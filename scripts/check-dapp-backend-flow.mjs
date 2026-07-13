@@ -67,7 +67,13 @@ try {
     storeId: 'store-dl-gaoxin',
     name: '24K 大连高新自提店',
     regionCode: '210211',
-    city: '大连市'
+    city: '大连市',
+    address: '辽宁省大连市高新区软件园路 24K 号',
+    hours: '09:00-21:00',
+    phone: '13800000000',
+    lat: 38.86,
+    lng: 121.52,
+    photos: ['https://cdn.example.test/stores/dapp-flow.png']
   }), 201, authHeaders(merchantSession.token));
   assert(savedPickupStore.id === 'store-dl-gaoxin' && savedPickupStore.regionCode === '210211', 'merchant should persist the GPS pickup store through action-intent');
 
@@ -138,7 +144,7 @@ try {
   assert(JSON.stringify(Object.keys(contracts.tokens || {}).sort()) === JSON.stringify(['bnm', 'npl']), 'contracts bundle should expose only NPL and BNM tokens');
   assert(
     contracts.humanReadableAbi?.escrow?.includes('function payOrder(bytes32 orderId,address seller,bytes32 productId,uint256 nplAmount,uint256 bnmLocked,uint64 deadline,bytes32 orderDigest,uint32 splitVersion,bytes authorization)')
-      && contracts.humanReadableAbi.escrow.includes('function forceRefund(bytes32 orderId,uint256 refundNplAmount)')
+      && contracts.humanReadableAbi.escrow.includes('function forceRefund(bytes32 orderId)')
       && contracts.humanReadableAbi.escrow.includes('event SellerApprovalUpdated(address indexed seller,bool approved)')
       && contracts.humanReadableAbi.escrow.includes('event SplitConfigUpdated(uint32 indexed version,bytes32 indexed configHash)')
       && contracts.humanReadableAbi?.rewardLedger?.includes('function setOperator(address operator,bool enabled)')

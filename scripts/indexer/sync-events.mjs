@@ -38,12 +38,11 @@ const escrowAbi = [
   'event OrderCompleted(bytes32 indexed orderId,address indexed seller,uint256 nplAmount,uint32 splitVersion)',
   'event OrderAllocation(bytes32 indexed orderId,bytes32 indexed role,address indexed receiver,uint256 amount)',
   'event OrderArbitration(bytes32 indexed orderId,address indexed caller)',
-  'event OrderForcedRefunded(bytes32 indexed orderId,address indexed buyer,uint256 refundedNpl,uint256 retainedNpl,address indexed retainedNplReceiver,uint256 burnedRewards)',
+  'event OrderForcedRefunded(bytes32 indexed orderId,address indexed buyer,uint256 refundedNpl,uint256 burnedRewards)',
   'event OrderEmergencyRefunded(bytes32 indexed orderId,address indexed buyer,uint256 refundedNpl,uint256 burnedRewards)',
   'event SellerApprovalUpdated(address indexed seller,bool approved)',
   'event SplitConfigUpdated(uint32 indexed version,bytes32 indexed configHash)',
   'event OrderSignerUpdated(address indexed signer)',
-  'event RetainedNplReceiverUpdated(address indexed receiver)',
   'event EscrowPaused(address indexed account)',
   'event EscrowUnpaused(address indexed account)'
 ];
@@ -211,11 +210,8 @@ function eventToPayload(log, chainId, contractAddress) {
       orderId: log.args.orderId,
       buyer: log.args.buyer,
       refundedNplWei: log.args.refundedNpl.toString(),
-      retainedNplWei: log.args.retainedNpl.toString(),
-      retainedNplReceiver: log.args.retainedNplReceiver,
       amountWei: log.args.refundedNpl.toString(),
       amountNpl: formatUnits(log.args.refundedNpl, 18),
-      retainedNpl: formatUnits(log.args.retainedNpl, 18),
       burnedRewards: Number(log.args.burnedRewards)
     };
   }

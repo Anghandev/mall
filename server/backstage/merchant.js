@@ -7,6 +7,7 @@ import {
   formatAmount,
   shortAddress,
   downloadBlob,
+  artifactBlob,
   showToast,
   getSession
 } from '/backstage/common.js';
@@ -1548,13 +1549,15 @@ async function exportOrders(format, button) {
   };
   try {
     const result = await busy(button, '等待二次签名...', () => signedAction('merchant.orders.export', payload, '/api/merchant/export', { sendTransaction: false }));
-    const content = result && typeof result === 'object' && 'content' in result ? result.content : result;
+    const content = result?.encoding === 'base64'
+      ? artifactBlob({ ...result, mimeType: result.mimeType || result.contentType })
+      : (result && typeof result === 'object' && 'content' in result ? result.content : result);
     if (typeof content !== 'string' && !(content instanceof Blob)) throw new Error('MERCHANT_EXPORT_CONTENT_MISSING');
-    const extension = format === 'excel' ? 'xls' : 'csv';
+    const extension = format === 'excel' ? 'xlsx' : 'csv';
     const fileName = result && typeof result === 'object' && result.fileName ? result.fileName : `24k-orders-${dateStamp()}.${extension}`;
     const contentType = result && typeof result === 'object' && result.contentType
       ? result.contentType
-      : (format === 'excel' ? 'application/vnd.ms-excel;charset=utf-8' : 'text/csv;charset=utf-8');
+      : (format === 'excel' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'text/csv;charset=utf-8');
     downloadBlob(content, fileName, contentType);
     showToast(`${format === 'excel' ? 'Excel' : 'CSV'} 完整订单已下载${Number.isFinite(Number(result?.rowCount)) ? `，共 ${numberText(result.rowCount)} 行` : ''}`);
   } catch (error) {

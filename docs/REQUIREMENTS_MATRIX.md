@@ -65,7 +65,7 @@ Status is restricted to `Done`, `Partial`, `Missing`, or `ExternalBlocked`. This
 | requirementId | Original requirement | Acceptance criteria | Code evidence | Test evidence | Status | Blocker |
 |---|---|---|---|---|---|---|
 | MER-001 | Wallet-only login | Approved merchant signs SIWE and receives scoped JWT | Backstage common auth; server auth | Backend auth tests | Done | None |
-| MER-002 | Strict EIP-4361 validation | Domain, URI, chain, nonce, issue/expiry and role resource are parsed and verified | Hand-built SIWE message/parser | Auth tests | Partial | Parser is not a strict EIP-4361 parser |
+| MER-002 | Strict EIP-4361 validation | Domain, URI, chain, nonce, issue/expiry and role resource are parsed and verified | `siwe` parser and `verifySiweLogin` | Strict positive/negative SIWE backend tests | Done | None |
 | MER-003 | Merchant whitelist | Unapproved wallet cannot receive merchant session | `ensureRoleAddressAllowed` | Backend role tests | Done | None |
 | MER-004 | JWT authorization | Every merchant read/write endpoint is role-scoped | `requireRole` | Backend role tests | Done | None |
 | MER-005 | Secondary signatures | Every merchant write binds action, wallet, payload, nonce and expiry | Action-intent and signature verifier | Backend tests | Done | None |
@@ -74,16 +74,16 @@ Status is restricted to `Done`, `Partial`, `Missing`, or `ExternalBlocked`. This
 | MER-008 | Seckill status | Assigned product reflects platform session lifecycle | Dashboard/submission state | None | Partial | Uses submission state instead of authoritative session mapping |
 | MER-009 | Today pickup verification | Today pickup count and records are correct | Merchant dashboard/pickup API | Full business E2E | Done | None |
 | MER-010 | One product per store | Active submission uniqueness is enforced by merchant and store | Unique index and submit API | Backend uniqueness tests | Done | None |
-| MER-011 | Product title/images/rich text | Title max 60, at most five HTTPS images and sanitized detail are enforced server-side | Submission UI/API | None | Partial | Server validation incomplete |
-| MER-012 | SKU matrix | At least one SKU; unique id; positive decimal price; integer nonnegative stock | Submission API | None | Missing | Payload is stored without full SKU validation |
-| MER-013 | Fulfillment modes | Only delivery/pickup accepted and at least one selected | Submission API | None | Partial | Server enum validation incomplete |
+| MER-011 | Product title/images/rich text | Title max 60, at most five HTTPS images and sanitized detail are enforced server-side | `normalizeMerchantSubmissionPayload`; `sanitizeProductDetail` | Backend invalid title/image and HTML sanitization tests | Done | None |
+| MER-012 | SKU matrix | At least one SKU; unique id; positive decimal price; integer nonnegative stock | `normalizeSubmissionSkus` | Backend empty/duplicate/price/stock validation tests | Done | None |
+| MER-013 | Fulfillment modes | Only delivery/pickup accepted and at least one selected | `normalizeSubmissionFulfillmentModes` | Backend invalid-enum tests | Done | None |
 | MER-014 | Listing deadlock | Pending review and active listing cannot be edited | Submission state machine | Backend tests | Done | None |
-| MER-015 | Active takedown deadlock | Merchant cannot remove Scheduled/Live item; platform retains authority | Takedown API | None | Missing | Active states can request takedown |
-| MER-016 | Sold-out release | SoldOut automatically releases merchant product slot | Product/submission state | None | Missing | Automatic transition absent |
+| MER-015 | Active takedown deadlock | Merchant cannot remove Scheduled/Live item; platform retains authority | `requestMerchantProductTakedown` | Scheduled-state negative backend test | Done | None |
+| MER-016 | Sold-out release | SoldOut automatically releases merchant product slot | `markProductSoldOutIfEmpty` | Order-paid stock depletion and replacement submission test | Done | None |
 | MER-017 | Delivery/pickup order tracks | Merchant list distinguishes both tracks and actions | Merchant orders UI/API | Backend E2E | Done | None |
 | MER-018 | No merchant repricing/refund | No merchant API changes paid price or directly refunds buyer | Route set | Negative route checks | Done | None |
-| MER-019 | Filtered Excel/CSV export | Selected filtered rows export valid CSV and XLSX | Export API | CSV/XLS XML tests | Partial | Excel output is SpreadsheetML `.xls`, not `.xlsx` |
-| MER-020 | Required export fields | Quantity, order time, logistics/pickup state and delivery contact are exported | Export builder | Export tests | Partial | Field completeness and source validation incomplete |
+| MER-019 | Filtered Excel/CSV export | Selected filtered rows export valid CSV and XLSX | Export API; `server/xlsx.mjs` | CSV plus OOXML ZIP structure tests | Done | None |
+| MER-020 | Required export fields | Quantity, order time, logistics/pickup state and delivery contact are exported | `exportMerchantOrders` | Complete persisted-order CSV/XLSX assertions | Done | None |
 | MER-021 | Cloud printer | Signed print job reaches provider and reports provider status | Print integration webhook | Adapter checks only | ExternalBlocked | Real printer provider credentials/device |
 | MER-022 | Electronic waybill | Signed request returns real tracking number from provider | Waybill webhook adapter | Adapter checks only | ExternalBlocked | Real waybill provider credentials |
 | MER-023 | Shipment entry | Paid order can be shipped once with carrier/tracking | Ship API/UI | Full business E2E | Done | None |
@@ -92,7 +92,7 @@ Status is restricted to `Done`, `Partial`, `Missing`, or `ExternalBlocked`. This
 | MER-026 | Delivery-triggered settlement | Delivered callback creates completeOrder owner transaction within SLA | Logistics callback and settlement request | Backend checks | Partial | External owner transaction executor/SLA not complete |
 | MER-027 | Pickup-triggered settlement | Pickup verification creates completeOrder owner transaction within SLA | Pickup settlement request | Backend checks | Partial | External owner transaction executor/SLA not complete |
 | MER-028 | Rewards Locked to Available | Indexed OrderCompleted releases configured ledger rewards | Chain event handler/contracts | Contract/backend tests | ExternalBlocked | Mainnet contracts and indexer |
-| MER-029 | Store required fields | Name, hours, phone, location and store photos are validated | Store UI/API | Partial backend checks | Partial | Photo and field validation incomplete |
+| MER-029 | Store required fields | Name, hours, phone, location and store photos are validated | `upsertMerchantStore` | Required field, coordinate, phone and HTTPS photo backend tests | Done | None |
 | MER-030 | AMap reverse geocode | Coordinates resolve to verified region code | AMap integration | Adapter checks | ExternalBlocked | AMap key and real response |
 | MER-031 | Immutable region code | Existing store region cannot be changed | Store API/schema | Backend tests | Done | None |
 | MER-032 | Printer device binding | Device belongs to merchant/store and provider reports online state | Printer config | None | ExternalBlocked | Provider API and ownership validation |
@@ -116,19 +116,19 @@ Status is restricted to `Done`, `Partial`, `Missing`, or `ExternalBlocked`. This
 | ADM-001 | Global AND/OR search | Exact/mixed filters for order, product, tx, wallet, UID, phone, time and state work server-side | `adminSearch` | Backend AND/OR tests | Done | None |
 | ADM-002 | Batch engine | CSV/XLSX, print, modify, listing, review and soft-delete validate selected ids | Batch API/UI | Partial backend tests | Partial | XLSX and several state operations need completion |
 | ADM-003 | Core dashboard metrics | Today order, NPL GMV, shipment rate and seckill count are accurate | Admin dashboard | Backend checks | Done | None |
-| ADM-004 | User/merchant metrics | New wallet UID and merchant counts reconcile with auth/merchant records | Admin dashboard | Partial checks | Partial | UID lifecycle analytics incomplete |
+| ADM-004 | User/merchant metrics | New wallet UID and merchant counts reconcile with auth/merchant records | `adminDashboard` first-seen wallet aggregation | Returning-wallet and exact UID backend assertions | Done | None |
 | ADM-005 | Todo stream | Pending merchant/product/after-sale and stock warnings are actionable | Admin dashboard | Backend checks | Done | None |
-| ADM-006 | Web3 risk waterline | Claims, failed tx, anomalies, blacklist and breaker state are live | Dashboard/risk APIs | Partial checks | Partial | Leverage/waterline semantics incomplete |
-| ADM-007 | Infrastructure dashboard | RPC latency, Oracle deviation, Gas blocks, bot events, CPU, memory, Redis, MQ and heights are live | Ops API/UI | DB/height partial checks | Partial | Oracle, Redis/MQ metrics and disk missing |
+| ADM-006 | Web3 risk waterline | Claims, failed tx, anomalies, blacklist and breaker state are live | `adminDashboard`; risk and circuit state | Exact waterline field backend assertions | Done | None |
+| ADM-007 | Infrastructure dashboard | RPC latency, Oracle deviation, Gas blocks, bot events, CPU, memory, Redis, MQ and heights are live | `adminOperationsSnapshot`; live probes and metrics | Backend runtime mock plus server operations checks | ExternalBlocked | Production RPC, Chainlink, Redis and MQ inputs in EXT-003/022/023/024 |
 | ADM-008 | Merchant review lifecycle | Pending, approved, rejected and blacklist views/actions work | Merchant admin API/UI | Backend tests | Done | None |
-| ADM-009 | Merchant qualification fields | License, legal identity, contact and settlement wallet are validated and protected | Merchant review API | Partial tests | Partial | Complete document/PII validation incomplete |
+| ADM-009 | Merchant qualification fields | License, legal identity, contact and settlement wallet are validated and protected | `normalizeMerchantQualification`; admin redaction | Invalid qualification, hash and masked-read backend tests | Done | None |
 | ADM-010 | On-chain seller whitelist | Approval returns setSeller intent and only indexed event finalizes approval | Admin approval/escrow event | Backend tests | ExternalBlocked | Mainnet owner transaction |
 | ADM-011 | V1-V5 limits | Price caps and monthly seckill quotas validate and persist | Merchant-level config | Backend tests | Done | None |
-| ADM-012 | Penetrating merchant dashboard | Orders, NPL flow, SLA, refunds, burn/BNM and five-state assets reconcile | Admin merchant views | Partial tests | Partial | Several derived analytics incomplete |
+| ADM-012 | Penetrating merchant dashboard | Orders, NPL flow, SLA, refunds, burn/BNM and five-state assets reconcile | `adminMerchantInsights` | Backend reconciliation assertions | Done | None |
 | ADM-013 | Three-level categories | Parent/child/depth, order, icon, enable and fee rate persist | Category API/UI | Backend checks | Done | None |
 | ADM-014 | Dynamic tags | Tag library, weights and product assignment work | Tag API/UI | Backend checks | Done | None |
-| ADM-015 | Category/tag deadlock | Active seckill or locked assets block disable/delete | Taxonomy API | Partial checks | Partial | Full locked-asset coverage incomplete |
-| ADM-016 | Product lifecycle CRUD | Platform create/edit inventory/price and soft-delete preserve history | Product admin APIs/UI | Partial tests | Partial | Full create/edit/soft-delete matrix incomplete |
+| ADM-015 | Category/tag deadlock | Active seckill or locked assets block disable/delete | `categoryOrTagLocked`; `productOperationalLockReason` | Active product/seckill and locked-order negative tests | Done | None |
+| ADM-016 | Product lifecycle CRUD | Platform create/edit inventory/price and soft-delete preserve history | Product admin APIs; append-only product history | Create/update/soft-delete/history backend tests | Done | None |
 | ADM-017 | NPL-only allocation | Product and platform allocation contain no active USDT branch | Contracts/config/payment APIs | NPL scan and tests | Done | None |
 | ADM-018 | Split configuration | All receivers/bps sum correctly; multisig transaction and event finalize version | Escrow split config APIs/contract | Contract/backend tests | ExternalBlocked | Production multisig transaction |
 | ADM-019 | Multiple beneficiaries | Multiple addresses and weights validate and persist | Beneficiary config UI/API | Partial tests | Partial | On-chain application/reconciliation incomplete |
@@ -149,29 +149,29 @@ Status is restricted to `Done`, `Partial`, `Missing`, or `ExternalBlocked`. This
 | ADM-034 | Atomic force refund | NPL refund, reward burn, seller penalty and product release are event-driven | Escrow/admin/indexer | Contract/backend tests | ExternalBlocked | Mainnet transaction and operational rehearsal |
 | ADM-035 | CMS | Independent keys, placements, schedule, targeting, legal and forced update work | CMS API/admin/customer | Backend CMS tests | Partial | Admin independent-key UI change needs stage verification |
 | ADM-036 | Notifications | Audience/channel scheduling and provider delivery status work | Notification API/integration | Local adapter tests | ExternalBlocked | SMS/email/push provider endpoint |
-| ADM-037 | Runtime parameters | Shipping, expiry and supported business parameters validate and audit old/new | System config API/UI | Partial tests | Partial | Some values are persisted but not consumed live |
-| ADM-038 | RPC primary/fallback routing | Primary/fallback URLs can change safely and health routing is live | Config UI; server env RPC | None | Missing | Stored config does not drive runtime RPC routing |
-| ADM-039 | Chainlink Oracle | Feed address, threshold, live price, reference, deviation and alert are implemented | Config UI only | None | Missing | Oracle reader/alert absent |
+| ADM-037 | Runtime parameters | Shipping, expiry and supported business parameters validate and audit old/new | Validated runtime config, dynamic timeout/TTL consumers and audit snapshots | Dynamic timeout, clear/reset and secret rejection backend tests | Done | None |
+| ADM-038 | RPC primary/fallback routing | Primary/fallback URLs can change safely and health routing is live | Runtime chain config, BSC chain-id validation and audited fallback router | Primary failure/fallback success/wrong-chain/reset tests | ExternalBlocked | Reliable production BSC primary/fallback URLs in EXT-003 |
+| ADM-039 | Chainlink Oracle | Feed address, threshold, live price, reference, deviation and alert are implemented | `operationsOracleStatus` Chainlink reader | Mock feed price/freshness/deviation tests | ExternalBlocked | Approved production feed/reference inputs in EXT-024 |
 | ADM-040 | Gas limit configuration | Reviewed nonzero limit reaches contract via owner transaction | Risk API/Seckill | Contract/backend tests | ExternalBlocked | Production owner transaction |
 | ADM-041 | Chain and multisig config | Chain id and owner addresses are visible, validated contracts and immutable in API env | Runtime checks | Production env checks | ExternalBlocked | Production addresses |
-| ADM-042 | Contract mappings | Latest NPL/BNM/Escrow/RewardLedger/Seckill addresses are validated and consumed | Config and public bundle | Partial checks | Partial | Production values missing and runtime overrides limited |
+| ADM-042 | Contract mappings | Latest NPL/BNM/Escrow/RewardLedger/Seckill addresses are validated and consumed | Fixed NPL, runtime code validation and public config consumers | Invalid no-code address, apply and reset backend tests | ExternalBlocked | Production contract addresses and deployment checks in EXT-005/006/007 |
 | ADM-043 | OSS/CDN/AI configuration | Non-secret metadata persists; credentials remain env-only | System config redaction | Backend secret rejection tests | Partial | Real provider adapters not implemented |
 | ADM-044 | Independent append-only audit DB | Business DB has no active audit table; separate DB rejects update/delete and hash-chains entries | Audit DB implementation | `scripts/check-database-stage.mjs` | Done | None |
 | ADM-045 | Login logs | Wallet signature hash, IP hash and device hash are recorded | SIWE audit | Auth tests | Done | None |
-| ADM-046 | JSON-RPC logs | Every RPC request/result/error is written to independent append-only storage | RPC audit implementation | Not yet stage-tested | Partial | Coverage and redaction tests pending |
+| ADM-046 | JSON-RPC logs | Every RPC request/result/error is written to independent append-only storage | `rpcAttempt`; independent `rpc_audit_logs` | Primary/fallback result/error and URL-redaction tests | Done | None |
 | ADM-047 | Error logs | Server/database/oracle errors are captured with sanitized context | API error audit/risk event | Partial tests | Partial | Database and oracle-specific paths incomplete |
-| ADM-048 | Signed funds/business logs | Every admin/merchant high-risk entry contains message signature hash or tx hash | Audit proof enforcement | Not yet stage-tested | Partial | Complete action coverage tests pending |
+| ADM-048 | Signed funds/business logs | Every admin/merchant high-risk entry contains message signature hash or tx hash | Central attempted-action audit before business handlers; audit proof enforcement | Audit-lock rollback, signature proof and database-stage checks | Done | None |
 | ADM-049 | Contract call audit | Method/event, status, tx hash and gas are traceable | Chain events, claims gas | Backend E2E | Done | None |
-| ADM-050 | Multisig approval audit | Every owner approval/signature for high-risk action is recorded | Transaction intents only | None | Missing | Multisig service integration absent |
+| ADM-050 | Multisig approval audit | Every owner approval/signature for high-risk action is recorded | Owner-restricted callback and append-only signature-hash audit | Owner mismatch, idempotency and admin query backend tests | ExternalBlocked | Existing production owner/multisig callback service in EXT-012 |
 | ADM-051 | Parameter change audit | Actor, old/new values and signature proof are recorded | Admin audited actions | Partial tests | Partial | Old/new snapshots not universal |
-| ADM-052 | Withdrawal and risk reconciliation | Chain amount equals ledger delta; breaker snapshot is recorded | Claim/indexer/risk APIs | Partial E2E | Partial | Automated reconciliation report incomplete |
-| ADM-053 | CPU/memory/disk monitoring | Live values and thresholds display | Ops API/UI | Ops checks | Partial | Disk waterline absent |
-| ADM-054 | Redis and MQ monitoring | Real connectivity, Redis hit ratio and MQ backlog are measured | Config placeholders only | None | Missing | Real health probes/metrics absent |
-| ADM-055 | TPS/QPS/latency/error rate | Live request and chain throughput metrics display | Request activity/ops API | Ops checks | Partial | Endpoint percentile/average latency incomplete |
+| ADM-052 | Withdrawal and risk reconciliation | Chain amount equals ledger delta; breaker snapshot is recorded | Expected-event, amount/state/TxHash/finality reconciliation and breaker snapshot | NoData, known-bad TxHash, restored success and circuit tests | Done | None |
+| ADM-053 | CPU/memory/disk monitoring | Live values and thresholds display | Ops API host/process/disk snapshot | Server operations and backend waterline checks | Done | None |
+| ADM-054 | Redis and MQ monitoring | Real connectivity, Redis hit ratio and MQ backlog are measured | Authenticated health probes and metric normalization | Redis hit ratio and MQ backlog mock tests | ExternalBlocked | Production Redis/MQ endpoints and credentials in EXT-022/023 |
+| ADM-055 | TPS/QPS/latency/error rate | Live request and chain throughput metrics display | Request metric ring and endpoint aggregates | Average/P50/P95/QPS/TPS/error backend checks | Done | None |
 | ADM-056 | RPC vs explorer height | Lag over three blocks is a red alert | Ops blockchain status | Backend checks | Done | None |
 | ADM-057 | Platform force-sign completion | Settlement request row can sign and broadcast completeOrder | API exists | None | Missing | Admin UI button absent |
 | ADM-058 | After-sale arbitration | Pending dispute cannot be resolved; confirmed arbitration can complete/refund/exchange/delay | After-sale admin/customer APIs | Full business E2E | Done | None |
 
-## Frozen Counts
+## Current Counts
 
-Counts are recalculated by the matrix check script once added. At freeze time the implementation contains substantial `Partial`, `Missing`, and `ExternalBlocked` work; no launch claim is permitted until every row is `Done`.
+Backend-stage count: 146 total; `Done` 83; `Partial` 23; `Missing` 6; `ExternalBlocked` 34. No launch claim is permitted until every row is `Done` with final acceptance evidence.

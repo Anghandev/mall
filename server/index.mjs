@@ -3,10 +3,13 @@ import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import http from 'node:http';
 import os from 'node:os';
-import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, statSync, unlinkSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, statSync, statfsSync, unlinkSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { AbiCoder, Interface, TypedDataEncoder, formatUnits, keccak256, verifyMessage, verifyTypedData } from 'ethers';
+import { AbiCoder, Interface, TypedDataEncoder, formatUnits, keccak256, recoverAddress, verifyMessage, verifyTypedData } from 'ethers';
+import sanitizeHtml from 'sanitize-html';
+import { SiweMessage } from 'siwe';
+import { buildXlsx } from './xlsx.mjs';
 import {
   createElectronicWaybill,
   integrationReadiness,
@@ -30,6 +33,10 @@ let verifiedAuditHead = `0x${'0'.repeat(64)}`;
 let verifiedAuditCount = 0;
 let verifiedAuditDataVersion = 0;
 let databaseFilesSeparate = false;
+const requestMetrics = [];
+const rpcRuntimeState = { active: null, degraded: false, lastLatencyMs: null, lastError: null, checkedAt: null };
+const REQUEST_METRICS_LIMIT = 5_000;
+const REQUEST_METRICS_WINDOW_MS = 60 * 60_000;
 
 process.once('SIGINT', () => { void shutdown('SIGINT', 0); });
 process.once('SIGTERM', () => { void shutdown('SIGTERM', 0); });
@@ -57,11 +64,16 @@ if (CHAIN_ID === 56 && CONFIGURED_NPL && CONFIGURED_NPL.toLowerCase() !== FIXED_
   throw new Error(`EXPO_PUBLIC_NPL_BSC_ADDRESS must be fixed to ${FIXED_BSC_NPL_ADDRESS} on BSC`);
 }
 const NPL = CHAIN_ID === 56 ? FIXED_BSC_NPL_ADDRESS : (CONFIGURED_NPL || FIXED_BSC_NPL_ADDRESS);
-const BNM = process.env.EXPO_PUBLIC_BNM_BSC_ADDRESS || '';
-const REWARD_LEDGER = process.env.EXPO_PUBLIC_REWARD_LEDGER_ADDRESS || process.env.REWARD_LEDGER_ADDRESS || '';
-const ESCROW = process.env.EXPO_PUBLIC_ESCROW_ADDRESS || '';
-const SECKILL = process.env.EXPO_PUBLIC_SECKILL_ADDRESS || process.env.SECKILL_ADDRESS || '';
-const GENESIS_NODE_CONTRACT = process.env.GENESIS_NODE_CONTRACT || '';
+const ENV_BNM = process.env.EXPO_PUBLIC_BNM_BSC_ADDRESS || '';
+const ENV_REWARD_LEDGER = process.env.EXPO_PUBLIC_REWARD_LEDGER_ADDRESS || process.env.REWARD_LEDGER_ADDRESS || '';
+const ENV_ESCROW = process.env.EXPO_PUBLIC_ESCROW_ADDRESS || '';
+const ENV_SECKILL = process.env.EXPO_PUBLIC_SECKILL_ADDRESS || process.env.SECKILL_ADDRESS || '';
+const ENV_GENESIS_NODE_CONTRACT = process.env.GENESIS_NODE_CONTRACT || '';
+let BNM = ENV_BNM;
+let REWARD_LEDGER = ENV_REWARD_LEDGER;
+let ESCROW = ENV_ESCROW;
+let SECKILL = ENV_SECKILL;
+let GENESIS_NODE_CONTRACT = ENV_GENESIS_NODE_CONTRACT;
 const GENESIS_NODE_TOKEN_STANDARD = String(process.env.GENESIS_NODE_TOKEN_STANDARD || 'erc721').toLowerCase();
 if (!['erc20', 'erc721', 'erc1155'].includes(GENESIS_NODE_TOKEN_STANDARD)) throw new Error('GENESIS_NODE_TOKEN_STANDARD must be erc20, erc721 or erc1155');
 const GENESIS_NODE_TOKEN_ID = String(process.env.GENESIS_NODE_TOKEN_ID || '').trim();
@@ -79,6 +91,7 @@ const MICRO_TEST_PRODUCT_PRICE_NPL = process.env.MICRO_TEST_PRODUCT_PRICE_NPL ||
 const MAX_ORDER_AMOUNT_NPL = process.env.MAX_ORDER_AMOUNT_NPL || (MICRO_TEST ? MICRO_TEST_PRODUCT_PRICE_NPL : '');
 const INDEXER_SECRET = process.env.INDEXER_SECRET || '';
 const LOGISTICS_CALLBACK_SECRET = process.env.LOGISTICS_CALLBACK_SECRET || '';
+const MULTISIG_CALLBACK_SECRET = process.env.MULTISIG_CALLBACK_SECRET || '';
 const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
 const ADMIN_WALLET = process.env.ADMIN_WALLET_ADDRESS || '';
 const ORDER_SIGNER = process.env.ORDER_SIGNER_ADDRESS || '';
@@ -89,22 +102,27 @@ const SIWE_DOMAIN = process.env.SIWE_DOMAIN || safeUrlHost(process.env.FRONTEND_
 const SIWE_URI = process.env.SIWE_URI || process.env.FRONTEND_URL || `https://${SIWE_DOMAIN}`;
 const ALLOW_UNVERIFIED_CHAIN_EVENTS = process.env.NODE_ENV === 'development' && process.env.ALLOW_UNVERIFIED_CHAIN_EVENTS === 'true';
 const CHAIN_EVENT_VERIFY_RPC = !ALLOW_UNVERIFIED_CHAIN_EVENTS;
-const CHAIN_EVENT_RPC_URL = process.env.CHAIN_EVENT_RPC_URL || process.env.BSC_RPC_URL || process.env.EXPO_PUBLIC_BSC_RPC_URL || '';
+const ENV_CHAIN_EVENT_RPC_URL = process.env.CHAIN_EVENT_RPC_URL || process.env.BSC_RPC_URL || process.env.EXPO_PUBLIC_BSC_RPC_URL || '';
+const ENV_CHAIN_EVENT_RPC_FALLBACK_URL = process.env.CHAIN_EVENT_RPC_FALLBACK_URL || process.env.BSC_RPC_FALLBACK_URL || '';
+let CHAIN_EVENT_RPC_URL = ENV_CHAIN_EVENT_RPC_URL;
+let CHAIN_EVENT_RPC_FALLBACK_URL = ENV_CHAIN_EVENT_RPC_FALLBACK_URL;
 const INDEXER_CONFIRMATIONS = Math.max(1, Number.parseInt(process.env.INDEXER_CONFIRMATIONS || '15', 10) || 15);
 const MAX_JSON_BODY_BYTES = Number(process.env.MAX_JSON_BODY_BYTES || 262_144);
-const CLAIM_REQUEST_TTL_MS = Math.max(1, Number(process.env.CLAIM_REQUEST_TTL_MS || 10 * 60_000));
+const DEFAULT_CLAIM_REQUEST_TTL_MS = Math.max(1, Number(process.env.CLAIM_REQUEST_TTL_MS || 10 * 60_000));
+const DEFAULT_SIWE_NONCE_TTL_MS = 10 * 60_000;
+const DEFAULT_ACTION_INTENT_TTL_MS = 10 * 60_000;
 const DB_BUSY_TIMEOUT_MS = 5_000;
 const BUSINESS_SCHEMA_VERSION = 2;
 const AUDIT_SCHEMA_VERSION = 1;
 const ZERO_AUDIT_HASH = `0x${'0'.repeat(64)}`;
-const ORDER_TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_ORDER_TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000;
 const REUSABLE_IDEMPOTENCY_STATUSES = new Set(['Draft']);
 const TERMINAL_ORDER_STATUSES = new Set(['Released', 'Cancelled', 'ForcedRefunded', 'EmergencyRefunded', 'Claimed']);
 const escrowEvents = new Interface([
   'event OrderPaid(bytes32 indexed orderId,address indexed buyer,address indexed seller,bytes32 productId,uint256 nplAmount,uint256 bnmLocked,uint64 deadline,bytes32 orderDigest,uint32 splitVersion)',
   'event OrderCompleted(bytes32 indexed orderId,address indexed seller,uint256 nplAmount,uint32 splitVersion)',
   'event OrderArbitration(bytes32 indexed orderId,address indexed caller)',
-  'event OrderForcedRefunded(bytes32 indexed orderId,address indexed buyer,uint256 refundedNpl,uint256 retainedNpl,address indexed retainedNplReceiver,uint256 burnedRewards)',
+  'event OrderForcedRefunded(bytes32 indexed orderId,address indexed buyer,uint256 refundedNpl,uint256 burnedRewards)',
   'event OrderEmergencyRefunded(bytes32 indexed orderId,address indexed buyer,uint256 refundedNpl,uint256 burnedRewards)',
   'event SellerApprovalUpdated(address indexed seller,bool approved)',
   'event SplitConfigUpdated(uint32 indexed version,bytes32 indexed configHash)',
@@ -150,7 +168,7 @@ const escrowTxInterface = new Interface([
   'function payOrder(bytes32 orderId,address seller,bytes32 productId,uint256 nplAmount,uint256 bnmLocked,uint64 deadline,bytes32 orderDigest,uint32 splitVersion,bytes authorization)',
   'function completeOrder(bytes32 orderId)',
   'function disputeOrder(bytes32 orderId)',
-  'function forceRefund(bytes32 orderId,uint256 refundNplAmount)',
+  'function forceRefund(bytes32 orderId)',
   'function setSeller(address seller,bool approved)',
   'function currentSplitVersion() view returns (uint32)',
   'function splitConfigs(uint32 version) view returns (address platformReceiver,address regionReceiver,address referralReceiver,address prizePoolReceiver,address burnReceiver,address circulationReceiver,uint16 merchantBps,uint16 platformBps,uint16 regionBps,uint16 referralBps,uint16 prizePoolBps,uint16 burnBps,uint16 circulationBps)',
@@ -170,6 +188,14 @@ const seckillTxInterface = new Interface([
 ]);
 const balanceOfInterface = new Interface(['function balanceOf(address owner) view returns (uint256)']);
 const erc1155BalanceOfInterface = new Interface(['function balanceOf(address owner,uint256 tokenId) view returns (uint256)']);
+const chainlinkFeedInterface = new Interface([
+  'function decimals() view returns (uint8)',
+  'function latestRoundData() view returns (uint80 roundId,int256 answer,uint256 startedAt,uint256 updatedAt,uint80 answeredInRound)'
+]);
+const safeMultisigInterface = new Interface([
+  'function isOwner(address owner) view returns (bool)',
+  'event ExecutionSuccess(bytes32 txHash,uint256 payment)'
+]);
 const genesisNodeEntitlementCache = new Map();
 const rewardLedgerTxInterface = new Interface([
   'function claim(uint256 entryId)',
@@ -222,8 +248,11 @@ initDb();
 migrateLegacyAuditLogs();
 verifyAuditChainIntegrity();
 if (process.env.NODE_ENV !== 'production') seed();
+applyRuntimeConfigFromDatabase();
 
 server = http.createServer(async (req, res) => {
+  const requestStartedAt = Date.now();
+  res.once('finish', () => recordRequestMetric(req, res, requestStartedAt));
   requestAuditContext.enterWith({ signatureProofs: new Map() });
   try {
     setCors(req, res);
@@ -397,7 +426,7 @@ server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && url.pathname === '/api/auth/siwe/verify') {
       const body = await readJson(req);
-      return json(res, 201, verifySiweLogin(body, req));
+      return json(res, 201, await verifySiweLogin(body, req));
     }
 
     if (req.method === 'POST' && url.pathname === '/api/auth/action-intent') {
@@ -818,6 +847,26 @@ server = http.createServer(async (req, res) => {
       return json(res, 200, adminMerchants());
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/admin/merchant-insights') {
+      requireRole(req, 'admin');
+      return json(res, 200, adminMerchantInsights(url.searchParams.get('merchantId') || url.searchParams.get('walletAddress')));
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/admin/products/history') {
+      requireRole(req, 'admin');
+      return json(res, 200, adminProductHistory(url.searchParams.get('productId')));
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/admin/multisig/approvals') {
+      requireRole(req, 'admin');
+      return json(res, 200, adminMultisigApprovals());
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/admin/reconciliation') {
+      requireRole(req, 'admin');
+      return json(res, 200, adminReconciliationReport());
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/admin/products/pending') {
       requireRole(req, 'admin');
       return json(res, 200, pendingProductSubmissions());
@@ -929,6 +978,12 @@ server = http.createServer(async (req, res) => {
       return json(res, 202, await recordLogisticsCallback(body));
     }
 
+    if (req.method === 'POST' && url.pathname === '/api/integrations/multisig/approval') {
+      requireMultisigCallbackSecret(req);
+      const body = await readJson(req);
+      return json(res, 202, await recordMultisigApproval(body));
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/buyer/orders') {
       const session = requireRole(req, 'buyer');
       return json(res, 200, buyerOrders(session.address));
@@ -1036,7 +1091,9 @@ server = http.createServer(async (req, res) => {
       try {
         recordRiskEvent({ kind: 'api-error', severity: 'high', ipHash: requestFingerprint(req, 'ip'), deviceHash: requestFingerprint(req, 'device'), action: `${req.method} ${req.url}`, status: 'Observed', payload: { error: message } });
       } catch {}
-      try { writeAudit('system', 'api', 'system.api.error', `${req.method} ${req.url}`, { error: sanitizeError(error), statusCode }); } catch {}
+      if (message !== 'database is locked') {
+        try { writeAudit('system', 'api', 'system.api.error', `${req.method} ${req.url}`, { error: sanitizeError(error), statusCode }); } catch {}
+      }
     }
     return json(res, statusCode, { error: message });
   }
@@ -1045,6 +1102,31 @@ server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`24K API listening on http://localhost:${PORT}`);
 });
+
+function recordRequestMetric(req, res, startedAt) {
+  const completedAt = Date.now();
+  let pathname = '/unknown';
+  try {
+    pathname = new URL(String(req.url || '/'), 'http://localhost').pathname;
+  } catch {}
+  requestMetrics.push({
+    completedAt,
+    method: String(req.method || 'UNKNOWN').slice(0, 12),
+    path: normalizeMetricPath(pathname),
+    statusCode: Number(res.statusCode || 0),
+    durationMs: Math.max(0, completedAt - Number(startedAt || completedAt))
+  });
+  const oldestAllowed = completedAt - REQUEST_METRICS_WINDOW_MS;
+  while (requestMetrics.length && (requestMetrics[0].completedAt < oldestAllowed || requestMetrics.length > REQUEST_METRICS_LIMIT)) requestMetrics.shift();
+}
+
+function normalizeMetricPath(pathnameValue) {
+  return String(pathnameValue || '/')
+    .replace(/\/0x[0-9a-f]{40,64}(?=\/|$)/gi, '/:chainId')
+    .replace(/\/[0-9a-f]{8}-[0-9a-f-]{27,}(?=\/|$)/gi, '/:id')
+    .replace(/\/(?:ord|claim|risk|batch|fulfillment|settlement|submission|product)-[a-z0-9:._-]+(?=\/|$)/gi, '/:id')
+    .slice(0, 240);
+}
 
 function prepareDatabaseDirectory() {
   const directories = [...new Set([dirname(DB_PATH), dirname(AUDIT_DB_PATH)])];
@@ -1474,6 +1556,7 @@ function validateRuntimeConfiguration() {
   if (!String(process.env.EXPLORER_API_KEY || process.env.BSCSCAN_API_KEY || '').trim()) missing.push('EXPLORER_API_KEY');
   if (!CHAIN_EVENT_RPC_URL || !/^https:\/\//i.test(CHAIN_EVENT_RPC_URL)) missing.push('CHAIN_EVENT_RPC_URL_HTTPS');
   if (!LOGISTICS_CALLBACK_SECRET || LOGISTICS_CALLBACK_SECRET.length < 32) missing.push('LOGISTICS_CALLBACK_SECRET');
+  if (!MULTISIG_CALLBACK_SECRET || MULTISIG_CALLBACK_SECRET.length < 32) missing.push('MULTISIG_CALLBACK_SECRET');
   if (!String(process.env.FRONTEND_URL || '').startsWith('https://')) missing.push('FRONTEND_URL_HTTPS');
   if (!process.env.CORS_ORIGINS) missing.push('CORS_ORIGINS');
   const integrations = integrationReadiness(process.env);
@@ -2613,7 +2696,7 @@ function dappIntegrationContract() {
       timeoutAndRefund: [
         'GET /api/orders/:orderId/timeout-actions?buyerAddress=... 判断 7 天超时动作',
         '商家 7 天未发货：POST /api/dapp/timeout-refund-request 创建 RefundRequested',
-        '用户无理由退款不开放；平台按审计调用 Abu24KPaymentEscrow.forceRefund，秒杀奖池对应金额可扣留',
+        '用户无理由退款不开放；平台按审计调用 Abu24KPaymentEscrow.forceRefund，全额退回托管 NPL 并原子销毁未领取奖励',
         '用户 7 天未确认收货：商家后台 POST /api/merchant/orders/:orderId/force-sign-request，平台仲裁/owner completeOrder'
       ],
       seckillCheckout: [
@@ -3079,12 +3162,12 @@ function dappHumanReadableAbi() {
       'function payOrder(bytes32 orderId,address seller,bytes32 productId,uint256 nplAmount,uint256 bnmLocked,uint64 deadline,bytes32 orderDigest,uint32 splitVersion,bytes authorization)',
       'function completeOrder(bytes32 orderId)',
       'function disputeOrder(bytes32 orderId)',
-      'function forceRefund(bytes32 orderId,uint256 refundNplAmount)',
+      'function forceRefund(bytes32 orderId)',
       'function orders(bytes32) view returns (address buyer,address seller,bytes32 productId,uint256 nplAmount,uint256 bnmLocked,uint64 deadline,bytes32 orderDigest,uint32 splitVersion,uint8 status)',
       'event OrderPaid(bytes32 indexed orderId,address indexed buyer,address indexed seller,bytes32 productId,uint256 nplAmount,uint256 bnmLocked,uint64 deadline,bytes32 orderDigest,uint32 splitVersion)',
       'event OrderCompleted(bytes32 indexed orderId,address indexed seller,uint256 nplAmount,uint32 splitVersion)',
       'event OrderArbitration(bytes32 indexed orderId,address indexed caller)',
-      'event OrderForcedRefunded(bytes32 indexed orderId,address indexed buyer,uint256 refundedNpl,uint256 retainedNpl,address indexed retainedNplReceiver,uint256 burnedRewards)',
+      'event OrderForcedRefunded(bytes32 indexed orderId,address indexed buyer,uint256 refundedNpl,uint256 burnedRewards)',
       'event OrderEmergencyRefunded(bytes32 indexed orderId,address indexed buyer,uint256 refundedNpl,uint256 burnedRewards)',
       'event SellerApprovalUpdated(address indexed seller,bool approved)',
       'event SplitConfigUpdated(uint32 indexed version,bytes32 indexed configHash)'
@@ -7116,11 +7199,13 @@ function passiveClaimState(order, buyerAddress, rewardId) {
 
 function orderTimeoutActions(order, nowMs = Date.now()) {
   const fulfillment = fulfillmentSummary(order);
-  const paidClock = timeoutClock(orderPaidTimestampMs(order), nowMs);
-  const receivedClock = timeoutClock(orderFulfillmentTimestampMs(order), nowMs);
+  const paidClock = timeoutClock(orderPaidTimestampMs(order), nowMs, 'shipping');
+  const receivedClock = timeoutClock(orderFulfillmentTimestampMs(order), nowMs, 'confirmation');
   const shipped = isOrderShippedOrPickupReady(order, fulfillment);
   const buyerEligibleStatus = ['PaidLocked', 'AwaitingShipment'].includes(order.status) && !shipped;
   const merchantEligibleStatus = ['Shipped', 'PickupReady'].includes(order.status);
+  const shippingWindowLabel = timeoutWindowLabel(paidClock.windowHours);
+  const confirmationWindowLabel = timeoutWindowLabel(receivedClock.windowHours);
   const buyerReason = buyerEligibleStatus
     ? (paidClock.reached ? 'MERCHANT_SHIPMENT_TIMEOUT_REACHED' : 'WAITING_7_DAYS_AFTER_PAYMENT')
     : (TERMINAL_ORDER_STATUSES.has(order.status) ? 'ORDER_ALREADY_TERMINAL' : 'ORDER_ALREADY_SHIPPED_OR_NOT_PAID');
@@ -7136,8 +7221,8 @@ function orderTimeoutActions(order, nowMs = Date.now()) {
     fulfillment,
     policy: {
       noUserNoReasonRefund: true,
-      buyerTimeoutRefund: '商家 7 天未发货，买家可申请平台强制退款；秒杀奖池对应金额由平台 forceRefund 参数扣留。',
-      merchantForceSign: '用户 7 天未确认收货，商家可申请平台强制签收；最终由平台 owner completeOrder 链上落地。',
+      buyerTimeoutRefund: `商家 ${shippingWindowLabel} 未发货，买家可申请平台强制全额退款；托管 NPL 全额退回，未领取奖励原子销毁。`,
+      merchantForceSign: `用户 ${confirmationWindowLabel} 未确认收货，商家可申请平台强制签收；最终由平台 owner completeOrder 链上落地。`,
       emergencyRefund: '保留透明 emergency refund / pause 恢复通道。'
     },
     buyerTimeoutRefund: {
@@ -7147,10 +7232,10 @@ function orderTimeoutActions(order, nowMs = Date.now()) {
       request: {
         method: 'POST',
         endpoint: buyerEndpoint,
-        body: { buyerAddress: order.buyer_address, orderId: order.order_id, reason: '7 天未发货' }
+        body: { buyerAddress: order.buyer_address, orderId: order.order_id, reason: `${shippingWindowLabel}未发货` }
       },
       resultStatus: 'RefundRequested',
-      chainActionRequired: 'Abu24KPaymentEscrow.forceRefund(orderId, refundNplAmount) by platform owner; unclaimed rewards burn atomically'
+      chainActionRequired: 'Abu24KPaymentEscrow.forceRefund(orderId) by platform owner; full escrowed NPL returns and unclaimed rewards burn atomically'
     },
     merchantForceSign: {
       eligible: merchantEligibleStatus && receivedClock.reached,
@@ -7159,7 +7244,7 @@ function orderTimeoutActions(order, nowMs = Date.now()) {
       request: {
         method: 'POST',
         endpoint: merchantEndpoint,
-        body: { orderId: order.order_id, reason: '7 天未确认收货' },
+        body: { orderId: order.order_id, reason: `${confirmationWindowLabel}未确认收货` },
         auth: 'merchant SIWE JWT + secondary signature'
       },
       resultStatus: 'Arbitration',
@@ -7218,7 +7303,7 @@ function requestBuyerTimeoutRefund(body) {
     status: 'RefundRequested',
     order: toOrder(updated),
     noUserNoReasonRefund: true,
-    refundPolicy: '仅 7 天未发货强制退款；无理由退款不开放；秒杀奖池对应金额可由平台 forceRefund 扣留。',
+    refundPolicy: '仅 7 天未发货强制全额退款；无理由退款不开放；托管 NPL 全额退回并原子销毁未领取奖励。',
     next: '等待平台审计后调用 Abu24KPaymentEscrow.forceRefund，并由 OrderForcedRefunded 事件同步为 ForcedRefunded。',
     chainActionRequired: actions.buyerTimeoutRefund.chainActionRequired,
     endpoints: {
@@ -7446,18 +7531,26 @@ function orderFulfillmentTimestampMs(order) {
   return timestampMs(row?.created_at) || timestampMs(order.updated_at) || timestampMs(order.created_at) || Date.now();
 }
 
-function timeoutClock(startMs, nowMs = Date.now()) {
+function timeoutClock(startMs, nowMs = Date.now(), kind = 'shipping') {
   const safeStart = Number.isFinite(startMs) && startMs > 0 ? startMs : nowMs;
-  const deadlineMs = safeStart + ORDER_TIMEOUT_MS;
+  const timeoutMs = orderTimeoutMs(kind);
+  const deadlineMs = safeStart + timeoutMs;
   const remainingMs = Math.max(0, deadlineMs - nowMs);
   return {
-    windowDays: 7,
+    windowDays: Number((timeoutMs / (24 * 60 * 60_000)).toFixed(2)),
+    windowHours: Number((timeoutMs / (60 * 60_000)).toFixed(2)),
     startAt: new Date(safeStart).toISOString(),
     deadlineAt: new Date(deadlineMs).toISOString(),
     reached: nowMs >= deadlineMs,
     remainingMs,
     elapsedMs: Math.max(0, nowMs - safeStart)
   };
+}
+
+function timeoutWindowLabel(hours) {
+  const value = Number(hours);
+  if (Number.isInteger(value) && value % 24 === 0) return `${value / 24} 天`;
+  return `${Number.isFinite(value) ? value : 168} 小时`;
 }
 
 function timestampMs(value) {
@@ -7477,7 +7570,7 @@ function createSiweNonce(body, req) {
   ensureRoleAddressAllowed(role, address);
   enforceWalletFingerprint(req, address, `${role}.siwe.nonce`);
   const nonce = randomBytes(16).toString('hex');
-  const expiresAt = Date.now() + 10 * 60_000;
+  const expiresAt = Date.now() + siweNonceTtlMs();
   const message = siweMessage(address, role, nonce, expiresAt);
   db.prepare('INSERT INTO siwe_nonces (nonce, address, role, message, expires_at, used) VALUES (?, ?, ?, ?, ?, 0)').run(
     nonce,
@@ -7489,26 +7582,62 @@ function createSiweNonce(body, req) {
   return { nonce, message, role, address, expiresAt };
 }
 
-function verifySiweLogin(body, req) {
+async function verifySiweLogin(body, req) {
   const address = requireAddress(body?.address, 'address');
   const role = normalizeRole(body?.role || 'merchant');
   const message = requireString(body?.message, 'message');
   const signature = requireString(body?.signature, 'signature');
   ensureRoleAddressAllowed(role, address);
-  const nonce = nonceFromMessage(message);
-  const row = db.prepare('SELECT * FROM siwe_nonces WHERE nonce = ? AND address = ? AND role = ?').get(nonce, address.toLowerCase(), role);
-  if (!row || Number(row.used) || Number(row.expires_at) < Date.now() || row.message !== message) fail(401, 'INVALID_SIWE_NONCE');
-  let recovered;
+  let parsed;
   try {
-    recovered = verifyMessage(message, signature);
+    parsed = new SiweMessage(message);
+  } catch {
+    fail(400, 'INVALID_SIWE_MESSAGE');
+  }
+  const nonce = parsed.nonce;
+  const row = db.prepare('SELECT * FROM siwe_nonces WHERE nonce = ? AND address = ? AND role = ?').get(nonce, address.toLowerCase(), role);
+  if (!row || Number(row.used) || Number(row.expires_at) < Date.now()) fail(401, 'INVALID_SIWE_NONCE');
+  const expectedResource = `urn:24k:role:${role}`;
+  if (parsed.domain !== SIWE_DOMAIN) fail(401, 'SIWE_DOMAIN_MISMATCH');
+  if (parsed.uri !== SIWE_URI) fail(401, 'SIWE_URI_MISMATCH');
+  if (parsed.version !== '1') fail(401, 'SIWE_VERSION_MISMATCH');
+  if (Number(parsed.chainId) !== CHAIN_ID) fail(401, 'SIWE_CHAIN_ID_MISMATCH');
+  if (parsed.address.toLowerCase() !== address.toLowerCase()) fail(401, 'SIWE_ADDRESS_MISMATCH');
+  if (parsed.requestId !== role) fail(401, 'SIWE_REQUEST_ID_MISMATCH');
+  if (parsed.statement !== `Sign in to 24K Mall as ${role}.`) fail(401, 'SIWE_STATEMENT_MISMATCH');
+  if (!Array.isArray(parsed.resources) || parsed.resources.length !== 1 || parsed.resources[0] !== expectedResource) fail(401, 'SIWE_RESOURCES_MISMATCH');
+  const issuedAt = Date.parse(String(parsed.issuedAt || ''));
+  const messageExpiresAt = Date.parse(String(parsed.expirationTime || ''));
+  if (!Number.isFinite(issuedAt) || issuedAt > Date.now() + 60_000 || issuedAt >= messageExpiresAt) fail(401, 'SIWE_ISSUED_AT_INVALID');
+  if (!Number.isFinite(messageExpiresAt) || messageExpiresAt !== Number(row.expires_at)) fail(401, 'SIWE_EXPIRATION_MISMATCH');
+  if (row.message !== message) fail(401, 'INVALID_SIWE_NONCE');
+  let verification;
+  try {
+    verification = await parsed.verify(
+      { signature, domain: SIWE_DOMAIN, nonce, time: new Date().toISOString() },
+      { suppressExceptions: true }
+    );
   } catch {
     fail(401, 'INVALID_SIWE_SIGNATURE');
   }
-  if (recovered.toLowerCase() !== address.toLowerCase()) fail(401, 'SIWE_ADDRESS_MISMATCH');
+  if (!verification?.success || verification.data.address.toLowerCase() !== address.toLowerCase()) fail(401, 'INVALID_SIWE_SIGNATURE');
   const expiresAt = Date.now() + AUTH_SESSION_TTL_MS;
   const token = authToken(address, role, nonce, expiresAt);
-  db.prepare('UPDATE siwe_nonces SET used = 1 WHERE nonce = ?').run(nonce);
-  db.prepare('INSERT OR REPLACE INTO auth_sessions (token, address, role, expires_at) VALUES (?, ?, ?, ?)').run(token, address.toLowerCase(), role, expiresAt);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const consumed = db.prepare('UPDATE siwe_nonces SET used = 1 WHERE nonce = ? AND address = ? AND role = ? AND used = 0 AND expires_at >= ?').run(
+      nonce,
+      address.toLowerCase(),
+      role,
+      Date.now()
+    );
+    if (Number(consumed.changes) !== 1) fail(401, 'INVALID_SIWE_NONCE');
+    db.prepare('INSERT OR REPLACE INTO auth_sessions (token, address, role, expires_at) VALUES (?, ?, ?, ?)').run(token, address.toLowerCase(), role, expiresAt);
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch {}
+    throw error;
+  }
   writeAudit(role, address, `${role}.siwe.login`, address, {
     nonce,
     expiresAt,
@@ -7521,28 +7650,19 @@ function verifySiweLogin(body, req) {
 
 function siweMessage(address, role, nonce, expiresAt) {
   const issuedAt = new Date().toISOString();
-  return [
-    `${SIWE_DOMAIN} wants you to sign in with your Ethereum account:`,
+  return new SiweMessage({
+    domain: SIWE_DOMAIN,
     address,
-    '',
-    `Sign in to 24K Mall as ${role}.`,
-    '',
-    `URI: ${SIWE_URI}`,
-    'Version: 1',
-    `Chain ID: ${CHAIN_ID}`,
-    `Nonce: ${nonce}`,
-    `Issued At: ${issuedAt}`,
-    `Expiration Time: ${new Date(expiresAt).toISOString()}`,
-    `Request ID: ${role}`,
-    'Resources:',
-    `- urn:24k:role:${role}`
-  ].join('\n');
-}
-
-function nonceFromMessage(message) {
-  const match = String(message).match(/^Nonce:\s*([0-9a-f]{32})$/im);
-  if (!match) fail(400, 'INVALID_SIWE_MESSAGE');
-  return match[1];
+    statement: `Sign in to 24K Mall as ${role}.`,
+    uri: SIWE_URI,
+    version: '1',
+    chainId: CHAIN_ID,
+    nonce,
+    issuedAt,
+    expirationTime: new Date(expiresAt).toISOString(),
+    requestId: role,
+    resources: [`urn:24k:role:${role}`]
+  }).prepareMessage();
 }
 
 function authToken(address, role, nonce, expiresAt) {
@@ -7629,6 +7749,11 @@ function requireSecondarySignature(body, session, action) {
   const nonce = requireString(fields.nonce, 'nonce');
   consumeWalletActionNonce(nonce, session.address, action, expiresAt);
   recordRequestSignatureProof(action, session.address, signature);
+  writeAudit(session.role, session.address, `${action}.attempt`, signedActionTarget(body), body);
+}
+
+function signedActionTarget(body) {
+  return body?.targetId || body?.productId || body?.merchantId || body?.orderId || body?.rewardId || body?.storeId || body?.addressId || body?.key || 'global';
 }
 
 function requirePathResourceBinding(body, expectedId, field) {
@@ -7642,7 +7767,7 @@ function createActionIntent(session, action, payload) {
   if (!/^(buyer|merchant|admin)\.[a-z0-9.-]{3,80}$/.test(action)) fail(400, 'INVALID_ACTION');
   const actionPayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
   const nonce = randomBytes(16).toString('hex');
-  const expiresAt = Date.now() + 10 * 60_000;
+  const expiresAt = Date.now() + actionIntentTtlMs();
   const payloadHash = payloadHashForSignature(actionPayload);
   const secondaryMessage = actionSignatureMessage({
     action,
@@ -7731,6 +7856,7 @@ function requireClaimSignature(body, walletAddress, reward, amount) {
   if (!Number.isSafeInteger(expiresAt) || expiresAt < Date.now()) fail(400, 'CLAIM_SIGNATURE_EXPIRED');
   const nonce = requireString(fields.nonce, 'nonce');
   consumeWalletActionNonce(nonce, walletAddress, expected.action, expiresAt);
+  writeAudit('buyer', walletAddress, `${expected.action}.attempt`, reward.id, body);
 }
 
 function claimMessageFields(message) {
@@ -7825,7 +7951,31 @@ function redactAuditPayload(payload) {
   delete copy.signature;
   delete copy.secondaryMessage;
   delete copy.secondarySignature;
-  return copy;
+  return redactAuditValue(copy);
+}
+
+function redactAuditValue(value) {
+  if (Array.isArray(value)) return value.map(redactAuditValue);
+  if (!value || typeof value !== 'object') return value;
+  const redacted = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (/(?:legalIdentity|legalId|identityNumber|idCard|idNumber)$/i.test(key) && entry) {
+      const text = String(entry);
+      redacted[`${key}Hash`] = `0x${createHash('sha256').update(text).digest('hex')}`;
+      redacted[`${key}Last4`] = text.slice(-4);
+      continue;
+    }
+    if (/phone$/i.test(key) && entry) {
+      redacted[key] = maskPhone(entry);
+      continue;
+    }
+    if (/(?:secret|password|private.?key|access.?key|api.?key|token|credential)$/i.test(key) && entry) {
+      redacted[key] = '<redacted>';
+      continue;
+    }
+    redacted[key] = redactAuditValue(entry);
+  }
+  return redacted;
 }
 
 function stripSignedEnvelope(payload) {
@@ -8016,7 +8166,9 @@ function adminMerchants() {
     walletAddress: row.wallet_address,
     name: row.name,
     status: row.status,
-    payload: JSON.parse(row.payload_json || '{}'),
+    payload: redactMerchantPayload(JSON.parse(row.payload_json || '{}')),
+    qualificationReady: merchantQualificationReady(JSON.parse(row.payload_json || '{}')),
+    createdAt: row.created_at,
     modules: ['单品提报', '发货', '门店', 'Claim']
   }));
   if (rows.length) return rows;
@@ -8027,6 +8179,238 @@ function adminMerchants() {
     status: 'Approved',
     modules: ['单品提报', '发货', '门店', 'Claim']
   }];
+}
+
+function adminMerchantInsights(identifier) {
+  const value = requireString(identifier, 'merchantId');
+  const merchant = isValidAddress(value)
+    ? db.prepare('SELECT * FROM merchants WHERE lower(wallet_address) = ?').get(value.toLowerCase())
+    : db.prepare('SELECT * FROM merchants WHERE id = ?').get(value);
+  if (!merchant) fail(404, 'MERCHANT_NOT_FOUND');
+  const wallet = merchant.wallet_address.toLowerCase();
+  const orders = db.prepare('SELECT * FROM orders WHERE lower(seller_address) = ? ORDER BY created_at DESC').all(wallet);
+  const orderIds = orders.map((order) => order.order_id);
+  const rewards = orderIds.length
+    ? db.prepare(`SELECT * FROM reward_ledger WHERE order_id IN (${orderIds.map(() => '?').join(',')})`).all(...orderIds)
+    : [];
+  const claims = db.prepare('SELECT * FROM claims WHERE lower(wallet_address) = ? ORDER BY created_at DESC').all(wallet);
+  const paid = orders.filter((order) => !['Draft', 'Cancelled'].includes(order.status));
+  const refunded = orders.filter((order) => ['ForcedRefunded', 'EmergencyRefunded'].includes(order.status));
+  const shipped = orders.filter((order) => ['Shipped', 'PickupReady', 'Released'].includes(order.status));
+  const overdue = orders.filter((order) => ['PaidLocked', 'AwaitingShipment'].includes(order.status) && Date.now() - timestampMs(order.created_at) >= orderTimeoutMs());
+  const rewardStates = Object.fromEntries(['Locked', 'Available', 'Claimed', 'Burned', 'Failed'].map((state) => [state, {
+    count: rewards.filter((row) => row.state === state).length,
+    amount: sumDecimalStrings(rewards.filter((row) => row.state === state).map((row) => row.amount))
+  }]));
+  return {
+    generatedAt: new Date().toISOString(),
+    merchant: {
+      id: merchant.id,
+      walletAddress: merchant.wallet_address,
+      name: merchant.name,
+      status: merchant.status,
+      qualification: redactMerchantPayload(JSON.parse(merchant.payload_json || '{}')).qualification || null
+    },
+    orders: {
+      total: orders.length,
+      paid: paid.length,
+      shipped: shipped.length,
+      overdue: overdue.length,
+      shipmentRatePct: paid.length ? Number(((shipped.length / paid.length) * 100).toFixed(2)) : 0,
+      recent: orders.slice(0, 50).map(toOrder)
+    },
+    npl: {
+      grossFlow: sumDecimalStrings(paid.map((row) => row.amount_npl)),
+      refunded: sumDecimalStrings(refunded.map((row) => row.amount_npl)),
+      locked: sumDecimalStrings(orders.filter((row) => ['PaidLocked', 'AwaitingShipment', 'Shipped', 'PickupReady', 'Arbitration', 'RefundRequested'].includes(row.status)).map((row) => row.amount_npl))
+    },
+    afterSales: {
+      refunds: refunded.length,
+      arbitration: orders.filter((row) => ['Arbitration', 'RefundRequested'].includes(row.status)).length
+    },
+    rewards: {
+      asset: 'BNM',
+      fiveStates: rewardStates,
+      burned: rewardStates.Burned,
+      entries: rewards.slice(0, 100).map(toLedgerEntry)
+    },
+    claims: {
+      total: claims.length,
+      failed: claims.filter((row) => String(row.status).toLowerCase() === 'failed').length,
+      records: claims.slice(0, 100).map(toClaimRecord)
+    }
+  };
+}
+
+function adminProductHistory(productId) {
+  const id = requireString(productId, 'productId');
+  return auditDb.prepare(`
+    SELECT id, actor_address, action, target, signature_hash, proof_type, payload_json, created_at
+    FROM audit_logs
+    WHERE target = ? AND action LIKE 'admin.product.%'
+    ORDER BY id DESC LIMIT 200
+  `).all(id).map((row) => ({
+    id: row.id,
+    actorAddress: row.actor_address,
+    action: row.action,
+    productId: row.target,
+    signatureHash: row.signature_hash,
+    proofType: row.proof_type,
+    change: JSON.parse(row.payload_json || '{}'),
+    createdAt: row.created_at
+  }));
+}
+
+function adminMultisigApprovals() {
+  return auditDb.prepare(`
+    SELECT id, actor_address, target, payload_json, created_at
+    FROM audit_logs
+    WHERE action = 'multisig.approval.recorded'
+    ORDER BY id DESC LIMIT 500
+  `).all().map((row) => ({
+    id: row.id,
+    signerAddress: row.actor_address,
+    safeTxHash: row.target,
+    ...JSON.parse(row.payload_json || '{}'),
+    createdAt: row.created_at
+  }));
+}
+
+function adminReconciliationReport() {
+  const totalEvents = Number(db.prepare(`
+    SELECT COUNT(*) AS count FROM chain_events
+    WHERE event_name IN ('OrderPaid','OrderCompleted','OrderForcedRefunded','OrderEmergencyRefunded','RewardClaimed')
+  `).get()?.count || 0);
+  const rows = db.prepare(`
+    SELECT order_id, event_name, payload_json, tx_hash, block_number, finality_status
+    FROM chain_events
+    WHERE event_name IN ('OrderPaid','OrderCompleted','OrderForcedRefunded','OrderEmergencyRefunded','RewardClaimed')
+    ORDER BY id DESC LIMIT 1000
+  `).all();
+  const records = rows.map((row) => {
+    const payload = JSON.parse(row.payload_json || '{}');
+    const finalityAccepted = reconciliationFinalityAccepted(row.finality_status);
+    if (row.event_name === 'RewardClaimed') {
+      const entryId = String(payload.entryId || '');
+      const reward = db.prepare('SELECT * FROM reward_ledger WHERE id = ? OR id = ? LIMIT 1').get(entryId, `reward-ledger-${entryId}`);
+      const claim = reward ? db.prepare('SELECT * FROM claims WHERE reward_id = ? ORDER BY created_at DESC LIMIT 1').get(reward.id) : null;
+      const chainAmount = decimalFromEventPayload(payload);
+      const ledgerAmount = reward?.amount || null;
+      const amountMatch = Boolean(ledgerAmount) && decimalsEqual(chainAmount, ledgerAmount);
+      const stateMatch = reward?.state === 'Claimed';
+      const txHashMatch = Boolean(reward?.tx_hash) && String(reward.tx_hash).toLowerCase() === String(row.tx_hash).toLowerCase()
+        && (!claim || (claim.status === 'success' && String(claim.tx_hash || '').toLowerCase() === String(row.tx_hash).toLowerCase()));
+      const reasons = reconciliationReasons({ amountMatch, stateMatch, txHashMatch, finalityAccepted });
+      return { eventName: row.event_name, target: entryId, txHash: row.tx_hash, chainAmount, ledgerAmount, amountMatch, stateMatch, txHashMatch, finalityAccepted, match: reasons.length === 0, reasons, finalityStatus: row.finality_status };
+    }
+    const orderId = payload.orderId || row.order_id;
+    const order = findOrderByIdOrOrderId(orderId);
+    const chainAmount = decimalFromEventPayload(payload);
+    const ledgerAmount = order?.amount_npl || null;
+    const amountMatch = Boolean(ledgerAmount) && decimalsEqual(chainAmount, ledgerAmount);
+    const stateMatch = reconciliationOrderStateMatches(row.event_name, order?.status);
+    const expectedTxHash = row.event_name === 'OrderPaid' ? order?.fund_tx_hash : order?.last_event_tx_hash;
+    const txHashMatch = Boolean(expectedTxHash) && String(expectedTxHash).toLowerCase() === String(row.tx_hash || '').toLowerCase();
+    const reasons = reconciliationReasons({ amountMatch, stateMatch, txHashMatch, finalityAccepted });
+    return { eventName: row.event_name, target: orderId, txHash: row.tx_hash, chainAmount, ledgerAmount, amountMatch, stateMatch, txHashMatch, finalityAccepted, match: reasons.length === 0, reasons, finalityStatus: row.finality_status };
+  });
+  const observed = new Set(records.map((row) => `${row.eventName}:${String(row.target).toLowerCase()}`));
+  for (const order of db.prepare("SELECT order_id, status FROM orders WHERE status NOT IN ('Draft','Cancelled')").all()) {
+    for (const eventName of expectedOrderReconciliationEvents(order.status)) {
+      const key = `${eventName}:${order.order_id.toLowerCase()}`;
+      if (!observed.has(key)) records.push(missingReconciliationRecord(eventName, order.order_id));
+    }
+  }
+  for (const claim of db.prepare("SELECT reward_id, tx_hash FROM claims WHERE status = 'success'").all()) {
+    const entryId = String(claim.reward_id || '').replace(/^reward-ledger-/, '');
+    const key = `RewardClaimed:${entryId.toLowerCase()}`;
+    if (!observed.has(key)) records.push(missingReconciliationRecord('RewardClaimed', entryId, claim.tx_hash));
+  }
+  if (totalEvents > rows.length) {
+    records.push({ eventName: 'Window', target: 'chain_events', txHash: null, match: false, reasons: ['EVENT_WINDOW_TRUNCATED'], totalEvents, inspectedEvents: rows.length });
+  }
+  const mismatches = records.filter((row) => !row.match);
+  return {
+    generatedAt: new Date().toISOString(),
+    status: records.length === 0 ? 'NoData' : mismatches.length ? 'AttentionRequired' : 'Reconciled',
+    checked: records.length,
+    matched: records.length - mismatches.length,
+    totalEvents,
+    truncated: totalEvents > rows.length,
+    mismatches,
+    records,
+    circuitSnapshot: ['orders', 'seckill', 'claims', 'force-cutoff'].map(circuitState)
+  };
+}
+
+function reconciliationFinalityAccepted(status) {
+  return status === 'Finalized' || (ALLOW_UNVERIFIED_CHAIN_EVENTS && status === 'Unverified');
+}
+
+function reconciliationOrderStateMatches(eventName, status) {
+  if (eventName === 'OrderPaid') return ['PaidLocked', 'AwaitingShipment', 'Shipped', 'PickupReady', 'Arbitration', 'RefundRequested', 'Released', 'ForcedRefunded', 'EmergencyRefunded', 'Claimed'].includes(String(status));
+  if (eventName === 'OrderCompleted') return status === 'Released';
+  if (eventName === 'OrderForcedRefunded') return status === 'ForcedRefunded';
+  if (eventName === 'OrderEmergencyRefunded') return status === 'EmergencyRefunded';
+  return false;
+}
+
+function expectedOrderReconciliationEvents(status) {
+  const events = ['OrderPaid'];
+  if (status === 'Released') events.push('OrderCompleted');
+  if (status === 'ForcedRefunded') events.push('OrderForcedRefunded');
+  if (status === 'EmergencyRefunded') events.push('OrderEmergencyRefunded');
+  return events;
+}
+
+function reconciliationReasons({ amountMatch, stateMatch, txHashMatch, finalityAccepted }) {
+  return [
+    !amountMatch ? 'AMOUNT_MISMATCH' : null,
+    !stateMatch ? 'STATE_MISMATCH' : null,
+    !txHashMatch ? 'TX_HASH_MISMATCH' : null,
+    !finalityAccepted ? 'FINALITY_NOT_ACCEPTED' : null
+  ].filter(Boolean);
+}
+
+function missingReconciliationRecord(eventName, target, txHash = null) {
+  return { eventName, target, txHash, chainAmount: null, ledgerAmount: null, match: false, reasons: ['EXPECTED_EVENT_MISSING'], finalityStatus: null };
+}
+
+function decimalFromEventPayload(payload) {
+  const wei = payload.nplAmountWei ?? payload.refundedNplWei ?? payload.amountWei ?? payload.amount;
+  if (wei !== undefined && /^(?:0|[1-9][0-9]*)$/.test(String(wei))) return formatDecimal18(BigInt(wei));
+  return String(payload.nplAmount ?? payload.refundedNpl ?? payload.amountNpl ?? '0');
+}
+
+function decimalsEqual(left, right) {
+  try {
+    return parseDecimal18(String(left)) === parseDecimal18(String(right));
+  } catch {
+    return false;
+  }
+}
+
+function sumDecimalStrings(values) {
+  return formatDecimal18(values.reduce((total, value) => total + parseDecimal18(String(value || '0')), 0n));
+}
+
+function redactMerchantPayload(payload) {
+  const value = structuredClone(payload || {});
+  if (value.qualification?.contactPhone) value.qualification.contactPhoneMasked = maskPhone(value.qualification.contactPhone);
+  if (value.qualification) delete value.qualification.contactPhone;
+  delete value.legalIdentity;
+  delete value.legalId;
+  return redactConfigValue(value);
+}
+
+function maskPhone(value) {
+  const text = String(value || '');
+  return text.length >= 7 ? `${text.slice(0, 3)}****${text.slice(-4)}` : '***';
+}
+
+function merchantQualificationReady(payload) {
+  const qualification = payload?.qualification;
+  return Boolean(qualification?.businessLicenseUrl && qualification?.legalRepresentative && qualification?.contactName && qualification?.contactPhone && qualification?.settlementWallet);
 }
 
 function pendingProductSubmissions() {
@@ -8314,8 +8698,12 @@ function exportMerchantOrders(merchantAddress, searchParams, format) {
     const content = `\uFEFF${[headers, ...rows.map((row) => fields.map((field) => row[field]))].map((line) => line.map(csvCell).join(',')).join('\r\n')}`;
     return { content, contentType: 'text/csv; charset=utf-8', fileName: `24k-orders-${stamp}.csv`, rowCount: rows.length, filters: { status, fulfillmentMode, sku, from, to } };
   }
-  const content = excelSpreadsheetXml(headers, fields, rows);
-  return { content, contentType: 'application/vnd.ms-excel; charset=utf-8', fileName: `24k-orders-${stamp}.xls`, rowCount: rows.length, filters: { status, fulfillmentMode, sku, from, to } };
+  const artifact = encodedArtifact(
+    `24k-orders-${stamp}.xlsx`,
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    buildXlsx({ sheetName: '24K Orders', headers, rows: rows.map((row) => fields.map((field) => row[field])) })
+  );
+  return { ...artifact, contentType: artifact.mimeType, rowCount: rows.length, filters: { status, fulfillmentMode, sku, from, to } };
 }
 
 function merchantExportSearchParams(filters) {
@@ -8329,15 +8717,6 @@ function merchantExportSearchParams(filters) {
 function csvCell(value) {
   const text = String(value ?? '');
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-}
-
-function excelSpreadsheetXml(headers, fields, rows) {
-  const cells = (values) => `<Row>${values.map((value) => `<Cell><Data ss:Type="String">${escapeXml(value)}</Data></Cell>`).join('')}</Row>`;
-  return `<?xml version="1.0" encoding="UTF-8"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Worksheet ss:Name="24K Orders"><Table>${cells(headers)}${rows.map((row) => cells(fields.map((field) => row[field]))).join('')}</Table></Worksheet></Workbook>`;
-}
-
-function escapeXml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[character]));
 }
 
 function adminCategories() {
@@ -8369,9 +8748,19 @@ function adminTags() {
 }
 
 function categoryOrTagLocked(field, id) {
-  return db.prepare("SELECT payload_json FROM product_submissions WHERE status IN ('PendingReview','Approved','Scheduled','Live','TakedownRequested')").all().some((row) => {
+  const submissionLocked = db.prepare("SELECT payload_json FROM product_submissions WHERE status IN ('PendingReview','Approved','Scheduled','Live','TakedownRequested')").all().some((row) => {
     const payload = JSON.parse(row.payload_json || '{}');
     return field === 'tagIds' ? Array.isArray(payload.tagIds) && payload.tagIds.includes(id) : payload[field] === id;
+  });
+  if (submissionLocked) return true;
+  const productIds = field === 'tagIds'
+    ? db.prepare('SELECT product_id FROM product_tags WHERE tag_id = ?').all(id).map((row) => row.product_id)
+    : db.prepare('SELECT approved_product_id, payload_json FROM product_submissions WHERE approved_product_id IS NOT NULL').all()
+      .filter((row) => JSON.parse(row.payload_json || '{}').categoryId === id)
+      .map((row) => row.approved_product_id);
+  return productIds.some((productId) => {
+    const product = db.prepare('SELECT status FROM products WHERE id = ?').get(productId);
+    return ['Active', 'SoldOut'].includes(product?.status) || Boolean(productOperationalLockReason(productId));
   });
 }
 
@@ -8746,10 +9135,9 @@ function resolveAfterSaleCase(session, body) {
     status = 'AwaitingCompletionTransaction';
     transactionIntent = adminContractIntent('escrowCompleteOrder', order.escrow_address, escrowTxInterface.encodeFunctionData('completeOrder', [order.order_id]), { orderId: order.order_id });
   } else if (resolution === 'refund') {
-    const refundNpl = body.refundNplAmount ? formatDecimal18(parseDecimal18(body.refundNplAmount)) : order.amount_npl;
-    if (parseDecimal18(refundNpl) > parseDecimal18(order.amount_npl)) fail(400, 'REFUND_AMOUNT_EXCEEDS_ORDER');
+    if (body.refundNplAmount !== undefined || body.amountNpl !== undefined) fail(400, 'FULL_REFUND_ONLY');
     status = 'AwaitingRefundTransaction';
-    transactionIntent = adminContractIntent('escrowForceRefund', order.escrow_address, escrowTxInterface.encodeFunctionData('forceRefund', [order.order_id, parseDecimal18(refundNpl)]), { orderId: order.order_id, refundNplAmount: refundNpl });
+    transactionIntent = adminContractIntent('escrowForceRefund', order.escrow_address, escrowTxInterface.encodeFunctionData('forceRefund', [order.order_id]), { orderId: order.order_id, fullRefundNpl: order.amount_npl });
   }
   db.prepare('UPDATE after_sale_cases SET status = ?, resolution = ?, payload_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(status, resolution, JSON.stringify(payload), id);
   return { case: afterSaleCaseById(id), order: toOrder(findOrderByIdOrOrderId(order.order_id)), transactionIntent };
@@ -8757,14 +9145,19 @@ function resolveAfterSaleCase(session, body) {
 
 async function adminOperationsSnapshot() {
   const memory = process.memoryUsage();
-  const activityLastMinute = Number(db.prepare('SELECT COUNT(*) AS count FROM request_activity WHERE created_at >= ?').get(Date.now() - 60_000)?.count || 0);
-  const activityLastHour = Number(db.prepare('SELECT COUNT(*) AS count FROM request_activity WHERE created_at >= ?').get(Date.now() - 60 * 60_000)?.count || 0);
   const writesLastMinute = Number(auditDb.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE created_at >= datetime('now', '-1 minute')").get()?.count || 0);
   const errorsLastHour = Number(db.prepare("SELECT COUNT(*) AS count FROM risk_events WHERE kind = 'api-error' AND created_at >= datetime('now', '-1 hour')").get()?.count || 0);
+  const botEventsLastHour = Number(db.prepare("SELECT COUNT(*) AS count FROM risk_events WHERE kind IN ('wallet-cluster','wallet-switch','order-cancel','fulfillment-change','rate-limit') AND created_at >= datetime('now', '-1 hour')").get()?.count || 0);
+  const openRiskEvents = Number(db.prepare("SELECT COUNT(*) AS count FROM risk_events WHERE status <> 'Resolved'").get()?.count || 0);
   const dbCheck = String(db.prepare('PRAGMA quick_check').get()?.quick_check || 'unknown');
-  const blockchain = await operationsBlockchainStatus();
-  const redisConfigured = Boolean(process.env.REDIS_URL);
-  const mqConfigured = Boolean(process.env.MQ_URL || process.env.RABBITMQ_URL);
+  const [blockchain, oracle, redis, mq] = await Promise.all([
+    operationsBlockchainStatus(),
+    operationsOracleStatus(),
+    probeRedisHealth(),
+    probeMqHealth()
+  ]);
+  const disk = operationsDiskStatus();
+  const traffic = operationsTrafficSnapshot(writesLastMinute, errorsLastHour);
   return {
     generatedAt: new Date().toISOString(),
     process: {
@@ -8777,44 +9170,78 @@ async function adminOperationsSnapshot() {
       totalMemoryMb: Math.round(os.totalmem() / 1024 / 1024),
       freeMemoryMb: Math.round(os.freemem() / 1024 / 1024),
       platform: os.platform(),
-      architecture: os.arch()
+      architecture: os.arch(),
+      disk
     },
-    traffic: {
-      requestsLastMinute: activityLastMinute,
-      qps: Number((activityLastMinute / 60).toFixed(2)),
-      tps: Number((writesLastMinute / 60).toFixed(2)),
-      writesLastMinute,
-      errorsLastHour,
-      errorRatePct: activityLastHour ? Number((errorsLastHour * 100 / activityLastHour).toFixed(3)) : 0
-    },
+    traffic,
     components: {
       db: { status: dbCheck === 'ok' ? 'healthy' : 'degraded', engine: 'sqlite', connectionModel: 'single-process', quickCheck: dbCheck },
-      redis: { status: redisConfigured ? 'configuredUnverified' : 'notConfigured', configured: redisConfigured },
-      mq: { status: mqConfigured ? 'configuredUnverified' : 'notConfigured', configured: mqConfigured }
+      redis,
+      mq
     },
     blockchain: {
       ...blockchain,
+      oracle,
       chainId: CHAIN_ID,
-      rpcConfigured: Boolean(CHAIN_EVENT_RPC_URL),
+      rpcConfigured: Boolean(CHAIN_EVENT_RPC_URL || CHAIN_EVENT_RPC_FALLBACK_URL),
       escrowConfigured: isValidAddress(ESCROW),
       rewardLedgerConfigured: isValidAddress(REWARD_LEDGER),
       seckillConfigured: isValidAddress(SECKILL),
       genesisNodeConfigured: isValidAddress(GENESIS_NODE_CONTRACT),
       requiredConfirmations: INDEXER_CONFIRMATIONS
+    },
+    risk: {
+      botEventsLastHour,
+      openEvents: openRiskEvents,
+      gasBlocked: Boolean(blockchain.gas?.blocked),
+      status: openRiskEvents || botEventsLastHour || blockchain.gas?.blocked || oracle.alert ? 'attention' : 'normal'
     }
   };
 }
 
 async function operationsBlockchainStatus() {
-  if (!CHAIN_EVENT_RPC_URL) return { status: 'notConfigured', rpcHeight: null, explorerHeight: null, heightLag: null, explorerStatus: 'notConfigured' };
+  const configured = Boolean(CHAIN_EVENT_RPC_URL || CHAIN_EVENT_RPC_FALLBACK_URL);
+  if (!configured) {
+    return {
+      status: 'notConfigured',
+      rpcHeight: null,
+      explorerHeight: null,
+      heightLag: null,
+      explorerStatus: 'notConfigured',
+      rpc: { status: 'notConfigured', configured: false, activeEndpoint: null, degraded: false, latencyMs: null, checkedAt: null },
+      gas: { status: 'notConfigured', priceGwei: null, limitGwei: null, blocked: false }
+    };
+  }
   let rpcHeight = null;
+  let gas = { status: 'unavailable', priceGwei: null, limitGwei: null, blocked: false };
   try {
     rpcHeight = Number.parseInt(String(await rpc('eth_blockNumber', [])), 16);
-  } catch {
-    return { status: 'degraded', rpcHeight: null, explorerHeight: null, heightLag: null, explorerStatus: 'unavailable' };
+    if (!Number.isSafeInteger(rpcHeight)) throw new Error('RPC_HEIGHT_INVALID');
+    gas = await operationsGasStatus();
+  } catch (error) {
+    recordOperationalIssue('rpc-error', 'operations.rpc', operationalErrorCode(error));
+    return {
+      status: 'degraded',
+      rpcHeight: null,
+      explorerHeight: null,
+      heightLag: null,
+      explorerStatus: 'unavailable',
+      rpc: rpcOperationsState(configured),
+      gas
+    };
   }
   const explorerApiKey = process.env.EXPLORER_API_KEY || process.env.BSCSCAN_API_KEY || '';
-  if (!explorerApiKey || CHAIN_ID !== 56) return { status: 'degraded', rpcHeight, explorerHeight: null, heightLag: null, explorerStatus: 'notConfigured' };
+  if (!explorerApiKey || CHAIN_ID !== 56) {
+    return {
+      status: rpcRuntimeState.degraded || gas.blocked ? 'degraded' : 'healthy',
+      rpcHeight,
+      explorerHeight: null,
+      heightLag: null,
+      explorerStatus: 'notConfigured',
+      rpc: rpcOperationsState(configured),
+      gas
+    };
+  }
   try {
     const endpoint = new URL('https://api.etherscan.io/v2/api');
     endpoint.searchParams.set('chainid', String(CHAIN_ID));
@@ -8827,10 +9254,292 @@ async function operationsBlockchainStatus() {
     const explorerHeight = Number.parseInt(String(payload.result || ''), 16);
     if (!Number.isSafeInteger(explorerHeight)) throw new Error('EXPLORER_HEIGHT_INVALID');
     const heightLag = explorerHeight - rpcHeight;
-    return { status: Math.abs(heightLag) <= 3 ? 'healthy' : 'degraded', rpcHeight, explorerHeight, heightLag, explorerStatus: 'healthy' };
-  } catch {
-    return { status: 'degraded', rpcHeight, explorerHeight: null, heightLag: null, explorerStatus: 'unavailable' };
+    return {
+      status: Math.abs(heightLag) <= 3 && !rpcRuntimeState.degraded && !gas.blocked ? 'healthy' : 'degraded',
+      rpcHeight,
+      explorerHeight,
+      heightLag,
+      explorerStatus: 'healthy',
+      rpc: rpcOperationsState(configured),
+      gas
+    };
+  } catch (error) {
+    recordOperationalIssue('explorer-error', 'operations.explorer', operationalErrorCode(error));
+    return {
+      status: 'degraded',
+      rpcHeight,
+      explorerHeight: null,
+      heightLag: null,
+      explorerStatus: 'unavailable',
+      rpc: rpcOperationsState(configured),
+      gas
+    };
   }
+}
+
+function rpcOperationsState(configured) {
+  return {
+    status: !configured ? 'notConfigured' : rpcRuntimeState.active ? (rpcRuntimeState.degraded ? 'degraded' : 'healthy') : 'unavailable',
+    configured,
+    primaryConfigured: Boolean(CHAIN_EVENT_RPC_URL),
+    fallbackConfigured: Boolean(CHAIN_EVENT_RPC_FALLBACK_URL),
+    activeEndpoint: rpcRuntimeState.active,
+    degraded: rpcRuntimeState.degraded,
+    latencyMs: rpcRuntimeState.lastLatencyMs,
+    lastError: rpcRuntimeState.lastError,
+    checkedAt: rpcRuntimeState.checkedAt
+  };
+}
+
+async function operationsGasStatus() {
+  const config = readAdminConfig('oracle-gas') || {};
+  const limitGwei = config.maxGasGwei ? Number(config.maxGasGwei) : null;
+  try {
+    const value = await rpc('eth_gasPrice', []);
+    const priceWei = BigInt(String(value));
+    const priceGwei = Number(formatUnits(priceWei, 9));
+    const blocked = Number.isFinite(limitGwei) && limitGwei > 0 ? priceGwei > limitGwei : false;
+    if (blocked) recordOperationalIssue('gas-block', 'operations.gas', 'GAS_PRICE_LIMIT_EXCEEDED', { priceGwei, limitGwei });
+    return {
+      status: blocked ? 'blocked' : Number.isFinite(limitGwei) && limitGwei > 0 ? 'healthy' : 'limitNotConfigured',
+      priceGwei: Number(priceGwei.toFixed(6)),
+      limitGwei: Number.isFinite(limitGwei) && limitGwei > 0 ? limitGwei : null,
+      blocked
+    };
+  } catch (error) {
+    return { status: 'unavailable', priceGwei: null, limitGwei: Number.isFinite(limitGwei) && limitGwei > 0 ? limitGwei : null, blocked: false, errorCode: operationalErrorCode(error) };
+  }
+}
+
+async function operationsOracleStatus() {
+  const config = readAdminConfig('oracle-gas') || {};
+  if (!config.oracleAddress) return { status: 'notConfigured', configured: false, alert: false };
+  const address = isValidAddress(config.oracleAddress) ? config.oracleAddress.toLowerCase() : null;
+  if (!address) return { status: 'invalidConfiguration', configured: true, alert: true };
+  try {
+    const [decimalsResult, roundResult] = await Promise.all([
+      rpc('eth_call', [{ to: address, data: chainlinkFeedInterface.encodeFunctionData('decimals') }, 'latest']),
+      rpc('eth_call', [{ to: address, data: chainlinkFeedInterface.encodeFunctionData('latestRoundData') }, 'latest'])
+    ]);
+    const decimals = Number(chainlinkFeedInterface.decodeFunctionResult('decimals', decimalsResult)[0]);
+    const [roundId, answer, , updatedAt, answeredInRound] = chainlinkFeedInterface.decodeFunctionResult('latestRoundData', roundResult);
+    if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > 18 || answer <= 0n || updatedAt <= 0n || answeredInRound < roundId) throw new Error('ORACLE_ROUND_INVALID');
+    const livePrice = formatUnits(answer, decimals);
+    const referencePrice = config.oracleReferencePrice || null;
+    const thresholdBps = Number.isSafeInteger(Number(config.oracleDeviationBps)) ? Number(config.oracleDeviationBps) : null;
+    const maxAgeSeconds = Number.isSafeInteger(Number(config.oracleMaxAgeSeconds)) ? Number(config.oracleMaxAgeSeconds) : 3_600;
+    const ageSeconds = Math.max(0, Math.floor(Date.now() / 1000) - Number(updatedAt));
+    const stale = ageSeconds > maxAgeSeconds;
+    let deviationBps = null;
+    if (referencePrice) {
+      const referenceUnits = decimalToScaledUnits(referencePrice, decimals);
+      if (referenceUnits > 0n) deviationBps = Number((absoluteBigInt(answer - referenceUnits) * 1_000_000n / referenceUnits)) / 100;
+    }
+    const alert = stale || (thresholdBps !== null && deviationBps !== null && deviationBps > thresholdBps);
+    const configurationComplete = Boolean(referencePrice) && thresholdBps !== null;
+    const status = stale ? 'stale' : alert ? 'alert' : configurationComplete ? 'healthy' : 'configurationIncomplete';
+    if (alert) recordOperationalIssue('oracle-deviation', 'operations.oracle', stale ? 'ORACLE_STALE' : 'ORACLE_DEVIATION_LIMIT_EXCEEDED', { deviationBps, thresholdBps, ageSeconds, maxAgeSeconds });
+    return {
+      status,
+      configured: true,
+      address,
+      decimals,
+      livePrice,
+      referencePrice,
+      deviationBps,
+      thresholdBps,
+      ageSeconds,
+      maxAgeSeconds,
+      updatedAt: new Date(Number(updatedAt) * 1000).toISOString(),
+      alert
+    };
+  } catch (error) {
+    const errorCode = operationalErrorCode(error, 'ORACLE_READ_FAILED');
+    recordOperationalIssue('oracle-error', 'operations.oracle', errorCode);
+    return { status: 'unavailable', configured: true, address, alert: true, errorCode };
+  }
+}
+
+function operationsTrafficSnapshot(writesLastMinute, errorsLastHour) {
+  const now = Date.now();
+  const recent = requestMetrics.filter((entry) => entry.completedAt >= now - 60_000);
+  const durations = recent.map((entry) => entry.durationMs).sort((left, right) => left - right);
+  const serverErrors = recent.filter((entry) => entry.statusCode >= 500).length;
+  const groups = new Map();
+  for (const entry of recent) {
+    const key = `${entry.method} ${entry.path}`;
+    const group = groups.get(key) || { endpoint: key, requests: 0, errors: 0, durations: [] };
+    group.requests += 1;
+    if (entry.statusCode >= 500) group.errors += 1;
+    group.durations.push(entry.durationMs);
+    groups.set(key, group);
+  }
+  const endpoints = [...groups.values()].map((group) => ({
+    endpoint: group.endpoint,
+    requests: group.requests,
+    errors: group.errors,
+    latencyAvgMs: average(group.durations),
+    latencyP50Ms: percentile(group.durations, 0.5),
+    latencyP95Ms: percentile(group.durations, 0.95)
+  })).sort((left, right) => right.requests - left.requests || left.endpoint.localeCompare(right.endpoint)).slice(0, 50);
+  return {
+    requestsLastMinute: recent.length,
+    qps: Number((recent.length / 60).toFixed(3)),
+    tps: Number((writesLastMinute / 60).toFixed(3)),
+    writesLastMinute,
+    errorsLastHour,
+    errorRatePct: recent.length ? Number((serverErrors * 100 / recent.length).toFixed(3)) : 0,
+    latencyAvgMs: average(durations),
+    latencyP50Ms: percentile(durations, 0.5),
+    latencyP95Ms: percentile(durations, 0.95),
+    endpoints
+  };
+}
+
+function operationsDiskStatus() {
+  const target = DB_PATH === ':memory:' ? process.cwd() : dirname(realpathOrOriginal(DB_PATH));
+  try {
+    const stats = statfsSync(target);
+    const totalBytes = Number(stats.blocks) * Number(stats.bsize);
+    const freeBytes = Number(stats.bavail) * Number(stats.bsize);
+    if (!Number.isFinite(totalBytes) || totalBytes <= 0 || !Number.isFinite(freeBytes)) throw new Error('DISK_STATS_INVALID');
+    const usedPct = Number((((totalBytes - freeBytes) * 100) / totalBytes).toFixed(2));
+    return {
+      status: usedPct >= 95 ? 'critical' : usedPct >= 85 ? 'warning' : 'healthy',
+      totalMb: Math.round(totalBytes / 1024 / 1024),
+      freeMb: Math.round(freeBytes / 1024 / 1024),
+      usedPct,
+      warningPct: 85,
+      criticalPct: 95
+    };
+  } catch (error) {
+    return { status: 'unavailable', totalMb: null, freeMb: null, usedPct: null, errorCode: operationalErrorCode(error, 'DISK_STATS_UNAVAILABLE') };
+  }
+}
+
+function realpathOrOriginal(path) {
+  try { return realpathSync(path); } catch { return path; }
+}
+
+async function probeRedisHealth() {
+  const infrastructure = readAdminConfig('infrastructure') || {};
+  const environmentUrl = process.env.REDIS_HEALTH_URL || '';
+  const url = infrastructure.redisHealthUrl || environmentUrl;
+  const configured = Boolean(url || process.env.REDIS_URL);
+  if (!configured) return { status: 'notConfigured', configured: false, hitRatioPct: null };
+  if (!url) return { status: 'configuredUnverified', configured: true, hitRatioPct: null, reason: 'REDIS_HEALTH_URL_REQUIRED' };
+  const headers = healthCredentialTargetMatches(url, environmentUrl) ? bearerHeaders(process.env.REDIS_HEALTH_TOKEN) : {};
+  const result = await probeHealthJson('redis', url, headers);
+  if (!result.ok) return { status: result.status, configured: true, hitRatioPct: null, latencyMs: result.latencyMs, errorCode: result.errorCode };
+  const hits = firstFiniteNumber(result.payload, ['keyspace_hits', 'hits', 'stats.keyspace_hits', 'stats.hits']);
+  const misses = firstFiniteNumber(result.payload, ['keyspace_misses', 'misses', 'stats.keyspace_misses', 'stats.misses']);
+  let hitRatioPct = firstFiniteNumber(result.payload, ['hitRatioPct', 'hit_ratio_pct', 'stats.hitRatioPct']);
+  if (hitRatioPct === null && hits !== null && misses !== null && hits + misses > 0) hitRatioPct = Number((hits * 100 / (hits + misses)).toFixed(3));
+  return { status: result.healthy ? 'healthy' : 'degraded', configured: true, connected: result.healthy, latencyMs: result.latencyMs, hits, misses, hitRatioPct };
+}
+
+async function probeMqHealth() {
+  const infrastructure = readAdminConfig('infrastructure') || {};
+  const environmentUrl = process.env.MQ_HEALTH_URL || process.env.RABBITMQ_MANAGEMENT_URL || '';
+  const url = infrastructure.mqHealthUrl || environmentUrl;
+  const configured = Boolean(url || process.env.MQ_URL || process.env.RABBITMQ_URL);
+  if (!configured) return { status: 'notConfigured', configured: false, backlog: null };
+  if (!url) return { status: 'configuredUnverified', configured: true, backlog: null, reason: 'MQ_HEALTH_URL_REQUIRED' };
+  const credentialTarget = healthCredentialTargetMatches(url, environmentUrl);
+  const headers = credentialTarget ? bearerHeaders(process.env.MQ_HEALTH_TOKEN) : {};
+  if (credentialTarget && !headers.authorization && process.env.RABBITMQ_MANAGEMENT_USERNAME && process.env.RABBITMQ_MANAGEMENT_PASSWORD) {
+    headers.authorization = `Basic ${Buffer.from(`${process.env.RABBITMQ_MANAGEMENT_USERNAME}:${process.env.RABBITMQ_MANAGEMENT_PASSWORD}`).toString('base64')}`;
+  }
+  const result = await probeHealthJson('mq', url, headers);
+  if (!result.ok) return { status: result.status, configured: true, backlog: null, latencyMs: result.latencyMs, errorCode: result.errorCode };
+  const ready = firstFiniteNumber(result.payload, ['messages_ready', 'ready', 'queue_totals.messages_ready']);
+  const unacknowledged = firstFiniteNumber(result.payload, ['messages_unacknowledged', 'unacknowledged', 'queue_totals.messages_unacknowledged']);
+  const explicitBacklog = firstFiniteNumber(result.payload, ['backlog', 'messages', 'queue_totals.messages']);
+  const backlog = explicitBacklog ?? (ready !== null || unacknowledged !== null ? Number(ready || 0) + Number(unacknowledged || 0) : null);
+  return { status: result.healthy ? 'healthy' : 'degraded', configured: true, connected: result.healthy, latencyMs: result.latencyMs, backlog, ready, unacknowledged };
+}
+
+async function probeHealthJson(kind, urlValue, headers) {
+  let url;
+  try {
+    url = normalizeRuntimeUrl(urlValue, `${kind}HealthUrl`);
+  } catch {
+    return { ok: false, status: 'invalidConfiguration', latencyMs: null, errorCode: `${kind.toUpperCase()}_HEALTH_URL_INVALID` };
+  }
+  const startedAt = Date.now();
+  try {
+    const response = await fetch(url, { headers: { accept: 'application/json', ...headers }, signal: AbortSignal.timeout(5_000) });
+    const latencyMs = Date.now() - startedAt;
+    if (!response.ok) {
+      const errorCode = `${kind.toUpperCase()}_HEALTH_HTTP_${response.status}`;
+      recordOperationalIssue(`${kind}-error`, `operations.${kind}`, errorCode);
+      return { ok: false, status: 'unavailable', latencyMs, errorCode };
+    }
+    const payload = await response.json();
+    const explicitStatus = String(payload?.status || payload?.health || '').toLowerCase();
+    const healthy = payload?.ok !== false && !['down', 'failed', 'error', 'unhealthy', 'unavailable'].includes(explicitStatus);
+    return { ok: true, healthy, payload, latencyMs };
+  } catch (error) {
+    const errorCode = operationalErrorCode(error, `${kind.toUpperCase()}_HEALTH_UNAVAILABLE`);
+    recordOperationalIssue(`${kind}-error`, `operations.${kind}`, errorCode);
+    return { ok: false, status: 'unavailable', latencyMs: Date.now() - startedAt, errorCode };
+  }
+}
+
+function bearerHeaders(token) {
+  return token ? { authorization: `Bearer ${token}` } : {};
+}
+
+function healthCredentialTargetMatches(configuredUrl, environmentUrl) {
+  if (!configuredUrl || !environmentUrl) return false;
+  try {
+    return new URL(configuredUrl).origin === new URL(environmentUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
+function firstFiniteNumber(value, paths) {
+  for (const path of paths) {
+    let current = value;
+    for (const segment of path.split('.')) current = current && typeof current === 'object' ? current[segment] : undefined;
+    const number = Number(current);
+    if (current !== null && current !== '' && Number.isFinite(number)) return number;
+  }
+  return null;
+}
+
+function average(values) {
+  return values.length ? Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(3)) : null;
+}
+
+function percentile(values, ratio) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.max(0, Math.ceil(sorted.length * ratio) - 1)];
+}
+
+function decimalToScaledUnits(value, decimals) {
+  const [whole, fraction = ''] = String(value).split('.');
+  const padded = `${fraction}${'0'.repeat(decimals)}`.slice(0, decimals);
+  return BigInt(whole || '0') * (10n ** BigInt(decimals)) + BigInt(padded || '0');
+}
+
+function absoluteBigInt(value) {
+  return value < 0n ? -value : value;
+}
+
+function operationalErrorCode(error, fallback = 'OPERATION_UNAVAILABLE') {
+  const message = error instanceof Error ? error.message : String(error || '');
+  if (/^[A-Z][A-Z0-9_:.-]{2,160}$/.test(message)) return message.slice(0, 160);
+  if (error?.name === 'TimeoutError') return 'OPERATION_TIMEOUT';
+  return fallback;
+}
+
+function recordOperationalIssue(kind, action, errorCode, payload = {}) {
+  const duplicate = db.prepare("SELECT id FROM risk_events WHERE kind = ? AND action = ? AND status = 'Observed' AND created_at >= datetime('now', '-5 minutes') LIMIT 1").get(kind, action);
+  if (duplicate) return duplicate.id;
+  return recordRiskEvent({ kind, severity: kind === 'oracle-deviation' || kind === 'gas-block' ? 'critical' : 'high', action, status: 'Observed', payload: { errorCode, ...payload } });
 }
 
 function saveAddressBookEntry(body, authenticatedAddress) {
@@ -9296,7 +10005,7 @@ function claimAvailableReward(body) {
   parseDecimal18(amount);
   if (parseDecimal18(amount) !== parseDecimal18(entry.amount)) fail(400, 'CLAIM_AMOUNT_MISMATCH');
   requireClaimSignature(body, walletAddress, entry, amount);
-  const expiresAt = Date.now() + CLAIM_REQUEST_TTL_MS;
+  const expiresAt = Date.now() + claimRequestTtlMs();
   db.prepare('UPDATE reward_ledger SET state = ?, tx_hash = COALESCE(?, tx_hash) WHERE id = ?').run('PendingClaim', body.txHash || null, entry.id);
   const claim = recordClaim(walletAddress, bucketId, assetSymbol, amount, 'pending', body.txHash, { rewardId: entry.id, expiresAt });
   writeAudit('buyer', walletAddress, 'claim.request', claim.id, claim);
@@ -9311,7 +10020,7 @@ function prepareClaimReward(body) {
   const entry = availableRewardForClaim(walletAddress, body.rewardId);
   const bucketId = String(body.bucketId || 'bnm');
   const amount = String(entry.amount);
-  const expiresAt = Date.now() + CLAIM_REQUEST_TTL_MS;
+  const expiresAt = Date.now() + claimRequestTtlMs();
   const nonce = `claim-${Date.now()}-${randomBytes(4).toString('hex')}`;
   const secondaryMessage = claimSignatureMessage({
     walletAddress,
@@ -9644,6 +10353,127 @@ function normalizeUnitPrice(candidate, fallback) {
   return formatDecimal18(parseDecimal18(String(candidate)));
 }
 
+function normalizeProductTitle(value) {
+  const title = requireString(value, 'title').trim();
+  if ([...title].length > 60) fail(400, 'PRODUCT_TITLE_TOO_LONG');
+  return title;
+}
+
+function normalizeHttpsImages(value, { required = false, field = 'imageUrls' } = {}) {
+  if (value === undefined || value === null) {
+    if (required) fail(400, `${field.toUpperCase()}_REQUIRED`);
+    return [];
+  }
+  if (!Array.isArray(value)) fail(400, `INVALID_${field.toUpperCase()}`);
+  if (value.length > 5) fail(400, `${field.toUpperCase()}_LIMIT_EXCEEDED`);
+  const images = value.map((entry) => {
+    const text = requireString(entry, field).trim();
+    if (text.length > 2048) fail(400, `INVALID_${field.toUpperCase()}`);
+    let parsed;
+    try {
+      parsed = new URL(text);
+    } catch {
+      fail(400, `INVALID_${field.toUpperCase()}`);
+    }
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password) fail(400, `${field.toUpperCase()}_HTTPS_REQUIRED`);
+    return parsed.toString();
+  });
+  if (required && images.length === 0) fail(400, `${field.toUpperCase()}_REQUIRED`);
+  return [...new Set(images)];
+}
+
+function sanitizeProductDetail(value) {
+  const raw = String(value || '');
+  if (raw.length > 50_000) fail(400, 'PRODUCT_DETAIL_TOO_LONG');
+  return sanitizeHtml(raw, {
+    allowedTags: ['p', 'br', 'strong', 'em', 'u', 'ul', 'ol', 'li', 'h2', 'h3', 'blockquote', 'a', 'img'],
+    allowedAttributes: {
+      a: ['href', 'title', 'target', 'rel'],
+      img: ['src', 'alt', 'title']
+    },
+    allowedSchemes: ['https'],
+    allowProtocolRelative: false,
+    enforceHtmlBoundary: true,
+    transformTags: {
+      a: (_tagName, attributes) => ({ tagName: 'a', attribs: { ...attributes, target: '_blank', rel: 'noopener noreferrer' } })
+    }
+  });
+}
+
+function normalizeSubmissionSkus(payload) {
+  const explicit = Array.isArray(payload.skus);
+  const source = explicit
+    ? payload.skus
+    : (payload.sku || payload.skuName || payload.priceNpl || payload.settlementPriceNpl)
+      ? [{ id: 'default', name: payload.sku || payload.skuName, settlementPriceNpl: payload.priceNpl || payload.settlementPriceNpl, stock: payload.stock }]
+      : [];
+  if (source.length === 0) fail(400, 'PRODUCT_SKU_REQUIRED');
+  if (source.length > 50) fail(400, 'PRODUCT_SKU_LIMIT_EXCEEDED');
+  const ids = new Set();
+  const normalized = source.map((sku, index) => {
+    if (!sku || typeof sku !== 'object' || Array.isArray(sku)) fail(400, `INVALID_SKU_${index + 1}`);
+    const id = String(sku.id || `sku-${index + 1}`).trim();
+    if (!/^[a-zA-Z0-9:._-]{1,96}$/.test(id)) fail(400, `INVALID_SKU_ID_${index + 1}`);
+    const lowerId = id.toLowerCase();
+    if (ids.has(lowerId)) fail(400, 'DUPLICATE_SKU_ID');
+    ids.add(lowerId);
+    const name = requireString(sku.name || sku.skuName, `skuName${index + 1}`).trim().slice(0, 80);
+    const settlementPriceNpl = normalizeUnitPrice(requireString(sku.settlementPriceNpl || sku.priceNpl, `skuPriceNpl${index + 1}`), '');
+    if (parseDecimal18(settlementPriceNpl) <= 0n) fail(400, `INVALID_SKU_PRICE_${index + 1}`);
+    const stock = normalizeStock(sku.stock, `skuStock${index + 1}`);
+    return { ...sku, id, name, settlementPriceNpl, stock };
+  });
+  return normalized;
+}
+
+function normalizeSubmissionFulfillmentModes(value) {
+  if (!Array.isArray(value) || value.length === 0) fail(400, 'PRODUCT_FULFILLMENT_REQUIRED');
+  const modes = [...new Set(value.map((entry) => String(entry).trim()))];
+  if (modes.some((entry) => !['delivery', 'pickup'].includes(entry))) fail(400, 'INVALID_PRODUCT_FULFILLMENT_MODE');
+  return modes;
+}
+
+function normalizeMerchantSubmissionPayload(input) {
+  const payload = { ...(input || {}) };
+  const title = normalizeProductTitle(payload.title);
+  const imageInput = payload.imageUrls ?? payload.images ?? (payload.imageUrl ? [payload.imageUrl] : []);
+  const imageUrls = normalizeHttpsImages(imageInput, { field: 'productImages' });
+  const detailSource = payload.descriptionHtml ?? payload.detailHtml ?? payload.richText ?? payload.description ?? '';
+  const descriptionHtml = sanitizeProductDetail(detailSource);
+  const skus = normalizeSubmissionSkus(payload);
+  const fulfillmentModes = normalizeSubmissionFulfillmentModes(payload.fulfillmentModes);
+  const stock = skus.reduce((total, sku) => total + sku.stock, 0);
+  if (!Number.isSafeInteger(stock)) fail(400, 'PRODUCT_STOCK_TOO_LARGE');
+  return {
+    ...payload,
+    title,
+    sku: skus[0].name,
+    priceNpl: skus[0].settlementPriceNpl,
+    stock,
+    seckillStock: stock,
+    skus,
+    fulfillmentModes,
+    imageUrl: imageUrls[0] || undefined,
+    imageUrls,
+    descriptionHtml,
+    detailHtml: descriptionHtml
+  };
+}
+
+function sanitizeMerchantDraftPayload(input) {
+  const payload = { ...(input || {}) };
+  if (payload.title !== undefined) payload.title = normalizeProductTitle(payload.title);
+  if (payload.imageUrls !== undefined || payload.images !== undefined || payload.imageUrl !== undefined) {
+    const imageUrls = normalizeHttpsImages(payload.imageUrls ?? payload.images ?? (payload.imageUrl ? [payload.imageUrl] : []), { field: 'productImages' });
+    payload.imageUrls = imageUrls;
+    payload.imageUrl = imageUrls[0] || undefined;
+  }
+  for (const key of ['descriptionHtml', 'detailHtml', 'richText', 'description']) {
+    if (payload[key] !== undefined) payload[key] = sanitizeProductDetail(payload[key]);
+  }
+  return payload;
+}
+
 function orderItemLineKey(line) {
   return [
     line.productId || line.product_id || '',
@@ -9660,8 +10490,8 @@ function merchantOrders(merchantAddress) {
 }
 
 function submitMerchantProduct(session, body) {
-  const businessBody = stripSignedEnvelope(body);
-  const storeId = String(body?.storeId || 'default').slice(0, 96);
+  const businessBody = normalizeMerchantSubmissionPayload(stripSignedEnvelope(body));
+  const storeId = normalizeStoreId(businessBody.storeId || 'default');
   const active = db.prepare(`
     SELECT * FROM product_submissions
     WHERE lower(merchant_address) = ? AND store_id = ? AND status IN ('PendingReview', 'Approved', 'Scheduled', 'Live', 'TakedownRequested')
@@ -9669,7 +10499,7 @@ function submitMerchantProduct(session, body) {
   `).get(session.address.toLowerCase(), storeId);
   if (active) fail(423, 'MERCHANT_SINGLE_PRODUCT_LOCKED');
   const id = `submission-${Date.now()}-${randomBytes(3).toString('hex')}`;
-  const title = requireString(body?.title || '未命名商品', 'title');
+  const title = businessBody.title;
   const immutablePayload = JSON.stringify(businessBody);
   db.prepare('INSERT INTO product_submissions (id, merchant_address, store_id, title, status, locked_at, immutable_payload_json, payload_json) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)').run(
     id,
@@ -9685,9 +10515,9 @@ function submitMerchantProduct(session, body) {
 }
 
 function saveMerchantProductDraft(session, body) {
-  const businessBody = stripSignedEnvelope(body);
-  const storeId = String(body?.storeId || 'default').slice(0, 96);
-  const title = requireString(body?.title || '未命名商品', 'title');
+  const businessBody = sanitizeMerchantDraftPayload(stripSignedEnvelope(body));
+  const storeId = normalizeStoreId(businessBody.storeId || 'default');
+  const title = normalizeProductTitle(businessBody.title || '未命名商品');
   const existing = db.prepare(`
     SELECT * FROM product_submissions
     WHERE lower(merchant_address) = ? AND store_id = ? AND status = 'Draft'
@@ -9721,15 +10551,13 @@ function submitMerchantDraftForReview(session, productId, body) {
     LIMIT 1
   `).get(session.address.toLowerCase(), row.store_id, row.id);
   if (active) fail(423, 'MERCHANT_SINGLE_PRODUCT_LOCKED');
-  const payload = { ...JSON.parse(row.payload_json || '{}'), ...body };
-  delete payload.secondaryMessage;
-  delete payload.secondarySignature;
+  const payload = normalizeMerchantSubmissionPayload({ ...JSON.parse(row.payload_json || '{}'), ...stripSignedEnvelope(body) });
   const immutablePayload = JSON.stringify(payload);
   db.prepare(`
     UPDATE product_submissions
     SET title = ?, status = 'PendingReview', locked_at = CURRENT_TIMESTAMP, immutable_payload_json = ?, payload_json = ?
     WHERE id = ?
-  `).run(requireString(payload.title || row.title, 'title'), immutablePayload, immutablePayload, row.id);
+  `).run(payload.title, immutablePayload, immutablePayload, row.id);
   writeAudit(session.role, session.address, 'merchant.product.submit-review', row.id, { productId: row.id });
   return { ...toProductSubmission(db.prepare('SELECT * FROM product_submissions WHERE id = ?').get(row.id)), action: 'merchant.product.submit-review', audit: 'written' };
 }
@@ -9739,9 +10567,11 @@ function requestMerchantProductTakedown(session, productId, body) {
   const reason = requireString(body.reason, 'reason').slice(0, 500);
   if (row.status === 'Draft' || row.status === 'PendingReview') {
     db.prepare('UPDATE product_submissions SET status = ? WHERE id = ?').run('Withdrawn', row.id);
-  } else if (['Approved', 'Scheduled', 'Live'].includes(row.status)) {
+  } else if (row.status === 'Approved') {
     const payload = { ...JSON.parse(row.payload_json || '{}'), statusBeforeTakedown: row.status, takedownReason: reason, takedownRequestedAt: new Date().toISOString() };
     db.prepare('UPDATE product_submissions SET status = ?, payload_json = ? WHERE id = ?').run('TakedownRequested', JSON.stringify(payload), row.id);
+  } else if (['Scheduled', 'Live'].includes(row.status)) {
+    fail(423, 'ACTIVE_PRODUCT_TAKEDOWN_LOCKED');
   } else {
     fail(409, 'INVALID_SUBMISSION_STATUS');
   }
@@ -9768,8 +10598,8 @@ function updateMerchantProduct(session, productId, body) {
   if (!row) fail(404, 'PRODUCT_SUBMISSION_NOT_FOUND');
   if (row.merchant_address.toLowerCase() !== session.address.toLowerCase()) fail(403, 'MERCHANT_PRODUCT_OWNER_MISMATCH');
   if (isProductSubmissionLocked(row.status)) fail(423, 'MERCHANT_PRODUCT_LOCKED');
-  const payload = { ...JSON.parse(row.payload_json || '{}'), ...stripSignedEnvelope(body) };
-  const title = body?.title ? requireString(body.title, 'title') : row.title;
+  const payload = sanitizeMerchantDraftPayload({ ...JSON.parse(row.payload_json || '{}'), ...stripSignedEnvelope(body) });
+  const title = payload.title ? normalizeProductTitle(payload.title) : row.title;
   db.prepare('UPDATE product_submissions SET title = ?, payload_json = ? WHERE id = ?').run(title, JSON.stringify(payload), productId);
   writeAudit(session.role, session.address, 'merchant.product.update', productId, body);
   return { id: productId, title, status: row.status, locked: false, action: 'merchant.product.update', audit: 'written' };
@@ -9786,11 +10616,15 @@ async function upsertMerchantStore(session, body) {
   const name = requireString(body?.name, 'name').slice(0, 80);
   const longitude = Number(body?.longitude ?? body?.lng);
   const latitude = Number(body?.latitude ?? body?.lat);
+  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180 || !Number.isFinite(latitude) || latitude < -90 || latitude > 90) fail(400, 'STORE_COORDINATES_REQUIRED');
+  const hours = requireString(body?.hours, 'hours').trim().slice(0, 160);
+  const phone = requireString(body?.phone, 'phone').trim();
+  if (!/^\+?[0-9][0-9 ()-]{5,22}[0-9]$/.test(phone)) fail(400, 'INVALID_STORE_PHONE');
+  const formattedAddress = requireString(body?.formattedAddress || body?.address, 'address').trim().slice(0, 500);
+  const photos = normalizeHttpsImages(body?.photos ?? body?.photoUrls, { required: true, field: 'storePhotos' });
   let geocode = null;
-  if (Number.isFinite(longitude) && Number.isFinite(latitude)) {
+  if (process.env.AMAP_WEB_SERVICE_KEY || process.env.AMAP_API_KEY) {
     geocode = await reverseGeocode({ longitude, latitude }, process.env);
-  } else if (process.env.NODE_ENV === 'production') {
-    fail(400, 'STORE_COORDINATES_REQUIRED');
   }
   const regionCode = requireRegionCode(geocode?.regionCode || body?.regionCode, 'regionCode');
   if (existing && existing.region_code !== regionCode) fail(423, 'STORE_REGION_CODE_LOCKED');
@@ -9804,8 +10638,12 @@ async function upsertMerchantStore(session, body) {
     regionCode,
     latitude: geocode?.latitude ?? latitude,
     longitude: geocode?.longitude ?? longitude,
-    formattedAddress: geocode?.formattedAddress || body?.formattedAddress || body?.address || previous.formattedAddress || '',
-    geocodeProvider: geocode?.provider || previous.geocodeProvider || null,
+    formattedAddress: geocode?.formattedAddress || formattedAddress,
+    address: geocode?.formattedAddress || formattedAddress,
+    hours,
+    phone,
+    photos,
+    geocodeProvider: geocode?.provider || 'manual-validated',
     regionLocked: true
   };
   db.prepare(`
@@ -10000,7 +10838,7 @@ function merchantClaimRequest(session, body) {
   const entryId = rewardLedgerEntryIdFromRewardId(reward.id);
   if (!isValidAddress(REWARD_LEDGER)) fail(409, 'REWARD_LEDGER_ADDRESS_NOT_CONFIGURED');
   if (entryId === null) fail(409, 'REWARD_ID_NOT_ONCHAIN_ENTRY');
-  const expiresAt = Date.now() + CLAIM_REQUEST_TTL_MS;
+  const expiresAt = Date.now() + claimRequestTtlMs();
   let claim;
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -10282,7 +11120,7 @@ function approveProductSubmission(id, body = {}) {
     const row = db.prepare('SELECT * FROM product_submissions WHERE id = ?').get(id);
     if (!row) fail(404, 'PRODUCT_SUBMISSION_NOT_FOUND');
     if (row.status !== 'PendingReview') fail(409, 'INVALID_SUBMISSION_STATUS');
-    const payload = JSON.parse(row.immutable_payload_json || row.payload_json || '{}');
+    const payload = normalizeMerchantSubmissionPayload(JSON.parse(row.immutable_payload_json || row.payload_json || '{}'));
     const productId = row.approved_product_id || approvedProductIdForSubmission(id);
     const existingProduct = db.prepare('SELECT id FROM products WHERE id = ?').get(productId);
     if (existingProduct && row.approved_product_id !== productId) fail(409, 'APPROVED_PRODUCT_ID_COLLISION');
@@ -10452,6 +11290,31 @@ function normalizeRiskPolicies(body) {
   return result;
 }
 
+function normalizeMerchantQualification(body, walletAddress) {
+  const businessLicenseNumber = requireString(body.businessLicenseNumber || body.licenseNumber, 'businessLicenseNumber').trim().slice(0, 120);
+  if (!/^[a-zA-Z0-9\u4e00-\u9fff._-]{5,120}$/.test(businessLicenseNumber)) fail(400, 'INVALID_BUSINESS_LICENSE_NUMBER');
+  const [businessLicenseUrl] = normalizeHttpsImages([body.businessLicenseUrl || body.licenseUrl], { required: true, field: 'businessLicenseUrl' });
+  const legalRepresentative = requireString(body.legalRepresentative || body.legalName, 'legalRepresentative').trim().slice(0, 80);
+  const legalIdentity = requireString(body.legalIdentity || body.legalId, 'legalIdentity').trim();
+  if (legalIdentity.length < 6 || legalIdentity.length > 120) fail(400, 'INVALID_LEGAL_IDENTITY');
+  const contactName = requireString(body.contactName, 'contactName').trim().slice(0, 80);
+  const contactPhone = requireString(body.contactPhone, 'contactPhone').trim();
+  if (!/^\+?[0-9][0-9 ()-]{5,22}[0-9]$/.test(contactPhone)) fail(400, 'INVALID_CONTACT_PHONE');
+  const settlementWallet = requireAddress(body.settlementWallet || body.settlementWalletAddress, 'settlementWallet').toLowerCase();
+  if (settlementWallet !== walletAddress.toLowerCase()) fail(400, 'SETTLEMENT_WALLET_MUST_MATCH_SELLER');
+  return {
+    businessLicenseNumber,
+    businessLicenseUrl,
+    legalRepresentative,
+    legalIdentityHash: `0x${createHash('sha256').update(legalIdentity).digest('hex')}`,
+    legalIdentityLast4: legalIdentity.slice(-4),
+    contactName,
+    contactPhone,
+    settlementWallet,
+    verifiedAt: new Date().toISOString()
+  };
+}
+
 function createAdminProduct(body) {
   const sellerAddress = requireAddress(body.sellerAddress, 'sellerAddress').toLowerCase();
   const merchant = db.prepare("SELECT * FROM merchants WHERE lower(wallet_address) = ? AND status = 'Approved'").get(sellerAddress);
@@ -10506,6 +11369,79 @@ function createAdminProduct(body) {
     db.prepare('DELETE FROM product_submissions WHERE id = ? AND status = ?').run(id, 'PendingReview');
     throw error;
   }
+}
+
+function updateAdminProduct(body, { softDelete = false } = {}) {
+  const productId = requireString(body.productId || body.id, 'productId');
+  const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(productId);
+  if (!existing) fail(404, 'PRODUCT_NOT_FOUND');
+  const oldValue = toProduct(existing);
+  const updates = [];
+  const values = [];
+  const requestedStatus = softDelete ? 'Inactive' : body.status;
+  if (requestedStatus !== undefined) {
+    if (!['Active', 'Inactive', 'SoldOut'].includes(String(requestedStatus))) fail(400, 'INVALID_PRODUCT_STATUS');
+    if (requestedStatus === 'Inactive') assertProductOperationalMutationAllowed(productId);
+    updates.push('status = ?');
+    values.push(String(requestedStatus));
+  }
+  if (body.title !== undefined) {
+    updates.push('title = ?');
+    values.push(normalizeProductTitle(body.title));
+  }
+  if (body.imageUrl !== undefined) {
+    const [imageUrl] = normalizeHttpsImages([body.imageUrl], { required: true, field: 'productImage' });
+    updates.push('image_url = ?');
+    values.push(imageUrl);
+  }
+  let nextPrice = null;
+  if (body.priceNpl !== undefined || body.settlementPriceNpl !== undefined) {
+    nextPrice = normalizeUnitPrice(body.priceNpl ?? body.settlementPriceNpl, '');
+    if (parseDecimal18(nextPrice) <= 0n) fail(400, 'INVALID_PRODUCT_PRICE');
+    updates.push('price_npl = ?');
+    values.push(nextPrice);
+  }
+  let nextStock = null;
+  if (body.stock !== undefined) {
+    nextStock = normalizeStock(body.stock, 'stock');
+    updates.push('stock = ?');
+    values.push(nextStock);
+  }
+  if (updates.length === 0) fail(400, 'EMPTY_PRODUCT_UPDATE');
+  const skuRows = db.prepare('SELECT * FROM product_skus WHERE product_id = ? ORDER BY id').all(productId);
+  if ((nextPrice !== null || nextStock !== null) && skuRows.length > 1) fail(409, 'MULTI_SKU_UPDATE_REQUIRES_SKU_MATRIX');
+  values.push(productId);
+  db.prepare(`UPDATE products SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  if (skuRows.length === 1) {
+    if (nextPrice !== null) db.prepare('UPDATE product_skus SET settlement_price_npl = ? WHERE id = ?').run(nextPrice, skuRows[0].id);
+    if (nextStock !== null) db.prepare('UPDATE product_skus SET stock = ? WHERE id = ?').run(nextStock, skuRows[0].id);
+  }
+  if (nextStock === 0) markProductSoldOutIfEmpty(productId);
+  if (softDelete) db.prepare("UPDATE product_submissions SET status = 'TakenDown' WHERE approved_product_id = ? AND status IN ('Approved','Scheduled','Live','TakedownRequested','SoldOut')").run(productId);
+  const updated = db.prepare('SELECT * FROM products WHERE id = ?').get(productId);
+  return { productId, oldValue, newValue: toProduct(updated), softDeleted: softDelete };
+}
+
+function assertProductOperationalMutationAllowed(productId) {
+  const reason = productOperationalLockReason(productId);
+  if (reason) fail(423, reason);
+}
+
+function productOperationalLockReason(productId) {
+  const activeSeckill = db.prepare(`
+    SELECT id FROM seckill_sessions
+    WHERE product_id = ? AND status IN ('scheduled','Scheduled','live','settling','PendingChainPublish')
+    LIMIT 1
+  `).get(productId);
+  if (activeSeckill) return 'PRODUCT_ACTIVE_SECKILL_LOCKED';
+  const lockedOrder = db.prepare(`
+    SELECT o.order_id
+    FROM orders o JOIN order_items i ON i.order_id = o.order_id
+    WHERE i.product_id = ? AND o.status IN ('PaidLocked','AwaitingShipment','Shipped','PickupReady','Arbitration','RefundRequested')
+    LIMIT 1
+  `).get(productId);
+  if (lockedOrder) return 'PRODUCT_LOCKED_ASSETS';
+  return '';
 }
 
 function upsertLogisticsTemplate(body) {
@@ -10599,6 +11535,10 @@ async function handleAdminAction(session, action, body) {
     const product = createAdminProduct(body);
     return auditedAdminAction(session, action, product.id, body, { product, status: 'Active' });
   }
+  if (action === 'admin.product.update' || action === 'admin.product.delete') {
+    const change = updateAdminProduct(body, { softDelete: action === 'admin.product.delete' });
+    return auditedAdminAction(session, action, change.productId, { ...body, oldValue: change.oldValue, newValue: change.newValue }, { product: change.newValue, historyRecorded: true });
+  }
   if (action === 'admin.risk.policies.configure') {
     const config = persistAdminConfig('risk-policies', normalizeRiskPolicies(body));
     const transactionIntent = config.maxGasGwei && isValidAddress(SECKILL)
@@ -10644,7 +11584,17 @@ async function handleAdminAction(session, action, body) {
     const approved = String(body.decision || body.status || '').toLowerCase() !== 'rejected';
     const status = approved ? 'PendingChainApproval' : 'PendingChainRejection';
     if (!isValidAddress(ESCROW)) fail(409, 'ESCROW_ADDRESS_NOT_CONFIGURED');
-    const merchantPayload = { ...(existing ? JSON.parse(existing.payload_json || '{}') : {}), ...stripSignedEnvelope(body), approved, chainStatus: 'AwaitingOwnerTransaction' };
+    const businessBody = stripSignedEnvelope(body);
+    const qualification = approved ? normalizeMerchantQualification(businessBody, wallet) : null;
+    delete businessBody.legalIdentity;
+    delete businessBody.legalId;
+    const merchantPayload = {
+      ...(existing ? JSON.parse(existing.payload_json || '{}') : {}),
+      ...businessBody,
+      ...(qualification ? { qualification } : {}),
+      approved,
+      chainStatus: 'AwaitingOwnerTransaction'
+    };
     db.prepare(`
       INSERT INTO merchants (id, wallet_address, name, status, payload_json)
       VALUES (?, ?, ?, ?, ?)
@@ -10752,15 +11702,13 @@ async function handleAdminAction(session, action, body) {
     const order = findOrderByIdOrOrderId(orderId);
     if (!order) fail(404, 'ORDER_NOT_FOUND');
     if (!isRefundableOrderStatus(order.status)) fail(400, 'ORDER_NOT_REFUNDABLE');
-    const refundNpl = String(body.refundNplAmount || body.amountNpl || order.amount_npl);
-    const refundUnits = parseDecimal18(refundNpl);
-    if (refundUnits > parseDecimal18(order.amount_npl)) fail(400, 'REFUND_TOO_LARGE');
+    if (body.refundNplAmount !== undefined || body.amountNpl !== undefined) fail(400, 'FULL_REFUND_ONLY');
     if (!isValidAddress(ESCROW)) fail(409, 'ESCROW_ADDRESS_NOT_CONFIGURED');
     const transactionIntent = adminContractIntent(
       'escrowForceRefund',
       ESCROW,
-      escrowTxInterface.encodeFunctionData('forceRefund', [order.order_id, refundUnits]),
-      { orderId: order.order_id, refundNplAmount: refundNpl, rewardsBurnedAtomically: true }
+      escrowTxInterface.encodeFunctionData('forceRefund', [order.order_id]),
+      { orderId: order.order_id, fullRefundNpl: order.amount_npl, rewardsBurnedAtomically: true }
     );
     db.prepare('UPDATE orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE order_id = ?').run('RefundRequested', order.order_id);
     return auditedAdminAction(session, action, orderId, body, {
@@ -10847,8 +11795,14 @@ async function handleAdminAction(session, action, body) {
   if (action === 'admin.system.configure') {
     const key = requireString(body.key, 'key');
     if (/secret|password|private.?key/i.test(key)) fail(400, 'SECRETS_MUST_USE_ENV');
-    const config = persistAdminConfig(key, body.value && typeof body.value === 'object' ? body.value : { value: body.value });
-    return auditedAdminAction(session, action, key, body, { config: { ...config, ...redactConfigValue(config) } });
+    const input = body.value && typeof body.value === 'object' ? body.value : { value: body.value };
+    const normalized = normalizeSystemConfig(key, input);
+    if (key === 'chain') await validateChainRuntimeConfig(normalized);
+    if (key === 'contracts') await validateContractRuntimeConfig(normalized);
+    const previous = readAdminConfig(key);
+    const config = persistAdminConfig(key, normalized);
+    applyRuntimeConfigFromDatabase();
+    return auditedAdminAction(session, action, key, { ...body, oldValue: previous, newValue: normalized }, { config: { ...config, ...redactConfigValue(config) }, applied: true });
   }
   if (action === 'admin.settlement.complete') {
     const orderId = requireString(body.orderId, 'orderId');
@@ -11108,6 +12062,240 @@ function readAdminConfigRow(key) {
   return { payload: JSON.parse(row.payload_json || '{}'), updatedAt: row.updated_at || null };
 }
 
+function normalizeSystemConfig(keyValue, inputValue) {
+  const key = String(keyValue || '').trim();
+  const input = inputValue && typeof inputValue === 'object' && !Array.isArray(inputValue) ? inputValue : {};
+  if (containsSensitiveConfigKey(input)) fail(400, 'SECRETS_MUST_USE_ENV');
+  if (key === 'chain') {
+    assertOnlyConfigFields(input, ['chainId', 'multisigAddress', 'primaryRpcUrl', 'backupRpcUrl']);
+    const chainId = normalizeConfigInteger(input.chainId ?? CHAIN_ID, 'chainId', 1, 2_147_483_647);
+    if (chainId !== CHAIN_ID) fail(400, 'CHAIN_ID_IS_ENV_IMMUTABLE');
+    return compactConfig({
+      chainId,
+      multisigAddress: normalizeOptionalConfigAddress(input.multisigAddress, 'multisigAddress'),
+      primaryRpcUrl: normalizeRuntimeUrl(input.primaryRpcUrl, 'primaryRpcUrl'),
+      backupRpcUrl: normalizeRuntimeUrl(input.backupRpcUrl, 'backupRpcUrl')
+    });
+  }
+  if (key === 'oracle-gas') {
+    assertOnlyConfigFields(input, ['oracleAddress', 'oracleDeviationBps', 'oracleReferencePrice', 'oracleMaxAgeSeconds', 'maxGasGwei']);
+    return compactConfig({
+      oracleAddress: normalizeOptionalConfigAddress(input.oracleAddress, 'oracleAddress'),
+      oracleDeviationBps: input.oracleDeviationBps === undefined ? undefined : normalizeConfigInteger(input.oracleDeviationBps, 'oracleDeviationBps', 0, 10_000),
+      oracleReferencePrice: normalizeOptionalPositiveDecimal(input.oracleReferencePrice, 'oracleReferencePrice'),
+      oracleMaxAgeSeconds: input.oracleMaxAgeSeconds === undefined ? undefined : normalizeConfigInteger(input.oracleMaxAgeSeconds, 'oracleMaxAgeSeconds', 30, 86_400),
+      maxGasGwei: normalizeOptionalPositiveDecimal(input.maxGasGwei, 'maxGasGwei')
+    });
+  }
+  if (key === 'contracts') {
+    assertOnlyConfigFields(input, ['nplAddress', 'bnmAddress', 'escrowAddress', 'seckillAddress', 'rewardLedgerAddress', 'genesisNodeAddress']);
+    const nplAddress = normalizeOptionalConfigAddress(input.nplAddress, 'nplAddress');
+    if (nplAddress && nplAddress.toLowerCase() !== NPL.toLowerCase()) fail(400, 'NPL_ADDRESS_IS_FIXED');
+    return compactConfig({
+      nplAddress: nplAddress || NPL,
+      bnmAddress: normalizeOptionalConfigAddress(input.bnmAddress, 'bnmAddress'),
+      escrowAddress: normalizeOptionalConfigAddress(input.escrowAddress, 'escrowAddress'),
+      seckillAddress: normalizeOptionalConfigAddress(input.seckillAddress, 'seckillAddress'),
+      rewardLedgerAddress: normalizeOptionalConfigAddress(input.rewardLedgerAddress, 'rewardLedgerAddress'),
+      genesisNodeAddress: normalizeOptionalConfigAddress(input.genesisNodeAddress, 'genesisNodeAddress')
+    });
+  }
+  if (key === 'business-parameters') {
+    assertOnlyConfigFields(input, ['shippingTimeoutHours', 'confirmationTimeoutHours', 'siweNonceTtlMinutes', 'actionIntentTtlMinutes', 'claimRequestTtlMinutes']);
+    return compactConfig({
+      shippingTimeoutHours: input.shippingTimeoutHours === undefined ? undefined : normalizeConfigInteger(input.shippingTimeoutHours, 'shippingTimeoutHours', 1, 720),
+      confirmationTimeoutHours: input.confirmationTimeoutHours === undefined ? undefined : normalizeConfigInteger(input.confirmationTimeoutHours, 'confirmationTimeoutHours', 1, 720),
+      siweNonceTtlMinutes: input.siweNonceTtlMinutes === undefined ? undefined : normalizeConfigInteger(input.siweNonceTtlMinutes, 'siweNonceTtlMinutes', 1, 60),
+      actionIntentTtlMinutes: input.actionIntentTtlMinutes === undefined ? undefined : normalizeConfigInteger(input.actionIntentTtlMinutes, 'actionIntentTtlMinutes', 1, 60),
+      claimRequestTtlMinutes: input.claimRequestTtlMinutes === undefined ? undefined : normalizeConfigInteger(input.claimRequestTtlMinutes, 'claimRequestTtlMinutes', 1, 1_440)
+    });
+  }
+  if (key === 'infrastructure') {
+    assertOnlyConfigFields(input, ['ossEndpoint', 'ossBucket', 'cdnEnabled', 'cdnBaseUrl', 'redisHealthUrl', 'mqHealthUrl']);
+    const ossBucket = input.ossBucket === undefined ? undefined : String(input.ossBucket || '').trim();
+    if (ossBucket && !/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(ossBucket)) fail(400, 'INVALID_OSSBUCKET');
+    return compactConfig({
+      ossEndpoint: normalizeRuntimeUrl(input.ossEndpoint, 'ossEndpoint'),
+      ossBucket,
+      cdnEnabled: input.cdnEnabled === undefined ? undefined : Boolean(input.cdnEnabled),
+      cdnBaseUrl: normalizeRuntimeUrl(input.cdnBaseUrl, 'cdnBaseUrl'),
+      redisHealthUrl: normalizeRuntimeUrl(input.redisHealthUrl, 'redisHealthUrl'),
+      mqHealthUrl: normalizeRuntimeUrl(input.mqHealthUrl, 'mqHealthUrl')
+    });
+  }
+  if (key === 'ai-agent') {
+    assertOnlyConfigFields(input, ['agentEnabled', 'agentPrompt', 'provider', 'model']);
+    const agentPrompt = input.agentPrompt === undefined ? undefined : String(input.agentPrompt || '').trim().slice(0, 8_000);
+    if (input.agentEnabled === true && !agentPrompt) fail(400, 'AI_AGENT_PROMPT_REQUIRED');
+    return compactConfig({
+      agentEnabled: input.agentEnabled === undefined ? undefined : Boolean(input.agentEnabled),
+      agentPrompt,
+      provider: input.provider === undefined ? undefined : String(input.provider || '').trim().slice(0, 80),
+      model: input.model === undefined ? undefined : String(input.model || '').trim().slice(0, 120)
+    });
+  }
+  fail(400, 'UNSUPPORTED_SYSTEM_CONFIG_KEY');
+}
+
+function applyRuntimeConfigFromDatabase() {
+  const load = (key) => {
+    const stored = readAdminConfig(key);
+    if (!stored) return null;
+    try {
+      return normalizeSystemConfig(key, stored);
+    } catch (error) {
+      console.error(JSON.stringify({ level: 'error', event: 'runtime_config_rejected', key, error: sanitizeError(error) }));
+      return null;
+    }
+  };
+  const chain = load('chain');
+  const contracts = load('contracts');
+  CHAIN_EVENT_RPC_URL = chain?.primaryRpcUrl || ENV_CHAIN_EVENT_RPC_URL;
+  CHAIN_EVENT_RPC_FALLBACK_URL = chain?.backupRpcUrl || ENV_CHAIN_EVENT_RPC_FALLBACK_URL;
+  BNM = contracts?.bnmAddress || ENV_BNM;
+  ESCROW = contracts?.escrowAddress || ENV_ESCROW;
+  SECKILL = contracts?.seckillAddress || ENV_SECKILL;
+  REWARD_LEDGER = contracts?.rewardLedgerAddress || ENV_REWARD_LEDGER;
+  GENESIS_NODE_CONTRACT = contracts?.genesisNodeAddress || ENV_GENESIS_NODE_CONTRACT;
+  rpcRuntimeState.active = null;
+  rpcRuntimeState.degraded = false;
+  rpcRuntimeState.lastLatencyMs = null;
+  rpcRuntimeState.lastError = null;
+  rpcRuntimeState.checkedAt = null;
+}
+
+async function validateChainRuntimeConfig(config) {
+  const endpoints = [
+    config.primaryRpcUrl ? { role: 'primary', url: config.primaryRpcUrl } : null,
+    config.backupRpcUrl && config.backupRpcUrl !== config.primaryRpcUrl ? { role: 'fallback', url: config.backupRpcUrl } : null
+  ].filter(Boolean);
+  if (!endpoints.length) return;
+  let reachable = 0;
+  let validatedEndpoint = null;
+  for (const endpoint of endpoints) {
+    const attempt = await rpcAttempt(endpoint, 'eth_chainId', []);
+    if (!attempt.ok) continue;
+    reachable += 1;
+    validatedEndpoint ||= endpoint;
+    const chainId = Number.parseInt(String(attempt.result || ''), 16);
+    if (!Number.isSafeInteger(chainId)) fail(400, `RPC_CHAIN_ID_INVALID:${endpoint.role}`);
+    if (chainId !== CHAIN_ID) fail(400, `RPC_CHAIN_ID_MISMATCH:${endpoint.role}`);
+  }
+  if (!reachable) fail(400, 'RPC_ENDPOINTS_UNAVAILABLE');
+  if (config.multisigAddress) {
+    const codeAttempt = await rpcAttempt(validatedEndpoint, 'eth_getCode', [config.multisigAddress, 'latest']);
+    if (!codeAttempt.ok) fail(400, 'MULTISIG_CODE_VALIDATION_FAILED');
+    if (!/^0x[0-9a-f]+$/i.test(String(codeAttempt.result || '')) || /^0x0*$/i.test(String(codeAttempt.result))) fail(400, 'MULTISIG_CONTRACT_CODE_NOT_FOUND');
+  }
+}
+
+async function validateContractRuntimeConfig(config) {
+  const contracts = [
+    ['nplAddress', config.nplAddress],
+    ['bnmAddress', config.bnmAddress],
+    ['escrowAddress', config.escrowAddress],
+    ['seckillAddress', config.seckillAddress],
+    ['rewardLedgerAddress', config.rewardLedgerAddress],
+    ['genesisNodeAddress', config.genesisNodeAddress]
+  ].filter(([, address]) => Boolean(address));
+  const unique = new Set(contracts.map(([, address]) => address.toLowerCase()));
+  if (unique.size !== contracts.length) fail(400, 'DUPLICATE_CONTRACT_ADDRESS');
+  if (!CHAIN_EVENT_RPC_URL && !CHAIN_EVENT_RPC_FALLBACK_URL) fail(409, 'CONTRACT_RPC_VALIDATION_REQUIRED');
+  for (const [field, address] of contracts) {
+    let code;
+    try {
+      code = await rpc('eth_getCode', [address, 'latest']);
+    } catch {
+      fail(503, `CONTRACT_RPC_VALIDATION_FAILED:${field}`);
+    }
+    if (!/^0x[0-9a-f]+$/i.test(String(code || '')) || /^0x0*$/i.test(String(code))) fail(400, `CONTRACT_CODE_NOT_FOUND:${field}`);
+  }
+}
+
+function orderTimeoutMs(kind = 'shipping') {
+  const config = readAdminConfig('business-parameters') || {};
+  const hours = Number(kind === 'confirmation' ? config.confirmationTimeoutHours : config.shippingTimeoutHours);
+  return Number.isSafeInteger(hours) && hours >= 1 && hours <= 720 ? hours * 60 * 60_000 : DEFAULT_ORDER_TIMEOUT_MS;
+}
+
+function siweNonceTtlMs() {
+  return configuredTtlMs('siweNonceTtlMinutes', DEFAULT_SIWE_NONCE_TTL_MS, 1, 60);
+}
+
+function actionIntentTtlMs() {
+  return configuredTtlMs('actionIntentTtlMinutes', DEFAULT_ACTION_INTENT_TTL_MS, 1, 60);
+}
+
+function claimRequestTtlMs() {
+  return configuredTtlMs('claimRequestTtlMinutes', DEFAULT_CLAIM_REQUEST_TTL_MS, 1, 1_440);
+}
+
+function configuredTtlMs(field, fallback, minimumMinutes, maximumMinutes) {
+  const minutes = Number(readAdminConfig('business-parameters')?.[field]);
+  return Number.isSafeInteger(minutes) && minutes >= minimumMinutes && minutes <= maximumMinutes ? minutes * 60_000 : fallback;
+}
+
+function containsSensitiveConfigKey(value) {
+  if (!value || typeof value !== 'object') return false;
+  return Object.entries(value).some(([key, entry]) => /secret|password|private.?key|access.?key|api.?key|token|credential/i.test(key) || containsSensitiveConfigKey(entry));
+}
+
+function assertOnlyConfigFields(input, allowedFields) {
+  const allowed = new Set(allowedFields);
+  const unknown = Object.keys(input).find((field) => !allowed.has(field));
+  if (unknown) fail(400, `UNSUPPORTED_SYSTEM_CONFIG_FIELD:${unknown}`);
+}
+
+function compactConfig(value) {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined && entry !== ''));
+}
+
+function normalizeConfigInteger(value, name, minimum, maximum) {
+  const number = Number(value);
+  if (!Number.isSafeInteger(number) || number < minimum || number > maximum) fail(400, `INVALID_${String(name).toUpperCase()}`);
+  return number;
+}
+
+function normalizeOptionalConfigAddress(value, name) {
+  if (value === undefined || value === null || String(value).trim() === '') return undefined;
+  return requireAddress(String(value).trim(), name).toLowerCase();
+}
+
+function normalizeOptionalPositiveDecimal(value, name) {
+  if (value === undefined || value === null || String(value).trim() === '') return undefined;
+  const text = String(value).trim();
+  if (!/^(?:0|[1-9]\d*)(?:\.\d{1,18})?$/.test(text) || Number(text) <= 0) fail(400, `INVALID_${String(name).toUpperCase()}`);
+  return text;
+}
+
+function normalizeRuntimeUrl(value, name) {
+  if (value === undefined || value === null || String(value).trim() === '') return undefined;
+  let parsed;
+  try {
+    parsed = new URL(String(value).trim());
+  } catch {
+    fail(400, `INVALID_${String(name).toUpperCase()}`);
+  }
+  const developmentHttp = process.env.NODE_ENV !== 'production' && parsed.protocol === 'http:';
+  if (parsed.protocol !== 'https:' && !developmentHttp) fail(400, `INVALID_${String(name).toUpperCase()}_PROTOCOL`);
+  if (parsed.username || parsed.password || parsed.hash) fail(400, `INVALID_${String(name).toUpperCase()}_CREDENTIALS`);
+  if ([...parsed.searchParams.keys()].some((key) => /secret|password|private.?key|access.?key|api.?key|token|credential/i.test(key))) fail(400, `INVALID_${String(name).toUpperCase()}_CREDENTIALS`);
+  if (process.env.NODE_ENV === 'production' && isPrivateRuntimeHostname(parsed.hostname)) fail(400, `INVALID_${String(name).toUpperCase()}_HOST`);
+  return parsed.toString();
+}
+
+function isPrivateRuntimeHostname(hostnameValue) {
+  const hostname = String(hostnameValue || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (!hostname || hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local') || hostname === '::1' || hostname === '0.0.0.0') return true;
+  const parts = hostname.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+  return parts[0] === 10
+    || parts[0] === 127
+    || (parts[0] === 169 && parts[1] === 254)
+    || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)
+    || (parts[0] === 192 && parts[1] === 168);
+}
+
 function normalizeBeneficiaryWeights(value) {
   if (!Array.isArray(value)) return [];
   return value.slice(0, 20).map((entry) => ({
@@ -11167,20 +12355,39 @@ async function runAdminBatch(body, session) {
     }
   }
   if (operation === 'soft-delete') {
-    const update = db.prepare('UPDATE product_submissions SET status = ? WHERE id = ?');
     for (const targetId of targetIds) {
-      const changes = update.run('Deleted', targetId).changes;
-      affected += changes;
-      results.push({ targetId, status: changes ? 'Deleted' : 'NotFound', ok: Boolean(changes) });
+      try {
+        if (resource === 'products') {
+          const change = updateAdminProduct({ productId: targetId }, { softDelete: true });
+          writeAudit(session.role, session.address, 'admin.product.batch-delete', targetId, { oldValue: change.oldValue, newValue: change.newValue });
+          affected += 1;
+          results.push({ targetId, status: 'Inactive', ok: true });
+        } else if (resource === 'productSubmissions') {
+          const submission = db.prepare('SELECT * FROM product_submissions WHERE id = ?').get(targetId);
+          if (!submission) fail(404, 'PRODUCT_SUBMISSION_NOT_FOUND');
+          if (isProductSubmissionLocked(submission.status)) fail(423, 'PRODUCT_SUBMISSION_LOCKED');
+          db.prepare("UPDATE product_submissions SET status = 'Deleted' WHERE id = ?").run(targetId);
+          affected += 1;
+          results.push({ targetId, status: 'Deleted', ok: true });
+        } else {
+          fail(400, 'UNSUPPORTED_SOFT_DELETE_RESOURCE');
+        }
+      } catch (error) {
+        results.push({ targetId, status: 'Failed', ok: false, error: error instanceof Error ? error.message : 'SOFT_DELETE_FAILED' });
+      }
     }
   }
   if (operation === 'product.up' || operation === 'product.down') {
     const nextStatus = operation === 'product.up' ? 'Active' : 'Inactive';
-    const update = db.prepare('UPDATE products SET status = ? WHERE id = ?');
     for (const targetId of targetIds) {
-      const changes = update.run(nextStatus, targetId).changes;
-      affected += changes;
-      results.push({ targetId, status: changes ? nextStatus : 'NotFound', ok: Boolean(changes) });
+      try {
+        const change = updateAdminProduct({ productId: targetId, status: nextStatus });
+        writeAudit(session.role, session.address, 'admin.product.batch-status', targetId, { oldValue: change.oldValue, newValue: change.newValue });
+        affected += 1;
+        results.push({ targetId, status: nextStatus, ok: true });
+      } catch (error) {
+        results.push({ targetId, status: 'Failed', ok: false, error: error instanceof Error ? error.message : 'PRODUCT_STATUS_FAILED' });
+      }
     }
   }
   if (operation === 'batch.modify') {
@@ -11188,18 +12395,17 @@ async function runAdminBatch(body, session) {
     if (resource !== 'products') fail(400, 'UNSUPPORTED_BATCH_MODIFY_RESOURCE');
     const nextStatus = patch.status === 'Inactive' || patch.status === 'Active' ? patch.status : null;
     const nextStock = patch.stock === undefined ? null : normalizeStock(patch.stock, 'stock');
-    if (!nextStatus && nextStock === null) fail(400, 'EMPTY_BATCH_MODIFY_PATCH');
+    const nextPrice = patch.priceNpl === undefined ? null : normalizeUnitPrice(patch.priceNpl, '');
+    if (!nextStatus && nextStock === null && nextPrice === null) fail(400, 'EMPTY_BATCH_MODIFY_PATCH');
     for (const targetId of targetIds) {
-      let changes = 0;
-      if (nextStatus && nextStock !== null) {
-        changes = db.prepare('UPDATE products SET status = ?, stock = ? WHERE id = ?').run(nextStatus, nextStock, targetId).changes;
-      } else if (nextStatus) {
-        changes = db.prepare('UPDATE products SET status = ? WHERE id = ?').run(nextStatus, targetId).changes;
-      } else {
-        changes = db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(nextStock, targetId).changes;
+      try {
+        const change = updateAdminProduct({ productId: targetId, status: nextStatus || undefined, stock: nextStock ?? undefined, priceNpl: nextPrice ?? undefined });
+        writeAudit(session.role, session.address, 'admin.product.batch-update', targetId, { oldValue: change.oldValue, newValue: change.newValue });
+        affected += 1;
+        results.push({ targetId, status: 'Modified', ok: true });
+      } catch (error) {
+        results.push({ targetId, status: 'Failed', ok: false, error: error instanceof Error ? error.message : 'PRODUCT_UPDATE_FAILED' });
       }
-      affected += changes;
-      results.push({ targetId, status: changes ? 'Modified' : 'NotFound', ok: Boolean(changes) });
     }
   }
   const printJobs = [];
@@ -11275,10 +12481,12 @@ function buildAdminExportArtifact(resource, operation, rows) {
       .join('\r\n');
     return encodedArtifact(`24k-${resource}-${timestamp}.csv`, 'text/csv;charset=utf-8', `\ufeff${csv}`);
   }
-  const header = columns.map((column) => `<Cell><Data ss:Type="String">${escapeXml(column)}</Data></Cell>`).join('');
-  const body = flatRows.map((row) => `<Row>${columns.map((column) => `<Cell><Data ss:Type="String">${escapeXml(row[column] ?? '')}</Data></Cell>`).join('')}</Row>`).join('');
-  const xml = `<?xml version="1.0"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Worksheet ss:Name="24K"><Table><Row>${header}</Row>${body}</Table></Worksheet></Workbook>`;
-  return encodedArtifact(`24k-${resource}-${timestamp}.xls`, 'application/vnd.ms-excel', xml);
+  const workbook = buildXlsx({
+    sheetName: '24K',
+    headers: columns,
+    rows: flatRows.map((row) => columns.map((column) => row[column] ?? ''))
+  });
+  return encodedArtifact(`24k-${resource}-${timestamp}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', workbook);
 }
 
 function flattenExportRow(row) {
@@ -11286,7 +12494,8 @@ function flattenExportRow(row) {
 }
 
 function encodedArtifact(fileName, mimeType, content) {
-  const contentBase64 = Buffer.from(content, 'utf8').toString('base64');
+  const buffer = Buffer.isBuffer(content) ? content : content instanceof Uint8Array ? Buffer.from(content) : Buffer.from(content, 'utf8');
+  const contentBase64 = buffer.toString('base64');
   return { fileName, mimeType, encoding: 'base64', contentBase64, dataUrl: `data:${mimeType};base64,${contentBase64}` };
 }
 
@@ -11387,6 +12596,8 @@ function adminActionForPath(pathname) {
   const map = {
     '/api/admin/merchant-levels': 'admin.merchant.levels.configure',
     '/api/admin/products': 'admin.product.create',
+    '/api/admin/products/update': 'admin.product.update',
+    '/api/admin/products/delete': 'admin.product.delete',
     '/api/admin/merchants/review': 'admin.merchant.review',
     '/api/admin/products/review': 'admin.product.review',
     '/api/admin/seckill/schedule': 'admin.seckill.schedule',
@@ -12412,11 +13623,8 @@ function payloadFromParsedEvent(parsed, expected) {
       ...base,
       buyer: parsed.args.buyer,
       refundedNplWei: parsed.args.refundedNpl.toString(),
-      retainedNplWei: parsed.args.retainedNpl.toString(),
-      retainedNplReceiver: parsed.args.retainedNplReceiver,
       amountWei: parsed.args.refundedNpl.toString(),
       amountNpl: formatUnits(parsed.args.refundedNpl, 18),
-      retainedNpl: formatUnits(parsed.args.retainedNpl, 18),
       burnedRewards: Number(parsed.args.burnedRewards)
     };
   }
@@ -12585,7 +13793,7 @@ function validateEventAgainstOrder(eventName, body, order) {
     if (!isRefundableOrderStatus(order.status)) fail(400, 'INVALID_ORDER_STATUS_TRANSITION');
     const buyer = requireAddress(body.buyer, 'buyer');
     if (buyer.toLowerCase() !== order.buyer_address.toLowerCase()) fail(400, 'EVENT_BUYER_MISMATCH');
-    if (eventName === 'OrderForcedRefunded') validateRefundAmount(body, order);
+    if (eventName === 'OrderForcedRefunded') validateFullRefundAmount(body, order);
     else validateEventAmount(body, order);
     return;
   }
@@ -12614,9 +13822,21 @@ function deductSoldStock(orderId) {
         deducted,
         line.id
       );
+      markProductSoldOutIfEmpty(line.product_id);
     }
   }
   return stockIssue;
+}
+
+function markProductSoldOutIfEmpty(productId) {
+  const product = db.prepare('SELECT stock, status FROM products WHERE id = ?').get(productId);
+  if (!product || Number(product.stock) > 0 || product.status === 'SoldOut') return;
+  db.prepare("UPDATE products SET status = 'SoldOut' WHERE id = ?").run(productId);
+  db.prepare(`
+    UPDATE product_submissions
+    SET status = 'SoldOut'
+    WHERE approved_product_id = ? AND status IN ('Approved', 'Scheduled', 'Live', 'TakedownRequested')
+  `).run(productId);
 }
 
 function restoreSoldStock(orderId) {
@@ -12734,15 +13954,18 @@ function validateEventAmount(body, order) {
   }
 }
 
-function validateRefundAmount(body, order) {
+function validateFullRefundAmount(body, order) {
   const refundWei = body.refundedNplWei ?? body.amountWei;
   const refundText = body.refundedNpl ?? body.amountNpl;
   const orderNpl = parseDecimal18(order.amount_npl);
-  if (refundWei !== undefined && parseUintString(refundWei, 'refundedNplWei') > orderNpl) {
-    fail(400, 'EVENT_REFUND_AMOUNT_TOO_LARGE');
+  if (refundWei === undefined && refundText === undefined) {
+    fail(400, 'EVENT_REFUND_AMOUNT_MISSING');
   }
-  if (refundText !== undefined && parseDecimal18(String(refundText)) > orderNpl) {
-    fail(400, 'EVENT_REFUND_AMOUNT_TOO_LARGE');
+  if (refundWei !== undefined && parseUintString(refundWei, 'refundedNplWei') !== orderNpl) {
+    fail(400, 'EVENT_REFUND_AMOUNT_MISMATCH');
+  }
+  if (refundText !== undefined && parseDecimal18(String(refundText)) !== orderNpl) {
+    fail(400, 'EVENT_REFUND_AMOUNT_MISMATCH');
   }
 }
 
@@ -13117,6 +14340,115 @@ function requireLogisticsCallbackSecret(req) {
   if (req.headers['x-logistics-secret'] !== LOGISTICS_CALLBACK_SECRET) fail(401, 'INVALID_LOGISTICS_CALLBACK_SECRET');
 }
 
+function requireMultisigCallbackSecret(req) {
+  if (!MULTISIG_CALLBACK_SECRET) fail(503, 'MULTISIG_CALLBACK_SECRET_NOT_CONFIGURED');
+  if (!timingSafeTextEqual(String(req.headers['x-multisig-secret'] || ''), MULTISIG_CALLBACK_SECRET)) fail(401, 'INVALID_MULTISIG_CALLBACK_SECRET');
+}
+
+async function recordMultisigApproval(body) {
+  const safeAddress = requireAddress(body?.safeAddress, 'safeAddress').toLowerCase();
+  const configuredSafes = configuredMultisigAddresses();
+  if (!configuredSafes.length) fail(503, 'MULTISIG_OWNER_NOT_CONFIGURED');
+  if (!configuredSafes.includes(safeAddress)) fail(403, 'MULTISIG_OWNER_MISMATCH');
+  const signerAddress = requireAddress(body?.signerAddress, 'signerAddress').toLowerCase();
+  const safeTxHash = requireBytes32(body?.safeTxHash, 'safeTxHash').toLowerCase();
+  const transactionHash = body?.txHash ? requireBytes32(body.txHash, 'txHash').toLowerCase() : null;
+  const approvalAction = requireString(body?.action, 'action').slice(0, 160);
+  if (!MULTISIG_APPROVAL_ACTIONS.has(approvalAction)) fail(400, 'INVALID_MULTISIG_ACTION');
+  const decision = String(body?.decision || 'approved').toLowerCase();
+  if (!['approved', 'executed'].includes(decision)) fail(400, 'INVALID_MULTISIG_DECISION');
+  const signedAtMs = Date.parse(String(body?.signedAt || ''));
+  if (!Number.isFinite(signedAtMs) || Math.abs(Date.now() - signedAtMs) > 24 * 60 * 60_000) fail(400, 'INVALID_MULTISIG_SIGNED_AT');
+  const approvalSignature = requireString(body?.approvalSignature || body?.signature, 'approvalSignature');
+  if (!/^0x[0-9a-fA-F]{130}$/.test(approvalSignature)) fail(400, 'INVALID_MULTISIG_APPROVAL_SIGNATURE');
+  let recovered;
+  try {
+    recovered = recoverAddress(safeTxHash, approvalSignature).toLowerCase();
+  } catch {
+    fail(401, 'INVALID_MULTISIG_APPROVAL_SIGNATURE');
+  }
+  if (recovered !== signerAddress) fail(401, 'MULTISIG_SIGNER_MISMATCH');
+  const ownerResult = await rpc('eth_call', [{
+    to: safeAddress,
+    data: safeMultisigInterface.encodeFunctionData('isOwner', [signerAddress])
+  }, 'latest']);
+  const [isOwner] = safeMultisigInterface.decodeFunctionResult('isOwner', ownerResult);
+  if (!isOwner) fail(403, 'MULTISIG_SIGNER_NOT_OWNER');
+  let execution = null;
+  if (decision === 'executed') {
+    if (!transactionHash) fail(400, 'MULTISIG_EXECUTION_TX_REQUIRED');
+    execution = await verifyMultisigExecution(safeAddress, safeTxHash, transactionHash);
+  }
+  const existing = auditDb.prepare(`
+    SELECT id FROM audit_logs
+    WHERE action = 'multisig.approval.recorded' AND target = ? AND actor_address = ?
+    LIMIT 1
+  `).get(safeTxHash, signerAddress);
+  if (existing) return { duplicate: true, id: existing.id, safeTxHash, signerAddress };
+  const signatureHash = `0x${createHash('sha256').update(approvalSignature).digest('hex')}`;
+  writeAudit('integration', signerAddress, 'multisig.approval.recorded', safeTxHash, {
+    safeAddress,
+    signerAddress,
+    safeTxHash,
+    txHash: transactionHash,
+    approvalAction,
+    decision,
+    signedAt: new Date(signedAtMs).toISOString(),
+    signatureHash,
+    execution,
+    source: 'multisig-callback'
+  });
+  return { duplicate: false, safeAddress, signerAddress, safeTxHash, txHash: transactionHash, approvalAction, decision, signatureHash, execution };
+}
+
+const MULTISIG_APPROVAL_ACTIONS = new Set([
+  'escrow.setSplitConfig',
+  'escrow.setSeller',
+  'escrow.completeOrder',
+  'escrow.forceRefund',
+  'escrow.pause',
+  'escrow.unpause',
+  'rewards.releaseOrder',
+  'rewards.pause',
+  'rewards.unpause',
+  'seckill.startSession',
+  'seckill.forceClose',
+  'seckill.settle',
+  'seckill.setMaxGasPrice',
+  'seckill.approvePrizePoolNpl',
+  'seckill.fundPrizePoolNpl',
+  'seckill.pause',
+  'seckill.unpause'
+]);
+
+async function verifyMultisigExecution(safeAddress, safeTxHash, transactionHash) {
+  const receipt = await rpc('eth_getTransactionReceipt', [transactionHash]);
+  if (!receipt) fail(409, 'MULTISIG_EXECUTION_NOT_MINED');
+  if (String(receipt.status || '').toLowerCase() !== '0x1') fail(409, 'MULTISIG_EXECUTION_FAILED');
+  if (String(receipt.to || '').toLowerCase() !== safeAddress) fail(400, 'MULTISIG_EXECUTION_SAFE_MISMATCH');
+  const executionLog = (Array.isArray(receipt.logs) ? receipt.logs : []).find((log) => {
+    if (String(log?.address || '').toLowerCase() !== safeAddress) return false;
+    try {
+      const parsed = safeMultisigInterface.parseLog(log);
+      return parsed?.name === 'ExecutionSuccess' && String(parsed.args.txHash).toLowerCase() === safeTxHash;
+    } catch {
+      return false;
+    }
+  });
+  if (!executionLog) fail(400, 'MULTISIG_EXECUTION_EVENT_MISMATCH');
+  const finality = await requireReceiptFinality(receipt);
+  return { status: 'Finalized', txHash: transactionHash, blockNumber: finality.blockNumber, confirmations: finality.confirmations };
+}
+
+function configuredMultisigAddresses() {
+  return [...new Set([
+    readAdminConfig('chain')?.multisigAddress,
+    process.env.ESCROW_OWNER_ADDRESS,
+    process.env.REWARDS_OWNER_ADDRESS,
+    process.env.SECKILL_OWNER_ADDRESS
+  ].filter(isValidAddress).map((address) => address.toLowerCase()))];
+}
+
 async function recordLogisticsCallback(body) {
   const orderId = requireString(body?.orderId, 'orderId');
   const order = findOrderByIdOrOrderId(orderId);
@@ -13278,36 +14610,75 @@ function isValidSeller(value) {
 }
 
 async function rpc(method, params) {
+  const endpoints = [
+    CHAIN_EVENT_RPC_URL ? { role: 'primary', url: CHAIN_EVENT_RPC_URL } : null,
+    CHAIN_EVENT_RPC_FALLBACK_URL && CHAIN_EVENT_RPC_FALLBACK_URL !== CHAIN_EVENT_RPC_URL ? { role: 'fallback', url: CHAIN_EVENT_RPC_FALLBACK_URL } : null
+  ].filter(Boolean);
+  if (!endpoints.length) fail(503, 'CHAIN_EVENT_RPC_NOT_CONFIGURED');
+  let lastErrorCode = 'CHAIN_EVENT_RPC_UNREACHABLE';
+  for (const endpoint of endpoints) {
+    const attempt = await rpcAttempt(endpoint, method, params);
+    if (attempt.ok) {
+      rpcRuntimeState.active = endpoint.role;
+      rpcRuntimeState.degraded = endpoint.role !== 'primary';
+      rpcRuntimeState.lastLatencyMs = attempt.durationMs;
+      rpcRuntimeState.lastError = endpoint.role === 'primary' ? null : lastErrorCode;
+      rpcRuntimeState.checkedAt = new Date().toISOString();
+      return attempt.result;
+    }
+    lastErrorCode = attempt.errorCode;
+  }
+  rpcRuntimeState.active = null;
+  rpcRuntimeState.degraded = true;
+  rpcRuntimeState.lastLatencyMs = null;
+  rpcRuntimeState.lastError = lastErrorCode;
+  rpcRuntimeState.checkedAt = new Date().toISOString();
+  fail(503, lastErrorCode);
+}
+
+async function rpcAttempt(endpoint, method, params) {
   const startedAt = Date.now();
-  const requestPayload = { jsonrpc: '2.0', id: 1, method, params };
+  const wirePayload = { jsonrpc: '2.0', id: 1, method, params };
+  const auditPayload = { ...wirePayload, endpointRole: endpoint.role };
   let response;
   try {
-    response = await fetch(CHAIN_EVENT_RPC_URL, {
+    response = await fetch(endpoint.url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(requestPayload)
+      body: JSON.stringify(wirePayload),
+      signal: AbortSignal.timeout(rpcTimeoutMs())
     });
   } catch (error) {
-    writeRpcAudit(method, requestPayload, null, 'network_error', Date.now() - startedAt, sanitizeError(error));
-    fail(503, 'CHAIN_EVENT_RPC_UNREACHABLE');
+    const errorCode = error?.name === 'TimeoutError' ? 'CHAIN_EVENT_RPC_TIMEOUT' : 'CHAIN_EVENT_RPC_UNREACHABLE';
+    writeRpcAudit(method, auditPayload, null, 'network_error', Date.now() - startedAt, errorCode);
+    return { ok: false, errorCode };
   }
   if (!response.ok) {
-    writeRpcAudit(method, requestPayload, { httpStatus: response.status }, 'http_error', Date.now() - startedAt, `HTTP_${response.status}`);
-    fail(503, 'CHAIN_EVENT_RPC_HTTP_ERROR');
+    const errorCode = 'CHAIN_EVENT_RPC_HTTP_ERROR';
+    writeRpcAudit(method, auditPayload, { httpStatus: response.status }, 'http_error', Date.now() - startedAt, `${errorCode}:${response.status}`);
+    return { ok: false, errorCode };
   }
   let body;
   try {
     body = await response.json();
-  } catch (error) {
-    writeRpcAudit(method, requestPayload, null, 'invalid_json', Date.now() - startedAt, sanitizeError(error));
-    fail(503, 'CHAIN_EVENT_RPC_INVALID_JSON');
+  } catch {
+    const errorCode = 'CHAIN_EVENT_RPC_INVALID_JSON';
+    writeRpcAudit(method, auditPayload, null, 'invalid_json', Date.now() - startedAt, errorCode);
+    return { ok: false, errorCode };
   }
-  if (body.error) {
-    writeRpcAudit(method, requestPayload, body, 'rpc_error', Date.now() - startedAt, String(body.error?.code || 'RPC_ERROR'));
-    fail(503, 'CHAIN_EVENT_RPC_ERROR');
+  if (body?.error) {
+    const errorCode = 'CHAIN_EVENT_RPC_ERROR';
+    writeRpcAudit(method, auditPayload, body, 'rpc_error', Date.now() - startedAt, `${errorCode}:${String(body.error?.code || 'UNKNOWN')}`);
+    return { ok: false, errorCode };
   }
-  writeRpcAudit(method, requestPayload, body, 'success', Date.now() - startedAt, null);
-  return body.result;
+  const durationMs = Date.now() - startedAt;
+  writeRpcAudit(method, auditPayload, body, 'success', durationMs, null);
+  return { ok: true, result: body?.result, durationMs };
+}
+
+function rpcTimeoutMs() {
+  const value = Number(process.env.CHAIN_EVENT_RPC_TIMEOUT_MS || process.env.RPC_TIMEOUT_MS || 8_000);
+  return Number.isSafeInteger(value) && value >= 500 && value <= 30_000 ? value : 8_000;
 }
 
 function writeRpcAudit(method, requestPayload, responsePayload, status, durationMs, errorCode) {
@@ -14340,14 +15711,39 @@ function adminDashboard() {
   const paidToday = todayOrders.filter((row) => !['Draft', 'Cancelled'].includes(row.status));
   const shippedToday = todayOrders.filter((row) => ['Shipped', 'Released'].includes(row.status));
   const memory = process.memoryUsage();
+  const walletUids = Number(db.prepare('SELECT COUNT(DISTINCT lower(address)) AS count FROM auth_sessions').get()?.count || 0);
+  const newWalletUidsToday = Number(db.prepare(`
+    SELECT COUNT(*) AS count FROM (
+      SELECT lower(address) AS wallet_address, MIN(created_at) AS first_seen_at
+      FROM auth_sessions
+      GROUP BY lower(address)
+      HAVING date(first_seen_at, 'localtime') = date('now', 'localtime')
+    )
+  `).get()?.count || 0);
+  const blacklistCount = Number(db.prepare('SELECT COUNT(*) AS count FROM blacklists').get()?.count || 0);
+  const failedClaims = Number(db.prepare("SELECT COUNT(*) AS count FROM claims WHERE lower(status) = 'failed'").get()?.count || 0);
+  const pendingClaims = Number(db.prepare("SELECT COUNT(*) AS count FROM claims WHERE lower(status) = 'pending'").get()?.count || 0);
+  const anomalyCount = Number(db.prepare("SELECT COUNT(*) AS count FROM risk_events WHERE status <> 'Resolved'").get()?.count || 0);
+  const botEvents = Number(db.prepare("SELECT COUNT(*) AS count FROM risk_events WHERE kind IN ('wallet-switch','order-cancel','fulfillment-change','rate-limit')").get()?.count || 0);
+  const circuits = ['orders', 'seckill', 'claims', 'force-cutoff'].map(circuitState);
+  const riskWaterline = {
+    pendingClaims,
+    failedTransactions: failedClaims + Number(db.prepare("SELECT COUNT(*) AS count FROM risk_events WHERE kind IN ('tx-failed','rpc-error')").get()?.count || 0),
+    anomalies: anomalyCount,
+    blacklisted: blacklistCount,
+    botEvents,
+    pausedCircuits: circuits.filter((entry) => entry.enabled).length,
+    status: failedClaims || anomalyCount || blacklistCount || circuits.some((entry) => entry.enabled) ? 'Attention' : 'Normal'
+  };
   return {
     generatedAt: new Date().toISOString(),
     paymentAsset: 'NPL',
     stats: {
       merchants: merchants.length,
+      walletUids,
       pendingReviews: merchants.filter((row) => /Pending/.test(row.status)).length + submissions.filter((row) => ['PendingReview', 'TakedownRequested'].includes(row.status)).length,
       seckillSessions: sessions.length,
-      riskAlerts: Number(db.prepare('SELECT COUNT(*) AS count FROM blacklists').get()?.count || 0),
+      riskAlerts: riskWaterline.anomalies + riskWaterline.blacklisted + riskWaterline.failedTransactions,
       prizePoolNpl: sumDecimalValues(reports.map((row) => row.prize_pool_npl))
     },
     today: {
@@ -14355,7 +15751,8 @@ function adminDashboard() {
       gmvNpl: sumOrderAmount(paidToday),
       shipmentRate: paidToday.length ? Number(((shippedToday.length / paidToday.length) * 100).toFixed(2)) : 0,
       seckillSessions: sessions.filter((row) => isToday(row.created_at)).length,
-      withdrawalsNpl: sumClaimAmount(db.prepare("SELECT * FROM claims WHERE lower(status) = 'success' AND date(created_at, 'localtime') = date('now', 'localtime')").all())
+      withdrawalsNpl: sumClaimAmount(db.prepare("SELECT * FROM claims WHERE lower(status) = 'success' AND date(created_at, 'localtime') = date('now', 'localtime')").all()),
+      newWalletUids: newWalletUidsToday
     },
     todo: {
       merchants: merchants.filter((row) => /Pending/.test(row.status)).length,
@@ -14363,7 +15760,8 @@ function adminDashboard() {
       arbitration: orders.filter((row) => ['Arbitration', 'RefundRequested'].includes(row.status)).length,
       lowStock: Number(db.prepare('SELECT COUNT(*) AS count FROM products WHERE stock <= 5 AND status = ?').get('Active')?.count || 0)
     },
-    circuits: ['orders', 'seckill', 'claims', 'force-cutoff'].map(circuitState),
+    circuits,
+    riskWaterline,
     infrastructure: {
       processUptimeSeconds: Math.floor(process.uptime()),
       cpuLoad1m: Number(os.loadavg()[0].toFixed(2)),

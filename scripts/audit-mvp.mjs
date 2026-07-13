@@ -140,7 +140,7 @@ check('admin global search batch and NPL ratio config are stateful', () => {
   const server = text('server/index.mjs');
   const backend = text('scripts/check-backend.mjs');
   return ['function adminSearch', 'batchActions', 'function runAdminBatch', 'admin.batch.run', 'normalizeRatioConfig', 'beneficiaryWeights', 'paymentRatioForProduct', 'readAdminConfig'].every((needle) => server.includes(needle))
-    && ['admin search should expose global results', 'admin batch should accept export jobs', 'ratio config should remain pending and preserve the signed NPL allocation payload'].every((needle) => backend.includes(needle));
+    && ['admin search should expose global results', 'admin batch should return a real export artifact for selected targets', 'ratio config should remain pending and preserve the signed NPL allocation payload'].every((needle) => backend.includes(needle));
 });
 
 check('order item schema and createFinalOrder persist SKU fulfillment address store and region', () => {
@@ -527,9 +527,9 @@ check('Foundry contract tests cover 24K happy paths and permission failures', ()
     'testSignedNplPaymentCompletesWithAtomicSplitAndRewardRelease',
     'testOrderAuthorizationSellerWhitelistAndSplitVersionAreEnforced',
     'testPauseBlocksPaymentAndEmergencyRefundBurnsRewardAtomically',
-    'testForceRefundRoutesRetentionAndBurnsUnclaimedReward',
+    'testForceRefundReturnsFullEscrowAndBurnsUnclaimedReward',
     'testEscrowPermissionFailuresAndArbitrationOwnerRelease',
-    'testEscrowAdminPermissionsAndRefundLimit',
+    'testEscrowAdminPermissionsAndTerminalRefundState',
     'testRewardLedgerOperatorReleaseClaimAndRecoveryBurn',
     'testRewardLedgerOnlyAcceptsFundedNplAndBnm',
     'testBnmPauseBlocksClaimAndUnpauseRestoresIt',
@@ -552,7 +552,7 @@ check('deploy and micro scripts target NPL payment plus NPL/BNM rewards', () => 
   const plan = text('scripts/microtest/plan.mjs');
   const localE2e = text('scripts/e2e/local-checkout.mjs');
   return deploy.includes('Abu24KPaymentEscrow.sol/Abu24KPaymentEscrow.json')
-    && deploy.includes('constructor(address npl,address rewardLedger,address orderSigner,address retainedNplReceiver,address initialOwner)')
+    && deploy.includes('constructor(address npl,address rewardLedger,address orderSigner,address initialOwner)')
     && ['setSplitConfig', 'setSeller', 'setOperator', 'unpause'].every((needle) => deploy.includes(needle))
     && rewards.includes('BNMToken.sol/BNMToken.json')
     && rewards.includes('Abu24KRewardLedger.sol/Abu24KRewardLedger.json')

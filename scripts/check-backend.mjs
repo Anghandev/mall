@@ -2,11 +2,13 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
 import { DatabaseSync } from 'node:sqlite';
 import { Interface, MaxUint256, parseUnits, Wallet } from 'ethers';
+import { strFromU8, unzipSync } from 'fflate';
 import { startOrderSigner } from './test-support/order-signer.mjs';
 
 const port = process.env.BACKEND_CHECK_PORT ? Number(process.env.BACKEND_CHECK_PORT) : await availablePort();
@@ -16,6 +18,7 @@ const escrowAddress = '0x2222222222222222222222222222222222222222';
 const seckillAddress = '0x3333333333333333333333333333333333333333';
 const rewardLedgerAddress = '0x4444444444444444444444444444444444444444';
 const bnmAddress = '0x5555555555555555555555555555555555555555';
+const multisigAddress = '0x8888888888888888888888888888888888888888';
 const merchantWallet = Wallet.createRandom();
 const adminWallet = Wallet.createRandom();
 const blacklistedWallet = Wallet.createRandom();
@@ -24,10 +27,12 @@ const merchantAddress = merchantWallet.address;
 const adminAddress = adminWallet.address;
 const indexerSecret = 'local-check-secret';
 const adminSecret = 'local-admin-secret';
+const multisigCallbackSecret = 'local-multisig-callback-secret-1234567890';
 const actionTokens = new Map();
 let defaultBuyerToken = '';
 rmSync(dbPath, { force: true });
 const localOrderSigner = await startOrderSigner({ chainId: 56, escrowAddress });
+const runtimeMock = await startRuntimeMock(await availablePort());
 
 const server = spawn(process.execPath, ['server/index.mjs'], {
   cwd: process.cwd(),
@@ -46,9 +51,15 @@ const server = spawn(process.execPath, ['server/index.mjs'], {
     JWT_SECRET: 'local-jwt-secret',
     INDEXER_SECRET: indexerSecret,
     ADMIN_SECRET: adminSecret,
+    MULTISIG_CALLBACK_SECRET: multisigCallbackSecret,
+    REDIS_HEALTH_TOKEN: 'redis-health-secret-that-must-not-leak',
+    MQ_HEALTH_TOKEN: 'mq-health-secret-that-must-not-leak',
     CHAIN_EVENT_RPC_URL: '',
+    CHAIN_EVENT_RPC_FALLBACK_URL: '',
     BSC_RPC_URL: '',
     EXPO_PUBLIC_BSC_RPC_URL: '',
+    EXPLORER_API_KEY: '',
+    BSCSCAN_API_KEY: '',
     RATE_LIMIT_REQUESTS_PER_MINUTE: '5000',
     ALLOW_UNVERIFIED_CHAIN_EVENTS: 'true'
   },
@@ -101,6 +112,8 @@ try {
   await assertProductionSecretsFailClosed();
   await assertProductionDistinctSecretsFailClosed();
   await assertOnchainSeckillPrizeRewardSync();
+  await assertStrictSiweValidation(merchantWallet);
+  await assertSiweNonceReplayIsAtomic(merchantWallet);
 
   const merchantAuth = await siweLogin(merchantWallet, 'merchant');
   const adminAuth = await siweLogin(adminWallet, 'admin');
@@ -124,10 +137,7 @@ try {
   const immutableProfile = await patch('/api/merchant/profile', await withSecondary(merchantWallet, 'merchant.profile.update', { status: 'Approved' }), merchantHeaders, 400);
   assert(immutableProfile.error === 'MERCHANT_PROFILE_IMMUTABLE_FIELD', 'merchant profile must reject immutable wallet/status fields');
   const initialStore = await post('/api/merchant/stores', await withSecondary(merchantWallet, 'merchant.store.upsert', {
-    storeId: 'store-dl-gaoxin',
-    name: '24K 大连高新自提店',
-    regionCode: '210211',
-    city: '大连市'
+    ...merchantStoreInput({ storeId: 'store-dl-gaoxin', name: '24K 大连高新自提店' })
   }), merchantHeaders);
   assert(initialStore.id === 'store-dl-gaoxin' && initialStore.regionCode === '210211', 'merchant should persist the GPS pickup store through action-intent');
   const actionIntentWithoutJwt = await fetch(`http://localhost:${port}/api/auth/action-intent`, {
@@ -254,10 +264,64 @@ try {
   assert(merchantSummary.paymentAsset === 'NPL' && merchantSummary.stats && merchantSummary.assets && merchantSummary.fulfillment, 'merchant summary API should expose NPL stats, assets and fulfillment');
   const adminSummary = await get('/api/admin/summary', adminHeaders);
   assert(adminSummary.paymentAsset === 'NPL' && adminSummary.stats && adminSummary.todo && adminSummary.infrastructure, 'admin summary API should expose NPL operations and infrastructure state');
+  const emptyReconciliation = await get('/api/admin/reconciliation', adminHeaders);
+  assert(emptyReconciliation.status === 'NoData' && emptyReconciliation.checked === 0, 'reconciliation must report NoData instead of a false success before any chain evidence exists');
   const operations = await get('/api/admin/ops', adminHeaders);
   assert(operations.components?.db?.status === 'healthy' && operations.components?.redis?.status === 'notConfigured' && operations.components?.mq?.status === 'notConfigured', 'operations snapshot should report real DB health and explicit Redis/MQ notConfigured states');
   assert(Number.isFinite(operations.traffic?.qps) && Number.isFinite(operations.traffic?.tps) && Number.isFinite(operations.traffic?.errorRatePct) && operations.blockchain?.status === 'notConfigured', 'operations snapshot should expose QPS/TPS/error rate and explicit blockchain configuration state');
 
+  const chainRuntimeConfig = {
+    chainId: 56,
+    multisigAddress,
+    primaryRpcUrl: runtimeMock.primaryRpcUrl,
+    backupRpcUrl: runtimeMock.fallbackRpcUrl
+  };
+  const rejectedWrongChain = await post('/api/admin/system-config', await withSecondary(adminWallet, 'admin.system.configure', {
+    key: 'chain',
+    value: { chainId: 56, multisigAddress, primaryRpcUrl: runtimeMock.wrongChainRpcUrl }
+  }), adminHeaders, 400);
+  assert(rejectedWrongChain.error.startsWith('RPC_CHAIN_ID_MISMATCH'), 'runtime RPC configuration must reject an endpoint on a different chain');
+  const savedChainRuntime = await post('/api/admin/system-config', await withSecondary(adminWallet, 'admin.system.configure', { key: 'chain', value: chainRuntimeConfig }), adminHeaders);
+  assert(savedChainRuntime.applied === true && savedChainRuntime.config?.chainId === 56, 'chain runtime configuration should validate, persist and apply immediately');
+  await post('/api/admin/system-config', await withSecondary(adminWallet, 'admin.system.configure', {
+    key: 'oracle-gas',
+    value: { oracleAddress: runtimeMock.oracleAddress, oracleDeviationBps: 150, oracleReferencePrice: '2.02', oracleMaxAgeSeconds: 3600, maxGasGwei: '2' }
+  }), adminHeaders);
+  await post('/api/admin/system-config', await withSecondary(adminWallet, 'admin.system.configure', {
+    key: 'infrastructure',
+    value: { redisHealthUrl: runtimeMock.redisHealthUrl, mqHealthUrl: runtimeMock.mqHealthUrl, cdnEnabled: false }
+  }), adminHeaders);
+  const rejectedCredentialUrl = await post('/api/admin/system-config', await withSecondary(adminWallet, 'admin.system.configure', {
+    key: 'infrastructure',
+    value: { redisHealthUrl: `${runtimeMock.redisHealthUrl}?apiToken=must-not-persist` }
+  }), adminHeaders, 400);
+  assert(rejectedCredentialUrl.error.includes('CREDENTIALS'), 'runtime URLs must reject credential-like query parameters');
+  const rejectedSecretConfig = await post('/api/admin/system-config', await withSecondary(adminWallet, 'admin.system.configure', {
+    key: 'infrastructure',
+    value: { redisHealthUrl: runtimeMock.redisHealthUrl, apiToken: 'must-not-persist' }
+  }), adminHeaders, 400);
+  assert(rejectedSecretConfig.error === 'SECRETS_MUST_USE_ENV', 'system configuration should reject nested credentials before persistence or audit');
+  const runtimeOperations = await get('/api/admin/ops', adminHeaders);
+  assert(runtimeOperations.blockchain?.rpc?.activeEndpoint === 'fallback' && runtimeOperations.blockchain.rpc.degraded === true && runtimeMock.counts.primaryRpc > 0 && runtimeMock.counts.fallbackRpc > 0, 'RPC should audit a failed primary attempt and route the request through fallback');
+  assert(runtimeOperations.blockchain?.oracle?.status === 'healthy' && runtimeOperations.blockchain.oracle.livePrice === '2.0' && runtimeOperations.blockchain.oracle.deviationBps < 150 && runtimeOperations.blockchain.oracle.alert === false, 'Chainlink reader should expose live/reference price, deviation and threshold state');
+  assert(runtimeOperations.blockchain?.gas?.blocked === false && runtimeOperations.blockchain.gas.priceGwei === 1 && runtimeOperations.blockchain.gas.limitGwei === 2, 'operations snapshot should expose live gas and configured block threshold');
+  assert(runtimeOperations.components?.redis?.status === 'healthy' && runtimeOperations.components.redis.hitRatioPct === 90, 'Redis HTTP probe should report real hit ratio');
+  assert(runtimeOperations.components?.mq?.status === 'healthy' && runtimeOperations.components.mq.backlog === 7, 'MQ management probe should report real backlog');
+  assert(!runtimeMock.counts.redisAuthorization && !runtimeMock.counts.mqAuthorization, 'database-configured health URLs must not receive environment Authorization credentials');
+  assert(runtimeOperations.host?.disk?.status === 'healthy' && Number.isFinite(runtimeOperations.host.disk.usedPct), 'operations snapshot should expose live disk waterline');
+  assert(Number.isFinite(runtimeOperations.traffic?.latencyAvgMs) && Number.isFinite(runtimeOperations.traffic?.latencyP95Ms) && runtimeOperations.traffic.endpoints?.length > 0, 'operations snapshot should expose average and percentile endpoint latency');
+  assert(!JSON.stringify(runtimeOperations).includes(runtimeMock.baseUrl), 'operations response must not disclose configured RPC or health endpoint URLs');
+  const rpcAudit = await get('/api/admin/rpc-audit-logs', adminHeaders);
+  assert(rpcAudit.some((entry) => entry.request?.endpointRole === 'primary' && entry.status === 'http_error') && rpcAudit.some((entry) => entry.request?.endpointRole === 'fallback' && entry.status === 'success'), 'RPC audit database should append every primary and fallback attempt without endpoint URLs');
+  assert(!JSON.stringify(rpcAudit).includes(runtimeMock.baseUrl), 'RPC audit records must not contain endpoint URLs');
+  await post('/api/admin/system-config', await withSecondary(adminWallet, 'admin.system.configure', {
+    key: 'chain',
+    value: { chainId: 56, multisigAddress }
+  }), adminHeaders);
+  const clearedRuntimeOperations = await get('/api/admin/ops', adminHeaders);
+  assert(clearedRuntimeOperations.blockchain?.status === 'notConfigured', 'clearing runtime RPC URLs must restore the environment fallback instead of retaining stale endpoints');
+  await post('/api/admin/system-config', await withSecondary(adminWallet, 'admin.system.configure', { key: 'chain', value: chainRuntimeConfig }), adminHeaders);
+  await assertAuditFailureBlocksBusinessMutation(adminWallet, adminHeaders);
   const messages = await get('/api/messages');
   assert(messages.some((message) => message.id === 'm-seckill'), 'messages API should seed 24K notifications');
 
@@ -306,15 +370,21 @@ try {
   const claims = await get(`/api/claims?address=${merchantAddress}`);
   assert(claims.length >= 1, 'claims API should expose claim records');
 
-  const submittedProduct = await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', { title: '24K 测试提报商品', sku: '测试 SKU', priceNpl: '1.00' }), merchantHeaders);
+  await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', merchantProductInput('x'.repeat(61), { storeId: 'invalid-title' })), merchantHeaders, 400);
+  await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', merchantProductInput('图片过量', { storeId: 'invalid-images', imageUrls: Array.from({ length: 6 }, (_, index) => `https://cdn.example.test/${index}.png`) })), merchantHeaders, 400);
+  await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', merchantProductInput('SKU 缺失', { storeId: 'invalid-empty-skus', skus: [] })), merchantHeaders, 400);
+  await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', merchantProductInput('SKU 重复', { storeId: 'invalid-duplicate-skus', skus: [{ id: 'same', name: 'A', settlementPriceNpl: '1', stock: 1 }, { id: 'SAME', name: 'B', settlementPriceNpl: '2', stock: 1 }] })), merchantHeaders, 400);
+  await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', merchantProductInput('履约非法', { storeId: 'invalid-fulfillment', fulfillmentModes: ['drone'] })), merchantHeaders, 400);
+  const submittedProduct = await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', merchantProductInput('24K 测试提报商品', { descriptionHtml: '<p>安全详情</p><script>alert(1)</script><a href="javascript:alert(1)">链接</a>' })), merchantHeaders);
   assert(submittedProduct.status === 'PendingReview' && submittedProduct.locked, 'merchant product submission should be pending and locked');
-  await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', { title: '24K 重复提报应被拒绝', sku: '重复 SKU', priceNpl: '1.00' }), merchantHeaders, 423);
+  await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', merchantProductInput('24K 重复提报应被拒绝')), merchantHeaders, 423);
   await patch(`/api/merchant/products/${submittedProduct.id}`, await withSecondary(merchantWallet, 'merchant.product.update', { title: '锁定后不能修改' }), merchantHeaders, 423);
   const lockedProduct = await post(`/api/merchant/products/${submittedProduct.id}/lock`, await withSecondary(merchantWallet, 'merchant.product.lock', {}), merchantHeaders, 200);
   assert(lockedProduct.action === 'merchant.product.lock', 'merchant product lock should write audit action');
   const merchantStores = await get('/api/merchant/stores', merchantHeaders);
   assert(merchantStores.length >= 1, 'merchant stores API should list stores');
-  const savedStore = await post('/api/merchant/stores', await withSecondary(merchantWallet, 'merchant.store.upsert', { storeId: 'store-check', name: '测试自提点', regionCode: '210211' }), merchantHeaders);
+  await post('/api/merchant/stores', await withSecondary(merchantWallet, 'merchant.store.upsert', merchantStoreInput({ storeId: 'store-invalid-photo', photos: ['http://cdn.example.test/store.png'] })), merchantHeaders, 400);
+  const savedStore = await post('/api/merchant/stores', await withSecondary(merchantWallet, 'merchant.store.upsert', merchantStoreInput({ storeId: 'store-check', name: '测试自提点' })), merchantHeaders);
   assert(savedStore.action === 'merchant.store.upsert', 'merchant store upsert should write audit action');
   const printer = await post('/api/merchant/printer', await withSecondary(merchantWallet, 'merchant.printer.configure', { deviceId: 'printer-1' }), merchantHeaders);
   assert(printer.action === 'merchant.printer.configure', 'merchant printer configure should write audit action');
@@ -324,7 +394,9 @@ try {
   assert(unsignedExport.status === 405, 'merchant export must reject unsigned GET requests');
   const signedExport = await post('/api/merchant/export', await withSecondary(merchantWallet, 'merchant.orders.export', { format: 'csv', filters: {} }), merchantHeaders, 200);
   assert(signedExport.fileName?.endsWith('.csv') && typeof signedExport.content === 'string' && signedExport.rowCount >= 0, 'merchant export should return a signed, downloadable CSV payload');
-  const draftProduct = await post('/api/merchant/products/drafts', await withSecondary(merchantWallet, 'merchant.product.draft', { storeId: 'draft-store', title: '24K 草稿商品', sku: '草稿 SKU', priceNpl: '3.00' }), merchantHeaders);
+  const signedXlsxExport = await post('/api/merchant/export', await withSecondary(merchantWallet, 'merchant.orders.export', { format: 'excel', filters: {} }), merchantHeaders, 200);
+  assertValidXlsxArtifact(signedXlsxExport, 'merchant Excel export');
+  const draftProduct = await post('/api/merchant/products/drafts', await withSecondary(merchantWallet, 'merchant.product.draft', merchantProductInput('24K 草稿商品', { storeId: 'draft-store', priceNpl: '3.00' })), merchantHeaders);
   assert(draftProduct.status === 'Draft' && draftProduct.locked === false, 'merchant should save an editable product draft');
   const submittedDraft = await post(`/api/merchant/products/${draftProduct.id}/submit-review`, await withSecondary(merchantWallet, 'merchant.product.submit-review', {}), merchantHeaders, 200);
   assert(submittedDraft.status === 'PendingReview' && submittedDraft.locked === true, 'submitting a draft should lock it for platform review');
@@ -335,13 +407,18 @@ try {
   assert(merchantClaim.error === 'REWARD_LEDGER_ADDRESS_NOT_CONFIGURED', 'merchant claim must not fake success before the RewardLedger contract is configured');
   const pendingProducts = await get('/api/admin/products/pending', adminHeaders);
   assert(pendingProducts.some((entry) => entry.id === submittedProduct.id && entry.locked && entry.storeId === 'default'), 'admin pending product API should expose locked merchant submissions');
+  const sanitizedSubmission = pendingProducts.find((entry) => entry.id === submittedProduct.id);
+  assert(sanitizedSubmission.payload.descriptionHtml.includes('<p>安全详情</p>') && !/script|javascript:/i.test(sanitizedSubmission.payload.descriptionHtml), 'merchant product rich text must be sanitized before immutable storage');
   const adminMerchants = await get('/api/admin/merchants', adminHeaders);
   assert(adminMerchants.some((entry) => entry.walletAddress.toLowerCase() === merchantAddress.toLowerCase()), 'admin merchants API should expose merchant whitelist');
   const adminReview = await post('/api/admin/products/review', await withSecondary(adminWallet, 'admin.product.review', { productId: submittedProduct.id, decision: 'approved' }), adminHeaders);
   assert(adminReview.action === 'admin.product.review' && adminReview.approvedProduct?.id, 'admin product review should write audit action and create formal product');
+  setSubmissionStatus(submittedProduct.id, 'Scheduled');
+  await post(`/api/merchant/products/${submittedProduct.id}/takedown`, await withSecondary(merchantWallet, 'merchant.product.takedown', { reason: '活动期间不得主动下架' }), merchantHeaders, 423);
+  setSubmissionStatus(submittedProduct.id, 'Approved');
   const takedownRequest = await post(`/api/merchant/products/${submittedProduct.id}/takedown`, await withSecondary(merchantWallet, 'merchant.product.takedown', { reason: '商品停止销售' }), merchantHeaders, 200);
   assert(takedownRequest.status === 'TakedownRequested', 'approved merchant product should enter takedown review');
-  await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', { title: '下架待审期间不得绕过', sku: '绕过 SKU', priceNpl: '1.00' }), merchantHeaders, 423);
+  await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', merchantProductInput('下架待审期间不得绕过')), merchantHeaders, 423);
   const takedownApproved = await post('/api/admin/products/review', await withSecondary(adminWallet, 'admin.product.review', { productId: submittedProduct.id, decision: 'approved' }), adminHeaders);
   assert(takedownApproved.status === 'TakenDown', 'admin should approve a pending takedown and release the single-product slot');
   const inactiveProductId = adminReview.approvedProduct.id;
@@ -352,36 +429,40 @@ try {
   const inactivePreflight = await post('/api/stock/preflight', { buyerAddress: merchantAddress, items: [deliveryItem(inactiveProductId)] }, {}, 200);
   assert(inactivePreflight.ok === false && inactivePreflight.lines[0].reason === 'PRODUCT_NOT_ACTIVE', 'inactive product must fail stock preflight');
   await post('/api/dapp/checkout-intent', { buyerAddress: merchantAddress, idempotencyKey: 'backend-check:inactive-product', items: [deliveryItem(inactiveProductId)] }, {}, 400);
-  const rejectSubmission = await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', { storeId: 'risk-reject', title: '拒绝后不可复审', sku: '拒绝 SKU', priceNpl: '1.00' }), merchantHeaders);
+  const rejectSubmission = await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', merchantProductInput('拒绝后不可复审', { storeId: 'risk-reject' })), merchantHeaders);
   const rejected = await post('/api/admin/products/review', await withSecondary(adminWallet, 'admin.product.review', { productId: rejectSubmission.id, decision: 'rejected' }), adminHeaders);
   assert(rejected.status === 'Rejected', 'admin can reject pending product submission');
   await post('/api/admin/products/review', await withSecondary(adminWallet, 'admin.product.review', { productId: rejectSubmission.id, decision: 'approved' }), adminHeaders, 409);
-  const badSubmission = await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', { storeId: 'risk-bad-price', title: '坏价格提报', sku: '坏 SKU', priceNpl: 'bad-price' }), merchantHeaders);
-  await post('/api/admin/products/review', await withSecondary(adminWallet, 'admin.product.review', { productId: badSubmission.id, decision: 'approved' }), adminHeaders, 400);
-  const badAfterReview = (await get('/api/admin/products/pending', adminHeaders)).find((entry) => entry.id === badSubmission.id);
-  assert(badAfterReview?.status === 'PendingReview' && !badAfterReview.approvedProductId, 'failed approval should roll back submission status and approved product binding');
+  await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', merchantProductInput('坏价格提报', { storeId: 'risk-bad-price', priceNpl: 'bad-price' })), merchantHeaders, 400);
   const runnerBeforeCollision = productById(await get('/api/products'), 'p-24k-runner');
-  const collisionSubmission = await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', {
+  const collisionSubmission = await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', merchantProductInput('恶意覆盖官方商品', {
     storeId: 'risk-collision',
-    title: '恶意覆盖官方商品',
-    sku: '恶意 SKU',
     productId: 'p-24k-runner',
     priceNpl: '0.01',
     stock: 9999,
     skus: [{ id: 'sku-runner-42', name: '恶意 SKU', settlementPriceNpl: '0.01', stock: 9999 }]
-  }), merchantHeaders);
+  })), merchantHeaders);
   const collisionReview = await post('/api/admin/products/review', await withSecondary(adminWallet, 'admin.product.review', { productId: collisionSubmission.id, decision: 'approved' }), adminHeaders);
   assert(collisionReview.approvedProduct?.id && collisionReview.approvedProduct.id !== 'p-24k-runner', 'approval should ignore merchant-supplied productId');
   const runnerAfterCollision = productById(await get('/api/products'), 'p-24k-runner');
   assert(runnerAfterCollision.title === runnerBeforeCollision.title && runnerAfterCollision.stock === runnerBeforeCollision.stock && runnerAfterCollision.sellerAddress.toLowerCase() === runnerBeforeCollision.sellerAddress.toLowerCase(), 'malicious productId/SKU collision must not overwrite official product');
-  const batchSubmission = await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', { storeId: 'risk-batch', title: '批量审核商品', sku: '批量 SKU', priceNpl: '2.00' }), merchantHeaders);
+  const batchSubmission = await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', merchantProductInput('批量审核商品', { storeId: 'risk-batch', priceNpl: '2.00' })), merchantHeaders);
   const batchApprove = await post('/api/admin/batch', await withSecondary(adminWallet, 'admin.batch.run', { operation: 'review.approve', resource: 'productSubmissions', targetIds: [batchSubmission.id] }), adminHeaders);
   assert(batchApprove.batch?.results?.[0]?.ok && batchApprove.batch.results[0].approvedProductId, 'batch review.approve should create formal product and return per-item result');
   assert(productById(await get('/api/products'), batchApprove.batch.results[0].approvedProductId).title === '批量审核商品', 'batch-approved product should appear in formal product list');
   await post('/api/admin/batch', await withSecondary(adminWallet, 'admin.batch.run', { operation: 'review.approve', resource: 'productSubmissions', targetIds: ['missing-submission'] }), adminHeaders, 400);
+  const soldOutSubmission = await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', merchantProductInput('售罄释放商品', { storeId: 'sold-out-store', stock: 1 })), merchantHeaders);
+  const soldOutReview = await post('/api/admin/products/review', await withSecondary(adminWallet, 'admin.product.review', { productId: soldOutSubmission.id, decision: 'approved' }), adminHeaders);
+  const soldOutOrder = await post('/api/orders', { buyerAddress: merchantAddress, idempotencyKey: 'backend-check:sold-out-release', items: [deliveryItem(soldOutReview.approvedProduct.id)] });
+  await post('/api/chain-events', fundedEvent(soldOutOrder, hex32('d1'), 89), { 'x-indexer-secret': indexerSecret }, 201);
+  const soldOutState = (await get('/api/admin/products/pending', adminHeaders)).find((entry) => entry.id === soldOutSubmission.id);
+  assert(soldOutState?.status === 'SoldOut' && !(await get('/api/products')).some((entry) => entry.id === soldOutReview.approvedProduct.id), 'stock reaching zero should mark the formal product and submission SoldOut');
+  const replacementSubmission = await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', merchantProductInput('售罄后的替换商品', { storeId: 'sold-out-store' })), merchantHeaders);
+  assert(replacementSubmission.status === 'PendingReview', 'SoldOut submission should release the one-store-one-product slot');
   const futureStartsAt = new Date(Date.now() + 60 * 60_000).toISOString();
   const futureEndsAt = new Date(Date.now() + 2 * 60 * 60_000).toISOString();
   const futureSeckill = await post('/api/admin/seckill/schedule', await withSecondary(adminWallet, 'admin.seckill.schedule', { productId: 'p-24k-phone', startsAt: futureStartsAt, endsAt: futureEndsAt, durationSeconds: 3600 }), adminHeaders);
+  await post('/api/admin/batch', await withSecondary(adminWallet, 'admin.batch.run', { operation: 'product.down', resource: 'products', targetIds: ['p-24k-phone'] }), adminHeaders, 400);
   await post('/api/admin/seckill/publish', await withSecondary(adminWallet, 'admin.seckill.publish', { sessionId: futureSeckill.sessionId }), adminHeaders, 409);
   await post('/api/admin/seckill/schedule', await withSecondary(adminWallet, 'admin.seckill.schedule', { productId: 'p-24k-phone', startsAt: futureStartsAt, endsAt: futureEndsAt, durationSeconds: 3600, status: 'live' }), adminHeaders, 409);
   const fartherStartsAt = new Date(Date.now() + 3 * 60 * 60_000).toISOString();
@@ -489,7 +570,8 @@ try {
   const prizeClaimIntent = await post('/api/dapp/claim-intent', { walletAddress: orderInputPreviewBuyer(), bucketId: 'seckill-prize', rewardId: prizeReward.id }, {}, 200);
   assert(prizeClaimIntent.assetSymbol === 'NPL' && prizeClaimIntent.submit?.body?.rewardId === prizeReward.id, 'seckill prize should reuse DApp claim intent as an NPL reward');
   await post('/api/admin/force-refund', await withSecondary(adminWallet, 'admin.force-refund', { orderId: finalized.orderId, reason: '未付款订单不能强制退款' }), adminHeaders, 400);
-  const pendingMerchantApproval = await post('/api/admin/merchants/review', await withSecondary(adminWallet, 'admin.merchant.review', { merchantId: 'merchant-abu-24k', walletAddress: merchantAddress, name: '24K 官方严选', decision: 'approved' }), adminHeaders);
+  await post('/api/admin/merchants/review', await withSecondary(adminWallet, 'admin.merchant.review', { merchantId: 'merchant-incomplete', walletAddress: merchantAddress, name: '资质不完整商家', decision: 'approved' }), adminHeaders, 400);
+  const pendingMerchantApproval = await post('/api/admin/merchants/review', await withSecondary(adminWallet, 'admin.merchant.review', merchantReviewInput(merchantAddress, { merchantId: 'merchant-abu-24k', name: '24K 官方严选' })), adminHeaders);
   assert(pendingMerchantApproval.status === 'PendingChainApproval' && pendingMerchantApproval.transactionIntent?.data, 'merchant approval should remain pending until the Escrow event is indexed');
   const indexedMerchantApproval = await post('/api/chain-events', {
     eventName: 'SellerApprovalUpdated',
@@ -541,8 +623,8 @@ try {
   assert(unavailablePrizePool.error === 'REWARD_LEDGER_ADDRESS_NOT_CONFIGURED', 'prize-pool injection must not fake success before RewardLedger is configured');
   const adminSearch = await get('/api/admin/search?q=24K', adminHeaders);
   assert(adminSearch.results?.products?.length >= 1 && adminSearch.batchActions?.includes('export.csv'), 'admin search should expose global results and batch actions');
-  const adminAndSearch = await get(`/api/admin/search?logic=AND&orderId=${encodeURIComponent(firstOrder.orderId)}&productId=p-24k-runner&wallet=${encodeURIComponent(orderInput.buyerAddress)}`, adminHeaders);
-  assert(adminAndSearch.filters?.logic === 'AND' && adminAndSearch.filters?.orderId === firstOrder.orderId.toLowerCase() && adminAndSearch.results?.orders?.length === 1, 'admin AND search should apply exact order/product/wallet filters in the backend');
+  const adminAndSearch = await get(`/api/admin/search?logic=AND&orderId=${encodeURIComponent(seckillIntent.order.orderId)}&productId=p-24k-runner&wallet=${encodeURIComponent(orderInputPreviewBuyer())}`, adminHeaders);
+  assert(adminAndSearch.filters?.logic === 'AND' && adminAndSearch.filters?.orderId === seckillIntent.order.orderId.toLowerCase() && adminAndSearch.results?.orders?.length === 1, 'admin AND search should apply exact order/product/wallet filters in the backend');
   const adminOrSearch = await get('/api/admin/search?logic=OR&orderId=0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff&productId=p-24k-runner', adminHeaders);
   assert(adminOrSearch.filters?.logic === 'OR' && adminOrSearch.results?.products?.some((entry) => entry.id === 'p-24k-runner'), 'admin OR search should return entities matching any exact field');
   const adminBatch = await post('/api/admin/batch', await withSecondary(adminWallet, 'admin.batch.run', { operation: 'export.csv', resource: 'products', targetIds: ['p-24k-runner'] }), adminHeaders);
@@ -550,8 +632,7 @@ try {
   const exportedCsv = Buffer.from(adminBatch.batch.download.contentBase64, 'base64').toString('utf8');
   assert(exportedCsv.includes('p-24k-runner') && !exportedCsv.includes('p-24k-phone'), 'admin export must contain only explicitly selected targets');
   const adminExcel = await post('/api/admin/batch', await withSecondary(adminWallet, 'admin.batch.run', { operation: 'export.excel', resource: 'products', targetIds: ['p-24k-runner'] }), adminHeaders);
-  const exportedExcel = Buffer.from(adminExcel.batch.download.contentBase64, 'base64').toString('utf8');
-  assert(adminExcel.batch.exportFile?.endsWith('.xls') && exportedExcel.includes('<Workbook') && exportedExcel.includes('p-24k-runner'), 'admin Excel export should return a real SpreadsheetML workbook');
+  assertValidXlsxArtifact(adminExcel.batch.download, 'admin Excel export', 'p-24k-runner');
   await post('/api/admin/batch', await withSecondary(adminWallet, 'admin.batch.run', { operation: 'export.csv', resource: 'products', targetIds: [] }), adminHeaders, 400);
   await post('/api/admin/blacklist', await withSecondary(adminWallet, 'admin.blacklist.update', { address: '0x9999999999999999999999999999999999999999' }), adminHeaders);
   await post('/api/admin/logistics', await withSecondary(adminWallet, 'admin.logistics.configure', { carrier: 'SF' }), adminHeaders);
@@ -585,7 +666,7 @@ try {
   assert(rejectedGatewaySecret.error === 'SECRETS_MUST_USE_ENV', 'message gateway endpoint must reject database secrets');
   await post('/api/admin/messages/gateways', await withSecondary(adminWallet, 'admin.message.gateway.configure', { smsProvider: 'aliyun', smtpHost: 'smtp.example.test', smtpUser: 'mailer', pushProvider: 'firebase' }), adminHeaders);
 
-  await post('/api/admin/merchants/review', await withSecondary(adminWallet, 'admin.merchant.review', { merchantId: 'merchant-platform-seller', walletAddress: platformSellerWallet.address, name: '平台代运营商家', decision: 'approved' }), adminHeaders);
+  await post('/api/admin/merchants/review', await withSecondary(adminWallet, 'admin.merchant.review', merchantReviewInput(platformSellerWallet.address, { merchantId: 'merchant-platform-seller', name: '平台代运营商家' })), adminHeaders);
   await post('/api/chain-events', {
     eventName: 'SellerApprovalUpdated',
     chainId: 56,
@@ -600,8 +681,36 @@ try {
   await post('/api/admin/categories/upsert', await withSecondary(adminWallet, 'admin.category.upsert', { id: 'cat-home-life', name: '生活用品', level: 2, parentId: 'cat-home' }), adminHeaders);
   await post('/api/admin/categories/upsert', await withSecondary(adminWallet, 'admin.category.upsert', { id: 'cat-home-life-cup', name: '杯具', level: 3, parentId: 'cat-home-life' }), adminHeaders);
   await post('/api/admin/tags/upsert', await withSecondary(adminWallet, 'admin.tag.upsert', { id: 'tag-new', name: '新品' }), adminHeaders);
-  const adminProduct = await post('/api/admin/products', await withSecondary(adminWallet, 'admin.product.create', { title: '24K 平台代上架商品', sellerAddress: platformSellerWallet.address, categoryId: 'cat-home-life-cup', tags: ['tag-new'], imageUrl: 'https://cdn.example.test/product.png', skus: [{ name: '标准款', stock: 3, settlementPriceNpl: '2.5' }] }), adminHeaders);
+  const adminProduct = await post('/api/admin/products', await withSecondary(adminWallet, 'admin.product.create', { title: '24K 平台代上架商品', sellerAddress: platformSellerWallet.address, categoryId: 'cat-home-life-cup', tags: ['tag-new'], imageUrl: 'https://cdn.example.test/product.png', imageUrls: ['https://cdn.example.test/product.png'], descriptionHtml: '<p>平台代上架商品</p>', fulfillmentModes: ['delivery'], skus: [{ id: 'standard', name: '标准款', stock: 3, settlementPriceNpl: '2.5' }] }), adminHeaders);
   assert(adminProduct.product?.status === 'Active' && adminProduct.product?.sellerAddress?.toLowerCase() === platformSellerWallet.address.toLowerCase() && adminProduct.product?.tagIds?.includes('tag-new'), 'admin product creation should enforce approved seller, taxonomy, SKU and NPL pricing');
+  await post('/api/admin/tags/delete', await withSecondary(adminWallet, 'admin.tag.delete', { id: 'tag-new' }), adminHeaders, 423);
+  const updatedAdminProduct = await post('/api/admin/products/update', await withSecondary(adminWallet, 'admin.product.update', { productId: adminProduct.product.id, priceNpl: '3.25', stock: 4 }), adminHeaders);
+  assert(updatedAdminProduct.product?.priceNpl === 3.25 && updatedAdminProduct.product?.stock === 4 && updatedAdminProduct.historyRecorded, 'admin product update should persist price and inventory');
+  const productHistory = await get(`/api/admin/products/history?productId=${encodeURIComponent(adminProduct.product.id)}`, adminHeaders);
+  assert(productHistory.some((entry) => entry.change?.oldValue?.stock === 3 && entry.change?.newValue?.stock === 4 && entry.signatureHash), 'admin product history should preserve signed old/new snapshots');
+  const deletedAdminProduct = await post('/api/admin/products/delete', await withSecondary(adminWallet, 'admin.product.delete', { productId: adminProduct.product.id, reason: '生命周期回归' }), adminHeaders);
+  assert(deletedAdminProduct.product?.status === 'Inactive', 'admin product delete should soft-delete without removing history');
+
+  const multisigBody = {
+    safeAddress: multisigAddress,
+    signerAddress: adminAddress,
+    safeTxHash: hex32('f1'),
+    txHash: hex32('f2'),
+    action: 'escrow.setSplitConfig',
+    decision: 'executed',
+    signedAt: new Date().toISOString(),
+    approvalSignature: adminWallet.signingKey.sign(hex32('f1')).serialized
+  };
+  const rejectedMultisigOwner = await post('/api/integrations/multisig/approval', { ...multisigBody, safeAddress: '0x9999999999999999999999999999999999999999' }, { 'x-multisig-secret': multisigCallbackSecret }, 403);
+  assert(rejectedMultisigOwner.error === 'MULTISIG_OWNER_MISMATCH', 'multisig callback must reject approvals for an unconfigured owner address');
+  const rejectedMultisigSigner = await post('/api/integrations/multisig/approval', { ...multisigBody, approvalSignature: blacklistedWallet.signingKey.sign(multisigBody.safeTxHash).serialized }, { 'x-multisig-secret': multisigCallbackSecret }, 401);
+  assert(rejectedMultisigSigner.error === 'MULTISIG_SIGNER_MISMATCH', 'multisig callback must reject a signature that does not recover the declared owner');
+  const multisigApproval = await post('/api/integrations/multisig/approval', multisigBody, { 'x-multisig-secret': multisigCallbackSecret }, 202);
+  assert(multisigApproval.duplicate === false && multisigApproval.signatureHash && multisigApproval.execution?.status === 'Finalized', 'multisig callback should verify owner signature and finalized Safe execution before appending proof');
+  const duplicateMultisigApproval = await post('/api/integrations/multisig/approval', multisigBody, { 'x-multisig-secret': multisigCallbackSecret }, 202);
+  assert(duplicateMultisigApproval.duplicate === true, 'multisig approval callback should be idempotent per safe transaction and signer');
+  const multisigApprovals = await get('/api/admin/multisig/approvals', adminHeaders);
+  assert(multisigApprovals.some((entry) => entry.safeTxHash === multisigBody.safeTxHash.toLowerCase() && entry.approvalAction === multisigBody.action), 'admin should query recorded multisig approvals');
 
   const savedTemplates = await get('/api/admin/logistics/templates', adminHeaders);
   const savedAddresses = await get('/api/admin/logistics/addresses', adminHeaders);
@@ -662,7 +771,7 @@ try {
   assert(connectedAssets.orderStateCounts?.pendingPayment >= 1 && connectedAssets.actions?.timeoutRefundRequest === '/api/dapp/timeout-refund-request', 'asset summary should expose order state counts and DApp actions for the assets tab');
   const buyerOrdersViaOrdersRoute = await get(`/api/orders?buyerAddress=${orderInput.buyerAddress}`);
   assert(buyerOrdersViaOrdersRoute.some((order) => order.orderId === firstOrder.orderId), 'orders API should support buyer-scoped list for DApp while keeping admin list protected');
-  const dustSubmission = await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', { storeId: 'risk-dust', title: '1 wei dust 商品', sku: '1 wei SKU', priceNpl: '0.000000000000000001' }), merchantHeaders);
+  const dustSubmission = await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', merchantProductInput('1 wei dust 商品', { storeId: 'risk-dust', priceNpl: '0.000000000000000001' })), merchantHeaders);
   const dustApproval = await post('/api/admin/products/review', await withSecondary(adminWallet, 'admin.product.review', { productId: dustSubmission.id, decision: 'approved' }), adminHeaders);
   const dustOrder = await post('/api/orders', { buyerAddress: orderInput.buyerAddress, idempotencyKey: 'backend-check:dust', items: [deliveryItem(dustApproval.approvedProduct.id)] });
   assert(parseDecimal18(dustOrder.amountNpl) === 1n, 'NPL amount should keep exact 1 wei precision without dust loss');
@@ -681,6 +790,7 @@ try {
   const event = fundedEvent(firstOrder, '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 123);
   await post('/api/chain-events', legacyFundedEvent(firstOrder, '0x9999999999999999999999999999999999999999999999999999999999999999', 122), { 'x-indexer-secret': indexerSecret }, 400);
   const recorded = await post('/api/chain-events', event, { 'x-indexer-secret': indexerSecret }, 201);
+  await post('/api/admin/products/delete', await withSecondary(adminWallet, 'admin.product.delete', { productId: 'p-24k-runner', reason: '锁定资产不得下架' }), adminHeaders, 423);
   assert(recorded.order.status === 'PaidLocked', 'OrderPaid should move order to PaidLocked');
   const confirmedFundingStatus = await get(`/api/orders/${firstOrder.orderId}/fund-tx-status?buyerAddress=${orderInput.buyerAddress}&txHash=${event.txHash}`);
   assert(confirmedFundingStatus.status === 'confirmed' && confirmedFundingStatus.order.status === 'PaidLocked', 'funding tx status should report confirmed after OrderPaid is indexed');
@@ -752,8 +862,13 @@ try {
     items: [deliveryItem('p-24k-bag')]
   });
   await post('/api/chain-events', fundedEvent(adminRefundOrder, '0xabababababababababababababababababababababababababababababababab', 129), { 'x-indexer-secret': indexerSecret }, 201);
+  const rejectedPartialRefund = await post('/api/admin/force-refund', await withSecondary(adminWallet, 'admin.force-refund', { orderId: adminRefundOrder.orderId, reason: '部分退款不允许', refundNplAmount: '1' }), adminHeaders, 400);
+  assert(rejectedPartialRefund.error === 'FULL_REFUND_ONLY', 'admin force refund must reject caller-controlled partial refund amounts');
   const adminForceRefund = await post('/api/admin/force-refund', await withSecondary(adminWallet, 'admin.force-refund', { orderId: adminRefundOrder.orderId, reason: '7 天未发货' }), adminHeaders);
   assert(adminForceRefund.status === 'RefundRequested', 'admin force refund should wait for chain event before terminal status');
+  const forceRefundInterface = new Interface(['function forceRefund(bytes32 orderId)']);
+  const [forcedRefundOrderId] = forceRefundInterface.decodeFunctionData('forceRefund', adminForceRefund.transactionIntent.data);
+  assert(forcedRefundOrderId === adminRefundOrder.orderId && adminForceRefund.transactionIntent.fullRefundNpl === adminRefundOrder.amountNpl, 'admin force refund calldata must use the frozen one-argument full refund ABI');
   const adminRefunded = await post('/api/chain-events', forcedRefundEvent(adminRefundOrder, '0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd', 130), { 'x-indexer-secret': indexerSecret }, 201);
   assert(adminRefunded.order.status === 'ForcedRefunded', 'OrderForcedRefunded event should finalize admin force refund');
 
@@ -763,9 +878,13 @@ try {
     items: [deliveryItem('p-24k-bag')]
   });
   await post('/api/chain-events', fundedEvent(timeoutRefundOrder, '0x1313131313131313131313131313131313131313131313131313131313131313', 132), { 'x-indexer-secret': indexerSecret }, 201);
-  backdateOrderForTimeout(timeoutRefundOrder.orderId);
+  await post('/api/admin/system-config', await withSecondary(adminWallet, 'admin.system.configure', {
+    key: 'business-parameters',
+    value: { shippingTimeoutHours: 1, confirmationTimeoutHours: 1, siweNonceTtlMinutes: 10, actionIntentTtlMinutes: 10, claimRequestTtlMinutes: 10 }
+  }), adminHeaders);
+  backdateOrderBy(timeoutRefundOrder.orderId, 2 * 60 * 60_000);
   const timeoutActions = await get(`/api/orders/${timeoutRefundOrder.orderId}/timeout-actions?buyerAddress=${orderInput.buyerAddress}`);
-  assert(timeoutActions.buyerTimeoutRefund?.eligible === true && timeoutActions.policy?.noUserNoReasonRefund === true, 'timeout actions should allow buyer refund only after 7-day unshipped timeout');
+  assert(timeoutActions.buyerTimeoutRefund?.eligible === true && timeoutActions.buyerTimeoutRefund.clock?.windowHours === 1 && timeoutActions.policy?.noUserNoReasonRefund === true, 'runtime shipping timeout should take effect immediately without enabling no-reason refunds');
   const timeoutRefundPayload = { buyerAddress: orderInput.buyerAddress, orderId: timeoutRefundOrder.orderId, reason: '7 天未发货' };
   const buyerTimeoutRefund = await post('/api/dapp/timeout-refund-request', await withSecondary(merchantWallet, 'buyer.timeout-refund.request', timeoutRefundPayload), buyerHeaders);
   assert(buyerTimeoutRefund.status === 'RefundRequested' && buyerTimeoutRefund.noUserNoReasonRefund === true, 'buyer timeout refund request should create RefundRequested without enabling no-reason refunds');
@@ -773,6 +892,10 @@ try {
   assert(timeoutAdminForce.status === 'RefundRequested', 'admin force refund should accept buyer timeout RefundRequested order');
   const timeoutRefunded = await post('/api/chain-events', { ...forcedRefundEvent(timeoutRefundOrder, '0x1414141414141414141414141414141414141414141414141414141414141414', 133), logIndex: 1 }, { 'x-indexer-secret': indexerSecret }, 201);
   assert(timeoutRefunded.order.status === 'ForcedRefunded', 'OrderForcedRefunded should finalize buyer timeout refund');
+  await post('/api/admin/system-config', await withSecondary(adminWallet, 'admin.system.configure', {
+    key: 'business-parameters',
+    value: { shippingTimeoutHours: 168, confirmationTimeoutHours: 168, siweNonceTtlMinutes: 10, actionIntentTtlMinutes: 10, claimRequestTtlMinutes: 10 }
+  }), adminHeaders);
 
   const forceSignOrder = await post('/api/orders', {
     buyerAddress: orderInput.buyerAddress,
@@ -789,9 +912,58 @@ try {
   const forceSignCompleted = await post('/api/chain-events', { ...completedEvent(forceSignOrder, '0x1616161616161616161616161616161616161616161616161616161616161616', 135), logIndex: 1 }, { 'x-indexer-secret': indexerSecret }, 201);
   assert(forceSignCompleted.order.status === 'Released', 'OrderCompleted should finalize platform force-sign completion');
 
+  const merchantInsights = await get(`/api/admin/merchant-insights?walletAddress=${encodeURIComponent(merchantAddress)}`, adminHeaders);
+  assert(merchantInsights.orders.total >= 1 && merchantInsights.npl.grossFlow && merchantInsights.rewards.fiveStates.Locked && merchantInsights.afterSales.refunds >= 1, 'admin merchant insights should reconcile orders, NPL, SLA, refunds and five-state rewards');
+  let mismatchedReconciliation;
+  setOrderFundTxHash(firstOrder.orderId, hex32('bad-reconciliation'));
+  try {
+    mismatchedReconciliation = await get('/api/admin/reconciliation', adminHeaders);
+  } finally {
+    setOrderFundTxHash(firstOrder.orderId, event.txHash);
+  }
+  assert(mismatchedReconciliation.status === 'AttentionRequired' && mismatchedReconciliation.mismatches.some((entry) => entry.eventName === 'OrderPaid' && entry.target === firstOrder.orderId && entry.reasons?.includes('TX_HASH_MISMATCH')), 'reconciliation must fail a known-bad order funding TxHash sample');
+  const reconciliation = await get('/api/admin/reconciliation', adminHeaders);
+  assert(reconciliation.status === 'Reconciled' && reconciliation.checked >= 1 && Array.isArray(reconciliation.records) && reconciliation.records.every((entry) => entry.match) && reconciliation.circuitSnapshot.length === 4, 'admin reconciliation should match finalized chain amounts, state and tx hashes to order/ledger deltas and include breaker state');
+  backdateAuthSessionsFor(merchantAddress);
+  await siweLogin(merchantWallet, 'buyer');
+  const finalAdminSummary = await get('/api/admin/summary', adminHeaders);
+  const riskFields = ['pendingClaims', 'failedTransactions', 'anomalies', 'blacklisted', 'botEvents', 'pausedCircuits'];
+  assert(finalAdminSummary.stats.walletUids === 3 && finalAdminSummary.today.newWalletUids === 2, `admin summary should count a returning wallet once and preserve its original first-seen date: ${JSON.stringify({ walletUids: finalAdminSummary.stats.walletUids, newWalletUids: finalAdminSummary.today.newWalletUids })}`);
+  assert(finalAdminSummary.riskWaterline && riskFields.every((field) => Number.isFinite(finalAdminSummary.riskWaterline[field])) && Array.isArray(finalAdminSummary.circuits), 'admin summary should expose claims, failed transactions, anomalies, blacklist, bot and circuit waterlines');
+  const qualifiedMerchants = await get('/api/admin/merchants', adminHeaders);
+  const qualifiedMerchant = qualifiedMerchants.find((entry) => entry.walletAddress.toLowerCase() === merchantAddress.toLowerCase());
+  assert(qualifiedMerchant?.qualificationReady === true && qualifiedMerchant.payload?.qualification?.contactPhoneMasked && !qualifiedMerchant.payload.qualification.contactPhone && qualifiedMerchant.payload.qualification.legalIdentityHash, 'merchant qualifications should be validated and sensitive contact data masked in admin reads');
+
+  const completeCsvExport = await post('/api/merchant/export', await withSecondary(merchantWallet, 'merchant.orders.export', { format: 'csv', filters: {} }), merchantHeaders, 200);
+  assert(completeCsvExport.content.includes(firstOrder.orderId) && completeCsvExport.content.includes('SF123456789') && completeCsvExport.content.includes('13800000001') && completeCsvExport.content.includes(',1,'), 'merchant CSV export should use persisted quantity, order time, logistics and delivery contact fields');
+  const completeXlsxExport = await post('/api/merchant/export', await withSecondary(merchantWallet, 'merchant.orders.export', { format: 'excel', filters: {} }), merchantHeaders, 200);
+  assertValidXlsxArtifact(completeXlsxExport, 'merchant complete XLSX export', firstOrder.orderId);
+
+  const rejectedContractMapping = await post('/api/admin/system-config', await withSecondary(adminWallet, 'admin.system.configure', {
+    key: 'contracts',
+    value: { nplAddress: '0x4e8277ab31e4956b2cd48449793a57656dfc03d2', bnmAddress: '0x7777777777777777777777777777777777777777' }
+  }), adminHeaders, 400);
+  assert(rejectedContractMapping.error.startsWith('CONTRACT_CODE_NOT_FOUND'), 'runtime contract mapping must reject an address without deployed code');
+  const contractRuntimeConfig = { nplAddress: '0x4e8277ab31e4956b2cd48449793a57656dfc03d2', bnmAddress, escrowAddress, seckillAddress, rewardLedgerAddress };
+  await post('/api/admin/system-config', await withSecondary(adminWallet, 'admin.system.configure', {
+    key: 'contracts',
+    value: contractRuntimeConfig
+  }), adminHeaders);
+  const runtimePublicConfig = await get('/api/config');
+  assert(runtimePublicConfig.bnmAddress === bnmAddress.toLowerCase() && runtimePublicConfig.rewardLedgerAddress === rewardLedgerAddress.toLowerCase(), 'validated contract mappings should be consumed by public runtime config');
+  await post('/api/admin/system-config', await withSecondary(adminWallet, 'admin.system.configure', {
+    key: 'contracts',
+    value: { nplAddress: '0x4e8277ab31e4956b2cd48449793a57656dfc03d2' }
+  }), adminHeaders);
+  const clearedContractConfig = await get('/api/config');
+  assert(clearedContractConfig.bnmAddress === '', 'clearing contract mappings must restore the environment fallback instead of retaining stale addresses');
+  await post('/api/admin/system-config', await withSecondary(adminWallet, 'admin.system.configure', { key: 'contracts', value: contractRuntimeConfig }), adminHeaders);
+
   const finalAudit = await get('/api/admin/audit-logs', adminHeaders);
   assert(finalAudit.some((entry) => entry.action === 'admin.force-refund'), 'audit logs should include admin force refund action');
   assert(finalAudit.some((entry) => entry.action === 'buyer.timeout-refund.request') && finalAudit.some((entry) => entry.action === 'merchant.order.force-sign-request'), 'audit logs should include timeout refund and merchant force-sign actions');
+  const merchantReviewAudits = finalAudit.filter((entry) => entry.action.startsWith('admin.merchant.review'));
+  assert(merchantReviewAudits.length > 0 && !JSON.stringify(merchantReviewAudits).includes('210202199001010011') && !JSON.stringify(merchantReviewAudits).includes('13800000000'), 'append-only merchant review audits must not retain raw legal identity or contact phone');
 
   const residue = JSON.stringify({ rootHtml, previewHtml, products, messages });
   for (const marker of [['DI','OR'].join(''), ['88','VIP'].join(''), ['天','猫'].join('')]) assert(!residue.includes(marker), `legacy marker should not leak: ${marker}`);
@@ -802,6 +974,7 @@ try {
   setTimeout(() => server.kill('SIGKILL'), 1_000).unref();
   if (stderr && !stderr.includes('ExperimentalWarning')) process.stderr.write(stderr);
   await localOrderSigner.close();
+  await runtimeMock.close();
   rmSync(tempDir, { recursive: true, force: true });
 }
 
@@ -842,7 +1015,7 @@ function legacyFundedEvent(order, txHash, blockNumber) {
 }
 
 function forcedRefundEvent(order, txHash, blockNumber) {
-  const refundedNpl = parseDecimal18(order.amountNpl) - 1n;
+  const refundedNpl = parseDecimal18(order.amountNpl);
   return {
     eventName: 'OrderForcedRefunded',
     chainId: 56,
@@ -853,9 +1026,7 @@ function forcedRefundEvent(order, txHash, blockNumber) {
     logIndex: 0,
     buyer: order.buyerAddress,
     refundedNplWei: refundedNpl.toString(),
-    retainedNplWei: '1',
-    retainedNplReceiver: merchantAddress,
-    retainedNpl: '0.000000000000000001',
+    amountNpl: order.amountNpl,
     burnedRewards: 1
   };
 }
@@ -899,6 +1070,63 @@ async function siweLogin(wallet, role) {
   const session = await post('/api/auth/siwe/verify', { address: wallet.address, role, message: nonce.message, signature });
   actionTokens.set(`${role}:${wallet.address.toLowerCase()}`, session.token);
   return session;
+}
+
+async function assertStrictSiweValidation(wallet) {
+  const cases = [
+    {
+      expected: 'SIWE_URI_MISMATCH',
+      mutate: (message) => message.replace(/^URI: .*$/m, 'URI: https://evil.example')
+    },
+    {
+      expected: 'SIWE_CHAIN_ID_MISMATCH',
+      mutate: (message) => message.replace(/^Chain ID: .*$/m, 'Chain ID: 1')
+    },
+    {
+      expected: 'SIWE_RESOURCES_MISMATCH',
+      mutate: (message) => message.replace(/\nResources:\n- urn:24k:role:merchant$/, '')
+    }
+  ];
+  for (const testCase of cases) {
+    const challenge = await post('/api/auth/siwe/nonce', { address: wallet.address, role: 'merchant' });
+    const message = testCase.mutate(challenge.message);
+    const signature = await wallet.signMessage(message);
+    const rejected = await post('/api/auth/siwe/verify', { address: wallet.address, role: 'merchant', message, signature }, {}, 401);
+    assert(rejected.error === testCase.expected, `strict SIWE parser should reject ${testCase.expected}`);
+  }
+}
+
+async function assertSiweNonceReplayIsAtomic(wallet) {
+  const challenge = await post('/api/auth/siwe/nonce', { address: wallet.address, role: 'buyer' });
+  const signature = await wallet.signMessage(challenge.message);
+  const request = () => fetch(`http://localhost:${port}/api/auth/siwe/verify`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ address: wallet.address, role: 'buyer', message: challenge.message, signature })
+  });
+  const responses = await Promise.all([request(), request()]);
+  const statuses = responses.map((response) => response.status).sort((left, right) => left - right);
+  assert(statuses[0] === 201 && statuses[1] === 401, `SIWE nonce must be consumed by exactly one concurrent verification: ${statuses.join(',')}`);
+}
+
+async function assertAuditFailureBlocksBusinessMutation(wallet, headers) {
+  const value = { shippingTimeoutHours: 2, confirmationTimeoutHours: 2, siweNonceTtlMinutes: 5, actionIntentTtlMinutes: 5, claimRequestTtlMinutes: 5 };
+  const signed = await withSecondary(wallet, 'admin.system.configure', { key: 'business-parameters', value });
+  const auditLock = new DatabaseSync(`${dbPath}.audit.db`);
+  auditLock.exec('PRAGMA busy_timeout = 0; BEGIN EXCLUSIVE');
+  try {
+    await post('/api/admin/system-config', signed, headers, 500);
+  } finally {
+    auditLock.exec('ROLLBACK');
+    auditLock.close();
+  }
+  const checkDb = new DatabaseSync(dbPath);
+  try {
+    const persisted = checkDb.prepare("SELECT key FROM admin_configs WHERE key = 'business-parameters'").get();
+    assert(!persisted, 'business mutation must not commit when the required attempted-action audit cannot be written');
+  } finally {
+    checkDb.close();
+  }
 }
 
 async function assertAdminSiweRequiresConfiguredWallet() {
@@ -1181,12 +1409,30 @@ function authHeaders(token) {
   return { authorization: `Bearer ${token}` };
 }
 
-function backdateOrderForTimeout(orderId) {
+function backdateOrderBy(orderId, elapsedMs) {
   const checkDb = new DatabaseSync(dbPath);
   try {
-    const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+    const old = new Date(Date.now() - elapsedMs).toISOString();
     checkDb.prepare('UPDATE orders SET updated_at = ? WHERE order_id = ?').run(old, orderId);
     checkDb.prepare('UPDATE fulfillment_orders SET created_at = ? WHERE order_id = ?').run(old, orderId);
+  } finally {
+    checkDb.close();
+  }
+}
+
+function backdateAuthSessionsFor(address) {
+  const checkDb = new DatabaseSync(dbPath);
+  try {
+    checkDb.prepare("UPDATE auth_sessions SET created_at = datetime('now', '-2 days') WHERE lower(address) = ?").run(address.toLowerCase());
+  } finally {
+    checkDb.close();
+  }
+}
+
+function setOrderFundTxHash(orderId, txHash) {
+  const checkDb = new DatabaseSync(dbPath);
+  try {
+    checkDb.prepare('UPDATE orders SET fund_tx_hash = ? WHERE order_id = ?').run(txHash, orderId);
   } finally {
     checkDb.close();
   }
@@ -1328,6 +1574,75 @@ function deliveryItem(productId, overrides = {}) {
   };
 }
 
+function merchantProductInput(title, overrides = {}) {
+  const {
+    sku = '标准 SKU',
+    priceNpl = '1.00',
+    stock = 10,
+    ...rest
+  } = overrides;
+  return {
+    title,
+    imageUrls: ['https://cdn.example.test/products/24k-product.png'],
+    descriptionHtml: '<p>24K 商家商品详情</p>',
+    fulfillmentModes: ['delivery'],
+    skus: [{ id: 'sku-main', name: sku, settlementPriceNpl: priceNpl, stock }],
+    ...rest
+  };
+}
+
+function merchantStoreInput(overrides = {}) {
+  return {
+    storeId: 'store-test',
+    name: '24K 测试自提店',
+    regionCode: '210211',
+    city: '大连市',
+    address: '辽宁省大连市高新区软件园路 1 号',
+    hours: '09:00-21:00',
+    phone: '13800000000',
+    lat: 38.86,
+    lng: 121.52,
+    photos: ['https://cdn.example.test/stores/24k-store.png'],
+    ...overrides
+  };
+}
+
+function merchantReviewInput(walletAddress, overrides = {}) {
+  return {
+    merchantId: `merchant-${walletAddress.slice(2, 10).toLowerCase()}`,
+    walletAddress,
+    name: '24K 审核商家',
+    decision: 'approved',
+    businessLicenseNumber: '91210200MA24K00001',
+    businessLicenseUrl: 'https://cdn.example.test/licenses/merchant-license.png',
+    legalRepresentative: '张三',
+    legalIdentity: '210202199001010011',
+    contactName: '李四',
+    contactPhone: '13800000000',
+    settlementWallet: walletAddress,
+    ...overrides
+  };
+}
+
+function setSubmissionStatus(id, status) {
+  const checkDb = new DatabaseSync(dbPath);
+  try {
+    checkDb.prepare('UPDATE product_submissions SET status = ? WHERE id = ?').run(status, id);
+  } finally {
+    checkDb.close();
+  }
+}
+
+function assertValidXlsxArtifact(artifact, label, expectedText = '') {
+  assert(artifact?.fileName?.endsWith('.xlsx'), `${label} should use .xlsx`);
+  assert(artifact?.mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', `${label} should use the XLSX MIME type`);
+  assert(artifact?.encoding === 'base64' && artifact.contentBase64, `${label} should return base64 binary content`);
+  const entries = unzipSync(Buffer.from(artifact.contentBase64, 'base64'));
+  assert(entries['[Content_Types].xml'] && entries['xl/workbook.xml'] && entries['xl/worksheets/sheet1.xml'], `${label} should contain required OOXML parts`);
+  const sheet = strFromU8(entries['xl/worksheets/sheet1.xml']);
+  assert(sheet.includes('<worksheet') && (!expectedText || sheet.includes(expectedText)), `${label} worksheet content mismatch`);
+}
+
 function pickupItem(productId, overrides = {}) {
   return {
     productId,
@@ -1353,6 +1668,112 @@ function parseDecimal18(value) {
   if (!/^[0-9]+(\.[0-9]{0,18})?$/.test(text)) throw new Error(`invalid decimal ${value}`);
   const [whole, fraction = ''] = text.split('.');
   return BigInt(whole || '0') * 10n ** 18n + BigInt(`${fraction}000000000000000000`.slice(0, 18));
+}
+
+async function startRuntimeMock(port) {
+  const oracleAddress = '0x6666666666666666666666666666666666666666';
+  const oracle = new Interface([
+    'function decimals() view returns (uint8)',
+    'function latestRoundData() view returns (uint80 roundId,int256 answer,uint256 startedAt,uint256 updatedAt,uint80 answeredInRound)'
+  ]);
+  const escrow = new Interface(['function currentSplitVersion() view returns (uint32)']);
+  const safeMultisig = new Interface([
+    'function isOwner(address owner) view returns (bool)',
+    'event ExecutionSuccess(bytes32 txHash,uint256 payment)'
+  ]);
+  const contractAddresses = new Set([
+    '0x4e8277ab31e4956b2cd48449793a57656dfc03d2',
+    bnmAddress,
+    escrowAddress,
+    seckillAddress,
+    rewardLedgerAddress,
+    multisigAddress
+  ].map((address) => address.toLowerCase()));
+  const counts = { primaryRpc: 0, fallbackRpc: 0, redis: 0, mq: 0, redisAuthorization: '', mqAuthorization: '' };
+  const server = createHttpServer(async (req, res) => {
+    if (req.method === 'GET' && req.url === '/redis-health') {
+      counts.redis += 1;
+      counts.redisAuthorization = String(req.headers.authorization || '');
+      return sendMockJson(res, 200, { ok: true, keyspace_hits: 90, keyspace_misses: 10 });
+    }
+    if (req.method === 'GET' && req.url === '/mq-health') {
+      counts.mq += 1;
+      counts.mqAuthorization = String(req.headers.authorization || '');
+      return sendMockJson(res, 200, { ok: true, queue_totals: { messages: 7, messages_ready: 5, messages_unacknowledged: 2 } });
+    }
+    if (req.method === 'POST' && req.url === '/rpc-primary') {
+      counts.primaryRpc += 1;
+      return sendMockJson(res, 503, { error: 'primary unavailable' });
+    }
+    if (req.method === 'POST' && req.url === '/rpc-wrong-chain') {
+      let raw = '';
+      for await (const chunk of req) raw += chunk;
+      const request = JSON.parse(raw || '{}');
+      return sendMockJson(res, 200, { jsonrpc: '2.0', id: request.id, result: request.method === 'eth_chainId' ? '0x1' : null });
+    }
+    if (req.method === 'POST' && req.url === '/rpc-fallback') {
+      counts.fallbackRpc += 1;
+      let raw = '';
+      for await (const chunk of req) raw += chunk;
+      const request = JSON.parse(raw || '{}');
+      let result;
+      if (request.method === 'eth_chainId') result = '0x38';
+      else if (request.method === 'eth_blockNumber') result = '0x64';
+      else if (request.method === 'eth_gasPrice') result = '0x3b9aca00';
+      else if (request.method === 'eth_getCode') result = contractAddresses.has(String(request.params?.[0] || '').toLowerCase()) ? '0x6000' : '0x';
+      else if (request.method === 'eth_getTransactionReceipt') {
+        const transactionHash = String(request.params?.[0] || '').toLowerCase();
+        if (transactionHash !== hex32('f2').toLowerCase()) result = null;
+        else {
+          const execution = safeMultisig.encodeEventLog(safeMultisig.getEvent('ExecutionSuccess'), [hex32('f1'), 0n]);
+          result = {
+            transactionHash,
+            status: '0x1',
+            to: multisigAddress,
+            blockNumber: '0x50',
+            blockHash: hex32('f3'),
+            logs: [{ address: multisigAddress, topics: execution.topics, data: execution.data }]
+          };
+        }
+      }
+      else if (request.method === 'eth_call') {
+        const data = String(request.params?.[0]?.data || '').toLowerCase();
+        if (data === oracle.encodeFunctionData('decimals').toLowerCase()) result = oracle.encodeFunctionResult('decimals', [8]);
+        else if (data === oracle.encodeFunctionData('latestRoundData').toLowerCase()) {
+          const updatedAt = BigInt(Math.floor(Date.now() / 1000) - 5);
+          result = oracle.encodeFunctionResult('latestRoundData', [10n, 200_000_000n, updatedAt, updatedAt, 10n]);
+        } else if (data === escrow.encodeFunctionData('currentSplitVersion').toLowerCase()) {
+          result = escrow.encodeFunctionResult('currentSplitVersion', [1]);
+        } else if (data.startsWith(safeMultisig.getFunction('isOwner').selector.toLowerCase())) {
+          const [owner] = safeMultisig.decodeFunctionData('isOwner', data);
+          result = safeMultisig.encodeFunctionResult('isOwner', [String(owner).toLowerCase() === adminAddress.toLowerCase()]);
+        } else return sendMockJson(res, 200, { jsonrpc: '2.0', id: request.id, error: { code: -32601, message: 'unknown eth_call' } });
+      } else return sendMockJson(res, 200, { jsonrpc: '2.0', id: request.id, error: { code: -32601, message: 'unknown method' } });
+      return sendMockJson(res, 200, { jsonrpc: '2.0', id: request.id, result });
+    }
+    return sendMockJson(res, 404, { error: 'not found' });
+  });
+  await new Promise((resolveListen, rejectListen) => {
+    server.once('error', rejectListen);
+    server.listen(port, '127.0.0.1', resolveListen);
+  });
+  const baseUrl = `http://127.0.0.1:${port}`;
+  return {
+    baseUrl,
+    primaryRpcUrl: `${baseUrl}/rpc-primary`,
+    fallbackRpcUrl: `${baseUrl}/rpc-fallback`,
+    wrongChainRpcUrl: `${baseUrl}/rpc-wrong-chain`,
+    redisHealthUrl: `${baseUrl}/redis-health`,
+    mqHealthUrl: `${baseUrl}/mq-health`,
+    oracleAddress,
+    counts,
+    close: () => new Promise((resolveClose, rejectClose) => server.close((error) => error ? rejectClose(error) : resolveClose()))
+  };
+}
+
+function sendMockJson(res, statusCode, payload) {
+  res.writeHead(statusCode, { 'content-type': 'application/json' });
+  res.end(JSON.stringify(payload));
 }
 
 function availablePort() {

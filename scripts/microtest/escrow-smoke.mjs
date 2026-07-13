@@ -48,7 +48,7 @@ const escrow = new Contract(escrowAddress, [
   'function currentSplitVersion() view returns (uint32)',
   'function approvedSellers(address) view returns (bool)',
   'function payOrder(bytes32,address,bytes32,uint256,uint256,uint64,bytes32,uint32,bytes)',
-  'function forceRefund(bytes32,uint256)',
+  'function forceRefund(bytes32)',
   'function orders(bytes32) view returns (address buyer,address seller,bytes32 productId,uint256 nplAmount,uint256 bnmLocked,uint64 deadline,bytes32 orderDigest,uint32 splitVersion,uint8 status)'
 ], signer);
 
@@ -127,10 +127,10 @@ if (funded.nplAmount !== nplAmount || funded.bnmLocked !== nplAmount) throw new 
 
 await sendGuardedTx({
   operation: 'force-refund smoke order',
-  functionCall: 'forceRefund(bytes32,uint256)',
+  functionCall: 'forceRefund(bytes32)',
   target: escrowAddress,
   expectedResult: 'micro order force-refunded to buyer',
-  build: () => escrow.forceRefund.populateTransaction(orderId, nplAmount),
+  build: () => escrow.forceRefund.populateTransaction(orderId),
 });
 
 const refunded = await escrow.orders(orderId);

@@ -311,6 +311,7 @@ function productionEnvironment(port, path) {
     ADMIN_SECRET: 'a'.repeat(40),
     INDEXER_SECRET: 'i'.repeat(40),
     LOGISTICS_CALLBACK_SECRET: 'l'.repeat(40),
+    MULTISIG_CALLBACK_SECRET: 'm'.repeat(40),
     ADMIN_WALLET_ADDRESS: address('1'),
     ORDER_SIGNER_ADDRESS: address('2'),
     MERCHANT_RECEIVER_ADDRESS: address('3'),

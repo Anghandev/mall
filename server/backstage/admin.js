@@ -2171,8 +2171,7 @@ async function submitActionForm(type, form) {
       caseId: values.caseId,
       resolution,
       note: String(values.note || '').trim(),
-      delayUntil: resolution === 'delay' ? new Date(values.delayUntil).toISOString() : undefined,
-      refundNplAmount: resolution === 'refund' ? values.refundNplAmount : undefined
+      delayUntil: resolution === 'delay' ? new Date(values.delayUntil).toISOString() : undefined
     });
     options = {
       ...actionOptions('admin.after-sale.resolve', '/api/admin/after-sales/resolve', payload, button, `售后仲裁 · ${resolution}`),
@@ -2347,7 +2346,7 @@ function openAfterSaleResolveDialog(caseId) {
         <div class="endpoint-state wide"><div><strong>${escapeHtml(entry.requestType || '售后请求')} · ${escapeHtml(entry.status)}</strong><br>${escapeHtml(entry.reason || '未填写原因')}</div></div>
         <label class="field wide"><span>仲裁决议 <i class="required-mark">*</i></span><select name="resolution" required><option value="exchange" ${initialResolution === 'exchange' ? 'selected' : ''}>批准换货</option><option value="delay" ${initialResolution === 'delay' ? 'selected' : ''}>批准延期</option><option value="resume" ${initialResolution === 'resume' ? 'selected' : ''}>恢复原履约</option><option value="complete">完成订单</option><option value="refund" ${initialResolution === 'refund' ? 'selected' : ''}>链上退款</option></select></label>
         <label class="field wide" data-resolution-field="delay" hidden><span>延期至 <i class="required-mark">*</i></span><input name="delayUntil" type="datetime-local" value="${escapeHtml(formatDateInput(entry.payload?.delayUntil))}" /></label>
-        <label class="field wide" data-resolution-field="refund" hidden><span>退款金额（NPL）</span><input name="refundNplAmount" inputmode="decimal" /></label>
+        <div class="endpoint-state wide" data-resolution-field="refund" hidden><div><strong>全额链上退款</strong><br>托管 NPL 将全额退回买家，未领取奖励由合约原子销毁。</div></div>
         <label class="field wide"><span>仲裁备注</span><textarea name="note" maxlength="1000">${escapeHtml(entry.payload?.resolutionNote || '')}</textarea></label>
       </div>
       <div class="dialog-foot"><button class="button" type="button" data-dialog-cancel>取消</button><button class="button danger" type="submit">二次签名并执行</button></div>

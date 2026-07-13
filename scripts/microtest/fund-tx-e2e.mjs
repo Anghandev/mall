@@ -59,10 +59,10 @@ const escrow = new Contract(escrowAddress, [
   'function currentSplitVersion() view returns (uint32)',
   'function approvedSellers(address) view returns (bool)',
   'function payOrder(bytes32,address,bytes32,uint256,uint256,uint64,bytes32,uint32,bytes)',
-  'function forceRefund(bytes32,uint256)',
+  'function forceRefund(bytes32)',
   'function orders(bytes32) view returns (address buyer,address seller,bytes32 productId,uint256 nplAmount,uint256 bnmLocked,uint64 deadline,bytes32 orderDigest,uint32 splitVersion,uint8 status)',
   'event OrderPaid(bytes32 indexed orderId,address indexed buyer,address indexed seller,bytes32 productId,uint256 nplAmount,uint256 bnmLocked,uint64 deadline,bytes32 orderDigest,uint32 splitVersion)',
-  'event OrderForcedRefunded(bytes32 indexed orderId,address indexed buyer,uint256 refundedNpl,uint256 retainedNpl,address indexed retainedNplReceiver,uint256 burnedRewards)'
+  'event OrderForcedRefunded(bytes32 indexed orderId,address indexed buyer,uint256 refundedNpl,uint256 burnedRewards)'
 ], signer);
 
 const [network, owner, paused, escrowNpl, configuredOrderSigner, splitVersion, sellerApproved, nplBalance] = await Promise.all([
@@ -181,10 +181,10 @@ try {
 
   const refundReceipt = await sendGuardedTx({
     operation: 'refund backend e2e order',
-    functionCall: 'forceRefund(bytes32,uint256)',
+    functionCall: 'forceRefund(bytes32)',
     target: escrowAddress,
     expectedResult: 'backend e2e micro order refunded to buyer',
-    build: () => escrow.forceRefund.populateTransaction(order.orderId, orderNplAmount),
+    build: () => escrow.forceRefund.populateTransaction(order.orderId),
   });
 
   const refundPayload = eventPayloadFromReceipt(refundReceipt, 'OrderForcedRefunded');
@@ -258,11 +258,8 @@ function eventPayloadFromReceipt(receipt, eventName) {
         ...base,
         buyer: parsed.args.buyer,
         refundedNplWei: parsed.args.refundedNpl.toString(),
-        retainedNplWei: parsed.args.retainedNpl.toString(),
-        retainedNplReceiver: parsed.args.retainedNplReceiver,
         amountWei: parsed.args.refundedNpl.toString(),
         amountNpl: formatUnits(parsed.args.refundedNpl, 18),
-        retainedNpl: formatUnits(parsed.args.retainedNpl, 18),
         burnedRewards: Number(parsed.args.burnedRewards)
       };
     }

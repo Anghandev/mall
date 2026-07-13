@@ -90,14 +90,21 @@ try {
   const savedStore = await post('/api/merchant/stores', await withSecondary(merchantWallet, 'merchant.store.upsert', {
     storeId: 'store-dl-gaoxin',
     name: '24K 大连高新自提店',
-    regionCode: '210211'
+    regionCode: '210211',
+    address: '辽宁省大连市高新区软件园路 24K 号',
+    hours: '09:00-21:00',
+    phone: '13800000000',
+    lat: 38.86,
+    lng: 121.52,
+    photos: ['https://cdn.example.test/stores/full-flow.png']
   }), merchantHeaders);
   assert(savedStore.store?.id === 'store-dl-gaoxin' || savedStore.id === 'store-dl-gaoxin', 'merchant should persist the pickup store through action-intent');
 
   const submittedProduct = await post('/api/merchant/products', await withSecondary(merchantWallet, 'merchant.product.submit', {
     title: '24K 全链路测试单品',
-    sku: '黑金测试 SKU',
-    priceNpl: '120.00',
+    imageUrls: ['https://cdn.example.test/products/full-flow.png'],
+    descriptionHtml: '<p>24K 全链路测试商品</p>',
+    skus: [{ id: 'black-gold', name: '黑金测试 SKU', settlementPriceNpl: '120.00', stock: 10 }],
     fulfillmentModes: ['delivery', 'pickup']
   }), merchantHeaders);
   assert(submittedProduct.status === 'PendingReview' && submittedProduct.locked, 'merchant product submit should enter locked pending review');
@@ -441,7 +448,7 @@ function orderArbitrationEvent(order, label, blockNumber) {
 }
 
 function forcedRefundEvent(order, label, blockNumber) {
-  const refundedNpl = parseDecimal18(order.amountNpl) - 1n;
+  const refundedNpl = parseDecimal18(order.amountNpl);
   return {
     eventName: 'OrderForcedRefunded',
     chainId: 56,
@@ -452,8 +459,7 @@ function forcedRefundEvent(order, label, blockNumber) {
     logIndex: blockNumber,
     buyer: order.buyerAddress,
     refundedNplWei: refundedNpl.toString(),
-    retainedNplWei: '1',
-    retainedNplReceiver: merchantWallet.address,
+    amountNpl: order.amountNpl,
     burnedRewards: 1
   };
 }

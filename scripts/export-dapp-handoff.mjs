@@ -87,7 +87,7 @@ try {
   assert(
     contracts.version === '24k-dapp-contracts-v1'
       && contracts.humanReadableAbi?.escrow?.includes('function payOrder(bytes32 orderId,address seller,bytes32 productId,uint256 nplAmount,uint256 bnmLocked,uint64 deadline,bytes32 orderDigest,uint32 splitVersion,bytes authorization)')
-      && contracts.humanReadableAbi.escrow.includes('function forceRefund(bytes32 orderId,uint256 refundNplAmount)')
+      && contracts.humanReadableAbi.escrow.includes('function forceRefund(bytes32 orderId)')
       && contracts.humanReadableAbi.escrow.includes('event SellerApprovalUpdated(address indexed seller,bool approved)')
       && contracts.humanReadableAbi.escrow.includes('event SplitConfigUpdated(uint32 indexed version,bytes32 indexed configHash)')
       && contracts.humanReadableAbi?.rewardLedger?.includes('function setOperator(address operator,bool enabled)')
