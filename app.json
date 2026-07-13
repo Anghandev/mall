@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "24K Mall",
+    "slug": "24k-web3-mall",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "twentyfourk",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.twentyfourk.mall"
+    },
+    "android": {
+      "package": "com.twentyfourk.mall",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.jpg",
+        "backgroundColor": "#0B0A07"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/logo.jpg"
+    }
+  }
+}
