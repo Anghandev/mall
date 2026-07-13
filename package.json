@@ -12,6 +12,8 @@
     "web": "./scripts/node scripts/expo-safe.mjs start --web",
     "export:ios": "./scripts/node scripts/expo-safe.mjs export --platform ios --output-dir /tmp/24k-export",
     "audit:mvp": "./scripts/node scripts/audit-mvp.mjs",
+    "requirements:check": "./scripts/node scripts/check-requirements-matrix.mjs",
+    "requirements:gate": "./scripts/node scripts/check-requirements-matrix.mjs --require-done",
     "typecheck": "./scripts/node node_modules/typescript/bin/tsc --noEmit",
     "server:dev": "./scripts/node server/index.mjs",
     "server:prod": "NODE_ENV=production SERVER_ENV_FILE=.env.production ./scripts/node server/index.mjs",
