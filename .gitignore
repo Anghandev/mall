@@ -2,6 +2,9 @@
 **/.expo/
 **/dist/
 **/web-build/
+**/.vite/
+**/.turbo/
+.pnpm-store/
 **/.env
 **/.env.*
 !.env.example
@@ -26,5 +29,8 @@
 **/cache/
 **/out/
 **/test-artifacts/
+**/coverage/
+**/playwright-report/
+**/test-results/
 **/deployments/*private*
 .DS_Store

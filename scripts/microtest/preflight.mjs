@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-import crypto from 'node:crypto';
-import { readEnvFile, requireEnv, targetChain, redact } from './env-utils.mjs';
+import { readEnvFile, requireEnv, targetChain } from './env-utils.mjs';
 
 const env = readEnvFile('.env');
 const chain = targetChain(env);
@@ -9,7 +8,7 @@ const rpcUrl = env[chain.rpcEnv];
 console.log('=== Mainnet Micro-Test Preflight ===');
 console.log(`target chain: ${chain.key} (${chain.chainId})`);
 console.log(`native token: ${chain.native}`);
-console.log(`explorer API key: ${redact(env.EXPLORER_API_KEY)}`);
+console.log(`explorer API key configured: ${Boolean(env.EXPLORER_API_KEY)}`);
 
 requireEnv(env, ['TARGET_CHAIN', 'CHAIN_ID', chain.rpcEnv, 'PRIVATE_KEY', 'DEV_WALLET', 'MARKETING_WALLET', 'MICRO_TEST']);
 
@@ -68,7 +67,6 @@ async function deriveAddress(privateKey) {
     const { Wallet } = await import('ethers');
     return new Wallet(`0x${key}`).address;
   } catch {
-    const pseudo = crypto.createHash('sha256').update(key).digest('hex');
-    throw new Error(`Cannot derive wallet address because package "ethers" is not installed. Install project deps first. key-check=${pseudo.slice(0, 8)}`);
+    throw new Error('Cannot derive wallet address because package "ethers" is not installed. Install project deps first.');
   }
 }

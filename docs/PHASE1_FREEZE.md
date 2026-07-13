@@ -36,7 +36,7 @@ matrices.
 The reproducible Phase 1 gate is:
 
 ```bash
-platform-v2/scripts/node scripts/check-requirements.mjs
+scripts/node scripts/check-requirements.mjs
 ```
 
 Passing this checkpoint does not authorize contract/backend/product

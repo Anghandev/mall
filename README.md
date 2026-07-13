@@ -1,23 +1,30 @@
-# Abu 24K V2 Transition Repository
+# Abu 24K Mall V2
 
-The repository is split into one shared core and three product surfaces:
+This repository is the clean V2 workspace. Financial and state-machine
+authority lives in `docs/V2_SYSTEM_CONTRACT.md`; product traceability lives in
+the three frozen Requirement Matrices.
 
-- `platform-v2/`: shared contracts/API core plus the platform operations UI.
-- `mall-v2/`: customer mall application.
-- `merchant-v2/`: merchant workbench application.
-- `legacy/v1-npl-only/`: frozen V1 implementation for history and recovery.
+## Workspace
 
-V2 must not import code from the legacy directory. Cross-project financial and
-ownership rules are defined in `docs/V2_SYSTEM_CONTRACT.md` and
-`docs/THREAD_OWNERSHIP.md`.
+- `platform-v2/`: Core contracts, server, data, workers and integration tests.
+- `mall-v2/`: customer mobile-size Web DApp.
+- `merchant-v2/`: merchant workbench.
+- `platform-v2/admin/`: platform operations UI.
+- `packages/core-artifacts/`: Core-owned coordinated consumer publication.
+- `legacy/v1-npl-only/`: read-only historical archive, never a workspace
+  package or V2 runtime dependency.
 
-## Commands
+## Baseline Gates
 
 ```bash
-pnpm v1:typecheck
-pnpm v1:contracts:test
-pnpm v2:verify
-pnpm v2:server
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm baseline:check
+pnpm requirements:check
+pnpm typecheck
 ```
 
-The V1 baseline is preserved by the annotated Git tag `v1-npl-only-final-20260713`.
+The remaining named gates intentionally stay fail closed until their real
+contracts, data, API, products and tests exist. The final gate is `pnpm verify`.
+
+No command in this repository deploys or sends a mainnet transaction without a
+separate user-approved bounded plan.

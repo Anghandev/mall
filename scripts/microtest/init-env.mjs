@@ -9,7 +9,14 @@ process.chdir(root);
 const envPath = '.env';
 const examplePath = '.env.example';
 const gitignorePath = '.gitignore';
-const requiredIgnores = ['.env', '.env.*', '!.env.example', 'test-artifacts/', 'deployments/*private*'];
+const requiredIgnores = [
+  '**/.env',
+  '**/.env.*',
+  '!.env.example',
+  '!**/.env.example',
+  '**/test-artifacts/',
+  '**/deployments/*private*',
+];
 
 if (!fs.existsSync(envPath)) {
   if (fs.existsSync(examplePath)) {
@@ -73,7 +80,7 @@ CHAIN_ID=56
 BSC_RPC_URL=
 ETH_RPC_URL=
 BASE_RPC_URL=
-EXPLORER_API_KEY=REMOVED_FROM_GITHUB
+EXPLORER_API_KEY=
 ETHERSCAN_API_KEY=\${EXPLORER_API_KEY}
 BSCSCAN_API_KEY=\${EXPLORER_API_KEY}
 BASESCAN_API_KEY=\${EXPLORER_API_KEY}

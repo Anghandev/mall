@@ -1,14 +1,7 @@
 {
+  "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "allowJs": true,
-    "checkJs": true,
-    "noEmit": true,
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "target": "ES2023",
-    "lib": ["ES2023", "DOM"],
-    "strict": true,
-    "skipLibCheck": true
+    "types": ["node"]
   },
-  "include": ["admin/**/*.js", "server/**/*.mjs", "scripts/**/*.mjs"]
+  "include": ["server/**/*.ts", "test/**/*.ts"]
 }

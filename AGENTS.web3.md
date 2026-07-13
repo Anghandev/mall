@@ -39,7 +39,7 @@ Default supported chains:
 Default free explorer API key:
 
 ```env
-EXPLORER_API_KEY=REMOVED_FROM_GITHUB
+EXPLORER_API_KEY=
 ```
 
 Use it as the default for explorer verification/querying unless the project overrides it.

@@ -1,0 +1,7 @@
+{
+  "name": "@abu24k/core-artifacts",
+  "version": "0.0.0-unpublished",
+  "private": true,
+  "type": "module",
+  "description": "Core-owned coordinated artifact publication placeholder"
+}

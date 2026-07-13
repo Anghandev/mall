@@ -1,33 +1,25 @@
 {
-  "name": "abu-24k-platform-v2",
-  "version": "0.1.0",
+  "name": "@abu24k/core",
+  "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Abu 24K merchant workbench V2 with USDT settlement and NPL/BNM rewards.",
+  "description": "Abu 24K V2 contracts, server, data and chain workers",
   "scripts": {
-    "typecheck": "./scripts/node node_modules/typescript/bin/tsc --noEmit",
-    "server:dev": "./scripts/node server/index.mjs",
-    "contracts:test": "FOUNDRY_ETH_RPC_URL= forge test -vv",
-    "contracts:freeze-check": "forge build && ./scripts/node scripts/check-contract-freeze.mjs",
-    "requirements:check": "./scripts/node scripts/check-requirements.mjs",
-    "database:check": "./scripts/node scripts/check-database.mjs",
-    "api:check": "./scripts/node scripts/check-api.mjs",
-    "admin:check": "./scripts/node scripts/check-admin.mjs",
-    "e2e:full": "./scripts/node scripts/e2e/full-flow.mjs",
-    "verify": "pnpm typecheck && pnpm requirements:check && pnpm contracts:test && pnpm database:check && pnpm api:check && pnpm admin:check && pnpm e2e:full",
-    "micro:init-env": "./scripts/node scripts/microtest/init-env.mjs",
-    "micro:preflight": "./scripts/node scripts/microtest/preflight.mjs",
-    "micro:report": "./scripts/node scripts/microtest/report.mjs"
+    "typecheck": "../scripts/node ../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+    "contracts:test": "../scripts/node ../scripts/pending-gate.mjs contracts:test",
+    "database:check": "../scripts/node ../scripts/pending-gate.mjs database:check",
+    "api:check": "../scripts/node ../scripts/pending-gate.mjs api:check",
+    "consumer:check": "../scripts/node ../scripts/pending-gate.mjs consumer:check",
+    "e2e:full": "../scripts/node ../scripts/pending-gate.mjs e2e:full"
   },
   "dependencies": {
     "@openzeppelin/contracts": "5.6.1",
-    "ethers": "6.17.0",
-    "sanitize-html": "2.17.6"
+    "ethers": "6.17.0"
   },
   "devDependencies": {
-    "typescript": "~6.0.3"
+    "typescript": "catalog:"
   },
   "engines": {
-    "node": ">=24"
+    "node": ">=24.14.0 <25"
   }
 }

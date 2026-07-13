@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const CHAINS = {
   bsc: {
@@ -61,13 +62,7 @@ export function targetChain(env) {
   return { key, ...chain };
 }
 
-export function redact(value) {
-  if (!value) return '';
-  if (value.length <= 10) return '***';
-  return `${value.slice(0, 6)}...${value.slice(-4)}`;
-}
-
 export function projectRootFromScript(importMetaUrl) {
-  const scriptPath = new URL(importMetaUrl).pathname;
+  const scriptPath = fileURLToPath(importMetaUrl);
   return path.resolve(path.dirname(scriptPath), '..', '..');
 }

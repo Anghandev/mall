@@ -1,18 +1,34 @@
 {
-  "name": "abu-24k-transition-root",
-  "version": "0.1.0",
+  "name": "@abu24k/v2-workspace",
+  "version": "0.0.0",
   "private": true,
-  "description": "Temporary V1/V2 isolation command wrappers.",
+  "description": "Abu 24K Mall V2 clean-rewrite workspace",
+  "packageManager": "pnpm@10.30.2",
+  "engines": {
+    "node": ">=24.14.0 <25",
+    "pnpm": ">=10 <11"
+  },
   "scripts": {
-    "requirements:check": "platform-v2/scripts/node scripts/check-requirements.mjs",
-    "v1:typecheck": "pnpm --dir legacy/v1-npl-only typecheck",
-    "v1:contracts:test": "pnpm --dir legacy/v1-npl-only contracts:test",
-    "v1:backend:check": "pnpm --dir legacy/v1-npl-only backend:check",
-    "v1:database:check": "pnpm --dir legacy/v1-npl-only database:check",
-    "v1:ops:check": "pnpm --dir legacy/v1-npl-only server:ops-check",
-    "v2:typecheck": "pnpm --dir platform-v2 typecheck",
-    "v2:contracts:test": "pnpm --dir platform-v2 contracts:test",
-    "v2:verify": "pnpm --dir platform-v2 verify",
-    "v2:server": "pnpm --dir platform-v2 server:dev"
+    "baseline:check": "./scripts/node scripts/check-workspace-baseline.mjs",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "contracts:test": "pnpm --filter @abu24k/core contracts:test",
+    "requirements:check": "./scripts/node scripts/check-requirements.mjs",
+    "database:check": "pnpm --filter @abu24k/core database:check",
+    "api:check": "pnpm --filter @abu24k/core api:check",
+    "admin:check": "pnpm --filter @abu24k/platform-admin check",
+    "merchant:check": "pnpm --filter @abu24k/merchant check",
+    "mall:check": "pnpm --filter @abu24k/mall check",
+    "consumer:check": "pnpm --filter @abu24k/core consumer:check",
+    "e2e:full": "pnpm --filter @abu24k/core e2e:full",
+    "verify": "pnpm baseline:check && pnpm typecheck && pnpm contracts:test && pnpm requirements:check && pnpm database:check && pnpm api:check && pnpm admin:check && pnpm merchant:check && pnpm mall:check && pnpm consumer:check && pnpm e2e:full",
+    "micro:init-env": "./scripts/node scripts/microtest/init-env.mjs",
+    "micro:preflight": "./scripts/node scripts/microtest/preflight.mjs",
+    "micro:report": "./scripts/node scripts/microtest/report.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "@types/node": "24.13.3",
+    "ethers": "6.17.0",
+    "typescript": "6.0.3"
   }
 }
