@@ -70,7 +70,6 @@ contract Abu24KPaymentEscrow is Ownable, Pausable, ReentrancyGuard, EIP712 {
     IERC20 public immutable npl;
     IAbu24KRewardLedger public immutable rewardLedger;
     address public orderSigner;
-    address public retainedNplReceiver;
     uint32 public currentSplitVersion;
     mapping(bytes32 orderId => Order order) public orders;
     mapping(address seller => bool approved) public approvedSellers;
@@ -90,12 +89,11 @@ contract Abu24KPaymentEscrow is Ownable, Pausable, ReentrancyGuard, EIP712 {
     event OrderCompleted(bytes32 indexed orderId, address indexed seller, uint256 nplAmount, uint32 splitVersion);
     event OrderAllocation(bytes32 indexed orderId, bytes32 indexed role, address indexed receiver, uint256 amount);
     event OrderArbitration(bytes32 indexed orderId, address indexed caller);
-    event OrderForcedRefunded(bytes32 indexed orderId, address indexed buyer, uint256 refundedNpl, uint256 retainedNpl, address indexed retainedNplReceiver, uint256 burnedRewards);
+    event OrderForcedRefunded(bytes32 indexed orderId, address indexed buyer, uint256 refundedNpl, uint256 burnedRewards);
     event OrderEmergencyRefunded(bytes32 indexed orderId, address indexed buyer, uint256 refundedNpl, uint256 burnedRewards);
     event SellerApprovalUpdated(address indexed seller, bool approved);
     event SplitConfigUpdated(uint32 indexed version, bytes32 indexed configHash);
     event OrderSignerUpdated(address indexed signer);
-    event RetainedNplReceiverUpdated(address indexed receiver);
     event EscrowPaused(address indexed account);
     event EscrowUnpaused(address indexed account);
 
@@ -110,7 +108,6 @@ contract Abu24KPaymentEscrow is Ownable, Pausable, ReentrancyGuard, EIP712 {
     error InvalidSplitVersion(uint32 expected, uint32 supplied);
     error InvalidOrderAuthorization();
     error SellerNotApproved(address seller);
-    error RefundTooLarge();
     error NotParticipantOrOwner();
     error OwnershipRenounceDisabled();
 
@@ -118,7 +115,6 @@ contract Abu24KPaymentEscrow is Ownable, Pausable, ReentrancyGuard, EIP712 {
         address npl_,
         address rewardLedger_,
         address orderSigner_,
-        address retainedNplReceiver_,
         address initialOwner
     ) Ownable(initialOwner) EIP712("24K Mall Escrow", "1") {
         if (npl_ == address(0) || rewardLedger_ == address(0) || orderSigner_ == address(0) || initialOwner == address(0)) {
@@ -128,7 +124,6 @@ contract Abu24KPaymentEscrow is Ownable, Pausable, ReentrancyGuard, EIP712 {
         npl = IERC20(npl_);
         rewardLedger = IAbu24KRewardLedger(rewardLedger_);
         orderSigner = orderSigner_;
-        _setRetainedNplReceiver(retainedNplReceiver_);
         _pause();
     }
 
@@ -159,10 +154,6 @@ contract Abu24KPaymentEscrow is Ownable, Pausable, ReentrancyGuard, EIP712 {
         if (signer == address(0)) revert InvalidAddress();
         orderSigner = signer;
         emit OrderSignerUpdated(signer);
-    }
-
-    function setRetainedNplReceiver(address receiver) external onlyOwner {
-        _setRetainedNplReceiver(receiver);
     }
 
     function orderAuthorizationDigest(
@@ -266,17 +257,13 @@ contract Abu24KPaymentEscrow is Ownable, Pausable, ReentrancyGuard, EIP712 {
     }
 
     /// @notice Platform refund for merchant timeout or fraud. Unclaimed order rewards are burned atomically.
-    function forceRefund(bytes32 orderId, uint256 refundNplAmount) external onlyOwner nonReentrant whenNotPaused {
+    function forceRefund(bytes32 orderId) external onlyOwner nonReentrant whenNotPaused {
         Order storage order = orders[orderId];
         if (order.status != Status.PaidLocked && order.status != Status.Arbitration) revert InvalidStatus(order.status);
-        if (refundNplAmount > order.nplAmount) revert RefundTooLarge();
-        uint256 retainedNpl = order.nplAmount - refundNplAmount;
-        address retainedReceiver = retainedNplReceiver;
         order.status = Status.ForcedRefunded;
         uint256 burnedRewards = rewardLedger.burnOrderRewards(orderId);
-        if (refundNplAmount > 0) npl.safeTransfer(order.buyer, refundNplAmount);
-        if (retainedNpl > 0) npl.safeTransfer(retainedReceiver, retainedNpl);
-        emit OrderForcedRefunded(orderId, order.buyer, refundNplAmount, retainedNpl, retainedReceiver, burnedRewards);
+        npl.safeTransfer(order.buyer, order.nplAmount);
+        emit OrderForcedRefunded(orderId, order.buyer, order.nplAmount, burnedRewards);
     }
 
     function cancelBeforePayment(bytes32 orderId) external onlyOwner whenNotPaused {
@@ -360,9 +347,4 @@ contract Abu24KPaymentEscrow is Ownable, Pausable, ReentrancyGuard, EIP712 {
         if (order.status != expected) revert InvalidStatus(order.status);
     }
 
-    function _setRetainedNplReceiver(address receiver) private {
-        if (receiver == address(0)) revert InvalidAddress();
-        retainedNplReceiver = receiver;
-        emit RetainedNplReceiverUpdated(receiver);
-    }
 }

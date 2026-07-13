@@ -57,7 +57,6 @@ contract Abu24KSystemTest is MiniTest {
     address buyer = address(0xB0B);
     address seller = address(0x5E11E2);
     address attacker = address(0xBAD);
-    address retainedNplReceiver = address(0xCAFE);
     address platformReceiver = address(0x1001);
     address regionReceiver = address(0x1002);
     address referralReceiver = address(0x1003);
@@ -73,7 +72,7 @@ contract Abu24KSystemTest is MiniTest {
         npl = new MockNPL();
         bnm = new BNMToken(owner);
         ledger = new Abu24KRewardLedger(address(bnm), address(npl), owner);
-        escrow = new Abu24KPaymentEscrow(address(npl), address(ledger), owner, retainedNplReceiver, owner);
+        escrow = new Abu24KPaymentEscrow(address(npl), address(ledger), owner, owner);
         seckill = new Abu24KSeckill(address(npl), address(escrow), address(ledger), owner);
 
         vm.startPrank(owner);
@@ -159,13 +158,12 @@ contract Abu24KSystemTest is MiniTest {
         _pay(order2, productId, 10 ether, 10 ether);
     }
 
-    function testForceRefundRoutesRetentionAndBurnsUnclaimedReward() public {
+    function testForceRefundReturnsFullEscrowAndBurnsUnclaimedReward() public {
         _pay(orderId, productId, 100 ether, 100 ether);
         uint256 buyerBefore = npl.balanceOf(buyer);
         vm.prank(owner);
-        escrow.forceRefund(orderId, 70 ether);
-        assertEq(npl.balanceOf(buyer), buyerBefore + 70 ether);
-        assertEq(npl.balanceOf(retainedNplReceiver), 30 ether);
+        escrow.forceRefund(orderId);
+        assertEq(npl.balanceOf(buyer), buyerBefore + 100 ether);
         (,,,,, Abu24KRewardLedger.State state) = ledger.entries(0);
         assertEq(uint256(state), uint256(Abu24KRewardLedger.State.Burned));
         (,,,,,,,, Abu24KPaymentEscrow.Status status) = escrow.orders(orderId);
@@ -182,7 +180,7 @@ contract Abu24KSystemTest is MiniTest {
         escrow.disputeOrder(orderId);
         vm.prank(attacker);
         vm.expectRevert();
-        escrow.forceRefund(orderId, 100 ether);
+        escrow.forceRefund(orderId);
 
         vm.prank(seller);
         escrow.disputeOrder(orderId);
@@ -194,14 +192,16 @@ contract Abu24KSystemTest is MiniTest {
         assertEq(npl.balanceOf(seller), 70 ether);
     }
 
-    function testEscrowAdminPermissionsAndRefundLimit() public {
+    function testEscrowAdminPermissionsAndTerminalRefundState() public {
         _pay(orderId, productId, 100 ether, 100 ether);
         vm.prank(attacker);
         vm.expectRevert();
         escrow.pause();
         vm.prank(owner);
-        vm.expectRevert(Abu24KPaymentEscrow.RefundTooLarge.selector);
-        escrow.forceRefund(orderId, 100 ether + 1);
+        escrow.forceRefund(orderId);
+        vm.prank(owner);
+        vm.expectRevert();
+        escrow.forceRefund(orderId);
         vm.prank(attacker);
         vm.expectRevert();
         escrow.setSeller(attacker, true);
@@ -214,7 +214,7 @@ contract Abu24KSystemTest is MiniTest {
         uint256 originalChainId = block.chainid;
         vm.chainId(56);
         vm.expectRevert(abi.encodeWithSelector(Abu24KPaymentEscrow.InvalidNplAddress.selector, address(npl)));
-        new Abu24KPaymentEscrow(address(npl), address(ledger), owner, retainedNplReceiver, owner);
+        new Abu24KPaymentEscrow(address(npl), address(ledger), owner, owner);
         vm.expectRevert(abi.encodeWithSelector(Abu24KRewardLedger.InvalidNplAddress.selector, address(npl)));
         new Abu24KRewardLedger(address(bnm), address(npl), owner);
         vm.expectRevert(abi.encodeWithSelector(Abu24KSeckill.InvalidNplAddress.selector, address(npl)));
@@ -401,7 +401,7 @@ contract Abu24KSystemTest is MiniTest {
         vm.prank(owner);
         ledger.pause();
 
-        vm.expectRevert();
+        vm.expectRevert(Abu24KSeckill.RewardLedgerPaused.selector);
         vm.prank(owner);
         seckill.settle(sessionId);
 
@@ -410,6 +410,30 @@ contract Abu24KSystemTest is MiniTest {
         assertEq(npl.balanceOf(address(seckill)), seckillBalanceBefore);
         assertEq(npl.balanceOf(address(ledger)), ledgerBalanceBefore);
         assertEq(ledger.entryCount(), entryCountBefore);
+
+        vm.prank(owner);
+        ledger.unpause();
+        vm.prank(owner);
+        seckill.settle(sessionId);
+        (,,,,,,,,,,, status) = seckill.sessions(sessionId);
+        assertEq(uint256(status), uint256(Abu24KSeckill.Status.Settled));
+    }
+
+    function testRewardLedgerPauseBlocksNewSeckillSessionAndUnpauseRestoresIt() public {
+        vm.prank(owner);
+        ledger.pause();
+
+        vm.expectRevert(Abu24KSeckill.RewardLedgerPaused.selector);
+        vm.prank(owner);
+        seckill.startSession(productId, 2 hours, 1 hours, 30, 100 ether, 10 ether);
+        assertEq(npl.balanceOf(address(seckill)), 0);
+
+        vm.prank(owner);
+        ledger.unpause();
+        vm.prank(owner);
+        bytes32 sessionId = seckill.startSession(productId, 2 hours, 1 hours, 30, 100 ether, 10 ether);
+        assertTrue(sessionId != bytes32(0));
+        assertEq(npl.balanceOf(address(seckill)), 10 ether);
     }
 
     function testSeckillMaxGasPriceConfigIsOwnerOnlyAndEmits() public {

@@ -15,10 +15,7 @@ const escrowAddress = requireAddress(env.EXPO_PUBLIC_ESCROW_ADDRESS, 'EXPO_PUBLI
 if (env.EXPO_PUBLIC_NPL_BSC_ADDRESS && env.EXPO_PUBLIC_NPL_BSC_ADDRESS.toLowerCase() !== DEFAULT_BSC_NPL.toLowerCase()) {
   throw new Error(`EXPO_PUBLIC_NPL_BSC_ADDRESS must be fixed to ${DEFAULT_BSC_NPL} on BSC`);
 }
-const expectedOwner = env.ESCROW_OWNER_ADDRESS ? requireAddress(env.ESCROW_OWNER_ADDRESS, 'ESCROW_OWNER_ADDRESS') : null;
-const expectedReceiver = env.RETAINED_NPL_RECEIVER_ADDRESS
-  ? requireAddress(env.RETAINED_NPL_RECEIVER_ADDRESS, 'RETAINED_NPL_RECEIVER_ADDRESS')
-  : null;
+const expectedOwner = requireAddress(env.ESCROW_OWNER_ADDRESS, 'ESCROW_OWNER_ADDRESS');
 const expectedLedger = requireAddress(
   env.EXPO_PUBLIC_REWARD_LEDGER_ADDRESS || env.REWARD_LEDGER_ADDRESS,
   'EXPO_PUBLIC_REWARD_LEDGER_ADDRESS or REWARD_LEDGER_ADDRESS'
@@ -31,15 +28,19 @@ const expectedSeller = requireAddress(
 const expectedSplitVersion = requirePositiveInteger(env.ESCROW_SPLIT_VERSION, 'ESCROW_SPLIT_VERSION');
 
 const provider = new JsonRpcProvider(rpcUrl, chain.chainId, { batchMaxCount: 1 });
-const [network, code] = await Promise.all([provider.getNetwork(), provider.getCode(escrowAddress)]);
+const [network, code, nplCode] = await Promise.all([
+  provider.getNetwork(),
+  provider.getCode(escrowAddress),
+  provider.getCode(DEFAULT_BSC_NPL),
+]);
 if (Number(network.chainId) !== chain.chainId) throw new Error(`RPC chainId ${network.chainId} does not match BSC ${chain.chainId}`);
 if (!code || code === '0x') throw new Error(`No contract code at EXPO_PUBLIC_ESCROW_ADDRESS=${escrowAddress}`);
+if (!nplCode || nplCode === '0x') throw new Error(`No NPL contract code at ${DEFAULT_BSC_NPL}`);
 
 const escrow = new Contract(escrowAddress, [
   'function npl() view returns (address)',
   'function rewardLedger() view returns (address)',
   'function orderSigner() view returns (address)',
-  'function retainedNplReceiver() view returns (address)',
   'function currentSplitVersion() view returns (uint32)',
   'function approvedSellers(address) view returns (bool)',
   'function splitConfigs(uint32) view returns (address platformReceiver,address regionReceiver,address referralReceiver,address prizePoolReceiver,address burnReceiver,address circulationReceiver,uint16 merchantBps,uint16 platformBps,uint16 regionBps,uint16 referralBps,uint16 prizePoolBps,uint16 burnBps,uint16 circulationBps)',
@@ -50,18 +51,16 @@ const escrow = new Contract(escrowAddress, [
 let npl;
 let rewardLedger;
 let orderSigner;
-let retainedNplReceiver;
 let currentSplitVersion;
 let sellerApproved;
 let splitConfig;
 let owner;
 let paused;
 try {
-  [npl, rewardLedger, orderSigner, retainedNplReceiver, currentSplitVersion, sellerApproved, splitConfig, owner, paused] = await Promise.all([
+  [npl, rewardLedger, orderSigner, currentSplitVersion, sellerApproved, splitConfig, owner, paused] = await Promise.all([
     escrow.npl(),
     escrow.rewardLedger(),
     escrow.orderSigner(),
-    escrow.retainedNplReceiver(),
     escrow.currentSplitVersion(),
     escrow.approvedSellers(expectedSeller),
     escrow.splitConfigs(expectedSplitVersion),
@@ -75,11 +74,8 @@ try {
 if (npl.toLowerCase() !== DEFAULT_BSC_NPL.toLowerCase()) throw new Error(`Escrow NPL mismatch: ${npl} !== ${DEFAULT_BSC_NPL}`);
 if (rewardLedger.toLowerCase() !== expectedLedger.toLowerCase()) throw new Error(`Escrow RewardLedger mismatch: ${rewardLedger} !== ${expectedLedger}`);
 if (orderSigner.toLowerCase() !== expectedOrderSigner.toLowerCase()) throw new Error(`Escrow order signer mismatch: ${orderSigner} !== ${expectedOrderSigner}`);
-if (expectedOwner && owner.toLowerCase() !== expectedOwner.toLowerCase()) throw new Error(`Escrow owner mismatch: ${owner} !== ${expectedOwner}`);
+if (owner.toLowerCase() !== expectedOwner.toLowerCase()) throw new Error(`Escrow owner mismatch: ${owner} !== ${expectedOwner}`);
 if ((await provider.getCode(owner)) === '0x') throw new Error(`Escrow owner must be a deployed multisig contract, got EOA ${owner}`);
-if (expectedReceiver && retainedNplReceiver.toLowerCase() !== expectedReceiver.toLowerCase()) {
-  throw new Error(`Escrow retained NPL receiver mismatch: ${retainedNplReceiver} !== ${expectedReceiver}`);
-}
 if (Number(currentSplitVersion) !== expectedSplitVersion) throw new Error(`Escrow split version mismatch: ${currentSplitVersion} !== ${expectedSplitVersion}`);
 if (!sellerApproved) throw new Error(`Escrow seller is not approved: ${expectedSeller}`);
 if (paused) throw new Error('Escrow is still paused after deployment configuration');
@@ -98,16 +94,19 @@ const expectedBps = {
 for (const [key, expected] of Object.entries(expectedBps)) {
   if (Number(splitConfig[key]) !== expected) throw new Error(`Escrow ${key} mismatch: ${splitConfig[key]} !== ${expected}`);
 }
-for (const [key, envName] of Object.entries({
-  platformReceiver: 'PLATFORM_RECEIVER_ADDRESS',
-  regionReceiver: 'REGION_RECEIVER_ADDRESS',
-  referralReceiver: 'REFERRAL_RECEIVER_ADDRESS',
-  prizePoolReceiver: 'PRIZE_POOL_RECEIVER_ADDRESS',
-  burnReceiver: 'BURN_RECEIVER_ADDRESS',
-  circulationReceiver: 'CIRCULATION_RECEIVER_ADDRESS'
+for (const [key, { envName, bpsKey }] of Object.entries({
+  platformReceiver: { envName: 'PLATFORM_RECEIVER_ADDRESS', bpsKey: 'platformBps' },
+  regionReceiver: { envName: 'REGION_RECEIVER_ADDRESS', bpsKey: 'regionBps' },
+  referralReceiver: { envName: 'REFERRAL_RECEIVER_ADDRESS', bpsKey: 'referralBps' },
+  prizePoolReceiver: { envName: 'PRIZE_POOL_RECEIVER_ADDRESS', bpsKey: 'prizePoolBps' },
+  burnReceiver: { envName: 'BURN_RECEIVER_ADDRESS', bpsKey: 'burnBps' },
+  circulationReceiver: { envName: 'CIRCULATION_RECEIVER_ADDRESS', bpsKey: 'circulationBps' }
 })) {
-  const expected = env[envName] ? requireAddress(env[envName], envName) : '';
-  if (expected && splitConfig[key].toLowerCase() !== expected.toLowerCase()) throw new Error(`Escrow ${key} mismatch: ${splitConfig[key]} !== ${expected}`);
+  const expected = expectedBps[bpsKey] > 0
+    ? requireAddress(env[envName], envName)
+    : String(env[envName] || '0x0000000000000000000000000000000000000000');
+  if (!/^0x[0-9a-fA-F]{40}$/.test(expected)) throw new Error(`${envName} must be a valid EVM address`);
+  if (splitConfig[key].toLowerCase() !== expected.toLowerCase()) throw new Error(`Escrow ${key} mismatch: ${splitConfig[key]} !== ${expected}`);
 }
 
 const ledger = new Contract(expectedLedger, ['function operators(address) view returns (bool)'], provider);
@@ -124,7 +123,6 @@ console.log(`sellerApproved=${sellerApproved}`);
 console.log(`splitVersion=${currentSplitVersion}`);
 console.log(`splitBpsTotal=${splitTotal}`);
 console.log(`owner=${owner}`);
-console.log(`retainedNplReceiver=${retainedNplReceiver}`);
 console.log(`paused=${paused}`);
 
 function requireAddress(value, name) {

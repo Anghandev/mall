@@ -12,6 +12,7 @@ interface IAbu24KEscrowOrders {
 }
 
 interface IAbu24KPrizeLedger {
+    function paused() external view returns (bool);
     function lockReward(address user, bytes32 orderId, address asset, uint256 amount, uint8 bucket) external returns (uint256);
     function releaseOrderRewards(bytes32 orderId) external;
 }
@@ -74,6 +75,7 @@ contract Abu24KSeckill is Ownable, Pausable, ReentrancyGuard {
     error OrderAlreadyRecorded(bytes32 orderId, bytes32 sessionId);
     error ContractCallerBlocked();
     error GasPriceTooHigh(uint256 gasPriceWei, uint256 maxGasPriceWei);
+    error RewardLedgerPaused();
     error OwnershipRenounceDisabled();
 
     constructor(address npl_, address escrow_, address rewardLedger_, address initialOwner) Ownable(initialOwner) {
@@ -93,6 +95,7 @@ contract Abu24KSeckill is Ownable, Pausable, ReentrancyGuard {
         uint256 prizePoolNpl
     ) external onlyOwner nonReentrant whenNotPaused returns (bytes32 sessionId) {
         if (productId == bytes32(0) || durationSeconds == 0 || relayInitialSeconds == 0 || relayExtendSeconds == 0 || minimumNplAmount == 0) revert InvalidTime();
+        if (rewardLedger.paused()) revert RewardLedgerPaused();
         uint64 start = uint64(block.timestamp);
         uint64 mainEnd = start + durationSeconds;
         uint64 relayEnd = start + relayInitialSeconds;
@@ -158,6 +161,7 @@ contract Abu24KSeckill is Ownable, Pausable, ReentrancyGuard {
         Session storage session = sessions[sessionId];
         if (session.status != Status.Live && session.status != Status.ForceClosed) revert InvalidStatus(session.status);
         if (session.status == Status.Live && block.timestamp <= session.mainEndsAt && block.timestamp <= session.relayEndsAt) revert InvalidTime();
+        if (session.prizePoolNpl > 0 && session.lastBuyer != address(0) && rewardLedger.paused()) revert RewardLedgerPaused();
         session.status = Status.Settled;
         if (session.prizePoolNpl > 0) {
             if (session.lastBuyer == address(0)) {

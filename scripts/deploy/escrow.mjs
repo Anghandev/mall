@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { Contract, ContractFactory, JsonRpcProvider, Wallet } from 'ethers';
+import { Contract, ContractFactory, JsonRpcProvider, NonceManager, Wallet } from 'ethers';
 import { readEnvFile, requireEnv, targetChain } from '../microtest/env-utils.mjs';
 import { appendTxLog, assertTxBudget, weiToNativeString } from '../microtest/tx-guard.mjs';
 
@@ -40,12 +40,13 @@ if (Number(network.chainId) !== chain.chainId) {
   throw new Error(`RPC chainId ${network.chainId} does not match BSC ${chain.chainId}`);
 }
 
-const signer = new Wallet(normalizePrivateKey(env.PRIVATE_KEY), provider);
+const signer = new NonceManager(new Wallet(normalizePrivateKey(env.PRIVATE_KEY), provider));
 const deployer = await signer.getAddress();
 if (env.EXPO_PUBLIC_NPL_BSC_ADDRESS && env.EXPO_PUBLIC_NPL_BSC_ADDRESS.toLowerCase() !== DEFAULT_BSC_NPL.toLowerCase()) {
   throw new Error(`EXPO_PUBLIC_NPL_BSC_ADDRESS must be fixed to ${DEFAULT_BSC_NPL} on BSC`);
 }
 const npl = DEFAULT_BSC_NPL;
+if ((await provider.getCode(npl)) === '0x') throw new Error(`No NPL contract code at ${npl}`);
 const owner = requireSafeOwner(env.ESCROW_OWNER_ADDRESS);
 if ((await provider.getCode(owner)) === '0x') throw new Error('ESCROW_OWNER_ADDRESS must be a deployed multisig contract');
 const rewardLedgerAddress = requireAddress(
@@ -57,10 +58,6 @@ const seller = requireAddress(
   env.MERCHANT_RECEIVER_ADDRESS || env.EXPO_PUBLIC_MERCHANT_RECEIVER_ADDRESS,
   'MERCHANT_RECEIVER_ADDRESS or EXPO_PUBLIC_MERCHANT_RECEIVER_ADDRESS'
 );
-const retainedNplReceiver = requireAddress(
-  env.RETAINED_NPL_RECEIVER_ADDRESS || env.PRIZE_POOL_RECEIVER_ADDRESS || env.DEV_WALLET || deployer,
-  'RETAINED_NPL_RECEIVER_ADDRESS, PRIZE_POOL_RECEIVER_ADDRESS or DEV_WALLET'
-);
 const splitConfig = readSplitConfig(env);
 
 run('forge', ['build']);
@@ -68,7 +65,28 @@ run('forge', ['build']);
 const artifact = JSON.parse(readFileSync('out/Abu24KPaymentEscrow.sol/Abu24KPaymentEscrow.json'));
 const bytecode = typeof artifact.bytecode === 'object' ? artifact.bytecode.object : artifact.bytecode;
 const factory = new ContractFactory(artifact.abi, bytecode, signer);
-const deployTx = await factory.getDeployTransaction(npl, rewardLedgerAddress, orderSigner, retainedNplReceiver, deployer);
+const ledger = new Contract(rewardLedgerAddress, [
+  'function owner() view returns (address)',
+  'function npl() view returns (address)',
+  'function paused() view returns (bool)',
+  'function operators(address) view returns (bool)',
+  'function setOperator(address,bool)'
+], signer);
+if ((await provider.getCode(rewardLedgerAddress)) === '0x') {
+  throw new Error(`No RewardLedger contract code at ${rewardLedgerAddress}`);
+}
+const [ledgerOwner, ledgerNpl, ledgerPaused] = await Promise.all([
+  ledger.owner(),
+  ledger.npl(),
+  ledger.paused(),
+]);
+if (ledgerOwner.toLowerCase() !== deployer.toLowerCase()) {
+  throw new Error(`RewardLedger owner must be the deployer before Escrow setup: ${ledgerOwner} !== ${deployer}`);
+}
+if (ledgerNpl.toLowerCase() !== npl.toLowerCase()) throw new Error(`RewardLedger NPL mismatch: ${ledgerNpl} !== ${npl}`);
+if (ledgerPaused) throw new Error('RewardLedger must be unpaused before Escrow deployment');
+
+const deployTx = await factory.getDeployTransaction(npl, rewardLedgerAddress, orderSigner, deployer);
 const estimatedGas = await signer.estimateGas(deployTx);
 const feeData = await provider.getFeeData();
 const maxFeePerGasWei = feeData.maxFeePerGas ?? feeData.gasPrice;
@@ -77,7 +95,7 @@ if (!maxFeePerGasWei) throw new Error('Could not read gas price from RPC');
 assertTxBudget({
   env,
   operation: 'deploy Abu24KPaymentEscrow',
-  functionCall: 'constructor(address npl,address rewardLedger,address orderSigner,address retainedNplReceiver,address initialOwner)',
+  functionCall: 'constructor(address npl,address rewardLedger,address orderSigner,address initialOwner)',
   target: 'CREATE',
   valueWei: 0n,
   estimatedGas,
@@ -93,11 +111,10 @@ console.log(`npl: ${npl}`);
 console.log(`reward ledger: ${rewardLedgerAddress}`);
 console.log(`order signer: ${orderSigner}`);
 console.log(`approved seller: ${seller}`);
-console.log(`retained NPL receiver: ${retainedNplReceiver}`);
 console.log(`estimated gas: ${estimatedGas}`);
 console.log(`estimated max gas cost: ${weiToNativeString(estimatedGas * maxFeePerGasWei)} ${chain.native}`);
 
-const contract = await factory.deploy(npl, rewardLedgerAddress, orderSigner, retainedNplReceiver, deployer);
+const contract = await factory.deploy(npl, rewardLedgerAddress, orderSigner, deployer);
 const tx = contract.deploymentTransaction();
 if (!tx) throw new Error('Deployment transaction was not created');
 
@@ -114,7 +131,7 @@ const costWei = receipt.gasUsed * gasPriceWei;
 
 appendTxLog({
   operation: 'deploy Abu24KPaymentEscrow',
-  functionCall: 'constructor(address npl,address rewardLedger,address orderSigner,address retainedNplReceiver,address initialOwner)',
+  functionCall: 'constructor(address npl,address rewardLedger,address orderSigner,address initialOwner)',
   target: address,
   value: '0',
   estimatedGas: estimatedGas.toString(),
@@ -145,15 +162,6 @@ const sellerApproval = await guardedCall({
   maxFeePerGasWei,
 });
 
-const ledger = new Contract(rewardLedgerAddress, [
-  'function owner() view returns (address)',
-  'function operators(address) view returns (bool)',
-  'function setOperator(address,bool)'
-], signer);
-const ledgerOwner = await ledger.owner();
-if (ledgerOwner.toLowerCase() !== deployer.toLowerCase()) {
-  throw new Error(`RewardLedger owner must be the deployer for setOperator: ${ledgerOwner} !== ${deployer}`);
-}
 const ledgerOperator = await guardedCall({
   contract: ledger,
   target: rewardLedgerAddress,
@@ -188,7 +196,9 @@ if (owner.toLowerCase() !== deployer.toLowerCase()) {
 }
 
 const splitVersion = await contract.currentSplitVersion();
+const configuredOwner = await contract.owner();
 if (splitVersion !== 1n) throw new Error(`Expected initial escrow split version 1, got ${splitVersion}`);
+if (configuredOwner.toLowerCase() !== owner.toLowerCase()) throw new Error(`Escrow final owner mismatch: ${configuredOwner} !== ${owner}`);
 if (!(await contract.approvedSellers(seller))) throw new Error('Escrow seller approval was not recorded');
 if (!(await ledger.operators(address))) throw new Error('Escrow RewardLedger operator authorization was not recorded');
 if (await contract.paused()) throw new Error('Escrow remained paused after initialization');
@@ -204,7 +214,6 @@ const deployment = {
   rewardLedgerAddress,
   orderSigner,
   seller,
-  retainedNplReceiver,
   splitVersion: splitVersion.toString(),
   splitConfig,
   owner,
@@ -230,7 +239,6 @@ if (WRITE_ENV) {
     REWARD_LEDGER_ADDRESS: rewardLedgerAddress,
     ORDER_SIGNER_ADDRESS: orderSigner,
     ESCROW_SPLIT_VERSION: splitVersion.toString(),
-    RETAINED_NPL_RECEIVER_ADDRESS: retainedNplReceiver,
     ESCROW_FROM_BLOCK: String(receipt.blockNumber),
   });
 }
@@ -342,7 +350,7 @@ function requireAddress(value, name) {
 }
 
 function requireSafeOwner(value) {
-  const address = requireAddress(value, 'ESCROW_OWNER_ADDRESS or DEV_WALLET');
+  const address = requireAddress(value, 'ESCROW_OWNER_ADDRESS');
   const lower = address.toLowerCase();
   if (lower === ZERO.toLowerCase() || lower === DEAD.toLowerCase()) {
     throw new Error('Escrow owner cannot be zero/dead address');
@@ -365,7 +373,7 @@ function updateEnvFile(file, updates) {
     if (!seen.has(key)) lines.push(`${key}=${value}`);
   }
   fs.writeFileSync(file, lines.join('\n').replace(/\n*$/, '\n'), { mode: 0o600 });
-  console.log('updated .env with escrow address, retained NPL receiver and from-block');
+  console.log('updated .env with Escrow address and from-block');
 }
 
 function failCleanly(error) {

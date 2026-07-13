@@ -1,8 +1,10 @@
 #!/usr/bin/env node
+import fs from 'node:fs';
 import { Contract, JsonRpcProvider } from 'ethers';
 import { readEnvFile, targetChain } from '../microtest/env-utils.mjs';
 
 const DEFAULT_BSC_NPL = '0x4e8277ab31e4956b2cd48449793a57656dfc03d2';
+const DEPLOYMENT_PATH = 'deployments/rewards-mainnet-micro-test.json';
 
 const env = { ...readEnvFile('.env'), ...process.env };
 const chain = targetChain(env);
@@ -13,19 +15,22 @@ if (!rpcUrl) throw new Error(`Missing RPC URL: ${chain.rpcEnv} or EXPO_PUBLIC_BS
 
 const bnmAddress = requireAddress(env.EXPO_PUBLIC_BNM_BSC_ADDRESS, 'EXPO_PUBLIC_BNM_BSC_ADDRESS');
 const rewardLedgerAddress = requireAddress(env.EXPO_PUBLIC_REWARD_LEDGER_ADDRESS || env.REWARD_LEDGER_ADDRESS, 'EXPO_PUBLIC_REWARD_LEDGER_ADDRESS or REWARD_LEDGER_ADDRESS');
-const expectedOwner = optionalAddress(env.REWARDS_OWNER_ADDRESS || env.DEV_WALLET, 'REWARDS_OWNER_ADDRESS or DEV_WALLET');
+const expectedOwner = requireAddress(env.REWARDS_OWNER_ADDRESS, 'REWARDS_OWNER_ADDRESS');
 const escrowAddress = optionalAddress(env.EXPO_PUBLIC_ESCROW_ADDRESS, 'EXPO_PUBLIC_ESCROW_ADDRESS');
 const seckillAddress = optionalAddress(env.EXPO_PUBLIC_SECKILL_ADDRESS || env.SECKILL_ADDRESS, 'EXPO_PUBLIC_SECKILL_ADDRESS or SECKILL_ADDRESS');
+const deferredDeployment = readDeferredDeployment();
 
 const provider = new JsonRpcProvider(rpcUrl, chain.chainId, { batchMaxCount: 1 });
-const [network, bnmCode, ledgerCode] = await Promise.all([
+const [network, bnmCode, ledgerCode, nplCode] = await Promise.all([
   provider.getNetwork(),
   provider.getCode(bnmAddress),
-  provider.getCode(rewardLedgerAddress)
+  provider.getCode(rewardLedgerAddress),
+  provider.getCode(DEFAULT_BSC_NPL),
 ]);
 if (Number(network.chainId) !== chain.chainId) throw new Error(`RPC chainId ${network.chainId} does not match BSC ${chain.chainId}`);
 if (!bnmCode || bnmCode === '0x') throw new Error(`No contract code at EXPO_PUBLIC_BNM_BSC_ADDRESS=${bnmAddress}`);
 if (!ledgerCode || ledgerCode === '0x') throw new Error(`No contract code at EXPO_PUBLIC_REWARD_LEDGER_ADDRESS=${rewardLedgerAddress}`);
+if (!nplCode || nplCode === '0x') throw new Error(`No NPL contract code at ${DEFAULT_BSC_NPL}`);
 
 const bnm = new Contract(bnmAddress, [
   'function name() view returns (string)',
@@ -92,14 +97,18 @@ if (escrowAddress && !escrowIsOperator) throw new Error('Escrow is not configure
 if (seckillAddress && !seckillIsOperator) throw new Error('Seckill is not configured as a RewardLedger operator');
 if (!/^0x[0-9a-fA-F]{40}$/.test(bnmOwner)) throw new Error('BNM owner is invalid');
 if (!/^0x[0-9a-fA-F]{40}$/.test(ledgerOwner)) throw new Error('RewardLedger owner is invalid');
-if (expectedOwner) {
-  if (bnmOwner.toLowerCase() !== expectedOwner.toLowerCase()) throw new Error(`BNM owner mismatch: ${bnmOwner} !== ${expectedOwner}`);
-  if (ledgerOwner.toLowerCase() !== expectedOwner.toLowerCase()) throw new Error(`RewardLedger owner mismatch: ${ledgerOwner} !== ${expectedOwner}`);
+if (bnmOwner.toLowerCase() !== expectedOwner.toLowerCase()) throw new Error(`BNM owner mismatch: ${bnmOwner} !== ${expectedOwner}`);
+const ledgerOwnershipDeferred = ledgerOwner.toLowerCase() !== expectedOwner.toLowerCase();
+if (ledgerOwnershipDeferred && !isValidDeferredOwner(deferredDeployment, ledgerOwner)) {
+  throw new Error(`RewardLedger owner mismatch: ${ledgerOwner} !== ${expectedOwner}`);
 }
-if ((await provider.getCode(bnmOwner)) === '0x') throw new Error(`BNM owner must be a deployed multisig contract, got EOA ${bnmOwner}`);
-if ((await provider.getCode(ledgerOwner)) === '0x') throw new Error(`RewardLedger owner must be a deployed multisig contract, got EOA ${ledgerOwner}`);
+if ((await provider.getCode(expectedOwner)) === '0x') throw new Error(`REWARDS_OWNER_ADDRESS must be a deployed multisig contract, got EOA ${expectedOwner}`);
+if (bnmPaused) throw new Error('BNM is paused');
+if (ledgerPaused) throw new Error('RewardLedger is paused');
 
-console.log('24K rewards check: PASS');
+console.log(ledgerOwnershipDeferred
+  ? '24K rewards pre-Seckill check: PASS (RewardLedger ownership transfer pending)'
+  : '24K rewards check: PASS');
 console.log(`chain=${chain.key} (${chain.chainId})`);
 console.log(`bnm=${bnmAddress}`);
 console.log(`rewardLedger=${rewardLedgerAddress}`);
@@ -116,6 +125,26 @@ console.log(`nplReserved=${nplReserved}`);
 console.log(`entryCount=${entryCount}`);
 if (escrowAddress) console.log(`escrowOperator=${escrowIsOperator}`);
 if (seckillAddress) console.log(`seckillOperator=${seckillIsOperator}`);
+console.log(`ownershipFinalized=${!ledgerOwnershipDeferred}`);
+
+function readDeferredDeployment() {
+  if (!fs.existsSync(DEPLOYMENT_PATH)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(DEPLOYMENT_PATH, 'utf8'));
+  } catch (error) {
+    throw new Error(`Could not read ${DEPLOYMENT_PATH}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function isValidDeferredOwner(deployment, currentOwner) {
+  if (seckillAddress || !deployment || deployment.rewardLedgerOwnershipDeferredUntilSeckill !== true) return false;
+  const fieldsMatch = String(deployment.chainId) === String(chain.chainId)
+    && String(deployment.bnmAddress || '').toLowerCase() === bnmAddress.toLowerCase()
+    && String(deployment.rewardLedgerAddress || '').toLowerCase() === rewardLedgerAddress.toLowerCase()
+    && String(deployment.intendedRewardLedgerOwner || '').toLowerCase() === expectedOwner.toLowerCase()
+    && String(deployment.deployer || '').toLowerCase() === currentOwner.toLowerCase();
+  return fieldsMatch;
+}
 
 function requireAddress(value, name) {
   const address = String(value || '').trim();

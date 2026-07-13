@@ -17,12 +17,17 @@ const expectedLedger = requireAddress(
   env.EXPO_PUBLIC_REWARD_LEDGER_ADDRESS || env.REWARD_LEDGER_ADDRESS,
   'EXPO_PUBLIC_REWARD_LEDGER_ADDRESS or REWARD_LEDGER_ADDRESS'
 );
-const expectedOwner = optionalAddress(env.SECKILL_OWNER_ADDRESS || env.DEV_WALLET, 'SECKILL_OWNER_ADDRESS or DEV_WALLET');
+const expectedOwner = requireAddress(env.SECKILL_OWNER_ADDRESS, 'SECKILL_OWNER_ADDRESS');
 const expectedMaxGasPriceWei = requirePositiveUint(env.SECKILL_MAX_GAS_PRICE_WEI, 'SECKILL_MAX_GAS_PRICE_WEI');
 const provider = new JsonRpcProvider(rpcUrl, chain.chainId, { batchMaxCount: 1 });
-const [network, code] = await Promise.all([provider.getNetwork(), provider.getCode(seckillAddress)]);
+const [network, code, nplCode] = await Promise.all([
+  provider.getNetwork(),
+  provider.getCode(seckillAddress),
+  provider.getCode(DEFAULT_BSC_NPL),
+]);
 if (Number(network.chainId) !== chain.chainId) throw new Error(`RPC chainId ${network.chainId} does not match BSC ${chain.chainId}`);
 if (!code || code === '0x') throw new Error(`No contract code at EXPO_PUBLIC_SECKILL_ADDRESS=${seckillAddress}`);
+if (!nplCode || nplCode === '0x') throw new Error(`No NPL contract code at ${DEFAULT_BSC_NPL}`);
 
 const seckill = new Contract(seckillAddress, [
   'function owner() view returns (address)',
@@ -58,7 +63,7 @@ try {
 }
 
 if (!/^0x[0-9a-fA-F]{40}$/.test(owner)) throw new Error('Seckill owner is invalid');
-if (expectedOwner && owner.toLowerCase() !== expectedOwner.toLowerCase()) {
+if (owner.toLowerCase() !== expectedOwner.toLowerCase()) {
   throw new Error(`Seckill owner mismatch: ${owner} !== ${expectedOwner}`);
 }
 if ((await provider.getCode(owner)) === '0x') throw new Error(`Seckill owner must be a deployed multisig contract, got EOA ${owner}`);
@@ -67,14 +72,23 @@ if (escrow.toLowerCase() !== expectedEscrow.toLowerCase()) throw new Error(`Seck
 if (rewardLedger.toLowerCase() !== expectedLedger.toLowerCase()) throw new Error(`Seckill RewardLedger mismatch: ${rewardLedger} !== ${expectedLedger}`);
 if (maxGasPriceWei !== expectedMaxGasPriceWei) throw new Error(`Seckill max gas price mismatch: ${maxGasPriceWei} !== ${expectedMaxGasPriceWei}`);
 if (paused) throw new Error('Seckill is paused');
-const ledger = new Contract(expectedLedger, ['function operators(address) view returns (bool)'], provider);
-if (!(await ledger.operators(seckillAddress))) throw new Error('Seckill is not configured as a RewardLedger operator');
-const ledgerWithOwner = new Contract(expectedLedger, ['function owner() view returns (address)'], provider);
-const ledgerOwner = await ledgerWithOwner.owner();
-const expectedLedgerOwner = optionalAddress(env.REWARDS_OWNER_ADDRESS || env.DEV_WALLET, 'REWARDS_OWNER_ADDRESS or DEV_WALLET');
-if (expectedLedgerOwner && ledgerOwner.toLowerCase() !== expectedLedgerOwner.toLowerCase()) {
+const ledger = new Contract(expectedLedger, [
+  'function operators(address) view returns (bool)',
+  'function owner() view returns (address)',
+  'function paused() view returns (bool)'
+], provider);
+const [seckillIsOperator, ledgerOwner, ledgerPaused] = await Promise.all([
+  ledger.operators(seckillAddress),
+  ledger.owner(),
+  ledger.paused(),
+]);
+if (!seckillIsOperator) throw new Error('Seckill is not configured as a RewardLedger operator');
+const expectedLedgerOwner = requireAddress(env.REWARDS_OWNER_ADDRESS, 'REWARDS_OWNER_ADDRESS');
+if (ledgerOwner.toLowerCase() !== expectedLedgerOwner.toLowerCase()) {
   throw new Error(`RewardLedger final owner mismatch: ${ledgerOwner} !== ${expectedLedgerOwner}`);
 }
+if ((await provider.getCode(ledgerOwner)) === '0x') throw new Error(`RewardLedger owner must be a deployed multisig contract, got EOA ${ledgerOwner}`);
+if (ledgerPaused) throw new Error('RewardLedger is paused');
 
 console.log('24K seckill check: PASS');
 console.log(`chain=${chain.key} (${chain.chainId})`);
@@ -85,6 +99,7 @@ console.log(`escrow=${escrow}`);
 console.log(`rewardLedger=${rewardLedger}`);
 console.log(`maxGasPriceWei=${maxGasPriceWei}`);
 console.log(`rewardLedgerOwner=${ledgerOwner}`);
+console.log(`rewardLedgerPaused=${ledgerPaused}`);
 console.log(`paused=${paused}`);
 console.log(`nonce=${nonce}`);
 console.log('callerRule=tx.origin == msg.sender (validated by local Foundry tests; runtime getter check is read-only)');
@@ -93,11 +108,6 @@ function requireAddress(value, name) {
   const address = String(value || '').trim();
   if (!/^0x[0-9a-fA-F]{40}$/.test(address)) throw new Error(`${name} must be a valid EVM address`);
   return address;
-}
-
-function optionalAddress(value, name) {
-  if (!value) return '';
-  return requireAddress(value, name);
 }
 
 function requirePositiveUint(value, name) {

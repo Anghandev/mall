@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { ContractFactory, JsonRpcProvider, Wallet } from 'ethers';
+import { ContractFactory, JsonRpcProvider, NonceManager, Wallet } from 'ethers';
 import { readEnvFile, requireEnv, targetChain } from '../microtest/env-utils.mjs';
 import { appendTxLog, assertTxBudget, weiToNativeString } from '../microtest/tx-guard.mjs';
 
@@ -30,7 +30,7 @@ const provider = new JsonRpcProvider(rpcUrl, chain.chainId);
 const network = await provider.getNetwork();
 if (Number(network.chainId) !== chain.chainId) throw new Error(`RPC chainId ${network.chainId} does not match BSC ${chain.chainId}`);
 
-const signer = new Wallet(normalizePrivateKey(env.PRIVATE_KEY), provider);
+const signer = new NonceManager(new Wallet(normalizePrivateKey(env.PRIVATE_KEY), provider));
 const deployer = await signer.getAddress();
 const initialOwner = deployer;
 const finalOwner = requireSafeOwner(env.REWARDS_OWNER_ADDRESS, 'REWARDS_OWNER_ADDRESS');
@@ -39,6 +39,7 @@ if (env.EXPO_PUBLIC_NPL_BSC_ADDRESS && env.EXPO_PUBLIC_NPL_BSC_ADDRESS.toLowerCa
   throw new Error(`EXPO_PUBLIC_NPL_BSC_ADDRESS must be fixed to ${DEFAULT_BSC_NPL} on BSC`);
 }
 const nplAddress = DEFAULT_BSC_NPL;
+if ((await provider.getCode(nplAddress)) === '0x') throw new Error(`No NPL contract code at ${nplAddress}`);
 
 run('forge', ['build']);
 const feeData = await provider.getFeeData();
@@ -115,6 +116,39 @@ if (finalOwner.toLowerCase() !== deployer.toLowerCase()) {
     maxFeePerGasWei,
   });
   bnmTransferOwnershipTxHash = bnmTransfer.txHash;
+}
+
+const [
+  configuredBnmOwner,
+  configuredBnmPaused,
+  configuredLedgerMinter,
+  configuredLedgerOwner,
+  configuredLedgerPaused,
+  configuredLedgerBnm,
+  configuredLedgerNpl,
+] = await Promise.all([
+  bnm.contract.owner(),
+  bnm.contract.paused(),
+  bnm.contract.minters(rewardLedgerAddress),
+  ledger.contract.owner(),
+  ledger.contract.paused(),
+  ledger.contract.bnm(),
+  ledger.contract.npl(),
+]);
+if (configuredBnmOwner.toLowerCase() !== finalOwner.toLowerCase()) {
+  throw new Error(`BNM final owner mismatch: ${configuredBnmOwner} !== ${finalOwner}`);
+}
+if (configuredBnmPaused) throw new Error('BNM is paused after deployment');
+if (!configuredLedgerMinter) throw new Error('RewardLedger BNM minter authorization was not recorded');
+if (configuredLedgerOwner.toLowerCase() !== deployer.toLowerCase()) {
+  throw new Error(`RewardLedger setup owner mismatch: ${configuredLedgerOwner} !== ${deployer}`);
+}
+if (configuredLedgerPaused) throw new Error('RewardLedger is paused after deployment');
+if (configuredLedgerBnm.toLowerCase() !== bnmAddress.toLowerCase()) {
+  throw new Error(`RewardLedger BNM mismatch: ${configuredLedgerBnm} !== ${bnmAddress}`);
+}
+if (configuredLedgerNpl.toLowerCase() !== nplAddress) {
+  throw new Error(`RewardLedger NPL mismatch: ${configuredLedgerNpl} !== ${nplAddress}`);
 }
 
 fs.mkdirSync('deployments', { recursive: true });

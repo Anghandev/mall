@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { Contract, ContractFactory, JsonRpcProvider, Wallet } from 'ethers';
+import { Contract, ContractFactory, JsonRpcProvider, NonceManager, Wallet } from 'ethers';
 import { readEnvFile, requireEnv, targetChain } from '../microtest/env-utils.mjs';
 import { appendTxLog, assertTxBudget, weiToNativeString } from '../microtest/tx-guard.mjs';
 
@@ -30,7 +30,7 @@ const provider = new JsonRpcProvider(rpcUrl, chain.chainId);
 const network = await provider.getNetwork();
 if (Number(network.chainId) !== chain.chainId) throw new Error(`RPC chainId ${network.chainId} does not match BSC ${chain.chainId}`);
 
-const signer = new Wallet(normalizePrivateKey(env.PRIVATE_KEY), provider);
+const signer = new NonceManager(new Wallet(normalizePrivateKey(env.PRIVATE_KEY), provider));
 const deployer = await signer.getAddress();
 const owner = requireSafeOwner(env.SECKILL_OWNER_ADDRESS, 'SECKILL_OWNER_ADDRESS');
 const finalLedgerOwner = requireSafeOwner(env.REWARDS_OWNER_ADDRESS, 'REWARDS_OWNER_ADDRESS');
@@ -40,12 +40,51 @@ if (env.EXPO_PUBLIC_NPL_BSC_ADDRESS && env.EXPO_PUBLIC_NPL_BSC_ADDRESS.toLowerCa
   throw new Error(`EXPO_PUBLIC_NPL_BSC_ADDRESS must be fixed to ${DEFAULT_BSC_NPL} on BSC`);
 }
 const nplAddress = DEFAULT_BSC_NPL;
+if ((await provider.getCode(nplAddress)) === '0x') throw new Error(`No NPL contract code at ${nplAddress}`);
 const escrowAddress = requireAddress(env.EXPO_PUBLIC_ESCROW_ADDRESS, 'EXPO_PUBLIC_ESCROW_ADDRESS');
 const rewardLedgerAddress = requireAddress(
   env.EXPO_PUBLIC_REWARD_LEDGER_ADDRESS || env.REWARD_LEDGER_ADDRESS,
   'EXPO_PUBLIC_REWARD_LEDGER_ADDRESS or REWARD_LEDGER_ADDRESS'
 );
 const maxGasPriceWei = requirePositiveUint(env.SECKILL_MAX_GAS_PRICE_WEI, 'SECKILL_MAX_GAS_PRICE_WEI');
+const [escrowCode, ledgerCode] = await Promise.all([
+  provider.getCode(escrowAddress),
+  provider.getCode(rewardLedgerAddress),
+]);
+if (escrowCode === '0x') throw new Error(`No Escrow contract code at ${escrowAddress}`);
+if (ledgerCode === '0x') throw new Error(`No RewardLedger contract code at ${rewardLedgerAddress}`);
+
+const escrow = new Contract(escrowAddress, [
+  'function npl() view returns (address)',
+  'function rewardLedger() view returns (address)',
+  'function paused() view returns (bool)'
+], signer);
+const ledger = new Contract(rewardLedgerAddress, [
+  'function owner() view returns (address)',
+  'function npl() view returns (address)',
+  'function paused() view returns (bool)',
+  'function operators(address) view returns (bool)',
+  'function setOperator(address,bool)',
+  'function transferOwnership(address)'
+], signer);
+const [escrowNpl, escrowLedger, escrowPaused, ledgerOwner, ledgerNpl, ledgerPaused] = await Promise.all([
+  escrow.npl(),
+  escrow.rewardLedger(),
+  escrow.paused(),
+  ledger.owner(),
+  ledger.npl(),
+  ledger.paused(),
+]);
+if (escrowNpl.toLowerCase() !== nplAddress) throw new Error(`Escrow NPL mismatch: ${escrowNpl} !== ${nplAddress}`);
+if (escrowLedger.toLowerCase() !== rewardLedgerAddress.toLowerCase()) {
+  throw new Error(`Escrow RewardLedger mismatch: ${escrowLedger} !== ${rewardLedgerAddress}`);
+}
+if (escrowPaused) throw new Error('Escrow must be unpaused before Seckill deployment');
+if (ledgerNpl.toLowerCase() !== nplAddress) throw new Error(`RewardLedger NPL mismatch: ${ledgerNpl} !== ${nplAddress}`);
+if (ledgerOwner.toLowerCase() !== deployer.toLowerCase()) {
+  throw new Error(`RewardLedger owner must be the deployer before Seckill setup: ${ledgerOwner} !== ${deployer}`);
+}
+if (ledgerPaused) throw new Error('RewardLedger must be unpaused before Seckill deployment');
 
 run('forge', ['build']);
 const artifact = JSON.parse(readFileSync('out/Abu24KSeckill.sol/Abu24KSeckill.json'));
@@ -104,15 +143,6 @@ appendTxLog({
   result: 'success',
 });
 
-const ledger = new Contract(rewardLedgerAddress, [
-  'function owner() view returns (address)',
-  'function operators(address) view returns (bool)',
-  'function setOperator(address,bool)'
-], signer);
-const ledgerOwner = await ledger.owner();
-if (ledgerOwner.toLowerCase() !== deployer.toLowerCase()) {
-  throw new Error(`RewardLedger owner must be the deployer for setOperator: ${ledgerOwner} !== ${deployer}`);
-}
 const ledgerOperator = await guardedCall({
   contract: ledger,
   target: rewardLedgerAddress,
@@ -133,20 +163,6 @@ const gasPriceGuard = await guardedCall({
   maxFeePerGasWei,
 });
 
-let ledgerTransferOwnershipTxHash = '';
-if (finalLedgerOwner.toLowerCase() !== deployer.toLowerCase()) {
-  const ledgerOwnership = await guardedCall({
-    contract: ledger,
-    target: rewardLedgerAddress,
-    operation: 'transfer RewardLedger ownership after operator configuration',
-    functionCall: 'Abu24KRewardLedger.transferOwnership(address)',
-    method: 'transferOwnership',
-    args: [finalLedgerOwner],
-    maxFeePerGasWei,
-  });
-  ledgerTransferOwnershipTxHash = ledgerOwnership.txHash;
-}
-
 let transferOwnershipTxHash = '';
 if (owner.toLowerCase() !== deployer.toLowerCase()) {
   const ownership = await guardedCall({
@@ -160,7 +176,34 @@ if (owner.toLowerCase() !== deployer.toLowerCase()) {
   });
   transferOwnershipTxHash = ownership.txHash;
 }
-if (!(await ledger.operators(address))) throw new Error('Seckill RewardLedger operator authorization was not recorded');
+
+let ledgerTransferOwnershipTxHash = '';
+if (finalLedgerOwner.toLowerCase() !== deployer.toLowerCase()) {
+  const ledgerOwnership = await guardedCall({
+    contract: ledger,
+    target: rewardLedgerAddress,
+    operation: 'transfer RewardLedger ownership after all operator configuration',
+    functionCall: 'Abu24KRewardLedger.transferOwnership(address)',
+    method: 'transferOwnership',
+    args: [finalLedgerOwner],
+    maxFeePerGasWei,
+  });
+  ledgerTransferOwnershipTxHash = ledgerOwnership.txHash;
+}
+const [configuredLedgerOwner, configuredOperator, configuredOwner, configuredPaused, configuredGasPrice] = await Promise.all([
+  ledger.owner(),
+  ledger.operators(address),
+  contract.owner(),
+  contract.paused(),
+  contract.maxGasPriceWei(),
+]);
+if (configuredLedgerOwner.toLowerCase() !== finalLedgerOwner.toLowerCase()) {
+  throw new Error(`RewardLedger final owner mismatch: ${configuredLedgerOwner} !== ${finalLedgerOwner}`);
+}
+if (!configuredOperator) throw new Error('Seckill RewardLedger operator authorization was not recorded');
+if (configuredOwner.toLowerCase() !== owner.toLowerCase()) throw new Error(`Seckill final owner mismatch: ${configuredOwner} !== ${owner}`);
+if (configuredPaused) throw new Error('Seckill is paused after deployment configuration');
+if (configuredGasPrice !== maxGasPriceWei) throw new Error(`Seckill max gas price mismatch: ${configuredGasPrice} !== ${maxGasPriceWei}`);
 
 fs.mkdirSync('deployments', { recursive: true });
 const deployment = {

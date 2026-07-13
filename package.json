@@ -21,6 +21,7 @@
     "db:backup": "./scripts/node scripts/ops/backup-db.mjs",
     "db:restore": "./scripts/node scripts/ops/restore-db.mjs",
     "contracts:test": "FOUNDRY_ETH_RPC_URL= forge test -vv",
+    "contracts:freeze-check": "forge build && ./scripts/node scripts/check-contract-freeze.mjs",
     "npl:check": "./scripts/node scripts/check-npl-token.mjs --strict",
     "signer:start": "./scripts/node signer/index.mjs",
     "signer:check": "./scripts/node scripts/check-production-order-signer.mjs",

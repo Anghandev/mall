@@ -13,7 +13,7 @@ These inputs are required for production deployment or real-world acceptance. Co
 | EXT-005 | Escrow production multisig owner contract | Escrow deployment | Missing | Contract code exists and owner() matches |
 | EXT-006 | RewardLedger/BNM production multisig owner contract | Rewards deployment | Missing | Contract code exists and owner() matches |
 | EXT-007 | Seckill production multisig owner contract | Seckill deployment | Missing | Contract code exists and owner() matches |
-| EXT-008 | Platform, region, referral, prize, circulation, burn and retained receiver addresses | Escrow split/refund | Missing | Reviewed split event and receiver checks |
+| EXT-008 | Platform, region, referral, prize, circulation and burn receiver addresses | Escrow split | Missing | Reviewed split event and receiver checks |
 | EXT-009 | Merchant settlement receiver/approved seller address | Orders and seller whitelist | Missing | Seller approval event indexed |
 | EXT-010 | Admin SIWE wallet | Platform backstage | Missing | Production SIWE login succeeds |
 | EXT-011 | External order signer address and HTTPS signer service/token | EIP-712 order authorization | Missing | Signer health and signature verification pass |
