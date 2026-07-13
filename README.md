@@ -1,11 +1,15 @@
 # Abu 24K V2 Transition Repository
 
-The repository is temporarily split into two independent projects:
+The repository is split into one shared core and three product surfaces:
 
-- `legacy/v1-npl-only/`: frozen V1 implementation. It remains runnable for historical orders and migration verification only.
-- `platform-v2/`: the active Abu 24K platform operations V2 implementation.
+- `platform-v2/`: shared contracts/API core plus the platform operations UI.
+- `mall-v2/`: customer mall application.
+- `merchant-v2/`: merchant workbench application.
+- `legacy/v1-npl-only/`: frozen V1 implementation for history and recovery.
 
-V2 must not import code from the legacy directory. Both projects use separate dependencies, environment files, databases, audit databases and deployment manifests.
+V2 must not import code from the legacy directory. Cross-project financial and
+ownership rules are defined in `docs/V2_SYSTEM_CONTRACT.md` and
+`docs/THREAD_OWNERSHIP.md`.
 
 ## Commands
 

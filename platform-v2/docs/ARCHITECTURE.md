@@ -1,25 +1,36 @@
-# Merchant Workbench V2 Architecture
+# Abu 24K Platform V2 Architecture
 
 ## Runtime Boundary
 
-V2 is a standalone Node.js, SQLite and Foundry project. The merchant console is served as native ES modules by the API process. It has no runtime dependency on the isolated V1 tree.
+V2 is the shared authority for contracts, funds, data, API, indexer, signer and
+external integrations. Customer, merchant and admin applications consume its
+versioned interfaces. V2 has no runtime dependency on the isolated V1 tree.
 
 ## Funds Boundary
 
-- Each order has one immutable USDT payment amount and allocation-policy version.
-- `Abu24KPaymentEscrow` is the only active payment contract. It never pulls NPL or BNM from a buyer.
-- Merchant USDT proceeds accrue in Escrow after confirmed fulfillment and remain pull-based until the merchant claims them.
-- NPL and BNM are reward assets only. `Abu24KRewardLedger` keeps their Locked, Available, Claimed and Burned states separate from merchant proceeds.
-- BNM is locked from the signed order authorization, released on completion and burned on refund.
+- Product prices and merchant settlement costs are denominated in USDT.
+- A versioned policy defines buyer USDT and NPL payment legs whose basis points
+  sum to 10,000.
+- Merchant proceeds are USDT-only and pull-based after finalized fulfillment.
+- NPL payment value follows a versioned Burn and circulation/reward policy and
+  is never counted as merchant proceeds.
+- BNM is locked by order, released on finalized fulfillment and burned on
+  refund.
+- The cross-project authority is `docs/V2_SYSTEM_CONTRACT.md`.
 
 ## Security Boundary
 
-- Merchant authentication uses SIWE and wallet-role bindings.
+- Customer, merchant and administrator authentication use SIWE and scoped
+  wallet-role bindings.
 - High-risk writes require a secondary wallet signature and a multisig approval reference.
 - Business and audit data use separate SQLite files. Audit entries are append-only and hash chained.
 - Escrow, reward, claim and seckill controls have independent pause scopes. Recovery operations remain available while user-facing writes are paused.
-- Settlement broadcasts are produced by an idempotent outbox and an external execution service; the API never stores an owner or deployer private key.
+- Settlement broadcasts are produced by an idempotent outbox and an external
+  execution service; the API never stores an owner or deployer private key.
+- Authorization does not rely on `tx.origin`.
 
 ## Legacy Boundary
 
-V1 contracts and historical chain events remain readable. V2 never mutates a V1 database or rewrites finalized V1 chain history. After cutover, only minimal V1 ABI, address and migration evidence remains in the active tree.
+V1 contracts and historical chain events remain readable. V2 never mutates a
+V1 database or rewrites finalized V1 chain history. After cutover, only minimal
+V1 ABI, address and migration evidence remains in the active tree.
