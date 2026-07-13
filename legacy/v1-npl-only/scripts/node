@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if command -v node >/dev/null 2>&1; then
+  exec node "$@"
+fi
+
+if [[ -n "${CODEX_NODE:-}" && -x "${CODEX_NODE}" ]]; then
+  exec "${CODEX_NODE}" "$@"
+fi
+
+for candidate in \
+  "/Users/ronnie/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node" \
+  "${HOME}/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"; do
+  if [[ -x "${candidate}" ]]; then
+    exec "${candidate}" "$@"
+  fi
+done
+
+echo "node executable not found. Install Node.js >=24 or set CODEX_NODE=/path/to/node." >&2
+exit 127
