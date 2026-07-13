@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "../../scripts/node node_modules/vite/bin/vite.js",
+    "dev": "../../scripts/node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 4313",
     "build": "../../scripts/node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit && ../../scripts/node node_modules/vite/bin/vite.js build",
     "typecheck": "../../scripts/node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
     "test": "../../scripts/node node_modules/vitest/vitest.mjs run",
-    "check": "pnpm typecheck && pnpm test && pnpm build"
+    "bundle:check": "../../scripts/node scripts/check-production-bundle.mjs",
+    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm bundle:check"
   },
   "dependencies": {
     "lucide-react": "catalog:",
