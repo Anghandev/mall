@@ -104,7 +104,7 @@ Status is restricted to `Done`, `Partial`, `Missing`, or `ExternalBlocked`. This
 | MER-038 | Withdrawal hash and Gas | Claim history stores TxHash, gas used, price and BNB cost | Claim schema/UI | Full business E2E | Done | None |
 | MER-039 | Store profile | Name, logo, support and announcement persist | Profile API/UI | Backend checks | Done | None |
 | MER-040 | Settlement wallet immutability | Approved settlement wallet cannot be changed by merchant | Merchant profile/approval | Backend checks | Done | None |
-| MER-041 | Merchant audit log | Separate append-only DB shows signature/hash proof for writes | Audit DB and merchant audit endpoint | Not yet stage-tested | Partial | Audit migration and fail-closed tests pending |
+| MER-041 | Merchant audit log | Separate append-only DB shows signature/hash proof for writes | Audit DB and merchant audit endpoint | `scripts/check-database-stage.mjs`; backend audit endpoint checks | Done | None |
 | MER-042 | Help center | Current seckill rules, merchant notices and penalties render | Help API/UI | Backend checks | Done | None |
 | MER-043 | Role isolation | Merchant cannot access buyer/admin resources | Role middleware | Backend negative tests | Done | None |
 | MER-044 | Production integrations | Signer, AMap, waybill, shipment, print and notification adapters are live | `server/integrations.mjs` | Strict gate fails | ExternalBlocked | Third-party endpoints and credentials |
@@ -156,7 +156,7 @@ Status is restricted to `Done`, `Partial`, `Missing`, or `ExternalBlocked`. This
 | ADM-041 | Chain and multisig config | Chain id and owner addresses are visible, validated contracts and immutable in API env | Runtime checks | Production env checks | ExternalBlocked | Production addresses |
 | ADM-042 | Contract mappings | Latest NPL/BNM/Escrow/RewardLedger/Seckill addresses are validated and consumed | Config and public bundle | Partial checks | Partial | Production values missing and runtime overrides limited |
 | ADM-043 | OSS/CDN/AI configuration | Non-secret metadata persists; credentials remain env-only | System config redaction | Backend secret rejection tests | Partial | Real provider adapters not implemented |
-| ADM-044 | Independent append-only audit DB | Business DB has no active audit table; separate DB rejects update/delete and hash-chains entries | Audit DB implementation | Not yet stage-tested | Partial | Migration/tamper/fail-closed tests pending |
+| ADM-044 | Independent append-only audit DB | Business DB has no active audit table; separate DB rejects update/delete and hash-chains entries | Audit DB implementation | `scripts/check-database-stage.mjs` | Done | None |
 | ADM-045 | Login logs | Wallet signature hash, IP hash and device hash are recorded | SIWE audit | Auth tests | Done | None |
 | ADM-046 | JSON-RPC logs | Every RPC request/result/error is written to independent append-only storage | RPC audit implementation | Not yet stage-tested | Partial | Coverage and redaction tests pending |
 | ADM-047 | Error logs | Server/database/oracle errors are captured with sanitized context | API error audit/risk event | Partial tests | Partial | Database and oracle-specific paths incomplete |
@@ -175,4 +175,3 @@ Status is restricted to `Done`, `Partial`, `Missing`, or `ExternalBlocked`. This
 ## Frozen Counts
 
 Counts are recalculated by the matrix check script once added. At freeze time the implementation contains substantial `Partial`, `Missing`, and `ExternalBlocked` work; no launch claim is permitted until every row is `Done`.
-

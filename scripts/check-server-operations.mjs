@@ -13,11 +13,12 @@ import {
 } from 'node:fs';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 const root = mkdtempSync(join(tmpdir(), '24k-server-operations-'));
 const databasePath = join(root, 'operations.db');
+const auditDatabasePath = join(root, 'operations.audit.db');
 const backupPath = join(root, 'operations.backup.db');
 const rollbackPath = join(root, 'operations.rollback.db');
 const corruptBackupPath = join(root, 'corrupt.backup.db');
@@ -41,10 +42,23 @@ try {
     status: 'ok',
     foreignKeys: true,
     journalMode: 'wal',
-    busyTimeoutMs: 5_000
+    busyTimeoutMs: 5_000,
+    schemaVersion: 2,
+    chainEventFinalityGuard: true,
+    chainEventsAppendOnly: true
+  });
+  assert.deepEqual(firstHealth.payload.auditDatabase, {
+    status: 'ok',
+    separate: true,
+    appendOnly: true,
+    hashChainVerified: true,
+    schemaVersion: 1,
+    journalMode: 'wal'
   });
   assert.equal(JSON.stringify(firstHealth.payload).includes(testSecret), false);
   assert.equal(JSON.stringify(firstHealth.payload).includes(databasePath), false);
+  assert.equal(statSync(databasePath).mode & 0o777, 0o600);
+  assert.equal(statSync(auditDatabasePath).mode & 0o777, 0o600);
 
   const inspection = new DatabaseSync(databasePath);
   assert.equal(inspection.prepare('PRAGMA journal_mode').get().journal_mode, 'wal');
@@ -194,6 +208,7 @@ function startApi(port) {
       NODE_ENV: 'development',
       PORT: String(port),
       DB_PATH: databasePath,
+      AUDIT_DB_PATH: auditDatabasePath,
       MICRO_TEST: 'false',
       JWT_SECRET: testSecret,
       ADMIN_SECRET: `${testSecret}-admin`,
@@ -291,6 +306,7 @@ function productionEnvironment(port, path) {
     NODE_ENV: 'production',
     PORT: String(port),
     DB_PATH: path,
+    AUDIT_DB_PATH: join(dirname(path), 'production.audit.db'),
     JWT_SECRET: 'j'.repeat(40),
     ADMIN_SECRET: 'a'.repeat(40),
     INDEXER_SECRET: 'i'.repeat(40),
@@ -304,6 +320,7 @@ function productionEnvironment(port, path) {
     EXPO_PUBLIC_SECKILL_ADDRESS: address('6'),
     SECKILL_ADDRESS: address('6'),
     EXPO_PUBLIC_BNM_BSC_ADDRESS: address('7'),
+    GENESIS_NODE_CONTRACT: address('8'),
     CHAIN_EVENT_RPC_URL: 'https://rpc.example.test',
     FRONTEND_URL: 'https://mall.example.test',
     CORS_ORIGINS: 'https://mall.example.test',

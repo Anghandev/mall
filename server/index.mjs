@@ -3,7 +3,7 @@ import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import http from 'node:http';
 import os from 'node:os';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { AbiCoder, Interface, TypedDataEncoder, formatUnits, keccak256, verifyMessage, verifyTypedData } from 'ethers';
@@ -26,6 +26,10 @@ let auditDatabaseClosed = false;
 let isShuttingDown = false;
 let shutdownPromise = null;
 const requestAuditContext = new AsyncLocalStorage();
+let verifiedAuditHead = `0x${'0'.repeat(64)}`;
+let verifiedAuditCount = 0;
+let verifiedAuditDataVersion = 0;
+let databaseFilesSeparate = false;
 
 process.once('SIGINT', () => { void shutdown('SIGINT', 0); });
 process.once('SIGTERM', () => { void shutdown('SIGTERM', 0); });
@@ -90,6 +94,9 @@ const INDEXER_CONFIRMATIONS = Math.max(1, Number.parseInt(process.env.INDEXER_CO
 const MAX_JSON_BODY_BYTES = Number(process.env.MAX_JSON_BODY_BYTES || 262_144);
 const CLAIM_REQUEST_TTL_MS = Math.max(1, Number(process.env.CLAIM_REQUEST_TTL_MS || 10 * 60_000));
 const DB_BUSY_TIMEOUT_MS = 5_000;
+const BUSINESS_SCHEMA_VERSION = 2;
+const AUDIT_SCHEMA_VERSION = 1;
+const ZERO_AUDIT_HASH = `0x${'0'.repeat(64)}`;
 const ORDER_TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000;
 const REUSABLE_IDEMPOTENCY_STATUSES = new Set(['Draft']);
 const TERMINAL_ORDER_STATUSES = new Set(['Released', 'Cancelled', 'ForcedRefunded', 'EmergencyRefunded', 'Claimed']);
@@ -206,10 +213,14 @@ if (existsSync(`${DB_PATH}.restore.lock`)) throw new Error('DATABASE_RESTORE_IN_
 db = new DatabaseSync(DB_PATH);
 configureDatabase();
 auditDb = new DatabaseSync(AUDIT_DB_PATH);
+protectDatabaseFilePermissions();
+assertSeparateDatabaseFiles();
 configureAuditDatabase();
 initAuditDb();
+verifyAuditChainIntegrity();
 initDb();
 migrateLegacyAuditLogs();
+verifyAuditChainIntegrity();
 if (process.env.NODE_ENV !== 'production') seed();
 
 server = http.createServer(async (req, res) => {
@@ -1065,6 +1076,41 @@ function prepareDatabaseDirectory() {
   }
 }
 
+function assertSeparateDatabaseFiles() {
+  if (DB_PATH === ':memory:' && AUDIT_DB_PATH === ':memory:') {
+    databaseFilesSeparate = true;
+    return;
+  }
+  try {
+    const businessLink = lstatSync(DB_PATH);
+    const auditLink = lstatSync(AUDIT_DB_PATH);
+    if (businessLink.isSymbolicLink() || auditLink.isSymbolicLink()) throw new Error('DATABASE_SYMLINK_NOT_ALLOWED');
+    const businessRealPath = realpathSync(DB_PATH);
+    const auditRealPath = realpathSync(AUDIT_DB_PATH);
+    const businessStats = statSync(businessRealPath);
+    const auditStats = statSync(auditRealPath);
+    if (
+      businessRealPath === auditRealPath
+      || (businessStats.dev === auditStats.dev && businessStats.ino === auditStats.ino)
+    ) throw new Error('DATABASE_FILES_MUST_BE_SEPARATE');
+    databaseFilesSeparate = true;
+  } catch (error) {
+    if (error instanceof Error && /^(?:DATABASE_SYMLINK_NOT_ALLOWED|DATABASE_FILES_MUST_BE_SEPARATE)$/.test(error.message)) throw error;
+    throw new Error('DATABASE_FILE_IDENTITY_CHECK_FAILED');
+  }
+}
+
+function protectDatabaseFilePermissions() {
+  for (const path of [DB_PATH, AUDIT_DB_PATH]) {
+    if (path === ':memory:') continue;
+    try {
+      chmodSync(path, 0o600);
+    } catch {
+      throw new Error('DATABASE_FILE_PERMISSION_UPDATE_FAILED');
+    }
+  }
+}
+
 function configureDatabase() {
   db.exec(`PRAGMA busy_timeout = ${DB_BUSY_TIMEOUT_MS}; PRAGMA foreign_keys = ON;`);
   const journalMode = String(db.prepare('PRAGMA journal_mode = WAL').get()?.journal_mode || '').toLowerCase();
@@ -1083,6 +1129,14 @@ function configureAuditDatabase() {
 }
 
 function initAuditDb() {
+  auditDb.exec(`
+    CREATE TABLE IF NOT EXISTS audit_schema_migrations (
+      version INTEGER PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  applySqliteMigration(auditDb, 'audit_schema_migrations', 1, 'independent-append-only-audit', () => {
   auditDb.exec(`
     CREATE TABLE IF NOT EXISTS audit_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1117,6 +1171,40 @@ function initAuditDb() {
     CREATE TRIGGER IF NOT EXISTS rpc_audit_logs_no_update BEFORE UPDATE ON rpc_audit_logs BEGIN SELECT RAISE(ABORT, 'RPC_AUDIT_LOG_APPEND_ONLY'); END;
     CREATE TRIGGER IF NOT EXISTS rpc_audit_logs_no_delete BEFORE DELETE ON rpc_audit_logs BEGIN SELECT RAISE(ABORT, 'RPC_AUDIT_LOG_APPEND_ONLY'); END;
   `);
+  });
+  assertSchemaVersion(auditDb, 'audit_schema_migrations', AUDIT_SCHEMA_VERSION, 'AUDIT');
+  assertAuditSchemaIntegrity();
+}
+
+function applySqliteMigration(database, table, version, name, migrate) {
+  const existing = database.prepare(`SELECT name FROM ${table} WHERE version = ?`).get(version);
+  if (existing) {
+    if (existing.name !== name) throw new Error(`SCHEMA_MIGRATION_NAME_MISMATCH:${table}:${version}`);
+    return;
+  }
+  const savepoint = `${table}_${version}`;
+  database.exec(`SAVEPOINT ${savepoint}`);
+  try {
+    migrate();
+    database.prepare(`INSERT INTO ${table} (version, name) VALUES (?, ?)`).run(version, name);
+    database.exec(`RELEASE SAVEPOINT ${savepoint}`);
+  } catch (error) {
+    try { database.exec(`ROLLBACK TO SAVEPOINT ${savepoint}; RELEASE SAVEPOINT ${savepoint}`); } catch {}
+    throw error;
+  }
+}
+
+function assertSchemaVersion(database, table, expectedVersion, label) {
+  const versions = database.prepare(`SELECT version FROM ${table} ORDER BY version`).all().map((row) => Number(row.version));
+  const valid = versions.length === expectedVersion && versions.every((version, index) => version === index + 1);
+  if (!valid) throw new Error(`${label}_SCHEMA_VERSION_MISMATCH:${versions.join(',')}:${expectedVersion}`);
+}
+
+function assertAuditSchemaIntegrity() {
+  const tables = new Set(auditDb.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
+  const requiredTables = ['audit_logs', 'rpc_audit_logs', 'audit_migrations', 'audit_schema_migrations'];
+  const triggers = Number(auditDb.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name IN ('audit_logs_no_update','audit_logs_no_delete','rpc_audit_logs_no_update','rpc_audit_logs_no_delete')").get()?.count || 0);
+  if (!requiredTables.every((table) => tables.has(table)) || triggers !== 4) throw new Error('AUDIT_SCHEMA_INTEGRITY_FAILED');
 }
 
 function migrateLegacyAuditLogs() {
@@ -1130,16 +1218,70 @@ function migrateLegacyAuditLogs() {
     let payload = {};
     try { payload = JSON.parse(payloadJson); } catch {}
     const signatureHash = payload.secondarySignatureHash || payload.signatureHash || (typeof payload.txHash === 'string' && /^0x[0-9a-f]{64}$/i.test(payload.txHash) ? payload.txHash.toLowerCase() : null);
-    const previousHash = auditDb.prepare('SELECT entry_hash FROM audit_logs ORDER BY id DESC LIMIT 1').get()?.entry_hash || `0x${'0'.repeat(64)}`;
-    const payloadHash = `0x${createHash('sha256').update(payloadJson).digest('hex')}`;
+    const previousHash = auditDb.prepare('SELECT entry_hash FROM audit_logs ORDER BY id DESC LIMIT 1').get()?.entry_hash || ZERO_AUDIT_HASH;
+    const payloadHash = auditPayloadHash(payloadJson);
     const createdAt = row.created_at || new Date().toISOString();
-    const entryHash = `0x${createHash('sha256').update([previousHash, row.actor_address, row.role, row.action, row.target, signatureHash || '', payloadHash, createdAt].join('|')).digest('hex')}`;
-    auditDb.prepare(`INSERT INTO audit_logs (actor_address, role, action, target, signature_hash, proof_type, payload_hash, payload_json, previous_hash, entry_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      row.actor_address, row.role, row.action, row.target, signatureHash, signatureHash ? 'legacy-proof' : 'legacy-unverified', payloadHash, payloadJson, previousHash, entryHash, createdAt
-    );
-    auditDb.prepare('INSERT INTO audit_migrations (source_key) VALUES (?)').run(sourceKey);
+    const entryHash = auditEntryHash({ previousHash, actorAddress: row.actor_address, role: row.role, action: row.action, target: row.target, signatureHash, payloadHash, createdAt });
+    auditDb.exec('SAVEPOINT legacy_audit_row');
+    try {
+      auditDb.prepare(`INSERT INTO audit_logs (actor_address, role, action, target, signature_hash, proof_type, payload_hash, payload_json, previous_hash, entry_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        row.actor_address, row.role, row.action, row.target, signatureHash, signatureHash ? 'legacy-proof' : 'legacy-unverified', payloadHash, payloadJson, previousHash, entryHash, createdAt
+      );
+      auditDb.prepare('INSERT INTO audit_migrations (source_key) VALUES (?)').run(sourceKey);
+      auditDb.exec('RELEASE SAVEPOINT legacy_audit_row');
+    } catch (error) {
+      try { auditDb.exec('ROLLBACK TO SAVEPOINT legacy_audit_row; RELEASE SAVEPOINT legacy_audit_row'); } catch {}
+      throw error;
+    }
   }
   db.exec('DROP TABLE audit_logs');
+}
+
+function auditPayloadHash(payloadJson) {
+  return `0x${createHash('sha256').update(String(payloadJson)).digest('hex')}`;
+}
+
+function auditEntryHash({ previousHash, actorAddress, role, action, target, signatureHash, payloadHash, createdAt }) {
+  return `0x${createHash('sha256').update([
+    previousHash,
+    actorAddress,
+    role,
+    action,
+    target,
+    signatureHash || '',
+    payloadHash,
+    createdAt
+  ].join('|')).digest('hex')}`;
+}
+
+function verifyAuditChainIntegrity() {
+  if (!auditDb || auditDatabaseClosed) throw new Error('AUDIT_DATABASE_UNAVAILABLE');
+  const rows = auditDb.prepare(`
+    SELECT id, actor_address, role, action, target, signature_hash, payload_hash, payload_json, previous_hash, entry_hash, created_at
+    FROM audit_logs
+    ORDER BY id
+  `).all();
+  let previousHash = ZERO_AUDIT_HASH;
+  for (const row of rows) {
+    const payloadHash = auditPayloadHash(row.payload_json);
+    const entryHash = auditEntryHash({
+      previousHash,
+      actorAddress: row.actor_address,
+      role: row.role,
+      action: row.action,
+      target: row.target,
+      signatureHash: row.signature_hash,
+      payloadHash,
+      createdAt: row.created_at
+    });
+    if (row.payload_hash !== payloadHash || row.previous_hash !== previousHash || row.entry_hash !== entryHash) {
+      throw new Error(`AUDIT_CHAIN_INTEGRITY_FAILED:${row.id}`);
+    }
+    previousHash = row.entry_hash;
+  }
+  verifiedAuditHead = previousHash;
+  verifiedAuditCount = rows.length;
+  verifiedAuditDataVersion = Number(auditDb.prepare('PRAGMA data_version').get()?.data_version || 0);
 }
 
 function operationalHealth() {
@@ -1165,8 +1307,20 @@ function auditDatabaseHealth() {
     const probe = Number(auditDb.prepare('SELECT 1 AS ok').get()?.ok || 0);
     const journalMode = String(auditDb.prepare('PRAGMA journal_mode').get()?.journal_mode || '').toLowerCase();
     const appendOnlyTriggers = Number(auditDb.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name IN ('audit_logs_no_update','audit_logs_no_delete','rpc_audit_logs_no_update','rpc_audit_logs_no_delete')").get()?.count || 0);
-    const healthy = probe === 1 && journalMode === 'wal' && appendOnlyTriggers === 4;
-    return { status: healthy ? 'ok' : 'unavailable', separate: AUDIT_DB_PATH !== DB_PATH, appendOnly: appendOnlyTriggers === 4, journalMode };
+    const schemaVersion = Number(auditDb.prepare('SELECT COALESCE(MAX(version), 0) AS version FROM audit_schema_migrations').get()?.version || 0);
+    const dataVersion = Number(auditDb.prepare('PRAGMA data_version').get()?.data_version || 0);
+    if (dataVersion !== verifiedAuditDataVersion) verifyAuditChainIntegrity();
+    const chainState = auditDb.prepare('SELECT COUNT(*) AS count, COALESCE((SELECT entry_hash FROM audit_logs ORDER BY id DESC LIMIT 1), ?) AS head FROM audit_logs').get(ZERO_AUDIT_HASH);
+    const hashChainVerified = Number(chainState?.count || 0) === verifiedAuditCount && chainState?.head === verifiedAuditHead;
+    const healthy = probe === 1 && journalMode === 'wal' && appendOnlyTriggers === 4 && schemaVersion === AUDIT_SCHEMA_VERSION && hashChainVerified;
+    return {
+      status: healthy ? 'ok' : 'unavailable',
+      separate: databaseFilesSeparate,
+      appendOnly: appendOnlyTriggers === 4,
+      hashChainVerified,
+      schemaVersion,
+      journalMode
+    };
   } catch {
     return { status: 'unavailable' };
   }
@@ -1186,12 +1340,23 @@ function databaseHealth() {
     const foreignKeys = Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys || 0);
     const journalMode = String(db.prepare('PRAGMA journal_mode').get()?.journal_mode || '').toLowerCase();
     const busyTimeoutMs = Number(db.prepare('PRAGMA busy_timeout').get()?.timeout || 0);
-    const healthy = probe === 1 && foreignKeys === 1 && journalMode === 'wal' && busyTimeoutMs === DB_BUSY_TIMEOUT_MS;
+    const schemaVersion = Number(db.prepare('SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations').get()?.version || 0);
+    const chainEventTriggers = Number(db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name IN ('chain_events_finality_guard','chain_events_no_update','chain_events_no_delete')").get()?.count || 0);
+    const finalityGuard = chainEventTriggers === 3;
+    const healthy = probe === 1
+      && foreignKeys === 1
+      && journalMode === 'wal'
+      && busyTimeoutMs === DB_BUSY_TIMEOUT_MS
+      && schemaVersion === BUSINESS_SCHEMA_VERSION
+      && finalityGuard;
     return {
       status: healthy ? 'ok' : 'unavailable',
       foreignKeys: foreignKeys === 1,
       journalMode,
-      busyTimeoutMs
+      busyTimeoutMs,
+      schemaVersion,
+      chainEventFinalityGuard: finalityGuard,
+      chainEventsAppendOnly: finalityGuard
     };
   } catch {
     if (transactionStarted) {
@@ -1322,6 +1487,14 @@ function validateRuntimeConfiguration() {
 
 function initDb() {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version INTEGER PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  applySqliteMigration(db, 'schema_migrations', 1, 'baseline-business-schema', () => {
+  db.exec(`
     CREATE TABLE IF NOT EXISTS products (
       id TEXT PRIMARY KEY,
       shop_name TEXT NOT NULL,
@@ -1390,7 +1563,12 @@ function initDb() {
       log_index INTEGER NOT NULL,
       event_name TEXT NOT NULL,
       payload_json TEXT NOT NULL,
-      UNIQUE(tx_hash, log_index)
+      confirmation_count INTEGER NOT NULL DEFAULT 0,
+      required_confirmations INTEGER NOT NULL DEFAULT 0,
+      finality_status TEXT NOT NULL DEFAULT 'Legacy',
+      finalized_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(chain_id, tx_hash, log_index)
     );
     CREATE TABLE IF NOT EXISTS siwe_nonces (
       nonce TEXT PRIMARY KEY,
@@ -1719,6 +1897,93 @@ function initDb() {
       ON after_sale_cases(order_id)
       WHERE status IN ('Open', 'AwaitingDisputeTransaction', 'Arbitration', 'ExchangeApproved', 'DelayApproved', 'AwaitingCompletionTransaction', 'AwaitingRefundTransaction');
   `);
+  });
+  applySqliteMigration(db, 'schema_migrations', 2, 'chain-event-finality-and-checkpoints', () => {
+    ensureChainEventsFrozenSchema();
+    ensureColumn('chain_events', 'confirmation_count', 'INTEGER NOT NULL DEFAULT 0');
+    ensureColumn('chain_events', 'required_confirmations', 'INTEGER NOT NULL DEFAULT 0');
+    ensureColumn('chain_events', 'finality_status', "TEXT NOT NULL DEFAULT 'Legacy'");
+    ensureColumn('chain_events', 'finalized_at', 'TEXT');
+    ensureColumn('chain_events', 'created_at', 'TEXT');
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS chain_events_chain_tx_log_unique
+        ON chain_events(chain_id, tx_hash, log_index);
+      CREATE INDEX IF NOT EXISTS chain_events_block_lookup
+        ON chain_events(chain_id, block_number, contract_address);
+      CREATE TABLE IF NOT EXISTS chain_sync_checkpoints (
+        chain_id INTEGER NOT NULL,
+        contract_address TEXT NOT NULL,
+        stream_name TEXT NOT NULL,
+        next_block INTEGER NOT NULL,
+        last_finalized_block INTEGER,
+        last_finalized_block_hash TEXT,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (chain_id, contract_address, stream_name)
+      );
+      CREATE TABLE IF NOT EXISTS chain_reorg_incidents (
+        id TEXT PRIMARY KEY,
+        chain_id INTEGER NOT NULL,
+        contract_address TEXT NOT NULL,
+        tx_hash TEXT,
+        log_index INTEGER,
+        block_number INTEGER NOT NULL,
+        expected_block_hash TEXT,
+        observed_block_hash TEXT,
+        status TEXT NOT NULL DEFAULT 'Open',
+        payload_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        resolved_at TEXT
+      );
+      DROP TRIGGER IF EXISTS chain_events_finality_guard;
+      DROP TRIGGER IF EXISTS chain_events_no_update;
+      DROP TRIGGER IF EXISTS chain_events_no_delete;
+      CREATE TRIGGER chain_events_finality_guard
+      BEFORE INSERT ON chain_events
+      WHEN NEW.finality_status NOT IN ('Finalized', 'Unverified')
+        OR NEW.required_confirmations < 1
+        OR NEW.confirmation_count < 0
+        OR (
+          NEW.finality_status = 'Finalized'
+          AND (
+            NEW.block_hash IS NULL
+            OR length(NEW.block_hash) <> 66
+            OR NEW.confirmation_count < NEW.required_confirmations
+            OR NEW.finalized_at IS NULL
+          )
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'CHAIN_EVENT_FINALITY_REQUIRED');
+      END;
+      CREATE TRIGGER chain_events_no_update BEFORE UPDATE ON chain_events
+      BEGIN
+        SELECT RAISE(ABORT, 'CHAIN_EVENTS_APPEND_ONLY');
+      END;
+      CREATE TRIGGER chain_events_no_delete BEFORE DELETE ON chain_events
+      BEGIN
+        SELECT RAISE(ABORT, 'CHAIN_EVENTS_APPEND_ONLY');
+      END;
+    `);
+  });
+  assertSchemaVersion(db, 'schema_migrations', BUSINESS_SCHEMA_VERSION, 'BUSINESS');
+  assertBusinessSchemaIntegrity();
+}
+
+function assertBusinessSchemaIntegrity() {
+  const columns = new Set(db.prepare('PRAGMA table_info(chain_events)').all().map((row) => row.name));
+  const requiredColumns = ['block_hash', 'confirmation_count', 'required_confirmations', 'finality_status', 'finalized_at'];
+  const requiredTables = ['chain_sync_checkpoints', 'chain_reorg_incidents'];
+  const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
+  const chainEventTriggers = Number(db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name IN ('chain_events_finality_guard','chain_events_no_update','chain_events_no_delete')").get()?.count || 0);
+  const uniqueShapes = chainEventUniqueIndexShapes();
+  if (
+    !requiredColumns.every((column) => columns.has(column))
+    || !requiredTables.every((table) => tables.has(table))
+    || chainEventTriggers !== 3
+    || !uniqueShapes.includes('chain_id,tx_hash,log_index')
+    || uniqueShapes.includes('tx_hash,log_index')
+  ) {
+    throw new Error('BUSINESS_SCHEMA_INTEGRITY_FAILED');
+  }
 }
 
 function dedupeActiveProductSubmissionsForUniqueIndex() {
@@ -7529,14 +7794,17 @@ function writeAudit(role, address, action, target, payload) {
   const proofType = explicitSignatureHash || contextProof?.signatureHash ? 'message-signature' : txHash ? 'transaction-hash' : role === 'system' || role === 'indexer' || role === 'integration' ? 'system' : 'none';
   if (auditActionRequiresSignature(role, action) && !signatureHash) throw new Error('AUDIT_SIGNATURE_REQUIRED');
   const payloadJson = JSON.stringify(redacted);
-  const payloadHash = `0x${createHash('sha256').update(payloadJson).digest('hex')}`;
-  const previousHash = auditDb.prepare('SELECT entry_hash FROM audit_logs ORDER BY id DESC LIMIT 1').get()?.entry_hash || `0x${'0'.repeat(64)}`;
+  const payloadHash = auditPayloadHash(payloadJson);
+  const previousHash = auditDb.prepare('SELECT entry_hash FROM audit_logs ORDER BY id DESC LIMIT 1').get()?.entry_hash || ZERO_AUDIT_HASH;
   const createdAt = new Date().toISOString();
-  const entryHash = `0x${createHash('sha256').update([previousHash, actorAddress, role, action, String(target || 'global'), signatureHash || '', payloadHash, createdAt].join('|')).digest('hex')}`;
+  const auditTarget = String(target || 'global');
+  const entryHash = auditEntryHash({ previousHash, actorAddress, role, action, target: auditTarget, signatureHash, payloadHash, createdAt });
   auditDb.prepare(`
     INSERT INTO audit_logs (actor_address, role, action, target, signature_hash, proof_type, payload_hash, payload_json, previous_hash, entry_hash, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(actorAddress, role, action, String(target || 'global'), signatureHash, proofType, payloadHash, payloadJson, previousHash, entryHash, createdAt);
+  `).run(actorAddress, role, action, auditTarget, signatureHash, proofType, payloadHash, payloadJson, previousHash, entryHash, createdAt);
+  verifiedAuditHead = entryHash;
+  verifiedAuditCount += 1;
 }
 
 function auditActionRequiresSignature(role, action) {
@@ -11275,13 +11543,12 @@ function createOrder(body) {
     for (const line of orderLines) {
       insertItem.run(orderId, line.productId, line.skuId || null, line.skuName || null, line.quantity, line.unitPriceNpl, line.fulfillmentMode, line.addressId || null, line.storeId || null, line.regionCode, line.lineKey);
     }
+    writeAudit('buyer', body.buyerAddress, 'order.create', orderId, { orderId, items: orderLines, amountNpl, fulfillmentMode, regionCode, bnmLocked });
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');
     throw error;
   }
-
-  writeAudit('buyer', body.buyerAddress, 'order.create', orderId, { orderId, items: orderLines, amountNpl, fulfillmentMode, regionCode, bnmLocked });
   if (storeId) recordBuyerBehavior(body.buyerAddress, 'store.select', storeId);
 
   return {
@@ -11378,7 +11645,7 @@ async function recordChainEvent(body) {
   if (chainId !== Number(order.chain_id)) fail(400, 'EVENT_CHAIN_MISMATCH');
   if (contractAddress.toLowerCase() !== order.escrow_address.toLowerCase()) fail(400, 'EVENT_CONTRACT_MISMATCH');
 
-  const duplicate = db.prepare('SELECT * FROM chain_events WHERE tx_hash = ? AND log_index = ?').get(txHash, logIndex);
+  const duplicate = db.prepare('SELECT * FROM chain_events WHERE chain_id = ? AND tx_hash = ? AND log_index = ?').get(chainId, txHash.toLowerCase(), logIndex);
   if (duplicate) {
     if (duplicate.order_id.toLowerCase() !== orderId.toLowerCase()) fail(400, 'DUPLICATE_EVENT_ORDER_MISMATCH');
     if (eventName === 'OrderArbitration') {
@@ -11404,10 +11671,7 @@ async function recordChainEvent(body) {
   let updatedOrder;
   db.exec('BEGIN IMMEDIATE');
   try {
-    db.prepare(`
-      INSERT INTO chain_events (chain_id, contract_address, order_id, tx_hash, block_number, block_hash, log_index, event_name, payload_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(chainId, contractAddress, orderId, txHash, blockNumber, eventBlockHash(verifiedBody), logIndex, eventName, JSON.stringify(verifiedBody));
+    insertChainEvent({ chainId, contractAddress, target: orderId, txHash, blockNumber, logIndex, eventName, payload: verifiedBody });
     writeAudit('indexer', contractAddress, `chain.${eventName}`, orderId, { txHash, blockNumber, logIndex, eventName });
     if (isPaidLockedStatus(nextStatus)) {
       const stockIssue = deductSoldStock(orderId);
@@ -11453,7 +11717,7 @@ async function recordCircuitChainEvent(body, eventName) {
   if (!isValidAddress(expected.address)) fail(409, 'CIRCUIT_CONTRACT_NOT_CONFIGURED');
   if (contractAddress.toLowerCase() !== expected.address.toLowerCase()) fail(400, 'EVENT_CONTRACT_MISMATCH');
 
-  const duplicate = db.prepare('SELECT * FROM chain_events WHERE tx_hash = ? AND log_index = ?').get(txHash, logIndex);
+  const duplicate = db.prepare('SELECT * FROM chain_events WHERE chain_id = ? AND tx_hash = ? AND log_index = ?').get(chainId, txHash.toLowerCase(), logIndex);
   if (duplicate) return { duplicate: true, eventName, circuit: circuitState(definition.scope) };
 
   const verifiedBody = CHAIN_EVENT_VERIFY_RPC
@@ -11464,10 +11728,7 @@ async function recordCircuitChainEvent(body, eventName) {
   db.exec('BEGIN IMMEDIATE');
   try {
     confirmCircuitBreaker(definition.scope, definition.enabled, `chain.${eventName}`, txHash);
-    db.prepare(`
-      INSERT INTO chain_events (chain_id, contract_address, order_id, tx_hash, block_number, block_hash, log_index, event_name, payload_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(chainId, contractAddress, target, txHash, blockNumber, eventBlockHash(verifiedBody), logIndex, eventName, JSON.stringify({ ...verifiedBody, account }));
+    insertChainEvent({ chainId, contractAddress, target, txHash, blockNumber, logIndex, eventName, payload: { ...verifiedBody, account } });
     writeAudit('indexer', contractAddress, `chain.${eventName}`, target, { txHash, blockNumber, logIndex, eventName, account });
     db.exec('COMMIT');
   } catch (error) {
@@ -11497,7 +11758,7 @@ async function recordEscrowControlEvent(body, eventName) {
   if (chainId !== CHAIN_ID) fail(400, 'EVENT_CHAIN_MISMATCH');
   if (contractAddress.toLowerCase() !== ESCROW.toLowerCase()) fail(400, 'EVENT_CONTRACT_MISMATCH');
 
-  const duplicate = db.prepare('SELECT * FROM chain_events WHERE tx_hash = ? AND log_index = ?').get(txHash, logIndex);
+  const duplicate = db.prepare('SELECT * FROM chain_events WHERE chain_id = ? AND tx_hash = ? AND log_index = ?').get(chainId, txHash.toLowerCase(), logIndex);
   if (duplicate) return { duplicate: true, eventName, target: duplicate.order_id };
 
   const verifiedBody = CHAIN_EVENT_VERIFY_RPC
@@ -11556,10 +11817,7 @@ async function recordEscrowControlEvent(body, eventName) {
       result = { splitVersion, configHash, config: active };
     }
 
-    db.prepare(`
-      INSERT INTO chain_events (chain_id, contract_address, order_id, tx_hash, block_number, block_hash, log_index, event_name, payload_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(chainId, contractAddress, target, txHash, blockNumber, eventBlockHash(verifiedBody), logIndex, eventName, JSON.stringify(verifiedBody));
+    insertChainEvent({ chainId, contractAddress, target, txHash, blockNumber, logIndex, eventName, payload: verifiedBody });
     writeAudit('indexer', contractAddress, `chain.${eventName}`, target, { txHash, blockNumber, logIndex, eventName });
     db.exec('COMMIT');
   } catch (error) {
@@ -11584,19 +11842,23 @@ async function recordSeckillChainEvent(body, eventName) {
   if (chainId !== CHAIN_ID) fail(400, 'EVENT_CHAIN_MISMATCH');
   if (contractAddress.toLowerCase() !== SECKILL.toLowerCase()) fail(400, 'EVENT_CONTRACT_MISMATCH');
 
-  const duplicate = db.prepare('SELECT * FROM chain_events WHERE tx_hash = ? AND log_index = ?').get(txHash, logIndex);
+  const duplicate = db.prepare('SELECT * FROM chain_events WHERE chain_id = ? AND tx_hash = ? AND log_index = ?').get(chainId, txHash.toLowerCase(), logIndex);
   if (duplicate) return { duplicate: true, session: seckillSessionById(sessionId), report: seckillReport(sessionId) };
 
   const verifiedBody = CHAIN_EVENT_VERIFY_RPC
     ? await verifySeckillChainEventOnRpc(body, { eventName, sessionId, txHash, contractAddress, chainId, blockNumber, logIndex })
     : body;
-  const result = applySeckillEvent(eventName, { ...verifiedBody, sessionId }, txHash, { chainId, contractAddress, blockNumber, logIndex });
-
-  db.prepare(`
-    INSERT INTO chain_events (chain_id, contract_address, order_id, tx_hash, block_number, block_hash, log_index, event_name, payload_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(chainId, contractAddress, sessionId, txHash, blockNumber, eventBlockHash(verifiedBody), logIndex, eventName, JSON.stringify(verifiedBody));
-  writeAudit('indexer', contractAddress, `chain.${eventName}`, sessionId, { txHash, blockNumber, logIndex, eventName });
+  let result;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    result = applySeckillEvent(eventName, { ...verifiedBody, sessionId }, txHash, { chainId, contractAddress, blockNumber, logIndex });
+    insertChainEvent({ chainId, contractAddress, target: sessionId, txHash, blockNumber, logIndex, eventName, payload: verifiedBody });
+    writeAudit('indexer', contractAddress, `chain.${eventName}`, sessionId, { txHash, blockNumber, logIndex, eventName });
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
   return { duplicate: false, ...result };
 }
 
@@ -11826,19 +12088,23 @@ async function recordRewardChainEvent(body, eventName) {
   if (chainId !== CHAIN_ID) fail(400, 'EVENT_CHAIN_MISMATCH');
   if (contractAddress.toLowerCase() !== REWARD_LEDGER.toLowerCase()) fail(400, 'EVENT_CONTRACT_MISMATCH');
 
-  const duplicate = db.prepare('SELECT * FROM chain_events WHERE tx_hash = ? AND log_index = ?').get(txHash, logIndex);
+  const duplicate = db.prepare('SELECT * FROM chain_events WHERE chain_id = ? AND tx_hash = ? AND log_index = ?').get(chainId, txHash.toLowerCase(), logIndex);
   if (duplicate) return { duplicate: true, reward: rewardByEntryId(entryId) };
 
   const verifiedBody = CHAIN_EVENT_VERIFY_RPC
     ? await verifyRewardChainEventOnRpc(body, { eventName, entryId, txHash, contractAddress, chainId, blockNumber, logIndex })
     : body;
-  const result = applyRewardLedgerEvent(eventName, { ...verifiedBody, entryId }, txHash);
-
-  db.prepare(`
-    INSERT INTO chain_events (chain_id, contract_address, order_id, tx_hash, block_number, block_hash, log_index, event_name, payload_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(chainId, contractAddress, result.orderId, txHash, blockNumber, eventBlockHash(verifiedBody), logIndex, eventName, JSON.stringify(verifiedBody));
-  writeAudit('indexer', contractAddress, `chain.${eventName}`, result.orderId, { txHash, blockNumber, logIndex, eventName, entryId });
+  let result;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    result = applyRewardLedgerEvent(eventName, { ...verifiedBody, entryId }, txHash);
+    insertChainEvent({ chainId, contractAddress, target: result.orderId, txHash, blockNumber, logIndex, eventName, payload: verifiedBody });
+    writeAudit('indexer', contractAddress, `chain.${eventName}`, result.orderId, { txHash, blockNumber, logIndex, eventName, entryId });
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
   return { duplicate: false, reward: result.reward };
 }
 
@@ -11918,7 +12184,7 @@ async function verifyEscrowControlEventOnRpc(body, expected) {
   const receipt = await rpc('eth_getTransactionReceipt', [expected.txHash]);
   if (!receipt) fail(400, 'CHAIN_EVENT_TX_NOT_FOUND');
   if (String(receipt.status).toLowerCase() !== '0x1') fail(400, 'CHAIN_EVENT_TX_FAILED');
-  await requireReceiptFinality(receipt);
+  const finality = await requireReceiptFinality(receipt);
   if (Number.parseInt(String(receipt.blockNumber), 16) !== expected.blockNumber) fail(400, 'CHAIN_EVENT_BLOCK_MISMATCH');
   const blockHash = verifiedReceiptBlockHash(body, receipt);
   const log = (receipt.logs || []).find((entry) => Number.parseInt(String(entry.logIndex), 16) === expected.logIndex);
@@ -11934,7 +12200,7 @@ async function verifyEscrowControlEventOnRpc(body, expected) {
   const verified = payloadFromEscrowControlParsedEvent(parsed, expected);
   if (body.seller && verified.seller && String(body.seller).toLowerCase() !== String(verified.seller).toLowerCase()) fail(400, 'SELLER_APPROVAL_EVENT_MISMATCH');
   if (body.configHash && verified.configHash && String(body.configHash).toLowerCase() !== String(verified.configHash).toLowerCase()) fail(400, 'SPLIT_CONFIG_EVENT_MISMATCH');
-  return { ...verified, blockHash };
+  return { ...verified, blockHash, finality };
 }
 
 async function verifyCircuitEventOnRpc(body, expected) {
@@ -11942,7 +12208,7 @@ async function verifyCircuitEventOnRpc(body, expected) {
   const receipt = await rpc('eth_getTransactionReceipt', [expected.txHash]);
   if (!receipt) fail(400, 'CHAIN_EVENT_TX_NOT_FOUND');
   if (String(receipt.status).toLowerCase() !== '0x1') fail(400, 'CHAIN_EVENT_TX_FAILED');
-  await requireReceiptFinality(receipt);
+  const finality = await requireReceiptFinality(receipt);
   if (Number.parseInt(String(receipt.blockNumber), 16) !== expected.blockNumber) fail(400, 'CHAIN_EVENT_BLOCK_MISMATCH');
   const blockHash = verifiedReceiptBlockHash(body, receipt);
   const log = (receipt.logs || []).find((entry) => Number.parseInt(String(entry.logIndex), 16) === expected.logIndex);
@@ -11957,7 +12223,7 @@ async function verifyCircuitEventOnRpc(body, expected) {
   if (!parsed || parsed.name !== expected.eventName) fail(400, 'CHAIN_EVENT_LOG_NAME_MISMATCH');
   const verified = payloadFromCircuitParsedEvent(parsed, expected);
   if (body.account && String(body.account).toLowerCase() !== verified.account.toLowerCase()) fail(400, 'CIRCUIT_EVENT_ACCOUNT_MISMATCH');
-  return { ...verified, blockHash };
+  return { ...verified, blockHash, finality };
 }
 
 async function verifyChainEventOnRpc(body, expected) {
@@ -11965,7 +12231,7 @@ async function verifyChainEventOnRpc(body, expected) {
   const receipt = await rpc('eth_getTransactionReceipt', [expected.txHash]);
   if (!receipt) fail(400, 'CHAIN_EVENT_TX_NOT_FOUND');
   if (String(receipt.status).toLowerCase() !== '0x1') fail(400, 'CHAIN_EVENT_TX_FAILED');
-  await requireReceiptFinality(receipt);
+  const finality = await requireReceiptFinality(receipt);
   if (Number.parseInt(String(receipt.blockNumber), 16) !== expected.blockNumber) fail(400, 'CHAIN_EVENT_BLOCK_MISMATCH');
   const blockHash = verifiedReceiptBlockHash(body, receipt);
   const log = (receipt.logs || []).find((entry) => Number.parseInt(String(entry.logIndex), 16) === expected.logIndex);
@@ -11986,7 +12252,7 @@ async function verifyChainEventOnRpc(body, expected) {
     fail(400, 'CHAIN_EVENT_DIGEST_MISMATCH');
   }
   if (parsed.name === 'OrderPaid') observeReceiptGas(receipt, verified.buyer, expected.txHash, 'order.pay');
-  return { ...verified, blockHash };
+  return { ...verified, blockHash, finality };
 }
 
 async function verifyRewardChainEventOnRpc(body, expected) {
@@ -11994,7 +12260,7 @@ async function verifyRewardChainEventOnRpc(body, expected) {
   const receipt = await rpc('eth_getTransactionReceipt', [expected.txHash]);
   if (!receipt) fail(400, 'CHAIN_EVENT_TX_NOT_FOUND');
   if (String(receipt.status).toLowerCase() !== '0x1') fail(400, 'CHAIN_EVENT_TX_FAILED');
-  await requireReceiptFinality(receipt);
+  const finality = await requireReceiptFinality(receipt);
   if (Number.parseInt(String(receipt.blockNumber), 16) !== expected.blockNumber) fail(400, 'CHAIN_EVENT_BLOCK_MISMATCH');
   const blockHash = verifiedReceiptBlockHash(body, receipt);
   const log = (receipt.logs || []).find((entry) => Number.parseInt(String(entry.logIndex), 16) === expected.logIndex);
@@ -12012,7 +12278,7 @@ async function verifyRewardChainEventOnRpc(body, expected) {
   if (verified.entryId !== expected.entryId) fail(400, 'REWARD_EVENT_ENTRY_MISMATCH');
   if (body.orderId && verified.orderId && String(body.orderId).toLowerCase() !== String(verified.orderId).toLowerCase()) fail(400, 'REWARD_EVENT_ORDER_MISMATCH');
   if (parsed.name === 'RewardClaimed') observeReceiptGas(receipt, verified.user, expected.txHash, 'reward.claim');
-  return { ...verified, blockHash, ...receiptGasDetails(receipt) };
+  return { ...verified, blockHash, finality, ...receiptGasDetails(receipt) };
 }
 
 async function verifySeckillChainEventOnRpc(body, expected) {
@@ -12020,7 +12286,7 @@ async function verifySeckillChainEventOnRpc(body, expected) {
   const receipt = await rpc('eth_getTransactionReceipt', [expected.txHash]);
   if (!receipt) fail(400, 'CHAIN_EVENT_TX_NOT_FOUND');
   if (String(receipt.status).toLowerCase() !== '0x1') fail(400, 'CHAIN_EVENT_TX_FAILED');
-  await requireReceiptFinality(receipt);
+  const finality = await requireReceiptFinality(receipt);
   if (Number.parseInt(String(receipt.blockNumber), 16) !== expected.blockNumber) fail(400, 'CHAIN_EVENT_BLOCK_MISMATCH');
   const blockHash = verifiedReceiptBlockHash(body, receipt);
   const log = (receipt.logs || []).find((entry) => Number.parseInt(String(entry.logIndex), 16) === expected.logIndex);
@@ -12037,7 +12303,7 @@ async function verifySeckillChainEventOnRpc(body, expected) {
   if (String(verified.sessionId).toLowerCase() !== expected.sessionId.toLowerCase()) fail(400, 'SECKILL_EVENT_SESSION_MISMATCH');
   if (body.orderId && verified.orderId && String(body.orderId).toLowerCase() !== String(verified.orderId).toLowerCase()) fail(400, 'SECKILL_EVENT_ORDER_MISMATCH');
   if (parsed.name === 'PurchaseRecorded') observeReceiptGas(receipt, verified.buyer, expected.txHash, 'seckill.purchase');
-  return { ...verified, blockHash };
+  return { ...verified, blockHash, finality };
 }
 
 function verifiedReceiptBlockHash(body, receipt) {
@@ -12060,6 +12326,56 @@ function receiptGasDetails(receipt) {
 function eventBlockHash(body) {
   if (!body?.blockHash) return null;
   return requireBytes32(body.blockHash, 'blockHash').toLowerCase();
+}
+
+function insertChainEvent({ chainId, contractAddress, target, txHash, blockNumber, logIndex, eventName, payload }) {
+  const finality = chainEventFinalityMetadata(payload, blockNumber);
+  db.prepare(`
+    INSERT INTO chain_events (
+      chain_id, contract_address, order_id, tx_hash, block_number, block_hash, log_index, event_name,
+      payload_json, confirmation_count, required_confirmations, finality_status, finalized_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    chainId,
+    contractAddress.toLowerCase(),
+    target,
+    txHash.toLowerCase(),
+    blockNumber,
+    eventBlockHash(payload),
+    logIndex,
+    eventName,
+    JSON.stringify(payload),
+    finality.confirmations,
+    finality.requiredConfirmations,
+    finality.status,
+    finality.finalizedAt,
+    new Date().toISOString()
+  );
+}
+
+function chainEventFinalityMetadata(payload, blockNumber) {
+  const finality = payload?.finality;
+  if (finality?.finalized === true) {
+    const confirmations = Number(finality.confirmations);
+    const requiredConfirmations = Number(finality.requiredConfirmations);
+    const finalizedBlock = Number(finality.blockNumber);
+    const latestBlock = Number(finality.latestBlock);
+    if (
+      !Number.isSafeInteger(confirmations)
+      || !Number.isSafeInteger(requiredConfirmations)
+      || !Number.isSafeInteger(finalizedBlock)
+      || !Number.isSafeInteger(latestBlock)
+      || requiredConfirmations !== INDEXER_CONFIRMATIONS
+      || confirmations < requiredConfirmations
+      || finalizedBlock !== blockNumber
+      || latestBlock < finalizedBlock
+    ) fail(409, 'CHAIN_EVENT_FINALITY_INVALID');
+    return { status: 'Finalized', confirmations, requiredConfirmations, finalizedAt: new Date().toISOString() };
+  }
+  if (!CHAIN_EVENT_VERIFY_RPC) {
+    return { status: 'Unverified', confirmations: 0, requiredConfirmations: INDEXER_CONFIRMATIONS, finalizedAt: null };
+  }
+  fail(409, 'CHAIN_EVENT_FINALITY_REQUIRED');
 }
 
 function payloadFromParsedEvent(parsed, expected) {
@@ -12658,6 +12974,78 @@ function tableColumnNames(table) {
   return db.prepare(`PRAGMA table_info(${table})`).all().map((entry) => entry.name);
 }
 
+function ensureChainEventsFrozenSchema() {
+  const columns = new Set(tableColumnNames('chain_events'));
+  const uniqueShapes = chainEventUniqueIndexShapes();
+  const requiredColumns = ['block_hash', 'confirmation_count', 'required_confirmations', 'finality_status', 'finalized_at', 'created_at'];
+  const hasLegacyUnique = uniqueShapes.includes('tx_hash,log_index');
+  const hasFrozenUnique = uniqueShapes.includes('chain_id,tx_hash,log_index');
+  if (!hasLegacyUnique && hasFrozenUnique && requiredColumns.every((column) => columns.has(column))) return;
+
+  const rows = db.prepare('SELECT * FROM chain_events ORDER BY id').all();
+  db.exec(`
+    DROP TABLE IF EXISTS chain_events_next;
+    CREATE TABLE chain_events_next (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chain_id INTEGER NOT NULL,
+      contract_address TEXT NOT NULL,
+      order_id TEXT NOT NULL,
+      tx_hash TEXT NOT NULL,
+      block_number INTEGER NOT NULL,
+      block_hash TEXT,
+      log_index INTEGER NOT NULL,
+      event_name TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      confirmation_count INTEGER NOT NULL DEFAULT 0,
+      required_confirmations INTEGER NOT NULL DEFAULT 0,
+      finality_status TEXT NOT NULL DEFAULT 'Legacy',
+      finalized_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(chain_id, tx_hash, log_index)
+    );
+  `);
+  const insert = db.prepare(`
+    INSERT INTO chain_events_next (
+      id, chain_id, contract_address, order_id, tx_hash, block_number, block_hash, log_index, event_name,
+      payload_json, confirmation_count, required_confirmations, finality_status, finalized_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  for (const row of rows) {
+    const confirmations = Number.isSafeInteger(Number(row.confirmation_count)) ? Math.max(0, Number(row.confirmation_count)) : 0;
+    const requiredConfirmations = Number.isSafeInteger(Number(row.required_confirmations)) ? Math.max(0, Number(row.required_confirmations)) : 0;
+    const finalized = row.finality_status === 'Finalized'
+      && /^0x[0-9a-f]{64}$/i.test(String(row.block_hash || ''))
+      && requiredConfirmations > 0
+      && confirmations >= requiredConfirmations
+      && Boolean(row.finalized_at);
+    const finalityStatus = finalized ? 'Finalized' : row.finality_status === 'Unverified' ? 'Unverified' : 'Legacy';
+    insert.run(
+      row.id,
+      row.chain_id,
+      String(row.contract_address).toLowerCase(),
+      row.order_id,
+      String(row.tx_hash).toLowerCase(),
+      row.block_number,
+      row.block_hash || null,
+      row.log_index,
+      row.event_name,
+      row.payload_json,
+      confirmations,
+      requiredConfirmations,
+      finalityStatus,
+      finalized ? row.finalized_at : null,
+      row.created_at || new Date().toISOString()
+    );
+  }
+  db.exec('DROP TABLE chain_events; ALTER TABLE chain_events_next RENAME TO chain_events');
+}
+
+function chainEventUniqueIndexShapes() {
+  return db.prepare("PRAGMA index_list('chain_events')").all()
+    .filter((index) => Number(index.unique) === 1)
+    .map((index) => db.prepare(`PRAGMA index_info(${index.name})`).all().map((entry) => entry.name).join(','));
+}
+
 function ensureOrderItemsFlexibleSchema() {
   const columns = db.prepare('PRAGMA table_info(order_items)').all().map((entry) => entry.name);
   const uniqueIndexes = db.prepare("PRAGMA index_list('order_items')").all().filter((entry) => Number(entry.unique) === 1);
@@ -12669,7 +13057,7 @@ function ensureOrderItemsFlexibleSchema() {
   if (!hasLegacyProductUnique && required.every((column) => columns.includes(column))) return;
 
   const rows = db.prepare('SELECT * FROM order_items').all();
-  db.exec('BEGIN IMMEDIATE');
+  db.exec('SAVEPOINT order_items_flexible_schema');
   try {
     db.exec(`
       DROP TABLE IF EXISTS order_items_next;
@@ -12712,9 +13100,9 @@ function ensureOrderItemsFlexibleSchema() {
         Number(row.stock_deducted || 0)
       );
     }
-    db.exec('DROP TABLE order_items; ALTER TABLE order_items_next RENAME TO order_items; COMMIT');
+    db.exec('DROP TABLE order_items; ALTER TABLE order_items_next RENAME TO order_items; RELEASE SAVEPOINT order_items_flexible_schema');
   } catch (error) {
-    db.exec('ROLLBACK');
+    try { db.exec('ROLLBACK TO SAVEPOINT order_items_flexible_schema; RELEASE SAVEPOINT order_items_flexible_schema'); } catch {}
     throw error;
   }
 }
