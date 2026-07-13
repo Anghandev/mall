@@ -4,6 +4,7 @@ Read these files before planning or editing:
 
 - `docs/V2_SYSTEM_CONTRACT.md`
 - `docs/THREAD_OWNERSHIP.md`
+- `docs/INTEGRATION_PROTOCOL.md`
 
 ## Authority
 

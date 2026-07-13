@@ -18,6 +18,8 @@ Writable paths:
 
 Responsibilities: contracts, funds, database, API, indexer, signer, external
 adapters, deployment, cross-project contract tests, and final launch gates.
+It also publishes versioned consumer artifacts, synchronizes core checkpoints
+into product branches, integrates product commits, and owns cross-product E2E.
 
 ## Customer Mall
 
