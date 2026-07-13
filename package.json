@@ -4,6 +4,7 @@
   "private": true,
   "description": "Temporary V1/V2 isolation command wrappers.",
   "scripts": {
+    "requirements:check": "platform-v2/scripts/node scripts/check-requirements.mjs",
     "v1:typecheck": "pnpm --dir legacy/v1-npl-only typecheck",
     "v1:contracts:test": "pnpm --dir legacy/v1-npl-only contracts:test",
     "v1:backend:check": "pnpm --dir legacy/v1-npl-only backend:check",

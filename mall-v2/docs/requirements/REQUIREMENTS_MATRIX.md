@@ -1,84 +1,60 @@
-# 24K Mall V2 Customer Requirements Matrix
+# Mall V2 Frozen Requirement Matrix
 
-Source: `docs/requirements/PRD-7.5.01.txt`
+Authority: `PRD-7.5.01.txt`, `SOURCE.md`, `../../../docs/V2_SYSTEM_CONTRACT.md`
+and `../../../docs/V2_DECISIONS.md`.
 
-Allowed status values are `Planned`, `Done`, and `ExternalBlocked`. `Done` requires code plus an automated or rendered evidence target. Platform, contract, merchant, database, and operator-console implementation is out of scope; their customer-facing contracts are tracked as upstream dependencies.
+This is a traceability index, not a second PRD. `Frozen` means accepted for
+implementation but not yet implemented. `Overridden` preserves a conflicting
+source clause and points to the binding Decision ID. `DecisionBlocked` and
+`ExternalBlocked` never authorize a guessed value or simulated success.
 
-| ID | PRD lines | Customer requirement | Acceptance criteria | Evidence target | Status | Upstream |
+| Requirement ID | Source lines | Field/state/action coverage | Decision | Acceptance and evidence target | Status | Core gap |
 |---|---:|---|---|---|---|---|
-| SCOPE-001 | 5-10 | Embedded mobile DApp with four persistent tabs | Seckill, mall, stores, and assets remain reachable and preserve local view state | App shell source + screenshot set | Planned | No |
-| SCOPE-002 | 6 | Mobile safe-area shell | Content and fixed tab bar do not collide with notches or gesture areas | 375/393 screenshots | Planned | No |
-| SCOPE-003 | 4,113 | Consumption and assets are visibly linked | Order and activity rows expose locked and released customer-facing states | Fixture state checks | Planned | Yes |
-| SCOPE-004 | 4,109-111 | No no-reason refund affordance | Only upstream-authorized exchange, delay, timeout refund, and arbitration actions render | Negative action checks | Planned | Yes |
-| SEK-001 | 13-17 | Four seckill phases | PREHEAT, LIVE, SETTLING, and SETTLED each render a distinct CTA and state | Fixture screenshots | Planned | Yes |
-| SEK-002 | 14 | Preheat countdown | Disabled CTA shows next-session countdown | Countdown check | Planned | Yes |
-| SEK-003 | 15 | Live dashboard and actions | Live state shows market data, rules, history, and payment CTA | UI source + screenshot | Planned | Yes |
-| SEK-004 | 16 | Settlement lockout | SETTLING disables purchase while keeping the prize pool visible | Negative CTA check | Planned | Yes |
-| SEK-005 | 17 | Settlement report | Settled state shows report, winner variant, and route to prize claim | Winner/loser fixtures | Planned | Yes |
-| SEK-006 | 18-21 | Real-time purchase wall | New sequenced events prepend, dedupe, reconnect, and fall back to polling | Stream client checks | Planned | Yes |
-| SEK-007 | 22-24 | Main and relay countdowns | Both server-anchored timers render independently using monospaced figures | Timer source check | Planned | Yes |
-| SEK-008 | 25-34 | Rules acknowledgement | Rules sheet is readable, dismissible, and records acknowledgement locally | Interaction check | Planned | Yes |
-| SEK-009 | 30-31 | Chain timestamp classification | UI displays authoritative upstream classification and never classifies locally | Source guard | Planned | Yes |
-| SEK-010 | 33-34 | BNM return wording | Payment success says BNM is locked until receipt, not already spendable | Copy guard | Planned | Yes |
-| SEK-011 | 114-118 | Participation history and result | Rows show session, amounts, win/loss, locked BNM, and USDT prize action | Fixture checks | Planned | Yes |
-| SEK-012 | 117 | Winner USDT claim | Claim CTA appears only when upstream marks the prize claimable | Allowed-action check | Planned | Yes |
-| SEK-013 | 165-169 | Transaction result metadata | Pending/finalized/reverted states and full TxHash are visible | Transaction fixtures | Planned | Yes |
-| MALL-001 | 35-39 | Horizontal category rail | Categories filter product results without a visible scrollbar | Interaction + screenshot | Planned | Yes |
-| MALL-002 | 38 | BNM return badge | Product cards show a restrained, readable BNM return marker | Screenshot check | Planned | Yes |
-| MALL-003 | 39 | Seckill product overlay | Locked products cannot start ordinary checkout and route to seckill | Negative action check | Planned | Yes |
-| MALL-004 | 40-42 | Product detail and persistent buy bar | Product details open without losing context; the primary buy action remains reachable | Mobile screenshot | Planned | Yes |
-| MALL-005 | 43-49 | Configuration sheet | SKU, quantity, delivery/pickup, address/store, and total are reviewable before order confirmation | Flow check | Planned | Yes |
-| MALL-006 | 45 | Required SKU selection | Confirmation is blocked until a valid in-stock SKU is selected | Negative flow check | Planned | Yes |
-| MALL-007 | 46 | Quantity stepper | Stepper enforces one-to-stock bounds and updates display quote from upstream-supported units | Unit check | Planned | Yes |
-| MALL-008 | 47-49 | Fulfillment switch | Delivery uses selected address; pickup uses selected eligible store | Fixture flow check | Planned | Yes |
-| MALL-009 | 146-148 | Stock preflight | Confirmation requests a reservation/preflight and shows actionable stock errors | API contract check | Planned | Yes |
-| MALL-010 | 149-157 | Five-factor final review | Product/SKU, quantity/quote, fulfillment, immutable region warning, and payment CTA are present | Final-review screenshot | Planned | Yes |
-| MALL-011 | 156,159 | Immutable region assertion | Delivery address or pickup-store region is explicitly shown before payment | Copy/source check | Planned | Yes |
-| MALL-012 | 17,152,163 | Dual-asset price | USDT and NPL exact string amounts render without floating-point recomputation | Money formatter tests | Planned | Yes |
-| STORE-001 | 50-53 | Store directory | Stores tab renders real store records, not marketing placeholders | Fixture screenshot | Planned | Yes |
-| STORE-002 | 51 | Country/city/district filters | Three linked filters constrain results and expose empty state | Interaction checks | Planned | Yes |
-| STORE-003 | 52 | GPS distance | Permission, loading, denial, unavailable, and distance states are distinct | Fixture states | Planned | Yes |
-| STORE-004 | 48-49,52 | Nearest pickup recommendation | Nearest eligible store is highlighted and can be selected | Fixture flow | Planned | Yes |
-| STORE-005 | 53 | Native call and navigation | Call and map buttons use platform links and provide unsupported fallbacks | Source check | Planned | No |
-| STORE-006 | 159 | Pickup region binding | Selected store region is shown in the final review | Flow check | Planned | Yes |
-| AST-001 | 54-101 | Customer profile and address entry | Assets tab exposes profile and address management entry points | Screenshot | Planned | Yes |
-| AST-002 | 95-100 | Paste-and-parse address | Pasted text is parsed, reviewed, and missing fields are highlighted before save | Parser + interaction tests | Planned | Yes |
-| AST-003 | 101 | Address CRUD and default | Add, edit, delete, set-default, and select actions are supported | Fixture flow | Planned | Yes |
-| AST-004 | 102-107 | Four order groups | Pending payment, shipment, receipt, and after-sale groups show accurate counts | Fixture checks | Planned | Yes |
-| AST-005 | 104-107 | Receipt card detail | Seckill badge, latest logistics summary, support, and confirm-receipt actions render when allowed | Fixture screenshot | Planned | Yes |
-| AST-006 | 108-111 | Exchange/delay arbitration | Only exchange and delay requests are offered; arbitration visibly keeps linked rewards locked | Negative/positive fixtures | Planned | Yes |
-| AST-007 | 112-122 | Dual-track activity records | Seckill participation and ordinary shopping records are separately scannable | Screenshot | Planned | Yes |
-| AST-008 | 119-122 | Shopping BNM release | Row changes from locked-until-receipt to released only from upstream state | State check | Planned | Yes |
-| AST-009 | 123-130 | BNM reward bucket | Cumulative, available, locked, provenance, and claim action render | Fixture check | Planned | Yes |
-| AST-010 | 131-134 | Genesis reward entitlement | Genesis bucket is hidden or disabled according to authoritative entitlement | Entitled/unentitled fixtures | Planned | Yes |
-| AST-011 | 135-137 | Referral reward bucket | Referral NPL cumulative/available/locked values and claim action render | Fixture check | Planned | Yes |
-| AST-012 | 138-141 | Regional reward bucket | Regional NPL values and receipt-linked release explanation render | Fixture check | Planned | Yes |
-| AST-013 | 142-144 | Operations reward bucket | Operations values render only for an authorized customer-facing entitlement | Authorized fixture | Planned | Yes |
-| AST-014 | 71-90,123-144 | Five distinct reward sections | BNM, genesis, referral, region, and operations are not collapsed into one ambiguous total | Screenshot check | Planned | Yes |
-| AST-015 | 130 | Asset provenance | Reward detail can display TxHash and timestamp supplied upstream | Fixture detail | Planned | Yes |
-| AST-016 | 4,138-140,187-192 | Locked-to-available semantics | UI never offers claim for Locked or arbitration-linked entries | Allowed-action guard | Planned | Yes |
-| AST-017 | 117,130,134,137,141,144 | Claim progress | Every claim supports awaiting-wallet, submitted, confirming, finalized, reverted, and replaced | Transaction fixtures | Planned | Yes |
-| FLOW-001 | 161-164 | Per-token allowance check | USDT and NPL allowances are checked independently | Wallet service tests | Planned | Yes |
-| FLOW-002 | 163-164 | Selective approvals | Only insufficient token legs request approval; revoked allowance is detected | Wallet fixtures | Planned | Yes |
-| FLOW-003 | 163 | Approval disclosure | Spender, requested amount, and a revocation route are visible before approval | Review screenshot | Planned | Yes |
-| FLOW-004 | 165-169 | Intent-driven calldata | App sends only upstream-supplied transaction requests and never constructs settlement calldata | Source guard | Planned | Yes |
-| FLOW-005 | 166-169,186 | Finality correctness | TxHash submission never mutates assets before successful confirmed receipt | State-machine tests | Planned | Yes |
-| FLOW-006 | 167 | Seckill post-payment step | recordPurchase is executed only when present in the authoritative intent | Wallet service test | Planned | Yes |
-| FLOW-007 | 168 | Boundary-order result | UI displays upstream ordinary/seckill classification and corresponding result copy | Fixture check | Planned | Yes |
-| FLOW-008 | 169 | Full transaction hash | Full hash is selectable and explorer-linkable | UI source check | Planned | Yes |
-| FLOW-009 | 181-186 | Checkout progression | Configuration, stock reservation, final review, wallet actions, and confirmation are ordered and resumable | End-to-end fixture flow | Planned | Yes |
-| FLOW-010 | 187-192 | Receipt release refresh | Finalized receipt completion triggers authoritative assets refresh | Client state test | Planned | Yes |
-| FLOW-011 | 4 | Seven-day no-shipment refund request | CTA renders only from upstream eligibility and shows prize deduction disclosure for seckill orders | Eligible/ineligible fixtures | Planned | Yes |
-| FLOW-012 | 4,140 | Merchant force-receipt visibility | Customer can see request/arbitration status without a local auto-completion path | Fixture check | Planned | Yes |
-| FLOW-013 | 108-111 | After-sale lock | Pending after-sale keeps linked rewards visibly locked | Fixture check | Planned | Yes |
-| FLOW-014 | 147,181-182 | Preflight latency feedback | A response over 200ms receives non-blocking progress feedback without false success | Interaction check | Planned | Yes |
-| NFR-001 | 6 | Mobile-first responsiveness | 375, 393, tablet, and desktop web layouts have no overlap or horizontal page scroll | Screenshot gate | Planned | No |
-| NFR-002 | 18-21 | Stream resilience | Disconnect, duplicate, out-of-order, and missed-event recovery are deterministic | Stream unit tests | Planned | Yes |
-| NFR-003 | 27,149-157 | Blocking review accessibility | Sheets/dialogs trap focus appropriately, expose labels, and provide a safe exit before payment | Accessibility source check | Planned | No |
-| NFR-004 | 17 | Reduced motion | Winner effects have a static reduced-motion alternative | Source + screenshot | Planned | No |
-| NFR-005 | 95-100,153-155 | PII handling | Logs and transaction payloads never contain full name, phone, or address unless contractually required off-chain | Source guard | Planned | Yes |
-| NFR-006 | 147 | Loading and error states | Every remote surface has loading, empty, retryable error, and unavailable states | Fixture screenshots | Planned | Yes |
-| NFR-007 | 169 | Transaction observability | Errors preserve action, stage, safe message, and correlation identifier without secrets | Client tests | Planned | Yes |
-| NFR-008 | 19,22-24 | Layout stability | Feed rows, counters, and timers have stable dimensions and cannot resize the shell | Screenshot check | Planned | No |
-| NFR-009 | 6,50-53 | Native-device acceptance | Wallet, GPS, call, map, and safe-area flows pass on physical iOS/Android devices | Device checklist | ExternalBlocked | Yes |
+| MAL-SRC-001 | 1 | PRD title/version identity | - | Local source hash equals SOURCE record | Frozen | - |
+| MAL-OVR-001 | 4 | Payment lock, prize timing, 7-day receipt request, 7-day no-shipment handling | D-V2-004, D-V2-005, D-V2-006, D-V2-007 | No refund action exists; no-shipment creates takeover; merchant force-receipt is request-only; Claims obey frozen finality | Overridden | GAP-MAL-006, GAP-MAL-008 |
+| MAL-SHELL-001 | 5-10 | Embedded mobile DApp; persistent Seckill/Mall/Stores/Assets tabs; each listed tab capability | - | Four tabs remain reachable and preserve view state | Frozen | GAP-MAL-002 |
+| MAL-SEK-001 | 11-17 | PREHEAT, LIVE, SETTLING 5-10 min, SETTLED; countdown, dashboard, rule/history/payment buttons, pool, 30s modal, winner/non-winner variants, daily-buy transition | D-V2-007 | Every phase has distinct copy/actions; prize Claim only after final settlement | Frozen | GAP-MAL-004, GAP-MAL-005 |
+| MAL-SEK-002 | 18-21 | Large/bold SlideUpFade wall, exact +30s event copy, WebSocket event insertion | D-V2-013 | Ordered/deduped event stream, reconnect/cursor recovery, reduced-motion fallback | Frozen | GAP-MAL-005 |
+| MAL-SEK-003 | 22-24 | Main and relay timers; 60-minute main; source 60-minute relay; +30s after final TxHash | D-V2-013 | Main 60 min; relay initial/cap 60 sec; +30 sec per final purchase; never past main deadline | Overridden | GAP-MAL-005 |
+| MAL-SEK-004 | 25-34 | Rules button/modal/acknowledgement; chain timestamp; fallback retail classification; dual approval wording; 1:1 BNM wording | D-V2-002, D-V2-008, D-V2-011, D-V2-017 | Modal shows frozen rules and both quotes; chain classifies; BNM is described as Locked until fulfillment | Overridden | GAP-MAL-003, GAP-MAL-004 |
+| MAL-CAT-001 | 35-39 | Horizontal multilevel categories, product waterfall, BNM badge, seckill overlay and route | - | Category filtering works; active seckill blocks ordinary checkout | Frozen | GAP-MAL-002, GAP-MAL-004 |
+| MAL-CAT-002 | 40-42 | Product detail, sticky Buy action, seckill-disabled state, SlideUp configuration sheet | - | Action remains reachable and follows authoritative product state | Frozen | GAP-MAL-002 |
+| MAL-CHK-001 | 43-49 | Confirmation prerequisite; SKU matrix/manual selection; +/- quantity; delivery/pickup; default full address fields; empty-address guidance; nearest store/address/hours/detail | D-V2-021 | No confirmation without valid SKU, quantity, mode and authoritative address/store; totals come from signed quote | Frozen | GAP-MAL-003, GAP-MAL-006, GAP-MAL-010 |
+| MAL-STORE-001 | 50-53 | Country/city/district selectors; GPS 1.2km display; Call and Navigation buttons; JSBridge AMap/Baidu launch | - | Permission/loading/denial/unavailable states and native fallbacks are tested | ExternalBlocked | GAP-MAL-010, GAP-MAL-016 |
+| MAL-ASSET-001 | 54-64 | Assets shell; avatar, nickname, account ID, address entry; four order groups/counts; View All | - | Profile and canonical counts render from Core projection | Frozen | GAP-MAL-007 |
+| MAL-ASSET-002 | 65-70 | Seckill/shopping tabs; session number; USDT+NPL input; Locked BNM; winner/prize and non-winner state labels | D-V2-007, D-V2-008 | Exact integer/canonical amounts and allowed prize action only | Frozen | GAP-MAL-007, GAP-MAL-009 |
+| MAL-ASSET-003 | 71-74 | Three-state BNM totals, provenance link and BNM Claim button | D-V2-008 | Cumulative/Available/Locked render; Claim only for Available | Frozen | GAP-MAL-009 |
+| MAL-ASSET-004 | 76-78 | Genesis 2% NPL, three totals, credential visibility, NPL Claim | D-V2-007, D-V2-009, D-V2-010 | Hidden for ordinary user; payment snapshot and fulfillment finality govern availability | Overridden | GAP-MAL-009 |
+| MAL-ASSET-005 | 80-82 | Regional NPL totals, receipt/arbitration explanation and Claim | D-V2-006, D-V2-007, D-V2-009 | Four regional roles use signed snapshot and finality | Frozen | GAP-MAL-009 |
+| MAL-ASSET-006 | 84-86 | Direct-referral 1% NPL totals, source next-block wording and Claim | D-V2-007, D-V2-009, D-V2-010 | 1% remains Locked until fulfillment finality | Overridden | GAP-MAL-009 |
+| MAL-ASSET-007 | 88-90 | Operations 4% NPL totals, source daily multisig wording and operation-only Claim | D-V2-007, D-V2-009 | 4% is snapshotted and not claimable before fulfillment finality | Overridden | GAP-MAL-009 |
+| MAL-ADDR-001 | 93-101 | Paste textarea; name/phone/province-city-district/detail parsing; 11-digit phone; review modal exact fields/copy; missing-field red error; edit/delete/default | - | PII-safe parser and CRUD; incomplete parse cannot silently save | Frozen | GAP-MAL-007, GAP-MAL-011 |
+| MAL-ORDER-001 | 102-107 | Pending Payment/Shipment/Receipt/After-sale groups; seckill badge; inline carrier/latest logistics; Support/Exchange and Confirm Receipt buttons | - | Actions render only from allowedActions; loading/empty/error states covered | Frozen | GAP-MAL-006, GAP-MAL-007 |
+| MAL-AFTER-001 | 108-111 | No no-reason action; Exchange or Delay only; arbitration state and linked reward lock | D-V2-004, D-V2-006 | No business-refund entry point; arbitration retains Locked projection | Frozen | GAP-MAL-006, GAP-MAL-008 |
+| MAL-TRACK-001 | 112-118 | Seckill product/session/input/result; USDT prize Claim; Locked BNM amount | D-V2-007, D-V2-008 | Prize Claim follows final session settlement; BNM remains Locked until fulfillment | Overridden | GAP-MAL-007, GAP-MAL-009 |
+| MAL-TRACK-002 | 119-122 | Ordinary shopping rows; `+ BNM` pending release; released state | D-V2-006, D-V2-008 | State changes only after authoritative fulfillment finality refresh | Frozen | GAP-MAL-007, GAP-MAL-009 |
+| MAL-RWD-001 | 123-127 | Reward-center layout; cumulative, Available and Locked metrics | - | Every reward rail exposes all three exact metrics | Frozen | GAP-MAL-009 |
+| MAL-RWD-002 | 128-130 | BNM source, Locked/Available rule, BNM Claim, provenance TxHash/timestamp | D-V2-008 | Order-linked BNM follows frozen lifecycle | Frozen | GAP-MAL-009 |
+| MAL-RWD-003 | 131-134 | Genesis credential visibility; 2% NPL; source session-timing copy; node Claim/Gas | D-V2-007, D-V2-009, D-V2-010 | Payment snapshot plus fulfillment finality; ordinary wallets see no module | Overridden | GAP-MAL-009 |
+| MAL-RWD-004 | 135-137 | Direct-referral shop 1% NPL; source next-block availability; Claim/Gas | D-V2-007, D-V2-009, D-V2-010 | No self/cycle; payment snapshot; fulfillment finality | Overridden | GAP-MAL-009 |
+| MAL-RWD-005 | 138-141 | District 1.2%, city .8%, province .6%, region .4%; receipt/platform arbitration; Claim/Gas | D-V2-006, D-V2-007, D-V2-009 | Signed region snapshot and finality govern exact allocation | Frozen | GAP-MAL-009 |
+| MAL-RWD-006 | 142-144 | Operations 4%; multiple weighted addresses; source daily distribution and multisig withdrawal | D-V2-007, D-V2-009, D-V2-014 | 4% payment snapshot; availability after fulfillment; policy publishing is governed | Overridden | GAP-MAL-009 |
+| MAL-STOCK-001 | 145-148 | Pay-before inventory check; SKU/quantity; exact sold-out error message | D-V2-017 | Signed reservation, not a read-only check, prevents oversell; error is actionable | Overridden | GAP-MAL-003 |
+| MAL-REVIEW-001 | 149-157 | Full-screen final review; product/SKU, quantity/total, fulfillment, full delivery fields or store/address/notice, immutable-region warning, Confirm Address/Specs and Pay/Broadcast buttons | D-V2-002, D-V2-017 | Five factors bind the reservation and signed quotes; no local recomputation | Frozen | GAP-MAL-003, GAP-MAL-004 |
+| MAL-REGION-001 | 158-159 | Pickup store province/city/district binding and regional beneficiary attribution | D-V2-010, D-V2-017 | Signed store region is immutable in the order snapshot | Frozen | GAP-MAL-003, GAP-MAL-010 |
+| MAL-WALLET-001 | 160-164 | Pay/Broadcast button; USDT then NPL then payment; unlimited first approval; allowance recheck/revocation fallback | D-V2-001, D-V2-002 | Zero legs omitted; each insufficient leg defaults to MaxUint256 after disclosure | Frozen | GAP-MAL-001, GAP-MAL-004 |
+| MAL-TX-001 | 165-169 | Seckill/ordinary/boundary result modal; +30s copy; BNM copy; WebSocket broadcast; full TxHash block | D-V2-008, D-V2-011, D-V2-013, D-V2-017 | Submitted is not final; authoritative classification and Locked BNM wording; full selectable explorer hash | Overridden | GAP-MAL-005, GAP-MAL-012 |
+| MAL-SEC-001 | 170-174 | Reentrancy guard; no business refund; no same-transaction rewards except Burn; source session/next-block distribution timing | D-V2-003, D-V2-004, D-V2-007, D-V2-015 | Frontend consumes intents only; reward availability follows frozen finality | Overridden | GAP-MAL-001, GAP-MAL-009 |
+| MAL-FLOW-001 | 175-180 | Detail entry; sticky Buy; SKU/quantity; delivery/default address; pickup/nearest store; Confirm Order | - | Flow is ordered, resumable and preserves configuration | Frozen | GAP-MAL-002, GAP-MAL-003 |
+| MAL-FLOW-002 | 181-186 | Inventory preflight under 200ms; exact insufficient-stock feedback; five-factor review; allowance; wallet payment; TxHash | D-V2-017 | Reservation expiration/concurrency and pending finality are explicit | Frozen | GAP-MAL-003, GAP-MAL-012 |
+| MAL-FLOW-003 | 187-192 | Every beneficiary ledger starts Locked; receipt/pickup/final arbitration; Completed and Available states; one-click Claim | D-V2-006, D-V2-007, D-V2-017 | No release before fulfillment finality; claims use allowedActions and ordered intents | Frozen | GAP-MAL-006, GAP-MAL-009 |
+| MAL-GOAL-001 | Final Goal | React + TypeScript Web DApp; mobile full-screen; desktop max about 430px centered; 375/393/430 acceptance | - | Typecheck plus Playwright at required widths with no overlap/overflow | Frozen | GAP-MAL-002 |
+| MAL-GOAL-002 | Final Goal | Wallet connect, wrong chain, rejection, MaxUint256 disclosure/revocation, ERC-1271-compatible provider | D-V2-002, D-V2-015 | Browser consumer tests cover every wallet state | Frozen | GAP-MAL-001, GAP-MAL-012 |
+| MAL-GOAL-003 | Final Goal | Keyboard/focus/labels/reduced motion/safe areas; no production fixtures; no business-refund entry | D-V2-004 | Accessibility and production-bundle negative tests pass | Frozen | GAP-MAL-002 |
+| MAL-GOAL-004 | Final Goal | Physical wallet, GPS, call/navigation and production HTTPS/WSS acceptance | D-V2-019 | Real device/provider evidence only | ExternalBlocked | GAP-MAL-016 |
 
+## Completion Rule
+
+A row becomes `Verified` only with real code plus the listed automated or
+external evidence. Every row that depends on Core remains fail closed until the
+same coordinated artifact version passes the Mall consumer test.

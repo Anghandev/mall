@@ -17,10 +17,11 @@ The locked V2 interpretation is:
 - customer payment uses versioned USDT and NPL legs;
 - merchant proceeds are USDT-only;
 - NPL follows versioned Burn and circulation/reward routing;
-- BNM is an order-linked locked/released/burned reward credential.
+- BNM is an order-linked Locked/Available reward credential minted on Claim.
 
-Unresolved P0 decisions in the system contract must fail closed. Do not guess
-fund allocations, refund amounts, reward timing, or beneficiary eligibility.
+Missing production decisions in the system contract must fail closed. Do not
+guess fund allocations, reward timing, guarantee thresholds or beneficiary
+eligibility. V2 has no business-refund model.
 
 ## Path Ownership
 
@@ -42,8 +43,9 @@ branch.
 - Do not deploy or send mainnet transactions until the combined release gate
   passes and the user explicitly approves the bounded transaction plan.
 - Do not use `tx.origin` for authorization.
-- Circuit breakers must keep refund, recovery, reconciliation and audit reads
-  available as documented by the shared system contract.
+- Circuit breakers must keep fulfillment, takeover, recovery, reconciliation,
+  finality synchronization and audit reads available as documented by the
+  shared system contract.
 - Do not delete V1 until a separate cutover task proves historical orders and
   audit evidence are safe.
 

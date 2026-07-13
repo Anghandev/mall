@@ -1,69 +1,43 @@
-# V2 Thread Ownership
+# V2 Thread And Path Ownership
 
-All threads start from the same `v2/core` checkpoint and run in separate Git
-worktrees. A thread may not edit another owner's paths.
+The current main conversation owns the single V2 Goal, Core and integration.
+Product agents are controlled writers under that Goal.
 
-## Core And Integration
+## Core Main Workspace
 
-Owner: the coordinating thread.
+Core is the only writer for:
 
-Writable paths:
+- `docs/**` and root workspace/tooling/release gates;
+- `platform-v2/contracts/**`, `platform-v2/server/**`,
+  `platform-v2/scripts/**` and `platform-v2/test/**`;
+- Schema, migrations, OpenAPI, ABI, manifests and generated types;
+- indexer, signer, executor, adapters and cross-product E2E.
 
-- `docs/`
-- `platform-v2/contracts/`
-- `platform-v2/server/`
-- `platform-v2/scripts/`
-- `platform-v2/test/`
-- shared OpenAPI, ABI, generated types, integration tests, and root tooling
+Funds, shared interfaces and database state can be changed only by Core.
 
-Responsibilities: contracts, funds, database, API, indexer, signer, external
-adapters, deployment, cross-project contract tests, and final launch gates.
-It also publishes versioned consumer artifacts, synchronizes core checkpoints
-into product branches, integrates product commits, and owns cross-product E2E.
+## Product Worktrees
 
-## Customer Mall
+| Branch | Sole writable path | Forbidden responsibility |
+|---|---|---|
+| `codex/v2-mall-rewrite` | `mall-v2/**` | Shared API/ABI/Schema, funds or other products |
+| `codex/v2-merchant-rewrite` | `merchant-v2/**` | Shared API/ABI/Schema, funds or other products |
+| `codex/v2-platform-admin-rewrite` | `platform-v2/admin/**` | Contracts, server, shared API/Schema or other products |
 
-Owner: Mall thread.
+Each worktree has at most one writer. A product reports a missing Core
+capability and implements the documented fail-closed behavior; it does not add
+the shared capability locally.
 
-Writable path: `mall-v2/` only.
+## Legacy And Secrets
 
-It consumes versioned API and Web3 artifacts. It must not edit contracts,
-server code, legacy code, merchant workbench, platform admin, or root tooling.
+`legacy/v1-npl-only/**` is read-only. No V2 runtime imports it. Deletion is a
+separate cutover task after historical-order and audit-evidence proof.
 
-## Merchant Workbench
+No writer commits or prints `.env`, private keys, seed phrases, provider
+tokens, databases, PEM files, keystores or device secrets.
 
-Owner: Merchant Workbench thread.
+## Integration Authority
 
-Writable path: `merchant-v2/` only.
-
-It implements merchant UI, local UI adapters, consumer tests, and its own
-assets. It reports missing backend capabilities to the core thread and must not
-implement shared funds, database, contracts, or indexer logic.
-
-## Platform Operations Admin
-
-Owner: Platform Operations thread.
-
-Writable path: `platform-v2/admin/` only.
-
-It implements admin UI, local UI adapters, consumer tests, and its own assets.
-It reports missing backend capabilities to the core thread and must not edit
-`platform-v2/contracts/`, `platform-v2/server/`, or shared integration scripts.
-
-## Legacy
-
-`legacy/v1-npl-only/` is read-only. No V2 runtime may import it. Deletion is a
-separate cutover task after all historical orders and audit evidence are safe.
-
-## Handoff Protocol
-
-Each implementation thread reports:
-
-- requirement IDs completed;
-- commit hash;
-- tests run and their result;
-- API or Web3 contract gaps;
-- external blockers.
-
-Only the core thread updates shared matrices, changes shared contracts, merges
-branches, and runs the combined release gate.
+Only Core publishes shared checkpoints, synchronizes product branches,
+integrates product commits and updates release gates. Product branches do not
+push, deploy, send mainnet transactions, rebase shared history or cherry-pick
+shared commits.

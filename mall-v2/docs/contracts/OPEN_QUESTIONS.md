@@ -1,21 +1,21 @@
-# Mall V2 Upstream Open Questions
+# Mall V2 Decision Closure
 
-These decisions change customer copy or transaction steps. The customer app will not infer answers.
+Status: no open Phase 1 business questions. Production values remain tracked as
+`DecisionBlocked` and external inputs as `ExternalBlocked`; neither is an open
+invitation to infer a default.
 
-| ID | PRD lines | Decision required | Safe customer behavior until resolved |
-|---|---:|---|---|
-| Q-001 | 4 | Confirm that `用户收款` means customer receipt/pickup completion | Label rewards Locked and hide claim |
-| Q-002 | 4,135-144,187-192 | Does the opening rule (all non-prize funds locked until receipt) override referral next-block and operations daily availability copy? | Render only upstream ledger states |
-| Q-003 | 4,109,172 | Exact exception between no-reason refunds and seven-day merchant-default refunds | Render only `allowedActions` and upstream disclosure |
-| Q-004 | 4,117,172 | Exact per-asset refund deduction after a seckill prize contribution and immediate NPL burn | Display upstream refund preview; never compute locally |
-| Q-005 | 17,68-69,152,163 | Per-SKU USDT/NPL price legs and token metadata | Disable checkout without a signed exact quote |
-| Q-006 | 22-24,30-31 | Which countdown ends LIVE, and how a boundary transaction is repriced/classified | Display upstream phase/classification only |
-| Q-007 | 34,128-130,167-168 | Is BNM minted/locked at payment or only created at receipt? | Use `Locked` wording until upstream says Available |
-| Q-008 | 117,173 | When does the USDT prize become claimable relative to the 5-10 minute settling phase? | Keep claim disabled until `allowedActions` enables it |
-| Q-009 | 123-144 | The heading says four rewards while the content describes BNM plus four NPL sections | Customer app treats them as five distinct sections |
-| Q-010 | 132-133 | Genesis credential standard, identifier, snapshot time, and hidden-vs-disabled behavior | Hide the section unless an entitlement state is supplied |
-| Q-011 | 136,139-140 | Referral and four-level region beneficiary snapshot semantics | Display upstream totals without deriving relationships |
-| Q-012 | 143-144 | Whether operations rewards are visible to ordinary customers | Hide unless upstream returns an entitled section |
-| Q-013 | 4,110,140 | Seven-day clock anchors and evidence for timeout refund/force receipt | Do not derive eligibility from device time |
-| Q-014 | 95-100 | Approved address parsing provider and PII retention policy | Support local fixture parsing only in development; production parse disabled until contracted |
-
+| Former question | Resolution |
+|---|---|
+| Q-001 receipt meaning | D-V2-006 and D-V2-017 |
+| Q-002 reward timing conflicts | D-V2-007 |
+| Q-003 and Q-004 business-refund behavior | D-V2-004; the interface does not exist |
+| Q-005 exact payment legs | D-V2-001 and D-V2-002 |
+| Q-006 timers and boundary classification | D-V2-011 and D-V2-013 |
+| Q-007 BNM lifecycle | D-V2-008 |
+| Q-008 prize Claim timing | D-V2-007 |
+| Q-009 reward section count | Matrix rows MAL-RWD-001 through MAL-RWD-006 |
+| Q-010 genesis credential | D-V2-010 plus production credential configuration |
+| Q-011 referral and region snapshots | D-V2-009 and D-V2-010 |
+| Q-012 operations visibility | Server-authoritative entitlement under D-V2-021 |
+| Q-013 seven-day clocks and evidence | D-V2-005 and D-V2-006 |
+| Q-014 address parser/provider | GAP-MAL-011 and ConfigurationRequired |

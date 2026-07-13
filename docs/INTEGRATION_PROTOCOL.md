@@ -1,68 +1,89 @@
 # V2 Integration Protocol
 
-The three product Goals are consumers of one shared platform. A product Goal is
-not complete when its local UI or fixtures pass; completion requires integration
-against the same published core artifacts and the combined end-to-end gate.
+One coordinating Goal owns Core and integration. The three product worktrees
+are controlled consumers under that Goal, not independent Goals.
+
+## Checkpoints And Worktrees
+
+1. Phase 1 is completed and committed in the main `v2/core` workspace.
+2. One clean V2 workspace baseline is committed by Core.
+3. From the same Core checkpoint, Core creates:
+   - `codex/v2-mall-rewrite`, writable only under `mall-v2/`;
+   - `codex/v2-merchant-rewrite`, writable only under `merchant-v2/`;
+   - `codex/v2-platform-admin-rewrite`, writable only under
+     `platform-v2/admin/`.
+4. No two writers use the same worktree. Product worktrees do not rebase,
+   rewrite shared history or cherry-pick individual shared commits.
 
 ## Shared Authority
 
-The core Goal owns contracts, funds, database state, API, indexer, signer,
-external adapters, deployment, and cross-product tests. It publishes versioned:
+Core owns funds, contracts, Schema/migrations, database, API, indexer, signer,
+executor, adapters, OpenAPI, ABI, manifests, generated types, enums, WebSocket
+protocol and consumer tests. Products never duplicate or infer them.
 
-- OpenAPI and generated TypeScript types;
-- ABI bundles and deployment manifests;
-- state and error enums;
-- payment, reservation, settlement, refund, claim, and finality consumer tests.
+Before Core publishes a coordinated artifact version, products may implement
+only deterministic UI and fail-closed states. Fixtures are test-only and must
+not enter a production bundle.
 
-Customer Mall, Merchant Workbench, and Platform Operations must consume those
-artifacts. They may not duplicate schemas, infer money, invent endpoints, or
-turn missing `allowedActions` into permission.
+## Publication And Consumption
 
-## Delivery Loop
+Core publishes one checkpoint containing the same-version OpenAPI, generated
+types, ABI bundle, deployment manifest, state/error enums, WebSocket protocol
+and payment/reservation/settlement/takeover/fulfillment/Claim/seckill/finality
+consumer tests.
 
-1. A product Goal records a missing capability in its owned upstream-gap file
-   and reports the affected requirement IDs to the core Goal.
-2. The core Goal resolves product decisions, implements the shared capability,
-   runs provider and contract tests, and publishes one versioned checkpoint.
-3. The coordinating thread synchronizes that checkpoint into all three product
-   branches. Product Goals do not cherry-pick or rewrite shared history.
-4. Each affected product replaces its fail-closed placeholder with a consumer
-   of the published artifact and runs its consumer, type, and UI tests.
-5. The core Goal integrates product commits containing only owned paths and runs
-   combined checkout, fulfillment, refund, settlement, Claim, seckill, audit,
-   finality, and permission E2E.
-6. A failed consumer or combined test reopens the originating requirement. A
-   local fixture, screenshot, static string check, or green unit test cannot
-   override failed integration evidence.
+The coordinating thread synchronizes the complete Core checkpoint to all three
+product branches. Each product then replaces only its affected fail-closed
+placeholder, consumes the published artifact and runs its consumer, type and UI
+tests. A local schema look-alike or handwritten calldata is forbidden.
 
-## Runtime Flow
+## Product Delivery Report
+
+Every product delivery reports:
+
+- completed Requirement IDs;
+- commit hash and modified files;
+- test commands and results;
+- required Core capability;
+- `ExternalBlocked` items;
+- whether any production fixture exists.
+
+When Core capability is missing, the only accepted record is:
+
+```text
+Requirement ID + required capability + fail-closed behavior
+```
+
+Core integrates one product commit at a time and immediately runs that
+product's consumer test. Combined E2E starts only after every product consumes
+the same Core artifact version.
+
+## Runtime Boundary
 
 ```text
 signed policy and reservation
   -> ordered wallet transaction intents
-  -> contract receipt and expected event
-  -> confirmation and reorg handling
+  -> receipt plus expected event identity
+  -> confirmations and reorg/replacement handling
   -> indexed domain state
   -> API projection plus allowedActions
-  -> Mall / Merchant / Operations UI
+  -> Mall / Merchant / Platform UI
 ```
 
-No UI may skip a step by directly setting a final business state. Resource IDs,
-wallet identity, signatures, expected event identity, block hash, and required
-confirmations remain bound through the entire flow.
+No UI may set a final business state directly. Resource ID, wallet identity,
+signature, expected event, block hash and confirmations remain bound end to
+end.
 
-## Completion Gate
+## Combined Gate
 
-The combined project is complete only when:
+The combined gate covers checkout, boundary classification, takeover
+fulfillment, receipt/pickup/arbitration, settlement, all Claims, seckill,
+audit/finality, provider failures, permissions and every Circuit Breaker.
 
-- all three product matrices are integrated against the same core version;
-- no local-fixable requirement remains Partial or Missing;
-- all consumer-contract and cross-product E2E tests pass;
-- Circuit Breaker activation, blocked actions, recovery actions, resume, and
-  permission failures are proven;
-- fixtures and mocks are excluded from production evidence;
-- external services, production HTTPS, devices, and bounded BSC micro-tests are
-  verified when the user supplies and approves those release inputs.
+A failed consumer or combined test reopens the originating Requirement ID.
+Screenshots, fixtures, static strings and isolated green unit tests cannot
+override failed integration evidence.
 
-Until then, each Goal remains active or accurately reports an external/core
-blocker. It must not mark the product or combined project complete.
+After the full local gate, one read-only full-repository security review is
+allowed. Core fixes its bounded list; the same review task then checks only the
+fix diff.
