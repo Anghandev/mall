@@ -74,7 +74,7 @@ export function CoreStatusPage() {
 
       <section className="snapshot-rule">
         <ShieldCheck aria-hidden="true" />
-        <div><strong>Admin 边界</strong><p>履约订单、订单级 allowedActions 和接管命令已发布；政策、保证金/债务、Safe 结算、CMS、审计与监控仍未发布。</p></div>
+        <div><strong>Admin 边界</strong><p>履约订单、订单级 allowedActions 及物流/售后/仲裁/接管命令已发布；政策、保证金/债务、Safe 结算、CMS、审计与监控仍未发布。</p></div>
       </section>
     </>
   );

@@ -1,8 +1,6 @@
 import {
-  executableOrderActionNames,
   type AllowedAction,
   type FulfillmentOrder,
-  type TakeoverOpenedResult,
 } from '@abu24k/core-artifacts';
 import {
   AlertTriangle,
@@ -13,24 +11,22 @@ import {
   Clock3,
   FileLock2,
   KeyRound,
-  PackageCheck,
   RefreshCw,
   ShieldCheck,
   Truck,
 } from 'lucide-react';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { BatchActionBar } from '../components/BatchActionBar';
+import { FulfillmentCommandPanel } from '../components/FulfillmentCommandPanel';
 import { GlobalSearch } from '../components/GlobalSearch';
 import {
   CoreApiError,
   fetchFulfillmentOrders,
   fetchOrderAllowedActions,
-  openTakeover,
+  type PlatformFulfillmentCommandResult,
 } from '../coreApi';
 import { useCoreSession } from '../coreSession';
 
-const bytes32Pattern = /^0x[0-9a-fA-F]{64}$/;
-const reasonCodePattern = /^[A-Z0-9_:-]{2,64}$/;
 const stages = [
   { label: '自动建案', detail: 'payment finality 后 7 × 24h 无有效发货证据', icon: Clock3 },
   { label: '冻结商家权限', detail: '新订单、上架与商家结算申请', icon: Ban },
@@ -45,37 +41,19 @@ export function TakeoverPage() {
   const [actions, setActions] = useState<readonly AllowedAction[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [actionsLoading, setActionsLoading] = useState(false);
+  const [commandPending, setCommandPending] = useState(false);
   const [resourceError, setResourceError] = useState<CoreApiError | null>(null);
-  const [commandError, setCommandError] = useState<CoreApiError | null>(null);
-  const [commandResult, setCommandResult] = useState<TakeoverOpenedResult | null>(null);
-  const [evidenceHash, setEvidenceHash] = useState('');
-  const [reasonCode, setReasonCode] = useState('');
-  const [idempotencyKey, setIdempotencyKey] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [commandResult, setCommandResult] = useState<PlatformFulfillmentCommandResult | null>(null);
   const hasPlatformRole = session?.roles.some((role) => role === 'ADMIN' || role === 'OPERATOR') ?? false;
   const selectedOrder = useMemo(
     () => orders.find((order) => order.orderId === selectedOrderId) ?? null,
     [orders, selectedOrderId],
   );
-  const takeoverAction = actions.find((action) => action.action === 'OPEN_TAKEOVER');
-  const takeoverPublished = executableOrderActionNames.includes('OPEN_TAKEOVER');
-  const disabledReason = takeoverDisabledReason({
-    actionsLoading,
-    evidenceHash,
-    hasPlatformRole,
-    reasonCode,
-    selectedOrder,
-    session: Boolean(session),
-    takeoverAction,
-    takeoverPublished,
-  });
-
   useEffect(() => {
     setOrders([]);
     setSelectedOrderId('');
     setActions([]);
     setResourceError(null);
-    setCommandError(null);
     setCommandResult(null);
     if (!session || !hasPlatformRole) return;
     const controller = new AbortController();
@@ -97,11 +75,7 @@ export function TakeoverPage() {
   useEffect(() => {
     setActions([]);
     setResourceError(null);
-    setCommandError(null);
     setCommandResult(null);
-    setEvidenceHash('');
-    setReasonCode('');
-    setIdempotencyKey('');
     if (!session || !hasPlatformRole || !selectedOrderId) return;
     const controller = new AbortController();
     setActionsLoading(true);
@@ -116,35 +90,18 @@ export function TakeoverPage() {
     return () => controller.abort();
   }, [hasPlatformRole, selectedOrderId, session]);
 
-  const submitTakeover = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!session || !selectedOrder || disabledReason) return;
-    const nextIdempotencyKey = idempotencyKey || `admin-takeover:${globalThis.crypto.randomUUID()}`;
-    setIdempotencyKey(nextIdempotencyKey);
-    setSubmitting(true);
-    setCommandError(null);
-    setCommandResult(null);
+  const handleCommandCompleted = async (result: PlatformFulfillmentCommandResult) => {
+    if (!session || !selectedOrder) return;
+    setCommandResult(result);
     try {
-      const result = await openTakeover(selectedOrder.orderId, {
-        idempotencyKey: nextIdempotencyKey,
-        evidenceHash: evidenceHash.trim(),
-        reasonCode: reasonCode.trim(),
-      }, session.token);
-      setCommandResult(result);
-      try {
-        const [nextOrders, nextActions] = await Promise.all([
-          fetchFulfillmentOrders(session.token),
-          fetchOrderAllowedActions(selectedOrder.orderId, session.token),
-        ]);
-        setOrders(nextOrders);
-        setActions(nextActions);
-      } catch (cause) {
-        setResourceError(asCoreError(cause, '接管已提交，但最新订单状态读取失败'));
-      }
+      const [nextOrders, nextActions] = await Promise.all([
+        fetchFulfillmentOrders(session.token),
+        fetchOrderAllowedActions(selectedOrder.orderId, session.token),
+      ]);
+      setOrders(nextOrders);
+      setActions(nextActions);
     } catch (cause) {
-      setCommandError(asCoreError(cause, '接管命令失败'));
-    } finally {
-      setSubmitting(false);
+      setResourceError(asCoreError(cause, '命令已提交，但最新订单状态读取失败'));
     }
   };
 
@@ -202,7 +159,7 @@ export function TakeoverPage() {
                         <td><strong>{order.state}</strong><small>{formatDate(order.paidAt)}</small></td>
                         <td><strong>{order.finalityStatus}</strong><small>{formatDate(order.paymentFinalizedAt)}</small></td>
                         <td><strong>{order.takeoverOpenedAt ? 'OPEN' : 'NOT_OPEN'}</strong><small>{formatDate(order.takeoverOpenedAt)}</small></td>
-                        <td><button className="button button-quiet" type="button" onClick={() => setSelectedOrderId(order.orderId)} aria-pressed={order.orderId === selectedOrderId}>查看</button></td>
+                        <td><button className="button button-quiet" type="button" onClick={() => setSelectedOrderId(order.orderId)} aria-pressed={order.orderId === selectedOrderId} disabled={commandPending}>查看</button></td>
                       </tr>
                     ))}
                   </tbody>
@@ -219,24 +176,35 @@ export function TakeoverPage() {
                       <div><dt>Open requests</dt><dd>{selectedOrder.requests.filter((request) => request.state === 'OPEN').length}</dd></div>
                       <div><dt>Balance states</dt><dd>{selectedOrder.balances.map((balance) => `${balance.asset}:${balance.state}`).join(' · ') || '无'}</dd></div>
                     </dl>
+                    <div className="fulfillment-evidence-streams">
+                      <EvidenceGroup title="Shipments" empty="无发货证据">
+                        {selectedOrder.shipments.map((shipment) => <li key={shipment.shipmentId}><strong>{shipment.carrierCode} · {shipment.shipmentId}</strong><code>{shipment.trackingNumberHash}</code><small>{formatDate(shipment.createdAt)}</small></li>)}
+                      </EvidenceGroup>
+                      <EvidenceGroup title="Logistics" empty="无物流事件">
+                        {selectedOrder.logistics.map((event) => <li key={event.logisticsEventId}><strong>{event.provider} · {event.status}</strong><code>{event.locationHash ?? '无位置哈希'}</code><small>{formatDate(event.occurredAt)}</small></li>)}
+                      </EvidenceGroup>
+                      <EvidenceGroup title="Requests" empty="无售后 / 仲裁申请">
+                        {selectedOrder.requests.map((request) => <li key={request.requestId}><strong>{request.requestType} · {request.state}</strong><code>{request.requestId}</code><small>{formatDate(request.requestedAt)}</small></li>)}
+                      </EvidenceGroup>
+                      <EvidenceGroup title="Balances" empty="无资金状态投影">
+                        {selectedOrder.balances.map((balance) => <li key={`${balance.asset}:${balance.state}`}><strong>{balance.asset} · {balance.state}</strong><code>{balance.amount}</code><small>Core atomic amount</small></li>)}
+                      </EvidenceGroup>
+                    </div>
                   </div>
-                  <form className="takeover-command" onSubmit={(event) => void submitTakeover(event)}>
-                    <div className="panel-heading"><div><p className="section-kicker">POST /v2/orders/{'{orderId}'}/takeover</p><h3>打开接管案件</h3></div><span className={takeoverAction?.enabled ? 'status-chip status-ready' : 'status-chip status-blocked'}>{actionsLoading ? 'Checking' : takeoverAction?.enabled ? 'Core allowed' : takeoverAction?.reasonCode ?? 'Not allowed'}</span></div>
-                    <label htmlFor="takeover-evidence">履约证据哈希 · bytes32</label>
-                    <input id="takeover-evidence" value={evidenceHash} onChange={(event) => setEvidenceHash(event.target.value)} autoComplete="off" placeholder="0x + 64 hex" />
-                    <label htmlFor="takeover-reason">原因代码</label>
-                    <input id="takeover-reason" value={reasonCode} onChange={(event) => setReasonCode(event.target.value.toUpperCase())} autoComplete="off" placeholder="NO_SHIPMENT_AFTER_FINALITY" />
-                    <button className="button button-primary button-full" type="submit" disabled={Boolean(disabledReason) || submitting}>
-                      <PackageCheck aria-hidden="true" /> {submitting ? '提交中' : '打开接管案件'}
-                    </button>
-                    <p className="button-explanation">{disabledReason ?? '当前 ADMIN / OPERATOR 会话与 Core allowedActions 均已授权。'}</p>
-                    {commandError ? <CoreErrorView error={commandError} /> : null}
-                  </form>
+                  <FulfillmentCommandPanel
+                    actions={actions}
+                    actionsLoading={actionsLoading}
+                    onBusyChange={setCommandPending}
+                    onCompleted={handleCommandCompleted}
+                    order={selectedOrder}
+                    roles={session.roles}
+                    token={session.token}
+                  />
                 </div>
               ) : null}
             </>
           )}
-          {commandResult ? <p className="healthy-copy takeover-command-result" role="status"><CheckCircle2 aria-hidden="true" /> Case {commandResult.caseId} 已打开，客户资金保持 Locked。</p> : null}
+          {commandResult ? <p className="healthy-copy takeover-command-result" role="status"><CheckCircle2 aria-hidden="true" /> Core 已确认订单状态 {commandResult.state}，订单 {commandResult.orderId}。</p> : null}
           {sessionError ? <p className="inline-notice" role="alert">{sessionError}</p> : null}
         </article>
         <aside className="panel takeover-guard">
@@ -252,31 +220,13 @@ export function TakeoverPage() {
   );
 }
 
-function takeoverDisabledReason(input: {
-  actionsLoading: boolean;
-  evidenceHash: string;
-  hasPlatformRole: boolean;
-  reasonCode: string;
-  selectedOrder: FulfillmentOrder | null;
-  session: boolean;
-  takeoverAction: AllowedAction | undefined;
-  takeoverPublished: boolean;
-}) {
-  if (!input.session) return '需要已认证的 Core 会话。';
-  if (!input.hasPlatformRole) return '当前会话缺少 ADMIN 或 OPERATOR 角色。';
-  if (!input.selectedOrder) return '请选择 Core 返回的履约订单。';
-  if (!input.takeoverPublished) return '当前 artifact 未发布 OPEN_TAKEOVER 能力。';
-  if (input.selectedOrder.state !== 'PAID') return `订单状态 ${input.selectedOrder.state} 不允许打开接管案件。`;
-  if (input.actionsLoading) return '正在读取当前订单 allowedActions。';
-  if (!input.takeoverAction) return 'Core 未向当前会话返回 OPEN_TAKEOVER。';
-  if (!input.takeoverAction.enabled) return `Core 拒绝 OPEN_TAKEOVER：${input.takeoverAction.reasonCode ?? 'UnknownState'}${input.takeoverAction.deadline ? ` · ${input.takeoverAction.deadline}` : ''}`;
-  if (!bytes32Pattern.test(input.evidenceHash.trim())) return '请输入 Core 要求的 bytes32 履约证据哈希。';
-  if (!reasonCodePattern.test(input.reasonCode.trim())) return '原因代码必须为 2—64 位大写字母、数字、下划线、冒号或连字符。';
-  return null;
-}
-
 function CoreErrorView({ error }: { error: CoreApiError }) {
   return <div className="resource-state resource-state-error" role="alert"><Ban aria-hidden="true" /><div><strong>{error.code}</strong><p>{error.message}{error.correlationId ? ` · Correlation ${error.correlationId}` : ''}</p></div></div>;
+}
+
+function EvidenceGroup({ children, empty, title }: { children: ReactNode; empty: string; title: string }) {
+  const hasEvidence = Array.isArray(children) ? children.length > 0 : Boolean(children);
+  return <section><h4>{title}</h4>{hasEvidence ? <ul>{children}</ul> : <p>{empty}</p>}</section>;
 }
 
 function asCoreError(cause: unknown, message: string) {

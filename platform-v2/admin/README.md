@@ -16,16 +16,19 @@ implements shared funds, contracts, API, Schema or signer behavior.
   reservation, Router-call and finality trace.
 - `GET /v2/orders` drives the ADMIN/OPERATOR fulfillment-order view.
   `POST /v2/actions/order` is the only authority for the current session's
-  order actions, and `POST /v2/orders/{orderId}/takeover` remains disabled
-  unless the current role, order state and returned `OPEN_TAKEOVER` action all
-  permit it. The static executable-action catalog is capability metadata only.
+  order actions. Shipment, delivery, exchange/delay decision, arbitration,
+  takeover and forced-receipt commands remain disabled unless the current
+  role, order state and matching Core action all permit them. Every command
+  carries a stable idempotency key and evidence hash. The static executable
+  action catalog is capability metadata only.
 - The browser uses `VITE_CORE_API_ORIGIN` when set and otherwise calls the Core
   API on the current origin. JWTs stay in memory and are not persisted.
 - The payment projection remains buyer-wallet scoped. Fulfillment orders and
-  the takeover command are ADMIN/OPERATOR scoped. Guarantee funding, merchant
-  debt, monitoring, policy publication, Safe settlement and other Admin writes
-  remain unpublished and fail closed. No amount, allocation, permission,
-  endpoint, calldata or finality is inferred.
+  platform fulfillment commands are ADMIN/OPERATOR scoped; arbitration
+  decisions additionally require ADMIN. Guarantee funding, merchant debt,
+  monitoring, policy publication, Safe settlement and other Admin writes remain
+  unpublished and fail closed. No amount, allocation, permission, endpoint,
+  calldata or finality is inferred.
 - Ordinary soft-delete controls are visible only as disabled capabilities
   waiting for Core `allowedActions`. Funds, chain, audit and historical evidence
   surfaces render no delete control.

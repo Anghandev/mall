@@ -229,6 +229,14 @@ input::placeholder { color: #8b8b82; }
 .takeover-command .healthy-copy { margin: 6px 0 0; }
 .takeover-command-result { margin: 0; padding: 0 18px 18px; }
 .takeover-guard > .button { margin-top: 14px; }
+.fulfillment-decision { margin: 3px 0; }
+.fulfillment-evidence-streams { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.fulfillment-evidence-streams section { min-width: 0; padding: 10px; background: var(--surface-muted); border: 1px solid var(--line); border-radius: 4px; }
+.fulfillment-evidence-streams h4 { margin: 0 0 7px; font-size: 11px; text-transform: uppercase; }
+.fulfillment-evidence-streams ul { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.fulfillment-evidence-streams li { min-width: 0; display: grid; }
+.fulfillment-evidence-streams code { overflow-wrap: anywhere; color: var(--ink-muted); font-size: 9px; }
+.fulfillment-evidence-streams small, .fulfillment-evidence-streams p { margin: 0; color: var(--ink-muted); font-size: 10px; }
 
 .data-panel { margin-top: 20px; padding: 0; overflow: hidden; }
 .data-panel > .panel-heading { min-height: 68px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
@@ -345,6 +353,7 @@ input::placeholder { color: #8b8b82; }
   .trace-form > div, .session-prompt { grid-template-columns: 1fr; }
   .session-prompt { align-items: stretch; flex-direction: column; }
   .takeover-stage-grid { grid-template-columns: 1fr; }
+  .fulfillment-evidence-streams { grid-template-columns: 1fr; }
   .dashboard-alert { grid-template-columns: 36px 1fr; }
   .dashboard-alert a { grid-column: 2; }
   .blocked-callout { align-items: flex-start; }
