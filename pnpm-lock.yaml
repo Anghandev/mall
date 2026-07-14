@@ -111,6 +111,9 @@ importers:
 
   merchant-v2:
     dependencies:
+      '@abu24k/core-artifacts':
+        specifier: workspace:*
+        version: link:../packages/core-artifacts
       lucide-react:
         specifier: 'catalog:'
         version: 1.24.0(react@19.2.7)
