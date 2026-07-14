@@ -35,6 +35,7 @@ describe('platform admin fail-closed experience', () => {
     expect(executableOrderActionNames).toContain('OPEN_TAKEOVER');
     expect(coreState.executableOrderActionNames).toEqual(executableOrderActionNames);
     expect(productBaseline.adminCapabilities.orderAllowedActions).toBe(true);
+    expect(productBaseline.adminCapabilities.fulfillmentCommands).toBe(true);
     expect(productBaseline.adminCapabilities.writesWithoutRuntimeAuthorization).toBe(false);
     expect(coreState.canWriteWithoutRuntimeAuthorization).toBe(false);
 
@@ -114,15 +115,15 @@ describe('platform admin fail-closed experience', () => {
 
     await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
     expect(await screen.findByText('Core allowed')).toBeTruthy();
-    const submit = screen.getByRole('button', { name: '打开接管案件' });
+    const submit = screen.getByRole('button', { name: '执行打开接管案件' });
     expect(submit.hasAttribute('disabled')).toBe(true);
 
-    await user.type(screen.getByLabelText('履约证据哈希 · bytes32'), hash('9'));
+    await user.type(screen.getByLabelText('证据哈希 · bytes32'), hash('9'));
     await user.type(screen.getByLabelText('原因代码'), 'NO_SHIPMENT_AFTER_FINALITY');
     expect(submit.hasAttribute('disabled')).toBe(false);
     await user.click(submit);
 
-    expect(await screen.findByText(/takeover-case-1 已打开/)).toBeTruthy();
+    expect(await screen.findByText(/Core 已确认订单状态 TAKEOVER/)).toBeTruthy();
     const commandCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith(`/v2/orders/${order.orderId}/takeover`));
     expect(commandCall?.[1]).toMatchObject({ method: 'POST' });
     expect(JSON.parse(String(commandCall?.[1]?.body))).toMatchObject({
@@ -149,10 +150,74 @@ describe('platform admin fail-closed experience', () => {
 
     await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
     expect(await screen.findByText('FinalityPending')).toBeTruthy();
-    await user.type(screen.getByLabelText('履约证据哈希 · bytes32'), hash('9'));
+    await user.type(screen.getByLabelText('证据哈希 · bytes32'), hash('9'));
     await user.type(screen.getByLabelText('原因代码'), 'NO_SHIPMENT_AFTER_FINALITY');
-    expect(screen.getByRole('button', { name: '打开接管案件' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '执行打开接管案件' }).hasAttribute('disabled')).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/takeover'))).toBe(false);
+  });
+
+  it('records replacement shipment only after takeover order state and Core action agree', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    const order = fulfillmentOrder({ state: 'TAKEOVER', takeoverOpenedAt: '2026-07-09T00:00:00.000Z' });
+    window.ethereum = walletProvider(wallet);
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['OPERATOR'] });
+      if (url.endsWith('/v2/orders') && !init?.method) return jsonResponse({ orders: [order] });
+      if (url.endsWith('/v2/actions/order')) return jsonResponse({ allowedActions: [{ action: 'RECORD_SHIPMENT', enabled: true }] });
+      if (url.endsWith(`/v2/orders/${order.orderId}/shipments`)) {
+        return jsonResponse({
+          orderId: order.orderId,
+          state: 'SHIPPED',
+          shipmentId: 'shipment-1',
+          carrierCode: 'SF',
+          trackingNumberHash: hash('7'),
+          recordedAt: '2026-07-14T10:00:00.000Z',
+        }, 201);
+      }
+      return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected request', correlationId: 'shipment-test' } }, 400);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderAt('/takeover');
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    expect(await screen.findByRole('button', { name: '执行记录发货' })).toBeTruthy();
+    await user.type(screen.getByLabelText('证据哈希 · bytes32'), hash('6'));
+    await user.type(screen.getByLabelText('承运商代码'), 'sf');
+    await user.type(screen.getByLabelText('运单号哈希 · bytes32'), hash('7'));
+    await user.click(screen.getByRole('button', { name: '执行记录发货' }));
+
+    expect(await screen.findByText(/Core 已确认订单状态 SHIPPED/)).toBeTruthy();
+    const commandCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith(`/v2/orders/${order.orderId}/shipments`));
+    expect(JSON.parse(String(commandCall?.[1]?.body))).toMatchObject({
+      carrierCode: 'SF',
+      evidenceHash: hash('6'),
+      trackingNumberHash: hash('7'),
+    });
+  });
+
+  it('denies arbitration decisions to an operator even if a bad Core response enables the action', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    const order = fulfillmentOrder({ state: 'ARBITRATION', arbitrationOpenedAt: '2026-07-14T09:00:00.000Z' });
+    window.ethereum = walletProvider(wallet);
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['OPERATOR'] });
+      if (url.endsWith('/v2/orders') && !init?.method) return jsonResponse({ orders: [order] });
+      if (url.endsWith('/v2/actions/order')) return jsonResponse({ allowedActions: [{ action: 'DECIDE_ARBITRATION', enabled: true }] });
+      return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected request', correlationId: 'role-fence' } }, 400);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderAt('/takeover');
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    expect(await screen.findByText(/DECIDE_ARBITRATION 不允许当前平台角色/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: '执行裁决仲裁' }).hasAttribute('disabled')).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/arbitration-decisions'))).toBe(false);
   });
 
   it('shows every governance gate and blocks publication', () => {
@@ -320,7 +385,7 @@ function paymentProjection() {
   };
 }
 
-function fulfillmentOrder() {
+function fulfillmentOrder(overrides: Record<string, unknown> = {}) {
   return {
     orderId: hash('8'),
     artifactVersion,
@@ -355,5 +420,6 @@ function fulfillmentOrder() {
     shipments: [],
     logistics: [],
     balances: [{ asset: 'USDT', state: 'LOCKED', amount: '65000000' }],
+    ...overrides,
   };
 }

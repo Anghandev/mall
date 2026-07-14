@@ -21,7 +21,7 @@ export const productBaseline = Object.freeze({
     paymentProjection: 'BUYER_WALLET_SCOPED',
     fulfillmentOrderProjection: 'ADMIN_RBAC_SCOPED',
     orderAllowedActions: true,
-    takeoverCommand: true,
+    fulfillmentCommands: true,
     projections: true,
     monitoring: false,
     policyPublication: false,

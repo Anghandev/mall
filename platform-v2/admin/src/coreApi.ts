@@ -1,6 +1,7 @@
 import {
   allowedActionNames,
   allowedActionReasonCodes,
+  arbitrationOutcomes,
   artifactVersion,
   balanceStates,
   chainIdentity,
@@ -15,11 +16,22 @@ import {
   orderProjectionStates,
   userRoles,
   type AllowedAction,
+  type ArbitrationDecision,
+  type ArbitrationDecisionResult,
+  type ArbitrationOpenedResult,
   type CatalogProduct,
   type CoreErrorCode,
+  type DeliveryResult,
+  type ForcedReceiptDecisionResult,
   type FulfillmentOrder,
+  type FulfillmentCommandInput,
+  type FulfillmentDecision,
+  type FulfillmentRequestDecision,
+  type FulfillmentRequestDecisionResult,
   type FulfillmentReasonRequest,
   type PaymentProjection,
+  type ShipmentRequest,
+  type ShipmentResult,
   type TakeoverOpenedResult,
   type UserRole,
 } from '@abu24k/core-artifacts';
@@ -31,6 +43,14 @@ const coreOrigin = (import.meta.env.VITE_CORE_API_ORIGIN ?? '').trim().replace(/
 
 export type CoreBootstrap = ReturnType<typeof parseBootstrap>;
 export type CoreSession = ReturnType<typeof parseSession>;
+export type PlatformFulfillmentCommandResult =
+  | ShipmentResult
+  | DeliveryResult
+  | FulfillmentRequestDecisionResult
+  | ArbitrationOpenedResult
+  | ArbitrationDecisionResult
+  | TakeoverOpenedResult
+  | ForcedReceiptDecisionResult;
 
 export type WalletProvider = {
   request(input: { method: string; params?: readonly unknown[] }): Promise<unknown>;
@@ -128,23 +148,107 @@ export async function openTakeover(
 ): Promise<TakeoverOpenedResult> {
   if (!bytes32Pattern.test(orderId)) throw invalidResponse('Order ID must be a bytes32 value');
   if (
-    input.idempotencyKey.length < 8
-      || input.idempotencyKey.length > 128
-      || !bytes32Pattern.test(input.evidenceHash)
-      || !/^[A-Z0-9_:-]{2,64}$/.test(input.reasonCode)
+    !isFulfillmentCommandInput(input)
+      || !isReasonCode(input.reasonCode)
   ) throw invalidResponse('Takeover command input does not match the coordinated generated type');
-  const body = await requestJson(`/v2/orders/${encodeURIComponent(orderId)}/takeover`, {
-    body: JSON.stringify(input),
-    headers: {
-      authorization: `Bearer ${token}`,
-      'content-type': 'application/json',
-    },
-    method: 'POST',
-  });
-  if (!isTakeoverOpenedResult(body) || body.orderId.toLowerCase() !== orderId.toLowerCase()) {
-    throw invalidResponse('Takeover result does not match the coordinated generated type');
+  return postFulfillmentCommand(orderId, 'takeover', input, token, isTakeoverOpenedResult, 'Takeover');
+}
+
+export async function recordShipment(
+  orderId: string,
+  input: ShipmentRequest,
+  token: string,
+): Promise<ShipmentResult> {
+  if (
+    !isFulfillmentCommandInput(input)
+      || !/^[A-Z0-9_-]{2,32}$/.test(input.carrierCode)
+      || !bytes32Pattern.test(input.trackingNumberHash)
+      || (input.providerReferenceHash !== undefined && !bytes32Pattern.test(input.providerReferenceHash))
+  ) throw invalidResponse('Shipment command input does not match the coordinated generated type');
+  return postFulfillmentCommand(orderId, 'shipments', input, token, isShipmentResult, 'Shipment');
+}
+
+export async function recordDelivery(
+  orderId: string,
+  input: FulfillmentCommandInput,
+  token: string,
+): Promise<DeliveryResult> {
+  if (!isFulfillmentCommandInput(input)) {
+    throw invalidResponse('Delivery command input does not match the coordinated generated type');
   }
-  return body;
+  return postFulfillmentCommand(orderId, 'delivery', input, token, isDeliveryResult, 'Delivery');
+}
+
+export async function decideFulfillmentRequest(
+  orderId: string,
+  input: FulfillmentRequestDecision,
+  token: string,
+): Promise<FulfillmentRequestDecisionResult> {
+  if (
+    !isFulfillmentCommandInput(input)
+      || input.requestId.length === 0
+      || typeof input.approved !== 'boolean'
+      || !isReasonCode(input.noteCode)
+  ) throw invalidResponse('Fulfillment request decision does not match the coordinated generated type');
+  return postFulfillmentCommand(
+    orderId,
+    'request-decisions',
+    input,
+    token,
+    isFulfillmentRequestDecisionResult,
+    'Fulfillment request decision',
+  );
+}
+
+export async function openArbitration(
+  orderId: string,
+  input: FulfillmentReasonRequest,
+  token: string,
+): Promise<ArbitrationOpenedResult> {
+  if (!isFulfillmentCommandInput(input) || !isReasonCode(input.reasonCode)) {
+    throw invalidResponse('Arbitration command input does not match the coordinated generated type');
+  }
+  return postFulfillmentCommand(orderId, 'arbitrations', input, token, isArbitrationOpenedResult, 'Arbitration');
+}
+
+export async function decideArbitration(
+  orderId: string,
+  input: ArbitrationDecision,
+  token: string,
+): Promise<ArbitrationDecisionResult> {
+  if (
+    !isFulfillmentCommandInput(input)
+      || !arbitrationOutcomes.includes(input.outcome)
+      || !isReasonCode(input.noteCode)
+  ) throw invalidResponse('Arbitration decision does not match the coordinated generated type');
+  return postFulfillmentCommand(
+    orderId,
+    'arbitration-decisions',
+    input,
+    token,
+    isArbitrationDecisionResult,
+    'Arbitration decision',
+  );
+}
+
+export async function decideForcedReceipt(
+  orderId: string,
+  input: FulfillmentDecision,
+  token: string,
+): Promise<ForcedReceiptDecisionResult> {
+  if (
+    !isFulfillmentCommandInput(input)
+      || typeof input.approved !== 'boolean'
+      || !isReasonCode(input.noteCode)
+  ) throw invalidResponse('Forced-receipt decision does not match the coordinated generated type');
+  return postFulfillmentCommand(
+    orderId,
+    'forced-receipt-decisions',
+    input,
+    token,
+    isForcedReceiptDecisionResult,
+    'Forced-receipt decision',
+  );
 }
 
 export async function createWalletSession(provider: WalletProvider): Promise<CoreSession> {
@@ -409,6 +513,98 @@ function isTakeoverOpenedResult(value: unknown): value is TakeoverOpenedResult {
     && value.caseId.length > 0
     && value.state === 'TAKEOVER'
     && value.customerFundsRemainLocked === true;
+}
+
+function isShipmentResult(value: unknown): value is ShipmentResult {
+  return isRecord(value)
+    && bytes32Pattern.test(String(value.orderId))
+    && value.state === 'SHIPPED'
+    && nonEmptyStrings(value, ['shipmentId', 'carrierCode'])
+    && bytes32Pattern.test(String(value.trackingNumberHash))
+    && isDateTime(value.recordedAt);
+}
+
+function isDeliveryResult(value: unknown): value is DeliveryResult {
+  return isRecord(value)
+    && bytes32Pattern.test(String(value.orderId))
+    && value.state === 'DELIVERED'
+    && isDateTime(value.deliveredAt);
+}
+
+function isFulfillmentRequestDecisionResult(value: unknown): value is FulfillmentRequestDecisionResult {
+  return isRecord(value)
+    && bytes32Pattern.test(String(value.orderId))
+    && nonEmptyStrings(value, ['requestId'])
+    && (value.requestType === 'EXCHANGE' || value.requestType === 'DELAY')
+    && (value.state === 'APPROVED' || value.state === 'REJECTED')
+    && isDateTime(value.decidedAt);
+}
+
+function isArbitrationOpenedResult(value: unknown): value is ArbitrationOpenedResult {
+  return isRecord(value)
+    && bytes32Pattern.test(String(value.orderId))
+    && nonEmptyStrings(value, ['requestId'])
+    && value.state === 'ARBITRATION'
+    && isDateTime(value.openedAt);
+}
+
+function isArbitrationDecisionResult(value: unknown): value is ArbitrationDecisionResult {
+  return isFulfillmentCompletedResult(value, 'ARBITRATION')
+    || (isRecord(value)
+      && bytes32Pattern.test(String(value.orderId))
+      && ['SHIPPED', 'DELIVERED', 'TAKEOVER', 'FULFILLMENT_PENDING'].includes(String(value.state))
+      && value.outcome === 'RESUME_FULFILLMENT'
+      && isDateTime(value.decidedAt));
+}
+
+function isForcedReceiptDecisionResult(value: unknown): value is ForcedReceiptDecisionResult {
+  return isFulfillmentCompletedResult(value, 'FORCED_RECEIPT')
+    || (isRecord(value)
+      && bytes32Pattern.test(String(value.orderId))
+      && value.state === 'DELIVERED'
+      && value.approved === false
+      && isDateTime(value.decidedAt));
+}
+
+function isFulfillmentCompletedResult(value: unknown, method: 'ARBITRATION' | 'FORCED_RECEIPT') {
+  return isRecord(value)
+    && bytes32Pattern.test(String(value.orderId))
+    && value.state === 'FULFILLED'
+    && value.method === method
+    && isDateTime(value.fulfilledAt);
+}
+
+function isFulfillmentCommandInput(value: FulfillmentCommandInput) {
+  return value.idempotencyKey.length >= 8
+    && value.idempotencyKey.length <= 128
+    && bytes32Pattern.test(value.evidenceHash);
+}
+
+function isReasonCode(value: string) {
+  return /^[A-Z0-9_:-]{2,64}$/.test(value);
+}
+
+async function postFulfillmentCommand<T extends { orderId: string }>(
+  orderId: string,
+  path: string,
+  input: object,
+  token: string,
+  validate: (value: unknown) => value is T,
+  label: string,
+): Promise<T> {
+  if (!bytes32Pattern.test(orderId)) throw invalidResponse('Order ID must be a bytes32 value');
+  const body = await requestJson(`/v2/orders/${encodeURIComponent(orderId)}/${path}`, {
+    body: JSON.stringify(input),
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
+    method: 'POST',
+  });
+  if (!validate(body) || body.orderId.toLowerCase() !== orderId.toLowerCase()) {
+    throw invalidResponse(`${label} result does not match the coordinated generated type`);
+  }
+  return body;
 }
 
 function nonEmptyStrings(value: Record<string, unknown>, fields: readonly string[]) {
