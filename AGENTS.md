@@ -13,11 +13,14 @@ Do not restore the V1 NPL-only model or invent a third payment model.
 
 The locked V2 interpretation is:
 
-- product price and merchant settlement cost are denominated in USDT;
-- customer payment uses versioned USDT and NPL legs;
-- merchant proceeds are USDT-only;
-- NPL follows versioned Burn and circulation/reward routing;
-- BNM is an order-linked Locked/Available reward credential minted on Claim.
+- product price, merchant base receivable and concession are denominated in USDT;
+- launch payment is exactly 70% USDT plus 30% Oracle-equivalent NPL;
+- immutable PaymentRouter sends funds directly to the Custody/Reward Safes and
+  normally retains zero balance;
+- settlement uses the append-only double-entry ledger and Safe MultiSend, not a
+  contract pull-Claim;
+- BNM is existing backend points with Locked/Available states, not an ERC-20,
+  mint or on-chain Claim.
 
 Missing production decisions in the system contract must fail closed. Do not
 guess fund allocations, reward timing, guarantee thresholds or beneficiary
@@ -34,7 +37,8 @@ eligibility. V2 has no business-refund model.
 
 When a product thread needs a shared API, contract, database, signer or indexer
 change, report the gap to the core thread. Do not implement it outside the core
-branch.
+branch. A fail-closed placeholder is temporary and never proves a Requirement
+complete; it must be replaced when the corresponding Core batch is published.
 
 ## Safety
 

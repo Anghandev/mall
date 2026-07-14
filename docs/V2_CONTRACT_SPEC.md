@@ -1,5 +1,10 @@
 # Abu 24K V2 Contract Freeze
 
+> **SUPERSEDED FUNDS MODEL:** The `2.0.0-rc.2` contract graph below predates
+> the function-first rewrite and must not be used for implementation or
+> deployment. `docs/V2_SYSTEM_CONTRACT.md` is authoritative. This file remains
+> temporarily as removal/rewrite evidence for the payment batch.
+
 Status: coordinated local artifact `2.0.0-rc.2`. This freeze implements the
 Phase 1 system authority and is included in the coordinated local publication.
 It does not prove product consumption or authorize deployment or a transaction.

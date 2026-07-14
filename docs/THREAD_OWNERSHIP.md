@@ -25,7 +25,10 @@ Funds, shared interfaces and database state can be changed only by Core.
 
 Each worktree has at most one writer. A product reports a missing Core
 capability and implements the documented fail-closed behavior; it does not add
-the shared capability locally.
+the shared capability locally. That fail-closed behavior is only a temporary
+development state and cannot be reported as Requirement completion. After the
+corresponding Core batch is published, the product must replace it with the real
+consumer path and evidence.
 
 ## Legacy And Secrets
 

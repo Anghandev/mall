@@ -1,5 +1,9 @@
 # Abu 24K V2 Data Model
 
+> **SUPERSEDED FUNDS MODEL:** The `2.0.0-rc.2` model below lacks the new
+> append-only double-entry ledger and Safe settlement batches. It is retained
+> only as rewrite evidence and is not an implementation contract.
+
 Status: Core database checkpoint included in coordinated local artifact
 `2.0.0-rc.2`. This document does not authorize a deployment.
 

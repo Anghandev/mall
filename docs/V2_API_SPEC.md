@@ -1,5 +1,9 @@
 # Abu 24K V2 Core API Contract
 
+> **SUPERSEDED FUNDS MODEL:** The `2.0.0-rc.2` API below predates PaymentRouter,
+> the double-entry ledger and Safe settlement batches. It must not be consumed
+> by new product work and will be replaced at the payment publication.
+
 Status: coordinated local artifact `2.0.0-rc.2`. The implemented HTTP surface,
 generated types and consumer checks are frozen together. This file does not
 authorize deployment or production signing.

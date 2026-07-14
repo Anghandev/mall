@@ -1,6 +1,10 @@
 # BSC Mainnet Micro-Test Approval Plan
 
-Status: `NOT AUTHORIZED` and `NON-EXECUTABLE`.
+Status: `OBSOLETE`, `NOT AUTHORIZED` and `NON-EXECUTABLE`.
+
+This plan targets the superseded `2.0.0-rc.2` funds graph. It must not be used
+for preflight, deployment or transactions and will be rewritten only after all
+three new Core batches and local gates pass.
 
 This plan is bound to Core artifact `2.0.0-rc.2` and Core checkpoint
 `20a28f9`. It does not authorize a deployment, approval, token transfer or

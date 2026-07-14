@@ -1,7 +1,7 @@
 # Abu 24K V2 System Contract
 
-Status: frozen Phase 1 authority for every V2 contract, service, database and
-product surface. Decision details and source conflicts are indexed in
+Status: frozen authority for the function-first V2 rewrite from
+`v2/core@1cab34d`. Decision details and source conflicts are indexed in
 `V2_DECISIONS.md`.
 
 ## Authority And Failure Mode
@@ -9,182 +9,229 @@ product surface. Decision details and source conflicts are indexed in
 - This contract overrides a source PRD only where a Decision ID explicitly
   identifies the conflict. Every non-conflicting PRD requirement remains in
   force.
-- Frontends never calculate prices, payment legs, allocations, rewards,
-  beneficiary eligibility or finality. They render signed Core projections and
-  `allowedActions`.
-- Historical orders and in-progress seckill sessions use their immutable
-  snapshots. Current admin configuration is never read to recalculate them.
-- Missing production business parameters return `DecisionBlocked`. Missing
-  credentials, accounts, devices, domains, RPC endpoints or Safe addresses
-  return `ExternalBlocked` or `ConfigurationRequired` as specified by the
-  consumer contract. No production path may simulate success.
+- The V2 code at `1cab34d` was never deployed and has no historical orders. Its
+  old funds runtime is replaced, not migrated or kept behind a compatibility
+  path. `legacy/v1-npl-only/**` remains read-only archival evidence.
+- Frontends never calculate authoritative prices, payment legs, allocations,
+  rewards, liabilities, eligibility or finality. They render signed Core
+  projections, previews and `allowedActions`.
+- Historical orders and in-progress seckill sessions use immutable snapshots.
+  A later policy version never recalculates them.
+- Missing business parameters return `DecisionBlocked`. Missing credentials,
+  accounts, devices, domains, RPC endpoints or Safe addresses return
+  `ExternalBlocked` or `ConfigurationRequired`. No production path may
+  simulate success with a fixture, empty action or disabled placeholder.
 
-## Network, Assets And Payment
+## Network, Assets And Launch Payment
 
 - BSC chain ID is `56`.
 - USDT is `0x55d398326f99059fF775485246999027B3197955`.
 - NPL is `0x4e8277ab31e4956b2cd48449793a57656dfc03d2`.
-- Product list price and merchant settlement cost are denominated in USDT.
-- A versioned product policy supplies exact USDT and NPL buyer payment legs.
-  The two basis-point weights sum to 10,000. A zero-value leg requires neither
-  approval nor transfer.
-- The first insufficient allowance defaults to `MaxUint256`. Before approval,
-  the customer sees the token, spender, allowance, risk and revocation route.
-- Quotes use integer token units and canonical decimal strings. They bind the
-  policy version, Oracle version, reservation, product/SKU/quantity,
-  fulfillment mode, region, nonce, deadline and exact transaction intents.
+- The NPL/USDT Oracle pair is the verified PancakeSwap V2 pair
+  `0x2955e33bb120714abf11ace2766e614e6e5955b2`.
+- Product list price, merchant base receivable, merchant concession and Safe
+  liabilities are denominated in USDT.
+- The launch policy requires the buyer to pay exactly 70% of the USDT list
+  price in USDT and 30% of the same price as Oracle-equivalent NPL. Without an
+  explicitly funded NPL subsidy, no later policy may set the buyer NPL leg
+  below 30%.
+- Quotes use integer token units and canonical decimal strings. They bind
+  `policyVersion`, Oracle observation, reservation, product/SKU/quantity,
+  fulfillment mode, beneficiary snapshot, nonce, deadline and exact Router
+  payment intent. Quote validity is five minutes.
+- First approval for an insufficient allowance defaults to `MaxUint256`. The
+  customer must see token, Router spender, amount, risk and revocation route.
+  Sufficient allowance is not repeated; revoked or insufficient allowance is
+  requested again.
 
-## NPL Burn And Routing
+## PaymentRouter And Custody
 
-- At payment finality, exactly 20% of the order's NPL payment leg is transferred
-  to `0x000000000000000000000000000000000000dEaD`.
-- The remaining 80% is locked until fulfillment finality and is the maximum
-  source for all NPL reward routing for that order.
-- The launch policy is fixed at 20% Burn and 80% circulation/reward routing.
-  Later changes require a new `policyVersion` under the governance rules below.
-- All NPL rewards are calculated from the signed NPL conversion of the order's
-  total USDT list price: genesis node 2%, direct-referral shop 1%, district
-  agent 1.2%, city agent 0.8%, province agent 0.6%, region agent 0.4% and
-  operations 4%.
-- Total routed rewards may not exceed the order's 80% NPL balance. Missing
-  beneficiaries, integer rounding remainders and every unallocated remainder
-  go to the circulation reward pool.
-- Referral relationships and all four regional beneficiaries are snapshotted
-  at payment. Self-referral and referral cycles are forbidden.
+- `PaymentRouter` is immutable and non-upgradeable. It accepts only signed
+  EIP-712 quotes, enforces nonce/deadline/replay protection, supports ERC-1271,
+  atomically transfers both payment assets, classifies seckill boundary orders,
+  emits indexed payment events and exposes the new-payment breaker.
+- For a successful launch payment, the Router transfers the 70% USDT buyer leg
+  directly to the USDT Custody Safe, transfers NPL equal to 20% of the total
+  USDT list price directly to
+  `0x000000000000000000000000000000000000dEaD`, and transfers NPL equal to 10%
+  of the same list price directly to the NPL Reward Safe.
+- The USDT Custody Safe backs buyer-paid USDT liabilities and their authorized
+  settlements. The NPL Reward Safe backs NPL reward liabilities. The Operations
+  Treasury Safe funds explicitly posted platform advances and operational
+  obligations; it never substitutes for a shortfall in either custody Safe.
+- The Router never manages logistics, arbitration, BNM, merchant balances,
+  settlement requests or arbitrary withdrawals. A normal successful call
+  leaves zero USDT and zero NPL in the Router.
+- Every transfer is balance-delta checked. Fee-on-transfer behavior, missing
+  allowance, stale quote, replay, mismatched snapshot or partial transfer
+  reverts the entire payment and does not consume inventory.
 
-## No Business Refunds
+## NPL Reward Allocation
 
-- V2 exposes no no-reason refund, merchant-timeout refund, forced platform
-  refund, refund button, refund API, refund reserve or business refund contract
-  method.
-- Source requirements that describe a seven-day merchant-default refund or a
-  forced-refund center are `Overridden` by `D-V2-004`.
-- Safe-controlled emergency recovery is limited to a documented technical
-  incident. It is not a mall workflow, cannot be advertised as a refund, and
-  must preserve append-only audit evidence.
+- The NPL Reward Safe receives exactly 10% of the order's total USDT list price
+  converted by the signed Oracle snapshot.
+- The payment snapshot allocates that 10% as: genesis 2%, direct referral 1%,
+  district 1.2%, city 0.8%, province 0.6%, region 0.4% and operations 4%.
+- Missing beneficiaries, integer rounding remainders and unallocated amounts
+  are credited to the circulation reward pool. Allocation entries balance
+  exactly to the amount transferred to the Reward Safe.
+- Genesis eligibility supports the configured ERC-721 or ERC-1155 credential.
+  Credential ownership, referral relationships, all four administrative codes
+  and beneficiaries are snapshotted at payment. Later credential transfer does
+  not alter an order. Self-referral and referral cycles are forbidden.
+- Ordinary customers do not see the genesis module.
 
-## Merchant Default And Takeover Fulfillment
+## Merchant Concession And Receivable
 
-- The clock starts at payment finality. If no valid shipment evidence exists
-  after 7 x 24 hours, the order enters platform takeover fulfillment.
-- The merchant immediately loses new-order, product-listing, merchant USDT
-  Claim and merchant NPL/BNM-related Claim permissions.
-- Takeover funding is consumed in this order: merchant fulfillment guarantee,
-  the merchant's available assets not already bound to another liability, then
-  the platform fulfillment risk reserve.
-- The platform or a replacement merchant completes shipment. Customer payment
-  and every associated reward remain Locked until ordinary fulfillment
-  finality. Platform advances become merchant debt.
-- A product cannot be listed when the merchant guarantee or platform risk
-  reserve is below its configured minimum. A disconnected merchant may never
-  leave an order without an active takeover case.
+- Merchant concession does not reduce buyer payment and never changes the
+  70/30 buyer legs.
+- `concessionAmount = merchantBaseReceivable * merchantConcessionBps / 10,000`,
+  using exact integer rules published by Core. The merchant may enter 0-100%.
+- Merchant net receivable equals base receivable minus concession. The
+  concession is credited in the USDT ledger to versioned platform, prize-pool,
+  node or other configured accounts. No frontend invents allocation weights.
+- Product maintenance shows the signed Core preview of base receivable,
+  concession, net receivable and each configured destination before submit.
 
-## Receipt, Pickup, Arbitration And Finality
+## Append-Only Double-Entry Ledger
 
-- Starting from logistics-confirmed delivery, a customer has 7 x 24 hours to
+- PostgreSQL is the authoritative off-chain ledger for custody liabilities,
+  merchant receivables, NPL rewards, prize liabilities, guarantees, debts and
+  settlement batches. Balances are derived from append-only balanced entries;
+  no endpoint directly edits a balance.
+- Every posting is asset-specific, idempotent and balanced. Corrections use a
+  linked reversal plus replacement entry. A posting may never create a
+  negative available balance or spend a liability twice.
+- Payable asset states are `Locked -> Available -> Requested -> Batched ->
+  Settled`. Arbitration adds `Disputed` and keeps funds and rewards Locked.
+  State transitions retain order, policy, beneficiary and journal evidence.
+- BNM is the existing backend points project, valued 1:1 against the product
+  USDT list price. Payment records Locked BNM; fulfillment finality makes it
+  Available. V2 deploys no BNM ERC-20, performs no BNM mint and exposes no
+  on-chain BNM Claim. BNM is not a Safe-transfer liability.
+
+## Signed Settlement And Safe MultiSend
+
+- Former token/proceeds Claim actions become gasless signed settlement
+  requests. Customers, merchants and external beneficiaries never broadcast
+  settlement transactions or pay settlement Gas.
+- A request is wallet-bound, asset-bound, amount-bound, nonce-protected,
+  expiring and idempotent. An external partner link is address-bound, one-use
+  and time-limited and cannot bypass eligibility, availability or Safe review.
+- Core groups Available requests into a Safe MultiSend batch. Each batch binds
+  `batchId`, chain ID, Safe address and nonce, every order, asset, recipient and
+  integer amount, per-asset totals and a canonical content hash.
+- A batch is immutable after approval. MultiSend succeeds in full or reverts in
+  full. Replacement transactions remain linked to the same batch and Safe
+  nonce; duplicate events cannot settle twice.
+- A payable becomes Settled only after a status-1 Safe receipt reaches 15 BSC
+  confirmations and the indexer verifies chain, Safe, nonce, transaction data,
+  batch hash, events, balances, replacement and canonical block. Reorgs return
+  affected entries to the last proven state without deleting evidence.
+- Mall and Merchant surfaces show `Locked`, `Available`, `Requested`, `Batched`
+  and `Settled` plus the final Safe TxHash for transferable assets. BNM shows
+  only its backend-points lifecycle and is never presented as a token payout.
+
+## Inventory, Fulfillment And No Business Refunds
+
+- Inventory reservation is atomic, SKU-specific, expiring and bound to the
+  signed quote. Payment either consumes the reservation and creates the order
+  or leaves both assets and inventory unchanged.
+- V2 has no no-reason refund, merchant-timeout refund, forced platform refund,
+  refund button, refund API, refund reserve or business-refund method.
+- Customers may request exchange or delay and may enter platform arbitration.
+  Arbitration keeps payment, BNM and all rewards Locked.
+- Seven days after payment finality without valid shipment evidence opens
+  platform takeover fulfillment and freezes merchant listing and new-order
+  permissions plus merchant settlement requests. Buyer-side prize eligibility
+  remains independent. The platform or a replacement merchant completes
+  delivery.
+- Starting at logistics-confirmed delivery, the customer has seven days to
   confirm receipt. The merchant may then request platform forced receipt but
-  cannot complete the order directly.
-- Platform forced receipt requires reviewed logistics evidence. Arbitration
-  keeps payment and every associated reward Locked.
-- Successful in-store pickup scan enters the normal fulfillment-completion
-  flow.
-- Only a receipt confirmation, pickup verification or final arbitration that
-  has reached chain/domain finality can release funds or rewards.
-- A receipt is not final without status `1`, the expected chain, contract,
-  event and resource identity, block hash, required confirmations and reorg/
-  replacement reconciliation.
-
-## Proceeds, Rewards And BNM
-
-- Merchant proceeds are USDT-only, pull-based and claimable after fulfillment
-  finality. Buyer-paid NPL is never merchant sales proceeds.
-- The seckill prize pool and prize Claim are USDT-denominated. A prize becomes
-  claimable only after final session settlement.
-- Merchant proceeds, BNM, genesis, referral, regional, operations and store
-  rewards become claimable only after fulfillment finality.
-- BNM equals the order's total USDT list price at 1:1, is ERC-20 with 18
-  decimals, and is order-linked. Payment creates Locked BNM; fulfillment
-  finality makes it Available; Claim mints it; minted BNM is transferable.
-- Genesis eligibility supports a configured ERC-721 or ERC-1155 credential and
-  is snapshotted at payment. Later credential transfers do not alter history.
-  Ordinary customers do not see the genesis module.
+  cannot finalize the order. Pickup verification and final arbitration use the
+  same finality path.
+- Major-loss funding consumes the merchant guarantee, frozen receivables and
+  future merchant proceeds in that order. Platform advances become merchant
+  debt. Merchant guarantee minimum is exactly 1,000 USDT; below it, new product
+  listing and new orders are prohibited.
+- Successful receipt, pickup verification or final arbitration unlocks
+  ordinary receivables, BNM and rewards. The seckill grand prize remains Locked
+  until final session settlement.
 
 ## Seckill And Boundary Orders
 
-- A seckill main session lasts exactly 60 minutes.
-- Relay time starts at 60 seconds. Each chain-final purchase adds 30 seconds;
-  remaining relay time is capped at 60 seconds and may never exceed the main
-  session deadline.
-- A seckill intent binds both a seckill quote and an ordinary fallback quote.
-  Before payment the customer explicitly acknowledges both prices and the
-  classification rule.
-- Chain block time is authoritative. A transaction included before the
-  deadline is seckill. A transaction included after the deadline atomically
-  uses the signed ordinary fallback quote and ordinary inventory, does not
-  enter or win the prize pool, and calculates BNM from the ordinary quote.
-- Insufficient ordinary inventory, balance or allowance reverts the entire
-  transaction. A frontend never classifies the order.
+- A seckill main session lasts exactly 60 minutes. Relay time starts at 60
+  seconds; each chain-final purchase adds 30 seconds; remaining relay time is
+  capped at 60 seconds and never exceeds the main deadline.
+- Session phases are PREHEAT, LIVE, SETTLING and SETTLED. Grand-prize settlement
+  occurs during the 5-10 minute SETTLING phase and becomes payable only after
+  final session settlement.
+- A seckill intent binds both seckill and ordinary fallback quotes. Before
+  payment, the customer acknowledges both prices and the classification rule.
+- Chain block time is authoritative. Inclusion before the deadline is seckill;
+  inclusion after it atomically uses the fallback price and ordinary inventory
+  and does not enter or win the prize pool. Failure of either required fallback
+  condition reverts the whole payment.
 
 ## Oracle
 
-- Core signs exact NPL/USDT quotes. On-chain validation uses a 30-minute
-  NPL/USDT TWAP with maximum deviation of 5%.
-- Production `maxAge` and minimum liquidity are mandatory configuration.
-- Expired quotes, excessive deviation or insufficient liquidity pause new
-  orders while fulfillment, recovery, reconciliation, audit reads and finality
-  synchronization remain available.
+- Core uses the specified PancakeSwap V2 pair to calculate a 30-minute
+  NPL/USDT TWAP. Maximum deviation is 5%, the observation may be at most 10
+  minutes old and USDT-side liquidity must be at least 50,000 USDT.
+- Expired quotes, stale observations, excessive deviation or insufficient
+  liquidity pause new payments while fulfillment, takeover, arbitration,
+  reconciliation, audit and finality synchronization remain available.
 
-## Governance And Authorization
+## Governance, Risk And Retention
 
-- Seckill time, Burn/Route and revenue proportions can change only when RBAC,
-  a secondary wallet signature and Safe multisig approvals publish a new
-  `policyVersion`.
-- A new version affects only future quotes, orders and sessions. It cannot
-  mutate historical orders or in-progress sessions.
-- Transaction authorization uses EIP-712 domain separation, nonce and deadline
-  and supports ERC-1271. Authorization never uses `tx.origin`.
-- Sensitive actions bind the exact resource, old/new values, policy version,
-  expiry and approval evidence and emit indexed audit events.
+- Policy publication and every high-risk change require RBAC, an exact
+  secondary-wallet EIP-712 signature and Safe multisig approval. A new
+  `policyVersion` affects only future quotes, orders and sessions.
+- High-Gas anomalies restrict the address for 24 hours. More than five wallets
+  on the same IP or device within one minute blacklists that IP/device. Three
+  cancellations within five minutes or frequent address/store changes restrict
+  new payment for two hours. Evidence, expiry, appeal and overrides are audited.
+- Category or tag deletion/disable is denied while it contains a seckill
+  product or an order with Locked funds. Products with history are logically
+  delisted only. Funds, policies, batches, chain evidence and audit records are
+  never deleted.
+- Authorization never uses `tx.origin`; it uses EIP-712, nonce, deadline,
+  ERC-1271, RBAC, secondary signatures and Safe authority as appropriate.
 
-## Circuit Breakers
+## Coverage And Circuit Breakers
 
-- New orders, seckill purchases, seckill settlement, merchant proceeds Claims,
-  reward Claims and prize Claims have independent pause scopes.
-- Fulfillment, takeover fulfillment, emergency recovery, reconciliation,
-  append-only audit reads and finality synchronization cannot be paused by a
-  customer-facing breaker.
-- Pause and resume require explicit RBAC and Safe authority, emit indexed
-  events and have tests for blocked writes, allowed recovery, resumption and
-  permission failure.
+- Core calculates coverage per asset from verified Safe assets divided by
+  unsettled ledger liabilities. The UI label is `Safe assets / unsettled
+  liabilities coverage`, never a leverage or liquidation coefficient.
+- Below 100% coverage, Core pauses new payments and creation of new settlement
+  batches. It does not rewrite balances or claim the system is healthy.
+- New payments, seckill purchases and new settlement batches have independent
+  breaker scopes. Fulfillment, takeover, exchange, arbitration, reconciliation,
+  audit reads and finality synchronization cannot be paused by those breakers.
+- Pause and resume require RBAC plus Safe authority, emit indexed/audited events
+  and retain tests for blocked writes, allowed recovery and permission failure.
 
-## Production Decision And External Inputs
+## Production And External Inputs
 
-The following are production `DecisionBlocked` until published in a versioned
-policy: platform service fee, seckill prize-pool proportion, merchant-store NPL
-reward proportion, merchant guarantee minimum, platform risk-reserve minimum,
-guarantee top-up line, fixed remainder accounts, Oracle `maxAge`, Oracle
-minimum liquidity and genesis credential contract/token ID.
-The required BSC fulfillment-finality confirmation count is also
-`DecisionBlocked`; test values are not production defaults.
+- Still `DecisionBlocked`: platform service-fee proportion, seckill prize-pool
+  proportion, merchant-store reward proportion, merchant-concession
+  destination weights, fixed circulation/remainder accounts and any policy
+  beneficiary not frozen above. No default may be inferred.
+- `ExternalBlocked`: USDT Custody, NPL Reward and Operations Treasury Safe
+  addresses and Owners, role wallets, production RPC/fallback RPC,
+  domains/HTTPS/WSS, the existing BNM backend project's API/schema/credentials,
+  provider accounts and credentials, approved merchant/admin wallets, encrypted
+  backup storage, printers and physical mobile-device evidence.
+- Provider absence may return `ConfigurationRequired`, but adapters,
+  validation, typed errors and the local business path must still exist.
+- Current ignored `.env` wallets are limited to local, fork and separately
+  approved micro-tests. Production Safe availability requires a fresh
+  production Router deployment; the test Router is never reused.
 
-The following are `ExternalBlocked` until supplied outside the repository:
-Safe and role addresses, RPC endpoints, domains/HTTPS, provider accounts and
-credentials, approved merchant/admin wallets, physical printer and mobile
-device evidence.
+## Coordinated Core Publications
 
-## Versioned Core Publications
-
-Core publishes one coordinated version of:
-
-- OpenAPI and generated shared types;
-- ABI bundle and deployment manifest;
-- state and error enums plus WebSocket protocol;
-- `ProductPolicy`, `SignedOrderIntent`, `SeckillQuote`,
-  `FallbackRetailQuote`, `InventoryReservation`, `AllocationSnapshot`,
-  `FulfillmentEvidence`, `FulfillmentFinality`, `MerchantTakeoverCase`,
-  `AllowedAction` and `TransactionFinality`;
-- payment, reservation, settlement, takeover, fulfillment, Claim, seckill and
-  finality consumer tests.
-
-Breaking changes require a new coordinated artifact version. Product clients
-must fail closed when any member of the artifact set is missing or mismatched.
+Core publishes shared artifacts only at the payment, fulfillment and
+settlement/admin batch boundaries. Each publication contains the same version
+of OpenAPI, Schema, ABI, deployment manifest, generated types, state/error
+enums, WebSocket protocol and consumer tests. Products never copy, infer or
+handwrite a parallel endpoint, schema, financial formula or calldata.
