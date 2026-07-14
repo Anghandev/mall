@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { AllowedAction } from '@abu24k/core-artifacts';
 import {
   Box,
   Download,
@@ -9,15 +10,37 @@ import {
   Search,
   Send,
 } from 'lucide-react';
-import { EmptyState, PageHeader } from '../components/ui';
+import { EmptyState, LoadingRows, PageHeader } from '../components/ui';
 import { canExecuteOrderAction } from '../core-boundary';
+import { readableError, useCoreRuntime } from '../core-runtime';
 
 const deliveryColumns = ['订单号', 'TxHash', '收货人', '电话', '详细地址', '数量', '下单时间', '物流单号', '核销状态', '操作'];
 const pickupColumns = ['订单号', '核销门店', '核销状态', '核销时间', '操作'];
 
 export function FulfillmentPage() {
   const [tab, setTab] = useState<'delivery' | 'pickup'>('delivery');
+  const [orderId, setOrderId] = useState('');
+  const [actionLookup, setActionLookup] = useState<
+    | { phase: 'idle' }
+    | { phase: 'loading' }
+    | { phase: 'ready'; actions: readonly AllowedAction[] }
+    | { phase: 'error'; message: string }
+  >({ phase: 'idle' });
+  const { api, session } = useCoreRuntime();
   const columns = tab === 'delivery' ? deliveryColumns : pickupColumns;
+
+  async function lookupOrderActions() {
+    if (!session || orderId.trim().length === 0) return;
+    setActionLookup({ phase: 'loading' });
+    try {
+      setActionLookup({
+        phase: 'ready',
+        actions: await api.getOrderAllowedActions(orderId.trim(), session.token),
+      });
+    } catch (error) {
+      setActionLookup({ phase: 'error', message: readableError(error) });
+    }
+  }
 
   return (
     <div className="page-stack">
@@ -32,6 +55,18 @@ export function FulfillmentPage() {
         eyebrow="03 / 订单与发货"
         title="履约交付"
       />
+
+      <section className="section-block order-check" aria-labelledby="order-check-title">
+        <div className="section-heading"><div><p className="eyebrow">Payment checkpoint</p><h2 id="order-check-title">订单权限核验</h2></div><span>实时 Core 读取</span></div>
+        <p className="section-intro">输入订单号后读取服务端 `allowedActions`。支付批次尚未发布商家订单列表或商家可见的支付投影，本页不使用买家专用接口越权查询。</p>
+        <form className="order-check-form" onSubmit={(event) => { event.preventDefault(); void lookupOrderActions(); }}>
+          <div className="field"><label htmlFor="order-action-id">订单 ID</label><input autoComplete="off" id="order-action-id" onChange={(event) => setOrderId(event.target.value)} placeholder="输入 Core 订单 ID" type="text" value={orderId} /></div>
+          <button className="button secondary" disabled={!session || orderId.trim().length === 0 || actionLookup.phase === 'loading'} type="submit">核验可用操作</button>
+        </form>
+        {actionLookup.phase === 'loading' ? <LoadingRows count={3} /> : null}
+        {actionLookup.phase === 'error' ? <p className="form-error" role="alert">{actionLookup.message}</p> : null}
+        {actionLookup.phase === 'ready' ? <AllowedActionsTable actions={actionLookup.actions} /> : null}
+      </section>
 
       <section className="section-block fulfillment-workspace" aria-labelledby="orders-title">
         <div className="tabs" role="group" aria-label="履约方式">
@@ -103,6 +138,26 @@ export function FulfillmentPage() {
         <span><i className="provider-dot warning" />云打印机：ConfigurationRequired</span>
         <span><i className="provider-dot offline" />Core 订单流：Unavailable</span>
       </div>
+    </div>
+  );
+}
+
+function AllowedActionsTable({ actions }: { actions: readonly AllowedAction[] }) {
+  return (
+    <div aria-live="polite" className="table-wrap compact-table">
+      <table>
+        <thead><tr><th scope="col">操作</th><th scope="col">Core 判定</th><th scope="col">原因</th><th scope="col">截止时间</th></tr></thead>
+        <tbody>
+          {actions.map((action) => (
+            <tr key={action.action}>
+              <td><code>{action.action}</code></td>
+              <td><span className={action.enabled ? 'state-text success' : 'state-text blocked'}>{action.enabled ? '允许' : '阻断'}</span></td>
+              <td>{action.reasonCode ?? '—'}</td>
+              <td>{action.deadline ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

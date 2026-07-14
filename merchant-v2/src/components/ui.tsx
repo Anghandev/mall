@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
-import { AlertTriangle, ArrowRight, DatabaseZap, LoaderCircle } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CircleCheck, DatabaseZap, LoaderCircle } from 'lucide-react';
 import { coreBoundary } from '../core-boundary';
+import { useCoreRuntime } from '../core-runtime';
 
 export function PageHeader({
   eyebrow,
@@ -26,12 +27,21 @@ export function PageHeader({
 }
 
 export function CoreUnavailable({ compact = false }: { compact?: boolean }) {
+  const { bootstrap } = useCoreRuntime();
+  const available = bootstrap.phase === 'ready';
+  const Icon = available ? CircleCheck : DatabaseZap;
   return (
-    <div className={compact ? 'system-notice compact' : 'system-notice'} role="status">
-      <DatabaseZap aria-hidden="true" size={18} />
+    <div className={`${compact ? 'system-notice compact' : 'system-notice'}${available ? ' ready' : ''}`} role="status">
+      <Icon aria-hidden="true" size={18} />
       <div>
-        <strong>Core 数据通道未发布</strong>
-        <span>{coreBoundary.reason}。金额、状态、权限与写入操作全部按失败关闭处理。</span>
+        <strong>{bootstrap.phase === 'checking' ? '正在校验 Core' : available ? '支付 Core 已连接' : 'Core 连接失败'}</strong>
+        <span>
+          {available
+            ? `${coreBoundary.reason}。未发布操作继续失败关闭。`
+            : bootstrap.phase === 'offline'
+              ? bootstrap.error
+              : `正在确认 ${coreBoundary.artifactVersion} 与运行时是否一致。`}
+        </span>
       </div>
     </div>
   );

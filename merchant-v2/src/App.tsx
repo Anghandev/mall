@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
+import type { CoreApi } from './core-api';
 import { WorkspaceShell } from './components/WorkspaceShell';
-import { coreBoundary } from './core-boundary';
+import { CoreRuntimeProvider, useCoreRuntime } from './core-runtime';
 import { AssetsPage } from './pages/AssetsPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { FulfillmentPage } from './pages/FulfillmentPage';
@@ -24,12 +25,13 @@ function isVisualReview() {
   return import.meta.env.DEV && new URLSearchParams(window.location.search).get('__merchant_visual_review__') === '1';
 }
 
-export function App() {
-  const canEnterWorkspace = coreBoundary.runtimeAvailable || isVisualReview();
+function AppRoutes() {
+  const { session } = useCoreRuntime();
+  const canEnterWorkspace = Boolean(session) || isVisualReview();
 
   return (
     <Routes>
-      <Route path="/" element={<LoginPage />} />
+      <Route path="/" element={session ? <Navigate replace to="/dashboard" /> : <LoginPage />} />
       {workspaceRoutes.map(({ path, element }) => (
         <Route
           element={canEnterWorkspace ? <WorkspaceShell>{element}</WorkspaceShell> : <Navigate replace to="/" />}
@@ -39,5 +41,13 @@ export function App() {
       ))}
       <Route path="*" element={<Navigate replace to="/" />} />
     </Routes>
+  );
+}
+
+export function App({ client }: { client?: CoreApi }) {
+  return (
+    <CoreRuntimeProvider {...(client ? { client } : {})}>
+      <AppRoutes />
+    </CoreRuntimeProvider>
   );
 }

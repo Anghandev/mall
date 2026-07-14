@@ -1,24 +1,26 @@
 # Merchant Workbench Core Gaps
 
-The merchant product consumes Core's coordinated `2.0.0-rc.2` artifact
-workspace package, including its version and public action catalog. It must not
-implement the remaining shared capabilities below. Each affected action stays
-disabled with the stated reason until its runtime capability is published.
+The merchant product consumes Core's coordinated `2.0.0-payment.1` artifact
+workspace package. Bootstrap, SIWE, public Catalog/SKU/inventory reads and
+order `allowedActions` are connected through their published HTTP surface.
+It must not implement the remaining shared capabilities below. Each affected
+action stays unavailable with the stated reason until its coordinated runtime
+capability is published.
 
 | Gap ID | Required Core capability | Fail-closed behavior |
 |---|---|---|
-| GAP-MER-001 | Non-empty executable action catalog coordinated with merchant runtime endpoints | Artifact version is exposed; runtime entry and all writes remain disabled |
-| GAP-MER-002 | Merchant SIWE nonce/verify, allowlist, JWT/RBAC and secondary-signature intent | Login/sensitive actions unavailable |
+| GAP-MER-001 | Coordinated merchant runtime endpoints for modules beyond the payment read surface | Published payment reads and SIWE are live; unpublished writes remain disabled |
+| GAP-MER-002 | Secondary-signature intents plus production merchant allowlist and domain configuration | SIWE client is live; unauthorized/rejected/wrong-chain states fail closed and sensitive actions remain unavailable |
 | GAP-MER-003 | Merchant dashboard aggregate with authoritative timezone/day and product state | Values show unavailable, never fake zero |
-| GAP-MER-004 | Unique product slot, signed uploads, save/submit/lock state and allowedActions | Product writes disabled |
-| GAP-MER-005 | Merchant order filters, cursor pagination, PII-safe export and batch shipment | Orders/export unavailable |
+| GAP-MER-004 | Merchant-bound unique product slot, signed uploads, save/submit/lock state and authoritative concession preview | Public catalog/SKU/inventory is read live without pretending a product belongs to the current merchant; writes and financial preview stay unavailable |
+| GAP-MER-005 | Merchant-scoped payment/order projection, filters, cursor pagination, PII-safe export and batch shipment | Order `allowedActions` can be checked by ID; order state/list/export remains unavailable and buyer-only payment projection is never called |
 | GAP-MER-006 | Fulfillment evidence, forced-receipt request, settlement outbox and finality projection | Merchant cannot complete or present settlement |
 | GAP-MER-007 | Pickup signed challenge and camera/manual verification contract | Scanner cannot submit |
 | GAP-MER-008 | AMap reverse geocode plus signed immutable six-digit region | Region read-only; store save disabled |
 | GAP-MER-009 | Feie device binding/status/two-copy print job/retry contract | Printer controls ConfigurationRequired |
 | GAP-MER-010 | Kuaidi100 waybill, callback signature and delivery evidence | Shipment provider controls ConfigurationRequired |
 | GAP-MER-011 | Merchant USDT five-state proceeds projection | Financial values unavailable, never locally calculated |
-| GAP-MER-012 | Merchant Claim allowedActions, ordered intent, receipt/replacement/finality | Claim disabled; no local calldata |
+| GAP-MER-012 | Merchant signed settlement-request action, ordered intent, Safe batch, replacement and finality | Settlement request disabled; no local calldata or simulated Safe result |
 | GAP-MER-013 | Separate NPL/BNM reward projections and lifecycle | Reward rails unavailable independently from USDT |
 | GAP-MER-014 | Shop profile, immutable settlement wallet and governed migration intent | Wallet read-only; profile writes disabled |
 | GAP-MER-015 | Merchant append-only audit read model with signature/Tx proof | Audit unavailable, never local fake history |
