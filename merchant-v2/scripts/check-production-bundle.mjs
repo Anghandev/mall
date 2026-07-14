@@ -10,6 +10,7 @@ const forbidden = [
   '__merchant_visual_review__',
   '2.0.0-rc.2',
   '2.0.0-payment.1',
+  '2.0.0-fulfillment.1',
   'CLAIM_' + 'MERCHANT_USDT',
   'Payment' + 'Escrow',
   'Claim' + 'Vault',
@@ -22,22 +23,22 @@ const forbidden = [
 ];
 
 let filesChecked = 0;
-let sawFulfillmentBoundary = false;
+let sawCoreBoundary = false;
 let sawArtifactVersion = false;
 
 for (const path of walk(dist)) {
   if (!textExtensions.has(extname(path))) continue;
   filesChecked += 1;
   const contents = readFileSync(path, 'utf8');
-  sawFulfillmentBoundary ||= contents.includes('支付与履约批次已发布');
+  sawCoreBoundary ||= contents.includes('支付、履约与结算后台批次已发布');
   sawArtifactVersion ||= contents.includes(artifactVersion);
   for (const token of forbidden) {
     if (contents.includes(token)) throw new Error(`Production bundle contains forbidden token: ${token}`);
   }
 }
 
-if (!sawFulfillmentBoundary) {
-  throw new Error('Production bundle is missing the coordinated fulfillment boundary');
+if (!sawCoreBoundary) {
+  throw new Error('Production bundle is missing the coordinated settlement-admin boundary');
 }
 
 if (!sawArtifactVersion) {

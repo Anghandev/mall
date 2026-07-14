@@ -1,6 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import type { Eip712TypedData } from '@abu24k/core-artifacts';
 import { createCoreApi, CoreApiError, type CoreApi, type CoreBootstrap, type MerchantSession } from './core-api';
-import { connectWallet, signSiweMessage, type Eip1193Provider } from './wallet';
+import {
+  connectWallet,
+  signSettlementTypedData as signWalletTypedData,
+  signSiweMessage,
+  type Eip1193Provider,
+} from './wallet';
 
 type BootstrapState =
   | { phase: 'checking' }
@@ -14,6 +20,7 @@ interface CoreRuntimeValue {
   signingIn: boolean;
   authError: string | undefined;
   signIn(provider: Eip1193Provider): Promise<void>;
+  signSettlementTypedData(typedData: Eip712TypedData): Promise<string>;
   signOut(): void;
   refreshBootstrap(): Promise<void>;
 }
@@ -30,6 +37,7 @@ export function CoreRuntimeProvider({
   const api = useMemo(() => client ?? createCoreApi(), [client]);
   const [bootstrap, setBootstrap] = useState<BootstrapState>({ phase: 'checking' });
   const [session, setSession] = useState<MerchantSession>();
+  const [activeProvider, setActiveProvider] = useState<Eip1193Provider>();
   const [signingIn, setSigningIn] = useState(false);
   const [authError, setAuthError] = useState<string>();
 
@@ -58,9 +66,14 @@ export function CoreRuntimeProvider({
       if (!nextSession.roles.includes('MERCHANT')) {
         throw new Error('该钱包没有商家工作台权限。');
       }
+      if (nextSession.walletAddress.toLowerCase() !== walletAddress.toLowerCase()) {
+        throw new Error('Core 会话钱包与已连接钱包不一致。');
+      }
       setSession(nextSession);
+      setActiveProvider(provider);
     } catch (error) {
       setSession(undefined);
+      setActiveProvider(undefined);
       setAuthError(readableError(error));
       throw error;
     } finally {
@@ -68,8 +81,14 @@ export function CoreRuntimeProvider({
     }
   }, [api, bootstrap.phase]);
 
+  const signSettlementTypedData = useCallback(async (typedData: Eip712TypedData) => {
+    if (!session || !activeProvider) throw new Error('请先连接并验证商家钱包。');
+    return signWalletTypedData(activeProvider, session.walletAddress, typedData);
+  }, [activeProvider, session]);
+
   const signOut = useCallback(() => {
     setSession(undefined);
+    setActiveProvider(undefined);
     setAuthError(undefined);
   }, []);
 
@@ -80,9 +99,20 @@ export function CoreRuntimeProvider({
     signingIn,
     authError,
     signIn,
+    signSettlementTypedData,
     signOut,
     refreshBootstrap,
-  }), [api, authError, bootstrap, refreshBootstrap, session, signIn, signOut, signingIn]);
+  }), [
+    api,
+    authError,
+    bootstrap,
+    refreshBootstrap,
+    session,
+    signIn,
+    signOut,
+    signSettlementTypedData,
+    signingIn,
+  ]);
 
   return <CoreRuntimeContext.Provider value={value}>{children}</CoreRuntimeContext.Provider>;
 }

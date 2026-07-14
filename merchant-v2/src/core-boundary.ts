@@ -11,7 +11,7 @@ export const coreBoundary = Object.freeze({
   artifactVersion,
   artifactsAvailable: true,
   executableOrderActionNames,
-  reason: '支付与履约批次已发布；结算与后台批次尚未发布',
+  reason: '支付、履约与结算后台批次已发布',
 } as const);
 
 export function canExecuteOrderAction(action: AllowedActionName, allowedActions?: readonly AllowedAction[]) {

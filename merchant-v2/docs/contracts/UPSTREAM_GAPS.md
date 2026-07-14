@@ -1,33 +1,39 @@
 # Merchant Workbench Core Gaps
 
-The merchant product consumes Core's coordinated `2.0.0-fulfillment.1` artifact
-workspace package. Bootstrap, SIWE, public Catalog/SKU/inventory reads and
-wallet-scoped orders/targets, session-bound fulfillment `allowedActions`,
-shipment evidence, forced-receipt review and pickup verification are connected
-through their published HTTP surface. Fulfillment controls also require the
-selected order's immutable target and enabled server action; an absent session,
-target mismatch, missing action or finality block keeps the control disabled.
-It must not implement the remaining shared capabilities below. Each affected
-action stays unavailable with the stated reason until its coordinated runtime
-capability is published.
+The merchant product consumes Core's coordinated
+`2.0.0-settlement-admin.1` artifact workspace package. Bootstrap, SIWE,
+Catalog/SKU/inventory reads, wallet-scoped fulfillment, merchant finance,
+guarantee-deposit evidence, signed settlement requests and Safe-finality
+history are connected through their published HTTP surfaces. The browser
+validates generated enums and immutable EIP-712 fields, keeps idempotency keys
+stable across retry, and fails closed on wallet, merchant, artifact or unknown
+state mismatches.
+
+## Resolved In Settlement/Admin Batch
+
+| Gap ID | Published Core capability | Merchant evidence |
+|---|---|---|
+| GAP-MER-006 | Settlement outbox, ledger lifecycle and Safe finality projection | Order balances and `/v2/settlements` remain separate; no merchant completion shortcut |
+| GAP-MER-011 | Merchant USDT five-state balances plus guarantee, debt and takeover finance | Exact `MERCHANT_RECEIVABLE` rows, finance restrictions and evidence render without browser netting |
+| GAP-MER-012 | Merchant settlement intent, EIP-712 request, immutable batch and final Safe TxHash | Wallet signs Core typed data and submits `/v2/settlement-requests`; Requested/Batched/Settled history links final BSC hash |
+| GAP-MER-013 (partial) | Transferable NPL reward balances and order-scoped BNM lifecycle | NPL five-state rows and BNM Locked/Available order rows render on separate rails; seckill revenue aggregate remains missing |
+| GAP-MER-016 | Versioned public rules/help content | Wallet-targeted `SECKILL_RULES` CMS content renders with its bound policyVersion; absent or malformed content fails closed |
+
+## Remaining Gaps
 
 | Gap ID | Required Core capability | Fail-closed behavior |
 |---|---|---|
-| GAP-MER-001 | Coordinated merchant runtime endpoints beyond the payment and fulfillment surfaces | Published payment/fulfillment reads and SIWE are live; unpublished writes remain disabled |
+| GAP-MER-001 | Coordinated merchant runtime endpoints beyond published payment, fulfillment and settlement/admin surfaces | Published reads and writes are live; unpublished writes remain unavailable |
 | GAP-MER-002 | Secondary-signature intents plus production merchant allowlist and domain configuration | SIWE client is live; unauthorized/rejected/wrong-chain states fail closed and sensitive actions remain unavailable |
 | GAP-MER-003 | Merchant dashboard aggregate with authoritative timezone/day and product state | Values show unavailable, never fake zero |
 | GAP-MER-004 | Merchant-bound unique product slot, signed uploads, save/submit/lock state and authoritative concession preview | Public catalog/SKU/inventory is read live without pretending a product belongs to the current merchant; writes and financial preview stay unavailable |
 | GAP-MER-005 | Cursor-paginated merchant order filters, PII-safe export and batch shipment contract | Wallet-scoped single-order reads and writes are live; export/batch controls stay unavailable and buyer-only payment projection is never called |
-| GAP-MER-006 | Settlement outbox and settlement finality projection | Fulfillment eligibility is server-authoritative; merchant cannot complete an order directly or present settlement |
 | GAP-MER-007 | Camera challenge/scan transport beyond the published six-digit order/store verification command | Manual order/store-bound verification is live; camera launch stays unavailable |
 | GAP-MER-008 | AMap reverse geocode plus signed immutable six-digit region | Region read-only; store save disabled |
-| GAP-MER-009 | Feie device binding/status/two-copy print job/retry contract | Printer controls ConfigurationRequired |
-| GAP-MER-010 | Canonical raw tracking-number hashing plus Kuaidi100 waybill and callback integration | Exact precomputed shipment/evidence hashes can submit; raw number generation and provider controls stay ConfigurationRequired |
-| GAP-MER-011 | Merchant USDT five-state proceeds projection | Financial values unavailable, never locally calculated |
-| GAP-MER-012 | Merchant signed settlement-request action, ordered intent, Safe batch, replacement and finality | Settlement request disabled; no local calldata or simulated Safe result |
-| GAP-MER-013 | Separate transferable NPL reward and settlement projections | Order-scoped BNM lifecycle is published; unpublished transferable reward rails remain unavailable independently from USDT |
+| GAP-MER-009 | Feie device binding/status/two-copy print job/retry contract | Printer controls return ConfigurationRequired |
+| GAP-MER-010 | Canonical raw tracking-number hashing plus Kuaidi100 waybill and callback integration | Exact precomputed shipment/evidence hashes can submit; raw number generation and provider controls return ConfigurationRequired |
+| GAP-MER-013 | Authoritative seckill revenue detail and finance-center BNM aggregate | Published NPL and order-scoped BNM rows are live; missing aggregates remain unavailable independently |
 | GAP-MER-014 | Shop profile, immutable settlement wallet and governed migration intent | Wallet read-only; profile writes disabled |
 | GAP-MER-015 | Merchant append-only audit read model with signature/Tx proof | Audit unavailable, never local fake history |
-| GAP-MER-016 | Versioned rules/help content | Shows policy content unavailable |
 | GAP-MER-017 | Signed media upload and owned-asset metadata | Local preview only; submit disabled |
 | GAP-MER-018 | Provider accounts/devices, authorized merchant wallet, RPC/domain/Safe inputs | ExternalBlocked; no simulated success |

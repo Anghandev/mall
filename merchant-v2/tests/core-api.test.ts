@@ -9,6 +9,14 @@ import {
   pickupTarget,
   trackingNumberHash,
 } from './fulfillment-fixtures';
+import {
+  cmsRules,
+  guaranteeDepositResult,
+  merchantFinance,
+  requestedSettlement,
+  settlementIntent,
+  settlementList,
+} from './settlement-fixtures';
 
 const originalFetch = globalThis.fetch;
 const productHash = `0x${'a'.repeat(64)}`;
@@ -19,7 +27,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('fulfillment.1 Core HTTP consumer', () => {
+describe('settlement-admin.1 Core HTTP consumer', () => {
   it('uses the published SIWE nonce and verify request bodies without a password fallback', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
@@ -73,7 +81,7 @@ describe('fulfillment.1 Core HTTP consumer', () => {
       'https://core.example.test/v2/catalog/products',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-fulfillment.1' }),
+        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.1' }),
       }),
     );
   });
@@ -212,6 +220,95 @@ describe('fulfillment.1 Core HTTP consumer', () => {
     await expect(createCoreApi().bootstrap()).rejects.toMatchObject({
       code: 'InvalidResponse',
     });
+  });
+
+  it('consumes the published merchant finance, guarantee and signed settlement routes', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(merchantFinance))
+      .mockResolvedValueOnce(jsonResponse(settlementList))
+      .mockResolvedValueOnce(jsonResponse(settlementIntent, 201))
+      .mockResolvedValueOnce(jsonResponse(requestedSettlement, 201))
+      .mockResolvedValueOnce(jsonResponse(guaranteeDepositResult, 201));
+    globalThis.fetch = fetchMock as typeof fetch;
+    const api = createCoreApi('https://core.example.test');
+    const settlementInput = {
+      rail: 'MERCHANT_USDT' as const,
+      amount: '45000000000000000000',
+      idempotencyKey: 'merchant-settlement-consumer-1',
+    };
+    const requestInput = { intentId: settlementIntent.intent.intentId, signature: `0x${'12'.repeat(65)}` };
+    const depositInput = {
+      policyVersion: '9',
+      expectedAmountUsdt: '1000000000000000000000',
+      transactionHash: guaranteeDepositResult.transactionHash,
+      idempotencyKey: 'merchant-guarantee-consumer-1',
+    };
+
+    expect((await api.getMerchantFinance('merchant-session')).merchant.guarantee_status).toBe('READY');
+    expect((await api.listSettlements('merchant-session')).requests[2]?.final_safe_tx_hash)
+      .toBe(settlementList.requests[2]?.final_safe_tx_hash);
+    expect((await api.createSettlementIntent(settlementInput, 'merchant-session')).typedData)
+      .toEqual(settlementIntent.typedData);
+    expect((await api.submitSettlementRequest(requestInput, 'merchant-session')).state).toBe('REQUESTED');
+    expect((await api.submitGuaranteeDeposit(depositInput, 'merchant-session')).state).toBe('SUBMITTED');
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, 'https://core.example.test/v2/finance/merchant', expect.objectContaining({
+      method: 'GET',
+      headers: expect.objectContaining({ authorization: 'Bearer merchant-session' }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, 'https://core.example.test/v2/settlements', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, 'https://core.example.test/v2/settlement-intents', expect.objectContaining({
+      body: JSON.stringify(settlementInput),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(4, 'https://core.example.test/v2/settlement-requests', expect.objectContaining({
+      body: JSON.stringify(requestInput),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      'https://core.example.test/v2/finance/merchant/guarantee-deposits',
+      expect.objectContaining({ body: JSON.stringify(depositInput) }),
+    );
+  });
+
+  it('refuses to sign a settlement typed-data message that differs from the immutable intent', async () => {
+    const malformed = structuredClone(settlementIntent);
+    (malformed.typedData.message as Record<string, unknown>).amount = '1';
+    globalThis.fetch = vi.fn(async () => jsonResponse(malformed, 201)) as typeof fetch;
+
+    await expect(createCoreApi().createSettlementIntent({
+      rail: 'MERCHANT_USDT',
+      amount: settlementIntent.intent.amount,
+      idempotencyKey: 'merchant-settlement-malformed-1',
+    }, 'merchant-session')).rejects.toMatchObject({ code: 'InvalidResponse' });
+  });
+
+  it('rejects unknown guarantee finality states instead of presenting a false success', async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({
+      ...guaranteeDepositResult,
+      state: 'CONFIRMED_ENOUGH',
+    }, 201)) as typeof fetch;
+
+    await expect(createCoreApi().submitGuaranteeDeposit({
+      policyVersion: '9',
+      expectedAmountUsdt: '1',
+      transactionHash: guaranteeDepositResult.transactionHash,
+      idempotencyKey: 'merchant-guarantee-invalid-state-1',
+    }, 'merchant-session')).rejects.toMatchObject({ code: 'InvalidResponse' });
+  });
+
+  it('reads wallet-targeted published CMS rules from the coordinated public route', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse([cmsRules]));
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const items = await createCoreApi('https://core.example.test').listPublicCms(
+      '0x1111111111111111111111111111111111111111',
+    );
+
+    expect(items).toEqual([cmsRules]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://core.example.test/v2/cms/public?walletAddress=0x1111111111111111111111111111111111111111',
+      expect.objectContaining({ method: 'GET' }),
+    );
   });
 
   it('preserves a typed Core error and correlation ID', async () => {
