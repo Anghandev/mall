@@ -3,7 +3,7 @@
 Mall cannot resolve these gaps by adding shared endpoints, schemas, financial
 logic or calldata. Every affected action remains disabled.
 
-Mall consumes the coordinated `@abu24k/core-artifacts@2.0.0-rc.1` package. Its
+Mall consumes the coordinated `@abu24k/core-artifacts@2.0.0-rc.2` package. Its
 version, chain identity and public action catalogs are available, but its
 executable order-action catalog is empty and the manifest does not authorize a
 deployment.

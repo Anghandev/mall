@@ -32,7 +32,7 @@ describe('Mall V2 fail-closed application', () => {
     expect(screen.getByRole('heading', { name: '常规商城' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '立即购买' }).hasAttribute('disabled')).toBe(true);
     expect(mallRuntimeBoundary).toEqual({
-      artifactStatus: '2.0.0-rc.1',
+      artifactStatus: '2.0.0-rc.2',
       executableOrderActions: [],
       writesEnabled: false,
       sharedInterface: '@abu24k/core-artifacts',
@@ -43,7 +43,7 @@ describe('Mall V2 fail-closed application', () => {
     renderAt('/mall');
 
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
-    expect(artifactVersion).toBe('2.0.0-rc.1');
+    expect(artifactVersion).toBe('2.0.0-rc.2');
     expect(productBaseline.knownOrderActions).toBe(allowedActionNames);
     expect(productBaseline.executableOrderActions).toBe(executableOrderActionNames);
     expect(executableOrderActionNames).toHaveLength(0);
