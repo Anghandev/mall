@@ -215,6 +215,20 @@ input::placeholder { color: #8b8b82; }
 .debt-note { display: flex; gap: 8px; margin-top: 20px; padding: 11px; color: #6d4c00; background: var(--gold-soft); border-radius: 4px; }
 .debt-note svg { flex: 0 0 auto; width: 17px; }
 .debt-note p { margin: 0; font-size: 11px; }
+.takeover-console { padding: 0; overflow: hidden; }
+.takeover-console > .panel-heading { min-height: 70px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+.takeover-console > .session-prompt, .takeover-console > .resource-state, .takeover-console > .catalog-loading { margin: 16px; }
+.takeover-orders { border-bottom: 1px solid var(--line); }
+.takeover-orders .data-table { min-width: 900px; }
+.takeover-orders tr.is-selected td { background: var(--gold-soft); }
+.takeover-order-detail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, .75fr); gap: 16px; padding: 18px; }
+.takeover-order-detail h3 { margin: 0; font-size: 16px; }
+.takeover-command { display: grid; gap: 7px; padding: 14px; background: var(--surface-muted); border: 1px solid var(--line); border-radius: 4px; }
+.takeover-command label { color: var(--ink-soft); font-size: 11px; font-weight: 700; }
+.takeover-command .resource-state { min-height: 84px; margin: 4px 0 0; }
+.takeover-command .healthy-copy { margin: 6px 0 0; }
+.takeover-command-result { margin: 0; padding: 0 18px 18px; }
+.takeover-guard > .button { margin-top: 14px; }
 
 .data-panel { margin-top: 20px; padding: 0; overflow: hidden; }
 .data-panel > .panel-heading { min-height: 68px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
@@ -278,6 +292,7 @@ input::placeholder { color: #8b8b82; }
   .search-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .workspace-grid, .policy-layout { grid-template-columns: minmax(0, 1fr); }
   .takeover-stage-grid { grid-template-columns: 1fr 1fr; }
+  .takeover-order-detail { grid-template-columns: minmax(0, 1fr); }
   .stage-arrow { display: none; }
 }
 

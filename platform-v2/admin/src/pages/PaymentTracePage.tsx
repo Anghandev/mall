@@ -72,7 +72,7 @@ export function PaymentTracePage() {
 
       <section className="blocked-callout" aria-labelledby="admin-payment-gap">
         <ShieldAlert aria-hidden="true" />
-        <div><strong id="admin-payment-gap">所需 Core 能力</strong><p>payment.1 的投影读取仍绑定买家钱包；Admin 全局订单检索、Gas、Safe 与账本核验需要 GAP-ADM-017 的 RBAC 审计投影。</p></div>
+        <div><strong id="admin-payment-gap">所需 Core 能力</strong><p>fulfillment.1 的支付投影读取仍绑定买家钱包；Admin 全局支付审计、Gas、Safe 与账本核验需要 GAP-ADM-017 的 RBAC 审计投影。</p></div>
         <span>全局审计 fail-closed</span>
       </section>
     </>

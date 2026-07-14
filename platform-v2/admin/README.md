@@ -9,17 +9,23 @@ implements shared funds, contracts, API, Schema or signer behavior.
   risk, logistics, takeover fulfillment, CMS, notifications, system config,
   append-only audit, clearing evidence, operations monitoring and Core status.
 - Production boots from `src/bootstrap.ts` with the coordinated
-  `@abu24k/core-artifacts@2.0.0-payment.1` package.
+  `@abu24k/core-artifacts@2.0.0-fulfillment.1` package.
 - `GET /v2/bootstrap` drives payment readiness and exact blocked reasons.
   `GET /v2/catalog/products` drives the active product/SKU/price/stock table.
   SIWE/JWT and `GET /v2/payments/{orderId}` drive the wallet-bound submission,
   reservation, Router-call and finality trace.
+- `GET /v2/orders` drives the ADMIN/OPERATOR fulfillment-order view.
+  `POST /v2/actions/order` is the only authority for the current session's
+  order actions, and `POST /v2/orders/{orderId}/takeover` remains disabled
+  unless the current role, order state and returned `OPEN_TAKEOVER` action all
+  permit it. The static executable-action catalog is capability metadata only.
 - The browser uses `VITE_CORE_API_ORIGIN` when set and otherwise calls the Core
   API on the current origin. JWTs stay in memory and are not persisted.
-- The payment projection published in this checkpoint is buyer-wallet scoped.
-  Admin-wide order lookup, monitoring, policy publication, Safe settlement and
-  every administrative write remain unpublished and fail closed. No amount,
-  allocation, permission, endpoint, calldata or finality is inferred.
+- The payment projection remains buyer-wallet scoped. Fulfillment orders and
+  the takeover command are ADMIN/OPERATOR scoped. Guarantee funding, merchant
+  debt, monitoring, policy publication, Safe settlement and other Admin writes
+  remain unpublished and fail closed. No amount, allocation, permission,
+  endpoint, calldata or finality is inferred.
 - Ordinary soft-delete controls are visible only as disabled capabilities
   waiting for Core `allowedActions`. Funds, chain, audit and historical evidence
   surfaces render no delete control.
