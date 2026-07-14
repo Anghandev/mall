@@ -65,6 +65,9 @@ importers:
 
   mall-v2:
     dependencies:
+      '@abu24k/core-artifacts':
+        specifier: workspace:2.0.0-rc.1
+        version: link:../packages/core-artifacts
       lucide-react:
         specifier: 'catalog:'
         version: 1.24.0(react@19.2.7)
