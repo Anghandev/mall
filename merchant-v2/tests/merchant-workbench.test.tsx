@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { artifactVersion, type CatalogProduct } from '@abu24k/core-artifacts';
 import { App } from '../src/App';
 import { productBaseline } from '../src/bootstrap';
-import type { CoreApi, CoreBootstrap } from '../src/core-api';
+import { CoreApiError, type CoreApi, type CoreBootstrap } from '../src/core-api';
 import { coreBoundary, canExecuteOrderAction } from '../src/core-boundary';
 import { CoreRuntimeProvider } from '../src/core-runtime';
 import { AssetsPage } from '../src/pages/AssetsPage';
@@ -16,6 +16,16 @@ import { LoginPage } from '../src/pages/LoginPage';
 import { ProductPage } from '../src/pages/ProductPage';
 import { SettingsPage } from '../src/pages/SettingsPage';
 import { StoresPage } from '../src/pages/StoresPage';
+import {
+  deliveryOrder,
+  deliveryOrderId,
+  deliveryTarget,
+  evidenceHash,
+  pickupOrder,
+  pickupOrderId,
+  pickupTarget,
+  trackingNumberHash,
+} from './fulfillment-fixtures';
 
 const styles = readFileSync('src/styles.css', 'utf8');
 const walletAddress = '0x1111111111111111111111111111111111111111';
@@ -61,11 +71,34 @@ function createMockCoreApi(overrides: Partial<CoreApi> = {}): CoreApi {
     }),
     verifySiwe: async () => ({ token: 'test-session', walletAddress, roles: ['MERCHANT'] }),
     listCatalog: async () => [catalogProduct],
+    listFulfillmentOrders: async () => [],
+    getOrderFulfillmentTarget: async () => deliveryTarget,
     getOrderAllowedActions: async () => [{
       action: 'RECORD_SHIPMENT',
       enabled: false,
       reasonCode: 'ConfigurationRequired',
     }],
+    recordShipment: async (orderId, input) => ({
+      orderId,
+      state: 'SHIPPED',
+      shipmentId: 'shipment-result',
+      carrierCode: input.carrierCode,
+      trackingNumberHash: input.trackingNumberHash,
+      recordedAt: '2026-07-14T12:00:00.000Z',
+    }),
+    requestForcedReceipt: async (orderId) => ({
+      orderId,
+      requestId: 'forced-receipt-result',
+      state: 'OPEN',
+      platformReviewRequired: true,
+      canFinalizeDirectly: false,
+    }),
+    verifyPickup: async (orderId) => ({
+      orderId,
+      state: 'FULFILLED',
+      method: 'PICKUP_VERIFICATION',
+      fulfilledAt: '2026-07-14T12:05:00.000Z',
+    }),
     ...overrides,
   };
 }
@@ -87,6 +120,18 @@ function installWallet() {
   });
   window.ethereum = { request };
   return request;
+}
+
+async function enterFulfillment(client: CoreApi) {
+  const user = userEvent.setup();
+  installWallet();
+  render(<MemoryRouter><App client={client} /></MemoryRouter>);
+  const connect = screen.getByRole('button', { name: '连接钱包' });
+  await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
+  await user.click(connect);
+  const navigation = await screen.findByRole('navigation', { name: '商家工作台导航' });
+  await user.click(within(navigation).getByRole('link', { name: /履约交付/ }));
+  return user;
 }
 
 describe('00 wallet gateway', () => {
@@ -211,61 +256,151 @@ describe('03 fulfillment center', () => {
     const user = userEvent.setup();
     renderPage(<FulfillmentPage />);
 
-    expect(screen.getByRole('columnheader', { name: '详细地址' })).toBeTruthy();
+    expect(screen.getByRole('columnheader', { name: '物流单号哈希' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /商家强制签收|直接完成订单/ })).toBeNull();
-    expect((screen.getByRole('button', { name: '申请平台审核' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('商家会话不可用')).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: '到店自提' }));
     expect(screen.getByRole('columnheader', { name: '核销门店' })).toBeTruthy();
-    expect(screen.getByRole('columnheader', { name: '核销时间' })).toBeTruthy();
-    expect((screen.getByRole('button', { name: '启动扫码' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(/不能离线提交/)).toBeTruthy();
+    expect(screen.getByRole('columnheader', { name: '完成时间' })).toBeTruthy();
   });
 
-  it('uses the real allowedActions consumer after SIWE without calling a buyer payment route', async () => {
-    const user = userEvent.setup();
-    installWallet();
-    const getOrderAllowedActions = vi.fn(createMockCoreApi().getOrderAllowedActions);
-    const client = createMockCoreApi({ getOrderAllowedActions });
-    render(<MemoryRouter><App client={client} /></MemoryRouter>);
-
-    const connect = screen.getByRole('button', { name: '连接钱包' });
-    await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
-    await user.click(connect);
-    const navigation = await screen.findByRole('navigation', { name: '商家工作台导航' });
-    await user.click(within(navigation).getByRole('link', { name: /履约交付/ }));
-    await user.type(screen.getByLabelText('订单 ID'), 'order-payment-check');
-    await user.click(screen.getByRole('button', { name: '核验可用操作' }));
-
-    expect(await screen.findByText('ConfigurationRequired')).toBeTruthy();
-    expect(getOrderAllowedActions).toHaveBeenCalledWith('order-payment-check', 'test-session');
-  });
-
-  it('enables platform receipt review only after the merchant session receives an eligible Core action', async () => {
-    const user = userEvent.setup();
-    installWallet();
+  it('reads merchant-scoped orders, target PII and finality-gated actions from Core', async () => {
+    const getOrderAllowedActions = vi.fn(async () => [{
+      action: 'RECORD_SHIPMENT' as const,
+      enabled: false,
+      reasonCode: 'FinalityPending' as const,
+    }]);
+    const getOrderFulfillmentTarget = vi.fn(async () => deliveryTarget);
     const client = createMockCoreApi({
-      getOrderAllowedActions: async () => [
-        { action: 'REQUEST_FORCED_RECEIPT', enabled: true, deadline: '2026-07-14T12:00:00.000Z' },
-        { action: 'RECORD_SHIPMENT', enabled: false, reasonCode: 'FinalityPending' },
-      ],
+      listFulfillmentOrders: async () => [deliveryOrder, pickupOrder],
+      getOrderAllowedActions,
+      getOrderFulfillmentTarget,
     });
-    render(<MemoryRouter><App client={client} /></MemoryRouter>);
+    const user = await enterFulfillment(client);
 
-    const connect = screen.getByRole('button', { name: '连接钱包' });
-    await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
-    await user.click(connect);
-    const navigation = await screen.findByRole('navigation', { name: '商家工作台导航' });
-    await user.click(within(navigation).getByRole('link', { name: /履约交付/ }));
+    await user.click(await screen.findByRole('button', { name: `处理订单 ${deliveryOrderId}` }));
 
-    const review = screen.getByRole('button', { name: '申请平台审核' }) as HTMLButtonElement;
-    expect(review.disabled).toBe(true);
-    await user.type(screen.getByLabelText('订单 ID'), 'eligible-delivery-order');
-    await user.click(screen.getByRole('button', { name: '核验可用操作' }));
-
-    await waitFor(() => expect(review.disabled).toBe(false));
-    expect((screen.getByRole('button', { name: '去发货' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(await screen.findByText('陈先生')).toBeTruthy();
+    expect(screen.getByText('北京市东城区仓储路 24 号')).toBeTruthy();
+    expect(screen.getAllByText('BNM_POINTS').length).toBeGreaterThan(0);
     expect(screen.getByText('FinalityPending')).toBeTruthy();
+    expect(getOrderAllowedActions).toHaveBeenCalledWith(deliveryOrderId, 'test-session');
+    expect(getOrderFulfillmentTarget).toHaveBeenCalledWith(deliveryOrderId, 'test-session');
+    expect(screen.getAllByText('未发布').length).toBeGreaterThan(0);
+  });
+
+  it('submits a platform-review request but never exposes direct merchant receipt completion', async () => {
+    const requestForcedReceipt = vi.fn(createMockCoreApi().requestForcedReceipt);
+    const client = createMockCoreApi({
+      listFulfillmentOrders: async () => [deliveryOrder],
+      getOrderFulfillmentTarget: async () => deliveryTarget,
+      getOrderAllowedActions: async () => [{
+        action: 'REQUEST_FORCED_RECEIPT',
+        enabled: true,
+        deadline: '2026-07-10T08:00:00.000Z',
+      }],
+      requestForcedReceipt,
+    });
+    const user = await enterFulfillment(client);
+    await user.click(await screen.findByRole('button', { name: `处理订单 ${deliveryOrderId}` }));
+    await screen.findByText('陈先生');
+
+    await user.type(screen.getByLabelText('申请原因代码'), 'delivered_review');
+    await user.type(screen.getByLabelText('签收证据哈希'), evidenceHash);
+    await user.click(screen.getByRole('button', { name: '申请平台审核' }));
+
+    expect(await screen.findByText(/forced-receipt-result/)).toBeTruthy();
+    expect(requestForcedReceipt).toHaveBeenCalledWith(
+      deliveryOrderId,
+      expect.objectContaining({
+        evidenceHash,
+        reasonCode: 'DELIVERED_REVIEW',
+        idempotencyKey: expect.stringMatching(/^merchant-forced-receipt-/),
+      }),
+      'test-session',
+    );
+    expect(screen.queryByRole('button', { name: /商家强制签收|直接完成订单/ })).toBeNull();
+  });
+
+  it('reuses the shipment idempotency key after a typed Core failure and confirms only real success', async () => {
+    const recordShipment = vi.fn()
+      .mockRejectedValueOnce(new CoreApiError('NetworkUnavailable', '网络中断'))
+      .mockResolvedValueOnce({
+        orderId: deliveryOrderId,
+        state: 'SHIPPED',
+        shipmentId: 'shipment-retry-ok',
+        carrierCode: 'SF_EXPRESS',
+        trackingNumberHash,
+        recordedAt: '2026-07-14T12:00:00.000Z',
+      });
+    const client = createMockCoreApi({
+      listFulfillmentOrders: async () => [deliveryOrder],
+      getOrderFulfillmentTarget: async () => deliveryTarget,
+      getOrderAllowedActions: async () => [{ action: 'RECORD_SHIPMENT', enabled: true }],
+      recordShipment,
+    });
+    const user = await enterFulfillment(client);
+    await user.click(await screen.findByRole('button', { name: `处理订单 ${deliveryOrderId}` }));
+    await screen.findByText('陈先生');
+    await user.type(screen.getByLabelText('承运商代码'), 'sf_express');
+    await user.type(screen.getByLabelText('物流单号哈希'), trackingNumberHash);
+    await user.type(screen.getByLabelText('发货证据哈希'), evidenceHash);
+
+    await user.click(screen.getByRole('button', { name: '提交发货证据' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('网络中断');
+    await user.click(screen.getByRole('button', { name: '提交发货证据' }));
+
+    expect(await screen.findByText(/shipment-retry-ok/)).toBeTruthy();
+    expect(recordShipment).toHaveBeenCalledTimes(2);
+    expect(recordShipment.mock.calls[0]?.[1].idempotencyKey).toBe(recordShipment.mock.calls[1]?.[1].idempotencyKey);
+  });
+
+  it('binds pickup verification to the immutable store and reports the authoritative completion', async () => {
+    const verifyPickup = vi.fn(createMockCoreApi().verifyPickup);
+    const client = createMockCoreApi({
+      listFulfillmentOrders: async () => [pickupOrder],
+      getOrderFulfillmentTarget: async () => pickupTarget,
+      getOrderAllowedActions: async () => [{ action: 'VERIFY_PICKUP', enabled: true }],
+      verifyPickup,
+    });
+    const user = await enterFulfillment(client);
+    await user.click(screen.getByRole('button', { name: '到店自提' }));
+    await user.click(await screen.findByRole('button', { name: `处理订单 ${pickupOrderId}` }));
+    expect((await screen.findByDisplayValue(pickupTarget.storeId) as HTMLInputElement).readOnly).toBe(true);
+    await user.type(screen.getByLabelText('六位核销码'), '123456');
+    await user.type(screen.getByLabelText('门店核销证据哈希'), evidenceHash);
+    await user.click(screen.getByRole('button', { name: '确认门店核销' }));
+
+    expect(await screen.findByText(/2026-07-14T12:05:00.000Z/)).toBeTruthy();
+    expect(verifyPickup).toHaveBeenCalledWith(
+      pickupOrderId,
+      expect.objectContaining({ code: '123456', evidenceHash, storeId: pickupTarget.storeId }),
+      'test-session',
+    );
+  });
+
+  it('keeps pickup inputs disabled when Core reports FinalityPending', async () => {
+    const verifyPickup = vi.fn(createMockCoreApi().verifyPickup);
+    const client = createMockCoreApi({
+      listFulfillmentOrders: async () => [pickupOrder],
+      getOrderFulfillmentTarget: async () => pickupTarget,
+      getOrderAllowedActions: async () => [{
+        action: 'VERIFY_PICKUP',
+        enabled: false,
+        reasonCode: 'FinalityPending',
+      }],
+      verifyPickup,
+    });
+    const user = await enterFulfillment(client);
+    await user.click(screen.getByRole('button', { name: '到店自提' }));
+    await user.click(await screen.findByRole('button', { name: `处理订单 ${pickupOrderId}` }));
+    await screen.findByDisplayValue(pickupTarget.storeId);
+
+    expect((screen.getByLabelText('六位核销码') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: '确认门店核销' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getAllByText('FinalityPending').length).toBeGreaterThan(0);
+    expect(verifyPickup).not.toHaveBeenCalled();
   });
 
   it('contains wide tables inside their horizontal scroll region', () => {
@@ -330,6 +465,6 @@ describe('workspace accessibility', () => {
     expect(screen.getByRole('button', { name: '打开导航' })).toBeTruthy();
     expect(screen.getByRole('main')).toBeTruthy();
     expect(screen.getByText(artifactVersion)).toBeTruthy();
-    expect(await screen.findByText('支付 Core 已连接')).toBeTruthy();
+    expect(await screen.findByText('支付与履约 Core 已连接')).toBeTruthy();
   });
 });

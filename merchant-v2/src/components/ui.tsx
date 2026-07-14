@@ -34,7 +34,7 @@ export function CoreUnavailable({ compact = false }: { compact?: boolean }) {
     <div className={`${compact ? 'system-notice compact' : 'system-notice'}${available ? ' ready' : ''}`} role="status">
       <Icon aria-hidden="true" size={18} />
       <div>
-        <strong>{bootstrap.phase === 'checking' ? '正在校验 Core' : available ? '支付 Core 已连接' : 'Core 连接失败'}</strong>
+        <strong>{bootstrap.phase === 'checking' ? '正在校验 Core' : available ? '支付与履约 Core 已连接' : 'Core 连接失败'}</strong>
         <span>
           {available
             ? `${coreBoundary.reason}。未发布操作继续失败关闭。`
