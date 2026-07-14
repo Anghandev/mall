@@ -22,7 +22,7 @@ export function DashboardPage() {
             <div><p className="eyebrow">Fulfillment</p><h2 id="delivery-title">今日交付队列</h2></div>
             <Link className="text-link" to="/fulfillment">查看全部 <ArrowRight aria-hidden="true" size={15} /></Link>
           </div>
-          <EmptyState blocked description="订单投影与 PII 授权接口尚未发布，不能展示或导出订单。" title="交付队列不可用" />
+          <EmptyState blocked description="履约订单已在交付页实时读取；大盘日界聚合与导出统计尚未发布。" title="交付聚合不可用" />
         </section>
         <section className="section-block" aria-labelledby="product-title">
           <div className="section-heading">

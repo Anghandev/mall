@@ -1210,6 +1210,15 @@ td .empty-state {
   gap: 16px;
 }
 
+.fulfillment-detail-panel {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 14px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
 .compact-section > p:not(.panel-note) {
   color: var(--muted);
   font-size: 0.8125rem;
