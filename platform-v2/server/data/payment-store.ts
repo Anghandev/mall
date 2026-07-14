@@ -70,7 +70,18 @@ interface LedgerAccount {
     | 'BNM_ISSUANCE'
     | 'BNM_LIABILITY';
   safeAddress?: string;
+  subtype?: RewardSubtype;
 }
+
+type RewardSubtype =
+  | 'GENESIS'
+  | 'DIRECT_REFERRAL'
+  | 'DISTRICT'
+  | 'CITY'
+  | 'PROVINCE'
+  | 'REGION'
+  | 'OPERATIONS'
+  | 'ROUNDING_REMAINDER';
 
 interface LedgerAccountRow {
   owner_type: LedgerAccount['ownerType'];
@@ -78,6 +89,7 @@ interface LedgerAccountRow {
   asset: LedgerAccount['asset'];
   purpose: LedgerAccount['purpose'];
   safe_address: string | null;
+  subtype: RewardSubtype | null;
 }
 
 export interface CanonicalPaymentEvent {
@@ -1193,6 +1205,8 @@ function paymentJournal(
         allocation.account,
         NPL,
         'REWARD_LIABILITY',
+        undefined,
+        rewardSubtype(allocation.role),
       ),
       'CREDIT',
       allocation.amount,
@@ -1228,20 +1242,37 @@ function account(
   asset: LedgerAccount['asset'],
   purpose: LedgerAccount['purpose'],
   safeAddress?: string,
+  subtype?: RewardSubtype,
 ): LedgerAccount {
-  return { accountId, ownerType, ownerId, asset, purpose, ...(safeAddress ? { safeAddress } : {}) };
+  return {
+    accountId,
+    ownerType,
+    ownerId,
+    asset,
+    purpose,
+    ...(safeAddress ? { safeAddress } : {}),
+    ...(subtype ? { subtype } : {}),
+  };
 }
 
 async function ensureAccount(executor: SqlExecutor, value: LedgerAccount) {
   await executor.query(
     `INSERT INTO core.ledger_accounts (
-       account_id, owner_type, owner_id, asset, purpose, safe_address
-     ) VALUES ($1,$2,$3,$4,$5,$6)
+       account_id, owner_type, owner_id, asset, purpose, safe_address, subtype
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7)
      ON CONFLICT (account_id) DO NOTHING`,
-    [value.accountId, value.ownerType, value.ownerId, value.asset, value.purpose, value.safeAddress ?? null],
+    [
+      value.accountId,
+      value.ownerType,
+      value.ownerId,
+      value.asset,
+      value.purpose,
+      value.safeAddress ?? null,
+      value.subtype ?? null,
+    ],
   );
   const persisted = await executor.query<LedgerAccountRow>(
-    `SELECT owner_type, owner_id, asset, purpose, safe_address
+    `SELECT owner_type, owner_id, asset, purpose, safe_address, subtype
      FROM core.ledger_accounts WHERE account_id = $1`,
     [value.accountId],
   );
@@ -1253,9 +1284,25 @@ async function ensureAccount(executor: SqlExecutor, value: LedgerAccount) {
       || row.asset !== value.asset
       || row.purpose !== value.purpose
       || row.safe_address !== (value.safeAddress ?? null)
+      || row.subtype !== (value.subtype ?? null)
   ) {
     throw new CoreError('InvalidFinality', 'Ledger account metadata does not match the immutable account identity', 409);
   }
+}
+
+function rewardSubtype(role: string): RewardSubtype {
+  const subtype = {
+    genesis: 'GENESIS',
+    directReferral: 'DIRECT_REFERRAL',
+    district: 'DISTRICT',
+    city: 'CITY',
+    province: 'PROVINCE',
+    region: 'REGION',
+    operations: 'OPERATIONS',
+    roundingRemainder: 'ROUNDING_REMAINDER',
+  }[role];
+  if (!subtype) throw new CoreError('InvalidFinality', 'NPL reward subtype is unavailable', 409);
+  return subtype as RewardSubtype;
 }
 
 async function postJournal(

@@ -804,6 +804,24 @@ test('seckill quote locks both inventories and final classification releases the
       nextCursor: publicEvents.nextCursor,
     });
     assert.throws(() => seckill.events(sessionId, { cursor: '-1' }), /Invalid event cursor/);
+    const settlementProjection = new SettlementService({ transactions: transactionAdapter(db) });
+    const buyerAssets = await settlementProjection.list({ walletAddress: BUYER, roles: ['BUYER'] });
+    assert.deepEqual(buyerAssets.points, [{
+      pointsType: 'BNM',
+      purpose: 'BNM_LIABILITY',
+      state: 'LOCKED',
+      amount: '90',
+      transferable: false,
+    }]);
+    const genesisAssets = await settlementProjection.list({
+      walletAddress: '0x5000000000000000000000000000000000000001',
+      roles: ['BUYER'],
+    });
+    assert.ok(genesisAssets.balances.some((balance) =>
+      balance.asset === 'NPL'
+      && balance.purpose === 'REWARD_LIABILITY'
+      && balance.rewardSubtype === 'GENESIS'
+      && balance.state === 'LOCKED'));
     const inventory = await db.query<{
       stock_available: number;
       stock_reserved: number;

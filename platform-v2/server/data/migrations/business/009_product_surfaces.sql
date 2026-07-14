@@ -1,3 +1,28 @@
+ALTER TABLE core.ledger_accounts ADD COLUMN subtype text;
+
+UPDATE core.ledger_accounts
+SET subtype = CASE split_part(account_id, ':', 2)
+    WHEN 'genesis' THEN 'GENESIS'
+    WHEN 'directReferral' THEN 'DIRECT_REFERRAL'
+    WHEN 'district' THEN 'DISTRICT'
+    WHEN 'city' THEN 'CITY'
+    WHEN 'province' THEN 'PROVINCE'
+    WHEN 'region' THEN 'REGION'
+    WHEN 'operations' THEN 'OPERATIONS'
+    WHEN 'roundingRemainder' THEN 'ROUNDING_REMAINDER'
+    ELSE NULL
+END
+WHERE purpose = 'REWARD_LIABILITY';
+
+ALTER TABLE core.ledger_accounts ADD CONSTRAINT ledger_accounts_reward_subtype_check
+    CHECK (
+        (purpose = 'REWARD_LIABILITY' AND subtype IN (
+            'GENESIS', 'DIRECT_REFERRAL', 'DISTRICT', 'CITY',
+            'PROVINCE', 'REGION', 'OPERATIONS', 'ROUNDING_REMAINDER'
+        ))
+        OR (purpose <> 'REWARD_LIABILITY' AND subtype IS NULL)
+    );
+
 CREATE TABLE core.seckill_relay_events (
     cursor bigint GENERATED ALWAYS AS IDENTITY UNIQUE,
     relay_event_key text PRIMARY KEY,

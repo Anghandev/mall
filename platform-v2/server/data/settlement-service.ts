@@ -763,18 +763,36 @@ export class SettlementService {
       const balances = await executor.query<{
         asset: string;
         purpose: string;
+        subtype: string | null;
         balance_state: string;
         amount: string;
       }>(
-        `SELECT account.asset, account.purpose, line.balance_state,
+        `SELECT account.asset, account.purpose, account.subtype, line.balance_state,
            sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS amount
          FROM core.ledger_lines line
          JOIN core.ledger_journals journal ON journal.journal_id = line.journal_id
          JOIN core.ledger_accounts account ON account.account_id = line.account_id
-         WHERE account.owner_id = $1 AND line.balance_state <> 'POSTED'
-         GROUP BY account.asset, account.purpose, line.balance_state
+         WHERE account.owner_id = $1 AND account.asset IN ('USDT','NPL')
+           AND line.balance_state <> 'POSTED'
+         GROUP BY account.asset, account.purpose, account.subtype, line.balance_state
          HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) > 0
-         ORDER BY account.asset, account.purpose, line.balance_state`,
+         ORDER BY account.asset, account.purpose, account.subtype, line.balance_state`,
+        [wallet],
+      );
+      const points = await executor.query<{
+        purpose: string;
+        balance_state: string;
+        amount: string;
+      }>(
+        `SELECT account.purpose, line.balance_state,
+           sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS amount
+         FROM core.ledger_lines line
+         JOIN core.ledger_accounts account ON account.account_id = line.account_id
+         WHERE account.owner_id = $1 AND account.asset = 'BNM_POINTS'
+           AND line.balance_state IN ('LOCKED','AVAILABLE')
+         GROUP BY account.purpose, line.balance_state
+         HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) > 0
+         ORDER BY account.purpose, line.balance_state`,
         [wallet],
       );
       const requests = await executor.query<{ request_id: string }>(
@@ -788,8 +806,16 @@ export class SettlementService {
         balances: balances.rows.map((row) => ({
           asset: row.asset,
           purpose: row.purpose,
+          rewardSubtype: row.subtype,
           state: row.balance_state,
           amount: row.amount,
+        })),
+        points: points.rows.map((row) => ({
+          pointsType: 'BNM' as const,
+          purpose: row.purpose,
+          state: row.balance_state,
+          amount: row.amount,
+          transferable: false as const,
         })),
         requests: await Promise.all(requests.rows.map((row) => loadRequestProjection(executor, row.request_id))),
       };
