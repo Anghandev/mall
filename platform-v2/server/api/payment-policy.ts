@@ -3,11 +3,12 @@ import type {
   FrozenPaymentPolicy,
   WeightedDestination,
 } from './checkout.ts';
-import { AbiCoder, keccak256 } from 'ethers';
+import { AbiCoder, keccak256, toUtf8Bytes } from 'ethers';
 import { assertPolicyReady } from './checkout.ts';
 import { CoreError } from './errors.ts';
 
 const BPS = 10_000n;
+const PRIZE_PURPOSE_HASH = keccak256(toUtf8Bytes('SECKILL_PRIZE_LIABILITY_V1'));
 
 export interface PaymentPolicySnapshot extends FrozenPaymentPolicy {
   platformFeeBps: number;
@@ -28,6 +29,7 @@ export interface PaymentPolicySnapshot extends FrozenPaymentPolicy {
   concessionDestinations: readonly WeightedDestination[];
   operationsDestinations: readonly WeightedDestination[];
   otherUsdtDestinations: readonly WeightedDestination[];
+  seckillPrizePoolAccount: string;
 }
 
 export function parsePaymentPolicySnapshot(
@@ -74,6 +76,7 @@ export function parsePaymentPolicySnapshot(
     concessionDestinations: destinations(value.concessionDestinations, 'concessionDestinations'),
     operationsDestinations: destinations(value.operationsDestinations, 'operationsDestinations'),
     otherUsdtDestinations: destinations(value.otherUsdtDestinations, 'otherUsdtDestinations'),
+    seckillPrizePoolAccount: text(value.seckillPrizePoolAccount, 'seckillPrizePoolAccount').toLowerCase(),
   };
   assertPolicyReady(policy);
   if (
@@ -89,6 +92,9 @@ export function parsePaymentPolicySnapshot(
       || !/^0x[0-9a-fA-F]{40}$/.test(policy.genesisCredential)
       || ![1, 2].includes(policy.genesisCredentialStandard)
       || !/^0x[0-9a-fA-F]{64}$/.test(policy.decisionEvidenceHash)
+      || !/^0x[0-9a-f]{40}$/.test(policy.seckillPrizePoolAccount)
+      || /^0x0{40}$/.test(policy.seckillPrizePoolAccount)
+      || policy.otherUsdtDestinations.some((item) => item.account === policy.seckillPrizePoolAccount)
   ) throw new CoreError('InvalidRequest', 'Published payment policy contains invalid governed fields');
   validateDestinations(policy.otherUsdtDestinations, 'otherUsdtDestinations');
   return Object.freeze(policy);
@@ -98,39 +104,62 @@ export function buildOtherUsdtAllocations(
   listPriceUsdt: bigint,
   merchantBaseReceivableUsdt: bigint,
   policy: PaymentPolicySnapshot,
+  classification: 'ORDINARY' | 'SECKILL' | 'FALLBACK_RETAIL',
 ): readonly ExactUsdtAllocation[] {
   const buyerUsdt = (listPriceUsdt * BigInt(policy.usdtPaymentBps)) / BPS;
   if (merchantBaseReceivableUsdt > buyerUsdt) {
     throw new CoreError('InvalidRequest', 'Merchant base receivable exceeds buyer USDT payment');
   }
   const amount = buyerUsdt - merchantBaseReceivableUsdt;
+  const prizeAmount = classification === 'SECKILL'
+    ? (listPriceUsdt * BigInt(policy.seckillPrizeBps)) / BPS
+    : 0n;
+  if (prizeAmount > amount || (classification === 'SECKILL' && policy.seckillPrizeBps > 0 && prizeAmount === 0n)) {
+    throw new CoreError('DecisionBlocked', 'Seckill prize liability cannot be funded by the signed USDT payment', 409);
+  }
+  const genericAmount = amount - prizeAmount;
   let allocated = 0n;
-  return Object.freeze(policy.otherUsdtDestinations.map((destination, index) => {
+  const allocations: ExactUsdtAllocation[] = policy.otherUsdtDestinations.map((destination, index) => {
     const share = index + 1 === policy.otherUsdtDestinations.length
-      ? amount - allocated
-      : (amount * BigInt(destination.weightBps)) / BPS;
+      ? genericAmount - allocated
+      : (genericAmount * BigInt(destination.weightBps)) / BPS;
     allocated += share;
-    return Object.freeze({
+    return {
       account: destination.account.toLowerCase(),
       amount: share,
-      purpose: 'POLICY_ALLOCATION',
+      purpose: 'POLICY_ALLOCATION' as const,
+    };
+  });
+  if (prizeAmount > 0n) {
+    allocations.push({
+      account: policy.seckillPrizePoolAccount,
+      amount: prizeAmount,
+      purpose: 'SECKILL_PRIZE_LIABILITY',
     });
-  }));
+  }
+  allocations.sort((left, right) => left.account.localeCompare(right.account));
+  return Object.freeze(allocations.map((allocation) => Object.freeze(allocation)));
 }
 
 export function paymentAllocationSetHash(
   concessionDestinations: readonly WeightedDestination[],
   otherUsdtDestinations: readonly WeightedDestination[],
+  seckillPrizePoolAccount: string,
 ) {
   validateDestinations(concessionDestinations, 'concessionDestinations');
   validateDestinations(otherUsdtDestinations, 'otherUsdtDestinations');
+  if (!/^0x[0-9a-fA-F]{40}$/.test(seckillPrizePoolAccount) || /^0x0{40}$/.test(seckillPrizePoolAccount)) {
+    throw blocked('seckillPrizePoolAccount');
+  }
   return keccak256(AbiCoder.defaultAbiCoder().encode(
-    ['address[]', 'uint16[]', 'address[]', 'uint16[]'],
+    ['address[]', 'uint16[]', 'address[]', 'uint16[]', 'address', 'bytes32'],
     [
       concessionDestinations.map((item) => item.account),
       concessionDestinations.map((item) => item.weightBps),
       otherUsdtDestinations.map((item) => item.account),
       otherUsdtDestinations.map((item) => item.weightBps),
+      seckillPrizePoolAccount,
+      PRIZE_PURPOSE_HASH,
     ],
   ));
 }

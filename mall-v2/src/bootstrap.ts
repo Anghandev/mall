@@ -5,6 +5,13 @@ import {
   executableOrderActionNames,
   type AllowedActionName,
 } from '@abu24k/core-artifacts';
+import coordinatedManifest from '@abu24k/core-artifacts/manifest';
+import contractManifest from '@abu24k/core-artifacts/contracts/manifest';
+
+const paymentRouterDeployment = (contractManifest.contracts as readonly Readonly<{
+  name: string;
+  address: string | null;
+}>[]).find((contract) => contract.name === 'PaymentRouterV2');
 
 export const productBaseline = Object.freeze({
   coreArtifacts: artifactVersion,
@@ -12,6 +19,17 @@ export const productBaseline = Object.freeze({
   chainId: chainIdentity.chainId,
   knownOrderActions: allowedActionNames,
   executableOrderActions: executableOrderActionNames,
+  deploymentAuthorized:
+    coordinatedManifest.deploymentAuthorized === true && contractManifest.deploymentAuthorized === true,
+  paymentRouterAddress: paymentRouterDeployment?.address ?? null,
+  paymentCapabilities: Object.freeze({
+    catalog: coordinatedManifest.capabilityStatus.catalogHttp === 'AVAILABLE',
+    ordinaryQuote: coordinatedManifest.capabilityStatus.paymentQuoteHttp === 'AVAILABLE',
+    seckillQuote: coordinatedManifest.capabilityStatus.seckillQuoteHttp === 'AVAILABLE',
+    submission: coordinatedManifest.capabilityStatus.paymentSubmissionHttp === 'AVAILABLE',
+    projection: coordinatedManifest.capabilityStatus.paymentProjectionHttp === 'AVAILABLE',
+  }),
+  payOrderExecutable: executableOrderActionNames.includes('PAY_ORDER'),
 } as const);
 
 export function isCoreOrderActionExecutable(action: AllowedActionName) {

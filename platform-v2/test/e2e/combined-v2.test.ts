@@ -28,9 +28,9 @@ test('all products consume one coordinated artifact and expose no executable wri
   assert.equal(merchantBaseline.coreArtifacts, artifactVersion);
   assert.equal(adminBaseline.artifactVersion, artifactVersion);
   assert.equal(merchantCore.artifactVersion, artifactVersion);
-  assert.equal(merchantCore.runtimeAvailable, false);
+  assert.equal(merchantCore.artifactsAvailable, true);
   assert.equal(adminBaseline.adminCapabilities.writes, false);
-  assert.equal(adminBaseline.adminCapabilities.projections, false);
+  assert.equal(adminBaseline.adminCapabilities.projections, true);
   for (const action of allowedActionNames) assert.equal(isCoreOrderActionExecutable(action), false, action);
 });
 
@@ -69,6 +69,7 @@ test('permissions, breakers and Claims remain fail closed across products', () =
       state: 'PAID',
       fulfillmentMode: 'DELIVERY',
       buyerWallet: BUYER,
+      merchantId: 'merchant-1',
       merchantWallet: MERCHANT,
       paidAt: new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000),
       shipmentEvidence: false,
@@ -83,6 +84,7 @@ test('permissions, breakers and Claims remain fail closed across products', () =
       state: 'QUOTED',
       fulfillmentMode: 'DELIVERY',
       buyerWallet: BUYER,
+      merchantId: 'merchant-1',
       merchantWallet: MERCHANT,
       shipmentEvidence: false,
       takeoverOpened: false,

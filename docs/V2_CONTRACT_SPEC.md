@@ -1,6 +1,6 @@
 # Abu 24K V2 Payment Contract Freeze
 
-Status: coordinated local payment checkpoint `2.0.0-payment.1`. The generated
+Status: coordinated local fulfillment checkpoint `2.0.0-fulfillment.1`. The generated
 manifest contains no deployment addresses and has `deploymentAuthorized:
 false`. This document does not authorize deployment or a transaction.
 
@@ -14,9 +14,9 @@ false`. This document does not authorize deployment or a transaction.
 | `PaymentRouterV2` | Signed ordinary/seckill payment, replay protection, Safe transfers, boundary classification and payment breakers | Normally zero |
 
 V2 deploys no BNM token, Claim vault, reward ledger, payment escrow, guarantee
-vault or separate seckill funds contract. Fulfillment, arbitration, guarantees,
-rewards and Safe settlement are PostgreSQL-ledger/Core responsibilities in later
-checkpoints.
+vault or separate seckill funds contract. Fulfillment and arbitration are
+published PostgreSQL-ledger/Core responsibilities in the current checkpoint;
+guarantees, transferable rewards and Safe settlement remain later Core work.
 
 ## Payment Intent
 
@@ -34,6 +34,9 @@ The signed `PaymentIntent` binds:
 - exact list price, USDT and NPL payment, Burn, Reward Safe, merchant concession
   and BNM-points amounts;
 - concession allocation hash, session identity and six beneficiary addresses.
+  The governed allocation-set hash also binds the explicit seckill prize-pool
+  account and `SECKILL_PRIZE_LIABILITY_V1` purpose domain; no consumer infers
+  that account from an allocation position or weight.
 
 Order IDs, buyer nonces and reservation IDs are one-use. Quote validity is at
 most five minutes. Reservation validity must cover the quote. Current policy,

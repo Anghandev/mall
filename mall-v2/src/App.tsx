@@ -8,6 +8,7 @@ import {
 import { BrowserRouter, Link, Navigate, useLocation } from 'react-router-dom';
 
 import { productBaseline } from './bootstrap';
+import { MallRuntimeProvider, useMallRuntime, type MallServices } from './mall-runtime';
 import {
   ActivityScreen,
   AddressScreen,
@@ -39,10 +40,19 @@ export function App() {
   );
 }
 
-export function MallApp() {
+export function MallApp({ services }: { services?: MallServices } = {}) {
+  return (
+    <MallRuntimeProvider {...(services ? { services } : {})}>
+      <MallShell />
+    </MallRuntimeProvider>
+  );
+}
+
+function MallShell() {
   const location = useLocation();
   const isPrimary = primaryPaths.has(location.pathname as (typeof tabs)[number]['path']);
   const activeRoot = getActiveRoot(location.pathname);
+  const runtime = useMallRuntime();
 
   if (location.pathname === '/') {
     return <Navigate to="/seckill" replace />;
@@ -65,18 +75,34 @@ export function MallApp() {
           <button
             className="wallet-button"
             type="button"
-            disabled
-            aria-describedby="wallet-unavailable-reason"
+            disabled={runtime.busy || Boolean(runtime.session)}
+            onClick={() => void runtime.connectWallet()}
           >
             <WalletCards aria-hidden="true" size={17} />
-            连接钱包
+            {runtime.session ? shortenAddress(runtime.session.walletAddress) : runtime.busy ? '连接中' : '连接钱包'}
           </button>
-          <span id="wallet-unavailable-reason" className="sr-only">
-            安全配置未发布，钱包连接暂不可用
-          </span>
         </header>
 
         <main id="main-content" className="app-content" tabIndex={-1}>
+          {runtime.error ? (
+            <div className="runtime-error" role="alert">
+              <span>{runtime.error}</span>
+              <button type="button" onClick={runtime.clearError}>关闭</button>
+            </div>
+          ) : null}
+          {runtime.pendingSubmission ? (
+            <section className="runtime-pending" aria-labelledby="pending-submission-title">
+              <div className="runtime-pending__info">
+                <strong id="pending-submission-title">链上交易待恢复跟踪</strong>
+                <span>{shortenHash(runtime.pendingSubmission.txHash)}</span>
+              </div>
+              <div className="runtime-pending__actions">
+                <button type="button" onClick={() => void runtime.retrySubmission()} disabled={runtime.busy || !runtime.session}>
+                  {runtime.pendingSubmission.phase === 'PENDING_CORE_SUBMISSION' ? '重试提交' : '刷新投影'}
+                </button>
+              </div>
+            </section>
+          ) : null}
           <div className="primary-screens" hidden={!isPrimary}>
             <section hidden={activeRoot !== '/seckill'} aria-label="秒杀大厅">
               <SeckillScreen />
@@ -147,7 +173,8 @@ function getActiveRoot(pathname: string) {
 export const mallRuntimeBoundary = Object.freeze({
   artifactStatus: productBaseline.coreArtifacts,
   executableOrderActions: productBaseline.executableOrderActions,
-  writesEnabled: false,
+  deploymentAuthorized: productBaseline.deploymentAuthorized,
+  paymentCapabilities: productBaseline.paymentCapabilities,
   sharedInterface: '@abu24k/core-artifacts',
 } as const);
 
@@ -156,3 +183,11 @@ export const routeEvidence = Object.freeze({
   protected: ['/assets/addresses', '/assets/orders', '/assets/activity', '/assets/rewards'],
   checkout: ['/checkout', '/checkout/review'],
 });
+
+function shortenAddress(address: string) {
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
+function shortenHash(hash: string) {
+  return `${hash.slice(0, 10)}…${hash.slice(-8)}`;
+}

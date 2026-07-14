@@ -1,21 +1,30 @@
 # Mall Core API Publication Boundary
 
-Status: the previous handwritten `mall-api-v1` proposal is retired. It was not
-a published Core contract and must not be implemented or copied.
+Status: the previous handwritten `mall-api-v1` proposal is retired. Mall now
+consumes coordinated Core fulfillment artifacts `2.0.0-fulfillment.1`.
 
-Core will publish one versioned OpenAPI document and generated consumer types
-after contracts, Schema and shared states are frozen. Until then Mall exposes
-fail-closed UI only and does not guess endpoint paths, payloads, amount fields,
-errors or state transitions.
+The published boundary currently covers:
 
-The publication must cover the Requirement Matrix capabilities, including:
+- bootstrap/readiness, BSC chain identity and fixed asset identity;
+- buyer SIWE challenge and session;
+- products/SKUs and authoritative atomic-unit prices/stock;
+- ordinary and dual seckill signed quotes with atomic reservations;
+- approval requirements and ABI-shaped PaymentRouter calls;
+- transaction submission plus replacement/reorg/finality projection.
+- store reads and authoritative delivery/pickup checkout targets;
+- order, fulfillment-target, shipment, logistics and balance projections;
+- fulfillment requests, receipt, pickup, arbitration and takeover actions with
+  generated `allowedActions`.
 
-- bootstrap/network/artifact version and provider readiness;
-- products/SKUs, signed quotes and inventory reservations;
-- seckill state, both signed quotes, timers, reports and event cursor;
-- addresses, stores, logistics, order/takeover/receipt/arbitration projections;
-- reward/Claim projections and ordered transaction intents;
-- `allowedActions`, exact disabled reasons and transaction finality;
-- idempotency, cursor replay, replacement/reorg and typed errors.
+Mall derives endpoint paths from the coordinated OpenAPI document and consumes
+the generated response types. It does not maintain a parallel API schema.
+
+The following later batches remain unpublished:
+
+- seckill session state, timers, reports and event cursor;
+- saved-address/profile persistence and PII-safe address parsing;
+- reward and signed-settlement projections;
+- settlement `allowedActions` and exact disabled reasons;
+- fulfillment and settlement WebSocket cursor replay.
 
 No business-refund endpoint or action is part of V2.

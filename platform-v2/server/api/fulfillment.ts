@@ -6,7 +6,7 @@ export interface FulfillmentProjection {
   orderId: string;
   fulfillmentMode: 'DELIVERY' | 'PICKUP';
   state: 'PAID' | 'SHIPPED' | 'DELIVERED' | 'ARBITRATION' | 'TAKEOVER' | 'FULFILLMENT_PENDING' | 'FULFILLED';
-  paidAt: Date;
+  paymentFinalizedAt?: Date;
   shippedAt?: Date;
   deliveredAt?: Date;
   shipmentEvidenceHash?: string;
@@ -22,7 +22,12 @@ export function evaluateTakeover(order: FulfillmentProjection, now: Date) {
       { orderId: order.orderId },
     );
   }
-  if (order.state !== 'PAID' || order.shipmentEvidenceHash || now.getTime() < order.paidAt.getTime() + SEVEN_DAYS_MS) {
+  if (
+    order.state !== 'PAID'
+    || !order.paymentFinalizedAt
+    || order.shipmentEvidenceHash
+    || now.getTime() < order.paymentFinalizedAt.getTime() + SEVEN_DAYS_MS
+  ) {
     throw new CoreError('FinalityPending', 'Delivery takeover is not eligible', 409, { orderId: order.orderId });
   }
   return {

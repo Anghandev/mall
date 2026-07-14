@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,10 +12,14 @@ import type { CanonicalPaymentIntent } from '../api/checkout.ts';
 import { CORE_ARTIFACT_VERSION } from '../api/enums.ts';
 import { paymentIntentHash } from '../api/payment-signing.ts';
 import { AbiEventDecoder } from '../chain/abi-decoder.ts';
+import { BnmAvailabilityWorker } from '../chain/bnm-availability-worker.ts';
+import { FulfillmentSchedulerWorker } from '../chain/fulfillment-scheduler-worker.ts';
 import { ChainIndexer, type IndexedChainBlock } from '../chain/indexer.ts';
 import { appendAuditEntry, verifyAuditChain, type AuditRow } from './audit-chain.ts';
 import { PostgresNonceStore, RedisNonceRateLimiter } from './auth-store.ts';
 import { CatalogPaymentService } from './catalog-payment-service.ts';
+import { FulfillmentService } from './fulfillment-service.ts';
+import { FulfillmentTargetService, assertQuoteFulfillmentTarget } from './fulfillment-target-service.ts';
 import { PostgresIndexerStore } from './indexer-store.ts';
 import { reserveInventory } from './inventory.ts';
 import { applyMigrations, type SqlExecutor, type SqlTransactionRunner } from './migrations.ts';
@@ -48,6 +53,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '003_indexer.sql',
       '004_parallel_auth_nonces.sql',
       '005_payment_ledger.sql',
+      '006_fulfillment.sql',
     ]);
     assert.deepEqual(auditNames, ['001_audit_schema.sql', '002_evidence_policy.sql']);
     const businessTables = await business.query<{ table_name: string }>(
@@ -232,14 +238,19 @@ test('PostgreSQL indexer atomically projects payment, rolls back a bad reorg and
       parentHash = block.block.hash;
     }
     await store.appendCanonical({ blockNumber: 100, blockHash: replacement100.block.hash }, confirmations);
-    const final = await db.query<{ confirmations: string; finality_status: string; state: string }>(
-      `SELECT payment.confirmations::text, orders.finality_status, finality.state
+    const final = await db.query<{ confirmations: string; finality_status: string; state: string; finalized_at: Date }>(
+      `SELECT payment.confirmations::text, orders.finality_status, finality.state, finality.finalized_at
        FROM core.payment_events payment
        JOIN core.orders orders ON orders.order_id = payment.order_id
        JOIN core.transaction_finality finality ON finality.transaction_id = 'payment:' || payment.event_key
        WHERE payment.canonical`,
     );
-    assert.deepEqual(final.rows[0], { confirmations: '15', finality_status: 'FINAL', state: 'FINAL' });
+    assert.deepEqual(final.rows[0], {
+      confirmations: '15',
+      finality_status: 'FINAL',
+      state: 'FINAL',
+      finalized_at: new Date((intent.issuedAt + 15) * 1000),
+    });
   } finally {
     await db.close();
   }
@@ -286,6 +297,18 @@ test('generated PaymentRouter ABI decodes through the Indexer into a balanced Po
     ]);
     const block99 = chainBlock(99, blockHash(99), blockHash(98), intent.issuedAt - 1);
     const block100 = chainBlock(100, blockHash(100), block99.block.hash, intent.issuedAt);
+    const confirmationBlocks: IndexedChainBlock[] = [];
+    let confirmationParent = block100.block.hash;
+    for (let number = 101; number <= 114; number += 1) {
+      const confirmation = chainBlock(
+        number,
+        blockHash(number),
+        confirmationParent,
+        intent.issuedAt + number - 100,
+      );
+      confirmationBlocks.push(confirmation);
+      confirmationParent = confirmation.block.hash;
+    }
     const decoder = await AbiEventDecoder.load(ABI_BUNDLE_PATH, { PaymentRouterV2: routerAddress });
     const indexer = new ChainIndexer(decoder, new PostgresIndexerStore(transactionAdapter(db)));
     await indexer.ingestSegment([
@@ -302,13 +325,26 @@ test('generated PaymentRouter ABI decodes through the Indexer into a balanced Po
           logIndex: 0,
         }],
       },
+      ...confirmationBlocks.map(({ block }) => ({ block, logs: [] })),
     ]);
-    const projection = await db.query<{ classification: string; confirmations: string; canonical: boolean }>(
-      `SELECT classification, confirmations::text, canonical
-       FROM core.payment_events WHERE order_id = $1`,
+    const projection = await db.query<{
+      classification: string;
+      confirmations: string;
+      canonical: boolean;
+      finalized_at: Date;
+    }>(
+      `SELECT payment.classification, payment.confirmations::text, payment.canonical, finality.finalized_at
+       FROM core.payment_events payment
+       JOIN core.transaction_finality finality ON finality.resource_id = payment.order_id
+       WHERE payment.order_id = $1`,
       [intent.orderId],
     );
-    assert.deepEqual(projection.rows[0], { classification: 'ORDINARY', confirmations: '1', canonical: true });
+    assert.deepEqual(projection.rows[0], {
+      classification: 'ORDINARY',
+      confirmations: '15',
+      canonical: true,
+      finalized_at: new Date((intent.issuedAt + 14) * 1000),
+    });
     await assertLedgerBalanced(db, 1);
   } finally {
     await db.close();
@@ -482,6 +518,7 @@ test('catalog payment service builds an authoritative idempotent quote and recor
   const db = await createBusinessDatabase();
   try {
     await seedCatalog(db, 2);
+    const quoteNow = new Date();
     let signCalls = 0;
     const ids = [`0x${'9'.repeat(64)}`, `0x${'d'.repeat(64)}`];
     const service = new CatalogPaymentService({
@@ -508,7 +545,7 @@ test('catalog payment service builds an authoritative idempotent quote and recor
       },
       policies: { assertPublished: async () => undefined },
       paymentRouterAddress: '0x9999999999999999999999999999999999999999',
-      clock: () => new Date('2026-07-14T12:00:00.000Z'),
+      clock: () => quoteNow,
       bytes32: () => ids.shift()!,
       nonce: () => 7n,
     });
@@ -680,6 +717,43 @@ test('seckill quote locks both inventories and final classification releases the
     });
     await assertLedgerBalanced(db, 1, { usdt: 63n, nplReward: 90n, bnm: 90n });
 
+    const fulfillment = new FulfillmentService({
+      transactions: transactionAdapter(db),
+      clock: () => new Date(event.event.finalizedAt!.getTime() + 60_000),
+    });
+    const buyer = { walletAddress: BUYER, roles: ['BUYER'] as const };
+    const merchant = { walletAddress: MERCHANT, roles: ['MERCHANT'] as const, merchantId: 'merchant-1' };
+    const arbitrator = { walletAddress: '0x4444444444444444444444444444444444444444', roles: ['ARBITRATOR'] as const };
+    await fulfillment.recordShipment(merchant, quote.orderId, {
+      idempotencyKey: 'seckill-prize-shipment',
+      evidenceHash: `0x${'8'.repeat(64)}`,
+      carrierCode: 'SF',
+      trackingNumberHash: `0x${'7'.repeat(64)}`,
+    });
+    await fulfillment.openArbitration(buyer, quote.orderId, {
+      idempotencyKey: 'seckill-prize-arbitration',
+      evidenceHash: `0x${'7'.repeat(64)}`,
+      reasonCode: 'SECKILL_DELIVERY_DISPUTE',
+    });
+    assert.deepEqual(await purposeBalances(db, quote.orderId, 'SECKILL_PRIZE_LIABILITY'), {
+      DISPUTED: '2',
+    });
+    await fulfillment.decideArbitration(arbitrator, quote.orderId, {
+      idempotencyKey: 'seckill-prize-fulfill',
+      evidenceHash: `0x${'8'.repeat(64)}`,
+      outcome: 'FULFILL',
+      noteCode: 'PRIZE_REMAINS_LOCKED',
+    });
+    assert.deepEqual(await purposeBalances(db, quote.orderId, 'SECKILL_PRIZE_LIABILITY'), {
+      LOCKED: '2',
+    });
+    assert.deepEqual(await liabilityStates(db, quote.orderId, 'AVAILABLE'), {
+      BNM_POINTS: '90',
+      NPL: '90',
+      USDT: '61',
+    });
+    assert.deepEqual(await liabilityStates(db, quote.orderId, 'LOCKED'), { USDT: '2' });
+
     const selectedEventKey = paymentEventKey(
       event.event.transactionHash,
       event.event.logIndex,
@@ -687,6 +761,9 @@ test('seckill quote locks both inventories and final classification releases the
     );
     const replacementBlockHash = `0x${'4'.repeat(64)}`;
     await store.reverse(selectedEventKey, replacementBlockHash);
+    for (const state of ['LOCKED', 'AVAILABLE', 'DISPUTED']) {
+      assert.deepEqual(await liabilityStates(db, quote.orderId, state), {});
+    }
     const fallbackEvent = paymentInput(quote.dual.fallback, 'FALLBACK_RETAIL');
     fallbackEvent.event.transactionHash = `0x${'3'.repeat(64)}`;
     fallbackEvent.event.blockHash = replacementBlockHash;
@@ -846,6 +923,1090 @@ test('payment projection rejects a ledger account identity bound to different Sa
     await assert.rejects(store.record(paymentInput(intent)), /immutable account identity/);
     const journals = await db.query<{ count: string }>('SELECT count(*)::text AS count FROM core.ledger_journals');
     assert.equal(journals.rows[0]?.count, '0');
+  } finally {
+    await db.close();
+  }
+});
+
+test('fulfillment targets encrypt delivery PII and bind quotes to an AMap six-digit region or active store snapshot', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    await seedCatalog(db, 3);
+    let regionCalls = 0;
+    const regions = {
+      reverseGeocode: async () => {
+        regionCalls += 1;
+        return {
+          regionCode: '310101',
+          province: 'Shanghai',
+          city: 'Shanghai',
+          district: 'Huangpu',
+          formattedAddress: 'Shanghai Huangpu Test Road 1',
+          sourceReferenceHash: HASH_2,
+        };
+      },
+    };
+    const service = new FulfillmentTargetService({
+      transactions: transactionAdapter(db),
+      regions,
+      encryptionKey: 'ab'.repeat(32),
+      clock: () => new Date(),
+    });
+    const buyer = { walletAddress: BUYER, roles: ['BUYER'] as const };
+    const merchant = { walletAddress: MERCHANT, roles: ['MERCHANT'] as const, merchantId: 'merchant-1' };
+    const store = await service.createStore(merchant, {
+      idempotencyKey: 'store-create-command-1',
+      name: 'Huangpu Store',
+      phone: '+862112345678',
+      longitude: 121.4737,
+      latitude: 31.2304,
+    });
+    assert.equal((await service.createStore(merchant, {
+      idempotencyKey: 'store-create-command-1',
+      name: 'Huangpu Store',
+      phone: '+862112345678',
+      longitude: 121.4737,
+      latitude: 31.2304,
+    })).storeId, store.storeId);
+    assert.equal(regionCalls, 1);
+
+    const delivery = await service.createDeliveryTarget(buyer, {
+      idempotencyKey: 'delivery-target-command-1',
+      recipientName: 'Test Recipient',
+      phone: '+8613800000000',
+      address: 'Test Road 1 Building 2 Room 3',
+      longitude: 121.4737,
+      latitude: 31.2304,
+    });
+    assert.equal((await service.createDeliveryTarget(buyer, {
+      idempotencyKey: 'delivery-target-command-1',
+      recipientName: 'Test Recipient',
+      phone: '+8613800000000',
+      address: 'Test Road 1 Building 2 Room 3',
+      longitude: 121.4737,
+      latitude: 31.2304,
+    })).targetHash, delivery.targetHash);
+    assert.equal(regionCalls, 2);
+    const encrypted = await db.query<{ payload_hex: string }>(
+      `SELECT encode(encrypted_payload, 'hex') AS payload_hex
+       FROM core.fulfillment_targets WHERE target_hash = $1`,
+      [delivery.targetHash],
+    );
+    assert.equal(encrypted.rows[0]?.payload_hex.includes(Buffer.from('Test Recipient').toString('hex')), false);
+    assert.equal(encrypted.rows[0]?.payload_hex.includes(Buffer.from('+8613800000000').toString('hex')), false);
+    await assertQuoteFulfillmentTarget(adapter(db), {
+      buyerWallet: BUYER,
+      fulfillmentMode: 'DELIVERY',
+      fulfillmentTargetHash: delivery.targetHash,
+      regionCodeHash: delivery.regionCodeHash,
+      now: new Date(),
+    });
+    await assert.rejects(
+      assertQuoteFulfillmentTarget(adapter(db), {
+        buyerWallet: BUYER,
+        fulfillmentMode: 'DELIVERY',
+        fulfillmentTargetHash: delivery.targetHash,
+        regionCodeHash: HASH,
+        now: new Date(),
+      }),
+      /mismatched/,
+    );
+
+    const reservationId = `0x${'7'.repeat(64)}`;
+    await reserveInventory(adapter(db), {
+      reservationId,
+      reservationHash: `0x${'8'.repeat(64)}`,
+      policyVersion: 1,
+      skuId: 'sku-1',
+      buyerWallet: BUYER,
+      quantity: 1,
+      classification: 'ORDINARY',
+      expiresAt: new Date(Date.now() + 10 * 60_000),
+    });
+    const targetOrderId = `0x${'9'.repeat(64)}`;
+    await insertOrder(db, targetOrderId, reservationId, delivery.targetHash, delivery.regionCodeHash);
+    const detail = await service.getOrderTarget(buyer, targetOrderId);
+    assert.equal(detail.payload.recipientName, 'Test Recipient');
+    await assert.rejects(
+      service.getOrderTarget(
+        { walletAddress: '0x9999999999999999999999999999999999999999', roles: ['BUYER'] },
+        targetOrderId,
+      ),
+      /outside the authenticated wallet scope/,
+    );
+    await assert.rejects(
+      service.getOrderTarget(
+        { walletAddress: '0x9999999999999999999999999999999999999999', roles: ['AUDITOR'] },
+        targetOrderId,
+      ),
+      /outside the authenticated wallet scope/,
+    );
+
+    const pickup = await service.createPickupTarget(buyer, {
+      idempotencyKey: 'pickup-target-command-1',
+      storeId: store.storeId,
+    });
+    assert.equal(pickup.fulfillmentMode, 'PICKUP');
+    assert.equal(pickup.storeId, store.storeId);
+    assert.equal(pickup.store.regionCode, '310101');
+    assert.equal((await service.listStores('310101')).length, 1);
+    assert.throws(
+      () => new FulfillmentTargetService({ transactions: transactionAdapter(db), regions, encryptionKey: 'short' }),
+      /must contain 32 bytes/,
+    );
+  } finally {
+    await db.close();
+  }
+});
+
+test('fulfillment service keeps evidence append-only and unlocks every order liability only after receipt', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const intent = await recordFinalPayment(db);
+    let now = new Date((intent.issuedAt + 60) * 1000);
+    const service = new FulfillmentService({ transactions: transactionAdapter(db), clock: () => now });
+    const buyer = { walletAddress: BUYER, roles: ['BUYER'] as const };
+    const merchant = { walletAddress: MERCHANT, roles: ['MERCHANT'] as const, merchantId: 'merchant-1' };
+    const operator = { walletAddress: '0x3333333333333333333333333333333333333333', roles: ['OPERATOR'] as const };
+
+    const shipment = await service.recordShipment(merchant, intent.orderId, {
+      idempotencyKey: 'shipment-command-1',
+      evidenceHash: `0x${'3'.repeat(64)}`,
+      carrierCode: 'SF',
+      trackingNumberHash: `0x${'4'.repeat(64)}`,
+    });
+    assert.equal(shipment.state, 'SHIPPED');
+    assert.deepEqual(
+      await service.recordShipment(merchant, intent.orderId, {
+        idempotencyKey: 'shipment-command-1',
+        evidenceHash: `0x${'3'.repeat(64)}`,
+        carrierCode: 'SF',
+        trackingNumberHash: `0x${'4'.repeat(64)}`,
+      }),
+      shipment,
+    );
+    await assert.rejects(
+      service.recordShipment(merchant, intent.orderId, {
+        idempotencyKey: 'shipment-command-1',
+        evidenceHash: `0x${'5'.repeat(64)}`,
+        carrierCode: 'SF',
+        trackingNumberHash: `0x${'4'.repeat(64)}`,
+      }),
+      /idempotency key was reused/i,
+    );
+
+    now = new Date(now.getTime() + 30_000);
+    await service.recordLogisticsUpdate(operator, intent.orderId, {
+      idempotencyKey: 'logistics-transit-command-1',
+      evidenceHash: `0x${'5'.repeat(64)}`,
+      provider: 'KUAIDI100',
+      providerEventIdHash: `0x${'a'.repeat(64)}`,
+      status: 'IN_TRANSIT',
+      occurredAt: now,
+    });
+    now = new Date(now.getTime() + 30_000);
+    await service.recordLogisticsUpdate(operator, intent.orderId, {
+      idempotencyKey: 'logistics-delivered-command-1',
+      evidenceHash: `0x${'b'.repeat(64)}`,
+      provider: 'KUAIDI100',
+      providerEventIdHash: `0x${'c'.repeat(64)}`,
+      status: 'DELIVERED',
+      occurredAt: now,
+    });
+    const exchange = await service.requestExchange(buyer, intent.orderId, {
+      idempotencyKey: 'exchange-request-command-1',
+      evidenceHash: `0x${'d'.repeat(64)}`,
+      reasonCode: 'SIZE_MISMATCH',
+    });
+    await service.decideFulfillmentRequest(merchant, intent.orderId, {
+      idempotencyKey: 'exchange-approval-command-1',
+      evidenceHash: `0x${'e'.repeat(64)}`,
+      requestId: exchange.requestId,
+      approved: true,
+      noteCode: 'REPLACEMENT_APPROVED',
+    });
+    now = new Date(now.getTime() + 30_000);
+    await service.recordShipment(merchant, intent.orderId, {
+      idempotencyKey: 'replacement-shipment-command-1',
+      evidenceHash: `0x${'f'.repeat(64)}`,
+      carrierCode: 'SF',
+      trackingNumberHash: `0x${'1'.repeat(64)}`,
+    });
+    now = new Date(now.getTime() + 30_000);
+    await service.recordLogisticsUpdate(operator, intent.orderId, {
+      idempotencyKey: 'replacement-delivered-command-1',
+      evidenceHash: `0x${'2'.repeat(64)}`,
+      provider: 'KUAIDI100',
+      providerEventIdHash: `0x${'3'.repeat(64)}`,
+      status: 'DELIVERED',
+      occurredAt: now,
+    });
+    await service.requestDelay(buyer, intent.orderId, {
+      idempotencyKey: 'delay-request-command-1',
+      evidenceHash: `0x${'6'.repeat(64)}`,
+      reasonCode: 'CUSTOMER_SCHEDULE',
+    });
+
+    const lockedBeforeReceipt = await liabilityStates(db, intent.orderId, 'LOCKED');
+    assert.deepEqual(lockedBeforeReceipt, { BNM_POINTS: '100', NPL: '100', USDT: '70' });
+    assert.deepEqual(await liabilityStates(db, intent.orderId, 'AVAILABLE'), {});
+
+    now = new Date(now.getTime() + 60_000);
+    const fulfilled = await service.confirmReceipt(buyer, intent.orderId, {
+      idempotencyKey: 'receipt-command-1',
+      evidenceHash: `0x${'7'.repeat(64)}`,
+    });
+    assert.deepEqual(
+      { state: fulfilled.state, method: fulfilled.method },
+      { state: 'FULFILLED', method: 'CUSTOMER_RECEIPT' },
+    );
+    assert.deepEqual(await liabilityStates(db, intent.orderId, 'LOCKED'), {});
+    assert.deepEqual(await liabilityStates(db, intent.orderId, 'AVAILABLE'), {
+      BNM_POINTS: '100',
+      NPL: '100',
+      USDT: '70',
+    });
+    const projection = await service.getOrder(buyer, intent.orderId);
+    assert.equal(projection.state, 'FULFILLED');
+    assert.equal(projection.requests[0]?.state, 'RESOLVED');
+    assert.deepEqual(
+      projection.shipments.map((shipment) => shipment.trackingNumberHash),
+      [`0x${'4'.repeat(64)}`, `0x${'1'.repeat(64)}`],
+    );
+    assert.deepEqual(projection.logistics.map((event) => event.status), ['IN_TRANSIT', 'DELIVERED', 'DELIVERED']);
+    await assertLedgerBalanced(db, 1);
+    await assert.rejects(
+      db.query("UPDATE core.fulfillment_commands SET result = '{}' WHERE command_id LIKE 'command:%'"),
+      /ImmutableRecord/,
+    );
+
+    const bnmStates: string[] = [];
+    const bnmWorker = new BnmAvailabilityWorker({
+      transactions: transactionAdapter(db),
+      adapter: {
+        setState: async (input) => {
+          bnmStates.push(input.state);
+          return {
+            providerReference: `bnm:${input.orderId}:${input.state}`,
+            syncedAt: now.toISOString(),
+            state: input.state,
+            stateVersion: input.stateVersion,
+          };
+        },
+      },
+      workerId: 'bnm-test-worker',
+    });
+    assert.equal(await bnmWorker.pollOnce(), 1);
+    assert.deepEqual(bnmStates, ['AVAILABLE']);
+
+    now = new Date(now.getTime() + 60_000);
+    const payment = paymentInput(intent);
+    await new PostgresPaymentStore(transactionAdapter(db)).reverse(
+      paymentEventKey(payment.event.transactionHash, payment.event.logIndex, payment.event.blockHash),
+      `0x${'9'.repeat(64)}`,
+    );
+    for (const state of ['LOCKED', 'AVAILABLE', 'DISPUTED']) {
+      assert.deepEqual(await liabilityStates(db, intent.orderId, state), {});
+    }
+    assert.equal((await service.getOrder(buyer, intent.orderId)).state, 'REORG_PENDING');
+    assert.equal(await bnmWorker.pollOnce(), 1);
+    assert.deepEqual(bnmStates, ['AVAILABLE', 'LOCKED']);
+    const bnmSync = await db.query<{ state: string }>(
+      'SELECT state FROM core.bnm_state_syncs WHERE order_id = $1 ORDER BY synced_at, sync_id',
+      [intent.orderId],
+    );
+    assert.deepEqual(bnmSync.rows.map((row) => row.state), ['AVAILABLE', 'LOCKED']);
+    await assertLedgerBalanced(db, 0);
+  } finally {
+    await db.close();
+  }
+});
+
+test('arbitration moves Locked liabilities to Disputed and only an arbitrator can resume or fulfill', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const intent = await recordFinalPayment(db);
+    let now = new Date((intent.issuedAt + 60) * 1000);
+    const service = new FulfillmentService({ transactions: transactionAdapter(db), clock: () => now });
+    const buyer = { walletAddress: BUYER, roles: ['BUYER'] as const };
+    const merchant = { walletAddress: MERCHANT, roles: ['MERCHANT'] as const, merchantId: 'merchant-1' };
+    const arbitrator = { walletAddress: '0x4444444444444444444444444444444444444444', roles: ['ARBITRATOR'] as const };
+
+    await service.recordShipment(merchant, intent.orderId, {
+      idempotencyKey: 'shipment-arbitration-1',
+      evidenceHash: `0x${'3'.repeat(64)}`,
+      carrierCode: 'SF',
+      trackingNumberHash: `0x${'4'.repeat(64)}`,
+    });
+    const exchange = await service.requestExchange(buyer, intent.orderId, {
+      idempotencyKey: 'exchange-before-arbitration',
+      evidenceHash: `0x${'4'.repeat(64)}`,
+      reasonCode: 'SIZE_MISMATCH',
+    });
+    await service.openArbitration(buyer, intent.orderId, {
+      idempotencyKey: 'open-arbitration-1',
+      evidenceHash: `0x${'5'.repeat(64)}`,
+      reasonCode: 'DELIVERY_DISPUTE',
+    });
+    assert.deepEqual(await liabilityStates(db, intent.orderId, 'LOCKED'), {});
+    assert.deepEqual(await liabilityStates(db, intent.orderId, 'DISPUTED'), {
+      BNM_POINTS: '100',
+      NPL: '100',
+      USDT: '70',
+    });
+    await assert.rejects(
+      service.decideFulfillmentRequest(merchant, intent.orderId, {
+        idempotencyKey: 'exchange-decision-during-arbitration',
+        evidenceHash: `0x${'5'.repeat(64)}`,
+        requestId: exchange.requestId,
+        approved: true,
+        noteCode: 'INVALID_DURING_ARBITRATION',
+      }),
+      /current order state/,
+    );
+    await assert.rejects(
+      service.decideArbitration(buyer, intent.orderId, {
+        idempotencyKey: 'bad-arbitration-decision',
+        evidenceHash: `0x${'6'.repeat(64)}`,
+        outcome: 'FULFILL',
+        noteCode: 'BUYER_CANNOT_DECIDE',
+      }),
+      /role is required/,
+    );
+
+    await service.decideArbitration(arbitrator, intent.orderId, {
+      idempotencyKey: 'resume-arbitration-1',
+      evidenceHash: `0x${'6'.repeat(64)}`,
+      outcome: 'RESUME_FULFILLMENT',
+      noteCode: 'CONTINUE_DELIVERY',
+    });
+    assert.deepEqual(await liabilityStates(db, intent.orderId, 'DISPUTED'), {});
+    assert.deepEqual(await liabilityStates(db, intent.orderId, 'LOCKED'), {
+      BNM_POINTS: '100',
+      NPL: '100',
+      USDT: '70',
+    });
+
+    now = new Date(now.getTime() + 60_000);
+    await service.openArbitration(buyer, intent.orderId, {
+      idempotencyKey: 'open-arbitration-2',
+      evidenceHash: `0x${'7'.repeat(64)}`,
+      reasonCode: 'DELIVERY_DISPUTE',
+    });
+    await service.decideArbitration(arbitrator, intent.orderId, {
+      idempotencyKey: 'fulfill-arbitration-2',
+      evidenceHash: `0x${'8'.repeat(64)}`,
+      outcome: 'FULFILL',
+      noteCode: 'PLATFORM_FULFILLED',
+    });
+    assert.deepEqual(await liabilityStates(db, intent.orderId, 'AVAILABLE'), {
+      BNM_POINTS: '100',
+      NPL: '100',
+      USDT: '70',
+    });
+    await assertLedgerBalanced(db, 1);
+  } finally {
+    await db.close();
+  }
+});
+
+test('merchant forced receipt remains a platform-reviewed request until seven days after delivery', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const intent = await recordFinalPayment(db);
+    let now = new Date((intent.issuedAt + 60) * 1000);
+    const service = new FulfillmentService({ transactions: transactionAdapter(db), clock: () => now });
+    const merchant = { walletAddress: MERCHANT, roles: ['MERCHANT'] as const, merchantId: 'merchant-1' };
+    const operator = { walletAddress: '0x3333333333333333333333333333333333333333', roles: ['OPERATOR'] as const };
+    await service.recordShipment(merchant, intent.orderId, {
+      idempotencyKey: 'forced-shipment-command-1',
+      evidenceHash: `0x${'3'.repeat(64)}`,
+      carrierCode: 'SF',
+      trackingNumberHash: `0x${'4'.repeat(64)}`,
+    });
+    await service.recordDelivery(operator, intent.orderId, {
+      idempotencyKey: 'forced-delivery-command-1',
+      evidenceHash: `0x${'5'.repeat(64)}`,
+    });
+    await assert.rejects(
+      service.requestForcedReceipt(merchant, intent.orderId, {
+        idempotencyKey: 'forced-too-early-command-1',
+        evidenceHash: `0x${'6'.repeat(64)}`,
+        reasonCode: 'CUSTOMER_NO_RESPONSE',
+      }),
+      /not eligible/,
+    );
+    now = new Date(now.getTime() + 8 * 24 * 60 * 60 * 1000);
+    const request = await service.requestForcedReceipt(merchant, intent.orderId, {
+      idempotencyKey: 'forced-request-command-1',
+      evidenceHash: `0x${'6'.repeat(64)}`,
+      reasonCode: 'CUSTOMER_NO_RESPONSE',
+    });
+    assert.equal(request.canFinalizeDirectly, false);
+    assert.deepEqual(await liabilityStates(db, intent.orderId, 'LOCKED'), {
+      BNM_POINTS: '100',
+      NPL: '100',
+      USDT: '70',
+    });
+    await service.decideForcedReceipt(operator, intent.orderId, {
+      idempotencyKey: 'forced-approval-command-1',
+      evidenceHash: `0x${'7'.repeat(64)}`,
+      approved: true,
+      noteCode: 'DELIVERY_EVIDENCE_VALID',
+    });
+    assert.deepEqual(await liabilityStates(db, intent.orderId, 'AVAILABLE'), {
+      BNM_POINTS: '100',
+      NPL: '100',
+      USDT: '70',
+    });
+    const requests = await db.query<{ state: string; resolved_by: string }>(
+      `SELECT state, resolved_by FROM core.fulfillment_requests
+       WHERE order_id = $1 AND request_type = 'FORCED_RECEIPT'`,
+      [intent.orderId],
+    );
+    assert.deepEqual(requests.rows[0], { state: 'APPROVED', resolved_by: operator.walletAddress });
+  } finally {
+    await db.close();
+  }
+});
+
+test('takeover freezes the merchant after seven days while funds stay Locked and pickup verification is one-use', async () => {
+  const deliveryDb = await createBusinessDatabase();
+  try {
+    const intent = await recordFinalPayment(deliveryDb);
+    const now = new Date((intent.issuedAt + 8 * 24 * 60 * 60) * 1000);
+    const service = new FulfillmentService({ transactions: transactionAdapter(deliveryDb), clock: () => now });
+    const buyer = { walletAddress: BUYER, roles: ['BUYER'] as const };
+    const operator = { walletAddress: '0x3333333333333333333333333333333333333333', roles: ['OPERATOR'] as const };
+    const takeover = await service.openTakeover(buyer, intent.orderId, {
+      idempotencyKey: 'takeover-command-1',
+      evidenceHash: `0x${'3'.repeat(64)}`,
+      reasonCode: 'NO_SHIPMENT_SEVEN_DAYS',
+    });
+    assert.equal(takeover.customerFundsRemainLocked, true);
+    assert.deepEqual(await liabilityStates(deliveryDb, intent.orderId, 'LOCKED'), {
+      BNM_POINTS: '100',
+      NPL: '100',
+      USDT: '70',
+    });
+    const frozen = await deliveryDb.query<{ status: string; guarantee_status: string; lifecycle_state: string }>(
+      `SELECT merchant.status, merchant.guarantee_status, product.lifecycle_state
+       FROM core.merchants merchant JOIN core.products product ON product.merchant_id = merchant.merchant_id`,
+    );
+    assert.deepEqual(frozen.rows[0], { status: 'SUSPENDED', guarantee_status: 'FROZEN', lifecycle_state: 'LOCKED' });
+    const funding = await deliveryDb.query<{ required_usdt: string | null }>(
+      'SELECT required_usdt::text FROM core.takeover_cases WHERE order_id = $1',
+      [intent.orderId],
+    );
+    assert.equal(funding.rows[0]?.required_usdt, null);
+    await service.recordShipment(operator, intent.orderId, {
+      idempotencyKey: 'takeover-shipment-command-1',
+      evidenceHash: `0x${'4'.repeat(64)}`,
+      carrierCode: 'SF',
+      trackingNumberHash: `0x${'5'.repeat(64)}`,
+    });
+    await service.recordDelivery(operator, intent.orderId, {
+      idempotencyKey: 'takeover-delivery-command-1',
+      evidenceHash: `0x${'6'.repeat(64)}`,
+    });
+    await service.confirmReceipt(buyer, intent.orderId, {
+      idempotencyKey: 'takeover-receipt-command-1',
+      evidenceHash: `0x${'7'.repeat(64)}`,
+    });
+    const closed = await deliveryDb.query<{ state: string }>(
+      'SELECT state FROM core.takeover_cases WHERE order_id = $1',
+      [intent.orderId],
+    );
+    assert.equal(closed.rows[0]?.state, 'CLOSED');
+    assert.deepEqual(await liabilityStates(deliveryDb, intent.orderId, 'AVAILABLE'), {
+      BNM_POINTS: '100',
+      NPL: '100',
+      USDT: '70',
+    });
+  } finally {
+    await deliveryDb.close();
+  }
+
+  const pickupDb = await createBusinessDatabase();
+  try {
+    const intent = paymentIntent();
+    intent.fulfillmentMode = 'PICKUP';
+    intent.fulfillmentTargetHash = `0x${'8'.repeat(64)}`;
+    await recordFinalPayment(pickupDb, intent);
+    await pickupDb.exec(`
+      INSERT INTO core.administrative_regions (
+        region_code, province, city, district, source, source_reference_hash, status
+      ) VALUES ('110101','Beijing','Beijing','Dongcheng','GOVERNED_IMPORT','${HASH}','ACTIVE')
+      ON CONFLICT (region_code) DO NOTHING;
+      INSERT INTO core.merchant_stores (
+        store_id, merchant_id, idempotency_key, request_hash, name, region_code,
+        longitude, latitude, address, phone, status, version
+      ) VALUES (
+        'store-pickup-1','merchant-1','pickup-store-fixture','${HASH_2}',
+        'Pickup Store','110101',116.397,39.908,'Pickup Store Address','01012345678','ACTIVE',1
+      ), (
+        'store-pickup-2','merchant-1','pickup-store-other','${HASH_2}',
+        'Other Store','110101',116.398,39.909,'Other Store Address','01012345679','ACTIVE',1
+      );
+      INSERT INTO core.fulfillment_targets (
+        target_id, target_hash, buyer_wallet, idempotency_key, request_hash,
+        fulfillment_mode, region_code, region_code_hash, store_id,
+        encrypted_payload, encryption_iv, encryption_tag, expires_at, created_at
+      ) VALUES (
+        'target-pickup-1','${intent.fulfillmentTargetHash}','${BUYER}','pickup-target-fixture','${HASH_2}',
+        'PICKUP','110101','${HASH}','store-pickup-1',
+        decode(repeat('00',32),'hex'),decode(repeat('00',12),'hex'),decode(repeat('00',16),'hex'),
+        clock_timestamp() + interval '1 day',clock_timestamp()
+      );
+    `);
+    let now = new Date((intent.issuedAt + 60) * 1000);
+    const service = new FulfillmentService({ transactions: transactionAdapter(pickupDb), clock: () => now });
+    const buyer = { walletAddress: BUYER, roles: ['BUYER'] as const };
+    const merchant = { walletAddress: MERCHANT, roles: ['MERCHANT'] as const, merchantId: 'merchant-1' };
+    await service.registerPickupCredential(buyer, intent.orderId, {
+      idempotencyKey: 'pickup-credential-1',
+      evidenceHash: `0x${'3'.repeat(64)}`,
+      code: '123456',
+      expiresAt: new Date(now.getTime() + 1_000),
+    });
+    now = new Date(now.getTime() + 2_000);
+    await service.registerPickupCredential(buyer, intent.orderId, {
+      idempotencyKey: 'pickup-credential-2',
+      evidenceHash: `0x${'8'.repeat(64)}`,
+      code: '234567',
+      expiresAt: new Date(now.getTime() + 60 * 60 * 1000),
+    });
+    const credentials = await pickupDb.query<{ consumed_at: Date | null; invalidated_at: Date | null }>(
+      `SELECT consumed_at, invalidated_at FROM core.pickup_credentials
+       WHERE order_id = $1 ORDER BY created_at, credential_id`,
+      [intent.orderId],
+    );
+    assert.equal(credentials.rows[0]?.consumed_at, null);
+    assert.ok(credentials.rows[0]?.invalidated_at);
+    assert.equal(credentials.rows[1]?.invalidated_at, null);
+    const failedAttempts = [
+      { idempotencyKey: 'pickup-wrong-store-1', code: '234567', storeId: 'store-pickup-2' },
+      { idempotencyKey: 'pickup-unknown-store', code: '234567', storeId: 'store-does-not-exist' },
+      { idempotencyKey: 'pickup-wrong-code-3', code: '654322', storeId: 'store-pickup-1' },
+      { idempotencyKey: 'pickup-wrong-code-4', code: '654323', storeId: 'store-pickup-1' },
+      { idempotencyKey: 'pickup-wrong-code-5', code: '654324', storeId: 'store-pickup-1' },
+    ];
+    for (const failed of failedAttempts) {
+      await assert.rejects(
+        service.verifyPickup(merchant, intent.orderId, {
+          ...failed,
+          evidenceHash: `0x${'4'.repeat(64)}`,
+        }),
+        /invalid or expired/,
+      );
+    }
+    await assert.rejects(
+      service.verifyPickup(merchant, intent.orderId, {
+        ...failedAttempts[4]!,
+        evidenceHash: `0x${'4'.repeat(64)}`,
+      }),
+      /invalid or expired/,
+    );
+    const blockedCredential = await pickupDb.query<{
+      failed_attempts: number;
+      invalidated_at: Date | null;
+      attempts: string;
+    }>(
+      `SELECT credential.failed_attempts, credential.invalidated_at,
+         (SELECT count(*)::text FROM core.pickup_verification_attempts attempt
+          WHERE attempt.order_id = credential.order_id AND NOT attempt.successful) AS attempts
+       FROM core.pickup_credentials credential
+       WHERE credential.order_id = $1 ORDER BY credential.created_at DESC LIMIT 1`,
+      [intent.orderId],
+    );
+    assert.equal(blockedCredential.rows[0]?.failed_attempts, 5);
+    assert.ok(blockedCredential.rows[0]?.invalidated_at);
+    assert.equal(blockedCredential.rows[0]?.attempts, '5');
+
+    await service.registerPickupCredential(buyer, intent.orderId, {
+      idempotencyKey: 'pickup-credential-3',
+      evidenceHash: `0x${'9'.repeat(64)}`,
+      code: '345678',
+      expiresAt: new Date(now.getTime() + 60 * 60 * 1000),
+    });
+    await service.verifyPickup(merchant, intent.orderId, {
+      idempotencyKey: 'pickup-correct-code-1',
+      evidenceHash: `0x${'5'.repeat(64)}`,
+      code: '345678',
+      storeId: 'store-pickup-1',
+    });
+    assert.deepEqual(await liabilityStates(pickupDb, intent.orderId, 'AVAILABLE'), {
+      BNM_POINTS: '100',
+      NPL: '100',
+      USDT: '70',
+    });
+    await assert.rejects(
+      service.verifyPickup(merchant, intent.orderId, {
+        idempotencyKey: 'pickup-replay-code-1',
+        evidenceHash: `0x${'6'.repeat(64)}`,
+        code: '123456',
+        storeId: 'store-pickup-1',
+      }),
+      /paid pickup order/,
+    );
+  } finally {
+    await pickupDb.close();
+  }
+});
+
+test('payment reorg cancels unsent BNM availability and synchronizes Locked next', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const intent = await recordFinalPayment(db);
+    const now = new Date((intent.issuedAt + 60) * 1000);
+    const fulfillment = new FulfillmentService({ transactions: transactionAdapter(db), clock: () => now });
+    const buyer = { walletAddress: BUYER, roles: ['BUYER'] as const };
+    const merchant = { walletAddress: MERCHANT, roles: ['MERCHANT'] as const, merchantId: 'merchant-1' };
+    const operator = { walletAddress: '0x3333333333333333333333333333333333333333', roles: ['OPERATOR'] as const };
+    await fulfillment.recordShipment(merchant, intent.orderId, {
+      idempotencyKey: 'bnm-race-shipment',
+      evidenceHash: `0x${'3'.repeat(64)}`,
+      carrierCode: 'SF',
+      trackingNumberHash: `0x${'4'.repeat(64)}`,
+    });
+    await fulfillment.recordDelivery(operator, intent.orderId, {
+      idempotencyKey: 'bnm-race-delivery',
+      evidenceHash: `0x${'5'.repeat(64)}`,
+    });
+    await fulfillment.confirmReceipt(buyer, intent.orderId, {
+      idempotencyKey: 'bnm-race-receipt',
+      evidenceHash: `0x${'6'.repeat(64)}`,
+    });
+
+    const payment = paymentInput(intent);
+    await new PostgresPaymentStore(transactionAdapter(db)).reverse(
+      paymentEventKey(payment.event.transactionHash, payment.event.logIndex, payment.event.blockHash),
+      `0x${'9'.repeat(64)}`,
+    );
+    const states: string[] = [];
+    const worker = new BnmAvailabilityWorker({
+      transactions: transactionAdapter(db),
+      workerId: 'bnm-race-worker',
+      adapter: {
+        setState: async (input) => {
+          states.push(input.state);
+          return {
+            providerReference: `bnm:${input.orderId}:${input.state}`,
+            syncedAt: now.toISOString(),
+            state: input.state,
+            stateVersion: input.stateVersion,
+          };
+        },
+      },
+    });
+    assert.equal(await worker.pollOnce(), 1);
+    assert.deepEqual(states, ['LOCKED']);
+    const outbox = await db.query<{ event_type: string; state: string; last_error_code: string | null }>(
+      `SELECT event_type, state, last_error_code FROM core.outbox_events
+       WHERE aggregate_id = $1 AND event_type IN ('BnmAvailabilityRequested', 'BnmLockRequested')
+       ORDER BY event_type`,
+      [intent.orderId],
+    );
+    assert.deepEqual(outbox.rows, [
+      { event_type: 'BnmAvailabilityRequested', state: 'DEAD_LETTER', last_error_code: 'PaymentReorged' },
+      { event_type: 'BnmLockRequested', state: 'DELIVERED', last_error_code: null },
+    ]);
+  } finally {
+    await db.close();
+  }
+});
+
+test('payment reorg waits for in-flight BNM availability acknowledgement before synchronizing Locked', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const { intent, now } = await completeDeliveryForBnm(db);
+    let releaseAvailable!: () => void;
+    let markAvailableStarted!: () => void;
+    const availableGate = new Promise<void>((resolve) => { releaseAvailable = resolve; });
+    const availableStarted = new Promise<void>((resolve) => { markAvailableStarted = resolve; });
+    const states: string[] = [];
+    const availableWorker = new BnmAvailabilityWorker({
+      transactions: transactionAdapter(db),
+      workerId: 'bnm-in-flight-success',
+      adapter: {
+        setState: async (input) => {
+          states.push(input.state);
+          markAvailableStarted();
+          await availableGate;
+          return {
+            providerReference: 'in-flight-available',
+            syncedAt: now.toISOString(),
+            state: input.state,
+            stateVersion: input.stateVersion,
+          };
+        },
+      },
+    });
+    const lockedWorker = new BnmAvailabilityWorker({
+      transactions: transactionAdapter(db),
+      workerId: 'bnm-in-flight-locked',
+      adapter: {
+        setState: async (input) => {
+          states.push(input.state);
+          return {
+            providerReference: 'in-flight-locked',
+            syncedAt: now.toISOString(),
+            state: input.state,
+            stateVersion: input.stateVersion,
+          };
+        },
+      },
+    });
+
+    const availablePoll = availableWorker.pollOnce();
+    await availableStarted;
+    await reversePayment(db, intent);
+    assert.equal(await lockedWorker.pollOnce(), 0);
+    releaseAvailable();
+    assert.equal(await availablePoll, 1);
+    assert.equal(await lockedWorker.pollOnce(), 1);
+    assert.deepEqual(states, ['AVAILABLE', 'LOCKED']);
+  } finally {
+    await db.close();
+  }
+});
+
+test('BNM monotonic state version rejects a timed-out AVAILABLE side effect that arrives after reorg Locked', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const { intent, now } = await completeDeliveryForBnm(db);
+    let releaseAvailable!: () => void;
+    let markAvailableStarted!: () => void;
+    const availableGate = new Promise<void>((resolve) => { releaseAvailable = resolve; });
+    const availableStarted = new Promise<void>((resolve) => { markAvailableStarted = resolve; });
+    const states: Array<{ state: string; stateVersion: string }> = [];
+    let lateAvailable: (() => void) | undefined;
+    let external = { state: 'LOCKED' as 'LOCKED' | 'AVAILABLE', stateVersion: '0' };
+    const applyAtBackend = (input: { state: 'LOCKED' | 'AVAILABLE'; stateVersion: string }) => {
+      const incoming = BigInt(input.stateVersion);
+      const current = BigInt(external.stateVersion);
+      if (incoming > current) external = { state: input.state, stateVersion: input.stateVersion };
+      if (incoming === current && input.state !== external.state) throw new Error('BNM_STATE_VERSION_CONFLICT');
+    };
+    const availableWorker = new BnmAvailabilityWorker({
+      transactions: transactionAdapter(db),
+      workerId: 'bnm-in-flight-failure',
+      adapter: {
+        setState: async (input) => {
+          states.push({ state: input.state, stateVersion: input.stateVersion });
+          lateAvailable = () => applyAtBackend(input);
+          markAvailableStarted();
+          await availableGate;
+          throw new Error('ambiguous provider timeout');
+        },
+      },
+    });
+    const lockedWorker = new BnmAvailabilityWorker({
+      transactions: transactionAdapter(db),
+      workerId: 'bnm-after-in-flight-failure',
+      adapter: {
+        setState: async (input) => {
+          states.push({ state: input.state, stateVersion: input.stateVersion });
+          applyAtBackend(input);
+          return {
+            providerReference: 'locked-after-timeout',
+            syncedAt: now.toISOString(),
+            state: external.state,
+            stateVersion: external.stateVersion,
+          };
+        },
+      },
+    });
+
+    const availablePoll = availableWorker.pollOnce();
+    await availableStarted;
+    await reversePayment(db, intent);
+    assert.equal(await lockedWorker.pollOnce(), 0);
+    releaseAvailable();
+    assert.equal(await availablePoll, 1);
+    const canceled = await db.query<{ state: string; last_error_code: string | null }>(
+      `SELECT state, last_error_code FROM core.outbox_events
+       WHERE aggregate_id = $1 AND event_type = 'BnmAvailabilityRequested'`,
+      [intent.orderId],
+    );
+    assert.deepEqual(canceled.rows[0], { state: 'DEAD_LETTER', last_error_code: 'PaymentReorged' });
+    assert.equal(await lockedWorker.pollOnce(), 1);
+    assert.equal(await lockedWorker.pollOnce(), 0);
+    assert.ok(lateAvailable);
+    lateAvailable();
+    assert.deepEqual(states, [
+      { state: 'AVAILABLE', stateVersion: '1' },
+      { state: 'LOCKED', stateVersion: '2' },
+    ]);
+    assert.deepEqual(external, { state: 'LOCKED', stateVersion: '2' });
+  } finally {
+    await db.close();
+  }
+});
+
+test('BNM outbox attempt token fences a stale promise after the same worker id re-leases an event', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const intent = await recordFinalPayment(db);
+    await db.query(
+      `INSERT INTO core.outbox_events (
+         event_id, aggregate_type, aggregate_id, event_type, payload, idempotency_key, state
+       ) VALUES ('bnm-fenced','ORDER',$1,'BnmAvailabilityRequested',$2,'bnm-fenced','PENDING')`,
+      [intent.orderId, JSON.stringify({
+        orderId: intent.orderId,
+        buyerWallet: intent.buyer,
+        amount: intent.bnmAmount,
+        state: 'AVAILABLE',
+        stateVersion: '1',
+        reason: 'FENCING_TEST',
+        sourceEvidenceHash: HASH,
+      })],
+    );
+    let releaseStale!: () => void;
+    let releaseCurrent!: () => void;
+    let markStaleStarted!: () => void;
+    let markCurrentStarted!: () => void;
+    const staleGate = new Promise<void>((resolve) => { releaseStale = resolve; });
+    const currentGate = new Promise<void>((resolve) => { releaseCurrent = resolve; });
+    const staleStarted = new Promise<void>((resolve) => { markStaleStarted = resolve; });
+    const currentStarted = new Promise<void>((resolve) => { markCurrentStarted = resolve; });
+    const staleWorker = new BnmAvailabilityWorker({
+      transactions: transactionAdapter(db),
+      workerId: 'same-worker-id',
+      adapter: {
+        setState: async (input) => {
+          markStaleStarted();
+          await staleGate;
+          return {
+            providerReference: 'stale-provider',
+            syncedAt: '2026-07-14T00:00:01.000Z',
+            state: input.state,
+            stateVersion: input.stateVersion,
+          };
+        },
+      },
+    });
+    const currentWorker = new BnmAvailabilityWorker({
+      transactions: transactionAdapter(db),
+      workerId: 'same-worker-id',
+      adapter: {
+        setState: async (input) => {
+          markCurrentStarted();
+          await currentGate;
+          return {
+            providerReference: 'current-provider',
+            syncedAt: '2026-07-14T00:00:02.000Z',
+            state: input.state,
+            stateVersion: input.stateVersion,
+          };
+        },
+      },
+    });
+
+    const stalePoll = staleWorker.pollOnce();
+    await staleStarted;
+    await db.query(
+      "UPDATE core.outbox_events SET locked_until = clock_timestamp() - interval '1 second' WHERE event_id = 'bnm-fenced'",
+    );
+    const currentPoll = currentWorker.pollOnce();
+    await currentStarted;
+    releaseStale();
+    assert.equal(await stalePoll, 1);
+    const fenced = await db.query<{ state: string; attempt_count: number; syncs: string }>(
+      `SELECT event.state, event.attempt_count,
+         (SELECT count(*)::text FROM core.bnm_state_syncs sync WHERE sync.event_id = event.event_id) AS syncs
+       FROM core.outbox_events event WHERE event.event_id = 'bnm-fenced'`,
+    );
+    assert.deepEqual(fenced.rows[0], { state: 'PROCESSING', attempt_count: 2, syncs: '0' });
+    releaseCurrent();
+    assert.equal(await currentPoll, 1);
+    const delivered = await db.query<{ state: string; provider_reference_hash: string }>(
+      `SELECT event.state, sync.provider_reference_hash
+       FROM core.outbox_events event JOIN core.bnm_state_syncs sync ON sync.event_id = event.event_id
+       WHERE event.event_id = 'bnm-fenced'`,
+    );
+    assert.deepEqual(delivered.rows[0], {
+      state: 'DELIVERED',
+      provider_reference_hash: `0x${createHash('sha256').update('current-provider').digest('hex')}`,
+    });
+  } finally {
+    await db.close();
+  }
+});
+
+test('BNM outbox leases one event per order and preserves AVAILABLE then LOCKED FIFO', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const intent = await recordFinalPayment(db);
+    const payload = (state: 'AVAILABLE' | 'LOCKED') => JSON.stringify({
+      orderId: intent.orderId,
+      buyerWallet: intent.buyer,
+      amount: intent.bnmAmount,
+      state,
+      stateVersion: state === 'AVAILABLE' ? '1' : '2',
+      reason: 'FIFO_TEST',
+      sourceEvidenceHash: state === 'AVAILABLE' ? HASH : HASH_2,
+    });
+    await db.query(
+      `INSERT INTO core.outbox_events (
+         event_id, aggregate_type, aggregate_id, event_type, payload,
+         idempotency_key, state, created_at
+       ) VALUES
+         ('bnm-fifo-available','ORDER',$1,'BnmAvailabilityRequested',$2,'bnm-fifo-available','PENDING',$4),
+         ('bnm-fifo-locked','ORDER',$1,'BnmLockRequested',$3,'bnm-fifo-locked','PENDING',$4 + interval '1 second')`,
+      [intent.orderId, payload('AVAILABLE'), payload('LOCKED'), new Date('2026-07-14T00:00:00.000Z')],
+    );
+    let releaseFirst!: () => void;
+    let markStarted!: () => void;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    const states: string[] = [];
+    const firstWorker = new BnmAvailabilityWorker({
+      transactions: transactionAdapter(db),
+      workerId: 'bnm-fifo-1',
+      adapter: {
+        setState: async (input) => {
+          states.push(input.state);
+          markStarted();
+          await firstGate;
+          return {
+            providerReference: 'fifo-available',
+            syncedAt: '2026-07-14T00:00:01.000Z',
+            state: input.state,
+            stateVersion: input.stateVersion,
+          };
+        },
+      },
+    });
+    const secondWorker = new BnmAvailabilityWorker({
+      transactions: transactionAdapter(db),
+      workerId: 'bnm-fifo-2',
+      adapter: {
+        setState: async (input) => {
+          states.push(input.state);
+          return {
+            providerReference: 'fifo-locked',
+            syncedAt: '2026-07-14T00:00:02.000Z',
+            state: input.state,
+            stateVersion: input.stateVersion,
+          };
+        },
+      },
+    });
+    const firstPoll = firstWorker.pollOnce();
+    await started;
+    assert.equal(await secondWorker.pollOnce(), 0);
+    releaseFirst();
+    assert.equal(await firstPoll, 1);
+    assert.equal(await secondWorker.pollOnce(), 1);
+    assert.deepEqual(states, ['AVAILABLE', 'LOCKED']);
+  } finally {
+    await db.close();
+  }
+});
+
+test('fulfillment scheduler isolates order failures and persists takeover retry evidence', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const opened: string[] = [];
+    const worker = new FulfillmentSchedulerWorker({
+      transactions: transactionAdapter(db),
+      platformWallet: '0x3333333333333333333333333333333333333333',
+      clock: () => new Date('2026-07-14T00:00:00.000Z'),
+      service: {
+        listOrders: async () => [
+          {
+            orderId: 'failing-order',
+            fulfillmentMode: 'DELIVERY',
+            state: 'PAID',
+            paymentFinalizedAt: '2026-07-01T00:00:00.000Z',
+            shipments: [],
+          },
+          {
+            orderId: 'healthy-order',
+            fulfillmentMode: 'DELIVERY',
+            state: 'PAID',
+            paymentFinalizedAt: '2026-07-01T00:00:00.000Z',
+            shipments: [],
+          },
+        ],
+        openTakeover: async (_actor, orderId) => {
+          if (orderId === 'failing-order') throw new Error('provider failure');
+          opened.push(orderId);
+        },
+      },
+    });
+    assert.deepEqual(await worker.pollOnce(), {
+      checked: 2,
+      opened: 1,
+      pickupBlocked: 0,
+      deferred: 0,
+      failed: 1,
+    });
+    assert.deepEqual(opened, ['healthy-order']);
+    assert.deepEqual(worker.status(), { healthy: false, errorCode: 'TakeoverOrderFailure' });
+    const failure = await db.query<{ state: string; attempt_count: number; last_error_code: string }>(
+      "SELECT state, attempt_count, last_error_code FROM core.durable_jobs WHERE resource_id = 'failing-order'",
+    );
+    assert.deepEqual(failure.rows[0], {
+      state: 'RETRY',
+      attempt_count: 1,
+      last_error_code: 'UnexpectedTakeoverFailure',
+    });
+  } finally {
+    await db.close();
+  }
+});
+
+test('fulfillment scheduler honors takeover backoff and stops after the fifth failed attempt', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    let attempts = 0;
+    const worker = new FulfillmentSchedulerWorker({
+      transactions: transactionAdapter(db),
+      platformWallet: '0x3333333333333333333333333333333333333333',
+      clock: () => new Date('2026-07-14T00:00:00.000Z'),
+      service: {
+        listOrders: async () => [{
+          orderId: 'backoff-order',
+          fulfillmentMode: 'DELIVERY',
+          state: 'PAID',
+          paymentFinalizedAt: '2026-07-01T00:00:00.000Z',
+          shipments: [],
+        }],
+        openTakeover: async () => {
+          attempts += 1;
+          throw new Error('provider failure');
+        },
+      },
+    });
+
+    assert.equal((await worker.pollOnce()).failed, 1);
+    assert.equal(attempts, 1);
+    assert.deepEqual(await worker.pollOnce(), {
+      checked: 1,
+      opened: 0,
+      pickupBlocked: 0,
+      deferred: 1,
+      failed: 0,
+    });
+    assert.equal(attempts, 1);
+    assert.deepEqual(worker.status(), { healthy: false, errorCode: 'TakeoverOrderRetryPending' });
+
+    for (let expectedAttempt = 2; expectedAttempt <= 5; expectedAttempt += 1) {
+      await db.query(
+        "UPDATE core.durable_jobs SET available_at = clock_timestamp() - interval '1 second' WHERE resource_id = 'backoff-order'",
+      );
+      assert.equal((await worker.pollOnce()).failed, 1);
+      assert.equal(attempts, expectedAttempt);
+    }
+    const deadLetter = await db.query<{ state: string; attempt_count: number }>(
+      "SELECT state, attempt_count FROM core.durable_jobs WHERE resource_id = 'backoff-order'",
+    );
+    assert.deepEqual(deadLetter.rows[0], { state: 'DEAD_LETTER', attempt_count: 5 });
+    assert.equal((await worker.pollOnce()).deferred, 1);
+    assert.equal(attempts, 5);
+    assert.deepEqual(worker.status(), { healthy: false, errorCode: 'TakeoverOrderDeadLetter' });
   } finally {
     await db.close();
   }
@@ -1238,6 +2399,90 @@ test('production backup enforces encrypted storage acknowledgement and mode 600 
   }
 });
 
+async function recordFinalPayment(db: PGlite, intent = paymentIntent()) {
+  await seedCatalog(db, 1);
+  await reserveInventory(adapter(db), {
+    reservationId: intent.reservationId,
+    reservationHash: intent.reservationHash,
+    policyVersion: intent.policyVersion,
+    skuId: 'sku-1',
+    buyerWallet: intent.buyer,
+    quantity: intent.quantity,
+    classification: 'ORDINARY',
+    expiresAt: new Date(intent.reservationDeadline * 1000),
+  });
+  await insertPaymentQuote(db, intent, `fulfillment-${intent.orderId}`);
+  await new PostgresPaymentStore(transactionAdapter(db)).record(paymentInput(intent));
+  return intent;
+}
+
+async function completeDeliveryForBnm(db: PGlite) {
+  const intent = await recordFinalPayment(db);
+  const now = new Date((intent.issuedAt + 60) * 1000);
+  const fulfillment = new FulfillmentService({ transactions: transactionAdapter(db), clock: () => now });
+  await fulfillment.recordShipment(
+    { walletAddress: MERCHANT, roles: ['MERCHANT'], merchantId: 'merchant-1' },
+    intent.orderId,
+    {
+      idempotencyKey: 'bnm-in-flight-shipment',
+      evidenceHash: `0x${'3'.repeat(64)}`,
+      carrierCode: 'SF',
+      trackingNumberHash: `0x${'4'.repeat(64)}`,
+    },
+  );
+  await fulfillment.recordDelivery(
+    { walletAddress: '0x3333333333333333333333333333333333333333', roles: ['OPERATOR'] },
+    intent.orderId,
+    { idempotencyKey: 'bnm-in-flight-delivery', evidenceHash: `0x${'5'.repeat(64)}` },
+  );
+  await fulfillment.confirmReceipt(
+    { walletAddress: BUYER, roles: ['BUYER'] },
+    intent.orderId,
+    { idempotencyKey: 'bnm-in-flight-receipt', evidenceHash: `0x${'6'.repeat(64)}` },
+  );
+  return { intent, now };
+}
+
+async function reversePayment(db: PGlite, intent: CanonicalPaymentIntent) {
+  const payment = paymentInput(intent);
+  return new PostgresPaymentStore(transactionAdapter(db)).reverse(
+    paymentEventKey(payment.event.transactionHash, payment.event.logIndex, payment.event.blockHash),
+    `0x${'9'.repeat(64)}`,
+  );
+}
+
+async function liabilityStates(db: PGlite, orderId: string, state: string) {
+  const result = await db.query<{ asset: string; amount: string }>(
+    `SELECT account.asset,
+       sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS amount
+     FROM core.ledger_journals journal
+     JOIN core.ledger_lines line ON line.journal_id = journal.journal_id
+     JOIN core.ledger_accounts account ON account.account_id = line.account_id
+     WHERE journal.order_id = $1 AND line.balance_state = $2
+     GROUP BY account.asset
+     HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) <> 0
+     ORDER BY account.asset`,
+    [orderId, state],
+  );
+  return Object.fromEntries(result.rows.map((row) => [row.asset, row.amount]));
+}
+
+async function purposeBalances(db: PGlite, orderId: string, purpose: string) {
+  const result = await db.query<{ balance_state: string; amount: string }>(
+    `SELECT line.balance_state,
+       sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS amount
+     FROM core.ledger_journals journal
+     JOIN core.ledger_lines line ON line.journal_id = journal.journal_id
+     JOIN core.ledger_accounts account ON account.account_id = line.account_id
+     WHERE journal.order_id = $1 AND account.purpose = $2
+     GROUP BY line.balance_state
+     HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) <> 0
+     ORDER BY line.balance_state`,
+    [orderId, purpose],
+  );
+  return Object.fromEntries(result.rows.map((row) => [row.balance_state, row.amount]));
+}
+
 function paymentIntent(): CanonicalPaymentIntent {
   const now = Math.floor(Date.now() / 1000);
   return {
@@ -1314,6 +2559,7 @@ function paymentInput(
       blockNumber: 100,
       blockHash: `0x${'5'.repeat(64)}`,
       blockTimestamp: new Date(intent.issuedAt * 1000),
+      finalizedAt: new Date((intent.issuedAt + 42) * 1000),
       contractAddress: '0x9999999999999999999999999999999999999999',
       eventHash: HASH,
       snapshotHash: paymentIntentHash(intent),
@@ -1462,6 +2708,21 @@ async function seedCatalog(db: PGlite, stock: number) {
     [MERCHANT],
   );
   await db.query(
+    `INSERT INTO core.administrative_regions (
+       region_code, province, city, district, source, source_reference_hash, status
+     ) VALUES ('110101', 'Beijing', 'Beijing', 'Dongcheng', 'GOVERNED_IMPORT', $1, 'ACTIVE')`,
+    [HASH],
+  );
+  await db.query(
+    `INSERT INTO core.fulfillment_targets (
+       target_id, target_hash, buyer_wallet, idempotency_key, request_hash,
+       fulfillment_mode, region_code, region_code_hash, encrypted_payload,
+       encryption_iv, encryption_tag, expires_at, created_at
+     ) VALUES ('target:test', $1, $2, 'seed-target-test', $1, 'DELIVERY',
+       '110101', $1, $3, $4, $5, clock_timestamp() + interval '1 day', clock_timestamp())`,
+    [HASH, BUYER, Buffer.from('00', 'hex'), Buffer.alloc(12), Buffer.alloc(16)],
+  );
+  await db.query(
     `INSERT INTO core.products (
        product_id, chain_product_id, merchant_id, version, title, lifecycle_state,
        product_policy_hash, merchant_concession_bps, metadata
@@ -1510,7 +2771,7 @@ function paymentPolicyPayload() {
     regionBps: 40,
     operationsBps: 400,
     platformFeeBps: 500,
-    seckillPrizeBps: 1_000,
+    seckillPrizeBps: 300,
     seckillMainDuration: 3_600,
     relayInitial: 60,
     relayIncrement: 30,
@@ -1540,6 +2801,7 @@ function paymentPolicyPayload() {
     otherUsdtDestinations: [
       { account: '0x7000000000000000000000000000000000000003', weightBps: 10_000 },
     ],
+    seckillPrizePoolAccount: '0x7000000000000000000000000000000000000004',
   };
 }
 
@@ -1579,7 +2841,13 @@ async function insertPaymentQuote(
   );
 }
 
-async function insertOrder(db: PGlite, orderId: string, reservationId: string) {
+async function insertOrder(
+  db: PGlite,
+  orderId: string,
+  reservationId: string,
+  fulfillmentTargetHash = HASH,
+  regionCodeHash = HASH,
+) {
   await db.query(
     `INSERT INTO core.orders (
        order_id, artifact_version, policy_version, oracle_version, buyer_wallet,
@@ -1589,10 +2857,10 @@ async function insertOrder(db: PGlite, orderId: string, reservationId: string) {
        state, finality_status
      ) VALUES (
        $1, '${CORE_ARTIFACT_VERSION}', 1, $2, $3, 'merchant-1', $4,
-       'product-1', 'sku-1', 1, 'DELIVERY', $2, $2, $2, $5,
+       'product-1', 'sku-1', 1, 'DELIVERY', $6, $7, $2, $5,
        '{}', '{}', '{"usdt":"50","npl":"500"}', 1,
        clock_timestamp() + interval '1 hour', 'QUOTED', 'NOT_SUBMITTED'
      )`,
-    [orderId, HASH, BUYER, MERCHANT, reservationId],
+    [orderId, HASH, BUYER, MERCHANT, reservationId, fulfillmentTargetHash, regionCodeHash],
   );
 }

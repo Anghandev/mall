@@ -108,7 +108,10 @@ Status: frozen authority for the function-first V2 rewrite from
 - BNM is the existing backend points project, valued 1:1 against the product
   USDT list price. Payment records Locked BNM; fulfillment finality makes it
   Available. V2 deploys no BNM ERC-20, performs no BNM mint and exposes no
-  on-chain BNM Claim. BNM is not a Safe-transfer liability.
+  on-chain BNM Claim. BNM is not a Safe-transfer liability. Every backend state
+  command carries an order-scoped monotonic version; the BNM backend must
+  atomically ignore lower versions and acknowledge the effective version/state.
+  Missing proof of that behavior is `ExternalBlocked`.
 
 ## Signed Settlement And Safe MultiSend
 
@@ -219,7 +222,8 @@ Status: frozen authority for the function-first V2 rewrite from
   beneficiary not frozen above. No default may be inferred.
 - `ExternalBlocked`: USDT Custody, NPL Reward and Operations Treasury Safe
   addresses and Owners, role wallets, production RPC/fallback RPC,
-  domains/HTTPS/WSS, the existing BNM backend project's API/schema/credentials,
+  domains/HTTPS/WSS, the existing BNM backend project's API/schema/credentials
+  and monotonic-state conformance evidence,
   provider accounts and credentials, approved merchant/admin wallets, encrypted
   backup storage, printers and physical mobile-device evidence.
 - Provider absence may return `ConfigurationRequired`, but adapters,

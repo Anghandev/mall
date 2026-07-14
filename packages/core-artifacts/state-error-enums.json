@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-payment.1",
+  "artifactVersion": "2.0.0-fulfillment.1",
   "orderProjectionStates": [
     "QUOTED",
     "SUBMITTED",
@@ -53,6 +53,9 @@
   ],
   "allowedActionNames": [
     "PAY_ORDER",
+    "REQUEST_EXCHANGE",
+    "REQUEST_DELAY",
+    "DECIDE_FULFILLMENT_REQUEST",
     "CONFIRM_RECEIPT",
     "REQUEST_FORCED_RECEIPT",
     "VERIFY_PICKUP",
@@ -60,13 +63,30 @@
     "OPEN_TAKEOVER",
     "RECORD_SHIPMENT",
     "RECORD_DELIVERY",
+    "REGISTER_PICKUP_CREDENTIAL",
+    "DECIDE_ARBITRATION",
+    "DECIDE_FORCED_RECEIPT",
     "REQUEST_MERCHANT_SETTLEMENT",
     "REQUEST_REWARD_SETTLEMENT",
     "REQUEST_PRIZE_SETTLEMENT",
     "RECONCILE",
     "RECOVER_SURPLUS"
   ],
-  "executableOrderActionNames": [],
+  "executableOrderActionNames": [
+    "REQUEST_EXCHANGE",
+    "REQUEST_DELAY",
+    "DECIDE_FULFILLMENT_REQUEST",
+    "CONFIRM_RECEIPT",
+    "REQUEST_FORCED_RECEIPT",
+    "VERIFY_PICKUP",
+    "OPEN_ARBITRATION",
+    "OPEN_TAKEOVER",
+    "RECORD_SHIPMENT",
+    "RECORD_DELIVERY",
+    "REGISTER_PICKUP_CREDENTIAL",
+    "DECIDE_ARBITRATION",
+    "DECIDE_FORCED_RECEIPT"
+  ],
   "allowedActionReasonCodes": [
     "ArtifactVersionMismatch",
     "BreakerActive",
@@ -89,6 +109,43 @@
     "FORCED_RECEIPT",
     "ARBITRATION"
   ],
+  "storeStatuses": [
+    "ACTIVE",
+    "SUSPENDED",
+    "CLOSED"
+  ],
+  "fulfillmentRequestTypes": [
+    "EXCHANGE",
+    "DELAY",
+    "ARBITRATION",
+    "FORCED_RECEIPT"
+  ],
+  "fulfillmentRequestStates": [
+    "OPEN",
+    "APPROVED",
+    "REJECTED",
+    "RESOLVED"
+  ],
+  "logisticsProviders": [
+    "KUAIDI100",
+    "CAINIAO"
+  ],
+  "logisticsStatuses": [
+    "PICKED_UP",
+    "IN_TRANSIT",
+    "OUT_FOR_DELIVERY",
+    "DELIVERED",
+    "EXCEPTION"
+  ],
+  "fulfillmentAssets": [
+    "USDT",
+    "NPL",
+    "BNM_POINTS"
+  ],
+  "arbitrationOutcomes": [
+    "FULFILL",
+    "RESUME_FULFILLMENT"
+  ],
   "settlementRails": [
     "MERCHANT_USDT",
     "REWARD_NPL",
@@ -109,9 +166,9 @@
     "DISPUTED"
   ],
   "takeoverStates": [
-    "ELIGIBILITY_PENDING",
     "OPEN",
     "FUNDED",
+    "FULFILLING",
     "FULFILLMENT_PENDING",
     "CLOSED",
     "DECISION_BLOCKED"
@@ -156,7 +213,10 @@
   "adapterProviders": [
     "AMAP",
     "KUAIDI100",
+    "CAINIAO",
     "FEIE",
+    "YILIANYUN",
+    "BNM",
     "ALIYUN_SMS",
     "ALIYUN_OSS",
     "SMTP",

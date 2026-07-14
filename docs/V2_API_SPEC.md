@@ -1,6 +1,6 @@
 # Abu 24K V2 Core API Contract
 
-Status: coordinated local payment checkpoint `2.0.0-payment.1`. OpenAPI,
+Status: coordinated local fulfillment checkpoint `2.0.0-fulfillment.1`. OpenAPI,
 generated types, ABI, manifests, enums, the fail-closed WebSocket protocol and
 consumer tests share this version. This checkpoint does not authorize a
 deployment, production signing or a transaction.
@@ -8,10 +8,11 @@ deployment, production signing or a transaction.
 ## Authority
 
 Core is authoritative for catalog price, payment legs, allocations, policy and
-beneficiary snapshots, reservations, seckill boundary classification and chain
-finality. Products submit user choices, wallet signatures and transaction
-hashes. They do not calculate funds, choose a classification or infer success
-from a transaction hash.
+beneficiary snapshots, reservations, seckill boundary classification, chain
+finality, fulfillment targets, order transitions and ledger release. Products
+submit user choices, wallet signatures, transaction hashes and immutable
+fulfillment evidence. They do not calculate funds, choose a classification,
+infer success from a transaction hash or release balances locally.
 
 Token amounts are unsigned integer decimal strings. IDs used by the Router are
 `bytes32`. BSC finality is fixed at 15 canonical confirmations. Missing policy
@@ -24,6 +25,9 @@ return `ExternalBlocked` or `ConfigurationRequired`.
   issue time and five-minute expiry.
 - JWT sessions bind the wallet and server-owned roles. Buyer payment endpoints
   require a `BUYER` role.
+- Kuaidi100 and Cainiao callbacks use `x-provider-signature`, calculated over
+  the exact raw request body with the configured HMAC secret. They do not use a
+  product JWT.
 - Every response includes `x-correlation-id`. Errors use the generated Core
   error-code catalog and fail closed.
 
@@ -43,6 +47,11 @@ Merchant concession never changes buyer payment. Core returns merchant base
 receivable, concession, net receivable and exact versioned allocation entries.
 The NPL reward allocation balances exactly to the Reward Safe amount; missing
 beneficiaries and rounding remainder use the frozen circulation pool.
+For a seckill quote, governed `seckillPrizePoolAccount` and `seckillPrizeBps`
+create an exact `SECKILL_PRIZE_LIABILITY` entry. Ordinary and fallback-retail
+quotes never create that entry. The prize account is included in the
+Safe-published allocation-set hash and is never inferred from array position or
+destination weight.
 
 An ordinary quote contains the exact `CanonicalPaymentIntent`, Router address,
 snapshot hash, EIP-712 authorization digest, quote signature and two approval
@@ -68,6 +77,7 @@ Public reads:
 - `GET /v2/bootstrap`
 - `GET /v2/catalog/products`
 - `GET /v2/catalog/products/{productId}`
+- `GET /v2/stores` with an optional six-digit `regionCode`
 
 Authentication:
 
@@ -81,6 +91,30 @@ Authenticated Core reads and writes:
 - `POST /v2/seckill/quotes`
 - `POST /v2/payments/submissions`
 - `GET /v2/payments/{orderId}`
+- `POST /v2/stores`
+- `POST /v2/fulfillment-targets/delivery`
+- `POST /v2/fulfillment-targets/pickup`
+- `GET /v2/orders`
+- `GET /v2/orders/{orderId}`
+- `GET /v2/orders/{orderId}/fulfillment-target`
+- `POST /v2/orders/{orderId}/shipments`
+- `POST /v2/orders/{orderId}/delivery`
+- `POST /v2/orders/{orderId}/pickup-credential`
+- `POST /v2/orders/{orderId}/pickup-verification`
+- `POST /v2/orders/{orderId}/exchange-requests`
+- `POST /v2/orders/{orderId}/delay-requests`
+- `POST /v2/orders/{orderId}/request-decisions`
+- `POST /v2/orders/{orderId}/arbitrations`
+- `POST /v2/orders/{orderId}/arbitration-decisions`
+- `POST /v2/orders/{orderId}/takeover`
+- `POST /v2/orders/{orderId}/forced-receipt-requests`
+- `POST /v2/orders/{orderId}/forced-receipt-decisions`
+- `POST /v2/orders/{orderId}/receipt-confirmation`
+
+Provider callbacks:
+
+- `POST /v2/providers/kuaidi100/webhooks/logistics`
+- `POST /v2/providers/cainiao/webhooks/logistics`
 
 `POST /v2/payments/submissions` binds the order and transaction hash. A
 replacement must bind the previously submitted hash. `GET
@@ -94,14 +128,35 @@ readiness gate is true. This gate does not apply to submission tracking or
 reads, so an already broadcast transaction can still be indexed and reconciled
 while new quoting is paused.
 
+Delivery targets require AMap reverse geocoding and encrypted PII storage.
+Pickup targets bind an active store snapshot and immutable six-digit region.
+Quotes accept only an unexpired target belonging to the authenticated buyer.
+Order reads are wallet/role scoped; decrypted target payloads are returned only
+to the buyer, bound merchant or authorized platform role.
+
+Every fulfillment write requires an idempotency key and evidence hash. The
+server owns roles, state transitions and `allowedActions`. Shipment, delivery,
+pickup, exchange/delay, arbitration, forced-receipt review and takeover remain
+available while payment or settlement breakers are active. A payment must first
+reach 15-confirmation finality. Seven-day delivery takeover starts from that
+finality timestamp, not the payment block timestamp. Pickup-timeout takeover is
+still `DecisionBlocked`.
+
+Pickup verification includes the order snapshot's exact `storeId`. Core stores
+only salted code hashes, persists each idempotent failed attempt and invalidates
+the active credential after five failures. A different store cannot release the
+order even when it belongs to the same merchant.
+
 ## Publication Boundary
 
-Payment checkpoint capabilities are catalog/SKU reads, ordinary and seckill
-quotes, atomic reservations, submission tracking, PaymentRouter ABI, payment
-indexing, Locked ledger projection and finality reads.
+The fulfillment checkpoint includes all payment capabilities plus stores,
+encrypted delivery/pickup targets, order projections, shipment and signed
+logistics evidence, one-use pickup verification, exchange/delay, arbitration,
+platform-reviewed forced receipt, delivery takeover and BNM
+Locked-to-Available synchronization.
 
-Fulfillment, takeover, arbitration, settlement requests, Safe MultiSend, CMS,
-notifications and live WebSocket channels are not published in this checkpoint.
-They remain `NOT_PUBLISHED_FAIL_CLOSED`; a disabled control, empty endpoint or
-fixture does not count as implementation. V2 exposes no business-refund or
-on-chain Claim API, and BNM is never a token payout.
+Settlement requests, Safe MultiSend, guarantees, transferable reward payout,
+CMS, notifications and live WebSocket channels are not published in this
+checkpoint. They remain `NOT_PUBLISHED_FAIL_CLOSED`; a disabled control, empty
+endpoint or fixture does not count as implementation. V2 exposes no
+business-refund or on-chain Claim API, and BNM is never a token payout.
