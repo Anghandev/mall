@@ -3,6 +3,7 @@ import { createHmac } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import { Wallet } from 'ethers';
+import { WebSocket } from 'ws';
 import { orderAllowedActions, settlementRequestAllowedAction } from './allowed-actions.ts';
 import {
   createSiweChallenge,
@@ -878,10 +879,12 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       current: async () => ({ sessionId: SESSION_ID, phase: 'LIVE' }),
       get: async (sessionId) => ({ sessionId, phase: 'LIVE' }),
       history: async (input) => ({ items: [], nextCursor: input?.cursor ?? null }),
-      events: async (sessionId, input) => ({
-        items: [{ sessionId, cursor: '1', eventType: 'SeckillRelayExtended' }],
-        nextCursor: input?.cursor ?? '1',
-      }),
+      events: async (sessionId, input) => input?.cursor === '1'
+        ? { items: [], nextCursor: '1' }
+        : {
+            items: [{ sessionId, cursor: '1', eventType: 'SeckillRelayExtended' }],
+            nextCursor: '1',
+          },
     },
     fulfillmentService: {
       getOrder: async (_actor, orderId) => ({ orderId, state: 'DELIVERED' }),
@@ -1023,6 +1026,29 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     assert.equal(((await seckillEvents.json()) as { items: unknown[] }).items.length, 1);
     assert.equal((await fetch(`${base}/v2/seckill/sessions/${SESSION_ID}`)).status, 200);
     assert.equal((await fetch(`${base}/v2/seckill/sessions/history?limit=20`)).status, 200);
+    const realtimeEvent = await new Promise<{ sessionId: string; cursor: string; eventType: string }>((resolve, reject) => {
+      const client = new WebSocket(
+        `ws://127.0.0.1:${address.port}/v2/ws?artifactVersion=${CORE_ARTIFACT_VERSION}&channel=seckill:${SESSION_ID}&cursor=0`,
+      );
+      client.once('error', reject);
+      client.once('message', (data) => {
+        resolve(JSON.parse(data.toString()) as { sessionId: string; cursor: string; eventType: string });
+        client.close();
+      });
+    });
+    assert.deepEqual(realtimeEvent, {
+      sessionId: SESSION_ID,
+      cursor: '1',
+      eventType: 'SeckillRelayExtended',
+    });
+    const mismatchClose = await new Promise<number>((resolve, reject) => {
+      const client = new WebSocket(
+        `ws://127.0.0.1:${address.port}/v2/ws?artifactVersion=stale&channel=seckill:${SESSION_ID}`,
+      );
+      client.once('error', reject);
+      client.once('close', (code) => resolve(code));
+    });
+    assert.equal(mismatchClose, 4409);
 
     const extraField = await fetch(`${base}/v2/auth/nonce`, {
       method: 'POST',

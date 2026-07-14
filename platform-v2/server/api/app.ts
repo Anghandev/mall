@@ -54,6 +54,7 @@ import type {
 import type { ConfigApprovalInput } from '../data/system-config-service.ts';
 import type { AuditQuery } from '../data/audit-service.ts';
 import { verifyWebhookHmac } from './providers.ts';
+import { attachRealtimeServer, type RealtimeEventPage } from './realtime.ts';
 
 export interface PaymentApiService {
   listCatalog(): Promise<unknown>;
@@ -71,7 +72,7 @@ export interface SeckillApiService {
   current(): Promise<unknown>;
   get(sessionId: string): Promise<unknown>;
   history(input?: { cursor?: string; limit?: number }): Promise<unknown>;
-  events(sessionId: string, input?: { cursor?: string; limit?: number }): Promise<unknown>;
+  events(sessionId: string, input?: { cursor?: string; limit?: number }): Promise<RealtimeEventPage>;
 }
 
 export interface FulfillmentApiService {
@@ -279,7 +280,7 @@ export interface ApiDependencies {
 }
 
 export function createApiServer(dependencies: ApiDependencies) {
-  return createServer(async (request, response) => {
+  const server = createServer(async (request, response) => {
     const correlationId = request.headers['x-correlation-id']?.toString() ?? randomUUID();
     const startedAt = performance.now();
     response.once('finish', () => {
@@ -296,6 +297,8 @@ export function createApiServer(dependencies: ApiDependencies) {
       sendJson(response, result.status, result.body, correlationId);
     }
   });
+  attachRealtimeServer(server, dependencies.seckillService);
+  return server;
 }
 
 async function route(
