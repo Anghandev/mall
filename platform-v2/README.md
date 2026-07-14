@@ -12,12 +12,18 @@ workers and the `admin/` product consumer. It must not import V1 runtime code.
 - Merchant proceeds are USDT-only and later settle from the append-only ledger
   through Safe MultiSend.
 - BNM is order-linked backend points, Locked at payment and Available after
-  fulfillment finality. It is not a token and is never minted or claimed.
+  fulfillment finality. Monotonic order state versions fence late provider
+  writes. BNM is not a token and is never minted or claimed.
+- Seckill prize USDT uses an explicit governed liability purpose and remains
+  Locked through order fulfillment until session settlement.
+- Pickup verification is bound to the snapshotted store and rate-limited with
+  persistent, idempotent failed-attempt evidence.
 - Merchant default enters takeover fulfillment. V2 has no business-refund
   interface.
 - Every write fails closed when its decision, RPC, Oracle, Safe, role or
   provider configuration is unavailable.
 
 The binding authority is `../docs/V2_SYSTEM_CONTRACT.md`. The current coordinated
-payment checkpoint is `2.0.0-payment.1`; later capabilities remain fail closed
-until their matching checkpoint and consumer tests are published.
+fulfillment checkpoint is `2.0.0-fulfillment.1`; settlement and administrative
+capabilities remain fail closed until their matching checkpoint and consumer
+tests are published.

@@ -22,6 +22,7 @@ import {
 } from '../api/payment-signing.ts';
 import type { SignerRequest } from '../chain/signer.ts';
 import { reserveInventory } from './inventory.ts';
+import { assertQuoteFulfillmentTarget } from './fulfillment-target-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 
 export interface QuoteSigner {
@@ -217,7 +218,7 @@ export class CatalogPaymentService {
     });
     if (existing) return existingQuoteResponse(existing, input, this.#paymentRouterAddress);
 
-    const prepared = await this.#transactions.transaction((executor) => loadPreparation(executor, input, this.#clock()));
+    const prepared = await this.#transactions.transaction((executor) => loadPreparation(executor, buyer, input, this.#clock()));
     const policy = parsePaymentPolicySnapshot(
       Number(prepared.policy.policy_version),
       prepared.policy.oracle_version,
@@ -278,7 +279,7 @@ export class CatalogPaymentService {
       nplQuoteAmount: oracle.nplQuoteAmount,
       merchantBaseReceivableUsdt,
       merchantConcessionBps: Number(prepared.catalog.merchant_concession_bps),
-      otherUsdtAllocations: buildOtherUsdtAllocations(listPriceUsdt, merchantBaseReceivableUsdt, policy),
+      otherUsdtAllocations: buildOtherUsdtAllocations(listPriceUsdt, merchantBaseReceivableUsdt, policy, 'ORDINARY'),
       beneficiaries,
     }, policy, 'ORDINARY', now);
     const snapshotHash = paymentIntentHash(intent);
@@ -293,7 +294,7 @@ export class CatalogPaymentService {
     });
 
     await this.#transactions.transaction(async (executor) => {
-      const current = await loadPreparation(executor, input, this.#clock());
+      const current = await loadPreparation(executor, buyer, input, this.#clock());
       if (preparationFingerprint(current) !== preparationFingerprint(prepared)) {
         throw new CoreError('IdempotencyConflict', 'Catalog or policy changed while quote was signed', 409);
       }
@@ -334,7 +335,7 @@ export class CatalogPaymentService {
       return loadExistingSeckillQuote(executor, buyer, input.idempotencyKey);
     });
     if (existing) return existingSeckillQuoteResponse(existing, input, this.#paymentRouterAddress);
-    const prepared = await this.#transactions.transaction((executor) => loadSeckillPreparation(executor, input, this.#clock()));
+    const prepared = await this.#transactions.transaction((executor) => loadSeckillPreparation(executor, buyer, input, this.#clock()));
     const policy = parsePaymentPolicySnapshot(
       Number(prepared.policy.policy_version),
       prepared.policy.oracle_version,
@@ -423,7 +424,12 @@ export class CatalogPaymentService {
         reservationHash: seckillReservationHash,
         listPriceUsdt: seckillListPriceUsdt,
         nplQuoteAmount: seckillOracle.nplQuoteAmount,
-        otherUsdtAllocations: buildOtherUsdtAllocations(seckillListPriceUsdt, merchantBaseReceivableUsdt, policy),
+        otherUsdtAllocations: buildOtherUsdtAllocations(
+          seckillListPriceUsdt,
+          merchantBaseReceivableUsdt,
+          policy,
+          'SECKILL',
+        ),
       },
       {
         ...shared,
@@ -431,7 +437,12 @@ export class CatalogPaymentService {
         reservationHash: fallbackReservationHash,
         listPriceUsdt: fallbackListPriceUsdt,
         nplQuoteAmount: fallbackOracle.nplQuoteAmount,
-        otherUsdtAllocations: buildOtherUsdtAllocations(fallbackListPriceUsdt, merchantBaseReceivableUsdt, policy),
+        otherUsdtAllocations: buildOtherUsdtAllocations(
+          fallbackListPriceUsdt,
+          merchantBaseReceivableUsdt,
+          policy,
+          'FALLBACK_RETAIL',
+        ),
       },
       policy,
       now,
@@ -446,7 +457,7 @@ export class CatalogPaymentService {
       idempotencyKey: `seckill-quote:${buyer}:${input.idempotencyKey}`,
     });
     await this.#transactions.transaction(async (executor) => {
-      const current = await loadSeckillPreparation(executor, input, this.#clock());
+      const current = await loadSeckillPreparation(executor, buyer, input, this.#clock());
       if (preparationFingerprint(current) !== preparationFingerprint(prepared)) {
         throw new CoreError('IdempotencyConflict', 'Seckill catalog or policy changed while quote was signed', 409);
       }
@@ -562,11 +573,18 @@ export class CatalogPaymentService {
   }
 }
 
-async function loadPreparation(executor: SqlExecutor, input: CreateOrdinaryQuoteInput, now: Date) {
+async function loadPreparation(executor: SqlExecutor, buyer: string, input: CreateOrdinaryQuoteInput, now: Date) {
   const breaker = await executor.query<{ paused: boolean }>(
     "SELECT paused FROM core.circuit_breakers WHERE scope = 'NEW_PAYMENT'",
   );
   if (breaker.rows[0]?.paused) throw new CoreError('BreakerActive', 'New payments are paused', 409);
+  await assertQuoteFulfillmentTarget(executor, {
+    buyerWallet: buyer,
+    fulfillmentMode: input.fulfillmentMode,
+    fulfillmentTargetHash: input.fulfillmentTargetHash,
+    regionCodeHash: input.regionCodeHash,
+    now,
+  });
   const catalogResult = await executor.query<CatalogRow>(`${catalogSelect()}
     WHERE product.product_id = $1 AND sku.sku_id = $2`, [input.productId, input.skuId]);
   const catalog = catalogResult.rows[0];
@@ -587,12 +605,19 @@ async function loadPreparation(executor: SqlExecutor, input: CreateOrdinaryQuote
   return { catalog, policy };
 }
 
-async function loadSeckillPreparation(executor: SqlExecutor, input: CreateSeckillQuoteInput, now: Date) {
+async function loadSeckillPreparation(executor: SqlExecutor, buyer: string, input: CreateSeckillQuoteInput, now: Date) {
   const breakers = await executor.query<{ scope: string }>(
     `SELECT scope FROM core.circuit_breakers
      WHERE paused AND scope IN ('NEW_PAYMENT', 'SECKILL_PURCHASE')`,
   );
   if (breakers.rows.length > 0) throw new CoreError('BreakerActive', 'Seckill payments are paused', 409);
+  await assertQuoteFulfillmentTarget(executor, {
+    buyerWallet: buyer,
+    fulfillmentMode: input.fulfillmentMode,
+    fulfillmentTargetHash: input.fulfillmentTargetHash,
+    regionCodeHash: input.regionCodeHash,
+    now,
+  });
   const catalogResult = await executor.query<CatalogRow>(`${catalogSelect()}
     WHERE product.product_id = $1 AND sku.sku_id = $2`, [input.productId, input.skuId]);
   const catalog = catalogResult.rows[0];

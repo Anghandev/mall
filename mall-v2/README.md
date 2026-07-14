@@ -5,15 +5,21 @@ Requirement Matrix and consumes only coordinated Core artifacts.
 
 ## Current Runtime Boundary
 
-- Production consumes coordinated Core artifacts `2.0.0-rc.2`, including its
-  version, BSC chain identity and order-action catalogs.
-- `executableOrderActionNames` is empty in this release candidate, so every
-  wallet write remains disabled. The application does not infer an action from
-  the broader known-action catalog.
-- The application does not define endpoints, shared schemas, calldata, prices,
-  allocations, eligibility or finality.
-- Product, session, store, order and reward values remain unavailable instead
-  of using production fixtures.
+- Production consumes coordinated Core artifacts `2.0.0-fulfillment.1` and derives
+  its HTTP paths from the published OpenAPI document.
+- The real payment consumer covers SIWE, product/SKU reads, ordinary and dual
+  seckill quotes, atomic reservations, approval requirements, ABI-shaped
+  `routerCall`, transaction submission and indexed payment projections.
+- Prices, payment legs, allocation amounts and finality are rendered exactly
+  from Core responses. The Mall does not recalculate them or treat a submitted
+  TxHash as final.
+- The fulfillment checkpoint publishes stores, checkout targets, order
+  projections, logistics and fulfillment action contracts. Their Mall consumer
+  wiring remains a separate batch and stays fail closed until implemented.
+- The coordinated manifest still has `deploymentAuthorized=false` and no
+  executable `PAY_ORDER`. Wallet broadcast therefore remains fail closed until
+  Core publishes deployment evidence. Seckill-session projections also remain
+  unpublished rather than using production fixtures.
 - The copied brand assets in `public/brand/` have no runtime dependency on the
   read-only legacy tree.
 

@@ -8,6 +8,11 @@ const textExtensions = new Set(['.css', '.html', '.js', '.map']);
 const forbidden = [
   'legacy/' + 'v1-npl-only',
   '__merchant_visual_review__',
+  '2.0.0-rc.2',
+  '2.0.0-payment.1',
+  'CLAIM_' + 'MERCHANT_USDT',
+  'Payment' + 'Escrow',
+  'Claim' + 'Vault',
   '5,000.00',
   '2,300.00',
   '0x7a...9b3c',
@@ -17,22 +22,22 @@ const forbidden = [
 ];
 
 let filesChecked = 0;
-let sawFailClosedCopy = false;
+let sawFulfillmentBoundary = false;
 let sawArtifactVersion = false;
 
 for (const path of walk(dist)) {
   if (!textExtensions.has(extname(path))) continue;
   filesChecked += 1;
   const contents = readFileSync(path, 'utf8');
-  sawFailClosedCopy ||= contents.includes('商家认证和执行接口尚未接入');
+  sawFulfillmentBoundary ||= contents.includes('支付与履约批次已发布');
   sawArtifactVersion ||= contents.includes(artifactVersion);
   for (const token of forbidden) {
     if (contents.includes(token)) throw new Error(`Production bundle contains forbidden token: ${token}`);
   }
 }
 
-if (!sawFailClosedCopy) {
-  throw new Error('Production bundle is missing the fail-closed Core boundary');
+if (!sawFulfillmentBoundary) {
+  throw new Error('Production bundle is missing the coordinated fulfillment boundary');
 }
 
 if (!sawArtifactVersion) {

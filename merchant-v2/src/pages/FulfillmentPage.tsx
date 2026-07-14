@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { AllowedAction } from '@abu24k/core-artifacts';
 import {
   Box,
   Download,
@@ -9,15 +10,41 @@ import {
   Search,
   Send,
 } from 'lucide-react';
-import { EmptyState, PageHeader } from '../components/ui';
+import { EmptyState, LoadingRows, PageHeader } from '../components/ui';
 import { canExecuteOrderAction } from '../core-boundary';
+import { readableError, useCoreRuntime } from '../core-runtime';
 
 const deliveryColumns = ['订单号', 'TxHash', '收货人', '电话', '详细地址', '数量', '下单时间', '物流单号', '核销状态', '操作'];
 const pickupColumns = ['订单号', '核销门店', '核销状态', '核销时间', '操作'];
 
 export function FulfillmentPage() {
   const [tab, setTab] = useState<'delivery' | 'pickup'>('delivery');
+  const [orderId, setOrderId] = useState('');
+  const [actionLookup, setActionLookup] = useState<
+    | { phase: 'idle' }
+    | { phase: 'loading' }
+    | { phase: 'ready'; actions: readonly AllowedAction[] }
+    | { phase: 'error'; message: string }
+  >({ phase: 'idle' });
+  const { api, session } = useCoreRuntime();
   const columns = tab === 'delivery' ? deliveryColumns : pickupColumns;
+  const allowedActions = actionLookup.phase === 'ready' ? actionLookup.actions : undefined;
+  const canExecute = (action: AllowedAction['action']) => (
+    Boolean(session) && canExecuteOrderAction(action, allowedActions)
+  );
+
+  async function lookupOrderActions() {
+    if (!session || orderId.trim().length === 0) return;
+    setActionLookup({ phase: 'loading' });
+    try {
+      setActionLookup({
+        phase: 'ready',
+        actions: await api.getOrderAllowedActions(orderId.trim(), session.token),
+      });
+    } catch (error) {
+      setActionLookup({ phase: 'error', message: readableError(error) });
+    }
+  }
 
   return (
     <div className="page-stack">
@@ -32,6 +59,18 @@ export function FulfillmentPage() {
         eyebrow="03 / 订单与发货"
         title="履约交付"
       />
+
+      <section className="section-block order-check" aria-labelledby="order-check-title">
+        <div className="section-heading"><div><p className="eyebrow">Fulfillment checkpoint</p><h2 id="order-check-title">订单权限核验</h2></div><span>实时 Core 读取</span></div>
+        <p className="section-intro">输入订单号后读取服务端 `allowedActions`。发货、自提核销和平台签收审核只在当前商家会话获得明确授权后开放，最终性不在前端推定。</p>
+        <form className="order-check-form" onSubmit={(event) => { event.preventDefault(); void lookupOrderActions(); }}>
+          <div className="field"><label htmlFor="order-action-id">订单 ID</label><input autoComplete="off" id="order-action-id" onChange={(event) => setOrderId(event.target.value)} placeholder="输入 Core 订单 ID" type="text" value={orderId} /></div>
+          <button className="button secondary" disabled={!session || orderId.trim().length === 0 || actionLookup.phase === 'loading'} type="submit">核验可用操作</button>
+        </form>
+        {actionLookup.phase === 'loading' ? <LoadingRows count={3} /> : null}
+        {actionLookup.phase === 'error' ? <p className="form-error" role="alert">{actionLookup.message}</p> : null}
+        {actionLookup.phase === 'ready' ? <AllowedActionsTable actions={actionLookup.actions} /> : null}
+      </section>
 
       <section className="section-block fulfillment-workspace" aria-labelledby="orders-title">
         <div className="tabs" role="group" aria-label="履约方式">
@@ -51,7 +90,7 @@ export function FulfillmentPage() {
           <span>已选择 0 笔</span>
           {tab === 'delivery' ? (
             <div className="button-group">
-              <button className="button secondary" disabled={!canExecuteOrderAction('RECORD_SHIPMENT')} type="button"><Send aria-hidden="true" size={16} /> 批量发货</button>
+              <button className="button secondary" disabled type="button"><Send aria-hidden="true" size={16} /> 批量发货</button>
               <button className="button secondary" disabled type="button"><FileSpreadsheet aria-hidden="true" size={16} /> 电子面单</button>
             </div>
           ) : (
@@ -71,13 +110,13 @@ export function FulfillmentPage() {
           <section className="section-block compact-section" aria-labelledby="shipment-title">
             <div className="section-heading"><div><p className="eyebrow">Shipment evidence</p><h2 id="shipment-title">提交发货证据</h2></div><PackageCheck aria-hidden="true" size={19} /></div>
             <div className="field"><label htmlFor="tracking-number">快递物流单号</label><input disabled id="tracking-number" placeholder="选择订单后录入或生成" type="text" /></div>
-            <button className="button primary wide" disabled={!canExecuteOrderAction('RECORD_SHIPMENT')} type="button">去发货</button>
+            <button className="button primary wide" disabled={!canExecute('RECORD_SHIPMENT')} type="button">去发货</button>
             <p className="panel-note">发货只提交幂等履约证据，不代表签收或资产结算。</p>
           </section>
           <section className="section-block compact-section" aria-labelledby="receipt-title">
             <div className="section-heading"><div><p className="eyebrow">Receipt review</p><h2 id="receipt-title">申请平台确认签收</h2></div></div>
             <p>物流确认送达满 7 天后，商家仅可提交证据申请，由平台审核。仲裁期间资产继续 Locked。</p>
-            <button className="button secondary wide" disabled={!canExecuteOrderAction('REQUEST_FORCED_RECEIPT')} type="button">申请平台审核</button>
+            <button className="button secondary wide" disabled={!canExecute('REQUEST_FORCED_RECEIPT')} type="button">申请平台审核</button>
             <p className="panel-note">本工作台没有“商家强制签收”或直接完成订单的操作。</p>
           </section>
         </div>
@@ -86,7 +125,7 @@ export function FulfillmentPage() {
           <section className="section-block compact-section" aria-labelledby="scan-title">
             <div className="section-heading"><div><p className="eyebrow">Pickup verification</p><h2 id="scan-title">扫码核销自提</h2></div><ScanLine aria-hidden="true" size={19} /></div>
             <div className="field"><label htmlFor="pickup-code">手工核销码</label><input disabled id="pickup-code" placeholder="等待门店签名挑战" type="text" /></div>
-            <button className="button primary wide" disabled={!canExecuteOrderAction('VERIFY_PICKUP')} type="button">启动扫码</button>
+            <button className="button primary wide" disabled={!canExecute('VERIFY_PICKUP')} type="button">启动扫码</button>
             <p className="panel-note">相机或手工核销必须绑定签名挑战、订单和当前门店，不能离线提交。</p>
           </section>
           <section className="section-block compact-section" aria-labelledby="pickup-print-title">
@@ -101,8 +140,28 @@ export function FulfillmentPage() {
       <div className="provider-strip" role="status">
         <span><i className="provider-dot warning" />快递接口：ConfigurationRequired</span>
         <span><i className="provider-dot warning" />云打印机：ConfigurationRequired</span>
-        <span><i className="provider-dot offline" />Core 订单流：Unavailable</span>
+        <span><i className="provider-dot ready" />Core 履约权限：Connected</span>
       </div>
+    </div>
+  );
+}
+
+function AllowedActionsTable({ actions }: { actions: readonly AllowedAction[] }) {
+  return (
+    <div aria-live="polite" className="table-wrap compact-table">
+      <table>
+        <thead><tr><th scope="col">操作</th><th scope="col">Core 判定</th><th scope="col">原因</th><th scope="col">截止时间</th></tr></thead>
+        <tbody>
+          {actions.map((action) => (
+            <tr key={action.action}>
+              <td><code>{action.action}</code></td>
+              <td><span className={action.enabled ? 'state-text success' : 'state-text blocked'}>{action.enabled ? '允许' : '阻断'}</span></td>
+              <td>{action.reasonCode ?? '—'}</td>
+              <td>{action.deadline ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

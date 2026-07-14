@@ -138,7 +138,7 @@ async function projectPayments(executor: SqlExecutor, segment: IndexedChainBlock
     for (const event of events) {
       if (event.contract !== 'PaymentRouterV2' || event.eventName !== 'PaymentCompleted') continue;
       await recordPaymentProjection(executor, {
-        event: canonicalPaymentEvent(block, event, canonicalHead),
+        event: canonicalPaymentEvent(block, event, segment, canonicalHead),
       });
     }
   }
@@ -147,9 +147,17 @@ async function projectPayments(executor: SqlExecutor, segment: IndexedChainBlock
 function canonicalPaymentEvent(
   block: IndexedChainBlock['block'],
   event: IndexedChainBlock['events'][number],
+  segment: IndexedChainBlock[],
   canonicalHead: number,
 ): CanonicalPaymentEvent {
   const classification = paymentClassification(event.values.classification);
+  const confirmations = canonicalHead - block.number + 1;
+  const confirmationBlock = confirmations >= 15
+    ? segment.find((item) => item.block.number === block.number + 14)?.block
+    : undefined;
+  if (confirmations >= 15 && !confirmationBlock) {
+    throw new CoreError('InvalidFinality', 'Canonical confirmation block is missing from the indexed segment');
+  }
   return {
     artifactVersion: event.artifactVersion,
     orderId: event.resourceId,
@@ -158,6 +166,7 @@ function canonicalPaymentEvent(
     blockNumber: event.blockNumber,
     blockHash: event.blockHash,
     blockTimestamp: new Date(block.timestamp * 1000),
+    ...(confirmationBlock ? { finalizedAt: new Date(confirmationBlock.timestamp * 1000) } : {}),
     contractAddress: event.contractAddress,
     eventHash: event.eventHash,
     snapshotHash: requiredValue(event.values, 'snapshotHash'),
@@ -172,7 +181,7 @@ function canonicalPaymentEvent(
     nplRewarded: decimalValue(event.values, 'nplRewarded'),
     bnmLocked: decimalValue(event.values, 'bnmLocked'),
     reservationId: requiredValue(event.values, 'reservationId'),
-    confirmations: canonicalHead - block.number + 1,
+    confirmations,
   };
 }
 

@@ -1,4 +1,4 @@
-export declare const artifactVersion: "2.0.0-payment.1";
+export declare const artifactVersion: "2.0.0-fulfillment.1";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
@@ -9,18 +9,26 @@ export type OrderFinalityStatus = "NOT_SUBMITTED" | "PENDING" | "CONFIRMED" | "R
 export type TransactionFinalityState = "SUBMITTED" | "MINED" | "REPLACED" | "REORGED" | "FINAL" | "FAILED";
 export type UserRole = "BUYER" | "MERCHANT" | "ADMIN" | "OPERATOR" | "ARBITRATOR" | "AUDITOR";
 export type BreakerScope = "NEW_PAYMENT" | "SECKILL_PURCHASE" | "NEW_SETTLEMENT_BATCH";
-export type AllowedActionName = "PAY_ORDER" | "CONFIRM_RECEIPT" | "REQUEST_FORCED_RECEIPT" | "VERIFY_PICKUP" | "OPEN_ARBITRATION" | "OPEN_TAKEOVER" | "RECORD_SHIPMENT" | "RECORD_DELIVERY" | "REQUEST_MERCHANT_SETTLEMENT" | "REQUEST_REWARD_SETTLEMENT" | "REQUEST_PRIZE_SETTLEMENT" | "RECONCILE" | "RECOVER_SURPLUS";
+export type AllowedActionName = "PAY_ORDER" | "REQUEST_EXCHANGE" | "REQUEST_DELAY" | "DECIDE_FULFILLMENT_REQUEST" | "CONFIRM_RECEIPT" | "REQUEST_FORCED_RECEIPT" | "VERIFY_PICKUP" | "OPEN_ARBITRATION" | "OPEN_TAKEOVER" | "RECORD_SHIPMENT" | "RECORD_DELIVERY" | "REGISTER_PICKUP_CREDENTIAL" | "DECIDE_ARBITRATION" | "DECIDE_FORCED_RECEIPT" | "REQUEST_MERCHANT_SETTLEMENT" | "REQUEST_REWARD_SETTLEMENT" | "REQUEST_PRIZE_SETTLEMENT" | "RECONCILE" | "RECOVER_SURPLUS";
 export type AllowedActionReasonCode = "ArtifactVersionMismatch" | "BreakerActive" | "ConfigurationRequired" | "DecisionBlocked" | "ExternalBlocked" | "FinalityPending" | "Forbidden" | "MerchantFrozen" | "PickupTakeoverDecisionBlocked" | "UnknownState";
 export type CoreErrorCode = "ArtifactVersionMismatch" | "BreakerActive" | "ConfigurationRequired" | "DecisionBlocked" | "EmptySessionPrizeDecisionBlocked" | "ExternalBlocked" | "FinalityPending" | "Forbidden" | "IdempotencyConflict" | "InvalidFinality" | "InvalidRequest" | "InvalidSignature" | "InventoryUnavailable" | "NonceExpired" | "NonceReplay" | "PickupTakeoverDecisionBlocked" | "ProviderSignatureInvalid" | "QuoteExpired" | "ReorgPending" | "ReservationConflict" | "Unauthorized" | "UnknownState";
 export type FulfillmentMode = "DELIVERY" | "PICKUP";
 export type FulfillmentMethod = "CUSTOMER_RECEIPT" | "PICKUP_VERIFICATION" | "FORCED_RECEIPT" | "ARBITRATION";
+export type StoreStatus = "ACTIVE" | "SUSPENDED" | "CLOSED";
+export type FulfillmentRequestType = "EXCHANGE" | "DELAY" | "ARBITRATION" | "FORCED_RECEIPT";
+export type FulfillmentRequestState = "OPEN" | "APPROVED" | "REJECTED" | "RESOLVED";
+export type LogisticsProvider = "KUAIDI100" | "CAINIAO";
+export type LogisticsStatus = "PICKED_UP" | "IN_TRANSIT" | "OUT_FOR_DELIVERY" | "DELIVERED" | "EXCEPTION";
+export type FulfillmentAsset = "USDT" | "NPL" | "BNM_POINTS";
+export type ArbitrationOutcome = "FULFILL" | "RESUME_FULFILLMENT";
 export type SettlementRail = "MERCHANT_USDT" | "REWARD_NPL" | "PRIZE_USDT";
 export type ReservationState = "ACTIVE" | "CONSUMED" | "EXPIRED" | "RELEASED";
 export type BalanceState = "LOCKED" | "AVAILABLE" | "REQUESTED" | "BATCHED" | "SETTLED" | "DISPUTED";
-export type TakeoverState = "ELIGIBILITY_PENDING" | "OPEN" | "FUNDED" | "FULFILLMENT_PENDING" | "CLOSED" | "DECISION_BLOCKED";
+export type UsdtLiabilityPurpose = 'POLICY_ALLOCATION' | 'SECKILL_PRIZE_LIABILITY';
+export type TakeoverState = "OPEN" | "FUNDED" | "FULFILLING" | "FULFILLMENT_PENDING" | "CLOSED" | "DECISION_BLOCKED";
 export type SeckillState = "SCHEDULED" | "LIVE" | "ENDED" | "SETTLED" | "NO_WINNER";
 export type PolicyPublicationState = "DRAFT" | "DECISION_BLOCKED" | "PUBLISHED" | "SUPERSEDED";
-export type AdapterProvider = "AMAP" | "KUAIDI100" | "FEIE" | "ALIYUN_SMS" | "ALIYUN_OSS" | "SMTP" | "JPUSH";
+export type AdapterProvider = "AMAP" | "KUAIDI100" | "CAINIAO" | "FEIE" | "YILIANYUN" | "BNM" | "ALIYUN_SMS" | "ALIYUN_OSS" | "SMTP" | "JPUSH";
 export type InfrastructureProvider = "RPC_PRIMARY" | "RPC_FALLBACK" | "EXPLORER";
 export type ProviderReadinessState = "READY" | "CONFIGURATION_REQUIRED";
 export declare const orderProjectionStates: readonly OrderProjectionState[];
@@ -35,6 +43,13 @@ export declare const allowedActionReasonCodes: readonly AllowedActionReasonCode[
 export declare const coreErrorCodes: readonly CoreErrorCode[];
 export declare const fulfillmentModes: readonly FulfillmentMode[];
 export declare const fulfillmentMethods: readonly FulfillmentMethod[];
+export declare const storeStatuses: readonly StoreStatus[];
+export declare const fulfillmentRequestTypes: readonly FulfillmentRequestType[];
+export declare const fulfillmentRequestStates: readonly FulfillmentRequestState[];
+export declare const logisticsProviders: readonly LogisticsProvider[];
+export declare const logisticsStatuses: readonly LogisticsStatus[];
+export declare const fulfillmentAssets: readonly FulfillmentAsset[];
+export declare const arbitrationOutcomes: readonly ArbitrationOutcome[];
 export declare const settlementRails: readonly SettlementRail[];
 export declare const reservationStates: readonly ReservationState[];
 export declare const balanceStates: readonly BalanceState[];
@@ -59,6 +74,8 @@ export interface ProductPolicy {
   provinceBps: number;
   regionBps: number;
   operationsBps: number;
+  platformFeeBps: number;
+  seckillPrizeBps: number;
   oracleWindowSeconds: 1800;
   oracleMaxDeviationBps: 500;
   oracleMaxAgeSeconds: 600;
@@ -73,6 +90,7 @@ export interface ProductPolicy {
   concessionDestinations: readonly WeightedDestination[];
   operationsDestinations: readonly WeightedDestination[];
   otherUsdtDestinations: readonly WeightedDestination[];
+  seckillPrizePoolAccount: Address;
 }
 
 export interface WeightedDestination {
@@ -95,6 +113,295 @@ export interface CatalogProduct {
   metadata: Readonly<Record<string, unknown>>;
   skus: readonly CatalogSku[];
 }
+
+export interface MerchantStore {
+  storeId: string;
+  merchantId: string;
+  name: string;
+  regionCode: string;
+  longitude: number;
+  latitude: number;
+  address: string;
+  phone: string;
+  status: StoreStatus;
+  version: number;
+}
+
+export interface CreateMerchantStoreRequest {
+  idempotencyKey: string;
+  name: string;
+  phone: string;
+  longitude: number;
+  latitude: number;
+}
+
+export interface CreateDeliveryTargetRequest {
+  idempotencyKey: string;
+  recipientName: string;
+  phone: string;
+  address: string;
+  longitude: number;
+  latitude: number;
+}
+
+export interface CreatePickupTargetRequest {
+  idempotencyKey: string;
+  storeId: string;
+}
+
+export interface FulfillmentTargetSummary {
+  targetId: string;
+  targetHash: Bytes32;
+  fulfillmentMode: FulfillmentMode;
+  regionCode: string;
+  regionCodeHash: Bytes32;
+  expiresAt: string;
+}
+
+export interface DeliveryTarget extends FulfillmentTargetSummary {
+  fulfillmentMode: 'DELIVERY';
+}
+
+export interface PickupTarget extends FulfillmentTargetSummary {
+  fulfillmentMode: 'PICKUP';
+  storeId: string;
+  store: MerchantStore;
+}
+
+export interface DeliveryTargetPayload {
+  recipientName: string;
+  phone: string;
+  address: string;
+  longitude: number;
+  latitude: number;
+  regionCode: string;
+}
+
+export type FulfillmentTarget =
+  | (DeliveryTarget & { payload: DeliveryTargetPayload })
+  | (Omit<PickupTarget, 'store'> & { payload: MerchantStore });
+
+export interface FulfillmentExactAmounts {
+  listPriceUsdt: AtomicAmount;
+  usdtPaymentAmount: AtomicAmount;
+  nplQuoteAmount: AtomicAmount;
+  nplPaymentAmount: AtomicAmount;
+  nplBurnAmount: AtomicAmount;
+  nplRewardAmount: AtomicAmount;
+  merchantBaseReceivableUsdt: AtomicAmount;
+  merchantConcessionAmount: AtomicAmount;
+  merchantNetReceivableUsdt: AtomicAmount;
+  bnmAmount: AtomicAmount;
+}
+
+export interface FulfillmentRequestProjection {
+  requestId: string;
+  requestType: FulfillmentRequestType;
+  state: FulfillmentRequestState;
+  requestedAt: string;
+  resolvedAt: string | null;
+}
+
+export interface ShipmentProjection {
+  shipmentId: string;
+  carrierCode: string;
+  trackingNumberHash: Bytes32;
+  providerReferenceHash: Bytes32 | null;
+  createdAt: string;
+}
+
+export interface LogisticsProjection {
+  logisticsEventId: string;
+  provider: LogisticsProvider;
+  status: LogisticsStatus;
+  locationHash: Bytes32 | null;
+  occurredAt: string;
+}
+
+export interface FulfillmentBalance {
+  asset: FulfillmentAsset;
+  state: BalanceState;
+  amount: AtomicAmount;
+}
+
+export interface FulfillmentOrder {
+  orderId: Bytes32;
+  artifactVersion: string;
+  buyerWallet: Address;
+  merchantId: string;
+  merchantWallet: Address;
+  productId: string;
+  skuId: string;
+  fulfillmentMode: FulfillmentMode;
+  state: OrderProjectionState;
+  finalityStatus: OrderFinalityStatus;
+  exactAmounts: FulfillmentExactAmounts;
+  paidAt: string | null;
+  paymentFinalizedAt: string | null;
+  shippedAt: string | null;
+  deliveredAt: string | null;
+  fulfilledAt: string | null;
+  takeoverOpenedAt: string | null;
+  arbitrationOpenedAt: string | null;
+  requests: readonly FulfillmentRequestProjection[];
+  shipments: readonly ShipmentProjection[];
+  logistics: readonly LogisticsProjection[];
+  balances: readonly FulfillmentBalance[];
+}
+
+export interface FulfillmentCommandInput {
+  idempotencyKey: string;
+  evidenceHash: Bytes32;
+}
+
+export interface FulfillmentReasonRequest extends FulfillmentCommandInput {
+  reasonCode: string;
+}
+
+export interface ShipmentRequest extends FulfillmentCommandInput {
+  carrierCode: string;
+  trackingNumberHash: Bytes32;
+  providerReferenceHash?: Bytes32;
+}
+
+export interface PickupCredentialRequest extends FulfillmentCommandInput {
+  code: string;
+  expiresAt: string;
+}
+
+export interface PickupVerificationRequest extends FulfillmentCommandInput {
+  code: string;
+  storeId: string;
+}
+
+export interface FulfillmentRequestDecision extends FulfillmentCommandInput {
+  requestId: string;
+  approved: boolean;
+  noteCode: string;
+}
+
+export interface FulfillmentDecision extends FulfillmentCommandInput {
+  approved: boolean;
+  noteCode: string;
+}
+
+export interface ArbitrationDecision extends FulfillmentCommandInput {
+  outcome: ArbitrationOutcome;
+  noteCode: string;
+}
+
+export interface LogisticsWebhookRequest {
+  eventId: string;
+  orderId: Bytes32;
+  status: LogisticsStatus;
+  occurredAt: string;
+  locationHash?: Bytes32;
+}
+
+export interface ShipmentResult {
+  orderId: Bytes32;
+  state: 'SHIPPED';
+  shipmentId: string;
+  carrierCode: string;
+  trackingNumberHash: Bytes32;
+  recordedAt: string;
+}
+
+export interface DeliveryResult {
+  orderId: Bytes32;
+  state: 'DELIVERED';
+  deliveredAt: string;
+}
+
+export interface LogisticsUpdateResult {
+  orderId: Bytes32;
+  logisticsEventId: string;
+  provider: LogisticsProvider;
+  status: LogisticsStatus;
+  state: 'SHIPPED' | 'DELIVERED';
+  occurredAt: string;
+}
+
+export interface PickupCredentialResult {
+  orderId: Bytes32;
+  credentialId: string;
+  expiresAt: string;
+}
+
+export interface FulfillmentRequestResult {
+  orderId: Bytes32;
+  requestId: string;
+  requestType: 'EXCHANGE' | 'DELAY';
+  state: 'OPEN';
+  requestedAt: string;
+}
+
+export interface FulfillmentRequestDecisionResult {
+  orderId: Bytes32;
+  requestId: string;
+  requestType: 'EXCHANGE' | 'DELAY';
+  state: 'APPROVED' | 'REJECTED';
+  decidedAt: string;
+}
+
+export interface ArbitrationOpenedResult {
+  orderId: Bytes32;
+  requestId: string;
+  state: 'ARBITRATION';
+  openedAt: string;
+}
+
+export interface ArbitrationResumedResult {
+  orderId: Bytes32;
+  state: 'SHIPPED' | 'DELIVERED' | 'TAKEOVER' | 'FULFILLMENT_PENDING';
+  outcome: 'RESUME_FULFILLMENT';
+  decidedAt: string;
+}
+
+export interface TakeoverOpenedResult {
+  orderId: Bytes32;
+  caseId: string;
+  state: 'TAKEOVER';
+  customerFundsRemainLocked: true;
+}
+
+export interface ForcedReceiptRequestResult {
+  orderId: Bytes32;
+  requestId: string;
+  state: 'OPEN';
+  platformReviewRequired: true;
+  canFinalizeDirectly: false;
+}
+
+export interface ForcedReceiptRejectedResult {
+  orderId: Bytes32;
+  state: 'DELIVERED';
+  approved: false;
+  decidedAt: string;
+}
+
+export interface FulfillmentCompletedResult {
+  orderId: Bytes32;
+  state: 'FULFILLED';
+  method: FulfillmentMethod;
+  fulfilledAt: string;
+}
+
+export type ArbitrationDecisionResult = FulfillmentCompletedResult | ArbitrationResumedResult;
+export type ForcedReceiptDecisionResult = FulfillmentCompletedResult | ForcedReceiptRejectedResult;
+export type FulfillmentCommandResult =
+  | ShipmentResult
+  | DeliveryResult
+  | LogisticsUpdateResult
+  | PickupCredentialResult
+  | FulfillmentRequestResult
+  | FulfillmentRequestDecisionResult
+  | ArbitrationOpenedResult
+  | ArbitrationResumedResult
+  | TakeoverOpenedResult
+  | ForcedReceiptRequestResult
+  | ForcedReceiptRejectedResult
+  | FulfillmentCompletedResult;
 
 export interface InventoryReservation {
   reservationId: Bytes32;
@@ -123,7 +430,7 @@ export interface MerchantConcessionAllocation {
 }
 
 export interface OtherUsdtAllocation extends MerchantConcessionAllocation {
-  purpose: string;
+  purpose: UsdtLiabilityPurpose;
 }
 
 export type NplRewardRole = 'genesis' | 'directReferral' | 'district' | 'city' | 'province' | 'region' | 'operations' | 'roundingRemainder';

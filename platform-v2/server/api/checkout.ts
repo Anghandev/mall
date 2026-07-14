@@ -17,10 +17,12 @@ export interface WeightedDestination {
   weightBps: number;
 }
 
+export type UsdtLiabilityPurpose = 'POLICY_ALLOCATION' | 'SECKILL_PRIZE_LIABILITY';
+
 export interface ExactUsdtAllocation {
   account: string;
   amount: bigint;
-  purpose: string;
+  purpose: UsdtLiabilityPurpose;
 }
 
 export interface FrozenPaymentPolicy {
@@ -114,7 +116,7 @@ export interface CanonicalPaymentIntent {
   sessionId: string;
   beneficiaries: Readonly<Record<string, string>>;
   merchantConcessionAllocations: readonly { account: string; amount: string }[];
-  otherUsdtAllocations: readonly { account: string; amount: string; purpose: string }[];
+  otherUsdtAllocations: readonly { account: string; amount: string; purpose: UsdtLiabilityPurpose }[];
   nplRewardAllocations: readonly { role: string; account: string; amount: string }[];
   requiredConfirmations: 15;
 }
@@ -376,7 +378,12 @@ function canonicalExactAllocations(allocations: readonly ExactUsdtAllocation[]) 
   let previous = '';
   return allocations.map((allocation) => {
     const account = allocation.account.toLowerCase();
-    if (!isAddress(account) || account <= previous || allocation.amount < 0n || allocation.purpose.length === 0) {
+    if (
+      !isAddress(account)
+      || account <= previous
+      || allocation.amount < 0n
+      || !['POLICY_ALLOCATION', 'SECKILL_PRIZE_LIABILITY'].includes(allocation.purpose)
+    ) {
       throw new CoreError('InvalidRequest', 'USDT allocations must be unique, sorted and non-negative');
     }
     previous = account;

@@ -12,7 +12,7 @@ export function DashboardPage() {
       />
       <section className="metric-grid" aria-label="今日核心数据">
         <Link className="metric-link-wrap" to="/fulfillment"><Metric hint="等待权威订单聚合" label="今日待发货订单" linkLabel="前往履约交付" /></Link>
-        <Metric hint="USDT，包含 Locked 与 PendingSettlement" label="今日销售货款" />
+        <Metric hint="商家五状态 USDT 投影未发布" label="今日销售货款" />
         <Metric hint="唯一商品状态枚举未发布" label="当前单品秒杀状态" />
         <Metric hint="跨门店已核销自提数量" label="今日门店核销" />
       </section>

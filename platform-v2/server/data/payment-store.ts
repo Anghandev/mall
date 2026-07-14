@@ -21,10 +21,9 @@ interface PaymentEventRow {
   canonical: boolean;
 }
 
-interface JournalLineRow {
+interface JournalBalanceRow {
   account_id: string;
-  side: 'DEBIT' | 'CREDIT';
-  amount: string;
+  net_credit: string;
   balance_state: LedgerLine['balanceState'];
 }
 
@@ -47,6 +46,7 @@ interface LedgerAccount {
     | 'MERCHANT_RECEIVABLE'
     | 'CONCESSION'
     | 'POLICY_ALLOCATION'
+    | 'SECKILL_PRIZE_LIABILITY'
     | 'REWARD_LIABILITY'
     | 'BNM_ISSUANCE'
     | 'BNM_LIABILITY';
@@ -69,6 +69,7 @@ export interface CanonicalPaymentEvent {
   blockNumber: number;
   blockHash: string;
   blockTimestamp: Date;
+  finalizedAt?: Date;
   contractAddress: string;
   eventHash: string;
   snapshotHash: string;
@@ -157,6 +158,7 @@ export async function recordPaymentProjection(executor: SqlExecutor, input: Reco
         unitListPrice * BigInt(intent.quantity),
         quote.merchantCostUsdt * BigInt(intent.quantity),
         policy,
+        input.event.classification,
       ),
       ...(intent.seckill ? { sessionId: intent.sessionId } : {}),
       beneficiaries: intent.beneficiaries,
@@ -351,7 +353,7 @@ export async function recordPaymentProjection(executor: SqlExecutor, input: Reco
       input.event.confirmations >= REQUIRED_CONFIRMATIONS ? 'FINAL' : 'MINED',
       JSON.stringify({ snapshotHash: input.event.snapshotHash, eventKey }),
       input.event.blockTimestamp,
-      input.event.confirmations >= REQUIRED_CONFIRMATIONS ? input.event.blockTimestamp : null,
+      input.event.confirmations >= REQUIRED_CONFIRMATIONS ? input.event.finalizedAt : null,
     ],
   );
   await executor.query(
@@ -376,15 +378,21 @@ export async function reversePaymentProjection(executor: SqlExecutor, eventKey: 
   const row = payment.rows[0];
   if (!row) throw new CoreError('InvalidFinality', 'Unknown payment event', 404);
   if (!row.canonical) return { status: 'IDEMPOTENT' as const, orderId: row.order_id };
-  const originalLines = await executor.query<JournalLineRow>(
-    `SELECT account_id, side, amount::text, balance_state
-     FROM core.ledger_lines WHERE journal_id = $1 ORDER BY line_id`,
-    [row.journal_id],
+  const currentBalances = await executor.query<JournalBalanceRow>(
+    `SELECT line.account_id, line.balance_state,
+       sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS net_credit
+     FROM core.ledger_journals journal
+     JOIN core.ledger_lines line ON line.journal_id = journal.journal_id
+     WHERE journal.order_id = $1
+     GROUP BY line.account_id, line.balance_state
+     HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) <> 0
+     ORDER BY line.account_id, line.balance_state`,
+    [row.order_id],
   );
-  const reversalLines: LedgerLine[] = originalLines.rows.map((line) => ({
+  const reversalLines: LedgerLine[] = currentBalances.rows.map((line) => ({
     accountId: line.account_id,
-    side: line.side === 'DEBIT' ? 'CREDIT' : 'DEBIT',
-    amount: line.amount,
+    side: BigInt(line.net_credit) > 0n ? 'DEBIT' : 'CREDIT',
+    amount: (BigInt(line.net_credit) < 0n ? -BigInt(line.net_credit) : BigInt(line.net_credit)).toString(),
     balanceState: line.balance_state,
   }));
   const reversalEventKey = `reorg:${eventKey}:${replacementBlockHash.toLowerCase()}`;
@@ -417,11 +425,13 @@ export async function reversePaymentProjection(executor: SqlExecutor, eventKey: 
        replaced_at = clock_timestamp() WHERE event_key = $1`,
     [eventKey, replacementBlockHash],
   );
-  await executor.query(
+  const reorgedOrder = await executor.query<{ bnm_state_version: string }>(
     `UPDATE core.orders SET state = 'REORG_PENDING', finality_status = 'REORGED',
-       updated_at = clock_timestamp() WHERE order_id = $1`,
+       bnm_state_version = bnm_state_version + 1, updated_at = clock_timestamp()
+     WHERE order_id = $1 RETURNING bnm_state_version::text`,
     [row.order_id],
   );
+  if (!reorgedOrder.rows[0]) throw new CoreError('UnknownState', 'Reorged order is unavailable', 409);
   await executor.query(
     `UPDATE core.payment_quotes SET state = 'REORGED', updated_at = clock_timestamp()
      WHERE order_id = $1`,
@@ -443,6 +453,49 @@ export async function reversePaymentProjection(executor: SqlExecutor, eventKey: 
       `payment-reorged:${reversalEventKey}`,
     ],
   );
+  await executor.query(
+    `UPDATE core.outbox_events SET state = 'DEAD_LETTER', locked_by = NULL,
+       locked_until = NULL, last_error_code = 'PaymentReorged'
+     WHERE aggregate_id = $1 AND event_type = 'BnmAvailabilityRequested'
+       AND state = 'PENDING'`,
+    [row.order_id],
+  );
+  await executor.query(
+    `UPDATE core.outbox_events SET last_error_code = 'PaymentReorgCancellationPending'
+     WHERE aggregate_id = $1 AND event_type = 'BnmAvailabilityRequested'
+       AND state = 'PROCESSING'`,
+    [row.order_id],
+  );
+  const bnm = await executor.query<{
+    buyer_wallet: string;
+    amount: string;
+  }>(
+    `SELECT orders.buyer_wallet, orders.exact_amounts ->> 'bnmAmount' AS amount
+     FROM core.orders orders
+     WHERE orders.order_id = $1`,
+    [row.order_id],
+  );
+  if (bnm.rows[0]) {
+    await executor.query(
+      `INSERT INTO core.outbox_events (
+         event_id, aggregate_type, aggregate_id, event_type, payload, idempotency_key, state
+       ) VALUES ($1,'ORDER',$2,'BnmLockRequested',$3,$1,'PENDING')
+       ON CONFLICT (idempotency_key) DO NOTHING`,
+      [
+        `outbox:bnm-lock:${reversalEventKey}`,
+        row.order_id,
+        JSON.stringify({
+          orderId: row.order_id,
+          buyerWallet: bnm.rows[0].buyer_wallet,
+          amount: bnm.rows[0].amount,
+          state: 'LOCKED',
+          stateVersion: reorgedOrder.rows[0].bnm_state_version,
+          reason: 'PAYMENT_REORG',
+          sourceEvidenceHash: replacementBlockHash.toLowerCase(),
+        }),
+      ],
+    );
+  }
   if (deepFinalized) {
     await executor.query(
       `INSERT INTO core.durable_jobs (
@@ -514,7 +567,16 @@ export async function advancePaymentFinality(executor: SqlExecutor, canonicalHea
      SET confirmations = payment.confirmations,
          state = CASE WHEN payment.confirmations >= 15 THEN 'FINAL' ELSE 'MINED' END,
          finalized_at = CASE
-           WHEN payment.confirmations >= 15 THEN COALESCE(finality.finalized_at, clock_timestamp())
+           WHEN payment.confirmations >= 15 THEN COALESCE(
+             finality.finalized_at,
+             (
+               SELECT to_timestamp(confirmation.block_timestamp)
+               FROM core.chain_blocks confirmation
+               WHERE confirmation.canonical
+                 AND confirmation.block_number = payment.block_number + 14
+             ),
+             clock_timestamp()
+           )
            ELSE NULL
          END,
          updated_at = clock_timestamp()
@@ -665,7 +727,19 @@ function paymentJournal(
     add(account(`concession:${allocation.account}:usdt`, 'BENEFICIARY', allocation.account, USDT, 'CONCESSION'), 'CREDIT', allocation.amount, 'LOCKED');
   }
   for (const allocation of intent.otherUsdtAllocations) {
-    add(account(`policy:${allocation.account}:usdt`, 'BENEFICIARY', allocation.account, USDT, 'POLICY_ALLOCATION'), 'CREDIT', allocation.amount, 'LOCKED');
+    const prize = allocation.purpose === 'SECKILL_PRIZE_LIABILITY';
+    add(
+      account(
+        prize ? `seckill-prize:${allocation.account}:usdt` : `policy:${allocation.account}:usdt`,
+        'BENEFICIARY',
+        allocation.account,
+        USDT,
+        allocation.purpose,
+      ),
+      'CREDIT',
+      allocation.amount,
+      'LOCKED',
+    );
   }
   add(account('burn:npl', 'SYSTEM', 'npl-burn', NPL, 'BURN'), 'DEBIT', intent.nplBurnAmount, 'POSTED');
   add(account('clearing:buyer-burn:npl', 'SYSTEM', 'buyer-burn-payment', NPL, 'PAYMENT_CLEARING'), 'CREDIT', intent.nplBurnAmount, 'POSTED');
@@ -800,6 +874,10 @@ function validatePaymentInput(input: RecordPaymentInput) {
       || !Number.isSafeInteger(event.policyVersion) || event.policyVersion <= 0
       || !Number.isSafeInteger(event.confirmations) || event.confirmations < 0
       || !Number.isFinite(event.blockTimestamp.getTime())
+      || (
+        event.confirmations >= REQUIRED_CONFIRMATIONS
+        && (!event.finalizedAt || !Number.isFinite(event.finalizedAt.getTime()))
+      )
       || !['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'].includes(event.classification)
       || amounts.some((amount) => !/^(0|[1-9][0-9]*)$/.test(amount))
   ) throw new CoreError('InvalidFinality', 'Invalid canonical payment event');

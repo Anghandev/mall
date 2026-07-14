@@ -405,6 +405,10 @@ h2 {
   background: var(--danger);
 }
 
+.connection-state.ready i {
+  background: var(--success);
+}
+
 .system-notice {
   display: flex;
   align-items: flex-start;
@@ -446,6 +450,16 @@ h2 {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.system-notice.ready {
+  border-color: oklch(84% 0.06 151);
+  color: oklch(35% 0.07 151);
+  background: var(--success-soft);
+}
+
+.system-notice.ready span {
+  color: oklch(43% 0.045 151);
 }
 
 .workspace main {
@@ -529,6 +543,18 @@ h2 {
 
 .metric-grid.five {
   grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.metric-grid.six {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.metric-grid.six > :nth-child(3n) {
+  border-right: 0;
+}
+
+.metric-grid.six > :nth-child(n + 4) {
+  border-top: 1px solid var(--border);
 }
 
 .metric,
@@ -1079,6 +1105,95 @@ tbody tr:last-child td {
   border-bottom: 0;
 }
 
+.section-intro {
+  max-width: 90ch;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.65;
+}
+
+.catalog-section,
+.order-check {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+
+.catalog-section .loading-rows,
+.order-check .loading-rows {
+  min-height: 120px;
+  align-content: center;
+}
+
+.catalog-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.catalog-table-wrap table {
+  min-width: 900px;
+}
+
+.table-secondary {
+  display: block;
+  max-width: 34ch;
+  margin-top: 4px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.numeric-cell,
+.hash-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.hash-value {
+  display: block;
+  max-width: 34ch;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.order-check-form {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.compact-table {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.compact-table table {
+  min-width: 680px;
+}
+
+.state-text {
+  font-weight: 750;
+}
+
+.state-text.success {
+  color: var(--success);
+}
+
+.state-text.blocked {
+  color: var(--danger);
+}
+
+.form-error {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid oklch(85% 0.06 27);
+  border-radius: 6px;
+  color: oklch(39% 0.09 27);
+  background: var(--danger-soft);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
 td .empty-state {
   min-height: 210px;
 }
@@ -1124,6 +1239,10 @@ td .empty-state {
   height: 7px;
   border-radius: 50%;
   background: var(--muted);
+}
+
+.provider-dot.ready {
+  background: var(--success);
 }
 
 .provider-dot.warning {
@@ -1583,6 +1702,16 @@ td .empty-state {
   text-align: left;
 }
 
+.wallet-list button:not(:disabled) {
+  color: var(--ink);
+  background: var(--surface);
+}
+
+.wallet-list button.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
 .wallet-list button > span:nth-child(2) {
   display: grid;
   gap: 2px;
@@ -1646,6 +1775,14 @@ td .empty-state {
 .loading-rows {
   display: grid;
   gap: 8px;
+}
+
+.spin {
+  animation: spin 800ms linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .skeleton {
@@ -1746,6 +1883,14 @@ td .empty-state {
     border-top: 1px solid var(--border);
   }
 
+  .metric-grid.six > .metric {
+    border-right: 1px solid var(--border);
+  }
+
+  .metric-grid.six > .metric:nth-child(2n) {
+    border-right: 0;
+  }
+
   .dashboard-grid,
   .form-layout,
   .store-layout,
@@ -1834,12 +1979,24 @@ td .empty-state {
     border-top: 1px solid var(--border);
   }
 
+  .metric-grid.six > .metric {
+    border-right: 0;
+  }
+
   .two-column-fields,
   .two-panel-grid,
   .reward-grid,
   .help-layout,
   .merchant-rules {
     grid-template-columns: 1fr;
+  }
+
+  .order-check-form {
+    grid-template-columns: 1fr;
+  }
+
+  .order-check-form .button {
+    width: 100%;
   }
 
   .reward-grid > :first-child {
@@ -1973,6 +2130,11 @@ td .empty-state {
   .wallet-panel,
   .store-list,
   .dashboard-grid .section-block {
+    padding: 16px;
+  }
+
+  .catalog-section,
+  .order-check {
     padding: 16px;
   }
 
