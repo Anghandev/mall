@@ -23,6 +23,8 @@ export interface DecodedDomainEvent {
   eventName: string;
   eventSignature: string;
   resourceId: string;
+  contractAddress: string;
+  eventHash: string;
   transactionHash: string;
   blockHash: string;
   blockNumber: number;
@@ -77,6 +79,8 @@ export class AbiEventDecoder {
       eventName: parsed.name,
       eventSignature: parsed.signature,
       resourceId,
+      contractAddress: log.address.toLowerCase(),
+      eventHash: log.topics[0] ?? '',
       transactionHash: log.transactionHash,
       blockHash: log.blockHash,
       blockNumber: log.blockNumber,

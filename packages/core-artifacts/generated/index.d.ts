@@ -1,4 +1,4 @@
-export declare const artifactVersion: "2.0.0-rc.2";
+export declare const artifactVersion: "2.0.0-payment.1";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
@@ -8,15 +8,15 @@ export type ContractOrderState = "NONE" | "PAID" | "SHIPPED" | "DELIVERED" | "AR
 export type OrderFinalityStatus = "NOT_SUBMITTED" | "PENDING" | "CONFIRMED" | "REPLACED" | "REORGED" | "FINAL";
 export type TransactionFinalityState = "SUBMITTED" | "MINED" | "REPLACED" | "REORGED" | "FINAL" | "FAILED";
 export type UserRole = "BUYER" | "MERCHANT" | "ADMIN" | "OPERATOR" | "ARBITRATOR" | "AUDITOR";
-export type BreakerScope = "NEW_ORDERS" | "SECKILL_PURCHASE" | "SECKILL_SETTLEMENT" | "MERCHANT_CLAIM" | "REWARD_CLAIM" | "PRIZE_CLAIM";
-export type AllowedActionName = "PAY_ORDER" | "CONFIRM_RECEIPT" | "REQUEST_FORCED_RECEIPT" | "VERIFY_PICKUP" | "OPEN_ARBITRATION" | "OPEN_TAKEOVER" | "RECORD_SHIPMENT" | "RECORD_DELIVERY" | "CLAIM_MERCHANT_USDT" | "CLAIM_REWARD_NPL" | "CLAIM_PRIZE_USDT" | "CLAIM_BNM" | "RECONCILE" | "RECOVER_SURPLUS";
+export type BreakerScope = "NEW_PAYMENT" | "SECKILL_PURCHASE" | "NEW_SETTLEMENT_BATCH";
+export type AllowedActionName = "PAY_ORDER" | "CONFIRM_RECEIPT" | "REQUEST_FORCED_RECEIPT" | "VERIFY_PICKUP" | "OPEN_ARBITRATION" | "OPEN_TAKEOVER" | "RECORD_SHIPMENT" | "RECORD_DELIVERY" | "REQUEST_MERCHANT_SETTLEMENT" | "REQUEST_REWARD_SETTLEMENT" | "REQUEST_PRIZE_SETTLEMENT" | "RECONCILE" | "RECOVER_SURPLUS";
 export type AllowedActionReasonCode = "ArtifactVersionMismatch" | "BreakerActive" | "ConfigurationRequired" | "DecisionBlocked" | "ExternalBlocked" | "FinalityPending" | "Forbidden" | "MerchantFrozen" | "PickupTakeoverDecisionBlocked" | "UnknownState";
 export type CoreErrorCode = "ArtifactVersionMismatch" | "BreakerActive" | "ConfigurationRequired" | "DecisionBlocked" | "EmptySessionPrizeDecisionBlocked" | "ExternalBlocked" | "FinalityPending" | "Forbidden" | "IdempotencyConflict" | "InvalidFinality" | "InvalidRequest" | "InvalidSignature" | "InventoryUnavailable" | "NonceExpired" | "NonceReplay" | "PickupTakeoverDecisionBlocked" | "ProviderSignatureInvalid" | "QuoteExpired" | "ReorgPending" | "ReservationConflict" | "Unauthorized" | "UnknownState";
 export type FulfillmentMode = "DELIVERY" | "PICKUP";
 export type FulfillmentMethod = "CUSTOMER_RECEIPT" | "PICKUP_VERIFICATION" | "FORCED_RECEIPT" | "ARBITRATION";
-export type ClaimRail = "MERCHANT_USDT" | "REWARD_NPL" | "PRIZE_USDT" | "BNM";
+export type SettlementRail = "MERCHANT_USDT" | "REWARD_NPL" | "PRIZE_USDT";
 export type ReservationState = "ACTIVE" | "CONSUMED" | "EXPIRED" | "RELEASED";
-export type BalanceState = "LOCKED" | "PENDING_SETTLEMENT" | "AVAILABLE" | "CLAIMED";
+export type BalanceState = "LOCKED" | "AVAILABLE" | "REQUESTED" | "BATCHED" | "SETTLED" | "DISPUTED";
 export type TakeoverState = "ELIGIBILITY_PENDING" | "OPEN" | "FUNDED" | "FULFILLMENT_PENDING" | "CLOSED" | "DECISION_BLOCKED";
 export type SeckillState = "SCHEDULED" | "LIVE" | "ENDED" | "SETTLED" | "NO_WINNER";
 export type PolicyPublicationState = "DRAFT" | "DECISION_BLOCKED" | "PUBLISHED" | "SUPERSEDED";
@@ -35,7 +35,7 @@ export declare const allowedActionReasonCodes: readonly AllowedActionReasonCode[
 export declare const coreErrorCodes: readonly CoreErrorCode[];
 export declare const fulfillmentModes: readonly FulfillmentMode[];
 export declare const fulfillmentMethods: readonly FulfillmentMethod[];
-export declare const claimRails: readonly ClaimRail[];
+export declare const settlementRails: readonly SettlementRail[];
 export declare const reservationStates: readonly ReservationState[];
 export declare const balanceStates: readonly BalanceState[];
 export declare const takeoverStates: readonly TakeoverState[];
@@ -46,15 +46,12 @@ export declare const infrastructureProviders: readonly InfrastructureProvider[];
 export declare const providerReadinessStates: readonly ProviderReadinessState[];
 
 export interface ProductPolicy {
-  artifactVersion: typeof artifactVersion;
   policyVersion: number;
-  policyHash: Bytes32;
   oracleVersion: Bytes32;
-  publicationStatus: 'PUBLISHED';
   usdtPaymentBps: number;
   nplPaymentBps: number;
-  burnBps: number;
-  routeBps: number;
+  nplBurnListPriceBps: number;
+  nplRewardListPriceBps: number;
   genesisBps: number;
   directReferralBps: number;
   districtBps: number;
@@ -62,42 +59,41 @@ export interface ProductPolicy {
   provinceBps: number;
   regionBps: number;
   operationsBps: number;
-  operationsBeneficiaries: readonly Address[];
-  operationsWeights: readonly number[];
-  merchantStoreBps: number;
-  platformFeeBps: number;
-  seckillPrizeBps: number;
-  seckillMainDurationSeconds: 3600;
-  relayInitialSeconds: 60;
-  relayIncrementSeconds: 30;
-  relayCapSeconds: 60;
-  oracleMaxAgeSeconds: number;
-  oracleMinimumLiquidity: AtomicAmount;
+  oracleWindowSeconds: 1800;
+  oracleMaxDeviationBps: 500;
+  oracleMaxAgeSeconds: 600;
+  oracleMinimumUsdtLiquidity: AtomicAmount;
+  requiredConfirmations: 15;
   merchantGuaranteeMinimumUsdt: AtomicAmount;
-  platformRiskReserveMinimumUsdt: AtomicAmount;
-  guaranteeTopupLineUsdt: AtomicAmount;
-  platformTreasury: Address;
+  usdtCustodySafe: Address;
+  nplRewardSafe: Address;
+  operationsTreasurySafe: Address;
   circulationPool: Address;
-  usdtRemainderAccount: Address;
-  genesisCredential: Address;
-  genesisTokenId: AtomicAmount;
-  genesisCredentialStandard: 'NONE' | 'ERC721' | 'ERC1155';
-  beneficiarySetHash: Bytes32;
-  decisionEvidenceHash: Bytes32;
-  rulesContentHash: Bytes32;
+  concessionDestinationSetHash: Bytes32;
+  concessionDestinations: readonly WeightedDestination[];
+  operationsDestinations: readonly WeightedDestination[];
+  otherUsdtDestinations: readonly WeightedDestination[];
 }
 
-export interface AllocationSnapshot {
+export interface WeightedDestination {
+  account: Address;
+  weightBps: number;
+}
+
+export interface CatalogSku {
+  skuId: string;
+  chainSkuId: Bytes32;
+  attributes: Readonly<Record<string, unknown>>;
   listPriceUsdt: AtomicAmount;
-  usdtPaymentAmount: AtomicAmount;
-  nplPaymentAmount: AtomicAmount;
-  merchantUsdtAmount: AtomicAmount;
-  platformUsdtAmount: AtomicAmount;
-  prizeUsdtAmount: AtomicAmount;
-  usdtRemainderAmount: AtomicAmount;
-  burnedNplAmount: AtomicAmount;
-  routedNplAmount: AtomicAmount;
-  bnmAmount: AtomicAmount;
+  stockAvailable: AtomicAmount;
+}
+
+export interface CatalogProduct {
+  productId: string;
+  chainProductId: Bytes32;
+  title: string;
+  metadata: Readonly<Record<string, unknown>>;
+  skus: readonly CatalogSku[];
 }
 
 export interface InventoryReservation {
@@ -119,10 +115,31 @@ export interface BeneficiarySnapshot {
   city: Address;
   province: Address;
   region: Address;
-  merchantStore: Address;
 }
 
-export interface ContractOrderIntent {
+export interface MerchantConcessionAllocation {
+  account: Address;
+  amount: AtomicAmount;
+}
+
+export interface OtherUsdtAllocation extends MerchantConcessionAllocation {
+  purpose: string;
+}
+
+export type NplRewardRole = 'genesis' | 'directReferral' | 'district' | 'city' | 'province' | 'region' | 'operations' | 'roundingRemainder';
+
+export interface NplRewardAllocation extends MerchantConcessionAllocation {
+  role: NplRewardRole;
+}
+
+export interface AllocationSnapshot {
+  beneficiaries: BeneficiarySnapshot;
+  concession: readonly MerchantConcessionAllocation[];
+  otherUsdt: readonly OtherUsdtAllocation[];
+  nplRewards: readonly NplRewardAllocation[];
+}
+
+export interface PaymentRouterIntent {
   orderId: Bytes32;
   policyVersion: number;
   oracleVersion: Bytes32;
@@ -131,58 +148,169 @@ export interface ContractOrderIntent {
   productId: Bytes32;
   skuId: Bytes32;
   quantity: number;
-  fulfillmentMode: FulfillmentMode;
+  fulfillmentMode: 0 | 1;
   fulfillmentTargetHash: Bytes32;
   regionCodeHash: Bytes32;
   productPolicyHash: Bytes32;
   reservationId: Bytes32;
   reservationHash: Bytes32;
   reservationDeadline: number;
-  nonce: string;
+  issuedAt: number;
   deadline: number;
+  nonce: AtomicAmount;
   listPriceUsdt: AtomicAmount;
   usdtPaymentAmount: AtomicAmount;
+  nplQuoteAmount: AtomicAmount;
   nplPaymentAmount: AtomicAmount;
-  rewardBaseNpl: AtomicAmount;
-  merchantUsdtAmount: AtomicAmount;
-  platformUsdtAmount: AtomicAmount;
-  prizeUsdtAmount: AtomicAmount;
-  usdtRemainderAmount: AtomicAmount;
+  nplBurnAmount: AtomicAmount;
+  nplRewardAmount: AtomicAmount;
+  merchantBaseReceivableUsdt: AtomicAmount;
+  merchantConcessionBps: number;
+  merchantConcessionAmount: AtomicAmount;
+  merchantNetReceivableUsdt: AtomicAmount;
+  concessionAllocationHash: Bytes32;
   bnmAmount: AtomicAmount;
   seckill: boolean;
-  sessionId: Bytes32 | '';
+  sessionId: Bytes32;
   beneficiaries: BeneficiarySnapshot;
 }
 
-export interface SignedOrderIntent {
-  artifactVersion: typeof artifactVersion;
-  intent: ContractOrderIntent;
-  allocation: AllocationSnapshot;
-  reservation: InventoryReservation;
+export interface CanonicalPaymentIntent extends Omit<PaymentRouterIntent, 'fulfillmentMode'> {
+  fulfillmentMode: FulfillmentMode;
+  merchantConcessionAllocations: readonly MerchantConcessionAllocation[];
+  otherUsdtAllocations: readonly OtherUsdtAllocation[];
+  nplRewardAllocations: readonly NplRewardAllocation[];
+  requiredConfirmations: 15;
+}
+
+export interface ApprovalRequirement {
+  token: Address;
+  spender: Address;
+  requiredAmount: AtomicAmount;
+  requestedAllowance: AtomicAmount;
+  approvalMode: 'ONLY_IF_ALLOWANCE_BELOW_REQUIRED';
+  risk: 'UNLIMITED_TOKEN_ALLOWANCE';
+  revocation: Readonly<{ method: 'ERC20_APPROVE_ZERO'; token: Address; spender: Address }>;
+}
+
+export interface Eip712Domain {
+  name: 'Abu24KPaymentRouter';
+  version: '2';
+  chainId: 56;
+  verifyingContract: Address;
+}
+
+export interface PaymentBuyerAuthorization {
+  domain: Eip712Domain;
+  types: Readonly<{ PaymentAuthorization: readonly Readonly<{ name: string; type: string }>[] }>;
+  primaryType: 'PaymentAuthorization';
+  message: Readonly<{
+    paymentHash: Bytes32;
+    orderId: Bytes32;
+    buyer: Address;
+    merchant: Address;
+    productId: Bytes32;
+    skuId: Bytes32;
+    quantity: number;
+    fulfillmentMode: 0 | 1;
+    listPriceUsdt: AtomicAmount;
+    usdtPaymentAmount: AtomicAmount;
+    nplPaymentAmount: AtomicAmount;
+    deadline: number;
+  }>;
+  digest: Bytes32;
+}
+
+export interface SeckillBuyerAuthorization {
+  domain: Eip712Domain;
+  types: Readonly<{ SeckillAuthorization: readonly Readonly<{ name: string; type: string }>[] }>;
+  primaryType: 'SeckillAuthorization';
+  message: Readonly<{
+    seckillHash: Bytes32;
+    orderId: Bytes32;
+    buyer: Address;
+    merchant: Address;
+    productId: Bytes32;
+    skuId: Bytes32;
+    quantity: number;
+    fulfillmentMode: 0 | 1;
+    seckillListPriceUsdt: AtomicAmount;
+    seckillUsdtPaymentAmount: AtomicAmount;
+    seckillNplPaymentAmount: AtomicAmount;
+    fallbackListPriceUsdt: AtomicAmount;
+    fallbackUsdtPaymentAmount: AtomicAmount;
+    fallbackNplPaymentAmount: AtomicAmount;
+    deadline: number;
+  }>;
+  digest: Bytes32;
+}
+
+export interface OrdinaryRouterCall {
+  functionName: 'pay';
+  intent: PaymentRouterIntent;
   quoteSignature: string;
-  buyerSignature: string;
 }
 
-export interface FallbackRetailQuote extends SignedOrderIntent {
-  classification: 'FALLBACK_RETAIL';
-  intent: ContractOrderIntent & { seckill: false; sessionId: '' };
-  reservation: InventoryReservation & { classification: 'FALLBACK_RETAIL' };
+export interface SeckillRouterCall {
+  functionName: 'paySeckill';
+  intent: Readonly<{
+    sessionId: Bytes32;
+    seckillPayment: PaymentRouterIntent;
+    fallbackPayment: PaymentRouterIntent;
+  }>;
+  quoteSignature: string;
 }
 
-export interface SeckillQuote {
+export type PaymentQuoteState = 'QUOTED' | 'SUBMITTED' | 'PAID' | 'REORGED' | 'EXPIRED';
+
+export interface PaymentQuoteResponse {
   artifactVersion: typeof artifactVersion;
-  policyVersion: number;
+  orderId: Bytes32;
+  state: PaymentQuoteState;
+  paymentRouterAddress: Address;
+  intent: CanonicalPaymentIntent;
+  snapshotHash: Bytes32;
+  authorizationDigest: Bytes32;
+  buyerAuthorization: PaymentBuyerAuthorization;
+  quoteSignature: string;
+  submittedTxHash: Bytes32 | null;
+  approvalRequirements: readonly ApprovalRequirement[];
+  routerCall: OrdinaryRouterCall;
+}
+
+export interface CanonicalSeckillIntent {
   sessionId: Bytes32;
-  seckillOrder: ContractOrderIntent & { seckill: true };
-  fallbackOrder: ContractOrderIntent & { seckill: false; sessionId: '' };
-  seckillAllocation: AllocationSnapshot;
-  fallbackAllocation: AllocationSnapshot;
-  seckillReservation: InventoryReservation & { classification: 'SECKILL' };
-  fallbackReservation: InventoryReservation & { classification: 'FALLBACK_RETAIL' };
-  deadline: number;
+  seckill: CanonicalPaymentIntent;
+  fallback: CanonicalPaymentIntent;
+  classificationAuthority: 'PAYMENT_ROUTER_BLOCK_TIMESTAMP';
+}
+
+export interface SeckillQuoteResponse {
+  artifactVersion: typeof artifactVersion;
+  orderId: Bytes32;
+  state: PaymentQuoteState;
+  paymentRouterAddress: Address;
+  dual: CanonicalSeckillIntent;
+  seckillHash: Bytes32;
+  snapshotHashes: Readonly<{ seckill: Bytes32; fallback: Bytes32 }>;
+  authorizationDigest: Bytes32;
+  buyerAuthorization: SeckillBuyerAuthorization;
   quoteSignature: string;
-  buyerAcknowledgementSignature: string;
-  classificationAuthority: 'CHAIN_TIMESTAMP';
+  submittedTxHash: Bytes32 | null;
+  approvalRequirements: readonly ApprovalRequirement[];
+  routerCall: SeckillRouterCall;
+}
+
+export interface PaymentSubmissionRequest {
+  orderId: Bytes32;
+  txHash: Bytes32;
+  replacementForTxHash?: Bytes32;
+}
+
+export interface PaymentSubmissionResponse {
+  orderId: Bytes32;
+  txHash: Bytes32;
+  state: 'SUBMITTED';
 }
 
 export interface AllowedAction {
@@ -192,65 +320,17 @@ export interface AllowedAction {
   deadline?: string;
 }
 
-export interface TransactionFinality {
-  artifactVersion: typeof artifactVersion;
-  resourceType: string;
-  resourceId: string;
-  chainId: 56;
-  contractAddress: Address;
-  expectedEventHash: Bytes32;
-  txHash: Bytes32;
-  replacementForTxHash?: Bytes32;
-  blockNumber?: number;
-  blockHash?: Bytes32;
-  confirmations: number;
-  requiredConfirmations: number;
-  receiptStatus?: 0 | 1;
-  eventResourceId?: string;
-  observedEventHash?: Bytes32;
-  canonicalBlock: boolean;
-  state: TransactionFinalityState;
-}
-
-export interface FulfillmentEvidence {
-  orderId: Bytes32;
-  method: FulfillmentMethod;
-  evidenceHash: Bytes32;
-  sourceChainId: 56;
-  sourceContract: Address;
-  sourceEventHash: Bytes32;
-  sourceTxHash: Bytes32;
+export interface PaymentFinality {
+  transactionHash: Bytes32;
+  replacementForTxHash: Bytes32 | null;
+  blockNumber: number;
   blockHash: Bytes32;
   confirmations: number;
+  requiredConfirmations: 15;
   receiptStatus: 1;
+  state: 'MINED' | 'REORGED' | 'FINAL';
+  canonicalBlock: boolean;
+  classification: 'ORDINARY' | 'SECKILL' | 'FALLBACK_RETAIL';
 }
 
-export interface FulfillmentFinality extends TransactionFinality {
-  resourceType: 'FULFILLMENT';
-  evidence: FulfillmentEvidence;
-}
-
-export interface MerchantTakeoverCase {
-  caseId: string;
-  orderId: Bytes32;
-  policyVersion: number;
-  fulfillmentMode: FulfillmentMode;
-  state: TakeoverState;
-  eligibleAt?: string;
-  guaranteeReservedUsdt: AtomicAmount;
-  merchantAvailableReservedUsdt: AtomicAmount;
-  riskReserveReservedUsdt: AtomicAmount;
-  actualRiskReserveDisbursedUsdt: AtomicAmount;
-  merchantDebtUsdt: AtomicAmount;
-  allowedActions: readonly AllowedAction[];
-  blockedReason?: 'PickupTakeoverDecisionBlocked';
-}
-
-export interface ClaimProjection {
-  rail: ClaimRail;
-  asset: Address;
-  balanceState: BalanceState;
-  amount: AtomicAmount;
-  allowedAction: AllowedAction;
-  finality?: TransactionFinality;
-}
+export type PaymentProjection = (PaymentQuoteResponse | SeckillQuoteResponse) & { finality: PaymentFinality | null };

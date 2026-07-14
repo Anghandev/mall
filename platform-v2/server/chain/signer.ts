@@ -47,4 +47,17 @@ export class RemoteSignerClient {
     if (recovered !== this.#expectedSigner) throw new CoreError('InvalidSignature', 'Unexpected remote signer', 502);
     return { signature: body.signature, signer: recovered };
   }
+
+  async health() {
+    const response = await this.#fetch(this.#url, {
+      method: 'GET',
+      headers: { accept: 'application/json', authorization: `Bearer ${this.#token}` },
+    });
+    if (!response.ok) throw new CoreError('ExternalBlocked', 'Remote signer health check failed', 503);
+    const body = (await response.json()) as { status?: string; signer?: string };
+    if (body.status !== 'READY' || body.signer?.toLowerCase() !== this.#expectedSigner) {
+      throw new CoreError('InvalidSignature', 'Remote signer health identity mismatch', 503);
+    }
+    return true;
+  }
 }

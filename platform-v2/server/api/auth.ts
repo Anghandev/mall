@@ -23,6 +23,10 @@ export interface NonceRateLimiter {
   consume(input: { walletAddress: string; clientAddress: string; now: Date }): Promise<void>;
 }
 
+export interface WalletMessageSignatureVerifier {
+  isValid(walletAddress: string, message: string, signature: string): Promise<boolean>;
+}
+
 export interface SiweChallenge {
   message: string;
   nonce: string;
@@ -69,6 +73,7 @@ export async function verifySiwe(
   store: NonceStore,
   input: { message: string; signature: string; expectedDomain: string; expectedUri: string },
   now = new Date(),
+  contractWalletVerifier?: WalletMessageSignatureVerifier,
 ) {
   const parsed = parseSiweMessage(input.message);
   if (
@@ -80,19 +85,22 @@ export async function verifySiwe(
   ) {
     throw new CoreError('NonceExpired', 'SIWE challenge is expired or outside its bound domain', 401);
   }
-  let recovered: string;
+  let valid = false;
   try {
-    recovered = normalizeAddress(verifyMessage(input.message, input.signature));
+    valid = normalizeAddress(verifyMessage(input.message, input.signature)) === parsed.walletAddress;
   } catch {
-    throw new CoreError('InvalidSignature', 'Invalid SIWE signature', 401);
+    valid = false;
   }
-  if (recovered !== parsed.walletAddress) throw new CoreError('InvalidSignature', 'SIWE signer mismatch', 401);
-  const consumed = await store.consume(recovered, sha256(parsed.nonce), now);
+  if (!valid && contractWalletVerifier) {
+    valid = await contractWalletVerifier.isValid(parsed.walletAddress, input.message, input.signature);
+  }
+  if (!valid) throw new CoreError('InvalidSignature', 'Invalid SIWE wallet signature', 401);
+  const consumed = await store.consume(parsed.walletAddress, sha256(parsed.nonce), now);
   if (!consumed) throw new CoreError('NonceReplay', 'SIWE nonce is unknown or already used', 401);
   if (consumed.domain !== parsed.domain || consumed.uri !== parsed.uri || consumed.expiresAt < now) {
     throw new CoreError('NonceExpired', 'Stored SIWE challenge is no longer valid', 401);
   }
-  return { walletAddress: recovered, issuedAt: parsed.issuedAt, nonceHash: consumed.nonceHash };
+  return { walletAddress: parsed.walletAddress, issuedAt: parsed.issuedAt, nonceHash: consumed.nonceHash };
 }
 
 export interface SessionClaims {

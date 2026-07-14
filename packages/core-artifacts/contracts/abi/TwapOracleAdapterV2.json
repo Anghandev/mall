@@ -8,16 +8,6 @@
         "internalType": "contract ITwapSourceV2"
       },
       {
-        "name": "usdt_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "npl_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
         "name": "oracleVersion_",
         "type": "bytes32",
         "internalType": "bytes32"
@@ -58,19 +48,6 @@
   },
   {
     "type": "function",
-    "name": "npl",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "oracleVersion",
     "inputs": [],
     "outputs": [
@@ -97,19 +74,6 @@
   },
   {
     "type": "function",
-    "name": "usdt",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "validateQuote",
     "inputs": [
       {
@@ -118,24 +82,14 @@
         "internalType": "bytes32"
       },
       {
-        "name": "usdtAmount",
+        "name": "usdtListPrice",
         "type": "uint256",
         "internalType": "uint256"
       },
       {
-        "name": "signedNplAmount",
+        "name": "signedNplQuoteAmount",
         "type": "uint256",
         "internalType": "uint256"
-      },
-      {
-        "name": "maxAge",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "minimumLiquidity",
-        "type": "uint128",
-        "internalType": "uint128"
       }
     ],
     "outputs": [

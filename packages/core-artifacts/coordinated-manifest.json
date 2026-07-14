@@ -1,7 +1,8 @@
 {
-  "artifactVersion": "2.0.0-rc.2",
-  "publicationStatus": "COORDINATED_RC",
+  "artifactVersion": "2.0.0-payment.1",
+  "publicationStatus": "COORDINATED_PAYMENT_CHECKPOINT",
   "deploymentAuthorized": false,
+  "deploymentAuthorizationEvidenceHash": null,
   "chain": {
     "name": "BSC Mainnet",
     "chainId": 56
@@ -13,97 +14,98 @@
   "components": {
     "packageMetadata": {
       "path": "package.json",
-      "sha256": "5bd1c55eb8c3f4ea11be44a5f44ebeca8a9284872d1f62939356aef804073daa"
+      "sha256": "20c0346aa11344da160353d45611e76e78689746b6e6869d0f8199ab57fcbb76"
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "27760877c293737605ede7935c883cb498ca7542cae03bd827bd43b6505b03e4"
+      "sha256": "1b8093d2f54b212bed52ca06143bff6cc2ea4cb0ed5b7c4065cb9032225afde4"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "8c0abd4b6fa05933bd2e354b2377d289a6e518e3d564ac34623e3bb251227704"
+      "sha256": "5c79a5b1b584a3c9ac6043ed5810f011535ffb8f3d0c72a4bd11aacfdf800523"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "d51191eacf35255c42fc5bdf007f57111aa580192f1fc9d72b86ddf79c454b68"
+      "sha256": "46311440a340655b5f7d6a9bc8ebdbf41631419b02ae086bd18778f824006955"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "6d475f9cd1118aacc93192c9bdc31aa1b60cfdbcd25e99f14595a33b6c6af857"
+      "sha256": "72964240d04f24716da0ead1452407e0fe8f6a3d19f0b9398cb376fd7950fe32"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
-      "sha256": "918e5626a60ba2f19cc019d6e111b4f101ce696e56eb3158ba0d2740bcad95a2"
+      "sha256": "3724fdea4b7330a56a514d920301c8cc668f82ca094a6abead1def49cf84dbce"
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "7febe849003e65d376c68b823cc0e51cc58e25fd5a13b93ccf8abd78847df505"
+      "sha256": "48ca207f60475c26e9ec6e77b0fe903bf99d66bc9f08b4073228ecfa35e41b05"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "5f041d5307d8286626c80dbe8f7dddf80f75d47073e31bb52e9a11e6d1e867d6"
+      "sha256": "b50333cbf6743c9fb418cd6982824be07c7deae7c17497a8fc9616717cd8c032"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "500f9e11e8fb9c83cb0c157fbc2bd7d18d2681fbd797d85060591d23d9a13514"
+      "sha256": "062ec90dc421b15721a7fa08275b4c4d6460e9962ac0030d4f822af3058b7abf"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
-      "sha256": "55268e16de3fd41f1c7d369f2d651ce86ae8539f07ae58cf2ff3a5871e338d0b"
+      "sha256": "a45bceb7314c7e2edb03e67896685a8e582338907ea12b96e4162ec706a7e38c"
     }
   },
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "28182916069a8c311e83d7d52e086cc4f6eca64902955f291c20bd93379cccab"
+      "sha256": "d9418e7716c6d84fd8a6c0ae65b8f09c7c26c9751899ad97fa8c8ce39e67d981"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "418c16152e2192ed44fae48d7b9a8558f5e321b4c9e58e05ed6ce5895c72ca65"
+      "sha256": "b6018ced0fdfef7d022a05dc6009e3ea5b4e2ce2ac4482efeb987adb49b3f662"
     }
   ],
   "httpSurface": [
     "GET /v2/bootstrap",
     "POST /v2/auth/nonce",
     "POST /v2/auth/verify",
-    "POST /v2/actions/order"
+    "POST /v2/actions/order",
+    "GET /v2/catalog/products",
+    "GET /v2/catalog/products/{productId}",
+    "POST /v2/payments/quotes",
+    "POST /v2/seckill/quotes",
+    "POST /v2/payments/submissions",
+    "GET /v2/payments/{orderId}"
   ],
   "capabilityStatus": {
     "bootstrap": "AVAILABLE",
     "siweAuthentication": "AVAILABLE",
     "orderAllowedActions": "AVAILABLE",
-    "paymentQuoteHttp": "NOT_PUBLISHED_FAIL_CLOSED",
-    "reservationHttp": "NOT_PUBLISHED_FAIL_CLOSED",
+    "catalogHttp": "AVAILABLE",
+    "paymentQuoteHttp": "AVAILABLE",
+    "inventoryReservation": "AVAILABLE",
+    "paymentSubmissionHttp": "AVAILABLE",
+    "paymentProjectionHttp": "AVAILABLE",
+    "paymentIndexer": "AVAILABLE",
     "settlementHttp": "NOT_PUBLISHED_FAIL_CLOSED",
     "takeoverHttp": "NOT_PUBLISHED_FAIL_CLOSED",
     "fulfillmentHttp": "NOT_PUBLISHED_FAIL_CLOSED",
-    "claimHttp": "NOT_PUBLISHED_FAIL_CLOSED",
-    "seckillHttp": "NOT_PUBLISHED_FAIL_CLOSED",
+    "seckillQuoteHttp": "AVAILABLE",
     "websocket": "NOT_PUBLISHED_FAIL_CLOSED"
   },
   "executableOrderActionNames": [],
   "decisionBlocked": [
     "PLATFORM_SERVICE_FEE_BPS",
     "SECKILL_PRIZE_POOL_BPS",
-    "MERCHANT_STORE_NPL_REWARD_BPS",
-    "MERCHANT_GUARANTEE_MINIMUM_USDT",
-    "PLATFORM_RISK_RESERVE_MINIMUM_USDT",
-    "GUARANTEE_TOP_UP_LINE_USDT",
+    "MERCHANT_CONCESSION_DESTINATION_WEIGHTS",
     "FIXED_REMAINDER_ACCOUNTS",
-    "ORACLE_MAX_AGE_SECONDS",
-    "ORACLE_MINIMUM_LIQUIDITY",
-    "GENESIS_CREDENTIAL_CONTRACT_AND_TOKEN_ID",
-    "PICKUP_TIMEOUT_AND_TAKEOVER_EVIDENCE",
-    "EMPTY_SESSION_INJECTED_PRIZE_ALLOCATION",
-    "REQUIRED_CONFIRMATIONS"
+    "GENESIS_CREDENTIAL_CONTRACT_AND_TOKEN_ID"
   ],
   "externalBlocked": [
-    "SAFE_AND_ROLE_ADDRESSES",
-    "SECONDARY_QUOTE_AND_FINALITY_SIGNERS",
+    "GOVERNANCE_AND_THREE_SAFE_ADDRESSES",
+    "SECONDARY_POLICY_AND_QUOTE_SIGNERS",
     "TWAP_SOURCE",
     "BSC_RPC_URL",
     "DEPLOYED_CONTRACT_ADDRESSES",
-    "REMOTE_SIGNER_AND_EXECUTOR",
+    "REMOTE_SIGNER",
     "DATABASE_AUDIT_DATABASE_AND_REDIS",
     "PROVIDER_ACCOUNTS_AND_CREDENTIALS",
     "PHYSICAL_PRINTER_AND_MOBILE_DEVICE_EVIDENCE",
@@ -112,15 +114,16 @@
   ],
   "requiredConsumerContracts": [
     "ProductPolicy",
-    "SignedOrderIntent",
-    "SeckillQuote",
-    "FallbackRetailQuote",
+    "CatalogProduct",
+    "CatalogSku",
+    "PaymentQuoteResponse",
+    "SeckillQuoteResponse",
+    "PaymentProjection",
+    "PaymentRouterIntent",
+    "CanonicalPaymentIntent",
     "InventoryReservation",
     "AllocationSnapshot",
-    "FulfillmentEvidence",
-    "FulfillmentFinality",
-    "MerchantTakeoverCase",
     "AllowedAction",
-    "TransactionFinality"
+    "PaymentFinality"
   ]
 }

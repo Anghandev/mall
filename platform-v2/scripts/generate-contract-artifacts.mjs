@@ -14,30 +14,14 @@ const contracts = [
   'PolicyRegistryV2',
   'BeneficiaryRegistryV2',
   'TwapOracleAdapterV2',
-  'BNMTokenV2',
-  'ClaimVaultV2',
-  'RewardLedgerV2',
-  'MerchantGuaranteeVaultV2',
-  'PaymentEscrowV2',
-  'SeckillV2',
+  'PaymentRouterV2',
 ];
+const deploymentEvidencePath = join(coreRoot, 'deployments', 'bsc-payment-v2.json');
+const deploymentEvidence = existsSync(deploymentEvidencePath)
+  ? validateDeploymentEvidence(JSON.parse(readFileSync(deploymentEvidencePath, 'utf8')))
+  : undefined;
 
-const roleGrants = [
-  ['BNMTokenV2', 'MINTER_ROLE', 'ClaimVaultV2'],
-  ['ClaimVaultV2', 'MERCHANT_CREDITOR_ROLE', 'PaymentEscrowV2'],
-  ['ClaimVaultV2', 'MERCHANT_CREDITOR_ROLE', 'MerchantGuaranteeVaultV2'],
-  ['ClaimVaultV2', 'REWARD_CREDITOR_ROLE', 'RewardLedgerV2'],
-  ['ClaimVaultV2', 'PRIZE_CREDITOR_ROLE', 'SeckillV2'],
-  ['ClaimVaultV2', 'BNM_CREDITOR_ROLE', 'PaymentEscrowV2'],
-  ['ClaimVaultV2', 'MERCHANT_FREEZER_ROLE', 'PaymentEscrowV2'],
-  ['ClaimVaultV2', 'MERCHANT_ENCUMBER_ROLE', 'MerchantGuaranteeVaultV2'],
-  ['RewardLedgerV2', 'PAYMENT_LOCKER_ROLE', 'PaymentEscrowV2'],
-  ['RewardLedgerV2', 'FULFILLMENT_RELEASER_ROLE', 'PaymentEscrowV2'],
-  ['MerchantGuaranteeVaultV2', 'TAKEOVER_ROLE', 'PaymentEscrowV2'],
-  ['MerchantGuaranteeVaultV2', 'ORDER_RESERVER_ROLE', 'PaymentEscrowV2'],
-  ['MerchantGuaranteeVaultV2', 'TAKEOVER_CLOSER_ROLE', 'PaymentEscrowV2'],
-  ['PaymentEscrowV2', 'SECKILL_ROLE', 'SeckillV2'],
-];
+const roleGrants = [];
 
 const sourceFiles = contracts.map((name) => join(coreRoot, 'contracts', `${name}.sol`)).concat([
   join(coreRoot, 'contracts/interfaces/IV2Core.sol'),
@@ -63,14 +47,17 @@ for (const name of contracts) {
   const constructor = abi.find((item) => item.type === 'constructor') ?? { inputs: [] };
   const bytecode = artifact.bytecode?.object ?? '';
   const deployedBytecode = artifact.deployedBytecode?.object ?? '';
+  const deployment = deploymentEvidence?.contracts[name];
   contractEntries.push({
     name,
     source: `platform-v2/contracts/${name}.sol`,
-    address: null,
-    status: 'ExternalBlocked',
+    address: deployment?.address ?? null,
+    deploymentBlock: deployment?.deploymentBlock ?? null,
+    status: deployment ? 'DEPLOYED' : 'ExternalBlocked',
     constructorInputs: constructor.inputs,
     bytecodeSha256: sha256(bytecode),
     deployedBytecodeSha256: sha256(deployedBytecode),
+    deployedCodeHash: deployment?.deployedCodeHash ?? null,
   });
   for (const item of abi) {
     if (item.type === 'event') {
@@ -93,7 +80,7 @@ roles.sort((left, right) => `${left.contract}.${left.role}`.localeCompare(`${rig
 const sourceDigest = sha256(sourceFiles.map((path) => `${relative(repoRoot, path)}\0${readFileSync(path)}`).join('\0'));
 const manifest = {
   artifactVersion,
-  publicationStatus: 'coordinated-rc',
+  publicationStatus: 'coordinated-payment-checkpoint',
   chain: {
     name: 'BSC Mainnet',
     chainId: 56,
@@ -106,16 +93,25 @@ const manifest = {
   },
   compiler: { version: '0.8.26', optimizer: true, optimizerRuns: 200, viaIR: true, evmVersion: 'cancun' },
   sourceDigestSha256: sourceDigest,
-  deploymentStatus: 'ExternalBlocked',
-  externalBlocked: ['SAFE_ADDRESS', 'SECONDARY_SIGNER', 'QUOTE_SIGNER', 'FINALITY_SIGNER', 'TWAP_SOURCE', 'BSC_RPC_URL'],
+  deploymentStatus: deploymentEvidence ? 'DEPLOYED' : 'ExternalBlocked',
+  deploymentAuthorized: deploymentEvidence?.deploymentAuthorized ?? false,
+  deploymentAuthorizationEvidenceHash: deploymentEvidence?.authorizationEvidenceHash ?? null,
+  externalBlocked: deploymentEvidence ? [] : [
+    'GOVERNANCE_SAFE_ADDRESS',
+    'USDT_CUSTODY_SAFE_ADDRESS',
+    'NPL_REWARD_SAFE_ADDRESS',
+    'OPERATIONS_TREASURY_SAFE_ADDRESS',
+    'SECONDARY_SIGNER',
+    'QUOTE_SIGNER',
+    'TWAP_SOURCE',
+    'BSC_RPC_URL',
+  ],
   decisionBlocked: [
-    'launch ProductPolicy commercial values',
-    'merchant guarantee and platform reserve thresholds',
-    'Oracle maxAge and minimum liquidity',
+    'platform service fee proportion',
+    'seckill prize-pool proportion',
+    'merchant concession destination weights',
+    'fixed circulation and remainder accounts',
     'genesis credential contract and token ID',
-    'pickup timeout and takeover evidence',
-    'empty-session injected prize allocation',
-    'required fulfillment confirmations',
   ],
   deploymentOrder: contracts,
   contracts: contractEntries,
@@ -170,14 +166,48 @@ function compareAbi(left, right) {
 function roleAuthority(contract, role) {
   if (role === 'DEFAULT_ADMIN_ROLE') return 'Safe multisig';
   if (
-    (contract === 'PolicyRegistryV2' && role === 'POLICY_PUBLISHER_ROLE') ||
-    (contract === 'SeckillV2' && role === 'SESSION_ADMIN_ROLE') ||
-    (contract === 'MerchantGuaranteeVaultV2' && role === 'TAKEOVER_DISBURSER_ROLE')
+    contract === 'PolicyRegistryV2' && role === 'POLICY_PUBLISHER_ROLE'
   ) {
     return 'Safe multisig plus secondary signature';
   }
-  if (role === 'PAUSER_ROLE' || role === 'RECOVERY_ROLE') return 'Safe multisig';
+  if (role === 'PAUSER_ROLE' || role === 'SESSION_ADMIN_ROLE' || role === 'REGISTRY_EDITOR_ROLE') return 'Safe multisig';
   return 'Safe-granted Core contract or bounded executor';
+}
+
+function validateDeploymentEvidence(value) {
+  if (
+    !value || value.artifactVersion !== artifactVersion || value.chainId !== 56
+      || value.deploymentAuthorized !== true
+      || !/^0x[0-9a-fA-F]{64}$/.test(value.authorizationEvidenceHash ?? '')
+      || !value.contracts || typeof value.contracts !== 'object' || Array.isArray(value.contracts)
+  ) throw new Error('Invalid BSC payment deployment evidence header');
+  const names = Object.keys(value.contracts).sort();
+  if (JSON.stringify(names) !== JSON.stringify([...contracts].sort())) {
+    throw new Error('Deployment evidence must contain exactly the coordinated payment contracts');
+  }
+  const addresses = new Set();
+  const deployments = {};
+  for (const name of contracts) {
+    const entry = value.contracts[name];
+    if (
+      !entry || !/^0x[0-9a-fA-F]{40}$/.test(entry.address ?? '')
+        || !Number.isSafeInteger(entry.deploymentBlock) || entry.deploymentBlock < 0
+        || !/^0x[0-9a-fA-F]{64}$/.test(entry.deployedCodeHash ?? '')
+    ) throw new Error(`Invalid deployment evidence for ${name}`);
+    const address = entry.address.toLowerCase();
+    if (addresses.has(address)) throw new Error('Deployment evidence contains duplicate contract addresses');
+    addresses.add(address);
+    deployments[name] = {
+      address,
+      deploymentBlock: entry.deploymentBlock,
+      deployedCodeHash: entry.deployedCodeHash.toLowerCase(),
+    };
+  }
+  return {
+    deploymentAuthorized: true,
+    authorizationEvidenceHash: value.authorizationEvidenceHash.toLowerCase(),
+    contracts: deployments,
+  };
 }
 
 function json(value) {

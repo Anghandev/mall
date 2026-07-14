@@ -1,50 +1,81 @@
-# Abu 24K V2 Chain Workers
+# Abu 24K V2 Payment Workers
 
-Status: local Core worker checkpoint. Production RPC, deployed contract
-addresses, signer/executor services and credentials remain `ExternalBlocked`.
-The production confirmation count remains `DecisionBlocked`; each finality
-record snapshots it from validated Core config and reuses it for receipt and
-replacement processing.
+Status: local payment checkpoint `2.0.0-payment.1`. Production RPCs, deployed
+addresses, signer service and credentials remain `ExternalBlocked`.
 
 ## Indexer
 
-The indexer loads the frozen ABI bundle and an address manifest. It does not
-copy event signatures into a parallel decoder. Every accepted log binds
-artifact version, contract, event signature, resource ID, transaction, block
-hash/number and log index.
+The indexer loads `PaymentRouterV2` from the coordinated ABI bundle and an
+address from the same-version manifest. It does not maintain a copied event
+signature. Every decoded `PaymentCompleted` binds artifact version, Router,
+event signature/hash, order, transaction, block hash/number and log index.
 
-Blocks must be contiguous and parent-linked to the stored canonical
-checkpoint. Replaying the same block/hash is idempotent. A conflicting block or
-parent records a reorg boundary and returns `ReorgPending`; no derived state is
-presented as final until replay and confirmation complete.
+Canonical blocks must be contiguous and parent-linked. Replaying the same
+block/hash is idempotent. A replacement segment proves a common ancestor before
+the old branch is marked non-canonical. Payment projection, inventory
+consumption, order creation, balanced Locked journals, finality and outbox writes
+occur in one PostgreSQL transaction.
+
+The runtime polling worker starts from the manifest's authoritative Router
+`deploymentBlock`. It first persists the preceding block as a reorg baseline,
+then ingests every canonical block, including blocks with no Router logs. Empty
+blocks advance confirmations. Each poll compares RPC with the persisted
+checkpoint, walks back to a proven common ancestor on mismatch and atomically
+replaces the branch. Shutdown waits for the active poll before PostgreSQL closes.
+
+The same transaction may be re-included in a different block. Reorg handling
+posts a linked reversal and retains both branches as evidence. Before finality,
+the selected reservation returns to its reserved state. A reorg after 15
+confirmations never puts sold inventory back on sale: the selected reservation
+remains consumed and the order enters reconciliation. Re-inclusion of the same
+signed leg can rebuild the projection; a different seckill/fallback leg is
+quarantined. Only at 15 confirmations is the unused reservation released.
+
+## RPC Sources
+
+The resilient contract reader requires independent primary and fallback BSC
+RPC URLs and verifies chain 56. The Oracle adapter verifies the fixed
+NPL/USDT pair, 30-minute window, age and liquidity. The beneficiary adapter
+reads referral, four region beneficiaries and genesis eligibility from the
+deployed registry. Both RPC providers failing returns `ExternalBlocked`.
+
+## Payment Write Readiness
+
+New ordinary and seckill quotes require a fresh runtime readiness snapshot.
+Core verifies artifact checksums, chain 56, deployed code hashes for all four
+contracts, immutable bindings, Safe-held roles, quote and secondary signers,
+the TWAP source address/codehash/pair, PostgreSQL, Redis, remote signer identity
+and a caught-up Indexer. The manifest must include each deployed address,
+runtime code hash and the Router deployment block.
+
+Missing fulfillment providers, audit storage or settlement Executor do not
+disable payment quoting. Payment readiness never stops submission tracking,
+payment reads, Indexer polling, finality or reorg recovery. The Indexer continues
+running while `writesEnabled` is false.
 
 ## Signer
 
-Core contains no signing key. `RemoteSignerClient` sends a purpose, bytes32
-digest, exact resource, policy version, deadline and idempotency key to an
-isolated signer service. It recovers the returned signature and rejects any
-signer other than the configured quote/finality/secondary wallet.
+Core stores no quote private key. `RemoteSignerClient` sends only purpose,
+bytes32 digest, resource, policy version, deadline and idempotency key to an
+isolated signer. It recovers the returned signature and rejects any signer other
+than the configured public address.
 
-Signer URL/token and public signer addresses are separate configuration. A
-public address without a reachable isolated signer remains `ExternalBlocked`.
+The same authenticated endpoint must answer the Core health request with
+`status: READY` and its public signer address. Health identity is checked before
+new quotes are enabled; each quote signature is still recovered independently.
 
-## Executor
+Signer URL/token and public signer address are independent configuration. A
+public address without a reachable isolated signer is not ready.
 
-Core contains no deployer/owner key. The remote executor accepts only chain 56,
-an exact target/calldata, zero native value, resource/policy/idempotency fields
-and a configured gas cap. Replacement requests bind the prior transaction hash
-and the response must echo that relationship.
+## Executor And Later Workers
 
-Execution returns `Submitted`, never final success. The indexer/finality worker
-must still verify receipt status, expected event/resource, canonical block and
-confirmations.
+The bounded executor validates chain, target, exact calldata, resource, policy,
+integer amounts, zero native value, gas cap and replacement evidence. An
+executor response is only `Submitted`; indexed receipt and canonical finality
+remain separate evidence.
 
-## Scheduler And Queue
-
-The scheduler emits idempotent durable jobs for eligible seven-day delivery
-takeover and forced-receipt review. Pickup timeout produces
-`PickupTakeoverDecisionBlocked` and no guessed job. PostgreSQL durable jobs and
-outbox rows survive process/Redis failure and use bounded leases/retries.
-
-Customer-facing breakers never stop indexer, finality, takeover, recovery,
+Fulfillment scheduling, takeover execution, Safe MultiSend settlement and
+provider webhook workers belong to later checkpoints. Their existing internal
+helpers and tests do not publish those HTTP/product capabilities in the payment
+manifest. Payment breakers never stop indexer, finality, reorg recovery,
 reconciliation or audit processing.

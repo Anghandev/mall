@@ -1,85 +1,107 @@
 # Abu 24K V2 Core API Contract
 
-> **SUPERSEDED FUNDS MODEL:** The `2.0.0-rc.2` API below predates PaymentRouter,
-> the double-entry ledger and Safe settlement batches. It must not be consumed
-> by new product work and will be replaced at the payment publication.
-
-Status: coordinated local artifact `2.0.0-rc.2`. The implemented HTTP surface,
-generated types and consumer checks are frozen together. This file does not
-authorize deployment or production signing.
+Status: coordinated local payment checkpoint `2.0.0-payment.1`. OpenAPI,
+generated types, ABI, manifests, enums, the fail-closed WebSocket protocol and
+consumer tests share this version. This checkpoint does not authorize a
+deployment, production signing or a transaction.
 
 ## Authority
 
-Core is authoritative for exact amounts, policy/session/order snapshots,
-inventory reservations, classification, finality and `allowedActions`.
-Products submit user choices and signatures; they never submit a trusted order
-state, calculate an allocation, classify a boundary transaction or infer
-finality from a transaction hash.
-The production confirmation threshold is `DecisionBlocked`; local test values
-must never be treated as a deployment default.
+Core is authoritative for catalog price, payment legs, allocations, policy and
+beneficiary snapshots, reservations, seckill boundary classification and chain
+finality. Products submit user choices, wallet signatures and transaction
+hashes. They do not calculate funds, choose a classification or infer success
+from a transaction hash.
 
-Every response carries a correlation ID. Unknown states and missing artifacts,
-decisions, credentials, providers, Safe evidence or chain evidence fail closed.
+Token amounts are unsigned integer decimal strings. IDs used by the Router are
+`bytes32`. BSC finality is fixed at 15 canonical confirmations. Missing policy
+decisions return `DecisionBlocked`; missing Safe, signer, RPC or provider inputs
+return `ExternalBlocked` or `ConfigurationRequired`.
 
-## Authentication And Governance
+## Authentication
 
-- SIWE messages bind domain, URI, BSC chain 56, wallet, random nonce, issued
-  time and five-minute expiration. PostgreSQL consumes the nonce atomically.
-- JWT sessions use a minimum 32-byte secret, 15-minute expiry, issuer/audience,
-  wallet subject, server-authoritative roles and a unique session ID.
-- Sensitive actions bind action, exact resource, policy version, old/new value
-  hashes, Safe, nonce and deadline in EIP-712. A valid secondary signature may
-  create a Safe proposal; indexed Safe execution remains separate evidence.
-- API processes never load or store an owner/deployer/quote/finality private
-  key. Signer and executor workers are separate boundaries.
+- SIWE binds the configured domain and URI, BSC chain 56, wallet, one-use nonce,
+  issue time and five-minute expiry.
+- JWT sessions bind the wallet and server-owned roles. Buyer payment endpoints
+  require a `BUYER` role.
+- Every response includes `x-correlation-id`. Errors use the generated Core
+  error-code catalog and fail closed.
 
-## Quotes And Reservations
+## Payment Contract
 
-The Core quote builder accepts only bytes32 on-chain identifiers, valid wallet
-addresses, future deadlines and a complete frozen policy. All token amounts are
-`bigint` internally and decimal strings on the wire.
-
-For each order it proves:
+For a signed launch quote:
 
 ```text
-USDT payment = merchant USDT + platform USDT + optional prize USDT + remainder
-NPL payment  = exact Burn NPL + Locked route NPL
-BNM Locked   = product USDT list price
+buyer USDT payment = 70% of USDT list price
+buyer NPL payment  = 30% of the Oracle-equivalent NPL quote
+NPL Burn           = 20% of the same Oracle-equivalent quote
+NPL Reward Safe    = 10% of the same Oracle-equivalent quote
+BNM Locked         = USDT list price, as backend points only
 ```
 
-Seckill acknowledgement contains both complete intents and two distinct atomic
-reservations. The active session's policy snapshot governs both the seckill and
-fallback intent even after a newer policy is published. Chain timestamp alone
-selects the final branch.
+Merchant concession never changes buyer payment. Core returns merchant base
+receivable, concession, net receivable and exact versioned allocation entries.
+The NPL reward allocation balances exactly to the Reward Safe amount; missing
+beneficiaries and rounding remainder use the frozen circulation pool.
 
-## Fulfillment And Finality
+An ordinary quote contains the exact `CanonicalPaymentIntent`, Router address,
+snapshot hash, EIP-712 authorization digest, quote signature and two approval
+requirements. Each requirement includes the exact amount, MaxUint256 approval
+policy, `ONLY_IF_ALLOWANCE_BELOW_REQUIRED`, unlimited-allowance risk and an
+ERC-20 `approve(0)` revocation instruction. Products must not request another
+approval when the current allowance is sufficient.
 
-Delivery takeover becomes eligible only after seven days from payment finality
-without shipment evidence. Pickup timeout evidence is not frozen and returns
-`PickupTakeoverDecisionBlocked`. Merchant forced receipt is a request after
-seven days from delivery and can never finalize directly.
+The response also publishes the complete wallet EIP-712 domain, types, readable
+message and ABI-shaped `routerCall`. Consumers recompute the digest before
+signing and encode `pay` or `paySeckill` directly with the coordinated ABI. They
+must not handwrite tuple order, calldata or a parallel signing schema.
 
-A final transaction must bind chain, contract, expected event, resource, block
-hash, status `1`, confirmations and canonical-block evidence. Replacement and
-reorg states are explicit; a transaction hash is never success by itself.
+A seckill quote contains signed seckill and retail-fallback intents with
+independent reservations. The approval requirement covers the larger amount of
+the two possible branches. `PaymentRouterV2` uses block timestamp to select the
+branch atomically; products never select it.
 
-## Breakers And Claims
+## HTTP Surface
 
-New orders, seckill purchase/settlement and the three Claim scopes are
-independent. Shipment, pickup, arbitration, takeover, finality,
-reconciliation, audit reads and technical recovery do not consult those
-customer-facing breakers. Merchant freeze blocks merchant/reward/BNM Claims,
-but not a prize won by the same address as a buyer.
+Public reads:
 
-## Initial HTTP Surface
+- `GET /v2/bootstrap`
+- `GET /v2/catalog/products`
+- `GET /v2/catalog/products/{productId}`
 
-- `GET /v2/bootstrap`: artifact identity and redacted readiness only.
-- `POST /v2/auth/nonce`: bounded SIWE challenge.
-- `POST /v2/auth/verify`: one-use SIWE verification and scoped session.
-- `POST /v2/actions/order`: authenticated order ID; Core loads the projection
-  and server clock before returning `allowedActions`.
+Authentication:
 
-OpenAPI, generated types, ABI, manifest, WebSocket protocol and the complete
-consumer-test surface are published together in the coordinated artifact
-checkpoint. Provider calls return `ConfigurationRequired` until their complete
-secret reference set and adapter are available.
+- `POST /v2/auth/nonce`
+- `POST /v2/auth/verify`
+
+Authenticated Core reads and writes:
+
+- `POST /v2/actions/order`
+- `POST /v2/payments/quotes`
+- `POST /v2/seckill/quotes`
+- `POST /v2/payments/submissions`
+- `GET /v2/payments/{orderId}`
+
+`POST /v2/payments/submissions` binds the order and transaction hash. A
+replacement must bind the previously submitted hash. `GET
+/v2/payments/{orderId}` is buyer-owned and returns the ordinary or seckill quote
+plus indexed classification, block evidence, canonical status, confirmations
+and finality when a `PaymentCompleted` event exists. A submitted hash without
+that evidence is not payment success.
+
+The two quote endpoints fail closed unless the payment-only `writesEnabled`
+readiness gate is true. This gate does not apply to submission tracking or
+reads, so an already broadcast transaction can still be indexed and reconciled
+while new quoting is paused.
+
+## Publication Boundary
+
+Payment checkpoint capabilities are catalog/SKU reads, ordinary and seckill
+quotes, atomic reservations, submission tracking, PaymentRouter ABI, payment
+indexing, Locked ledger projection and finality reads.
+
+Fulfillment, takeover, arbitration, settlement requests, Safe MultiSend, CMS,
+notifications and live WebSocket channels are not published in this checkpoint.
+They remain `NOT_PUBLISHED_FAIL_CLOSED`; a disabled control, empty endpoint or
+fixture does not count as implementation. V2 exposes no business-refund or
+on-chain Claim API, and BNM is never a token payout.

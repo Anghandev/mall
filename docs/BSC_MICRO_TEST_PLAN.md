@@ -1,156 +1,114 @@
 # BSC Mainnet Micro-Test Approval Plan
 
-Status: `OBSOLETE`, `NOT AUTHORIZED` and `NON-EXECUTABLE`.
+Status: `DRAFT`, `NOT AUTHORIZED` and `NON-EXECUTABLE`.
 
-This plan targets the superseded `2.0.0-rc.2` funds graph. It must not be used
-for preflight, deployment or transactions and will be rewritten only after all
-three new Core batches and local gates pass.
+This draft is bound to local payment artifact `2.0.0-payment.1`. It does not
+authorize deployment, approval, token transfer or any transaction. No `.env` or
+private key is read for this plan. `pnpm micro:preflight` must not be run until
+the full local release gate passes and the project-specific preflight described
+below is implemented.
 
-This plan is bound to Core artifact `2.0.0-rc.2` and Core checkpoint
-`20a28f9`. It does not authorize a deployment, approval, token transfer or
-transaction. `pnpm micro:preflight` has not been run and no ignored `.env` or
-private key has been read.
+## Current Blockers
 
-## Current Gate
+Execution remains prohibited while any of these is true:
 
-Execution is blocked while `packages/core-artifacts/coordinated-manifest.json`
-has `deploymentAuthorized: false`, any `DecisionBlocked` item remains, or any
-required external input is absent.
+- the coordinated manifest has `deploymentAuthorized: false`;
+- any `DecisionBlocked` payment allocation remains;
+- governance, USDT Custody, NPL Reward or Operations Treasury Safe addresses
+  and owners are unavailable;
+- secondary policy signer, quote signer, primary/fallback RPC, production
+  domains or isolated signer service are unavailable;
+- fulfillment and settlement checkpoints, all three product consumers,
+  combined E2E, security review, backup/restore and breaker drills are incomplete;
+- deployed bytecode, roles, immutable addresses and verified source do not match
+  the final coordinated artifact;
+- the user has not approved one exact bounded transaction packet.
 
-Before an approval packet can be generated, Core must receive and verify:
+The current generic preflight checks only environment, chain, wallet and budget.
+It is insufficient for this project and cannot authorize a run.
 
-- the published launch `ProductPolicy`, including all 13 manifest-listed
-  decisions and the required BSC confirmation count;
-- Safe, secondary signer, quote signer, finality signer, TWAP source and all
-  role addresses;
-- BSC RPC and fallback RPC, deployed contract addresses, production HTTPS,
-  remote signer/executor mTLS and health evidence;
-- actual deployed runtime-code hashes, role grants, Safe admin and signer
-  getter attestations for the same artifact version;
-- dedicated test wallets and explicit maximum BNB, USDT and NPL budgets;
-- encrypted backup storage, provider accounts, approved merchant/admin
-  wallets and required device evidence.
+## Future Deployment Evidence
 
-The known provider key in five immutable V1 Phase 1 blobs must be rotated
-outside this repository. V1 history remains read-only until a separate
-cutover task is approved.
-
-## Deployment Targets
-
-The only permitted deployment order is the order in the coordinated contract
-manifest:
+The payment contract order is:
 
 1. `PolicyRegistryV2`
 2. `BeneficiaryRegistryV2`
 3. `TwapOracleAdapterV2`
-4. `BNMTokenV2`
-5. `ClaimVaultV2`
-6. `RewardLedgerV2`
-7. `MerchantGuaranteeVaultV2`
-8. `PaymentEscrowV2`
-9. `SeckillV2`
-10. Every manifest-listed post-deployment role grant
-11. Launch policy publication through RBAC, secondary signature and Safe
+4. `PaymentRouterV2`
 
-No deployment script or production address manifest is currently published.
-Those are `ExternalBlocked`; they must be implemented, audited and dry-run
-against a BSC fork before byte-level deployment calldata is proposed.
+Before approval, a project-specific dry run must prove constructor arguments,
+CREATE addresses, runtime-code hashes, source verification inputs, Safe-held
+roles, policy secondary signature, fixed token/pair addresses and Router zero
+retention on a BSC fork. Test deployments are never promoted to production when
+production Safe inputs change.
 
-## Calldata Approval Record
+The final manifest must bind each deployment block, each actual runtime code
+hash and the independently approved TWAP source code hash. Runtime readiness
+must reproduce those values from both configured RPC providers before new
+quotes are enabled.
 
-Every proposed transaction must be recorded before approval with:
+After explicit approval, the non-secret evidence is recorded in
+`platform-v2/deployments/bsc-payment-v2.json` with the bounded release-evidence
+hash. Generated manifests must not be edited directly.
+
+## Required Approval Packet
+
+Every proposed transaction must be listed in execution order with:
 
 ```text
 chainId = 56
+transaction sequence number and total count
 from role and expected signer
-to contract name and deployed address
+to address and verified contract name
 function signature and 4-byte selector
-SHA-256/keccak256 of exact calldata
-resourceId and policyVersion
-every USDT/NPL/BNM amount in integer token units
+exact calldata and keccak256 calldata hash
+policyVersion, order/session/reservation IDs
+USDT and NPL integer amounts
 native value
-idempotency key
+current allowance and requested allowance
 replacementForTxHash, if any
-eth_estimateGas result, gas limit and max fee
-expected events, state changes and balance deltas
+eth_estimateGas, gas limit, fee ceiling and maximum BNB cost
+expected events and exact wallet/Safe/Burn/Router balance deltas
+post-transaction assertion and stop condition
 ```
 
-The Executor must independently decode the same ABI and match target,
-selector, resource, policy and every amount. Unknown targets, selectors,
-trailing calldata, replacement mismatches or missing bindings stop the run.
+The packet also fixes the per-transaction and cumulative BNB, USDT and NPL
+budgets. Unknown targets, selectors, trailing calldata, amount drift, allowance
+drift, replacement mismatch or a changed Safe nonce invalidates the approval.
 
-Exact calldata hashes are intentionally absent from this document: contract
-addresses and policy values are not available, so producing them now would be
-guessing.
+## Future Micro-Test Sequence
 
-## Micro-Test Sequence
+Only after the complete release gate and separate approval, the bounded run may
+cover:
 
-After deployment and role verification, the separately approved run is:
+1. deploy and verify the four contracts and Safe-held roles;
+2. publish one approved payment policy through RBAC, secondary signature and
+   Safe execution;
+3. configure one dedicated merchant, SKU, beneficiary and region snapshot;
+4. fund only the approved buyer USDT/NPL and micro operational amounts;
+5. execute one ordinary payment and prove 70% USDT to Custody Safe, 20% NPL to
+   Burn, 10% NPL to Reward Safe and zero Router retention;
+6. execute one seckill payment and one deadline fallback using independent
+   reservations and prove the 60-minute/60-second/+30-second rules;
+7. wait for 15 canonical confirmations and prove event indexing, balanced Locked
+   journals, order finality and unused reservation release;
+8. after later checkpoints are published, execute the separately approved
+   fulfillment, BNM-points, settlement-request and Safe MultiSend micro paths;
+9. exercise payment/seckill/settlement breakers while recovery reads and
+   finality continue;
+10. revoke temporary token allowances and reconcile every wallet, Safe, Burn,
+    ledger liability, event and audit record.
 
-1. Publish the approved launch policy and verify its immutable snapshot.
-2. Configure the dedicated merchant, beneficiary and regional test snapshot.
-3. Fund only the approved micro guarantee, risk reserve, buyer USDT and buyer
-   NPL amounts.
-4. Execute one ordinary dual-leg purchase and prove exact USDT/NPL debits,
-   20% NPL Burn, 80% Locked routing and Locked BNM.
-5. Record shipment/delivery and submit one finality attestation at the approved
-   confirmation threshold; prove merchant USDT and rewards release only then.
-6. Execute one micro merchant Claim, one NPL reward Claim and one BNM Claim.
-7. Create one 60-minute seckill session, execute one final purchase that adds
-   30 seconds without exceeding the 60-second relay cap, settle it and execute
-   one micro prize Claim.
-8. Exercise pause, blocked write, allowed reconciliation/recovery read and
-   resume with Safe-held RBAC evidence.
-9. Revoke temporary token allowances and reconcile every wallet, contract,
-   Burn address, liability and audit-chain balance.
-
-Micro token amounts remain `DecisionBlocked` until the approved policy makes
-all integer conservation and Burn constraints satisfiable. No test fixture or
-locally invented amount may be substituted.
-
-## Gas And Budget
-
-The hard default ceilings are:
-
-- native value per transaction: `0.0001 BNB`;
-- maximum gas cost per transaction: `0.0002 BNB`;
-- cumulative native spend: `0.001 BNB`.
-
-Before broadcast, each transaction must pass `eth_estimateGas` and the locked
-spend ledger in `scripts/microtest/tx-guard.mjs`. The exclusive lock must cover
-budget check, broadcast, receipt wait and atomic receipt logging. Successful
-transactions count gas plus native value; failed mined transactions still
-count gas. Transaction hashes are unique.
-
-If the full deployment and test sequence cannot fit these ceilings, execution
-stops. The limits are not raised without a new bounded user approval.
+There is no business-refund or on-chain Claim fallback.
 
 ## Stop Conditions
 
-Stop before the next broadcast when any of these occurs:
+Stop before the next broadcast on any failed assertion, receipt status other
+than 1, reorg, replacement mismatch, chain mismatch, stale or low-liquidity
+Oracle, quote expiry, finality shortfall, unexpected event/balance/liability,
+Router retained balance, role drift, Safe nonce drift, provider failure, audit
+failure or budget excess.
 
-- missing or mismatched artifact, manifest, address, bytecode or role evidence;
-- RPC chain mismatch, provider outage, reorg, replacement mismatch or receipt
-  status other than `1`;
-- quote expiry, Oracle age/liquidity/deviation failure or finality shortfall;
-- unexpected event, balance delta, liability, Burn, reward or BNM result;
-- failed assertion, failed audit append, lock conflict or damaged spend log;
-- per-transaction or cumulative gas/budget excess.
-
-## Recovery
-
-There is no business-refund fallback. If a technical incident occurs:
-
-- Safe pauses only the affected new-order, seckill or Claim scope;
-- fulfillment, takeover, reconciliation, audit reads and finality sync remain
-  available;
-- an unverified deployment is not added to the production manifest, signers
-  and executors stay disabled, and erroneous roles are revoked;
-- only provable surplus may be recovered through the Safe-only recovery
-  functions; recorded liabilities remain untouched;
-- every action, transaction hash, receipt, event, balance proof and decision is
-  appended to the audit package before any resume decision.
-
-User approval must name the exact transaction count, calldata hashes, token
-amounts and BNB ceiling. Approval of this document alone is not approval to
-transact.
+Failed mined transactions still consume the approved gas budget. Resuming after
+a stop requires a new evidence package and explicit user approval. Approval of
+this draft alone is never approval to transact.

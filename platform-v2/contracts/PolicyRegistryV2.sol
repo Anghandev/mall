@@ -109,32 +109,44 @@ contract PolicyRegistryV2 is AccessControl, EIP712 {
 
     function _validatePolicy(V2Types.Policy calldata policy) private view {
         if (policy.version != latestVersion + 1 || policy.decisionEvidenceHash == bytes32(0)) revert InvalidPolicy();
-        if (policy.usdtPaymentBps + policy.nplPaymentBps != V2Types.BPS) revert InvalidPolicy();
-        if (policy.burnBps + policy.routeBps != V2Types.BPS) revert InvalidPolicy();
         if (
-            policy.platformTreasury == address(0) || policy.circulationPool == address(0)
-                || policy.usdtRemainderAccount == address(0) || policy.genesisCredential == address(0)
-                || policy.genesisCredentialStandard == V2Types.CredentialStandard.None || policy.oracleMaxAge == 0
-                || policy.oracleMinLiquidity == 0 || policy.merchantGuaranteeMinimum == 0
-                || policy.platformRiskReserveMinimum == 0 || policy.guaranteeTopupLine == 0 || policy.relayInitial == 0
+            policy.usdtPaymentBps != V2Types.LAUNCH_USDT_PAYMENT_BPS
+                || policy.nplPaymentBps != V2Types.LAUNCH_NPL_PAYMENT_BPS
+                || policy.nplBurnListPriceBps + policy.nplRewardListPriceBps != policy.nplPaymentBps
+        ) revert InvalidPolicy();
+        if (
+            policy.usdtCustodySafe == address(0) || policy.nplRewardSafe == address(0)
+                || policy.operationsTreasurySafe == address(0) || policy.circulationPool == address(0)
+                || policy.genesisCredential == address(0)
+                || policy.genesisCredentialStandard == V2Types.CredentialStandard.None
+                || policy.usdtCustodySafe == policy.nplRewardSafe
+                || policy.usdtCustodySafe == policy.operationsTreasurySafe
+                || policy.nplRewardSafe == policy.operationsTreasurySafe || policy.relayInitial == 0
                 || policy.relayIncrement == 0 || policy.relayCap == 0 || policy.seckillMainDuration == 0
                 || policy.relayInitial > policy.relayCap || policy.relayCap > policy.seckillMainDuration
                 || policy.oracleVersion == bytes32(0) || policy.rulesContentHash == bytes32(0)
+                || policy.concessionDestinationSetHash == bytes32(0)
         ) revert InvalidPolicy();
 
         uint256 rewardsBps = uint256(policy.genesisBps) + policy.directReferralBps + policy.districtBps + policy.cityBps
-            + policy.provinceBps + policy.regionBps + policy.operationsBps + policy.merchantStoreBps;
-        uint256 routeCapacityBps = uint256(policy.nplPaymentBps) * policy.routeBps / V2Types.BPS;
-        if (rewardsBps > routeCapacityBps) revert InvalidPolicy();
-        if (uint256(policy.platformFeeBps) + policy.seckillPrizeBps > policy.usdtPaymentBps) revert InvalidPolicy();
+            + policy.provinceBps + policy.regionBps + policy.operationsBps;
+        if (rewardsBps != policy.nplRewardListPriceBps) revert InvalidPolicy();
+        if (uint256(policy.platformFeeBps) + policy.seckillPrizeBps > V2Types.BPS) revert InvalidPolicy();
+        if (
+            policy.oracleMaxAge != V2Types.ORACLE_MAX_AGE
+                || policy.oracleMinLiquidity != V2Types.ORACLE_MIN_USDT_LIQUIDITY
+                || policy.merchantGuaranteeMinimum < V2Types.MERCHANT_GUARANTEE_MINIMUM
+        ) revert InvalidPolicy();
 
         if (policy.version == 1) {
             if (
-                policy.burnBps != 2_000 || policy.routeBps != 8_000 || policy.genesisBps != 200
+                policy.nplBurnListPriceBps != V2Types.NPL_BURN_LIST_PRICE_BPS
+                    || policy.nplRewardListPriceBps != V2Types.NPL_REWARD_LIST_PRICE_BPS || policy.genesisBps != 200
                     || policy.directReferralBps != 100 || policy.districtBps != 120 || policy.cityBps != 80
                     || policy.provinceBps != 60 || policy.regionBps != 40 || policy.operationsBps != 400
                     || policy.seckillMainDuration != 60 minutes || policy.relayInitial != 60 seconds
                     || policy.relayIncrement != 30 seconds || policy.relayCap != 60 seconds
+                    || policy.merchantGuaranteeMinimum != V2Types.MERCHANT_GUARANTEE_MINIMUM
             ) revert InvalidLaunchPolicy();
         }
     }

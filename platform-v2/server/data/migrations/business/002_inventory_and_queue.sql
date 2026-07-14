@@ -6,7 +6,8 @@ CREATE FUNCTION core.reserve_inventory(
     p_buyer_wallet text,
     p_quantity bigint,
     p_classification text,
-    p_expires_at timestamptz
+    p_expires_at timestamptz,
+    p_session_id text
 ) RETURNS core.inventory_reservations
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -25,22 +26,34 @@ BEGIN
             AND existing.quantity = p_quantity
             AND existing.classification = p_classification
             AND existing.expires_at = p_expires_at
+            AND existing.session_id IS NOT DISTINCT FROM p_session_id
         THEN
             RETURN existing;
         END IF;
         RAISE EXCEPTION 'ReservationConflict' USING ERRCODE = 'P0001';
     END IF;
 
-    IF p_quantity <= 0 OR p_expires_at <= clock_timestamp() THEN
+    IF p_quantity <= 0 OR p_expires_at <= clock_timestamp()
+        OR ((p_classification = 'SECKILL') <> (p_session_id IS NOT NULL))
+    THEN
         RAISE EXCEPTION 'InvalidReservation' USING ERRCODE = 'P0001';
     END IF;
 
-    UPDATE core.skus
-    SET stock_available = stock_available - p_quantity,
-        stock_reserved = stock_reserved + p_quantity
-    WHERE sku_id = p_sku_id
-      AND lifecycle_state = 'ACTIVE'
-      AND stock_available >= p_quantity;
+    IF p_classification = 'SECKILL' THEN
+        UPDATE core.seckill_sessions
+        SET reserved = reserved + p_quantity, updated_at = clock_timestamp()
+        WHERE session_id = p_session_id AND sku_id = p_sku_id
+          AND policy_version = p_policy_version AND phase = 'LIVE'
+          AND starts_at <= clock_timestamp() AND main_deadline > clock_timestamp()
+          AND inventory - sold - reserved >= p_quantity;
+    ELSE
+        UPDATE core.skus
+        SET stock_available = stock_available - p_quantity,
+            stock_reserved = stock_reserved + p_quantity
+        WHERE sku_id = p_sku_id
+          AND lifecycle_state = 'ACTIVE'
+          AND stock_available >= p_quantity;
+    END IF;
 
     IF NOT FOUND THEN
         RAISE EXCEPTION 'InventoryUnavailable' USING ERRCODE = 'P0001';
@@ -48,10 +61,10 @@ BEGIN
 
     INSERT INTO core.inventory_reservations (
         reservation_id, reservation_hash, policy_version, sku_id, buyer_wallet,
-        quantity, classification, state, expires_at
+        quantity, classification, session_id, state, expires_at
     ) VALUES (
         p_reservation_id, p_reservation_hash, p_policy_version, p_sku_id,
-        p_buyer_wallet, p_quantity, p_classification, 'ACTIVE', p_expires_at
+        p_buyer_wallet, p_quantity, p_classification, p_session_id, 'ACTIVE', p_expires_at
     ) RETURNING * INTO created;
 
     RETURN created;
@@ -80,10 +93,16 @@ BEGIN
         RETURN reservation;
     END IF;
 
-    UPDATE core.skus
-    SET stock_available = stock_available + reservation.quantity,
-        stock_reserved = stock_reserved - reservation.quantity
-    WHERE sku_id = reservation.sku_id;
+    IF reservation.classification = 'SECKILL' THEN
+        UPDATE core.seckill_sessions
+        SET reserved = reserved - reservation.quantity, updated_at = clock_timestamp()
+        WHERE session_id = reservation.session_id;
+    ELSE
+        UPDATE core.skus
+        SET stock_available = stock_available + reservation.quantity,
+            stock_reserved = stock_reserved - reservation.quantity
+        WHERE sku_id = reservation.sku_id;
+    END IF;
 
     UPDATE core.inventory_reservations
     SET state = p_target_state, updated_at = clock_timestamp()
@@ -108,10 +127,18 @@ BEGIN
         RAISE EXCEPTION 'ReservationUnavailable' USING ERRCODE = 'P0001';
     END IF;
 
-    UPDATE core.skus
-    SET stock_total = stock_total - reservation.quantity,
-        stock_reserved = stock_reserved - reservation.quantity
-    WHERE sku_id = reservation.sku_id;
+    IF reservation.classification = 'SECKILL' THEN
+        UPDATE core.seckill_sessions
+        SET reserved = reserved - reservation.quantity,
+            sold = sold + reservation.quantity,
+            updated_at = clock_timestamp()
+        WHERE session_id = reservation.session_id;
+    ELSE
+        UPDATE core.skus
+        SET stock_total = stock_total - reservation.quantity,
+            stock_reserved = stock_reserved - reservation.quantity
+        WHERE sku_id = reservation.sku_id;
+    END IF;
 
     UPDATE core.inventory_reservations
     SET state = 'CONSUMED', consumed_order_id = p_order_id, updated_at = clock_timestamp()

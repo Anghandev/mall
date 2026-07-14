@@ -1,4 +1,4 @@
-import { BSC_CHAIN_ID, type FinalityState } from './enums.ts';
+import { BSC_CHAIN_ID, REQUIRED_CONFIRMATIONS, type FinalityState } from './enums.ts';
 import type { CoreConfig } from './config.ts';
 import { CoreError } from './errors.ts';
 
@@ -13,7 +13,7 @@ export interface FinalityRecord {
   blockNumber?: number;
   blockHash?: string;
   confirmations: number;
-  requiredConfirmations: number;
+  requiredConfirmations: 15;
   receiptStatus?: 0 | 1;
   eventResourceId?: string;
   observedEventHash?: string;
@@ -31,14 +31,14 @@ export function submittedFinality(
     txHash: string;
   },
 ): FinalityRecord {
-  if (!config.requiredConfirmations) {
-    throw new CoreError('DecisionBlocked', 'Required finality confirmations are not frozen', 409);
+  if (config.requiredConfirmations !== REQUIRED_CONFIRMATIONS) {
+    throw new CoreError('InvalidFinality', 'V2 finality must use 15 confirmations');
   }
   return {
     ...input,
     chainId: BSC_CHAIN_ID,
     confirmations: 0,
-    requiredConfirmations: config.requiredConfirmations,
+    requiredConfirmations: REQUIRED_CONFIRMATIONS,
     canonicalBlock: false,
     state: 'SUBMITTED',
   };
@@ -65,7 +65,7 @@ export function applyReceipt(
     receipt.contractAddress.toLowerCase() !== record.contractAddress.toLowerCase() ||
     receipt.eventHash.toLowerCase() !== record.expectedEventHash.toLowerCase() ||
     receipt.eventResourceId !== record.resourceId ||
-    !receipt.blockHash
+    !receipt.blockHash || !Number.isSafeInteger(receipt.confirmations) || receipt.confirmations < 0
   ) {
     throw new CoreError('InvalidFinality', 'Receipt does not bind the expected resource/event domain');
   }

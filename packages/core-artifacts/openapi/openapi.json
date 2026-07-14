@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Abu 24K V2 Core API",
-    "version": "2.0.0-rc.2"
+    "version": "2.0.0-payment.1"
   },
-  "x-artifactVersion": "2.0.0-rc.2",
+  "x-artifactVersion": "2.0.0-payment.1",
   "servers": [],
   "paths": {
     "/v2/bootstrap": {
@@ -205,6 +205,341 @@
           }
         }
       }
+    },
+    "/v2/catalog/products": {
+      "get": {
+        "operationId": "listCatalogProducts",
+        "responses": {
+          "200": {
+            "description": "Active products and authoritative SKU prices",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "products"
+                  ],
+                  "properties": {
+                    "products": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CatalogProduct"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/catalog/products/{productId}": {
+      "get": {
+        "operationId": "getCatalogProduct",
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active product detail",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "product"
+                  ],
+                  "properties": {
+                    "product": {
+                      "$ref": "#/components/schemas/CatalogProduct"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/payments/quotes": {
+      "post": {
+        "operationId": "createOrdinaryPaymentQuote",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentQuoteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Server-authoritative signed ordinary quote",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentQuoteResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/seckill/quotes": {
+      "post": {
+        "operationId": "createSeckillPaymentQuote",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeckillQuoteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Signed seckill and retail fallback quote",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeckillQuoteResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/payments/submissions": {
+      "post": {
+        "operationId": "submitPaymentTransaction",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentSubmissionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Bound transaction submission",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentSubmissionResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/payments/{orderId}": {
+      "get": {
+        "operationId": "getPaymentProjection",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Quote, submission and indexed payment projection",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -219,6 +554,10 @@
       "AtomicAmount": {
         "type": "string",
         "pattern": "^(0|[1-9][0-9]*)$"
+      },
+      "Bytes32": {
+        "type": "string",
+        "pattern": "^0x[0-9a-fA-F]{64}$"
       },
       "Address": {
         "type": "string",
@@ -262,10 +601,9 @@
           "OPEN_TAKEOVER",
           "RECORD_SHIPMENT",
           "RECORD_DELIVERY",
-          "CLAIM_MERCHANT_USDT",
-          "CLAIM_REWARD_NPL",
-          "CLAIM_PRIZE_USDT",
-          "CLAIM_BNM",
+          "REQUEST_MERCHANT_SETTLEMENT",
+          "REQUEST_REWARD_SETTLEMENT",
+          "REQUEST_PRIZE_SETTLEMENT",
           "RECONCILE",
           "RECOVER_SURPLUS"
         ]
@@ -326,6 +664,8 @@
           "assets",
           "decisionBlocked",
           "externalBlocked",
+          "paymentDecisionBlocked",
+          "paymentExternalBlocked",
           "providers",
           "writesEnabled"
         ],
@@ -360,6 +700,18 @@
               "type": "string"
             }
           },
+          "paymentDecisionBlocked": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "paymentExternalBlocked": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "providers": {
             "type": "object",
             "additionalProperties": {
@@ -384,7 +736,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-rc.2"
+            "const": "2.0.0-payment.1"
           },
           "status": {
             "const": "CORE_API_READY"
@@ -496,6 +848,1290 @@
             "items": {
               "$ref": "#/components/schemas/AllowedAction"
             }
+          }
+        }
+      },
+      "CatalogSku": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "skuId",
+          "chainSkuId",
+          "attributes",
+          "listPriceUsdt",
+          "stockAvailable"
+        ],
+        "properties": {
+          "skuId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chainSkuId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "attributes": {
+            "type": "object"
+          },
+          "listPriceUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "stockAvailable": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          }
+        }
+      },
+      "CatalogProduct": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "productId",
+          "chainProductId",
+          "title",
+          "metadata",
+          "skus"
+        ],
+        "properties": {
+          "productId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chainProductId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "skus": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/CatalogSku"
+            }
+          }
+        }
+      },
+      "PaymentQuoteRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "productId",
+          "skuId",
+          "quantity",
+          "fulfillmentMode",
+          "fulfillmentTargetHash",
+          "regionCodeHash"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          },
+          "productId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "skuId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "fulfillmentMode": {
+            "enum": [
+              "DELIVERY",
+              "PICKUP"
+            ]
+          },
+          "fulfillmentTargetHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "regionCodeHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "SeckillQuoteRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sessionId",
+          "idempotencyKey",
+          "productId",
+          "skuId",
+          "quantity",
+          "fulfillmentMode",
+          "fulfillmentTargetHash",
+          "regionCodeHash"
+        ],
+        "properties": {
+          "sessionId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          },
+          "productId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "skuId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "fulfillmentMode": {
+            "enum": [
+              "DELIVERY",
+              "PICKUP"
+            ]
+          },
+          "fulfillmentTargetHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "regionCodeHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "BeneficiarySnapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "genesis",
+          "directReferral",
+          "district",
+          "city",
+          "province",
+          "region"
+        ],
+        "properties": {
+          "genesis": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "directReferral": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "district": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "city": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "province": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "region": {
+            "$ref": "#/components/schemas/Address"
+          }
+        }
+      },
+      "MerchantConcessionAllocation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "account",
+          "amount"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          }
+        }
+      },
+      "OtherUsdtAllocation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "account",
+          "amount",
+          "purpose"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "purpose": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "NplRewardAllocation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "role",
+          "account",
+          "amount"
+        ],
+        "properties": {
+          "role": {
+            "enum": [
+              "genesis",
+              "directReferral",
+              "district",
+              "city",
+              "province",
+              "region",
+              "operations",
+              "roundingRemainder"
+            ]
+          },
+          "account": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          }
+        }
+      },
+      "CanonicalPaymentIntent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "policyVersion",
+          "oracleVersion",
+          "buyer",
+          "merchant",
+          "productId",
+          "skuId",
+          "quantity",
+          "fulfillmentMode",
+          "fulfillmentTargetHash",
+          "regionCodeHash",
+          "productPolicyHash",
+          "reservationId",
+          "reservationHash",
+          "reservationDeadline",
+          "issuedAt",
+          "deadline",
+          "nonce",
+          "listPriceUsdt",
+          "usdtPaymentAmount",
+          "nplQuoteAmount",
+          "nplPaymentAmount",
+          "nplBurnAmount",
+          "nplRewardAmount",
+          "merchantBaseReceivableUsdt",
+          "merchantConcessionBps",
+          "merchantConcessionAmount",
+          "merchantNetReceivableUsdt",
+          "concessionAllocationHash",
+          "bnmAmount",
+          "seckill",
+          "sessionId",
+          "beneficiaries",
+          "merchantConcessionAllocations",
+          "otherUsdtAllocations",
+          "nplRewardAllocations",
+          "requiredConfirmations"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "policyVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "oracleVersion": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "buyer": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "merchant": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "productId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "skuId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "fulfillmentMode": {
+            "enum": [
+              "DELIVERY",
+              "PICKUP"
+            ]
+          },
+          "fulfillmentTargetHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "regionCodeHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "productPolicyHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "reservationId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "reservationHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "reservationDeadline": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "issuedAt": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "deadline": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "nonce": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "listPriceUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "usdtPaymentAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "nplQuoteAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "nplPaymentAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "nplBurnAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "nplRewardAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "merchantBaseReceivableUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "merchantConcessionBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "merchantConcessionAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "merchantNetReceivableUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "concessionAllocationHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "bnmAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "seckill": {
+            "type": "boolean"
+          },
+          "sessionId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "beneficiaries": {
+            "$ref": "#/components/schemas/BeneficiarySnapshot"
+          },
+          "merchantConcessionAllocations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantConcessionAllocation"
+            }
+          },
+          "otherUsdtAllocations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OtherUsdtAllocation"
+            }
+          },
+          "nplRewardAllocations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NplRewardAllocation"
+            }
+          },
+          "requiredConfirmations": {
+            "const": 15
+          }
+        }
+      },
+      "ApprovalRequirement": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "token",
+          "spender",
+          "requiredAmount",
+          "requestedAllowance",
+          "approvalMode",
+          "risk",
+          "revocation"
+        ],
+        "properties": {
+          "token": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "spender": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "requiredAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "requestedAllowance": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "approvalMode": {
+            "const": "ONLY_IF_ALLOWANCE_BELOW_REQUIRED"
+          },
+          "risk": {
+            "const": "UNLIMITED_TOKEN_ALLOWANCE"
+          },
+          "revocation": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "method",
+              "token",
+              "spender"
+            ],
+            "properties": {
+              "method": {
+                "const": "ERC20_APPROVE_ZERO"
+              },
+              "token": {
+                "$ref": "#/components/schemas/Address"
+              },
+              "spender": {
+                "$ref": "#/components/schemas/Address"
+              }
+            }
+          }
+        }
+      },
+      "Eip712Field": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "type"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
+      "Eip712Domain": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "version",
+          "chainId",
+          "verifyingContract"
+        ],
+        "properties": {
+          "name": {
+            "const": "Abu24KPaymentRouter"
+          },
+          "version": {
+            "const": "2"
+          },
+          "chainId": {
+            "const": 56
+          },
+          "verifyingContract": {
+            "$ref": "#/components/schemas/Address"
+          }
+        }
+      },
+      "PaymentBuyerAuthorization": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "domain",
+          "types",
+          "primaryType",
+          "message",
+          "digest"
+        ],
+        "properties": {
+          "domain": {
+            "$ref": "#/components/schemas/Eip712Domain"
+          },
+          "types": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "PaymentAuthorization"
+            ],
+            "properties": {
+              "PaymentAuthorization": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Eip712Field"
+                }
+              }
+            }
+          },
+          "primaryType": {
+            "const": "PaymentAuthorization"
+          },
+          "message": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "paymentHash",
+              "orderId",
+              "buyer",
+              "merchant",
+              "productId",
+              "skuId",
+              "quantity",
+              "fulfillmentMode",
+              "listPriceUsdt",
+              "usdtPaymentAmount",
+              "nplPaymentAmount",
+              "deadline"
+            ],
+            "properties": {
+              "paymentHash": {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              "orderId": {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              "buyer": {
+                "$ref": "#/components/schemas/Address"
+              },
+              "merchant": {
+                "$ref": "#/components/schemas/Address"
+              },
+              "productId": {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              "skuId": {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              "quantity": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "fulfillmentMode": {
+                "enum": [
+                  0,
+                  1
+                ]
+              },
+              "listPriceUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "usdtPaymentAmount": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "nplPaymentAmount": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "deadline": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "digest": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "SeckillBuyerAuthorization": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "domain",
+          "types",
+          "primaryType",
+          "message",
+          "digest"
+        ],
+        "properties": {
+          "domain": {
+            "$ref": "#/components/schemas/Eip712Domain"
+          },
+          "types": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "SeckillAuthorization"
+            ],
+            "properties": {
+              "SeckillAuthorization": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Eip712Field"
+                }
+              }
+            }
+          },
+          "primaryType": {
+            "const": "SeckillAuthorization"
+          },
+          "message": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "seckillHash",
+              "orderId",
+              "buyer",
+              "merchant",
+              "productId",
+              "skuId",
+              "quantity",
+              "fulfillmentMode",
+              "seckillListPriceUsdt",
+              "seckillUsdtPaymentAmount",
+              "seckillNplPaymentAmount",
+              "fallbackListPriceUsdt",
+              "fallbackUsdtPaymentAmount",
+              "fallbackNplPaymentAmount",
+              "deadline"
+            ],
+            "properties": {
+              "seckillHash": {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              "orderId": {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              "buyer": {
+                "$ref": "#/components/schemas/Address"
+              },
+              "merchant": {
+                "$ref": "#/components/schemas/Address"
+              },
+              "productId": {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              "skuId": {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              "quantity": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "fulfillmentMode": {
+                "enum": [
+                  0,
+                  1
+                ]
+              },
+              "seckillListPriceUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "seckillUsdtPaymentAmount": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "seckillNplPaymentAmount": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "fallbackListPriceUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "fallbackUsdtPaymentAmount": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "fallbackNplPaymentAmount": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "deadline": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "digest": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "OrdinaryRouterCall": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "functionName",
+          "intent",
+          "quoteSignature"
+        ],
+        "properties": {
+          "functionName": {
+            "const": "pay"
+          },
+          "intent": {
+            "$ref": "#/components/schemas/PaymentRouterIntent"
+          },
+          "quoteSignature": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]+$"
+          }
+        }
+      },
+      "SeckillRouterCall": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "functionName",
+          "intent",
+          "quoteSignature"
+        ],
+        "properties": {
+          "functionName": {
+            "const": "paySeckill"
+          },
+          "intent": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sessionId",
+              "seckillPayment",
+              "fallbackPayment"
+            ],
+            "properties": {
+              "sessionId": {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              "seckillPayment": {
+                "$ref": "#/components/schemas/PaymentRouterIntent"
+              },
+              "fallbackPayment": {
+                "$ref": "#/components/schemas/PaymentRouterIntent"
+              }
+            }
+          },
+          "quoteSignature": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]+$"
+          }
+        }
+      },
+      "PaymentQuoteResponse": {
+        "type": "object",
+        "required": [
+          "artifactVersion",
+          "orderId",
+          "state",
+          "paymentRouterAddress",
+          "intent",
+          "snapshotHash",
+          "authorizationDigest",
+          "buyerAuthorization",
+          "quoteSignature",
+          "submittedTxHash",
+          "approvalRequirements",
+          "routerCall"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-payment.1"
+          },
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "state": {
+            "enum": [
+              "QUOTED",
+              "SUBMITTED",
+              "PAID",
+              "REORGED",
+              "EXPIRED"
+            ]
+          },
+          "paymentRouterAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "intent": {
+            "$ref": "#/components/schemas/CanonicalPaymentIntent"
+          },
+          "snapshotHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "authorizationDigest": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "buyerAuthorization": {
+            "$ref": "#/components/schemas/PaymentBuyerAuthorization"
+          },
+          "quoteSignature": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]+$"
+          },
+          "submittedTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approvalRequirements": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "$ref": "#/components/schemas/ApprovalRequirement"
+            }
+          },
+          "routerCall": {
+            "$ref": "#/components/schemas/OrdinaryRouterCall"
+          }
+        }
+      },
+      "CanonicalSeckillIntent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sessionId",
+          "seckill",
+          "fallback",
+          "classificationAuthority"
+        ],
+        "properties": {
+          "sessionId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "seckill": {
+            "$ref": "#/components/schemas/CanonicalPaymentIntent"
+          },
+          "fallback": {
+            "$ref": "#/components/schemas/CanonicalPaymentIntent"
+          },
+          "classificationAuthority": {
+            "const": "PAYMENT_ROUTER_BLOCK_TIMESTAMP"
+          }
+        }
+      },
+      "SeckillQuoteResponse": {
+        "type": "object",
+        "required": [
+          "artifactVersion",
+          "orderId",
+          "state",
+          "paymentRouterAddress",
+          "dual",
+          "seckillHash",
+          "snapshotHashes",
+          "authorizationDigest",
+          "buyerAuthorization",
+          "quoteSignature",
+          "submittedTxHash",
+          "approvalRequirements",
+          "routerCall"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-payment.1"
+          },
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "state": {
+            "enum": [
+              "QUOTED",
+              "SUBMITTED",
+              "PAID",
+              "REORGED",
+              "EXPIRED"
+            ]
+          },
+          "paymentRouterAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "dual": {
+            "$ref": "#/components/schemas/CanonicalSeckillIntent"
+          },
+          "seckillHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "snapshotHashes": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "seckill",
+              "fallback"
+            ],
+            "properties": {
+              "seckill": {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              "fallback": {
+                "$ref": "#/components/schemas/Bytes32"
+              }
+            }
+          },
+          "authorizationDigest": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "buyerAuthorization": {
+            "$ref": "#/components/schemas/SeckillBuyerAuthorization"
+          },
+          "quoteSignature": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]+$"
+          },
+          "submittedTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approvalRequirements": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "$ref": "#/components/schemas/ApprovalRequirement"
+            }
+          },
+          "routerCall": {
+            "$ref": "#/components/schemas/SeckillRouterCall"
+          }
+        }
+      },
+      "PaymentSubmissionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "txHash"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "txHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "replacementForTxHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "PaymentSubmissionResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "txHash",
+          "state"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "txHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "state": {
+            "const": "SUBMITTED"
+          }
+        }
+      },
+      "PaymentFinality": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "transactionHash",
+          "blockNumber",
+          "blockHash",
+          "confirmations",
+          "requiredConfirmations",
+          "receiptStatus",
+          "state",
+          "canonicalBlock",
+          "classification"
+        ],
+        "properties": {
+          "transactionHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "replacementForTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "blockNumber": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "blockHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "confirmations": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "requiredConfirmations": {
+            "const": 15
+          },
+          "receiptStatus": {
+            "const": 1
+          },
+          "state": {
+            "enum": [
+              "MINED",
+              "REORGED",
+              "FINAL"
+            ]
+          },
+          "canonicalBlock": {
+            "type": "boolean"
+          },
+          "classification": {
+            "enum": [
+              "ORDINARY",
+              "SECKILL",
+              "FALLBACK_RETAIL"
+            ]
+          }
+        }
+      },
+      "PaymentProjection": {
+        "oneOf": [
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaymentQuoteResponse"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "finality"
+                ],
+                "properties": {
+                  "finality": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/PaymentFinality"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SeckillQuoteResponse"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "finality"
+                ],
+                "properties": {
+                  "finality": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/PaymentFinality"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "PaymentRouterIntent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "policyVersion",
+          "oracleVersion",
+          "buyer",
+          "merchant",
+          "productId",
+          "skuId",
+          "quantity",
+          "fulfillmentMode",
+          "fulfillmentTargetHash",
+          "regionCodeHash",
+          "productPolicyHash",
+          "reservationId",
+          "reservationHash",
+          "reservationDeadline",
+          "issuedAt",
+          "deadline",
+          "nonce",
+          "listPriceUsdt",
+          "usdtPaymentAmount",
+          "nplQuoteAmount",
+          "nplPaymentAmount",
+          "nplBurnAmount",
+          "nplRewardAmount",
+          "merchantBaseReceivableUsdt",
+          "merchantConcessionBps",
+          "merchantConcessionAmount",
+          "merchantNetReceivableUsdt",
+          "concessionAllocationHash",
+          "bnmAmount",
+          "seckill",
+          "sessionId",
+          "beneficiaries"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "policyVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "oracleVersion": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "buyer": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "merchant": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "productId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "skuId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "fulfillmentMode": {
+            "enum": [
+              0,
+              1
+            ]
+          },
+          "fulfillmentTargetHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "regionCodeHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "productPolicyHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "reservationId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "reservationHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "reservationDeadline": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "issuedAt": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "deadline": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "nonce": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "listPriceUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "usdtPaymentAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "nplQuoteAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "nplPaymentAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "nplBurnAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "nplRewardAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "merchantBaseReceivableUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "merchantConcessionBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "merchantConcessionAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "merchantNetReceivableUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "concessionAllocationHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "bnmAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "seckill": {
+            "type": "boolean"
+          },
+          "sessionId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "beneficiaries": {
+            "$ref": "#/components/schemas/BeneficiarySnapshot"
           }
         }
       },

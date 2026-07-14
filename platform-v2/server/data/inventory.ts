@@ -8,6 +8,7 @@ export interface InventoryReservationInput {
   buyerWallet: string;
   quantity: number;
   classification: 'ORDINARY' | 'SECKILL' | 'FALLBACK_RETAIL';
+  sessionId?: string;
   expiresAt: Date;
 }
 
@@ -20,7 +21,7 @@ export interface InventoryReservationRow {
 
 export async function reserveInventory(executor: SqlExecutor, input: InventoryReservationInput) {
   const result = await executor.query<InventoryReservationRow>(
-    `SELECT * FROM core.reserve_inventory($1, $2, $3, $4, $5, $6, $7, $8)`,
+    `SELECT * FROM core.reserve_inventory($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
     [
       input.reservationId,
       input.reservationHash,
@@ -30,6 +31,7 @@ export async function reserveInventory(executor: SqlExecutor, input: InventoryRe
       input.quantity,
       input.classification,
       input.expiresAt,
+      input.sessionId ?? null,
     ],
   );
   const row = result.rows[0];

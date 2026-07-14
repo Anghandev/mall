@@ -74,6 +74,7 @@ contract MockCredential is ERC721 {
 }
 
 contract MockTwapSource is ITwapSourceV2 {
+    address public pair = 0x2955e33bb120714aBf11ACE2766E614E6E5955B2;
     uint256 public quoteAmount;
     uint128 public liquidity;
     uint64 public updatedAt;
@@ -85,7 +86,15 @@ contract MockTwapSource is ITwapSourceV2 {
         updatedAt = updatedAt_;
     }
 
-    function consult(address, address, uint256, uint32 window) external view returns (uint256, uint128, uint64) {
+    function setPair(address pair_) external {
+        pair = pair_;
+    }
+
+    function consult(address, address, address, uint256, uint32 window)
+        external
+        view
+        returns (uint256, uint128, uint64)
+    {
         window;
         return (quoteAmount, liquidity, updatedAt);
     }

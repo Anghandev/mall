@@ -78,7 +78,6 @@ contract BeneficiaryRegistryV2 is AccessControl {
             revert BeneficiaryMismatch();
         }
         if (snapshot.directReferral != referrerOf[buyer]) revert BeneficiaryMismatch();
-        if (snapshot.merchantStore != address(0) && snapshot.merchantStore != merchant) revert BeneficiaryMismatch();
 
         RegionBeneficiaries memory expected = regionBeneficiaries[regionCodeHash];
         if (
@@ -86,7 +85,11 @@ contract BeneficiaryRegistryV2 is AccessControl {
                 || snapshot.province != expected.province || snapshot.region != expected.region
         ) revert BeneficiaryMismatch();
 
-        if (snapshot.genesis != address(0) && !_isGenesisEligible(policyVersion, snapshot.genesis)) {
+        bool buyerGenesisEligible = _isGenesisEligible(policyVersion, buyer);
+        if (
+            (buyerGenesisEligible && snapshot.genesis != buyer)
+                || (!buyerGenesisEligible && snapshot.genesis != address(0))
+        ) {
             revert InvalidGenesisCredential();
         }
     }

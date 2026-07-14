@@ -1,7 +1,9 @@
-export const CORE_ARTIFACT_VERSION = '2.0.0-rc.2';
+export const CORE_ARTIFACT_VERSION = '2.0.0-payment.1';
 export const BSC_CHAIN_ID = 56;
 export const USDT_ADDRESS = '0x55d398326f99059ff775485246999027b3197955';
 export const NPL_ADDRESS = '0x4e8277ab31e4956b2cd48449793a57656dfc03d2';
+export const NPL_USDT_PAIR_ADDRESS = '0x2955e33bb120714abf11ace2766e614e6e5955b2';
+export const REQUIRED_CONFIRMATIONS = 15;
 
 export const orderProjectionStates = [
   'QUOTED',
@@ -46,12 +48,9 @@ export const userRoles = ['BUYER', 'MERCHANT', 'ADMIN', 'OPERATOR', 'ARBITRATOR'
 export type UserRole = (typeof userRoles)[number];
 
 export const breakerScopes = [
-  'NEW_ORDERS',
+  'NEW_PAYMENT',
   'SECKILL_PURCHASE',
-  'SECKILL_SETTLEMENT',
-  'MERCHANT_CLAIM',
-  'REWARD_CLAIM',
-  'PRIZE_CLAIM',
+  'NEW_SETTLEMENT_BATCH',
 ] as const;
 export type BreakerScope = (typeof breakerScopes)[number];
 
@@ -64,10 +63,9 @@ export const allowedActionNames = [
   'OPEN_TAKEOVER',
   'RECORD_SHIPMENT',
   'RECORD_DELIVERY',
-  'CLAIM_MERCHANT_USDT',
-  'CLAIM_REWARD_NPL',
-  'CLAIM_PRIZE_USDT',
-  'CLAIM_BNM',
+  'REQUEST_MERCHANT_SETTLEMENT',
+  'REQUEST_REWARD_SETTLEMENT',
+  'REQUEST_PRIZE_SETTLEMENT',
   'RECONCILE',
   'RECOVER_SURPLUS',
 ] as const;
@@ -107,13 +105,13 @@ export const fulfillmentMethods = [
 ] as const;
 export type FulfillmentMethod = (typeof fulfillmentMethods)[number];
 
-export const claimRails = ['MERCHANT_USDT', 'REWARD_NPL', 'PRIZE_USDT', 'BNM'] as const;
-export type ClaimRail = (typeof claimRails)[number];
+export const settlementRails = ['MERCHANT_USDT', 'REWARD_NPL', 'PRIZE_USDT'] as const;
+export type SettlementRail = (typeof settlementRails)[number];
 
 export const reservationStates = ['ACTIVE', 'CONSUMED', 'EXPIRED', 'RELEASED'] as const;
 export type ReservationState = (typeof reservationStates)[number];
 
-export const balanceStates = ['LOCKED', 'PENDING_SETTLEMENT', 'AVAILABLE', 'CLAIMED'] as const;
+export const balanceStates = ['LOCKED', 'AVAILABLE', 'REQUESTED', 'BATCHED', 'SETTLED', 'DISPUTED'] as const;
 export type BalanceState = (typeof balanceStates)[number];
 
 export const takeoverStates = [

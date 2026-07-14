@@ -76,11 +76,13 @@ CREATE TABLE core.merchants (
 
 CREATE TABLE core.products (
     product_id text PRIMARY KEY,
+    chain_product_id text NOT NULL UNIQUE CHECK (chain_product_id ~ '^0x[0-9a-fA-F]{64}$'),
     merchant_id text NOT NULL REFERENCES core.merchants(merchant_id),
     version bigint NOT NULL CHECK (version > 0),
     title text NOT NULL,
     lifecycle_state text NOT NULL CHECK (lifecycle_state IN ('DRAFT', 'REVIEW', 'ACTIVE', 'HIDDEN', 'DELISTED', 'LOCKED')),
     product_policy_hash text NOT NULL CHECK (product_policy_hash ~ '^0x[0-9a-fA-F]{64}$'),
+    merchant_concession_bps integer NOT NULL DEFAULT 0 CHECK (merchant_concession_bps BETWEEN 0 AND 10000),
     metadata jsonb NOT NULL CHECK (jsonb_typeof(metadata) = 'object'),
     allowed_actions jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(allowed_actions) = 'array'),
     created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
@@ -89,10 +91,13 @@ CREATE TABLE core.products (
 
 CREATE TABLE core.skus (
     sku_id text PRIMARY KEY,
+    chain_sku_id text NOT NULL UNIQUE CHECK (chain_sku_id ~ '^0x[0-9a-fA-F]{64}$'),
     product_id text NOT NULL REFERENCES core.products(product_id),
     sku_version bigint NOT NULL CHECK (sku_version > 0),
     attributes jsonb NOT NULL CHECK (jsonb_typeof(attributes) = 'object'),
-    merchant_cost_usdt numeric(78, 0) CHECK (merchant_cost_usdt IS NULL OR merchant_cost_usdt >= 0),
+    list_price_usdt numeric(78, 0) NOT NULL CHECK (list_price_usdt > 0),
+    merchant_cost_usdt numeric(78, 0) NOT NULL CHECK (merchant_cost_usdt >= 0),
+    CHECK (merchant_cost_usdt <= list_price_usdt),
     stock_total bigint NOT NULL CHECK (stock_total >= 0),
     stock_available bigint NOT NULL CHECK (stock_available >= 0),
     stock_reserved bigint NOT NULL DEFAULT 0 CHECK (stock_reserved >= 0),
@@ -108,11 +113,13 @@ CREATE TABLE core.inventory_reservations (
     buyer_wallet text NOT NULL CHECK (buyer_wallet ~ '^0x[0-9a-fA-F]{40}$'),
     quantity bigint NOT NULL CHECK (quantity > 0),
     classification text NOT NULL CHECK (classification IN ('ORDINARY', 'SECKILL', 'FALLBACK_RETAIL')),
+    session_id text,
     state text NOT NULL CHECK (state IN ('ACTIVE', 'CONSUMED', 'EXPIRED', 'RELEASED')),
     expires_at timestamptz NOT NULL,
     consumed_order_id text,
     created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-    updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+    updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    CHECK ((classification = 'SECKILL') = (session_id IS NOT NULL))
 );
 
 CREATE INDEX inventory_reservations_active_idx
@@ -131,6 +138,8 @@ CREATE TABLE core.seckill_sessions (
     relay_deadline timestamptz NOT NULL,
     inventory bigint NOT NULL CHECK (inventory > 0),
     sold bigint NOT NULL DEFAULT 0 CHECK (sold >= 0 AND sold <= inventory),
+    reserved bigint NOT NULL DEFAULT 0 CHECK (reserved >= 0 AND sold + reserved <= inventory),
+    seckill_list_price_usdt numeric(78, 0) NOT NULL CHECK (seckill_list_price_usdt > 0),
     phase text NOT NULL CHECK (phase IN ('PREHEAT', 'LIVE', 'SETTLING', 'SETTLED', 'FORCE_CLOSED')),
     last_buyer_wallet text,
     prize_pool_usdt numeric(78, 0) NOT NULL DEFAULT 0 CHECK (prize_pool_usdt >= 0),
@@ -141,6 +150,10 @@ CREATE TABLE core.seckill_sessions (
     CHECK (main_deadline > starts_at),
     CHECK (relay_deadline <= main_deadline)
 );
+
+ALTER TABLE core.inventory_reservations
+    ADD CONSTRAINT inventory_reservations_session_fk
+    FOREIGN KEY (session_id) REFERENCES core.seckill_sessions(session_id);
 
 CREATE TABLE core.orders (
     order_id text PRIMARY KEY,
@@ -215,12 +228,12 @@ CREATE TABLE core.takeover_cases (
 
 CREATE TABLE core.transaction_finality (
     transaction_id text PRIMARY KEY,
-    resource_type text NOT NULL CHECK (resource_type IN ('ORDER_PAYMENT', 'FULFILLMENT', 'CLAIM', 'SECKILL_SETTLEMENT', 'POLICY', 'TAKEOVER_DISBURSEMENT', 'RECOVERY')),
+    resource_type text NOT NULL CHECK (resource_type IN ('ORDER_PAYMENT', 'FULFILLMENT', 'SETTLEMENT_BATCH', 'SECKILL_SETTLEMENT', 'POLICY', 'TAKEOVER_DISBURSEMENT', 'RECOVERY')),
     resource_id text NOT NULL,
     chain_id bigint NOT NULL CHECK (chain_id = 56),
     contract_address text NOT NULL CHECK (contract_address ~ '^0x[0-9a-fA-F]{40}$'),
     expected_event_hash text NOT NULL CHECK (expected_event_hash ~ '^0x[0-9a-fA-F]{64}$'),
-    tx_hash text NOT NULL UNIQUE CHECK (tx_hash ~ '^0x[0-9a-fA-F]{64}$'),
+    tx_hash text NOT NULL CHECK (tx_hash ~ '^0x[0-9a-fA-F]{64}$'),
     replacement_for_tx_hash text,
     block_number bigint,
     block_hash text,
@@ -235,25 +248,10 @@ CREATE TABLE core.transaction_finality (
 );
 
 CREATE INDEX transaction_finality_resource_idx ON core.transaction_finality (resource_type, resource_id, updated_at DESC);
-
-CREATE TABLE core.claim_projections (
-    claim_id text PRIMARY KEY,
-    resource_id text NOT NULL,
-    claimant_wallet text NOT NULL CHECK (claimant_wallet ~ '^0x[0-9a-fA-F]{40}$'),
-    rail text NOT NULL CHECK (rail IN ('MERCHANT_USDT', 'REWARD_NPL', 'PRIZE_USDT', 'BNM')),
-    asset_address text NOT NULL CHECK (asset_address ~ '^0x[0-9a-fA-F]{40}$'),
-    cumulative_amount numeric(78, 0) NOT NULL CHECK (cumulative_amount >= 0),
-    locked_amount numeric(78, 0) NOT NULL CHECK (locked_amount >= 0),
-    available_amount numeric(78, 0) NOT NULL CHECK (available_amount >= 0),
-    claimed_amount numeric(78, 0) NOT NULL CHECK (claimed_amount >= 0),
-    state text NOT NULL CHECK (state IN ('LOCKED', 'PENDING_SETTLEMENT', 'AVAILABLE', 'CLAIM_SUBMITTED', 'CLAIMED', 'PAUSED', 'FROZEN')),
-    allowed_actions jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(allowed_actions) = 'array'),
-    updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-    CHECK (locked_amount + available_amount + claimed_amount = cumulative_amount)
-);
+CREATE INDEX transaction_finality_tx_idx ON core.transaction_finality (tx_hash, block_hash);
 
 CREATE TABLE core.circuit_breakers (
-    scope text PRIMARY KEY CHECK (scope IN ('NEW_ORDERS', 'SECKILL_PURCHASE', 'SECKILL_SETTLEMENT', 'MERCHANT_CLAIM', 'REWARD_CLAIM', 'PRIZE_CLAIM')),
+    scope text PRIMARY KEY CHECK (scope IN ('NEW_PAYMENT', 'SECKILL_PURCHASE', 'NEW_SETTLEMENT_BATCH')),
     paused boolean NOT NULL,
     evidence_hash text NOT NULL CHECK (evidence_hash ~ '^0x[0-9a-fA-F]{64}$'),
     policy_version bigint REFERENCES core.policy_snapshots(policy_version),
@@ -418,10 +416,6 @@ CREATE TRIGGER transaction_finality_no_delete
 
 CREATE TRIGGER takeover_cases_no_delete
     BEFORE DELETE ON core.takeover_cases
-    FOR EACH ROW EXECUTE FUNCTION core.reject_mutation();
-
-CREATE TRIGGER claim_projections_no_delete
-    BEFORE DELETE ON core.claim_projections
     FOR EACH ROW EXECUTE FUNCTION core.reject_mutation();
 
 CREATE TRIGGER outbox_no_delete

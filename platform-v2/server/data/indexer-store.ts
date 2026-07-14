@@ -5,6 +5,13 @@ import type {
   IndexerStore,
 } from '../chain/indexer.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
+import {
+  advancePaymentFinality,
+  paymentEventKey,
+  recordPaymentProjection,
+  reversePaymentProjection,
+  type CanonicalPaymentEvent,
+} from './payment-store.ts';
 
 interface BlockRow {
   block_number: string | number;
@@ -47,6 +54,8 @@ export class PostgresIndexerStore implements IndexerStore {
     return this.#transactions.transaction(async (executor) => {
       await assertHead(executor, expectedHead);
       await insertSegment(executor, segment);
+      await projectPayments(executor, segment);
+      await advancePaymentFinality(executor, segment.at(-1)!.block.number);
     });
   }
 
@@ -67,6 +76,26 @@ export class PostgresIndexerStore implements IndexerStore {
       if (checkpoint(ancestor.rows[0])?.blockHash.toLowerCase() !== commonAncestor.blockHash.toLowerCase()) {
         throw new CoreError('ReorgPending', 'Indexer common ancestor changed', 409);
       }
+      const orphanedPayments = await executor.query<{
+        transaction_hash: string;
+        log_index: string | number;
+        block_hash: string;
+      }>(
+        `SELECT transaction_hash, log_index, block_hash
+         FROM core.chain_events
+         WHERE canonical AND block_number > $1
+           AND contract_name = 'PaymentRouterV2' AND event_name = 'PaymentCompleted'
+         ORDER BY block_number DESC, log_index DESC
+         FOR UPDATE`,
+        [commonAncestor.blockNumber],
+      );
+      for (const payment of orphanedPayments.rows) {
+        await reversePaymentProjection(
+          executor,
+          paymentEventKey(payment.transaction_hash, Number(payment.log_index), payment.block_hash),
+          segment.at(-1)!.block.hash,
+        );
+      }
       await executor.query(
         `UPDATE core.chain_events
          SET canonical = false, replaced_at = clock_timestamp()
@@ -80,6 +109,8 @@ export class PostgresIndexerStore implements IndexerStore {
         [commonAncestor.blockNumber],
       );
       await insertSegment(executor, segment);
+      await projectPayments(executor, segment);
+      await advancePaymentFinality(executor, segment.at(-1)!.block.number);
       await executor.query(
         `INSERT INTO core.chain_reorg_evidence (
            from_block, expected_hash, observed_hash, status, common_ancestor
@@ -99,6 +130,74 @@ export class PostgresIndexerStore implements IndexerStore {
       );
     });
   }
+}
+
+async function projectPayments(executor: SqlExecutor, segment: IndexedChainBlock[]) {
+  const canonicalHead = segment.at(-1)!.block.number;
+  for (const { block, events } of segment) {
+    for (const event of events) {
+      if (event.contract !== 'PaymentRouterV2' || event.eventName !== 'PaymentCompleted') continue;
+      await recordPaymentProjection(executor, {
+        event: canonicalPaymentEvent(block, event, canonicalHead),
+      });
+    }
+  }
+}
+
+function canonicalPaymentEvent(
+  block: IndexedChainBlock['block'],
+  event: IndexedChainBlock['events'][number],
+  canonicalHead: number,
+): CanonicalPaymentEvent {
+  const classification = paymentClassification(event.values.classification);
+  return {
+    artifactVersion: event.artifactVersion,
+    orderId: event.resourceId,
+    transactionHash: event.transactionHash,
+    logIndex: event.logIndex,
+    blockNumber: event.blockNumber,
+    blockHash: event.blockHash,
+    blockTimestamp: new Date(block.timestamp * 1000),
+    contractAddress: event.contractAddress,
+    eventHash: event.eventHash,
+    snapshotHash: requiredValue(event.values, 'snapshotHash'),
+    classification,
+    buyer: requiredValue(event.values, 'buyer'),
+    merchant: requiredValue(event.values, 'merchant'),
+    policyVersion: safeInteger(event.values, 'policyVersion'),
+    listPriceUsdt: decimalValue(event.values, 'listPriceUsdt'),
+    usdtPaid: decimalValue(event.values, 'usdtPaid'),
+    nplPaid: decimalValue(event.values, 'nplPaid'),
+    nplBurned: decimalValue(event.values, 'nplBurned'),
+    nplRewarded: decimalValue(event.values, 'nplRewarded'),
+    bnmLocked: decimalValue(event.values, 'bnmLocked'),
+    reservationId: requiredValue(event.values, 'reservationId'),
+    confirmations: canonicalHead - block.number + 1,
+  };
+}
+
+function paymentClassification(value: string | undefined): CanonicalPaymentEvent['classification'] {
+  const classification = value === '0' ? 'ORDINARY' : value === '1' ? 'SECKILL' : value === '2' ? 'FALLBACK_RETAIL' : undefined;
+  if (!classification) throw new CoreError('InvalidFinality', 'Unknown PaymentCompleted classification');
+  return classification;
+}
+
+function requiredValue(values: Record<string, string>, name: string) {
+  const value = values[name];
+  if (!value) throw new CoreError('InvalidFinality', `PaymentCompleted is missing ${name}`);
+  return value;
+}
+
+function decimalValue(values: Record<string, string>, name: string) {
+  const value = requiredValue(values, name);
+  if (!/^(0|[1-9][0-9]*)$/.test(value)) throw new CoreError('InvalidFinality', `PaymentCompleted ${name} is invalid`);
+  return value;
+}
+
+function safeInteger(values: Record<string, string>, name: string) {
+  const value = Number(requiredValue(values, name));
+  if (!Number.isSafeInteger(value) || value < 0) throw new CoreError('InvalidFinality', `PaymentCompleted ${name} is invalid`);
+  return value;
 }
 
 async function assertHead(executor: SqlExecutor, expected: CanonicalCheckpoint | undefined) {

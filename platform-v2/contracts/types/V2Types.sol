@@ -3,11 +3,22 @@ pragma solidity 0.8.26;
 
 library V2Types {
     uint16 internal constant BPS = 10_000;
+    uint16 internal constant LAUNCH_USDT_PAYMENT_BPS = 7_000;
+    uint16 internal constant LAUNCH_NPL_PAYMENT_BPS = 3_000;
+    uint16 internal constant NPL_BURN_LIST_PRICE_BPS = 2_000;
+    uint16 internal constant NPL_REWARD_LIST_PRICE_BPS = 1_000;
     uint32 internal constant ORACLE_WINDOW = 30 minutes;
     uint16 internal constant ORACLE_MAX_DEVIATION_BPS = 500;
+    uint64 internal constant ORACLE_MAX_AGE = 10 minutes;
+    uint64 internal constant QUOTE_VALIDITY = 5 minutes;
+    uint128 internal constant ORACLE_MIN_USDT_LIQUIDITY = 50_000 ether;
+    uint128 internal constant MERCHANT_GUARANTEE_MINIMUM = 1_000 ether;
+    uint32 internal constant REQUIRED_CONFIRMATIONS = 15;
     uint256 internal constant BSC_CHAIN_ID = 56;
     address internal constant USDT = 0x55d398326f99059fF775485246999027B3197955;
     address internal constant NPL = 0x4E8277AB31e4956b2CD48449793a57656DfC03D2;
+    address internal constant NPL_USDT_PAIR = 0x2955e33bb120714aBf11ACE2766E614E6E5955B2;
+    address internal constant NPL_BURN_ADDRESS = 0x000000000000000000000000000000000000dEaD;
 
     enum CredentialStandard {
         None,
@@ -20,37 +31,18 @@ library V2Types {
         Pickup
     }
 
-    enum FulfillmentMethod {
-        CustomerReceipt,
-        PickupVerification,
-        ForcedReceipt,
-        Arbitration
-    }
-
-    enum ClaimRail {
-        MerchantUsdt,
-        RewardNpl,
-        PrizeUsdt,
-        Bnm
-    }
-
-    enum OrderState {
-        None,
-        Paid,
-        Shipped,
-        Delivered,
-        Arbitration,
-        Takeover,
-        FulfillmentPending,
-        Fulfilled
+    enum PaymentClassification {
+        Ordinary,
+        Seckill,
+        FallbackRetail
     }
 
     struct Policy {
         uint64 version;
         uint16 usdtPaymentBps;
         uint16 nplPaymentBps;
-        uint16 burnBps;
-        uint16 routeBps;
+        uint16 nplBurnListPriceBps;
+        uint16 nplRewardListPriceBps;
         uint16 genesisBps;
         uint16 directReferralBps;
         uint16 districtBps;
@@ -58,7 +50,6 @@ library V2Types {
         uint16 provinceBps;
         uint16 regionBps;
         uint16 operationsBps;
-        uint16 merchantStoreBps;
         uint16 platformFeeBps;
         uint16 seckillPrizeBps;
         uint32 seckillMainDuration;
@@ -69,15 +60,15 @@ library V2Types {
         uint64 oracleMaxAge;
         uint128 oracleMinLiquidity;
         uint128 merchantGuaranteeMinimum;
-        uint128 platformRiskReserveMinimum;
-        uint128 guaranteeTopupLine;
-        address platformTreasury;
+        address usdtCustodySafe;
+        address nplRewardSafe;
+        address operationsTreasurySafe;
         address circulationPool;
-        address usdtRemainderAccount;
         address genesisCredential;
         uint256 genesisTokenId;
         CredentialStandard genesisCredentialStandard;
         bytes32 beneficiarySetHash;
+        bytes32 concessionDestinationSetHash;
         bytes32 decisionEvidenceHash;
         bytes32 rulesContentHash;
     }
@@ -89,10 +80,9 @@ library V2Types {
         address city;
         address province;
         address region;
-        address merchantStore;
     }
 
-    struct OrderIntent {
+    struct PaymentIntent {
         bytes32 orderId;
         uint64 policyVersion;
         bytes32 oracleVersion;
@@ -108,16 +98,20 @@ library V2Types {
         bytes32 reservationId;
         bytes32 reservationHash;
         uint64 reservationDeadline;
-        uint256 nonce;
+        uint64 issuedAt;
         uint64 deadline;
+        uint256 nonce;
         uint256 listPriceUsdt;
         uint256 usdtPaymentAmount;
+        uint256 nplQuoteAmount;
         uint256 nplPaymentAmount;
-        uint256 rewardBaseNpl;
-        uint256 merchantUsdtAmount;
-        uint256 platformUsdtAmount;
-        uint256 prizeUsdtAmount;
-        uint256 usdtRemainderAmount;
+        uint256 nplBurnAmount;
+        uint256 nplRewardAmount;
+        uint256 merchantBaseReceivableUsdt;
+        uint16 merchantConcessionBps;
+        uint256 merchantConcessionAmount;
+        uint256 merchantNetReceivableUsdt;
+        bytes32 concessionAllocationHash;
         uint256 bnmAmount;
         bool seckill;
         bytes32 sessionId;
@@ -126,32 +120,7 @@ library V2Types {
 
     struct SeckillIntent {
         bytes32 sessionId;
-        OrderIntent seckillOrder;
-        OrderIntent fallbackOrder;
-        uint64 deadline;
-    }
-
-    struct FulfillmentAttestation {
-        bytes32 orderId;
-        FulfillmentMethod method;
-        uint256 sourceChainId;
-        address sourceContract;
-        bytes32 sourceEventHash;
-        bytes32 sourceTxHash;
-        bytes32 blockHash;
-        uint32 confirmations;
-        uint8 status;
-        uint256 nonce;
-        uint64 deadline;
-        bytes32 evidenceHash;
-    }
-
-    struct ClaimIntent {
-        address claimant;
-        ClaimRail rail;
-        address asset;
-        uint256 amount;
-        uint256 nonce;
-        uint64 deadline;
+        PaymentIntent seckillPayment;
+        PaymentIntent fallbackPayment;
     }
 }

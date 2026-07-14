@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Abu 24K V2 contracts, server, data and chain workers",
   "scripts": {
+    "start": "../scripts/node server/start.ts",
     "typecheck": "../scripts/node ../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
     "contracts:build": "forge build",
     "contracts:artifacts": "../scripts/node scripts/generate-contract-artifacts.mjs",

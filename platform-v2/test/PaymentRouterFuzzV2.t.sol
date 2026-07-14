@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.26;
+
+import {CoreFixture} from "./helpers/CoreFixture.sol";
+import {V2Types} from "../contracts/types/V2Types.sol";
+
+contract PaymentRouterFuzzV2Test is CoreFixture {
+    function testFuzz_PaymentConservesEveryAtomicUnit(uint96 rawListPrice, uint96 rawNplQuote, uint16 rawConcession)
+        public
+    {
+        uint256 listPrice = bound(uint256(rawListPrice), 10, 1_000_000 ether);
+        uint256 nplQuote = bound(uint256(rawNplQuote), 10, 10_000_000 ether);
+        uint16 concessionBps = uint16(bound(rawConcession, 0, 10_000));
+        twapSource.setResult(nplQuote, 50_000 ether, uint64(block.timestamp));
+        V2Types.PaymentIntent memory intent = _makePayment(
+            keccak256(abi.encode("fuzz-order", rawListPrice, rawNplQuote, rawConcession)),
+            buyer,
+            uint256(keccak256(abi.encode(rawListPrice, rawNplQuote, rawConcession))),
+            false,
+            keccak256(abi.encode("fuzz-reservation", rawListPrice, rawNplQuote, rawConcession))
+        );
+        intent = _setAmounts(intent, listPrice, nplQuote, concessionBps);
+        uint256 custodyBefore = usdt.balanceOf(usdtCustodySafe);
+        uint256 burnBefore = npl.balanceOf(V2Types.NPL_BURN_ADDRESS);
+        uint256 rewardBefore = npl.balanceOf(nplRewardSafe);
+
+        _pay(intent, BUYER_KEY);
+
+        assertEq(usdt.balanceOf(usdtCustodySafe) - custodyBefore, intent.usdtPaymentAmount);
+        assertEq(npl.balanceOf(V2Types.NPL_BURN_ADDRESS) - burnBefore, intent.nplBurnAmount);
+        assertEq(npl.balanceOf(nplRewardSafe) - rewardBefore, intent.nplRewardAmount);
+        assertEq(intent.nplBurnAmount + intent.nplRewardAmount, intent.nplPaymentAmount);
+        assertEq(intent.merchantConcessionAmount + intent.merchantNetReceivableUsdt, intent.merchantBaseReceivableUsdt);
+        assertEq(usdt.balanceOf(address(router)), 0);
+        assertEq(npl.balanceOf(address(router)), 0);
+    }
+}

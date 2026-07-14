@@ -338,12 +338,12 @@
             "internalType": "uint16"
           },
           {
-            "name": "burnBps",
+            "name": "nplBurnListPriceBps",
             "type": "uint16",
             "internalType": "uint16"
           },
           {
-            "name": "routeBps",
+            "name": "nplRewardListPriceBps",
             "type": "uint16",
             "internalType": "uint16"
           },
@@ -379,11 +379,6 @@
           },
           {
             "name": "operationsBps",
-            "type": "uint16",
-            "internalType": "uint16"
-          },
-          {
-            "name": "merchantStoreBps",
             "type": "uint16",
             "internalType": "uint16"
           },
@@ -438,27 +433,22 @@
             "internalType": "uint128"
           },
           {
-            "name": "platformRiskReserveMinimum",
-            "type": "uint128",
-            "internalType": "uint128"
+            "name": "usdtCustodySafe",
+            "type": "address",
+            "internalType": "address"
           },
           {
-            "name": "guaranteeTopupLine",
-            "type": "uint128",
-            "internalType": "uint128"
+            "name": "nplRewardSafe",
+            "type": "address",
+            "internalType": "address"
           },
           {
-            "name": "platformTreasury",
+            "name": "operationsTreasurySafe",
             "type": "address",
             "internalType": "address"
           },
           {
             "name": "circulationPool",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "usdtRemainderAccount",
             "type": "address",
             "internalType": "address"
           },
@@ -479,6 +469,11 @@
           },
           {
             "name": "beneficiarySetHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "concessionDestinationSetHash",
             "type": "bytes32",
             "internalType": "bytes32"
           },
@@ -559,12 +554,12 @@
             "internalType": "uint16"
           },
           {
-            "name": "burnBps",
+            "name": "nplBurnListPriceBps",
             "type": "uint16",
             "internalType": "uint16"
           },
           {
-            "name": "routeBps",
+            "name": "nplRewardListPriceBps",
             "type": "uint16",
             "internalType": "uint16"
           },
@@ -600,11 +595,6 @@
           },
           {
             "name": "operationsBps",
-            "type": "uint16",
-            "internalType": "uint16"
-          },
-          {
-            "name": "merchantStoreBps",
             "type": "uint16",
             "internalType": "uint16"
           },
@@ -659,27 +649,22 @@
             "internalType": "uint128"
           },
           {
-            "name": "platformRiskReserveMinimum",
-            "type": "uint128",
-            "internalType": "uint128"
+            "name": "usdtCustodySafe",
+            "type": "address",
+            "internalType": "address"
           },
           {
-            "name": "guaranteeTopupLine",
-            "type": "uint128",
-            "internalType": "uint128"
+            "name": "nplRewardSafe",
+            "type": "address",
+            "internalType": "address"
           },
           {
-            "name": "platformTreasury",
+            "name": "operationsTreasurySafe",
             "type": "address",
             "internalType": "address"
           },
           {
             "name": "circulationPool",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "usdtRemainderAccount",
             "type": "address",
             "internalType": "address"
           },
@@ -700,6 +685,11 @@
           },
           {
             "name": "beneficiarySetHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "concessionDestinationSetHash",
             "type": "bytes32",
             "internalType": "bytes32"
           },
@@ -846,12 +836,12 @@
             "internalType": "uint16"
           },
           {
-            "name": "burnBps",
+            "name": "nplBurnListPriceBps",
             "type": "uint16",
             "internalType": "uint16"
           },
           {
-            "name": "routeBps",
+            "name": "nplRewardListPriceBps",
             "type": "uint16",
             "internalType": "uint16"
           },
@@ -887,11 +877,6 @@
           },
           {
             "name": "operationsBps",
-            "type": "uint16",
-            "internalType": "uint16"
-          },
-          {
-            "name": "merchantStoreBps",
             "type": "uint16",
             "internalType": "uint16"
           },
@@ -946,27 +931,22 @@
             "internalType": "uint128"
           },
           {
-            "name": "platformRiskReserveMinimum",
-            "type": "uint128",
-            "internalType": "uint128"
+            "name": "usdtCustodySafe",
+            "type": "address",
+            "internalType": "address"
           },
           {
-            "name": "guaranteeTopupLine",
-            "type": "uint128",
-            "internalType": "uint128"
+            "name": "nplRewardSafe",
+            "type": "address",
+            "internalType": "address"
           },
           {
-            "name": "platformTreasury",
+            "name": "operationsTreasurySafe",
             "type": "address",
             "internalType": "address"
           },
           {
             "name": "circulationPool",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "usdtRemainderAccount",
             "type": "address",
             "internalType": "address"
           },
@@ -987,6 +967,11 @@
           },
           {
             "name": "beneficiarySetHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "concessionDestinationSetHash",
             "type": "bytes32",
             "internalType": "bytes32"
           },

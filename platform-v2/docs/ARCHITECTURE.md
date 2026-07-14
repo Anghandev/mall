@@ -10,11 +10,14 @@ runtime dependency on `legacy/v1-npl-only/`.
 ## Funds Boundary
 
 - Product prices and merchant settlement costs are denominated in USDT.
-- Buyer payment uses exact versioned USDT and NPL legs.
-- Merchant proceeds are USDT-only and pull-based after fulfillment finality.
-- Payment-final NPL follows the frozen 20% Burn and 80% Locked routing policy.
-- BNM is order-linked, Locked at payment and Available after fulfillment
-  finality; Claim mints it.
+- Buyer payment is exactly 70% USDT plus 30% Oracle-equivalent NPL.
+- USDT moves directly to the Custody Safe; 20%-of-list NPL is burned and
+  10%-of-list NPL moves directly to the Reward Safe. PaymentRouter normally
+  retains zero.
+- Merchant proceeds are USDT-only and settle from the append-only double-entry
+  ledger through Safe MultiSend after the required business finality.
+- BNM is order-linked backend points, Locked at payment and Available after
+  fulfillment finality. It is not an ERC-20 or a Claim payout.
 - V2 has no business-refund workflow. Merchant default enters platform takeover
   fulfillment under `docs/V2_SYSTEM_CONTRACT.md`.
 

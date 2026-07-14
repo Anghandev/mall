@@ -30,7 +30,7 @@ export function orderAllowedActions(order: OrderProjection, context: ActionConte
   const merchantActor = actor === merchant && context.roles.includes('MERCHANT');
 
   if (order.state === 'QUOTED' && buyerActor) {
-    actions.push(action('PAY_ORDER', !context.pausedScopes.has('NEW_ORDERS'), 'BreakerActive'));
+    actions.push(action('PAY_ORDER', !context.pausedScopes.has('NEW_PAYMENT'), 'BreakerActive'));
   }
   if (order.state === 'PAID' && order.fulfillmentMode === 'DELIVERY' && (operator || merchantActor)) {
     actions.push({ action: 'RECORD_SHIPMENT', enabled: true });
@@ -90,22 +90,18 @@ export function orderAllowedActions(order: OrderProjection, context: ActionConte
   );
 }
 
-export function claimAllowedAction(
-  rail: 'MERCHANT_USDT' | 'REWARD_NPL' | 'PRIZE_USDT' | 'BNM',
+export function settlementRequestAllowedAction(
+  rail: 'MERCHANT_USDT' | 'REWARD_NPL' | 'PRIZE_USDT',
   amountAvailable: bigint,
   frozen: boolean,
-  pausedScopes: ReadonlySet<BreakerScope>,
 ): AllowedAction {
   const actionName = {
-    MERCHANT_USDT: 'CLAIM_MERCHANT_USDT',
-    REWARD_NPL: 'CLAIM_REWARD_NPL',
-    PRIZE_USDT: 'CLAIM_PRIZE_USDT',
-    BNM: 'CLAIM_BNM',
+    MERCHANT_USDT: 'REQUEST_MERCHANT_SETTLEMENT',
+    REWARD_NPL: 'REQUEST_REWARD_SETTLEMENT',
+    PRIZE_USDT: 'REQUEST_PRIZE_SETTLEMENT',
   } as const;
-  const scope = rail === 'MERCHANT_USDT' ? 'MERCHANT_CLAIM' : rail === 'PRIZE_USDT' ? 'PRIZE_CLAIM' : 'REWARD_CLAIM';
   if (amountAvailable === 0n) return { action: actionName[rail], enabled: false, reasonCode: 'FinalityPending' };
   if (frozen && rail !== 'PRIZE_USDT') return { action: actionName[rail], enabled: false, reasonCode: 'MerchantFrozen' };
-  if (pausedScopes.has(scope)) return { action: actionName[rail], enabled: false, reasonCode: 'BreakerActive' };
   return { action: actionName[rail], enabled: true };
 }
 

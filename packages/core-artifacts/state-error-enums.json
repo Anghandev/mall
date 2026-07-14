@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-rc.2",
+  "artifactVersion": "2.0.0-payment.1",
   "orderProjectionStates": [
     "QUOTED",
     "SUBMITTED",
@@ -47,12 +47,9 @@
     "AUDITOR"
   ],
   "breakerScopes": [
-    "NEW_ORDERS",
+    "NEW_PAYMENT",
     "SECKILL_PURCHASE",
-    "SECKILL_SETTLEMENT",
-    "MERCHANT_CLAIM",
-    "REWARD_CLAIM",
-    "PRIZE_CLAIM"
+    "NEW_SETTLEMENT_BATCH"
   ],
   "allowedActionNames": [
     "PAY_ORDER",
@@ -63,10 +60,9 @@
     "OPEN_TAKEOVER",
     "RECORD_SHIPMENT",
     "RECORD_DELIVERY",
-    "CLAIM_MERCHANT_USDT",
-    "CLAIM_REWARD_NPL",
-    "CLAIM_PRIZE_USDT",
-    "CLAIM_BNM",
+    "REQUEST_MERCHANT_SETTLEMENT",
+    "REQUEST_REWARD_SETTLEMENT",
+    "REQUEST_PRIZE_SETTLEMENT",
     "RECONCILE",
     "RECOVER_SURPLUS"
   ],
@@ -93,11 +89,10 @@
     "FORCED_RECEIPT",
     "ARBITRATION"
   ],
-  "claimRails": [
+  "settlementRails": [
     "MERCHANT_USDT",
     "REWARD_NPL",
-    "PRIZE_USDT",
-    "BNM"
+    "PRIZE_USDT"
   ],
   "reservationStates": [
     "ACTIVE",
@@ -107,9 +102,11 @@
   ],
   "balanceStates": [
     "LOCKED",
-    "PENDING_SETTLEMENT",
     "AVAILABLE",
-    "CLAIMED"
+    "REQUESTED",
+    "BATCHED",
+    "SETTLED",
+    "DISPUTED"
   ],
   "takeoverStates": [
     "ELIGIBILITY_PENDING",

@@ -564,11 +564,6 @@
             "name": "region",
             "type": "address",
             "internalType": "address"
-          },
-          {
-            "name": "merchantStore",
-            "type": "address",
-            "internalType": "address"
           }
         ]
       }
