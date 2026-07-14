@@ -1241,6 +1241,10 @@ td .empty-state {
   background: var(--muted);
 }
 
+.provider-dot.ready {
+  background: var(--success);
+}
+
 .provider-dot.warning {
   background: var(--warning);
 }

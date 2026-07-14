@@ -11,12 +11,14 @@ pnpm --filter @abu24k/merchant check
 ```
 
 The app consumes the coordinated `@abu24k/core-artifacts` workspace package at
-`2.0.0-payment.1`. It connects the published Bootstrap, merchant SIWE,
-catalog/SKU/inventory reads and order `allowedActions` endpoint. Merchant
-product writes, merchant-scoped order/payment projections, fulfillment and
-settlement stay visibly fail closed until their coordinated Core batches are
-published. The browser never calls the buyer-only payment projection with a
-merchant session.
+`2.0.0-fulfillment.1`. It connects the published Bootstrap, merchant SIWE,
+catalog/SKU/inventory reads and session-bound fulfillment `allowedActions`.
+Fulfillment controls require both the published action catalog and an enabled
+server action for the selected order; missing session, finality or permission
+fails closed. Merchant product writes, pagination/export/provider devices and
+settlement stay unavailable until their coordinated capabilities are published
+or configured. The browser never calls the buyer-only payment projection with
+a merchant session.
 
 Core is expected on the same origin. A separately hosted local Core can be
 selected with `VITE_CORE_API_BASE_URL`; production deployment must provide the

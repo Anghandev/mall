@@ -1,6 +1,7 @@
 import {
   artifactVersion,
   executableOrderActionNames,
+  type AllowedAction,
   type AllowedActionName,
 } from '@abu24k/core-artifacts';
 
@@ -10,11 +11,12 @@ export const coreBoundary = Object.freeze({
   artifactVersion,
   artifactsAvailable: true,
   executableOrderActionNames,
-  reason: '支付批次已发布；履约、商家订单投影和结算批次尚未发布',
+  reason: '支付与履约批次已发布；结算与后台批次尚未发布',
 } as const);
 
-export function canExecuteOrderAction(action: AllowedActionName) {
-  return executableOrderActionSet.has(action);
+export function canExecuteOrderAction(action: AllowedActionName, allowedActions?: readonly AllowedAction[]) {
+  return executableOrderActionSet.has(action)
+    && allowedActions?.some((item) => item.action === action && item.enabled) === true;
 }
 
 export const unavailableValue = '不可用';
