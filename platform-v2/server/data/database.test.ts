@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { PGlite } from '@electric-sql/pglite';
 import { appendAuditEntry, verifyAuditChain, type AuditRow } from './audit-chain.ts';
+import { PostgresNonceStore } from './auth-store.ts';
 import { reserveInventory } from './inventory.ts';
 import { applyMigrations, type SqlExecutor } from './migrations.ts';
 import { leaseDurableJobs } from './queue.ts';
@@ -75,6 +76,27 @@ test('inventory reservation is atomic, idempotent and cannot oversell', async ()
     assert.equal(replay.reservation_id, winner.value.reservation_id);
     const count = await db.query<{ count: string }>('SELECT count(*)::text AS count FROM core.inventory_reservations');
     assert.equal(count.rows[0]?.count, '1');
+  } finally {
+    await db.close();
+  }
+});
+
+test('PostgreSQL SIWE nonce consumption is atomic and one-use', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const store = new PostgresNonceStore(adapter(db));
+    const now = new Date('2026-07-14T00:00:00.000Z');
+    await store.save({
+      walletAddress: BUYER,
+      nonceHash: 'a'.repeat(64),
+      domain: 'mall.abu.test',
+      uri: 'https://mall.abu.test',
+      chainId: 56,
+      issuedAt: now,
+      expiresAt: new Date(now.getTime() + 60_000),
+    });
+    assert.ok(await store.consume(BUYER, 'a'.repeat(64), now));
+    assert.equal(await store.consume(BUYER, 'a'.repeat(64), now), undefined);
   } finally {
     await db.close();
   }
