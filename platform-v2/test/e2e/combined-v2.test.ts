@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { allowedActionNames, artifactVersion } from '../../../packages/core-artifacts/generated/index.js';
+import {
+  allowedActionNames,
+  artifactVersion,
+  executableOrderActionNames,
+} from '../../../packages/core-artifacts/generated/index.js';
 import { productBaseline as mallBaseline, isCoreOrderActionExecutable } from '../../../mall-v2/src/bootstrap.ts';
 import { productBaseline as merchantBaseline } from '../../../merchant-v2/src/bootstrap.ts';
 import { coreBoundary as merchantCore } from '../../../merchant-v2/src/core-boundary.ts';
@@ -23,15 +27,18 @@ const CONTRACT = '0x3333333333333333333333333333333333333333';
 const BUYER = '0x1111111111111111111111111111111111111111';
 const MERCHANT = '0x2222222222222222222222222222222222222222';
 
-test('all products consume one coordinated artifact and expose no executable write', () => {
+test('all products consume one coordinated artifact without bypassing runtime authorization', () => {
   assert.equal(mallBaseline.coreArtifacts, artifactVersion);
   assert.equal(merchantBaseline.coreArtifacts, artifactVersion);
   assert.equal(adminBaseline.artifactVersion, artifactVersion);
   assert.equal(merchantCore.artifactVersion, artifactVersion);
   assert.equal(merchantCore.artifactsAvailable, true);
-  assert.equal(adminBaseline.adminCapabilities.writes, false);
+  assert.equal(adminBaseline.adminCapabilities.writesWithoutRuntimeAuthorization, false);
   assert.equal(adminBaseline.adminCapabilities.projections, true);
-  for (const action of allowedActionNames) assert.equal(isCoreOrderActionExecutable(action), false, action);
+  for (const action of allowedActionNames) {
+    assert.equal(isCoreOrderActionExecutable(action), executableOrderActionNames.includes(action), action);
+  }
+  assert.equal(isCoreOrderActionExecutable('PAY_ORDER'), false);
 });
 
 test('ordinary and seckill quotes conserve funds and keep independent reservations', () => {
@@ -109,7 +116,7 @@ test('takeover, fulfillment and empty-session decisions preserve locked funds', 
     orderId: 'order-1',
     fulfillmentMode: 'DELIVERY' as const,
     state: 'PAID' as const,
-    paidAt,
+    paymentFinalizedAt: paidAt,
     takeoverOpened: false,
   };
   assert.equal(evaluateTakeover(delivery, new Date('2026-07-09T00:00:00.000Z')).customerFundsRemainLocked, true);
