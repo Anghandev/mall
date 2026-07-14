@@ -1,9 +1,17 @@
 import type {
+  AllowedAction,
   CatalogProduct,
+  CreateDeliveryTargetRequest,
+  CreatePickupTargetRequest,
+  DeliveryTarget,
+  FulfillmentOrder,
+  FulfillmentTarget,
+  MerchantStore,
   PaymentProjection,
   PaymentQuoteResponse,
   PaymentSubmissionRequest,
   PaymentSubmissionResponse,
+  PickupTarget,
   SeckillQuoteResponse,
   UserRole,
 } from '@abu24k/core-artifacts';
@@ -46,12 +54,19 @@ export interface CoreClient {
   createSeckillQuote(token: string, sessionId: string, selection: QuoteSelection): Promise<SeckillQuoteResponse>;
   submitPayment(token: string, request: PaymentSubmissionRequest): Promise<PaymentSubmissionResponse>;
   getPayment(token: string, orderId: string): Promise<PaymentProjection>;
+  listStores(regionCode?: string): Promise<readonly MerchantStore[]>;
+  createDeliveryTarget(token: string, request: CreateDeliveryTargetRequest): Promise<DeliveryTarget>;
+  createPickupTarget(token: string, request: CreatePickupTargetRequest): Promise<PickupTarget>;
+  listOrders(token: string): Promise<readonly FulfillmentOrder[]>;
+  getOrder(token: string, orderId: string): Promise<FulfillmentOrder>;
+  getOrderTarget(token: string, orderId: string): Promise<FulfillmentTarget>;
+  getOrderAllowedActions(token: string, orderId: string): Promise<readonly AllowedAction[]>;
 }
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 type HttpMethod = 'get' | 'post';
 
-const operations = Object.freeze({
+const paymentOperations = Object.freeze({
   bootstrap: operationPath('getBootstrap', 'get'),
   nonce: operationPath('createSiweNonce', 'post'),
   verify: operationPath('verifySiwe', 'post'),
@@ -61,6 +76,18 @@ const operations = Object.freeze({
   submission: operationPath('submitPaymentTransaction', 'post'),
   payment: operationPath('getPaymentProjection', 'get'),
 });
+
+const fulfillmentOperations = Object.freeze({
+  allowedActions: operationPath('getOrderAllowedActions', 'post'),
+  stores: operationPath('listMerchantStores', 'get'),
+  deliveryTarget: operationPath('createDeliveryTarget', 'post'),
+  pickupTarget: operationPath('createPickupTarget', 'post'),
+  orders: operationPath('listFulfillmentOrders', 'get'),
+  order: operationPath('getFulfillmentOrder', 'get'),
+  orderTarget: operationPath('getOrderFulfillmentTarget', 'get'),
+});
+
+const operations = Object.freeze({ ...paymentOperations, ...fulfillmentOperations });
 
 export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } = {}): CoreClient {
   const baseUrl = input.baseUrl?.replace(/\/$/, '') ?? '';
@@ -141,6 +168,68 @@ export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } 
       await assertPaymentQuoteIntegrity(projection);
       return projection;
     },
+
+    async listStores(regionCode) {
+      const query = regionCode ? `?regionCode=${encodeURIComponent(regionCode)}` : '';
+      const value = await requestJson<{ stores: readonly MerchantStore[] }>(
+        fetcher,
+        `${baseUrl}${operations.stores}${query}`,
+      );
+      if (!Array.isArray(value.stores)) throw new CoreClientError('InvalidResponse', '门店列表响应无效');
+      return value.stores;
+    },
+
+    createDeliveryTarget(token, request) {
+      return postAuthorized<DeliveryTarget>(fetcher, `${baseUrl}${operations.deliveryTarget}`, token, request);
+    },
+
+    createPickupTarget(token, request) {
+      return postAuthorized<PickupTarget>(fetcher, `${baseUrl}${operations.pickupTarget}`, token, request);
+    },
+
+    async listOrders(token) {
+      const value = await requestJson<{ orders: readonly FulfillmentOrder[] }>(
+        fetcher,
+        `${baseUrl}${operations.orders}`,
+        { headers: authorizedHeaders(token) },
+      );
+      if (!Array.isArray(value.orders)) throw new CoreClientError('InvalidResponse', '订单列表响应无效');
+      value.orders.forEach(assertFulfillmentOrderVersion);
+      return value.orders;
+    },
+
+    async getOrder(token, orderId) {
+      const value = await requestJson<{ order: FulfillmentOrder }>(
+        fetcher,
+        `${baseUrl}${orderPath(operations.order, orderId)}`,
+        { headers: authorizedHeaders(token) },
+      );
+      assertFulfillmentOrderVersion(value.order);
+      return value.order;
+    },
+
+    async getOrderTarget(token, orderId) {
+      const value = await requestJson<{ target: FulfillmentTarget }>(
+        fetcher,
+        `${baseUrl}${orderPath(operations.orderTarget, orderId)}`,
+        { headers: authorizedHeaders(token) },
+      );
+      return value.target;
+    },
+
+    async getOrderAllowedActions(token, orderId) {
+      const value = await postAuthorized<{ allowedActions: readonly AllowedAction[] }>(
+        fetcher,
+        `${baseUrl}${operations.allowedActions}`,
+        token,
+        { orderId },
+      );
+      if (!Array.isArray(value.allowedActions)) {
+        throw new CoreClientError('InvalidResponse', '订单允许操作响应无效');
+      }
+      return value.allowedActions;
+    },
+
   };
 }
 
@@ -267,6 +356,22 @@ function authorizedHeaders(token: string) {
   return { ...jsonHeaders(), authorization: `Bearer ${token}` };
 }
 
+function postAuthorized<T>(fetcher: FetchLike, url: string, token: string, body: unknown) {
+  return requestJson<T>(fetcher, url, {
+    method: 'POST',
+    headers: authorizedHeaders(token),
+    body: JSON.stringify(body),
+  });
+}
+
+function orderPath(path: string, orderId: string) {
+  return path.replace('{orderId}', encodeURIComponent(orderId));
+}
+
+function assertFulfillmentOrderVersion(order: FulfillmentOrder) {
+  assertArtifactVersion(order.artifactVersion);
+}
+
 function operationPath(operationId: string, method: HttpMethod) {
   for (const [path, entry] of Object.entries(openApi.paths)) {
     const operation = (entry as Partial<Record<HttpMethod, { operationId?: string }>>)[method];
@@ -275,4 +380,5 @@ function operationPath(operationId: string, method: HttpMethod) {
   throw new Error(`Coordinated OpenAPI operation is missing: ${operationId}`);
 }
 
-export const coordinatedPaymentOperations = operations;
+export const coordinatedPaymentOperations = paymentOperations;
+export const coordinatedFulfillmentOperations = fulfillmentOperations;

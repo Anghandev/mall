@@ -8,8 +8,12 @@ import {
   type ReactNode,
 } from 'react';
 import type {
+  AllowedAction,
   CatalogProduct,
   CatalogSku,
+  FulfillmentOrder,
+  FulfillmentTarget,
+  MerchantStore,
   PaymentProjection,
   PaymentQuoteResponse,
   PaymentSubmissionRequest,
@@ -30,10 +34,21 @@ import { createBrowserWalletGateway, type ApprovalStatus, type WalletGateway } f
 type SignedQuote = PaymentQuoteResponse | SeckillQuoteResponse;
 type LoadState = 'loading' | 'ready' | 'empty' | 'error';
 
+export interface BrowserPosition {
+  latitude: number;
+  longitude: number;
+}
+
+export interface DeliveryTargetDraft {
+  recipientName: string;
+  phone: string;
+  address: string;
+}
+
 export interface MallServices {
   core: CoreClient;
   wallet: WalletGateway;
-  resolveCheckoutTarget(mode: 'DELIVERY' | 'PICKUP'): Promise<CheckoutTarget | null>;
+  getCurrentPosition(): Promise<BrowserPosition>;
   createIdempotencyKey(): string;
   submissionStore: SubmissionStore;
   walletWritesAuthorized: boolean;
@@ -56,6 +71,17 @@ export interface MallRuntimeValue {
   bootstrap: CorePaymentAvailability | null;
   catalog: readonly CatalogProduct[];
   catalogState: LoadState;
+  stores: readonly MerchantStore[];
+  storesState: LoadState;
+  location: BrowserPosition | null;
+  locationState: 'idle' | 'loading' | 'ready' | 'error';
+  checkoutTarget: CheckoutTarget | null;
+  orders: readonly FulfillmentOrder[];
+  ordersState: 'idle' | LoadState;
+  orderActions: Readonly<Record<string, readonly AllowedAction[]>>;
+  orderTargets: Readonly<Record<string, FulfillmentTarget>>;
+  orderCapabilityErrors: Readonly<Record<string, string>>;
+  fulfillmentEvidenceStatus: 'NOT_PUBLISHED_FAIL_CLOSED';
   session: WalletSession | null;
   selectedProduct: CatalogProduct | null;
   selectedSku: CatalogSku | null;
@@ -71,6 +97,11 @@ export interface MallRuntimeValue {
   walletWritesAuthorized: boolean;
   connectWallet(): Promise<void>;
   reloadCatalog(): Promise<void>;
+  reloadStores(regionCode?: string): Promise<void>;
+  requestLocation(): Promise<void>;
+  createDeliveryTarget(draft: DeliveryTargetDraft): Promise<void>;
+  createPickupTarget(storeId: string): Promise<void>;
+  reloadOrders(): Promise<void>;
   selectProduct(productId: string): void;
   selectSku(skuId: string): void;
   setQuantity(quantity: number): void;
@@ -96,6 +127,16 @@ export function MallRuntimeProvider({
   const [bootstrap, setBootstrap] = useState<CorePaymentAvailability | null>(null);
   const [catalog, setCatalog] = useState<readonly CatalogProduct[]>([]);
   const [catalogState, setCatalogState] = useState<LoadState>('loading');
+  const [stores, setStores] = useState<readonly MerchantStore[]>([]);
+  const [storesState, setStoresState] = useState<LoadState>('loading');
+  const [location, setLocation] = useState<BrowserPosition | null>(null);
+  const [locationState, setLocationState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [checkoutTarget, setCheckoutTarget] = useState<CheckoutTarget | null>(null);
+  const [orders, setOrders] = useState<readonly FulfillmentOrder[]>([]);
+  const [ordersState, setOrdersState] = useState<'idle' | LoadState>('idle');
+  const [orderActions, setOrderActions] = useState<Readonly<Record<string, readonly AllowedAction[]>>>({});
+  const [orderTargets, setOrderTargets] = useState<Readonly<Record<string, FulfillmentTarget>>>({});
+  const [orderCapabilityErrors, setOrderCapabilityErrors] = useState<Readonly<Record<string, string>>>({});
   const [session, setSession] = useState<WalletSession | null>(null);
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const [selectedSkuId, setSelectedSkuId] = useState<string | null>(null);
@@ -132,10 +173,36 @@ export function MallRuntimeProvider({
     };
   }, [services]);
 
+  useEffect(() => {
+    let active = true;
+    void services.core.listStores()
+      .then((nextStores) => {
+        if (!active) return;
+        setStores(nextStores);
+        setStoresState(nextStores.length > 0 ? 'ready' : 'empty');
+      })
+      .catch(() => {
+        if (!active) return;
+        setStoresState('error');
+      });
+    return () => { active = false; };
+  }, [services]);
+
   const value = useMemo<MallRuntimeValue>(() => ({
     bootstrap,
     catalog,
     catalogState,
+    stores,
+    storesState,
+    location,
+    locationState,
+    checkoutTarget,
+    orders,
+    ordersState,
+    orderActions,
+    orderTargets,
+    orderCapabilityErrors,
+    fulfillmentEvidenceStatus: 'NOT_PUBLISHED_FAIL_CLOSED',
     session,
     selectedProduct,
     selectedSku,
@@ -162,6 +229,12 @@ export function MallRuntimeProvider({
         setPendingSubmission(recovered);
         setSubmittedTxHash(recovered?.txHash ?? null);
         setSession(nextSession);
+        try {
+          await loadOrderBundle(nextSession);
+        } catch (reason) {
+          setOrdersState('error');
+          setError(errorMessage(reason));
+        }
       });
     },
 
@@ -172,6 +245,69 @@ export function MallRuntimeProvider({
         setCatalog(products);
         setCatalogState(products.length > 0 ? 'ready' : 'empty');
       }, () => setCatalogState('error'));
+    },
+
+    async reloadStores(regionCode) {
+      setStoresState('loading');
+      await run(async () => {
+        const nextStores = await services.core.listStores(regionCode);
+        setStores(nextStores);
+        setStoresState(nextStores.length > 0 ? 'ready' : 'empty');
+      }, () => setStoresState('error'));
+    },
+
+    async requestLocation() {
+      setLocationState('loading');
+      await run(async () => {
+        const nextLocation = await services.getCurrentPosition();
+        setLocation(nextLocation);
+        setLocationState('ready');
+      }, () => setLocationState('error'));
+    },
+
+    async createDeliveryTarget(draft) {
+      await run(async () => {
+        const activeSession = requireSession();
+        assertDeliveryTargetDraft(draft);
+        const nextLocation = location ?? await services.getCurrentPosition();
+        setLocation(nextLocation);
+        setLocationState('ready');
+        const target = await services.core.createDeliveryTarget(activeSession.token, {
+          idempotencyKey: services.createIdempotencyKey(),
+          ...draft,
+          ...nextLocation,
+        });
+        setCheckoutTarget({
+          fulfillmentMode: target.fulfillmentMode,
+          fulfillmentTargetHash: target.targetHash,
+          regionCodeHash: target.regionCodeHash,
+          label: `${draft.recipientName} · ${draft.address}`,
+        });
+        clearQuoteState();
+      });
+    },
+
+    async createPickupTarget(storeId) {
+      await run(async () => {
+        const activeSession = requireSession();
+        const store = stores.find((item) => item.storeId === storeId && item.status === 'ACTIVE');
+        if (!store) throw new CoreClientError('InvalidRequest', '请选择当前可用门店');
+        const target = await services.core.createPickupTarget(activeSession.token, {
+          idempotencyKey: services.createIdempotencyKey(),
+          storeId: store.storeId,
+        });
+        setCheckoutTarget({
+          fulfillmentMode: target.fulfillmentMode,
+          fulfillmentTargetHash: target.targetHash,
+          regionCodeHash: target.regionCodeHash,
+          label: `${target.store.name} · ${target.store.address}`,
+        });
+        clearQuoteState();
+      });
+    },
+
+    async reloadOrders() {
+      await run(async () => loadOrderBundle(requireSession()), () => setOrdersState('error'));
     },
 
     selectProduct(productId) {
@@ -198,6 +334,7 @@ export function MallRuntimeProvider({
     setFulfillmentMode(mode) {
       if (pendingSubmission) return setError('当前链上交易尚未提交到 Core，请先恢复跟踪');
       setFulfillmentModeState(mode);
+      if (checkoutTarget?.fulfillmentMode !== mode) setCheckoutTarget(null);
       clearPaymentState();
     },
 
@@ -294,8 +431,16 @@ export function MallRuntimeProvider({
     busy,
     catalog,
     catalogState,
+    checkoutTarget,
     error,
     fulfillmentMode,
+    location,
+    locationState,
+    orderActions,
+    orderCapabilityErrors,
+    orders,
+    ordersState,
+    orderTargets,
     projection,
     pendingSubmission,
     quantity,
@@ -304,6 +449,8 @@ export function MallRuntimeProvider({
     selectedSku,
     services,
     session,
+    stores,
+    storesState,
     submittedTxHash,
   ]);
 
@@ -338,7 +485,7 @@ export function MallRuntimeProvider({
     if (BigInt(selectedSku.stockAvailable) < BigInt(quantity)) {
       throw new CoreClientError('InventoryUnavailable', '抱歉，该规格商品刚刚已被抢光，请重新选择规格！');
     }
-    const target = await services.resolveCheckoutTarget(fulfillmentMode);
+    const target = checkoutTarget;
     if (!target || target.fulfillmentMode !== fulfillmentMode) {
       throw new CoreClientError(
         'ExternalBlocked',
@@ -357,11 +504,40 @@ export function MallRuntimeProvider({
   }
 
   function clearPaymentState() {
+    clearQuoteState();
+    setPendingSubmission(null);
+    setSubmittedTxHash(null);
+  }
+
+  function clearQuoteState() {
     setQuote(null);
     setProjection(null);
     setApprovals([]);
-    setPendingSubmission(null);
-    setSubmittedTxHash(null);
+  }
+
+  async function loadOrderBundle(activeSession: WalletSession) {
+    setOrdersState('loading');
+    const nextOrders = await services.core.listOrders(activeSession.token);
+    const actions: Record<string, readonly AllowedAction[]> = {};
+    const targets: Record<string, FulfillmentTarget> = {};
+    const capabilityErrors: Record<string, string> = {};
+    await Promise.all(nextOrders.map(async (order) => {
+      const [actionResult, targetResult] = await Promise.allSettled([
+        services.core.getOrderAllowedActions(activeSession.token, order.orderId),
+        services.core.getOrderTarget(activeSession.token, order.orderId),
+      ]);
+      if (actionResult.status === 'fulfilled') actions[order.orderId] = actionResult.value;
+      else capabilityErrors[order.orderId] = '订单允许操作暂不可用';
+      if (targetResult.status === 'fulfilled') targets[order.orderId] = targetResult.value;
+      else capabilityErrors[order.orderId] = capabilityErrors[order.orderId]
+        ? `${capabilityErrors[order.orderId]}；履约目标暂不可用`
+        : '履约目标暂不可用';
+    }));
+    setOrders(nextOrders);
+    setOrderActions(actions);
+    setOrderTargets(targets);
+    setOrderCapabilityErrors(capabilityErrors);
+    setOrdersState(nextOrders.length > 0 ? 'ready' : 'empty');
   }
 
   async function submitAndRefresh(submission: PendingSubmission) {
@@ -390,8 +566,20 @@ export function useMallRuntime() {
 export const defaultMallServices: MallServices = Object.freeze({
   core: createCoreClient(),
   wallet: createBrowserWalletGateway(),
-  async resolveCheckoutTarget() {
-    return null;
+  async getCurrentPosition() {
+    if (!globalThis.navigator?.geolocation) {
+      throw new CoreClientError('ExternalBlocked', '当前设备未提供安全定位能力');
+    }
+    return new Promise<BrowserPosition>((resolve, reject) => {
+      globalThis.navigator.geolocation.getCurrentPosition(
+        (position) => resolve({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        }),
+        () => reject(new CoreClientError('ExternalBlocked', '未取得设备定位授权')),
+        { enableHighAccuracy: true, maximumAge: 30_000, timeout: 10_000 },
+      );
+    });
   },
   createIdempotencyKey() {
     return `mall-${globalThis.crypto.randomUUID()}`;
@@ -412,6 +600,12 @@ function readinessError(bootstrap: CorePaymentAvailability | null) {
     return new CoreClientError('ExternalBlocked', '支付基础设施尚未就绪');
   }
   return new CoreClientError('ConfigurationRequired', '新支付当前已安全停用');
+}
+
+function assertDeliveryTargetDraft(draft: DeliveryTargetDraft) {
+  if (!draft.recipientName.trim() || !/^\d{11}$/.test(draft.phone) || draft.address.trim().length < 5) {
+    throw new CoreClientError('InvalidRequest', '请完整填写收货人、11 位手机号和详细地址');
+  }
 }
 
 function errorMessage(reason: unknown) {

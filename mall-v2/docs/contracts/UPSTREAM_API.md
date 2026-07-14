@@ -23,6 +23,8 @@ The following later batches remain unpublished:
 
 - seckill session state, timers, reports and event cursor;
 - saved-address/profile persistence and PII-safe address parsing;
+- canonical buyer-evidence generation/upload required before Mall may execute
+  exchange, delay, receipt, pickup, arbitration or takeover commands;
 - reward and signed-settlement projections;
 - settlement `allowedActions` and exact disabled reasons;
 - fulfillment and settlement WebSocket cursor replay.

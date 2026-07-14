@@ -13,12 +13,17 @@ Requirement Matrix and consumes only coordinated Core artifacts.
 - Prices, payment legs, allocation amounts and finality are rendered exactly
   from Core responses. The Mall does not recalculate them or treat a submitted
   TxHash as final.
-- The fulfillment checkpoint publishes stores, checkout targets, order
-  projections, logistics and fulfillment action contracts. Their Mall consumer
-  wiring remains a separate batch and stays fail closed until implemented.
+- The Mall consumes published stores, browser-location-backed delivery/pickup
+  targets, wallet-scoped order/target projections, logistics, balances and
+  current-session `allowedActions`. No endpoint, amount or state is duplicated
+  locally.
+- Buyer fulfillment commands remain fail closed even when `allowedActions`
+  enables them because Core has not published canonical buyer-evidence
+  creation/upload semantics for the required `evidenceHash`.
 - The coordinated manifest still has `deploymentAuthorized=false` and no
   executable `PAY_ORDER`. Wallet broadcast therefore remains fail closed until
-  Core publishes deployment evidence. Seckill-session projections also remain
+  Core publishes deployment evidence. Native navigation, production-device GPS
+  evidence and seckill-session projections also remain externally blocked or
   unpublished rather than using production fixtures.
 - The copied brand assets in `public/brand/` have no runtime dependency on the
   read-only legacy tree.
