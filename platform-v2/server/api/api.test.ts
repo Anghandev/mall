@@ -874,6 +874,15 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       submitPayment: async (buyerWallet, input) => ({ ...input, buyerWallet, state: 'SUBMITTED' }),
       getPayment: async (buyerWallet, orderId) => ({ orderId, buyerWallet, state: 'SUBMITTED' }),
     },
+    seckillService: {
+      current: async () => ({ sessionId: SESSION_ID, phase: 'LIVE' }),
+      get: async (sessionId) => ({ sessionId, phase: 'LIVE' }),
+      history: async (input) => ({ items: [], nextCursor: input?.cursor ?? null }),
+      events: async (sessionId, input) => ({
+        items: [{ sessionId, cursor: '1', eventType: 'SeckillRelayExtended' }],
+        nextCursor: input?.cursor ?? '1',
+      }),
+    },
     fulfillmentService: {
       getOrder: async (_actor, orderId) => ({ orderId, state: 'DELIVERED' }),
       listOrders: async () => [{ orderId: 'order-1', state: 'DELIVERED' }],
@@ -1006,6 +1015,14 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     assert.ok(bootstrap.headers.get('x-correlation-id'));
     const catalog = await fetch(`${base}/v2/catalog/products`);
     assert.equal(catalog.status, 200);
+    const seckillCurrent = await fetch(`${base}/v2/seckill/sessions/current`);
+    assert.equal(seckillCurrent.status, 200);
+    assert.equal(((await seckillCurrent.json()) as { sessionId: string }).sessionId, SESSION_ID);
+    const seckillEvents = await fetch(`${base}/v2/seckill/sessions/${SESSION_ID}/events?cursor=0&limit=20`);
+    assert.equal(seckillEvents.status, 200);
+    assert.equal(((await seckillEvents.json()) as { items: unknown[] }).items.length, 1);
+    assert.equal((await fetch(`${base}/v2/seckill/sessions/${SESSION_ID}`)).status, 200);
+    assert.equal((await fetch(`${base}/v2/seckill/sessions/history?limit=20`)).status, 200);
 
     const extraField = await fetch(`${base}/v2/auth/nonce`, {
       method: 'POST',

@@ -35,7 +35,7 @@ import {
   GuaranteeDepositService,
   type GuaranteeDepositChainObservation,
 } from './guarantee-deposit-service.ts';
-import { PostgresIndexerStore } from './indexer-store.ts';
+import { PostgresIndexerStore, recordSeckillRelayProjection } from './indexer-store.ts';
 import { reserveInventory } from './inventory.ts';
 import { applyMigrations, type SqlExecutor, type SqlTransactionRunner } from './migrations.ts';
 import {
@@ -46,6 +46,7 @@ import {
 } from './payment-store.ts';
 import { leaseDurableJobs } from './queue.ts';
 import { SettlementService } from './settlement-service.ts';
+import { SeckillService } from './seckill-service.ts';
 import { TakeoverFundingService, type TakeoverFundingApprovalInput } from './takeover-funding-service.ts';
 import { PolicyService } from './policy-service.ts';
 import { NotificationService } from './notification-service.ts';
@@ -84,6 +85,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '006_fulfillment.sql',
       '007_settlement_admin.sql',
       '008_admin_services.sql',
+      '009_product_surfaces.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -660,7 +662,7 @@ test('seckill quote locks both inventories and final classification releases the
   const db = await createBusinessDatabase();
   try {
     await seedCatalog(db, 1);
-    const now = new Date();
+    const now = new Date(Math.floor(Date.now() / 1000) * 1000);
     const sessionId = `0x${'f'.repeat(64)}`;
     await insertLiveSeckillSession(db, sessionId, now, 90);
     const ids = [`0x${'8'.repeat(64)}`, `0x${'d'.repeat(64)}`, `0x${'e'.repeat(64)}`];
@@ -726,9 +728,82 @@ test('seckill quote locks both inventories and final classification releases the
     assert.deepEqual(reserved.rows[0], { stock_reserved: 1, session_reserved: 1 });
 
     const event = paymentInput(quote.dual.seckill, 'SECKILL');
+    event.event.blockTimestamp = new Date(now.getTime() + 42_000);
+    event.event.finalizedAt = new Date(now.getTime() + 84_000);
     const store = new PostgresPaymentStore(transactionAdapter(db));
     await store.record(event);
+    const relayBeforeFinality = await db.query<{ relay_deadline: Date }>(
+      'SELECT relay_deadline FROM core.seckill_sessions WHERE session_id = $1',
+      [sessionId],
+    );
+    const relayDeadline = Math.floor(relayBeforeFinality.rows[0]!.relay_deadline.getTime() / 1000) + 30;
+    await assert.rejects(
+      recordSeckillRelayProjection(
+        adapter(db),
+        {
+          number: event.event.blockNumber,
+          hash: event.event.blockHash,
+          parentHash: blockHash(event.event.blockNumber - 1),
+          timestamp: Math.floor(event.event.blockTimestamp.getTime() / 1000),
+        },
+        decodedSeckillRelayEvent(sessionId, quote.orderId, event.event.blockHash, relayDeadline + 1),
+      ),
+      /deadline does not match the Router event/,
+    );
+    await recordSeckillRelayProjection(
+      adapter(db),
+      {
+        number: event.event.blockNumber,
+        hash: event.event.blockHash,
+        parentHash: blockHash(event.event.blockNumber - 1),
+        timestamp: Math.floor(event.event.blockTimestamp.getTime() / 1000),
+      },
+      decodedSeckillRelayEvent(sessionId, quote.orderId, event.event.blockHash, relayDeadline),
+    );
+    const relayAfterIndexing = await db.query<{ relay_deadline: Date }>(
+      'SELECT relay_deadline FROM core.seckill_sessions WHERE session_id = $1',
+      [sessionId],
+    );
+    assert.equal(
+      relayAfterIndexing.rows[0]!.relay_deadline.getTime(),
+      relayBeforeFinality.rows[0]!.relay_deadline.getTime() + 30_000,
+    );
     await advancePaymentFinality(adapter(db), event.event.blockNumber + 14);
+    const relayAfterFinality = await db.query<{ relay_deadline: Date; events: string }>(
+      `SELECT session.relay_deadline,
+         (SELECT count(*)::text FROM core.outbox_events
+          WHERE event_type = 'SeckillRelayExtended' AND aggregate_id = session.session_id) AS events
+       FROM core.seckill_sessions session WHERE session.session_id = $1`,
+      [sessionId],
+    );
+    assert.equal(
+      relayAfterFinality.rows[0]!.relay_deadline.getTime(),
+      relayAfterIndexing.rows[0]!.relay_deadline.getTime(),
+    );
+    assert.equal(relayAfterFinality.rows[0]!.events, '1');
+    const seckill = new SeckillService({
+      transactions: transactionAdapter(db),
+      clock: () => new Date(now.getTime() + 84_000),
+    });
+    const currentSession = await seckill.current();
+    assert.equal(currentSession.sessionId, sessionId);
+    assert.equal(currentSession.phase, 'LIVE');
+    assert.equal(currentSession.timers.mainDurationSeconds, 3_600);
+    assert.equal(currentSession.timers.relayInitialSeconds, 60);
+    assert.equal(currentSession.timers.relayIncrementSeconds, 30);
+    assert.equal(currentSession.timers.relayCapSeconds, 60);
+    assert.equal(currentSession.inventory.available, '0');
+    const publicEvents = await seckill.events(sessionId, { cursor: '0', limit: 20 });
+    assert.equal(publicEvents.items.length, 1);
+    assert.equal(publicEvents.items[0]!.eventType, 'SeckillRelayExtended');
+    assert.equal(publicEvents.items[0]!.payload.relayDeadline, relayAfterFinality.rows[0]!.relay_deadline.toISOString());
+    assert.equal(publicEvents.items[0]!.payload.extensionSeconds, 30);
+    assert.equal(publicEvents.nextCursor, publicEvents.items[0]!.cursor);
+    assert.deepEqual(await seckill.events(sessionId, { cursor: publicEvents.nextCursor }), {
+      items: [],
+      nextCursor: publicEvents.nextCursor,
+    });
+    assert.throws(() => seckill.events(sessionId, { cursor: '-1' }), /Invalid event cursor/);
     const inventory = await db.query<{
       stock_available: number;
       stock_reserved: number;
@@ -754,6 +829,16 @@ test('seckill quote locks both inventories and final classification releases the
       canonicalBlock: true,
       classification: 'SECKILL',
     });
+    await advancePaymentFinality(adapter(db), event.event.blockNumber + 20);
+    const relayAfterReplay = await db.query<{ relay_deadline: Date; events: string }>(
+      `SELECT session.relay_deadline,
+         (SELECT count(*)::text FROM core.outbox_events
+          WHERE event_type = 'SeckillRelayExtended' AND aggregate_id = session.session_id) AS events
+       FROM core.seckill_sessions session WHERE session.session_id = $1`,
+      [sessionId],
+    );
+    assert.equal(relayAfterReplay.rows[0]!.relay_deadline.getTime(), relayAfterFinality.rows[0]!.relay_deadline.getTime());
+    assert.equal(relayAfterReplay.rows[0]!.events, '1');
     await assertLedgerBalanced(db, 1, { usdt: 63n, nplReward: 90n, bnm: 90n });
 
     const fulfillment = new FulfillmentService({
@@ -800,6 +885,18 @@ test('seckill quote locks both inventories and final classification releases the
     );
     const replacementBlockHash = `0x${'4'.repeat(64)}`;
     await store.reverse(selectedEventKey, replacementBlockHash);
+    const relayAfterReorg = await db.query<{ relay_deadline: Date; canonical_events: string; reorg_events: string }>(
+      `SELECT session.relay_deadline,
+         (SELECT count(*)::text FROM core.seckill_relay_events
+          WHERE session_id = session.session_id AND canonical) AS canonical_events,
+         (SELECT count(*)::text FROM core.outbox_events
+          WHERE event_type = 'SeckillRelayReorged' AND aggregate_id = session.session_id) AS reorg_events
+       FROM core.seckill_sessions session WHERE session.session_id = $1`,
+      [sessionId],
+    );
+    assert.equal(relayAfterReorg.rows[0]!.relay_deadline.getTime(), relayBeforeFinality.rows[0]!.relay_deadline.getTime());
+    assert.equal(relayAfterReorg.rows[0]!.canonical_events, '0');
+    assert.equal(relayAfterReorg.rows[0]!.reorg_events, '1');
     for (const state of ['LOCKED', 'AVAILABLE', 'DISPUTED']) {
       assert.deepEqual(await liabilityStates(db, quote.orderId, state), {});
     }
@@ -5793,6 +5890,32 @@ function decodedPaymentEvent(intent: CanonicalPaymentIntent, canonicalBlockHash:
       bnmLocked: intent.bnmAmount,
       reservationId: intent.reservationId,
       snapshotHash: paymentIntentHash(intent),
+    },
+  };
+}
+
+function decodedSeckillRelayEvent(
+  sessionId: string,
+  orderId: string,
+  canonicalBlockHash: string,
+  relayDeadline: number,
+) {
+  return {
+    artifactVersion: CORE_ARTIFACT_VERSION,
+    contract: 'PaymentRouterV2',
+    eventName: 'SeckillRelayExtended',
+    eventSignature: 'SeckillRelayExtended(bytes32,bytes32,uint64)',
+    resourceId: sessionId,
+    contractAddress: '0x9999999999999999999999999999999999999999',
+    eventHash: HASH_2,
+    transactionHash: `0x${'6'.repeat(64)}`,
+    blockHash: canonicalBlockHash,
+    blockNumber: 100,
+    logIndex: 1,
+    values: {
+      sessionId,
+      orderId,
+      relayDeadline: String(relayDeadline),
     },
   };
 }

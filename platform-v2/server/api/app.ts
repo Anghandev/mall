@@ -67,6 +67,13 @@ export interface PaymentApiService {
   getPayment(buyerWallet: string, orderId: string): Promise<unknown>;
 }
 
+export interface SeckillApiService {
+  current(): Promise<unknown>;
+  get(sessionId: string): Promise<unknown>;
+  history(input?: { cursor?: string; limit?: number }): Promise<unknown>;
+  events(sessionId: string, input?: { cursor?: string; limit?: number }): Promise<unknown>;
+}
+
 export interface FulfillmentApiService {
   getOrder(actor: FulfillmentActor, orderId: string): Promise<unknown>;
   listOrders(actor: FulfillmentActor): Promise<unknown>;
@@ -254,6 +261,7 @@ export interface ApiDependencies {
   getOrderProjection(orderId: string): Promise<OrderProjection | undefined>;
   getPausedScopes(): Promise<ActionContext['pausedScopes']>;
   paymentService: PaymentApiService;
+  seckillService: SeckillApiService;
   fulfillmentService: FulfillmentApiService;
   fulfillmentTargetService: FulfillmentTargetApiService;
   settlementService: SettlementApiService;
@@ -308,6 +316,34 @@ async function route(
       },
       correlationId,
     );
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/seckill/sessions/current') {
+    sendJson(response, 200, await dependencies.seckillService.current(), correlationId);
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/seckill/sessions/history') {
+    sendJson(response, 200, await dependencies.seckillService.history({
+      ...(url.searchParams.get('cursor') ? { cursor: url.searchParams.get('cursor')! } : {}),
+      ...(url.searchParams.get('limit')
+        ? { limit: optionalPositiveIntegerParameter(url.searchParams.get('limit'), 'limit')! }
+        : {}),
+    }), correlationId);
+    return;
+  }
+  const seckillEvents = url.pathname.match(/^\/v2\/seckill\/sessions\/(0x[0-9a-fA-F]{64})\/events$/);
+  if (request.method === 'GET' && seckillEvents) {
+    sendJson(response, 200, await dependencies.seckillService.events(seckillEvents[1]!, {
+      ...(url.searchParams.get('cursor') ? { cursor: url.searchParams.get('cursor')! } : {}),
+      ...(url.searchParams.get('limit')
+        ? { limit: optionalPositiveIntegerParameter(url.searchParams.get('limit'), 'limit')! }
+        : {}),
+    }), correlationId);
+    return;
+  }
+  const seckillSession = url.pathname.match(/^\/v2\/seckill\/sessions\/(0x[0-9a-fA-F]{64})$/);
+  if (request.method === 'GET' && seckillSession) {
+    sendJson(response, 200, await dependencies.seckillService.get(seckillSession[1]!), correlationId);
     return;
   }
   if (await routeAdminServices(dependencies, request, response, url, correlationId)) return;

@@ -135,13 +135,136 @@ export class PostgresIndexerStore implements IndexerStore {
 async function projectPayments(executor: SqlExecutor, segment: IndexedChainBlock[]) {
   const canonicalHead = segment.at(-1)!.block.number;
   for (const { block, events } of segment) {
-    for (const event of events) {
+    const ordered = [...events].sort((left, right) => left.logIndex - right.logIndex);
+    for (const event of ordered) {
       if (event.contract !== 'PaymentRouterV2' || event.eventName !== 'PaymentCompleted') continue;
       await recordPaymentProjection(executor, {
         event: canonicalPaymentEvent(block, event, segment, canonicalHead),
       });
     }
+    for (const event of ordered) {
+      if (event.contract !== 'PaymentRouterV2' || event.eventName !== 'SeckillRelayExtended') continue;
+      await recordSeckillRelayProjection(executor, block, event);
+    }
   }
+}
+
+export async function recordSeckillRelayProjection(
+  executor: SqlExecutor,
+  block: IndexedChainBlock['block'],
+  event: IndexedChainBlock['events'][number],
+) {
+  if (event.contract !== 'PaymentRouterV2' || event.eventName !== 'SeckillRelayExtended') {
+    throw new CoreError('InvalidFinality', 'Expected a PaymentRouter SeckillRelayExtended event', 409);
+  }
+  const sessionId = relayValue(event.values, 'sessionId').toLowerCase();
+  const orderId = relayValue(event.values, 'orderId').toLowerCase();
+  if (sessionId !== event.resourceId.toLowerCase()) {
+    throw new CoreError('InvalidFinality', 'Seckill relay resource does not match its session', 409);
+  }
+  const emittedDeadline = safeRelayInteger(event.values, 'relayDeadline');
+  const relayEventKey = paymentEventKey(event.transactionHash, event.logIndex, event.blockHash);
+  const existing = await executor.query<{
+    session_id: string;
+    order_id: string;
+    transaction_hash: string;
+    block_hash: string;
+    log_index: string | number;
+    relay_deadline: Date;
+    canonical: boolean;
+  }>('SELECT * FROM core.seckill_relay_events WHERE relay_event_key = $1', [relayEventKey]);
+  if (existing.rows[0]) {
+    const row = existing.rows[0];
+    if (
+      row.session_id.toLowerCase() !== sessionId
+      || row.order_id.toLowerCase() !== orderId
+      || row.transaction_hash.toLowerCase() !== event.transactionHash.toLowerCase()
+      || row.block_hash.toLowerCase() !== event.blockHash.toLowerCase()
+      || Number(row.log_index) !== event.logIndex
+      || Math.floor(row.relay_deadline.getTime() / 1000) !== emittedDeadline
+      || !row.canonical
+    ) throw new CoreError('IdempotencyConflict', 'Seckill relay event identity changed', 409);
+    return { status: 'IDEMPOTENT' as const, sessionId, orderId, relayDeadline: row.relay_deadline };
+  }
+  const context = await executor.query<{
+    payment_event_key: string;
+    buyer_wallet: string;
+    session_id: string;
+    relay_deadline: Date;
+    main_deadline: Date;
+    phase: string;
+    relay_increment: string | number;
+    relay_cap: string | number;
+  }>(
+    `SELECT payment.event_key AS payment_event_key, orders.buyer_wallet,
+       session.session_id, session.relay_deadline, session.main_deadline,
+       session.phase,
+       policy.payload ->> 'relayIncrement' AS relay_increment,
+       policy.payload ->> 'relayCap' AS relay_cap
+     FROM core.payment_events payment
+     JOIN core.orders orders ON orders.order_id = payment.order_id
+     JOIN core.seckill_sessions session
+       ON session.session_id = orders.seckill_snapshot ->> 'sessionId'
+     JOIN core.policy_snapshots policy
+       ON policy.policy_version = session.policy_version
+     WHERE payment.order_id = $1 AND payment.transaction_hash = $2
+       AND payment.block_hash = $3 AND payment.canonical
+       AND payment.classification = 'SECKILL' AND payment.log_index < $4
+     FOR UPDATE OF session`,
+    [orderId, event.transactionHash.toLowerCase(), event.blockHash.toLowerCase(), event.logIndex],
+  );
+  const row = context.rows[0];
+  if (!row || row.session_id.toLowerCase() !== sessionId || row.phase !== 'LIVE') {
+    throw new CoreError('InvalidFinality', 'Seckill relay event has no matching live payment session', 409);
+  }
+  const previousDeadline = Math.floor(row.relay_deadline.getTime() / 1000);
+  const mainDeadline = Math.floor(row.main_deadline.getTime() / 1000);
+  const relayIncrement = Number(row.relay_increment);
+  const relayCap = Number(row.relay_cap);
+  if (
+    block.hash.toLowerCase() !== event.blockHash.toLowerCase()
+    || block.number !== event.blockNumber
+    || block.timestamp >= previousDeadline
+    || block.timestamp >= mainDeadline
+    || !Number.isSafeInteger(relayIncrement) || relayIncrement <= 0
+    || !Number.isSafeInteger(relayCap) || relayCap <= 0
+  ) throw new CoreError('InvalidFinality', 'Seckill relay event violates its snapshotted timer state', 409);
+  const remaining = previousDeadline - block.timestamp;
+  const expectedDeadline = Math.min(
+    mainDeadline,
+    block.timestamp + Math.min(remaining + relayIncrement, relayCap),
+  );
+  if (emittedDeadline !== expectedDeadline || emittedDeadline < previousDeadline) {
+    throw new CoreError('InvalidFinality', 'Seckill relay deadline does not match the Router event', 409);
+  }
+  const projectedDeadline = new Date(emittedDeadline * 1000);
+  await executor.query(
+    `INSERT INTO core.seckill_relay_events (
+       relay_event_key, payment_event_key, session_id, order_id, buyer_wallet,
+       transaction_hash, log_index, block_number, block_hash,
+       previous_relay_deadline, relay_deadline
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+    [
+      relayEventKey,
+      row.payment_event_key,
+      sessionId,
+      orderId,
+      row.buyer_wallet,
+      event.transactionHash.toLowerCase(),
+      event.logIndex,
+      event.blockNumber,
+      event.blockHash.toLowerCase(),
+      row.relay_deadline,
+      projectedDeadline,
+    ],
+  );
+  await executor.query(
+    `UPDATE core.seckill_sessions
+     SET relay_deadline = $2, last_buyer_wallet = $3, updated_at = clock_timestamp()
+     WHERE session_id = $1`,
+    [sessionId, projectedDeadline, row.buyer_wallet],
+  );
+  return { status: 'RECORDED' as const, sessionId, orderId, relayDeadline: projectedDeadline };
 }
 
 function canonicalPaymentEvent(
@@ -206,6 +329,20 @@ function decimalValue(values: Record<string, string>, name: string) {
 function safeInteger(values: Record<string, string>, name: string) {
   const value = Number(requiredValue(values, name));
   if (!Number.isSafeInteger(value) || value < 0) throw new CoreError('InvalidFinality', `PaymentCompleted ${name} is invalid`);
+  return value;
+}
+
+function relayValue(values: Record<string, string>, name: string) {
+  const value = values[name];
+  if (!value) throw new CoreError('InvalidFinality', `SeckillRelayExtended is missing ${name}`, 409);
+  return value;
+}
+
+function safeRelayInteger(values: Record<string, string>, name: string) {
+  const value = Number(relayValue(values, name));
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new CoreError('InvalidFinality', `SeckillRelayExtended ${name} is invalid`, 409);
+  }
   return value;
 }
 

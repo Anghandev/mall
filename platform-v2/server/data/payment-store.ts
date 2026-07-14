@@ -397,6 +397,7 @@ export async function reversePaymentProjection(executor: SqlExecutor, eventKey: 
   const row = payment.rows[0];
   if (!row) throw new CoreError('InvalidFinality', 'Unknown payment event', 404);
   if (!row.canonical) return { status: 'IDEMPOTENT' as const, orderId: row.order_id };
+  await reverseSeckillRelayProjection(executor, row.order_id, replacementBlockHash);
   const settlementItems = await executor.query<SettlementReorgRow>(
     `SELECT request.request_id, item.item_index, request.batch_id,
        request.state AS request_state, request.asset, item.amount::text,
@@ -860,27 +861,38 @@ export async function advancePaymentFinality(executor: SqlExecutor, canonicalHea
      FROM core.payment_events payment
      WHERE payment.canonical AND orders.order_id = payment.order_id`,
   );
-  await executor.query(
-    `INSERT INTO core.outbox_events (
-       event_id, aggregate_type, aggregate_id, event_type, payload,
-       idempotency_key, state
+  const finalizedPayments = await executor.query<{ aggregate_id: string }>(
+    `WITH inserted AS (
+       INSERT INTO core.outbox_events (
+         event_id, aggregate_type, aggregate_id, event_type, payload,
+         idempotency_key, state
+       )
+       SELECT
+         'outbox:payment-final:' || payment.event_key,
+         'ORDER', payment.order_id, 'PaymentFinalized',
+         jsonb_build_object(
+           'eventKey', payment.event_key,
+           'orderId', payment.order_id,
+           'transactionHash', payment.transaction_hash,
+           'blockHash', payment.block_hash,
+           'confirmations', payment.confirmations
+         ),
+         'payment-finalized:' || payment.event_key,
+         'PENDING'
+       FROM core.payment_events payment
+       WHERE payment.canonical AND payment.confirmations >= 15
+       ON CONFLICT (idempotency_key) DO NOTHING
+       RETURNING aggregate_id
      )
-     SELECT
-       'outbox:payment-final:' || payment.event_key,
-       'ORDER', payment.order_id, 'PaymentFinalized',
-       jsonb_build_object(
-         'eventKey', payment.event_key,
-         'orderId', payment.order_id,
-         'transactionHash', payment.transaction_hash,
-         'blockHash', payment.block_hash,
-         'confirmations', payment.confirmations
-       ),
-       'payment-finalized:' || payment.event_key,
-       'PENDING'
-     FROM core.payment_events payment
-     WHERE payment.canonical AND payment.confirmations >= 15
-     ON CONFLICT (idempotency_key) DO NOTHING`,
+     SELECT inserted.aggregate_id
+     FROM inserted
+     JOIN core.payment_events payment
+       ON payment.order_id = inserted.aggregate_id AND payment.canonical
+     ORDER BY payment.block_number, payment.log_index`,
   );
+  for (const payment of finalizedPayments.rows) {
+    await finalizeSeckillRelayProjection(executor, payment.aggregate_id);
+  }
   const unusedReservations = await executor.query<{ reservation_id: string }>(
     `SELECT leg.reservation_id
      FROM core.payment_quote_legs leg
@@ -893,6 +905,134 @@ export async function advancePaymentFinality(executor: SqlExecutor, canonicalHea
   );
   for (const reservation of unusedReservations.rows) {
     await executor.query("SELECT core.release_inventory_reservation($1, 'RELEASED')", [reservation.reservation_id]);
+  }
+}
+
+async function finalizeSeckillRelayProjection(executor: SqlExecutor, orderId: string) {
+  const payment = await executor.query<{ classification: string }>(
+    `SELECT classification FROM core.payment_events
+     WHERE order_id = $1 AND canonical AND confirmations >= 15`,
+    [orderId],
+  );
+  if (payment.rows[0]?.classification !== 'SECKILL') return;
+  const finalized = await executor.query<{
+    relay_event_key: string;
+    payment_event_key: string;
+    session_id: string;
+    buyer_wallet: string;
+    transaction_hash: string;
+    previous_relay_deadline: Date;
+    relay_deadline: Date;
+    finalized_at: Date;
+  }>(
+    `UPDATE core.seckill_relay_events relay
+     SET finalized = true, finalized_at = finality.finalized_at
+     FROM core.transaction_finality finality
+     WHERE relay.order_id = $1 AND relay.canonical AND NOT relay.finalized
+       AND finality.resource_type = 'ORDER_PAYMENT'
+       AND finality.resource_id = relay.order_id
+       AND finality.tx_hash = relay.transaction_hash
+       AND finality.block_hash = relay.block_hash
+       AND finality.state = 'FINAL' AND finality.finalized_at IS NOT NULL
+     RETURNING relay.relay_event_key, relay.payment_event_key, relay.session_id,
+       relay.buyer_wallet, relay.transaction_hash,
+       relay.previous_relay_deadline, relay.relay_deadline, relay.finalized_at`,
+    [orderId],
+  );
+  const row = finalized.rows[0];
+  if (!row) throw new CoreError('InvalidFinality', 'Final seckill payment is missing its Router relay event', 409);
+  await executor.query(
+    `INSERT INTO core.outbox_events (
+       event_id, aggregate_type, aggregate_id, event_type, payload,
+       idempotency_key, state
+     ) VALUES ($1,'SECKILL_SESSION',$2,'SeckillRelayExtended',$3,$1,'PENDING')
+     ON CONFLICT (idempotency_key) DO NOTHING`,
+    [
+      `outbox:seckill-relay:${row.relay_event_key}`,
+      row.session_id,
+      JSON.stringify({
+        sessionId: row.session_id,
+        orderId,
+        eventKey: row.relay_event_key,
+        paymentEventKey: row.payment_event_key,
+        transactionHash: row.transaction_hash,
+        buyerWallet: row.buyer_wallet,
+        finalizedAt: row.finalized_at,
+        previousRelayDeadline: row.previous_relay_deadline,
+        relayDeadline: row.relay_deadline,
+      }),
+    ],
+  );
+}
+
+async function reverseSeckillRelayProjection(
+  executor: SqlExecutor,
+  orderId: string,
+  replacementBlockHash: string,
+) {
+  const relay = await executor.query<{
+    relay_event_key: string;
+    session_id: string;
+    previous_relay_deadline: Date;
+    relay_deadline: Date;
+    finalized: boolean;
+  }>(
+    `SELECT relay_event_key, session_id, previous_relay_deadline,
+       relay_deadline, finalized
+     FROM core.seckill_relay_events
+     WHERE order_id = $1 AND canonical
+     FOR UPDATE`,
+    [orderId],
+  );
+  const row = relay.rows[0];
+  if (!row) return;
+  const session = await executor.query<{ relay_deadline: Date }>(
+    `SELECT relay_deadline FROM core.seckill_sessions
+     WHERE session_id = $1 FOR UPDATE`,
+    [row.session_id],
+  );
+  if (session.rows[0]?.relay_deadline.getTime() !== row.relay_deadline.getTime()) {
+    throw new CoreError('ReorgPending', 'Seckill relay reorg is not the latest session transition', 409);
+  }
+  await executor.query(
+    `UPDATE core.seckill_relay_events
+     SET canonical = false, finalized = false, finalized_at = NULL,
+       replacement_block_hash = $2, replaced_at = clock_timestamp()
+     WHERE relay_event_key = $1`,
+    [row.relay_event_key, replacementBlockHash.toLowerCase()],
+  );
+  const previous = await executor.query<{ buyer_wallet: string }>(
+    `SELECT buyer_wallet FROM core.seckill_relay_events
+     WHERE session_id = $1 AND canonical
+     ORDER BY block_number DESC, log_index DESC LIMIT 1`,
+    [row.session_id],
+  );
+  await executor.query(
+    `UPDATE core.seckill_sessions
+     SET relay_deadline = $2, last_buyer_wallet = $3,
+       updated_at = clock_timestamp()
+     WHERE session_id = $1`,
+    [row.session_id, row.previous_relay_deadline, previous.rows[0]?.buyer_wallet ?? null],
+  );
+  if (row.finalized) {
+    await executor.query(
+      `INSERT INTO core.outbox_events (
+         event_id, aggregate_type, aggregate_id, event_type, payload,
+         idempotency_key, state
+       ) VALUES ($1,'SECKILL_SESSION',$2,'SeckillRelayReorged',$3,$1,'PENDING')
+       ON CONFLICT (idempotency_key) DO NOTHING`,
+      [
+        `outbox:seckill-relay-reorg:${row.relay_event_key}:${replacementBlockHash.toLowerCase()}`,
+        row.session_id,
+        JSON.stringify({
+          sessionId: row.session_id,
+          orderId,
+          relayEventKey: row.relay_event_key,
+          restoredRelayDeadline: row.previous_relay_deadline,
+          replacementBlockHash: replacementBlockHash.toLowerCase(),
+        }),
+      ],
+    );
   }
 }
 

@@ -73,6 +73,7 @@ import {
 import type { SqlExecutor } from './data/migrations.ts';
 import { PostgresIndexerStore } from './data/indexer-store.ts';
 import { SettlementService } from './data/settlement-service.ts';
+import { SeckillService } from './data/seckill-service.ts';
 import { TakeoverFundingService } from './data/takeover-funding-service.ts';
 import { AuditQueryService } from './data/audit-service.ts';
 import { CmsService } from './data/cms-service.ts';
@@ -130,6 +131,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     paymentRouterAddress: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),
   });
   const indexerStore = new PostgresIndexerStore(transactions);
+  const seckillService = new SeckillService({ transactions });
   const fulfillmentService = new FulfillmentService({ transactions });
   const settlementService = new SettlementService({
     transactions,
@@ -428,6 +430,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     getOrderProjection: (orderId) => getOrderProjection(database, orderId),
     getPausedScopes: () => getPausedScopes(database),
     paymentService,
+    seckillService,
     fulfillmentService,
     fulfillmentTargetService,
     settlementService,
