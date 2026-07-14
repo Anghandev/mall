@@ -3,23 +3,30 @@ import {
   allowedActionReasonCodes,
   artifactVersion,
   balanceStates,
+  cmsContentTypes,
   coreErrorCodes,
   fulfillmentAssets,
   fulfillmentMethods,
   fulfillmentModes,
   fulfillmentRequestStates,
   fulfillmentRequestTypes,
+  guaranteeStatuses,
   logisticsProviders,
   logisticsStatuses,
+  merchantGuaranteeDepositStates,
   orderFinalityStatuses,
   orderProjectionStates,
+  settlementRails,
+  settlementRequestStates,
   storeStatuses,
+  takeoverStates,
   userRoles,
   type AllowedAction,
   type AllowedActionName,
   type AllowedActionReasonCode,
   type CatalogProduct,
   type CatalogSku,
+  type CmsPublicItem,
   type CoreErrorCode,
   type ForcedReceiptRequestResult,
   type FulfillmentBalance,
@@ -29,12 +36,20 @@ import {
   type FulfillmentReasonRequest,
   type FulfillmentRequestProjection,
   type FulfillmentTarget,
+  type GuaranteeDepositProjection,
+  type GuaranteeDepositRequest,
   type LogisticsProjection,
+  type MerchantFinanceProjection,
   type MerchantStore,
   type PickupVerificationRequest,
   type ShipmentProjection,
   type ShipmentRequest,
   type ShipmentResult,
+  type SettlementIntentProjection,
+  type SettlementIntentRequest,
+  type SettlementListProjection,
+  type SettlementRequestProjection,
+  type SettlementRequestSubmission,
   type UserRole,
 } from '@abu24k/core-artifacts';
 
@@ -53,6 +68,13 @@ const fulfillmentAssetSet = new Set<string>(fulfillmentAssets);
 const balanceStateSet = new Set<string>(balanceStates);
 const storeStatusSet = new Set<string>(storeStatuses);
 const fulfillmentMethodSet = new Set<string>(fulfillmentMethods);
+const guaranteeStatusSet = new Set<string>(guaranteeStatuses);
+const guaranteeDepositStateSet = new Set<string>(merchantGuaranteeDepositStates);
+const settlementRailSet = new Set<string>(settlementRails);
+const settlementRequestStateSet = new Set<string>(settlementRequestStates);
+const takeoverStateSet = new Set<string>(takeoverStates);
+const cmsContentTypeSet = new Set<string>(cmsContentTypes);
+const settlementAssetSet = new Set<string>(['USDT', 'NPL']);
 
 export interface CoreReadiness {
   chainId: 56;
@@ -102,6 +124,18 @@ export interface CoreApi {
     input: PickupVerificationRequest,
     token: string,
   ): Promise<FulfillmentCompletedResult>;
+  listSettlements(token: string): Promise<SettlementListProjection>;
+  createSettlementIntent(input: SettlementIntentRequest, token: string): Promise<SettlementIntentProjection>;
+  submitSettlementRequest(
+    input: SettlementRequestSubmission,
+    token: string,
+  ): Promise<SettlementRequestProjection>;
+  getMerchantFinance(token: string): Promise<MerchantFinanceProjection>;
+  submitGuaranteeDeposit(
+    input: GuaranteeDepositRequest,
+    token: string,
+  ): Promise<GuaranteeDepositProjection>;
+  listPublicCms(walletAddress?: string): Promise<readonly CmsPublicItem[]>;
 }
 
 export class CoreApiError extends Error {
@@ -224,6 +258,46 @@ export function createCoreApi(baseUrl = import.meta.env.VITE_CORE_API_BASE_URL ?
         { method: 'POST', body: JSON.stringify(input), token },
       );
       return parseFulfillmentCompletedResult(body, orderId, 'PICKUP_VERIFICATION');
+    },
+
+    async listSettlements(token) {
+      return parseSettlementList(await request(normalizedBaseUrl, '/v2/settlements', { token }));
+    },
+
+    async createSettlementIntent(input, token) {
+      return parseSettlementIntent(await request(normalizedBaseUrl, '/v2/settlement-intents', {
+        method: 'POST',
+        body: JSON.stringify(input),
+        token,
+      }));
+    },
+
+    async submitSettlementRequest(input, token) {
+      return parseSettlementRequest(await request(normalizedBaseUrl, '/v2/settlement-requests', {
+        method: 'POST',
+        body: JSON.stringify(input),
+        token,
+      }));
+    },
+
+    async getMerchantFinance(token) {
+      return parseMerchantFinance(await request(normalizedBaseUrl, '/v2/finance/merchant', { token }));
+    },
+
+    async submitGuaranteeDeposit(input, token) {
+      return parseGuaranteeDeposit(await request(normalizedBaseUrl, '/v2/finance/merchant/guarantee-deposits', {
+        method: 'POST',
+        body: JSON.stringify(input),
+        token,
+      }));
+    },
+
+    async listPublicCms(walletAddress) {
+      const query = walletAddress ? `?walletAddress=${encodeURIComponent(walletAddress)}` : '';
+      return array(
+        await request(normalizedBaseUrl, `/v2/cms/public${query}`),
+        'public CMS response',
+      ).map(parseCmsPublicItem);
     },
   };
 }
@@ -539,6 +613,336 @@ function parseFulfillmentCompletedResult(
   };
 }
 
+function parseSettlementIntent(input: unknown): SettlementIntentProjection {
+  const value = record(input, 'settlement intent');
+  const intent = parseSettlementIntentRecord(value.intent);
+  const typedData = record(value.typedData, 'settlement intent typedData');
+  const domain = record(typedData.domain, 'settlement typedData.domain');
+  const types = record(typedData.types, 'settlement typedData.types');
+  const message = record(typedData.message, 'settlement typedData.message');
+  const primaryType = string(typedData.primaryType, 'settlement typedData.primaryType');
+
+  exactObjectKeys(domain, ['name', 'version', 'chainId', 'verifyingContract'], 'settlement typedData.domain');
+  exact(domain.name, 'Abu24KV2Settlement', 'settlement typedData.domain.name');
+  exact(domain.version, '2', 'settlement typedData.domain.version');
+  exact(domain.chainId, 56, 'settlement typedData.domain.chainId');
+  exact(
+    address(domain.verifyingContract, 'settlement typedData.domain.verifyingContract').toLowerCase(),
+    intent.safeAddress.toLowerCase(),
+    'settlement typedData.domain.verifyingContract',
+  );
+  exact(primaryType, 'SettlementRequest', 'settlement typedData.primaryType');
+  exactObjectKeys(types, ['SettlementRequest'], 'settlement typedData.types');
+  const fields = array(types.SettlementRequest, 'settlement typedData.types.SettlementRequest');
+  const expectedFields = [
+    ['intentId', 'bytes32'],
+    ['artifactVersion', 'string'],
+    ['wallet', 'address'],
+    ['recipient', 'address'],
+    ['rail', 'string'],
+    ['asset', 'address'],
+    ['safeAddress', 'address'],
+    ['amount', 'uint256'],
+    ['itemsHash', 'bytes32'],
+    ['nonce', 'uint256'],
+    ['deadline', 'uint64'],
+  ] as const;
+  if (fields.length !== expectedFields.length) invalid('settlement typedData type fields do not match');
+  fields.forEach((field, index) => {
+    const parsed = record(field, `settlement typedData field ${index}`);
+    exactObjectKeys(parsed, ['name', 'type'], `settlement typedData field ${index}`);
+    exact(parsed.name, expectedFields[index]![0], `settlement typedData field ${index} name`);
+    exact(parsed.type, expectedFields[index]![1], `settlement typedData field ${index} type`);
+  });
+  exactObjectKeys(message, Object.keys(intent), 'settlement typedData.message');
+  for (const [name, intentValue] of Object.entries(intent)) {
+    const messageValue = message[name];
+    if (typeof intentValue === 'string' && /^0x[0-9a-fA-F]{40}$/.test(intentValue)) {
+      exact(address(messageValue, `settlement typedData.message.${name}`).toLowerCase(), intentValue.toLowerCase(), name);
+    } else {
+      exact(messageValue, intentValue, `settlement typedData.message.${name}`);
+    }
+  }
+
+  return {
+    intent,
+    digest: bytes32(value.digest, 'settlement intent digest'),
+    typedData: { domain, types, primaryType, message },
+    items: array(value.items, 'settlement intent items').map((inputItem) => {
+      const item = record(inputItem, 'settlement intent item');
+      return {
+        itemIndex: nonNegativeInteger(item.itemIndex, 'settlement intent item.itemIndex'),
+        orderId: string(item.orderId, 'settlement intent item.orderId'),
+        accountId: string(item.accountId, 'settlement intent item.accountId'),
+        backingSafeAddress: address(item.backingSafeAddress, 'settlement intent item.backingSafeAddress'),
+        amount: atomicAmount(item.amount, 'settlement intent item.amount'),
+        itemHash: bytes32(item.itemHash, 'settlement intent item.itemHash'),
+      };
+    }),
+    createdAt: dateTime(value.createdAt, 'settlement intent createdAt'),
+  };
+}
+
+function parseSettlementIntentRecord(input: unknown): SettlementIntentProjection['intent'] {
+  const value = record(input, 'settlement request intent');
+  exact(value.artifactVersion, artifactVersion, 'settlement intent artifactVersion');
+  return {
+    intentId: bytes32(value.intentId, 'settlement intent.intentId'),
+    artifactVersion,
+    wallet: address(value.wallet, 'settlement intent.wallet'),
+    recipient: address(value.recipient, 'settlement intent.recipient'),
+    rail: enumValue(value.rail, settlementRailSet, 'settlement intent.rail'),
+    asset: address(value.asset, 'settlement intent.asset'),
+    safeAddress: address(value.safeAddress, 'settlement intent.safeAddress'),
+    amount: positiveAtomicAmount(value.amount, 'settlement intent.amount'),
+    itemsHash: bytes32(value.itemsHash, 'settlement intent.itemsHash'),
+    nonce: atomicAmount(value.nonce, 'settlement intent.nonce'),
+    deadline: positiveInteger(value.deadline, 'settlement intent.deadline'),
+  };
+}
+
+function parseSettlementList(input: unknown): SettlementListProjection {
+  const value = record(input, 'settlement list');
+  exact(value.artifactVersion, artifactVersion, 'settlement list artifactVersion');
+  return {
+    artifactVersion,
+    wallet: address(value.wallet, 'settlement list wallet'),
+    balances: array(value.balances, 'settlement balances').map((inputBalance) => {
+      const balance = record(inputBalance, 'settlement balance');
+      return {
+        asset: enumValue(balance.asset, settlementAssetSet, 'settlement balance.asset'),
+        purpose: string(balance.purpose, 'settlement balance.purpose'),
+        state: enumValue(balance.state, balanceStateSet, 'settlement balance.state'),
+        amount: atomicAmount(balance.amount, 'settlement balance.amount'),
+      };
+    }),
+    requests: array(value.requests, 'settlement requests').map(parseSettlementRequest),
+  };
+}
+
+function parseSettlementRequest(input: unknown): SettlementRequestProjection {
+  const value = record(input, 'settlement request');
+  exact(value.artifact_version, artifactVersion, 'settlement request artifact_version');
+  return {
+    request_id: string(value.request_id, 'settlement request.request_id'),
+    intent_id: bytes32(value.intent_id, 'settlement request.intent_id'),
+    artifact_version: artifactVersion,
+    wallet_address: address(value.wallet_address, 'settlement request.wallet_address'),
+    recipient_address: address(value.recipient_address, 'settlement request.recipient_address'),
+    rail: enumValue(value.rail, settlementRailSet, 'settlement request.rail'),
+    asset: enumValue(value.asset, settlementAssetSet, 'settlement request.asset'),
+    asset_address: address(value.asset_address, 'settlement request.asset_address'),
+    safe_address: address(value.safe_address, 'settlement request.safe_address'),
+    amount: positiveAtomicAmount(value.amount, 'settlement request.amount'),
+    items_hash: bytes32(value.items_hash, 'settlement request.items_hash'),
+    intent_digest: bytes32(value.intent_digest, 'settlement request.intent_digest'),
+    signature_hash: bytes32(value.signature_hash, 'settlement request.signature_hash'),
+    state: enumValue(value.state, settlementRequestStateSet, 'settlement request.state'),
+    batch_id: nullableString(value.batch_id, 'settlement request.batch_id'),
+    final_safe_tx_hash: nullableBytes32(value.final_safe_tx_hash, 'settlement request.final_safe_tx_hash'),
+    final_execution_tx_hash: nullableBytes32(
+      value.final_execution_tx_hash,
+      'settlement request.final_execution_tx_hash',
+    ),
+    requested_at: dateTime(value.requested_at, 'settlement request.requested_at'),
+    batched_at: nullableDateTime(value.batched_at, 'settlement request.batched_at'),
+    settled_at: nullableDateTime(value.settled_at, 'settlement request.settled_at'),
+    items: array(value.items, 'settlement request.items').map((inputItem) => {
+      const item = record(inputItem, 'settlement request item');
+      return {
+        item_index: nonNegativeInteger(item.item_index, 'settlement request item.item_index'),
+        order_id: string(item.order_id, 'settlement request item.order_id'),
+        account_id: string(item.account_id, 'settlement request item.account_id'),
+        backing_safe_address: address(
+          item.backing_safe_address,
+          'settlement request item.backing_safe_address',
+        ),
+        amount: atomicAmount(item.amount, 'settlement request item.amount'),
+        requested_journal_id: string(item.requested_journal_id, 'settlement request item.requested_journal_id'),
+        batched_journal_id: nullableString(
+          item.batched_journal_id,
+          'settlement request item.batched_journal_id',
+        ),
+        settled_journal_id: nullableString(
+          item.settled_journal_id,
+          'settlement request item.settled_journal_id',
+        ),
+      };
+    }),
+    transitions: array(value.transitions, 'settlement request.transitions').map((inputTransition) => {
+      const transition = record(inputTransition, 'settlement request transition');
+      return {
+        transition_id: string(transition.transition_id, 'settlement transition.transition_id'),
+        request_item_index: nonNegativeInteger(
+          transition.request_item_index,
+          'settlement transition.request_item_index',
+        ),
+        batch_id: nullableString(transition.batch_id, 'settlement transition.batch_id'),
+        transition_sequence: atomicAmount(
+          transition.transition_sequence,
+          'settlement transition.transition_sequence',
+        ),
+        transition_type: string(transition.transition_type, 'settlement transition.transition_type'),
+        journal_id: string(transition.journal_id, 'settlement transition.journal_id'),
+        created_at: dateTime(transition.created_at, 'settlement transition.created_at'),
+      };
+    }),
+  };
+}
+
+function parseGuaranteeDeposit(input: unknown): GuaranteeDepositProjection {
+  const value = record(input, 'guarantee deposit');
+  return {
+    depositId: string(value.depositId, 'guarantee deposit.depositId'),
+    merchantId: string(value.merchantId, 'guarantee deposit.merchantId'),
+    policyVersion: positiveInteger(value.policyVersion, 'guarantee deposit.policyVersion'),
+    transactionHash: bytes32(value.transactionHash, 'guarantee deposit.transactionHash'),
+    expectedAmountUsdt: positiveAtomicAmount(
+      value.expectedAmountUsdt,
+      'guarantee deposit.expectedAmountUsdt',
+    ),
+    operationsSafeAddress: address(value.operationsSafeAddress, 'guarantee deposit.operationsSafeAddress'),
+    state: enumValue(value.state, guaranteeDepositStateSet, 'guarantee deposit.state'),
+    confirmations: nonNegativeInteger(value.confirmations, 'guarantee deposit.confirmations'),
+    ...(value.blockNumber === undefined
+      ? {}
+      : { blockNumber: nonNegativeInteger(value.blockNumber, 'guarantee deposit.blockNumber') }),
+    ...(value.blockHash === undefined
+      ? {}
+      : { blockHash: bytes32(value.blockHash, 'guarantee deposit.blockHash') }),
+    ...(value.logIndex === undefined
+      ? {}
+      : { logIndex: nonNegativeInteger(value.logIndex, 'guarantee deposit.logIndex') }),
+  };
+}
+
+function parseMerchantFinance(input: unknown): MerchantFinanceProjection {
+  const value = record(input, 'merchant finance');
+  const merchant = record(value.merchant, 'merchant finance.merchant');
+  const guarantee = value.guarantee === null ? null : record(value.guarantee, 'merchant finance.guarantee');
+  const debt = value.debt === null ? null : record(value.debt, 'merchant finance.debt');
+  return {
+    merchant: {
+      merchant_id: string(merchant.merchant_id, 'merchant finance.merchant_id'),
+      status: string(merchant.status, 'merchant finance.status'),
+      guarantee_status: enumValue(
+        merchant.guarantee_status,
+        guaranteeStatusSet,
+        'merchant finance.guarantee_status',
+      ),
+      settlement_wallet: address(merchant.settlement_wallet, 'merchant finance.settlement_wallet'),
+    },
+    guarantee: guarantee ? {
+      backing_safe_address: address(guarantee.backing_safe_address, 'merchant guarantee.backing_safe_address'),
+      balance_usdt: atomicAmount(guarantee.balance_usdt, 'merchant guarantee.balance_usdt'),
+      minimum_usdt: atomicAmount(guarantee.minimum_usdt, 'merchant guarantee.minimum_usdt'),
+      source_evidence_hash: bytes32(guarantee.source_evidence_hash, 'merchant guarantee.source_evidence_hash'),
+      updated_at: dateTime(guarantee.updated_at, 'merchant guarantee.updated_at'),
+    } : null,
+    guaranteeDeposits: array(value.guaranteeDeposits, 'merchant guarantee deposits').map((inputDeposit) => {
+      const deposit = record(inputDeposit, 'merchant guarantee deposit history');
+      return {
+        deposit_id: string(deposit.deposit_id, 'merchant guarantee deposit.deposit_id'),
+        policy_version: atomicAmount(deposit.policy_version, 'merchant guarantee deposit.policy_version'),
+        token_address: address(deposit.token_address, 'merchant guarantee deposit.token_address'),
+        operations_safe_address: address(
+          deposit.operations_safe_address,
+          'merchant guarantee deposit.operations_safe_address',
+        ),
+        expected_amount_usdt: atomicAmount(
+          deposit.expected_amount_usdt,
+          'merchant guarantee deposit.expected_amount_usdt',
+        ),
+        transaction_hash: bytes32(deposit.transaction_hash, 'merchant guarantee deposit.transaction_hash'),
+        state: enumValue(deposit.state, guaranteeDepositStateSet, 'merchant guarantee deposit.state'),
+        observed_block_number: nullableAtomicAmount(
+          deposit.observed_block_number,
+          'merchant guarantee deposit.observed_block_number',
+        ),
+        observed_block_hash: nullableBytes32(
+          deposit.observed_block_hash,
+          'merchant guarantee deposit.observed_block_hash',
+        ),
+        observed_log_index: nullableNonNegativeInteger(
+          deposit.observed_log_index,
+          'merchant guarantee deposit.observed_log_index',
+        ),
+        confirmations: nonNegativeInteger(deposit.confirmations, 'merchant guarantee deposit.confirmations'),
+        transfer_evidence_hash: nullableBytes32(
+          deposit.transfer_evidence_hash,
+          'merchant guarantee deposit.transfer_evidence_hash',
+        ),
+        created_at: dateTime(deposit.created_at, 'merchant guarantee deposit.created_at'),
+        updated_at: dateTime(deposit.updated_at, 'merchant guarantee deposit.updated_at'),
+        finalized_at: nullableDateTime(deposit.finalized_at, 'merchant guarantee deposit.finalized_at'),
+      };
+    }),
+    debt: debt ? {
+      incurred_usdt: atomicAmount(debt.incurred_usdt, 'merchant debt.incurred_usdt'),
+      recovered_usdt: atomicAmount(debt.recovered_usdt, 'merchant debt.recovered_usdt'),
+      outstanding_usdt: atomicAmount(debt.outstanding_usdt, 'merchant debt.outstanding_usdt'),
+      latest_evidence_hash: bytes32(debt.latest_evidence_hash, 'merchant debt.latest_evidence_hash'),
+      updated_at: dateTime(debt.updated_at, 'merchant debt.updated_at'),
+    } : null,
+    takeovers: array(value.takeovers, 'merchant takeovers').map((inputTakeover) => {
+      const takeover = record(inputTakeover, 'merchant takeover');
+      return {
+        case_id: string(takeover.case_id, 'merchant takeover.case_id'),
+        order_id: string(takeover.order_id, 'merchant takeover.order_id'),
+        state: enumValue(takeover.state, takeoverStateSet, 'merchant takeover.state'),
+        required_usdt: nullableAtomicAmount(takeover.required_usdt, 'merchant takeover.required_usdt'),
+        guarantee_used_usdt: nullableAtomicAmount(
+          takeover.guarantee_used_usdt,
+          'merchant takeover.guarantee_used_usdt',
+        ),
+        merchant_available_used_usdt: nullableAtomicAmount(
+          takeover.merchant_available_used_usdt,
+          'merchant takeover.merchant_available_used_usdt',
+        ),
+        future_proceeds_used_usdt: nullableAtomicAmount(
+          takeover.future_proceeds_used_usdt,
+          'merchant takeover.future_proceeds_used_usdt',
+        ),
+        platform_advance_usdt: nullableAtomicAmount(
+          takeover.platform_advance_usdt,
+          'merchant takeover.platform_advance_usdt',
+        ),
+        disbursed_usdt: nullableAtomicAmount(takeover.disbursed_usdt, 'merchant takeover.disbursed_usdt'),
+        merchant_debt_usdt: nullableAtomicAmount(
+          takeover.merchant_debt_usdt,
+          'merchant takeover.merchant_debt_usdt',
+        ),
+        evidence_hash: bytes32(takeover.evidence_hash, 'merchant takeover.evidence_hash'),
+        opened_at: dateTime(takeover.opened_at, 'merchant takeover.opened_at'),
+        closed_at: nullableDateTime(takeover.closed_at, 'merchant takeover.closed_at'),
+        updated_at: dateTime(takeover.updated_at, 'merchant takeover.updated_at'),
+      };
+    }),
+  };
+}
+
+function parseCmsPublicItem(input: unknown): CmsPublicItem {
+  const value = record(input, 'public CMS item');
+  return {
+    entryId: string(value.entryId, 'public CMS entryId'),
+    versionId: string(value.versionId, 'public CMS versionId'),
+    version: positiveInteger(value.version, 'public CMS version'),
+    slug: string(value.slug, 'public CMS slug'),
+    contentType: enumValue(value.contentType, cmsContentTypeSet, 'public CMS contentType'),
+    placement: string(value.placement, 'public CMS placement'),
+    locale: string(value.locale, 'public CMS locale'),
+    content: record(value.content, 'public CMS content'),
+    contentHash: bytes32(value.contentHash, 'public CMS contentHash'),
+    audience: record(value.audience, 'public CMS audience'),
+    startsAt: nullableDateTime(value.startsAt, 'public CMS startsAt'),
+    endsAt: nullableDateTime(value.endsAt, 'public CMS endsAt'),
+    frequencyCap: value.frequencyCap === null
+      ? null
+      : positiveInteger(value.frequencyCap, 'public CMS frequencyCap'),
+    policyVersion: nullableAtomicAmount(value.policyVersion, 'public CMS policyVersion'),
+  };
+}
+
 function record(input: unknown, name: string) {
   const value = recordOrUndefined(input);
   if (!value) invalid(`${name} must be an object`);
@@ -602,6 +1006,16 @@ function atomicAmount(input: unknown, name: string) {
   return value;
 }
 
+function positiveAtomicAmount(input: unknown, name: string) {
+  const value = atomicAmount(input, name);
+  if (value === '0') invalid(`${name} must be greater than zero`);
+  return value;
+}
+
+function nullableAtomicAmount(input: unknown, name: string) {
+  return input === null ? null : atomicAmount(input, name);
+}
+
 function dateTime(input: unknown, name: string) {
   const value = string(input, name);
   if (!Number.isFinite(Date.parse(value))) invalid(`${name} must be a date-time`);
@@ -628,6 +1042,29 @@ function positiveInteger(input: unknown, name: string) {
     invalid(`${name} must be a positive integer`);
   }
   return input;
+}
+
+function nonNegativeInteger(input: unknown, name: string) {
+  if (typeof input !== 'number' || !Number.isSafeInteger(input) || input < 0) {
+    invalid(`${name} must be a non-negative integer`);
+  }
+  return input;
+}
+
+function nullableNonNegativeInteger(input: unknown, name: string) {
+  return input === null ? null : nonNegativeInteger(input, name);
+}
+
+function nullableString(input: unknown, name: string) {
+  return input === null ? null : string(input, name);
+}
+
+function exactObjectKeys(input: Record<string, unknown>, expected: readonly string[], name: string) {
+  const actual = Object.keys(input).sort();
+  const wanted = [...expected].sort();
+  if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) {
+    invalid(`${name} contains unexpected fields`);
+  }
 }
 
 function invalid(message: string): never {

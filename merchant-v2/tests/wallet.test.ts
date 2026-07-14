@@ -1,14 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
-import { connectWallet, signSiweMessage, type Eip1193Provider } from '../src/wallet';
+import {
+  connectWallet,
+  signSettlementTypedData,
+  signSiweMessage,
+  type Eip1193Provider,
+} from '../src/wallet';
+import { settlementIntent } from './settlement-fixtures';
 
 const walletAddress = '0x1111111111111111111111111111111111111111';
 
 describe('EIP-1193 merchant wallet boundary', () => {
   it('switches a wrong-chain wallet to BSC before authentication', async () => {
+    let chainId = '0x1';
     const request = vi.fn(async ({ method }: { method: string }) => {
       if (method === 'eth_requestAccounts') return [walletAddress];
-      if (method === 'eth_chainId') return '0x1';
-      if (method === 'wallet_switchEthereumChain') return null;
+      if (method === 'eth_chainId') return chainId;
+      if (method === 'wallet_switchEthereumChain') {
+        chainId = '0x38';
+        return null;
+      }
       throw new Error(`Unexpected method: ${method}`);
     });
 
@@ -38,5 +48,29 @@ describe('EIP-1193 merchant wallet boundary', () => {
       method: 'personal_sign',
       params: ['exact challenge', walletAddress],
     });
+  });
+
+  it('signs the exact published settlement typed data on BSC', async () => {
+    const signature = `0x${'12'.repeat(65)}`;
+    const request = vi.fn(async ({ method }: { method: string }) => {
+      if (method === 'eth_chainId') return '0x38';
+      if (method === 'eth_signTypedData_v4') return signature;
+      throw new Error(`Unexpected method: ${method}`);
+    });
+
+    await expect(signSettlementTypedData({ request }, walletAddress, settlementIntent.typedData)).resolves.toBe(signature);
+    expect(request).toHaveBeenNthCalledWith(2, {
+      method: 'eth_signTypedData_v4',
+      params: [walletAddress, JSON.stringify(settlementIntent.typedData)],
+    });
+  });
+
+  it('rejects an invalid settlement signature response', async () => {
+    const request = vi.fn(async ({ method }: { method: string }) => (
+      method === 'eth_chainId' ? '0x38' : 'not-a-signature'
+    ));
+
+    await expect(signSettlementTypedData({ request }, walletAddress, settlementIntent.typedData))
+      .rejects.toThrow('EIP-712');
   });
 });

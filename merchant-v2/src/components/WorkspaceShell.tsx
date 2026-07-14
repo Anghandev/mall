@@ -71,7 +71,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
         <div className="sidebar-footer">
           <div className="security-chip">
             <ShieldCheck aria-hidden="true" size={16} />
-            <span>只读阻断模式</span>
+            <span>受控签名与链上证据</span>
           </div>
           <p>Artifact version</p>
           <strong>{coreBoundary.artifactVersion}</strong>

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
@@ -26,6 +26,14 @@ import {
   pickupTarget,
   trackingNumberHash,
 } from './fulfillment-fixtures';
+import {
+  cmsRules,
+  guaranteeDepositResult,
+  merchantFinance,
+  requestedSettlement,
+  settlementIntent,
+  settlementList,
+} from './settlement-fixtures';
 
 const styles = readFileSync('src/styles.css', 'utf8');
 const walletAddress = '0x1111111111111111111111111111111111111111';
@@ -99,6 +107,12 @@ function createMockCoreApi(overrides: Partial<CoreApi> = {}): CoreApi {
       method: 'PICKUP_VERIFICATION',
       fulfilledAt: '2026-07-14T12:05:00.000Z',
     }),
+    listSettlements: async () => settlementList,
+    createSettlementIntent: async () => settlementIntent,
+    submitSettlementRequest: async () => requestedSettlement,
+    getMerchantFinance: async () => merchantFinance,
+    submitGuaranteeDeposit: async () => guaranteeDepositResult,
+    listPublicCms: async () => [cmsRules],
     ...overrides,
   };
 }
@@ -112,10 +126,11 @@ function renderPage(page: React.ReactNode, client = createMockCoreApi()) {
 }
 
 function installWallet() {
-  const request = vi.fn(async ({ method }: { method: string }) => {
+  const request = vi.fn(async ({ method }: { method: string; params?: readonly unknown[] }) => {
     if (method === 'eth_requestAccounts') return [walletAddress];
     if (method === 'eth_chainId') return '0x38';
     if (method === 'personal_sign') return '0xsigned';
+    if (method === 'eth_signTypedData_v4') return `0x${'12'.repeat(65)}`;
     throw new Error(`Unexpected wallet method: ${method}`);
   });
   window.ethereum = { request };
@@ -134,9 +149,21 @@ async function enterFulfillment(client: CoreApi) {
   return user;
 }
 
+async function enterAssets(client: CoreApi) {
+  const user = userEvent.setup();
+  const walletRequest = installWallet();
+  render(<MemoryRouter><App client={client} /></MemoryRouter>);
+  const connect = screen.getByRole('button', { name: '连接钱包' });
+  await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
+  await user.click(connect);
+  const navigation = await screen.findByRole('navigation', { name: '商家工作台导航' });
+  await user.click(within(navigation).getByRole('link', { name: /资产清算/ }));
+  return { user, walletRequest };
+}
+
 describe('00 wallet gateway', () => {
-  it('consumes fulfillment.1 and requires a server-authoritative action grant', () => {
-    expect(artifactVersion).toBe('2.0.0-fulfillment.1');
+  it('consumes settlement-admin.1 and requires a server-authoritative order-action grant', () => {
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.1');
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
     expect(coreBoundary.artifactVersion).toBe(artifactVersion);
     expect(coreBoundary.artifactsAvailable).toBe(true);
@@ -422,16 +449,81 @@ describe('04 store controls', () => {
 });
 
 describe('05 asset rails', () => {
-  it('uses the five settlement states and contains no contract-pull proceeds action', () => {
-    renderPage(<AssetsPage />);
+  it('renders Core five-state balances, Safe finality, guarantee reorg and takeover debt without local netting', async () => {
+    await enterAssets(createMockCoreApi({ listFulfillmentOrders: async () => [deliveryOrder] }));
 
-    expect(screen.getByRole('heading', { name: 'USDT 货款' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'USDT 商家货款' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '门店奖励池' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: '释放跟踪' })).toBeTruthy();
-    expect((screen.getByRole('button', { name: '签名结算申请' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText('Requested 已申请')).toBeTruthy();
-    expect(screen.getByText('Batched 已组批')).toBeTruthy();
-    expect(screen.getByText('Settled 已结算')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '后台积分释放跟踪' })).toBeTruthy();
+    expect(screen.getByLabelText('USDT 商家货款五状态余额')).toBeTruthy();
+    expect(screen.getByText('45000000000000000000')).toBeTruthy();
+    expect(screen.getByText('safe-batch-7')).toBeTruthy();
+    expect(screen.getByRole('link', { name: new RegExp(`0x${'9'.repeat(64)}`) }).getAttribute('href'))
+      .toBe(`https://bscscan.com/tx/0x${'9'.repeat(64)}`);
+    expect(screen.getByText('REORGED')).toBeTruthy();
+    expect(screen.getByText('15 / 15')).toBeTruthy();
+    expect(screen.getByText('takeover-1')).toBeTruthy();
+    expect(screen.getAllByText('200000000000000000000').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/CLAIM_MERCHANT_USDT|ClaimVault|PaymentEscrow/)).toBeNull();
+  });
+
+  it('creates the exact merchant settlement intent, signs Core EIP-712 data and submits the signed request', async () => {
+    const createSettlementIntent = vi.fn(createMockCoreApi().createSettlementIntent);
+    const submitSettlementRequest = vi.fn(createMockCoreApi().submitSettlementRequest);
+    const { user, walletRequest } = await enterAssets(createMockCoreApi({
+      createSettlementIntent,
+      submitSettlementRequest,
+    }));
+    await screen.findByText('45000000000000000000');
+
+    await user.type(screen.getByLabelText('申请金额（USDT 最小单位）'), '45000000000000000000');
+    const submit = screen.getByRole('button', { name: '签名并提交结算申请' });
+    await waitFor(() => expect((submit as HTMLButtonElement).disabled).toBe(false));
+    await user.click(submit);
+
+    expect(await screen.findByText(/settlement-request-requested/)).toBeTruthy();
+    expect(createSettlementIntent).toHaveBeenCalledWith({
+      rail: 'MERCHANT_USDT',
+      amount: '45000000000000000000',
+      idempotencyKey: expect.stringMatching(/^merchant-settlement-intent-/),
+    }, 'test-session');
+    const typedDataCall = walletRequest.mock.calls.find(([request]) => request.method === 'eth_signTypedData_v4');
+    expect(typedDataCall?.[0].params?.[0]).toBe(walletAddress);
+    expect(JSON.parse(String(typedDataCall?.[0].params?.[1]))).toEqual(settlementIntent.typedData);
+    expect(submitSettlementRequest).toHaveBeenCalledWith({
+      intentId: settlementIntent.intent.intentId,
+      signature: `0x${'12'.repeat(65)}`,
+    }, 'test-session');
+  });
+
+  it('submits only the published guarantee evidence fields and keeps a frozen merchant fail closed', async () => {
+    const submitGuaranteeDeposit = vi.fn(createMockCoreApi().submitGuaranteeDeposit);
+    const { user } = await enterAssets(createMockCoreApi({ submitGuaranteeDeposit }));
+    expect((await screen.findAllByText('1200000000000000000000')).length).toBeGreaterThan(0);
+    const transactionHash = `0x${'0'.repeat(64)}`;
+
+    await user.type(screen.getByLabelText('Policy version'), '9');
+    await user.type(screen.getByLabelText('预期金额（USDT 最小单位）'), '1000000000000000000000');
+    await user.type(screen.getByLabelText('BSC Transfer TxHash'), transactionHash);
+    await user.click(screen.getByRole('button', { name: '提交保证金交易证据' }));
+
+    expect(await screen.findByText(/guarantee-submitted/)).toBeTruthy();
+    expect(submitGuaranteeDeposit).toHaveBeenCalledWith({
+      policyVersion: '9',
+      expectedAmountUsdt: '1000000000000000000000',
+      transactionHash,
+      idempotencyKey: expect.stringMatching(/^merchant-guarantee-deposit-/),
+    }, 'test-session');
+
+    cleanup();
+    const frozenFinance = {
+      ...merchantFinance,
+      merchant: { ...merchantFinance.merchant, guarantee_status: 'FROZEN' as const },
+    };
+    const frozen = await enterAssets(createMockCoreApi({ getMerchantFinance: async () => frozenFinance }));
+    expect((await screen.findAllByText(/APPROVED \/ FROZEN/)).length).toBeGreaterThan(0);
+    await frozen.user.type(screen.getByLabelText('申请金额（USDT 最小单位）'), '1');
+    expect((screen.getByRole('button', { name: '签名并提交结算申请' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
 
@@ -444,13 +536,15 @@ describe('06 audit and 07 rules', () => {
     expect(screen.getByText('审计日志不可用')).toBeTruthy();
   });
 
-  it('shows frozen merchant boundaries while versioned policy content is unavailable', () => {
+  it('shows published versioned policy content and the frozen merchant boundaries', async () => {
     renderPage(<HelpPage />);
 
-    expect(screen.getByText('当前规则内容不可用')).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '秒杀履约与结算' })).toBeTruthy();
+    expect(screen.getByText('Policy 8')).toBeTruthy();
+    expect(screen.getByText(/Locked 进入 Available/)).toBeTruthy();
     expect(screen.getByRole('heading', { name: '7 天未发货进入平台接管' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '商家不能直接确认签收' })).toBeTruthy();
-    expect(screen.getByText(/具体责任和金额必须以已发布政策/)).toBeTruthy();
+    expect(screen.getByText(/保证金 → 冻结应收 → 未来货款/)).toBeTruthy();
   });
 });
 
@@ -465,6 +559,6 @@ describe('workspace accessibility', () => {
     expect(screen.getByRole('button', { name: '打开导航' })).toBeTruthy();
     expect(screen.getByRole('main')).toBeTruthy();
     expect(screen.getByText(artifactVersion)).toBeTruthy();
-    expect(await screen.findByText('支付与履约 Core 已连接')).toBeTruthy();
+    expect(await screen.findByText('三批 Core 能力已连接')).toBeTruthy();
   });
 });
