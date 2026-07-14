@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
@@ -13,6 +14,8 @@ import { LoginPage } from '../src/pages/LoginPage';
 import { ProductPage } from '../src/pages/ProductPage';
 import { SettingsPage } from '../src/pages/SettingsPage';
 import { StoresPage } from '../src/pages/StoresPage';
+
+const styles = readFileSync('src/styles.css', 'utf8');
 
 function renderPage(page: React.ReactNode) {
   return render(<MemoryRouter>{page}</MemoryRouter>);
@@ -76,6 +79,11 @@ describe('03 fulfillment center', () => {
     expect((screen.getByRole('button', { name: '启动扫码' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/不能离线提交/)).toBeTruthy();
   });
+
+  it('contains wide tables inside their horizontal scroll region', () => {
+    expect(styles).toMatch(/\.page-stack,\s*\.page-stack > \* \{\s*min-width: 0;/);
+    expect(styles).toMatch(/\.table-wrap \{[^}]*max-width: 100%;[^}]*min-width: 0;[^}]*overflow-x: auto;/);
+  });
 });
 
 describe('04 store controls', () => {
@@ -131,5 +139,7 @@ describe('workspace accessibility', () => {
     expect(screen.getByRole('link', { name: '跳到主要内容' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '打开导航' })).toBeTruthy();
     expect(screen.getByRole('main')).toBeTruthy();
+    expect(screen.getByText(artifactVersion)).toBeTruthy();
+    expect(screen.queryByText('UNPUBLISHED')).toBeNull();
   });
 });

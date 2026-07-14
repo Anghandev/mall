@@ -455,6 +455,11 @@ h2 {
   padding: 30px 32px 56px;
 }
 
+.page-stack,
+.page-stack > * {
+  min-width: 0;
+}
+
 .page-stack {
   display: grid;
   gap: 24px;
@@ -1042,6 +1047,8 @@ h2 {
 
 .table-wrap {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   overflow-x: auto;
 }
 
