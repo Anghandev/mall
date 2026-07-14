@@ -9,7 +9,7 @@ implements shared funds, contracts, API, Schema or signer behavior.
   risk, logistics, takeover fulfillment, CMS, notifications, system config,
   append-only audit, clearing evidence, operations monitoring and Core status.
 - Production boots from `src/bootstrap.ts` with the coordinated
-  `@abu24k/core-artifacts@2.0.0-rc.1` package. The artifact version and public
+  `@abu24k/core-artifacts@2.0.0-rc.2` package. The artifact version and public
   role, breaker, policy-state and executable-action catalogs come directly from
   that package.
 - Admin projections, monitoring, policy publication and write contracts remain
