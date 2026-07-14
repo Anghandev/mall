@@ -1,0 +1,177 @@
+{
+  "artifactVersion": "2.0.0-rc.1",
+  "orderProjectionStates": [
+    "QUOTED",
+    "SUBMITTED",
+    "PAID",
+    "SHIPPED",
+    "DELIVERED",
+    "ARBITRATION",
+    "TAKEOVER",
+    "FULFILLMENT_PENDING",
+    "FULFILLED",
+    "REORG_PENDING"
+  ],
+  "contractOrderStates": [
+    "NONE",
+    "PAID",
+    "SHIPPED",
+    "DELIVERED",
+    "ARBITRATION",
+    "TAKEOVER",
+    "FULFILLMENT_PENDING",
+    "FULFILLED"
+  ],
+  "orderFinalityStatuses": [
+    "NOT_SUBMITTED",
+    "PENDING",
+    "CONFIRMED",
+    "REPLACED",
+    "REORGED",
+    "FINAL"
+  ],
+  "finalityStates": [
+    "SUBMITTED",
+    "MINED",
+    "REPLACED",
+    "REORGED",
+    "FINAL",
+    "FAILED"
+  ],
+  "userRoles": [
+    "BUYER",
+    "MERCHANT",
+    "ADMIN",
+    "OPERATOR",
+    "ARBITRATOR",
+    "AUDITOR"
+  ],
+  "breakerScopes": [
+    "NEW_ORDERS",
+    "SECKILL_PURCHASE",
+    "SECKILL_SETTLEMENT",
+    "MERCHANT_CLAIM",
+    "REWARD_CLAIM",
+    "PRIZE_CLAIM"
+  ],
+  "allowedActionNames": [
+    "PAY_ORDER",
+    "CONFIRM_RECEIPT",
+    "REQUEST_FORCED_RECEIPT",
+    "VERIFY_PICKUP",
+    "OPEN_ARBITRATION",
+    "OPEN_TAKEOVER",
+    "RECORD_SHIPMENT",
+    "RECORD_DELIVERY",
+    "CLAIM_MERCHANT_USDT",
+    "CLAIM_REWARD_NPL",
+    "CLAIM_PRIZE_USDT",
+    "CLAIM_BNM",
+    "RECONCILE",
+    "RECOVER_SURPLUS"
+  ],
+  "executableOrderActionNames": [],
+  "allowedActionReasonCodes": [
+    "ArtifactVersionMismatch",
+    "BreakerActive",
+    "ConfigurationRequired",
+    "DecisionBlocked",
+    "ExternalBlocked",
+    "FinalityPending",
+    "Forbidden",
+    "MerchantFrozen",
+    "PickupTakeoverDecisionBlocked",
+    "UnknownState"
+  ],
+  "fulfillmentModes": [
+    "DELIVERY",
+    "PICKUP"
+  ],
+  "fulfillmentMethods": [
+    "CUSTOMER_RECEIPT",
+    "PICKUP_VERIFICATION",
+    "FORCED_RECEIPT",
+    "ARBITRATION"
+  ],
+  "claimRails": [
+    "MERCHANT_USDT",
+    "REWARD_NPL",
+    "PRIZE_USDT",
+    "BNM"
+  ],
+  "reservationStates": [
+    "ACTIVE",
+    "CONSUMED",
+    "EXPIRED",
+    "RELEASED"
+  ],
+  "balanceStates": [
+    "LOCKED",
+    "PENDING_SETTLEMENT",
+    "AVAILABLE",
+    "CLAIMED"
+  ],
+  "takeoverStates": [
+    "ELIGIBILITY_PENDING",
+    "OPEN",
+    "FUNDED",
+    "FULFILLMENT_PENDING",
+    "CLOSED",
+    "DECISION_BLOCKED"
+  ],
+  "seckillStates": [
+    "SCHEDULED",
+    "LIVE",
+    "ENDED",
+    "SETTLED",
+    "NO_WINNER"
+  ],
+  "coreErrorCodes": [
+    "ArtifactVersionMismatch",
+    "BreakerActive",
+    "ConfigurationRequired",
+    "DecisionBlocked",
+    "EmptySessionPrizeDecisionBlocked",
+    "ExternalBlocked",
+    "FinalityPending",
+    "Forbidden",
+    "IdempotencyConflict",
+    "InvalidFinality",
+    "InvalidRequest",
+    "InvalidSignature",
+    "InventoryUnavailable",
+    "NonceExpired",
+    "NonceReplay",
+    "PickupTakeoverDecisionBlocked",
+    "ProviderSignatureInvalid",
+    "QuoteExpired",
+    "ReorgPending",
+    "ReservationConflict",
+    "Unauthorized",
+    "UnknownState"
+  ],
+  "policyPublicationStates": [
+    "DRAFT",
+    "DECISION_BLOCKED",
+    "PUBLISHED",
+    "SUPERSEDED"
+  ],
+  "adapterProviders": [
+    "AMAP",
+    "KUAIDI100",
+    "FEIE",
+    "ALIYUN_SMS",
+    "ALIYUN_OSS",
+    "SMTP",
+    "JPUSH"
+  ],
+  "infrastructureProviders": [
+    "RPC_PRIMARY",
+    "RPC_FALLBACK",
+    "EXPLORER"
+  ],
+  "providerReadinessStates": [
+    "READY",
+    "CONFIGURATION_REQUIRED"
+  ]
+}

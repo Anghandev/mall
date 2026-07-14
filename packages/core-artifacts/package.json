@@ -1,7 +1,22 @@
 {
   "name": "@abu24k/core-artifacts",
-  "version": "0.0.0-unpublished",
+  "version": "2.0.0-rc.1",
   "private": true,
   "type": "module",
-  "description": "Core-owned coordinated artifact publication placeholder"
+  "description": "Core-owned coordinated V2 API, types, protocol and contract artifacts",
+  "exports": {
+    ".": {
+      "types": "./generated/index.d.ts",
+      "import": "./generated/index.js",
+      "default": "./generated/index.js"
+    },
+    "./openapi": "./openapi/openapi.json",
+    "./manifest": "./coordinated-manifest.json",
+    "./enums": "./state-error-enums.json",
+    "./websocket": "./websocket-protocol.json",
+    "./contracts": "./contracts/abi-bundle.json",
+    "./contracts/manifest": "./contracts/contract-manifest.json",
+    "./contracts/events": "./contracts/event-catalog.json",
+    "./contracts/roles": "./contracts/role-catalog.json"
+  }
 }

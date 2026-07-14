@@ -1,0 +1,2092 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "usdt_",
+        "type": "address",
+        "internalType": "contract IERC20"
+      },
+      {
+        "name": "policyRegistry_",
+        "type": "address",
+        "internalType": "contract IPolicyRegistryV2"
+      },
+      {
+        "name": "guaranteeVault_",
+        "type": "address",
+        "internalType": "contract IMerchantGuaranteeVaultV2"
+      },
+      {
+        "name": "paymentEscrow_",
+        "type": "address",
+        "internalType": "contract IPaymentEscrowV2"
+      },
+      {
+        "name": "claimVault_",
+        "type": "address",
+        "internalType": "contract IClaimVaultV2"
+      },
+      {
+        "name": "quoteSigner_",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "error",
+    "name": "AccessControlBadConfirmation",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "AccessControlUnauthorizedAccount",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "neededRole",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "AdminReplay",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InexactTransfer",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InsufficientSurplus",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "IntentExpired",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidEvidence",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidIntentPair",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidSession",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidShortString",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidSignature",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InventoryExceeded",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NoWinner",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PurchasesPaused",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ReentrancyGuardReentrantCall",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SafeERC20FailedOperation",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "SafeExecutionRequired",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SessionAlreadySettled",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SessionClosed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SessionExists",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SessionNotReadyToSettle",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SessionNotStarted",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SettlementPaused",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "StringTooLong",
+    "inputs": [
+      {
+        "name": "str",
+        "type": "string",
+        "internalType": "string"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UnknownSession",
+    "inputs": []
+  },
+  {
+    "type": "event",
+    "name": "EIP712DomainChanged",
+    "inputs": [],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PrizeInjected",
+    "inputs": [
+      {
+        "name": "sessionId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "newPrizePool",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "evidenceHash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RoleAdminChanged",
+    "inputs": [
+      {
+        "name": "role",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "previousAdminRole",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "newAdminRole",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RoleGranted",
+    "inputs": [
+      {
+        "name": "role",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "sender",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RoleRevoked",
+    "inputs": [
+      {
+        "name": "role",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "sender",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SeckillPauseChanged",
+    "inputs": [
+      {
+        "name": "scope",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "paused",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      },
+      {
+        "name": "evidenceHash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SeckillPurchaseFinal",
+    "inputs": [
+      {
+        "name": "sessionId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "orderId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "buyer",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "seckillClassified",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      },
+      {
+        "name": "quantity",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "relayDeadline",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "prizeContribution",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SessionCreated",
+    "inputs": [
+      {
+        "name": "sessionId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "policyVersion",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "productId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "skuId",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "startsAt",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "mainDeadline",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "relayDeadline",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "inventory",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "productPolicyHash",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SessionForceClosed",
+    "inputs": [
+      {
+        "name": "sessionId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "closedAt",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "evidenceHash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SessionSettled",
+    "inputs": [
+      {
+        "name": "sessionId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "winner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "prizeAmount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SurplusRecovered",
+    "inputs": [
+      {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "incidentHash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "function",
+    "name": "ADMIN_ACTION_TYPEHASH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "buy",
+    "inputs": [
+      {
+        "name": "intent",
+        "type": "tuple",
+        "internalType": "struct V2Types.SeckillIntent",
+        "components": [
+          {
+            "name": "sessionId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "seckillOrder",
+            "type": "tuple",
+            "internalType": "struct V2Types.OrderIntent",
+            "components": [
+              {
+                "name": "orderId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "policyVersion",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "oracleVersion",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "buyer",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "merchant",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "productId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "skuId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "quantity",
+                "type": "uint32",
+                "internalType": "uint32"
+              },
+              {
+                "name": "fulfillmentMode",
+                "type": "uint8",
+                "internalType": "enum V2Types.FulfillmentMode"
+              },
+              {
+                "name": "fulfillmentTargetHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "regionCodeHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "productPolicyHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "reservationId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "reservationHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "reservationDeadline",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "nonce",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "deadline",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "listPriceUsdt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "usdtPaymentAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "nplPaymentAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "rewardBaseNpl",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "merchantUsdtAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "platformUsdtAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "prizeUsdtAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "usdtRemainderAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "bnmAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "seckill",
+                "type": "bool",
+                "internalType": "bool"
+              },
+              {
+                "name": "sessionId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "beneficiaries",
+                "type": "tuple",
+                "internalType": "struct V2Types.BeneficiarySnapshot",
+                "components": [
+                  {
+                    "name": "genesis",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "directReferral",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "district",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "city",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "province",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "region",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "merchantStore",
+                    "type": "address",
+                    "internalType": "address"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "fallbackOrder",
+            "type": "tuple",
+            "internalType": "struct V2Types.OrderIntent",
+            "components": [
+              {
+                "name": "orderId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "policyVersion",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "oracleVersion",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "buyer",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "merchant",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "productId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "skuId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "quantity",
+                "type": "uint32",
+                "internalType": "uint32"
+              },
+              {
+                "name": "fulfillmentMode",
+                "type": "uint8",
+                "internalType": "enum V2Types.FulfillmentMode"
+              },
+              {
+                "name": "fulfillmentTargetHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "regionCodeHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "productPolicyHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "reservationId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "reservationHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "reservationDeadline",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "nonce",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "deadline",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "listPriceUsdt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "usdtPaymentAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "nplPaymentAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "rewardBaseNpl",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "merchantUsdtAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "platformUsdtAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "prizeUsdtAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "usdtRemainderAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "bnmAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "seckill",
+                "type": "bool",
+                "internalType": "bool"
+              },
+              {
+                "name": "sessionId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "beneficiaries",
+                "type": "tuple",
+                "internalType": "struct V2Types.BeneficiarySnapshot",
+                "components": [
+                  {
+                    "name": "genesis",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "directReferral",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "district",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "city",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "province",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "region",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "merchantStore",
+                    "type": "address",
+                    "internalType": "address"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "deadline",
+            "type": "uint64",
+            "internalType": "uint64"
+          }
+        ]
+      },
+      {
+        "name": "quoteSignature",
+        "type": "bytes",
+        "internalType": "bytes"
+      },
+      {
+        "name": "buyerSignature",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "claimVault",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IClaimVaultV2"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "createSession",
+    "inputs": [
+      {
+        "name": "sessionId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "policyVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "merchant",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "productId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "skuId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "productPolicyHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "startsAt",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "inventory",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "nonce",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "deadline",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "secondarySignature",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "DEFAULT_ADMIN_ROLE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "eip712Domain",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "fields",
+        "type": "bytes1",
+        "internalType": "bytes1"
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "version",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "chainId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "verifyingContract",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "extensions",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "forceClose",
+    "inputs": [
+      {
+        "name": "sessionId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "evidenceHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "nonce",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "deadline",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "secondarySignature",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "getRoleAdmin",
+    "inputs": [
+      {
+        "name": "role",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getSession",
+    "inputs": [
+      {
+        "name": "sessionId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct SeckillV2.Session",
+        "components": [
+          {
+            "name": "policyVersion",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "startsAt",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "mainDeadline",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "relayDeadline",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "forceClosedAt",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "merchant",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "lastBuyer",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "productId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "skuId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "productPolicyHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "inventory",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "sold",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "prizePool",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "settled",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "grantRole",
+    "inputs": [
+      {
+        "name": "role",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "guaranteeVault",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IMerchantGuaranteeVaultV2"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "hashAdminAction",
+    "inputs": [
+      {
+        "name": "actionHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "nonce",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "deadline",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "hashPurchase",
+    "inputs": [
+      {
+        "name": "intent",
+        "type": "tuple",
+        "internalType": "struct V2Types.SeckillIntent",
+        "components": [
+          {
+            "name": "sessionId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "seckillOrder",
+            "type": "tuple",
+            "internalType": "struct V2Types.OrderIntent",
+            "components": [
+              {
+                "name": "orderId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "policyVersion",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "oracleVersion",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "buyer",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "merchant",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "productId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "skuId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "quantity",
+                "type": "uint32",
+                "internalType": "uint32"
+              },
+              {
+                "name": "fulfillmentMode",
+                "type": "uint8",
+                "internalType": "enum V2Types.FulfillmentMode"
+              },
+              {
+                "name": "fulfillmentTargetHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "regionCodeHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "productPolicyHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "reservationId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "reservationHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "reservationDeadline",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "nonce",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "deadline",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "listPriceUsdt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "usdtPaymentAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "nplPaymentAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "rewardBaseNpl",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "merchantUsdtAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "platformUsdtAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "prizeUsdtAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "usdtRemainderAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "bnmAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "seckill",
+                "type": "bool",
+                "internalType": "bool"
+              },
+              {
+                "name": "sessionId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "beneficiaries",
+                "type": "tuple",
+                "internalType": "struct V2Types.BeneficiarySnapshot",
+                "components": [
+                  {
+                    "name": "genesis",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "directReferral",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "district",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "city",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "province",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "region",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "merchantStore",
+                    "type": "address",
+                    "internalType": "address"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "fallbackOrder",
+            "type": "tuple",
+            "internalType": "struct V2Types.OrderIntent",
+            "components": [
+              {
+                "name": "orderId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "policyVersion",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "oracleVersion",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "buyer",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "merchant",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "productId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "skuId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "quantity",
+                "type": "uint32",
+                "internalType": "uint32"
+              },
+              {
+                "name": "fulfillmentMode",
+                "type": "uint8",
+                "internalType": "enum V2Types.FulfillmentMode"
+              },
+              {
+                "name": "fulfillmentTargetHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "regionCodeHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "productPolicyHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "reservationId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "reservationHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "reservationDeadline",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "nonce",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "deadline",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "listPriceUsdt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "usdtPaymentAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "nplPaymentAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "rewardBaseNpl",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "merchantUsdtAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "platformUsdtAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "prizeUsdtAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "usdtRemainderAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "bnmAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "seckill",
+                "type": "bool",
+                "internalType": "bool"
+              },
+              {
+                "name": "sessionId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "beneficiaries",
+                "type": "tuple",
+                "internalType": "struct V2Types.BeneficiarySnapshot",
+                "components": [
+                  {
+                    "name": "genesis",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "directReferral",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "district",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "city",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "province",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "region",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "merchantStore",
+                    "type": "address",
+                    "internalType": "address"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "deadline",
+            "type": "uint64",
+            "internalType": "uint64"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "hasRole",
+    "inputs": [
+      {
+        "name": "role",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "injectPrize",
+    "inputs": [
+      {
+        "name": "sessionId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "evidenceHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "nonce",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "deadline",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "secondarySignature",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "isSeckillWindowOpen",
+    "inputs": [
+      {
+        "name": "sessionId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MIN_SETTLEMENT_DELAY",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "PAUSER_ROLE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "paymentEscrow",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IPaymentEscrowV2"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "policyRegistry",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IPolicyRegistryV2"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "PURCHASE_TYPEHASH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "purchasesPaused",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "quoteSigner",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "recoverSurplus",
+    "inputs": [
+      {
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "incidentHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "RECOVERY_ROLE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "renounceRole",
+    "inputs": [
+      {
+        "name": "role",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "callerConfirmation",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "revokeRole",
+    "inputs": [
+      {
+        "name": "role",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "safe",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "SESSION_ADMIN_ROLE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "setPurchasePause",
+    "inputs": [
+      {
+        "name": "paused",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "evidenceHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setSettlementPause",
+    "inputs": [
+      {
+        "name": "paused",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "evidenceHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "settle",
+    "inputs": [
+      {
+        "name": "sessionId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "settlementPaused",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "SETTLER_ROLE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "supportsInterface",
+    "inputs": [
+      {
+        "name": "interfaceId",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "totalUnsettledPrize",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "usdt",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IERC20"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "usedAdminNonce",
+    "inputs": [
+      {
+        "name": "nonce",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "used",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  }
+]
