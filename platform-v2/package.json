@@ -11,7 +11,7 @@
     "contracts:artifacts:check": "../scripts/node scripts/generate-contract-artifacts.mjs --check",
     "contracts:test": "forge fmt --check && forge test && ../scripts/node scripts/generate-contract-artifacts.mjs --check",
     "database:check": "../scripts/node --test --test-concurrency=1 server/data/database.test.ts",
-    "api:check": "../scripts/node --test --test-concurrency=1 server/api/api.test.ts",
+    "api:check": "../scripts/node --test --test-concurrency=1 server/api/api.test.ts server/chain/workers.test.ts",
     "consumer:check": "../scripts/node ../scripts/pending-gate.mjs consumer:check",
     "e2e:full": "../scripts/node ../scripts/pending-gate.mjs e2e:full"
   },

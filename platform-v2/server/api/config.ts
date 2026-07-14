@@ -25,6 +25,11 @@ const externalVariables = [
   'QUOTE_SIGNER_ADDRESS',
   'FINALITY_SIGNER_ADDRESS',
   'TWAP_SOURCE_ADDRESS',
+  'SIGNER_SERVICE_URL',
+  'SIGNER_SERVICE_TOKEN',
+  'SETTLEMENT_EXECUTOR_URL',
+  'SETTLEMENT_EXECUTOR_TOKEN',
+  'EXECUTOR_MAX_GAS_LIMIT',
 ] as const;
 
 export type ProviderName = 'AMAP' | 'KUAIDI100' | 'FEIE' | 'ALIYUN_SMS' | 'ALIYUN_OSS' | 'SMTP' | 'JPUSH';
@@ -53,6 +58,11 @@ export interface CoreConfig {
   quoteSignerAddress: string | undefined;
   finalitySignerAddress: string | undefined;
   twapSourceAddress: string | undefined;
+  signerServiceUrl: string | undefined;
+  signerServiceToken: string | undefined;
+  executorUrl: string | undefined;
+  executorToken: string | undefined;
+  executorMaxGasLimit: bigint | undefined;
   decisionBlocked: readonly string[];
   externalBlocked: readonly string[];
   providerReadiness: Readonly<Record<ProviderName, 'READY' | 'CONFIGURATION_REQUIRED'>>;
@@ -93,6 +103,11 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     quoteSignerAddress: normalizeOptionalAddress(env.QUOTE_SIGNER_ADDRESS),
     finalitySignerAddress: normalizeOptionalAddress(env.FINALITY_SIGNER_ADDRESS),
     twapSourceAddress: normalizeOptionalAddress(env.TWAP_SOURCE_ADDRESS),
+    signerServiceUrl: env.SIGNER_SERVICE_URL,
+    signerServiceToken: env.SIGNER_SERVICE_TOKEN,
+    executorUrl: env.SETTLEMENT_EXECUTOR_URL,
+    executorToken: env.SETTLEMENT_EXECUTOR_TOKEN,
+    executorMaxGasLimit: parseOptionalPositiveBigInt(env.EXECUTOR_MAX_GAS_LIMIT, 'EXECUTOR_MAX_GAS_LIMIT'),
     decisionBlocked,
     externalBlocked,
     providerReadiness: Object.freeze(providerReadiness),
@@ -150,5 +165,16 @@ function validateDecisionValues(env: Readonly<Record<string, string | undefined>
     if (BigInt(env.GENESIS_CREDENTIAL_TOKEN_ID!) < 0n) throw new Error('negative token id');
   } catch {
     throw new CoreError('InvalidRequest', 'GENESIS_CREDENTIAL_TOKEN_ID must be a non-negative integer', 500);
+  }
+}
+
+function parseOptionalPositiveBigInt(value: string | undefined, name: string) {
+  if (!value) return undefined;
+  try {
+    const parsed = BigInt(value);
+    if (parsed <= 0n) throw new Error('positive value required');
+    return parsed;
+  } catch {
+    throw new CoreError('InvalidRequest', `${name} must be a positive integer`, 500);
   }
 }
