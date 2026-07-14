@@ -5,8 +5,11 @@ Requirement Matrix and consumes only coordinated Core artifacts.
 
 ## Current Runtime Boundary
 
-- Production starts with Core artifacts `unpublished` and every wallet write
-  disabled.
+- Production consumes coordinated Core artifacts `2.0.0-rc.1`, including its
+  version, BSC chain identity and order-action catalogs.
+- `executableOrderActionNames` is empty in this release candidate, so every
+  wallet write remains disabled. The application does not infer an action from
+  the broader known-action catalog.
 - The application does not define endpoints, shared schemas, calldata, prices,
   allocations, eligibility or finality.
 - Product, session, store, order and reward values remain unavailable instead

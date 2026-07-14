@@ -146,8 +146,9 @@ function getActiveRoot(pathname: string) {
 
 export const mallRuntimeBoundary = Object.freeze({
   artifactStatus: productBaseline.coreArtifacts,
+  executableOrderActions: productBaseline.executableOrderActions,
   writesEnabled: false,
-  sharedInterface: null,
+  sharedInterface: '@abu24k/core-artifacts',
 } as const);
 
 export const routeEvidence = Object.freeze({

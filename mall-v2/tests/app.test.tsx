@@ -1,8 +1,14 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import {
+  allowedActionNames,
+  artifactVersion,
+  executableOrderActionNames,
+} from '@abu24k/core-artifacts';
 import { MemoryRouter } from 'react-router-dom';
 
 import { MallApp, mallRuntimeBoundary } from '../src/App';
+import { isCoreOrderActionExecutable, productBaseline } from '../src/bootstrap';
 
 function renderAt(path = '/seckill') {
   return render(
@@ -26,10 +32,24 @@ describe('Mall V2 fail-closed application', () => {
     expect(screen.getByRole('heading', { name: '常规商城' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '立即购买' }).hasAttribute('disabled')).toBe(true);
     expect(mallRuntimeBoundary).toEqual({
-      artifactStatus: 'unpublished',
+      artifactStatus: '2.0.0-rc.1',
+      executableOrderActions: [],
       writesEnabled: false,
-      sharedInterface: null,
+      sharedInterface: '@abu24k/core-artifacts',
     });
+  });
+
+  it('consumes the coordinated artifact version and fails closed with no executable actions', () => {
+    renderAt('/mall');
+
+    expect(productBaseline.coreArtifacts).toBe(artifactVersion);
+    expect(artifactVersion).toBe('2.0.0-rc.1');
+    expect(productBaseline.knownOrderActions).toBe(allowedActionNames);
+    expect(productBaseline.executableOrderActions).toBe(executableOrderActionNames);
+    expect(executableOrderActionNames).toHaveLength(0);
+    expect(allowedActionNames.every((action) => !isCoreOrderActionExecutable(action))).toBe(true);
+    expect(mallRuntimeBoundary.writesEnabled).toBe(false);
+    expect(screen.getByRole('button', { name: '立即购买' }).hasAttribute('disabled')).toBe(true);
   });
 
   it('shows only frozen seckill rules and never classifies locally', async () => {
