@@ -3,11 +3,20 @@ import { TypedDataEncoder } from 'ethers';
 import { vi } from 'vitest';
 
 import {
+  coordinatedFulfillmentOperations,
   coordinatedPaymentOperations,
   createCoreClient,
   type QuoteSelection,
 } from '../src/core-client';
 import { paymentAuthorizationTypes } from '../src/payment-integrity';
+import {
+  deliveryActions,
+  deliveryOrder,
+  deliveryOrderTarget,
+  deliveryTarget,
+  pickupTarget,
+  store,
+} from './fulfillment-fixtures';
 import { paymentQuote, product, seckillQuote } from './payment-fixtures';
 
 const HASH = `0x${'1'.repeat(64)}`;
@@ -25,6 +34,56 @@ describe('coordinated Core HTTP client', () => {
       submission: '/v2/payments/submissions',
       payment: '/v2/payments/{orderId}',
     });
+  });
+
+  it('derives every Mall fulfillment path from coordinated OpenAPI', () => {
+    expect(coordinatedFulfillmentOperations).toEqual({
+      allowedActions: '/v2/actions/order',
+      stores: '/v2/stores',
+      deliveryTarget: '/v2/fulfillment-targets/delivery',
+      pickupTarget: '/v2/fulfillment-targets/pickup',
+      orders: '/v2/orders',
+      order: '/v2/orders/{orderId}',
+      orderTarget: '/v2/orders/{orderId}/fulfillment-target',
+    });
+  });
+
+  it('consumes stores, checkout targets, wallet orders and allowedActions without parallel schemas', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, ...(init ? { init } : {}) });
+      if (url.endsWith('/v2/stores?regionCode=210202')) return json({ stores: [store] });
+      if (url.endsWith('/v2/fulfillment-targets/delivery')) return json(deliveryTarget, 201);
+      if (url.endsWith('/v2/fulfillment-targets/pickup')) return json(pickupTarget, 201);
+      if (url.endsWith('/v2/orders')) return json({ orders: [deliveryOrder] });
+      if (url.endsWith(`/v2/orders/${deliveryOrder.orderId}/fulfillment-target`)) return json({ target: deliveryOrderTarget });
+      if (url.endsWith(`/v2/orders/${deliveryOrder.orderId}`)) return json({ order: deliveryOrder });
+      if (url.endsWith('/v2/actions/order')) return json({ allowedActions: deliveryActions });
+      throw new Error(`unexpected URL ${url}`);
+    });
+    const client = createCoreClient({ baseUrl: 'https://core.mall.test', fetch: fetcher });
+    const targetDraft = {
+      idempotencyKey: 'mall-target-1234',
+      recipientName: '张三',
+      phone: '13800138000',
+      address: '辽宁省大连市中山区示例路 24 号',
+      longitude: 121.6389,
+      latitude: 38.914,
+    };
+
+    expect(await client.listStores('210202')).toEqual([store]);
+    expect(await client.createDeliveryTarget('session', targetDraft)).toEqual(deliveryTarget);
+    expect(await client.createPickupTarget('session', { idempotencyKey: 'mall-pickup-1234', storeId: store.storeId })).toEqual(pickupTarget);
+    expect(await client.listOrders('session')).toEqual([deliveryOrder]);
+    expect(await client.getOrder('session', deliveryOrder.orderId)).toEqual(deliveryOrder);
+    expect(await client.getOrderTarget('session', deliveryOrder.orderId)).toEqual(deliveryOrderTarget);
+    expect(await client.getOrderAllowedActions('session', deliveryOrder.orderId)).toEqual(deliveryActions);
+
+    const protectedCalls = calls.filter((call) => !call.url.includes('/v2/stores'));
+    expect(protectedCalls.every((call) => (call.init?.headers as Record<string, string>)?.authorization === 'Bearer session')).toBe(true);
+    expect(JSON.parse(String(calls.find((call) => call.url.endsWith('/v2/fulfillment-targets/delivery'))?.init?.body))).toEqual(targetDraft);
+    expect(JSON.parse(String(calls.find((call) => call.url.endsWith('/v2/actions/order'))?.init?.body))).toEqual({ orderId: deliveryOrder.orderId });
   });
 
   it('uses generated responses and passes exact quote/routerCall fields through unchanged', async () => {

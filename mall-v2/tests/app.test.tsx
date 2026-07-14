@@ -11,9 +11,17 @@ import { vi } from 'vitest';
 
 import { MallApp, mallRuntimeBoundary } from '../src/App';
 import { isCoreOrderActionExecutable, productBaseline } from '../src/bootstrap';
-import type { CoreClient, CorePaymentAvailability } from '../src/core-client';
+import { CoreClientError, type CoreClient, type CorePaymentAvailability } from '../src/core-client';
 import type { MallServices, PendingSubmission } from '../src/mall-runtime';
 import type { WalletGateway } from '../src/wallet';
+import {
+  deliveryActions,
+  deliveryOrder,
+  deliveryOrderTarget,
+  deliveryTarget,
+  pickupTarget,
+  store,
+} from './fulfillment-fixtures';
 import { paymentQuote, product } from './payment-fixtures';
 
 function renderAt(path = '/seckill', services = offlineServices()) {
@@ -71,6 +79,7 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByRole('heading', { name: '订单配置' })).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
+    await prepareDeliveryTarget(user);
     await user.click(screen.getByRole('button', { name: '创建签名报价' }));
 
     await screen.findByRole('heading', { name: '库存已预留' });
@@ -80,9 +89,9 @@ describe('Mall V2 payment consumer', () => {
       skuId: product.skus[0]?.skuId,
       quantity: 1,
       fulfillmentMode: 'DELIVERY',
-      fulfillmentTargetHash: HASH,
-      regionCodeHash: HASH_2,
-      label: '已验证收货地址',
+      fulfillmentTargetHash: deliveryTarget.targetHash,
+      regionCodeHash: deliveryTarget.regionCodeHash,
+      label: '张三 · 辽宁省大连市中山区示例路 24 号',
     });
     expect(screen.getByText(`${quote.intent.listPriceUsdt} USDT 原子单位`)).toBeTruthy();
 
@@ -111,6 +120,7 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     await user.click(screen.getByRole('button', { name: /选择商品/ }));
     await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
+    await prepareDeliveryTarget(user);
     await user.click(screen.getByRole('button', { name: '创建签名报价' }));
     await user.click(await screen.findByRole('link', { name: /核对报价/ }));
     await user.click(screen.getByRole('button', { name: '刷新 Core 投影' }));
@@ -120,20 +130,18 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText('--/15')).toBeTruthy();
   });
 
-  it('refuses to invent fulfillment hashes when the address batch is unpublished', async () => {
+  it('refuses to invent fulfillment hashes until a Core target exists', async () => {
     const user = userEvent.setup();
     const createOrdinaryQuote = vi.fn<CoreClient['createOrdinaryQuote']>();
     const services = readyServices({ createOrdinaryQuote });
-    services.resolveCheckoutTarget = vi.fn().mockResolvedValue(null);
     renderAt('/mall', services);
 
     await screen.findByRole('heading', { name: product.title });
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     await user.click(screen.getByRole('button', { name: /选择商品/ }));
     await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
-    await user.click(screen.getByRole('button', { name: '创建签名报价' }));
-
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('请先选择由 Core 验证的收货地址'));
+    expect(screen.getByRole('button', { name: '创建签名报价' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText('请先验证快递目标')).toBeTruthy();
     expect(createOrdinaryQuote).not.toHaveBeenCalled();
     expect(screen.queryByRole('heading', { name: '库存已预留' })).toBeNull();
   });
@@ -164,6 +172,7 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     await user.click(screen.getByRole('button', { name: /选择商品/ }));
     await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
+    await prepareDeliveryTarget(user);
     await user.click(screen.getByRole('button', { name: '创建签名报价' }));
     await user.click(await screen.findByRole('link', { name: /核对报价/ }));
     await user.click(screen.getByRole('checkbox', { name: /无限额度授权风险/ }));
@@ -226,6 +235,7 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     await user.click(screen.getByRole('button', { name: /选择商品/ }));
     await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
+    await prepareDeliveryTarget(user);
     await user.click(screen.getByRole('button', { name: '创建签名报价' }));
     await user.click(await screen.findByRole('link', { name: /核对报价/ }));
     await user.click(screen.getByRole('checkbox', { name: /无限额度授权风险/ }));
@@ -254,6 +264,83 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByRole('button', { name: '支付并广播' }).hasAttribute('disabled')).toBe(true);
   });
 
+  it('renders Core stores, browser distance and keeps native navigation ExternalBlocked', async () => {
+    const user = userEvent.setup();
+    const services = readyServices();
+    renderAt('/stores', services);
+
+    await screen.findByRole('heading', { name: store.name });
+    expect(screen.getByText('定位后显示')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '获取距离' }));
+    await screen.findByText('0.0 km');
+    expect(screen.getByRole('link', { name: `拨打 ${store.name} 电话` }).getAttribute('href')).toBe(`tel:${store.phone}`);
+    expect(screen.getByRole('button', { name: '导航' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText(/原生地图桥接.*ExternalBlocked/)).toBeTruthy();
+  });
+
+  it('binds a pickup target only through a published Core store snapshot', async () => {
+    const user = userEvent.setup();
+    const createPickupTarget = vi.fn<CoreClient['createPickupTarget']>().mockResolvedValue(pickupTarget);
+    const services = readyServices({ createPickupTarget });
+    renderAt('/mall', services);
+
+    await screen.findByRole('heading', { name: product.title });
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await user.click(screen.getByRole('button', { name: /选择商品/ }));
+    await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
+    await user.click(screen.getByRole('button', { name: '到店自提' }));
+    await user.click(await screen.findByRole('button', { name: new RegExp(store.name) }));
+
+    expect(createPickupTarget).toHaveBeenCalledWith('buyer-session', {
+      idempotencyKey: 'mall-test-idempotency',
+      storeId: store.storeId,
+    });
+    expect(screen.getByText(`${store.name} · ${store.address}`)).toBeTruthy();
+    expect(screen.getByRole('button', { name: '创建签名报价' }).hasAttribute('disabled')).toBe(false);
+  });
+
+  it('fails closed before target creation when browser location is denied', async () => {
+    const user = userEvent.setup();
+    const createDeliveryTarget = vi.fn<CoreClient['createDeliveryTarget']>();
+    const services = readyServices({ createDeliveryTarget });
+    services.getCurrentPosition = vi.fn().mockRejectedValue(new CoreClientError('ExternalBlocked', '未取得设备定位授权'));
+    renderAt('/mall', services);
+
+    await screen.findByRole('heading', { name: product.title });
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await user.click(screen.getByRole('button', { name: /选择商品/ }));
+    await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
+    await user.type(screen.getByLabelText('收货人'), '张三');
+    await user.type(screen.getByLabelText('手机号'), '13800138000');
+    await user.type(screen.getByLabelText('详细地址'), '辽宁省大连市中山区示例路 24 号');
+    await user.click(screen.getByRole('button', { name: '验证快递目标' }));
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('未取得设备定位授权'));
+    expect(createDeliveryTarget).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '创建签名报价' }).hasAttribute('disabled')).toBe(true);
+  });
+
+  it('renders wallet-scoped orders, logistics, BNM and server allowedActions fail closed', async () => {
+    const user = userEvent.setup();
+    const services = readyServices({
+      listOrders: vi.fn().mockResolvedValue([deliveryOrder]),
+      getOrderAllowedActions: vi.fn().mockResolvedValue(deliveryActions),
+      getOrderTarget: vi.fn().mockResolvedValue(deliveryOrderTarget),
+    });
+    renderAt('/assets/orders', services);
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await screen.findByText('BNM 后台积分');
+    expect(screen.getByText('KUAIDI100 · 运输中 · 05/18 13:00')).toBeTruthy();
+    expect(screen.getByText(deliveryOrder.exactAmounts.bnmAmount)).toBeTruthy();
+    expect(screen.getByText(/13800138000/)).toBeTruthy();
+    const exchange = screen.getByRole('button', { name: '申请换货' });
+    expect(exchange.hasAttribute('disabled')).toBe(true);
+    expect(screen.getAllByText(/canonical evidence 生成\/上传契约尚未发布/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('UnknownState')).toHaveLength(2);
+    expect(document.body.textContent).not.toMatch(/申请退款|强制退款|无理由退款/i);
+  });
+
   it('keeps unpublished fulfillment, reward and device capabilities fail closed', () => {
     renderAt('/assets/rewards');
     expect(screen.getByRole('heading', { name: '消费产出池' })).toBeTruthy();
@@ -271,8 +358,6 @@ describe('Mall V2 payment consumer', () => {
   });
 });
 
-const HASH = `0x${'1'.repeat(64)}`;
-const HASH_2 = `0x${'2'.repeat(64)}`;
 const HASH_3 = `0x${'3'.repeat(64)}`;
 
 function offlineServices(): MallServices {
@@ -286,6 +371,7 @@ function readyServices(overrides: Partial<CoreClient> = {}): MallServices {
   return servicesWith({
     getBootstrap: vi.fn().mockResolvedValue(bootstrap(true)),
     listCatalog: vi.fn().mockResolvedValue([product]),
+    listStores: vi.fn().mockResolvedValue([store]),
     ...overrides,
   });
 }
@@ -300,6 +386,13 @@ function servicesWith(overrides: Partial<CoreClient>): MallServices {
     createSeckillQuote: vi.fn().mockRejectedValue(new Error('not configured')),
     submitPayment: vi.fn().mockRejectedValue(new Error('not configured')),
     getPayment: vi.fn().mockRejectedValue(new Error('not configured')),
+    listStores: vi.fn().mockResolvedValue([]),
+    createDeliveryTarget: vi.fn().mockResolvedValue(deliveryTarget),
+    createPickupTarget: vi.fn().mockResolvedValue(pickupTarget),
+    listOrders: vi.fn().mockResolvedValue([]),
+    getOrder: vi.fn().mockRejectedValue(new Error('not configured')),
+    getOrderTarget: vi.fn().mockRejectedValue(new Error('not configured')),
+    getOrderAllowedActions: vi.fn().mockResolvedValue([]),
     ...overrides,
   };
   const wallet: WalletGateway = {
@@ -315,12 +408,7 @@ function servicesWith(overrides: Partial<CoreClient>): MallServices {
   return {
     core,
     wallet,
-    resolveCheckoutTarget: vi.fn().mockResolvedValue({
-      fulfillmentMode: 'DELIVERY',
-      fulfillmentTargetHash: HASH,
-      regionCodeHash: HASH_2,
-      label: '已验证收货地址',
-    }),
+    getCurrentPosition: vi.fn().mockResolvedValue({ latitude: store.latitude, longitude: store.longitude }),
     createIdempotencyKey: () => 'mall-test-idempotency',
     submissionStore: {
       load: (walletAddress) => pendingSubmission?.walletAddress === walletAddress.toLowerCase() ? pendingSubmission : null,
@@ -329,6 +417,14 @@ function servicesWith(overrides: Partial<CoreClient>): MallServices {
     },
     walletWritesAuthorized: false,
   };
+}
+
+async function prepareDeliveryTarget(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByLabelText('收货人'), '张三');
+  await user.type(screen.getByLabelText('手机号'), '13800138000');
+  await user.type(screen.getByLabelText('详细地址'), '辽宁省大连市中山区示例路 24 号');
+  await user.click(screen.getByRole('button', { name: '验证快递目标' }));
+  await screen.findByText('Core 目标已验证');
 }
 
 function pendingRecord(orderId: string, txHash: string, phase: PendingSubmission['phase'] = 'PENDING_CORE_SUBMISSION'): PendingSubmission {

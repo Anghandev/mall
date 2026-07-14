@@ -31,7 +31,13 @@ import {
   Zap,
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import type { PaymentRouterIntent } from '@abu24k/core-artifacts';
+import type {
+  AllowedAction,
+  FulfillmentOrder,
+  FulfillmentTarget,
+  MerchantStore,
+  PaymentRouterIntent,
+} from '@abu24k/core-artifacts';
 
 import {
   DisabledAction,
@@ -41,7 +47,7 @@ import {
   StatusNotice,
   UnavailableValue,
 } from './components';
-import { useMallRuntime, type MallRuntimeValue } from './mall-runtime';
+import { useMallRuntime, type BrowserPosition, type MallRuntimeValue } from './mall-runtime';
 
 const unavailableReason = '安全配置未发布，当前操作已停用';
 
@@ -180,6 +186,9 @@ export function MallScreen() {
 }
 
 export function StoresScreen() {
+  const runtime = useMallRuntime();
+  const [regionCode, setRegionCode] = useState('');
+
   return (
     <div className="screen screen--stores">
       <ScreenHeader
@@ -190,62 +199,105 @@ export function StoresScreen() {
 
       <img className="store-hero" src="/brand/store-front.png" alt="阿步 24K 线下门店空间" />
 
-      <fieldset className="location-filter" disabled>
-        <legend>筛选地区</legend>
-        <label>
-          国家
-          <select defaultValue="" disabled>
-            <option value="">待同步</option>
-          </select>
+      <form
+        className="store-tools"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void runtime.reloadStores(regionCode || undefined);
+        }}
+      >
+        <label className="field">
+          六位行政区代码
+          <input
+            value={regionCode}
+            onChange={(event) => setRegionCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+            inputMode="numeric"
+            pattern="[0-9]{6}"
+            placeholder="全部地区"
+          />
         </label>
-        <label>
-          城市
-          <select defaultValue="" disabled>
-            <option value="">待同步</option>
-          </select>
-        </label>
-        <label>
-          区县
-          <select defaultValue="" disabled>
-            <option value="">待同步</option>
-          </select>
-        </label>
-      </fieldset>
-
-      <StatusNotice title="位置服务不可用" tone="warning">
-        尚未取得真实设备定位与门店区域数据，不显示虚构距离或最近门店。
-      </StatusNotice>
-
-      <section className="store-placeholder" aria-labelledby="nearby-store-title">
-        <div className="store-placeholder__icon"><Store aria-hidden="true" size={24} /></div>
-        <div>
-          <h2 id="nearby-store-title">附近门店</h2>
-          <p>门店名称、地址、营业时间与距离待同步</p>
+        <div className="split-actions">
+          <button className="button button--secondary" type="submit" disabled={runtime.busy || Boolean(regionCode && regionCode.length !== 6)}>
+            <RefreshCw aria-hidden="true" size={18} /> 筛选门店
+          </button>
+          <button className="button button--secondary" type="button" onClick={() => void runtime.requestLocation()} disabled={runtime.busy}>
+            <LocateFixed aria-hidden="true" size={18} />
+            {runtime.locationState === 'loading' ? '定位中' : '获取距离'}
+          </button>
         </div>
-        <span className="status-pill status-pill--muted">-- km</span>
-      </section>
+      </form>
 
-      <div className="split-actions">
-        <button className="button button--secondary" type="button" disabled>
-          <Phone aria-hidden="true" size={18} />
-          拨号
-        </button>
-        <button className="button button--secondary" type="button" disabled>
-          <Navigation aria-hidden="true" size={18} />
-          导航
-        </button>
-      </div>
-      <p className="control-reason">真实设备、原生地图与 HTTPS 域名完成验收后开放</p>
+      {runtime.locationState !== 'ready' ? (
+        <StatusNotice title="设备定位尚未验证" tone="warning">
+          未授权定位时只展示 Core 门店资料，不推断最近门店或虚构距离。
+        </StatusNotice>
+      ) : null}
+
+      {runtime.storesState === 'loading' ? <StoreListSkeleton /> : null}
+      {runtime.storesState === 'error' ? (
+        <StatusNotice title="门店同步失败" tone="warning">当前不展示缓存门店或示例地址。</StatusNotice>
+      ) : null}
+      {runtime.storesState === 'empty' ? (
+        <EmptyState title="当前地区暂无门店">Core 已返回空门店列表，可清除行政区筛选后重试。</EmptyState>
+      ) : null}
+      {runtime.storesState === 'ready' ? (
+        <div className="store-list" aria-label="可用自提门店">
+          {runtime.stores.map((store) => (
+            <StoreRow key={store.storeId} store={store} location={runtime.location} />
+          ))}
+        </div>
+      ) : null}
+
+      <p id="native-navigation-blocked" className="control-reason">原生地图桥接与真实设备导航证据仍为 ExternalBlocked，导航入口保持关闭。</p>
     </div>
   );
 }
 
+function StoreListSkeleton() {
+  return (
+    <div className="store-list" aria-label="正在加载门店">
+      {[0, 1].map((item) => <div className="store-row store-row--skeleton" key={item} />)}
+    </div>
+  );
+}
+
+function StoreRow({ store, location }: { store: MerchantStore; location: BrowserPosition | null }) {
+  const distance = location ? distanceKm(location, store) : null;
+  return (
+    <article className="store-row">
+      <div className="store-row__header">
+        <div>
+          <h2>{store.name}</h2>
+          <p>{store.address}</p>
+        </div>
+        <span className={store.status === 'ACTIVE' ? 'status-pill status-pill--success' : 'status-pill status-pill--muted'}>
+          {store.status === 'ACTIVE' ? '营业中' : store.status}
+        </span>
+      </div>
+      <dl className="store-row__facts">
+        <div><dt>行政区</dt><dd>{store.regionCode}</dd></div>
+        <div><dt>距离</dt><dd>{distance === null ? '定位后显示' : `${distance.toFixed(1)} km`}</dd></div>
+        <div><dt>版本</dt><dd>v{store.version}</dd></div>
+      </dl>
+      <div className="split-actions">
+        <a className="button button--secondary" href={`tel:${store.phone}`} aria-label={`拨打 ${store.name} 电话`}>
+          <Phone aria-hidden="true" size={18} /> 拨号
+        </a>
+        <button className="button button--secondary" type="button" disabled aria-describedby="native-navigation-blocked">
+          <Navigation aria-hidden="true" size={18} /> 导航
+        </button>
+      </div>
+    </article>
+  );
+}
+
 export function AssetsScreen() {
+  const runtime = useMallRuntime();
   const orderItems = [
-    { label: '待付款', icon: Clock3 },
-    { label: '待发货', icon: PackageOpen },
-    { label: '待收货', icon: Truck },
-    { label: '售后 / 仲裁', icon: ShieldAlert },
+    { label: '待付款', icon: Clock3, count: runtime.orders.filter((order) => ['QUOTED', 'SUBMITTED'].includes(order.state)).length },
+    { label: '待发货', icon: PackageOpen, count: runtime.orders.filter((order) => order.state === 'PAID').length },
+    { label: '待收货', icon: Truck, count: runtime.orders.filter((order) => ['SHIPPED', 'DELIVERED', 'FULFILLMENT_PENDING'].includes(order.state)).length },
+    { label: '售后 / 仲裁', icon: ShieldAlert, count: runtime.orders.filter((order) => ['ARBITRATION', 'TAKEOVER'].includes(order.state)).length },
   ];
 
   return (
@@ -255,8 +307,8 @@ export function AssetsScreen() {
       <section className="profile-strip" aria-labelledby="profile-title">
         <div className="avatar-placeholder"><UserRound aria-hidden="true" size={24} /></div>
         <div className="profile-strip__copy">
-          <h2 id="profile-title">未连接钱包</h2>
-          <p>账号 ID 与链上身份待安全校验</p>
+          <h2 id="profile-title">{runtime.session ? shortHash(runtime.session.walletAddress) : '未连接钱包'}</h2>
+          <p>{runtime.session ? 'BUYER 会话已验证' : '账号 ID 与链上身份待安全校验'}</p>
         </div>
         <Link className="icon-button" to="/assets/addresses" aria-label="打开我的收货地址">
           <MapPinned aria-hidden="true" size={20} />
@@ -276,7 +328,7 @@ export function AssetsScreen() {
             return (
               <Link key={item.label} to="/assets/orders" className="order-status-item">
                 <span className="order-status-item__icon"><Icon aria-hidden="true" size={20} /></span>
-                <strong aria-label={`${item.label}数量暂不可用`}>--</strong>
+                <strong>{runtime.session && runtime.ordersState !== 'error' ? item.count : '--'}</strong>
                 <span>{item.label}</span>
               </Link>
             );
@@ -405,13 +457,15 @@ export function AddressScreen() {
 }
 
 export function OrdersScreen() {
-  const [active, setActive] = useState('待付款');
-  const tabs = ['待付款', '待发货', '待收货', '售后 / 仲裁'];
+  const runtime = useMallRuntime();
+  const [active, setActive] = useState('全部');
+  const tabs = ['全部', '待付款', '待发货', '待收货', '售后 / 仲裁'];
+  const visibleOrders = runtime.orders.filter((order) => orderMatchesTab(order, active));
 
   return (
     <div className="screen screen--detail">
       <ScreenHeader eyebrow="FULFILLMENT" title="我的订单" description="交付动作仅由允许操作开放" backTo="/assets" />
-      <div className="segmented-control" role="tablist" aria-label="订单状态">
+      <div className="segmented-control order-tabs" role="tablist" aria-label="订单状态">
         {tabs.map((tab) => (
           <button
             key={tab}
@@ -426,13 +480,36 @@ export function OrdersScreen() {
         ))}
       </div>
 
-      <StatusNotice title="订单数据暂不可用">
-        订单、物流、平台接管履约和仲裁状态尚未同步，任何交付动作都不会被本地推断。
-      </StatusNotice>
-
-      <EmptyState title={`暂无可显示的${active}订单`}>
-        加载完成后，物流摘要、秒杀标识和可执行操作会直接显示在订单卡片中。
-      </EmptyState>
+      {!runtime.session ? (
+        <StatusNotice title="需要钱包登录">连接钱包后只读取当前 BUYER 会话可见的订单与允许操作。</StatusNotice>
+      ) : null}
+      {runtime.ordersState === 'loading' ? <OrderListSkeleton /> : null}
+      {runtime.ordersState === 'error' ? (
+        <div className="catalog-retry">
+          <StatusNotice title="订单同步失败" tone="warning">当前不展示缓存状态或本地推断动作。</StatusNotice>
+          <button className="button button--secondary" type="button" onClick={() => void runtime.reloadOrders()} disabled={runtime.busy}>
+            <RefreshCw aria-hidden="true" size={18} /> 重新同步
+          </button>
+        </div>
+      ) : null}
+      {runtime.session && ['ready', 'empty'].includes(runtime.ordersState) && visibleOrders.length === 0 ? (
+        <EmptyState title={`暂无可显示的${active}订单`}>
+          订单分组来自 Core 当前状态，不用本地时间推断。
+        </EmptyState>
+      ) : null}
+      {visibleOrders.length > 0 ? (
+        <div className="order-list" aria-live="polite">
+          {visibleOrders.map((order) => (
+            <OrderRow
+              key={order.orderId}
+              order={order}
+              actions={runtime.orderActions[order.orderId] ?? []}
+              {...(runtime.orderTargets[order.orderId] ? { target: runtime.orderTargets[order.orderId] } : {})}
+              {...(runtime.orderCapabilityErrors[order.orderId] ? { capabilityError: runtime.orderCapabilityErrors[order.orderId] } : {})}
+            />
+          ))}
+        </div>
+      ) : null}
 
       <section className="support-policy" aria-labelledby="support-title">
         <div className="support-policy__icon"><Headphones aria-hidden="true" size={22} /></div>
@@ -442,6 +519,128 @@ export function OrdersScreen() {
         </div>
       </section>
     </div>
+  );
+}
+
+function OrderListSkeleton() {
+  return (
+    <div className="order-list" aria-label="正在加载订单">
+      {[0, 1].map((item) => <div className="order-row order-row--skeleton" key={item} />)}
+    </div>
+  );
+}
+
+function OrderRow({
+  order,
+  target,
+  actions,
+  capabilityError,
+}: {
+  order: FulfillmentOrder;
+  target?: FulfillmentTarget;
+  actions: readonly AllowedAction[];
+  capabilityError?: string;
+}) {
+  const logistics = order.logistics.at(-1);
+  const buyerActions = actions.filter((action) => BUYER_FULFILLMENT_ACTIONS.includes(action.action));
+  return (
+    <article className="order-row">
+      <header className="order-row__header">
+        <div>
+          <p className="eyebrow">{order.fulfillmentMode === 'DELIVERY' ? '快递订单' : '到店自提'}</p>
+          <h2>{shortHash(order.orderId)}</h2>
+        </div>
+        <div className="order-row__state">
+          <span className="status-pill">{orderStateLabel(order.state)}</span>
+          <span>{finalityLabel(order.finalityStatus)}</span>
+        </div>
+      </header>
+
+      <dl className="order-row__identity">
+        <div><dt>商品</dt><dd>{order.productId}</dd></div>
+        <div><dt>规格</dt><dd>{order.skuId}</dd></div>
+        <div><dt>USDT 支付</dt><dd>{order.exactAmounts.usdtPaymentAmount}</dd></div>
+        <div><dt>NPL 支付</dt><dd>{order.exactAmounts.nplPaymentAmount}</dd></div>
+      </dl>
+
+      {target ? <OrderTarget target={target} /> : null}
+      <section className="order-row__section" aria-label="物流状态">
+        <div className="section-heading section-heading--compact">
+          <h3>物流</h3>
+          <Truck aria-hidden="true" size={17} />
+        </div>
+        {logistics ? (
+          <p>{logistics.provider} · {logisticsStatusLabel(logistics.status)} · {formatIso(logistics.occurredAt)}</p>
+        ) : order.shipments[0] ? (
+          <p>{order.shipments[0].carrierCode} · 运单 {shortHash(order.shipments[0].trackingNumberHash)}</p>
+        ) : <p>尚无有效物流证据</p>}
+      </section>
+
+      <section className="order-row__section" aria-label="资产状态">
+        <div className="section-heading section-heading--compact"><h3>订单资产</h3><Banknote aria-hidden="true" size={17} /></div>
+        {order.balances.length > 0 ? (
+          <div className="balance-list">
+            {order.balances.map((balance, index) => (
+              <div key={`${balance.asset}-${balance.state}-${index}`}>
+                <span>{balance.asset === 'BNM_POINTS' ? 'BNM 后台积分' : balance.asset}</span>
+                <strong>{balance.amount}</strong>
+                <span>{balance.asset === 'BNM_POINTS' && !['LOCKED', 'AVAILABLE'].includes(balance.state) ? '状态不可用' : balanceStateLabel(balance.state)}</span>
+              </div>
+            ))}
+          </div>
+        ) : <p>Core 尚未返回资产状态</p>}
+      </section>
+
+      {order.requests.length > 0 ? (
+        <section className="order-row__section" aria-label="履约申请">
+          <div className="request-list">
+            {order.requests.map((request) => (
+              <div key={request.requestId}>
+                <span>{requestTypeLabel(request.requestType)}</span>
+                <strong>{request.state}</strong>
+                <time dateTime={request.requestedAt}>{formatIso(request.requestedAt)}</time>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      <section className="order-row__actions" aria-label="订单允许操作">
+        <div className="section-heading section-heading--compact"><h3>可执行操作</h3><ShieldAlert aria-hidden="true" size={17} /></div>
+        {capabilityError ? <p className="field-error" role="status">{capabilityError}</p> : null}
+        {buyerActions.length > 0 ? (
+          <div className="order-action-grid">
+            {buyerActions.map((action) => {
+              const reason = action.enabled
+                ? 'Core 已允许该操作，但 canonical evidence 生成/上传契约尚未发布'
+                : action.reasonCode ?? 'Core 当前未允许该操作';
+              const reasonId = `action-${order.orderId.slice(2, 10)}-${action.action}`;
+              return (
+                <div key={action.action}>
+                  <button type="button" className="button button--secondary" disabled aria-describedby={reasonId}>
+                    {actionLabel(action.action)}
+                  </button>
+                  <p id={reasonId}>{reason}{action.deadline ? ` · ${formatIso(action.deadline)}` : ''}</p>
+                </div>
+              );
+            })}
+          </div>
+        ) : <p>当前会话未返回买家履约动作。</p>}
+      </section>
+    </article>
+  );
+}
+
+function OrderTarget({ target }: { target: FulfillmentTarget }) {
+  return (
+    <section className="order-row__section order-target" aria-label="履约目标">
+      <MapPinned aria-hidden="true" size={18} />
+      <div>
+        <h3>{target.fulfillmentMode === 'DELIVERY' ? target.payload.recipientName : target.payload.name}</h3>
+        <p>{target.fulfillmentMode === 'DELIVERY' ? `${target.payload.phone} · ${target.payload.address}` : target.payload.address}</p>
+        <span>行政区 {target.regionCode} · 快照 {shortHash(target.targetHash)}</span>
+      </div>
+    </section>
   );
 }
 
@@ -522,6 +721,7 @@ export function CheckoutScreen() {
       && runtime.bootstrap?.writesEnabled
       && product
       && sku
+      && runtime.checkoutTarget?.fulfillmentMode === runtime.fulfillmentMode
       && !runtime.busy,
   );
 
@@ -590,13 +790,7 @@ export function CheckoutScreen() {
         </div>
       </fieldset>
 
-      <section className="fulfillment-preview" aria-live="polite">
-        {runtime.fulfillmentMode === 'DELIVERY' ? <MapPinned aria-hidden="true" size={22} /> : <LocateFixed aria-hidden="true" size={22} />}
-        <div>
-          <h2>{runtime.fulfillmentMode === 'DELIVERY' ? '默认收货地址' : '最近可用门店'}</h2>
-          <p>{runtime.fulfillmentMode === 'DELIVERY' ? '需要 Core 发布的地址目标与行政区哈希' : '需要 Core 发布的门店目标与行政区哈希'}</p>
-        </div>
-      </section>
+      <CheckoutTargetSelector />
 
       <div className="checkout-total">
         <span>Core 签名报价</span>
@@ -618,6 +812,80 @@ export function CheckoutScreen() {
         </section>
       ) : null}
     </div>
+  );
+}
+
+function CheckoutTargetSelector() {
+  const runtime = useMallRuntime();
+  const [recipientName, setRecipientName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [address, setAddress] = useState('');
+
+  return (
+    <section className="checkout-target" aria-labelledby="checkout-target-title">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">CORE TARGET</p>
+          <h2 id="checkout-target-title">{runtime.fulfillmentMode === 'DELIVERY' ? '快递目标' : '自提门店'}</h2>
+        </div>
+        {runtime.fulfillmentMode === 'DELIVERY' ? <MapPinned aria-hidden="true" size={19} /> : <Store aria-hidden="true" size={19} />}
+      </div>
+
+      {runtime.fulfillmentMode === 'DELIVERY' ? (
+        <form
+          className="checkout-target__form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void runtime.createDeliveryTarget({ recipientName, phone, address });
+          }}
+          noValidate
+        >
+          <div className="checkout-target__person">
+            <label className="field">收货人<input value={recipientName} onChange={(event) => setRecipientName(event.target.value)} autoComplete="name" maxLength={64} /></label>
+            <label className="field">手机号<input value={phone} onChange={(event) => setPhone(event.target.value.replace(/\D/g, '').slice(0, 11))} inputMode="numeric" autoComplete="tel" /></label>
+          </div>
+          <label className="field">详细地址<textarea value={address} onChange={(event) => setAddress(event.target.value)} autoComplete="street-address" rows={3} maxLength={300} /></label>
+          <button
+            className="button button--secondary"
+            type="submit"
+            disabled={!runtime.session || runtime.busy || !recipientName.trim() || !/^\d{11}$/.test(phone) || address.trim().length < 5}
+          >
+            <LocateFixed aria-hidden="true" size={18} />
+            {runtime.locationState === 'loading' ? '定位中' : '验证快递目标'}
+          </button>
+          {runtime.locationState !== 'ready' ? <p className="control-reason">需要浏览器定位与 Core AMap 行政区验证，拒绝定位时保持 fail-closed。</p> : null}
+        </form>
+      ) : (
+        <div className="pickup-options">
+          {runtime.storesState === 'loading' ? <StoreListSkeleton /> : null}
+          {runtime.storesState === 'empty' ? <p className="section-copy">当前没有可用自提门店。</p> : null}
+          {runtime.storesState === 'error' ? <p className="field-error">门店列表不可用，无法创建自提目标。</p> : null}
+          {runtime.stores.map((store) => (
+            <button
+              key={store.storeId}
+              type="button"
+              className="pickup-option"
+              disabled={!runtime.session || runtime.busy || store.status !== 'ACTIVE'}
+              onClick={() => void runtime.createPickupTarget(store.storeId)}
+            >
+              <span><strong>{store.name}</strong><small>{store.address}</small></span>
+              <ChevronRight aria-hidden="true" size={17} />
+            </button>
+          ))}
+        </div>
+      )}
+
+      {runtime.checkoutTarget?.fulfillmentMode === runtime.fulfillmentMode ? (
+        <div className="fulfillment-preview" aria-live="polite">
+          <BadgeCheck aria-hidden="true" size={22} />
+          <div>
+            <h2>Core 目标已验证</h2>
+            <p>{runtime.checkoutTarget.label}</p>
+            <span>{shortHash(runtime.checkoutTarget.fulfillmentTargetHash)}</span>
+          </div>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -788,6 +1056,9 @@ function quoteDisabledReason(runtime: MallRuntimeValue) {
   if (!runtime.session) return '请先连接钱包并完成 SIWE 登录';
   if (!runtime.bootstrap) return '正在同步 Core 安全状态';
   if (!runtime.bootstrap.writesEnabled) return '新支付当前被 Core 安全门禁阻断';
+  if (!runtime.checkoutTarget || runtime.checkoutTarget.fulfillmentMode !== runtime.fulfillmentMode) {
+    return runtime.fulfillmentMode === 'DELIVERY' ? '请先验证快递目标' : '请先选择自提门店';
+  }
   return '请完成当前配置';
 }
 
@@ -801,6 +1072,106 @@ function formatTimestamp(timestamp: number) {
 
 function shortHash(value: string) {
   return value.length > 18 ? `${value.slice(0, 10)}…${value.slice(-8)}` : value;
+}
+
+const BUYER_FULFILLMENT_ACTIONS: readonly string[] = [
+  'REQUEST_EXCHANGE',
+  'REQUEST_DELAY',
+  'CONFIRM_RECEIPT',
+  'VERIFY_PICKUP',
+  'OPEN_ARBITRATION',
+  'OPEN_TAKEOVER',
+];
+
+function distanceKm(location: BrowserPosition, store: MerchantStore) {
+  const radians = (value: number) => value * Math.PI / 180;
+  const latitudeDelta = radians(store.latitude - location.latitude);
+  const longitudeDelta = radians(store.longitude - location.longitude);
+  const a = Math.sin(latitudeDelta / 2) ** 2
+    + Math.cos(radians(location.latitude)) * Math.cos(radians(store.latitude))
+    * Math.sin(longitudeDelta / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function orderMatchesTab(order: FulfillmentOrder, tab: string) {
+  if (tab === '全部') return true;
+  if (tab === '待付款') return ['QUOTED', 'SUBMITTED'].includes(order.state);
+  if (tab === '待发货') return order.state === 'PAID';
+  if (tab === '待收货') return ['SHIPPED', 'DELIVERED', 'FULFILLMENT_PENDING'].includes(order.state);
+  return ['ARBITRATION', 'TAKEOVER'].includes(order.state);
+}
+
+function orderStateLabel(state: FulfillmentOrder['state']) {
+  return ({
+    QUOTED: '待付款',
+    SUBMITTED: '提交中',
+    PAID: '待发货',
+    SHIPPED: '运输中',
+    DELIVERED: '已送达',
+    ARBITRATION: '仲裁中',
+    TAKEOVER: '平台接管',
+    FULFILLMENT_PENDING: '履约确认中',
+    FULFILLED: '已完成',
+    REORG_PENDING: '重组核验中',
+  } as const)[state];
+}
+
+function finalityLabel(status: FulfillmentOrder['finalityStatus']) {
+  return ({
+    NOT_SUBMITTED: '未提交',
+    PENDING: '确认中',
+    CONFIRMED: '已确认',
+    REPLACED: '交易已替换',
+    REORGED: '链重组',
+    FINAL: '链上最终',
+  } as const)[status];
+}
+
+function logisticsStatusLabel(status: FulfillmentOrder['logistics'][number]['status']) {
+  return ({
+    PICKED_UP: '已揽收',
+    IN_TRANSIT: '运输中',
+    OUT_FOR_DELIVERY: '派送中',
+    DELIVERED: '已送达',
+    EXCEPTION: '物流异常',
+  } as const)[status];
+}
+
+function balanceStateLabel(state: FulfillmentOrder['balances'][number]['state']) {
+  return ({
+    LOCKED: '锁定',
+    AVAILABLE: '可用',
+    REQUESTED: '已申请',
+    BATCHED: '已入批次',
+    SETTLED: '已结算',
+    DISPUTED: '争议锁定',
+  } as const)[state];
+}
+
+function requestTypeLabel(type: FulfillmentOrder['requests'][number]['requestType']) {
+  return ({ EXCHANGE: '换货', DELAY: '延期', ARBITRATION: '仲裁', FORCED_RECEIPT: '强制收货审查' } as const)[type];
+}
+
+function actionLabel(action: AllowedAction['action']) {
+  return ({
+    REQUEST_EXCHANGE: '申请换货',
+    REQUEST_DELAY: '申请延期',
+    CONFIRM_RECEIPT: '确认收货',
+    VERIFY_PICKUP: '自提核销',
+    OPEN_ARBITRATION: '发起仲裁',
+    OPEN_TAKEOVER: '平台接管',
+  } as Partial<Record<AllowedAction['action'], string>>)[action] ?? action;
+}
+
+function formatIso(value: string) {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return value;
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(timestamp));
 }
 
 export const mallScreenRequirementEvidence = Object.freeze({
