@@ -8,6 +8,10 @@ const forbidden = [
   'fixtureAdminRecords',
   'sampleOrderTxHash',
   '平台强行退款',
+  '2.0.0-rc.2',
+  'USDT Claim',
+  'NPL/BNM Claim',
+  'Escrow',
 ];
 
 function files(path) {
