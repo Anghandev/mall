@@ -1,11 +1,12 @@
 import { CircleDollarSign, Coins, ExternalLink, Gift, LockKeyhole, WalletCards } from 'lucide-react';
 import { EmptyState, Metric, PageHeader } from '../components/ui';
+import { canExecuteOrderAction } from '../core-boundary';
 
 export function AssetsPage() {
   return (
     <div className="page-stack">
       <PageHeader
-        actions={<button className="button primary" disabled type="button"><WalletCards aria-hidden="true" size={16} /> 签名提取货款 (Claim)</button>}
+        actions={<button className="button primary" disabled={!canExecuteOrderAction('CLAIM_MERCHANT_USDT')} type="button"><WalletCards aria-hidden="true" size={16} /> 签名提取货款 (Claim)</button>}
         description="USDT 商家货款与 NPL、BNM 奖励分轨展示，所有金额和可领取状态来自 Core。"
         eyebrow="05 / 财务与收益"
         title="资产清算中心"

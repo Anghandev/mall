@@ -10,6 +10,7 @@ import {
   Send,
 } from 'lucide-react';
 import { EmptyState, PageHeader } from '../components/ui';
+import { canExecuteOrderAction } from '../core-boundary';
 
 const deliveryColumns = ['订单号', 'TxHash', '收货人', '电话', '详细地址', '数量', '下单时间', '物流单号', '核销状态', '操作'];
 const pickupColumns = ['订单号', '核销门店', '核销状态', '核销时间', '操作'];
@@ -50,7 +51,7 @@ export function FulfillmentPage() {
           <span>已选择 0 笔</span>
           {tab === 'delivery' ? (
             <div className="button-group">
-              <button className="button secondary" disabled type="button"><Send aria-hidden="true" size={16} /> 批量发货</button>
+              <button className="button secondary" disabled={!canExecuteOrderAction('RECORD_SHIPMENT')} type="button"><Send aria-hidden="true" size={16} /> 批量发货</button>
               <button className="button secondary" disabled type="button"><FileSpreadsheet aria-hidden="true" size={16} /> 电子面单</button>
             </div>
           ) : (
@@ -70,13 +71,13 @@ export function FulfillmentPage() {
           <section className="section-block compact-section" aria-labelledby="shipment-title">
             <div className="section-heading"><div><p className="eyebrow">Shipment evidence</p><h2 id="shipment-title">提交发货证据</h2></div><PackageCheck aria-hidden="true" size={19} /></div>
             <div className="field"><label htmlFor="tracking-number">快递物流单号</label><input disabled id="tracking-number" placeholder="选择订单后录入或生成" type="text" /></div>
-            <button className="button primary wide" disabled type="button">去发货</button>
+            <button className="button primary wide" disabled={!canExecuteOrderAction('RECORD_SHIPMENT')} type="button">去发货</button>
             <p className="panel-note">发货只提交幂等履约证据，不代表签收或资产结算。</p>
           </section>
           <section className="section-block compact-section" aria-labelledby="receipt-title">
             <div className="section-heading"><div><p className="eyebrow">Receipt review</p><h2 id="receipt-title">申请平台确认签收</h2></div></div>
             <p>物流确认送达满 7 天后，商家仅可提交证据申请，由平台审核。仲裁期间资产继续 Locked。</p>
-            <button className="button secondary wide" disabled type="button">申请平台审核</button>
+            <button className="button secondary wide" disabled={!canExecuteOrderAction('REQUEST_FORCED_RECEIPT')} type="button">申请平台审核</button>
             <p className="panel-note">本工作台没有“商家强制签收”或直接完成订单的操作。</p>
           </section>
         </div>
@@ -85,7 +86,7 @@ export function FulfillmentPage() {
           <section className="section-block compact-section" aria-labelledby="scan-title">
             <div className="section-heading"><div><p className="eyebrow">Pickup verification</p><h2 id="scan-title">扫码核销自提</h2></div><ScanLine aria-hidden="true" size={19} /></div>
             <div className="field"><label htmlFor="pickup-code">手工核销码</label><input disabled id="pickup-code" placeholder="等待门店签名挑战" type="text" /></div>
-            <button className="button primary wide" disabled type="button">启动扫码</button>
+            <button className="button primary wide" disabled={!canExecuteOrderAction('VERIFY_PICKUP')} type="button">启动扫码</button>
             <p className="panel-note">相机或手工核销必须绑定签名挑战、订单和当前门店，不能离线提交。</p>
           </section>
           <section className="section-block compact-section" aria-labelledby="pickup-print-title">

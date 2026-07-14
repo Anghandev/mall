@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { artifactVersion } from '@abu24k/core-artifacts';
 
 const dist = fileURLToPath(new URL('../dist/', import.meta.url));
 const textExtensions = new Set(['.css', '.html', '.js', '.map']);
@@ -17,12 +18,14 @@ const forbidden = [
 
 let filesChecked = 0;
 let sawFailClosedCopy = false;
+let sawArtifactVersion = false;
 
 for (const path of walk(dist)) {
   if (!textExtensions.has(extname(path))) continue;
   filesChecked += 1;
   const contents = readFileSync(path, 'utf8');
-  sawFailClosedCopy ||= contents.includes('Core 协调版 artifacts 尚未发布');
+  sawFailClosedCopy ||= contents.includes('商家认证和执行接口尚未接入');
+  sawArtifactVersion ||= contents.includes(artifactVersion);
   for (const token of forbidden) {
     if (contents.includes(token)) throw new Error(`Production bundle contains forbidden token: ${token}`);
   }
@@ -30,6 +33,10 @@ for (const path of walk(dist)) {
 
 if (!sawFailClosedCopy) {
   throw new Error('Production bundle is missing the fail-closed Core boundary');
+}
+
+if (!sawArtifactVersion) {
+  throw new Error('Production bundle is missing the coordinated Core artifact version');
 }
 
 console.log(`OK merchant production bundle: ${filesChecked} text files, no review bypass or sample records`);

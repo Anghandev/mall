@@ -2,7 +2,10 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
+import { artifactVersion } from '@abu24k/core-artifacts';
 import { App } from '../src/App';
+import { productBaseline } from '../src/bootstrap';
+import { canExecuteOrderAction, coreBoundary } from '../src/core-boundary';
 import { AssetsPage } from '../src/pages/AssetsPage';
 import { FulfillmentPage } from '../src/pages/FulfillmentPage';
 import { HelpPage } from '../src/pages/HelpPage';
@@ -16,6 +19,17 @@ function renderPage(page: React.ReactNode) {
 }
 
 describe('00 wallet gateway', () => {
+  it('consumes the coordinated artifact version and keeps unpublished actions disabled', () => {
+    expect(artifactVersion).toBe('2.0.0-rc.1');
+    expect(productBaseline.coreArtifacts).toBe(artifactVersion);
+    expect(coreBoundary.artifactVersion).toBe(artifactVersion);
+    expect(coreBoundary.artifactsAvailable).toBe(true);
+    expect(coreBoundary.executableOrderActionNames).toEqual([]);
+    expect(coreBoundary.runtimeAvailable).toBe(false);
+    expect(canExecuteOrderAction('RECORD_SHIPMENT')).toBe(false);
+    expect(canExecuteOrderAction('CLAIM_MERCHANT_USDT')).toBe(false);
+  });
+
   it('fails closed without a password fallback or enabled wallet action', () => {
     renderPage(<LoginPage />);
 
@@ -25,7 +39,7 @@ describe('00 wallet gateway', () => {
     expect(screen.getByText(/Nonce、时间戳、授权商家校验/)).toBeTruthy();
   });
 
-  it('redirects protected routes when Core artifacts are unpublished', async () => {
+  it('redirects protected routes while merchant runtime authentication is unavailable', async () => {
     window.history.replaceState({}, '', '/dashboard');
     render(<MemoryRouter initialEntries={['/dashboard']}><App /></MemoryRouter>);
 

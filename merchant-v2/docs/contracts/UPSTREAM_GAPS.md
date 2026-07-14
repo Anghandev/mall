@@ -1,12 +1,13 @@
 # Merchant Workbench Core Gaps
 
-The merchant product must not implement these shared capabilities. Until Core
-publishes one coordinated artifact version, each affected action is disabled
-with the stated reason.
+The merchant product consumes Core's coordinated artifact workspace package,
+including its version and public action catalog. It must not implement the
+remaining shared capabilities below. Each affected action stays disabled with
+the stated reason until its runtime capability is published.
 
 | Gap ID | Required Core capability | Fail-closed behavior |
 |---|---|---|
-| GAP-MER-001 | Versioned OpenAPI, generated types, ABI, manifest and state/error enums | Runtime contract unavailable; all writes disabled |
+| GAP-MER-001 | Non-empty executable action catalog coordinated with merchant runtime endpoints | Artifact version is exposed; runtime entry and all writes remain disabled |
 | GAP-MER-002 | Merchant SIWE nonce/verify, allowlist, JWT/RBAC and secondary-signature intent | Login/sensitive actions unavailable |
 | GAP-MER-003 | Merchant dashboard aggregate with authoritative timezone/day and product state | Values show unavailable, never fake zero |
 | GAP-MER-004 | Unique product slot, signed uploads, save/submit/lock state and allowedActions | Product writes disabled |

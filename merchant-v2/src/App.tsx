@@ -25,7 +25,7 @@ function isVisualReview() {
 }
 
 export function App() {
-  const canEnterWorkspace = coreBoundary.available || isVisualReview();
+  const canEnterWorkspace = coreBoundary.runtimeAvailable || isVisualReview();
 
   return (
     <Routes>
