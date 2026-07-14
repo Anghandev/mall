@@ -112,7 +112,7 @@ importers:
   merchant-v2:
     dependencies:
       '@abu24k/core-artifacts':
-        specifier: workspace:*
+        specifier: workspace:2.0.0-rc.1
         version: link:../packages/core-artifacts
       lucide-react:
         specifier: 'catalog:'
