@@ -4,4 +4,6 @@ import { afterEach } from 'vitest';
 afterEach(() => {
   cleanup();
   window.history.replaceState({}, '', '/');
+  delete window.ethereum;
+  delete window.okxwallet;
 });

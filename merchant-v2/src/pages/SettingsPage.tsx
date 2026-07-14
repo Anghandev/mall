@@ -15,7 +15,7 @@ export function SettingsPage() {
 
         <section className="section-block wallet-panel" aria-labelledby="wallet-title">
           <div className="section-heading"><div><p className="eyebrow">Settlement identity</p><h2 id="wallet-title">绑定结算钱包</h2></div><WalletCards aria-hidden="true" size={19} /></div>
-          <div className="wallet-address"><span>常驻 Claim 地址</span><strong>地址不可用</strong><small>当前会话未建立</small></div>
+          <div className="wallet-address"><span>常驻结算钱包</span><strong>地址不可用</strong><small>商家资料接口未发布</small></div>
           <div className="governance-note"><KeyRound aria-hidden="true" size={18} /><div><strong>普通编辑不可更换</strong><p>钱包变更必须走治理迁移，不是本地表单字段。</p></div></div>
           <button className="button secondary wide" disabled type="button">申请治理迁移</button>
         </section>

@@ -1,12 +1,14 @@
 import { readFileSync } from 'node:fs';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
-import { artifactVersion } from '@abu24k/core-artifacts';
+import { describe, expect, it, vi } from 'vitest';
+import { artifactVersion, type CatalogProduct } from '@abu24k/core-artifacts';
 import { App } from '../src/App';
 import { productBaseline } from '../src/bootstrap';
-import { canExecuteOrderAction, coreBoundary } from '../src/core-boundary';
+import type { CoreApi, CoreBootstrap } from '../src/core-api';
+import { coreBoundary, canExecuteOrderAction } from '../src/core-boundary';
+import { CoreRuntimeProvider } from '../src/core-runtime';
 import { AssetsPage } from '../src/pages/AssetsPage';
 import { FulfillmentPage } from '../src/pages/FulfillmentPage';
 import { HelpPage } from '../src/pages/HelpPage';
@@ -16,35 +18,163 @@ import { SettingsPage } from '../src/pages/SettingsPage';
 import { StoresPage } from '../src/pages/StoresPage';
 
 const styles = readFileSync('src/styles.css', 'utf8');
+const walletAddress = '0x1111111111111111111111111111111111111111';
+const chainProductId = `0x${'a'.repeat(64)}`;
+const chainSkuId = `0x${'b'.repeat(64)}`;
 
-function renderPage(page: React.ReactNode) {
-  return render(<MemoryRouter>{page}</MemoryRouter>);
+const bootstrap: CoreBootstrap = {
+  artifactVersion,
+  status: 'CORE_API_READY',
+  readiness: {
+    chainId: 56,
+    decisionBlocked: [],
+    externalBlocked: [],
+    paymentDecisionBlocked: [],
+    paymentExternalBlocked: [],
+    providers: {},
+    writesEnabled: false,
+  },
+};
+
+const catalogProduct: CatalogProduct = {
+  productId: 'product-payment-read',
+  chainProductId,
+  title: '支付批次商品',
+  metadata: {},
+  skus: [{
+    skuId: 'sku-gold',
+    chainSkuId,
+    attributes: { color: '金色' },
+    listPriceUsdt: '24000000000000000000',
+    stockAvailable: '19',
+  }],
+};
+
+function createMockCoreApi(overrides: Partial<CoreApi> = {}): CoreApi {
+  return {
+    bootstrap: async () => bootstrap,
+    createSiweChallenge: async () => ({
+      message: 'merchant.test wants you to sign in',
+      nonce: 'nonce',
+      issuedAt: '2026-07-14T12:00:00.000Z',
+      expiresAt: '2026-07-14T12:05:00.000Z',
+    }),
+    verifySiwe: async () => ({ token: 'test-session', walletAddress, roles: ['MERCHANT'] }),
+    listCatalog: async () => [catalogProduct],
+    getOrderAllowedActions: async () => [{
+      action: 'RECORD_SHIPMENT',
+      enabled: false,
+      reasonCode: 'ConfigurationRequired',
+    }],
+    ...overrides,
+  };
+}
+
+function renderPage(page: React.ReactNode, client = createMockCoreApi()) {
+  return render(
+    <MemoryRouter>
+      <CoreRuntimeProvider client={client}>{page}</CoreRuntimeProvider>
+    </MemoryRouter>,
+  );
+}
+
+function installWallet() {
+  const request = vi.fn(async ({ method }: { method: string }) => {
+    if (method === 'eth_requestAccounts') return [walletAddress];
+    if (method === 'eth_chainId') return '0x38';
+    if (method === 'personal_sign') return '0xsigned';
+    throw new Error(`Unexpected wallet method: ${method}`);
+  });
+  window.ethereum = { request };
+  return request;
 }
 
 describe('00 wallet gateway', () => {
-  it('consumes the coordinated artifact version and keeps unpublished actions disabled', () => {
-    expect(artifactVersion).toBe('2.0.0-rc.2');
+  it('consumes payment.1 and keeps unpublished executable actions disabled', () => {
+    expect(artifactVersion).toBe('2.0.0-payment.1');
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
     expect(coreBoundary.artifactVersion).toBe(artifactVersion);
     expect(coreBoundary.artifactsAvailable).toBe(true);
     expect(coreBoundary.executableOrderActionNames).toEqual([]);
-    expect(coreBoundary.runtimeAvailable).toBe(false);
     expect(canExecuteOrderAction('RECORD_SHIPMENT')).toBe(false);
-    expect(canExecuteOrderAction('CLAIM_MERCHANT_USDT')).toBe(false);
+    expect(canExecuteOrderAction('REQUEST_MERCHANT_SETTLEMENT')).toBe(false);
   });
 
-  it('fails closed without a password fallback or enabled wallet action', () => {
+  it('performs the published BSC SIWE flow and enters only with a merchant role', async () => {
+    const user = userEvent.setup();
+    const walletRequest = installWallet();
+    const createSiweChallenge = vi.fn(createMockCoreApi().createSiweChallenge);
+    const verifySiwe = vi.fn(createMockCoreApi().verifySiwe);
+    const client = createMockCoreApi({ createSiweChallenge, verifySiwe });
+
+    render(<MemoryRouter><App client={client} /></MemoryRouter>);
+
+    const connect = screen.getByRole('button', { name: '连接钱包' });
+    await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
+    await user.click(connect);
+
+    expect(await screen.findByRole('heading', { name: '运营大盘' })).toBeTruthy();
+    expect(createSiweChallenge).toHaveBeenCalledWith(walletAddress);
+    expect(verifySiwe).toHaveBeenCalledWith('merchant.test wants you to sign in', '0xsigned');
+    expect(walletRequest.mock.calls.map(([request]) => request.method)).toEqual([
+      'eth_requestAccounts',
+      'eth_chainId',
+      'personal_sign',
+    ]);
+  });
+
+  it('can launch the detected OKX provider explicitly', async () => {
+    const user = userEvent.setup();
+    delete window.ethereum;
+    const request = vi.fn(async ({ method }: { method: string }) => {
+      if (method === 'eth_requestAccounts') return [walletAddress];
+      if (method === 'eth_chainId') return '0x38';
+      if (method === 'personal_sign') return '0xokx-signed';
+      throw new Error(`Unexpected wallet method: ${method}`);
+    });
+    window.okxwallet = { request };
+    render(<MemoryRouter><App client={createMockCoreApi()} /></MemoryRouter>);
+
+    await user.click(screen.getByRole('button', { name: /OKX Wallet/ }));
+    const connect = screen.getByRole('button', { name: '连接钱包' });
+    await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
+    await user.click(connect);
+
+    expect(await screen.findByRole('heading', { name: '运营大盘' })).toBeTruthy();
+    expect(request).toHaveBeenCalledWith({ method: 'personal_sign', params: [expect.any(String), walletAddress] });
+  });
+
+  it('has no password fallback and fails closed when no supported wallet is installed', async () => {
+    delete window.ethereum;
+    delete window.okxwallet;
     renderPage(<LoginPage />);
 
     expect(screen.getByRole('heading', { name: '连接授权商家钱包' })).toBeTruthy();
     expect(screen.queryByLabelText(/密码/)).toBeNull();
-    expect((screen.getByRole('button', { name: '连接钱包' }) as HTMLButtonElement).disabled).toBe(true);
+    const connect = screen.getByRole('button', { name: '连接钱包' }) as HTMLButtonElement;
+    await waitFor(() => expect(connect.disabled).toBe(true));
     expect(screen.getByText(/Nonce、时间戳、授权商家校验/)).toBeTruthy();
   });
 
-  it('redirects protected routes while merchant runtime authentication is unavailable', async () => {
-    window.history.replaceState({}, '', '/dashboard');
-    render(<MemoryRouter initialEntries={['/dashboard']}><App /></MemoryRouter>);
+  it('rejects an authenticated wallet that lacks the merchant role', async () => {
+    const user = userEvent.setup();
+    installWallet();
+    const client = createMockCoreApi({
+      verifySiwe: async () => ({ token: 'buyer-session', walletAddress, roles: ['BUYER'] }),
+    });
+    render(<MemoryRouter><App client={client} /></MemoryRouter>);
+
+    const connect = screen.getByRole('button', { name: '连接钱包' });
+    await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
+    await user.click(connect);
+
+    expect((await screen.findByRole('alert')).textContent).toContain('没有商家工作台权限');
+    expect(screen.getByRole('heading', { name: '连接授权商家钱包' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: '运营大盘' })).toBeNull();
+  });
+
+  it('redirects protected routes while merchant authentication is unavailable', async () => {
+    render(<MemoryRouter initialEntries={['/dashboard']}><App client={createMockCoreApi()} /></MemoryRouter>);
 
     expect(await screen.findByRole('heading', { name: '连接授权商家钱包' })).toBeTruthy();
     expect(screen.queryByRole('heading', { name: '运营大盘' })).toBeNull();
@@ -52,15 +182,18 @@ describe('00 wallet gateway', () => {
 });
 
 describe('02 one-product form', () => {
-  it('renders the complete slot and locks every Core-owned write', () => {
+  it('reads official Catalog/SKU/stock values but does not invent merchant ownership or costs', async () => {
     renderPage(<ProductPage />);
 
     expect(screen.getByRole('heading', { name: '单品提报' })).toBeTruthy();
-    expect(screen.getByText(/该单品已被平台秒杀锁定，在场次截止前无权篡改数据/)).toBeTruthy();
+    expect(await screen.findByText('支付批次商品')).toBeTruthy();
+    expect(screen.getByText('24000000000000000000')).toBeTruthy();
+    expect(screen.getByText('19')).toBeTruthy();
+    expect(screen.getByText(/color: 金色/)).toBeTruthy();
+    expect(screen.getByText(/不将任何一条冒充为/)).toBeTruthy();
     expect((screen.getByRole('button', { name: '保存提报' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByLabelText('结算价') as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByLabelText('秒杀专属库存') as HTMLInputElement).disabled).toBe(true);
-    expect(screen.queryByRole('table')).toBeNull();
+    expect((screen.getByLabelText('商家基础应收') as HTMLInputElement).disabled).toBe(true);
+    expect(screen.getByText(/前端不从售价反推/)).toBeTruthy();
   });
 });
 
@@ -78,6 +211,25 @@ describe('03 fulfillment center', () => {
     expect(screen.getByRole('columnheader', { name: '核销时间' })).toBeTruthy();
     expect((screen.getByRole('button', { name: '启动扫码' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/不能离线提交/)).toBeTruthy();
+  });
+
+  it('uses the real allowedActions consumer after SIWE without calling a buyer payment route', async () => {
+    const user = userEvent.setup();
+    installWallet();
+    const getOrderAllowedActions = vi.fn(createMockCoreApi().getOrderAllowedActions);
+    const client = createMockCoreApi({ getOrderAllowedActions });
+    render(<MemoryRouter><App client={client} /></MemoryRouter>);
+
+    const connect = screen.getByRole('button', { name: '连接钱包' });
+    await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
+    await user.click(connect);
+    const navigation = await screen.findByRole('navigation', { name: '商家工作台导航' });
+    await user.click(within(navigation).getByRole('link', { name: /履约交付/ }));
+    await user.type(screen.getByLabelText('订单 ID'), 'order-payment-check');
+    await user.click(screen.getByRole('button', { name: '核验可用操作' }));
+
+    expect(await screen.findByText('ConfigurationRequired')).toBeTruthy();
+    expect(getOrderAllowedActions).toHaveBeenCalledWith('order-payment-check', 'test-session');
   });
 
   it('contains wide tables inside their horizontal scroll region', () => {
@@ -99,14 +251,16 @@ describe('04 store controls', () => {
 });
 
 describe('05 asset rails', () => {
-  it('separates USDT proceeds from NPL and BNM projections', () => {
+  it('uses the five settlement states and contains no contract-pull proceeds action', () => {
     renderPage(<AssetsPage />);
 
     expect(screen.getByRole('heading', { name: 'USDT 货款' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '门店奖励池' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '释放跟踪' })).toBeTruthy();
-    expect((screen.getByRole('button', { name: /签名提取货款/ }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getAllByText('--').length).toBeGreaterThan(5);
+    expect((screen.getByRole('button', { name: '签名结算申请' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('Requested 已申请')).toBeTruthy();
+    expect(screen.getByText('Batched 已组批')).toBeTruthy();
+    expect(screen.getByText('Settled 已结算')).toBeTruthy();
   });
 });
 
@@ -130,9 +284,9 @@ describe('06 audit and 07 rules', () => {
 });
 
 describe('workspace accessibility', () => {
-  it('provides labeled navigation, skip link and mobile drawer controls in review mode', () => {
+  it('provides labeled navigation, skip link and mobile drawer controls in review mode', async () => {
     window.history.replaceState({}, '', '/dashboard?__merchant_visual_review__=1');
-    render(<MemoryRouter initialEntries={['/dashboard?__merchant_visual_review__=1']}><App /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/dashboard?__merchant_visual_review__=1']}><App client={createMockCoreApi()} /></MemoryRouter>);
 
     const navigation = screen.getByRole('navigation', { name: '商家工作台导航' });
     expect(within(navigation).getByRole('link', { name: /履约交付/ })).toBeTruthy();
@@ -140,6 +294,6 @@ describe('workspace accessibility', () => {
     expect(screen.getByRole('button', { name: '打开导航' })).toBeTruthy();
     expect(screen.getByRole('main')).toBeTruthy();
     expect(screen.getByText(artifactVersion)).toBeTruthy();
-    expect(screen.queryByText('UNPUBLISHED')).toBeNull();
+    expect(await screen.findByText('支付 Core 已连接')).toBeTruthy();
   });
 });
