@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Abu 24K V2 Core API",
-    "version": "2.0.0-payment.1"
+    "version": "2.0.0-fulfillment.1"
   },
-  "x-artifactVersion": "2.0.0-payment.1",
+  "x-artifactVersion": "2.0.0-fulfillment.1",
   "servers": [],
   "paths": {
     "/v2/bootstrap": {
@@ -182,6 +182,1394 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AllowedActionsResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/stores": {
+      "get": {
+        "operationId": "listMerchantStores",
+        "parameters": [
+          {
+            "name": "regionCode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{6}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active pickup stores",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "stores"
+                  ],
+                  "properties": {
+                    "stores": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MerchantStore"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createMerchantStore",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMerchantStoreRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "AMap-bound merchant store",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantStore"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/fulfillment-targets/delivery": {
+      "post": {
+        "operationId": "createDeliveryTarget",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDeliveryTargetRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Encrypted delivery target",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryTarget"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/fulfillment-targets/pickup": {
+      "post": {
+        "operationId": "createPickupTarget",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePickupTargetRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Versioned pickup-store target",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PickupTarget"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/orders": {
+      "get": {
+        "operationId": "listFulfillmentOrders",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Wallet-scoped fulfillment orders",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "orders"
+                  ],
+                  "properties": {
+                    "orders": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FulfillmentOrder"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/orders/{orderId}": {
+      "get": {
+        "operationId": "getFulfillmentOrder",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Wallet-scoped fulfillment order",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "order"
+                  ],
+                  "properties": {
+                    "order": {
+                      "$ref": "#/components/schemas/FulfillmentOrder"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/orders/{orderId}/fulfillment-target": {
+      "get": {
+        "operationId": "getOrderFulfillmentTarget",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized decrypted order target",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "target"
+                  ],
+                  "properties": {
+                    "target": {
+                      "$ref": "#/components/schemas/FulfillmentTarget"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/orders/{orderId}/shipments": {
+      "post": {
+        "operationId": "recordShipment",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShipmentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative idempotent fulfillment result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShipmentResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/orders/{orderId}/delivery": {
+      "post": {
+        "operationId": "recordDelivery",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FulfillmentCommandInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative idempotent fulfillment result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/orders/{orderId}/pickup-credential": {
+      "post": {
+        "operationId": "registerPickupCredential",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PickupCredentialRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative idempotent fulfillment result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PickupCredentialResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/orders/{orderId}/pickup-verification": {
+      "post": {
+        "operationId": "verifyPickup",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PickupVerificationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative idempotent fulfillment result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FulfillmentCompletedResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/orders/{orderId}/exchange-requests": {
+      "post": {
+        "operationId": "requestExchange",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FulfillmentReasonRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative idempotent fulfillment result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FulfillmentRequestResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/orders/{orderId}/delay-requests": {
+      "post": {
+        "operationId": "requestDelay",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FulfillmentReasonRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative idempotent fulfillment result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FulfillmentRequestResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/orders/{orderId}/request-decisions": {
+      "post": {
+        "operationId": "decideFulfillmentRequest",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FulfillmentRequestDecision"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative idempotent fulfillment result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FulfillmentRequestDecisionResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/orders/{orderId}/arbitrations": {
+      "post": {
+        "operationId": "openArbitration",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FulfillmentReasonRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative idempotent fulfillment result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArbitrationOpenedResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/orders/{orderId}/arbitration-decisions": {
+      "post": {
+        "operationId": "decideArbitration",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArbitrationDecision"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative idempotent fulfillment result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArbitrationDecisionResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/orders/{orderId}/takeover": {
+      "post": {
+        "operationId": "openTakeover",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FulfillmentReasonRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative idempotent fulfillment result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoverOpenedResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/orders/{orderId}/forced-receipt-requests": {
+      "post": {
+        "operationId": "requestForcedReceipt",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FulfillmentReasonRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative idempotent fulfillment result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForcedReceiptRequestResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/orders/{orderId}/forced-receipt-decisions": {
+      "post": {
+        "operationId": "decideForcedReceipt",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FulfillmentDecision"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative idempotent fulfillment result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForcedReceiptDecisionResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/orders/{orderId}/receipt-confirmation": {
+      "post": {
+        "operationId": "confirmReceipt",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FulfillmentCommandInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative idempotent fulfillment result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FulfillmentCompletedResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/providers/kuaidi100/webhooks/logistics": {
+      "post": {
+        "operationId": "recordKuaidi100LogisticsWebhook",
+        "security": [
+          {
+            "providerSignature": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogisticsWebhookRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Authenticated immutable logistics event",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogisticsUpdateResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/providers/cainiao/webhooks/logistics": {
+      "post": {
+        "operationId": "recordCainiaoLogisticsWebhook",
+        "security": [
+          {
+            "providerSignature": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogisticsWebhookRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Authenticated immutable logistics event",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogisticsUpdateResult"
                 }
               }
             }
@@ -548,6 +1936,11 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "JWT"
+      },
+      "providerSignature": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-provider-signature"
       }
     },
     "schemas": {
@@ -594,6 +1987,9 @@
         "type": "string",
         "enum": [
           "PAY_ORDER",
+          "REQUEST_EXCHANGE",
+          "REQUEST_DELAY",
+          "DECIDE_FULFILLMENT_REQUEST",
           "CONFIRM_RECEIPT",
           "REQUEST_FORCED_RECEIPT",
           "VERIFY_PICKUP",
@@ -601,6 +1997,9 @@
           "OPEN_TAKEOVER",
           "RECORD_SHIPMENT",
           "RECORD_DELIVERY",
+          "REGISTER_PICKUP_CREDENTIAL",
+          "DECIDE_ARBITRATION",
+          "DECIDE_FORCED_RECEIPT",
           "REQUEST_MERCHANT_SETTLEMENT",
           "REQUEST_REWARD_SETTLEMENT",
           "REQUEST_PRIZE_SETTLEMENT",
@@ -736,7 +2135,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-payment.1"
+            "const": "2.0.0-fulfillment.1"
           },
           "status": {
             "const": "CORE_API_READY"
@@ -851,6 +2250,1592 @@
           }
         }
       },
+      "IdempotencyKey": {
+        "type": "string",
+        "minLength": 8,
+        "maxLength": 128
+      },
+      "RegionCode": {
+        "type": "string",
+        "pattern": "^[0-9]{6}$"
+      },
+      "MerchantStore": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "storeId",
+          "merchantId",
+          "name",
+          "regionCode",
+          "longitude",
+          "latitude",
+          "address",
+          "phone",
+          "status",
+          "version"
+        ],
+        "properties": {
+          "storeId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "merchantId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "regionCode": {
+            "$ref": "#/components/schemas/RegionCode"
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "latitude": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "address": {
+            "type": "string",
+            "minLength": 1
+          },
+          "phone": {
+            "type": "string",
+            "pattern": "^[+]?[0-9-]{7,20}$"
+          },
+          "status": {
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED",
+              "CLOSED"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "CreateMerchantStoreRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "name",
+          "phone",
+          "longitude",
+          "latitude"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "phone": {
+            "type": "string",
+            "pattern": "^[+]?[0-9-]{7,20}$"
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "latitude": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          }
+        }
+      },
+      "CreateDeliveryTargetRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "recipientName",
+          "phone",
+          "address",
+          "longitude",
+          "latitude"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          },
+          "recipientName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "phone": {
+            "type": "string",
+            "pattern": "^[+]?[0-9-]{7,20}$"
+          },
+          "address": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 300
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "latitude": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          }
+        }
+      },
+      "CreatePickupTargetRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "storeId"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          },
+          "storeId": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "DeliveryTarget": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "targetId",
+          "targetHash",
+          "fulfillmentMode",
+          "regionCode",
+          "regionCodeHash",
+          "expiresAt"
+        ],
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "targetHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "fulfillmentMode": {
+            "const": "DELIVERY"
+          },
+          "regionCode": {
+            "$ref": "#/components/schemas/RegionCode"
+          },
+          "regionCodeHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PickupTarget": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "targetId",
+          "targetHash",
+          "fulfillmentMode",
+          "regionCode",
+          "regionCodeHash",
+          "expiresAt",
+          "storeId",
+          "store"
+        ],
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "targetHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "fulfillmentMode": {
+            "const": "PICKUP"
+          },
+          "regionCode": {
+            "$ref": "#/components/schemas/RegionCode"
+          },
+          "regionCodeHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "storeId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "store": {
+            "$ref": "#/components/schemas/MerchantStore"
+          }
+        }
+      },
+      "DeliveryTargetPayload": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "recipientName",
+          "phone",
+          "address",
+          "longitude",
+          "latitude",
+          "regionCode"
+        ],
+        "properties": {
+          "recipientName": {
+            "type": "string"
+          },
+          "phone": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "longitude": {
+            "type": "number"
+          },
+          "latitude": {
+            "type": "number"
+          },
+          "regionCode": {
+            "$ref": "#/components/schemas/RegionCode"
+          }
+        }
+      },
+      "FulfillmentTarget": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "targetId",
+              "targetHash",
+              "fulfillmentMode",
+              "regionCode",
+              "regionCodeHash",
+              "expiresAt",
+              "payload"
+            ],
+            "properties": {
+              "targetId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "targetHash": {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              "fulfillmentMode": {
+                "const": "DELIVERY"
+              },
+              "regionCode": {
+                "$ref": "#/components/schemas/RegionCode"
+              },
+              "regionCodeHash": {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "payload": {
+                "$ref": "#/components/schemas/DeliveryTargetPayload"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "targetId",
+              "targetHash",
+              "fulfillmentMode",
+              "regionCode",
+              "regionCodeHash",
+              "expiresAt",
+              "storeId",
+              "payload"
+            ],
+            "properties": {
+              "targetId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "targetHash": {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              "fulfillmentMode": {
+                "const": "PICKUP"
+              },
+              "regionCode": {
+                "$ref": "#/components/schemas/RegionCode"
+              },
+              "regionCodeHash": {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "storeId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "payload": {
+                "$ref": "#/components/schemas/MerchantStore"
+              }
+            }
+          }
+        ]
+      },
+      "FulfillmentRequestProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requestId",
+          "requestType",
+          "state",
+          "requestedAt",
+          "resolvedAt"
+        ],
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "requestType": {
+            "enum": [
+              "EXCHANGE",
+              "DELAY",
+              "ARBITRATION",
+              "FORCED_RECEIPT"
+            ]
+          },
+          "state": {
+            "enum": [
+              "OPEN",
+              "APPROVED",
+              "REJECTED",
+              "RESOLVED"
+            ]
+          },
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resolvedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ShipmentProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "shipmentId",
+          "carrierCode",
+          "trackingNumberHash",
+          "providerReferenceHash",
+          "createdAt"
+        ],
+        "properties": {
+          "shipmentId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "carrierCode": {
+            "type": "string",
+            "pattern": "^[A-Z0-9_-]{2,32}$"
+          },
+          "trackingNumberHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "providerReferenceHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "LogisticsProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "logisticsEventId",
+          "provider",
+          "status",
+          "locationHash",
+          "occurredAt"
+        ],
+        "properties": {
+          "logisticsEventId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "provider": {
+            "enum": [
+              "KUAIDI100",
+              "CAINIAO"
+            ]
+          },
+          "status": {
+            "enum": [
+              "PICKED_UP",
+              "IN_TRANSIT",
+              "OUT_FOR_DELIVERY",
+              "DELIVERED",
+              "EXCEPTION"
+            ]
+          },
+          "locationHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "FulfillmentBalance": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "asset",
+          "state",
+          "amount"
+        ],
+        "properties": {
+          "asset": {
+            "enum": [
+              "USDT",
+              "NPL",
+              "BNM_POINTS"
+            ]
+          },
+          "state": {
+            "enum": [
+              "LOCKED",
+              "AVAILABLE",
+              "REQUESTED",
+              "BATCHED",
+              "SETTLED",
+              "DISPUTED"
+            ]
+          },
+          "amount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          }
+        }
+      },
+      "FulfillmentExactAmounts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "listPriceUsdt",
+          "usdtPaymentAmount",
+          "nplQuoteAmount",
+          "nplPaymentAmount",
+          "nplBurnAmount",
+          "nplRewardAmount",
+          "merchantBaseReceivableUsdt",
+          "merchantConcessionAmount",
+          "merchantNetReceivableUsdt",
+          "bnmAmount"
+        ],
+        "properties": {
+          "listPriceUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "usdtPaymentAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "nplQuoteAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "nplPaymentAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "nplBurnAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "nplRewardAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "merchantBaseReceivableUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "merchantConcessionAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "merchantNetReceivableUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "bnmAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          }
+        }
+      },
+      "FulfillmentOrder": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "artifactVersion",
+          "buyerWallet",
+          "merchantId",
+          "merchantWallet",
+          "productId",
+          "skuId",
+          "fulfillmentMode",
+          "state",
+          "finalityStatus",
+          "exactAmounts",
+          "paidAt",
+          "paymentFinalizedAt",
+          "shippedAt",
+          "deliveredAt",
+          "fulfilledAt",
+          "takeoverOpenedAt",
+          "arbitrationOpenedAt",
+          "requests",
+          "shipments",
+          "logistics",
+          "balances"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "artifactVersion": {
+            "type": "string",
+            "minLength": 1
+          },
+          "buyerWallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "merchantId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "merchantWallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "productId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "skuId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "fulfillmentMode": {
+            "enum": [
+              "DELIVERY",
+              "PICKUP"
+            ]
+          },
+          "state": {
+            "enum": [
+              "QUOTED",
+              "SUBMITTED",
+              "PAID",
+              "SHIPPED",
+              "DELIVERED",
+              "ARBITRATION",
+              "TAKEOVER",
+              "FULFILLMENT_PENDING",
+              "FULFILLED",
+              "REORG_PENDING"
+            ]
+          },
+          "finalityStatus": {
+            "enum": [
+              "NOT_SUBMITTED",
+              "PENDING",
+              "CONFIRMED",
+              "REPLACED",
+              "REORGED",
+              "FINAL"
+            ]
+          },
+          "exactAmounts": {
+            "$ref": "#/components/schemas/FulfillmentExactAmounts"
+          },
+          "paidAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "paymentFinalizedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shippedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deliveredAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fulfilledAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "takeoverOpenedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "arbitrationOpenedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FulfillmentRequestProjection"
+            }
+          },
+          "shipments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ShipmentProjection"
+            }
+          },
+          "logistics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LogisticsProjection"
+            }
+          },
+          "balances": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FulfillmentBalance"
+            }
+          }
+        }
+      },
+      "FulfillmentCommandInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "evidenceHash"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "FulfillmentReasonRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "evidenceHash",
+          "reasonCode"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z0-9_:-]{2,64}$"
+          }
+        }
+      },
+      "ShipmentRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "evidenceHash",
+          "carrierCode",
+          "trackingNumberHash"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "carrierCode": {
+            "type": "string",
+            "pattern": "^[A-Z0-9_-]{2,32}$"
+          },
+          "trackingNumberHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "providerReferenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "PickupCredentialRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "evidenceHash",
+          "code",
+          "expiresAt"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^[0-9]{6}$"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PickupVerificationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "evidenceHash",
+          "code",
+          "storeId"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^[0-9]{6}$"
+          },
+          "storeId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      },
+      "FulfillmentRequestDecision": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "evidenceHash",
+          "requestId",
+          "approved",
+          "noteCode"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "approved": {
+            "type": "boolean"
+          },
+          "noteCode": {
+            "type": "string",
+            "pattern": "^[A-Z0-9_:-]{2,64}$"
+          }
+        }
+      },
+      "FulfillmentDecision": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "evidenceHash",
+          "approved",
+          "noteCode"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "approved": {
+            "type": "boolean"
+          },
+          "noteCode": {
+            "type": "string",
+            "pattern": "^[A-Z0-9_:-]{2,64}$"
+          }
+        }
+      },
+      "ArbitrationDecision": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "evidenceHash",
+          "outcome",
+          "noteCode"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "outcome": {
+            "enum": [
+              "FULFILL",
+              "RESUME_FULFILLMENT"
+            ]
+          },
+          "noteCode": {
+            "type": "string",
+            "pattern": "^[A-Z0-9_:-]{2,64}$"
+          }
+        }
+      },
+      "LogisticsWebhookRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "eventId",
+          "orderId",
+          "status",
+          "occurredAt"
+        ],
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "status": {
+            "enum": [
+              "PICKED_UP",
+              "IN_TRANSIT",
+              "OUT_FOR_DELIVERY",
+              "DELIVERED",
+              "EXCEPTION"
+            ]
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "locationHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "ShipmentResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "state",
+          "shipmentId",
+          "carrierCode",
+          "trackingNumberHash",
+          "recordedAt"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "state": {
+            "const": "SHIPPED"
+          },
+          "shipmentId": {
+            "type": "string"
+          },
+          "carrierCode": {
+            "type": "string"
+          },
+          "trackingNumberHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DeliveryResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "state",
+          "deliveredAt"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "state": {
+            "const": "DELIVERED"
+          },
+          "deliveredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "LogisticsUpdateResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "logisticsEventId",
+          "provider",
+          "status",
+          "state",
+          "occurredAt"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "logisticsEventId": {
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "KUAIDI100",
+              "CAINIAO"
+            ]
+          },
+          "status": {
+            "enum": [
+              "PICKED_UP",
+              "IN_TRANSIT",
+              "OUT_FOR_DELIVERY",
+              "DELIVERED",
+              "EXCEPTION"
+            ]
+          },
+          "state": {
+            "enum": [
+              "SHIPPED",
+              "DELIVERED"
+            ]
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PickupCredentialResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "credentialId",
+          "expiresAt"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "credentialId": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "FulfillmentRequestResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "requestId",
+          "requestType",
+          "state",
+          "requestedAt"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "requestType": {
+            "enum": [
+              "EXCHANGE",
+              "DELAY"
+            ]
+          },
+          "state": {
+            "const": "OPEN"
+          },
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "FulfillmentRequestDecisionResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "requestId",
+          "requestType",
+          "state",
+          "decidedAt"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "requestType": {
+            "enum": [
+              "EXCHANGE",
+              "DELAY"
+            ]
+          },
+          "state": {
+            "enum": [
+              "APPROVED",
+              "REJECTED"
+            ]
+          },
+          "decidedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ArbitrationOpenedResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "requestId",
+          "state",
+          "openedAt"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "state": {
+            "const": "ARBITRATION"
+          },
+          "openedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ArbitrationResumedResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "state",
+          "outcome",
+          "decidedAt"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "state": {
+            "enum": [
+              "SHIPPED",
+              "DELIVERED",
+              "TAKEOVER",
+              "FULFILLMENT_PENDING"
+            ]
+          },
+          "outcome": {
+            "const": "RESUME_FULFILLMENT"
+          },
+          "decidedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TakeoverOpenedResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "caseId",
+          "state",
+          "customerFundsRemainLocked"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "caseId": {
+            "type": "string"
+          },
+          "state": {
+            "const": "TAKEOVER"
+          },
+          "customerFundsRemainLocked": {
+            "const": true
+          }
+        }
+      },
+      "ForcedReceiptRequestResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "requestId",
+          "state",
+          "platformReviewRequired",
+          "canFinalizeDirectly"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "state": {
+            "const": "OPEN"
+          },
+          "platformReviewRequired": {
+            "const": true
+          },
+          "canFinalizeDirectly": {
+            "const": false
+          }
+        }
+      },
+      "ForcedReceiptRejectedResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "state",
+          "approved",
+          "decidedAt"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "state": {
+            "const": "DELIVERED"
+          },
+          "approved": {
+            "const": false
+          },
+          "decidedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "FulfillmentCompletedResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "state",
+          "method",
+          "fulfilledAt"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "state": {
+            "const": "FULFILLED"
+          },
+          "method": {
+            "enum": [
+              "CUSTOMER_RECEIPT",
+              "PICKUP_VERIFICATION",
+              "FORCED_RECEIPT",
+              "ARBITRATION"
+            ]
+          },
+          "fulfilledAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ArbitrationDecisionResult": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/FulfillmentCompletedResult"
+          },
+          {
+            "$ref": "#/components/schemas/ArbitrationResumedResult"
+          }
+        ]
+      },
+      "ForcedReceiptDecisionResult": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/FulfillmentCompletedResult"
+          },
+          {
+            "$ref": "#/components/schemas/ForcedReceiptRejectedResult"
+          }
+        ]
+      },
+      "FulfillmentCommandResult": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ShipmentResult"
+          },
+          {
+            "$ref": "#/components/schemas/DeliveryResult"
+          },
+          {
+            "$ref": "#/components/schemas/LogisticsUpdateResult"
+          },
+          {
+            "$ref": "#/components/schemas/PickupCredentialResult"
+          },
+          {
+            "$ref": "#/components/schemas/FulfillmentRequestResult"
+          },
+          {
+            "$ref": "#/components/schemas/FulfillmentRequestDecisionResult"
+          },
+          {
+            "$ref": "#/components/schemas/ArbitrationOpenedResult"
+          },
+          {
+            "$ref": "#/components/schemas/ArbitrationResumedResult"
+          },
+          {
+            "$ref": "#/components/schemas/TakeoverOpenedResult"
+          },
+          {
+            "$ref": "#/components/schemas/ForcedReceiptRequestResult"
+          },
+          {
+            "$ref": "#/components/schemas/ForcedReceiptRejectedResult"
+          },
+          {
+            "$ref": "#/components/schemas/FulfillmentCompletedResult"
+          }
+        ]
+      },
+      "WeightedDestination": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "account",
+          "weightBps"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "weightBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          }
+        }
+      },
+      "ProductPolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "policyVersion",
+          "oracleVersion",
+          "usdtPaymentBps",
+          "nplPaymentBps",
+          "nplBurnListPriceBps",
+          "nplRewardListPriceBps",
+          "genesisBps",
+          "directReferralBps",
+          "districtBps",
+          "cityBps",
+          "provinceBps",
+          "regionBps",
+          "operationsBps",
+          "platformFeeBps",
+          "seckillPrizeBps",
+          "oracleWindowSeconds",
+          "oracleMaxDeviationBps",
+          "oracleMaxAgeSeconds",
+          "oracleMinimumUsdtLiquidity",
+          "requiredConfirmations",
+          "merchantGuaranteeMinimumUsdt",
+          "usdtCustodySafe",
+          "nplRewardSafe",
+          "operationsTreasurySafe",
+          "circulationPool",
+          "concessionDestinationSetHash",
+          "concessionDestinations",
+          "operationsDestinations",
+          "otherUsdtDestinations",
+          "seckillPrizePoolAccount"
+        ],
+        "properties": {
+          "policyVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "oracleVersion": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "usdtPaymentBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "nplPaymentBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "nplBurnListPriceBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "nplRewardListPriceBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "genesisBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "directReferralBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "districtBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "cityBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "provinceBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "regionBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "operationsBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "platformFeeBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "seckillPrizeBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "oracleWindowSeconds": {
+            "const": 1800
+          },
+          "oracleMaxDeviationBps": {
+            "const": 500
+          },
+          "oracleMaxAgeSeconds": {
+            "const": 600
+          },
+          "oracleMinimumUsdtLiquidity": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "requiredConfirmations": {
+            "const": 15
+          },
+          "merchantGuaranteeMinimumUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "usdtCustodySafe": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "nplRewardSafe": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "operationsTreasurySafe": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "circulationPool": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "concessionDestinationSetHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "concessionDestinations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WeightedDestination"
+            }
+          },
+          "operationsDestinations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WeightedDestination"
+            }
+          },
+          "otherUsdtDestinations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WeightedDestination"
+            }
+          },
+          "seckillPrizePoolAccount": {
+            "$ref": "#/components/schemas/Address"
+          }
+        }
+      },
       "CatalogSku": {
         "type": "object",
         "additionalProperties": false,
@@ -911,6 +3896,62 @@
             "items": {
               "$ref": "#/components/schemas/CatalogSku"
             }
+          }
+        }
+      },
+      "InventoryReservation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reservationId",
+          "reservationHash",
+          "policyVersion",
+          "skuId",
+          "buyerWallet",
+          "quantity",
+          "classification",
+          "state",
+          "expiresAt"
+        ],
+        "properties": {
+          "reservationId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "reservationHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "policyVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "skuId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "buyerWallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "classification": {
+            "enum": [
+              "ORDINARY",
+              "SECKILL",
+              "FALLBACK_RETAIL"
+            ]
+          },
+          "state": {
+            "enum": [
+              "ACTIVE",
+              "CONSUMED",
+              "EXPIRED",
+              "RELEASED"
+            ]
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -1071,7 +4112,10 @@
           },
           "purpose": {
             "type": "string",
-            "minLength": 1
+            "enum": [
+              "POLICY_ALLOCATION",
+              "SECKILL_PRIZE_LIABILITY"
+            ]
           }
         }
       },
@@ -1101,6 +4145,39 @@
           },
           "amount": {
             "$ref": "#/components/schemas/AtomicAmount"
+          }
+        }
+      },
+      "AllocationSnapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "beneficiaries",
+          "concession",
+          "otherUsdt",
+          "nplRewards"
+        ],
+        "properties": {
+          "beneficiaries": {
+            "$ref": "#/components/schemas/BeneficiarySnapshot"
+          },
+          "concession": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantConcessionAllocation"
+            }
+          },
+          "otherUsdt": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OtherUsdtAllocation"
+            }
+          },
+          "nplRewards": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NplRewardAllocation"
+            }
           }
         }
       },
@@ -1657,7 +4734,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-payment.1"
+            "const": "2.0.0-fulfillment.1"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -1756,7 +4833,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-payment.1"
+            "const": "2.0.0-fulfillment.1"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"

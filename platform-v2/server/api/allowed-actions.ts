@@ -1,19 +1,32 @@
-import type { AllowedAction, AllowedActionName, BreakerScope, OrderState, UserRole } from './enums.ts';
+import type {
+  AllowedAction,
+  AllowedActionName,
+  BreakerScope,
+  OrderFinalityStatus,
+  OrderState,
+  UserRole,
+} from './enums.ts';
 
 export interface OrderProjection {
   state: OrderState;
   fulfillmentMode: 'DELIVERY' | 'PICKUP';
   buyerWallet: string;
+  merchantId: string;
   merchantWallet: string;
   deliveredAt?: Date;
   paidAt?: Date;
   shipmentEvidence: boolean;
   takeoverOpened: boolean;
   pendingMethod?: 'CUSTOMER_RECEIPT' | 'PICKUP_VERIFICATION' | 'FORCED_RECEIPT' | 'ARBITRATION';
+  paymentFinalityStatus?: OrderFinalityStatus;
+  openRequestTypes?: readonly ('EXCHANGE' | 'DELAY' | 'ARBITRATION' | 'FORCED_RECEIPT')[];
+  activePickupCredential?: boolean;
+  approvedExchange?: boolean;
 }
 
 export interface ActionContext {
   actorWallet: string;
+  actorMerchantId?: string;
   roles: readonly UserRole[];
   now: Date;
   pausedScopes: ReadonlySet<BreakerScope>;
@@ -27,23 +40,48 @@ export function orderAllowedActions(order: OrderProjection, context: ActionConte
   const merchant = order.merchantWallet.toLowerCase();
   const operator = context.roles.includes('OPERATOR') || context.roles.includes('ADMIN');
   const buyerActor = actor === buyer && context.roles.includes('BUYER');
-  const merchantActor = actor === merchant && context.roles.includes('MERCHANT');
+  const merchantActor = context.roles.includes('MERCHANT')
+    && (actor === merchant || context.actorMerchantId === order.merchantId);
+  const fulfillmentFinal = order.paymentFinalityStatus === undefined || order.paymentFinalityStatus === 'FINAL';
 
   if (order.state === 'QUOTED' && buyerActor) {
     actions.push(action('PAY_ORDER', !context.pausedScopes.has('NEW_PAYMENT'), 'BreakerActive'));
   }
-  if (order.state === 'PAID' && order.fulfillmentMode === 'DELIVERY' && (operator || merchantActor)) {
-    actions.push({ action: 'RECORD_SHIPMENT', enabled: true });
+  if (
+    order.fulfillmentMode === 'DELIVERY'
+    && (operator || merchantActor)
+    && (
+      order.state === 'PAID'
+      || (order.state === 'TAKEOVER' && operator)
+      || (['SHIPPED', 'DELIVERED'].includes(order.state) && order.approvedExchange)
+    )
+  ) {
+    actions.push(action('RECORD_SHIPMENT', fulfillmentFinal, 'FinalityPending'));
   }
-  if (order.state === 'PAID' && order.fulfillmentMode === 'PICKUP' && operator) {
-    actions.push({ action: 'VERIFY_PICKUP', enabled: true });
+  if (order.state === 'PAID' && order.fulfillmentMode === 'PICKUP' && (operator || merchantActor)) {
+    actions.push(action('VERIFY_PICKUP', fulfillmentFinal, 'FinalityPending'));
   }
-  if (order.state === 'PAID' && order.fulfillmentMode === 'PICKUP' && buyerActor) {
+  if (
+    order.state === 'PAID'
+    && order.fulfillmentMode === 'PICKUP'
+    && buyerActor
+    && !order.activePickupCredential
+  ) {
+    actions.push(action('REGISTER_PICKUP_CREDENTIAL', fulfillmentFinal, 'FinalityPending'));
     actions.push({ action: 'OPEN_TAKEOVER', enabled: false, reasonCode: 'PickupTakeoverDecisionBlocked' });
   }
-  if (order.state === 'SHIPPED' && operator) actions.push({ action: 'RECORD_DELIVERY', enabled: true });
-  if (order.state === 'DELIVERED' && buyerActor) actions.push({ action: 'CONFIRM_RECEIPT', enabled: true });
-  if (order.state === 'DELIVERED' && merchantActor && order.deliveredAt) {
+  if (order.state === 'SHIPPED' && operator) {
+    actions.push(action('RECORD_DELIVERY', fulfillmentFinal, 'FinalityPending'));
+  }
+  if (order.state === 'DELIVERED' && buyerActor) {
+    actions.push(action('CONFIRM_RECEIPT', fulfillmentFinal, 'FinalityPending'));
+  }
+  if (
+    order.state === 'DELIVERED'
+    && merchantActor
+    && order.deliveredAt
+    && !order.openRequestTypes?.includes('FORCED_RECEIPT')
+  ) {
     const deadline = new Date(order.deliveredAt.getTime() + 7 * 24 * 60 * 60 * 1000);
     actions.push(
       context.now >= deadline
@@ -56,19 +94,41 @@ export function orderAllowedActions(order: OrderProjection, context: ActionConte
           },
     );
   }
+  if (['PAID', 'SHIPPED', 'DELIVERED'].includes(order.state) && buyerActor) {
+    if (!order.openRequestTypes?.includes('EXCHANGE')) {
+      actions.push(action('REQUEST_EXCHANGE', fulfillmentFinal, 'FinalityPending'));
+    }
+    if (!order.openRequestTypes?.includes('DELAY')) {
+      actions.push(action('REQUEST_DELAY', fulfillmentFinal, 'FinalityPending'));
+    }
+  }
+  if (
+    order.openRequestTypes?.some((type) => type === 'EXCHANGE' || type === 'DELAY')
+    && ['PAID', 'SHIPPED', 'DELIVERED'].includes(order.state)
+    && (merchantActor || operator)
+  ) {
+    actions.push(action('DECIDE_FULFILLMENT_REQUEST', fulfillmentFinal, 'FinalityPending'));
+  }
   if (
     ['SHIPPED', 'DELIVERED', 'TAKEOVER', 'FULFILLMENT_PENDING'].includes(order.state) &&
     !(order.state === 'FULFILLMENT_PENDING' && order.pendingMethod === 'ARBITRATION') &&
-    buyerActor
+    (buyerActor || operator)
   ) {
-    actions.push({ action: 'OPEN_ARBITRATION', enabled: true });
+    actions.push(action('OPEN_ARBITRATION', fulfillmentFinal, 'FinalityPending'));
+  }
+  if (order.state === 'ARBITRATION' && (context.roles.includes('ARBITRATOR') || context.roles.includes('ADMIN'))) {
+    actions.push({ action: 'DECIDE_ARBITRATION', enabled: true });
+  }
+  if (order.state === 'DELIVERED' && operator && order.openRequestTypes?.includes('FORCED_RECEIPT')) {
+    actions.push({ action: 'DECIDE_FORCED_RECEIPT', enabled: true });
   }
   if (
     order.state === 'PAID' &&
     order.fulfillmentMode === 'DELIVERY' &&
     order.paidAt &&
     !order.shipmentEvidence &&
-    buyerActor
+    !order.takeoverOpened &&
+    (buyerActor || operator)
   ) {
     const deadline = new Date(order.paidAt.getTime() + 7 * 24 * 60 * 60 * 1000);
     actions.push(

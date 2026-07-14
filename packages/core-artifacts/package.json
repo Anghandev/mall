@@ -1,6 +1,6 @@
 {
   "name": "@abu24k/core-artifacts",
-  "version": "2.0.0-payment.1",
+  "version": "2.0.0-fulfillment.1",
   "private": true,
   "type": "module",
   "description": "Core-owned coordinated V2 API, types, protocol and contract artifacts",

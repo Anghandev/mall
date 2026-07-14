@@ -37,6 +37,8 @@ const externalVariables = [
   'JWT_SECRET',
   'AUTH_DOMAIN',
   'AUTH_URI',
+  'DELIVERY_DATA_ENCRYPTION_KEY',
+  'AMAP_WEB_SERVICE_KEY',
   'BSC_RPC_URL',
   'BSC_FALLBACK_RPC_URL',
   'PLATFORM_SAFE_ADDRESS',
@@ -54,6 +56,10 @@ const externalVariables = [
   'SETTLEMENT_EXECUTOR_TOKEN',
   'EXECUTOR_MAX_GAS_LIMIT',
   'BACKUP_STORAGE_ENCRYPTED',
+  'BNM_AVAILABILITY_URL',
+  'BNM_API_TOKEN',
+  'BNM_PROJECT_ID',
+  'BNM_MONOTONIC_CONFORMANCE_EVIDENCE_HASH',
 ] as const;
 
 const paymentExternalVariables = [
@@ -62,6 +68,8 @@ const paymentExternalVariables = [
   'JWT_SECRET',
   'AUTH_DOMAIN',
   'AUTH_URI',
+  'DELIVERY_DATA_ENCRYPTION_KEY',
+  'AMAP_WEB_SERVICE_KEY',
   'BSC_RPC_URL',
   'BSC_FALLBACK_RPC_URL',
   'PLATFORM_SAFE_ADDRESS',
@@ -76,12 +84,30 @@ const paymentExternalVariables = [
   'SIGNER_SERVICE_TOKEN',
 ] as const;
 
-export type ProviderName = 'AMAP' | 'KUAIDI100' | 'FEIE' | 'ALIYUN_SMS' | 'ALIYUN_OSS' | 'SMTP' | 'JPUSH';
+export type ProviderName =
+  | 'AMAP'
+  | 'KUAIDI100'
+  | 'CAINIAO'
+  | 'FEIE'
+  | 'YILIANYUN'
+  | 'BNM'
+  | 'ALIYUN_SMS'
+  | 'ALIYUN_OSS'
+  | 'SMTP'
+  | 'JPUSH';
 
 const providerVariables: Readonly<Record<ProviderName, readonly string[]>> = {
   AMAP: ['AMAP_WEB_SERVICE_KEY'],
   KUAIDI100: ['KUAIDI100_CUSTOMER', 'KUAIDI100_KEY', 'KUAIDI100_SECRET', 'KUAIDI100_CALLBACK_SECRET'],
+  CAINIAO: ['CAINIAO_APP_KEY', 'CAINIAO_APP_SECRET', 'CAINIAO_CALLBACK_SECRET'],
   FEIE: ['FEIE_USER', 'FEIE_UKEY'],
+  YILIANYUN: ['YILIANYUN_CLIENT_ID', 'YILIANYUN_CLIENT_SECRET'],
+  BNM: [
+    'BNM_AVAILABILITY_URL',
+    'BNM_API_TOKEN',
+    'BNM_PROJECT_ID',
+    'BNM_MONOTONIC_CONFORMANCE_EVIDENCE_HASH',
+  ],
   ALIYUN_SMS: ['ALIYUN_SMS_ACCESS_KEY_ID', 'ALIYUN_SMS_ACCESS_KEY_SECRET'],
   ALIYUN_OSS: ['ALIYUN_OSS_ACCESS_KEY_ID', 'ALIYUN_OSS_ACCESS_KEY_SECRET'],
   SMTP: ['SMTP_URL'],
@@ -120,6 +146,7 @@ export interface CoreConfig {
   executorUrl: string | undefined;
   executorToken: string | undefined;
   executorMaxGasLimit: bigint | undefined;
+  bnmMonotonicConformanceEvidenceHash: string | undefined;
   requiredConfirmations: 15;
   deploymentReady: boolean;
   decisionBlocked: readonly string[];
@@ -186,6 +213,10 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
   if (missingDecisionVariables.length === 0) validateDecisionValues(env);
   validateProductionEndpoints(env);
   validateDistinctAuthorities(env);
+  const bnmMonotonicConformanceEvidenceHash = normalizeOptionalHash(
+    env.BNM_MONOTONIC_CONFORMANCE_EVIDENCE_HASH,
+    'BNM_MONOTONIC_CONFORMANCE_EVIDENCE_HASH',
+  );
   if (env.JWT_SECRET && Buffer.byteLength(env.JWT_SECRET) < 32) {
     throw new CoreError('InvalidRequest', 'JWT_SECRET must be at least 32 bytes', 500);
   }
@@ -229,6 +260,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     executorUrl: env.SETTLEMENT_EXECUTOR_URL,
     executorToken: env.SETTLEMENT_EXECUTOR_TOKEN,
     executorMaxGasLimit: parseOptionalPositiveBigInt(env.EXECUTOR_MAX_GAS_LIMIT, 'EXECUTOR_MAX_GAS_LIMIT'),
+    bnmMonotonicConformanceEvidenceHash,
     requiredConfirmations: REQUIRED_CONFIRMATIONS,
     deploymentReady,
     decisionBlocked,
@@ -345,7 +377,7 @@ function runtimeReadinessValid(snapshot: RuntimeReadinessSnapshot | undefined, n
 }
 
 function validateProductionEndpoints(env: Readonly<Record<string, string | undefined>>) {
-  for (const name of ['SIGNER_SERVICE_URL', 'SETTLEMENT_EXECUTOR_URL']) {
+  for (const name of ['SIGNER_SERVICE_URL', 'SETTLEMENT_EXECUTOR_URL', 'BNM_AVAILABILITY_URL']) {
     const value = env[name];
     if (value && protocol(value) !== 'https:') throw new CoreError('InvalidRequest', `${name} must use HTTPS`, 500);
   }

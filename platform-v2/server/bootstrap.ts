@@ -5,6 +5,7 @@ import type { OrderProjection } from './api/allowed-actions.ts';
 import { loadConfig } from './api/config.ts';
 import { CORE_ARTIFACT_VERSION, type BreakerScope, type UserRole } from './api/enums.ts';
 import { CoreError } from './api/errors.ts';
+import { AmapAdministrativeRegionResolver } from './api/providers.ts';
 import {
   ResilientBscContractReader,
   RpcBeneficiarySnapshotSource,
@@ -13,6 +14,8 @@ import {
   RpcWalletMessageSignatureVerifier,
 } from './chain/payment-sources.ts';
 import { AbiEventDecoder } from './chain/abi-decoder.ts';
+import { BnmAvailabilityWorker, HttpBnmAvailabilityAdapter } from './chain/bnm-availability-worker.ts';
+import { FulfillmentSchedulerWorker } from './chain/fulfillment-scheduler-worker.ts';
 import { ChainIndexer } from './chain/indexer.ts';
 import {
   PollingPaymentIndexer,
@@ -26,6 +29,8 @@ import {
 import { RemoteSignerClient } from './chain/signer.ts';
 import { PostgresNonceStore, RedisNonceRateLimiter } from './data/auth-store.ts';
 import { CatalogPaymentService } from './data/catalog-payment-service.ts';
+import { FulfillmentService } from './data/fulfillment-service.ts';
+import { FulfillmentTargetService } from './data/fulfillment-target-service.ts';
 import {
   createPostgresPool,
   createRedisConnection,
@@ -41,7 +46,7 @@ const ABI_BUNDLE_PATH = fileURLToPath(
 
 export const coreBaseline = Object.freeze({
   artifactVersion: CORE_ARTIFACT_VERSION,
-  status: 'payment-runtime',
+  status: 'fulfillment-runtime',
 } as const);
 
 export async function createCoreRuntime(env: Readonly<Record<string, string | undefined>>) {
@@ -78,6 +83,30 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     paymentRouterAddress: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),
   });
   const indexerStore = new PostgresIndexerStore(transactions);
+  const fulfillmentService = new FulfillmentService({ transactions });
+  const fulfillmentScheduler = new FulfillmentSchedulerWorker({
+    service: fulfillmentService,
+    platformWallet: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    transactions,
+  });
+  const fulfillmentTargetService = new FulfillmentTargetService({
+    transactions,
+    regions: new AmapAdministrativeRegionResolver({
+      ...(env.AMAP_WEB_SERVICE_KEY ? { key: env.AMAP_WEB_SERVICE_KEY } : {}),
+    }),
+    ...(env.DELIVERY_DATA_ENCRYPTION_KEY ? { encryptionKey: env.DELIVERY_DATA_ENCRYPTION_KEY } : {}),
+  });
+  const bnmWorker = new BnmAvailabilityWorker({
+    transactions,
+    adapter: new HttpBnmAvailabilityAdapter({
+      ...(env.BNM_AVAILABILITY_URL ? { url: env.BNM_AVAILABILITY_URL } : {}),
+      ...(env.BNM_API_TOKEN ? { token: env.BNM_API_TOKEN } : {}),
+      ...(env.BNM_PROJECT_ID ? { projectId: env.BNM_PROJECT_ID } : {}),
+      ...(config.bnmMonotonicConformanceEvidenceHash
+        ? { conformanceEvidenceHash: config.bnmMonotonicConformanceEvidenceHash }
+        : {}),
+    }),
+  });
   const decoder = await AbiEventDecoder.load(ABI_BUNDLE_PATH, {
     PaymentRouterV2: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),
   });
@@ -93,6 +122,12 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   });
   await paymentIndexer.pollOnce().catch(() => undefined);
   paymentIndexer.start();
+  if (config.providerReadiness.BNM === 'READY') {
+    await bnmWorker.pollOnce().catch(() => undefined);
+    bnmWorker.start();
+  }
+  await fulfillmentScheduler.pollOnce().catch(() => undefined);
+  fulfillmentScheduler.start();
 
   const runtimeAttestor = new RpcPaymentRuntimeAttestor({
     reader,
@@ -135,6 +170,12 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     getOrderProjection: (orderId) => getOrderProjection(database, orderId),
     getPausedScopes: () => getPausedScopes(database),
     paymentService,
+    fulfillmentService,
+    fulfillmentTargetService,
+    logisticsWebhookSecrets: {
+      ...(env.KUAIDI100_CALLBACK_SECRET ? { KUAIDI100: env.KUAIDI100_CALLBACK_SECRET } : {}),
+      ...(env.CAINIAO_CALLBACK_SECRET ? { CAINIAO: env.CAINIAO_CALLBACK_SECRET } : {}),
+    },
     clock: () => new Date(),
   });
   return {
@@ -147,6 +188,8 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
       });
       await readinessMonitor.stop();
       await paymentIndexer.stop();
+      await fulfillmentScheduler.stop();
+      await bnmWorker.stop();
       await redis.quit();
       await pool.end();
     },
@@ -179,20 +222,47 @@ async function getOrderProjection(database: SqlExecutor, orderId: string): Promi
     state: OrderProjection['state'];
     fulfillment_mode: OrderProjection['fulfillmentMode'];
     buyer_wallet: string;
+    merchant_id: string;
     merchant_wallet: string;
     paid_at: Date | null;
-    fulfilled_at: Date | null;
+    delivered_at: Date | null;
+    finality_status: NonNullable<OrderProjection['paymentFinalityStatus']>;
+    payment_finalized_at: Date | null;
     shipment_evidence: boolean;
     takeover_opened: boolean;
+    open_request_types: Array<'EXCHANGE' | 'DELAY' | 'ARBITRATION' | 'FORCED_RECEIPT'>;
+    active_pickup_credential: boolean;
+    approved_exchange: boolean;
   }>(
-    `SELECT orders.state, orders.fulfillment_mode, orders.buyer_wallet, orders.merchant_wallet,
-       orders.paid_at, orders.fulfilled_at,
+    `SELECT orders.state, orders.fulfillment_mode, orders.buyer_wallet, orders.merchant_id, orders.merchant_wallet,
+       orders.paid_at, orders.delivered_at, orders.finality_status,
+       finality.finalized_at AS payment_finalized_at,
        EXISTS (
          SELECT 1 FROM core.fulfillment_evidence evidence
          WHERE evidence.order_id = orders.order_id AND evidence.evidence_type = 'SHIPMENT'
        ) AS shipment_evidence,
-       EXISTS (SELECT 1 FROM core.takeover_cases takeover WHERE takeover.order_id = orders.order_id) AS takeover_opened
-     FROM core.orders WHERE orders.order_id = $1`,
+       EXISTS (SELECT 1 FROM core.takeover_cases takeover WHERE takeover.order_id = orders.order_id) AS takeover_opened,
+       ARRAY(
+         SELECT request.request_type FROM core.fulfillment_requests request
+         WHERE request.order_id = orders.order_id AND request.state = 'OPEN'
+         ORDER BY request.request_type
+       ) AS open_request_types,
+       EXISTS (
+         SELECT 1 FROM core.pickup_credentials credential
+         WHERE credential.order_id = orders.order_id AND credential.consumed_at IS NULL
+           AND credential.invalidated_at IS NULL
+           AND credential.expires_at > clock_timestamp()
+       ) AS active_pickup_credential,
+       EXISTS (
+         SELECT 1 FROM core.fulfillment_requests request
+         WHERE request.order_id = orders.order_id AND request.request_type = 'EXCHANGE'
+           AND request.state = 'APPROVED'
+       ) AS approved_exchange
+     FROM core.orders
+     LEFT JOIN core.transaction_finality finality
+       ON finality.resource_type = 'ORDER_PAYMENT' AND finality.resource_id = orders.order_id
+       AND finality.state = 'FINAL'
+     WHERE orders.order_id = $1`,
     [orderId],
   );
   const row = result.rows[0];
@@ -201,11 +271,16 @@ async function getOrderProjection(database: SqlExecutor, orderId: string): Promi
     state: row.state,
     fulfillmentMode: row.fulfillment_mode,
     buyerWallet: row.buyer_wallet,
+    merchantId: row.merchant_id,
     merchantWallet: row.merchant_wallet,
-    ...(row.paid_at ? { paidAt: new Date(row.paid_at) } : {}),
-    ...(row.fulfilled_at ? { deliveredAt: new Date(row.fulfilled_at) } : {}),
+    ...(row.payment_finalized_at ? { paidAt: new Date(row.payment_finalized_at) } : {}),
+    ...(row.delivered_at ? { deliveredAt: new Date(row.delivered_at) } : {}),
+    paymentFinalityStatus: row.finality_status,
     shipmentEvidence: row.shipment_evidence,
     takeoverOpened: row.takeover_opened,
+    openRequestTypes: row.open_request_types,
+    activePickupCredential: row.active_pickup_credential,
+    approvedExchange: row.approved_exchange,
   };
 }
 

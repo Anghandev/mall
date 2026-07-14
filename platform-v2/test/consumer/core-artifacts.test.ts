@@ -22,13 +22,15 @@ const abiBundle = readJson('contracts/abi-bundle.json');
 const contractManifest = readJson('contracts/contract-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('payment checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-payment.1');
+test('fulfillment checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-fulfillment.1');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
   assert.equal(openapi['x-artifactVersion'], artifactVersion);
-  assert.equal(manifest.publicationStatus, 'COORDINATED_PAYMENT_CHECKPOINT');
+  assert.equal(manifest.publicationStatus, 'COORDINATED_FULFILLMENT_CHECKPOINT');
+  assert.equal(contractManifest.publicationStatus, 'coordinated-fulfillment-checkpoint');
+  assert.ok(manifest.decisionBlocked.includes('SECKILL_PRIZE_POOL_ACCOUNT'));
   assert.deepEqual(
     manifest.consumerTests.map((item: { path: string }) => item.path),
     ['platform-v2/server/api/api.test.ts', 'platform-v2/test/consumer/core-artifacts.test.ts'],
@@ -49,7 +51,7 @@ test('payment checkpoint has one identity, resolvable exports and exact checksum
   }
 });
 
-test('OpenAPI publishes only implemented payment checkpoint operations and has no dangling refs', () => {
+test('OpenAPI publishes the implemented payment and fulfillment operations with no dangling refs', () => {
   const operations = Object.entries(openapi.paths)
     .flatMap(([path, methods]) =>
       Object.keys(methods as Record<string, unknown>).map((method) => `${method.toUpperCase()} ${path}`),
@@ -59,30 +61,72 @@ test('OpenAPI publishes only implemented payment checkpoint operations and has n
     'GET /v2/bootstrap',
     'GET /v2/catalog/products',
     'GET /v2/catalog/products/{productId}',
+    'GET /v2/orders',
+    'GET /v2/orders/{orderId}',
+    'GET /v2/orders/{orderId}/fulfillment-target',
     'GET /v2/payments/{orderId}',
+    'GET /v2/stores',
     'POST /v2/actions/order',
     'POST /v2/auth/nonce',
     'POST /v2/auth/verify',
+    'POST /v2/fulfillment-targets/delivery',
+    'POST /v2/fulfillment-targets/pickup',
+    'POST /v2/orders/{orderId}/arbitration-decisions',
+    'POST /v2/orders/{orderId}/arbitrations',
+    'POST /v2/orders/{orderId}/delay-requests',
+    'POST /v2/orders/{orderId}/delivery',
+    'POST /v2/orders/{orderId}/exchange-requests',
+    'POST /v2/orders/{orderId}/forced-receipt-decisions',
+    'POST /v2/orders/{orderId}/forced-receipt-requests',
+    'POST /v2/orders/{orderId}/pickup-credential',
+    'POST /v2/orders/{orderId}/pickup-verification',
+    'POST /v2/orders/{orderId}/receipt-confirmation',
+    'POST /v2/orders/{orderId}/request-decisions',
+    'POST /v2/orders/{orderId}/shipments',
+    'POST /v2/orders/{orderId}/takeover',
     'POST /v2/payments/quotes',
     'POST /v2/payments/submissions',
+    'POST /v2/providers/cainiao/webhooks/logistics',
+    'POST /v2/providers/kuaidi100/webhooks/logistics',
     'POST /v2/seckill/quotes',
+    'POST /v2/stores',
   ]);
-  for (const path of [
-    '/v2/actions/order',
-    '/v2/payments/quotes',
-    '/v2/payments/submissions',
-    '/v2/payments/{orderId}',
-    '/v2/seckill/quotes',
-  ]) {
-    const operation = Object.values(openapi.paths[path])[0] as { security?: Array<{ bearerAuth: unknown[] }> };
-    assert.deepEqual(operation.security, [{ bearerAuth: [] }], path);
+  assert.deepEqual([...manifest.httpSurface].sort(), operations);
+  const bearerOperations = operations.filter((operation: string) =>
+    ![
+      'GET /v2/bootstrap',
+      'GET /v2/catalog/products',
+      'GET /v2/catalog/products/{productId}',
+      'GET /v2/stores',
+      'POST /v2/auth/nonce',
+      'POST /v2/auth/verify',
+      'POST /v2/providers/cainiao/webhooks/logistics',
+      'POST /v2/providers/kuaidi100/webhooks/logistics',
+    ].includes(operation));
+  for (const operation of bearerOperations) {
+    const [method, path] = operation.split(' ');
+    assert.deepEqual(openapi.paths[path!][method!.toLowerCase()].security, [{ bearerAuth: [] }], operation);
   }
+  for (const path of [
+    '/v2/providers/cainiao/webhooks/logistics',
+    '/v2/providers/kuaidi100/webhooks/logistics',
+  ]) assert.deepEqual(openapi.paths[path].post.security, [{ providerSignature: [] }], path);
   for (const ref of collectRefs(openapi)) {
     assert.ok(resolveRef(openapi, ref), ref);
   }
   assert.equal(openapi.components.schemas.CanonicalPaymentIntent.properties.requiredConfirmations.const, 15);
   assert.equal(openapi.components.schemas.ApprovalRequirement.properties.approvalMode.const, 'ONLY_IF_ALLOWANCE_BELOW_REQUIRED');
   assert.equal(openapi.components.schemas.ApprovalRequirement.properties.risk.const, 'UNLIMITED_TOKEN_ALLOWANCE');
+  assert.deepEqual(openapi.components.schemas.OtherUsdtAllocation.properties.purpose.enum, [
+    'POLICY_ALLOCATION',
+    'SECKILL_PRIZE_LIABILITY',
+  ]);
+  assert.ok(openapi.components.schemas.ProductPolicy.required.includes('seckillPrizeBps'));
+  assert.ok(openapi.components.schemas.ProductPolicy.required.includes('seckillPrizePoolAccount'));
+  for (const contract of manifest.requiredConsumerContracts as string[]) {
+    assert.ok(openapi.components.schemas[contract], `OpenAPI ${contract}`);
+    assert.match(declarations, new RegExp(`export (?:interface|type) ${contract}\\b`), contract);
+  }
 });
 
 test('generated payment DTOs match the PaymentRouter tuple and current response surface', () => {
@@ -123,6 +167,69 @@ test('generated payment DTOs match the PaymentRouter tuple and current response 
     assert.match(declarations, new RegExp(`\\b${field}\\b`), field);
   }
   assert.deepEqual([...settlementRails], ['MERCHANT_USDT', 'REWARD_NPL', 'PRIZE_USDT']);
+  assert.match(declarations, /export type UsdtLiabilityPurpose = 'POLICY_ALLOCATION' \| 'SECKILL_PRIZE_LIABILITY'/);
+});
+
+test('generated fulfillment DTOs expose exact amounts, immutable evidence and command results', () => {
+  for (const name of [
+    'MerchantStore',
+    'CreateMerchantStoreRequest',
+    'DeliveryTarget',
+    'PickupTarget',
+    'DeliveryTargetPayload',
+    'FulfillmentExactAmounts',
+    'FulfillmentRequestProjection',
+    'ShipmentProjection',
+    'LogisticsProjection',
+    'FulfillmentBalance',
+    'FulfillmentOrder',
+    'FulfillmentCommandInput',
+    'ShipmentRequest',
+    'PickupCredentialRequest',
+    'PickupVerificationRequest',
+    'FulfillmentReasonRequest',
+    'FulfillmentRequestDecision',
+    'ArbitrationDecision',
+    'FulfillmentDecision',
+    'LogisticsWebhookRequest',
+    'ShipmentResult',
+    'DeliveryResult',
+    'LogisticsUpdateResult',
+    'PickupCredentialResult',
+    'FulfillmentCompletedResult',
+    'FulfillmentRequestResult',
+    'FulfillmentRequestDecisionResult',
+    'ArbitrationOpenedResult',
+    'TakeoverOpenedResult',
+    'ForcedReceiptRequestResult',
+  ]) assert.match(declarations, new RegExp(`export interface ${name}\\b`), name);
+  for (const name of ['FulfillmentTarget', 'ArbitrationDecisionResult', 'ForcedReceiptDecisionResult', 'FulfillmentCommandResult']) {
+    assert.match(declarations, new RegExp(`export type ${name}\\b`), name);
+  }
+  assert.deepEqual(Object.keys(openapi.components.schemas.FulfillmentExactAmounts.properties).sort(), [
+    'bnmAmount',
+    'listPriceUsdt',
+    'merchantBaseReceivableUsdt',
+    'merchantConcessionAmount',
+    'merchantNetReceivableUsdt',
+    'nplBurnAmount',
+    'nplPaymentAmount',
+    'nplQuoteAmount',
+    'nplRewardAmount',
+    'usdtPaymentAmount',
+  ]);
+  assert.deepEqual(enums.logisticsProviders, ['KUAIDI100', 'CAINIAO']);
+  assert.ok(enums.adapterProviders.includes('YILIANYUN'));
+  assert.ok(enums.adapterProviders.includes('BNM'));
+  assert.ok(openapi.components.schemas.PickupVerificationRequest.required.includes('storeId'));
+  assert.deepEqual(enums.takeoverStates, [
+    'OPEN',
+    'FUNDED',
+    'FULFILLING',
+    'FULFILLMENT_PENDING',
+    'CLOSED',
+    'DECISION_BLOCKED',
+  ]);
 });
 
 test('published wallet calls encode with the ABI and published EIP-712 messages reproduce authorization digests', () => {
@@ -330,7 +437,7 @@ test('publication contains no Claim, BNM token payout, old escrow or old allocat
   assert.equal([...settlementRails].includes('BNM' as never), false);
 });
 
-test('unpublished transports and later Core batches stay explicitly fail closed', () => {
+test('unpublished transports and settlement stay fail closed while fulfillment is executable', () => {
   assert.equal(websocket.endpoint, null);
   assert.deepEqual(websocket.channels, []);
   assert.equal(websocket.publicationStatus, 'FAIL_CLOSED');
@@ -345,6 +452,13 @@ test('unpublished transports and later Core batches stay explicitly fail closed'
     'paymentProjectionHttp',
     'paymentIndexer',
     'seckillQuoteHttp',
+    'storesHttp',
+    'fulfillmentTargetHttp',
+    'fulfillmentHttp',
+    'logisticsWebhookHttp',
+    'takeoverHttp',
+    'fulfillmentScheduler',
+    'bnmAvailabilityWorker',
   ]);
   for (const [capability, status] of Object.entries(manifest.capabilityStatus)) {
     assert.equal(status, available.has(capability) ? 'AVAILABLE' : 'NOT_PUBLISHED_FAIL_CLOSED', capability);
@@ -355,10 +469,27 @@ test('unpublished transports and later Core batches stay explicitly fail closed'
   assert.equal(contractManifest.deploymentAuthorizationEvidenceHash, null);
   assert.ok(contractManifest.contracts.every((contract: { deploymentBlock: null; deployedCodeHash: null }) =>
     contract.deploymentBlock === null && contract.deployedCodeHash === null));
-  assert.deepEqual([...executableOrderActionNames], []);
-  assert.deepEqual(manifest.executableOrderActionNames, []);
+  const fulfillmentActions = [
+    'REQUEST_EXCHANGE',
+    'REQUEST_DELAY',
+    'DECIDE_FULFILLMENT_REQUEST',
+    'CONFIRM_RECEIPT',
+    'REQUEST_FORCED_RECEIPT',
+    'VERIFY_PICKUP',
+    'OPEN_ARBITRATION',
+    'OPEN_TAKEOVER',
+    'RECORD_SHIPMENT',
+    'RECORD_DELIVERY',
+    'REGISTER_PICKUP_CREDENTIAL',
+    'DECIDE_ARBITRATION',
+    'DECIDE_FORCED_RECEIPT',
+  ];
+  assert.deepEqual([...executableOrderActionNames], fulfillmentActions);
+  assert.deepEqual(manifest.executableOrderActionNames, fulfillmentActions);
   assert.ok(manifest.externalBlocked.includes('GOVERNANCE_AND_THREE_SAFE_ADDRESSES'));
   assert.ok(manifest.externalBlocked.includes('PROVIDER_ACCOUNTS_AND_CREDENTIALS'));
+  assert.ok(manifest.externalBlocked.includes('BNM_MONOTONIC_CONFORMANCE_EVIDENCE'));
+  assert.ok(manifest.decisionBlocked.includes('PICKUP_TIMEOUT_AND_TAKEOVER_EVIDENCE'));
   assert.equal(manifest.decisionBlocked.includes('REQUIRED_CONFIRMATIONS'), false);
 });
 

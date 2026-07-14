@@ -1,6 +1,6 @@
-# Abu 24K V2 Payment Workers
+# Abu 24K V2 Payment And Fulfillment Workers
 
-Status: local payment checkpoint `2.0.0-payment.1`. Production RPCs, deployed
+Status: local fulfillment checkpoint `2.0.0-fulfillment.1`. Production RPCs, deployed
 addresses, signer service and credentials remain `ExternalBlocked`.
 
 ## Indexer
@@ -22,6 +22,12 @@ then ingests every canonical block, including blocks with no Router logs. Empty
 blocks advance confirmations. Each poll compares RPC with the persisted
 checkpoint, walks back to a proven common ancestor on mismatch and atomically
 replaces the branch. Shutdown waits for the active poll before PostgreSQL closes.
+
+When a payment first appears with 15 or more confirmations in one historical
+batch, `finalized_at` is the timestamp of its fifteenth canonical block. For an
+incrementally observed payment, Core uses that same canonical timestamp when
+available and the real confirmation observation time as fallback; it never
+reuses the payment block timestamp as finality time.
 
 The same transaction may be re-included in a different block. Reorg handling
 posts a linked reversal and retains both branches as evidence. Before finality,
@@ -74,8 +80,55 @@ integer amounts, zero native value, gas cap and replacement evidence. An
 executor response is only `Submitted`; indexed receipt and canonical finality
 remain separate evidence.
 
-Fulfillment scheduling, takeover execution, Safe MultiSend settlement and
-provider webhook workers belong to later checkpoints. Their existing internal
-helpers and tests do not publish those HTTP/product capabilities in the payment
-manifest. Payment breakers never stop indexer, finality, reorg recovery,
-reconciliation or audit processing.
+## Fulfillment Scheduling And Providers
+
+The scheduler uses the indexed 15-confirmation payment-finality timestamp. It
+may open delivery takeover after seven days without shipment evidence and
+records pickup timeout as `DecisionBlocked`; it never guesses a pickup policy.
+One order failure does not stop later eligible orders. Unexpected failures are
+persisted as retry/dead-letter `OPEN_TAKEOVER` jobs and exposed by worker status;
+`available_at` and terminal job state control whether another attempt may run,
+and the timer does not silently discard a rejected polling cycle.
+Payment and settlement breakers do not stop this scheduler or any fulfillment,
+takeover, arbitration, reconciliation or audit action.
+
+Kuaidi100 and Cainiao callbacks authenticate an HMAC over exact raw body bytes.
+Each provider/event identity is immutable and idempotent. Unsupported status,
+future timestamp, bad signature or missing secret fails closed. A `DELIVERED`
+event moves only the fulfillment state; it does not itself release balances.
+
+AMap reverse geocoding validates the national six-digit region code and records
+the response evidence hash. Missing key, malformed provider response or region
+drift returns `ConfigurationRequired`, `ExternalBlocked` or an idempotency
+conflict without storing plaintext delivery data.
+
+## BNM Availability
+
+Fulfillment completion writes one `BnmAvailabilityRequested` outbox event in
+the same PostgreSQL transaction as the order and ledger transition. The BNM
+worker calls only a configured HTTPS backend endpoint with order, buyer, exact
+integer point amount, state, monotonic order-scoped `stateVersion`, reason and
+evidence hash. The backend must atomically apply only a version newer than its
+stored version, treat an equal version with changed content as a conflict, and
+ignore lower versions. Acknowledgements must match the idempotency identity and
+prove the requested effective version/state; missing or mismatched proof is
+`ExternalBlocked`. `BNM_MONOTONIC_CONFORMANCE_EVIDENCE_HASH` is set only from a
+verified delayed-write conformance run; without it provider readiness remains
+`CONFIGURATION_REQUIRED`, bootstrap does not start the worker and the adapter
+does not issue an HTTP request. Ordinary failures remain retryable and never fabricate
+success. Events for one order are leased strictly FIFO, including expired-lease
+recovery. A deep payment reorg cancels an unsent `AVAILABLE` event and always
+appends a higher-version `LOCKED` synchronization. An external call already in
+flight is fenced locally by its unique worker identity and attempt token and
+externally by the monotonic version. After that call resolves or fails
+ambiguously, the canceled `AVAILABLE` is never sent again; even a server-side
+late arrival cannot overwrite the newer `LOCKED` state.
+Outer lease or retry-write failures remain visible in worker status and do not
+make `stop()` reject.
+BNM has no token, mint, Claim, Safe transfer or settlement executor path.
+
+Safe MultiSend settlement and administrative batch workers belong to the next
+checkpoint. The bounded executor remains internal until those exact request,
+batch and finality contracts are published. Payment breakers never stop
+Indexer, finality, reorg recovery, fulfillment, reconciliation or audit
+processing.

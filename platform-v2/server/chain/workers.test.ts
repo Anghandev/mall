@@ -5,6 +5,8 @@ import { AbiCoder, Interface, Wallet, keccak256, type InterfaceAbi } from 'ether
 import { CORE_ARTIFACT_VERSION } from '../api/enums.ts';
 import { paymentAllocationSetHash, type PaymentPolicySnapshot } from '../api/payment-policy.ts';
 import { AbiEventDecoder, type DecodedDomainEvent, type IndexedLog } from './abi-decoder.ts';
+import { BnmAvailabilityWorker, HttpBnmAvailabilityAdapter } from './bnm-availability-worker.ts';
+import { FulfillmentSchedulerWorker } from './fulfillment-scheduler-worker.ts';
 import { RemoteExecutorClient } from './executor.ts';
 import {
   RpcBeneficiarySnapshotSource,
@@ -29,6 +31,7 @@ import {
 } from './runtime-readiness.ts';
 import { scheduleFulfillmentJobs } from './scheduler.ts';
 import { RemoteSignerClient } from './signer.ts';
+import type { SqlExecutor, SqlTransactionRunner } from '../data/migrations.ts';
 
 const CONTRACT = '0x3333333333333333333333333333333333333333';
 const BUYER = '0x1111111111111111111111111111111111111111';
@@ -568,21 +571,21 @@ test('scheduler opens eligible delivery takeover and records pickup DecisionBloc
         orderId: 'delivery-order',
         fulfillmentMode: 'DELIVERY',
         state: 'PAID',
-        paidAt,
+        paymentFinalizedAt: paidAt,
         takeoverOpened: false,
       },
       {
         orderId: 'pickup-order',
         fulfillmentMode: 'PICKUP',
         state: 'PAID',
-        paidAt,
+        paymentFinalizedAt: paidAt,
         takeoverOpened: false,
       },
       {
         orderId: 'delivered-order',
         fulfillmentMode: 'DELIVERY',
         state: 'DELIVERED',
-        paidAt,
+        paymentFinalizedAt: paidAt,
         deliveredAt: paidAt,
         takeoverOpened: false,
       },
@@ -594,6 +597,150 @@ test('scheduler opens eligible delivery takeover and records pickup DecisionBloc
     ['FORCED_RECEIPT_ELIGIBILITY', 'OPEN_TAKEOVER'],
   );
   assert.deepEqual(result.blocked, [{ orderId: 'pickup-order', code: 'PickupTakeoverDecisionBlocked' }]);
+});
+
+test('fulfillment scheduler executes eligible takeover with deterministic evidence and skips pickup', async () => {
+  const now = new Date('2026-07-14T00:00:00.000Z');
+  const opened: Array<{ actor: string; orderId: string; input: Record<string, string> }> = [];
+  const worker = new FulfillmentSchedulerWorker({
+    platformWallet: CONTRACT,
+    transactions: noopTransactions(),
+    clock: () => now,
+    service: {
+      listOrders: async () => [
+        {
+          orderId: ORDER_ID,
+          fulfillmentMode: 'DELIVERY' as const,
+          state: 'PAID',
+          paymentFinalizedAt: '2026-07-01T00:00:00.000Z',
+          shipments: [],
+        },
+        {
+          orderId: HASH_2,
+          fulfillmentMode: 'PICKUP' as const,
+          state: 'PAID',
+          paymentFinalizedAt: '2026-07-01T00:00:00.000Z',
+          shipments: [],
+        },
+        {
+          orderId: HASH_3,
+          fulfillmentMode: 'DELIVERY' as const,
+          state: 'PAID',
+          paymentFinalizedAt: '2026-07-01T00:00:00.000Z',
+          shipments: [{}],
+        },
+      ],
+      openTakeover: async (actor, orderId, input) => {
+        opened.push({ actor: actor.walletAddress, orderId, input });
+        return { orderId, state: 'TAKEOVER' };
+      },
+    },
+  });
+  assert.deepEqual(await worker.pollOnce(), { checked: 3, opened: 1, pickupBlocked: 1, deferred: 0, failed: 0 });
+  assert.equal(opened[0]?.actor, CONTRACT);
+  assert.equal(opened[0]?.orderId, ORDER_ID);
+  assert.equal(opened[0]?.input.idempotencyKey, `auto-takeover:${ORDER_ID}`);
+  assert.equal(opened[0]?.input.reasonCode, 'SEVEN_DAY_NO_SHIPMENT');
+  assert.match(opened[0]?.input.evidenceHash ?? '', /^0x[0-9a-f]{64}$/);
+  await worker.pollOnce();
+  assert.deepEqual(opened[1]?.input, opened[0]?.input);
+});
+
+test('BNM adapter is idempotency-bound, validates acknowledgements and fails closed without configuration', async () => {
+  const input = {
+    orderId: ORDER_ID,
+    buyerWallet: BUYER,
+    amount: '100',
+    state: 'AVAILABLE' as const,
+    stateVersion: '1',
+    reason: 'CUSTOMER_RECEIPT',
+    sourceEvidenceHash: HASH_1,
+    idempotencyKey: 'outbox:bnm:order-1',
+  };
+  await assert.rejects(new HttpBnmAvailabilityAdapter({}).setState(input), /unavailable/);
+  let unverifiedFetchCalled = false;
+  await assert.rejects(
+    new HttpBnmAvailabilityAdapter({
+      url: 'https://bnm.example.invalid/v1/order-points/state',
+      token: 'provider-token',
+      projectId: 'abu-24k',
+      fetch: (async () => {
+        unverifiedFetchCalled = true;
+        return new Response('{}');
+      }) as typeof fetch,
+    }).setState(input),
+    /unavailable/,
+  );
+  assert.equal(unverifiedFetchCalled, false);
+  assert.throws(
+    () => new HttpBnmAvailabilityAdapter({ url: 'http://bnm.example.invalid' }),
+    /must use HTTPS/,
+  );
+
+  let request: Request | undefined;
+  const adapter = new HttpBnmAvailabilityAdapter({
+    url: 'https://bnm.example.invalid/v1/order-points/state',
+    token: 'provider-token',
+    projectId: 'abu-24k',
+    conformanceEvidenceHash: HASH_2,
+    fetch: (async (input, init) => {
+      request = new Request(input, init);
+      return new Response(JSON.stringify({
+        providerReference: 'bnm-reference-1',
+        orderId: ORDER_ID,
+        amount: '100',
+        state: 'AVAILABLE',
+        stateVersion: '1',
+        conformanceEvidenceHash: HASH_2,
+        syncedAt: '2026-07-14T00:00:00.000Z',
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch,
+  });
+  assert.deepEqual(await adapter.setState(input), {
+    providerReference: 'bnm-reference-1',
+    syncedAt: '2026-07-14T00:00:00.000Z',
+    state: 'AVAILABLE',
+    stateVersion: '1',
+  });
+  assert.equal(request?.headers.get('idempotency-key'), input.idempotencyKey);
+  assert.equal(request?.headers.get('authorization'), 'Bearer provider-token');
+  assert.deepEqual(await request?.json(), {
+    projectId: 'abu-24k',
+    conformanceEvidenceHash: HASH_2,
+    orderId: ORDER_ID,
+    walletAddress: BUYER,
+    amount: '100',
+    state: 'AVAILABLE',
+    stateVersion: '1',
+    reason: 'CUSTOMER_RECEIPT',
+    sourceEvidenceHash: HASH_1,
+  });
+
+  const invalid = new HttpBnmAvailabilityAdapter({
+    url: 'https://bnm.example.invalid/v1/order-points/state',
+    token: 'provider-token',
+    projectId: 'abu-24k',
+    conformanceEvidenceHash: HASH_2,
+    fetch: (async () => new Response(JSON.stringify({ state: 'AVAILABLE' }), { status: 200 })) as typeof fetch,
+  });
+  await assert.rejects(invalid.setState(input), /invalid acknowledgement/);
+});
+
+test('BNM worker reports outer database failures and stop never rethrows a rejected polling promise', async () => {
+  const worker = new BnmAvailabilityWorker({
+    transactions: {
+      transaction: async () => {
+        throw new Error('database unavailable');
+      },
+    },
+    adapter: { setState: async () => { throw new Error('unreachable'); } },
+    intervalMs: 10,
+  });
+  await assert.rejects(worker.pollOnce(), /database unavailable/);
+  worker.start();
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  await worker.stop();
+  assert.deepEqual(worker.status(), { healthy: false, errorCode: 'UnexpectedBnmWorkerFailure' });
 });
 
 class MemoryIndexerStore implements IndexerStore {
@@ -761,7 +908,7 @@ function paymentPolicySnapshot(): PaymentPolicySnapshot {
     regionBps: 40,
     operationsBps: 400,
     platformFeeBps: 500,
-    seckillPrizeBps: 1_000,
+    seckillPrizeBps: 300,
     seckillMainDuration: 3_600,
     relayInitial: 60,
     relayIncrement: 30,
@@ -779,7 +926,11 @@ function paymentPolicySnapshot(): PaymentPolicySnapshot {
     genesisCredential: '0x6000000000000000000000000000000000000002',
     genesisTokenId: 1n,
     genesisCredentialStandard: 1,
-    concessionDestinationSetHash: paymentAllocationSetHash(concessionDestinations, otherUsdtDestinations),
+    concessionDestinationSetHash: paymentAllocationSetHash(
+      concessionDestinations,
+      otherUsdtDestinations,
+      '0x7000000000000000000000000000000000000004',
+    ),
     decisionEvidenceHash: HASH_2,
     concessionDestinations,
     operationsDestinations: [
@@ -787,6 +938,7 @@ function paymentPolicySnapshot(): PaymentPolicySnapshot {
       { account: '0x5000000000000000000000000000000000000008', weightBps: 6_000 },
     ],
     otherUsdtDestinations,
+    seckillPrizePoolAccount: '0x7000000000000000000000000000000000000004',
   };
 }
 
@@ -853,4 +1005,9 @@ function executorDeployment() {
     },
     mutualTls: true as const,
   };
+}
+
+function noopTransactions(): SqlTransactionRunner {
+  const executor: SqlExecutor = { query: async () => ({ rows: [] }) };
+  return { transaction: (operation) => operation(executor) };
 }
