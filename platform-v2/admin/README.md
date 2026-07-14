@@ -8,8 +8,13 @@ implements shared funds, contracts, API, Schema or signer behavior.
 - Routes cover Dashboard, merchants, catalog, policy governance, seckill,
   risk, logistics, takeover fulfillment, CMS, notifications, system config,
   append-only audit, clearing evidence, operations monitoring and Core status.
-- Production boots from `src/bootstrap.ts` with Core artifacts `unpublished`.
-  Reads show unavailable, every write is disabled and no amount, allocation,
+- Production boots from `src/bootstrap.ts` with the coordinated
+  `@abu24k/core-artifacts@2.0.0-rc.1` package. The artifact version and public
+  role, breaker, policy-state and executable-action catalogs come directly from
+  that package.
+- Admin projections, monitoring, policy publication and write contracts remain
+  unpublished. Reads show unavailable and every write remains disabled because
+  the coordinated executable-action catalog is empty; no amount, allocation,
   permission, endpoint, calldata or finality is inferred.
 - Ordinary soft-delete controls are visible only as disabled capabilities
   waiting for Core `allowedActions`. Funds, chain, audit and historical evidence

@@ -1,8 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { artifactVersion, executableOrderActionNames } from '@abu24k/core-artifacts';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import { App } from '../src/App';
+import { productBaseline } from '../src/bootstrap';
 import { coreState } from '../src/coreState';
 
 function renderAt(path: string) {
@@ -10,6 +14,28 @@ function renderAt(path: string) {
 }
 
 describe('platform admin fail-closed experience', () => {
+  it('boots against the coordinated Core artifact version', () => {
+    const packageJson = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as {
+      dependencies: Record<string, string>;
+    };
+
+    expect(packageJson.dependencies['@abu24k/core-artifacts']).toBe(`workspace:${artifactVersion}`);
+    expect(productBaseline.artifactVersion).toBe(artifactVersion);
+    expect(coreState.artifactVersion).toBe(artifactVersion);
+    expect(coreState.artifactStatus).toBe('coordinated-rc');
+    expect(coreState.connectionLabel).toContain(artifactVersion);
+  });
+
+  it('keeps every write disabled when Core publishes no executable order action', () => {
+    expect(executableOrderActionNames).toEqual([]);
+    expect(coreState.executableOrderActionNames).toEqual(executableOrderActionNames);
+    expect(productBaseline.adminCapabilities.writes).toBe(false);
+    expect(coreState.canWrite).toBe(false);
+
+    renderAt('/policy');
+    expect(screen.getByRole('button', { name: '发布新 policyVersion' }).hasAttribute('disabled')).toBe(true);
+  });
+
   it('renders unavailable dashboard values instead of synthetic zeroes', () => {
     renderAt('/');
     expect(screen.getByRole('heading', { name: '今日运营态势' })).toBeTruthy();
