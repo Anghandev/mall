@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   BadgeCheck,
   Banknote,
+  Bell,
   Box,
   ChevronRight,
   CircleDollarSign,
@@ -13,6 +14,7 @@ import {
   LocateFixed,
   LockKeyhole,
   MapPinned,
+  Megaphone,
   Minus,
   Navigation,
   Package,
@@ -37,6 +39,9 @@ import type {
   FulfillmentTarget,
   MerchantStore,
   PaymentRouterIntent,
+  SettlementBalance,
+  SettlementRail,
+  SettlementRequestProjection,
 } from '@abu24k/core-artifacts';
 
 import {
@@ -52,6 +57,7 @@ import { useMallRuntime, type BrowserPosition, type MallRuntimeValue } from './m
 const unavailableReason = '安全配置未发布，当前操作已停用';
 
 export function SeckillScreen() {
+  const runtime = useMallRuntime();
   return (
     <div className="screen screen--seckill">
       <ScreenHeader
@@ -59,6 +65,12 @@ export function SeckillScreen() {
         title="秒杀大厅"
         description="以链上最终确认时间为准"
         trailing={<span className="status-pill status-pill--muted">暂未开放</span>}
+      />
+
+      <PublishedContent
+        items={runtime.cmsItems.filter((item) => item.contentType === 'SECKILL_RULES')}
+        state={runtime.cmsState}
+        onRetry={() => void runtime.reloadCms()}
       />
 
       <section className="seckill-hero" aria-label="秒杀活动状态">
@@ -119,6 +131,12 @@ export function MallScreen() {
         eyebrow="ABU SELECT"
         title="常规商城"
         description="商品、规格与价格以签名报价为准"
+      />
+
+      <PublishedContent
+        items={runtime.cmsItems.filter((item) => item.contentType !== 'SECKILL_RULES')}
+        state={runtime.cmsState}
+        onRetry={() => void runtime.reloadCms()}
       />
 
       <section className="catalog-banner">
@@ -310,9 +328,14 @@ export function AssetsScreen() {
           <h2 id="profile-title">{runtime.session ? shortHash(runtime.session.walletAddress) : '未连接钱包'}</h2>
           <p>{runtime.session ? 'BUYER 会话已验证' : '账号 ID 与链上身份待安全校验'}</p>
         </div>
-        <Link className="icon-button" to="/assets/addresses" aria-label="打开我的收货地址">
-          <MapPinned aria-hidden="true" size={20} />
-        </Link>
+        <div className="profile-strip__actions">
+          <Link className="icon-button" to="/assets/notifications" aria-label="打开通知中心">
+            <Bell aria-hidden="true" size={20} />
+          </Link>
+          <Link className="icon-button" to="/assets/addresses" aria-label="打开我的收货地址">
+            <MapPinned aria-hidden="true" size={20} />
+          </Link>
+        </div>
       </section>
 
       <section className="section-block" aria-labelledby="order-center-title">
@@ -673,9 +696,18 @@ export function ActivityScreen() {
 }
 
 export function RewardsScreen() {
+  const runtime = useMallRuntime();
+  const bnmBalances = runtime.orders.flatMap((order) => order.balances
+    .filter((balance) => balance.asset === 'BNM_POINTS')
+    .map((balance) => ({ orderId: order.orderId, ...balance })));
+  const transferableRails = (['REWARD_NPL', 'PRIZE_USDT'] as const).filter((rail) =>
+    runtime.settlements?.balances.some((balance) => railForBalance(balance) === rail)
+      || runtime.settlements?.requests.some((request) => request.rail === rail),
+  );
+
   return (
     <div className="screen screen--detail screen--rewards">
-      <ScreenHeader eyebrow="REWARD LEDGER" title="收益对账" description="累计、待领取与锁定三态分离" backTo="/assets" />
+      <ScreenHeader eyebrow="REWARD LEDGER" title="收益对账" description="Core 账本与 Safe 结算状态逐项对账" backTo="/assets" />
 
       <section className="reward-rail" aria-labelledby="bnm-rail-title">
         <div className="reward-rail__header">
@@ -684,31 +716,187 @@ export function RewardsScreen() {
             <p className="eyebrow">BNM</p>
             <h2 id="bnm-rail-title">消费产出池</h2>
           </div>
-          <span className="status-pill status-pill--locked"><LockKeyhole aria-hidden="true" size={13} />未同步</span>
+          <span className="status-pill status-pill--locked"><LockKeyhole aria-hidden="true" size={13} />后台积分</span>
         </div>
-        <div className="metric-grid metric-grid--three">
-          <UnavailableValue label="累计" />
-          <UnavailableValue label="待领取" />
-          <UnavailableValue label="锁定中" />
-        </div>
-        <Link className="text-link text-link--disabled" to="/assets/rewards" aria-disabled="true" onClick={(event) => event.preventDefault()}>
-          <FileClock aria-hidden="true" size={16} /> 资产溯源明细
-        </Link>
-        <DisabledAction reason="账目、最终状态和领取交易意图尚未发布">自主提取 BNM</DisabledAction>
+        {bnmBalances.length > 0 ? (
+          <div className="balance-list" aria-label="BNM 订单明细">
+            {bnmBalances.map((balance) => (
+              <div key={`${balance.orderId}-${balance.state}`}>
+                <span>订单 {shortHash(balance.orderId)}</span>
+                <strong>{balance.amount}</strong>
+                <span>{balanceStateLabel(balance.state)}</span>
+              </div>
+            ))}
+          </div>
+        ) : <p className="section-copy">当前订单投影没有 BNM 记录。</p>}
+        <p className="field-help"><FileClock aria-hidden="true" size={15} /> BNM 仅有 Locked / Available，不是代币，也不进入 Safe 结算。</p>
       </section>
 
-      <section className="eligibility-gate" aria-labelledby="eligibility-title">
-        <BadgeCheck aria-hidden="true" size={24} />
-        <div>
-          <h2 id="eligibility-title">收益资格待校验</h2>
-          <p>创世、直推、区域与运维收益仅在服务端确认当前钱包具备资格后出现，未确认时保持隐藏。</p>
+      {!runtime.session ? <StatusNotice title="请先验证钱包">连接钱包后同步该钱包的收益、申请和 Safe 最终状态。</StatusNotice> : null}
+      {runtime.settlementsState === 'loading' ? <p className="loading-copy" role="status">正在同步收益账本…</p> : null}
+      {runtime.settlementsState === 'error' ? (
+        <div className="catalog-retry">
+          <StatusNotice title="收益账本同步失败" tone="warning">不会展示缓存金额或伪造可领取状态。</StatusNotice>
+          <button className="button button--secondary" type="button" onClick={() => void runtime.reloadSettlements()} disabled={runtime.busy}>
+            <RefreshCw aria-hidden="true" size={18} /> 重新同步
+          </button>
         </div>
-      </section>
+      ) : null}
+      {runtime.session && runtime.settlementsState === 'empty' ? (
+        <EmptyState title="暂无可转移收益">当前钱包没有已发布的 NPL 收益、秒杀奖金或结算申请。</EmptyState>
+      ) : null}
+      {transferableRails.map((rail) => (
+        <TransferableRewardRail
+          key={rail}
+          rail={rail}
+          balances={runtime.settlements?.balances ?? []}
+          requests={runtime.settlements?.requests ?? []}
+          busy={runtime.busy}
+          onRequest={(amount) => void runtime.requestSettlement(rail, amount)}
+        />
+      ))}
 
-      <StatusNotice title="所有收益默认锁定">
-        BNM、节点、直推、区域和运维收益均不会因页面显示而变为可领取，状态必须通过最终确认。
+      <StatusNotice title="签名申请，不发链上交易">
+        可用收益由钱包签署一次性结算意图，平台 Safe 组批并承担 Gas；只有达到 15 次确认的最终 Safe TxHash 才表示 Settled。
       </StatusNotice>
     </div>
+  );
+}
+
+function TransferableRewardRail({
+  rail,
+  balances,
+  requests,
+  busy,
+  onRequest,
+}: {
+  rail: 'REWARD_NPL' | 'PRIZE_USDT';
+  balances: readonly SettlementBalance[];
+  requests: readonly SettlementRequestProjection[];
+  busy: boolean;
+  onRequest(amount: string): void;
+}) {
+  const railBalances = balances.filter((balance) => railForBalance(balance) === rail);
+  const railRequests = requests.filter((request) => request.rail === rail);
+  const available = railBalances.find((balance) => balance.state === 'AVAILABLE');
+  const states = ['LOCKED', 'AVAILABLE', 'REQUESTED', 'BATCHED', 'SETTLED'] as const;
+  return (
+    <section className="reward-rail" aria-labelledby={`${rail}-title`}>
+      <div className="reward-rail__header">
+        <div className="reward-rail__icon"><Banknote aria-hidden="true" size={22} /></div>
+        <div>
+          <p className="eyebrow">{rail}</p>
+          <h2 id={`${rail}-title`}>{rail === 'REWARD_NPL' ? 'NPL 收益' : '秒杀 USDT 奖金'}</h2>
+        </div>
+        <span className="status-pill">Core 账本</span>
+      </div>
+      <dl className="settlement-lifecycle" aria-label="结算生命周期金额">
+        {states.map((state) => {
+          const balance = railBalances.find((item) => item.state === state);
+          return <div key={state}><dt>{settlementStateLabel(state)}</dt><dd>{balance?.amount ?? '--'}</dd></div>;
+        })}
+      </dl>
+      {available ? (
+        <button className="button button--primary" type="button" onClick={() => onRequest(available.amount)} disabled={busy}>
+          <WalletCards aria-hidden="true" size={18} /> 签名申请结算 {available.amount}
+        </button>
+      ) : <p className="field-help">只有 Core 标记为 Available 的金额才能创建签名结算申请。</p>}
+      {railRequests.length > 0 ? (
+        <div className="settlement-request-list" aria-label="结算申请记录">
+          {railRequests.map((request) => (
+            <article key={request.request_id}>
+              <div><strong>{settlementStateLabel(request.state)}</strong><span>{request.amount} {request.asset}</span></div>
+              <p>申请 {shortHash(request.request_id)}{request.batch_id ? ` · 批次 ${shortHash(request.batch_id)}` : ''}</p>
+              {request.final_safe_tx_hash ? (
+                <p className="safe-hash"><span>Final Safe TxHash</span><code>{request.final_safe_tx_hash}</code></p>
+              ) : <p>Safe 最终交易尚未达到 15 次确认</p>}
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+export function NotificationsScreen() {
+  const runtime = useMallRuntime();
+  return (
+    <div className="screen screen--detail">
+      <ScreenHeader eyebrow="INBOX" title="通知中心" description="订单、BNM 与 Safe 结算消息" backTo="/assets" />
+      {!runtime.session ? <StatusNotice title="请先验证钱包">通知只按当前已验证钱包读取。</StatusNotice> : null}
+      {runtime.session ? (
+        <section className="notification-settings" aria-labelledby="notification-setting-title">
+          <div>
+            <Bell aria-hidden="true" size={21} />
+            <div>
+              <h2 id="notification-setting-title">站内通知</h2>
+              <p>{runtime.notificationEndpoint ? `${runtime.notificationEndpoint.provider} · ${runtime.notificationEndpoint.state}` : '绑定当前钱包作为站内收件人'}</p>
+            </div>
+          </div>
+          <button className="button button--secondary" type="button" onClick={() => void runtime.enableInAppNotifications()} disabled={runtime.busy}>
+            {runtime.notificationEndpoint ? '重新确认绑定' : '启用站内通知'}
+          </button>
+        </section>
+      ) : null}
+      {runtime.notificationsState === 'loading' ? <p className="loading-copy" role="status">正在同步通知…</p> : null}
+      {runtime.notificationsState === 'error' ? (
+        <div className="catalog-retry">
+          <StatusNotice title="通知同步失败" tone="warning">不会使用本地示例消息替代 Core inbox。</StatusNotice>
+          <button className="button button--secondary" type="button" onClick={() => void runtime.reloadNotifications()} disabled={runtime.busy}>
+            <RefreshCw aria-hidden="true" size={18} /> 重新同步
+          </button>
+        </div>
+      ) : null}
+      {runtime.notificationsState === 'empty' ? <EmptyState title="暂无通知">新消息会由 Core 按当前钱包和主题投递。</EmptyState> : null}
+      {runtime.notificationsState === 'ready' ? (
+        <div className="notification-list" aria-label="通知列表">
+          {runtime.notifications.map((item) => (
+            <article key={item.messageId}>
+              <div className="notification-list__header">
+                <div><p className="eyebrow">{item.topic}</p><h2>{item.sourceEventType}</h2></div>
+                <span className="status-pill">{notificationStateLabel(item.deliveryState)}</span>
+              </div>
+              {notificationTemplateRows(item.templateData).map(([key, value]) => <p key={key}><span>{key}</span><strong>{value}</strong></p>)}
+              <time dateTime={item.createdAt}>{formatIso(item.createdAt)}</time>
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PublishedContent({
+  items,
+  state,
+  onRetry,
+}: {
+  items: MallRuntimeValue['cmsItems'];
+  state: MallRuntimeValue['cmsState'];
+  onRetry(): void;
+}) {
+  if (state === 'error') {
+    return (
+      <div className="cms-error" role="status">
+        <span>平台公告同步失败</span>
+        <button type="button" onClick={onRetry}>重试</button>
+      </div>
+    );
+  }
+  if (items.length === 0) return null;
+  return (
+    <section className="published-content" aria-label="平台发布内容">
+      {items.map((item) => (
+        <article key={item.versionId}>
+          <Megaphone aria-hidden="true" size={18} />
+          <div>
+            <p className="eyebrow">{item.contentType} · V{item.version}</p>
+            <h2>{publicContentText(item.content) || item.slug}</h2>
+            <span>{item.placement} · {item.locale}</span>
+          </div>
+        </article>
+      ))}
+    </section>
   );
 }
 
@@ -1161,6 +1349,60 @@ function actionLabel(action: AllowedAction['action']) {
     OPEN_ARBITRATION: '发起仲裁',
     OPEN_TAKEOVER: '平台接管',
   } as Partial<Record<AllowedAction['action'], string>>)[action] ?? action;
+}
+
+function railForBalance(balance: SettlementBalance): Extract<SettlementRail, 'REWARD_NPL' | 'PRIZE_USDT'> | null {
+  if (balance.asset === 'NPL' && balance.purpose === 'REWARD_LIABILITY') return 'REWARD_NPL';
+  if (balance.asset === 'USDT' && balance.purpose === 'SECKILL_PRIZE_LIABILITY') return 'PRIZE_USDT';
+  return null;
+}
+
+function settlementStateLabel(state: SettlementBalance['state'] | SettlementRequestProjection['state']) {
+  return ({
+    LOCKED: 'Locked',
+    AVAILABLE: 'Available',
+    REQUESTED: 'Requested',
+    BATCHED: 'Batched',
+    SETTLED: 'Settled',
+    DISPUTED: 'Disputed',
+    RETRYABLE: '可重试',
+    QUARANTINED: '已隔离',
+  } as const)[state];
+}
+
+function notificationStateLabel(state: MallRuntimeValue['notifications'][number]['deliveryState']) {
+  return ({
+    PENDING: '待投递',
+    PROCESSING: '投递中',
+    DELIVERED: '已送达',
+    RETRY: '待重试',
+    CONFIGURATION_REQUIRED: '需配置',
+    DEAD_LETTER: '已隔离',
+  } as const)[state];
+}
+
+function notificationTemplateRows(template: Readonly<Record<string, unknown>>) {
+  return Object.entries(template)
+    .filter((entry): entry is [string, string | number | boolean] => ['string', 'number', 'boolean'].includes(typeof entry[1]))
+    .map(([key, value]) => [key, String(value)] as const);
+}
+
+function publicContentText(content: Readonly<Record<string, unknown>>) {
+  const values: string[] = [];
+  collectPublicText(content, values);
+  const combined = values.join(' ').trim();
+  return combined.length > 180 ? `${combined.slice(0, 177)}...` : combined;
+}
+
+function collectPublicText(value: unknown, output: string[]) {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectPublicText(item, output));
+    return;
+  }
+  if (!value || typeof value !== 'object') return;
+  const record = value as Record<string, unknown>;
+  if (typeof record.text === 'string') output.push(record.text);
+  if ('children' in record) collectPublicText(record.children, output);
 }
 
 function formatIso(value: string) {

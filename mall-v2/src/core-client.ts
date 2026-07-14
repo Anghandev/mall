@@ -3,19 +3,36 @@ import type {
   CatalogProduct,
   CreateDeliveryTargetRequest,
   CreatePickupTargetRequest,
+  CmsPublicItem,
   DeliveryTarget,
   FulfillmentOrder,
   FulfillmentTarget,
   MerchantStore,
+  NotificationEndpointProjection,
+  NotificationEndpointRequest,
+  NotificationInboxItem,
   PaymentProjection,
   PaymentQuoteResponse,
   PaymentSubmissionRequest,
   PaymentSubmissionResponse,
   PickupTarget,
   SeckillQuoteResponse,
+  SettlementIntentProjection,
+  SettlementIntentRequest,
+  SettlementListProjection,
+  SettlementRequestProjection,
+  SettlementRequestSubmission,
   UserRole,
 } from '@abu24k/core-artifacts';
-import { artifactVersion, userRoles } from '@abu24k/core-artifacts';
+import {
+  artifactVersion,
+  balanceStates,
+  cmsContentTypes,
+  notificationDeliveryStates,
+  notificationEndpointStates,
+  settlementRequestStates,
+  userRoles,
+} from '@abu24k/core-artifacts';
 import openApi from '@abu24k/core-artifacts/openapi';
 
 import { assertPaymentQuoteIntegrity } from './payment-integrity';
@@ -61,6 +78,12 @@ export interface CoreClient {
   getOrder(token: string, orderId: string): Promise<FulfillmentOrder>;
   getOrderTarget(token: string, orderId: string): Promise<FulfillmentTarget>;
   getOrderAllowedActions(token: string, orderId: string): Promise<readonly AllowedAction[]>;
+  listSettlements(token: string): Promise<SettlementListProjection>;
+  createSettlementIntent(token: string, request: SettlementIntentRequest): Promise<SettlementIntentProjection>;
+  submitSettlementRequest(token: string, request: SettlementRequestSubmission): Promise<SettlementRequestProjection>;
+  listPublicCms(walletAddress?: string): Promise<readonly CmsPublicItem[]>;
+  listNotifications(token: string, limit?: number): Promise<readonly NotificationInboxItem[]>;
+  registerNotificationEndpoint(token: string, request: NotificationEndpointRequest): Promise<NotificationEndpointProjection>;
 }
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -87,7 +110,16 @@ const fulfillmentOperations = Object.freeze({
   orderTarget: operationPath('getOrderFulfillmentTarget', 'get'),
 });
 
-const operations = Object.freeze({ ...paymentOperations, ...fulfillmentOperations });
+const settlementAdminOperations = Object.freeze({
+  settlements: operationPath('listSettlements', 'get'),
+  settlementIntent: operationPath('createSettlementIntent', 'post'),
+  settlementRequest: operationPath('submitSettlementRequest', 'post'),
+  publicCms: operationPath('listPublicCms', 'get'),
+  notifications: operationPath('listNotifications', 'get'),
+  notificationEndpoint: operationPath('registerNotificationEndpoint', 'post'),
+});
+
+const operations = Object.freeze({ ...paymentOperations, ...fulfillmentOperations, ...settlementAdminOperations });
 
 export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } = {}): CoreClient {
   const baseUrl = input.baseUrl?.replace(/\/$/, '') ?? '';
@@ -230,6 +262,60 @@ export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } 
       return value.allowedActions;
     },
 
+    async listSettlements(token) {
+      const value = await requestJson<unknown>(fetcher, `${baseUrl}${operations.settlements}`, {
+        headers: authorizedHeaders(token),
+      });
+      return parseSettlementList(value);
+    },
+
+    async createSettlementIntent(token, request) {
+      const value = await postAuthorized<unknown>(
+        fetcher,
+        `${baseUrl}${operations.settlementIntent}`,
+        token,
+        request,
+      );
+      return parseSettlementIntent(value);
+    },
+
+    async submitSettlementRequest(token, request) {
+      const value = await postAuthorized<unknown>(
+        fetcher,
+        `${baseUrl}${operations.settlementRequest}`,
+        token,
+        request,
+      );
+      return parseSettlementRequest(value);
+    },
+
+    async listPublicCms(walletAddress) {
+      const query = walletAddress ? `?walletAddress=${encodeURIComponent(walletAddress)}` : '';
+      const value = await requestJson<unknown>(
+        fetcher,
+        `${baseUrl}${operations.publicCms}${query}`,
+      );
+      return parseCmsItems(value);
+    },
+
+    async listNotifications(token, limit = 50) {
+      const value = await requestJson<unknown>(
+        fetcher,
+        `${baseUrl}${operations.notifications}?limit=${encodeURIComponent(String(limit))}`,
+        { headers: authorizedHeaders(token) },
+      );
+      return parseNotifications(value);
+    },
+
+    registerNotificationEndpoint(token, request) {
+      return postAuthorized<unknown>(
+        fetcher,
+        `${baseUrl}${operations.notificationEndpoint}`,
+        token,
+        request,
+      ).then(parseNotificationEndpoint);
+    },
+
   };
 }
 
@@ -322,6 +408,110 @@ function parseWalletSession(value: unknown): WalletSession {
   };
 }
 
+function parseSettlementList(value: unknown): SettlementListProjection {
+  const response = objectValue(value);
+  assertArtifactVersion(stringValue(response.artifactVersion));
+  addressValue(response.wallet);
+  const balances = arrayValue(response.balances);
+  for (const item of balances) {
+    const balance = objectValue(item);
+    enumValue(balance.asset, ['USDT', 'NPL'] as const);
+    stringValue(balance.purpose);
+    enumValue(balance.state, balanceStates);
+    atomicValue(balance.amount);
+  }
+  const requests = arrayValue(response.requests);
+  requests.forEach(parseSettlementRequest);
+  return value as SettlementListProjection;
+}
+
+function parseSettlementIntent(value: unknown): SettlementIntentProjection {
+  const response = objectValue(value);
+  const intent = objectValue(response.intent);
+  assertArtifactVersion(stringValue(intent.artifactVersion));
+  bytes32Value(intent.intentId);
+  addressValue(intent.wallet);
+  addressValue(intent.recipient);
+  enumValue(intent.rail, ['MERCHANT_USDT', 'REWARD_NPL', 'PRIZE_USDT', 'TAKEOVER_USDT', 'OPERATIONS_REIMBURSEMENT_USDT'] as const);
+  addressValue(intent.asset);
+  addressValue(intent.safeAddress);
+  atomicValue(intent.amount);
+  bytes32Value(intent.itemsHash);
+  atomicValue(intent.nonce);
+  if (!Number.isSafeInteger(intent.deadline) || Number(intent.deadline) <= 0) {
+    throw new CoreClientError('InvalidResponse', '结算意图有效期无效');
+  }
+  bytes32Value(response.digest);
+  const typedData = objectValue(response.typedData);
+  objectValue(typedData.domain);
+  objectValue(typedData.types);
+  objectValue(typedData.message);
+  stringValue(typedData.primaryType);
+  arrayValue(response.items);
+  stringValue(response.createdAt);
+  return value as SettlementIntentProjection;
+}
+
+function parseSettlementRequest(value: unknown): SettlementRequestProjection {
+  const response = objectValue(value);
+  assertArtifactVersion(stringValue(response.artifact_version));
+  stringValue(response.request_id);
+  bytes32Value(response.intent_id);
+  addressValue(response.wallet_address);
+  addressValue(response.recipient_address);
+  enumValue(response.rail, ['MERCHANT_USDT', 'REWARD_NPL', 'PRIZE_USDT', 'TAKEOVER_USDT', 'OPERATIONS_REIMBURSEMENT_USDT'] as const);
+  enumValue(response.asset, ['USDT', 'NPL'] as const);
+  atomicValue(response.amount);
+  enumValue(response.state, settlementRequestStates);
+  optionalBytes32Value(response.final_safe_tx_hash);
+  optionalBytes32Value(response.final_execution_tx_hash);
+  arrayValue(response.items);
+  arrayValue(response.transitions);
+  return value as unknown as SettlementRequestProjection;
+}
+
+function parseCmsItems(value: unknown): readonly CmsPublicItem[] {
+  return arrayValue(value).map((item) => {
+    const entry = objectValue(item);
+    stringValue(entry.entryId);
+    stringValue(entry.versionId);
+    if (!Number.isSafeInteger(entry.version) || Number(entry.version) < 1) {
+      throw new CoreClientError('InvalidResponse', 'CMS 版本无效');
+    }
+    enumValue(entry.contentType, cmsContentTypes);
+    stringValue(entry.slug);
+    stringValue(entry.placement);
+    stringValue(entry.locale);
+    objectValue(entry.content);
+    bytes32Value(entry.contentHash);
+    objectValue(entry.audience);
+    return item as CmsPublicItem;
+  });
+}
+
+function parseNotifications(value: unknown): readonly NotificationInboxItem[] {
+  return arrayValue(value).map((item) => {
+    const entry = objectValue(item);
+    stringValue(entry.messageId);
+    stringValue(entry.sourceEventType);
+    stringValue(entry.topic);
+    objectValue(entry.templateData);
+    enumValue(entry.deliveryState, notificationDeliveryStates);
+    stringValue(entry.createdAt);
+    return item as NotificationInboxItem;
+  });
+}
+
+function parseNotificationEndpoint(value: unknown): NotificationEndpointProjection {
+  const entry = objectValue(value);
+  stringValue(entry.endpointId);
+  enumValue(entry.channel, ['IN_APP', 'SMS', 'EMAIL', 'PUSH'] as const);
+  enumValue(entry.provider, ['CORE', 'ALIYUN_SMS', 'TENCENT_SMS', 'SMTP', 'FIREBASE', 'JPUSH'] as const);
+  stringArray(entry.topics);
+  enumValue(entry.state, notificationEndpointStates);
+  return value as NotificationEndpointProjection;
+}
+
 function objectValue(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new CoreClientError('InvalidResponse', 'Core 响应格式无效');
@@ -334,6 +524,40 @@ function stringValue(value: unknown) {
     throw new CoreClientError('InvalidResponse', 'Core 响应字段无效');
   }
   return value;
+}
+
+function arrayValue(value: unknown): readonly unknown[] {
+  if (!Array.isArray(value)) throw new CoreClientError('InvalidResponse', 'Core 响应列表字段无效');
+  return value;
+}
+
+function enumValue<T extends string>(value: unknown, values: readonly T[]): T {
+  if (typeof value !== 'string' || !values.includes(value as T)) {
+    throw new CoreClientError('InvalidResponse', 'Core 响应枚举字段无效');
+  }
+  return value as T;
+}
+
+function addressValue(value: unknown) {
+  const address = stringValue(value);
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) throw new CoreClientError('InvalidResponse', 'Core 响应地址无效');
+  return address;
+}
+
+function bytes32Value(value: unknown) {
+  const hash = stringValue(value);
+  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new CoreClientError('InvalidResponse', 'Core 响应哈希无效');
+  return hash;
+}
+
+function optionalBytes32Value(value: unknown) {
+  if (value !== null) bytes32Value(value);
+}
+
+function atomicValue(value: unknown) {
+  const amount = stringValue(value);
+  if (!/^(0|[1-9][0-9]*)$/.test(amount)) throw new CoreClientError('InvalidResponse', 'Core 响应金额无效');
+  return amount;
 }
 
 function booleanValue(value: unknown) {
@@ -382,3 +606,4 @@ function operationPath(operationId: string, method: HttpMethod) {
 
 export const coordinatedPaymentOperations = paymentOperations;
 export const coordinatedFulfillmentOperations = fulfillmentOperations;
+export const coordinatedSettlementAdminOperations = settlementAdminOperations;

@@ -23,6 +23,14 @@ import {
   store,
 } from './fulfillment-fixtures';
 import { paymentQuote, product } from './payment-fixtures';
+import {
+  finalSafeTxHash,
+  notificationItem,
+  publicCmsItem,
+  requestedSettlement,
+  settlementIntent,
+  settlementProjection,
+} from './settlement-fixtures';
 
 function renderAt(path = '/seckill', services = offlineServices()) {
   return render(
@@ -37,7 +45,7 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/mall');
 
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
-    expect(artifactVersion).toBe('2.0.0-fulfillment.1');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.1');
     expect(productBaseline.knownOrderActions).toBe(allowedActionNames);
     expect(productBaseline.executableOrderActions).toBe(executableOrderActionNames);
     expect(executableOrderActionNames).toContain('CONFIRM_RECEIPT');
@@ -45,9 +53,10 @@ describe('Mall V2 payment consumer', () => {
     expect(isCoreOrderActionExecutable('CONFIRM_RECEIPT')).toBe(true);
     expect(isCoreOrderActionExecutable('PAY_ORDER')).toBe(false);
     expect(mallRuntimeBoundary).toMatchObject({
-      artifactStatus: '2.0.0-fulfillment.1',
+      artifactStatus: '2.0.0-settlement-admin.1',
       executableOrderActions: executableOrderActionNames,
       deploymentAuthorized: false,
+      settlementAdminCapabilities: { settlements: true, cms: true, notifications: true },
       sharedInterface: '@abu24k/core-artifacts',
     });
     await waitFor(() => expect(screen.getByText('暂无可售商品')).toBeTruthy());
@@ -341,12 +350,70 @@ describe('Mall V2 payment consumer', () => {
     expect(document.body.textContent).not.toMatch(/申请退款|强制退款|无理由退款/i);
   });
 
-  it('keeps unpublished fulfillment, reward and device capabilities fail closed', () => {
-    renderAt('/assets/rewards');
-    expect(screen.getByRole('heading', { name: '消费产出池' })).toBeTruthy();
-    expect(screen.queryByRole('heading', { name: /创世/ })).toBeNull();
-    expect(screen.getByRole('button', { name: '自主提取 BNM' }).hasAttribute('disabled')).toBe(true);
+  it('renders public CMS content without inventing a local content response', async () => {
+    renderAt('/mall', readyServices({ listPublicCms: vi.fn().mockResolvedValue([publicCmsItem]) }));
+    await screen.findByRole('heading', { name: '结算中心已开放' });
+    expect(screen.getByText('RELEASE_ANNOUNCEMENT · V2')).toBeTruthy();
+  });
+
+  it('renders every transferable lifecycle state and submits a wallet-signed settlement request', async () => {
+    const user = userEvent.setup();
+    const createSettlementIntent = vi.fn<CoreClient['createSettlementIntent']>().mockResolvedValue(settlementIntent);
+    const submitSettlementRequest = vi.fn<CoreClient['submitSettlementRequest']>().mockResolvedValue(requestedSettlement);
+    const services = readyServices({
+      listSettlements: vi.fn().mockResolvedValue(settlementProjection),
+      createSettlementIntent,
+      submitSettlementRequest,
+    });
+    renderAt('/assets/rewards', services);
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await screen.findByRole('heading', { name: 'NPL 收益' });
+    for (const label of ['Locked', 'Available', 'Requested', 'Batched', 'Settled']) {
+      expect(screen.getAllByText(label).length).toBeGreaterThan(0);
+    }
+    expect(screen.getByText(finalSafeTxHash)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '签名申请结算 200' }));
+
+    await waitFor(() => expect(createSettlementIntent).toHaveBeenCalledWith('buyer-session', {
+      rail: 'REWARD_NPL',
+      amount: '200',
+      idempotencyKey: 'mall-test-idempotency',
+    }));
+    expect(services.wallet.signSettlementIntent).toHaveBeenCalledWith(settlementIntent);
+    expect(submitSettlementRequest).toHaveBeenCalledWith('buyer-session', {
+      intentId: settlementIntent.intent.intentId,
+      signature: '0xsettlement-signature',
+    });
     expect(document.body.textContent).not.toMatch(/申请退款|强制退款|无理由退款/i);
+  });
+
+  it('loads the real notification inbox and registers the wallet-bound in-app endpoint', async () => {
+    const user = userEvent.setup();
+    const registerNotificationEndpoint = vi.fn<CoreClient['registerNotificationEndpoint']>().mockResolvedValue({
+      endpointId: 'notification-endpoint-1',
+      channel: 'IN_APP',
+      provider: 'CORE',
+      topics: ['*'],
+      state: 'ACTIVE',
+    });
+    const services = readyServices({
+      listNotifications: vi.fn().mockResolvedValue([notificationItem]),
+      registerNotificationEndpoint,
+    });
+    renderAt('/assets/notifications', services);
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await screen.findByRole('heading', { name: 'SettlementFinalized' });
+    expect(screen.getByText(finalSafeTxHash)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '启用站内通知' }));
+    await waitFor(() => expect(registerNotificationEndpoint).toHaveBeenCalledWith('buyer-session', {
+      channel: 'IN_APP',
+      provider: 'CORE',
+      endpointReference: `recipient://wallet/${BUYER}`,
+      topics: ['*'],
+    }));
+    expect(await screen.findByText('CORE · ACTIVE')).toBeTruthy();
   });
 
   it('provides accessible names for every icon-only control', () => {
@@ -393,11 +460,18 @@ function servicesWith(overrides: Partial<CoreClient>): MallServices {
     getOrder: vi.fn().mockRejectedValue(new Error('not configured')),
     getOrderTarget: vi.fn().mockRejectedValue(new Error('not configured')),
     getOrderAllowedActions: vi.fn().mockResolvedValue([]),
+    listSettlements: vi.fn().mockResolvedValue({ artifactVersion, wallet: BUYER, balances: [], requests: [] }),
+    createSettlementIntent: vi.fn().mockRejectedValue(new Error('not configured')),
+    submitSettlementRequest: vi.fn().mockRejectedValue(new Error('not configured')),
+    listPublicCms: vi.fn().mockResolvedValue([]),
+    listNotifications: vi.fn().mockResolvedValue([]),
+    registerNotificationEndpoint: vi.fn().mockRejectedValue(new Error('not configured')),
     ...overrides,
   };
   const wallet: WalletGateway = {
     connect: vi.fn().mockResolvedValue(BUYER),
     signMessage: vi.fn().mockResolvedValue('0xsigned'),
+    signSettlementIntent: vi.fn().mockResolvedValue('0xsettlement-signature'),
     inspectApprovals: vi.fn().mockResolvedValue([
       { currentAllowance: '0', sufficient: false },
       { currentAllowance: '999999999999999999999', sufficient: true },

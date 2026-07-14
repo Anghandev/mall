@@ -5,7 +5,7 @@ Requirement Matrix and consumes only coordinated Core artifacts.
 
 ## Current Runtime Boundary
 
-- Production consumes coordinated Core artifacts `2.0.0-fulfillment.1` and derives
+- Production consumes coordinated Core artifacts `2.0.0-settlement-admin.1` and derives
   its HTTP paths from the published OpenAPI document.
 - The real payment consumer covers SIWE, product/SKU reads, ordinary and dual
   seckill quotes, atomic reservations, approval requirements, ABI-shaped
@@ -17,6 +17,14 @@ Requirement Matrix and consumes only coordinated Core artifacts.
   targets, wallet-scoped order/target projections, logistics, balances and
   current-session `allowedActions`. No endpoint, amount or state is duplicated
   locally.
+- Transferable balances now render Core-projected Locked, Available, Requested,
+  Batched and Settled states. Available NPL reward and USDT prize balances use
+  a wallet-bound EIP-712 settlement intent; the Mall never creates settlement
+  calldata or pays Safe Gas. Settled requests show the final Safe TxHash.
+- Published CMS content, the wallet notification inbox and the IN_APP/CORE
+  endpoint are consumed from the same OpenAPI and generated-types checkpoint.
+  Reward sub-type attribution remains hidden because Core does not yet project
+  genesis/referral/region/operations taxonomy separately.
 - Buyer fulfillment commands remain fail closed even when `allowedActions`
   enables them because Core has not published canonical buyer-evidence
   creation/upload semantics for the required `evidenceHash`.
@@ -31,7 +39,8 @@ Requirement Matrix and consumes only coordinated Core artifacts.
 ## Routes
 
 - `/seckill`, `/mall`, `/stores`, `/assets`
-- `/assets/addresses`, `/assets/orders`, `/assets/activity`, `/assets/rewards`
+- `/assets/addresses`, `/assets/orders`, `/assets/activity`, `/assets/rewards`,
+  `/assets/notifications`
 - `/checkout`, `/checkout/review`
 
 ## Local Verification

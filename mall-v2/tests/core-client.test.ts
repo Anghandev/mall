@@ -5,6 +5,7 @@ import { vi } from 'vitest';
 import {
   coordinatedFulfillmentOperations,
   coordinatedPaymentOperations,
+  coordinatedSettlementAdminOperations,
   createCoreClient,
   type QuoteSelection,
 } from '../src/core-client';
@@ -18,6 +19,12 @@ import {
   store,
 } from './fulfillment-fixtures';
 import { paymentQuote, product, seckillQuote } from './payment-fixtures';
+import {
+  publicCmsItem,
+  requestedSettlement,
+  settlementIntent,
+  settlementProjection,
+} from './settlement-fixtures';
 
 const HASH = `0x${'1'.repeat(64)}`;
 const HASH_2 = `0x${'2'.repeat(64)}`;
@@ -46,6 +53,64 @@ describe('coordinated Core HTTP client', () => {
       order: '/v2/orders/{orderId}',
       orderTarget: '/v2/orders/{orderId}/fulfillment-target',
     });
+  });
+
+  it('derives settlement, CMS and notification paths from coordinated OpenAPI', () => {
+    expect(coordinatedSettlementAdminOperations).toEqual({
+      settlements: '/v2/settlements',
+      settlementIntent: '/v2/settlement-intents',
+      settlementRequest: '/v2/settlement-requests',
+      publicCms: '/v2/cms/public',
+      notifications: '/v2/notifications',
+      notificationEndpoint: '/v2/notification-endpoints',
+    });
+  });
+
+  it('consumes settlement, public CMS and notification DTOs without a parallel schema', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, ...(init ? { init } : {}) });
+      if (url.endsWith('/v2/settlements')) return json(settlementProjection);
+      if (url.endsWith('/v2/settlement-intents')) return json(settlementIntent, 201);
+      if (url.endsWith('/v2/settlement-requests')) return json(requestedSettlement, 201);
+      if (url.endsWith(`/v2/cms/public?walletAddress=${settlementProjection.wallet}`)) return json([publicCmsItem]);
+      if (url.endsWith('/v2/notifications?limit=25')) return json([]);
+      if (url.endsWith('/v2/notification-endpoints')) return json({
+        endpointId: 'notification-endpoint-1', channel: 'IN_APP', provider: 'CORE', topics: ['*'], state: 'ACTIVE',
+      }, 201);
+      throw new Error(`unexpected URL ${url}`);
+    });
+    const client = createCoreClient({ baseUrl: 'https://core.mall.test', fetch: fetcher });
+    const endpoint = { channel: 'IN_APP' as const, provider: 'CORE' as const, endpointReference: `recipient://wallet/${settlementProjection.wallet}`, topics: ['*'] };
+
+    expect(await client.listSettlements('session')).toEqual(settlementProjection);
+    expect(await client.createSettlementIntent('session', { rail: 'REWARD_NPL', amount: '200', idempotencyKey: 'mall-settlement-1' })).toEqual(settlementIntent);
+    expect(await client.submitSettlementRequest('session', { intentId: settlementIntent.intent.intentId, signature: '0xsigned' })).toEqual(requestedSettlement);
+    expect(await client.listPublicCms(settlementProjection.wallet)).toEqual([publicCmsItem]);
+    expect(await client.listNotifications('session', 25)).toEqual([]);
+    expect((await client.registerNotificationEndpoint('session', endpoint)).state).toBe('ACTIVE');
+
+    for (const call of calls.filter((entry) => !entry.url.includes('/v2/cms/public'))) {
+      expect((call.init?.headers as Record<string, string>)?.authorization).toBe('Bearer session');
+    }
+    expect(JSON.parse(String(calls.find((call) => call.url.endsWith('/v2/settlement-intents'))?.init?.body))).toEqual({
+      rail: 'REWARD_NPL', amount: '200', idempotencyKey: 'mall-settlement-1',
+    });
+    expect(JSON.parse(String(calls.find((call) => call.url.endsWith('/v2/notification-endpoints'))?.init?.body))).toEqual(endpoint);
+  });
+
+  it('rejects malformed settlement, CMS and notification projections', async () => {
+    const malformedSettlement = structuredClone(settlementProjection);
+    (malformedSettlement.balances[0] as { state: string }).state = 'CLAIMABLE';
+    await expect(createCoreClient({ fetch: vi.fn().mockResolvedValue(json(malformedSettlement)) }).listSettlements('session'))
+      .rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    await expect(createCoreClient({ fetch: vi.fn().mockResolvedValue(json([{ ...publicCmsItem, content: [] }])) }).listPublicCms())
+      .rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    await expect(createCoreClient({ fetch: vi.fn().mockResolvedValue(json([{ deliveryState: 'UNKNOWN' }])) }).listNotifications('session'))
+      .rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
   it('consumes stores, checkout targets, wallet orders and allowedActions without parallel schemas', async () => {

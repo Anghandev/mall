@@ -29,6 +29,11 @@ export const productBaseline = Object.freeze({
     submission: coordinatedManifest.capabilityStatus.paymentSubmissionHttp === 'AVAILABLE',
     projection: coordinatedManifest.capabilityStatus.paymentProjectionHttp === 'AVAILABLE',
   }),
+  settlementAdminCapabilities: Object.freeze({
+    settlements: coordinatedManifest.capabilityStatus.settlementHttp === 'AVAILABLE',
+    cms: coordinatedManifest.capabilityStatus.cmsHttp === 'AVAILABLE',
+    notifications: coordinatedManifest.capabilityStatus.notificationHttp === 'AVAILABLE',
+  }),
   payOrderExecutable: executableOrderActionNames.includes('PAY_ORDER'),
 } as const);
 

@@ -16,6 +16,7 @@ import {
   CheckoutScreen,
   MallScreen,
   NotFoundScreen,
+  NotificationsScreen,
   OrdersScreen,
   ReviewScreen,
   RewardsScreen,
@@ -153,6 +154,8 @@ function DetailRoute({ pathname }: { pathname: string }) {
       return <ActivityScreen />;
     case '/assets/rewards':
       return <RewardsScreen />;
+    case '/assets/notifications':
+      return <NotificationsScreen />;
     case '/checkout':
       return <CheckoutScreen />;
     case '/checkout/review':
@@ -175,12 +178,13 @@ export const mallRuntimeBoundary = Object.freeze({
   executableOrderActions: productBaseline.executableOrderActions,
   deploymentAuthorized: productBaseline.deploymentAuthorized,
   paymentCapabilities: productBaseline.paymentCapabilities,
+  settlementAdminCapabilities: productBaseline.settlementAdminCapabilities,
   sharedInterface: '@abu24k/core-artifacts',
 } as const);
 
 export const routeEvidence = Object.freeze({
   primary: tabs.map((tab) => tab.path),
-  protected: ['/assets/addresses', '/assets/orders', '/assets/activity', '/assets/rewards'],
+  protected: ['/assets/addresses', '/assets/orders', '/assets/activity', '/assets/rewards', '/assets/notifications'],
   checkout: ['/checkout', '/checkout/review'],
 });
 
