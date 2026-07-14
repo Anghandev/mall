@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import logo from '../assets/abu-24k-logo.png';
+import { coreBoundary } from '../core-boundary';
 import { CoreUnavailable } from './ui';
 
 const navigation = [
@@ -71,7 +72,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
             <span>只读阻断模式</span>
           </div>
           <p>Artifact version</p>
-          <strong>UNPUBLISHED</strong>
+          <strong>{coreBoundary.artifactVersion}</strong>
         </div>
       </aside>
 
