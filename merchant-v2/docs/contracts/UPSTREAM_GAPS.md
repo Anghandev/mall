@@ -1,9 +1,9 @@
 # Merchant Workbench Core Gaps
 
-The merchant product consumes Core's coordinated artifact workspace package,
-including its version and public action catalog. It must not implement the
-remaining shared capabilities below. Each affected action stays disabled with
-the stated reason until its runtime capability is published.
+The merchant product consumes Core's coordinated `2.0.0-rc.2` artifact
+workspace package, including its version and public action catalog. It must not
+implement the remaining shared capabilities below. Each affected action stays
+disabled with the stated reason until its runtime capability is published.
 
 | Gap ID | Required Core capability | Fail-closed behavior |
 |---|---|---|
