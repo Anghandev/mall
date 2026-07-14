@@ -26,12 +26,12 @@ export function PolicyPage() {
               <label>商家结算成本 · USDT<input inputMode="decimal" placeholder="由 Core canonical amount 提供" /></label>
               <label>买家 USDT payment leg<input inputMode="decimal" placeholder="由 signed policy 提供" /></label>
               <label>买家 NPL payment leg<input inputMode="decimal" placeholder="由 signed policy 提供" /></label>
-              <label>NPL Burn<input value="20% · launch policy" readOnly /></label>
-              <label>NPL Route<input value="80% · launch policy" readOnly /></label>
+              <label>NPL Burn · list-price basis<input placeholder="等待 Core policy projection" /></label>
+              <label>NPL Reward Safe · list-price basis<input placeholder="等待 Core policy projection" /></label>
               <label>平台服务费<input placeholder="DecisionBlocked" /></label>
               <label>秒杀奖池比例<input placeholder="DecisionBlocked" /></label>
               <label>商家店铺奖励比例<input placeholder="DecisionBlocked" /></label>
-              <label>Oracle maxAge / minimum liquidity<input placeholder="DecisionBlocked" /></label>
+              <label>Oracle maxAge / minimum liquidity<input placeholder="等待 Core policy projection" /></label>
             </div>
           </fieldset>
           <p className="field-note"><AlertTriangle aria-hidden="true" /> 平台不得在界面预设未冻结商业值，也不得计算总和、路由或受益资格。</p>

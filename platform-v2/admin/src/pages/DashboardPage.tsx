@@ -1,7 +1,9 @@
-import { AlertTriangle, ArrowRight, Ban, Database, ServerCog, ShieldCheck, ShoppingBag, Store, WalletCards } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Ban, CheckCircle2, Database, RefreshCw, ServerCog, ShieldCheck, ShoppingBag, Store, WalletCards } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { fetchCoreBootstrap } from '../coreApi';
 import { coreState } from '../coreState';
 import { adminModules } from '../domain/adminModules';
+import { useCoreResource } from '../useCoreResource';
 
 const metricGroups = [
   {
@@ -17,7 +19,7 @@ const metricGroups = [
   {
     title: 'Web3 资管与风控',
     icon: ShieldCheck,
-    metrics: ['USDT Claims', '链上失败', '异常订单', '黑名单拦截', 'leverage status'],
+    metrics: ['签名结算申请', 'Safe settled · USDT', '链上失败', '异常订单', '黑名单拦截', '逐资产覆盖率'],
   },
   {
     title: '基础设施',
@@ -27,6 +29,9 @@ const metricGroups = [
 ] as const;
 
 export function DashboardPage() {
+  const bootstrap = useCoreResource(fetchCoreBootstrap);
+  const readiness = bootstrap.data?.readiness;
+
   return (
     <>
       <header className="page-header dashboard-header">
@@ -39,10 +44,21 @@ export function DashboardPage() {
         <div className="requirement-list"><code>ADM-DASH-001—004</code><code>2026-07-14 · UTC+8</code></div>
       </header>
 
-      <section className="dashboard-alert" role="status">
-        <span><Ban aria-hidden="true" /></span>
-        <div><strong>{coreState.connectionLabel}</strong><p>Dashboard 数据、风险事件与探针全部 fail-closed。当前页面仅展示确定的信息架构。</p></div>
-        <Link to="/core-status">查看阻断项 <ArrowRight aria-hidden="true" /></Link>
+      <section className={readiness?.writesEnabled ? 'dashboard-alert dashboard-alert-ready' : 'dashboard-alert'} role="status">
+        <span>{readiness?.writesEnabled ? <CheckCircle2 aria-hidden="true" /> : <Ban aria-hidden="true" />}</span>
+        <div>
+          <strong>{bootstrap.loading ? '正在读取支付 readiness' : bootstrap.error ? `${bootstrap.error.code}: ${bootstrap.error.message}` : readiness?.writesEnabled ? '支付运行时允许新报价' : '新支付保持 fail-closed'}</strong>
+          <p>业务聚合、风险队列和基础设施探针尚未发布；支付门禁状态来自 Core bootstrap，不以静态值代替。</p>
+        </div>
+        <Link to="/core-status">查看证据 <ArrowRight aria-hidden="true" /></Link>
+      </section>
+
+      <section className="readiness-strip" aria-label="支付 checkpoint 状态">
+        <div><span>Artifact</span><strong>{coreState.artifactVersion}</strong></div>
+        <div><span>Chain</span><strong>{readiness?.chainId ?? '—'}</strong></div>
+        <div><span>Payment DecisionBlocked</span><strong>{readiness ? readiness.paymentDecisionBlocked.length : '—'}</strong></div>
+        <div><span>Payment ExternalBlocked</span><strong>{readiness ? readiness.paymentExternalBlocked.length : '—'}</strong></div>
+        <button className="icon-button light-icon-button" type="button" aria-label="重新读取支付 readiness" onClick={bootstrap.reload} disabled={bootstrap.loading}><RefreshCw aria-hidden="true" /></button>
       </section>
 
       <section className="metric-board" aria-label="Dashboard 指标组">
