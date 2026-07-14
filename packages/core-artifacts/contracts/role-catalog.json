@@ -1,0 +1,262 @@
+{
+  "artifactVersion": "2.0.0-contracts.1",
+  "roles": [
+    {
+      "contract": "BeneficiaryRegistryV2",
+      "role": "DEFAULT_ADMIN_ROLE",
+      "authority": "Safe multisig"
+    },
+    {
+      "contract": "BeneficiaryRegistryV2",
+      "role": "REGISTRY_EDITOR_ROLE",
+      "authority": "Safe-granted Core contract or bounded executor"
+    },
+    {
+      "contract": "BNMTokenV2",
+      "role": "DEFAULT_ADMIN_ROLE",
+      "authority": "Safe multisig"
+    },
+    {
+      "contract": "BNMTokenV2",
+      "role": "MINTER_ROLE",
+      "authority": "Safe-granted Core contract or bounded executor"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "BNM_CREDITOR_ROLE",
+      "authority": "Safe-granted Core contract or bounded executor"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "DEFAULT_ADMIN_ROLE",
+      "authority": "Safe multisig"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "MERCHANT_CREDITOR_ROLE",
+      "authority": "Safe-granted Core contract or bounded executor"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "MERCHANT_ENCUMBER_ROLE",
+      "authority": "Safe-granted Core contract or bounded executor"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "MERCHANT_FREEZER_ROLE",
+      "authority": "Safe-granted Core contract or bounded executor"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "PAUSER_ROLE",
+      "authority": "Safe multisig"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "PRIZE_CREDITOR_ROLE",
+      "authority": "Safe-granted Core contract or bounded executor"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "RECOVERY_ROLE",
+      "authority": "Safe multisig"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "REWARD_CREDITOR_ROLE",
+      "authority": "Safe-granted Core contract or bounded executor"
+    },
+    {
+      "contract": "MerchantGuaranteeVaultV2",
+      "role": "DEFAULT_ADMIN_ROLE",
+      "authority": "Safe multisig"
+    },
+    {
+      "contract": "MerchantGuaranteeVaultV2",
+      "role": "ORDER_RESERVER_ROLE",
+      "authority": "Safe-granted Core contract or bounded executor"
+    },
+    {
+      "contract": "MerchantGuaranteeVaultV2",
+      "role": "RECOVERY_ROLE",
+      "authority": "Safe multisig"
+    },
+    {
+      "contract": "MerchantGuaranteeVaultV2",
+      "role": "TAKEOVER_CLOSER_ROLE",
+      "authority": "Safe-granted Core contract or bounded executor"
+    },
+    {
+      "contract": "MerchantGuaranteeVaultV2",
+      "role": "TAKEOVER_DISBURSER_ROLE",
+      "authority": "Safe multisig plus secondary signature"
+    },
+    {
+      "contract": "MerchantGuaranteeVaultV2",
+      "role": "TAKEOVER_ROLE",
+      "authority": "Safe-granted Core contract or bounded executor"
+    },
+    {
+      "contract": "PaymentEscrowV2",
+      "role": "ARBITRATOR_ROLE",
+      "authority": "Safe-granted Core contract or bounded executor"
+    },
+    {
+      "contract": "PaymentEscrowV2",
+      "role": "DEFAULT_ADMIN_ROLE",
+      "authority": "Safe multisig"
+    },
+    {
+      "contract": "PaymentEscrowV2",
+      "role": "FORCED_RECEIPT_REVIEWER_ROLE",
+      "authority": "Safe-granted Core contract or bounded executor"
+    },
+    {
+      "contract": "PaymentEscrowV2",
+      "role": "FULFILLMENT_OPERATOR_ROLE",
+      "authority": "Safe-granted Core contract or bounded executor"
+    },
+    {
+      "contract": "PaymentEscrowV2",
+      "role": "PAUSER_ROLE",
+      "authority": "Safe multisig"
+    },
+    {
+      "contract": "PaymentEscrowV2",
+      "role": "RECOVERY_ROLE",
+      "authority": "Safe multisig"
+    },
+    {
+      "contract": "PaymentEscrowV2",
+      "role": "SECKILL_ROLE",
+      "authority": "Safe-granted Core contract or bounded executor"
+    },
+    {
+      "contract": "PolicyRegistryV2",
+      "role": "DEFAULT_ADMIN_ROLE",
+      "authority": "Safe multisig"
+    },
+    {
+      "contract": "PolicyRegistryV2",
+      "role": "POLICY_PUBLISHER_ROLE",
+      "authority": "Safe multisig plus secondary signature"
+    },
+    {
+      "contract": "RewardLedgerV2",
+      "role": "DEFAULT_ADMIN_ROLE",
+      "authority": "Safe multisig"
+    },
+    {
+      "contract": "RewardLedgerV2",
+      "role": "FULFILLMENT_RELEASER_ROLE",
+      "authority": "Safe-granted Core contract or bounded executor"
+    },
+    {
+      "contract": "RewardLedgerV2",
+      "role": "PAYMENT_LOCKER_ROLE",
+      "authority": "Safe-granted Core contract or bounded executor"
+    },
+    {
+      "contract": "RewardLedgerV2",
+      "role": "RECOVERY_ROLE",
+      "authority": "Safe multisig"
+    },
+    {
+      "contract": "SeckillV2",
+      "role": "DEFAULT_ADMIN_ROLE",
+      "authority": "Safe multisig"
+    },
+    {
+      "contract": "SeckillV2",
+      "role": "PAUSER_ROLE",
+      "authority": "Safe multisig"
+    },
+    {
+      "contract": "SeckillV2",
+      "role": "RECOVERY_ROLE",
+      "authority": "Safe multisig"
+    },
+    {
+      "contract": "SeckillV2",
+      "role": "SESSION_ADMIN_ROLE",
+      "authority": "Safe multisig plus secondary signature"
+    },
+    {
+      "contract": "SeckillV2",
+      "role": "SETTLER_ROLE",
+      "authority": "Safe-granted Core contract or bounded executor"
+    }
+  ],
+  "requiredGrants": [
+    {
+      "contract": "BNMTokenV2",
+      "role": "MINTER_ROLE",
+      "grantee": "ClaimVaultV2"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "MERCHANT_CREDITOR_ROLE",
+      "grantee": "PaymentEscrowV2"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "MERCHANT_CREDITOR_ROLE",
+      "grantee": "MerchantGuaranteeVaultV2"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "REWARD_CREDITOR_ROLE",
+      "grantee": "RewardLedgerV2"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "PRIZE_CREDITOR_ROLE",
+      "grantee": "SeckillV2"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "BNM_CREDITOR_ROLE",
+      "grantee": "PaymentEscrowV2"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "MERCHANT_FREEZER_ROLE",
+      "grantee": "PaymentEscrowV2"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "MERCHANT_ENCUMBER_ROLE",
+      "grantee": "MerchantGuaranteeVaultV2"
+    },
+    {
+      "contract": "RewardLedgerV2",
+      "role": "PAYMENT_LOCKER_ROLE",
+      "grantee": "PaymentEscrowV2"
+    },
+    {
+      "contract": "RewardLedgerV2",
+      "role": "FULFILLMENT_RELEASER_ROLE",
+      "grantee": "PaymentEscrowV2"
+    },
+    {
+      "contract": "MerchantGuaranteeVaultV2",
+      "role": "TAKEOVER_ROLE",
+      "grantee": "PaymentEscrowV2"
+    },
+    {
+      "contract": "MerchantGuaranteeVaultV2",
+      "role": "ORDER_RESERVER_ROLE",
+      "grantee": "PaymentEscrowV2"
+    },
+    {
+      "contract": "MerchantGuaranteeVaultV2",
+      "role": "TAKEOVER_CLOSER_ROLE",
+      "grantee": "PaymentEscrowV2"
+    },
+    {
+      "contract": "PaymentEscrowV2",
+      "role": "SECKILL_ROLE",
+      "grantee": "SeckillV2"
+    }
+  ]
+}

@@ -1,0 +1,411 @@
+{
+  "artifactVersion": "2.0.0-contracts.1",
+  "publicationStatus": "contracts-frozen-not-coordinated",
+  "chain": {
+    "name": "BSC Mainnet",
+    "chainId": 56,
+    "explorer": "https://bscscan.com"
+  },
+  "fixedTokens": {
+    "USDT": "0x55d398326f99059fF775485246999027B3197955",
+    "NPL": "0x4e8277ab31e4956b2cd48449793a57656dfc03d2",
+    "NPL_BURN_ADDRESS": "0x000000000000000000000000000000000000dEaD"
+  },
+  "compiler": {
+    "version": "0.8.26",
+    "optimizer": true,
+    "optimizerRuns": 200,
+    "viaIR": true,
+    "evmVersion": "cancun"
+  },
+  "sourceDigestSha256": "d6fe016fa6fe6c687869df1f33fb823af7d225732aad6b583997476265825ea0",
+  "deploymentStatus": "ExternalBlocked",
+  "externalBlocked": [
+    "SAFE_ADDRESS",
+    "SECONDARY_SIGNER",
+    "QUOTE_SIGNER",
+    "FINALITY_SIGNER",
+    "TWAP_SOURCE",
+    "BSC_RPC_URL"
+  ],
+  "decisionBlocked": [
+    "launch ProductPolicy commercial values",
+    "merchant guarantee and platform reserve thresholds",
+    "Oracle maxAge and minimum liquidity",
+    "genesis credential contract and token ID",
+    "pickup timeout and takeover evidence",
+    "empty-session injected prize allocation"
+  ],
+  "deploymentOrder": [
+    "PolicyRegistryV2",
+    "BeneficiaryRegistryV2",
+    "TwapOracleAdapterV2",
+    "BNMTokenV2",
+    "ClaimVaultV2",
+    "RewardLedgerV2",
+    "MerchantGuaranteeVaultV2",
+    "PaymentEscrowV2",
+    "SeckillV2"
+  ],
+  "contracts": [
+    {
+      "name": "PolicyRegistryV2",
+      "source": "platform-v2/contracts/PolicyRegistryV2.sol",
+      "address": null,
+      "status": "ExternalBlocked",
+      "constructorInputs": [
+        {
+          "name": "safe_",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "secondarySigner_",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "bytecodeSha256": "48cd9e972392f35f1f54a413420019967dc74abc843644eab006bc2b65266007",
+      "deployedBytecodeSha256": "4263a70075bda8bbbb068d3655a9166a8c94cb9c4d88e37a296fdaac5556f744"
+    },
+    {
+      "name": "BeneficiaryRegistryV2",
+      "source": "platform-v2/contracts/BeneficiaryRegistryV2.sol",
+      "address": null,
+      "status": "ExternalBlocked",
+      "constructorInputs": [
+        {
+          "name": "policyRegistry_",
+          "type": "address",
+          "internalType": "contract IPolicyRegistryV2"
+        }
+      ],
+      "bytecodeSha256": "61111050fc3467aefc9fed697f7823aef5740aec5f4658b6e2f6fc6699aeb16c",
+      "deployedBytecodeSha256": "dfda3b20276bd37d3d9976cc4b3f286fd7b201d0d2638a9584eed3814a4d5a18"
+    },
+    {
+      "name": "TwapOracleAdapterV2",
+      "source": "platform-v2/contracts/TwapOracleAdapterV2.sol",
+      "address": null,
+      "status": "ExternalBlocked",
+      "constructorInputs": [
+        {
+          "name": "source_",
+          "type": "address",
+          "internalType": "contract ITwapSourceV2"
+        },
+        {
+          "name": "usdt_",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "npl_",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "oracleVersion_",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        }
+      ],
+      "bytecodeSha256": "20f16cd98e931b39b349eb3d96581fab98427ba31551f82fe7fbe443dd8756e4",
+      "deployedBytecodeSha256": "1cabafa525c0d9522d93ab8467624cb476ca0431db304173d2870ed42050bdf2"
+    },
+    {
+      "name": "BNMTokenV2",
+      "source": "platform-v2/contracts/BNMTokenV2.sol",
+      "address": null,
+      "status": "ExternalBlocked",
+      "constructorInputs": [
+        {
+          "name": "safe",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "bytecodeSha256": "600d2b8fbc34bbdc0a5535039317306ab6f87e77991a4d70f83181ec28711a67",
+      "deployedBytecodeSha256": "5e9f33c8c7d7713a7ebacdc4f7a5fc948a0c20c0b453f2eaeeac41dadb183198"
+    },
+    {
+      "name": "ClaimVaultV2",
+      "source": "platform-v2/contracts/ClaimVaultV2.sol",
+      "address": null,
+      "status": "ExternalBlocked",
+      "constructorInputs": [
+        {
+          "name": "safe",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "usdt_",
+          "type": "address",
+          "internalType": "contract IERC20"
+        },
+        {
+          "name": "npl_",
+          "type": "address",
+          "internalType": "contract IERC20"
+        },
+        {
+          "name": "bnm_",
+          "type": "address",
+          "internalType": "contract IBNMTokenV2"
+        }
+      ],
+      "bytecodeSha256": "0c88f652e98880a447c37399d4d097250ddd33425f95c814d1c84c6cf7554e2b",
+      "deployedBytecodeSha256": "fbdda1529550ee701eedca83f3a077ee00cd142d9b863a516b5b8ba3a342a733"
+    },
+    {
+      "name": "RewardLedgerV2",
+      "source": "platform-v2/contracts/RewardLedgerV2.sol",
+      "address": null,
+      "status": "ExternalBlocked",
+      "constructorInputs": [
+        {
+          "name": "safe",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "npl_",
+          "type": "address",
+          "internalType": "contract IERC20"
+        },
+        {
+          "name": "policyRegistry_",
+          "type": "address",
+          "internalType": "contract IPolicyRegistryV2"
+        },
+        {
+          "name": "claimVault_",
+          "type": "address",
+          "internalType": "contract IClaimVaultV2"
+        }
+      ],
+      "bytecodeSha256": "bdba2c2b4900927bc03a1d2f101bd2e92ed18e3c20ced6e284c71ac39f71e8b7",
+      "deployedBytecodeSha256": "f187a2842d4bbdc70076244045da1a1cdb5d97694a6451eeb5dffc5c0994d5b4"
+    },
+    {
+      "name": "MerchantGuaranteeVaultV2",
+      "source": "platform-v2/contracts/MerchantGuaranteeVaultV2.sol",
+      "address": null,
+      "status": "ExternalBlocked",
+      "constructorInputs": [
+        {
+          "name": "safe",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "usdt_",
+          "type": "address",
+          "internalType": "contract IERC20"
+        },
+        {
+          "name": "policyRegistry_",
+          "type": "address",
+          "internalType": "contract IPolicyRegistryV2"
+        },
+        {
+          "name": "claimVault_",
+          "type": "address",
+          "internalType": "contract IClaimVaultV2"
+        }
+      ],
+      "bytecodeSha256": "726f32d36c4aafec99fbbedac1908cad6b02dfcfd3d89f4df25f4a69d513e4ee",
+      "deployedBytecodeSha256": "13d89d1c6cd43af1fe2b2fe0b61d7dd480150e0ce1e7932455d80753f8e323a7"
+    },
+    {
+      "name": "PaymentEscrowV2",
+      "source": "platform-v2/contracts/PaymentEscrowV2.sol",
+      "address": null,
+      "status": "ExternalBlocked",
+      "constructorInputs": [
+        {
+          "name": "safe",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "usdt_",
+          "type": "address",
+          "internalType": "contract IERC20"
+        },
+        {
+          "name": "npl_",
+          "type": "address",
+          "internalType": "contract IERC20"
+        },
+        {
+          "name": "policyRegistry_",
+          "type": "address",
+          "internalType": "contract IPolicyRegistryV2"
+        },
+        {
+          "name": "beneficiaryRegistry_",
+          "type": "address",
+          "internalType": "contract IBeneficiaryRegistryV2"
+        },
+        {
+          "name": "oracle_",
+          "type": "address",
+          "internalType": "contract ITwapOracleV2"
+        },
+        {
+          "name": "rewardLedger_",
+          "type": "address",
+          "internalType": "contract IRewardLedgerV2"
+        },
+        {
+          "name": "claimVault_",
+          "type": "address",
+          "internalType": "contract IClaimVaultV2"
+        },
+        {
+          "name": "guaranteeVault_",
+          "type": "address",
+          "internalType": "contract IMerchantGuaranteeVaultV2"
+        },
+        {
+          "name": "quoteSigner_",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "finalitySigner_",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "requiredConfirmations_",
+          "type": "uint32",
+          "internalType": "uint32"
+        }
+      ],
+      "bytecodeSha256": "b976d28aaa71ee6a236d5ee6e91ef70ce5ecd364001675031f578903a951772e",
+      "deployedBytecodeSha256": "034736ec95f9ed6e490221a5576926bdda26949d2b6050d8ad5bfef1091682d6"
+    },
+    {
+      "name": "SeckillV2",
+      "source": "platform-v2/contracts/SeckillV2.sol",
+      "address": null,
+      "status": "ExternalBlocked",
+      "constructorInputs": [
+        {
+          "name": "usdt_",
+          "type": "address",
+          "internalType": "contract IERC20"
+        },
+        {
+          "name": "policyRegistry_",
+          "type": "address",
+          "internalType": "contract IPolicyRegistryV2"
+        },
+        {
+          "name": "guaranteeVault_",
+          "type": "address",
+          "internalType": "contract IMerchantGuaranteeVaultV2"
+        },
+        {
+          "name": "paymentEscrow_",
+          "type": "address",
+          "internalType": "contract IPaymentEscrowV2"
+        },
+        {
+          "name": "claimVault_",
+          "type": "address",
+          "internalType": "contract IClaimVaultV2"
+        },
+        {
+          "name": "quoteSigner_",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "bytecodeSha256": "58507fcb8016b9143dcb2e4994920fea99e4f4efcafd40e5d9c22e300b62e88f",
+      "deployedBytecodeSha256": "f199dbd5397b0c43e45df28e9371f29be3cc1f09f852882620fdf0befa6ee8cd"
+    }
+  ],
+  "postDeploymentRoleGrants": [
+    {
+      "contract": "BNMTokenV2",
+      "role": "MINTER_ROLE",
+      "grantee": "ClaimVaultV2"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "MERCHANT_CREDITOR_ROLE",
+      "grantee": "PaymentEscrowV2"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "MERCHANT_CREDITOR_ROLE",
+      "grantee": "MerchantGuaranteeVaultV2"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "REWARD_CREDITOR_ROLE",
+      "grantee": "RewardLedgerV2"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "PRIZE_CREDITOR_ROLE",
+      "grantee": "SeckillV2"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "BNM_CREDITOR_ROLE",
+      "grantee": "PaymentEscrowV2"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "MERCHANT_FREEZER_ROLE",
+      "grantee": "PaymentEscrowV2"
+    },
+    {
+      "contract": "ClaimVaultV2",
+      "role": "MERCHANT_ENCUMBER_ROLE",
+      "grantee": "MerchantGuaranteeVaultV2"
+    },
+    {
+      "contract": "RewardLedgerV2",
+      "role": "PAYMENT_LOCKER_ROLE",
+      "grantee": "PaymentEscrowV2"
+    },
+    {
+      "contract": "RewardLedgerV2",
+      "role": "FULFILLMENT_RELEASER_ROLE",
+      "grantee": "PaymentEscrowV2"
+    },
+    {
+      "contract": "MerchantGuaranteeVaultV2",
+      "role": "TAKEOVER_ROLE",
+      "grantee": "PaymentEscrowV2"
+    },
+    {
+      "contract": "MerchantGuaranteeVaultV2",
+      "role": "ORDER_RESERVER_ROLE",
+      "grantee": "PaymentEscrowV2"
+    },
+    {
+      "contract": "MerchantGuaranteeVaultV2",
+      "role": "TAKEOVER_CLOSER_ROLE",
+      "grantee": "PaymentEscrowV2"
+    },
+    {
+      "contract": "PaymentEscrowV2",
+      "role": "SECKILL_ROLE",
+      "grantee": "SeckillV2"
+    }
+  ],
+  "coordinatedPublicationRequired": [
+    "OpenAPI",
+    "generated types",
+    "state and error enums",
+    "WebSocket protocol",
+    "consumer tests"
+  ]
+}

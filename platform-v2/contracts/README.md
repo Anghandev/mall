@@ -1,5 +1,10 @@
-# Contracts Baseline
+# V2 Contracts
 
-The pre-freeze contracts were removed. New V2 contracts are implemented only
-from `../../docs/V2_SYSTEM_CONTRACT.md` and must pass real Foundry unit, fuzz
-and invariant tests before an ABI is published.
+The active V2 contracts are a clean implementation of
+`../../docs/V2_SYSTEM_CONTRACT.md`. Their frozen responsibilities, funds,
+roles, events, deployment order and artifact boundary are documented in
+`../../docs/V2_CONTRACT_SPEC.md`.
+
+The Foundry gate contains unit, 256-run fuzz and 256-run stateful invariant
+tests. Run it through `pnpm contracts:test`; an ABI is accepted only when the
+generated artifact check also matches the current compiled bytecode and ABI.

@@ -6,7 +6,10 @@
   "description": "Abu 24K V2 contracts, server, data and chain workers",
   "scripts": {
     "typecheck": "../scripts/node ../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
-    "contracts:test": "../scripts/node ../scripts/pending-gate.mjs contracts:test",
+    "contracts:build": "forge build",
+    "contracts:artifacts": "../scripts/node scripts/generate-contract-artifacts.mjs",
+    "contracts:artifacts:check": "../scripts/node scripts/generate-contract-artifacts.mjs --check",
+    "contracts:test": "forge fmt --check && forge test && ../scripts/node scripts/generate-contract-artifacts.mjs --check",
     "database:check": "../scripts/node ../scripts/pending-gate.mjs database:check",
     "api:check": "../scripts/node ../scripts/pending-gate.mjs api:check",
     "consumer:check": "../scripts/node ../scripts/pending-gate.mjs consumer:check",
