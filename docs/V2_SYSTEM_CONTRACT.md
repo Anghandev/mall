@@ -164,6 +164,8 @@ policy: platform service fee, seckill prize-pool proportion, merchant-store NPL
 reward proportion, merchant guarantee minimum, platform risk-reserve minimum,
 guarantee top-up line, fixed remainder accounts, Oracle `maxAge`, Oracle
 minimum liquidity and genesis credential contract/token ID.
+The required BSC fulfillment-finality confirmation count is also
+`DecisionBlocked`; test values are not production defaults.
 
 The following are `ExternalBlocked` until supplied outside the repository:
 Safe and role addresses, RPC endpoints, domains/HTTPS, provider accounts and

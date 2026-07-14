@@ -14,7 +14,7 @@ It follows Phase 1 commit `03fb9fb` and excludes the archived contract WIP at
 | `mall-v2/` | `@abu24k/mall` | Mall worktree after this checkpoint |
 | `merchant-v2/` | `@abu24k/merchant` | Merchant worktree after this checkpoint |
 | `platform-v2/admin/` | `@abu24k/platform-admin` | Admin worktree after this checkpoint |
-| `packages/core-artifacts/` | `@abu24k/core-artifacts` | Core only; unpublished and export-free |
+| `packages/core-artifacts/` | `@abu24k/core-artifacts` | Core only; coordinated local release candidate |
 
 `legacy/v1-npl-only/` is intentionally absent from `pnpm-workspace.yaml` and
 remains read-only.
@@ -35,7 +35,8 @@ The previous active contracts/interfaces, nested `platform-v2/pnpm-lock.yaml`
 and stale generated outputs were removed. Their Git history and the isolated
 WIP branch remain available as evidence but are not implementation inputs.
 
-Product packages contain only typed unpublished-artifact bootstrap constants.
+Product packages begin with typed unpublished-artifact bootstrap constants and
+may consume only a complete coordinated Core checkpoint.
 They have no fixture data, guessed endpoints, copied ABI or business UI.
 
 ## Baseline Gate
@@ -47,9 +48,10 @@ pnpm requirements:check
 pnpm typecheck
 ```
 
-The named contract, database, API, consumer and E2E gates deliberately fail
-closed until their real implementation replaces `scripts/pending-gate.mjs`.
-An empty test suite is not completion evidence.
+At the initial baseline, the named contract, database, API, consumer and E2E
+gates failed closed. Core has replaced the first four with executable checks;
+combined E2E remains closed until all three products consume one artifact
+version. An empty test suite is not completion evidence.
 
 The root ignored `.env` is mode `600`. Provider keys and private keys are not
 tracked or printed. No deployment or transaction is authorized by this

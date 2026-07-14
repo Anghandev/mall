@@ -1,0 +1,535 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Abu 24K V2 Core API",
+    "version": "2.0.0-rc.1"
+  },
+  "x-artifactVersion": "2.0.0-rc.1",
+  "servers": [],
+  "paths": {
+    "/v2/bootstrap": {
+      "get": {
+        "operationId": "getBootstrap",
+        "responses": {
+          "200": {
+            "description": "Core identity and redacted readiness",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BootstrapResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/auth/nonce": {
+      "post": {
+        "operationId": "createSiweNonce",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NonceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Bound one-use SIWE challenge",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiweChallenge"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/auth/verify": {
+      "post": {
+        "operationId": "verifySiwe",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scoped wallet session",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/actions/order": {
+      "post": {
+        "operationId": "getOrderAllowedActions",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderActionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Server-authoritative order actions",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AllowedActionsResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "AtomicAmount": {
+        "type": "string",
+        "pattern": "^(0|[1-9][0-9]*)$"
+      },
+      "Address": {
+        "type": "string",
+        "pattern": "^0x[0-9a-fA-F]{40}$"
+      },
+      "CoreErrorCode": {
+        "type": "string",
+        "enum": [
+          "ArtifactVersionMismatch",
+          "BreakerActive",
+          "ConfigurationRequired",
+          "DecisionBlocked",
+          "EmptySessionPrizeDecisionBlocked",
+          "ExternalBlocked",
+          "FinalityPending",
+          "Forbidden",
+          "IdempotencyConflict",
+          "InvalidFinality",
+          "InvalidRequest",
+          "InvalidSignature",
+          "InventoryUnavailable",
+          "NonceExpired",
+          "NonceReplay",
+          "PickupTakeoverDecisionBlocked",
+          "ProviderSignatureInvalid",
+          "QuoteExpired",
+          "ReorgPending",
+          "ReservationConflict",
+          "Unauthorized",
+          "UnknownState"
+        ]
+      },
+      "AllowedActionName": {
+        "type": "string",
+        "enum": [
+          "PAY_ORDER",
+          "CONFIRM_RECEIPT",
+          "REQUEST_FORCED_RECEIPT",
+          "VERIFY_PICKUP",
+          "OPEN_ARBITRATION",
+          "OPEN_TAKEOVER",
+          "RECORD_SHIPMENT",
+          "RECORD_DELIVERY",
+          "CLAIM_MERCHANT_USDT",
+          "CLAIM_REWARD_NPL",
+          "CLAIM_PRIZE_USDT",
+          "CLAIM_BNM",
+          "RECONCILE",
+          "RECOVER_SURPLUS"
+        ]
+      },
+      "AllowedActionReasonCode": {
+        "type": "string",
+        "enum": [
+          "ArtifactVersionMismatch",
+          "BreakerActive",
+          "ConfigurationRequired",
+          "DecisionBlocked",
+          "ExternalBlocked",
+          "FinalityPending",
+          "Forbidden",
+          "MerchantFrozen",
+          "PickupTakeoverDecisionBlocked",
+          "UnknownState"
+        ]
+      },
+      "UserRole": {
+        "type": "string",
+        "enum": [
+          "BUYER",
+          "MERCHANT",
+          "ADMIN",
+          "OPERATOR",
+          "ARBITRATOR",
+          "AUDITOR"
+        ]
+      },
+      "AllowedAction": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "enabled"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/AllowedActionName"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "reasonCode": {
+            "$ref": "#/components/schemas/AllowedActionReasonCode"
+          },
+          "deadline": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Readiness": {
+        "type": "object",
+        "required": [
+          "chainId",
+          "assets",
+          "decisionBlocked",
+          "externalBlocked",
+          "providers",
+          "writesEnabled"
+        ],
+        "properties": {
+          "chainId": {
+            "const": 56
+          },
+          "assets": {
+            "type": "object",
+            "required": [
+              "usdt",
+              "npl"
+            ],
+            "properties": {
+              "usdt": {
+                "const": "0x55d398326f99059ff775485246999027b3197955"
+              },
+              "npl": {
+                "const": "0x4e8277ab31e4956b2cd48449793a57656dfc03d2"
+              }
+            }
+          },
+          "decisionBlocked": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "externalBlocked": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "providers": {
+            "type": "object",
+            "additionalProperties": {
+              "enum": [
+                "READY",
+                "CONFIGURATION_REQUIRED"
+              ]
+            }
+          },
+          "writesEnabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "BootstrapResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "status",
+          "readiness"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-rc.1"
+          },
+          "status": {
+            "const": "CORE_API_READY"
+          },
+          "readiness": {
+            "$ref": "#/components/schemas/Readiness"
+          }
+        }
+      },
+      "NonceRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "walletAddress"
+        ],
+        "properties": {
+          "walletAddress": {
+            "$ref": "#/components/schemas/Address"
+          }
+        }
+      },
+      "SiweChallenge": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "message",
+          "nonce",
+          "issuedAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "nonce": {
+            "type": "string"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "VerifyRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "message",
+          "signature"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          }
+        }
+      },
+      "SessionResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "token",
+          "walletAddress",
+          "roles"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "walletAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserRole"
+            }
+          }
+        }
+      },
+      "OrderActionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId"
+        ],
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "AllowedActionsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "allowedActions"
+        ],
+        "properties": {
+          "allowedActions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AllowedAction"
+            }
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message",
+              "correlationId"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/CoreErrorCode"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object"
+              },
+              "correlationId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
