@@ -192,6 +192,7 @@ export class RpcPaymentPolicyAttestationSource implements PaymentPolicyAttestati
     const destinationHash = paymentAllocationSetHash(
       input.policy.concessionDestinations,
       input.policy.otherUsdtDestinations,
+      input.policy.seckillPrizePoolAccount,
     );
     const comparisons: Array<[string, unknown, unknown]> = [
       ['policyHash', policyHash.toLowerCase(), input.policyHash.toLowerCase()],

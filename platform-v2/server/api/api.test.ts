@@ -32,8 +32,14 @@ import {
   seckillAuthorizationDigest,
   seckillIntentHash,
 } from './payment-signing.ts';
+import {
+  buildOtherUsdtAllocations,
+  parsePaymentPolicySnapshot,
+  paymentAllocationSetHash,
+  type PaymentPolicySnapshot,
+} from './payment-policy.ts';
 import { assertEmptySessionPrizeDecision, evaluateForcedReceipt, evaluateTakeover } from './fulfillment.ts';
-import { executeProvider, verifyWebhookHmac } from './providers.ts';
+import { AmapAdministrativeRegionResolver, executeProvider, verifyWebhookHmac } from './providers.ts';
 
 const HASH = `0x${'1'.repeat(64)}`;
 const HASH_2 = `0x${'2'.repeat(64)}`;
@@ -54,6 +60,7 @@ test('typed config reports blocked inputs without exposing secret values', () =>
   assert.ok(blocked.decisionBlocked.includes('PICKUP_TIMEOUT_AND_TAKEOVER_EVIDENCE'));
   assert.ok(blocked.externalBlocked.includes('DATABASE_URL'));
   assert.equal(blocked.providerReadiness.KUAIDI100, 'CONFIGURATION_REQUIRED');
+  assert.equal(blocked.providerReadiness.BNM, 'CONFIGURATION_REQUIRED');
   assert.equal(publicReadiness(blocked).writesEnabled, false);
   assert.throws(() => requireProvider(blocked, 'KUAIDI100'), { name: 'CoreError' });
 
@@ -63,6 +70,17 @@ test('typed config reports blocked inputs without exposing secret values', () =>
   assert.ok(ready.externalBlocked.includes('COORDINATED_DEPLOYMENT_AUTHORIZATION'));
   assert.equal(serialized.includes('test-jwt-secret'), false);
   assert.equal(serialized.includes('provider-secret'), false);
+  assert.equal(ready.providerReadiness.BNM, 'READY');
+  const unverifiedBnm = loadConfig({
+    ...completeEnvironment(),
+    BNM_MONOTONIC_CONFORMANCE_EVIDENCE_HASH: undefined,
+  });
+  assert.equal(unverifiedBnm.providerReadiness.BNM, 'CONFIGURATION_REQUIRED');
+  assert.ok(unverifiedBnm.externalBlocked.includes('BNM_MONOTONIC_CONFORMANCE_EVIDENCE_HASH'));
+  assert.throws(
+    () => loadConfig({ ...completeEnvironment(), BNM_MONOTONIC_CONFORMANCE_EVIDENCE_HASH: 'unverified' }),
+    /must be bytes32/,
+  );
   const readinessTime = new Date('2026-07-14T00:00:00.000Z');
   const paymentReady = {
     ...ready,
@@ -352,6 +370,62 @@ test('Core quote math conserves both assets and dual quote keeps independent res
   );
 });
 
+test('governed USDT allocation identifies seckill prize liability without affecting fallback quotes', () => {
+  const policy = governedPaymentPolicy();
+  assert.deepEqual(buildOtherUsdtAllocations(100n, 60n, policy, 'ORDINARY'), [
+    { account: '0x9999999999999999999999999999999999999999', amount: 10n, purpose: 'POLICY_ALLOCATION' },
+  ]);
+  assert.deepEqual(buildOtherUsdtAllocations(100n, 60n, policy, 'SECKILL'), [
+    { account: '0x9999999999999999999999999999999999999999', amount: 7n, purpose: 'POLICY_ALLOCATION' },
+    { account: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', amount: 3n, purpose: 'SECKILL_PRIZE_LIABILITY' },
+  ]);
+  assert.deepEqual(buildOtherUsdtAllocations(100n, 60n, policy, 'FALLBACK_RETAIL'), [
+    { account: '0x9999999999999999999999999999999999999999', amount: 10n, purpose: 'POLICY_ALLOCATION' },
+  ]);
+  assert.throws(
+    () => buildOtherUsdtAllocations(100n, 68n, policy, 'SECKILL'),
+    /cannot be funded/,
+  );
+  assert.throws(
+    () => buildOtherUsdtAllocations(1n, 0n, { ...policy, seckillPrizeBps: 1 }, 'SECKILL'),
+    /cannot be funded/,
+  );
+
+  const hash = paymentAllocationSetHash(
+    policy.concessionDestinations,
+    policy.otherUsdtDestinations,
+    policy.seckillPrizePoolAccount,
+  );
+  assert.notEqual(
+    hash,
+    paymentAllocationSetHash(
+      policy.concessionDestinations,
+      policy.otherUsdtDestinations,
+      '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    ),
+  );
+
+  const payload = {
+    ...policy,
+    oracleMinimumUsdtLiquidity: policy.oracleMinimumUsdtLiquidity.toString(),
+    merchantGuaranteeMinimumUsdt: policy.merchantGuaranteeMinimumUsdt.toString(),
+    genesisTokenId: policy.genesisTokenId.toString(),
+  };
+  const { seckillPrizePoolAccount: _missing, ...missingPrizeAccount } = payload;
+  assert.throws(() => parsePaymentPolicySnapshot(1, HASH, missingPrizeAccount), /missing seckillPrizePoolAccount/);
+  assert.throws(
+    () => parsePaymentPolicySnapshot(1, HASH, { ...payload, seckillPrizePoolAccount: '0x0000000000000000000000000000000000000000' }),
+    /invalid governed fields/,
+  );
+  assert.throws(
+    () => parsePaymentPolicySnapshot(1, HASH, {
+      ...payload,
+      seckillPrizePoolAccount: policy.otherUsdtDestinations[0]!.account,
+    }),
+    /invalid governed fields/,
+  );
+});
+
 test('payment snapshot and EIP-712 digest match the frozen Solidity encoding vector', () => {
   const intent = signingVectorIntent();
   assert.equal(paymentIntentHash(intent), '0xc125633288a4ba4ccb0602dae00c885dbe1adb7a0a77cc842f34d3d425d9279f');
@@ -384,6 +458,7 @@ test('allowedActions obey breakers, timeouts, roles and merchant prize exception
       state: 'PAID',
       fulfillmentMode: 'DELIVERY',
       buyerWallet: buyer,
+      merchantId: 'merchant-1',
       merchantWallet: merchant,
       paidAt: new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000),
       shipmentEvidence: false,
@@ -398,6 +473,7 @@ test('allowedActions obey breakers, timeouts, roles and merchant prize exception
       state: 'PAID',
       fulfillmentMode: 'DELIVERY',
       buyerWallet: buyer,
+      merchantId: 'merchant-1',
       merchantWallet: merchant,
       paidAt: new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000),
       shipmentEvidence: false,
@@ -412,6 +488,7 @@ test('allowedActions obey breakers, timeouts, roles and merchant prize exception
       state: 'PAID',
       fulfillmentMode: 'PICKUP',
       buyerWallet: buyer,
+      merchantId: 'merchant-1',
       merchantWallet: merchant,
       paidAt: now,
       shipmentEvidence: false,
@@ -429,6 +506,7 @@ test('allowedActions obey breakers, timeouts, roles and merchant prize exception
       state: 'PAID',
       fulfillmentMode: 'DELIVERY',
       buyerWallet: buyer,
+      merchantId: 'merchant-1',
       merchantWallet: merchant,
       paidAt: now,
       shipmentEvidence: false,
@@ -437,6 +515,119 @@ test('allowedActions obey breakers, timeouts, roles and merchant prize exception
     { actorWallet: merchant, roles: ['MERCHANT'], now, pausedScopes: new Set(), executableActions: EXECUTABLE_ACTIONS },
   );
   assert.equal(merchantShipment.some((item) => item.action === 'RECORD_SHIPMENT'), true);
+  const merchantSubwallet = orderAllowedActions(
+    {
+      state: 'PAID',
+      fulfillmentMode: 'DELIVERY',
+      buyerWallet: buyer,
+      merchantId: 'merchant-1',
+      merchantWallet: merchant,
+      paidAt: now,
+      shipmentEvidence: false,
+      takeoverOpened: false,
+    },
+    {
+      actorWallet: SAFE,
+      actorMerchantId: 'merchant-1',
+      roles: ['MERCHANT'],
+      now,
+      pausedScopes: new Set(),
+      executableActions: EXECUTABLE_ACTIONS,
+    },
+  );
+  assert.equal(merchantSubwallet.some((item) => item.action === 'RECORD_SHIPMENT'), true);
+
+  const pickupWithCredential = orderAllowedActions(
+    {
+      state: 'PAID',
+      fulfillmentMode: 'PICKUP',
+      buyerWallet: buyer,
+      merchantId: 'merchant-1',
+      merchantWallet: merchant,
+      paidAt: now,
+      shipmentEvidence: false,
+      takeoverOpened: false,
+      activePickupCredential: true,
+      openRequestTypes: ['EXCHANGE'],
+    },
+    { actorWallet: buyer, roles: ['BUYER'], now, pausedScopes: new Set(), executableActions: EXECUTABLE_ACTIONS },
+  );
+  assert.equal(pickupWithCredential.some((item) => item.action === 'REGISTER_PICKUP_CREDENTIAL'), false);
+  assert.equal(pickupWithCredential.some((item) => item.action === 'REQUEST_EXCHANGE'), false);
+  assert.equal(pickupWithCredential.some((item) => item.action === 'REQUEST_DELAY'), true);
+
+  const deliveredForPlatform = {
+    state: 'DELIVERED' as const,
+    fulfillmentMode: 'DELIVERY' as const,
+    buyerWallet: buyer,
+    merchantId: 'merchant-1',
+    merchantWallet: merchant,
+    paidAt: now,
+    deliveredAt: now,
+    shipmentEvidence: true,
+    takeoverOpened: false,
+  };
+  const platformContext = {
+    actorWallet: SAFE,
+    roles: ['OPERATOR'] as const,
+    now,
+    pausedScopes: new Set<'NEW_PAYMENT' | 'SECKILL_PURCHASE' | 'NEW_SETTLEMENT_BATCH'>(),
+    executableActions: EXECUTABLE_ACTIONS,
+  };
+  assert.equal(
+    orderAllowedActions(deliveredForPlatform, platformContext)
+      .some((item) => item.action === 'DECIDE_FORCED_RECEIPT'),
+    false,
+  );
+  const platformActions = orderAllowedActions(
+    { ...deliveredForPlatform, openRequestTypes: ['FORCED_RECEIPT'], approvedExchange: true },
+    platformContext,
+  );
+  assert.equal(platformActions.some((item) => item.action === 'DECIDE_FORCED_RECEIPT'), true);
+  assert.equal(platformActions.some((item) => item.action === 'RECORD_SHIPMENT'), true);
+  assert.equal(platformActions.some((item) => item.action === 'OPEN_ARBITRATION'), true);
+  const merchantWithForcedRequest = orderAllowedActions(
+    { ...deliveredForPlatform, openRequestTypes: ['FORCED_RECEIPT'] },
+    {
+      actorWallet: merchant,
+      roles: ['MERCHANT'],
+      now: new Date(now.getTime() + 8 * 24 * 60 * 60 * 1000),
+      pausedScopes: new Set(),
+      executableActions: EXECUTABLE_ACTIONS,
+    },
+  );
+  assert.equal(merchantWithForcedRequest.some((item) => item.action === 'REQUEST_FORCED_RECEIPT'), false);
+
+  const platformTakeover = orderAllowedActions(
+    {
+      state: 'PAID',
+      fulfillmentMode: 'DELIVERY',
+      buyerWallet: buyer,
+      merchantId: 'merchant-1',
+      merchantWallet: merchant,
+      paidAt: new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000),
+      shipmentEvidence: false,
+      takeoverOpened: false,
+    },
+    platformContext,
+  );
+  assert.equal(platformTakeover.some((item) => item.action === 'OPEN_TAKEOVER'), true);
+  assert.equal(
+    orderAllowedActions(
+      {
+        state: 'PAID',
+        fulfillmentMode: 'DELIVERY',
+        buyerWallet: buyer,
+        merchantId: 'merchant-1',
+        merchantWallet: merchant,
+        paidAt: new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000),
+        shipmentEvidence: false,
+        takeoverOpened: true,
+      },
+      platformContext,
+    ).some((item) => item.action === 'OPEN_TAKEOVER'),
+    false,
+  );
 });
 
 test('finality rejects mismatched events and handles confirmation, replacement and reorg', () => {
@@ -484,7 +675,7 @@ test('fulfillment eligibility preserves locked funds and fails closed on undefin
     orderId: 'order-1',
     fulfillmentMode: 'DELIVERY' as const,
     state: 'PAID' as const,
-    paidAt,
+    paymentFinalizedAt: paidAt,
     takeoverOpened: false,
   };
   assert.equal(evaluateTakeover(delivery, new Date('2026-07-09T00:00:00.000Z')).customerFundsRemainLocked, true);
@@ -515,6 +706,34 @@ test('provider calls and webhooks fail closed until configured and signed', asyn
   const signature = createHmac('sha256', secret).update(body).digest('hex');
   assert.equal(verifyWebhookHmac(body, signature, secret), true);
   assert.throws(() => verifyWebhookHmac(body, '0'.repeat(64), secret), /mismatch/);
+
+  await assert.rejects(
+    new AmapAdministrativeRegionResolver({}).reverseGeocode({ longitude: 116.397, latitude: 39.908 }),
+    /not configured/,
+  );
+  let requestedUrl = '';
+  const amap = new AmapAdministrativeRegionResolver({
+    key: 'amap-secret',
+    fetch: (async (input) => {
+      requestedUrl = input.toString();
+      return new Response(JSON.stringify({
+        status: '1',
+        regeocode: {
+          formatted_address: 'Beijing Dongcheng Test Road 1',
+          addressComponent: {
+            adcode: '110101',
+            province: 'Beijing',
+            city: [],
+            district: 'Dongcheng',
+          },
+        },
+      }), { status: 200 });
+    }) as typeof fetch,
+  });
+  const region = await amap.reverseGeocode({ longitude: 116.397, latitude: 39.908 });
+  assert.equal(region.regionCode, '110101');
+  assert.equal(region.city, 'Beijing');
+  assert.ok(requestedUrl.startsWith('https://restapi.amap.com/v3/geocode/regeo?'));
 });
 
 test('HTTP bootstrap and SIWE flow return correlated JSON and protect order actions', async () => {
@@ -528,6 +747,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     paymentExternalBlocked: [],
   };
   const runtimeReadiness = paymentRuntimeReadiness(now, false);
+  const fulfillmentCalls: Array<{ operation: string; wallet: string; orderId: string; input?: unknown }> = [];
   const server = createApiServer({
     config,
     runtimeReadiness,
@@ -542,6 +762,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
             state: 'DELIVERED',
             fulfillmentMode: 'DELIVERY',
             buyerWallet: wallet.address,
+            merchantId: 'merchant-1',
             merchantWallet: SAFE,
             deliveredAt: new Date('2026-07-13T00:00:00.000Z'),
             shipmentEvidence: true,
@@ -566,6 +787,58 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       }),
       submitPayment: async (buyerWallet, input) => ({ ...input, buyerWallet, state: 'SUBMITTED' }),
       getPayment: async (buyerWallet, orderId) => ({ orderId, buyerWallet, state: 'SUBMITTED' }),
+    },
+    fulfillmentService: {
+      getOrder: async (_actor, orderId) => ({ orderId, state: 'DELIVERED' }),
+      listOrders: async () => [{ orderId: 'order-1', state: 'DELIVERED' }],
+      recordShipment: async (_actor, orderId) => ({ orderId, state: 'SHIPPED' }),
+      recordDelivery: async (_actor, orderId) => ({ orderId, state: 'DELIVERED' }),
+      recordLogisticsUpdate: async (actor, orderId, input) => {
+        fulfillmentCalls.push({ operation: 'LOGISTICS_UPDATE', wallet: actor.walletAddress, orderId, input });
+        return { orderId, state: input.status === 'DELIVERED' ? 'DELIVERED' : 'SHIPPED' };
+      },
+      registerPickupCredential: async (_actor, orderId) => ({ orderId, credentialId: 'pickup-1' }),
+      verifyPickup: async (_actor, orderId) => ({ orderId, state: 'FULFILLED' }),
+      requestExchange: async (actor, orderId, input) => {
+        fulfillmentCalls.push({ operation: 'REQUEST_EXCHANGE', wallet: actor.walletAddress, orderId, input });
+        return { orderId, requestType: 'EXCHANGE' };
+      },
+      requestDelay: async (_actor, orderId) => ({ orderId, requestType: 'DELAY' }),
+      decideFulfillmentRequest: async (_actor, orderId, input) => ({
+        orderId,
+        requestId: input.requestId,
+        state: input.approved ? 'APPROVED' : 'REJECTED',
+      }),
+      openArbitration: async (_actor, orderId) => ({ orderId, state: 'ARBITRATION' }),
+      decideArbitration: async (_actor, orderId) => ({ orderId, state: 'FULFILLED' }),
+      openTakeover: async (_actor, orderId) => ({ orderId, state: 'TAKEOVER' }),
+      requestForcedReceipt: async (_actor, orderId) => ({ orderId, state: 'OPEN' }),
+      decideForcedReceipt: async (_actor, orderId) => ({ orderId, state: 'FULFILLED' }),
+      confirmReceipt: async (actor, orderId, input) => {
+        fulfillmentCalls.push({ operation: 'CONFIRM_RECEIPT', wallet: actor.walletAddress, orderId, input });
+        return { orderId, state: 'FULFILLED' };
+      },
+    },
+    fulfillmentTargetService: {
+      createDeliveryTarget: async (actor) => ({
+        targetId: 'target-1',
+        targetHash: HASH,
+        regionCodeHash: HASH_2,
+        buyerWallet: actor.walletAddress,
+      }),
+      createPickupTarget: async (actor, input) => ({
+        targetId: 'target-2',
+        targetHash: HASH_2,
+        storeId: input.storeId,
+        buyerWallet: actor.walletAddress,
+      }),
+      createStore: async (actor) => ({ storeId: 'store-1', merchantId: actor.merchantId }),
+      listStores: async () => [{ storeId: 'store-1', regionCode: '110101' }],
+      getOrderTarget: async (actor, orderId) => ({ orderId, buyerWallet: actor.walletAddress }),
+    },
+    logisticsWebhookSecrets: {
+      KUAIDI100: 'kuaidi-webhook-secret',
+      CAINIAO: 'cainiao-webhook-secret',
     },
     clock: () => now,
   });
@@ -600,6 +873,14 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     });
     assert.equal(login.status, 200);
     const session = (await login.json()) as { token: string };
+    const postOrderAction = (action: string, body: Record<string, unknown>) => fetch(
+      `${base}/v2/orders/order-1/${action}`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+        body: JSON.stringify(body),
+      },
+    );
 
     const unauthorized = await fetch(`${base}/v2/actions/order`, { method: 'POST', body: '{}' });
     assert.equal(unauthorized.status, 401);
@@ -615,11 +896,164 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       allowedActions: Array<{ action: string; enabled: boolean; reasonCode?: string }>;
     };
     const confirmReceipt = projection.allowedActions.find((item) => item.action === 'CONFIRM_RECEIPT');
-    assert.deepEqual(confirmReceipt, {
-      action: 'CONFIRM_RECEIPT',
-      enabled: false,
-      reasonCode: 'ConfigurationRequired',
+    assert.deepEqual(confirmReceipt, { action: 'CONFIRM_RECEIPT', enabled: true });
+
+    const unauthorizedOrders = await fetch(`${base}/v2/orders`);
+    assert.equal(unauthorizedOrders.status, 401);
+    const orders = await fetch(`${base}/v2/orders`, {
+      headers: { authorization: `Bearer ${session.token}` },
     });
+    assert.equal(orders.status, 200);
+    const order = await fetch(`${base}/v2/orders/order-1`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    });
+    assert.equal(order.status, 200);
+    const stores = await fetch(`${base}/v2/stores?regionCode=110101`);
+    assert.equal(stores.status, 200);
+    const deliveryTarget = await fetch(`${base}/v2/fulfillment-targets/delivery`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+      body: JSON.stringify({
+        idempotencyKey: 'delivery-target-1',
+        recipientName: 'Buyer',
+        phone: '+8613800000000',
+        address: 'Test address 1',
+        longitude: 116.397,
+        latitude: 39.908,
+      }),
+    });
+    assert.equal(deliveryTarget.status, 201);
+    const pickupTarget = await fetch(`${base}/v2/fulfillment-targets/pickup`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+      body: JSON.stringify({ idempotencyKey: 'pickup-target-1', storeId: 'store-1' }),
+    });
+    assert.equal(pickupTarget.status, 201);
+    const createStore = await fetch(`${base}/v2/stores`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+      body: JSON.stringify({
+        idempotencyKey: 'create-store-1',
+        name: 'Store',
+        phone: '+8613800000000',
+        longitude: 116.397,
+        latitude: 39.908,
+      }),
+    });
+    assert.equal(createStore.status, 201);
+    const target = await fetch(`${base}/v2/orders/order-1/fulfillment-target`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    });
+    assert.equal(target.status, 200);
+    const logisticsBody = Buffer.from(JSON.stringify({
+      eventId: 'kuaidi-event-1',
+      orderId: 'order-1',
+      status: 'DELIVERED',
+      occurredAt: now.toISOString(),
+      locationHash: HASH,
+    }));
+    const logisticsSignature = createHmac('sha256', 'kuaidi-webhook-secret').update(logisticsBody).digest('hex');
+    const logistics = await fetch(`${base}/v2/providers/kuaidi100/webhooks/logistics`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-provider-signature': logisticsSignature },
+      body: logisticsBody,
+    });
+    assert.equal(logistics.status, 202);
+    const badLogisticsSignature = await fetch(`${base}/v2/providers/kuaidi100/webhooks/logistics`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-provider-signature': '0'.repeat(64) },
+      body: logisticsBody,
+    });
+    assert.equal(badLogisticsSignature.status, 401);
+    const cainiaoBody = Buffer.from(JSON.stringify({
+      eventId: 'cainiao-event-1',
+      orderId: 'order-1',
+      status: 'IN_TRANSIT',
+      occurredAt: now.toISOString(),
+    }));
+    const cainiaoSignature = createHmac('sha256', 'cainiao-webhook-secret').update(cainiaoBody).digest('hex');
+    const cainiao = await fetch(`${base}/v2/providers/cainiao/webhooks/logistics`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-provider-signature': cainiaoSignature },
+      body: cainiaoBody,
+    });
+    assert.equal(cainiao.status, 202);
+    const exchange = await fetch(`${base}/v2/orders/order-1/exchange-requests`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+      body: JSON.stringify({
+        idempotencyKey: 'exchange-command-1',
+        evidenceHash: HASH,
+        reasonCode: 'SIZE_MISMATCH',
+      }),
+    });
+    assert.equal(exchange.status, 201);
+    const actionCases: Array<[string, Record<string, unknown>, number]> = [
+      ['shipments', {
+        idempotencyKey: 'shipment-command-1',
+        evidenceHash: HASH,
+        carrierCode: 'SF',
+        trackingNumberHash: HASH_2,
+      }, 201],
+      ['delivery', { idempotencyKey: 'delivery-command-1', evidenceHash: HASH }, 200],
+      ['pickup-credential', {
+        idempotencyKey: 'pickup-credential-1',
+        evidenceHash: HASH,
+        code: '123456',
+        expiresAt: new Date(now.getTime() + 60_000).toISOString(),
+      }, 201],
+      ['pickup-verification', {
+        idempotencyKey: 'pickup-verification-1', evidenceHash: HASH, code: '123456', storeId: 'store-1',
+      }, 200],
+      ['delay-requests', {
+        idempotencyKey: 'delay-command-1', evidenceHash: HASH, reasonCode: 'NEED_MORE_TIME',
+      }, 201],
+      ['request-decisions', {
+        idempotencyKey: 'request-decision-1', evidenceHash: HASH, requestId: 'request-1',
+        approved: true, noteCode: 'APPROVED',
+      }, 200],
+      ['arbitrations', {
+        idempotencyKey: 'arbitration-command-1', evidenceHash: HASH, reasonCode: 'EVIDENCE_DISPUTED',
+      }, 201],
+      ['arbitration-decisions', {
+        idempotencyKey: 'arbitration-decision-1', evidenceHash: HASH,
+        outcome: 'FULFILL', noteCode: 'FULFILL_ORDER',
+      }, 200],
+      ['takeover', {
+        idempotencyKey: 'takeover-command-1', evidenceHash: HASH, reasonCode: 'NO_SHIPMENT',
+      }, 201],
+      ['forced-receipt-requests', {
+        idempotencyKey: 'forced-receipt-request-1', evidenceHash: HASH, reasonCode: 'DELIVERED',
+      }, 201],
+      ['forced-receipt-decisions', {
+        idempotencyKey: 'forced-receipt-decision-1', evidenceHash: HASH,
+        approved: true, noteCode: 'EVIDENCE_ACCEPTED',
+      }, 200],
+    ];
+    for (const [path, body, expectedStatus] of actionCases) {
+      assert.equal((await postOrderAction(path, body)).status, expectedStatus, path);
+    }
+    const receipt = await fetch(`${base}/v2/orders/order-1/receipt-confirmation`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+      body: JSON.stringify({ idempotencyKey: 'receipt-command-1', evidenceHash: HASH_2 }),
+    });
+    assert.equal(receipt.status, 200);
+    assert.deepEqual(
+      fulfillmentCalls.map(({ operation, wallet, orderId }) => ({ operation, wallet, orderId })),
+      [
+        { operation: 'LOGISTICS_UPDATE', wallet: SAFE, orderId: 'order-1' },
+        { operation: 'LOGISTICS_UPDATE', wallet: SAFE, orderId: 'order-1' },
+        { operation: 'REQUEST_EXCHANGE', wallet: wallet.address.toLowerCase(), orderId: 'order-1' },
+        { operation: 'CONFIRM_RECEIPT', wallet: wallet.address.toLowerCase(), orderId: 'order-1' },
+      ],
+    );
+    const extraFulfillmentField = await fetch(`${base}/v2/orders/order-1/receipt-confirmation`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+      body: JSON.stringify({ idempotencyKey: 'receipt-command-2', evidenceHash: HASH_2, refund: true }),
+    });
+    assert.equal(extraFulfillmentField.status, 400);
     const quotePayload = {
       idempotencyKey: 'checkout-attempt-1',
       productId: 'product-1',
@@ -765,6 +1199,34 @@ function quoteRequest(): PaymentQuoteRequest {
   };
 }
 
+function governedPaymentPolicy(): PaymentPolicySnapshot {
+  const base = readyPolicy();
+  return {
+    ...base,
+    usdtCustodySafe: base.usdtCustodySafe!,
+    nplRewardSafe: base.nplRewardSafe!,
+    operationsTreasurySafe: base.operationsTreasurySafe!,
+    circulationPool: base.circulationPool!,
+    concessionDestinationSetHash: base.concessionDestinationSetHash!,
+    concessionDestinations: base.concessionDestinations!,
+    operationsDestinations: base.operationsDestinations!,
+    platformFeeBps: 500,
+    seckillPrizeBps: 300,
+    seckillMainDuration: 3_600,
+    relayInitial: 60,
+    relayIncrement: 30,
+    relayCap: 60,
+    genesisCredential: '0xdddddddddddddddddddddddddddddddddddddddd',
+    genesisTokenId: 1n,
+    genesisCredentialStandard: 1,
+    decisionEvidenceHash: HASH_2,
+    otherUsdtDestinations: [
+      { account: '0x9999999999999999999999999999999999999999', weightBps: 10_000 },
+    ],
+    seckillPrizePoolAccount: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  };
+}
+
 function signingVectorIntent(): CanonicalPaymentIntent {
   const hash = (character: string) => `0x${character.repeat(64)}`;
   const address = (character: string) => `0x${character.repeat(40)}`;
@@ -826,6 +1288,7 @@ function completeEnvironment(): Record<string, string> {
     JWT_SECRET: 'test-jwt-secret-that-is-at-least-32-bytes',
     AUTH_DOMAIN: 'mall.abu.test',
     AUTH_URI: 'https://mall.abu.test',
+    DELIVERY_DATA_ENCRYPTION_KEY: 'ab'.repeat(32),
     BSC_RPC_URL: 'https://rpc.example.invalid',
     BSC_FALLBACK_RPC_URL: 'https://fallback-rpc.example.invalid',
     PLATFORM_SAFE_ADDRESS: SAFE,
@@ -854,8 +1317,17 @@ function completeEnvironment(): Record<string, string> {
     KUAIDI100_KEY: 'provider-secret',
     KUAIDI100_SECRET: 'provider-secret',
     KUAIDI100_CALLBACK_SECRET: 'provider-secret',
+    CAINIAO_APP_KEY: 'provider-secret',
+    CAINIAO_APP_SECRET: 'provider-secret',
+    CAINIAO_CALLBACK_SECRET: 'provider-secret',
     FEIE_USER: 'provider-secret',
     FEIE_UKEY: 'provider-secret',
+    YILIANYUN_CLIENT_ID: 'provider-secret',
+    YILIANYUN_CLIENT_SECRET: 'provider-secret',
+    BNM_AVAILABILITY_URL: 'https://bnm.example.invalid/v1/order-points/state',
+    BNM_API_TOKEN: 'provider-secret',
+    BNM_PROJECT_ID: 'abu-24k',
+    BNM_MONOTONIC_CONFORMANCE_EVIDENCE_HASH: HASH_2,
     ALIYUN_SMS_ACCESS_KEY_ID: 'provider-secret',
     ALIYUN_SMS_ACCESS_KEY_SECRET: 'provider-secret',
     ALIYUN_OSS_ACCESS_KEY_ID: 'provider-secret',

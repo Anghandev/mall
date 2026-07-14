@@ -2,7 +2,7 @@
 
 Status: `DRAFT`, `NOT AUTHORIZED` and `NON-EXECUTABLE`.
 
-This draft is bound to local payment artifact `2.0.0-payment.1`. It does not
+This draft is bound to local fulfillment artifact `2.0.0-fulfillment.1`. It does not
 authorize deployment, approval, token transfer or any transaction. No `.env` or
 private key is read for this plan. `pnpm micro:preflight` must not be run until
 the full local release gate passes and the project-specific preflight described
@@ -13,12 +13,13 @@ below is implemented.
 Execution remains prohibited while any of these is true:
 
 - the coordinated manifest has `deploymentAuthorized: false`;
-- any `DecisionBlocked` payment allocation remains;
+- any `DecisionBlocked` payment allocation, including the seckill prize-pool
+  account, remains;
 - governance, USDT Custody, NPL Reward or Operations Treasury Safe addresses
   and owners are unavailable;
 - secondary policy signer, quote signer, primary/fallback RPC, production
   domains or isolated signer service are unavailable;
-- fulfillment and settlement checkpoints, all three product consumers,
+- fulfillment consumers, the settlement checkpoint, all three complete product consumers,
   combined E2E, security review, backup/restore and breaker drills are incomplete;
 - deployed bytecode, roles, immutable addresses and verified source do not match
   the final coordinated artifact;
@@ -92,8 +93,11 @@ cover:
    reservations and prove the 60-minute/60-second/+30-second rules;
 7. wait for 15 canonical confirmations and prove event indexing, balanced Locked
    journals, order finality and unused reservation release;
-8. after later checkpoints are published, execute the separately approved
-   fulfillment, BNM-points, settlement-request and Safe MultiSend micro paths;
+8. execute the separately approved fulfillment and BNM-points path, prove the
+   BNM backend rejects a delayed lower `stateVersion`, prove the seckill prize
+   liability remains Locked until session settlement, record the evidence hash
+   used by the runtime readiness gate, then after the settlement checkpoint is
+   published execute settlement-request and Safe MultiSend micro paths;
 9. exercise payment/seckill/settlement breakers while recovery reads and
    finality continue;
 10. revoke temporary token allowances and reconcile every wallet, Safe, Burn,

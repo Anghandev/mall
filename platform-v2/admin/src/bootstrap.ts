@@ -7,7 +7,7 @@ import {
 } from '@abu24k/core-artifacts';
 
 export const productBaseline = Object.freeze({
-  coreArtifacts: 'coordinated-rc',
+  coreArtifacts: 'coordinated-payment-checkpoint',
   artifactVersion,
   publicCatalogs: Object.freeze({
     breakerScopes,
@@ -16,7 +16,10 @@ export const productBaseline = Object.freeze({
     userRoles,
   }),
   adminCapabilities: Object.freeze({
-    projections: false,
+    bootstrapReadiness: true,
+    catalogRead: true,
+    paymentProjection: 'BUYER_WALLET_SCOPED',
+    projections: true,
     monitoring: false,
     policyPublication: false,
     writes: false,

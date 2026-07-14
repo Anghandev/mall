@@ -1,7 +1,8 @@
 # Abu 24K V2 Data Model
 
-Status: coordinated local payment checkpoint `2.0.0-payment.1`. This document
-describes implemented payment storage only and does not authorize deployment.
+Status: coordinated local fulfillment checkpoint `2.0.0-fulfillment.1`. This
+document describes implemented payment and fulfillment storage and does not
+authorize deployment.
 
 ## Storage Boundary
 
@@ -64,18 +65,61 @@ Safe asset account IDs include the normalized Safe address. Existing account
 metadata is verified field by field before posting, so a governed Safe rotation
 cannot silently post new assets into an account bound to an old Safe.
 
-The payment checkpoint publishes two journal events:
+The payment and fulfillment checkpoints publish these journal events:
 
 - `PAYMENT_LOCKED` records Custody Safe assets, merchant and policy USDT
   liabilities, Reward Safe assets and beneficiary NPL liabilities, Burn, and
   Locked BNM points;
 - `PAYMENT_REORG_REVERSAL` reverses the exact original lines and links the
   original journal.
+- fulfillment completion moves eligible order liabilities from `Locked` to
+  `Available` with an append-only balanced journal. A
+  `SECKILL_PRIZE_LIABILITY` remains `Locked` until session settlement;
+- arbitration moves all order liabilities `Locked -> Disputed`. A resume moves
+  them back to `Locked`; reviewed fulfillment moves eligible liabilities to
+  `Available` but returns the seckill prize liability to `Locked`;
+- a deep payment reorg posts linked reversals for every current order balance
+  state, including balances already moved by fulfillment.
 
 BNM is a backend-points liability, not an ERC-20, mint or Safe-transfer asset.
-The later lifecycle states `Available`, `Requested`, `Batched` and `Settled`
-remain reserved for the fulfillment and settlement checkpoints and are not
-published here as executable flows.
+This checkpoint publishes only its `Locked -> Available` fulfillment lifecycle.
+`Requested`, `Batched` and `Settled` remain reserved for transferable assets in
+the settlement checkpoint and never apply to BNM. `core.orders.bnm_state_version`
+is incremented in the same transaction that appends each BNM state command, and
+`core.bnm_state_syncs` records the version acknowledged by the backend. Versions
+are order-scoped and never reused, so a timed-out lower-version request cannot
+overwrite a later reorg `LOCKED` state.
+
+## Fulfillment Storage
+
+- `core.administrative_regions` records frozen six-digit AMap region evidence.
+- `core.merchant_stores` records versioned pickup stores. Historical order
+  snapshots do not change when a store later moves or closes.
+- `core.fulfillment_targets` binds buyer, delivery/pickup mode, target and
+  region hashes, expiry and AES-256-GCM encrypted payload. Plain delivery PII is
+  never stored in a database column.
+- `core.fulfillment_commands` makes every actor/idempotency-key command
+  replay-safe and rejects changed input.
+- `core.fulfillment_evidence`, `core.shipments` and `core.logistics_events` are
+  immutable. Provider event identity is unique and callback order is preserved.
+- `core.pickup_credentials` stores salted hashes, binds the credential to the
+  pickup store snapshotted by the order and allows one successful use before
+  expiry. `core.pickup_verification_attempts` stores no plaintext code, keeps
+  idempotent failure evidence and invalidates the active credential after five
+  failed attempts.
+- `core.fulfillment_requests` owns exchange, delay, arbitration and forced
+  receipt state. Only one open request of each kind exists per order.
+- `core.takeover_cases` starts seven days after payment finality when delivery
+  has no valid shipment evidence. Opening a case freezes the merchant and its
+  active/review products while customer funds and rewards remain Locked. This
+  checkpoint keeps replacement `required_usdt` null and all funding usage zero;
+  the settlement checkpoint must publish the balanced guarantee, frozen
+  receivable, future-proceeds and platform-advance/debt entries before funding.
+
+Fulfillment completion stores the method and immutable evidence, closes an
+active takeover case, resolves eligible requests and writes BNM availability to
+the outbox in the same business transaction. There is no refund table or
+payment-reversal fulfillment action.
 
 ## Immutability And Recovery
 

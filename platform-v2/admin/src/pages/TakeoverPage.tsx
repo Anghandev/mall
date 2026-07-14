@@ -4,8 +4,8 @@ import { GlobalSearch } from '../components/GlobalSearch';
 
 const stages = [
   { label: '自动建案', detail: 'payment finality 后 7 × 24h 无有效发货证据', icon: Clock3 },
-  { label: '冻结商家权限', detail: '新订单、上架、USDT Claim 与 NPL/BNM Claim', icon: Ban },
-  { label: '顺序筹资', detail: '保证金 → 未占用资产 → 平台风险准备金', icon: CircleDollarSign },
+  { label: '冻结商家权限', detail: '新订单、上架与商家结算申请', icon: Ban },
+  { label: '顺序筹资', detail: '保证金 → 冻结应收 → 未来货款', icon: CircleDollarSign },
   { label: '完成履约', detail: '平台或替代商家发货，进入普通 finality', icon: Truck },
 ] as const;
 

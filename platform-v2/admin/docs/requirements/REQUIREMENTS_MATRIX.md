@@ -92,3 +92,20 @@ evidence exist against the same Core batch artifact version consumed by Mall
 and Merchant. A disabled control, empty API/action catalog, static record,
 fixture-only path or fail-closed placeholder is temporary safety behavior, not
 completion evidence. External inputs cannot be replaced by fixture success.
+
+## Payment Checkpoint Consumer Evidence
+
+The Admin consumer is pinned to `@abu24k/core-artifacts@2.0.0-payment.1`.
+
+- `ADM-SYS-005`: consumes the coordinated manifest plus live bootstrap chain,
+  fixed-asset and payment-readiness values; missing deployment/Safe evidence is
+  shown as `ExternalBlocked` and never inferred.
+- `ADM-CAT-004`: active product, SKU, authoritative price and available-stock
+  reads are integrated. Admin creation, merchant binding, media and inventory
+  writes remain `GAP-ADM-007`, so the full row is not complete.
+- `ADM-CLEAR-001` and `ADM-CLEAR-004`: the wallet-bound payment projection now
+  renders submission, reservation, Router call and indexed finality. Admin-wide
+  RBAC audit, Gas, Safe and ledger evidence remain `GAP-ADM-017`, so these rows
+  are not complete.
+
+All test records stay under `tests/**`; no production fixture is shipped.

@@ -66,8 +66,11 @@ importers:
   mall-v2:
     dependencies:
       '@abu24k/core-artifacts':
-        specifier: workspace:2.0.0-rc.2
+        specifier: workspace:2.0.0-payment.1
         version: link:../packages/core-artifacts
+      ethers:
+        specifier: 6.17.0
+        version: 6.17.0
       lucide-react:
         specifier: 'catalog:'
         version: 1.24.0(react@19.2.7)
@@ -112,7 +115,7 @@ importers:
   merchant-v2:
     dependencies:
       '@abu24k/core-artifacts':
-        specifier: workspace:2.0.0-rc.2
+        specifier: workspace:2.0.0-payment.1
         version: link:../packages/core-artifacts
       lucide-react:
         specifier: 'catalog:'
@@ -185,7 +188,7 @@ importers:
   platform-v2/admin:
     dependencies:
       '@abu24k/core-artifacts':
-        specifier: workspace:2.0.0-rc.2
+        specifier: workspace:2.0.0-payment.1
         version: link:../../packages/core-artifacts
       lucide-react:
         specifier: 'catalog:'
