@@ -1,20 +1,26 @@
 import { createHash } from 'node:crypto';
+import { id } from 'ethers';
 import { buildPaymentIntent, type CanonicalPaymentIntent } from '../api/checkout.ts';
 import { CoreError } from '../api/errors.ts';
 import { buildOtherUsdtAllocations, parsePaymentPolicySnapshot } from '../api/payment-policy.ts';
 import { paymentIntentHash } from '../api/payment-signing.ts';
+import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 
 const REQUIRED_CONFIRMATIONS = 15;
 const USDT = 'USDT';
 const NPL = 'NPL';
 const BNM = 'BNM_POINTS';
+const PAYMENT_COMPLETED_EVENT_SIGNATURE_HASH = id(
+  'PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)',
+).toLowerCase();
 
 interface PaymentEventRow {
   event_key: string;
   order_id: string;
   journal_id: string;
   transaction_hash: string;
+  log_index: string | number;
   block_hash: string;
   snapshot_hash: string;
   confirmations: string | number;
@@ -25,6 +31,18 @@ interface JournalBalanceRow {
   account_id: string;
   net_credit: string;
   balance_state: LedgerLine['balanceState'];
+  backing_safe_address: string | null;
+}
+
+interface SettlementReorgRow {
+  request_id: string;
+  item_index: number;
+  batch_id: string | null;
+  request_state: string;
+  asset: 'USDT' | 'NPL';
+  amount: string;
+  final_safe_tx_hash: string | null;
+  final_execution_tx_hash: string | null;
 }
 
 interface LedgerLine {
@@ -32,6 +50,7 @@ interface LedgerLine {
   side: 'DEBIT' | 'CREDIT';
   amount: string;
   balanceState: 'POSTED' | 'LOCKED' | 'AVAILABLE' | 'REQUESTED' | 'BATCHED' | 'SETTLED' | 'DISPUTED';
+  backingSafeAddress?: string;
 }
 
 interface LedgerAccount {
@@ -378,13 +397,35 @@ export async function reversePaymentProjection(executor: SqlExecutor, eventKey: 
   const row = payment.rows[0];
   if (!row) throw new CoreError('InvalidFinality', 'Unknown payment event', 404);
   if (!row.canonical) return { status: 'IDEMPOTENT' as const, orderId: row.order_id };
+  const settlementItems = await executor.query<SettlementReorgRow>(
+    `SELECT request.request_id, item.item_index, request.batch_id,
+       request.state AS request_state, request.asset, item.amount::text,
+       request.final_safe_tx_hash, request.final_execution_tx_hash
+     FROM core.settlement_request_items item
+     JOIN core.settlement_requests request ON request.request_id = item.request_id
+     WHERE item.order_id = $1
+     ORDER BY request.request_id, item.item_index
+     FOR UPDATE OF request, item`,
+    [row.order_id],
+  );
+  const batchIds = [...new Set(settlementItems.rows.flatMap((item) => item.batch_id ? [item.batch_id] : []))].sort();
+  const batchStates = new Map<string, string>();
+  if (batchIds.length > 0) {
+    const placeholders = batchIds.map((_, index) => `$${index + 1}`).join(',');
+    const batches = await executor.query<{ batch_id: string; state: string }>(
+      `SELECT batch_id, state FROM core.settlement_batches
+       WHERE batch_id IN (${placeholders}) ORDER BY batch_id FOR UPDATE`,
+      batchIds,
+    );
+    for (const batch of batches.rows) batchStates.set(batch.batch_id, batch.state);
+  }
   const currentBalances = await executor.query<JournalBalanceRow>(
-    `SELECT line.account_id, line.balance_state,
+    `SELECT line.account_id, line.balance_state, line.backing_safe_address,
        sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS net_credit
      FROM core.ledger_journals journal
      JOIN core.ledger_lines line ON line.journal_id = journal.journal_id
      WHERE journal.order_id = $1
-     GROUP BY line.account_id, line.balance_state
+     GROUP BY line.account_id, line.balance_state, line.backing_safe_address
      HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) <> 0
      ORDER BY line.account_id, line.balance_state`,
     [row.order_id],
@@ -394,17 +435,26 @@ export async function reversePaymentProjection(executor: SqlExecutor, eventKey: 
     side: BigInt(line.net_credit) > 0n ? 'DEBIT' : 'CREDIT',
     amount: (BigInt(line.net_credit) < 0n ? -BigInt(line.net_credit) : BigInt(line.net_credit)).toString(),
     balanceState: line.balance_state,
+    ...(line.backing_safe_address ? { backingSafeAddress: line.backing_safe_address } : {}),
   }));
   const reversalEventKey = `reorg:${eventKey}:${replacementBlockHash.toLowerCase()}`;
+  const reversalJournalId = `reversal:${row.journal_id}:${replacementBlockHash.toLowerCase()}`;
+  const paymentIdentity = await executor.query<{ policy_version: string; contract_address: string }>(
+    `SELECT orders.policy_version::text, finality.contract_address
+     FROM core.orders orders
+     JOIN core.transaction_finality finality
+       ON finality.transaction_id = $2
+     WHERE orders.order_id = $1`,
+    [row.order_id, `payment:${eventKey}`],
+  );
+  const identity = paymentIdentity.rows[0];
+  if (!identity) throw new CoreError('InvalidFinality', 'Payment reorg identity is unavailable', 409);
   await postJournal(executor, {
-    journalId: `reversal:${row.journal_id}:${replacementBlockHash.toLowerCase()}`,
+    journalId: reversalJournalId,
     eventKey: reversalEventKey,
     eventType: 'PAYMENT_REORG_REVERSAL',
     orderId: row.order_id,
-    policyVersion: Number((await executor.query<{ policy_version: string }>(
-      'SELECT policy_version FROM core.orders WHERE order_id = $1',
-      [row.order_id],
-    )).rows[0]!.policy_version),
+    policyVersion: Number(identity.policy_version),
     contentHash: hashJson({ reversalOf: row.journal_id, replacementBlockHash, lines: reversalLines }),
     sourceTxHash: row.transaction_hash,
     sourceBlockHash: replacementBlockHash,
@@ -412,6 +462,42 @@ export async function reversePaymentProjection(executor: SqlExecutor, eventKey: 
     payload: { replacedEventKey: eventKey },
     lines: reversalLines,
   });
+  await quarantineReorgedSettlements(executor, {
+    paymentEventKey: eventKey,
+    orderId: row.order_id,
+    replacementBlockHash,
+    reversalJournalId,
+    items: settlementItems.rows,
+    batchStates,
+  });
+  const debtRecovery = await executor.query<{ merchant_id: string; amount: string }>(
+    `SELECT merchant_id, amount_usdt::text AS amount
+     FROM core.merchant_debt_recoveries
+     WHERE order_id = $1 AND reversed_at IS NULL
+     ORDER BY recovery_id FOR UPDATE`,
+    [row.order_id],
+  );
+  const recoveredByMerchant = new Map<string, bigint>();
+  for (const recovery of debtRecovery.rows) {
+    recoveredByMerchant.set(
+      recovery.merchant_id,
+      (recoveredByMerchant.get(recovery.merchant_id) ?? 0n) + BigInt(recovery.amount),
+    );
+  }
+  for (const [merchantId, amount] of recoveredByMerchant) {
+    await executor.query(
+      `UPDATE core.merchant_debts SET recovered_usdt = recovered_usdt - $2,
+         outstanding_usdt = outstanding_usdt + $2,
+         latest_evidence_hash = $3, updated_at = clock_timestamp()
+       WHERE merchant_id = $1 AND recovered_usdt >= $2`,
+      [merchantId, amount.toString(), replacementBlockHash],
+    );
+  }
+  await executor.query(
+    `UPDATE core.merchant_debt_recoveries SET reversed_at = clock_timestamp(),
+       reversal_evidence_hash = $2 WHERE order_id = $1 AND reversed_at IS NULL`,
+    [row.order_id, replacementBlockHash],
+  );
   const reservation = await executor.query<{ reservation_id: string }>(
     'SELECT reservation_id FROM core.orders WHERE order_id = $1',
     [row.order_id],
@@ -510,7 +596,188 @@ export async function reversePaymentProjection(executor: SqlExecutor, eventKey: 
       ],
     );
   }
+  const reorgAuditHash = hashJson({
+    eventKey,
+    transactionHash: row.transaction_hash,
+    previousBlockHash: row.block_hash,
+    canonicalBlockHash: replacementBlockHash.toLowerCase(),
+    deepFinalized,
+  });
+  await enqueueAudit(executor, {
+    sourceEventId: auditSourceId('audit:payment-reorg', {
+      eventKey,
+      replacementBlockHash: replacementBlockHash.toLowerCase(),
+    }),
+    streamName: 'financial',
+    evidenceProfile: 'CHAIN_OBSERVED',
+    eventType: 'PaymentFinalityReorged',
+    resourceType: 'ORDER',
+    resourceId: row.order_id,
+    actorRole: 'PAYMENT_INDEXER',
+    correlationId: `payment-reorg:${row.order_id}`,
+    requestHash: reorgAuditHash.slice(2),
+    payload: {
+      eventKey,
+      previousBlockHash: row.block_hash,
+      canonicalBlockHash: replacementBlockHash.toLowerCase(),
+      deepFinalized,
+      reversedDebtRecoveries: debtRecovery.rows.length,
+    },
+    transactionEvidence: {
+      txHash: row.transaction_hash,
+      chainId: 56,
+      contractAddress: identity.contract_address,
+      eventSignatureHash: PAYMENT_COMPLETED_EVENT_SIGNATURE_HASH,
+      logIndex: Number(row.log_index),
+      resourceId: row.order_id,
+      policyVersion: Number(identity.policy_version),
+      blockHash: row.block_hash,
+      confirmations: 0,
+    },
+    createdAt: new Date(),
+  });
   return { status: 'REVERSED' as const, orderId: row.order_id };
+}
+
+async function quarantineReorgedSettlements(
+  executor: SqlExecutor,
+  input: {
+    paymentEventKey: string;
+    orderId: string;
+    replacementBlockHash: string;
+    reversalJournalId: string;
+    items: readonly SettlementReorgRow[];
+    batchStates: ReadonlyMap<string, string>;
+  },
+) {
+  if (input.items.length === 0) return;
+  const evidenceHash = input.replacementBlockHash.toLowerCase();
+  for (const item of input.items) {
+    await executor.query(
+      `INSERT INTO core.settlement_payment_reorg_exposures (
+         exposure_id, payment_event_key, order_id, request_id, request_item_index,
+         batch_id, previous_request_state, previous_batch_state, asset, amount,
+         final_safe_tx_hash, final_execution_tx_hash, reversal_journal_id,
+         evidence_hash, resolution_state, created_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'OPEN',clock_timestamp())
+       ON CONFLICT (payment_event_key, request_id, request_item_index) DO NOTHING`,
+      [
+        hashJson({
+          paymentEventKey: input.paymentEventKey,
+          requestId: item.request_id,
+          itemIndex: item.item_index,
+        }),
+        input.paymentEventKey,
+        input.orderId,
+        item.request_id,
+        item.item_index,
+        item.batch_id,
+        item.request_state,
+        item.batch_id ? input.batchStates.get(item.batch_id) ?? null : null,
+        item.asset,
+        item.amount,
+        item.final_safe_tx_hash,
+        item.final_execution_tx_hash,
+        input.reversalJournalId,
+        evidenceHash,
+      ],
+    );
+  }
+  const requestIds = [...new Set(input.items.map((item) => item.request_id))].sort();
+  for (const requestId of requestIds) {
+    await executor.query(
+      `UPDATE core.settlement_requests SET state = 'QUARANTINED'
+       WHERE request_id = $1 AND state <> 'QUARANTINED'`,
+      [requestId],
+    );
+  }
+  const batchIds = [...input.batchStates.keys()].sort();
+  for (const batchId of batchIds) {
+    await executor.query(
+      `UPDATE core.settlement_batches SET state = 'QUARANTINED'
+       WHERE batch_id = $1 AND state <> 'QUARANTINED'`,
+      [batchId],
+    );
+    await executor.query(
+      `UPDATE core.settlement_execution_attempts SET state = 'QUARANTINED',
+         updated_at = clock_timestamp()
+       WHERE batch_id = $1 AND state <> 'QUARANTINED'`,
+      [batchId],
+    );
+    await executor.query(
+      `UPDATE core.safe_nonce_reservations SET state = 'QUARANTINED'
+       WHERE batch_id = $1 AND state <> 'QUARANTINED'`,
+      [batchId],
+    );
+  }
+  const causeId = `payment-reorg:${input.orderId}`;
+  await executor.query(
+    `INSERT INTO core.breaker_causes (
+       scope, cause_type, cause_id, active, evidence_hash, updated_at
+     ) VALUES ('NEW_SETTLEMENT_BATCH','SECURITY',$1,true,$2,clock_timestamp())
+     ON CONFLICT (scope, cause_type, cause_id) DO UPDATE
+       SET active = true, evidence_hash = EXCLUDED.evidence_hash, updated_at = EXCLUDED.updated_at`,
+    [causeId, evidenceHash],
+  );
+  await executor.query(
+    `INSERT INTO core.breaker_events (
+       breaker_event_id, scope, action, cause_type, cause_id,
+       evidence_hash, policy_version, changed_by, changed_at
+     ) VALUES ($1,'NEW_SETTLEMENT_BATCH','PAUSE','SECURITY',$2,$3,NULL,'PAYMENT_REORG',clock_timestamp())
+     ON CONFLICT (breaker_event_id) DO NOTHING`,
+    [hashJson({ causeId, evidenceHash, action: 'PAUSE' }), causeId, evidenceHash],
+  );
+  await executor.query(
+    `INSERT INTO core.circuit_breakers (
+       scope, paused, evidence_hash, policy_version, changed_by, changed_at
+     ) VALUES ('NEW_SETTLEMENT_BATCH',true,$1,NULL,'PAYMENT_REORG',clock_timestamp())
+     ON CONFLICT (scope) DO UPDATE SET paused = true, evidence_hash = EXCLUDED.evidence_hash,
+       policy_version = NULL, changed_by = EXCLUDED.changed_by, changed_at = EXCLUDED.changed_at`,
+    [evidenceHash],
+  );
+  await executor.query(
+    `INSERT INTO core.outbox_events (
+       event_id, aggregate_type, aggregate_id, event_type, payload,
+       idempotency_key, state
+     ) VALUES ($1,'ORDER',$2,'SettlementPaymentReorgQuarantined',$3,$1,'PENDING')
+     ON CONFLICT (idempotency_key) DO NOTHING`,
+    [
+      `outbox:settlement-payment-reorg:${hashJson({
+        paymentEventKey: input.paymentEventKey,
+        orderId: input.orderId,
+      }).slice(2)}`,
+      input.orderId,
+      JSON.stringify({
+        paymentEventKey: input.paymentEventKey,
+        reversalJournalId: input.reversalJournalId,
+        requestIds,
+        batchIds,
+        evidenceHash,
+      }),
+    ],
+  );
+  if (input.items.some((item) => item.final_execution_tx_hash)) {
+    await executor.query(
+      `INSERT INTO core.durable_jobs (
+         job_id, job_type, resource_id, payload, idempotency_key, state
+       ) VALUES ($1,'RECONCILE',$2,$3,$1,'READY')
+       ON CONFLICT (idempotency_key) DO NOTHING`,
+      [
+        `settlement-payment-reorg:${hashJson({
+          paymentEventKey: input.paymentEventKey,
+          orderId: input.orderId,
+        }).slice(2)}`,
+        input.orderId,
+        JSON.stringify({
+          paymentEventKey: input.paymentEventKey,
+          requestIds,
+          finalExecutionTxHashes: input.items.flatMap((item) =>
+            item.final_execution_tx_hash ? [item.final_execution_tx_hash] : []),
+          evidenceHash,
+        }),
+      ],
+    );
+  }
 }
 
 async function quarantineDeepReorgPayment(
@@ -592,6 +859,27 @@ export async function advancePaymentFinality(executor: SqlExecutor, canonicalHea
          updated_at = clock_timestamp()
      FROM core.payment_events payment
      WHERE payment.canonical AND orders.order_id = payment.order_id`,
+  );
+  await executor.query(
+    `INSERT INTO core.outbox_events (
+       event_id, aggregate_type, aggregate_id, event_type, payload,
+       idempotency_key, state
+     )
+     SELECT
+       'outbox:payment-final:' || payment.event_key,
+       'ORDER', payment.order_id, 'PaymentFinalized',
+       jsonb_build_object(
+         'eventKey', payment.event_key,
+         'orderId', payment.order_id,
+         'transactionHash', payment.transaction_hash,
+         'blockHash', payment.block_hash,
+         'confirmations', payment.confirmations
+       ),
+       'payment-finalized:' || payment.event_key,
+       'PENDING'
+     FROM core.payment_events payment
+     WHERE payment.canonical AND payment.confirmations >= 15
+     ON CONFLICT (idempotency_key) DO NOTHING`,
   );
   const unusedReservations = await executor.query<{ reservation_id: string }>(
     `SELECT leg.reservation_id
@@ -716,15 +1004,27 @@ function paymentJournal(
 ) {
   const accounts = new Map<string, LedgerAccount>();
   const lines: LedgerLine[] = [];
-  const add = (account: LedgerAccount, side: LedgerLine['side'], amount: string, balanceState: LedgerLine['balanceState']) => {
+  const add = (
+    account: LedgerAccount,
+    side: LedgerLine['side'],
+    amount: string,
+    balanceState: LedgerLine['balanceState'],
+    backingSafeAddress?: string,
+  ) => {
     if (BigInt(amount) === 0n) return;
     accounts.set(account.accountId, account);
-    lines.push({ accountId: account.accountId, side, amount, balanceState });
+    lines.push({
+      accountId: account.accountId,
+      side,
+      amount,
+      balanceState,
+      ...(backingSafeAddress ? { backingSafeAddress: backingSafeAddress.toLowerCase() } : {}),
+    });
   };
-  add(safeAccount('usdt-custody', safes.usdtCustodySafe, USDT), 'DEBIT', intent.usdtPaymentAmount, 'POSTED');
-  add(account(`merchant:${intent.merchant}:usdt`, 'MERCHANT', intent.merchant, USDT, 'MERCHANT_RECEIVABLE'), 'CREDIT', intent.merchantNetReceivableUsdt, 'LOCKED');
+  add(safeAccount('usdt-custody', safes.usdtCustodySafe, USDT), 'DEBIT', intent.usdtPaymentAmount, 'POSTED', safes.usdtCustodySafe);
+  add(account(`merchant:${intent.merchant}:usdt`, 'MERCHANT', intent.merchant, USDT, 'MERCHANT_RECEIVABLE'), 'CREDIT', intent.merchantNetReceivableUsdt, 'LOCKED', safes.usdtCustodySafe);
   for (const allocation of intent.merchantConcessionAllocations) {
-    add(account(`concession:${allocation.account}:usdt`, 'BENEFICIARY', allocation.account, USDT, 'CONCESSION'), 'CREDIT', allocation.amount, 'LOCKED');
+    add(account(`concession:${allocation.account}:usdt`, 'BENEFICIARY', allocation.account, USDT, 'CONCESSION'), 'CREDIT', allocation.amount, 'LOCKED', safes.usdtCustodySafe);
   }
   for (const allocation of intent.otherUsdtAllocations) {
     const prize = allocation.purpose === 'SECKILL_PRIZE_LIABILITY';
@@ -739,11 +1039,12 @@ function paymentJournal(
       'CREDIT',
       allocation.amount,
       'LOCKED',
+      safes.usdtCustodySafe,
     );
   }
   add(account('burn:npl', 'SYSTEM', 'npl-burn', NPL, 'BURN'), 'DEBIT', intent.nplBurnAmount, 'POSTED');
   add(account('clearing:buyer-burn:npl', 'SYSTEM', 'buyer-burn-payment', NPL, 'PAYMENT_CLEARING'), 'CREDIT', intent.nplBurnAmount, 'POSTED');
-  add(safeAccount('npl-reward', safes.nplRewardSafe, NPL), 'DEBIT', intent.nplRewardAmount, 'POSTED');
+  add(safeAccount('npl-reward', safes.nplRewardSafe, NPL), 'DEBIT', intent.nplRewardAmount, 'POSTED', safes.nplRewardSafe);
   for (const allocation of intent.nplRewardAllocations) {
     add(
       account(
@@ -756,6 +1057,7 @@ function paymentJournal(
       'CREDIT',
       allocation.amount,
       'LOCKED',
+      safes.nplRewardSafe,
     );
   }
   add(account('issuance:bnm', 'SYSTEM', 'bnm-issuance', BNM, 'BNM_ISSUANCE'), 'DEBIT', intent.bnmAmount, 'POSTED');
@@ -850,6 +1152,7 @@ async function postJournal(
         side: line.side,
         amount: line.amount,
         balance_state: line.balanceState,
+        backing_safe_address: line.backingSafeAddress ?? null,
       }))),
     ],
   );

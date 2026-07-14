@@ -40,6 +40,13 @@ import {
 } from './payment-policy.ts';
 import { assertEmptySessionPrizeDecision, evaluateForcedReceipt, evaluateTakeover } from './fulfillment.ts';
 import { AmapAdministrativeRegionResolver, executeProvider, verifyWebhookHmac } from './providers.ts';
+import {
+  settlementIntentDigest,
+  settlementRequestDomain,
+  settlementRequestTypes,
+  verifySettlementRequestSignature,
+} from './settlement-signing.ts';
+import { assertSafeSettlementBatch, buildSafeSettlementBatch } from '../chain/safe-multisend.ts';
 
 const HASH = `0x${'1'.repeat(64)}`;
 const HASH_2 = `0x${'2'.repeat(64)}`;
@@ -102,6 +109,18 @@ test('typed config reports blocked inputs without exposing secret values', () =>
   assert.throws(
     () => loadConfig({ ...completeEnvironment(), SETTLEMENT_EXECUTOR_URL: 'http://executor.example.invalid' }),
     /must use HTTPS/,
+  );
+  assert.throws(
+    () => loadConfig({ ...completeEnvironment(), BSC_RPC_URL: 'wss://rpc.example.invalid' }),
+    /must use HTTPS/,
+  );
+  assert.throws(
+    () => loadConfig({
+      ...completeEnvironment(),
+      BSC_RPC_URL: 'https://rpc.example.invalid',
+      BSC_FALLBACK_RPC_URL: 'https://rpc.example.invalid/',
+    }),
+    /must be distinct/,
   );
   assert.throws(
     () => loadConfig({ ...completeEnvironment(), QUOTE_SIGNER_ADDRESS: SAFE }),
@@ -237,6 +256,68 @@ test('sensitive action binds exact resource, old/new hashes, policy, Safe, nonce
         new Date(1_799_999_000 * 1000),
       ),
     /Secondary signer mismatch/,
+  );
+});
+
+test('settlement EIP-712 intent and Safe MultiSend bind wallet, items, nonce and exact transfers', async () => {
+  const wallet = Wallet.createRandom();
+  const intent = {
+    intentId: ORDER_ID,
+    artifactVersion: CORE_ARTIFACT_VERSION,
+    wallet: wallet.address,
+    recipient: wallet.address,
+    rail: 'MERCHANT_USDT' as const,
+    asset: '0x55d398326f99059ff775485246999027b3197955',
+    safeAddress: SAFE,
+    amount: '45',
+    itemsHash: HASH,
+    nonce: '3',
+    deadline: 1_800_000_300,
+  };
+  const signature = await wallet.signTypedData(
+    settlementRequestDomain(SAFE),
+    settlementRequestTypes,
+    intent,
+  );
+  const verified = await verifySettlementRequestSignature(
+    intent,
+    signature,
+    new Date(1_800_000_000_000),
+  );
+  assert.equal(verified.wallet, wallet.address.toLowerCase());
+  assert.equal(verified.digest, settlementIntentDigest(intent));
+  await assert.rejects(
+    verifySettlementRequestSignature(
+      { ...intent, amount: '46' },
+      signature,
+      new Date(1_800_000_000_000),
+    ),
+    /signer does not match/,
+  );
+
+  const batch = buildSafeSettlementBatch({
+    batchId: HASH_2,
+    safeAddress: SAFE,
+    safeNonce: '7',
+    items: [
+      {
+        orderId: ORDER_ID,
+        requestId: HASH_2,
+        requestItemIndex: 0,
+        accountId: `merchant:${wallet.address.toLowerCase()}:usdt`,
+        tokenAddress: intent.asset,
+        recipientAddress: wallet.address,
+        amount: '45',
+      },
+    ],
+  });
+  assert.equal(batch.safeTransaction.operation, 1);
+  assert.equal(batch.safeTransaction.safeTxGas, '0');
+  assert.equal(batch.items[0]?.transferCalldata.slice(0, 10), '0xa9059cbb');
+  assert.equal(assertSafeSettlementBatch(batch).safeTxHash, batch.safeTxHash);
+  assert.throws(
+    () => assertSafeSettlementBatch({ ...batch, totalAmount: '46' }),
+    /totalAmount/,
   );
 });
 
@@ -748,6 +829,8 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
   };
   const runtimeReadiness = paymentRuntimeReadiness(now, false);
   const fulfillmentCalls: Array<{ operation: string; wallet: string; orderId: string; input?: unknown }> = [];
+  let notificationEndpointCorrelationId: string | undefined;
+  let monitoringCorrelationId: string | undefined;
   const server = createApiServer({
     config,
     runtimeReadiness,
@@ -755,7 +838,10 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     nonceRateLimiter: { consume: async () => undefined },
     authDomain: 'mall.abu.test',
     authUri: 'https://mall.abu.test',
-    resolveRoles: async () => ({ roles: ['BUYER'] }),
+    resolveRoles: async () => ({
+      roles: ['BUYER', 'MERCHANT', 'ADMIN', 'OPERATOR', 'ARBITRATOR', 'AUDITOR'],
+      merchantId: 'merchant-1',
+    }),
     getOrderProjection: async (orderId) =>
       orderId === 'order-1'
         ? {
@@ -836,6 +922,75 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       listStores: async () => [{ storeId: 'store-1', regionCode: '110101' }],
       getOrderTarget: async (actor, orderId) => ({ orderId, buyerWallet: actor.walletAddress }),
     },
+    settlementService: {
+      createIntent: async (actor, input) => ({
+        intentId: ORDER_ID,
+        wallet: actor.walletAddress,
+        ...input,
+      }),
+      createGovernedIntent: async (actor, input) => ({
+        intentId: HASH,
+        wallet: actor.walletAddress,
+        ...input,
+      }),
+      submitRequest: async (actor, input) => ({
+        requestId: HASH_2,
+        wallet: actor.walletAddress,
+        intentId: input.intentId,
+        state: 'REQUESTED',
+      }),
+      list: async (actor) => ({ wallet: actor.walletAddress, balances: [], requests: [] }),
+    },
+    takeoverFundingService: {
+      fundingApprovalChallenge: async (_actor, input) => ({ ...input, digest: HASH }),
+      fundTakeover: async (_actor, input) => ({ ...input, state: 'FUNDED' }),
+      getMerchantFinance: async (actor, merchantId) => ({
+        wallet: actor.walletAddress,
+        merchantId: merchantId ?? actor.merchantId ?? 'merchant-1',
+      }),
+      getTakeoverFunding: async (_actor, caseId) => ({ caseId, state: 'FUNDED' }),
+    },
+    guaranteeDepositService: {
+      submit: async (actor, input) => ({ merchantId: actor.merchantId, ...input, state: 'SUBMITTED' }),
+    },
+    policyService: {
+      createDraft: async (actor, input) => ({ draftId: 'policy-draft-1', actor: actor.walletAddress, ...input }),
+      updateDraft: async (_actor, draftId, input) => ({ draftId, ...input }),
+      approvalChallenge: async (_actor, draftId, input) => ({ draftId, ...input, digest: HASH }),
+      submitSecondarySignature: async (_actor, draftId, input) => ({ draftId, ...input, state: 'SECONDARY_SIGNED' }),
+      proposeToSafe: async (_actor, draftId) => ({ draftId, state: 'SAFE_PROPOSED' }),
+      getDraft: async (_actor, draftId) => ({ draftId, state: 'DRAFT' }),
+      listDrafts: async () => [],
+    },
+    cmsService: {
+      createVersion: async (_actor, input) => ({ versionId: 'cms-version-1', ...input }),
+      publish: async (_actor, versionId) => ({ versionId, published: true }),
+      rollback: async (_actor, versionId) => ({ versionId, publicationType: 'ROLLED_BACK' }),
+      getVersion: async (_actor, versionId) => ({ versionId }),
+      listPublished: async () => [],
+    },
+    notificationService: {
+      registerEndpoint: async (actor, input) => {
+        notificationEndpointCorrelationId = input.correlationId;
+        return { wallet: actor.walletAddress, ...input };
+      },
+      createCampaign: async (_actor, input) => ({ campaignId: 'campaign-1', ...input }),
+      publishCampaign: async (_actor, campaignId) => ({ campaignId, state: 'PUBLISHED' }),
+      listInbox: async (actor) => ({ wallet: actor.walletAddress, messages: [] }),
+    },
+    systemConfigService: {
+      createVersion: async (_actor, input) => ({ configVersionId: 'config-1', ...input }),
+      publish: async (_actor, configVersionId) => ({ configVersionId, published: true }),
+      list: async () => [],
+    },
+    auditService: { list: async (_actor, query) => ({ entries: [], query }) },
+    monitoringService: {
+      dashboard: async () => ({ metrics: [], alerts: [] }),
+      acknowledge: async (_actor, alertKey, correlationId) => {
+        monitoringCorrelationId = correlationId;
+        return { alertKey, state: 'ACKNOWLEDGED' };
+      },
+    },
     logisticsWebhookSecrets: {
       KUAIDI100: 'kuaidi-webhook-secret',
       CAINIAO: 'cainiao-webhook-secret',
@@ -873,6 +1028,18 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     });
     assert.equal(login.status, 200);
     const session = (await login.json()) as { token: string };
+    const bearerHeaders = {
+      'content-type': 'application/json',
+      authorization: `Bearer ${session.token}`,
+    };
+    const buyerOnlyToken = issueSessionToken(
+      { walletAddress: wallet.address, roles: ['BUYER'] },
+      config.jwtSecret!,
+      now,
+    );
+    assert.equal((await fetch(`${base}/v2/admin/policy-drafts`, {
+      headers: { authorization: `Bearer ${buyerOnlyToken}` },
+    })).status, 403);
     const postOrderAction = (action: string, body: Record<string, unknown>) => fetch(
       `${base}/v2/orders/order-1/${action}`,
       {
@@ -897,6 +1064,239 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     };
     const confirmReceipt = projection.allowedActions.find((item) => item.action === 'CONFIRM_RECEIPT');
     assert.deepEqual(confirmReceipt, { action: 'CONFIRM_RECEIPT', enabled: true });
+
+    const settlementIntent = await fetch(`${base}/v2/settlement-intents`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+      body: JSON.stringify({
+        rail: 'PRIZE_USDT',
+        amount: '10',
+        idempotencyKey: 'settlement-intent-http-1',
+      }),
+    });
+    assert.equal(settlementIntent.status, 201);
+    const governedSettlementIntent = await fetch(`${base}/v2/admin/settlement-intents`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+      body: JSON.stringify({
+        rail: 'TAKEOVER_USDT',
+        resourceId: 'takeover:1',
+        orderId: ORDER_ID,
+        accountId: 'takeover:takeover:1:usdt',
+        recipient: SAFE,
+        fulfillmentTargetHash: HASH,
+        amount: '10',
+        idempotencyKey: 'governed-settlement-intent-http-1',
+        approval: {
+          action: 'CREATE_TAKEOVER_PAYOUT',
+          resourceType: 'TAKEOVER_CASE',
+          resourceId: 'takeover:1',
+          policyVersion: '1',
+          oldValueHash: HASH,
+          newValueHash: HASH_2,
+          safeAddress: SAFE,
+          nonce: '1',
+          deadline: '1800000000',
+          signature: '0x1234',
+        },
+      }),
+    });
+    assert.equal(governedSettlementIntent.status, 201);
+    const settlementRequest = await fetch(`${base}/v2/settlement-requests`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+      body: JSON.stringify({ intentId: ORDER_ID, signature: '0x1234' }),
+    });
+    assert.equal(settlementRequest.status, 201);
+    assert.equal((await fetch(`${base}/v2/settlements`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+
+    assert.equal((await fetch(`${base}/v2/finance/merchant`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/finance/merchant/guarantee-deposits`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        policyVersion: '1',
+        expectedAmountUsdt: '1000000000000000000000',
+        transactionHash: HASH,
+        idempotencyKey: 'guarantee-deposit-http-1',
+      }),
+    })).status, 201);
+    assert.equal((await fetch(`${base}/v2/admin/takeover-funding/approval-challenge`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        caseId: 'takeover-1',
+        requiredUsdt: '10',
+        nonce: '1',
+        deadline: '1800000000',
+      }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/takeover-funding`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        caseId: 'takeover-1',
+        requiredUsdt: '10',
+        idempotencyKey: 'takeover-funding-http-1',
+        approval: {
+          action: 'FUND_TAKEOVER',
+          resourceType: 'TAKEOVER_CASE',
+          resourceId: 'takeover-1',
+          policyVersion: '1',
+          oldValueHash: HASH,
+          newValueHash: HASH_2,
+          safeAddress: SAFE,
+          nonce: '1',
+          deadline: '1800000000',
+          signature: '0x1234',
+        },
+      }),
+    })).status, 201);
+    assert.equal((await fetch(`${base}/v2/admin/takeover-funding/takeover-1`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+
+    assert.equal((await fetch(`${base}/v2/cms/public`)).status, 200);
+    const notificationEndpointResponse = await fetch(`${base}/v2/notification-endpoints`, {
+      method: 'POST',
+      headers: { ...bearerHeaders, 'x-correlation-id': 'notification-endpoint-http' },
+      body: JSON.stringify({
+        channel: 'IN_APP',
+        provider: 'CORE',
+        endpointReference: 'recipient://wallet',
+        topics: ['ORDER'],
+      }),
+    });
+    assert.equal(notificationEndpointResponse.status, 201);
+    assert.equal(notificationEndpointCorrelationId, 'notification-endpoint-http');
+    assert.equal(notificationEndpointResponse.headers.get('x-correlation-id'), 'notification-endpoint-http');
+    assert.equal((await fetch(`${base}/v2/notifications`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+
+    assert.equal((await fetch(`${base}/v2/admin/policy-drafts`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/policy-drafts`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ payload: {}, idempotencyKey: 'policy-draft-http-1' }),
+    })).status, 201);
+    assert.equal((await fetch(`${base}/v2/admin/policy-drafts/policy-draft-1`, {
+      method: 'PUT',
+      headers: bearerHeaders,
+      body: JSON.stringify({ payload: {} }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/policy-drafts/policy-draft-1`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/policy-drafts/policy-draft-1/approval-challenge`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ nonce: '1', deadline: '1800000000' }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/policy-drafts/policy-draft-1/secondary-signature`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ nonce: '1', deadline: '1800000000', signature: '0x1234' }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/policy-drafts/policy-draft-1/safe-proposal`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: '{}',
+    })).status, 202);
+
+    assert.equal((await fetch(`${base}/v2/admin/cms/versions`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        slug: 'seckill-rules',
+        contentType: 'SECKILL_RULES',
+        placement: 'SECKILL',
+        locale: 'zh-CN',
+        contentFormat: 'STRUCTURED_RICH_TEXT',
+        content: {},
+        audience: {},
+        idempotencyKey: 'cms-version-http-1',
+      }),
+    })).status, 201);
+    assert.equal((await fetch(`${base}/v2/admin/cms/versions/cms-version-1`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    for (const action of ['publish', 'rollback']) {
+      assert.equal((await fetch(`${base}/v2/admin/cms/versions/cms-version-1/${action}`, {
+        method: 'POST',
+        headers: bearerHeaders,
+        body: JSON.stringify({ evidenceHash: HASH }),
+      })).status, 200, `cms ${action}`);
+    }
+
+    assert.equal((await fetch(`${base}/v2/admin/notification-campaigns`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        topic: 'ANNOUNCEMENT',
+        audience: {},
+        message: {},
+        idempotencyKey: 'notification-campaign-http-1',
+      }),
+    })).status, 201);
+    assert.equal((await fetch(`${base}/v2/admin/notification-campaigns/campaign-1/publish`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ evidenceHash: HASH }),
+    })).status, 200);
+
+    assert.equal((await fetch(`${base}/v2/admin/system-config/versions`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/system-config/versions`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        configKey: 'BUSINESS',
+        payload: {},
+        effectiveFrom: now.toISOString(),
+        idempotencyKey: 'system-config-http-1',
+      }),
+    })).status, 201);
+    assert.equal((await fetch(`${base}/v2/admin/system-config/versions/config-1/publish`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        approval: {
+          action: 'PUBLISH_SYSTEM_CONFIG',
+          resourceType: 'SYSTEM_CONFIG',
+          resourceId: 'config-1',
+          policyVersion: '1',
+          oldValueHash: HASH,
+          newValueHash: HASH_2,
+          safeAddress: SAFE,
+          nonce: '1',
+          deadline: '1800000000',
+          signature: '0x1234',
+        },
+      }),
+    })).status, 200);
+
+    assert.equal((await fetch(`${base}/v2/admin/audit/entries?streamName=governance&limit=25`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/monitoring`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    const monitoringResponse = await fetch(`${base}/v2/admin/monitoring/alerts/RPC_PRIMARY:height_lag/acknowledge`, {
+      method: 'POST',
+      headers: { ...bearerHeaders, 'x-correlation-id': 'monitoring-http-correlation' },
+      body: '{}',
+    });
+    assert.equal(monitoringResponse.status, 200);
+    assert.equal(monitoringCorrelationId, 'monitoring-http-correlation');
+    assert.equal(monitoringResponse.headers.get('x-correlation-id'), 'monitoring-http-correlation');
 
     const unauthorizedOrders = await fetch(`${base}/v2/orders`);
     assert.equal(unauthorizedOrders.status, 401);
@@ -1304,6 +1704,34 @@ function completeEnvironment(): Record<string, string> {
     SETTLEMENT_EXECUTOR_URL: 'https://executor.example.invalid',
     SETTLEMENT_EXECUTOR_TOKEN: 'provider-secret',
     EXECUTOR_MAX_GAS_LIMIT: '1000000',
+    SETTLEMENT_REPLACEMENT_DELAY_MS: '300000',
+    SAFE_APPROVAL_VERIFIER_URL: 'https://safe-approvals.example.invalid',
+    SAFE_APPROVAL_VERIFIER_TOKEN: 'provider-secret',
+    SAFE_INTERNAL_MTLS_ENABLED: 'true',
+    USDT_SAFE_PROXY_CODE_HASH: HASH,
+    USDT_SAFE_OWNER_SET_HASH: HASH_2,
+    USDT_SAFE_THRESHOLD: '2',
+    USDT_SAFE_GUARD_ADDRESS: '0x0000000000000000000000000000000000000000',
+    USDT_SAFE_FALLBACK_HANDLER_ADDRESS: '0x0000000000000000000000000000000000000000',
+    USDT_SAFE_MODULES_HASH: HASH_2,
+    USDT_TOKEN_CODE_HASH: HASH,
+    USDT_TRANSFER_CONFORMANCE_EVIDENCE_HASH: HASH_2,
+    NPL_SAFE_PROXY_CODE_HASH: HASH,
+    NPL_SAFE_OWNER_SET_HASH: HASH_2,
+    NPL_SAFE_THRESHOLD: '2',
+    NPL_SAFE_GUARD_ADDRESS: '0x0000000000000000000000000000000000000000',
+    NPL_SAFE_FALLBACK_HANDLER_ADDRESS: '0x0000000000000000000000000000000000000000',
+    NPL_SAFE_MODULES_HASH: HASH_2,
+    NPL_TOKEN_CODE_HASH: HASH,
+    NPL_TRANSFER_CONFORMANCE_EVIDENCE_HASH: HASH_2,
+    OPERATIONS_SAFE_PROXY_CODE_HASH: HASH,
+    OPERATIONS_SAFE_OWNER_SET_HASH: HASH_2,
+    OPERATIONS_SAFE_THRESHOLD: '2',
+    OPERATIONS_SAFE_GUARD_ADDRESS: '0x0000000000000000000000000000000000000000',
+    OPERATIONS_SAFE_FALLBACK_HANDLER_ADDRESS: '0x0000000000000000000000000000000000000000',
+    OPERATIONS_SAFE_MODULES_HASH: HASH_2,
+    OPERATIONS_TOKEN_CODE_HASH: HASH,
+    OPERATIONS_TRANSFER_CONFORMANCE_EVIDENCE_HASH: HASH_2,
     PLATFORM_SERVICE_FEE_BPS: '500',
     SECKILL_PRIZE_POOL_BPS: '1000',
     MERCHANT_CONCESSION_DESTINATIONS_JSON:

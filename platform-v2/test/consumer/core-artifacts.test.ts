@@ -20,16 +20,17 @@ const websocket = readJson('websocket-protocol.json');
 const enums = readJson('state-error-enums.json');
 const abiBundle = readJson('contracts/abi-bundle.json');
 const contractManifest = readJson('contracts/contract-manifest.json');
+const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('fulfillment checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-fulfillment.1');
-  for (const document of [manifest, websocket, enums, abiBundle, contractManifest]) {
+test('settlement/admin checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-settlement-admin.1');
+  for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
   assert.equal(openapi['x-artifactVersion'], artifactVersion);
-  assert.equal(manifest.publicationStatus, 'COORDINATED_FULFILLMENT_CHECKPOINT');
-  assert.equal(contractManifest.publicationStatus, 'coordinated-fulfillment-checkpoint');
+  assert.equal(manifest.publicationStatus, 'COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT');
+  assert.equal(contractManifest.publicationStatus, 'coordinated-settlement-admin-checkpoint');
   assert.ok(manifest.decisionBlocked.includes('SECKILL_PRIZE_POOL_ACCOUNT'));
   assert.deepEqual(
     manifest.consumerTests.map((item: { path: string }) => item.path),
@@ -49,28 +50,71 @@ test('fulfillment checkpoint has one identity, resolvable exports and exact chec
     assert.ok(match, line);
     assert.equal(sha256(readFileSync(join(artifactsRoot, match[2]!))), match[1], match[2]);
   }
+  assert.equal(schemaManifest.formatVersion, 1);
+  assert.equal(schemaManifest.databaseEngine, 'postgresql');
+  assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
+  assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
+  assert.equal(schemaManifest.schemas.core.migrations.length, 8);
+  assert.equal(schemaManifest.schemas.audit.migrations.length, 3);
+  for (const migration of [
+    ...schemaManifest.schemas.core.migrations,
+    ...schemaManifest.schemas.audit.migrations,
+  ] as Array<{ path: string; sha256: string }>) {
+    const artifact = readFileSync(join(artifactsRoot, migration.path));
+    const source = readFileSync(join(repoRoot, 'platform-v2/server/data/migrations', migration.path.slice('schema/'.length)));
+    assert.deepEqual(artifact, source, migration.path);
+    assert.equal(sha256(artifact), migration.sha256, migration.path);
+  }
 });
 
-test('OpenAPI publishes the implemented payment and fulfillment operations with no dangling refs', () => {
+test('OpenAPI publishes all implemented Core operations with no dangling refs', () => {
   const operations = Object.entries(openapi.paths)
     .flatMap(([path, methods]) =>
       Object.keys(methods as Record<string, unknown>).map((method) => `${method.toUpperCase()} ${path}`),
     )
     .sort();
   assert.deepEqual(operations, [
+    'GET /v2/admin/audit/entries',
+    'GET /v2/admin/cms/versions/{versionId}',
+    'GET /v2/admin/monitoring',
+    'GET /v2/admin/policy-drafts',
+    'GET /v2/admin/policy-drafts/{draftId}',
+    'GET /v2/admin/system-config/versions',
+    'GET /v2/admin/takeover-funding/{caseId}',
     'GET /v2/bootstrap',
     'GET /v2/catalog/products',
     'GET /v2/catalog/products/{productId}',
+    'GET /v2/cms/public',
+    'GET /v2/finance/merchant',
+    'GET /v2/notifications',
     'GET /v2/orders',
     'GET /v2/orders/{orderId}',
     'GET /v2/orders/{orderId}/fulfillment-target',
     'GET /v2/payments/{orderId}',
+    'GET /v2/settlements',
     'GET /v2/stores',
     'POST /v2/actions/order',
+    'POST /v2/admin/cms/versions',
+    'POST /v2/admin/cms/versions/{versionId}/publish',
+    'POST /v2/admin/cms/versions/{versionId}/rollback',
+    'POST /v2/admin/monitoring/alerts/{alertKey}/acknowledge',
+    'POST /v2/admin/notification-campaigns',
+    'POST /v2/admin/notification-campaigns/{campaignId}/publish',
+    'POST /v2/admin/policy-drafts',
+    'POST /v2/admin/policy-drafts/{draftId}/approval-challenge',
+    'POST /v2/admin/policy-drafts/{draftId}/safe-proposal',
+    'POST /v2/admin/policy-drafts/{draftId}/secondary-signature',
+    'POST /v2/admin/settlement-intents',
+    'POST /v2/admin/system-config/versions',
+    'POST /v2/admin/system-config/versions/{configVersionId}/publish',
+    'POST /v2/admin/takeover-funding',
+    'POST /v2/admin/takeover-funding/approval-challenge',
     'POST /v2/auth/nonce',
     'POST /v2/auth/verify',
+    'POST /v2/finance/merchant/guarantee-deposits',
     'POST /v2/fulfillment-targets/delivery',
     'POST /v2/fulfillment-targets/pickup',
+    'POST /v2/notification-endpoints',
     'POST /v2/orders/{orderId}/arbitration-decisions',
     'POST /v2/orders/{orderId}/arbitrations',
     'POST /v2/orders/{orderId}/delay-requests',
@@ -89,7 +133,10 @@ test('OpenAPI publishes the implemented payment and fulfillment operations with 
     'POST /v2/providers/cainiao/webhooks/logistics',
     'POST /v2/providers/kuaidi100/webhooks/logistics',
     'POST /v2/seckill/quotes',
+    'POST /v2/settlement-intents',
+    'POST /v2/settlement-requests',
     'POST /v2/stores',
+    'PUT /v2/admin/policy-drafts/{draftId}',
   ]);
   assert.deepEqual([...manifest.httpSurface].sort(), operations);
   const bearerOperations = operations.filter((operation: string) =>
@@ -97,6 +144,7 @@ test('OpenAPI publishes the implemented payment and fulfillment operations with 
       'GET /v2/bootstrap',
       'GET /v2/catalog/products',
       'GET /v2/catalog/products/{productId}',
+      'GET /v2/cms/public',
       'GET /v2/stores',
       'POST /v2/auth/nonce',
       'POST /v2/auth/verify',
@@ -166,7 +214,13 @@ test('generated payment DTOs match the PaymentRouter tuple and current response 
   ]) {
     assert.match(declarations, new RegExp(`\\b${field}\\b`), field);
   }
-  assert.deepEqual([...settlementRails], ['MERCHANT_USDT', 'REWARD_NPL', 'PRIZE_USDT']);
+  assert.deepEqual([...settlementRails], [
+    'MERCHANT_USDT',
+    'REWARD_NPL',
+    'PRIZE_USDT',
+    'TAKEOVER_USDT',
+    'OPERATIONS_REIMBURSEMENT_USDT',
+  ]);
   assert.match(declarations, /export type UsdtLiabilityPurpose = 'POLICY_ALLOCATION' \| 'SECKILL_PRIZE_LIABILITY'/);
 });
 
@@ -230,6 +284,50 @@ test('generated fulfillment DTOs expose exact amounts, immutable evidence and co
     'CLOSED',
     'DECISION_BLOCKED',
   ]);
+});
+
+test('generated settlement and admin DTOs preserve the implemented naming and state boundaries', () => {
+  const source = ts.createSourceFile('index.d.ts', declarations, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  assert.deepEqual((source as unknown as { parseDiagnostics: readonly unknown[] }).parseDiagnostics, []);
+  for (const name of [
+    'SettlementIntentProjection',
+    'SettlementRequestProjection',
+    'SettlementListProjection',
+    'GuaranteeDepositProjection',
+    'TakeoverFundingChallenge',
+    'TakeoverFundingResult',
+    'MerchantFinanceProjection',
+    'TakeoverFundingDetail',
+    'PolicyDraftProjection',
+    'PolicyDraftDetail',
+    'CmsVersionProjection',
+    'CmsPublicItem',
+    'NotificationEndpointProjection',
+    'NotificationInboxItem',
+    'SystemConfigProjection',
+    'AuditListResponse',
+    'MonitoringDashboard',
+  ]) assert.match(declarations, new RegExp(`export interface ${name}\\b`), name);
+  assert.deepEqual(enums.merchantGuaranteeDepositStates, ['SUBMITTED', 'MINED', 'FINAL', 'REORGED', 'QUARANTINED']);
+  assert.deepEqual(enums.policyDraftStates, [
+    'DRAFT', 'DECISION_BLOCKED', 'SECONDARY_SIGNED', 'SAFE_PROPOSED',
+    'FINALITY_PENDING', 'REORGED', 'REJECTED', 'PUBLISHED',
+  ]);
+  assert.ok(enums.adapterProviders.includes('TENCENT_SMS'));
+  assert.ok(enums.adapterProviders.includes('FIREBASE'));
+  assert.deepEqual(Object.keys(openapi.components.schemas.SettlementRequestProjection.properties).sort(), [
+    'amount', 'artifact_version', 'asset', 'asset_address', 'batch_id', 'batched_at',
+    'final_execution_tx_hash', 'final_safe_tx_hash', 'intent_digest', 'intent_id', 'items',
+    'items_hash', 'rail', 'recipient_address', 'request_id', 'requested_at', 'safe_address',
+    'settled_at', 'signature_hash', 'state', 'transitions', 'wallet_address',
+  ]);
+  assert.deepEqual(Object.keys(openapi.components.schemas.MonitoringCoverage.properties).sort(), [
+    'asset', 'assets', 'covered', 'observed_at', 'safe_address', 'unsettled_liabilities',
+  ]);
+  assert.equal(openapi.paths['/v2/cms/public'].get.responses['200'].content['application/json'].schema.type, 'array');
+  assert.equal(openapi.paths['/v2/notifications'].get.responses['200'].content['application/json'].schema.type, 'array');
+  assert.equal(openapi.paths['/v2/admin/policy-drafts'].get.responses['200'].content['application/json'].schema.type, 'array');
+  assert.equal(openapi.paths['/v2/admin/system-config/versions'].get.responses['200'].content['application/json'].schema.type, 'array');
 });
 
 test('published wallet calls encode with the ABI and published EIP-712 messages reproduce authorization digests', () => {
@@ -437,7 +535,7 @@ test('publication contains no Claim, BNM token payout, old escrow or old allocat
   assert.equal([...settlementRails].includes('BNM' as never), false);
 });
 
-test('unpublished transports and settlement stay fail closed while fulfillment is executable', () => {
+test('settlement/admin capabilities are published while websocket and deployment stay fail closed', () => {
   assert.equal(websocket.endpoint, null);
   assert.deepEqual(websocket.channels, []);
   assert.equal(websocket.publicationStatus, 'FAIL_CLOSED');
@@ -459,6 +557,19 @@ test('unpublished transports and settlement stay fail closed while fulfillment i
     'takeoverHttp',
     'fulfillmentScheduler',
     'bnmAvailabilityWorker',
+    'settlementHttp',
+    'settlementSafeBatching',
+    'guaranteeDepositHttp',
+    'guaranteeDepositFinality',
+    'takeoverFundingHttp',
+    'policyGovernanceHttp',
+    'cmsHttp',
+    'notificationHttp',
+    'notificationDelivery',
+    'systemConfigGovernanceHttp',
+    'auditHttp',
+    'monitoringHttp',
+    'coverageMonitoring',
   ]);
   for (const [capability, status] of Object.entries(manifest.capabilityStatus)) {
     assert.equal(status, available.has(capability) ? 'AVAILABLE' : 'NOT_PUBLISHED_FAIL_CLOSED', capability);

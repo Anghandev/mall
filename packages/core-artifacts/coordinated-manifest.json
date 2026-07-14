@@ -1,6 +1,6 @@
 {
-  "artifactVersion": "2.0.0-fulfillment.1",
-  "publicationStatus": "COORDINATED_FULFILLMENT_CHECKPOINT",
+  "artifactVersion": "2.0.0-settlement-admin.1",
+  "publicationStatus": "COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
   "chain": {
@@ -14,88 +14,123 @@
   "components": {
     "packageMetadata": {
       "path": "package.json",
-      "sha256": "0fbee68858ee58e3470a0218a808b257388b6a4ff0c53a11f474790ec7c5c68c"
+      "sha256": "fd6fc22206f6abb8ab025dae8c4a3eae080d21bfad418af34343fe863b13d366"
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "142038084810a22313de1a3c1b983eee5017437be7648b963402fa1b034e85e5"
+      "sha256": "554360f7aaa0193831f529a54d80b37cba6be9ab2a83997e2e28f0d84de04ea2"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "45f39daefc785c69dc302f674da8bb44d1bb153ece8c3fe840dd1dd62edabfef"
+      "sha256": "76bf4df65954aa7429b7adcdf69f80d3bf287c58277716f64aa97d3bb362c7a6"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "b5264c89bd46a69ee7c1299868c622801276b30d157eb35fc5ffcbe5c70a90f6"
+      "sha256": "d86ca6a437a72e915c5d3535c74106da8113b747bc6b07e76af2f6c605f53ecd"
+    },
+    "schemaManifest": {
+      "path": "schema/schema-manifest.json",
+      "sha256": "54a3b122a35bb0d53fb11a5d920e02d770a1b76f28ce79823ff3084b681b6d7c"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "4c199c0dc678f6d885ce944fd44d6cf6bf7550674b018bbdf160b99f4c8ea067"
+      "sha256": "190b98136b04ad2d77b2cb92f9f9f02ab1a061710ea451eb8619d358eec015fd"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
-      "sha256": "1b717f3b78435eabf18fb19d70e19695b22341a7af01c520f510333c3336a61e"
+      "sha256": "dbd080d95614c1bd576871d06007d8748a87baf7621d840b37ee48fc5c040b11"
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "42b42e6c4a00f5b46d6af3e2cdc93bd16da8653756facb7a801f609ff6336f30"
+      "sha256": "ba67b7e5bf77249b068b7b7d65e692d568fab0f4506db3d11a9a038b6f926b75"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "133c14e1bf5d85db808c1aab5179b47870849e91dc1f6e8a5bc2502c9ff3f72a"
+      "sha256": "e53cccd5482a12d71f352548e3053279876203150215643a3646156b1aacbd86"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "54a7f45d4f2c0afa9d6642c25e5f52a1be3709e3cd414a6a722298559c7f52ce"
+      "sha256": "3bc01231fdd41a6ac3846f8ae9a487f74d32f8b3966a09db40964495a2b3bf2e"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
-      "sha256": "9e759ca05246ff2160c321b56b17b13b2c0b047c2a2d97edd8536e22c9d3b2cc"
+      "sha256": "dd91b68441a582c62dc318c93414040204c4a702fa8cf4a1efb0419203971ead"
     }
   },
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "c747825871ad81dc358b9796daffd32b2fd7d3ee4f7a62b8a3f0e609af725f05"
+      "sha256": "6f8960d6e5a8beaddf276b540850e288f7b690aced978d8e1131c545be62c57c"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "9e7bf5f957e0d302992d74cd04b5273c473d6bbc187696d0701c7ed834b20093"
+      "sha256": "d7b1fa619e4a8ed097fa498be29f4c1a281298275ba85aeea2fab8268dd0de3e"
     }
   ],
   "httpSurface": [
+    "GET /v2/admin/audit/entries",
+    "GET /v2/admin/cms/versions/{versionId}",
+    "GET /v2/admin/monitoring",
+    "GET /v2/admin/policy-drafts",
+    "GET /v2/admin/policy-drafts/{draftId}",
+    "GET /v2/admin/system-config/versions",
+    "GET /v2/admin/takeover-funding/{caseId}",
     "GET /v2/bootstrap",
-    "POST /v2/auth/nonce",
-    "POST /v2/auth/verify",
-    "POST /v2/actions/order",
-    "GET /v2/stores",
-    "POST /v2/stores",
-    "POST /v2/fulfillment-targets/delivery",
-    "POST /v2/fulfillment-targets/pickup",
+    "GET /v2/catalog/products",
+    "GET /v2/catalog/products/{productId}",
+    "GET /v2/cms/public",
+    "GET /v2/finance/merchant",
+    "GET /v2/notifications",
     "GET /v2/orders",
     "GET /v2/orders/{orderId}",
     "GET /v2/orders/{orderId}/fulfillment-target",
-    "POST /v2/orders/{orderId}/shipments",
+    "GET /v2/payments/{orderId}",
+    "GET /v2/settlements",
+    "GET /v2/stores",
+    "POST /v2/actions/order",
+    "POST /v2/admin/cms/versions",
+    "POST /v2/admin/cms/versions/{versionId}/publish",
+    "POST /v2/admin/cms/versions/{versionId}/rollback",
+    "POST /v2/admin/monitoring/alerts/{alertKey}/acknowledge",
+    "POST /v2/admin/notification-campaigns",
+    "POST /v2/admin/notification-campaigns/{campaignId}/publish",
+    "POST /v2/admin/policy-drafts",
+    "POST /v2/admin/policy-drafts/{draftId}/approval-challenge",
+    "POST /v2/admin/policy-drafts/{draftId}/safe-proposal",
+    "POST /v2/admin/policy-drafts/{draftId}/secondary-signature",
+    "POST /v2/admin/settlement-intents",
+    "POST /v2/admin/system-config/versions",
+    "POST /v2/admin/system-config/versions/{configVersionId}/publish",
+    "POST /v2/admin/takeover-funding",
+    "POST /v2/admin/takeover-funding/approval-challenge",
+    "POST /v2/auth/nonce",
+    "POST /v2/auth/verify",
+    "POST /v2/finance/merchant/guarantee-deposits",
+    "POST /v2/fulfillment-targets/delivery",
+    "POST /v2/fulfillment-targets/pickup",
+    "POST /v2/notification-endpoints",
+    "POST /v2/orders/{orderId}/arbitration-decisions",
+    "POST /v2/orders/{orderId}/arbitrations",
+    "POST /v2/orders/{orderId}/delay-requests",
     "POST /v2/orders/{orderId}/delivery",
+    "POST /v2/orders/{orderId}/exchange-requests",
+    "POST /v2/orders/{orderId}/forced-receipt-decisions",
+    "POST /v2/orders/{orderId}/forced-receipt-requests",
     "POST /v2/orders/{orderId}/pickup-credential",
     "POST /v2/orders/{orderId}/pickup-verification",
-    "POST /v2/orders/{orderId}/exchange-requests",
-    "POST /v2/orders/{orderId}/delay-requests",
-    "POST /v2/orders/{orderId}/request-decisions",
-    "POST /v2/orders/{orderId}/arbitrations",
-    "POST /v2/orders/{orderId}/arbitration-decisions",
-    "POST /v2/orders/{orderId}/takeover",
-    "POST /v2/orders/{orderId}/forced-receipt-requests",
-    "POST /v2/orders/{orderId}/forced-receipt-decisions",
     "POST /v2/orders/{orderId}/receipt-confirmation",
-    "POST /v2/providers/kuaidi100/webhooks/logistics",
-    "POST /v2/providers/cainiao/webhooks/logistics",
-    "GET /v2/catalog/products",
-    "GET /v2/catalog/products/{productId}",
+    "POST /v2/orders/{orderId}/request-decisions",
+    "POST /v2/orders/{orderId}/shipments",
+    "POST /v2/orders/{orderId}/takeover",
     "POST /v2/payments/quotes",
-    "POST /v2/seckill/quotes",
     "POST /v2/payments/submissions",
-    "GET /v2/payments/{orderId}"
+    "POST /v2/providers/cainiao/webhooks/logistics",
+    "POST /v2/providers/kuaidi100/webhooks/logistics",
+    "POST /v2/seckill/quotes",
+    "POST /v2/settlement-intents",
+    "POST /v2/settlement-requests",
+    "POST /v2/stores",
+    "PUT /v2/admin/policy-drafts/{draftId}"
   ],
   "capabilityStatus": {
     "bootstrap": "AVAILABLE",
@@ -107,7 +142,19 @@
     "paymentSubmissionHttp": "AVAILABLE",
     "paymentProjectionHttp": "AVAILABLE",
     "paymentIndexer": "AVAILABLE",
-    "settlementHttp": "NOT_PUBLISHED_FAIL_CLOSED",
+    "settlementHttp": "AVAILABLE",
+    "settlementSafeBatching": "AVAILABLE",
+    "guaranteeDepositHttp": "AVAILABLE",
+    "guaranteeDepositFinality": "AVAILABLE",
+    "takeoverFundingHttp": "AVAILABLE",
+    "policyGovernanceHttp": "AVAILABLE",
+    "cmsHttp": "AVAILABLE",
+    "notificationHttp": "AVAILABLE",
+    "notificationDelivery": "AVAILABLE",
+    "systemConfigGovernanceHttp": "AVAILABLE",
+    "auditHttp": "AVAILABLE",
+    "monitoringHttp": "AVAILABLE",
+    "coverageMonitoring": "AVAILABLE",
     "storesHttp": "AVAILABLE",
     "fulfillmentTargetHttp": "AVAILABLE",
     "fulfillmentHttp": "AVAILABLE",
@@ -174,6 +221,22 @@
     "FulfillmentTarget",
     "FulfillmentOrder",
     "FulfillmentCommandInput",
-    "FulfillmentCommandResult"
+    "FulfillmentCommandResult",
+    "SettlementIntentProjection",
+    "SettlementRequestProjection",
+    "SettlementListProjection",
+    "GuaranteeDepositProjection",
+    "TakeoverFundingChallenge",
+    "TakeoverFundingResult",
+    "MerchantFinanceProjection",
+    "TakeoverFundingDetail",
+    "PolicyDraftProjection",
+    "CmsVersionProjection",
+    "CmsPublicItem",
+    "NotificationEndpointProjection",
+    "NotificationInboxItem",
+    "SystemConfigProjection",
+    "AuditListResponse",
+    "MonitoringDashboard"
   ]
 }

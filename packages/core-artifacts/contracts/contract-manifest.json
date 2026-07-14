@@ -1,6 +1,6 @@
 {
-  "artifactVersion": "2.0.0-fulfillment.1",
-  "publicationStatus": "coordinated-fulfillment-checkpoint",
+  "artifactVersion": "2.0.0-settlement-admin.1",
+  "publicationStatus": "coordinated-settlement-admin-checkpoint",
   "chain": {
     "name": "BSC Mainnet",
     "chainId": 56,

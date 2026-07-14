@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { CoreError } from '../api/errors.ts';
 import type { UserRole } from '../api/enums.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
+import { captureMerchantFutureProceeds } from './takeover-funding-service.ts';
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_PICKUP_ATTEMPTS = 5;
@@ -95,6 +96,7 @@ interface LedgerStateRow {
   asset: 'USDT' | 'NPL' | 'BNM_POINTS';
   amount: string;
   purpose: string;
+  backing_safe_address: string | null;
 }
 
 type CommandType =
@@ -887,6 +889,13 @@ async function completeOrder(
     'AVAILABLE',
     method === 'ARBITRATION' ? 'ARBITRATION_RESOLVED' : 'FULFILLMENT_AVAILABLE',
   );
+  await captureMerchantFutureProceeds(executor, {
+    orderId: order.order_id,
+    merchantId: order.merchant_id,
+    evidenceHash,
+    correlationId: `fulfillment:${command.id}`,
+    capturedAt: command.now,
+  });
   await transitionOrder(executor, order, command, evidenceId, 'FULFILLED', method);
   const bnmState = await executor.query<{ state_version: string }>(
     `UPDATE core.orders SET state = 'FULFILLED', fulfilled_at = $2,
@@ -929,13 +938,13 @@ async function moveLedgerState(
   eventType: 'ARBITRATION_DISPUTED' | 'ARBITRATION_RESOLVED' | 'FULFILLMENT_AVAILABLE',
 ) {
   const balances = await executor.query<LedgerStateRow>(
-    `SELECT line.account_id, account.asset, account.purpose,
+    `SELECT line.account_id, account.asset, account.purpose, line.backing_safe_address,
        sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS amount
      FROM core.ledger_journals journal
      JOIN core.ledger_lines line ON line.journal_id = journal.journal_id
      JOIN core.ledger_accounts account ON account.account_id = line.account_id
      WHERE journal.order_id = $1 AND line.balance_state = $2
-     GROUP BY line.account_id, account.asset, account.purpose
+     GROUP BY line.account_id, account.asset, account.purpose, line.backing_safe_address
      HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) > 0
      ORDER BY line.account_id`,
     [order.order_id, from],
@@ -945,8 +954,20 @@ async function moveLedgerState(
     const target = to === 'AVAILABLE' && row.purpose === 'SECKILL_PRIZE_LIABILITY' ? 'LOCKED' : to;
     if (target === from) return [];
     return [
-      { account_id: row.account_id, side: 'DEBIT', amount: row.amount, balance_state: from },
-      { account_id: row.account_id, side: 'CREDIT', amount: row.amount, balance_state: target },
+      {
+        account_id: row.account_id,
+        side: 'DEBIT',
+        amount: row.amount,
+        balance_state: from,
+        backing_safe_address: row.backing_safe_address,
+      },
+      {
+        account_id: row.account_id,
+        side: 'CREDIT',
+        amount: row.amount,
+        balance_state: target,
+        backing_safe_address: row.backing_safe_address,
+      },
     ];
   });
   if (lines.length === 0) throw new CoreError('FinalityPending', `No ${from} balances can change state`, 409);
@@ -961,7 +982,7 @@ async function moveLedgerState(
       Number(order.policy_version),
       hashJson({ eventKey, commandHash: command.contentHash, lines }),
       evidenceHash.toLowerCase(),
-      evidenceHash.toLowerCase(),
+      null,
       JSON.stringify({ commandId: command.id, from, to }),
       JSON.stringify(lines),
     ],

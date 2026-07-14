@@ -104,7 +104,9 @@ for (const path of working) {
   if (!runtimeExtensions.has(extname(path))) continue;
   for (const text of contentVariants(path, tracked.has(path))) {
     for (const token of forbiddenRuntimeTokens) {
-      if (text.includes(token)) throw new Error(`${path}: forbidden V2 runtime token ${token}`);
+      if (containsForbiddenRuntimeToken(text, token)) {
+        throw new Error(`${path}: forbidden V2 runtime token ${token}`);
+      }
     }
     if (/\/src\//.test(`/${path}`) && /\b(fixtures?|mocks?)\b/i.test(text)) {
       throw new Error(`${path}: production source references fixture/mock data`);
@@ -156,6 +158,12 @@ if (detectedLegacyCredentialDebt.size > 0) {
   console.log(`ExternalBlocked legacy credential rotation: ${detectedLegacyCredentialDebt.size} immutable Phase 1 blobs`);
 }
 console.log('OK microtest syntax and optional local .env protection');
+
+function containsForbiddenRuntimeToken(text, token) {
+  if (token === 'Expo') return /(^|[^A-Za-z0-9_])expo(?=$|[^A-Za-z0-9_])/i.test(text);
+  if (token === 'React Native') return /\bReact Native\b|react-native/i.test(text);
+  return text.includes(token);
+}
 
 function assertNoCredentialValue(path, text) {
   for (const line of text.split(/\r?\n/)) {

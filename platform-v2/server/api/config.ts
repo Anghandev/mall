@@ -54,12 +54,50 @@ const externalVariables = [
   'SIGNER_SERVICE_TOKEN',
   'SETTLEMENT_EXECUTOR_URL',
   'SETTLEMENT_EXECUTOR_TOKEN',
+  'SAFE_APPROVAL_VERIFIER_URL',
+  'SAFE_APPROVAL_VERIFIER_TOKEN',
+  'SAFE_INTERNAL_MTLS_ENABLED',
   'EXECUTOR_MAX_GAS_LIMIT',
+  'SETTLEMENT_REPLACEMENT_DELAY_MS',
+  'USDT_SAFE_PROXY_CODE_HASH',
+  'USDT_SAFE_OWNER_SET_HASH',
+  'USDT_SAFE_THRESHOLD',
+  'USDT_SAFE_GUARD_ADDRESS',
+  'USDT_SAFE_FALLBACK_HANDLER_ADDRESS',
+  'USDT_SAFE_MODULES_HASH',
+  'USDT_TOKEN_CODE_HASH',
+  'USDT_TRANSFER_CONFORMANCE_EVIDENCE_HASH',
+  'NPL_SAFE_PROXY_CODE_HASH',
+  'NPL_SAFE_OWNER_SET_HASH',
+  'NPL_SAFE_THRESHOLD',
+  'NPL_SAFE_GUARD_ADDRESS',
+  'NPL_SAFE_FALLBACK_HANDLER_ADDRESS',
+  'NPL_SAFE_MODULES_HASH',
+  'NPL_TOKEN_CODE_HASH',
+  'NPL_TRANSFER_CONFORMANCE_EVIDENCE_HASH',
+  'OPERATIONS_SAFE_PROXY_CODE_HASH',
+  'OPERATIONS_SAFE_OWNER_SET_HASH',
+  'OPERATIONS_SAFE_THRESHOLD',
+  'OPERATIONS_SAFE_GUARD_ADDRESS',
+  'OPERATIONS_SAFE_FALLBACK_HANDLER_ADDRESS',
+  'OPERATIONS_SAFE_MODULES_HASH',
+  'OPERATIONS_TOKEN_CODE_HASH',
+  'OPERATIONS_TRANSFER_CONFORMANCE_EVIDENCE_HASH',
   'BACKUP_STORAGE_ENCRYPTED',
   'BNM_AVAILABILITY_URL',
   'BNM_API_TOKEN',
   'BNM_PROJECT_ID',
   'BNM_MONOTONIC_CONFORMANCE_EVIDENCE_HASH',
+  'POLICY_SAFE_PROPOSER_URL',
+  'POLICY_SAFE_PROPOSER_TOKEN',
+  'POLICY_EXECUTION_LOOKUP_URL',
+  'POLICY_EXECUTION_LOOKUP_TOKEN',
+  'SYSTEM_CONFIG_SAFE_APPROVER_URL',
+  'SYSTEM_CONFIG_SAFE_APPROVER_TOKEN',
+  'SECRET_RESOLVER_URL',
+  'SECRET_RESOLVER_TOKEN',
+  'BSC_EXPLORER_API_URL',
+  'EXPLORER_API_KEY',
 ] as const;
 
 const paymentExternalVariables = [
@@ -92,8 +130,10 @@ export type ProviderName =
   | 'YILIANYUN'
   | 'BNM'
   | 'ALIYUN_SMS'
+  | 'TENCENT_SMS'
   | 'ALIYUN_OSS'
   | 'SMTP'
+  | 'FIREBASE'
   | 'JPUSH';
 
 const providerVariables: Readonly<Record<ProviderName, readonly string[]>> = {
@@ -108,10 +148,12 @@ const providerVariables: Readonly<Record<ProviderName, readonly string[]>> = {
     'BNM_PROJECT_ID',
     'BNM_MONOTONIC_CONFORMANCE_EVIDENCE_HASH',
   ],
-  ALIYUN_SMS: ['ALIYUN_SMS_ACCESS_KEY_ID', 'ALIYUN_SMS_ACCESS_KEY_SECRET'],
+  ALIYUN_SMS: ['SECRET_RESOLVER_URL', 'SECRET_RESOLVER_TOKEN', 'ALIYUN_SMS_GATEWAY_URL', 'ALIYUN_SMS_CREDENTIAL_REF'],
+  TENCENT_SMS: ['SECRET_RESOLVER_URL', 'SECRET_RESOLVER_TOKEN', 'TENCENT_SMS_GATEWAY_URL', 'TENCENT_SMS_CREDENTIAL_REF'],
   ALIYUN_OSS: ['ALIYUN_OSS_ACCESS_KEY_ID', 'ALIYUN_OSS_ACCESS_KEY_SECRET'],
-  SMTP: ['SMTP_URL'],
-  JPUSH: ['JPUSH_APP_KEY', 'JPUSH_MASTER_SECRET'],
+  SMTP: ['SECRET_RESOLVER_URL', 'SECRET_RESOLVER_TOKEN', 'SMTP_GATEWAY_URL', 'SMTP_CREDENTIAL_REF'],
+  FIREBASE: ['SECRET_RESOLVER_URL', 'SECRET_RESOLVER_TOKEN', 'FIREBASE_GATEWAY_URL', 'FIREBASE_CREDENTIAL_REF'],
+  JPUSH: ['SECRET_RESOLVER_URL', 'SECRET_RESOLVER_TOKEN', 'JPUSH_GATEWAY_URL', 'JPUSH_CREDENTIAL_REF'],
 };
 
 export interface CoreConfig {
@@ -146,6 +188,22 @@ export interface CoreConfig {
   executorUrl: string | undefined;
   executorToken: string | undefined;
   executorMaxGasLimit: bigint | undefined;
+  settlementReplacementDelayMs: number | undefined;
+  safeApprovalVerifierUrl: string | undefined;
+  safeApprovalVerifierToken: string | undefined;
+  safeMutualTls: boolean;
+  safeSettlementExpectations: Readonly<Partial<Record<'USDT' | 'NPL' | 'OPERATIONS_USDT', {
+    safeAddress: string;
+    safeProxyCodeHash: string;
+    ownerSetHash: string;
+    threshold: number;
+    guardAddress: string;
+    fallbackHandlerAddress: string;
+    modulesHash: string;
+    tokenAddress: string;
+    tokenCodeHash: string;
+    tokenTransferConformanceEvidenceHash: string;
+  }>>>;
   bnmMonotonicConformanceEvidenceHash: string | undefined;
   requiredConfirmations: 15;
   deploymentReady: boolean;
@@ -212,6 +270,9 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
   ];
   if (missingDecisionVariables.length === 0) validateDecisionValues(env);
   validateProductionEndpoints(env);
+  if (env.SAFE_INTERNAL_MTLS_ENABLED && env.SAFE_INTERNAL_MTLS_ENABLED !== 'true') {
+    throw new CoreError('InvalidRequest', 'SAFE_INTERNAL_MTLS_ENABLED must be true', 500);
+  }
   validateDistinctAuthorities(env);
   const bnmMonotonicConformanceEvidenceHash = normalizeOptionalHash(
     env.BNM_MONOTONIC_CONFORMANCE_EVIDENCE_HASH,
@@ -260,6 +321,36 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     executorUrl: env.SETTLEMENT_EXECUTOR_URL,
     executorToken: env.SETTLEMENT_EXECUTOR_TOKEN,
     executorMaxGasLimit: parseOptionalPositiveBigInt(env.EXECUTOR_MAX_GAS_LIMIT, 'EXECUTOR_MAX_GAS_LIMIT'),
+    settlementReplacementDelayMs: parseOptionalPositiveInteger(
+      env.SETTLEMENT_REPLACEMENT_DELAY_MS,
+      'SETTLEMENT_REPLACEMENT_DELAY_MS',
+    ),
+    safeApprovalVerifierUrl: env.SAFE_APPROVAL_VERIFIER_URL,
+    safeApprovalVerifierToken: env.SAFE_APPROVAL_VERIFIER_TOKEN,
+    safeMutualTls: env.SAFE_INTERNAL_MTLS_ENABLED === 'true',
+    safeSettlementExpectations: Object.freeze({
+      ...(safeExpectation(env, 'USDT', normalizeOptionalAddress(env.USDT_CUSTODY_SAFE_ADDRESS), USDT_ADDRESS)
+        ? { USDT: safeExpectation(env, 'USDT', normalizeOptionalAddress(env.USDT_CUSTODY_SAFE_ADDRESS), USDT_ADDRESS)! }
+        : {}),
+      ...(safeExpectation(env, 'NPL', normalizeOptionalAddress(env.NPL_REWARD_SAFE_ADDRESS), NPL_ADDRESS)
+        ? { NPL: safeExpectation(env, 'NPL', normalizeOptionalAddress(env.NPL_REWARD_SAFE_ADDRESS), NPL_ADDRESS)! }
+        : {}),
+      ...(safeExpectation(
+        env,
+        'OPERATIONS',
+        normalizeOptionalAddress(env.OPERATIONS_TREASURY_SAFE_ADDRESS),
+        USDT_ADDRESS,
+      )
+        ? {
+          OPERATIONS_USDT: safeExpectation(
+            env,
+            'OPERATIONS',
+            normalizeOptionalAddress(env.OPERATIONS_TREASURY_SAFE_ADDRESS),
+            USDT_ADDRESS,
+          )!,
+        }
+        : {}),
+    }),
     bnmMonotonicConformanceEvidenceHash,
     requiredConfirmations: REQUIRED_CONFIRMATIONS,
     deploymentReady,
@@ -377,15 +468,35 @@ function runtimeReadinessValid(snapshot: RuntimeReadinessSnapshot | undefined, n
 }
 
 function validateProductionEndpoints(env: Readonly<Record<string, string | undefined>>) {
-  for (const name of ['SIGNER_SERVICE_URL', 'SETTLEMENT_EXECUTOR_URL', 'BNM_AVAILABILITY_URL']) {
+  for (const name of [
+    'SIGNER_SERVICE_URL',
+    'SETTLEMENT_EXECUTOR_URL',
+    'SAFE_APPROVAL_VERIFIER_URL',
+    'BNM_AVAILABILITY_URL',
+    'POLICY_SAFE_PROPOSER_URL',
+    'POLICY_EXECUTION_LOOKUP_URL',
+    'SYSTEM_CONFIG_SAFE_APPROVER_URL',
+    'SECRET_RESOLVER_URL',
+    'BSC_EXPLORER_API_URL',
+    'ALIYUN_SMS_GATEWAY_URL',
+    'TENCENT_SMS_GATEWAY_URL',
+    'SMTP_GATEWAY_URL',
+    'FIREBASE_GATEWAY_URL',
+    'JPUSH_GATEWAY_URL',
+  ]) {
     const value = env[name];
     if (value && protocol(value) !== 'https:') throw new CoreError('InvalidRequest', `${name} must use HTTPS`, 500);
   }
   for (const name of ['BSC_RPC_URL', 'BSC_FALLBACK_RPC_URL']) {
-    if (env[name] && !['https:', 'wss:'].includes(protocol(env[name]))) {
-      throw new CoreError('InvalidRequest', `${name} must use HTTPS or WSS`, 500);
+    if (env[name] && protocol(env[name]) !== 'https:') {
+      throw new CoreError('InvalidRequest', `${name} must use HTTPS`, 500);
     }
   }
+  if (
+    env.BSC_RPC_URL
+    && env.BSC_FALLBACK_RPC_URL
+    && normalizedEndpoint(env.BSC_RPC_URL) === normalizedEndpoint(env.BSC_FALLBACK_RPC_URL)
+  ) throw new CoreError('InvalidRequest', 'BSC primary and fallback RPC URLs must be distinct', 500);
 }
 
 function validateAuthOrigin(env: Readonly<Record<string, string | undefined>>) {
@@ -429,6 +540,12 @@ function protocol(value: string) {
   }
 }
 
+function normalizedEndpoint(value: string) {
+  const url = new URL(value);
+  url.hash = '';
+  return url.href.replace(/\/$/, '');
+}
+
 export function requireProvider(config: CoreConfig, provider: ProviderName) {
   if (config.providerReadiness[provider] !== 'READY') {
     throw new CoreError('ConfigurationRequired', `${provider} is not configured`, 503, { provider });
@@ -445,6 +562,44 @@ function normalizeOptionalHash(value: string | undefined, name: string) {
   if (!value) return undefined;
   if (!/^0x[0-9a-fA-F]{64}$/.test(value)) throw new CoreError('InvalidRequest', `${name} must be bytes32`, 500);
   return value.toLowerCase();
+}
+
+function safeExpectation(
+  env: Readonly<Record<string, string | undefined>>,
+  prefix: 'USDT' | 'NPL' | 'OPERATIONS',
+  safeAddress: string | undefined,
+  tokenAddress: string,
+) {
+  const names = {
+    safeProxyCodeHash: `${prefix}_SAFE_PROXY_CODE_HASH`,
+    ownerSetHash: `${prefix}_SAFE_OWNER_SET_HASH`,
+    threshold: `${prefix}_SAFE_THRESHOLD`,
+    guardAddress: `${prefix}_SAFE_GUARD_ADDRESS`,
+    fallbackHandlerAddress: `${prefix}_SAFE_FALLBACK_HANDLER_ADDRESS`,
+    modulesHash: `${prefix}_SAFE_MODULES_HASH`,
+    tokenCodeHash: `${prefix}_TOKEN_CODE_HASH`,
+    tokenTransferConformanceEvidenceHash: `${prefix}_TRANSFER_CONFORMANCE_EVIDENCE_HASH`,
+  } as const;
+  if (!safeAddress || Object.values(names).some((name) => !env[name])) return undefined;
+  const threshold = Number(env[names.threshold]);
+  if (!Number.isSafeInteger(threshold) || threshold <= 0) {
+    throw new CoreError('InvalidRequest', `${names.threshold} must be a positive integer`, 500);
+  }
+  return {
+    safeAddress,
+    safeProxyCodeHash: normalizeOptionalHash(env[names.safeProxyCodeHash], names.safeProxyCodeHash)!,
+    ownerSetHash: normalizeOptionalHash(env[names.ownerSetHash], names.ownerSetHash)!,
+    threshold,
+    guardAddress: normalizeOptionalAddress(env[names.guardAddress])!,
+    fallbackHandlerAddress: normalizeOptionalAddress(env[names.fallbackHandlerAddress])!,
+    modulesHash: normalizeOptionalHash(env[names.modulesHash], names.modulesHash)!,
+    tokenAddress,
+    tokenCodeHash: normalizeOptionalHash(env[names.tokenCodeHash], names.tokenCodeHash)!,
+    tokenTransferConformanceEvidenceHash: normalizeOptionalHash(
+      env[names.tokenTransferConformanceEvidenceHash],
+      names.tokenTransferConformanceEvidenceHash,
+    )!,
+  };
 }
 
 function validateDecisionValues(env: Readonly<Record<string, string | undefined>>) {
@@ -514,4 +669,13 @@ function parseOptionalPositiveBigInt(value: string | undefined, name: string) {
   } catch {
     throw new CoreError('InvalidRequest', `${name} must be a positive integer`, 500);
   }
+}
+
+function parseOptionalPositiveInteger(value: string | undefined, name: string) {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new CoreError('InvalidRequest', `${name} must be a positive safe integer`, 500);
+  }
+  return parsed;
 }

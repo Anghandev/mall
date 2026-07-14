@@ -595,7 +595,7 @@ async function loadPreparation(executor: SqlExecutor, buyer: string, input: Crea
   ) throw new CoreError('InventoryUnavailable', 'Product, merchant or inventory is unavailable', 409);
   const policyResult = await executor.query<PolicyRow>(
     `SELECT artifact_version, policy_version, policy_hash, oracle_version,
-       rules_content_hash, beneficiary_set_hash, payload FROM core.policy_snapshots
+       rules_content_hash, beneficiary_set_hash, payload FROM core.canonical_policy_publications
      WHERE publication_status = 'PUBLISHED' AND (effective_from IS NULL OR effective_from <= $1)
      ORDER BY policy_version DESC LIMIT 1`,
     [now],

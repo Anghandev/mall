@@ -1,6 +1,6 @@
 {
   "name": "@abu24k/core-artifacts",
-  "version": "2.0.0-fulfillment.1",
+  "version": "2.0.0-settlement-admin.1",
   "private": true,
   "type": "module",
   "description": "Core-owned coordinated V2 API, types, protocol and contract artifacts",
@@ -12,6 +12,7 @@
     },
     "./openapi": "./openapi/openapi.json",
     "./manifest": "./coordinated-manifest.json",
+    "./schema": "./schema/schema-manifest.json",
     "./enums": "./state-error-enums.json",
     "./websocket": "./websocket-protocol.json",
     "./contracts": "./contracts/abi-bundle.json",

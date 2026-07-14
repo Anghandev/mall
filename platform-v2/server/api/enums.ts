@@ -1,4 +1,4 @@
-export const CORE_ARTIFACT_VERSION = '2.0.0-fulfillment.1';
+export const CORE_ARTIFACT_VERSION = '2.0.0-settlement-admin.1';
 export const BSC_CHAIN_ID = 56;
 export const USDT_ADDRESS = '0x55d398326f99059ff775485246999027b3197955';
 export const NPL_ADDRESS = '0x4e8277ab31e4956b2cd48449793a57656dfc03d2';
@@ -146,7 +146,13 @@ export type FulfillmentAsset = (typeof fulfillmentAssets)[number];
 export const arbitrationOutcomes = ['FULFILL', 'RESUME_FULFILLMENT'] as const;
 export type ArbitrationOutcome = (typeof arbitrationOutcomes)[number];
 
-export const settlementRails = ['MERCHANT_USDT', 'REWARD_NPL', 'PRIZE_USDT'] as const;
+export const settlementRails = [
+  'MERCHANT_USDT',
+  'REWARD_NPL',
+  'PRIZE_USDT',
+  'TAKEOVER_USDT',
+  'OPERATIONS_REIMBURSEMENT_USDT',
+] as const;
 export type SettlementRail = (typeof settlementRails)[number];
 
 export const reservationStates = ['ACTIVE', 'CONSUMED', 'EXPIRED', 'RELEASED'] as const;
@@ -154,6 +160,38 @@ export type ReservationState = (typeof reservationStates)[number];
 
 export const balanceStates = ['LOCKED', 'AVAILABLE', 'REQUESTED', 'BATCHED', 'SETTLED', 'DISPUTED'] as const;
 export type BalanceState = (typeof balanceStates)[number];
+
+export const settlementIntentStates = ['ISSUED', 'CONSUMED', 'EXPIRED', 'CANCELLED'] as const;
+export type SettlementIntentState = (typeof settlementIntentStates)[number];
+
+export const settlementRequestStates = ['REQUESTED', 'BATCHED', 'SETTLED', 'RETRYABLE', 'QUARANTINED'] as const;
+export type SettlementRequestState = (typeof settlementRequestStates)[number];
+
+export const settlementBatchStates = [
+  'APPROVAL_PENDING',
+  'APPROVED',
+  'SUBMITTING',
+  'SUBMITTED',
+  'MINED',
+  'SETTLED',
+  'FAILED',
+  'REORGED',
+  'RETRYABLE',
+  'QUARANTINED',
+] as const;
+export type SettlementBatchState = (typeof settlementBatchStates)[number];
+
+export const merchantGuaranteeDepositStates = ['SUBMITTED', 'MINED', 'FINAL', 'REORGED', 'QUARANTINED'] as const;
+export type MerchantGuaranteeDepositState = (typeof merchantGuaranteeDepositStates)[number];
+
+export const guaranteeStatuses = ['DECISION_BLOCKED', 'BELOW_MINIMUM', 'READY', 'FROZEN'] as const;
+export type GuaranteeStatus = (typeof guaranteeStatuses)[number];
+
+export const breakerActions = ['PAUSE', 'RESUME'] as const;
+export type BreakerAction = (typeof breakerActions)[number];
+
+export const breakerCauseTypes = ['COVERAGE', 'GOVERNANCE', 'SECURITY', 'OPERATIONS'] as const;
+export type BreakerCauseType = (typeof breakerCauseTypes)[number];
 
 export const takeoverStates = [
   'OPEN',
@@ -171,6 +209,108 @@ export type SeckillState = (typeof seckillStates)[number];
 export const policyPublicationStates = ['DRAFT', 'DECISION_BLOCKED', 'PUBLISHED', 'SUPERSEDED'] as const;
 export type PolicyPublicationState = (typeof policyPublicationStates)[number];
 
+export const policyDraftStates = [
+  'DRAFT',
+  'DECISION_BLOCKED',
+  'SECONDARY_SIGNED',
+  'SAFE_PROPOSED',
+  'FINALITY_PENDING',
+  'REORGED',
+  'REJECTED',
+  'PUBLISHED',
+] as const;
+export type PolicyDraftState = (typeof policyDraftStates)[number];
+
+export const cmsContentTypes = [
+  'BANNER',
+  'RECOMMENDATION',
+  'SPLASH',
+  'CAMPAIGN_POPUP',
+  'SECKILL_RULES',
+  'FAQ',
+  'SERVICE_AGREEMENT',
+  'PRIVACY',
+  'ABOUT',
+  'RELEASE_ANNOUNCEMENT',
+  'UPDATE_NOTICE',
+  'CONTRACT_NOTICE',
+] as const;
+export type CmsContentType = (typeof cmsContentTypes)[number];
+
+export const cmsContentFormats = ['STRUCTURED_RICH_TEXT', 'STRUCTURED_CAMPAIGN'] as const;
+export type CmsContentFormat = (typeof cmsContentFormats)[number];
+
+export const cmsPublicationEventTypes = ['PUBLISHED', 'ROLLED_BACK'] as const;
+export type CmsPublicationEventType = (typeof cmsPublicationEventTypes)[number];
+
+export const notificationChannels = ['IN_APP', 'SMS', 'EMAIL', 'PUSH'] as const;
+export type NotificationChannel = (typeof notificationChannels)[number];
+
+export const notificationProviders = ['CORE', 'ALIYUN_SMS', 'TENCENT_SMS', 'SMTP', 'FIREBASE', 'JPUSH'] as const;
+export type NotificationProvider = (typeof notificationProviders)[number];
+
+export const notificationEndpointStates = ['ACTIVE', 'PAUSED', 'REVOKED'] as const;
+export type NotificationEndpointState = (typeof notificationEndpointStates)[number];
+
+export const notificationCampaignTopics = ['ANNOUNCEMENT', 'MAINTENANCE', 'ACTIVITY'] as const;
+export type NotificationCampaignTopic = (typeof notificationCampaignTopics)[number];
+
+export const notificationCampaignStates = ['DRAFT', 'PUBLISHED', 'CANCELLED'] as const;
+export type NotificationCampaignState = (typeof notificationCampaignStates)[number];
+
+export const notificationDeliveryStates = [
+  'PENDING',
+  'PROCESSING',
+  'DELIVERED',
+  'RETRY',
+  'CONFIGURATION_REQUIRED',
+  'DEAD_LETTER',
+] as const;
+export type NotificationDeliveryState = (typeof notificationDeliveryStates)[number];
+
+export const systemConfigKeys = ['BUSINESS', 'FREIGHT', 'RPC', 'ORACLE', 'GAS', 'CHAIN', 'INTEGRATIONS'] as const;
+export type SystemConfigKey = (typeof systemConfigKeys)[number];
+
+export const auditStreamNames = ['financial', 'governance', 'authentication', 'operational', 'backup'] as const;
+export type AuditStreamName = (typeof auditStreamNames)[number];
+
+export const auditEvidenceProfiles = [
+  'RBAC',
+  'AUTHORIZATION',
+  'SIGNED_OFFCHAIN',
+  'SAFE_APPROVED',
+  'CHAIN_OBSERVED',
+  'CHAIN_FINAL',
+  'SYSTEM',
+] as const;
+export type AuditEvidenceProfile = (typeof auditEvidenceProfiles)[number];
+
+export const operationsMetricComponents = [
+  'HOST',
+  'REDIS',
+  'MQ',
+  'DATABASE',
+  'HTTP',
+  'PAYMENT',
+  'FULFILLMENT',
+  'RPC_PRIMARY',
+  'RPC_FALLBACK',
+  'EXPLORER',
+] as const;
+export type OperationsMetricComponent = (typeof operationsMetricComponents)[number];
+
+export const operationsMetricUnits = ['PERCENT', 'BYTES', 'COUNT', 'MILLISECONDS', 'BLOCK', 'PER_SECOND'] as const;
+export type OperationsMetricUnit = (typeof operationsMetricUnits)[number];
+
+export const operationsMetricStatuses = ['HEALTHY', 'WARNING', 'CRITICAL', 'UNAVAILABLE', 'CONFIGURATION_REQUIRED'] as const;
+export type OperationsMetricStatus = (typeof operationsMetricStatuses)[number];
+
+export const operationsAlertEventTypes = ['OPENED', 'ACKNOWLEDGED', 'RECOVERED'] as const;
+export type OperationsAlertEventType = (typeof operationsAlertEventTypes)[number];
+
+export const operationsAlertSeverities = ['WARNING', 'CRITICAL'] as const;
+export type OperationsAlertSeverity = (typeof operationsAlertSeverities)[number];
+
 export const adapterProviders = [
   'AMAP',
   'KUAIDI100',
@@ -179,8 +319,10 @@ export const adapterProviders = [
   'YILIANYUN',
   'BNM',
   'ALIYUN_SMS',
+  'TENCENT_SMS',
   'ALIYUN_OSS',
   'SMTP',
+  'FIREBASE',
   'JPUSH',
 ] as const;
 export type AdapterProvider = (typeof adapterProviders)[number];

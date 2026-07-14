@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { AbiCoder, Interface, Wallet, keccak256, type InterfaceAbi } from 'ethers';
-import { CORE_ARTIFACT_VERSION } from '../api/enums.ts';
+import { AbiCoder, Interface, Wallet, keccak256, toUtf8Bytes, type InterfaceAbi } from 'ethers';
+import { CORE_ARTIFACT_VERSION, USDT_ADDRESS } from '../api/enums.ts';
 import { paymentAllocationSetHash, type PaymentPolicySnapshot } from '../api/payment-policy.ts';
 import { AbiEventDecoder, type DecodedDomainEvent, type IndexedLog } from './abi-decoder.ts';
 import { BnmAvailabilityWorker, HttpBnmAvailabilityAdapter } from './bnm-availability-worker.ts';
 import { FulfillmentSchedulerWorker } from './fulfillment-scheduler-worker.ts';
+import { ResilientBscGuaranteeDepositSource } from './guarantee-deposit-worker.ts';
+import type { GuaranteeDepositFinalityItem } from '../data/guarantee-deposit-service.ts';
+import { HttpTakeoverFundingSafeApprover } from './takeover-funding-governance.ts';
 import { RemoteExecutorClient } from './executor.ts';
 import {
   RpcBeneficiarySnapshotSource,
@@ -32,6 +35,26 @@ import {
 import { scheduleFulfillmentJobs } from './scheduler.ts';
 import { RemoteSignerClient } from './signer.ts';
 import type { SqlExecutor, SqlTransactionRunner } from '../data/migrations.ts';
+import {
+  HttpSafeApprovalVerifier,
+  HttpSafeSettlementBroadcaster,
+  ResilientBscSafeSettlementChainSource,
+} from './safe-settlement-adapters.ts';
+import {
+  RpcSafeRuntimeAttestor,
+  emptySafeModulesHash,
+  zeroSafeAddress,
+} from './safe-runtime-attestor.ts';
+import {
+  MULTISEND_CALL_ONLY_ADDRESS,
+  MULTISEND_CALL_ONLY_CODE_HASH,
+  SAFE_L2_SINGLETON_ADDRESS,
+  SAFE_L2_SINGLETON_CODE_HASH,
+} from './safe-multisend.ts';
+import {
+  HttpRpcPolicyChainSource,
+  type PolicyFinalityCandidate,
+} from './policy-publication-worker.ts';
 
 const CONTRACT = '0x3333333333333333333333333333333333333333';
 const BUYER = '0x1111111111111111111111111111111111111111';
@@ -352,6 +375,269 @@ test('remote executor enforces chain, zero native value, gas cap and replacement
   );
 });
 
+test('Safe runtime attestation binds owners, modules, guard, fallback and deployment code hashes', async () => {
+  const owners = [
+    '0x1000000000000000000000000000000000000002',
+    '0x1000000000000000000000000000000000000001',
+  ];
+  const ownerSetHash = keccak256(toUtf8Bytes(JSON.stringify({ owners: owners.slice().sort(), threshold: 2 })));
+  const reader = {
+    chainId: async () => 56,
+    codeHash: async (address: string) => {
+      const normalized = address.toLowerCase();
+      if (normalized === CONTRACT) return HASH_1;
+      if (normalized === SAFE_L2_SINGLETON_ADDRESS) return SAFE_L2_SINGLETON_CODE_HASH;
+      if (normalized === MULTISEND_CALL_ONLY_ADDRESS) return MULTISEND_CALL_ONLY_CODE_HASH;
+      if (normalized === MERCHANT) return HASH_2;
+      throw new Error('unknown runtime');
+    },
+    call: async (_address: string, _abi: InterfaceAbi, method: string) => {
+      if (method === 'VERSION') return '1.4.1';
+      if (method === 'masterCopy') return SAFE_L2_SINGLETON_ADDRESS;
+      if (method === 'getOwners') return owners;
+      if (method === 'getThreshold') return 2n;
+      if (method === 'nonce') return 7n;
+      if (method === 'getModulesPaginated') return [[], '0x0000000000000000000000000000000000000001'];
+      if (method === 'getStorageAt') return `0x${'0'.repeat(64)}`;
+      throw new Error(`unexpected ${method}`);
+    },
+  };
+  const expected = {
+    safeAddress: CONTRACT,
+    safeProxyCodeHash: HASH_1,
+    ownerSetHash,
+    threshold: 2,
+    guardAddress: zeroSafeAddress,
+    fallbackHandlerAddress: zeroSafeAddress,
+    modulesHash: emptySafeModulesHash,
+    tokenAddress: MERCHANT,
+    tokenCodeHash: HASH_2,
+    tokenTransferConformanceEvidenceHash: HASH_3,
+  };
+  const attested = await new RpcSafeRuntimeAttestor({ reader, expected }).attest();
+  assert.equal(attested.safeNonce, '7');
+  assert.equal(attested.ownerSetHash, ownerSetHash);
+  assert.equal(attested.multisendCodeHash, MULTISEND_CALL_ONLY_CODE_HASH);
+  await assert.rejects(
+    new RpcSafeRuntimeAttestor({ reader, expected: { ...expected, ownerSetHash: HASH_3 } }).attest(),
+    /does not match governed expectations/,
+  );
+});
+
+test('Safe approval and broadcaster adapters require HTTPS mTLS and echo-bound envelopes', async () => {
+  assert.throws(
+    () => new HttpSafeApprovalVerifier({ url: 'http://unsafe.invalid', token: 'token', mutualTls: true }),
+    /requires HTTPS/,
+  );
+  assert.throws(
+    () => new ResilientBscSafeSettlementChainSource({ primaryRpcUrl: 'https://rpc.invalid' }),
+    /Two BSC RPC/,
+  );
+  assert.throws(
+    () => new ResilientBscSafeSettlementChainSource({
+      primaryRpcUrl: 'https://rpc.invalid',
+      fallbackRpcUrl: 'https://rpc.invalid',
+    }),
+    /independent BSC RPC/,
+  );
+  assert.throws(
+    () => new ResilientBscSafeSettlementChainSource({
+      primaryRpcUrl: 'http://primary.invalid',
+      fallbackRpcUrl: 'wss://fallback.invalid',
+    }),
+    /require HTTPS/,
+  );
+  const approval = new HttpSafeApprovalVerifier({
+    url: 'https://approvals.example.invalid/v1/verify',
+    token: 'approval-token',
+    mutualTls: true,
+    fetch: async () => new Response(JSON.stringify({
+      safeAddress: CONTRACT,
+      safeTxHash: HASH_1,
+      ownerSetHash: HASH_2,
+      threshold: 2,
+      proposalReferenceHash: HASH_2,
+      approvalEvidenceHash: HASH_3,
+      packedSignatures: '0x1122',
+      approvals: [
+        { ownerAddress: BUYER, signature: '0x11' },
+        { ownerAddress: MERCHANT, signature: '0x22' },
+      ],
+    }), { status: 200 }),
+  });
+  assert.equal((await approval.verify({
+    batchId: ORDER_ID,
+    safeAddress: CONTRACT,
+    safeTxHash: HASH_1,
+    signingData: '0x1901',
+    ownerSetHash: HASH_2,
+    threshold: 2,
+  })).approvals.length, 2);
+
+  let requestBody: Record<string, unknown> | undefined;
+  const broadcaster = new HttpSafeSettlementBroadcaster({
+    url: 'https://executor.example.invalid/v1/safe',
+    token: 'executor-token',
+    mutualTls: true,
+    maxOuterGasLimit: 1_000_000n,
+    fetch: async (_url, init) => {
+      requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({
+        executionTxHash: HASH_3,
+        outerSender: BUYER,
+        outerNonce: '9',
+        requestDigest: requestBody.requestDigest,
+        ...(requestBody.replacementForExecutionTxHash
+          ? { replacementForExecutionTxHash: requestBody.replacementForExecutionTxHash }
+          : {}),
+      }), { status: 200 });
+    },
+  });
+  const submitted = await broadcaster.submit({
+    chainId: 56,
+    batchId: ORDER_ID,
+    safeAddress: CONTRACT,
+    safeNonce: '7',
+    safeTxHash: HASH_1,
+    contentHash: HASH_2,
+    execTransactionCalldata: '0x11223344',
+    requestDigest: HASH_3,
+    idempotencyKey: 'settlement-attempt:1',
+    outerGasLimit: '1000000',
+  });
+  assert.equal(submitted.executionTxHash, HASH_3);
+  assert.equal(requestBody?.safeTxHash, HASH_1);
+  const replacement = await broadcaster.replace({
+    chainId: 56,
+    batchId: ORDER_ID,
+    safeAddress: CONTRACT,
+    safeNonce: '7',
+    safeTxHash: HASH_1,
+    contentHash: HASH_2,
+    execTransactionCalldata: '0x11223344',
+    requestDigest: HASH_3,
+    idempotencyKey: 'settlement-attempt:2',
+    outerGasLimit: '1000000',
+    replacementForAttemptId: 'settlement-attempt:1',
+    replacementForExecutionTxHash: HASH_2,
+    outerSender: BUYER,
+    outerNonce: '9',
+  });
+  assert.equal(replacement.replacementForExecutionTxHash, HASH_2);
+  assert.equal(requestBody?.outerNonce, '9');
+  await assert.rejects(
+    broadcaster.replace({
+      chainId: 56,
+      batchId: ORDER_ID,
+      safeAddress: CONTRACT,
+      safeNonce: '7',
+      safeTxHash: HASH_1,
+      contentHash: HASH_2,
+      execTransactionCalldata: '0x11223344',
+      requestDigest: HASH_3,
+      idempotencyKey: 'settlement-attempt:3',
+      outerGasLimit: '1000000',
+      replacementForAttemptId: 'settlement-attempt:2',
+      replacementForExecutionTxHash: HASH_3,
+      outerSender: BUYER,
+      outerNonce: '10',
+    }),
+    /did not bind/,
+  );
+});
+
+test('takeover Safe approver rejects malformed owner evidence with a controlled finality error', async () => {
+  const input = {
+    caseId: 'takeover-case-1',
+    policyVersion: 1,
+    governanceSafeAddress: CONTRACT,
+    operationsSafeAddress: '0x5555555555555555555555555555555555555555',
+    actionDigest: HASH_1,
+    oldValueHash: HASH_2,
+    newValueHash: HASH_3,
+  };
+  const approver = new HttpTakeoverFundingSafeApprover({
+    url: 'https://takeover-safe.example.invalid/verify',
+    token: 'takeover-safe-token',
+    mutualTls: true,
+    fetchImpl: async () => jsonResponse({
+      ...input,
+      safeTxHash: HASH_1,
+      proposalReferenceHash: HASH_2,
+      approvalEvidenceHash: HASH_3,
+      ownerSetHash: HASH_1,
+      threshold: 1,
+      approvals: [{ ownerAddress: 'not-an-address', signature: '0x11' }],
+    }),
+  });
+  await assert.rejects(approver.verify(input), /Safe owner approval is malformed/);
+});
+
+test('policy RPC finality binds BSC, semantic receipts, canonical blocks and 14/15 confirmations', async () => {
+  const harness = policyRpcHarness();
+  const source = policyChainSource(harness.fetch);
+  harness.state.head = 113;
+  const mined = await source.observe(policyFinalityCandidate());
+  assert.equal(mined.state, 'MINED');
+  if (mined.state !== 'MINED') throw new Error('ExpectedMinedPolicy');
+  assert.equal(mined.confirmations, 14);
+  assert.equal(mined.executionTxHash, harness.executionTxHash);
+
+  harness.state.head = 114;
+  const finalized = await source.observe(policyFinalityCandidate());
+  assert.equal(finalized.state, 'FINAL');
+  if (finalized.state !== 'FINAL') throw new Error('ExpectedFinalPolicy');
+  assert.equal(finalized.confirmations, 15);
+  assert.equal(finalized.blockHash, harness.minedBlockHash);
+});
+
+test('policy RPC finality fails closed on chain, receipt, transaction and provider disagreement', async () => {
+  const cases: Array<[string, (harness: ReturnType<typeof policyRpcHarness>) => void]> = [
+    ['wrong chain', (harness) => { harness.state.primaryChainId = 1; }],
+    ['one missing receipt', (harness) => { harness.state.fallbackReceiptMissing = true; }],
+    ['wrong transaction', (harness) => { harness.state.fallbackTransactionHash = HASH_2; }],
+    ['failed transaction', (harness) => { harness.state.receiptStatus = '0x0'; }],
+    ['receipt block disagreement', (harness) => { harness.state.fallbackReceiptBlockHash = HASH_2; }],
+    ['canonical provider disagreement', (harness) => { harness.state.fallbackCanonicalBlockHash = HASH_2; }],
+  ];
+  for (const [name, mutate] of cases) {
+    const harness = policyRpcHarness();
+    mutate(harness);
+    await assert.rejects(policyChainSource(harness.fetch).observe(policyFinalityCandidate()), () => true, name);
+  }
+});
+
+test('policy RPC finality distinguishes pending execution from a proven deep reorg', async () => {
+  const harness = policyRpcHarness();
+  harness.state.primaryReceiptMissing = true;
+  harness.state.fallbackReceiptMissing = true;
+  const source = policyChainSource(harness.fetch);
+  assert.deepEqual(await source.observe(policyFinalityCandidate()), { state: 'NOT_FOUND' });
+
+  const previous = {
+    executionTxHash: harness.executionTxHash,
+    blockNumber: 100,
+    blockHash: harness.minedBlockHash,
+  };
+  harness.state.primaryCanonicalBlockHash = harness.replacementBlockHash;
+  harness.state.fallbackCanonicalBlockHash = harness.replacementBlockHash;
+  const reorged = await source.observe({
+    ...policyFinalityCandidate(),
+    priorState: 'PUBLISHED',
+    priorFinality: previous,
+  });
+  assert.equal(reorged.state, 'REORGED');
+  if (reorged.state !== 'REORGED') throw new Error('ExpectedReorgedPolicy');
+  assert.equal(reorged.blockHash, harness.minedBlockHash);
+  assert.equal(reorged.canonicalBlockHash, harness.replacementBlockHash);
+
+  assert.deepEqual(await source.observe({
+    ...policyFinalityCandidate(),
+    priorState: 'REORGED',
+    priorFinality: previous,
+  }), { state: 'NOT_FOUND' });
+});
+
 test('payment RPC sources enforce the frozen Oracle and beneficiary snapshot rules', async () => {
   const now = 1_800_000_000;
   const reader = new StubContractReader({
@@ -646,6 +932,116 @@ test('fulfillment scheduler executes eligible takeover with deterministic eviden
   assert.deepEqual(opened[1]?.input, opened[0]?.input);
 });
 
+test('guarantee RPC source binds exact BSC USDT transfer and 14/15 confirmation finality', async () => {
+  assert.throws(
+    () => new ResilientBscGuaranteeDepositSource({
+      primaryRpcUrl: 'http://primary.example.invalid',
+      fallbackRpcUrl: 'https://fallback.example.invalid',
+    }),
+    /must be an HTTPS endpoint/,
+  );
+  assert.throws(
+    () => new ResilientBscGuaranteeDepositSource({
+      primaryRpcUrl: 'https://same.example.invalid',
+      fallbackRpcUrl: 'https://same.example.invalid',
+    }),
+    /must be independent/,
+  );
+  assert.throws(
+    () => new ResilientBscGuaranteeDepositSource({
+      primaryRpcUrl: 'https://user:password@primary.example.invalid',
+      fallbackRpcUrl: 'https://fallback.example.invalid',
+    }),
+    /without embedded credentials/,
+  );
+
+  const harness = guaranteeRpcHarness();
+  const source = guaranteeChainSource(harness.fetch);
+  const mined = await source.observe(guaranteeFinalityItem());
+  assert.equal(mined.state, 'MINED');
+  if (mined.state !== 'MINED') throw new Error('ExpectedMinedGuarantee');
+  assert.equal(mined.confirmations, 14);
+  assert.equal(mined.from, MERCHANT);
+  assert.equal(mined.to, guaranteeFinalityItem().operationsSafeAddress);
+  assert.equal(mined.amount, guaranteeFinalityItem().expectedAmountUsdt);
+  assert.equal(mined.logIndex, 3);
+  assert.match(mined.transferEvidenceHash, /^0x[0-9a-f]{64}$/);
+
+  harness.state.primaryHead = 114;
+  harness.state.fallbackHead = 116;
+  const final = await source.observe(guaranteeFinalityItem());
+  assert.equal(final.state, 'FINAL');
+  if (final.state !== 'FINAL') throw new Error('ExpectedFinalGuarantee');
+  assert.equal(final.confirmations, 15);
+  harness.state.primaryHead = 120;
+  harness.state.fallbackHead = 121;
+  assert.equal(final.transferEvidenceHash, (await source.observe(guaranteeFinalityItem()) as typeof final).transferEvidenceHash);
+});
+
+test('guarantee RPC source fails closed on chain, receipt, transfer and canonical disagreement', async () => {
+  const harness = guaranteeRpcHarness();
+  const source = guaranteeChainSource(harness.fetch);
+
+  harness.state.fallbackChainId = 1;
+  await assert.rejects(source.observe(guaranteeFinalityItem()), /not BSC chain 56/);
+  harness.state.fallbackChainId = 56;
+
+  harness.state.fallbackReceiptMissing = true;
+  await assert.rejects(source.observe(guaranteeFinalityItem()), /providers disagree/);
+  harness.state.fallbackReceiptMissing = false;
+
+  harness.state.fallbackReceiptBlockHash = HASH_3;
+  await assert.rejects(source.observe(guaranteeFinalityItem()), /different transactions/);
+  harness.state.fallbackReceiptBlockHash = harness.minedBlockHash;
+
+  harness.state.fallbackCanonicalBlockHash = HASH_3;
+  await assert.rejects(source.observe(guaranteeFinalityItem()), /not canonical/);
+  harness.state.fallbackCanonicalBlockHash = harness.minedBlockHash;
+
+  harness.state.transferAmount = '999';
+  await assert.rejects(source.observe(guaranteeFinalityItem()), /one exact USDT Transfer/);
+  harness.state.transferAmount = guaranteeFinalityItem().expectedAmountUsdt;
+
+  harness.state.transferRecipient = BUYER;
+  await assert.rejects(source.observe(guaranteeFinalityItem()), /one exact USDT Transfer/);
+  harness.state.transferRecipient = guaranteeFinalityItem().operationsSafeAddress;
+
+  harness.state.transferData = '0x01';
+  await assert.rejects(source.observe(guaranteeFinalityItem()), /one exact USDT Transfer/);
+  harness.state.transferData = null;
+
+  harness.state.receiptStatus = '0x0';
+  await assert.rejects(source.observe(guaranteeFinalityItem()), /did not succeed/);
+});
+
+test('guarantee RPC source proves deep reorg only when both providers replace the old block', async () => {
+  const harness = guaranteeRpcHarness();
+  const source = guaranteeChainSource(harness.fetch);
+  const observed = {
+    ...guaranteeFinalityItem(),
+    state: 'FINAL' as const,
+    observedBlockNumber: 100,
+    observedBlockHash: harness.minedBlockHash,
+    observedLogIndex: 3,
+    confirmations: 15,
+  };
+  harness.state.primaryReceiptMissing = true;
+  harness.state.fallbackReceiptMissing = true;
+  harness.state.primaryCanonicalBlockHash = harness.replacementBlockHash;
+  harness.state.fallbackCanonicalBlockHash = harness.replacementBlockHash;
+  const reorg = await source.observe(observed);
+  assert.equal(reorg.state, 'REORGED');
+  if (reorg.state !== 'REORGED') throw new Error('ExpectedGuaranteeReorg');
+  assert.equal(reorg.previousBlockHash, harness.minedBlockHash);
+  assert.equal(reorg.canonicalBlockHash, harness.replacementBlockHash);
+
+  harness.state.fallbackCanonicalBlockHash = HASH_3;
+  await assert.rejects(source.observe(observed), /providers disagree/);
+  harness.state.fallbackCanonicalBlockHash = harness.minedBlockHash;
+  harness.state.primaryCanonicalBlockHash = harness.minedBlockHash;
+  await assert.rejects(source.observe(observed), /block remains canonical/);
+});
+
 test('BNM adapter is idempotency-bound, validates acknowledgements and fails closed without configuration', async () => {
   const input = {
     orderId: ORDER_ID,
@@ -882,6 +1278,202 @@ function policySource(
   return new RpcPaymentPolicyAttestationSource({
     reader: new StubContractReader({ getPolicy: tuple, getOperations: operations, latestVersion }),
     policyRegistryAddress: CONTRACT,
+  });
+}
+
+function guaranteeFinalityItem(): GuaranteeDepositFinalityItem {
+  return {
+    depositId: 'guarantee-deposit:rpc-test',
+    merchantId: 'merchant-1',
+    merchantWallet: MERCHANT,
+    policyVersion: 1,
+    tokenAddress: USDT_ADDRESS,
+    operationsSafeAddress: '0x5555555555555555555555555555555555555555',
+    expectedAmountUsdt: (1_000n * 10n ** 18n).toString(),
+    transactionHash: HASH_2,
+    state: 'SUBMITTED',
+    confirmations: 0,
+  };
+}
+
+function guaranteeChainSource(fetchImpl: typeof fetch) {
+  return new ResilientBscGuaranteeDepositSource({
+    primaryRpcUrl: 'https://guarantee-primary.example.invalid',
+    fallbackRpcUrl: 'https://guarantee-fallback.example.invalid',
+    fetchImpl,
+    clock: () => new Date('2026-07-15T08:00:00.000Z'),
+  });
+}
+
+function guaranteeRpcHarness() {
+  const minedBlockHash = `0x${'6'.repeat(64)}`;
+  const replacementBlockHash = `0x${'7'.repeat(64)}`;
+  const transferInterface = new Interface(['event Transfer(address indexed from,address indexed to,uint256 value)']);
+  const event = transferInterface.getEvent('Transfer');
+  if (!event) throw new Error('MissingTransferEvent');
+  const state = {
+    primaryChainId: 56,
+    fallbackChainId: 56,
+    primaryHead: 113,
+    fallbackHead: 113,
+    primaryReceiptMissing: false,
+    fallbackReceiptMissing: false,
+    receiptStatus: '0x1',
+    fallbackReceiptBlockHash: minedBlockHash,
+    primaryCanonicalBlockHash: minedBlockHash,
+    fallbackCanonicalBlockHash: minedBlockHash,
+    transferAmount: guaranteeFinalityItem().expectedAmountUsdt,
+    transferRecipient: guaranteeFinalityItem().operationsSafeAddress,
+    transferData: null as string | null,
+  };
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const primary = String(input).startsWith('https://guarantee-primary.example.invalid');
+    const request = JSON.parse(String(init?.body)) as { method: string; params: unknown[] };
+    let result: unknown;
+    if (request.method === 'eth_chainId') {
+      result = `0x${(primary ? state.primaryChainId : state.fallbackChainId).toString(16)}`;
+    } else if (request.method === 'eth_blockNumber') {
+      result = `0x${(primary ? state.primaryHead : state.fallbackHead).toString(16)}`;
+    } else if (request.method === 'eth_getBlockByNumber') {
+      result = {
+        number: String(request.params[0]).toLowerCase(),
+        hash: primary ? state.primaryCanonicalBlockHash : state.fallbackCanonicalBlockHash,
+      };
+    } else if (request.method === 'eth_getTransactionReceipt') {
+      const missing = primary ? state.primaryReceiptMissing : state.fallbackReceiptMissing;
+      if (missing) {
+        result = null;
+      } else {
+        const encoded = transferInterface.encodeEventLog(event, [
+          MERCHANT,
+          state.transferRecipient,
+          BigInt(state.transferAmount),
+        ]);
+        const blockHash = primary ? minedBlockHash : state.fallbackReceiptBlockHash;
+        result = {
+          transactionHash: HASH_2,
+          transactionIndex: '0x0',
+          blockHash,
+          blockNumber: '0x64',
+          status: state.receiptStatus,
+          logs: [{
+            address: USDT_ADDRESS,
+            topics: encoded.topics,
+            data: state.transferData ?? encoded.data,
+            logIndex: '0x3',
+            transactionHash: HASH_2,
+            blockHash,
+            blockNumber: '0x64',
+            removed: false,
+          }],
+        };
+      }
+    } else {
+      throw new Error(`UnexpectedGuaranteeRpcMethod:${request.method}`);
+    }
+    return jsonResponse({ jsonrpc: '2.0', id: 1, result });
+  };
+  return { state, fetch: fetchImpl, minedBlockHash, replacementBlockHash };
+}
+
+function policyFinalityCandidate(): PolicyFinalityCandidate {
+  return {
+    draftId: 'policy-draft-1',
+    policyVersion: 2,
+    safeTxHash: `0x${'5'.repeat(64)}`,
+    policyRegistryAddress: CONTRACT,
+    policyHash: HASH_1,
+    operationsHash: HASH_2,
+    decisionEvidenceHash: HASH_3,
+    safeAddress: BUYER,
+    priorState: 'SAFE_PROPOSED',
+  };
+}
+
+function policyChainSource(fetchImpl: typeof fetch) {
+  return new HttpRpcPolicyChainSource({
+    lookupUrl: 'https://safe-lookup.example.invalid/policy',
+    lookupToken: 'lookup-token',
+    primaryRpcUrl: 'https://primary-rpc.example.invalid',
+    fallbackRpcUrl: 'https://fallback-rpc.example.invalid',
+    fetchImpl,
+  });
+}
+
+function policyRpcHarness() {
+  const executionTxHash = `0x${'4'.repeat(64)}`;
+  const minedBlockHash = `0x${'6'.repeat(64)}`;
+  const replacementBlockHash = `0x${'7'.repeat(64)}`;
+  const iface = new Interface([
+    'event PolicyPublished(uint64 indexed version,bytes32 indexed policyHash,bytes32 indexed operationsHash,bytes32 decisionEvidenceHash,address safeExecutor)',
+  ]);
+  const event = iface.getEvent('PolicyPublished');
+  if (!event) throw new Error('MissingPolicyPublishedEvent');
+  const encoded = iface.encodeEventLog(event, [2, HASH_1, HASH_2, HASH_3, BUYER]);
+  const state = {
+    primaryChainId: 56,
+    fallbackChainId: 56,
+    head: 114,
+    primaryReceiptMissing: false,
+    fallbackReceiptMissing: false,
+    receiptStatus: '0x1',
+    fallbackTransactionHash: executionTxHash,
+    fallbackReceiptBlockHash: minedBlockHash,
+    primaryCanonicalBlockHash: minedBlockHash,
+    fallbackCanonicalBlockHash: minedBlockHash,
+  };
+  const log = { address: CONTRACT, topics: encoded.topics, data: encoded.data };
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = String(input);
+    if (url.startsWith('https://safe-lookup.example.invalid')) {
+      return jsonResponse({
+        safeTxHash: policyFinalityCandidate().safeTxHash,
+        resourceId: policyFinalityCandidate().draftId,
+        executionTxHash,
+      });
+    }
+    const primary = url.startsWith('https://primary-rpc.example.invalid');
+    const request = JSON.parse(String(init?.body)) as { method: string; params: unknown[] };
+    let result: unknown;
+    if (request.method === 'eth_chainId') {
+      result = `0x${(primary ? state.primaryChainId : state.fallbackChainId).toString(16)}`;
+    } else if (request.method === 'eth_blockNumber') {
+      result = `0x${state.head.toString(16)}`;
+    } else if (request.method === 'eth_getBlockByNumber') {
+      result = { hash: primary ? state.primaryCanonicalBlockHash : state.fallbackCanonicalBlockHash };
+    } else if (request.method === 'eth_getTransactionReceipt') {
+      const missing = primary ? state.primaryReceiptMissing : state.fallbackReceiptMissing;
+      result = missing
+        ? null
+        : primary
+          ? {
+            transactionHash: executionTxHash,
+            status: state.receiptStatus,
+            blockHash: minedBlockHash,
+            blockNumber: '0x64',
+            logs: [log],
+            providerExtension: 'primary-only',
+          }
+          : {
+            logs: [{ data: log.data, topics: log.topics, address: log.address }],
+            blockNumber: '0x64',
+            blockHash: state.fallbackReceiptBlockHash,
+            status: state.receiptStatus,
+            transactionHash: state.fallbackTransactionHash,
+            providerExtension: 'fallback-only',
+          };
+    } else {
+      throw new Error(`UnexpectedPolicyRpcMethod:${request.method}`);
+    }
+    return jsonResponse({ jsonrpc: '2.0', id: 1, result });
+  };
+  return { state, fetch: fetchImpl, executionTxHash, minedBlockHash, replacementBlockHash };
+}
+
+function jsonResponse(body: unknown) {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
   });
 }
 

@@ -212,6 +212,24 @@ export class BnmAvailabilityWorker {
                AND attempt_count = $3`,
             [event.event_id, this.#workerId, event.attempt_count],
           );
+          await executor.query(
+            `INSERT INTO core.outbox_events (
+               event_id, aggregate_type, aggregate_id, event_type, payload,
+               idempotency_key, state
+             ) VALUES ($1,'ORDER',$2,'BnmStateFinalized',$3,$1,'PENDING')
+             ON CONFLICT (idempotency_key) DO NOTHING`,
+            [
+              `outbox:bnm-final:${event.event_id}`,
+              input.orderId,
+              JSON.stringify({
+                orderId: input.orderId,
+                state: input.state,
+                amount: input.amount,
+                stateVersion: input.stateVersion,
+                sourceEventId: event.event_id,
+              }),
+            ],
+          );
         });
       } catch (error) {
         await this.#transactions.transaction((executor) => retryBnmEvent(executor, event, this.#workerId, error));

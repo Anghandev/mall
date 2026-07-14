@@ -7,6 +7,16 @@ import { CORE_ARTIFACT_VERSION, type BreakerScope, type UserRole } from './api/e
 import { CoreError } from './api/errors.ts';
 import { AmapAdministrativeRegionResolver } from './api/providers.ts';
 import {
+  HttpNotificationProviderAdapter,
+  HttpSecretReferenceResolver,
+  type ExternalNotificationProvider,
+} from './api/notification-providers.ts';
+import {
+  MiddlewareMonitoringSource,
+  NodeHostMonitoringSource,
+  RpcExplorerHeightSource,
+} from './api/monitoring-sources.ts';
+import {
   ResilientBscContractReader,
   RpcBeneficiarySnapshotSource,
   RpcPaymentOracleQuoteSource,
@@ -16,6 +26,12 @@ import {
 import { AbiEventDecoder } from './chain/abi-decoder.ts';
 import { BnmAvailabilityWorker, HttpBnmAvailabilityAdapter } from './chain/bnm-availability-worker.ts';
 import { FulfillmentSchedulerWorker } from './chain/fulfillment-scheduler-worker.ts';
+import {
+  GuaranteeDepositWorker,
+  ResilientBscGuaranteeDepositSource,
+} from './chain/guarantee-deposit-worker.ts';
+import { CoverageWorker } from './chain/coverage-worker.ts';
+import { ResilientBscCoverageSource } from './chain/coverage-source.ts';
 import { ChainIndexer } from './chain/indexer.ts';
 import {
   PollingPaymentIndexer,
@@ -27,10 +43,28 @@ import {
   verifyArtifactChecksums,
 } from './chain/runtime-readiness.ts';
 import { RemoteSignerClient } from './chain/signer.ts';
+import {
+  HttpSafeApprovalVerifier,
+  HttpSafeSettlementBroadcaster,
+  ResilientBscSafeSettlementChainSource,
+} from './chain/safe-settlement-adapters.ts';
+import { RpcSafeRuntimeAttestor } from './chain/safe-runtime-attestor.ts';
+import { SettlementBatchScheduler, SettlementWorker } from './chain/settlement-worker.ts';
+import { AuditOutboxWorker } from './chain/audit-outbox-worker.ts';
+import { NotificationWorker } from './chain/notification-worker.ts';
+import { OperationsMonitoringWorker, RuntimeMetricsRegistry } from './chain/monitoring-worker.ts';
+import {
+  HttpPolicySafeProposer,
+  HttpRpcPolicyChainSource,
+  PolicyFinalityWorker,
+} from './chain/policy-publication-worker.ts';
+import { HttpSystemConfigSafeApprover } from './chain/system-config-governance.ts';
+import { HttpTakeoverFundingSafeApprover } from './chain/takeover-funding-governance.ts';
 import { PostgresNonceStore, RedisNonceRateLimiter } from './data/auth-store.ts';
 import { CatalogPaymentService } from './data/catalog-payment-service.ts';
 import { FulfillmentService } from './data/fulfillment-service.ts';
 import { FulfillmentTargetService } from './data/fulfillment-target-service.ts';
+import { GuaranteeDepositService } from './data/guarantee-deposit-service.ts';
 import {
   createPostgresPool,
   createRedisConnection,
@@ -38,6 +72,14 @@ import {
 } from './data/connections.ts';
 import type { SqlExecutor } from './data/migrations.ts';
 import { PostgresIndexerStore } from './data/indexer-store.ts';
+import { SettlementService } from './data/settlement-service.ts';
+import { TakeoverFundingService } from './data/takeover-funding-service.ts';
+import { AuditQueryService } from './data/audit-service.ts';
+import { CmsService } from './data/cms-service.ts';
+import { MonitoringService } from './data/monitoring-service.ts';
+import { NotificationService } from './data/notification-service.ts';
+import { PolicyService } from './data/policy-service.ts';
+import { SystemConfigService } from './data/system-config-service.ts';
 
 const ARTIFACT_ROOT = fileURLToPath(new URL('../../packages/core-artifacts/', import.meta.url));
 const ABI_BUNDLE_PATH = fileURLToPath(
@@ -46,20 +88,25 @@ const ABI_BUNDLE_PATH = fileURLToPath(
 
 export const coreBaseline = Object.freeze({
   artifactVersion: CORE_ARTIFACT_VERSION,
-  status: 'fulfillment-runtime',
+  status: 'settlement-runtime',
 } as const);
 
 export async function createCoreRuntime(env: Readonly<Record<string, string | undefined>>) {
   const config = loadConfig(env);
   const databaseUrl = required(config.databaseUrl, 'DATABASE_URL');
+  const auditDatabaseUrl = required(config.auditDatabaseUrl, 'AUDIT_DATABASE_URL');
   const redisUrl = required(config.redisUrl, 'REDIS_URL');
   const authDomain = required(config.authDomain, 'AUTH_DOMAIN');
   const authUri = required(config.authUri, 'AUTH_URI');
   const pool = createPostgresPool(databaseUrl);
+  const auditPool = createPostgresPool(auditDatabaseUrl);
   const redis = await createRedisConnection(redisUrl);
   const database = sqlExecutor(pool);
   const transactions = postgresTransactionRunner(pool);
+  const auditDatabase = sqlExecutor(auditPool);
+  const auditTransactions = postgresTransactionRunner(auditPool);
   const reader = new ResilientBscContractReader(config.rpcUrl, config.fallbackRpcUrl);
+  const walletSignatureVerifier = new RpcWalletMessageSignatureVerifier(reader);
   const signer = new RemoteSignerClient({
     url: required(config.signerServiceUrl, 'SIGNER_SERVICE_URL'),
     token: required(config.signerServiceToken, 'SIGNER_SERVICE_TOKEN'),
@@ -84,6 +131,201 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   });
   const indexerStore = new PostgresIndexerStore(transactions);
   const fulfillmentService = new FulfillmentService({ transactions });
+  const settlementService = new SettlementService({
+    transactions,
+    contractWalletVerifier: walletSignatureVerifier,
+    secondarySignerAddress: required(config.secondarySignerAddress, 'SECONDARY_SIGNER_ADDRESS'),
+    governanceVerifyingContract: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+  });
+  const auditReady = async () => {
+    try {
+      await auditPool.query('SELECT 1');
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const takeoverFundingService = new TakeoverFundingService({
+    transactions,
+    approver: new HttpTakeoverFundingSafeApprover({
+      ...(env.TAKEOVER_FUNDING_SAFE_APPROVER_URL ? { url: env.TAKEOVER_FUNDING_SAFE_APPROVER_URL } : {}),
+      ...(env.TAKEOVER_FUNDING_SAFE_APPROVER_TOKEN ? { token: env.TAKEOVER_FUNDING_SAFE_APPROVER_TOKEN } : {}),
+      mutualTls: config.safeMutualTls,
+    }),
+    secondarySigner: required(config.secondarySignerAddress, 'SECONDARY_SIGNER_ADDRESS'),
+    governanceSafe: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    verifyingContract: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    auditReady,
+  });
+  const guaranteeDepositService = new GuaranteeDepositService({
+    transactions,
+    operationsSafeAddress: required(config.operationsTreasurySafeAddress, 'OPERATIONS_TREASURY_SAFE_ADDRESS'),
+  });
+  const guaranteeDepositWorker = new GuaranteeDepositWorker({
+    service: guaranteeDepositService,
+    source: new ResilientBscGuaranteeDepositSource({
+      primaryRpcUrl: required(config.rpcUrl, 'BSC_RPC_URL'),
+      fallbackRpcUrl: required(config.fallbackRpcUrl, 'BSC_FALLBACK_RPC_URL'),
+    }),
+  });
+  const policyService = new PolicyService({
+    transactions,
+    proposer: new HttpPolicySafeProposer({
+      ...(env.POLICY_SAFE_PROPOSER_URL ? { url: env.POLICY_SAFE_PROPOSER_URL } : {}),
+      ...(env.POLICY_SAFE_PROPOSER_TOKEN ? { token: env.POLICY_SAFE_PROPOSER_TOKEN } : {}),
+      mutualTls: config.safeMutualTls,
+    }),
+    policyRegistryAddress: required(config.policyRegistryAddress, 'POLICY_REGISTRY_ADDRESS_MANIFEST'),
+    governanceSafe: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    secondarySigner: required(config.secondarySignerAddress, 'SECONDARY_SIGNER_ADDRESS'),
+    decisionBlocked: config.paymentDecisionBlocked,
+    auditReady,
+  });
+  const cmsService = new CmsService({ transactions });
+  const notificationService = new NotificationService({ transactions });
+  const secretResolver = new HttpSecretReferenceResolver({
+    ...(env.SECRET_RESOLVER_URL ? { url: env.SECRET_RESOLVER_URL } : {}),
+    ...(env.SECRET_RESOLVER_TOKEN ? { token: env.SECRET_RESOLVER_TOKEN } : {}),
+  });
+  const notificationAdapters = ([
+    ['ALIYUN_SMS', 'ALIYUN_SMS_GATEWAY_URL', 'ALIYUN_SMS_CREDENTIAL_REF'],
+    ['TENCENT_SMS', 'TENCENT_SMS_GATEWAY_URL', 'TENCENT_SMS_CREDENTIAL_REF'],
+    ['SMTP', 'SMTP_GATEWAY_URL', 'SMTP_CREDENTIAL_REF'],
+    ['FIREBASE', 'FIREBASE_GATEWAY_URL', 'FIREBASE_CREDENTIAL_REF'],
+    ['JPUSH', 'JPUSH_GATEWAY_URL', 'JPUSH_CREDENTIAL_REF'],
+  ] as const).map(([provider, gatewayName, credentialName]) => new HttpNotificationProviderAdapter({
+    provider: provider as ExternalNotificationProvider,
+    ...(env[gatewayName] ? { gatewayUrl: env[gatewayName] } : {}),
+    ...(env[credentialName] ? { credentialReference: env[credentialName] } : {}),
+    resolver: secretResolver,
+  }));
+  const notificationWorker = new NotificationWorker({
+    transactions,
+    service: notificationService,
+    adapters: notificationAdapters,
+  });
+  const systemConfigService = new SystemConfigService({
+    transactions,
+    approver: new HttpSystemConfigSafeApprover({
+      ...(env.SYSTEM_CONFIG_SAFE_APPROVER_URL ? { url: env.SYSTEM_CONFIG_SAFE_APPROVER_URL } : {}),
+      ...(env.SYSTEM_CONFIG_SAFE_APPROVER_TOKEN ? { token: env.SYSTEM_CONFIG_SAFE_APPROVER_TOKEN } : {}),
+      mutualTls: config.safeMutualTls,
+    }),
+    secondarySigner: required(config.secondarySignerAddress, 'SECONDARY_SIGNER_ADDRESS'),
+    governanceSafe: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    verifyingContract: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    auditReady,
+  });
+  const auditWorker = new AuditOutboxWorker({ business: transactions, audit: auditTransactions });
+  const runtimeMetrics = new RuntimeMetricsRegistry();
+  const monitoringService = new MonitoringService({ transactions });
+  const monitoringWorker = new OperationsMonitoringWorker({
+    transactions,
+    sources: [
+      new NodeHostMonitoringSource(),
+      new MiddlewareMonitoringSource({
+        database,
+        redis,
+        dbPool: () => ({ active: pool.totalCount - pool.idleCount, maximum: 20 }),
+      }),
+      new RpcExplorerHeightSource({
+        ...(config.rpcUrl ? { primaryRpcUrl: config.rpcUrl } : {}),
+        ...(config.fallbackRpcUrl ? { fallbackRpcUrl: config.fallbackRpcUrl } : {}),
+        ...(env.BSC_EXPLORER_API_URL ? { explorerApiUrl: env.BSC_EXPLORER_API_URL } : {}),
+        ...(env.EXPLORER_API_KEY ? { explorerApiKey: env.EXPLORER_API_KEY } : {}),
+      }),
+      runtimeMetrics,
+    ],
+  });
+  const policyFinalityWorker = new PolicyFinalityWorker({
+    service: policyService,
+    source: new HttpRpcPolicyChainSource({
+      ...(env.POLICY_EXECUTION_LOOKUP_URL ? { lookupUrl: env.POLICY_EXECUTION_LOOKUP_URL } : {}),
+      ...(env.POLICY_EXECUTION_LOOKUP_TOKEN ? { lookupToken: env.POLICY_EXECUTION_LOOKUP_TOKEN } : {}),
+      ...(config.rpcUrl ? { primaryRpcUrl: config.rpcUrl } : {}),
+      ...(config.fallbackRpcUrl ? { fallbackRpcUrl: config.fallbackRpcUrl } : {}),
+    }),
+  });
+  const usdtSafeExpectation = required(
+    config.safeSettlementExpectations.USDT,
+    'USDT_SAFE_RUNTIME_EXPECTATIONS',
+  );
+  const nplSafeExpectation = required(
+    config.safeSettlementExpectations.NPL,
+    'NPL_SAFE_RUNTIME_EXPECTATIONS',
+  );
+  const operationsSafeExpectation = required(
+    config.safeSettlementExpectations.OPERATIONS_USDT,
+    'OPERATIONS_SAFE_RUNTIME_EXPECTATIONS',
+  );
+  const usdtSafeAttestor = new RpcSafeRuntimeAttestor({ reader, expected: usdtSafeExpectation });
+  const nplSafeAttestor = new RpcSafeRuntimeAttestor({ reader, expected: nplSafeExpectation });
+  const operationsSafeAttestor = new RpcSafeRuntimeAttestor({ reader, expected: operationsSafeExpectation });
+  const coverageAssets = [
+    {
+      safeAddress: usdtSafeExpectation.safeAddress,
+      asset: 'USDT' as const,
+      tokenAddress: usdtSafeExpectation.tokenAddress,
+    },
+    {
+      safeAddress: nplSafeExpectation.safeAddress,
+      asset: 'NPL' as const,
+      tokenAddress: nplSafeExpectation.tokenAddress,
+    },
+    {
+      safeAddress: operationsSafeExpectation.safeAddress,
+      asset: 'USDT' as const,
+      tokenAddress: operationsSafeExpectation.tokenAddress,
+    },
+  ];
+  const coverageWorker = new CoverageWorker({
+    transactions,
+    source: new ResilientBscCoverageSource({
+      primaryRpcUrl: required(config.rpcUrl, 'BSC_RPC_URL'),
+      fallbackRpcUrl: required(config.fallbackRpcUrl, 'BSC_FALLBACK_RPC_URL'),
+      assets: coverageAssets,
+    }),
+    expectedAssets: coverageAssets,
+  });
+  const settlementBatchScheduler = new SettlementBatchScheduler({
+    service: settlementService,
+    platformWallet: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    targets: [
+      { asset: 'USDT', attest: () => usdtSafeAttestor.attest() },
+      { asset: 'NPL', attest: () => nplSafeAttestor.attest() },
+      { asset: 'USDT', attest: () => operationsSafeAttestor.attest() },
+    ],
+  });
+  const executorMaxGasLimit = required(config.executorMaxGasLimit, 'EXECUTOR_MAX_GAS_LIMIT');
+  const settlementWorker = new SettlementWorker({
+    transactions,
+    approvals: new HttpSafeApprovalVerifier({
+      url: required(config.safeApprovalVerifierUrl, 'SAFE_APPROVAL_VERIFIER_URL'),
+      token: required(config.safeApprovalVerifierToken, 'SAFE_APPROVAL_VERIFIER_TOKEN'),
+      mutualTls: config.safeMutualTls,
+    }),
+    broadcaster: new HttpSafeSettlementBroadcaster({
+      url: required(config.executorUrl, 'SETTLEMENT_EXECUTOR_URL'),
+      token: required(config.executorToken, 'SETTLEMENT_EXECUTOR_TOKEN'),
+      mutualTls: config.safeMutualTls,
+      maxOuterGasLimit: executorMaxGasLimit,
+    }),
+    chain: new ResilientBscSafeSettlementChainSource({
+      primaryRpcUrl: required(config.rpcUrl, 'BSC_RPC_URL'),
+      fallbackRpcUrl: required(config.fallbackRpcUrl, 'BSC_FALLBACK_RPC_URL'),
+    }),
+    runtimeAttest: (safeAddress) => {
+      if (safeAddress === usdtSafeExpectation.safeAddress) return usdtSafeAttestor.attest();
+      if (safeAddress === nplSafeExpectation.safeAddress) return nplSafeAttestor.attest();
+      if (safeAddress === operationsSafeExpectation.safeAddress) return operationsSafeAttestor.attest();
+      throw new CoreError('ExternalBlocked', 'Settlement Safe runtime attestor is unavailable', 503);
+    },
+    outerGasLimit: executorMaxGasLimit.toString(),
+    replacementDelayMs: required(
+      config.settlementReplacementDelayMs,
+      'SETTLEMENT_REPLACEMENT_DELAY_MS',
+    ),
+  });
   const fulfillmentScheduler = new FulfillmentSchedulerWorker({
     service: fulfillmentService,
     platformWallet: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
@@ -128,6 +370,22 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   }
   await fulfillmentScheduler.pollOnce().catch(() => undefined);
   fulfillmentScheduler.start();
+  await coverageWorker.pollOnce().catch(() => undefined);
+  coverageWorker.start();
+  await guaranteeDepositWorker.pollOnce().catch(() => undefined);
+  guaranteeDepositWorker.start();
+  await settlementBatchScheduler.pollOnce().catch(() => undefined);
+  settlementBatchScheduler.start();
+  await settlementWorker.pollOnce().catch(() => undefined);
+  settlementWorker.start();
+  await auditWorker.pollOnce().catch(() => undefined);
+  auditWorker.start();
+  await notificationWorker.pollOnce().catch(() => undefined);
+  notificationWorker.start();
+  await monitoringWorker.pollOnce().catch(() => undefined);
+  monitoringWorker.start();
+  await policyFinalityWorker.pollOnce().catch(() => undefined);
+  policyFinalityWorker.start();
 
   const runtimeAttestor = new RpcPaymentRuntimeAttestor({
     reader,
@@ -163,7 +421,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     runtimeReadiness: () => readinessMonitor.snapshot(),
     nonceStore: new PostgresNonceStore(database),
     nonceRateLimiter: new RedisNonceRateLimiter(redis),
-    walletSignatureVerifier: new RpcWalletMessageSignatureVerifier(reader),
+    walletSignatureVerifier,
     authDomain,
     authUri,
     resolveRoles: (walletAddress) => resolveRoles(database, walletAddress),
@@ -172,6 +430,33 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     paymentService,
     fulfillmentService,
     fulfillmentTargetService,
+    settlementService,
+    policyService,
+    cmsService,
+    notificationService,
+    systemConfigService,
+    auditService: new AuditQueryService(auditDatabase),
+    monitoringService,
+    recordRuntimeMetric: (kind, durationMs, error, at) => runtimeMetrics.record(kind, durationMs, error, at),
+    takeoverFundingService: {
+      fundingApprovalChallenge: (actor, input) => takeoverFundingService.fundingApprovalChallenge(actor, {
+        ...input,
+        operationsSafeAddress: required(
+          config.operationsTreasurySafeAddress,
+          'OPERATIONS_TREASURY_SAFE_ADDRESS',
+        ),
+      }),
+      fundTakeover: (actor, input) => takeoverFundingService.fundTakeover(actor, {
+        ...input,
+        operationsSafeAddress: required(
+          config.operationsTreasurySafeAddress,
+          'OPERATIONS_TREASURY_SAFE_ADDRESS',
+        ),
+      }),
+      getMerchantFinance: (actor, merchantId) => takeoverFundingService.getMerchantFinance(actor, merchantId),
+      getTakeoverFunding: (actor, caseId) => takeoverFundingService.getTakeoverFunding(actor, caseId),
+    },
+    guaranteeDepositService,
     logisticsWebhookSecrets: {
       ...(env.KUAIDI100_CALLBACK_SECRET ? { KUAIDI100: env.KUAIDI100_CALLBACK_SECRET } : {}),
       ...(env.CAINIAO_CALLBACK_SECRET ? { CAINIAO: env.CAINIAO_CALLBACK_SECRET } : {}),
@@ -187,10 +472,19 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
         server.close((error) => (error ? reject(error) : resolve()));
       });
       await readinessMonitor.stop();
+      await policyFinalityWorker.stop();
+      await monitoringWorker.stop();
+      await notificationWorker.stop();
+      await auditWorker.stop();
       await paymentIndexer.stop();
       await fulfillmentScheduler.stop();
+      await settlementWorker.stop();
+      await settlementBatchScheduler.stop();
+      await coverageWorker.stop();
+      await guaranteeDepositWorker.stop();
       await bnmWorker.stop();
       await redis.quit();
+      await auditPool.end();
       await pool.end();
     },
   };

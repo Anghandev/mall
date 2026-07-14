@@ -12,8 +12,15 @@ import {
   allowedActionNames,
   allowedActionReasonCodes,
   arbitrationOutcomes,
+  auditEvidenceProfiles,
+  auditStreamNames,
   balanceStates,
+  breakerActions,
+  breakerCauseTypes,
   breakerScopes,
+  cmsContentFormats,
+  cmsContentTypes,
+  cmsPublicationEventTypes,
   finalityStates,
   executableOrderActionNames,
   fulfillmentAssets,
@@ -25,14 +32,32 @@ import {
   infrastructureProviders,
   logisticsProviders,
   logisticsStatuses,
+  merchantGuaranteeDepositStates,
+  guaranteeStatuses,
+  notificationCampaignStates,
+  notificationCampaignTopics,
+  notificationChannels,
+  notificationDeliveryStates,
+  notificationEndpointStates,
+  notificationProviders,
+  operationsAlertEventTypes,
+  operationsAlertSeverities,
+  operationsMetricComponents,
+  operationsMetricStatuses,
+  operationsMetricUnits,
   orderFinalityStatuses,
   orderProjectionStates,
+  policyDraftStates,
   policyPublicationStates,
   providerReadinessStates,
   reservationStates,
   seckillStates,
+  settlementBatchStates,
+  settlementIntentStates,
   settlementRails,
+  settlementRequestStates,
   storeStatuses,
+  systemConfigKeys,
   takeoverStates,
   userRoles,
 } from '../server/api/enums.ts';
@@ -44,6 +69,47 @@ const outputRoot = join(repoRoot, 'packages/core-artifacts');
 const contractsRoot = join(outputRoot, 'contracts');
 const checkOnly = process.argv.includes('--check');
 const artifactVersion = CORE_ARTIFACT_VERSION;
+const schemaSources = [
+  {
+    name: 'core',
+    directory: 'business',
+    migrationTable: 'core.schema_migrations',
+    files: [
+      '001_core_schema.sql',
+      '002_inventory_and_queue.sql',
+      '003_indexer.sql',
+      '004_parallel_auth_nonces.sql',
+      '005_payment_ledger.sql',
+      '006_fulfillment.sql',
+      '007_settlement_admin.sql',
+      '008_admin_services.sql',
+    ],
+  },
+  {
+    name: 'audit',
+    directory: 'audit',
+    migrationTable: 'audit.schema_migrations',
+    files: ['001_audit_schema.sql', '002_evidence_policy.sql', '003_admin_query_and_ingest.sql'],
+  },
+];
+const schemaArtifacts = new Map();
+const schemaManifest = {
+  artifactVersion,
+  formatVersion: 1,
+  databaseEngine: 'postgresql',
+  schemas: Object.fromEntries(schemaSources.map((schema) => [
+    schema.name,
+    {
+      migrationTable: schema.migrationTable,
+      migrations: schema.files.map((name) => {
+        const source = readRequired(join(coreRoot, 'server/data/migrations', schema.directory, name));
+        const path = `schema/${schema.directory}/${name}`;
+        schemaArtifacts.set(path, source);
+        return { name, path, sha256: sha256(source) };
+      }),
+    },
+  ])),
+};
 
 const enums = {
   artifactVersion,
@@ -66,12 +132,37 @@ const enums = {
   fulfillmentAssets,
   arbitrationOutcomes,
   settlementRails,
+  settlementIntentStates,
+  settlementRequestStates,
+  settlementBatchStates,
+  merchantGuaranteeDepositStates,
+  guaranteeStatuses,
+  breakerActions,
+  breakerCauseTypes,
   reservationStates,
   balanceStates,
   takeoverStates,
   seckillStates,
   coreErrorCodes,
   policyPublicationStates,
+  policyDraftStates,
+  cmsContentTypes,
+  cmsContentFormats,
+  cmsPublicationEventTypes,
+  notificationChannels,
+  notificationProviders,
+  notificationEndpointStates,
+  notificationCampaignTopics,
+  notificationCampaignStates,
+  notificationDeliveryStates,
+  systemConfigKeys,
+  auditStreamNames,
+  auditEvidenceProfiles,
+  operationsMetricComponents,
+  operationsMetricUnits,
+  operationsMetricStatuses,
+  operationsAlertEventTypes,
+  operationsAlertSeverities,
   adapterProviders,
   infrastructureProviders,
   providerReadinessStates,
@@ -123,15 +214,18 @@ const files = new Map([
   ['openapi/openapi.json', json(openapi)],
   ['generated/index.js', generatedJavaScript()],
   ['generated/index.d.ts', generatedTypes()],
+  ['schema/schema-manifest.json', json(schemaManifest)],
   ['state-error-enums.json', json(enums)],
   ['websocket-protocol.json', json(websocket)],
 ]);
+for (const [path, content] of schemaArtifacts) files.set(path, content);
 
 const componentPaths = {
   packageMetadata: 'package.json',
   openapi: 'openapi/openapi.json',
   generatedRuntime: 'generated/index.js',
   generatedTypes: 'generated/index.d.ts',
+  schemaManifest: 'schema/schema-manifest.json',
   stateErrorEnums: 'state-error-enums.json',
   websocketProtocol: 'websocket-protocol.json',
   abiBundle: 'contracts/abi-bundle.json',
@@ -151,7 +245,7 @@ const publishedContractManifest = JSON.parse(readRequired(join(contractsRoot, 'c
 
 const coordinatedManifest = {
   artifactVersion,
-  publicationStatus: 'COORDINATED_FULFILLMENT_CHECKPOINT',
+  publicationStatus: 'COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT',
   deploymentAuthorized: publishedContractManifest.deploymentAuthorized === true,
   deploymentAuthorizationEvidenceHash:
     publishedContractManifest.deploymentAuthorizationEvidenceHash ?? null,
@@ -167,40 +261,7 @@ const coordinatedManifest = {
     path,
     sha256: sha256(readRequired(join(repoRoot, path))),
   })),
-  httpSurface: [
-    'GET /v2/bootstrap',
-    'POST /v2/auth/nonce',
-    'POST /v2/auth/verify',
-    'POST /v2/actions/order',
-    'GET /v2/stores',
-    'POST /v2/stores',
-    'POST /v2/fulfillment-targets/delivery',
-    'POST /v2/fulfillment-targets/pickup',
-    'GET /v2/orders',
-    'GET /v2/orders/{orderId}',
-    'GET /v2/orders/{orderId}/fulfillment-target',
-    'POST /v2/orders/{orderId}/shipments',
-    'POST /v2/orders/{orderId}/delivery',
-    'POST /v2/orders/{orderId}/pickup-credential',
-    'POST /v2/orders/{orderId}/pickup-verification',
-    'POST /v2/orders/{orderId}/exchange-requests',
-    'POST /v2/orders/{orderId}/delay-requests',
-    'POST /v2/orders/{orderId}/request-decisions',
-    'POST /v2/orders/{orderId}/arbitrations',
-    'POST /v2/orders/{orderId}/arbitration-decisions',
-    'POST /v2/orders/{orderId}/takeover',
-    'POST /v2/orders/{orderId}/forced-receipt-requests',
-    'POST /v2/orders/{orderId}/forced-receipt-decisions',
-    'POST /v2/orders/{orderId}/receipt-confirmation',
-    'POST /v2/providers/kuaidi100/webhooks/logistics',
-    'POST /v2/providers/cainiao/webhooks/logistics',
-    'GET /v2/catalog/products',
-    'GET /v2/catalog/products/{productId}',
-    'POST /v2/payments/quotes',
-    'POST /v2/seckill/quotes',
-    'POST /v2/payments/submissions',
-    'GET /v2/payments/{orderId}',
-  ],
+  httpSurface: openApiHttpSurface(openapi),
   capabilityStatus: {
     bootstrap: 'AVAILABLE',
     siweAuthentication: 'AVAILABLE',
@@ -211,7 +272,19 @@ const coordinatedManifest = {
     paymentSubmissionHttp: 'AVAILABLE',
     paymentProjectionHttp: 'AVAILABLE',
     paymentIndexer: 'AVAILABLE',
-    settlementHttp: 'NOT_PUBLISHED_FAIL_CLOSED',
+    settlementHttp: 'AVAILABLE',
+    settlementSafeBatching: 'AVAILABLE',
+    guaranteeDepositHttp: 'AVAILABLE',
+    guaranteeDepositFinality: 'AVAILABLE',
+    takeoverFundingHttp: 'AVAILABLE',
+    policyGovernanceHttp: 'AVAILABLE',
+    cmsHttp: 'AVAILABLE',
+    notificationHttp: 'AVAILABLE',
+    notificationDelivery: 'AVAILABLE',
+    systemConfigGovernanceHttp: 'AVAILABLE',
+    auditHttp: 'AVAILABLE',
+    monitoringHttp: 'AVAILABLE',
+    coverageMonitoring: 'AVAILABLE',
     storesHttp: 'AVAILABLE',
     fulfillmentTargetHttp: 'AVAILABLE',
     fulfillmentHttp: 'AVAILABLE',
@@ -265,6 +338,22 @@ const coordinatedManifest = {
     'FulfillmentOrder',
     'FulfillmentCommandInput',
     'FulfillmentCommandResult',
+    'SettlementIntentProjection',
+    'SettlementRequestProjection',
+    'SettlementListProjection',
+    'GuaranteeDepositProjection',
+    'TakeoverFundingChallenge',
+    'TakeoverFundingResult',
+    'MerchantFinanceProjection',
+    'TakeoverFundingDetail',
+    'PolicyDraftProjection',
+    'CmsVersionProjection',
+    'CmsPublicItem',
+    'NotificationEndpointProjection',
+    'NotificationInboxItem',
+    'SystemConfigProjection',
+    'AuditListResponse',
+    'MonitoringDashboard',
   ],
 };
 files.set('coordinated-manifest.json', json(coordinatedManifest));
@@ -293,7 +382,7 @@ if (checkOnly) {
   process.exit(0);
 }
 
-for (const path of ['openapi', 'generated']) rmSync(join(outputRoot, path), { recursive: true, force: true });
+for (const path of ['openapi', 'generated', 'schema']) rmSync(join(outputRoot, path), { recursive: true, force: true });
 for (const [path, content] of files) {
   const absolute = join(outputRoot, path);
   mkdirSync(dirname(absolute), { recursive: true });
@@ -346,6 +435,7 @@ function buildOpenApi() {
     'x-artifactVersion': artifactVersion,
     servers: [],
     paths: {
+      ...settlementAdminOpenApiPaths(errorResponse),
       '/v2/bootstrap': {
         get: {
           operationId: 'getBootstrap',
@@ -686,6 +776,7 @@ function buildOpenApi() {
         },
         ...fulfillmentOpenApiSchemas(),
         ...paymentOpenApiSchemas(),
+        ...settlementAdminOpenApiSchemas(),
         ErrorResponse: {
           type: 'object', additionalProperties: false, required: ['error'],
           properties: {
@@ -700,6 +791,660 @@ function buildOpenApi() {
         },
       },
     },
+  };
+}
+
+function settlementAdminOpenApiPaths(errorResponse) {
+  const security = [{ bearerAuth: [] }];
+  const resourceParameter = (name) => ({
+    name,
+    in: 'path',
+    required: true,
+    schema: { type: 'string', minLength: 1 },
+  });
+  const operation = (operationId, responseSchema, status = 200, requestSchema) => ({
+    operationId,
+    security,
+    ...(requestSchema ? { requestBody: body({ $ref: `#/components/schemas/${requestSchema}` }) } : {}),
+    responses: {
+      [status]: response('Authoritative Core result', responseSchema),
+      default: errorResponse,
+    },
+  });
+  const resourceOperation = (operationId, parameter, responseSchema, status = 200, requestSchema) => ({
+    ...operation(operationId, responseSchema, status, requestSchema),
+    parameters: [resourceParameter(parameter)],
+  });
+  return {
+    '/v2/settlement-intents': {
+      post: operation('createSettlementIntent', { $ref: '#/components/schemas/SettlementIntentProjection' }, 201, 'SettlementIntentRequest'),
+    },
+    '/v2/admin/settlement-intents': {
+      post: operation('createGovernedSettlementIntent', { $ref: '#/components/schemas/SettlementIntentProjection' }, 201, 'GovernedSettlementIntentRequest'),
+    },
+    '/v2/settlement-requests': {
+      post: operation('submitSettlementRequest', { $ref: '#/components/schemas/SettlementRequestProjection' }, 201, 'SettlementRequestSubmission'),
+    },
+    '/v2/settlements': {
+      get: operation('listSettlements', { $ref: '#/components/schemas/SettlementListProjection' }),
+    },
+    '/v2/finance/merchant': {
+      get: {
+        ...operation('getMerchantFinance', { $ref: '#/components/schemas/MerchantFinanceProjection' }),
+        parameters: [{ name: 'merchantId', in: 'query', required: false, schema: { type: 'string', minLength: 1 } }],
+      },
+    },
+    '/v2/finance/merchant/guarantee-deposits': {
+      post: operation('submitMerchantGuaranteeDeposit', { $ref: '#/components/schemas/GuaranteeDepositProjection' }, 201, 'GuaranteeDepositRequest'),
+    },
+    '/v2/admin/takeover-funding/approval-challenge': {
+      post: operation('createTakeoverFundingApprovalChallenge', { $ref: '#/components/schemas/TakeoverFundingChallenge' }, 200, 'TakeoverFundingChallengeRequest'),
+    },
+    '/v2/admin/takeover-funding': {
+      post: operation('fundTakeover', { $ref: '#/components/schemas/TakeoverFundingResult' }, 201, 'TakeoverFundingRequest'),
+    },
+    '/v2/admin/takeover-funding/{caseId}': {
+      get: resourceOperation('getTakeoverFunding', 'caseId', { $ref: '#/components/schemas/TakeoverFundingDetail' }),
+    },
+    '/v2/cms/public': {
+      get: {
+        operationId: 'listPublicCms',
+        parameters: [
+          { name: 'walletAddress', in: 'query', required: false, schema: { $ref: '#/components/schemas/Address' } },
+          { name: 'merchantId', in: 'query', required: false, schema: { type: 'string', minLength: 1 } },
+          { name: 'regionCode', in: 'query', required: false, schema: { $ref: '#/components/schemas/RegionCode' } },
+        ],
+        responses: {
+          200: response('Published CMS items', { type: 'array', items: { $ref: '#/components/schemas/CmsPublicItem' } }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/notification-endpoints': {
+      post: operation('registerNotificationEndpoint', { $ref: '#/components/schemas/NotificationEndpointProjection' }, 201, 'NotificationEndpointRequest'),
+    },
+    '/v2/notifications': {
+      get: {
+        ...operation('listNotifications', { type: 'array', items: { $ref: '#/components/schemas/NotificationInboxItem' } }),
+        parameters: [{ name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 200 } }],
+      },
+    },
+    '/v2/admin/policy-drafts': {
+      get: operation('listPolicyDrafts', { type: 'array', items: { $ref: '#/components/schemas/PolicyDraftProjection' } }),
+      post: operation('createPolicyDraft', { $ref: '#/components/schemas/PolicyDraftDetail' }, 201, 'PolicyDraftCreateRequest'),
+    },
+    '/v2/admin/policy-drafts/{draftId}': {
+      get: resourceOperation('getPolicyDraft', 'draftId', { $ref: '#/components/schemas/PolicyDraftDetail' }),
+      put: resourceOperation('updatePolicyDraft', 'draftId', { $ref: '#/components/schemas/PolicyDraftDetail' }, 200, 'PolicyDraftUpdateRequest'),
+    },
+    '/v2/admin/policy-drafts/{draftId}/approval-challenge': {
+      post: resourceOperation('createPolicyApprovalChallenge', 'draftId', { $ref: '#/components/schemas/PolicyApprovalChallenge' }, 200, 'PolicyApprovalChallengeRequest'),
+    },
+    '/v2/admin/policy-drafts/{draftId}/secondary-signature': {
+      post: resourceOperation('submitPolicySecondarySignature', 'draftId', { $ref: '#/components/schemas/PolicyDraftDetail' }, 200, 'PolicySecondarySignatureRequest'),
+    },
+    '/v2/admin/policy-drafts/{draftId}/safe-proposal': {
+      post: resourceOperation('proposePolicyToSafe', 'draftId', { $ref: '#/components/schemas/PolicyDraftDetail' }, 202, 'EmptyObject'),
+    },
+    '/v2/admin/cms/versions': {
+      post: operation('createCmsVersion', { $ref: '#/components/schemas/CmsVersionProjection' }, 201, 'CmsVersionCreateRequest'),
+    },
+    '/v2/admin/cms/versions/{versionId}': {
+      get: resourceOperation('getCmsVersion', 'versionId', { $ref: '#/components/schemas/CmsVersionProjection' }),
+    },
+    '/v2/admin/cms/versions/{versionId}/publish': {
+      post: resourceOperation('publishCmsVersion', 'versionId', { $ref: '#/components/schemas/CmsVersionProjection' }, 200, 'EvidenceHashRequest'),
+    },
+    '/v2/admin/cms/versions/{versionId}/rollback': {
+      post: resourceOperation('rollbackCmsVersion', 'versionId', { $ref: '#/components/schemas/CmsVersionProjection' }, 200, 'EvidenceHashRequest'),
+    },
+    '/v2/admin/notification-campaigns': {
+      post: operation('createNotificationCampaign', { $ref: '#/components/schemas/NotificationCampaignCreateResult' }, 201, 'NotificationCampaignRequest'),
+    },
+    '/v2/admin/notification-campaigns/{campaignId}/publish': {
+      post: resourceOperation('publishNotificationCampaign', 'campaignId', { $ref: '#/components/schemas/NotificationCampaignPublishResult' }, 200, 'EvidenceHashRequest'),
+    },
+    '/v2/admin/system-config/versions': {
+      get: operation('listSystemConfigVersions', { type: 'array', items: { $ref: '#/components/schemas/SystemConfigProjection' } }),
+      post: operation('createSystemConfigVersion', { $ref: '#/components/schemas/SystemConfigProjection' }, 201, 'SystemConfigCreateRequest'),
+    },
+    '/v2/admin/system-config/versions/{configVersionId}/publish': {
+      post: resourceOperation('publishSystemConfigVersion', 'configVersionId', { $ref: '#/components/schemas/SystemConfigProjection' }, 200, 'SystemConfigPublishRequest'),
+    },
+    '/v2/admin/audit/entries': {
+      get: {
+        ...operation('listAuditEntries', { $ref: '#/components/schemas/AuditListResponse' }),
+        parameters: [
+          { name: 'streamName', in: 'query', required: false, schema: { enum: [...auditStreamNames] } },
+          ...['eventType', 'resourceType', 'resourceId', 'correlationId', 'cursorEntryId'].map((name) => ({ name, in: 'query', required: false, schema: { type: 'string', minLength: 1 } })),
+          { name: 'actorWallet', in: 'query', required: false, schema: { $ref: '#/components/schemas/Address' } },
+          ...['from', 'to', 'cursorCreatedAt'].map((name) => ({ name, in: 'query', required: false, schema: { type: 'string', format: 'date-time' } })),
+          { name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 200 } },
+        ],
+      },
+    },
+    '/v2/admin/monitoring': {
+      get: operation('getMonitoringDashboard', { $ref: '#/components/schemas/MonitoringDashboard' }),
+    },
+    '/v2/admin/monitoring/alerts/{alertKey}/acknowledge': {
+      post: resourceOperation('acknowledgeMonitoringAlert', 'alertKey', { $ref: '#/components/schemas/MonitoringAcknowledgeResult' }, 200, 'EmptyObject'),
+    },
+  };
+}
+
+function openApiHttpSurface(document) {
+  return Object.entries(document.paths)
+    .flatMap(([path, methods]) => Object.keys(methods).map((method) => `${method.toUpperCase()} ${path}`))
+    .sort();
+}
+
+function settlementAdminOpenApiSchemas() {
+  const ref = (name) => ({ $ref: `#/components/schemas/${name}` });
+  const nullable = (schema) => ({ anyOf: [schema, { type: 'null' }] });
+  const object = (properties, required = Object.keys(properties), additionalProperties = false) => ({
+    type: 'object', additionalProperties, required, properties,
+  });
+  const timestamp = { type: 'string', format: 'date-time' };
+  const nullableTimestamp = nullable(timestamp);
+  const string = { type: 'string', minLength: 1 };
+  const nullableString = nullable(string);
+  const atomic = ref('AtomicAmount');
+  const nullableAtomic = nullable(atomic);
+  const hash = ref('Bytes32');
+  const nullableHash = nullable(hash);
+  const auditHash = { type: 'string', pattern: '^[0-9a-f]{64}$' };
+  const nullableAuditHash = nullable(auditHash);
+  const address = ref('Address');
+  const nullableAddress = nullable(address);
+  const jsonObject = { type: 'object', additionalProperties: true };
+  const idempotencyKey = ref('IdempotencyKey');
+  const emptyObject = object({});
+  const sensitiveApprovalProperties = {
+    action: string,
+    resourceType: string,
+    resourceId: string,
+    policyVersion: atomic,
+    oldValueHash: hash,
+    newValueHash: hash,
+    safeAddress: address,
+    nonce: atomic,
+    deadline: atomic,
+    signature: { type: 'string', pattern: '^0x(?:[0-9a-fA-F]{2})+$' },
+  };
+  const settlementIntentItem = object({
+    itemIndex: { type: 'integer', minimum: 0 },
+    orderId: string,
+    accountId: string,
+    backingSafeAddress: address,
+    amount: atomic,
+    itemHash: hash,
+  });
+  const settlementIntent = object({
+    intentId: hash,
+    artifactVersion: { const: artifactVersion },
+    wallet: address,
+    recipient: address,
+    rail: { enum: [...settlementRails] },
+    asset: address,
+    safeAddress: address,
+    amount: atomic,
+    itemsHash: hash,
+    nonce: atomic,
+    deadline: { type: 'integer', minimum: 1 },
+  });
+  const eip712TypedData = object({
+    domain: jsonObject,
+    types: jsonObject,
+    primaryType: string,
+    message: jsonObject,
+  });
+  const settlementRequestItem = object({
+    item_index: { type: 'integer', minimum: 0 },
+    order_id: string,
+    account_id: string,
+    backing_safe_address: address,
+    amount: atomic,
+    requested_journal_id: string,
+    batched_journal_id: nullableString,
+    settled_journal_id: nullableString,
+  });
+  const settlementTransition = object({
+    transition_id: string,
+    request_item_index: { type: 'integer', minimum: 0 },
+    batch_id: nullableString,
+    transition_sequence: atomic,
+    transition_type: string,
+    journal_id: string,
+    created_at: timestamp,
+  });
+  const settlementRequestProperties = {
+    request_id: string,
+    intent_id: hash,
+    artifact_version: { const: artifactVersion },
+    wallet_address: address,
+    recipient_address: address,
+    rail: { enum: [...settlementRails] },
+    asset: { enum: ['USDT', 'NPL'] },
+    asset_address: address,
+    safe_address: address,
+    amount: atomic,
+    items_hash: hash,
+    intent_digest: hash,
+    signature_hash: hash,
+    state: { enum: [...settlementRequestStates] },
+    batch_id: nullableString,
+    final_safe_tx_hash: nullableHash,
+    final_execution_tx_hash: nullableHash,
+    requested_at: timestamp,
+    batched_at: nullableTimestamp,
+    settled_at: nullableTimestamp,
+    items: { type: 'array', items: settlementRequestItem },
+    transitions: { type: 'array', items: settlementTransition },
+  };
+  const fundingPlan = object({
+    caseId: string,
+    orderId: string,
+    policyVersion: { type: 'integer', minimum: 1 },
+    requiredUsdt: atomic,
+    operationsSafe: address,
+    guaranteeUsedUsdt: atomic,
+    receivables: {
+      type: 'array',
+      items: object({ orderId: string, accountId: string, backingSafeAddress: address, amount: atomic }),
+    },
+    frozenReceivablesUsedUsdt: atomic,
+    platformAdvanceUsdt: atomic,
+    oldValueHash: hash,
+    newValueHash: hash,
+  });
+  const fundingProjection = object({
+    case_id: string,
+    state: { enum: [...takeoverStates] },
+    required_usdt: nullableAtomic,
+    guarantee_used_usdt: nullableAtomic,
+    merchant_available_used_usdt: nullableAtomic,
+    future_proceeds_used_usdt: nullableAtomic,
+    platform_advance_usdt: nullableAtomic,
+    merchant_debt_usdt: nullableAtomic,
+  });
+  const policyDraftProperties = {
+    draftId: string,
+    nextPolicyVersion: atomic,
+    basePolicyVersion: nullableAtomic,
+    artifactVersion: nullableString,
+    payload: jsonObject,
+    validationErrors: {
+      type: 'array',
+      items: object({ code: string, field: string }),
+    },
+    state: { enum: [...policyDraftStates] },
+    policyHash: nullableHash,
+    operationsHash: nullableHash,
+    publicationDigest: nullableHash,
+    publicationNonce: nullableAtomic,
+    publicationDeadline: nullableTimestamp,
+    secondarySigner: nullableAddress,
+    secondarySignatureHash: nullableHash,
+    safeAddress: nullableAddress,
+    safeCalldataHash: nullableHash,
+    safeTxHash: nullableHash,
+    safeProposalHash: nullableHash,
+    createdBy: address,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  const cmsProjectionProperties = {
+    entryId: string,
+    versionId: string,
+    version: { type: 'integer', minimum: 1 },
+    slug: string,
+    contentType: { enum: [...cmsContentTypes] },
+    placement: string,
+    locale: string,
+    contentFormat: { enum: [...cmsContentFormats] },
+    content: jsonObject,
+    contentHash: hash,
+    audience: jsonObject,
+    startsAt: nullableTimestamp,
+    endsAt: nullableTimestamp,
+    frequencyCap: nullable({ type: 'integer', minimum: 1 }),
+    policyVersion: nullableAtomic,
+    published: { type: 'boolean' },
+    publicationType: nullable({ enum: [...cmsPublicationEventTypes] }),
+    createdBy: address,
+    createdAt: timestamp,
+  };
+  const configProjectionProperties = {
+    configVersionId: string,
+    configKey: { enum: [...systemConfigKeys] },
+    version: { type: 'integer', minimum: 1 },
+    payload: jsonObject,
+    payloadHash: hash,
+    effectiveFrom: timestamp,
+    published: { type: 'boolean' },
+    createdBy: address,
+    createdAt: timestamp,
+  };
+  return {
+    EmptyObject: emptyObject,
+    SensitiveApproval: object(sensitiveApprovalProperties),
+    EvidenceHashRequest: object({ evidenceHash: hash }),
+    SettlementIntentRequest: object({
+      rail: { enum: ['MERCHANT_USDT', 'REWARD_NPL', 'PRIZE_USDT'] },
+      amount: atomic,
+      idempotencyKey,
+    }),
+    GovernedSettlementIntentRequest: object({
+      rail: { enum: ['TAKEOVER_USDT', 'OPERATIONS_REIMBURSEMENT_USDT'] },
+      resourceId: string,
+      orderId: string,
+      accountId: string,
+      recipient: address,
+      fulfillmentTargetHash: hash,
+      amount: atomic,
+      idempotencyKey,
+      approval: ref('SensitiveApproval'),
+    }, ['rail', 'resourceId', 'orderId', 'accountId', 'recipient', 'amount', 'idempotencyKey', 'approval']),
+    SettlementRequestSubmission: object({
+      intentId: hash,
+      signature: { type: 'string', pattern: '^0x(?:[0-9a-fA-F]{2})+$' },
+    }),
+    SettlementRequestIntent: settlementIntent,
+    SettlementIntentItem: settlementIntentItem,
+    SettlementIntentProjection: object({
+      intent: ref('SettlementRequestIntent'),
+      digest: hash,
+      typedData: eip712TypedData,
+      items: { type: 'array', items: ref('SettlementIntentItem') },
+      createdAt: timestamp,
+    }),
+    SettlementRequestItem: settlementRequestItem,
+    SettlementRequestItemTransition: settlementTransition,
+    SettlementRequestProjection: object(settlementRequestProperties),
+    SettlementBalance: object({ asset: { enum: ['USDT', 'NPL'] }, purpose: string, state: { enum: [...balanceStates] }, amount: atomic }),
+    SettlementListProjection: object({
+      artifactVersion: { const: artifactVersion },
+      wallet: address,
+      balances: { type: 'array', items: ref('SettlementBalance') },
+      requests: { type: 'array', items: ref('SettlementRequestProjection') },
+    }),
+    GuaranteeDepositRequest: object({
+      policyVersion: atomic,
+      expectedAmountUsdt: atomic,
+      transactionHash: hash,
+      idempotencyKey,
+    }),
+    GuaranteeDepositProjection: object({
+      depositId: string,
+      merchantId: string,
+      policyVersion: { type: 'integer', minimum: 1 },
+      transactionHash: hash,
+      expectedAmountUsdt: atomic,
+      operationsSafeAddress: address,
+      state: { enum: [...merchantGuaranteeDepositStates] },
+      confirmations: { type: 'integer', minimum: 0 },
+      blockNumber: { type: 'integer', minimum: 0 },
+      blockHash: hash,
+      logIndex: { type: 'integer', minimum: 0 },
+    }, [
+      'depositId', 'merchantId', 'policyVersion', 'transactionHash', 'expectedAmountUsdt',
+      'operationsSafeAddress', 'state', 'confirmations',
+    ]),
+    TakeoverFundingChallengeRequest: object({ caseId: string, requiredUsdt: atomic, nonce: atomic, deadline: atomic }),
+    TakeoverFundingRequest: object({ caseId: string, requiredUsdt: atomic, idempotencyKey, approval: ref('SensitiveApproval') }),
+    TakeoverFundingPlan: fundingPlan,
+    TakeoverFundingChallenge: object({ plan: ref('TakeoverFundingPlan'), typedData: eip712TypedData }),
+    TakeoverFundingResult: object({
+      caseId: string,
+      state: { const: 'FUNDED' },
+      requiredUsdt: atomic,
+      guaranteeUsedUsdt: atomic,
+      frozenReceivablesUsedUsdt: atomic,
+      futureProceedsUsedUsdt: atomic,
+      platformAdvanceUsdt: atomic,
+      merchantDebtUsdt: atomic,
+    }),
+    MerchantFinanceMerchant: object({ merchant_id: string, status: string, guarantee_status: { enum: [...guaranteeStatuses] }, settlement_wallet: address }),
+    MerchantGuarantee: object({
+      backing_safe_address: address,
+      balance_usdt: atomic,
+      minimum_usdt: atomic,
+      source_evidence_hash: hash,
+      updated_at: timestamp,
+    }),
+    MerchantGuaranteeDeposit: object({
+      deposit_id: string,
+      policy_version: atomic,
+      token_address: address,
+      operations_safe_address: address,
+      expected_amount_usdt: atomic,
+      transaction_hash: hash,
+      state: { enum: [...merchantGuaranteeDepositStates] },
+      observed_block_number: nullableAtomic,
+      observed_block_hash: nullableHash,
+      observed_log_index: nullable({ type: 'integer', minimum: 0 }),
+      confirmations: { type: 'integer', minimum: 0 },
+      transfer_evidence_hash: nullableHash,
+      created_at: timestamp,
+      updated_at: timestamp,
+      finalized_at: nullableTimestamp,
+    }),
+    MerchantDebt: object({
+      incurred_usdt: atomic,
+      recovered_usdt: atomic,
+      outstanding_usdt: atomic,
+      latest_evidence_hash: hash,
+      updated_at: timestamp,
+    }),
+    MerchantTakeover: object({
+      case_id: string,
+      order_id: string,
+      state: { enum: [...takeoverStates] },
+      required_usdt: nullableAtomic,
+      guarantee_used_usdt: nullableAtomic,
+      merchant_available_used_usdt: nullableAtomic,
+      future_proceeds_used_usdt: nullableAtomic,
+      platform_advance_usdt: nullableAtomic,
+      disbursed_usdt: nullableAtomic,
+      merchant_debt_usdt: nullableAtomic,
+      evidence_hash: hash,
+      opened_at: timestamp,
+      closed_at: nullableTimestamp,
+      updated_at: timestamp,
+    }),
+    MerchantFinanceProjection: object({
+      merchant: ref('MerchantFinanceMerchant'),
+      guarantee: nullable(ref('MerchantGuarantee')),
+      guaranteeDeposits: { type: 'array', items: ref('MerchantGuaranteeDeposit') },
+      debt: nullable(ref('MerchantDebt')),
+      takeovers: { type: 'array', items: ref('MerchantTakeover') },
+    }),
+    TakeoverFundingProjection: fundingProjection,
+    TakeoverFundingItem: object({ source_type: string, amount_usdt: atomic, journal_id: string, evidence_hash: hash, created_at: timestamp }),
+    MerchantDebtRecovery: object({
+      recovery_id: string,
+      order_id: string,
+      amount_usdt: atomic,
+      operations_safe_address: address,
+      backing_safe_address: address,
+      journal_id: string,
+      evidence_hash: hash,
+      recovered_at: timestamp,
+      reversed_at: nullableTimestamp,
+      reversal_evidence_hash: nullableHash,
+    }),
+    TakeoverFundingDetail: object({
+      ...fundingProjection.properties,
+      items: { type: 'array', items: ref('TakeoverFundingItem') },
+      debtRecoveries: { type: 'array', items: ref('MerchantDebtRecovery') },
+    }),
+    PolicyDraftCreateRequest: object({ payload: jsonObject, idempotencyKey }),
+    PolicyDraftUpdateRequest: object({ payload: jsonObject }),
+    PolicyApprovalChallengeRequest: object({ nonce: atomic, deadline: atomic }),
+    PolicySecondarySignatureRequest: object({
+      nonce: atomic,
+      deadline: atomic,
+      signature: { type: 'string', pattern: '^0x(?:[0-9a-fA-F]{2})+$' },
+    }),
+    PolicyDraftProjection: object(policyDraftProperties),
+    PolicyDraftTransition: object({
+      transitionId: string,
+      fromState: nullable({ enum: [...policyDraftStates] }),
+      toState: { enum: [...policyDraftStates] },
+      evidenceHash: hash,
+      actorWallet: address,
+      createdAt: timestamp,
+    }),
+    PolicyDraftDetail: object({
+      ...policyDraftProperties,
+      transitions: { type: 'array', items: ref('PolicyDraftTransition') },
+    }),
+    PolicyApprovalChallenge: object({
+      draftId: string,
+      policyVersion: { type: 'integer', minimum: 1 },
+      signer: address,
+      typedData: eip712TypedData,
+      digest: hash,
+    }),
+    CmsVersionCreateRequest: object({
+      entryId: string,
+      slug: string,
+      contentType: { enum: [...cmsContentTypes] },
+      placement: string,
+      locale: string,
+      contentFormat: { enum: [...cmsContentFormats] },
+      content: jsonObject,
+      audience: jsonObject,
+      startsAt: timestamp,
+      endsAt: timestamp,
+      frequencyCap: { type: 'integer', minimum: 1, maximum: 1000 },
+      policyVersion: atomic,
+      idempotencyKey,
+    }, ['slug', 'contentType', 'placement', 'locale', 'contentFormat', 'content', 'audience', 'idempotencyKey']),
+    CmsVersionProjection: object(cmsProjectionProperties),
+    CmsPublicItem: object({
+      entryId: string,
+      versionId: string,
+      version: { type: 'integer', minimum: 1 },
+      slug: string,
+      contentType: { enum: [...cmsContentTypes] },
+      placement: string,
+      locale: string,
+      content: jsonObject,
+      contentHash: hash,
+      audience: jsonObject,
+      startsAt: nullableTimestamp,
+      endsAt: nullableTimestamp,
+      frequencyCap: nullable({ type: 'integer', minimum: 1 }),
+      policyVersion: nullableAtomic,
+    }),
+    NotificationEndpointRequest: object({
+      channel: { enum: [...notificationChannels] },
+      provider: { enum: [...notificationProviders] },
+      endpointReference: string,
+      topics: { type: 'array', items: string },
+      regionCode: ref('RegionCode'),
+    }, ['channel', 'provider', 'endpointReference', 'topics']),
+    NotificationEndpointProjection: object({
+      endpointId: string,
+      channel: { enum: [...notificationChannels] },
+      provider: { enum: [...notificationProviders] },
+      topics: { type: 'array', items: string },
+      state: { enum: [...notificationEndpointStates] },
+    }),
+    NotificationInboxItem: object({
+      messageId: string,
+      sourceEventType: string,
+      topic: string,
+      templateData: jsonObject,
+      deliveryState: { enum: [...notificationDeliveryStates] },
+      createdAt: timestamp,
+    }),
+    NotificationCampaignRequest: object({
+      topic: { enum: [...notificationCampaignTopics] },
+      audience: jsonObject,
+      message: jsonObject,
+      cmsVersionId: string,
+      startsAt: timestamp,
+      endsAt: timestamp,
+      idempotencyKey,
+    }, ['topic', 'audience', 'message', 'idempotencyKey']),
+    NotificationCampaignCreateResult: object({
+      campaignId: string,
+      state: { enum: [...notificationCampaignStates] },
+      contentHash: hash,
+    }),
+    NotificationCampaignPublishResult: object({ campaignId: string, state: { const: 'PUBLISHED' } }),
+    SystemConfigCreateRequest: object({
+      configKey: { enum: [...systemConfigKeys] },
+      payload: jsonObject,
+      effectiveFrom: timestamp,
+      idempotencyKey,
+    }),
+    SystemConfigPublishRequest: object({ approval: ref('SensitiveApproval') }),
+    SystemConfigProjection: object(configProjectionProperties),
+    AuditEntry: object({
+      entryId: string,
+      sourceEventId: string,
+      streamName: { enum: [...auditStreamNames] },
+      evidenceProfile: { enum: [...auditEvidenceProfiles] },
+      sequence: atomic,
+      eventType: string,
+      resourceType: string,
+      resourceId: string,
+      actorWallet: nullableAddress,
+      actorRole: nullableString,
+      correlationId: string,
+      requestHash: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+      payload: jsonObject,
+      signatureEvidence: nullable(jsonObject),
+      authorizationEvidence: nullable(jsonObject),
+      transactionEvidence: nullable(jsonObject),
+      previousHash: auditHash,
+      entryHash: auditHash,
+      createdAt: timestamp,
+    }),
+    AuditChainProof: object({ verified: { type: 'boolean' }, entries: { type: 'integer', minimum: 0 }, headHash: nullableAuditHash }),
+    AuditListResponse: object({
+      entries: { type: 'array', items: ref('AuditEntry') },
+      chainProof: { type: 'object', additionalProperties: ref('AuditChainProof') },
+      nextCursor: nullable(object({ createdAt: timestamp, entryId: string })),
+    }),
+    MonitoringMetric: object({
+      snapshotId: string,
+      component: { enum: [...operationsMetricComponents] },
+      metricName: string,
+      unit: { enum: [...operationsMetricUnits] },
+      value: nullable({ type: 'number' }),
+      status: { enum: [...operationsMetricStatuses] },
+      windowStartedAt: timestamp,
+      windowEndedAt: timestamp,
+      evidence: jsonObject,
+      observedAt: timestamp,
+    }),
+    MonitoringAlert: object({
+      alertEventId: string,
+      alertKey: string,
+      state: { enum: [...operationsAlertEventTypes] },
+      severity: { enum: [...operationsAlertSeverities] },
+      snapshotId: string,
+      actorWallet: nullableAddress,
+      createdAt: timestamp,
+    }),
+    MonitoringCoverage: object({
+      asset: { enum: ['USDT', 'NPL'] },
+      safe_address: address,
+      assets: atomic,
+      unsettled_liabilities: atomic,
+      covered: { type: 'boolean' },
+      observed_at: timestamp,
+    }),
+    MonitoringDashboard: object({
+      metrics: { type: 'array', items: ref('MonitoringMetric') },
+      alerts: { type: 'array', items: ref('MonitoringAlert') },
+      coverage: { type: 'array', items: ref('MonitoringCoverage') },
+    }),
+    MonitoringAcknowledgeResult: object({ alertKey: string, state: { const: 'ACKNOWLEDGED' } }),
   };
 }
 
@@ -1608,12 +2353,37 @@ export type LogisticsStatus = ${union(logisticsStatuses)};
 export type FulfillmentAsset = ${union(fulfillmentAssets)};
 export type ArbitrationOutcome = ${union(arbitrationOutcomes)};
 export type SettlementRail = ${union(settlementRails)};
+export type SettlementIntentState = ${union(settlementIntentStates)};
+export type SettlementRequestState = ${union(settlementRequestStates)};
+export type SettlementBatchState = ${union(settlementBatchStates)};
+export type MerchantGuaranteeDepositState = ${union(merchantGuaranteeDepositStates)};
+export type GuaranteeStatus = ${union(guaranteeStatuses)};
+export type BreakerAction = ${union(breakerActions)};
+export type BreakerCauseType = ${union(breakerCauseTypes)};
 export type ReservationState = ${union(reservationStates)};
 export type BalanceState = ${union(balanceStates)};
 export type UsdtLiabilityPurpose = 'POLICY_ALLOCATION' | 'SECKILL_PRIZE_LIABILITY';
 export type TakeoverState = ${union(takeoverStates)};
 export type SeckillState = ${union(seckillStates)};
 export type PolicyPublicationState = ${union(policyPublicationStates)};
+export type PolicyDraftState = ${union(policyDraftStates)};
+export type CmsContentType = ${union(cmsContentTypes)};
+export type CmsContentFormat = ${union(cmsContentFormats)};
+export type CmsPublicationEventType = ${union(cmsPublicationEventTypes)};
+export type NotificationChannel = ${union(notificationChannels)};
+export type NotificationProvider = ${union(notificationProviders)};
+export type NotificationEndpointState = ${union(notificationEndpointStates)};
+export type NotificationCampaignTopic = ${union(notificationCampaignTopics)};
+export type NotificationCampaignState = ${union(notificationCampaignStates)};
+export type NotificationDeliveryState = ${union(notificationDeliveryStates)};
+export type SystemConfigKey = ${union(systemConfigKeys)};
+export type AuditStreamName = ${union(auditStreamNames)};
+export type AuditEvidenceProfile = ${union(auditEvidenceProfiles)};
+export type OperationsMetricComponent = ${union(operationsMetricComponents)};
+export type OperationsMetricUnit = ${union(operationsMetricUnits)};
+export type OperationsMetricStatus = ${union(operationsMetricStatuses)};
+export type OperationsAlertEventType = ${union(operationsAlertEventTypes)};
+export type OperationsAlertSeverity = ${union(operationsAlertSeverities)};
 export type AdapterProvider = ${union(adapterProviders)};
 export type InfrastructureProvider = ${union(infrastructureProviders)};
 export type ProviderReadinessState = ${union(providerReadinessStates)};
@@ -1637,14 +2407,587 @@ export declare const logisticsStatuses: readonly LogisticsStatus[];
 export declare const fulfillmentAssets: readonly FulfillmentAsset[];
 export declare const arbitrationOutcomes: readonly ArbitrationOutcome[];
 export declare const settlementRails: readonly SettlementRail[];
+export declare const settlementIntentStates: readonly SettlementIntentState[];
+export declare const settlementRequestStates: readonly SettlementRequestState[];
+export declare const settlementBatchStates: readonly SettlementBatchState[];
+export declare const merchantGuaranteeDepositStates: readonly MerchantGuaranteeDepositState[];
+export declare const guaranteeStatuses: readonly GuaranteeStatus[];
+export declare const breakerActions: readonly BreakerAction[];
+export declare const breakerCauseTypes: readonly BreakerCauseType[];
 export declare const reservationStates: readonly ReservationState[];
 export declare const balanceStates: readonly BalanceState[];
 export declare const takeoverStates: readonly TakeoverState[];
 export declare const seckillStates: readonly SeckillState[];
 export declare const policyPublicationStates: readonly PolicyPublicationState[];
+export declare const policyDraftStates: readonly PolicyDraftState[];
+export declare const cmsContentTypes: readonly CmsContentType[];
+export declare const cmsContentFormats: readonly CmsContentFormat[];
+export declare const cmsPublicationEventTypes: readonly CmsPublicationEventType[];
+export declare const notificationChannels: readonly NotificationChannel[];
+export declare const notificationProviders: readonly NotificationProvider[];
+export declare const notificationEndpointStates: readonly NotificationEndpointState[];
+export declare const notificationCampaignTopics: readonly NotificationCampaignTopic[];
+export declare const notificationCampaignStates: readonly NotificationCampaignState[];
+export declare const notificationDeliveryStates: readonly NotificationDeliveryState[];
+export declare const systemConfigKeys: readonly SystemConfigKey[];
+export declare const auditStreamNames: readonly AuditStreamName[];
+export declare const auditEvidenceProfiles: readonly AuditEvidenceProfile[];
+export declare const operationsMetricComponents: readonly OperationsMetricComponent[];
+export declare const operationsMetricUnits: readonly OperationsMetricUnit[];
+export declare const operationsMetricStatuses: readonly OperationsMetricStatus[];
+export declare const operationsAlertEventTypes: readonly OperationsAlertEventType[];
+export declare const operationsAlertSeverities: readonly OperationsAlertSeverity[];
 export declare const adapterProviders: readonly AdapterProvider[];
 export declare const infrastructureProviders: readonly InfrastructureProvider[];
 export declare const providerReadinessStates: readonly ProviderReadinessState[];
+
+export type JsonObject = Readonly<Record<string, unknown>>;
+
+export interface SensitiveApproval {
+  action: string;
+  resourceType: string;
+  resourceId: string;
+  policyVersion: AtomicAmount;
+  oldValueHash: Bytes32;
+  newValueHash: Bytes32;
+  safeAddress: Address;
+  nonce: AtomicAmount;
+  deadline: AtomicAmount;
+  signature: string;
+}
+
+export interface SettlementIntentRequest {
+  rail: 'MERCHANT_USDT' | 'REWARD_NPL' | 'PRIZE_USDT';
+  amount: AtomicAmount;
+  idempotencyKey: string;
+}
+
+export interface GovernedSettlementIntentRequest {
+  rail: 'TAKEOVER_USDT' | 'OPERATIONS_REIMBURSEMENT_USDT';
+  resourceId: string;
+  orderId: string;
+  accountId: string;
+  recipient: Address;
+  fulfillmentTargetHash?: Bytes32;
+  amount: AtomicAmount;
+  idempotencyKey: string;
+  approval: SensitiveApproval;
+}
+
+export interface SettlementRequestSubmission {
+  intentId: Bytes32;
+  signature: string;
+}
+
+export interface SettlementRequestIntent {
+  intentId: Bytes32;
+  artifactVersion: typeof artifactVersion;
+  wallet: Address;
+  recipient: Address;
+  rail: SettlementRail;
+  asset: Address;
+  safeAddress: Address;
+  amount: AtomicAmount;
+  itemsHash: Bytes32;
+  nonce: AtomicAmount;
+  deadline: number;
+}
+
+export interface SettlementIntentItem {
+  itemIndex: number;
+  orderId: string;
+  accountId: string;
+  backingSafeAddress: Address;
+  amount: AtomicAmount;
+  itemHash: Bytes32;
+}
+
+export interface Eip712TypedData {
+  domain: JsonObject;
+  types: JsonObject;
+  primaryType: string;
+  message: JsonObject;
+}
+
+export interface SettlementIntentProjection {
+  intent: SettlementRequestIntent;
+  digest: Bytes32;
+  typedData: Eip712TypedData;
+  items: readonly SettlementIntentItem[];
+  createdAt: string;
+}
+
+export interface SettlementRequestItem {
+  item_index: number;
+  order_id: string;
+  account_id: string;
+  backing_safe_address: Address;
+  amount: AtomicAmount;
+  requested_journal_id: string;
+  batched_journal_id: string | null;
+  settled_journal_id: string | null;
+}
+
+export interface SettlementRequestItemTransition {
+  transition_id: string;
+  request_item_index: number;
+  batch_id: string | null;
+  transition_sequence: AtomicAmount;
+  transition_type: string;
+  journal_id: string;
+  created_at: string;
+}
+
+export interface SettlementRequestProjection {
+  request_id: string;
+  intent_id: Bytes32;
+  artifact_version: typeof artifactVersion;
+  wallet_address: Address;
+  recipient_address: Address;
+  rail: SettlementRail;
+  asset: 'USDT' | 'NPL';
+  asset_address: Address;
+  safe_address: Address;
+  amount: AtomicAmount;
+  items_hash: Bytes32;
+  intent_digest: Bytes32;
+  signature_hash: Bytes32;
+  state: SettlementRequestState;
+  batch_id: string | null;
+  final_safe_tx_hash: Bytes32 | null;
+  final_execution_tx_hash: Bytes32 | null;
+  requested_at: string;
+  batched_at: string | null;
+  settled_at: string | null;
+  items: readonly SettlementRequestItem[];
+  transitions: readonly SettlementRequestItemTransition[];
+}
+
+export interface SettlementBalance {
+  asset: 'USDT' | 'NPL';
+  purpose: string;
+  state: BalanceState;
+  amount: AtomicAmount;
+}
+
+export interface SettlementListProjection {
+  artifactVersion: typeof artifactVersion;
+  wallet: Address;
+  balances: readonly SettlementBalance[];
+  requests: readonly SettlementRequestProjection[];
+}
+
+export interface GuaranteeDepositRequest {
+  policyVersion: AtomicAmount;
+  expectedAmountUsdt: AtomicAmount;
+  transactionHash: Bytes32;
+  idempotencyKey: string;
+}
+
+export interface GuaranteeDepositProjection {
+  depositId: string;
+  merchantId: string;
+  policyVersion: number;
+  transactionHash: Bytes32;
+  expectedAmountUsdt: AtomicAmount;
+  operationsSafeAddress: Address;
+  state: MerchantGuaranteeDepositState;
+  confirmations: number;
+  blockNumber?: number;
+  blockHash?: Bytes32;
+  logIndex?: number;
+}
+
+export interface TakeoverFundingChallengeRequest {
+  caseId: string;
+  requiredUsdt: AtomicAmount;
+  nonce: AtomicAmount;
+  deadline: AtomicAmount;
+}
+
+export interface TakeoverFundingRequest {
+  caseId: string;
+  requiredUsdt: AtomicAmount;
+  idempotencyKey: string;
+  approval: SensitiveApproval;
+}
+
+export interface TakeoverFundingReceivable {
+  orderId: string;
+  accountId: string;
+  backingSafeAddress: Address;
+  amount: AtomicAmount;
+}
+
+export interface TakeoverFundingPlan {
+  caseId: string;
+  orderId: string;
+  policyVersion: number;
+  requiredUsdt: AtomicAmount;
+  operationsSafe: Address;
+  guaranteeUsedUsdt: AtomicAmount;
+  receivables: readonly TakeoverFundingReceivable[];
+  frozenReceivablesUsedUsdt: AtomicAmount;
+  platformAdvanceUsdt: AtomicAmount;
+  oldValueHash: Bytes32;
+  newValueHash: Bytes32;
+}
+
+export interface TakeoverFundingChallenge {
+  plan: TakeoverFundingPlan;
+  typedData: Eip712TypedData;
+}
+
+export interface TakeoverFundingResult {
+  caseId: string;
+  state: 'FUNDED';
+  requiredUsdt: AtomicAmount;
+  guaranteeUsedUsdt: AtomicAmount;
+  frozenReceivablesUsedUsdt: AtomicAmount;
+  futureProceedsUsedUsdt: AtomicAmount;
+  platformAdvanceUsdt: AtomicAmount;
+  merchantDebtUsdt: AtomicAmount;
+}
+
+export interface MerchantFinanceMerchant {
+  merchant_id: string;
+  status: string;
+  guarantee_status: GuaranteeStatus;
+  settlement_wallet: Address;
+}
+
+export interface MerchantGuarantee {
+  backing_safe_address: Address;
+  balance_usdt: AtomicAmount;
+  minimum_usdt: AtomicAmount;
+  source_evidence_hash: Bytes32;
+  updated_at: string;
+}
+
+export interface MerchantGuaranteeDeposit {
+  deposit_id: string;
+  policy_version: AtomicAmount;
+  token_address: Address;
+  operations_safe_address: Address;
+  expected_amount_usdt: AtomicAmount;
+  transaction_hash: Bytes32;
+  state: MerchantGuaranteeDepositState;
+  observed_block_number: AtomicAmount | null;
+  observed_block_hash: Bytes32 | null;
+  observed_log_index: number | null;
+  confirmations: number;
+  transfer_evidence_hash: Bytes32 | null;
+  created_at: string;
+  updated_at: string;
+  finalized_at: string | null;
+}
+
+export interface MerchantDebt {
+  incurred_usdt: AtomicAmount;
+  recovered_usdt: AtomicAmount;
+  outstanding_usdt: AtomicAmount;
+  latest_evidence_hash: Bytes32;
+  updated_at: string;
+}
+
+export interface MerchantTakeover {
+  case_id: string;
+  order_id: string;
+  state: TakeoverState;
+  required_usdt: AtomicAmount | null;
+  guarantee_used_usdt: AtomicAmount | null;
+  merchant_available_used_usdt: AtomicAmount | null;
+  future_proceeds_used_usdt: AtomicAmount | null;
+  platform_advance_usdt: AtomicAmount | null;
+  disbursed_usdt: AtomicAmount | null;
+  merchant_debt_usdt: AtomicAmount | null;
+  evidence_hash: Bytes32;
+  opened_at: string;
+  closed_at: string | null;
+  updated_at: string;
+}
+
+export interface MerchantFinanceProjection {
+  merchant: MerchantFinanceMerchant;
+  guarantee: MerchantGuarantee | null;
+  guaranteeDeposits: readonly MerchantGuaranteeDeposit[];
+  debt: MerchantDebt | null;
+  takeovers: readonly MerchantTakeover[];
+}
+
+export interface TakeoverFundingProjection {
+  case_id: string;
+  state: TakeoverState;
+  required_usdt: AtomicAmount | null;
+  guarantee_used_usdt: AtomicAmount | null;
+  merchant_available_used_usdt: AtomicAmount | null;
+  future_proceeds_used_usdt: AtomicAmount | null;
+  platform_advance_usdt: AtomicAmount | null;
+  merchant_debt_usdt: AtomicAmount | null;
+}
+
+export interface TakeoverFundingItem {
+  source_type: string;
+  amount_usdt: AtomicAmount;
+  journal_id: string;
+  evidence_hash: Bytes32;
+  created_at: string;
+}
+
+export interface MerchantDebtRecovery {
+  recovery_id: string;
+  order_id: string;
+  amount_usdt: AtomicAmount;
+  operations_safe_address: Address;
+  backing_safe_address: Address;
+  journal_id: string;
+  evidence_hash: Bytes32;
+  recovered_at: string;
+  reversed_at: string | null;
+  reversal_evidence_hash: Bytes32 | null;
+}
+
+export interface TakeoverFundingDetail extends TakeoverFundingProjection {
+  items: readonly TakeoverFundingItem[];
+  debtRecoveries: readonly MerchantDebtRecovery[];
+}
+
+export interface PolicyDraftCreateRequest { payload: JsonObject; idempotencyKey: string }
+export interface PolicyDraftUpdateRequest { payload: JsonObject }
+export interface PolicyApprovalChallengeRequest { nonce: AtomicAmount; deadline: AtomicAmount }
+export interface PolicySecondarySignatureRequest extends PolicyApprovalChallengeRequest { signature: string }
+
+export interface PolicyDraftProjection {
+  draftId: string;
+  nextPolicyVersion: AtomicAmount;
+  basePolicyVersion: AtomicAmount | null;
+  artifactVersion: string | null;
+  payload: JsonObject;
+  validationErrors: readonly Readonly<{ code: string; field: string }>[];
+  state: PolicyDraftState;
+  policyHash: Bytes32 | null;
+  operationsHash: Bytes32 | null;
+  publicationDigest: Bytes32 | null;
+  publicationNonce: AtomicAmount | null;
+  publicationDeadline: string | null;
+  secondarySigner: Address | null;
+  secondarySignatureHash: Bytes32 | null;
+  safeAddress: Address | null;
+  safeCalldataHash: Bytes32 | null;
+  safeTxHash: Bytes32 | null;
+  safeProposalHash: Bytes32 | null;
+  createdBy: Address;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PolicyDraftTransition {
+  transitionId: string;
+  fromState: PolicyDraftState | null;
+  toState: PolicyDraftState;
+  evidenceHash: Bytes32;
+  actorWallet: Address;
+  createdAt: string;
+}
+
+export interface PolicyDraftDetail extends PolicyDraftProjection {
+  transitions: readonly PolicyDraftTransition[];
+}
+
+export interface PolicyApprovalChallenge {
+  draftId: string;
+  policyVersion: number;
+  signer: Address;
+  typedData: Eip712TypedData;
+  digest: Bytes32;
+}
+
+export interface CmsVersionCreateRequest {
+  entryId?: string;
+  slug: string;
+  contentType: CmsContentType;
+  placement: string;
+  locale: string;
+  contentFormat: CmsContentFormat;
+  content: JsonObject;
+  audience: JsonObject;
+  startsAt?: string;
+  endsAt?: string;
+  frequencyCap?: number;
+  policyVersion?: AtomicAmount;
+  idempotencyKey: string;
+}
+
+export interface CmsVersionProjection {
+  entryId: string;
+  versionId: string;
+  version: number;
+  slug: string;
+  contentType: CmsContentType;
+  placement: string;
+  locale: string;
+  contentFormat: CmsContentFormat;
+  content: JsonObject;
+  contentHash: Bytes32;
+  audience: JsonObject;
+  startsAt: string | null;
+  endsAt: string | null;
+  frequencyCap: number | null;
+  policyVersion: AtomicAmount | null;
+  published: boolean;
+  publicationType: CmsPublicationEventType | null;
+  createdBy: Address;
+  createdAt: string;
+}
+
+export interface CmsPublicItem {
+  entryId: string;
+  versionId: string;
+  version: number;
+  slug: string;
+  contentType: CmsContentType;
+  placement: string;
+  locale: string;
+  content: JsonObject;
+  contentHash: Bytes32;
+  audience: JsonObject;
+  startsAt: string | null;
+  endsAt: string | null;
+  frequencyCap: number | null;
+  policyVersion: AtomicAmount | null;
+}
+
+export interface NotificationEndpointRequest {
+  channel: NotificationChannel;
+  provider: NotificationProvider;
+  endpointReference: string;
+  topics: readonly string[];
+  regionCode?: string;
+}
+
+export interface NotificationEndpointProjection {
+  endpointId: string;
+  channel: NotificationChannel;
+  provider: NotificationProvider;
+  topics: readonly string[];
+  state: NotificationEndpointState;
+}
+
+export interface NotificationInboxItem {
+  messageId: string;
+  sourceEventType: string;
+  topic: string;
+  templateData: JsonObject;
+  deliveryState: NotificationDeliveryState;
+  createdAt: string;
+}
+
+export interface NotificationCampaignRequest {
+  topic: NotificationCampaignTopic;
+  audience: JsonObject;
+  message: JsonObject;
+  cmsVersionId?: string;
+  startsAt?: string;
+  endsAt?: string;
+  idempotencyKey: string;
+}
+
+export interface NotificationCampaignCreateResult {
+  campaignId: string;
+  state: NotificationCampaignState;
+  contentHash: Bytes32;
+}
+
+export interface NotificationCampaignPublishResult { campaignId: string; state: 'PUBLISHED' }
+
+export interface SystemConfigCreateRequest {
+  configKey: SystemConfigKey;
+  payload: JsonObject;
+  effectiveFrom: string;
+  idempotencyKey: string;
+}
+
+export interface SystemConfigProjection {
+  configVersionId: string;
+  configKey: SystemConfigKey;
+  version: number;
+  payload: JsonObject;
+  payloadHash: Bytes32;
+  effectiveFrom: string;
+  published: boolean;
+  createdBy: Address;
+  createdAt: string;
+}
+
+export interface AuditEntry {
+  entryId: string;
+  sourceEventId: string;
+  streamName: AuditStreamName;
+  evidenceProfile: AuditEvidenceProfile;
+  sequence: AtomicAmount;
+  eventType: string;
+  resourceType: string;
+  resourceId: string;
+  actorWallet: Address | null;
+  actorRole: string | null;
+  correlationId: string;
+  requestHash: string;
+  payload: JsonObject;
+  signatureEvidence: JsonObject | null;
+  authorizationEvidence: JsonObject | null;
+  transactionEvidence: JsonObject | null;
+  previousHash: string;
+  entryHash: string;
+  createdAt: string;
+}
+
+export interface AuditChainProof { verified: boolean; entries: number; headHash: string | null }
+export interface AuditCursor { createdAt: string; entryId: string }
+export interface AuditListResponse {
+  entries: readonly AuditEntry[];
+  chainProof: Readonly<Partial<Record<AuditStreamName, AuditChainProof>>>;
+  nextCursor: AuditCursor | null;
+}
+
+export interface MonitoringMetric {
+  snapshotId: string;
+  component: OperationsMetricComponent;
+  metricName: string;
+  unit: OperationsMetricUnit;
+  value: number | null;
+  status: OperationsMetricStatus;
+  windowStartedAt: string;
+  windowEndedAt: string;
+  evidence: JsonObject;
+  observedAt: string;
+}
+
+export interface MonitoringAlert {
+  alertEventId: string;
+  alertKey: string;
+  state: OperationsAlertEventType;
+  severity: OperationsAlertSeverity;
+  snapshotId: string;
+  actorWallet: Address | null;
+  createdAt: string;
+}
+
+export interface MonitoringCoverage {
+  asset: 'USDT' | 'NPL';
+  safe_address: Address;
+  assets: AtomicAmount;
+  unsettled_liabilities: AtomicAmount;
+  covered: boolean;
+  observed_at: string;
+}
+
+export interface MonitoringDashboard {
+  metrics: readonly MonitoringMetric[];
+  alerts: readonly MonitoringAlert[];
+  coverage: readonly MonitoringCoverage[];
+}
+
+export interface MonitoringAcknowledgeResult { alertKey: string; state: 'ACKNOWLEDGED' }
 
 export interface ProductPolicy {
   policyVersion: number;

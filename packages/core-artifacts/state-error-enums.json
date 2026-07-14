@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-fulfillment.1",
+  "artifactVersion": "2.0.0-settlement-admin.1",
   "orderProjectionStates": [
     "QUOTED",
     "SUBMITTED",
@@ -149,7 +149,57 @@
   "settlementRails": [
     "MERCHANT_USDT",
     "REWARD_NPL",
-    "PRIZE_USDT"
+    "PRIZE_USDT",
+    "TAKEOVER_USDT",
+    "OPERATIONS_REIMBURSEMENT_USDT"
+  ],
+  "settlementIntentStates": [
+    "ISSUED",
+    "CONSUMED",
+    "EXPIRED",
+    "CANCELLED"
+  ],
+  "settlementRequestStates": [
+    "REQUESTED",
+    "BATCHED",
+    "SETTLED",
+    "RETRYABLE",
+    "QUARANTINED"
+  ],
+  "settlementBatchStates": [
+    "APPROVAL_PENDING",
+    "APPROVED",
+    "SUBMITTING",
+    "SUBMITTED",
+    "MINED",
+    "SETTLED",
+    "FAILED",
+    "REORGED",
+    "RETRYABLE",
+    "QUARANTINED"
+  ],
+  "merchantGuaranteeDepositStates": [
+    "SUBMITTED",
+    "MINED",
+    "FINAL",
+    "REORGED",
+    "QUARANTINED"
+  ],
+  "guaranteeStatuses": [
+    "DECISION_BLOCKED",
+    "BELOW_MINIMUM",
+    "READY",
+    "FROZEN"
+  ],
+  "breakerActions": [
+    "PAUSE",
+    "RESUME"
+  ],
+  "breakerCauseTypes": [
+    "COVERAGE",
+    "GOVERNANCE",
+    "SECURITY",
+    "OPERATIONS"
   ],
   "reservationStates": [
     "ACTIVE",
@@ -210,6 +260,136 @@
     "PUBLISHED",
     "SUPERSEDED"
   ],
+  "policyDraftStates": [
+    "DRAFT",
+    "DECISION_BLOCKED",
+    "SECONDARY_SIGNED",
+    "SAFE_PROPOSED",
+    "FINALITY_PENDING",
+    "REORGED",
+    "REJECTED",
+    "PUBLISHED"
+  ],
+  "cmsContentTypes": [
+    "BANNER",
+    "RECOMMENDATION",
+    "SPLASH",
+    "CAMPAIGN_POPUP",
+    "SECKILL_RULES",
+    "FAQ",
+    "SERVICE_AGREEMENT",
+    "PRIVACY",
+    "ABOUT",
+    "RELEASE_ANNOUNCEMENT",
+    "UPDATE_NOTICE",
+    "CONTRACT_NOTICE"
+  ],
+  "cmsContentFormats": [
+    "STRUCTURED_RICH_TEXT",
+    "STRUCTURED_CAMPAIGN"
+  ],
+  "cmsPublicationEventTypes": [
+    "PUBLISHED",
+    "ROLLED_BACK"
+  ],
+  "notificationChannels": [
+    "IN_APP",
+    "SMS",
+    "EMAIL",
+    "PUSH"
+  ],
+  "notificationProviders": [
+    "CORE",
+    "ALIYUN_SMS",
+    "TENCENT_SMS",
+    "SMTP",
+    "FIREBASE",
+    "JPUSH"
+  ],
+  "notificationEndpointStates": [
+    "ACTIVE",
+    "PAUSED",
+    "REVOKED"
+  ],
+  "notificationCampaignTopics": [
+    "ANNOUNCEMENT",
+    "MAINTENANCE",
+    "ACTIVITY"
+  ],
+  "notificationCampaignStates": [
+    "DRAFT",
+    "PUBLISHED",
+    "CANCELLED"
+  ],
+  "notificationDeliveryStates": [
+    "PENDING",
+    "PROCESSING",
+    "DELIVERED",
+    "RETRY",
+    "CONFIGURATION_REQUIRED",
+    "DEAD_LETTER"
+  ],
+  "systemConfigKeys": [
+    "BUSINESS",
+    "FREIGHT",
+    "RPC",
+    "ORACLE",
+    "GAS",
+    "CHAIN",
+    "INTEGRATIONS"
+  ],
+  "auditStreamNames": [
+    "financial",
+    "governance",
+    "authentication",
+    "operational",
+    "backup"
+  ],
+  "auditEvidenceProfiles": [
+    "RBAC",
+    "AUTHORIZATION",
+    "SIGNED_OFFCHAIN",
+    "SAFE_APPROVED",
+    "CHAIN_OBSERVED",
+    "CHAIN_FINAL",
+    "SYSTEM"
+  ],
+  "operationsMetricComponents": [
+    "HOST",
+    "REDIS",
+    "MQ",
+    "DATABASE",
+    "HTTP",
+    "PAYMENT",
+    "FULFILLMENT",
+    "RPC_PRIMARY",
+    "RPC_FALLBACK",
+    "EXPLORER"
+  ],
+  "operationsMetricUnits": [
+    "PERCENT",
+    "BYTES",
+    "COUNT",
+    "MILLISECONDS",
+    "BLOCK",
+    "PER_SECOND"
+  ],
+  "operationsMetricStatuses": [
+    "HEALTHY",
+    "WARNING",
+    "CRITICAL",
+    "UNAVAILABLE",
+    "CONFIGURATION_REQUIRED"
+  ],
+  "operationsAlertEventTypes": [
+    "OPENED",
+    "ACKNOWLEDGED",
+    "RECOVERED"
+  ],
+  "operationsAlertSeverities": [
+    "WARNING",
+    "CRITICAL"
+  ],
   "adapterProviders": [
     "AMAP",
     "KUAIDI100",
@@ -218,8 +398,10 @@
     "YILIANYUN",
     "BNM",
     "ALIYUN_SMS",
+    "TENCENT_SMS",
     "ALIYUN_OSS",
     "SMTP",
+    "FIREBASE",
     "JPUSH"
   ],
   "infrastructureProviders": [

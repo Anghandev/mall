@@ -2,11 +2,1926 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Abu 24K V2 Core API",
-    "version": "2.0.0-fulfillment.1"
+    "version": "2.0.0-settlement-admin.1"
   },
-  "x-artifactVersion": "2.0.0-fulfillment.1",
+  "x-artifactVersion": "2.0.0-settlement-admin.1",
   "servers": [],
   "paths": {
+    "/v2/settlement-intents": {
+      "post": {
+        "operationId": "createSettlementIntent",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettlementIntentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettlementIntentProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/settlement-intents": {
+      "post": {
+        "operationId": "createGovernedSettlementIntent",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GovernedSettlementIntentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettlementIntentProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/settlement-requests": {
+      "post": {
+        "operationId": "submitSettlementRequest",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettlementRequestSubmission"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettlementRequestProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/settlements": {
+      "get": {
+        "operationId": "listSettlements",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettlementListProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/finance/merchant": {
+      "get": {
+        "operationId": "getMerchantFinance",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantFinanceProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "merchantId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/finance/merchant/guarantee-deposits": {
+      "post": {
+        "operationId": "submitMerchantGuaranteeDeposit",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuaranteeDepositRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuaranteeDepositProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/takeover-funding/approval-challenge": {
+      "post": {
+        "operationId": "createTakeoverFundingApprovalChallenge",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TakeoverFundingChallengeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoverFundingChallenge"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/takeover-funding": {
+      "post": {
+        "operationId": "fundTakeover",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TakeoverFundingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoverFundingResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/takeover-funding/{caseId}": {
+      "get": {
+        "operationId": "getTakeoverFunding",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoverFundingDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "caseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/cms/public": {
+      "get": {
+        "operationId": "listPublicCms",
+        "parameters": [
+          {
+            "name": "walletAddress",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Address"
+            }
+          },
+          {
+            "name": "merchantId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "regionCode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RegionCode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Published CMS items",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CmsPublicItem"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/notification-endpoints": {
+      "post": {
+        "operationId": "registerNotificationEndpoint",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationEndpointRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationEndpointProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/notifications": {
+      "get": {
+        "operationId": "listNotifications",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NotificationInboxItem"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/policy-drafts": {
+      "get": {
+        "operationId": "listPolicyDrafts",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PolicyDraftProjection"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createPolicyDraft",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyDraftCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyDraftDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/policy-drafts/{draftId}": {
+      "get": {
+        "operationId": "getPolicyDraft",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyDraftDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "draftId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "updatePolicyDraft",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyDraftUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyDraftDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "draftId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/policy-drafts/{draftId}/approval-challenge": {
+      "post": {
+        "operationId": "createPolicyApprovalChallenge",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyApprovalChallengeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyApprovalChallenge"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "draftId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/policy-drafts/{draftId}/secondary-signature": {
+      "post": {
+        "operationId": "submitPolicySecondarySignature",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicySecondarySignatureRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyDraftDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "draftId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/policy-drafts/{draftId}/safe-proposal": {
+      "post": {
+        "operationId": "proposePolicyToSafe",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyObject"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyDraftDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "draftId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/cms/versions": {
+      "post": {
+        "operationId": "createCmsVersion",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CmsVersionCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CmsVersionProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/cms/versions/{versionId}": {
+      "get": {
+        "operationId": "getCmsVersion",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CmsVersionProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/cms/versions/{versionId}/publish": {
+      "post": {
+        "operationId": "publishCmsVersion",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvidenceHashRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CmsVersionProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/cms/versions/{versionId}/rollback": {
+      "post": {
+        "operationId": "rollbackCmsVersion",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvidenceHashRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CmsVersionProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/notification-campaigns": {
+      "post": {
+        "operationId": "createNotificationCampaign",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationCampaignRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationCampaignCreateResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/notification-campaigns/{campaignId}/publish": {
+      "post": {
+        "operationId": "publishNotificationCampaign",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvidenceHashRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationCampaignPublishResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "campaignId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/system-config/versions": {
+      "get": {
+        "operationId": "listSystemConfigVersions",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SystemConfigProjection"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createSystemConfigVersion",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemConfigCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemConfigProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/system-config/versions/{configVersionId}/publish": {
+      "post": {
+        "operationId": "publishSystemConfigVersion",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemConfigPublishRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemConfigProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "configVersionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/audit/entries": {
+      "get": {
+        "operationId": "listAuditEntries",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditListResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "streamName",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "financial",
+                "governance",
+                "authentication",
+                "operational",
+                "backup"
+              ]
+            }
+          },
+          {
+            "name": "eventType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "resourceType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "resourceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "correlationId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "cursorEntryId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "actorWallet",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Address"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "cursorCreatedAt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/monitoring": {
+      "get": {
+        "operationId": "getMonitoringDashboard",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonitoringDashboard"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/monitoring/alerts/{alertKey}/acknowledge": {
+      "post": {
+        "operationId": "acknowledgeMonitoringAlert",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyObject"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonitoringAcknowledgeResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "alertKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
     "/v2/bootstrap": {
       "get": {
         "operationId": "getBootstrap",
@@ -2135,7 +4050,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment.1"
+            "const": "2.0.0-settlement-admin.1"
           },
           "status": {
             "const": "CORE_API_READY"
@@ -4734,7 +6649,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment.1"
+            "const": "2.0.0-settlement-admin.1"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -4833,7 +6748,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment.1"
+            "const": "2.0.0-settlement-admin.1"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -5209,6 +7124,3462 @@
           },
           "beneficiaries": {
             "$ref": "#/components/schemas/BeneficiarySnapshot"
+          }
+        }
+      },
+      "EmptyObject": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {}
+      },
+      "SensitiveApproval": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "resourceType",
+          "resourceId",
+          "policyVersion",
+          "oldValueHash",
+          "newValueHash",
+          "safeAddress",
+          "nonce",
+          "deadline",
+          "signature"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resourceType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resourceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "policyVersion": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "oldValueHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "newValueHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "safeAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "nonce": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "deadline": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^0x(?:[0-9a-fA-F]{2})+$"
+          }
+        }
+      },
+      "EvidenceHashRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "evidenceHash"
+        ],
+        "properties": {
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "SettlementIntentRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rail",
+          "amount",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "rail": {
+            "enum": [
+              "MERCHANT_USDT",
+              "REWARD_NPL",
+              "PRIZE_USDT"
+            ]
+          },
+          "amount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          }
+        }
+      },
+      "GovernedSettlementIntentRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rail",
+          "resourceId",
+          "orderId",
+          "accountId",
+          "recipient",
+          "amount",
+          "idempotencyKey",
+          "approval"
+        ],
+        "properties": {
+          "rail": {
+            "enum": [
+              "TAKEOVER_USDT",
+              "OPERATIONS_REIMBURSEMENT_USDT"
+            ]
+          },
+          "resourceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "orderId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "recipient": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "fulfillmentTargetHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          },
+          "approval": {
+            "$ref": "#/components/schemas/SensitiveApproval"
+          }
+        }
+      },
+      "SettlementRequestSubmission": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "intentId",
+          "signature"
+        ],
+        "properties": {
+          "intentId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^0x(?:[0-9a-fA-F]{2})+$"
+          }
+        }
+      },
+      "SettlementRequestIntent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "intentId",
+          "artifactVersion",
+          "wallet",
+          "recipient",
+          "rail",
+          "asset",
+          "safeAddress",
+          "amount",
+          "itemsHash",
+          "nonce",
+          "deadline"
+        ],
+        "properties": {
+          "intentId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.1"
+          },
+          "wallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "recipient": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "rail": {
+            "enum": [
+              "MERCHANT_USDT",
+              "REWARD_NPL",
+              "PRIZE_USDT",
+              "TAKEOVER_USDT",
+              "OPERATIONS_REIMBURSEMENT_USDT"
+            ]
+          },
+          "asset": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "safeAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "itemsHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "nonce": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "deadline": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "SettlementIntentItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "itemIndex",
+          "orderId",
+          "accountId",
+          "backingSafeAddress",
+          "amount",
+          "itemHash"
+        ],
+        "properties": {
+          "itemIndex": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "orderId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "backingSafeAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "itemHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "SettlementIntentProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "intent",
+          "digest",
+          "typedData",
+          "items",
+          "createdAt"
+        ],
+        "properties": {
+          "intent": {
+            "$ref": "#/components/schemas/SettlementRequestIntent"
+          },
+          "digest": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "typedData": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "domain",
+              "types",
+              "primaryType",
+              "message"
+            ],
+            "properties": {
+              "domain": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "types": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "primaryType": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SettlementIntentItem"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SettlementRequestItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "item_index",
+          "order_id",
+          "account_id",
+          "backing_safe_address",
+          "amount",
+          "requested_journal_id",
+          "batched_journal_id",
+          "settled_journal_id"
+        ],
+        "properties": {
+          "item_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "order_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "account_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "backing_safe_address": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "requested_journal_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "batched_journal_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settled_journal_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "SettlementRequestItemTransition": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "transition_id",
+          "request_item_index",
+          "batch_id",
+          "transition_sequence",
+          "transition_type",
+          "journal_id",
+          "created_at"
+        ],
+        "properties": {
+          "transition_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "request_item_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "transition_sequence": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "transition_type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "journal_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SettlementRequestProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id",
+          "intent_id",
+          "artifact_version",
+          "wallet_address",
+          "recipient_address",
+          "rail",
+          "asset",
+          "asset_address",
+          "safe_address",
+          "amount",
+          "items_hash",
+          "intent_digest",
+          "signature_hash",
+          "state",
+          "batch_id",
+          "final_safe_tx_hash",
+          "final_execution_tx_hash",
+          "requested_at",
+          "batched_at",
+          "settled_at",
+          "items",
+          "transitions"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "intent_id": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "artifact_version": {
+            "const": "2.0.0-settlement-admin.1"
+          },
+          "wallet_address": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "recipient_address": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "rail": {
+            "enum": [
+              "MERCHANT_USDT",
+              "REWARD_NPL",
+              "PRIZE_USDT",
+              "TAKEOVER_USDT",
+              "OPERATIONS_REIMBURSEMENT_USDT"
+            ]
+          },
+          "asset": {
+            "enum": [
+              "USDT",
+              "NPL"
+            ]
+          },
+          "asset_address": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "safe_address": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "items_hash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "intent_digest": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "signature_hash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "state": {
+            "enum": [
+              "REQUESTED",
+              "BATCHED",
+              "SETTLED",
+              "RETRYABLE",
+              "QUARANTINED"
+            ]
+          },
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "final_safe_tx_hash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "final_execution_tx_hash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "batched_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "item_index",
+                "order_id",
+                "account_id",
+                "backing_safe_address",
+                "amount",
+                "requested_journal_id",
+                "batched_journal_id",
+                "settled_journal_id"
+              ],
+              "properties": {
+                "item_index": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "order_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "account_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "backing_safe_address": {
+                  "$ref": "#/components/schemas/Address"
+                },
+                "amount": {
+                  "$ref": "#/components/schemas/AtomicAmount"
+                },
+                "requested_journal_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "batched_journal_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "settled_journal_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "transitions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "transition_id",
+                "request_item_index",
+                "batch_id",
+                "transition_sequence",
+                "transition_type",
+                "journal_id",
+                "created_at"
+              ],
+              "properties": {
+                "transition_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "request_item_index": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "batch_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "transition_sequence": {
+                  "$ref": "#/components/schemas/AtomicAmount"
+                },
+                "transition_type": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "journal_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        }
+      },
+      "SettlementBalance": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "asset",
+          "purpose",
+          "state",
+          "amount"
+        ],
+        "properties": {
+          "asset": {
+            "enum": [
+              "USDT",
+              "NPL"
+            ]
+          },
+          "purpose": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "enum": [
+              "LOCKED",
+              "AVAILABLE",
+              "REQUESTED",
+              "BATCHED",
+              "SETTLED",
+              "DISPUTED"
+            ]
+          },
+          "amount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          }
+        }
+      },
+      "SettlementListProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "wallet",
+          "balances",
+          "requests"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.1"
+          },
+          "wallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "balances": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SettlementBalance"
+            }
+          },
+          "requests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SettlementRequestProjection"
+            }
+          }
+        }
+      },
+      "GuaranteeDepositRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "policyVersion",
+          "expectedAmountUsdt",
+          "transactionHash",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "policyVersion": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "expectedAmountUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "transactionHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          }
+        }
+      },
+      "GuaranteeDepositProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "depositId",
+          "merchantId",
+          "policyVersion",
+          "transactionHash",
+          "expectedAmountUsdt",
+          "operationsSafeAddress",
+          "state",
+          "confirmations"
+        ],
+        "properties": {
+          "depositId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "merchantId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "policyVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "transactionHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "expectedAmountUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "operationsSafeAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "state": {
+            "enum": [
+              "SUBMITTED",
+              "MINED",
+              "FINAL",
+              "REORGED",
+              "QUARANTINED"
+            ]
+          },
+          "confirmations": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "blockNumber": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "blockHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "logIndex": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "TakeoverFundingChallengeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "caseId",
+          "requiredUsdt",
+          "nonce",
+          "deadline"
+        ],
+        "properties": {
+          "caseId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "requiredUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "nonce": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "deadline": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          }
+        }
+      },
+      "TakeoverFundingRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "caseId",
+          "requiredUsdt",
+          "idempotencyKey",
+          "approval"
+        ],
+        "properties": {
+          "caseId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "requiredUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          },
+          "approval": {
+            "$ref": "#/components/schemas/SensitiveApproval"
+          }
+        }
+      },
+      "TakeoverFundingPlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "caseId",
+          "orderId",
+          "policyVersion",
+          "requiredUsdt",
+          "operationsSafe",
+          "guaranteeUsedUsdt",
+          "receivables",
+          "frozenReceivablesUsedUsdt",
+          "platformAdvanceUsdt",
+          "oldValueHash",
+          "newValueHash"
+        ],
+        "properties": {
+          "caseId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "orderId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "policyVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "requiredUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "operationsSafe": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "guaranteeUsedUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "receivables": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "orderId",
+                "accountId",
+                "backingSafeAddress",
+                "amount"
+              ],
+              "properties": {
+                "orderId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "accountId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "backingSafeAddress": {
+                  "$ref": "#/components/schemas/Address"
+                },
+                "amount": {
+                  "$ref": "#/components/schemas/AtomicAmount"
+                }
+              }
+            }
+          },
+          "frozenReceivablesUsedUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "platformAdvanceUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "oldValueHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "newValueHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "TakeoverFundingChallenge": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "plan",
+          "typedData"
+        ],
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/TakeoverFundingPlan"
+          },
+          "typedData": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "domain",
+              "types",
+              "primaryType",
+              "message"
+            ],
+            "properties": {
+              "domain": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "types": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "primaryType": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "TakeoverFundingResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "caseId",
+          "state",
+          "requiredUsdt",
+          "guaranteeUsedUsdt",
+          "frozenReceivablesUsedUsdt",
+          "futureProceedsUsedUsdt",
+          "platformAdvanceUsdt",
+          "merchantDebtUsdt"
+        ],
+        "properties": {
+          "caseId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "const": "FUNDED"
+          },
+          "requiredUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "guaranteeUsedUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "frozenReceivablesUsedUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "futureProceedsUsedUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "platformAdvanceUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "merchantDebtUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          }
+        }
+      },
+      "MerchantFinanceMerchant": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "merchant_id",
+          "status",
+          "guarantee_status",
+          "settlement_wallet"
+        ],
+        "properties": {
+          "merchant_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1
+          },
+          "guarantee_status": {
+            "enum": [
+              "DECISION_BLOCKED",
+              "BELOW_MINIMUM",
+              "READY",
+              "FROZEN"
+            ]
+          },
+          "settlement_wallet": {
+            "$ref": "#/components/schemas/Address"
+          }
+        }
+      },
+      "MerchantGuarantee": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "backing_safe_address",
+          "balance_usdt",
+          "minimum_usdt",
+          "source_evidence_hash",
+          "updated_at"
+        ],
+        "properties": {
+          "backing_safe_address": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "balance_usdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "minimum_usdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "source_evidence_hash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MerchantGuaranteeDeposit": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "deposit_id",
+          "policy_version",
+          "token_address",
+          "operations_safe_address",
+          "expected_amount_usdt",
+          "transaction_hash",
+          "state",
+          "observed_block_number",
+          "observed_block_hash",
+          "observed_log_index",
+          "confirmations",
+          "transfer_evidence_hash",
+          "created_at",
+          "updated_at",
+          "finalized_at"
+        ],
+        "properties": {
+          "deposit_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "policy_version": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "token_address": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "operations_safe_address": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "expected_amount_usdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "transaction_hash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "state": {
+            "enum": [
+              "SUBMITTED",
+              "MINED",
+              "FINAL",
+              "REORGED",
+              "QUARANTINED"
+            ]
+          },
+          "observed_block_number": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observed_block_hash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observed_log_index": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confirmations": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "transfer_evidence_hash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finalized_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "MerchantDebt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "incurred_usdt",
+          "recovered_usdt",
+          "outstanding_usdt",
+          "latest_evidence_hash",
+          "updated_at"
+        ],
+        "properties": {
+          "incurred_usdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "recovered_usdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "outstanding_usdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "latest_evidence_hash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MerchantTakeover": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "case_id",
+          "order_id",
+          "state",
+          "required_usdt",
+          "guarantee_used_usdt",
+          "merchant_available_used_usdt",
+          "future_proceeds_used_usdt",
+          "platform_advance_usdt",
+          "disbursed_usdt",
+          "merchant_debt_usdt",
+          "evidence_hash",
+          "opened_at",
+          "closed_at",
+          "updated_at"
+        ],
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "enum": [
+              "OPEN",
+              "FUNDED",
+              "FULFILLING",
+              "FULFILLMENT_PENDING",
+              "CLOSED",
+              "DECISION_BLOCKED"
+            ]
+          },
+          "required_usdt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "guarantee_used_usdt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "merchant_available_used_usdt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "future_proceeds_used_usdt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "platform_advance_usdt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "disbursed_usdt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "merchant_debt_usdt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidence_hash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "opened_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MerchantFinanceProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "merchant",
+          "guarantee",
+          "guaranteeDeposits",
+          "debt",
+          "takeovers"
+        ],
+        "properties": {
+          "merchant": {
+            "$ref": "#/components/schemas/MerchantFinanceMerchant"
+          },
+          "guarantee": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MerchantGuarantee"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "guaranteeDeposits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantGuaranteeDeposit"
+            }
+          },
+          "debt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MerchantDebt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "takeovers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantTakeover"
+            }
+          }
+        }
+      },
+      "TakeoverFundingProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "case_id",
+          "state",
+          "required_usdt",
+          "guarantee_used_usdt",
+          "merchant_available_used_usdt",
+          "future_proceeds_used_usdt",
+          "platform_advance_usdt",
+          "merchant_debt_usdt"
+        ],
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "enum": [
+              "OPEN",
+              "FUNDED",
+              "FULFILLING",
+              "FULFILLMENT_PENDING",
+              "CLOSED",
+              "DECISION_BLOCKED"
+            ]
+          },
+          "required_usdt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "guarantee_used_usdt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "merchant_available_used_usdt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "future_proceeds_used_usdt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "platform_advance_usdt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "merchant_debt_usdt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "TakeoverFundingItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_type",
+          "amount_usdt",
+          "journal_id",
+          "evidence_hash",
+          "created_at"
+        ],
+        "properties": {
+          "source_type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "amount_usdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "journal_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_hash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MerchantDebtRecovery": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "recovery_id",
+          "order_id",
+          "amount_usdt",
+          "operations_safe_address",
+          "backing_safe_address",
+          "journal_id",
+          "evidence_hash",
+          "recovered_at",
+          "reversed_at",
+          "reversal_evidence_hash"
+        ],
+        "properties": {
+          "recovery_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "amount_usdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "operations_safe_address": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "backing_safe_address": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "journal_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_hash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "recovered_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reversed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reversal_evidence_hash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "TakeoverFundingDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "case_id",
+          "state",
+          "required_usdt",
+          "guarantee_used_usdt",
+          "merchant_available_used_usdt",
+          "future_proceeds_used_usdt",
+          "platform_advance_usdt",
+          "merchant_debt_usdt",
+          "items",
+          "debtRecoveries"
+        ],
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "enum": [
+              "OPEN",
+              "FUNDED",
+              "FULFILLING",
+              "FULFILLMENT_PENDING",
+              "CLOSED",
+              "DECISION_BLOCKED"
+            ]
+          },
+          "required_usdt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "guarantee_used_usdt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "merchant_available_used_usdt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "future_proceeds_used_usdt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "platform_advance_usdt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "merchant_debt_usdt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TakeoverFundingItem"
+            }
+          },
+          "debtRecoveries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantDebtRecovery"
+            }
+          }
+        }
+      },
+      "PolicyDraftCreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "payload",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          }
+        }
+      },
+      "PolicyDraftUpdateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "payload"
+        ],
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "PolicyApprovalChallengeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "nonce",
+          "deadline"
+        ],
+        "properties": {
+          "nonce": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "deadline": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          }
+        }
+      },
+      "PolicySecondarySignatureRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "nonce",
+          "deadline",
+          "signature"
+        ],
+        "properties": {
+          "nonce": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "deadline": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^0x(?:[0-9a-fA-F]{2})+$"
+          }
+        }
+      },
+      "PolicyDraftProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "draftId",
+          "nextPolicyVersion",
+          "basePolicyVersion",
+          "artifactVersion",
+          "payload",
+          "validationErrors",
+          "state",
+          "policyHash",
+          "operationsHash",
+          "publicationDigest",
+          "publicationNonce",
+          "publicationDeadline",
+          "secondarySigner",
+          "secondarySignatureHash",
+          "safeAddress",
+          "safeCalldataHash",
+          "safeTxHash",
+          "safeProposalHash",
+          "createdBy",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "draftId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "nextPolicyVersion": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "basePolicyVersion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "artifactVersion": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "validationErrors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "code",
+                "field"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "field": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          "state": {
+            "enum": [
+              "DRAFT",
+              "DECISION_BLOCKED",
+              "SECONDARY_SIGNED",
+              "SAFE_PROPOSED",
+              "FINALITY_PENDING",
+              "REORGED",
+              "REJECTED",
+              "PUBLISHED"
+            ]
+          },
+          "policyHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operationsHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "publicationDigest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "publicationNonce": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "publicationDeadline": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "secondarySigner": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "secondarySignatureHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "safeAddress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "safeCalldataHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "safeTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "safeProposalHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdBy": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PolicyDraftTransition": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "transitionId",
+          "fromState",
+          "toState",
+          "evidenceHash",
+          "actorWallet",
+          "createdAt"
+        ],
+        "properties": {
+          "transitionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "fromState": {
+            "anyOf": [
+              {
+                "enum": [
+                  "DRAFT",
+                  "DECISION_BLOCKED",
+                  "SECONDARY_SIGNED",
+                  "SAFE_PROPOSED",
+                  "FINALITY_PENDING",
+                  "REORGED",
+                  "REJECTED",
+                  "PUBLISHED"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "toState": {
+            "enum": [
+              "DRAFT",
+              "DECISION_BLOCKED",
+              "SECONDARY_SIGNED",
+              "SAFE_PROPOSED",
+              "FINALITY_PENDING",
+              "REORGED",
+              "REJECTED",
+              "PUBLISHED"
+            ]
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "actorWallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PolicyDraftDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "draftId",
+          "nextPolicyVersion",
+          "basePolicyVersion",
+          "artifactVersion",
+          "payload",
+          "validationErrors",
+          "state",
+          "policyHash",
+          "operationsHash",
+          "publicationDigest",
+          "publicationNonce",
+          "publicationDeadline",
+          "secondarySigner",
+          "secondarySignatureHash",
+          "safeAddress",
+          "safeCalldataHash",
+          "safeTxHash",
+          "safeProposalHash",
+          "createdBy",
+          "createdAt",
+          "updatedAt",
+          "transitions"
+        ],
+        "properties": {
+          "draftId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "nextPolicyVersion": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "basePolicyVersion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "artifactVersion": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "validationErrors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "code",
+                "field"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "field": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          "state": {
+            "enum": [
+              "DRAFT",
+              "DECISION_BLOCKED",
+              "SECONDARY_SIGNED",
+              "SAFE_PROPOSED",
+              "FINALITY_PENDING",
+              "REORGED",
+              "REJECTED",
+              "PUBLISHED"
+            ]
+          },
+          "policyHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operationsHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "publicationDigest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "publicationNonce": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "publicationDeadline": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "secondarySigner": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "secondarySignatureHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "safeAddress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "safeCalldataHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "safeTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "safeProposalHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdBy": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "transitions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PolicyDraftTransition"
+            }
+          }
+        }
+      },
+      "PolicyApprovalChallenge": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "draftId",
+          "policyVersion",
+          "signer",
+          "typedData",
+          "digest"
+        ],
+        "properties": {
+          "draftId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "policyVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "signer": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "typedData": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "domain",
+              "types",
+              "primaryType",
+              "message"
+            ],
+            "properties": {
+              "domain": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "types": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "primaryType": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "digest": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "CmsVersionCreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slug",
+          "contentType",
+          "placement",
+          "locale",
+          "contentFormat",
+          "content",
+          "audience",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "entryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1
+          },
+          "contentType": {
+            "enum": [
+              "BANNER",
+              "RECOMMENDATION",
+              "SPLASH",
+              "CAMPAIGN_POPUP",
+              "SECKILL_RULES",
+              "FAQ",
+              "SERVICE_AGREEMENT",
+              "PRIVACY",
+              "ABOUT",
+              "RELEASE_ANNOUNCEMENT",
+              "UPDATE_NOTICE",
+              "CONTRACT_NOTICE"
+            ]
+          },
+          "placement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "locale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "contentFormat": {
+            "enum": [
+              "STRUCTURED_RICH_TEXT",
+              "STRUCTURED_CAMPAIGN"
+            ]
+          },
+          "content": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "audience": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "frequencyCap": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "policyVersion": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          }
+        }
+      },
+      "CmsVersionProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entryId",
+          "versionId",
+          "version",
+          "slug",
+          "contentType",
+          "placement",
+          "locale",
+          "contentFormat",
+          "content",
+          "contentHash",
+          "audience",
+          "startsAt",
+          "endsAt",
+          "frequencyCap",
+          "policyVersion",
+          "published",
+          "publicationType",
+          "createdBy",
+          "createdAt"
+        ],
+        "properties": {
+          "entryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "versionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1
+          },
+          "contentType": {
+            "enum": [
+              "BANNER",
+              "RECOMMENDATION",
+              "SPLASH",
+              "CAMPAIGN_POPUP",
+              "SECKILL_RULES",
+              "FAQ",
+              "SERVICE_AGREEMENT",
+              "PRIVACY",
+              "ABOUT",
+              "RELEASE_ANNOUNCEMENT",
+              "UPDATE_NOTICE",
+              "CONTRACT_NOTICE"
+            ]
+          },
+          "placement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "locale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "contentFormat": {
+            "enum": [
+              "STRUCTURED_RICH_TEXT",
+              "STRUCTURED_CAMPAIGN"
+            ]
+          },
+          "content": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "contentHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "audience": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "startsAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "endsAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "frequencyCap": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "policyVersion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "published": {
+            "type": "boolean"
+          },
+          "publicationType": {
+            "anyOf": [
+              {
+                "enum": [
+                  "PUBLISHED",
+                  "ROLLED_BACK"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdBy": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CmsPublicItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entryId",
+          "versionId",
+          "version",
+          "slug",
+          "contentType",
+          "placement",
+          "locale",
+          "content",
+          "contentHash",
+          "audience",
+          "startsAt",
+          "endsAt",
+          "frequencyCap",
+          "policyVersion"
+        ],
+        "properties": {
+          "entryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "versionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1
+          },
+          "contentType": {
+            "enum": [
+              "BANNER",
+              "RECOMMENDATION",
+              "SPLASH",
+              "CAMPAIGN_POPUP",
+              "SECKILL_RULES",
+              "FAQ",
+              "SERVICE_AGREEMENT",
+              "PRIVACY",
+              "ABOUT",
+              "RELEASE_ANNOUNCEMENT",
+              "UPDATE_NOTICE",
+              "CONTRACT_NOTICE"
+            ]
+          },
+          "placement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "locale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "content": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "contentHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "audience": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "startsAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "endsAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "frequencyCap": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "policyVersion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "NotificationEndpointRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "channel",
+          "provider",
+          "endpointReference",
+          "topics"
+        ],
+        "properties": {
+          "channel": {
+            "enum": [
+              "IN_APP",
+              "SMS",
+              "EMAIL",
+              "PUSH"
+            ]
+          },
+          "provider": {
+            "enum": [
+              "CORE",
+              "ALIYUN_SMS",
+              "TENCENT_SMS",
+              "SMTP",
+              "FIREBASE",
+              "JPUSH"
+            ]
+          },
+          "endpointReference": {
+            "type": "string",
+            "minLength": 1
+          },
+          "topics": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "regionCode": {
+            "$ref": "#/components/schemas/RegionCode"
+          }
+        }
+      },
+      "NotificationEndpointProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "endpointId",
+          "channel",
+          "provider",
+          "topics",
+          "state"
+        ],
+        "properties": {
+          "endpointId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "channel": {
+            "enum": [
+              "IN_APP",
+              "SMS",
+              "EMAIL",
+              "PUSH"
+            ]
+          },
+          "provider": {
+            "enum": [
+              "CORE",
+              "ALIYUN_SMS",
+              "TENCENT_SMS",
+              "SMTP",
+              "FIREBASE",
+              "JPUSH"
+            ]
+          },
+          "topics": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "state": {
+            "enum": [
+              "ACTIVE",
+              "PAUSED",
+              "REVOKED"
+            ]
+          }
+        }
+      },
+      "NotificationInboxItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "messageId",
+          "sourceEventType",
+          "topic",
+          "templateData",
+          "deliveryState",
+          "createdAt"
+        ],
+        "properties": {
+          "messageId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourceEventType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "topic": {
+            "type": "string",
+            "minLength": 1
+          },
+          "templateData": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "deliveryState": {
+            "enum": [
+              "PENDING",
+              "PROCESSING",
+              "DELIVERED",
+              "RETRY",
+              "CONFIGURATION_REQUIRED",
+              "DEAD_LETTER"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "NotificationCampaignRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "topic",
+          "audience",
+          "message",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "topic": {
+            "enum": [
+              "ANNOUNCEMENT",
+              "MAINTENANCE",
+              "ACTIVITY"
+            ]
+          },
+          "audience": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "message": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "cmsVersionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          }
+        }
+      },
+      "NotificationCampaignCreateResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "campaignId",
+          "state",
+          "contentHash"
+        ],
+        "properties": {
+          "campaignId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "enum": [
+              "DRAFT",
+              "PUBLISHED",
+              "CANCELLED"
+            ]
+          },
+          "contentHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "NotificationCampaignPublishResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "campaignId",
+          "state"
+        ],
+        "properties": {
+          "campaignId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "const": "PUBLISHED"
+          }
+        }
+      },
+      "SystemConfigCreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "configKey",
+          "payload",
+          "effectiveFrom",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "configKey": {
+            "enum": [
+              "BUSINESS",
+              "FREIGHT",
+              "RPC",
+              "ORACLE",
+              "GAS",
+              "CHAIN",
+              "INTEGRATIONS"
+            ]
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          }
+        }
+      },
+      "SystemConfigPublishRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "approval"
+        ],
+        "properties": {
+          "approval": {
+            "$ref": "#/components/schemas/SensitiveApproval"
+          }
+        }
+      },
+      "SystemConfigProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "configVersionId",
+          "configKey",
+          "version",
+          "payload",
+          "payloadHash",
+          "effectiveFrom",
+          "published",
+          "createdBy",
+          "createdAt"
+        ],
+        "properties": {
+          "configVersionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "configKey": {
+            "enum": [
+              "BUSINESS",
+              "FREIGHT",
+              "RPC",
+              "ORACLE",
+              "GAS",
+              "CHAIN",
+              "INTEGRATIONS"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "payloadHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "published": {
+            "type": "boolean"
+          },
+          "createdBy": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AuditEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entryId",
+          "sourceEventId",
+          "streamName",
+          "evidenceProfile",
+          "sequence",
+          "eventType",
+          "resourceType",
+          "resourceId",
+          "actorWallet",
+          "actorRole",
+          "correlationId",
+          "requestHash",
+          "payload",
+          "signatureEvidence",
+          "authorizationEvidence",
+          "transactionEvidence",
+          "previousHash",
+          "entryHash",
+          "createdAt"
+        ],
+        "properties": {
+          "entryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourceEventId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "streamName": {
+            "enum": [
+              "financial",
+              "governance",
+              "authentication",
+              "operational",
+              "backup"
+            ]
+          },
+          "evidenceProfile": {
+            "enum": [
+              "RBAC",
+              "AUTHORIZATION",
+              "SIGNED_OFFCHAIN",
+              "SAFE_APPROVED",
+              "CHAIN_OBSERVED",
+              "CHAIN_FINAL",
+              "SYSTEM"
+            ]
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "eventType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resourceType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resourceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "actorWallet": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actorRole": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "correlationId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "requestHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "signatureEvidence": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "authorizationEvidence": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "transactionEvidence": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "previousHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "entryHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AuditChainProof": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "verified",
+          "entries",
+          "headHash"
+        ],
+        "properties": {
+          "verified": {
+            "type": "boolean"
+          },
+          "entries": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "headHash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "AuditListResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entries",
+          "chainProof",
+          "nextCursor"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditEntry"
+            }
+          },
+          "chainProof": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AuditChainProof"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "createdAt",
+                  "entryId"
+                ],
+                "properties": {
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "entryId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "MonitoringMetric": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "snapshotId",
+          "component",
+          "metricName",
+          "unit",
+          "value",
+          "status",
+          "windowStartedAt",
+          "windowEndedAt",
+          "evidence",
+          "observedAt"
+        ],
+        "properties": {
+          "snapshotId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "component": {
+            "enum": [
+              "HOST",
+              "REDIS",
+              "MQ",
+              "DATABASE",
+              "HTTP",
+              "PAYMENT",
+              "FULFILLMENT",
+              "RPC_PRIMARY",
+              "RPC_FALLBACK",
+              "EXPLORER"
+            ]
+          },
+          "metricName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "unit": {
+            "enum": [
+              "PERCENT",
+              "BYTES",
+              "COUNT",
+              "MILLISECONDS",
+              "BLOCK",
+              "PER_SECOND"
+            ]
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "HEALTHY",
+              "WARNING",
+              "CRITICAL",
+              "UNAVAILABLE",
+              "CONFIGURATION_REQUIRED"
+            ]
+          },
+          "windowStartedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "windowEndedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidence": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MonitoringAlert": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "alertEventId",
+          "alertKey",
+          "state",
+          "severity",
+          "snapshotId",
+          "actorWallet",
+          "createdAt"
+        ],
+        "properties": {
+          "alertEventId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "alertKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "enum": [
+              "OPENED",
+              "ACKNOWLEDGED",
+              "RECOVERED"
+            ]
+          },
+          "severity": {
+            "enum": [
+              "WARNING",
+              "CRITICAL"
+            ]
+          },
+          "snapshotId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "actorWallet": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MonitoringCoverage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "asset",
+          "safe_address",
+          "assets",
+          "unsettled_liabilities",
+          "covered",
+          "observed_at"
+        ],
+        "properties": {
+          "asset": {
+            "enum": [
+              "USDT",
+              "NPL"
+            ]
+          },
+          "safe_address": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "assets": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "unsettled_liabilities": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "covered": {
+            "type": "boolean"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MonitoringDashboard": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "metrics",
+          "alerts",
+          "coverage"
+        ],
+        "properties": {
+          "metrics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MonitoringMetric"
+            }
+          },
+          "alerts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MonitoringAlert"
+            }
+          },
+          "coverage": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MonitoringCoverage"
+            }
+          }
+        }
+      },
+      "MonitoringAcknowledgeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "alertKey",
+          "state"
+        ],
+        "properties": {
+          "alertKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "const": "ACKNOWLEDGED"
           }
         }
       },

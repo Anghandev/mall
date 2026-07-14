@@ -4,6 +4,7 @@ import {
   createSiweChallenge,
   issueSessionToken,
   normalizeAddress,
+  requireRole,
   verifySessionToken,
   verifySiwe,
   type NonceRateLimiter,
@@ -13,7 +14,20 @@ import {
 import { orderAllowedActions, type ActionContext, type OrderProjection } from './allowed-actions.ts';
 import type { CoreConfig, RuntimeReadinessSnapshot } from './config.ts';
 import { publicReadiness } from './config.ts';
-import { CORE_ARTIFACT_VERSION, executableOrderActionNames, type UserRole } from './enums.ts';
+import {
+  CORE_ARTIFACT_VERSION,
+  auditStreamNames,
+  cmsContentFormats,
+  cmsContentTypes,
+  executableOrderActionNames,
+  notificationCampaignTopics,
+  notificationChannels,
+  notificationProviders,
+  settlementRails,
+  systemConfigKeys,
+  type SettlementRail,
+  type UserRole,
+} from './enums.ts';
 import { CoreError, errorBody } from './errors.ts';
 import type { CreateOrdinaryQuoteInput, CreateSeckillQuoteInput } from '../data/catalog-payment-service.ts';
 import type {
@@ -33,6 +47,12 @@ import type {
   PickupTargetInput,
   StoreInput,
 } from '../data/fulfillment-target-service.ts';
+import type {
+  GovernedSettlementApprovalInput,
+  GovernedSettlementRail,
+} from '../data/settlement-service.ts';
+import type { ConfigApprovalInput } from '../data/system-config-service.ts';
+import type { AuditQuery } from '../data/audit-service.ts';
 import { verifyWebhookHmac } from './providers.ts';
 
 export interface PaymentApiService {
@@ -82,6 +102,146 @@ export interface FulfillmentTargetApiService {
   getOrderTarget(actor: FulfillmentActor, orderId: string): Promise<unknown>;
 }
 
+export interface SettlementApiService {
+  createIntent(
+    actor: FulfillmentActor,
+    input: { rail: SettlementRail; amount: string; idempotencyKey: string; correlationId: string },
+  ): Promise<unknown>;
+  createGovernedIntent(
+    actor: FulfillmentActor,
+    input: {
+      rail: GovernedSettlementRail;
+      resourceId: string;
+      orderId: string;
+      accountId: string;
+      recipient: string;
+      fulfillmentTargetHash?: string;
+      amount: string;
+      idempotencyKey: string;
+      correlationId: string;
+      approval: GovernedSettlementApprovalInput;
+    },
+  ): Promise<unknown>;
+  submitRequest(
+    actor: FulfillmentActor,
+    input: { intentId: string; signature: string; correlationId: string },
+  ): Promise<unknown>;
+  list(actor: FulfillmentActor): Promise<unknown>;
+}
+
+export interface TakeoverFundingApiService {
+  fundingApprovalChallenge(
+    actor: FulfillmentActor,
+    input: { caseId: string; requiredUsdt: string; nonce: string; deadline: string },
+  ): Promise<unknown>;
+  fundTakeover(
+    actor: FulfillmentActor,
+    input: {
+      caseId: string;
+      requiredUsdt: string;
+      idempotencyKey: string;
+      correlationId: string;
+      approval: ConfigApprovalInput;
+    },
+  ): Promise<unknown>;
+  getMerchantFinance(actor: FulfillmentActor, merchantId?: string): Promise<unknown>;
+  getTakeoverFunding(actor: FulfillmentActor, caseId: string): Promise<unknown>;
+}
+
+export interface GuaranteeDepositApiService {
+  submit(actor: FulfillmentActor, input: {
+    policyVersion: string;
+    expectedAmountUsdt: string;
+    transactionHash: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<unknown>;
+}
+
+export interface PolicyApiService {
+  createDraft(actor: FulfillmentActor, input: { payload: unknown; idempotencyKey: string; correlationId: string }): Promise<unknown>;
+  updateDraft(actor: FulfillmentActor, draftId: string, input: { payload: unknown; correlationId: string }): Promise<unknown>;
+  approvalChallenge(actor: FulfillmentActor, draftId: string, input: { nonce: string; deadline: string }): Promise<unknown>;
+  submitSecondarySignature(
+    actor: FulfillmentActor,
+    draftId: string,
+    input: { nonce: string; deadline: string; signature: string; correlationId: string },
+  ): Promise<unknown>;
+  proposeToSafe(actor: FulfillmentActor, draftId: string, correlationId: string): Promise<unknown>;
+  getDraft(actor: FulfillmentActor, draftId: string): Promise<unknown>;
+  listDrafts(actor: FulfillmentActor): Promise<unknown>;
+}
+
+export interface CmsApiService {
+  createVersion(actor: FulfillmentActor, input: {
+    entryId?: string;
+    slug: string;
+    contentType:
+      | 'BANNER' | 'RECOMMENDATION' | 'SPLASH' | 'CAMPAIGN_POPUP' | 'SECKILL_RULES'
+      | 'FAQ' | 'SERVICE_AGREEMENT' | 'PRIVACY' | 'ABOUT' | 'RELEASE_ANNOUNCEMENT'
+      | 'UPDATE_NOTICE' | 'CONTRACT_NOTICE';
+    placement: string;
+    locale: string;
+    contentFormat: 'STRUCTURED_RICH_TEXT' | 'STRUCTURED_CAMPAIGN';
+    content: unknown;
+    audience: unknown;
+    startsAt?: string;
+    endsAt?: string;
+    frequencyCap?: number;
+    policyVersion?: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<unknown>;
+  publish(actor: FulfillmentActor, versionId: string, input: { evidenceHash: string; correlationId: string }): Promise<unknown>;
+  rollback(actor: FulfillmentActor, versionId: string, input: { evidenceHash: string; correlationId: string }): Promise<unknown>;
+  getVersion(actor: FulfillmentActor, versionId: string): Promise<unknown>;
+  listPublished(context?: { walletAddress?: string; merchantId?: string; regionCode?: string; now?: Date }): Promise<unknown>;
+}
+
+export interface NotificationApiService {
+  registerEndpoint(actor: FulfillmentActor, input: {
+    channel: 'IN_APP' | 'SMS' | 'EMAIL' | 'PUSH';
+    provider: 'CORE' | 'ALIYUN_SMS' | 'TENCENT_SMS' | 'SMTP' | 'FIREBASE' | 'JPUSH';
+    endpointReference: string;
+    topics: string[];
+    regionCode?: string;
+    correlationId: string;
+  }): Promise<unknown>;
+  createCampaign(actor: FulfillmentActor, input: {
+    topic: 'ANNOUNCEMENT' | 'MAINTENANCE' | 'ACTIVITY';
+    audience: unknown;
+    message: unknown;
+    cmsVersionId?: string;
+    startsAt?: string;
+    endsAt?: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<unknown>;
+  publishCampaign(actor: FulfillmentActor, campaignId: string, input: { evidenceHash: string; correlationId: string }): Promise<unknown>;
+  listInbox(actor: FulfillmentActor, limit?: number): Promise<unknown>;
+}
+
+export interface SystemConfigApiService {
+  createVersion(actor: FulfillmentActor, input: {
+    configKey: 'BUSINESS' | 'FREIGHT' | 'RPC' | 'ORACLE' | 'GAS' | 'CHAIN' | 'INTEGRATIONS';
+    payload: unknown;
+    effectiveFrom: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<unknown>;
+  publish(actor: FulfillmentActor, configVersionId: string, approval: ConfigApprovalInput): Promise<unknown>;
+  list(actor: FulfillmentActor): Promise<unknown>;
+}
+
+export interface AuditApiService {
+  list(actor: FulfillmentActor, query: AuditQuery): Promise<unknown>;
+}
+
+export interface MonitoringApiService {
+  dashboard(actor: FulfillmentActor): Promise<unknown>;
+  acknowledge(actor: FulfillmentActor, alertKey: string, correlationId: string): Promise<unknown>;
+}
+
 export interface ApiDependencies {
   config: CoreConfig;
   runtimeReadiness?: RuntimeReadinessSnapshot | (() => RuntimeReadinessSnapshot | undefined);
@@ -96,6 +256,16 @@ export interface ApiDependencies {
   paymentService: PaymentApiService;
   fulfillmentService: FulfillmentApiService;
   fulfillmentTargetService: FulfillmentTargetApiService;
+  settlementService: SettlementApiService;
+  takeoverFundingService: TakeoverFundingApiService;
+  guaranteeDepositService: GuaranteeDepositApiService;
+  policyService: PolicyApiService;
+  cmsService: CmsApiService;
+  notificationService: NotificationApiService;
+  systemConfigService: SystemConfigApiService;
+  auditService: AuditApiService;
+  monitoringService: MonitoringApiService;
+  recordRuntimeMetric?(kind: 'HTTP' | 'PAYMENT' | 'FULFILLMENT', durationMs: number, error: boolean, at: Date): void;
   logisticsWebhookSecrets?: Readonly<Partial<Record<'KUAIDI100' | 'CAINIAO', string>>>;
   clock(): Date;
 }
@@ -103,6 +273,14 @@ export interface ApiDependencies {
 export function createApiServer(dependencies: ApiDependencies) {
   return createServer(async (request, response) => {
     const correlationId = request.headers['x-correlation-id']?.toString() ?? randomUUID();
+    const startedAt = performance.now();
+    response.once('finish', () => {
+      const duration = performance.now() - startedAt;
+      const error = response.statusCode >= 500;
+      dependencies.recordRuntimeMetric?.('HTTP', duration, error, dependencies.clock());
+      const domain = runtimeMetricKind(request.url ?? '/');
+      if (domain) dependencies.recordRuntimeMetric?.(domain, duration, error, dependencies.clock());
+    });
     try {
       await route(dependencies, request, response, correlationId);
     } catch (error) {
@@ -132,6 +310,7 @@ async function route(
     );
     return;
   }
+  if (await routeAdminServices(dependencies, request, response, url, correlationId)) return;
   if (request.method === 'POST' && url.pathname === '/v2/auth/nonce') {
     const body = await readJson(request);
     assertOnlyKeys(body, ['walletAddress']);
@@ -219,6 +398,209 @@ async function route(
       executableActions: new Set(executableOrderActionNames),
     };
     sendJson(response, 200, { allowedActions: orderAllowedActions(order, context) }, correlationId);
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/settlement-intents') {
+    const claims = authorize(request, dependencies.config, dependencies.clock());
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['rail', 'amount', 'idempotencyKey']);
+    sendJson(
+      response,
+      201,
+      await dependencies.settlementService.createIntent(fulfillmentActor(claims), {
+        rail: settlementRail(body.rail),
+        amount: requiredString(body, 'amount'),
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+        correlationId,
+      }),
+      correlationId,
+    );
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/settlement-intents') {
+    const claims = authorizeRoles(
+      request,
+      dependencies.config,
+      dependencies.clock(),
+      ['ADMIN', 'OPERATOR', 'ARBITRATOR'],
+    );
+    const body = await readJson(request);
+    assertOnlyKeys(body, [
+      'rail',
+      'resourceId',
+      'orderId',
+      'accountId',
+      'recipient',
+      'fulfillmentTargetHash',
+      'amount',
+      'idempotencyKey',
+      'approval',
+    ]);
+    const approval = requiredObject(body, 'approval');
+    assertOnlyKeys(approval, [
+      'action',
+      'resourceType',
+      'resourceId',
+      'policyVersion',
+      'oldValueHash',
+      'newValueHash',
+      'safeAddress',
+      'nonce',
+      'deadline',
+      'signature',
+    ]);
+    sendJson(
+      response,
+      201,
+      await dependencies.settlementService.createGovernedIntent(fulfillmentActor(claims), {
+        rail: governedSettlementRail(body.rail),
+        resourceId: requiredString(body, 'resourceId'),
+        orderId: requiredString(body, 'orderId'),
+        accountId: requiredString(body, 'accountId'),
+        recipient: requiredString(body, 'recipient'),
+        ...(body.fulfillmentTargetHash === undefined
+          ? {}
+          : { fulfillmentTargetHash: requiredString(body, 'fulfillmentTargetHash') }),
+        amount: requiredString(body, 'amount'),
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+        correlationId,
+        approval: {
+          action: requiredString(approval, 'action'),
+          resourceType: requiredString(approval, 'resourceType'),
+          resourceId: requiredString(approval, 'resourceId'),
+          policyVersion: requiredString(approval, 'policyVersion'),
+          oldValueHash: requiredString(approval, 'oldValueHash'),
+          newValueHash: requiredString(approval, 'newValueHash'),
+          safeAddress: requiredString(approval, 'safeAddress'),
+          nonce: requiredString(approval, 'nonce'),
+          deadline: requiredString(approval, 'deadline'),
+          signature: requiredString(approval, 'signature'),
+        },
+      }),
+      correlationId,
+    );
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/settlement-requests') {
+    const claims = authorize(request, dependencies.config, dependencies.clock());
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['intentId', 'signature']);
+    sendJson(
+      response,
+      201,
+      await dependencies.settlementService.submitRequest(fulfillmentActor(claims), {
+        intentId: requiredString(body, 'intentId'),
+        signature: requiredString(body, 'signature'),
+        correlationId,
+      }),
+      correlationId,
+    );
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/settlements') {
+    const claims = authorize(request, dependencies.config, dependencies.clock());
+    sendJson(
+      response,
+      200,
+      await dependencies.settlementService.list(fulfillmentActor(claims)),
+      correlationId,
+    );
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/finance/merchant') {
+    const claims = authorize(request, dependencies.config, dependencies.clock());
+    const merchantId = url.searchParams.get('merchantId') ?? undefined;
+    sendJson(
+      response,
+      200,
+      await dependencies.takeoverFundingService.getMerchantFinance(
+        fulfillmentActor(claims),
+        merchantId,
+      ),
+      correlationId,
+    );
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/finance/merchant/guarantee-deposits') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['policyVersion', 'expectedAmountUsdt', 'transactionHash', 'idempotencyKey']);
+    sendJson(
+      response,
+      201,
+      await dependencies.guaranteeDepositService.submit(fulfillmentActor(claims), {
+        policyVersion: requiredString(body, 'policyVersion'),
+        expectedAmountUsdt: requiredString(body, 'expectedAmountUsdt'),
+        transactionHash: requiredString(body, 'transactionHash'),
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+        correlationId,
+      }),
+      correlationId,
+    );
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/takeover-funding/approval-challenge') {
+    const claims = authorizeRoles(
+      request,
+      dependencies.config,
+      dependencies.clock(),
+      ['ADMIN', 'OPERATOR', 'ARBITRATOR'],
+    );
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['caseId', 'requiredUsdt', 'nonce', 'deadline']);
+    sendJson(
+      response,
+      200,
+      await dependencies.takeoverFundingService.fundingApprovalChallenge(fulfillmentActor(claims), {
+        caseId: requiredString(body, 'caseId'),
+        requiredUsdt: requiredString(body, 'requiredUsdt'),
+        nonce: requiredString(body, 'nonce'),
+        deadline: requiredString(body, 'deadline'),
+      }),
+      correlationId,
+    );
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/takeover-funding') {
+    const claims = authorizeRoles(
+      request,
+      dependencies.config,
+      dependencies.clock(),
+      ['ADMIN', 'OPERATOR', 'ARBITRATOR'],
+    );
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['caseId', 'requiredUsdt', 'idempotencyKey', 'approval']);
+    sendJson(
+      response,
+      201,
+      await dependencies.takeoverFundingService.fundTakeover(fulfillmentActor(claims), {
+        caseId: requiredString(body, 'caseId'),
+        requiredUsdt: requiredString(body, 'requiredUsdt'),
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+        correlationId,
+        approval: sensitiveApproval(requiredObject(body, 'approval')),
+      }),
+      correlationId,
+    );
+    return;
+  }
+  const takeoverFundingCaseId = pathParameter(url.pathname, '/v2/admin/takeover-funding/');
+  if (request.method === 'GET' && takeoverFundingCaseId) {
+    const claims = authorizeRoles(
+      request,
+      dependencies.config,
+      dependencies.clock(),
+      ['ADMIN', 'OPERATOR', 'ARBITRATOR', 'AUDITOR'],
+    );
+    sendJson(
+      response,
+      200,
+      await dependencies.takeoverFundingService.getTakeoverFunding(
+        fulfillmentActor(claims),
+        takeoverFundingCaseId,
+      ),
+      correlationId,
+    );
     return;
   }
   if (request.method === 'GET' && url.pathname === '/v2/stores') {
@@ -464,7 +846,7 @@ async function route(
   }
   if (request.method === 'POST' && url.pathname === '/v2/payments/quotes') {
     const claims = authorizeBuyer(request, dependencies.config, dependencies.clock());
-    assertPaymentWritesEnabled(dependencies);
+    await assertPaymentWritesEnabled(dependencies, ['NEW_PAYMENT']);
     const body = await readJson(request);
     assertOnlyKeys(body, [
       'idempotencyKey',
@@ -494,7 +876,7 @@ async function route(
   }
   if (request.method === 'POST' && url.pathname === '/v2/seckill/quotes') {
     const claims = authorizeBuyer(request, dependencies.config, dependencies.clock());
-    assertPaymentWritesEnabled(dependencies);
+    await assertPaymentWritesEnabled(dependencies, ['NEW_PAYMENT', 'SECKILL_PURCHASE']);
     const body = await readJson(request);
     assertOnlyKeys(body, [
       'idempotencyKey',
@@ -556,6 +938,271 @@ async function route(
   throw new CoreError('InvalidRequest', 'Route not found', 404);
 }
 
+async function routeAdminServices(
+  dependencies: ApiDependencies,
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+  correlationId: string,
+) {
+  if (request.method === 'GET' && url.pathname === '/v2/cms/public') {
+    const walletAddress = url.searchParams.get('walletAddress') ?? undefined;
+    sendJson(response, 200, await dependencies.cmsService.listPublished({
+      ...(walletAddress ? { walletAddress } : {}),
+      ...(url.searchParams.get('merchantId') ? { merchantId: url.searchParams.get('merchantId')! } : {}),
+      ...(url.searchParams.get('regionCode') ? { regionCode: url.searchParams.get('regionCode')! } : {}),
+      now: dependencies.clock(),
+    }), correlationId);
+    return true;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/notification-endpoints') {
+    const claims = authorize(request, dependencies.config, dependencies.clock());
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['channel', 'provider', 'endpointReference', 'topics', 'regionCode']);
+    sendJson(response, 201, await dependencies.notificationService.registerEndpoint(fulfillmentActor(claims), {
+      channel: notificationChannel(body.channel),
+      provider: notificationProvider(body.provider),
+      endpointReference: requiredString(body, 'endpointReference'),
+      topics: requiredStringArray(body, 'topics'),
+      ...(body.regionCode === undefined ? {} : { regionCode: requiredString(body, 'regionCode') }),
+      correlationId,
+    }), correlationId);
+    return true;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/notifications') {
+    const claims = authorize(request, dependencies.config, dependencies.clock());
+    sendJson(
+      response,
+      200,
+      await dependencies.notificationService.listInbox(
+        fulfillmentActor(claims),
+        optionalPositiveIntegerParameter(url.searchParams.get('limit'), 'limit'),
+      ),
+      correlationId,
+    );
+    return true;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/admin/policy-drafts') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
+    sendJson(response, 200, await dependencies.policyService.listDrafts(fulfillmentActor(claims)), correlationId);
+    return true;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/policy-drafts') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['payload', 'idempotencyKey']);
+    sendJson(response, 201, await dependencies.policyService.createDraft(fulfillmentActor(claims), {
+      payload: requiredObject(body, 'payload'),
+      idempotencyKey: requiredString(body, 'idempotencyKey'),
+      correlationId,
+    }), correlationId);
+    return true;
+  }
+  const policyPath = matchResourceAction(url.pathname, '/v2/admin/policy-drafts/');
+  if (policyPath) {
+    const allowedRoles = request.method === 'GET'
+      ? ['ADMIN', 'OPERATOR', 'AUDITOR'] as const
+      : policyPath.action === 'approval-challenge'
+        || policyPath.action === 'secondary-signature'
+        || policyPath.action === 'safe-proposal'
+        ? ['ADMIN'] as const
+        : ['ADMIN', 'OPERATOR'] as const;
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), allowedRoles);
+    const actor = fulfillmentActor(claims);
+    if (request.method === 'GET' && !policyPath.action) {
+      sendJson(response, 200, await dependencies.policyService.getDraft(actor, policyPath.resourceId), correlationId);
+      return true;
+    }
+    if (request.method === 'PUT' && !policyPath.action) {
+      const body = await readJson(request);
+      assertOnlyKeys(body, ['payload']);
+      sendJson(response, 200, await dependencies.policyService.updateDraft(actor, policyPath.resourceId, {
+        payload: requiredObject(body, 'payload'),
+        correlationId,
+      }), correlationId);
+      return true;
+    }
+    if (request.method === 'POST' && policyPath.action === 'approval-challenge') {
+      const body = await readJson(request);
+      assertOnlyKeys(body, ['nonce', 'deadline']);
+      sendJson(response, 200, await dependencies.policyService.approvalChallenge(actor, policyPath.resourceId, {
+        nonce: requiredString(body, 'nonce'),
+        deadline: requiredString(body, 'deadline'),
+      }), correlationId);
+      return true;
+    }
+    if (request.method === 'POST' && policyPath.action === 'secondary-signature') {
+      const body = await readJson(request);
+      assertOnlyKeys(body, ['nonce', 'deadline', 'signature']);
+      sendJson(response, 200, await dependencies.policyService.submitSecondarySignature(actor, policyPath.resourceId, {
+        nonce: requiredString(body, 'nonce'),
+        deadline: requiredString(body, 'deadline'),
+        signature: requiredString(body, 'signature'),
+        correlationId,
+      }), correlationId);
+      return true;
+    }
+    if (request.method === 'POST' && policyPath.action === 'safe-proposal') {
+      const body = await readJson(request);
+      assertOnlyKeys(body, []);
+      sendJson(
+        response,
+        202,
+        await dependencies.policyService.proposeToSafe(actor, policyPath.resourceId, correlationId),
+        correlationId,
+      );
+      return true;
+    }
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/cms/versions') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, [
+      'entryId', 'slug', 'contentType', 'placement', 'locale', 'contentFormat',
+      'content', 'audience', 'startsAt', 'endsAt', 'frequencyCap', 'policyVersion',
+      'idempotencyKey',
+    ]);
+    sendJson(response, 201, await dependencies.cmsService.createVersion(fulfillmentActor(claims), {
+      ...(body.entryId === undefined ? {} : { entryId: requiredString(body, 'entryId') }),
+      slug: requiredString(body, 'slug'),
+      contentType: cmsContentType(body.contentType),
+      placement: requiredString(body, 'placement'),
+      locale: requiredString(body, 'locale'),
+      contentFormat: cmsContentFormat(body.contentFormat),
+      content: requiredObject(body, 'content'),
+      audience: requiredObject(body, 'audience'),
+      ...(body.startsAt === undefined ? {} : { startsAt: requiredString(body, 'startsAt') }),
+      ...(body.endsAt === undefined ? {} : { endsAt: requiredString(body, 'endsAt') }),
+      ...(body.frequencyCap === undefined ? {} : { frequencyCap: requiredPositiveInteger(body, 'frequencyCap') }),
+      ...(body.policyVersion === undefined ? {} : { policyVersion: requiredString(body, 'policyVersion') }),
+      idempotencyKey: requiredString(body, 'idempotencyKey'),
+      correlationId,
+    }), correlationId);
+    return true;
+  }
+  const cmsPath = matchResourceAction(url.pathname, '/v2/admin/cms/versions/');
+  if (cmsPath) {
+    const claims = authorizeRoles(
+      request,
+      dependencies.config,
+      dependencies.clock(),
+      request.method === 'GET' ? ['ADMIN', 'OPERATOR', 'AUDITOR'] : ['ADMIN', 'OPERATOR'],
+    );
+    const actor = fulfillmentActor(claims);
+    if (request.method === 'GET' && !cmsPath.action) {
+      sendJson(response, 200, await dependencies.cmsService.getVersion(actor, cmsPath.resourceId), correlationId);
+      return true;
+    }
+    if (request.method === 'POST' && (cmsPath.action === 'publish' || cmsPath.action === 'rollback')) {
+      const body = await readJson(request);
+      assertOnlyKeys(body, ['evidenceHash']);
+      const input = { evidenceHash: requiredString(body, 'evidenceHash'), correlationId };
+      const result = cmsPath.action === 'publish'
+        ? await dependencies.cmsService.publish(actor, cmsPath.resourceId, input)
+        : await dependencies.cmsService.rollback(actor, cmsPath.resourceId, input);
+      sendJson(response, 200, result, correlationId);
+      return true;
+    }
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/notification-campaigns') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['topic', 'audience', 'message', 'cmsVersionId', 'startsAt', 'endsAt', 'idempotencyKey']);
+    sendJson(response, 201, await dependencies.notificationService.createCampaign(fulfillmentActor(claims), {
+      topic: notificationCampaignTopic(body.topic),
+      audience: requiredObject(body, 'audience'),
+      message: requiredObject(body, 'message'),
+      ...(body.cmsVersionId === undefined ? {} : { cmsVersionId: requiredString(body, 'cmsVersionId') }),
+      ...(body.startsAt === undefined ? {} : { startsAt: requiredString(body, 'startsAt') }),
+      ...(body.endsAt === undefined ? {} : { endsAt: requiredString(body, 'endsAt') }),
+      idempotencyKey: requiredString(body, 'idempotencyKey'),
+      correlationId,
+    }), correlationId);
+    return true;
+  }
+  const campaignPath = matchResourceAction(url.pathname, '/v2/admin/notification-campaigns/');
+  if (request.method === 'POST' && campaignPath?.action === 'publish') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['evidenceHash']);
+    sendJson(response, 200, await dependencies.notificationService.publishCampaign(
+      fulfillmentActor(claims),
+      campaignPath.resourceId,
+      { evidenceHash: requiredString(body, 'evidenceHash'), correlationId },
+    ), correlationId);
+    return true;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/admin/system-config/versions') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
+    sendJson(response, 200, await dependencies.systemConfigService.list(fulfillmentActor(claims)), correlationId);
+    return true;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/system-config/versions') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['configKey', 'payload', 'effectiveFrom', 'idempotencyKey']);
+    sendJson(response, 201, await dependencies.systemConfigService.createVersion(fulfillmentActor(claims), {
+      configKey: systemConfigKey(body.configKey),
+      payload: requiredObject(body, 'payload'),
+      effectiveFrom: requiredString(body, 'effectiveFrom'),
+      idempotencyKey: requiredString(body, 'idempotencyKey'),
+      correlationId,
+    }), correlationId);
+    return true;
+  }
+  const configPath = matchResourceAction(url.pathname, '/v2/admin/system-config/versions/');
+  if (request.method === 'POST' && configPath?.action === 'publish') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['approval']);
+    const approval = sensitiveApproval(requiredObject(body, 'approval'));
+    sendJson(response, 200, await dependencies.systemConfigService.publish(
+      fulfillmentActor(claims),
+      configPath.resourceId,
+      approval,
+    ), correlationId);
+    return true;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/admin/audit/entries') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'AUDITOR']);
+    const query: AuditQuery = {
+      ...(url.searchParams.get('streamName') ? { streamName: auditStream(url.searchParams.get('streamName')) } : {}),
+      ...(url.searchParams.get('eventType') ? { eventType: url.searchParams.get('eventType')! } : {}),
+      ...(url.searchParams.get('resourceType') ? { resourceType: url.searchParams.get('resourceType')! } : {}),
+      ...(url.searchParams.get('resourceId') ? { resourceId: url.searchParams.get('resourceId')! } : {}),
+      ...(url.searchParams.get('actorWallet') ? { actorWallet: url.searchParams.get('actorWallet')! } : {}),
+      ...(url.searchParams.get('correlationId') ? { correlationId: url.searchParams.get('correlationId')! } : {}),
+      ...(url.searchParams.get('from') ? { from: dateParameter(url.searchParams.get('from')!, 'from') } : {}),
+      ...(url.searchParams.get('to') ? { to: dateParameter(url.searchParams.get('to')!, 'to') } : {}),
+      ...(url.searchParams.get('cursorCreatedAt')
+        ? { cursorCreatedAt: dateParameter(url.searchParams.get('cursorCreatedAt')!, 'cursorCreatedAt') }
+        : {}),
+      ...(url.searchParams.get('cursorEntryId') ? { cursorEntryId: url.searchParams.get('cursorEntryId')! } : {}),
+      ...(url.searchParams.get('limit') ? { limit: optionalPositiveIntegerParameter(url.searchParams.get('limit'), 'limit')! } : {}),
+    };
+    sendJson(response, 200, await dependencies.auditService.list(fulfillmentActor(claims), query), correlationId);
+    return true;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/admin/monitoring') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
+    sendJson(response, 200, await dependencies.monitoringService.dashboard(fulfillmentActor(claims)), correlationId);
+    return true;
+  }
+  const alertPath = matchResourceAction(url.pathname, '/v2/admin/monitoring/alerts/');
+  if (request.method === 'POST' && alertPath?.action === 'acknowledge') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, []);
+    sendJson(response, 200, await dependencies.monitoringService.acknowledge(
+      fulfillmentActor(claims),
+      alertPath.resourceId,
+      correlationId,
+    ), correlationId);
+    return true;
+  }
+  return false;
+}
+
 function authorize(request: IncomingMessage, config: CoreConfig, now: Date) {
   const header = request.headers.authorization;
   if (!header?.startsWith('Bearer ') || !config.jwtSecret) {
@@ -564,19 +1211,40 @@ function authorize(request: IncomingMessage, config: CoreConfig, now: Date) {
   return verifySessionToken(header.slice('Bearer '.length), config.jwtSecret, now);
 }
 
+function authorizeRoles(
+  request: IncomingMessage,
+  config: CoreConfig,
+  now: Date,
+  allowed: readonly UserRole[],
+) {
+  const claims = authorize(request, config, now);
+  requireRole(claims, allowed);
+  return claims;
+}
+
 function authorizeBuyer(request: IncomingMessage, config: CoreConfig, now: Date) {
   const claims = authorize(request, config, now);
   if (!claims.roles.includes('BUYER')) throw new CoreError('Forbidden', 'Buyer role is required', 403);
   return claims;
 }
 
-function assertPaymentWritesEnabled(dependencies: ApiDependencies) {
+async function assertPaymentWritesEnabled(
+  dependencies: ApiDependencies,
+  scopes: readonly ('NEW_PAYMENT' | 'SECKILL_PURCHASE')[],
+) {
   const readiness = publicReadiness(
     dependencies.config,
     currentRuntimeReadiness(dependencies),
     dependencies.clock(),
   );
-  if (readiness.writesEnabled) return;
+  if (readiness.writesEnabled) {
+    const paused = await dependencies.getPausedScopes();
+    const active = scopes.filter((scope) => paused.has(scope));
+    if (active.length > 0) {
+      throw new CoreError('BreakerActive', 'New payment quote is paused', 409, { scopes: active });
+    }
+    return;
+  }
   if (readiness.paymentDecisionBlocked.length > 0) {
     throw new CoreError('DecisionBlocked', 'New payment quotes are blocked by unresolved payment policy', 409, {
       blocked: readiness.paymentDecisionBlocked,
@@ -633,6 +1301,22 @@ function requiredString(body: Record<string, unknown>, name: string) {
   const value = body[name];
   if (typeof value !== 'string' || value.length === 0) throw new CoreError('InvalidRequest', `${name} is required`);
   return value;
+}
+
+function requiredObject(body: Record<string, unknown>, name: string) {
+  const value = body[name];
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new CoreError('InvalidRequest', `${name} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function requiredStringArray(body: Record<string, unknown>, name: string) {
+  const value = body[name];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+    throw new CoreError('InvalidRequest', `${name} must be a string array`);
+  }
+  return value as string[];
 }
 
 function requiredPositiveInteger(body: Record<string, unknown>, name: string) {
@@ -696,6 +1380,20 @@ function fulfillmentMode(value: unknown): 'DELIVERY' | 'PICKUP' {
   return value;
 }
 
+function settlementRail(value: unknown): SettlementRail {
+  if (!settlementRails.includes(value as SettlementRail)) {
+    throw new CoreError('InvalidRequest', 'Unsupported settlement rail');
+  }
+  return value as SettlementRail;
+}
+
+function governedSettlementRail(value: unknown): GovernedSettlementRail {
+  if (value !== 'TAKEOVER_USDT' && value !== 'OPERATIONS_REIMBURSEMENT_USDT') {
+    throw new CoreError('InvalidRequest', 'Unsupported governed settlement rail');
+  }
+  return value;
+}
+
 function pathParameter(pathname: string, prefix: string) {
   if (!pathname.startsWith(prefix)) return undefined;
   const value = pathname.slice(prefix.length);
@@ -705,6 +1403,106 @@ function pathParameter(pathname: string, prefix: string) {
   } catch {
     throw new CoreError('InvalidRequest', 'Invalid URL path');
   }
+}
+
+function matchResourceAction(pathname: string, prefix: string) {
+  if (!pathname.startsWith(prefix)) return undefined;
+  const parts = pathname.slice(prefix.length).split('/');
+  if (parts.length < 1 || parts.length > 2 || !parts[0]) return undefined;
+  try {
+    return {
+      resourceId: decodeURIComponent(parts[0]),
+      action: parts[1] ? decodeURIComponent(parts[1]) : undefined,
+    };
+  } catch {
+    throw new CoreError('InvalidRequest', 'Invalid resource URL path');
+  }
+}
+
+function optionalPositiveIntegerParameter(value: string | null, name: string) {
+  if (value === null) return undefined;
+  if (!/^[1-9][0-9]*$/.test(value) || Number(value) > Number.MAX_SAFE_INTEGER) {
+    throw new CoreError('InvalidRequest', `${name} must be a positive integer`);
+  }
+  return Number(value);
+}
+
+function dateParameter(value: string, name: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime()) || date.toISOString() !== value) {
+    throw new CoreError('InvalidRequest', `${name} must be a canonical ISO timestamp`);
+  }
+  return date;
+}
+
+function cmsContentType(value: unknown): Parameters<CmsApiService['createVersion']>[1]['contentType'] {
+  if (!cmsContentTypes.includes(value as typeof cmsContentTypes[number])) throw new CoreError('InvalidRequest', 'Unsupported CMS content type');
+  return value as typeof cmsContentTypes[number];
+}
+
+function cmsContentFormat(value: unknown): Parameters<CmsApiService['createVersion']>[1]['contentFormat'] {
+  if (!cmsContentFormats.includes(value as typeof cmsContentFormats[number])) {
+    throw new CoreError('InvalidRequest', 'Unsupported CMS content format');
+  }
+  return value as typeof cmsContentFormats[number];
+}
+
+function notificationChannel(value: unknown): Parameters<NotificationApiService['registerEndpoint']>[1]['channel'] {
+  if (!notificationChannels.includes(value as typeof notificationChannels[number])) throw new CoreError('InvalidRequest', 'Unsupported notification channel');
+  return value as Parameters<NotificationApiService['registerEndpoint']>[1]['channel'];
+}
+
+function notificationProvider(value: unknown): Parameters<NotificationApiService['registerEndpoint']>[1]['provider'] {
+  if (!notificationProviders.includes(value as typeof notificationProviders[number])) {
+    throw new CoreError('InvalidRequest', 'Unsupported notification provider');
+  }
+  return value as Parameters<NotificationApiService['registerEndpoint']>[1]['provider'];
+}
+
+function notificationCampaignTopic(value: unknown): Parameters<NotificationApiService['createCampaign']>[1]['topic'] {
+  if (!notificationCampaignTopics.includes(value as typeof notificationCampaignTopics[number])) {
+    throw new CoreError('InvalidRequest', 'Unsupported notification campaign topic');
+  }
+  return value as Parameters<NotificationApiService['createCampaign']>[1]['topic'];
+}
+
+function systemConfigKey(value: unknown): Parameters<SystemConfigApiService['createVersion']>[1]['configKey'] {
+  if (!systemConfigKeys.includes(value as typeof systemConfigKeys[number])) {
+    throw new CoreError('InvalidRequest', 'Unsupported system config key');
+  }
+  return value as Parameters<SystemConfigApiService['createVersion']>[1]['configKey'];
+}
+
+function sensitiveApproval(body: Record<string, unknown>): ConfigApprovalInput {
+  assertOnlyKeys(body, [
+    'action', 'resourceType', 'resourceId', 'policyVersion', 'oldValueHash',
+    'newValueHash', 'safeAddress', 'nonce', 'deadline', 'signature',
+  ]);
+  return {
+    action: requiredString(body, 'action'),
+    resourceType: requiredString(body, 'resourceType'),
+    resourceId: requiredString(body, 'resourceId'),
+    policyVersion: requiredString(body, 'policyVersion'),
+    oldValueHash: requiredString(body, 'oldValueHash'),
+    newValueHash: requiredString(body, 'newValueHash'),
+    safeAddress: requiredString(body, 'safeAddress'),
+    nonce: requiredString(body, 'nonce'),
+    deadline: requiredString(body, 'deadline'),
+    signature: requiredString(body, 'signature'),
+  };
+}
+
+function auditStream(value: string | null): NonNullable<AuditQuery['streamName']> {
+  if (!auditStreamNames.includes(value as typeof auditStreamNames[number])) {
+    throw new CoreError('InvalidRequest', 'Unsupported audit stream');
+  }
+  return value as NonNullable<AuditQuery['streamName']>;
+}
+
+function runtimeMetricKind(path: string): 'PAYMENT' | 'FULFILLMENT' | undefined {
+  if (/^\/v2\/(?:payments|seckill)/.test(path)) return 'PAYMENT';
+  if (/^\/v2\/(?:orders|fulfillment-targets|stores)/.test(path)) return 'FULFILLMENT';
+  return undefined;
 }
 
 function matchOrderPath(pathname: string) {

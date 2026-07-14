@@ -1,5 +1,6 @@
 import { AbiCoder, Contract, JsonRpcProvider, getAddress, hashMessage, keccak256, type InterfaceAbi } from 'ethers';
 import type { WalletMessageSignatureVerifier } from '../api/auth.ts';
+import type { WalletDigestSignatureVerifier } from '../api/settlement-signing.ts';
 import { CORE_ARTIFACT_VERSION, NPL_ADDRESS, NPL_USDT_PAIR_ADDRESS, USDT_ADDRESS } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import { paymentAllocationSetHash, type PaymentPolicySnapshot } from '../api/payment-policy.ts';
@@ -58,20 +59,31 @@ export class ResilientBscContractReader implements ContractReader {
     return this.#withProvider((provider) => provider.getCode(address));
   }
 
+  async codeHash(address: string) {
+    const code = await this.code(address);
+    if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(code)) {
+      throw new CoreError('ExternalBlocked', 'Runtime code is unavailable', 503);
+    }
+    return keccak256(code).toLowerCase();
+  }
+
   async #withProvider<Result>(operation: (provider: JsonRpcProvider) => Promise<Result>) {
-    let lastError: unknown;
-    for (const provider of this.#providers) {
-      try {
+    try {
+      const results = await Promise.all(this.#providers.map(async (provider) => {
         const network = await provider.getNetwork();
         if (network.chainId !== 56n) throw new CoreError('ExternalBlocked', 'RPC is not BSC chain 56', 503);
-        return await operation(provider);
-      } catch (error) {
-        lastError = error;
+        return operation(provider);
+      }));
+      if (stableRpcValue(results[0]) !== stableRpcValue(results[1])) {
+        throw new CoreError('InvalidFinality', 'BSC RPC providers returned inconsistent contract state', 409);
       }
+      return results[0]!;
+    } catch (error) {
+      if (error instanceof CoreError) throw error;
+      throw new CoreError('ExternalBlocked', 'Both BSC RPC providers must return matching state', 503, {
+        reason: error instanceof Error ? error.name : 'UnknownRpcFailure',
+      });
     }
-    throw new CoreError('ExternalBlocked', 'Both BSC RPC providers failed', 503, {
-      reason: lastError instanceof Error ? lastError.name : 'UnknownRpcFailure',
-    });
   }
 }
 
@@ -242,7 +254,7 @@ export class RpcPaymentPolicyAttestationSource implements PaymentPolicyAttestati
   }
 }
 
-export class RpcWalletMessageSignatureVerifier implements WalletMessageSignatureVerifier {
+export class RpcWalletMessageSignatureVerifier implements WalletMessageSignatureVerifier, WalletDigestSignatureVerifier {
   readonly #reader: ContractReader;
 
   constructor(reader: ContractReader) {
@@ -250,12 +262,16 @@ export class RpcWalletMessageSignatureVerifier implements WalletMessageSignature
   }
 
   async isValid(walletAddress: string, message: string, signature: string) {
+    return this.isValidDigest(walletAddress, hashMessage(message), signature);
+  }
+
+  async isValidDigest(walletAddress: string, digest: string, signature: string) {
     try {
       const result = await this.#reader.call(
         address(walletAddress, 'contract wallet'),
         ERC1271_ABI,
         'isValidSignature',
-        [hashMessage(message), signature],
+        [digest, signature],
       );
       return String(result).toLowerCase() === ERC1271_MAGIC_VALUE;
     } catch {
@@ -282,4 +298,8 @@ function address(value: string | undefined, name: string) {
 
 function isHash(value: string) {
   return /^0x[0-9a-fA-F]{64}$/.test(value);
+}
+
+function stableRpcValue(value: unknown) {
+  return JSON.stringify(value, (_key, child) => typeof child === 'bigint' ? child.toString() : child);
 }

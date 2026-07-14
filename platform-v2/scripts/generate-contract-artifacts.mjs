@@ -80,7 +80,7 @@ roles.sort((left, right) => `${left.contract}.${left.role}`.localeCompare(`${rig
 const sourceDigest = sha256(sourceFiles.map((path) => `${relative(repoRoot, path)}\0${readFileSync(path)}`).join('\0'));
 const manifest = {
   artifactVersion,
-  publicationStatus: 'coordinated-fulfillment-checkpoint',
+  publicationStatus: 'coordinated-settlement-admin-checkpoint',
   chain: {
     name: 'BSC Mainnet',
     chainId: 56,

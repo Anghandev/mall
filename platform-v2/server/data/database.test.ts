@@ -7,19 +7,34 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { PGlite } from '@electric-sql/pglite';
-import { Interface, type InterfaceAbi } from 'ethers';
+import { Interface, Wallet, id, keccak256, toUtf8Bytes, type InterfaceAbi, type Signer } from 'ethers';
+import { sensitiveActionDomain, sensitiveActionTypes, type SensitiveActionIntent } from '../api/auth.ts';
 import type { CanonicalPaymentIntent } from '../api/checkout.ts';
-import { CORE_ARTIFACT_VERSION } from '../api/enums.ts';
+import { CORE_ARTIFACT_VERSION, USDT_ADDRESS } from '../api/enums.ts';
+import { MiddlewareMonitoringSource, RpcExplorerHeightSource } from '../api/monitoring-sources.ts';
+import { paymentAllocationSetHash } from '../api/payment-policy.ts';
 import { paymentIntentHash } from '../api/payment-signing.ts';
 import { AbiEventDecoder } from '../chain/abi-decoder.ts';
 import { BnmAvailabilityWorker } from '../chain/bnm-availability-worker.ts';
 import { FulfillmentSchedulerWorker } from '../chain/fulfillment-scheduler-worker.ts';
+import { GuaranteeDepositWorker } from '../chain/guarantee-deposit-worker.ts';
+import { CoverageWorker, type CoverageObservation } from '../chain/coverage-worker.ts';
+import { AuditOutboxWorker } from '../chain/audit-outbox-worker.ts';
+import { NotificationWorker } from '../chain/notification-worker.ts';
+import { OperationsMonitoringWorker, RuntimeMetricsRegistry } from '../chain/monitoring-worker.ts';
+import { SettlementWorker, type SafeSettlementReceipt } from '../chain/settlement-worker.ts';
 import { ChainIndexer, type IndexedChainBlock } from '../chain/indexer.ts';
 import { appendAuditEntry, verifyAuditChain, type AuditRow } from './audit-chain.ts';
+import { AuditQueryService, enqueueAudit } from './audit-service.ts';
 import { PostgresNonceStore, RedisNonceRateLimiter } from './auth-store.ts';
 import { CatalogPaymentService } from './catalog-payment-service.ts';
+import { CmsService, sanitizeStructuredContent } from './cms-service.ts';
 import { FulfillmentService } from './fulfillment-service.ts';
 import { FulfillmentTargetService, assertQuoteFulfillmentTarget } from './fulfillment-target-service.ts';
+import {
+  GuaranteeDepositService,
+  type GuaranteeDepositChainObservation,
+} from './guarantee-deposit-service.ts';
 import { PostgresIndexerStore } from './indexer-store.ts';
 import { reserveInventory } from './inventory.ts';
 import { applyMigrations, type SqlExecutor, type SqlTransactionRunner } from './migrations.ts';
@@ -30,6 +45,19 @@ import {
   type RecordPaymentInput,
 } from './payment-store.ts';
 import { leaseDurableJobs } from './queue.ts';
+import { SettlementService } from './settlement-service.ts';
+import { TakeoverFundingService, type TakeoverFundingApprovalInput } from './takeover-funding-service.ts';
+import { PolicyService } from './policy-service.ts';
+import { NotificationService } from './notification-service.ts';
+import { SystemConfigService } from './system-config-service.ts';
+import { MonitoringService } from './monitoring-service.ts';
+import {
+  MULTISEND_CALL_ONLY_ADDRESS,
+  MULTISEND_CALL_ONLY_CODE_HASH,
+  SAFE_L2_SINGLETON_ADDRESS,
+  SAFE_L2_SINGLETON_CODE_HASH,
+  SAFE_VERSION,
+} from '../chain/safe-multisend.ts';
 
 const BUSINESS_MIGRATIONS = fileURLToPath(new URL('./migrations/business/', import.meta.url));
 const AUDIT_MIGRATIONS = fileURLToPath(new URL('./migrations/audit/', import.meta.url));
@@ -54,8 +82,14 @@ test('business and audit migrations apply from empty databases', async () => {
       '004_parallel_auth_nonces.sql',
       '005_payment_ledger.sql',
       '006_fulfillment.sql',
+      '007_settlement_admin.sql',
+      '008_admin_services.sql',
     ]);
-    assert.deepEqual(auditNames, ['001_audit_schema.sql', '002_evidence_policy.sql']);
+    assert.deepEqual(auditNames, [
+      '001_audit_schema.sql',
+      '002_evidence_policy.sql',
+      '003_admin_query_and_ingest.sql',
+    ]);
     const businessTables = await business.query<{ table_name: string }>(
       "SELECT table_name FROM information_schema.tables WHERE table_schema = 'core' ORDER BY table_name",
     );
@@ -64,6 +98,11 @@ test('business and audit migrations apply from empty databases', async () => {
     assert.ok(businessTables.rows.some((row) => row.table_name === 'chain_blocks'));
     assert.ok(businessTables.rows.some((row) => row.table_name === 'ledger_journals'));
     assert.ok(businessTables.rows.some((row) => row.table_name === 'payment_events'));
+    assert.ok(businessTables.rows.some((row) => row.table_name === 'policy_publication_transitions'));
+    assert.ok(businessTables.rows.some((row) => row.table_name === 'cms_versions'));
+    assert.ok(businessTables.rows.some((row) => row.table_name === 'notification_deliveries'));
+    assert.ok(businessTables.rows.some((row) => row.table_name === 'audit_outbox_events'));
+    assert.ok(businessTables.rows.some((row) => row.table_name === 'operations_metric_snapshots'));
     assert.equal(businessTables.rows.some((row) => row.table_name === 'claim_projections'), false);
     const finalityColumns = await business.query<{ column_name: string }>(
       "SELECT column_name FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'transaction_finality'",
@@ -74,14 +113,14 @@ test('business and audit migrations apply from empty databases', async () => {
     );
     assert.deepEqual(
       auditTables.rows.map((row) => row.table_name),
-      ['entries', 'schema_migrations', 'stream_heads'],
+      ['entries', 'retention_policies', 'schema_migrations', 'stream_heads'],
     );
     await assert.rejects(
       audit.query(
         `INSERT INTO audit.entries (
-           entry_id, stream_name, sequence, event_type, resource_type, resource_id,
+           entry_id, stream_name, evidence_profile, sequence, event_type, resource_type, resource_id,
            correlation_id, request_hash, payload, previous_hash, entry_hash
-         ) VALUES ('missing-evidence', 'financial', 1, 'PaymentIndexed', 'ORDER', 'order-1',
+         ) VALUES ('missing-evidence', 'financial', 'SIGNED_OFFCHAIN', 1, 'PaymentIndexed', 'ORDER', 'order-1',
            'constraint-test', $1, '{}', $1, $2)`,
         ['a'.repeat(64), 'b'.repeat(64)],
       ),
@@ -2133,6 +2172,1061 @@ test('policy drafts remain editable while published policy and historical catalo
   }
 });
 
+test('policy publication binds the Registry signature and Safe proposal, activates at 15 confirmations and reorgs append-only', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    await seedCatalog(db, 3);
+    const admin = Wallet.createRandom();
+    const secondary = Wallet.createRandom();
+    const safe = '0x9000000000000000000000000000000000000001';
+    const registry = '0x9000000000000000000000000000000000000002';
+    const rulesHash = `0x${'3'.repeat(64)}`;
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, status, evidence_hash
+       ) VALUES ($1, 'ADMIN', 'ACTIVE', $2)`,
+      [admin.address.toLowerCase(), HASH],
+    );
+    await db.query(
+      `INSERT INTO core.cms_entries (
+         entry_id, slug, content_type, placement, created_by, created_at
+       ) VALUES ('cms:rules', 'seckill-rules', 'SECKILL_RULES', 'SECKILL_RULES', $1, $2)`,
+      [admin.address.toLowerCase(), new Date('2026-07-15T03:00:00.000Z')],
+    );
+    await db.query(
+      `INSERT INTO core.cms_versions (
+         version_id, entry_id, version, locale, content_format, source_content,
+         sanitized_content, content_hash, audience, idempotency_key, request_hash,
+         created_by, created_at
+       ) VALUES ('cms:rules:v1', 'cms:rules', 1, 'zh-CN', 'STRUCTURED_RICH_TEXT',
+         '{"type":"doc","children":[]}', '{"type":"doc","children":[]}',
+         $1, '{"type":"ALL"}', 'seed-policy-rules', $2, $3, $4)`,
+      [rulesHash, HASH, admin.address.toLowerCase(), new Date('2026-07-15T03:00:00.000Z')],
+    );
+    const policy = paymentPolicyPayload();
+    policy.concessionDestinationSetHash = paymentAllocationSetHash(
+      policy.concessionDestinations,
+      policy.otherUsdtDestinations,
+      policy.seckillPrizePoolAccount,
+    ).toLowerCase();
+    let now = new Date('2026-07-15T03:00:00.000Z');
+    const frozenSessionId = `0x${'9'.repeat(64)}`;
+    await insertLiveSeckillSession(db, frozenSessionId, now, 80);
+    let proposalInput: { calldataHash: string; draftId: string } | undefined;
+    const service = new PolicyService({
+      transactions: transactionAdapter(db),
+      proposer: {
+        propose: async (input) => {
+          proposalInput = input;
+          return { safeTxHash: `0x${'4'.repeat(64)}`, proposalHash: `0x${'5'.repeat(64)}` };
+        },
+      },
+      policyRegistryAddress: registry,
+      governanceSafe: safe,
+      secondarySigner: secondary.address,
+      auditReady: () => true,
+      clock: () => now,
+    });
+    const actor = { walletAddress: admin.address, roles: ['ADMIN'] as const };
+    const draft = await service.createDraft(actor, {
+      payload: { oracleVersion: HASH_2, rulesContentHash: rulesHash, policy },
+      idempotencyKey: 'policy-draft-v2',
+      correlationId: 'policy-draft-v2',
+    });
+    assert.equal(draft.state, 'DRAFT');
+    assert.equal(draft.nextPolicyVersion, '2');
+    const replayedDraft = await service.createDraft(actor, {
+      payload: { oracleVersion: HASH_2, rulesContentHash: rulesHash, policy },
+      idempotencyKey: 'policy-draft-v2',
+      correlationId: 'policy-draft-v2-retry',
+    });
+    assert.equal(replayedDraft.draftId, draft.draftId);
+    assert.equal(replayedDraft.transitions.length, 1);
+
+    const deadline = String(Math.floor(now.getTime() / 1_000) + 300);
+    const challenge = await service.approvalChallenge(actor, draft.draftId, { nonce: '17', deadline });
+    const signature = await secondary.signTypedData(
+      challenge.typedData.domain,
+      challenge.typedData.types,
+      challenge.typedData.message,
+    );
+    const wrongSignature = await Wallet.createRandom().signTypedData(
+      challenge.typedData.domain,
+      challenge.typedData.types,
+      challenge.typedData.message,
+    );
+    await assert.rejects(
+      service.submitSecondarySignature(actor, draft.draftId, {
+        nonce: '17',
+        deadline,
+        signature: wrongSignature,
+        correlationId: 'policy-wrong-signature',
+      }),
+      /secondary signer mismatch/,
+    );
+    const signed = await service.submitSecondarySignature(actor, draft.draftId, {
+      nonce: '17',
+      deadline,
+      signature,
+      correlationId: 'policy-secondary-signature',
+    });
+    assert.equal(signed.state, 'SECONDARY_SIGNED');
+    assert.equal(signed.publicationDigest, challenge.digest);
+    await db.query(
+      "UPDATE core.wallet_role_bindings SET status = 'REVOKED', revoked_at = $2 WHERE wallet_address = $1 AND role = 'ADMIN'",
+      [admin.address.toLowerCase(), now],
+    );
+    await assert.rejects(
+      service.proposeToSafe(actor, draft.draftId, 'policy-safe-proposal-revoked'),
+      /Current wallet role cannot govern policy/,
+    );
+    await db.query(
+      "UPDATE core.wallet_role_bindings SET status = 'ACTIVE', revoked_at = NULL WHERE wallet_address = $1 AND role = 'ADMIN'",
+      [admin.address.toLowerCase()],
+    );
+    const proposed = await service.proposeToSafe(actor, draft.draftId, 'policy-safe-proposal');
+    assert.equal(proposed.state, 'SAFE_PROPOSED');
+    assert.equal(proposalInput?.draftId, draft.draftId);
+    assert.equal(proposalInput?.calldataHash, signed.safeCalldataHash);
+    const replayedProposal = await service.proposeToSafe(actor, draft.draftId, 'policy-safe-proposal-retry');
+    assert.equal(replayedProposal.safeTxHash, proposed.safeTxHash);
+    assert.ok(replayedProposal.transitions.length >= 3);
+
+    const observation = {
+      safeTxHash: `0x${'4'.repeat(64)}`,
+      executionTxHash: `0x${'6'.repeat(64)}`,
+      blockNumber: 123,
+      blockHash: `0x${'7'.repeat(64)}`,
+      canonical: true as const,
+      policyVersion: 2,
+      policyHash: signed.policyHash!,
+      operationsHash: signed.operationsHash!,
+      decisionEvidenceHash: HASH_2,
+      safeExecutor: safe,
+    };
+    now = new Date(now.getTime() + 1_000);
+    const pending = await service.recordObservation(draft.draftId, {
+      ...observation,
+      state: 'MINED',
+      confirmations: 14,
+    });
+    assert.equal(pending?.state, 'FINALITY_PENDING');
+    assert.equal((await db.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM core.policy_snapshots WHERE policy_version = 2',
+    )).rows[0]?.count, '0');
+
+    now = new Date(now.getTime() + 1_000);
+    const published = await service.recordObservation(draft.draftId, {
+      ...observation,
+      state: 'FINAL',
+      confirmations: 15,
+    });
+    assert.equal(published?.state, 'PUBLISHED');
+    assert.deepEqual((await db.query<{ policy_version: string | number }>(
+      'SELECT policy_version FROM core.canonical_policy_publications ORDER BY policy_version',
+    )).rows.map((row) => Number(row.policy_version)), [1, 2]);
+    const sessionPolicy = await db.query<{ policy_version: string | number }>(
+      'SELECT policy_version FROM core.seckill_sessions WHERE session_id = $1',
+      [frozenSessionId],
+    );
+    assert.equal(Number(sessionPolicy.rows[0]?.policy_version), 1);
+
+    now = new Date(now.getTime() + 1_000);
+    const reorged = await service.recordObservation(draft.draftId, {
+      ...observation,
+      state: 'REORGED',
+      canonical: false,
+      confirmations: 0,
+      canonicalBlockHash: `0x${'8'.repeat(64)}`,
+    });
+    assert.equal(reorged?.state, 'REORGED');
+    assert.deepEqual((await db.query<{ policy_version: string | number }>(
+      'SELECT policy_version FROM core.canonical_policy_publications ORDER BY policy_version',
+    )).rows.map((row) => Number(row.policy_version)), [1]);
+    const publicationHistory = await db.query<{ event_type: string }>(
+      'SELECT event_type FROM core.policy_publication_transitions WHERE policy_version = 2 ORDER BY transition_sequence',
+    );
+    assert.deepEqual(publicationHistory.rows.map((row) => row.event_type), ['FINAL', 'REORGED']);
+    await assert.rejects(
+      db.query("UPDATE core.policy_publication_transitions SET event_type = 'FINAL' WHERE policy_version = 2"),
+      /ImmutableRecord/,
+    );
+    const afterReorg = await service.pendingFinality(25);
+    const replacementCandidate = afterReorg.find((item) => item.draftId === draft.draftId);
+    assert.equal(replacementCandidate?.priorState, 'REORGED');
+    assert.deepEqual(replacementCandidate?.priorFinality, {
+      executionTxHash: observation.executionTxHash,
+      blockNumber: observation.blockNumber,
+      blockHash: observation.blockHash,
+    });
+
+    now = new Date(now.getTime() + 1_000);
+    const republished = await service.recordObservation(draft.draftId, {
+      ...observation,
+      state: 'FINAL',
+      executionTxHash: `0x${'9'.repeat(64)}`,
+      blockNumber: 124,
+      blockHash: `0x${'a'.repeat(64)}`,
+      confirmations: 15,
+    });
+    assert.equal(republished?.state, 'PUBLISHED');
+    assert.deepEqual((await db.query<{ policy_version: string | number }>(
+      'SELECT policy_version FROM core.canonical_policy_publications ORDER BY policy_version',
+    )).rows.map((row) => Number(row.policy_version)), [1, 2]);
+    assert.deepEqual((await db.query<{ event_type: string }>(
+      'SELECT event_type FROM core.policy_publication_transitions WHERE policy_version = 2 ORDER BY transition_sequence',
+    )).rows.map((row) => row.event_type), ['FINAL', 'REORGED', 'FINAL']);
+  } finally {
+    await db.close();
+  }
+});
+
+test('CMS sanitizes structured content, targets audiences, binds seckill rules and rolls back by append-only publication', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    await seedCatalog(db, 3);
+    const admin = Wallet.createRandom();
+    const now = new Date('2026-07-15T04:00:00.000Z');
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, status, evidence_hash
+       ) VALUES ($1, 'ADMIN', 'ACTIVE', $2)`,
+      [admin.address.toLowerCase(), HASH],
+    );
+    const service = new CmsService({ transactions: transactionAdapter(db), clock: () => now });
+    const actor = { walletAddress: admin.address, roles: ['ADMIN'] as const };
+    const content = (text: string) => ({
+      type: 'doc',
+      children: [{ type: 'paragraph', children: [{ type: 'text', text, marks: ['bold'] }] }],
+    });
+    assert.throws(
+      () => sanitizeStructuredContent({
+        type: 'doc',
+        children: [{ type: 'link', href: 'javascript:alert(1)', children: [{ type: 'text', text: 'bad', marks: [] }] }],
+      }),
+      /link protocol is not allowed/,
+    );
+    assert.throws(
+      () => sanitizeStructuredContent({ type: 'doc', children: [{ type: 'script', source: 'alert(1)' }] }),
+      /node type script is not allowed/,
+    );
+    assert.throws(
+      () => sanitizeStructuredContent({
+        type: 'doc',
+        children: [{ type: 'paragraph', onClick: 'bad', children: [] }],
+      }),
+      /unknown fields/,
+    );
+
+    const first = await service.createVersion(actor, {
+      slug: 'regional-banner',
+      contentType: 'BANNER',
+      placement: 'MALL_HOME_TOP',
+      locale: 'zh-CN',
+      contentFormat: 'STRUCTURED_RICH_TEXT',
+      content: content('First banner'),
+      audience: { type: 'REGION', regionCodes: ['110101'] },
+      startsAt: new Date(now.getTime() - 1_000).toISOString(),
+      endsAt: new Date(now.getTime() + 60_000).toISOString(),
+      frequencyCap: 2,
+      idempotencyKey: 'cms-banner-v1',
+      correlationId: 'cms-test-v1',
+    });
+    assert.equal(first.version, 1);
+    assert.equal((await service.createVersion(actor, {
+      slug: 'regional-banner',
+      contentType: 'BANNER',
+      placement: 'MALL_HOME_TOP',
+      locale: 'zh-CN',
+      contentFormat: 'STRUCTURED_RICH_TEXT',
+      content: content('First banner'),
+      audience: { type: 'REGION', regionCodes: ['110101'] },
+      startsAt: new Date(now.getTime() - 1_000).toISOString(),
+      endsAt: new Date(now.getTime() + 60_000).toISOString(),
+      frequencyCap: 2,
+      idempotencyKey: 'cms-banner-v1',
+      correlationId: 'cms-test-v1',
+    })).versionId, first.versionId);
+    await service.publish(actor, first.versionId, { evidenceHash: HASH, correlationId: 'cms-publish-v1' });
+    assert.equal((await service.listPublished({ regionCode: '110101', now })).length, 1);
+    assert.equal((await service.listPublished({ regionCode: '310101', now })).length, 0);
+
+    const second = await service.createVersion(actor, {
+      entryId: first.entryId,
+      slug: 'regional-banner',
+      contentType: 'BANNER',
+      placement: 'MALL_HOME_TOP',
+      locale: 'zh-CN',
+      contentFormat: 'STRUCTURED_RICH_TEXT',
+      content: content('Second banner'),
+      audience: { type: 'REGION', regionCodes: ['110101'] },
+      startsAt: new Date(now.getTime() - 1_000).toISOString(),
+      endsAt: new Date(now.getTime() + 60_000).toISOString(),
+      frequencyCap: 1,
+      idempotencyKey: 'cms-banner-v2',
+      correlationId: 'cms-test-v2',
+    });
+    await service.publish(actor, second.versionId, { evidenceHash: HASH_2, correlationId: 'cms-publish-v2' });
+    assert.equal((await service.listPublished({ regionCode: '110101', now }))[0]?.version, 2);
+    await service.rollback(actor, first.versionId, {
+      evidenceHash: `0x${'4'.repeat(64)}`,
+      correlationId: 'cms-rollback-v1',
+    });
+    assert.equal((await service.listPublished({ regionCode: '110101', now }))[0]?.version, 1);
+    assert.equal((await db.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM core.cms_versions WHERE entry_id = $1',
+      [first.entryId],
+    )).rows[0]?.count, '2');
+    await assert.rejects(
+      db.query("UPDATE core.cms_versions SET locale = 'en-US' WHERE version_id = $1", [first.versionId]),
+      /ImmutableRecord/,
+    );
+
+    const rules = await service.createVersion(actor, {
+      slug: 'seckill-rules-v2',
+      contentType: 'SECKILL_RULES',
+      placement: 'SECKILL_RULES',
+      locale: 'zh-CN',
+      contentFormat: 'STRUCTURED_RICH_TEXT',
+      content: content('Version two rules'),
+      audience: { type: 'ALL' },
+      policyVersion: '2',
+      idempotencyKey: 'cms-rules-v2',
+      correlationId: 'cms-rules-create',
+    });
+    await db.query(
+      `INSERT INTO core.policy_drafts (
+         draft_id, next_policy_version, base_policy_version, payload,
+         validation_errors, state, created_by, artifact_version
+       ) VALUES ('cms-policy-draft-2', 2, 1, $1, '[]', 'DRAFT', $2, $3)`,
+      [JSON.stringify({ rulesContentHash: rules.contentHash }), admin.address.toLowerCase(), CORE_ARTIFACT_VERSION],
+    );
+    await service.publish(actor, rules.versionId, {
+      evidenceHash: `0x${'5'.repeat(64)}`,
+      correlationId: 'cms-rules-publish',
+    });
+    assert.equal((await service.getVersion(actor, rules.versionId)).published, true);
+
+    const wrongRules = await service.createVersion(actor, {
+      slug: 'seckill-rules-v3',
+      contentType: 'SECKILL_RULES',
+      placement: 'SECKILL_RULES_NEXT',
+      locale: 'zh-CN',
+      contentFormat: 'STRUCTURED_RICH_TEXT',
+      content: content('Unbound rules'),
+      audience: { type: 'ALL' },
+      policyVersion: '3',
+      idempotencyKey: 'cms-rules-v3',
+      correlationId: 'cms-rules-wrong',
+    });
+    await assert.rejects(
+      service.publish(actor, wrongRules.versionId, {
+        evidenceHash: `0x${'6'.repeat(64)}`,
+        correlationId: 'cms-rules-wrong-publish',
+      }),
+      /rules hash does not match policyVersion/,
+    );
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.audit_outbox_events WHERE event_type LIKE 'Cms%'",
+    )).rows[0]?.count, '8');
+  } finally {
+    await db.close();
+  }
+});
+
+test('notifications consume finalized domain events independently and isolate ConfigurationRequired provider delivery', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    await seedCatalog(db, 3);
+    await db.query(
+      `INSERT INTO core.inventory_reservations (
+         reservation_id, reservation_hash, policy_version, sku_id, buyer_wallet,
+         quantity, classification, state, expires_at
+       ) VALUES ('reservation-notification', $1, 1, 'sku-1', $2, 1,
+         'ORDINARY', 'ACTIVE', clock_timestamp() + interval '1 hour')`,
+      [`0x${'8'.repeat(64)}`, BUYER],
+    );
+    await insertOrder(db, 'order-notification', 'reservation-notification');
+    const now = new Date('2026-07-15T05:00:00.000Z');
+    const service = new NotificationService({ transactions: transactionAdapter(db), clock: () => now });
+    const endpoint = await service.registerEndpoint({ walletAddress: BUYER, roles: ['BUYER'] }, {
+      channel: 'SMS',
+      provider: 'ALIYUN_SMS',
+      endpointReference: 'secret://recipients/buyer-sms',
+      topics: ['*'],
+      regionCode: '110101',
+      correlationId: 'notification-endpoint-register',
+    });
+    await service.registerEndpoint({ walletAddress: BUYER, roles: ['BUYER'] }, {
+      channel: 'SMS',
+      provider: 'ALIYUN_SMS',
+      endpointReference: 'secret://recipients/buyer-sms-v2',
+      topics: ['*'],
+      regionCode: '110101',
+      correlationId: 'notification-endpoint-update',
+    });
+    const endpointAudits = await db.query<{
+      event_type: string;
+      evidence_profile: string;
+      correlation_id: string;
+      payload: Record<string, unknown>;
+      authorization_evidence: Record<string, unknown>;
+    }>(
+      `SELECT event_type, evidence_profile, correlation_id, payload, authorization_evidence
+       FROM core.audit_outbox_events WHERE resource_type = 'NOTIFICATION_ENDPOINT'
+       ORDER BY created_at, event_type`,
+    );
+    assert.deepEqual(endpointAudits.rows.map((row) => row.event_type).sort(), [
+      'NotificationEndpointRegistered',
+      'NotificationEndpointUpdated',
+    ]);
+    assert.deepEqual(endpointAudits.rows.map((row) => row.correlation_id).sort(), [
+      'notification-endpoint-register',
+      'notification-endpoint-update',
+    ]);
+    assert.ok(endpointAudits.rows.every((row) => row.evidence_profile === 'AUTHORIZATION'));
+    assert.ok(endpointAudits.rows.every((row) => row.authorization_evidence.scheme === 'SESSION_RESOURCE_OWNERSHIP'));
+    assert.ok(endpointAudits.rows.every((row) => typeof row.payload.endpointReferenceHash === 'string'));
+    assert.doesNotMatch(JSON.stringify(endpointAudits.rows), /secret:\/\/recipients\/buyer-sms/);
+
+    const failingEndpointService = new NotificationService({
+      transactions: transactionAdapter(db, (sql) => {
+        if (sql.includes('INSERT INTO core.audit_outbox_events')) throw new Error('InjectedNotificationAuditFailure');
+      }),
+      clock: () => now,
+    });
+    await assert.rejects(
+      failingEndpointService.registerEndpoint({ walletAddress: BUYER, roles: ['BUYER'] }, {
+        channel: 'SMS',
+        provider: 'TENCENT_SMS',
+        endpointReference: 'secret://recipients/rollback-insert',
+        topics: ['*'],
+        correlationId: 'notification-endpoint-rollback-insert',
+      }),
+      /InjectedNotificationAuditFailure/,
+    );
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.notification_endpoints WHERE provider = 'TENCENT_SMS'",
+    )).rows[0]?.count, '0');
+    await assert.rejects(
+      failingEndpointService.registerEndpoint({ walletAddress: BUYER, roles: ['BUYER'] }, {
+        channel: 'SMS',
+        provider: 'ALIYUN_SMS',
+        endpointReference: 'secret://recipients/rollback-update',
+        topics: ['*'],
+        correlationId: 'notification-endpoint-rollback-update',
+      }),
+      /InjectedNotificationAuditFailure/,
+    );
+    assert.equal((await db.query<{ endpoint_reference: string }>(
+      'SELECT endpoint_reference FROM core.notification_endpoints WHERE endpoint_id = $1',
+      [endpoint.endpointId],
+    )).rows[0]?.endpoint_reference, 'secret://recipients/buyer-sms-v2');
+    await db.query(
+      `INSERT INTO core.outbox_events (
+         event_id, aggregate_type, aggregate_id, event_type, payload,
+         idempotency_key, state, created_at
+       ) VALUES
+         ('notify-payment-final', 'ORDER', 'order-notification', 'PaymentFinalized',
+          '{"orderId":"order-notification","confirmations":15}', 'notify-payment-final', 'PENDING', $1),
+         ('notify-bnm-final', 'ORDER', 'order-notification', 'BnmStateFinalized',
+          '{"orderId":"order-notification","state":"AVAILABLE","amount":"100","stateVersion":"2"}',
+          'notify-bnm-final', 'PENDING', $1)`,
+      [now],
+    );
+    assert.equal(await service.projectNext(), 2);
+    assert.equal(await service.projectNext(), 0);
+    assert.equal((await db.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM core.notification_source_consumptions',
+    )).rows[0]?.count, '2');
+    assert.equal((await db.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM core.notification_messages',
+    )).rows[0]?.count, '3');
+    assert.equal((await db.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM core.notification_deliveries',
+    )).rows[0]?.count, '5');
+
+    const unconfigured = new NotificationWorker({
+      transactions: transactionAdapter(db),
+      service,
+      workerId: 'notification-worker-unconfigured',
+      clock: () => now,
+    });
+    assert.equal(await unconfigured.pollOnce(), 5);
+    const deliveryStates = await db.query<{ provider: string; state: string; count: string }>(
+      `SELECT provider, state, count(*)::text AS count FROM core.notification_deliveries
+       GROUP BY provider, state ORDER BY provider, state`,
+    );
+    assert.deepEqual(deliveryStates.rows, [
+      { provider: 'ALIYUN_SMS', state: 'CONFIGURATION_REQUIRED', count: '2' },
+      { provider: 'CORE', state: 'DELIVERED', count: '3' },
+    ]);
+    const initialDeliveryAudits = await db.query<{ event_type: string; payload: Record<string, unknown> }>(
+      `SELECT event_type, payload FROM core.audit_outbox_events
+       WHERE resource_type = 'NOTIFICATION_DELIVERY' ORDER BY event_type`,
+    );
+    assert.equal(initialDeliveryAudits.rows.filter((row) => row.event_type === 'NotificationDeliveryDelivered').length, 3);
+    assert.equal(initialDeliveryAudits.rows.filter((row) => row.event_type === 'NotificationDeliveryConfigurationRequired').length, 2);
+    assert.ok(initialDeliveryAudits.rows.every((row) => typeof row.payload.endpointReferenceHash === 'string'));
+    assert.doesNotMatch(JSON.stringify(initialDeliveryAudits.rows), /secret:\/\/recipients\/buyer-sms/);
+    const inbox = await service.listInbox({ walletAddress: BUYER, roles: ['BUYER'] });
+    assert.equal(inbox.length, 2);
+    const bnm = inbox.find((message) => message.topic === 'BNM_AVAILABLE');
+    assert.equal(bnm?.templateData.copyKey, 'BNM_POINTS_AVAILABLE');
+    assert.doesNotMatch(JSON.stringify(bnm), /mint|claim|token/i);
+
+    const configured = new NotificationWorker({
+      transactions: transactionAdapter(db),
+      service,
+      adapters: [{
+        provider: 'ALIYUN_SMS' as const,
+        send: async (input) => ({
+          providerMessageId: `provider:${input.deliveryId}`,
+          acceptedAt: now.toISOString(),
+        }),
+      }],
+      workerId: 'notification-worker-configured',
+      clock: () => now,
+    });
+    assert.equal(await configured.retryConfigured('ALIYUN_SMS'), 2);
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.audit_outbox_events WHERE event_type = 'NotificationDeliveryRetryScheduled'",
+    )).rows[0]?.count, '2');
+    assert.equal(await configured.pollOnce(), 2);
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.notification_deliveries WHERE provider = 'ALIYUN_SMS' AND state = 'DELIVERED'",
+    )).rows[0]?.count, '2');
+
+    await db.query(
+      `INSERT INTO core.outbox_events (
+         event_id, aggregate_type, aggregate_id, event_type, payload,
+         idempotency_key, state, created_at
+       ) VALUES ('notify-payment-reorg', 'ORDER', 'order-notification', 'PaymentReorged',
+         '{"orderId":"order-notification","state":"REORGED"}',
+         'notify-payment-reorg', 'PENDING', $1)`,
+      [new Date(now.getTime() + 1_000)],
+    );
+    assert.equal(await service.projectNext(), 1);
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.notification_messages WHERE recipient_wallet = $1 AND topic = 'PAYMENT_REORGED'",
+      [BUYER],
+    )).rows[0]?.count, '1');
+
+    const admin = Wallet.createRandom();
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, status, evidence_hash
+       ) VALUES ($1, 'ADMIN', 'ACTIVE', $2)`,
+      [admin.address.toLowerCase(), HASH],
+    );
+    const campaign = await service.createCampaign({ walletAddress: admin.address, roles: ['ADMIN'] }, {
+      topic: 'ANNOUNCEMENT',
+      audience: { type: 'WALLET', wallets: [BUYER] },
+      message: { titleKey: 'SYSTEM_ANNOUNCEMENT', bodyKey: 'SYSTEM_ANNOUNCEMENT_BODY', variables: { version: '2' } },
+      idempotencyKey: 'notification-campaign-1',
+      correlationId: 'notification-campaign-create',
+    });
+    await service.publishCampaign({ walletAddress: admin.address, roles: ['ADMIN'] }, campaign.campaignId, {
+      evidenceHash: HASH_2,
+      correlationId: 'notification-campaign-publish',
+    });
+    const replayedCampaign = await service.createCampaign({ walletAddress: admin.address, roles: ['ADMIN'] }, {
+      topic: 'ANNOUNCEMENT',
+      audience: { type: 'WALLET', wallets: [BUYER] },
+      message: { titleKey: 'SYSTEM_ANNOUNCEMENT', bodyKey: 'SYSTEM_ANNOUNCEMENT_BODY', variables: { version: '2' } },
+      idempotencyKey: 'notification-campaign-1',
+      correlationId: 'notification-campaign-create',
+    });
+    assert.equal(replayedCampaign.state, 'PUBLISHED');
+    assert.equal(replayedCampaign.contentHash, campaign.contentHash);
+    assert.equal(await service.projectNext(), 1);
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.notification_messages WHERE topic = 'ANNOUNCEMENT'",
+    )).rows[0]?.count, '1');
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.audit_outbox_events WHERE event_type LIKE 'NotificationCampaign%'",
+    )).rows[0]?.count, '2');
+  } finally {
+    await db.close();
+  }
+});
+
+test('notification delivery failures audit exact states and lost leases fail closed', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const now = new Date('2026-07-15T05:30:00.000Z');
+    const endpointId = 'notification-endpoint:worker-failures';
+    await db.query(
+      `INSERT INTO core.notification_endpoints (
+         endpoint_id, wallet_address, channel, provider, endpoint_reference,
+         topics, state, created_at, updated_at
+       ) VALUES ($1,$2,'SMS','ALIYUN_SMS','secret://recipients/worker-failures',
+         '["*"]','ACTIVE',$3,$3)`,
+      [endpointId, BUYER, now],
+    );
+    for (const [deliveryId, attempts] of [
+      ['notification-delivery:a-retry', 0],
+      ['notification-delivery:b-dead', 7],
+      ['notification-delivery:z-lost', 0],
+    ] as const) {
+      const messageId = `notification-message:${deliveryId}`;
+      await db.query(
+        `INSERT INTO core.notification_messages (
+           message_id, source_event_id, source_event_type, recipient_wallet,
+           topic, template_data, created_at
+         ) VALUES ($1,$2,'PaymentFinalized',$3,'PAYMENT_FINALIZED','{}',$4)`,
+        [messageId, `source:${deliveryId}`, BUYER, now],
+      );
+      await db.query(
+        `INSERT INTO core.notification_deliveries (
+           delivery_id, message_id, endpoint_id, channel, provider,
+           endpoint_reference, state, attempt_count, available_at
+         ) VALUES ($1,$2,$3,'SMS','ALIYUN_SMS','secret://recipients/worker-failures','PENDING',$4,$5)`,
+        [deliveryId, messageId, endpointId, attempts, now],
+      );
+    }
+    const service = new NotificationService({ transactions: transactionAdapter(db), clock: () => now });
+    const worker = new NotificationWorker({
+      transactions: transactionAdapter(db),
+      service,
+      adapters: [{
+        provider: 'ALIYUN_SMS' as const,
+        send: async (input) => {
+          if (input.deliveryId.endsWith('z-lost')) {
+            await db.query(
+              "UPDATE core.notification_deliveries SET locked_by = 'replacement-worker' WHERE delivery_id = $1",
+              [input.deliveryId],
+            );
+            return { providerMessageId: 'provider:lost', acceptedAt: now.toISOString() };
+          }
+          throw new Error('ProviderBoom');
+        },
+      }],
+      workerId: 'notification-failure-worker',
+      clock: () => now,
+    });
+    await assert.rejects(worker.pollOnce(), /NotificationLeaseLost/);
+    const states = await db.query<{ delivery_id: string; state: string; locked_by: string | null }>(
+      'SELECT delivery_id, state, locked_by FROM core.notification_deliveries ORDER BY delivery_id',
+    );
+    assert.deepEqual(states.rows, [
+      { delivery_id: 'notification-delivery:a-retry', state: 'RETRY', locked_by: null },
+      { delivery_id: 'notification-delivery:b-dead', state: 'DEAD_LETTER', locked_by: null },
+      { delivery_id: 'notification-delivery:z-lost', state: 'PROCESSING', locked_by: 'replacement-worker' },
+    ]);
+    const audits = await db.query<{ event_type: string; resource_id: string }>(
+      `SELECT event_type, resource_id FROM core.audit_outbox_events
+       WHERE resource_type = 'NOTIFICATION_DELIVERY' ORDER BY resource_id`,
+    );
+    assert.deepEqual(audits.rows, [
+      { event_type: 'NotificationDeliveryRetryScheduled', resource_id: 'notification-delivery:a-retry' },
+      { event_type: 'NotificationDeliveryDeadLettered', resource_id: 'notification-delivery:b-dead' },
+    ]);
+    assert.doesNotMatch(JSON.stringify(await db.query(
+      "SELECT * FROM core.audit_outbox_events WHERE resource_type = 'NOTIFICATION_DELIVERY'",
+    )), /secret:\/\/recipients\/worker-failures/);
+
+    const rollbackDeliveryId = 'notification-delivery:zz-audit-rollback';
+    const rollbackMessageId = `notification-message:${rollbackDeliveryId}`;
+    await db.query(
+      `INSERT INTO core.notification_messages (
+         message_id, source_event_id, source_event_type, recipient_wallet,
+         topic, template_data, created_at
+       ) VALUES ($1,$2,'PaymentFinalized',$3,'PAYMENT_FINALIZED','{}',$4)`,
+      [rollbackMessageId, `source:${rollbackDeliveryId}`, BUYER, now],
+    );
+    await db.query(
+      `INSERT INTO core.notification_deliveries (
+         delivery_id, message_id, endpoint_id, channel, provider,
+         endpoint_reference, state, available_at
+       ) VALUES ($1,$2,$3,'SMS','ALIYUN_SMS','secret://recipients/worker-failures','PENDING',$4)`,
+      [rollbackDeliveryId, rollbackMessageId, endpointId, now],
+    );
+    const auditFailingWorker = new NotificationWorker({
+      transactions: transactionAdapter(db, (sql) => {
+        if (sql.includes('INSERT INTO core.audit_outbox_events')) throw new Error('InjectedDeliveryAuditFailure');
+      }),
+      service,
+      adapters: [{ provider: 'ALIYUN_SMS' as const, send: async () => { throw new Error('ProviderBoom'); } }],
+      workerId: 'notification-audit-failure-worker',
+      clock: () => now,
+    });
+    await assert.rejects(auditFailingWorker.pollOnce(), /InjectedDeliveryAuditFailure/);
+    assert.deepEqual((await db.query<{ state: string; locked_by: string }>(
+      'SELECT state, locked_by FROM core.notification_deliveries WHERE delivery_id = $1',
+      [rollbackDeliveryId],
+    )).rows[0], { state: 'PROCESSING', locked_by: 'notification-audit-failure-worker' });
+    assert.equal((await db.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM core.audit_outbox_events WHERE resource_id = $1',
+      [rollbackDeliveryId],
+    )).rows[0]?.count, '0');
+  } finally {
+    await db.close();
+  }
+});
+
+test('system config keeps secrets as references and publishes exact old/new versions through RBAC, secondary signature and Safe approval', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    await seedCatalog(db, 3);
+    const admin = Wallet.createRandom();
+    const secondary = Wallet.createRandom();
+    const safe = '0x9100000000000000000000000000000000000001';
+    let now = new Date('2026-07-15T06:00:00.000Z');
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, status, evidence_hash
+       ) VALUES ($1, 'ADMIN', 'ACTIVE', $2)`,
+      [admin.address.toLowerCase(), HASH],
+    );
+    let approvals = 0;
+    const service = new SystemConfigService({
+      transactions: transactionAdapter(db),
+      approver: {
+        verify: async (input) => {
+          approvals += 1;
+          return { safeTxHash: `0x${'a'.repeat(64)}`, approvalEvidenceHash: `0x${'b'.repeat(64)}` };
+        },
+      },
+      secondarySigner: secondary.address,
+      governanceSafe: safe,
+      verifyingContract: safe,
+      auditReady: () => true,
+      clock: () => now,
+    });
+    const actor = { walletAddress: admin.address, roles: ['ADMIN'] as const };
+    assert.throws(
+      () => service.createVersion(actor, {
+        configKey: 'RPC',
+        payload: {
+          chainId: 56,
+          primaryRpcSecretRef: 'https://rpc.example.invalid/secret',
+          fallbackRpcSecretRef: 'secret://rpc/fallback',
+          explorerApiSecretRef: 'secret://explorer/key',
+        },
+        effectiveFrom: '2020-01-01T00:00:00.000Z',
+        idempotencyKey: 'system-rpc-invalid',
+        correlationId: 'system-rpc-invalid',
+      }),
+      /must be a secret reference/,
+    );
+    const first = await service.createVersion(actor, {
+      configKey: 'RPC',
+      payload: {
+        chainId: 56,
+        primaryRpcSecretRef: 'secret://rpc/primary-v1',
+        fallbackRpcSecretRef: 'secret://rpc/fallback-v1',
+        explorerApiSecretRef: 'secret://explorer/key-v1',
+      },
+      effectiveFrom: '2020-01-01T00:00:00.000Z',
+      idempotencyKey: 'system-rpc-v1',
+      correlationId: 'system-rpc-create-v1',
+    });
+    assert.equal(first.version, 1);
+    assert.equal(first.payload.primaryRpcSecretRef, 'secret://rpc/primary-v1');
+    assert.equal(JSON.stringify(first).includes('https://'), false);
+    const intent: SensitiveActionIntent = {
+      action: 'PUBLISH_SYSTEM_CONFIG',
+      resourceType: 'SYSTEM_CONFIG',
+      resourceId: first.configVersionId,
+      policyVersion: 1n,
+      oldValueHash: `0x${'0'.repeat(64)}`,
+      newValueHash: first.payloadHash,
+      safeAddress: safe,
+      nonce: 101n,
+      deadline: BigInt(Math.floor(now.getTime() / 1_000) + 300),
+    };
+    const approval = {
+      action: intent.action,
+      resourceType: intent.resourceType,
+      resourceId: intent.resourceId,
+      policyVersion: intent.policyVersion.toString(),
+      oldValueHash: intent.oldValueHash,
+      newValueHash: intent.newValueHash,
+      safeAddress: intent.safeAddress,
+      nonce: intent.nonce.toString(),
+      deadline: intent.deadline.toString(),
+      signature: await secondary.signTypedData(sensitiveActionDomain(safe), sensitiveActionTypes, intent),
+    };
+    await db.query(
+      "UPDATE core.wallet_role_bindings SET status = 'REVOKED', revoked_at = $2 WHERE wallet_address = $1 AND role = 'ADMIN'",
+      [admin.address.toLowerCase(), now],
+    );
+    await assert.rejects(service.publish(actor, first.configVersionId, approval), /Current wallet role cannot manage system config/);
+    await db.query(
+      "UPDATE core.wallet_role_bindings SET status = 'ACTIVE', revoked_at = NULL WHERE wallet_address = $1 AND role = 'ADMIN'",
+      [admin.address.toLowerCase()],
+    );
+    assert.equal((await service.publish(actor, first.configVersionId, approval)).published, true);
+    assert.equal(approvals, 1);
+    assert.equal((await service.publish(actor, first.configVersionId, approval)).published, true);
+    assert.equal(approvals, 1);
+
+    now = new Date(now.getTime() + 1_000);
+    const second = await service.createVersion(actor, {
+      configKey: 'RPC',
+      payload: {
+        chainId: 56,
+        primaryRpcSecretRef: 'secret://rpc/primary-v2',
+        fallbackRpcSecretRef: 'secret://rpc/fallback-v2',
+        explorerApiSecretRef: 'secret://explorer/key-v2',
+      },
+      effectiveFrom: '2020-01-01T00:00:00.000Z',
+      idempotencyKey: 'system-rpc-v2',
+      correlationId: 'system-rpc-create-v2',
+    });
+    const secondIntent: SensitiveActionIntent = {
+      ...intent,
+      resourceId: second.configVersionId,
+      oldValueHash: first.payloadHash,
+      newValueHash: second.payloadHash,
+      nonce: 102n,
+      deadline: BigInt(Math.floor(now.getTime() / 1_000) + 300),
+    };
+    const secondApproval = {
+      action: secondIntent.action,
+      resourceType: secondIntent.resourceType,
+      resourceId: secondIntent.resourceId,
+      policyVersion: secondIntent.policyVersion.toString(),
+      oldValueHash: secondIntent.oldValueHash,
+      newValueHash: secondIntent.newValueHash,
+      safeAddress: secondIntent.safeAddress,
+      nonce: secondIntent.nonce.toString(),
+      deadline: secondIntent.deadline.toString(),
+      signature: await secondary.signTypedData(sensitiveActionDomain(safe), sensitiveActionTypes, secondIntent),
+    };
+    assert.equal((await service.publish(actor, second.configVersionId, secondApproval)).published, true);
+    const current = await db.query<{ version: number; payload: Record<string, unknown> }>(
+      "SELECT version, payload FROM core.current_system_config WHERE config_key = 'RPC'",
+    );
+    assert.equal(current.rows[0]?.version, 2);
+    assert.equal(current.rows[0]?.payload.primaryRpcSecretRef, 'secret://rpc/primary-v2');
+    await assert.rejects(
+      db.query("UPDATE core.system_config_versions SET payload = '{}' WHERE config_version_id = $1", [first.configVersionId]),
+      /ImmutableRecord/,
+    );
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.audit_outbox_events WHERE event_type LIKE 'SystemConfig%'",
+    )).rows[0]?.count, '4');
+  } finally {
+    await db.close();
+  }
+});
+
+test('monitoring treats missing samples as unavailable and alerts only when RPC height lag exceeds three blocks', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const admin = Wallet.createRandom();
+    let now = new Date('2026-07-15T07:00:00.000Z');
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, status, evidence_hash
+       ) VALUES ($1, 'ADMIN', 'ACTIVE', $2)`,
+      [admin.address.toLowerCase(), HASH],
+    );
+    const runtime = new RuntimeMetricsRegistry(60_000);
+    const noSamples = await runtime.collect(now);
+    assert.equal(noSamples.find((metric) => metric.metricName === 'throughput')?.status, 'UNAVAILABLE');
+    assert.equal(noSamples.find((metric) => metric.metricName === 'throughput')?.value, null);
+    runtime.record('HTTP', 120, false, now);
+    assert.equal((await runtime.collect(now)).find((metric) => metric.component === 'HTTP' && metric.metricName === 'throughput')?.status, 'HEALTHY');
+
+    const redisZero = new MiddlewareMonitoringSource({
+      database: adapter(db),
+      redis: { info: async () => 'keyspace_hits:0\r\nkeyspace_misses:0\r\n' },
+      dbPool: () => ({ active: 1, maximum: 10 }),
+    });
+    assert.equal((await redisZero.collect(now)).find((metric) => metric.component === 'REDIS')?.status, 'UNAVAILABLE');
+
+    let explorerHeight = 97;
+    const heights = new RpcExplorerHeightSource({
+      primaryRpcUrl: 'https://primary.example.invalid',
+      fallbackRpcUrl: 'https://fallback.example.invalid',
+      explorerApiUrl: 'https://explorer.example.invalid/api',
+      explorerApiKey: 'test-key',
+      fetchImpl: (async (input) => {
+        const url = String(input);
+        const height = url.includes('explorer') ? explorerHeight : 100;
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: `0x${height.toString(16)}` }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }) as typeof fetch,
+    });
+    assert.equal((await heights.collect(now)).find((metric) => metric.component === 'RPC_PRIMARY')?.status, 'HEALTHY');
+    explorerHeight = 96;
+    assert.equal((await heights.collect(now)).find((metric) => metric.component === 'RPC_PRIMARY')?.status, 'CRITICAL');
+
+    let lag = 3;
+    const worker = new OperationsMonitoringWorker({
+      transactions: transactionAdapter(db),
+      sources: [{
+        name: 'height-boundary',
+        collect: async (at) => [{
+          component: 'RPC_PRIMARY' as const,
+          metricName: 'height_lag',
+          unit: 'BLOCK' as const,
+          value: lag,
+          status: lag > 3 ? 'CRITICAL' as const : 'HEALTHY' as const,
+          windowStartedAt: at,
+          windowEndedAt: at,
+          evidence: { rpc: 100, explorer: 100 - lag },
+        }],
+      }],
+      clock: () => now,
+    });
+    assert.equal(await worker.pollOnce(), 1);
+    assert.equal((await db.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM core.operations_alert_events',
+    )).rows[0]?.count, '0');
+    lag = 4;
+    now = new Date(now.getTime() + 1_000);
+    assert.equal(await worker.pollOnce(), 1);
+    const service = new MonitoringService({ transactions: transactionAdapter(db), clock: () => now });
+    const actor = { walletAddress: admin.address, roles: ['ADMIN'] as const };
+    let dashboard = await service.dashboard(actor);
+    assert.equal(dashboard.metrics.find((metric) => metric.metricName === 'height_lag')?.status, 'CRITICAL');
+    assert.equal(dashboard.alerts.find((alert) => alert.alertKey === 'RPC_PRIMARY:height_lag')?.state, 'OPENED');
+    const openedAudit = await db.query<{
+      evidence_profile: string;
+      payload: Record<string, unknown>;
+      transaction_evidence: Record<string, unknown>;
+    }>(
+      "SELECT evidence_profile, payload, transaction_evidence FROM core.audit_outbox_events WHERE event_type = 'MonitoringAlertOpened'",
+    );
+    assert.equal(openedAudit.rows[0]?.evidence_profile, 'SYSTEM');
+    assert.match(String(openedAudit.rows[0]?.payload.evidenceHash), /^0x[0-9a-f]{64}$/);
+    assert.deepEqual(openedAudit.rows[0]?.transaction_evidence, {});
+
+    await db.query(
+      "UPDATE core.wallet_role_bindings SET status = 'REVOKED', revoked_at = $2 WHERE wallet_address = $1 AND role = 'ADMIN'",
+      [admin.address.toLowerCase(), now],
+    );
+    await assert.rejects(service.dashboard(actor), /Current wallet role cannot read or acknowledge monitoring/);
+    await assert.rejects(
+      service.acknowledge(actor, 'RPC_PRIMARY:height_lag', 'monitoring-revoked'),
+      /Current wallet role cannot read or acknowledge monitoring/,
+    );
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.operations_alert_events WHERE event_type = 'ACKNOWLEDGED'",
+    )).rows[0]?.count, '0');
+    await db.query(
+      "UPDATE core.wallet_role_bindings SET status = 'ACTIVE', revoked_at = NULL WHERE wallet_address = $1 AND role = 'ADMIN'",
+      [admin.address.toLowerCase()],
+    );
+
+    const auditFailingService = new MonitoringService({
+      transactions: transactionAdapter(db, (sql) => {
+        if (sql.includes('INSERT INTO core.audit_outbox_events')) throw new Error('InjectedMonitoringAuditFailure');
+      }),
+      clock: () => now,
+    });
+    await assert.rejects(
+      auditFailingService.acknowledge(actor, 'RPC_PRIMARY:height_lag', 'monitoring-ack-rollback'),
+      /InjectedMonitoringAuditFailure/,
+    );
+    assert.equal((await db.query<{ event_type: string }>(
+      "SELECT event_type FROM core.current_operations_alerts WHERE alert_key = 'RPC_PRIMARY:height_lag'",
+    )).rows[0]?.event_type, 'OPENED');
+    assert.deepEqual(await service.acknowledge(actor, 'RPC_PRIMARY:height_lag', 'monitoring-acknowledge'), {
+      alertKey: 'RPC_PRIMARY:height_lag',
+      state: 'ACKNOWLEDGED',
+    });
+    const acknowledgedAudit = await db.query<{
+      evidence_profile: string;
+      correlation_id: string;
+      authorization_evidence: Record<string, unknown>;
+    }>(
+      "SELECT evidence_profile, correlation_id, authorization_evidence FROM core.audit_outbox_events WHERE event_type = 'MonitoringAlertAcknowledged'",
+    );
+    assert.equal(acknowledgedAudit.rows[0]?.evidence_profile, 'RBAC');
+    assert.equal(acknowledgedAudit.rows[0]?.correlation_id, 'monitoring-acknowledge');
+    assert.equal(acknowledgedAudit.rows[0]?.authorization_evidence.scheme, 'RBAC_ROLE_REVALIDATION');
+    assert.equal(acknowledgedAudit.rows[0]?.authorization_evidence.subject, admin.address.toLowerCase());
+    now = new Date(now.getTime() + 1_000);
+    await worker.pollOnce();
+    dashboard = await service.dashboard(actor);
+    assert.equal(dashboard.alerts.find((alert) => alert.alertKey === 'RPC_PRIMARY:height_lag')?.state, 'ACKNOWLEDGED');
+    lag = 0;
+    now = new Date(now.getTime() + 1_000);
+    await worker.pollOnce();
+    dashboard = await service.dashboard(actor);
+    assert.equal(dashboard.alerts.find((alert) => alert.alertKey === 'RPC_PRIMARY:height_lag')?.state, 'RECOVERED');
+    assert.equal((await db.query<{ evidence_profile: string }>(
+      "SELECT evidence_profile FROM core.audit_outbox_events WHERE event_type = 'MonitoringAlertRecovered'",
+    )).rows[0]?.evidence_profile, 'SYSTEM');
+
+    let probeFails = true;
+    const partialWorker = new OperationsMonitoringWorker({
+      transactions: transactionAdapter(db),
+      sources: [
+        {
+          name: 'failing-source',
+          collect: async () => {
+            if (probeFails) throw new Error('ProviderUnavailable');
+            return [];
+          },
+        },
+        {
+          name: 'healthy-source',
+          collect: async (at) => [{
+            component: 'HTTP' as const,
+            metricName: 'partial_probe_health',
+            unit: 'COUNT' as const,
+            value: 1,
+            status: 'HEALTHY' as const,
+            windowStartedAt: at,
+            windowEndedAt: at,
+            evidence: { sampleCount: 1 },
+          }],
+        },
+      ],
+      clock: () => now,
+    });
+    assert.equal(await partialWorker.pollOnce(), 1);
+    assert.deepEqual(partialWorker.status(), { healthy: false, errorCode: 'failing-sourceProbeUnavailable' });
+    assert.equal((await db.query<{ evidence_profile: string }>(
+      "SELECT evidence_profile FROM core.audit_outbox_events WHERE event_type = 'MonitoringProbeUnavailable'",
+    )).rows[0]?.evidence_profile, 'SYSTEM');
+    probeFails = false;
+    assert.equal(await partialWorker.pollOnce(), 1);
+    assert.deepEqual(partialWorker.status(), { healthy: true, errorCode: undefined });
+
+    const rollbackWorker = new OperationsMonitoringWorker({
+      transactions: transactionAdapter(db, (sql) => {
+        if (sql.includes('INSERT INTO core.audit_outbox_events')) throw new Error('InjectedMonitoringAuditFailure');
+      }),
+      sources: [{
+        name: 'rollback-source',
+        collect: async (at) => [{
+          component: 'HTTP' as const,
+          metricName: 'rollback_probe',
+          unit: 'COUNT' as const,
+          value: 1,
+          status: 'CRITICAL' as const,
+          windowStartedAt: at,
+          windowEndedAt: at,
+          evidence: { reason: 'test' },
+        }],
+      }],
+      clock: () => now,
+    });
+    await assert.rejects(rollbackWorker.pollOnce(), /InjectedMonitoringAuditFailure/);
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.operations_metric_snapshots WHERE metric_name = 'rollback_probe'",
+    )).rows[0]?.count, '0');
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.operations_alert_events WHERE alert_key = 'HTTP:rollback_probe'",
+    )).rows[0]?.count, '0');
+    await assert.rejects(
+      db.query("UPDATE core.operations_metric_snapshots SET status = 'HEALTHY'"),
+      /ImmutableRecord/,
+    );
+  } finally {
+    await db.close();
+  }
+});
+
 test('outbox participates in the business transaction and durable jobs lease once', async () => {
   const db = await createBusinessDatabase();
   try {
@@ -2175,6 +3269,7 @@ test('audit database redacts secrets, verifies its hash chain and rejects mutati
     for (const index of [1, 2]) {
       await appendAuditEntry(transactionAdapter(db), {
           streamName: 'financial',
+          evidenceProfile: 'CHAIN_OBSERVED',
           eventType: index === 1 ? 'PaymentIndexed' : 'PaymentFinalized',
           resourceType: 'ORDER',
           resourceId: 'order-1',
@@ -2244,11 +3339,16 @@ test('audit database redacts secrets, verifies its hash chain and rejects mutati
     });
     assert.equal(verifyAuditChain(result.rows), true);
     assert.equal(verifyAuditChain([{ ...result.rows[0]!, entry_hash: 'f'.repeat(64) }, result.rows[1]!]), false);
+    assert.equal(verifyAuditChain([{
+      ...result.rows[0]!,
+      evidence_profile: 'CHAIN_FINAL',
+    }, result.rows[1]!]), false);
     await assert.rejects(db.query("UPDATE audit.entries SET event_type = 'tampered'"), /AppendOnlyAudit/);
     await assert.rejects(db.query('DELETE FROM audit.entries'), /AppendOnlyAudit/);
     await assert.rejects(
       appendAuditEntry(transactionAdapter(db), {
         streamName: 'financial',
+        evidenceProfile: 'SIGNED_OFFCHAIN',
         eventType: 'MissingEvidence',
         resourceType: 'ORDER',
         resourceId: 'order-missing-evidence',
@@ -2256,7 +3356,7 @@ test('audit database redacts secrets, verifies its hash chain and rejects mutati
         requestHash: 'd'.repeat(64),
         payload: {},
       }),
-      /MissingSensitiveAuditEvidence/,
+      /InvalidSignedOffchainAuditEvidence/,
     );
     const failingRunner = transactionAdapter(db, (sql) => {
       if (sql.startsWith('UPDATE audit.stream_heads')) throw new Error('InjectedAuditHeadFailure');
@@ -2264,6 +3364,7 @@ test('audit database redacts secrets, verifies its hash chain and rejects mutati
     await assert.rejects(
       appendAuditEntry(failingRunner, {
         streamName: 'financial',
+        evidenceProfile: 'CHAIN_OBSERVED',
         eventType: 'MustRollback',
         resourceType: 'ORDER',
         resourceId: 'order-2',
@@ -2296,6 +3397,7 @@ test('audit database redacts secrets, verifies its hash chain and rejects mutati
     await assert.rejects(
       appendAuditEntry(transactionAdapter(db), {
         streamName: 'financial',
+        evidenceProfile: 'SIGNED_OFFCHAIN',
         eventType: 'RejectUnknownEvidence',
         resourceType: 'ORDER',
         resourceId: 'order-3',
@@ -2320,6 +3422,134 @@ test('audit database redacts secrets, verifies its hash chain and rejects mutati
   }
 });
 
+test('audit outbox is transactional, retries exactly once and exposes read-only filtered chain proof', async () => {
+  const business = await PGlite.create();
+  const audit = await PGlite.create();
+  try {
+    await applyMigrations(adapter(business), 'core', BUSINESS_MIGRATIONS);
+    await applyMigrations(adapter(audit), 'audit', AUDIT_MIGRATIONS);
+    const now = new Date('2026-07-15T02:00:00.000Z');
+    const input = {
+      sourceEventId: 'audit:operation:one',
+      streamName: 'operational' as const,
+      evidenceProfile: 'CHAIN_OBSERVED' as const,
+      eventType: 'AdminActionRecorded',
+      resourceType: 'CMS_VERSION',
+      resourceId: 'cms-version-1',
+      actorWallet: BUYER,
+      actorRole: 'ADMIN',
+      correlationId: 'audit-correlation-1',
+      requestHash: 'a'.repeat(64),
+      payload: { action: 'CREATE', apiToken: 'must-redact' },
+      transactionEvidence: {
+        txHash: HASH,
+        chainId: 56 as const,
+        contractAddress: BUYER,
+        selector: '0x12345678',
+        calldataHash: HASH_2,
+        resourceId: 'cms-version-1',
+        policyVersion: 1,
+      },
+      createdAt: now,
+    };
+    await assert.rejects(
+      transactionAdapter(business).transaction(async (executor) => {
+        await enqueueAudit(executor, input);
+        throw new Error('rollback');
+      }),
+      /rollback/,
+    );
+    assert.equal((await business.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM core.audit_outbox_events',
+    )).rows[0]?.count, '0');
+    await assert.rejects(
+      transactionAdapter(business).transaction(async (executor) => {
+        await executor.query(
+          `INSERT INTO core.outbox_events (
+             event_id, aggregate_type, aggregate_id, event_type, payload, idempotency_key, state
+           ) VALUES ('outbox:audit-validation-rollback','TEST','audit-validation','MustRollback','{}',
+             'outbox:audit-validation-rollback','PENDING')`,
+        );
+        await enqueueAudit(executor, {
+          ...input,
+          sourceEventId: 'audit:operation:invalid-finality',
+          evidenceProfile: 'CHAIN_FINAL',
+          transactionEvidence: {
+            ...input.transactionEvidence,
+            blockHash: HASH,
+            confirmations: 14,
+          },
+        });
+      }),
+      /MissingFinalChainAuditEvidence/,
+    );
+    assert.equal((await business.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.outbox_events WHERE event_id = 'outbox:audit-validation-rollback'",
+    )).rows[0]?.count, '0');
+
+    await transactionAdapter(business).transaction((executor) => enqueueAudit(executor, input));
+    assert.equal(
+      (await transactionAdapter(business).transaction((executor) => enqueueAudit(executor, input))).existing,
+      true,
+    );
+    await assert.rejects(
+      transactionAdapter(business).transaction((executor) => enqueueAudit(executor, {
+        ...input,
+        payload: { action: 'DIFFERENT' },
+      })),
+      /Audit source event id was reused/,
+    );
+
+    const worker = new AuditOutboxWorker({
+      business: transactionAdapter(business),
+      audit: transactionAdapter(audit),
+      workerId: 'audit-test-worker',
+      clock: () => now,
+    });
+    assert.equal(await worker.pollOnce(), true);
+    const delivered = await business.query<{ state: string }>(
+      "SELECT state FROM core.audit_outbox_events WHERE source_event_id = 'audit:operation:one'",
+    );
+    assert.equal(delivered.rows[0]?.state, 'DELIVERED');
+
+    const duplicate = await appendAuditEntry(transactionAdapter(audit), {
+      sourceEventId: input.sourceEventId,
+      streamName: input.streamName,
+      evidenceProfile: input.evidenceProfile,
+      eventType: input.eventType,
+      resourceType: input.resourceType,
+      resourceId: input.resourceId,
+      actorWallet: input.actorWallet,
+      actorRole: input.actorRole,
+      correlationId: input.correlationId,
+      requestHash: input.requestHash,
+      payload: input.payload,
+      transactionEvidence: input.transactionEvidence,
+      createdAt: now,
+    });
+    const auditRows = await audit.query<AuditRow>('SELECT * FROM audit.entries ORDER BY sequence');
+    assert.equal(auditRows.rows.length, 1);
+    assert.equal(duplicate.entry_id, auditRows.rows[0]?.entry_id);
+    assert.equal(auditRows.rows[0]?.payload.apiToken, '[REDACTED]');
+
+    const query = new AuditQueryService(adapter(audit));
+    const result = await query.list({ walletAddress: BUYER, roles: ['AUDITOR'] }, {
+      streamName: 'operational',
+      eventType: 'AdminActionRecorded',
+      limit: 10,
+    });
+    assert.equal(result.entries.length, 1);
+    assert.equal(result.chainProof.operational?.verified, true);
+    await assert.rejects(
+      query.list({ walletAddress: BUYER, roles: ['MERCHANT'], merchantId: 'merchant-1' }, {}),
+      /Audit records require ADMIN or AUDITOR/,
+    );
+  } finally {
+    await business.close();
+    await audit.close();
+  }
+});
+
 test('same-version physical backup restores business and audit data into new databases', async () => {
   const business = await createBusinessDatabase();
   const audit = await PGlite.create();
@@ -2330,12 +3560,13 @@ test('same-version physical backup restores business and audit data into new dat
     await applyMigrations(adapter(audit), 'audit', AUDIT_MIGRATIONS);
     await appendAuditEntry(transactionAdapter(audit), {
       streamName: 'backup',
+      evidenceProfile: 'SYSTEM',
       eventType: 'BackupEvidence',
       resourceType: 'DATABASE',
       resourceId: 'audit',
       correlationId: 'backup-roundtrip',
       requestHash: 'b'.repeat(64),
-      payload: { verified: true },
+      payload: { verified: true, evidenceHash: HASH },
     });
 
     const businessDump = await business.dumpDataDir('gzip');
@@ -2399,8 +3630,1921 @@ test('production backup enforces encrypted storage acknowledgement and mode 600 
   }
 });
 
+test('signed settlement request moves Available to Requested and an immutable covered Safe batch moves it to Batched', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const merchantWallet = Wallet.createRandom();
+    const intent = paymentIntent();
+    intent.merchant = merchantWallet.address.toLowerCase();
+    await recordFinalPayment(db, intent);
+    let now = new Date((intent.issuedAt + 60) * 1000);
+    const fulfillment = new FulfillmentService({ transactions: transactionAdapter(db), clock: () => now });
+    const merchant = {
+      walletAddress: merchantWallet.address,
+      roles: ['MERCHANT'] as const,
+      merchantId: 'merchant-1',
+    };
+    await fulfillment.recordShipment(merchant, intent.orderId, {
+      idempotencyKey: 'settlement-shipment-1',
+      evidenceHash: `0x${'3'.repeat(64)}`,
+      carrierCode: 'SF',
+      trackingNumberHash: `0x${'4'.repeat(64)}`,
+    });
+    await fulfillment.recordDelivery(
+      { walletAddress: '0x3333333333333333333333333333333333333333', roles: ['OPERATOR'] },
+      intent.orderId,
+      { idempotencyKey: 'settlement-delivery-1', evidenceHash: `0x${'5'.repeat(64)}` },
+    );
+    await fulfillment.confirmReceipt(
+      { walletAddress: BUYER, roles: ['BUYER'] },
+      intent.orderId,
+      { idempotencyKey: 'settlement-receipt-1', evidenceHash: `0x${'6'.repeat(64)}` },
+    );
+
+    now = new Date(now.getTime() + 60_000);
+    const settlements = new SettlementService({ transactions: transactionAdapter(db), clock: () => now });
+    const challenge = await settlements.createIntent(merchant, {
+      rail: 'MERCHANT_USDT',
+      amount: '45',
+      idempotencyKey: 'merchant-settlement-intent-1',
+    });
+    const repeatedChallenge = await settlements.createIntent(merchant, {
+      rail: 'MERCHANT_USDT',
+      amount: '45',
+      idempotencyKey: 'merchant-settlement-intent-1',
+    });
+    assert.equal(repeatedChallenge.digest, challenge.digest);
+    const signature = await merchantWallet.signTypedData(
+      challenge.typedData.domain,
+      challenge.typedData.types,
+      challenge.typedData.message,
+    );
+    const request = await settlements.submitRequest(merchant, {
+      intentId: challenge.intent.intentId,
+      signature,
+    });
+    assert.equal(request.state, 'REQUESTED');
+    assert.equal((await settlements.submitRequest(merchant, {
+      intentId: challenge.intent.intentId,
+      signature,
+    })).request_id, request.request_id);
+    await assert.rejects(
+      settlements.createIntent(merchant, {
+        rail: 'MERCHANT_USDT',
+        amount: '1',
+        idempotencyKey: 'merchant-settlement-intent-2',
+      }),
+      /insufficient/,
+    );
+    const merchantStates = await db.query<{ balance_state: string; amount: string }>(
+      `SELECT line.balance_state,
+         sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS amount
+       FROM core.ledger_lines line
+       JOIN core.ledger_accounts account ON account.account_id = line.account_id
+       WHERE account.owner_id = $1 AND account.purpose = 'MERCHANT_RECEIVABLE'
+       GROUP BY line.balance_state
+       HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) <> 0
+       ORDER BY line.balance_state`,
+      [merchantWallet.address.toLowerCase()],
+    );
+    assert.deepEqual(merchantStates.rows, [{ balance_state: 'REQUESTED', amount: '45' }]);
+
+    await db.query(
+      `INSERT INTO core.coverage_snapshots (
+         snapshot_id, chain_id, block_number, block_hash, canonical, evidence_hash, recorded_at
+       ) VALUES ('coverage:settlement:1', 56, 1000, $1, true, $2, $3)`,
+      [`0x${'7'.repeat(64)}`, `0x${'8'.repeat(64)}`, now],
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshot_items (
+         snapshot_id, safe_address, asset, verified_asset_balance,
+         unsettled_liability, coverage_met
+       ) VALUES ('coverage:settlement:1', $1, 'USDT', 70, 70, true)`,
+      ['0x3333333333333333333333333333333333333333'],
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshot_canonicality (
+         observation_id, snapshot_id, canonical, observed_block_hash, evidence_hash, observed_at
+       ) VALUES ('coverage-observation:settlement:1', 'coverage:settlement:1', true, $1, $2, $3)`,
+      [`0x${'7'.repeat(64)}`, `0x${'8'.repeat(64)}`, now],
+    );
+    const operator = {
+      walletAddress: '0x9999999999999999999999999999999999999999',
+      roles: ['OPERATOR'] as const,
+    };
+    const runtime = {
+      safeAddress: '0x3333333333333333333333333333333333333333',
+      safeVersion: SAFE_VERSION,
+      singletonAddress: SAFE_L2_SINGLETON_ADDRESS,
+      singletonCodeHash: SAFE_L2_SINGLETON_CODE_HASH,
+      safeNonce: '7',
+      ownerSetHash: HASH,
+      approvalThreshold: 2,
+      multisendAddress: MULTISEND_CALL_ONLY_ADDRESS,
+      multisendCodeHash: MULTISEND_CALL_ONLY_CODE_HASH,
+      tokenCodeHash: `0x${'9'.repeat(64)}`,
+      tokenTransferConformanceEvidenceHash: `0x${'a'.repeat(64)}`,
+      evidenceHash: `0x${'b'.repeat(64)}`,
+      checkedAt: now,
+    };
+    const batch = await settlements.createBatch(operator, {
+      asset: 'USDT',
+      idempotencyKey: 'safe-settlement-batch-1',
+      runtime,
+    });
+    assert.equal(batch.state, 'APPROVAL_PENDING');
+    assert.equal(batch.total_amount, '45');
+    assert.equal((await settlements.createBatch(operator, {
+      asset: 'USDT',
+      idempotencyKey: 'safe-settlement-batch-1',
+      runtime,
+    })).batch_id, batch.batch_id);
+    const afterBatch = await db.query<{ balance_state: string; amount: string }>(
+      `SELECT line.balance_state,
+         sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS amount
+       FROM core.ledger_lines line
+       JOIN core.ledger_accounts account ON account.account_id = line.account_id
+       WHERE account.owner_id = $1 AND account.purpose = 'MERCHANT_RECEIVABLE'
+       GROUP BY line.balance_state
+       HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) <> 0
+       ORDER BY line.balance_state`,
+      [merchantWallet.address.toLowerCase()],
+    );
+    assert.deepEqual(afterBatch.rows, [{ balance_state: 'BATCHED', amount: '45' }]);
+    await assert.rejects(
+      db.query('UPDATE core.settlement_batches SET total_amount = 44 WHERE batch_id = $1', [batch.batch_id]),
+      /ImmutableSettlementBatch/,
+    );
+
+    let submittedCalldata = '';
+    let receipt: SafeSettlementReceipt | undefined;
+    const executionTxHash = `0x${'d'.repeat(64)}`;
+    const outerSender = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+    let observedCanonicalBlockHash = `0x${'e'.repeat(64)}`;
+    const worker = new SettlementWorker({
+      transactions: transactionAdapter(db),
+      approvals: {
+        verify: async () => ({
+          safeAddress: runtime.safeAddress,
+          safeTxHash: String(batch.safe_tx_hash),
+          ownerSetHash: runtime.ownerSetHash,
+          threshold: runtime.approvalThreshold,
+          proposalReferenceHash: `0x${'c'.repeat(64)}`,
+          approvalEvidenceHash: `0x${'d'.repeat(64)}`,
+          packedSignatures: `0x${'11'.repeat(130)}`,
+          approvals: [
+            { ownerAddress: '0x1000000000000000000000000000000000000001', signature: '0x11' },
+            { ownerAddress: '0x1000000000000000000000000000000000000002', signature: '0x22' },
+          ],
+        }),
+      },
+      broadcaster: {
+        submit: async (input) => {
+          submittedCalldata = input.execTransactionCalldata;
+          return {
+            executionTxHash,
+            outerSender,
+            outerNonce: '12',
+            requestDigest: input.requestDigest,
+          };
+        },
+        replace: async () => {
+          throw new Error('unexpected replacement');
+        },
+      },
+      chain: {
+        receipt: async () => receipt,
+        canonicalBlock: async (input) => ({
+          canonical: observedCanonicalBlockHash === input.blockHash,
+          observedBlockHash: observedCanonicalBlockHash,
+          evidenceHash: HASH,
+        }),
+      },
+      runtimeAttest: async () => runtime,
+      outerGasLimit: '1000000',
+      clock: () => now,
+    });
+    assert.equal(await worker.approveOnce(), 1);
+    assert.equal(await worker.submitOnce(), 1);
+    receipt = {
+      chainId: 56,
+      executionTxHash,
+      transactionTo: runtime.safeAddress,
+      transactionCalldata: submittedCalldata,
+      outerSender,
+      outerNonce: '12',
+      receiptStatus: 1,
+      blockNumber: 1_010,
+      blockHash: `0x${'e'.repeat(64)}`,
+      confirmations: 14,
+      canonicalBlock: true,
+      executionSuccessSafeTxHash: String(batch.safe_tx_hash),
+      safeNonceAfter: '8',
+      transfers: [{
+        tokenAddress: '0x55d398326f99059ff775485246999027b3197955',
+        from: runtime.safeAddress,
+        to: merchantWallet.address,
+        amount: '45',
+      }],
+      balanceDeltas: [
+        {
+          tokenAddress: '0x55d398326f99059ff775485246999027b3197955',
+          account: runtime.safeAddress,
+          delta: '-45',
+        },
+        {
+          tokenAddress: '0x55d398326f99059ff775485246999027b3197955',
+          account: merchantWallet.address,
+          delta: '45',
+        },
+      ],
+      evidenceHash: `0x${'f'.repeat(64)}`,
+    };
+    assert.equal(await worker.pollFinalityOnce(), 1);
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.settlement_batches WHERE batch_id = $1',
+      [batch.batch_id],
+    )).rows[0]?.state, 'MINED');
+    receipt = { ...receipt, confirmations: 15 };
+    now = new Date(now.getTime() + 60_000);
+    assert.equal(await worker.pollFinalityOnce(), 1);
+    const settled = await db.query<{
+      state: string;
+      final_safe_tx_hash: string;
+      final_execution_tx_hash: string;
+    }>(
+      `SELECT state, final_safe_tx_hash, final_execution_tx_hash
+       FROM core.settlement_requests WHERE request_id = $1`,
+      [request.request_id],
+    );
+    assert.deepEqual(settled.rows[0], {
+      state: 'SETTLED',
+      final_safe_tx_hash: batch.safe_tx_hash,
+      final_execution_tx_hash: executionTxHash,
+    });
+    const settledBalance = await db.query<{ amount: string }>(
+      `SELECT sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS amount
+       FROM core.ledger_lines line
+       JOIN core.ledger_accounts account ON account.account_id = line.account_id
+       WHERE account.owner_id = $1 AND account.purpose = 'MERCHANT_RECEIVABLE'
+         AND line.balance_state = 'SETTLED'`,
+      [merchantWallet.address.toLowerCase()],
+    );
+    assert.equal(settledBalance.rows[0]?.amount, '45');
+    await assertLedgerBalanced(db, 1);
+    observedCanonicalBlockHash = `0x${'a'.repeat(64)}`;
+    assert.equal(await worker.reconcileSettledCanonicalityOnce(), 1);
+    const reorged = await db.query<{
+      state: string;
+      final_safe_tx_hash: string | null;
+      final_execution_tx_hash: string | null;
+    }>(
+      `SELECT state, final_safe_tx_hash, final_execution_tx_hash
+       FROM core.settlement_requests WHERE request_id = $1`,
+      [request.request_id],
+    );
+    assert.deepEqual(reorged.rows[0], {
+      state: 'BATCHED',
+      final_safe_tx_hash: null,
+      final_execution_tx_hash: null,
+    });
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.settlement_batches WHERE batch_id = $1',
+      [batch.batch_id],
+    )).rows[0]?.state, 'REORGED');
+    assert.deepEqual((await db.query<{ transition_type: string }>(
+      `SELECT transition_type FROM core.settlement_request_item_transitions
+       WHERE request_id = $1 ORDER BY transition_sequence`,
+      [request.request_id],
+    )).rows.map((row) => row.transition_type), [
+      'REQUESTED',
+      'BATCHED',
+      'SETTLED',
+      'FINALITY_REVERSED',
+    ]);
+    assert.equal((await db.query<{ amount: string }>(
+      `SELECT COALESCE(sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END),0)::text AS amount
+       FROM core.ledger_lines line
+       JOIN core.ledger_journals journal ON journal.journal_id = line.journal_id
+       WHERE journal.order_id = $1 AND line.balance_state = 'BATCHED'`,
+      [intent.orderId],
+    )).rows[0]?.amount, '45');
+    const settlementAudits = await db.query<{
+      event_type: string;
+      evidence_profile: string;
+      payload: Record<string, unknown>;
+      signature_evidence: Record<string, unknown>;
+      transaction_evidence: Record<string, unknown>;
+    }>(
+      `SELECT event_type, evidence_profile, payload, signature_evidence, transaction_evidence
+       FROM core.audit_outbox_events WHERE resource_type = 'SETTLEMENT_BATCH' AND resource_id = $1`,
+      [batch.batch_id],
+    );
+    const auditByType = new Map(settlementAudits.rows.map((row) => [row.event_type, row]));
+    const approvalAudit = auditByType.get('SettlementBatchApproved');
+    assert.equal(approvalAudit?.evidence_profile, 'SAFE_APPROVED');
+    assert.equal(approvalAudit?.signature_evidence.scheme, 'SAFE_OWNER_SET');
+    assert.equal(approvalAudit?.signature_evidence.digest, batch.safe_tx_hash);
+    assert.deepEqual(approvalAudit?.transaction_evidence, {});
+    const submittedAudit = auditByType.get('SettlementBatchSubmitted');
+    assert.equal(submittedAudit?.evidence_profile, 'CHAIN_OBSERVED');
+    assert.equal(submittedAudit?.transaction_evidence.txHash, executionTxHash);
+    assert.equal(submittedAudit?.transaction_evidence.policyVersion, 1);
+    assert.notEqual(submittedAudit?.transaction_evidence.txHash, batch.safe_tx_hash);
+    assert.equal(auditByType.get('SettlementBatchMined')?.evidence_profile, 'CHAIN_OBSERVED');
+    const finalAudit = auditByType.get('SettlementBatchFinalized');
+    assert.equal(finalAudit?.evidence_profile, 'CHAIN_FINAL');
+    assert.equal(finalAudit?.transaction_evidence.confirmations, 15);
+    assert.equal(finalAudit?.transaction_evidence.blockHash, `0x${'e'.repeat(64)}`);
+    const reorgAudit = auditByType.get('SettlementBatchFinalityReorged');
+    assert.equal(reorgAudit?.evidence_profile, 'CHAIN_OBSERVED');
+    assert.equal(reorgAudit?.transaction_evidence.blockHash, `0x${'e'.repeat(64)}`);
+    assert.equal(reorgAudit?.payload.canonicalBlockHash, `0x${'a'.repeat(64)}`);
+    const reorgFinality = await db.query<{ block_hash: string; evidence: Record<string, unknown> }>(
+      'SELECT block_hash, evidence FROM core.transaction_finality WHERE transaction_id LIKE $1',
+      [`settlement:%${batch.batch_id}%`],
+    );
+    assert.equal(reorgFinality.rows[0]?.block_hash, `0x${'e'.repeat(64)}`);
+    assert.equal(reorgFinality.rows[0]?.evidence.canonicalBlockHash, `0x${'a'.repeat(64)}`);
+    await assertLedgerBalanced(db, 1);
+  } finally {
+    await db.close();
+  }
+});
+
+test('coverage worker derives per-Safe liabilities, pauses on deficit and never auto-resumes', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    await recordFinalPayment(db);
+    let observation: CoverageObservation = {
+      chainId: 56,
+      blockNumber: 1_000,
+      blockHash: `0x${'7'.repeat(64)}`,
+      canonical: true,
+      evidenceHash: `0x${'8'.repeat(64)}`,
+      observedAt: new Date(),
+      assets: [
+        {
+          safeAddress: '0x3333333333333333333333333333333333333333',
+          asset: 'USDT',
+          tokenAddress: '0x55d398326f99059ff775485246999027b3197955',
+          balance: '69',
+        },
+        {
+          safeAddress: '0x4444444444444444444444444444444444444444',
+          asset: 'NPL',
+          tokenAddress: '0x4e8277ab31e4956b2cd48449793a57656dfc03d2',
+          balance: '100',
+        },
+      ],
+    };
+    const worker = new CoverageWorker({
+      transactions: transactionAdapter(db),
+      source: { observe: async () => observation },
+      expectedAssets: observation.assets.map((item) => ({
+        safeAddress: item.safeAddress,
+        asset: item.asset,
+        tokenAddress: item.tokenAddress,
+      })),
+    });
+    const deficient = await worker.pollOnce();
+    assert.deepEqual(Object.fromEntries(deficient.assets.map((item) => [item.asset, {
+      liability: item.unsettledLiability,
+      met: item.coverageMet,
+    }])), {
+      USDT: { liability: '70', met: false },
+      NPL: { liability: '100', met: true },
+    });
+    const paused = await db.query<{ scope: string }>(
+      'SELECT scope FROM core.circuit_breakers WHERE paused ORDER BY scope',
+    );
+    assert.deepEqual(paused.rows.map((row) => row.scope), ['NEW_PAYMENT', 'NEW_SETTLEMENT_BATCH']);
+
+    observation = {
+      ...observation,
+      blockNumber: 1_001,
+      blockHash: `0x${'9'.repeat(64)}`,
+      evidenceHash: `0x${'a'.repeat(64)}`,
+      observedAt: new Date(observation.observedAt.getTime() + 60_000),
+      assets: observation.assets.map((item) => ({ ...item, balance: item.asset === 'USDT' ? '70' : '100' })),
+    };
+    const recovered = await worker.pollOnce();
+    assert.ok(recovered.assets.every((item) => item.coverageMet));
+    assert.equal((await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM core.breaker_causes
+       WHERE cause_type = 'COVERAGE' AND active`,
+    )).rows[0]?.count, '2');
+    assert.equal((await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM core.outbox_events
+       WHERE event_type = 'CoverageRecoveryAwaitingGovernance'`,
+    )).rows[0]?.count, '1');
+
+    await worker.recordCanonicality({
+      snapshotId: recovered.snapshotId,
+      canonical: false,
+      observedBlockHash: `0x${'b'.repeat(64)}`,
+      evidenceHash: `0x${'c'.repeat(64)}`,
+      observedAt: new Date(observation.observedAt.getTime() + 30_000),
+    });
+    const canonicality = await db.query<{ canonical: boolean }>(
+      `SELECT canonical FROM core.coverage_snapshot_canonicality
+       WHERE snapshot_id = $1 ORDER BY observed_at`,
+      [recovered.snapshotId],
+    );
+    assert.deepEqual(canonicality.rows.map((row) => row.canonical), [true, false]);
+  } finally {
+    await db.close();
+  }
+});
+
+test('settlement batching fails closed on the latest non-canonical coverage observation', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const prepared = await prepareRequestedSettlement(db);
+    const observedAt = new Date(prepared.now.getTime() + 60_000);
+    await db.query(
+      `INSERT INTO core.coverage_snapshots (
+         snapshot_id, chain_id, block_number, block_hash, canonical, evidence_hash, recorded_at
+       ) VALUES ('coverage:latest:1', 56, 1001, $1, true, $2, $3)`,
+      [`0x${'c'.repeat(64)}`, `0x${'d'.repeat(64)}`, observedAt],
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshot_items (
+         snapshot_id, safe_address, asset, verified_asset_balance,
+         unsettled_liability, coverage_met
+       ) VALUES ('coverage:latest:1', $1, 'USDT', 70, 70, true)`,
+      [prepared.runtime.safeAddress],
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshot_canonicality (
+         observation_id, snapshot_id, canonical, observed_block_hash, evidence_hash, observed_at
+       ) VALUES
+         ('coverage-observation:latest:true', 'coverage:latest:1', true, $1, $2, $5),
+         ('coverage-observation:latest:false', 'coverage:latest:1', false, $3, $4, $5)`,
+      [
+        `0x${'c'.repeat(64)}`,
+        `0x${'d'.repeat(64)}`,
+        `0x${'e'.repeat(64)}`,
+        `0x${'f'.repeat(64)}`,
+        new Date(observedAt.getTime() + 1_000),
+      ],
+    );
+    await assert.rejects(
+      prepared.settlements.createBatch(prepared.operator, {
+        asset: 'USDT',
+        idempotencyKey: 'safe-settlement-latest-noncanonical',
+        runtime: prepared.runtime,
+      }),
+      /coverage evidence is unavailable/,
+    );
+    assert.equal((await db.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM core.settlement_batches',
+    )).rows[0]?.count, '0');
+  } finally {
+    await db.close();
+  }
+});
+
+test('payment reorg quarantines a requested settlement before it can be batched', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const prepared = await prepareRequestedSettlement(db);
+    assert.equal((await reversePayment(db, prepared.intent)).status, 'REVERSED');
+    const request = await db.query<{ state: string; batch_id: string | null }>(
+      'SELECT state, batch_id FROM core.settlement_requests WHERE request_id = $1',
+      [prepared.request.request_id],
+    );
+    assert.deepEqual(request.rows[0], { state: 'QUARANTINED', batch_id: null });
+    const exposure = await db.query<{
+      previous_request_state: string;
+      previous_batch_state: string | null;
+      final_execution_tx_hash: string | null;
+      resolution_state: string;
+    }>(
+      `SELECT previous_request_state, previous_batch_state,
+         final_execution_tx_hash, resolution_state
+       FROM core.settlement_payment_reorg_exposures WHERE request_id = $1`,
+      [prepared.request.request_id],
+    );
+    assert.deepEqual(exposure.rows[0], {
+      previous_request_state: 'REQUESTED',
+      previous_batch_state: null,
+      final_execution_tx_hash: null,
+      resolution_state: 'OPEN',
+    });
+    const requested = await db.query<{ amount: string }>(
+      `SELECT COALESCE(sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END),0)::text AS amount
+       FROM core.ledger_lines line
+       JOIN core.ledger_journals journal ON journal.journal_id = line.journal_id
+       WHERE journal.order_id = $1 AND line.balance_state = 'REQUESTED'`,
+      [prepared.intent.orderId],
+    );
+    assert.equal(requested.rows[0]?.amount, '0');
+    await assert.rejects(
+      prepared.settlements.createBatch(prepared.operator, {
+        asset: 'USDT',
+        idempotencyKey: 'reorged-request-must-not-batch',
+        runtime: prepared.runtime,
+      }),
+      /paused/,
+    );
+  } finally {
+    await db.close();
+  }
+});
+
+test('Safe replacement preserves outer sender, nonce and exact calldata before final settlement', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const prepared = await prepareBatchedSettlement(db);
+    let now = prepared.now;
+    let submittedCalldata = '';
+    const firstExecutionTxHash = `0x${'2'.repeat(64)}`;
+    const replacementExecutionTxHash = `0x${'3'.repeat(64)}`;
+    const outerSender = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+    const receipts = new Map<string, SafeSettlementReceipt>();
+    let simulateCrashBeforePersistence = true;
+    const worker = new SettlementWorker({
+      transactions: transactionAdapter(db),
+      approvals: {
+        verify: async (input) => ({
+          safeAddress: input.safeAddress,
+          safeTxHash: input.safeTxHash,
+          ownerSetHash: input.ownerSetHash,
+          threshold: input.threshold,
+          proposalReferenceHash: `0x${'c'.repeat(64)}`,
+          approvalEvidenceHash: `0x${'d'.repeat(64)}`,
+          packedSignatures: `0x${'11'.repeat(130)}`,
+          approvals: [
+            { ownerAddress: '0x1000000000000000000000000000000000000001', signature: '0x11' },
+            { ownerAddress: '0x1000000000000000000000000000000000000002', signature: '0x22' },
+          ],
+        }),
+      },
+      broadcaster: {
+        submit: async (input) => {
+          submittedCalldata = input.execTransactionCalldata;
+          if (simulateCrashBeforePersistence) throw new Error('simulated crash before persistence');
+          return {
+            executionTxHash: firstExecutionTxHash,
+            outerSender,
+            outerNonce: '21',
+            requestDigest: input.requestDigest,
+          };
+        },
+        replace: async (input) => {
+          assert.equal(input.replacementForExecutionTxHash, firstExecutionTxHash);
+          assert.equal(input.outerSender, outerSender);
+          assert.equal(input.outerNonce, '21');
+          assert.equal(input.execTransactionCalldata, submittedCalldata);
+          return {
+            executionTxHash: replacementExecutionTxHash,
+            outerSender,
+            outerNonce: '21',
+            requestDigest: input.requestDigest,
+            replacementForExecutionTxHash: firstExecutionTxHash,
+          };
+        },
+      },
+      chain: {
+        receipt: async (txHash) => receipts.get(txHash),
+        canonicalBlock: async (input) => ({
+          canonical: true,
+          observedBlockHash: input.blockHash,
+          evidenceHash: HASH,
+        }),
+      },
+      runtimeAttest: async () => prepared.runtime,
+      outerGasLimit: '1000000',
+      replacementDelayMs: 1_000,
+      clock: () => now,
+    });
+    assert.equal(await worker.approveOnce(), 1);
+    await assert.rejects(worker.submitOnce(), /simulated crash before persistence/);
+    const firstAttempt = await db.query<{ attempt_id: string; state: string }>(
+      `SELECT attempt_id, state FROM core.settlement_execution_attempts
+       WHERE batch_id = $1 AND attempt_number = 1`,
+      [prepared.batch.batch_id],
+    );
+    assert.equal(firstAttempt.rows[0]?.state, 'LEASED');
+    await db.query(
+      `UPDATE core.settlement_execution_attempts SET leased_until = $2
+       WHERE attempt_id = $1`,
+      [firstAttempt.rows[0]!.attempt_id, new Date(now.getTime() - 1)],
+    );
+    await db.query(
+      `UPDATE core.settlement_batches SET state = 'SUBMITTING', submitted_at = NULL WHERE batch_id = $1`,
+      [prepared.batch.batch_id],
+    );
+    simulateCrashBeforePersistence = false;
+    assert.equal(await worker.recoverExpiredLeaseOnce(), 1);
+    now = new Date(now.getTime() + 1_001);
+    assert.equal(await worker.replaceOnce(), 1);
+    const attempts = await db.query<{
+      attempt_id: string;
+      request_digest: string;
+      exec_transaction_calldata: string;
+      safe_tx_hash: string;
+      execution_tx_hash: string;
+      outer_sender: string;
+      outer_nonce: string;
+      replacement_for_attempt_id: string | null;
+    }>(
+      `SELECT attempt_id, request_digest, exec_transaction_calldata, safe_tx_hash,
+         execution_tx_hash, outer_sender, outer_nonce::text, replacement_for_attempt_id
+       FROM core.settlement_execution_attempts
+       WHERE batch_id = $1 ORDER BY attempt_number`,
+      [prepared.batch.batch_id],
+    );
+    assert.equal(attempts.rows.length, 2);
+    assert.equal(attempts.rows[1]?.request_digest, attempts.rows[0]?.request_digest);
+    assert.equal(attempts.rows[1]?.exec_transaction_calldata, attempts.rows[0]?.exec_transaction_calldata);
+    assert.equal(attempts.rows[1]?.safe_tx_hash, attempts.rows[0]?.safe_tx_hash);
+    assert.equal(attempts.rows[1]?.outer_sender, attempts.rows[0]?.outer_sender);
+    assert.equal(attempts.rows[1]?.outer_nonce, attempts.rows[0]?.outer_nonce);
+    assert.equal(attempts.rows[1]?.replacement_for_attempt_id, attempts.rows[0]?.attempt_id);
+
+    receipts.set(replacementExecutionTxHash, {
+      chainId: 56,
+      executionTxHash: replacementExecutionTxHash,
+      transactionTo: prepared.runtime.safeAddress,
+      transactionCalldata: submittedCalldata,
+      outerSender,
+      outerNonce: '21',
+      receiptStatus: 1,
+      blockNumber: 1_020,
+      blockHash: `0x${'e'.repeat(64)}`,
+      confirmations: 15,
+      canonicalBlock: true,
+      executionSuccessSafeTxHash: String(prepared.batch.safe_tx_hash),
+      safeNonceAfter: '8',
+      transfers: [{
+        tokenAddress: '0x55d398326f99059ff775485246999027b3197955',
+        from: prepared.runtime.safeAddress,
+        to: prepared.merchantWallet.address,
+        amount: '45',
+      }],
+      balanceDeltas: [
+        {
+          tokenAddress: '0x55d398326f99059ff775485246999027b3197955',
+          account: prepared.runtime.safeAddress,
+          delta: '-45',
+        },
+        {
+          tokenAddress: '0x55d398326f99059ff775485246999027b3197955',
+          account: prepared.merchantWallet.address,
+          delta: '45',
+        },
+      ],
+      evidenceHash: `0x${'f'.repeat(64)}`,
+    });
+    assert.equal(await worker.pollFinalityOnce(), 1);
+    const request = await db.query<{ state: string; final_execution_tx_hash: string }>(
+      `SELECT state, final_execution_tx_hash FROM core.settlement_requests WHERE request_id = $1`,
+      [prepared.request.request_id],
+    );
+    assert.deepEqual(request.rows[0], {
+      state: 'SETTLED',
+      final_execution_tx_hash: replacementExecutionTxHash,
+    });
+    assert.equal((await reversePayment(db, prepared.intent)).status, 'REVERSED');
+    const quarantined = await db.query<{
+      state: string;
+      final_execution_tx_hash: string;
+    }>(
+      `SELECT state, final_execution_tx_hash FROM core.settlement_requests WHERE request_id = $1`,
+      [prepared.request.request_id],
+    );
+    assert.deepEqual(quarantined.rows[0], {
+      state: 'QUARANTINED',
+      final_execution_tx_hash: replacementExecutionTxHash,
+    });
+    const exposure = await db.query<{
+      previous_request_state: string;
+      previous_batch_state: string;
+      final_execution_tx_hash: string;
+      resolution_state: string;
+    }>(
+      `SELECT previous_request_state, previous_batch_state,
+         final_execution_tx_hash, resolution_state
+       FROM core.settlement_payment_reorg_exposures WHERE request_id = $1`,
+      [prepared.request.request_id],
+    );
+    assert.deepEqual(exposure.rows[0], {
+      previous_request_state: 'SETTLED',
+      previous_batch_state: 'SETTLED',
+      final_execution_tx_hash: replacementExecutionTxHash,
+      resolution_state: 'OPEN',
+    });
+    assert.equal((await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM core.durable_jobs
+       WHERE job_type = 'RECONCILE' AND resource_id = $1`,
+      [prepared.intent.orderId],
+    )).rows[0]?.count, '2');
+  } finally {
+    await db.close();
+  }
+});
+
+test('Safe outer failure keeps Batched funds quarantined until the Safe nonce is safely resolved', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const prepared = await prepareBatchedSettlement(db);
+    let now = prepared.now;
+    let submittedCalldata = '';
+    let executionIndex = 0;
+    let receipt: SafeSettlementReceipt | undefined;
+    const approvals = {
+      verify: async (input: { safeAddress: string; safeTxHash: string; ownerSetHash: string; threshold: number }) => ({
+        safeAddress: input.safeAddress,
+        safeTxHash: input.safeTxHash,
+        ownerSetHash: input.ownerSetHash,
+        threshold: input.threshold,
+        proposalReferenceHash: `0x${'c'.repeat(64)}`,
+        approvalEvidenceHash: `0x${'d'.repeat(64)}`,
+        packedSignatures: `0x${'11'.repeat(130)}`,
+        approvals: [
+          { ownerAddress: '0x1000000000000000000000000000000000000001', signature: '0x11' },
+          { ownerAddress: '0x1000000000000000000000000000000000000002', signature: '0x22' },
+        ],
+      }),
+    };
+    const worker = new SettlementWorker({
+      transactions: transactionAdapter(db),
+      approvals,
+      broadcaster: {
+        submit: async (input) => {
+          executionIndex += 1;
+          submittedCalldata = input.execTransactionCalldata;
+          return {
+            executionTxHash: `0x${String(executionIndex + 1).repeat(64)}`,
+            outerSender: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+            outerNonce: String(20 + executionIndex),
+            requestDigest: input.requestDigest,
+          };
+        },
+        replace: async () => {
+          throw new Error('unexpected replacement');
+        },
+      },
+      chain: {
+        receipt: async () => receipt,
+        canonicalBlock: async (input) => ({
+          canonical: true,
+          observedBlockHash: input.blockHash,
+          evidenceHash: HASH,
+        }),
+      },
+      runtimeAttest: async () => prepared.runtime,
+      outerGasLimit: '1000000',
+      clock: () => now,
+    });
+    assert.equal(await worker.approveOnce(), 1);
+    assert.equal(await worker.submitOnce(), 1);
+    receipt = {
+      chainId: 56,
+      executionTxHash: `0x${'2'.repeat(64)}`,
+      transactionTo: prepared.runtime.safeAddress,
+      transactionCalldata: submittedCalldata,
+      outerSender: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+      outerNonce: '21',
+      receiptStatus: 0,
+      blockNumber: 1_020,
+      blockHash: `0x${'e'.repeat(64)}`,
+      confirmations: 1,
+      canonicalBlock: true,
+      executionFailureSafeTxHash: String(prepared.batch.safe_tx_hash),
+      safeNonceAfter: '7',
+      transfers: [],
+      balanceDeltas: [],
+      evidenceHash: `0x${'f'.repeat(64)}`,
+    };
+    assert.equal(await worker.pollFinalityOnce(), 1);
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.settlement_requests WHERE request_id = $1',
+      [prepared.request.request_id],
+    )).rows[0]?.state, 'BATCHED');
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.settlement_batches WHERE batch_id = $1',
+      [prepared.batch.batch_id],
+    )).rows[0]?.state, 'MINED');
+    const batched = await db.query<{ amount: string }>(
+      `SELECT sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS amount
+       FROM core.ledger_lines line
+       JOIN core.ledger_accounts account ON account.account_id = line.account_id
+       WHERE account.owner_id = $1 AND account.purpose = 'MERCHANT_RECEIVABLE'
+         AND line.balance_state = 'BATCHED'`,
+      [prepared.merchantWallet.address.toLowerCase()],
+    );
+    assert.equal(batched.rows[0]?.amount, '45');
+    receipt = { ...receipt, confirmations: 15 };
+    assert.equal(await worker.pollFinalityOnce(), 1);
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.settlement_batches WHERE batch_id = $1',
+      [prepared.batch.batch_id],
+    )).rows[0]?.state, 'QUARANTINED');
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.settlement_requests WHERE request_id = $1',
+      [prepared.request.request_id],
+    )).rows[0]?.state, 'BATCHED');
+    assert.equal((await db.query<{ paused: boolean }>(
+      "SELECT paused FROM core.circuit_breakers WHERE scope = 'NEW_SETTLEMENT_BATCH'",
+    )).rows[0]?.paused, true);
+    const failureAudit = await db.query<{
+      evidence_profile: string;
+      transaction_evidence: Record<string, unknown>;
+    }>(
+      `SELECT evidence_profile, transaction_evidence FROM core.audit_outbox_events
+       WHERE event_type = 'SettlementFinalityQuarantined' AND resource_id = $1`,
+      [prepared.batch.batch_id],
+    );
+    assert.equal(failureAudit.rows[0]?.evidence_profile, 'CHAIN_OBSERVED');
+    assert.equal(failureAudit.rows[0]?.transaction_evidence.txHash, receipt.executionTxHash);
+    assert.equal(failureAudit.rows[0]?.transaction_evidence.confirmations, 15);
+  } finally {
+    await db.close();
+  }
+});
+
+test('merchant guarantee finality is policy-bound, audited and frozen across deep reorg', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    await seedCatalog(db, 1);
+    const operationsSafe = '0x5555555555555555555555555555555555555555';
+    const amount = (1_000n * 10n ** 18n).toString();
+    let now = new Date('2026-07-15T09:00:00.000Z');
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES ($1,'MERCHANT','merchant-1','ACTIVE',$2)`,
+      [MERCHANT, HASH],
+    );
+    const service = new GuaranteeDepositService({
+      transactions: transactionAdapter(db),
+      operationsSafeAddress: operationsSafe,
+      clock: () => now,
+    });
+    const actor = { walletAddress: MERCHANT, roles: ['MERCHANT'] as const, merchantId: 'merchant-1' };
+    await db.query(
+      "UPDATE core.wallet_role_bindings SET status = 'REVOKED', revoked_at = $2 WHERE wallet_address = $1 AND role = 'MERCHANT'",
+      [MERCHANT, now],
+    );
+    await assert.rejects(
+      service.submit(actor, {
+        policyVersion: '1',
+        expectedAmountUsdt: amount,
+        transactionHash: `0x${'c'.repeat(64)}`,
+        idempotencyKey: 'guarantee-role-revoked',
+        correlationId: 'guarantee-role-revoked',
+      }),
+      /Current merchant role cannot submit/,
+    );
+    await db.query(
+      "UPDATE core.wallet_role_bindings SET status = 'ACTIVE', revoked_at = NULL WHERE wallet_address = $1 AND role = 'MERCHANT'",
+      [MERCHANT],
+    );
+    const wrongSafeService = new GuaranteeDepositService({
+      transactions: transactionAdapter(db),
+      operationsSafeAddress: '0x6666666666666666666666666666666666666666',
+      clock: () => now,
+    });
+    await assert.rejects(
+      wrongSafeService.submit(actor, {
+        policyVersion: '1',
+        expectedAmountUsdt: amount,
+        transactionHash: `0x${'c'.repeat(64)}`,
+        idempotencyKey: 'guarantee-wrong-safe',
+        correlationId: 'guarantee-wrong-safe',
+      }),
+      /Policy and runtime Operations Treasury Safe do not match/,
+    );
+    const submission = await service.submit(actor, {
+      policyVersion: '1',
+      expectedAmountUsdt: amount,
+      transactionHash: `0x${'c'.repeat(64)}`,
+      idempotencyKey: 'guarantee-finality-1',
+      correlationId: 'guarantee-finality-submit',
+    });
+    assert.deepEqual(await service.submit(actor, {
+      policyVersion: '1',
+      expectedAmountUsdt: amount,
+      transactionHash: `0x${'c'.repeat(64)}`,
+      idempotencyKey: 'guarantee-finality-1',
+      correlationId: 'guarantee-finality-submit',
+    }), submission);
+    await assert.rejects(
+      service.submit(actor, {
+        policyVersion: '1',
+        expectedAmountUsdt: (BigInt(amount) + 1n).toString(),
+        transactionHash: `0x${'c'.repeat(64)}`,
+        idempotencyKey: 'guarantee-finality-1',
+        correlationId: 'guarantee-finality-conflict',
+      }),
+      /idempotency conflict/,
+    );
+    let observation: GuaranteeDepositChainObservation = {
+      state: 'MINED',
+      transactionHash: submission.transactionHash,
+      tokenAddress: '0x55d398326f99059ff775485246999027b3197955',
+      from: MERCHANT,
+      to: operationsSafe,
+      amount,
+      blockNumber: 1_000,
+      blockHash: `0x${'d'.repeat(64)}`,
+      logIndex: 2,
+      confirmations: 14,
+      receiptStatus: 1 as const,
+      canonicalBlock: true as const,
+      transferEvidenceHash: `0x${'e'.repeat(64)}`,
+      observedAt: now,
+    };
+    const worker = new GuaranteeDepositWorker({
+      service,
+      source: { observe: async () => observation },
+    });
+    assert.equal(await worker.pollOnce(), 1);
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.merchant_guarantee_deposit_submissions WHERE deposit_id = $1',
+      [submission.depositId],
+    )).rows[0]?.state, 'MINED');
+    assert.equal((await db.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM core.merchant_guarantees',
+    )).rows[0]?.count, '0');
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.audit_outbox_events WHERE event_type = 'GuaranteeDepositFinalized'",
+    )).rows[0]?.count, '0');
+
+    await assert.rejects(
+      service.recordObservation(submission.depositId, {
+        ...observation,
+        blockNumber: 1_001,
+        blockHash: `0x${'9'.repeat(64)}`,
+        transferEvidenceHash: `0x${'8'.repeat(64)}`,
+      }),
+      /record reorg before new chain evidence/,
+    );
+
+    now = new Date(now.getTime() + 1_000);
+    observation = {
+      ...observation,
+      state: 'FINAL',
+      confirmations: 15,
+      transferEvidenceHash: `0x${'f'.repeat(64)}`,
+      observedAt: now,
+    };
+    assert.equal(await worker.pollOnce(), 1);
+    const journal = await db.query<{
+      policy_version: string | number;
+      source_tx_hash: string;
+      source_block_hash: string;
+      source_kind: string;
+    }>(
+      "SELECT policy_version, source_tx_hash, source_block_hash, source_kind FROM core.ledger_journals WHERE event_type = 'GUARANTEE_DEPOSITED'",
+    );
+    assert.equal(Number(journal.rows[0]?.policy_version), 1);
+    assert.equal(journal.rows[0]?.source_tx_hash, submission.transactionHash);
+    assert.equal(journal.rows[0]?.source_block_hash, observation.blockHash);
+    assert.equal(journal.rows[0]?.source_kind, 'CHAIN_EVENT');
+    const lineBalance = await db.query<{ debits: string; credits: string }>(
+      `SELECT sum(CASE WHEN side = 'DEBIT' THEN amount ELSE 0 END)::text AS debits,
+         sum(CASE WHEN side = 'CREDIT' THEN amount ELSE 0 END)::text AS credits
+       FROM core.ledger_lines WHERE journal_id = (
+         SELECT journal_id FROM core.ledger_journals WHERE event_type = 'GUARANTEE_DEPOSITED'
+       )`,
+    );
+    assert.equal(lineBalance.rows[0]?.debits, amount);
+    assert.equal(lineBalance.rows[0]?.credits, amount);
+    const finalAudit = await db.query<{
+      evidence_profile: string;
+      correlation_id: string;
+      transaction_evidence: Record<string, unknown>;
+    }>(
+      "SELECT evidence_profile, correlation_id, transaction_evidence FROM core.audit_outbox_events WHERE event_type = 'GuaranteeDepositFinalized'",
+    );
+    assert.equal(finalAudit.rows[0]?.evidence_profile, 'CHAIN_FINAL');
+    assert.equal(finalAudit.rows[0]?.correlation_id, 'guarantee-finality-submit');
+    assert.equal(finalAudit.rows[0]?.transaction_evidence.txHash, submission.transactionHash);
+    assert.equal(finalAudit.rows[0]?.transaction_evidence.contractAddress, '0x55d398326f99059ff775485246999027b3197955');
+    assert.equal(finalAudit.rows[0]?.transaction_evidence.eventSignatureHash, id('Transfer(address,address,uint256)'));
+    assert.equal(finalAudit.rows[0]?.transaction_evidence.logIndex, 2);
+    assert.equal(finalAudit.rows[0]?.transaction_evidence.policyVersion, 1);
+    assert.equal(finalAudit.rows[0]?.transaction_evidence.confirmations, 15);
+    await assert.rejects(
+      db.query(
+        'UPDATE core.merchant_guarantee_deposit_submissions SET expected_amount_usdt = expected_amount_usdt + 1 WHERE deposit_id = $1',
+        [submission.depositId],
+      ),
+      /ImmutableGuaranteeDepositSubmission/,
+    );
+    await assert.rejects(
+      db.query(
+        "UPDATE core.merchant_guarantee_deposit_transitions SET evidence_hash = $2 WHERE deposit_id = $1 AND event_type = 'FINAL'",
+        [submission.depositId, `0x${'1'.repeat(64)}`],
+      ),
+      /ImmutableRecord/,
+    );
+
+    now = new Date(now.getTime() + 1_000);
+    await service.recordReorg(submission.depositId, {
+      state: 'REORGED',
+      transactionHash: submission.transactionHash,
+      previousBlockNumber: 1_000,
+      previousBlockHash: observation.blockHash,
+      previousLogIndex: 2,
+      canonicalBlockHash: `0x${'a'.repeat(64)}`,
+      confirmations: 15,
+      evidenceHash: `0x${'b'.repeat(64)}`,
+      observedAt: now,
+    });
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.merchant_guarantee_reorg_exposures WHERE deposit_id = $1',
+      [submission.depositId],
+    )).rows[0]?.state, 'OPEN');
+    await assert.rejects(
+      db.query(
+        'UPDATE core.merchant_guarantee_reorg_exposures SET amount_usdt = amount_usdt + 1 WHERE deposit_id = $1',
+        [submission.depositId],
+      ),
+      /ImmutableGuaranteeReorgExposure/,
+    );
+    assert.equal((await db.query<{ guarantee_status: string }>(
+      "SELECT guarantee_status FROM core.merchants WHERE merchant_id = 'merchant-1'",
+    )).rows[0]?.guarantee_status, 'FROZEN');
+    assert.deepEqual((await db.query<{ scope: string; paused: boolean }>(
+      'SELECT scope, paused FROM core.circuit_breakers ORDER BY scope',
+    )).rows, [
+      { scope: 'NEW_PAYMENT', paused: true },
+      { scope: 'NEW_SETTLEMENT_BATCH', paused: true },
+    ]);
+    assert.equal((await db.query<{ evidence_profile: string }>(
+      "SELECT evidence_profile FROM core.audit_outbox_events WHERE event_type = 'GuaranteeDepositReorged'",
+    )).rows[0]?.evidence_profile, 'CHAIN_OBSERVED');
+
+    now = new Date(now.getTime() + 1_000);
+    const replacementFinal = {
+      ...observation,
+      blockNumber: 1_001,
+      blockHash: `0x${'9'.repeat(64)}`,
+      confirmations: 15,
+      transferEvidenceHash: `0x${'8'.repeat(64)}`,
+      observedAt: now,
+    };
+    assert.equal((await service.recordObservation(submission.depositId, replacementFinal)).state, 'FINAL');
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.ledger_journals WHERE event_type = 'GUARANTEE_DEPOSITED'",
+    )).rows[0]?.count, '1');
+    assert.equal((await db.query<{ balance_usdt: string }>(
+      "SELECT balance_usdt::text FROM core.merchant_guarantees WHERE merchant_id = 'merchant-1'",
+    )).rows[0]?.balance_usdt, amount);
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.merchant_guarantee_reorg_exposures WHERE deposit_id = $1',
+      [submission.depositId],
+    )).rows[0]?.state, 'RESOLVED');
+    assert.equal((await db.query<{ guarantee_status: string }>(
+      "SELECT guarantee_status FROM core.merchants WHERE merchant_id = 'merchant-1'",
+    )).rows[0]?.guarantee_status, 'READY');
+    assert.ok((await db.query<{ paused: boolean }>(
+      'SELECT paused FROM core.circuit_breakers',
+    )).rows.every((row) => row.paused));
+    assert.ok((await db.query<{ active: boolean }>(
+      "SELECT active FROM core.breaker_causes WHERE cause_type = 'SECURITY'",
+    )).rows.every((row) => !row.active));
+
+    await db.query(
+      `INSERT INTO core.merchant_guarantee_deposit_submissions (
+         deposit_id, merchant_id, merchant_wallet, policy_version, chain_id,
+         token_address, operations_safe_address, expected_amount_usdt,
+         transaction_hash, state, idempotency_key, request_hash,
+         correlation_id, submitted_by, created_at, updated_at
+       )
+       SELECT
+         'guarantee-fairness:' || value, 'merchant-1', $1, 1, 56,
+         $2, $3, 1, '0x' || lpad(to_hex(value), 64, '0'), 'SUBMITTED',
+         'fairness-key-' || value, '0x' || lpad(to_hex(value + 100), 64, '0'),
+         'guarantee-fairness', $1, $4, $4
+       FROM generate_series(1, 25) value`,
+      [MERCHANT, USDT_ADDRESS, operationsSafe.toLowerCase(), new Date('2026-07-15T08:00:00.000Z')],
+    );
+    const firstFinalityPage = await service.pendingFinality(25);
+    assert.equal(firstFinalityPage.some((item) => item.depositId === submission.depositId), false);
+    const secondFinalityPage = await service.pendingFinality(25);
+    assert.equal(secondFinalityPage.some((item) => item.depositId === submission.depositId), true);
+
+    const rollbackSubmission = await service.submit(actor, {
+      policyVersion: '1',
+      expectedAmountUsdt: '1',
+      transactionHash: `0x${'7'.repeat(64)}`,
+      idempotencyKey: 'guarantee-audit-rollback',
+      correlationId: 'guarantee-audit-rollback',
+    });
+    const auditFailingService = new GuaranteeDepositService({
+      transactions: transactionAdapter(db, (sql) => {
+        if (sql.includes('INSERT INTO core.audit_outbox_events')) throw new Error('InjectedGuaranteeAuditFailure');
+      }),
+      operationsSafeAddress: operationsSafe,
+      clock: () => now,
+    });
+    await assert.rejects(
+      auditFailingService.recordObservation(rollbackSubmission.depositId, {
+        ...replacementFinal,
+        transactionHash: rollbackSubmission.transactionHash,
+        amount: '1',
+        blockNumber: 1_002,
+        blockHash: `0x${'6'.repeat(64)}`,
+        logIndex: 3,
+        transferEvidenceHash: `0x${'5'.repeat(64)}`,
+      }),
+      /InjectedGuaranteeAuditFailure/,
+    );
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.merchant_guarantee_deposit_submissions WHERE deposit_id = $1',
+      [rollbackSubmission.depositId],
+    )).rows[0]?.state, 'SUBMITTED');
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.ledger_journals WHERE event_type = 'GUARANTEE_DEPOSITED'",
+    )).rows[0]?.count, '1');
+    assert.equal((await db.query<{ balance_usdt: string }>(
+      "SELECT balance_usdt::text FROM core.merchant_guarantees WHERE merchant_id = 'merchant-1'",
+    )).rows[0]?.balance_usdt, amount);
+  } finally {
+    await db.close();
+  }
+});
+
+test('takeover funding consumes final guarantee first and records Operations advance as merchant debt', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const intent = await recordFinalPayment(db);
+    await db.query(
+      `UPDATE core.skus SET stock_total = stock_total + 1,
+         stock_available = stock_available + 1 WHERE sku_id = 'sku-1'`,
+    );
+    const rotatedOperationsSafe = '0x6666666666666666666666666666666666666666';
+    await db.query(
+      `INSERT INTO core.policy_snapshots (
+         policy_version, artifact_version, policy_hash, oracle_version,
+         rules_content_hash, beneficiary_set_hash, payload, publication_status
+       ) VALUES (2, $1, $2, $3, $4, $5, $6, 'PUBLISHED')`,
+      [
+        CORE_ARTIFACT_VERSION,
+        `0x${'8'.repeat(64)}`,
+        HASH_2,
+        `0x${'a'.repeat(64)}`,
+        `0x${'b'.repeat(64)}`,
+        JSON.stringify({ ...paymentPolicyPayload(), operationsTreasurySafe: rotatedOperationsSafe }),
+      ],
+    );
+    const futureIntent = paymentIntent();
+    futureIntent.policyVersion = 2;
+    futureIntent.orderId = `0x${'9'.repeat(64)}`;
+    futureIntent.reservationId = `0x${'7'.repeat(64)}`;
+    futureIntent.reservationHash = `0x${'8'.repeat(64)}`;
+    futureIntent.nonce = '2';
+    await reserveInventory(adapter(db), {
+      reservationId: futureIntent.reservationId,
+      reservationHash: futureIntent.reservationHash,
+      policyVersion: futureIntent.policyVersion,
+      skuId: 'sku-1',
+      buyerWallet: futureIntent.buyer,
+      quantity: futureIntent.quantity,
+      classification: 'ORDINARY',
+      expiresAt: new Date(futureIntent.reservationDeadline * 1000),
+    });
+    await insertPaymentQuote(db, futureIntent, 'future-proceeds-payment-quote');
+    const futurePayment = paymentInput(futureIntent);
+    futurePayment.event.transactionHash = `0x${'a'.repeat(64)}`;
+    futurePayment.event.blockHash = `0x${'b'.repeat(64)}`;
+    await new PostgresPaymentStore(transactionAdapter(db)).record(futurePayment);
+    let now = new Date((intent.issuedAt + 60) * 1000);
+    const takeoverSecondary = Wallet.createRandom();
+    const takeoverGovernanceSafe = '0x7777777777777777777777777777777777777777';
+    const funding = governedTakeoverFundingService(
+      db,
+      takeoverSecondary,
+      takeoverGovernanceSafe,
+      () => now,
+    );
+    const guaranteeAmount = (1_000n * 10n ** 18n).toString();
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES ($1,'MERCHANT','merchant-1','ACTIVE',$2)`,
+      [MERCHANT, HASH],
+    );
+    const guaranteeDeposits = new GuaranteeDepositService({
+      transactions: transactionAdapter(db),
+      operationsSafeAddress: '0x5555555555555555555555555555555555555555',
+      clock: () => now,
+    });
+    const deposit = await guaranteeDeposits.submit({ walletAddress: MERCHANT, roles: ['MERCHANT'], merchantId: 'merchant-1' }, {
+      policyVersion: '1',
+      expectedAmountUsdt: guaranteeAmount,
+      transactionHash: `0x${'3'.repeat(64)}`,
+      idempotencyKey: 'guarantee-deposit-1',
+      correlationId: 'guarantee-deposit-submit',
+    });
+    const finalDeposit = {
+      state: 'FINAL' as const,
+      transactionHash: deposit.transactionHash,
+      tokenAddress: '0x55d398326f99059ff775485246999027b3197955',
+      from: MERCHANT,
+      to: deposit.operationsSafeAddress,
+      amount: guaranteeAmount,
+      blockHash: `0x${'4'.repeat(64)}`,
+      blockNumber: 500,
+      logIndex: 1,
+      confirmations: 15,
+      receiptStatus: 1 as const,
+      canonicalBlock: true as const,
+      transferEvidenceHash: `0x${'5'.repeat(64)}`,
+      observedAt: now,
+    };
+    assert.equal((await guaranteeDeposits.recordObservation(deposit.depositId, finalDeposit)).state, 'FINAL');
+    assert.equal((await guaranteeDeposits.recordObservation(deposit.depositId, finalDeposit)).state, 'FINAL');
+    await assert.rejects(
+      async () => guaranteeDeposits.recordObservation(deposit.depositId, { ...finalDeposit, confirmations: 14 }),
+      /fewer than 15 confirmations/,
+    );
+
+    now = new Date((intent.issuedAt + 42) * 1000 + 7 * 24 * 60 * 60 * 1000);
+    const fulfillment = new FulfillmentService({ transactions: transactionAdapter(db), clock: () => now });
+    const operator = {
+      walletAddress: '0x9999999999999999999999999999999999999999',
+      roles: ['OPERATOR'] as const,
+    };
+    await grantRole(db, operator.walletAddress, 'OPERATOR');
+    const takeover = await fulfillment.openTakeover(operator, intent.orderId, {
+      idempotencyKey: 'funded-takeover-open-1',
+      evidenceHash: `0x${'6'.repeat(64)}`,
+      reasonCode: 'NO_SHIPMENT',
+    });
+    const required = (BigInt(guaranteeAmount) + 10n).toString();
+    const operationsSafe = rotatedOperationsSafe;
+    const fundingApproval = await signedTakeoverFundingApproval(
+      funding,
+      operator,
+      {
+        caseId: takeover.caseId,
+        requiredUsdt: required,
+        operationsSafeAddress: operationsSafe,
+      },
+      takeoverSecondary,
+      '1',
+      String(Math.floor(now.getTime() / 1_000) + 300),
+    );
+    const fundingCommand = {
+      caseId: takeover.caseId,
+      requiredUsdt: required,
+      operationsSafeAddress: operationsSafe,
+      idempotencyKey: 'takeover-funding-command-1',
+      correlationId: 'takeover-funding-correlation-1',
+      approval: fundingApproval,
+    };
+    await db.query(
+      `UPDATE core.wallet_role_bindings SET status = 'REVOKED', revoked_at = clock_timestamp()
+       WHERE wallet_address = $1 AND role = 'OPERATOR'`,
+      [operator.walletAddress],
+    );
+    await assert.rejects(funding.fundTakeover(operator, fundingCommand), /Current wallet role cannot fund takeover/);
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.takeover_cases WHERE case_id = $1',
+      [takeover.caseId],
+    )).rows[0]?.state, 'OPEN');
+    await grantRole(db, operator.walletAddress, 'OPERATOR');
+    const result = await funding.fundTakeover(operator, fundingCommand);
+    assert.deepEqual(result, {
+      caseId: takeover.caseId,
+      state: 'FUNDED',
+      requiredUsdt: required,
+      guaranteeUsedUsdt: guaranteeAmount,
+      frozenReceivablesUsedUsdt: '0',
+      futureProceedsUsedUsdt: '0',
+      platformAdvanceUsdt: '10',
+      merchantDebtUsdt: '10',
+    });
+    assert.deepEqual(await funding.fundTakeover(operator, fundingCommand), result);
+    const fundingEvidence = await db.query<{
+      correlation_id: string;
+      safe_owner_approvals: unknown[];
+      source_tx_hash: string | null;
+      source_block_hash: string | null;
+      evidence_profile: string;
+      signature_evidence: Record<string, unknown>;
+      transaction_evidence: Record<string, unknown>;
+    }>(
+      `SELECT command.correlation_id, command.safe_owner_approvals,
+         journal.source_tx_hash, journal.source_block_hash,
+         audit.evidence_profile, audit.signature_evidence, audit.transaction_evidence
+       FROM core.takeover_funding_commands command
+       JOIN core.ledger_journals journal
+         ON journal.resource_type = 'TAKEOVER_CASE' AND journal.resource_id = command.case_id
+       JOIN core.audit_outbox_events audit
+         ON audit.event_type = 'TakeoverFundingApproved' AND audit.resource_id = command.case_id
+       WHERE command.case_id = $1 ORDER BY journal.journal_id LIMIT 1`,
+      [takeover.caseId],
+    );
+    assert.equal(fundingEvidence.rows[0]?.correlation_id, 'takeover-funding-correlation-1');
+    assert.equal(fundingEvidence.rows[0]?.safe_owner_approvals.length, 2);
+    assert.equal(fundingEvidence.rows[0]?.source_tx_hash, null);
+    assert.equal(fundingEvidence.rows[0]?.source_block_hash, null);
+    assert.equal(fundingEvidence.rows[0]?.evidence_profile, 'SAFE_APPROVED');
+    assert.equal(fundingEvidence.rows[0]?.signature_evidence.scheme, 'EIP712');
+    assert.deepEqual(fundingEvidence.rows[0]?.transaction_evidence, {});
+    const debt = await db.query<{ outstanding_usdt: string }>(
+      'SELECT outstanding_usdt::text FROM core.merchant_debts WHERE merchant_id = $1',
+      ['merchant-1'],
+    );
+    assert.equal(debt.rows[0]?.outstanding_usdt, '10');
+    const guarantee = await db.query<{ balance_usdt: string }>(
+      'SELECT balance_usdt::text FROM core.merchant_guarantees WHERE merchant_id = $1',
+      ['merchant-1'],
+    );
+    assert.equal(guarantee.rows[0]?.balance_usdt, '0');
+
+    const merchant = {
+      walletAddress: MERCHANT,
+      roles: ['MERCHANT'] as const,
+      merchantId: 'merchant-1',
+    };
+    await fulfillment.recordShipment(merchant, futureIntent.orderId, {
+      idempotencyKey: 'future-proceeds-shipment-1',
+      evidenceHash: `0x${'8'.repeat(64)}`,
+      carrierCode: 'SF',
+      trackingNumberHash: `0x${'9'.repeat(64)}`,
+    });
+    await fulfillment.recordDelivery(operator, futureIntent.orderId, {
+      idempotencyKey: 'future-proceeds-delivery-1',
+      evidenceHash: `0x${'a'.repeat(64)}`,
+    });
+    await fulfillment.confirmReceipt(
+      { walletAddress: BUYER, roles: ['BUYER'] },
+      futureIntent.orderId,
+      { idempotencyKey: 'future-proceeds-receipt-1', evidenceHash: `0x${'b'.repeat(64)}` },
+    );
+    const repaid = await db.query<{ recovered_usdt: string; outstanding_usdt: string }>(
+      `SELECT recovered_usdt::text, outstanding_usdt::text
+       FROM core.merchant_debts WHERE merchant_id = 'merchant-1'`,
+    );
+    assert.deepEqual(repaid.rows[0], { recovered_usdt: '10', outstanding_usdt: '0' });
+    const futureProceedsAudit = await db.query<{
+      evidence_profile: string;
+      correlation_id: string;
+      transaction_evidence: Record<string, unknown>;
+    }>(
+      `SELECT evidence_profile, correlation_id, transaction_evidence
+       FROM core.audit_outbox_events
+       WHERE event_type = 'MerchantFutureProceedsCaptured' AND resource_id = 'merchant-1'`,
+    );
+    assert.equal(futureProceedsAudit.rows[0]?.evidence_profile, 'SYSTEM');
+    assert.match(futureProceedsAudit.rows[0]?.correlation_id ?? '', /^fulfillment:command:/);
+    assert.deepEqual(futureProceedsAudit.rows[0]?.transaction_evidence, {});
+    const reimbursement = await db.query<{ owner_id: string; amount: string }>(
+      `SELECT account.owner_id,
+         sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS amount
+       FROM core.ledger_lines line
+       JOIN core.ledger_accounts account ON account.account_id = line.account_id
+       WHERE account.purpose = 'OPERATIONS_REIMBURSEMENT' AND line.balance_state = 'AVAILABLE'
+       GROUP BY account.owner_id`,
+    );
+    assert.deepEqual(reimbursement.rows, [{ owner_id: operationsSafe, amount: '10' }]);
+
+    await new PostgresPaymentStore(transactionAdapter(db)).reverse(
+      paymentEventKey(
+        futurePayment.event.transactionHash,
+        futurePayment.event.logIndex,
+        futurePayment.event.blockHash,
+      ),
+      `0x${'c'.repeat(64)}`,
+    );
+    const reorgedDebt = await db.query<{ recovered_usdt: string; outstanding_usdt: string }>(
+      `SELECT recovered_usdt::text, outstanding_usdt::text
+       FROM core.merchant_debts WHERE merchant_id = 'merchant-1'`,
+    );
+    assert.deepEqual(reorgedDebt.rows[0], { recovered_usdt: '0', outstanding_usdt: '10' });
+    const debtReorgAudit = await db.query<{
+      evidence_profile: string;
+      payload: Record<string, unknown>;
+      transaction_evidence: Record<string, unknown>;
+    }>(
+      `SELECT evidence_profile, payload, transaction_evidence
+       FROM core.audit_outbox_events
+       WHERE event_type = 'PaymentFinalityReorged' AND resource_id = $1`,
+      [futureIntent.orderId],
+    );
+    assert.equal(debtReorgAudit.rows[0]?.evidence_profile, 'CHAIN_OBSERVED');
+    assert.equal(debtReorgAudit.rows[0]?.payload.reversedDebtRecoveries, 1);
+    assert.equal(debtReorgAudit.rows[0]?.transaction_evidence.txHash, futurePayment.event.transactionHash);
+    assert.equal(debtReorgAudit.rows[0]?.transaction_evidence.eventSignatureHash, id(
+      'PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)',
+    ));
+    assert.equal(debtReorgAudit.rows[0]?.transaction_evidence.logIndex, futurePayment.event.logIndex);
+    await assertLedgerBalanced(db, 1);
+  } finally {
+    await db.close();
+  }
+});
+
+test('governed takeover and Operations reimbursement bind secondary approval, frozen target and separate Safes', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const intent = await recordFinalPayment(db);
+    let now = new Date((intent.issuedAt + 42) * 1000 + 7 * 24 * 60 * 60 * 1000);
+    const operatorWallet = Wallet.createRandom();
+    const operator = { walletAddress: operatorWallet.address, roles: ['OPERATOR'] as const };
+    await grantRole(db, operator.walletAddress, 'OPERATOR');
+    const fulfillment = new FulfillmentService({ transactions: transactionAdapter(db), clock: () => now });
+    const takeover = await fulfillment.openTakeover(operator, intent.orderId, {
+      idempotencyKey: 'governed-takeover-open-1',
+      evidenceHash: `0x${'6'.repeat(64)}`,
+      reasonCode: 'NO_SHIPMENT',
+    });
+    const operationsSafe = '0x5555555555555555555555555555555555555555';
+    const custodySafe = '0x3333333333333333333333333333333333333333';
+    const secondary = Wallet.createRandom();
+    const governanceSafe = '0x7777777777777777777777777777777777777777';
+    const funding = governedTakeoverFundingService(db, secondary, governanceSafe, () => now);
+    const fundingApproval = await signedTakeoverFundingApproval(
+      funding,
+      operator,
+      { caseId: takeover.caseId, requiredUsdt: '20', operationsSafeAddress: operationsSafe },
+      secondary,
+      '9',
+      String(Math.floor(now.getTime() / 1_000) + 300),
+    );
+    const funded = await funding.fundTakeover(operator, {
+      caseId: takeover.caseId,
+      requiredUsdt: '20',
+      operationsSafeAddress: operationsSafe,
+      idempotencyKey: 'governed-takeover-funding-1',
+      correlationId: 'governed-takeover-funding-correlation-1',
+      approval: fundingApproval,
+    });
+    assert.equal(funded?.platformAdvanceUsdt, '20');
+
+    const settlements = new SettlementService({
+      transactions: transactionAdapter(db),
+      secondarySignerAddress: secondary.address,
+      governanceVerifyingContract: governanceSafe,
+      clock: () => now,
+    });
+    const takeoverAccount = `takeover:${takeover.caseId}:usdt`;
+    const replacementRecipient = '0x8888888888888888888888888888888888888888';
+    const takeoverApprovalIntent: SensitiveActionIntent = {
+      action: 'CREATE_TAKEOVER_PAYOUT',
+      resourceType: 'TAKEOVER_CASE',
+      resourceId: takeover.caseId,
+      policyVersion: 1n,
+      oldValueHash: stableHash({
+        accountId: takeoverAccount,
+        availableAmount: '20',
+        backingSafeAddress: operationsSafe,
+      }),
+      newValueHash: stableHash({
+        rail: 'TAKEOVER_USDT',
+        resourceId: takeover.caseId,
+        orderId: intent.orderId,
+        accountId: takeoverAccount,
+        recipient: replacementRecipient,
+        amount: '10',
+        fulfillmentTargetHash: HASH,
+      }),
+      safeAddress: operationsSafe,
+      nonce: 1n,
+      deadline: BigInt(Math.floor(now.getTime() / 1000) + 300),
+    };
+    const takeoverApproval = await signedGovernedApproval(secondary, governanceSafe, takeoverApprovalIntent);
+    const takeoverChallenge = await settlements.createGovernedIntent(operator, {
+      rail: 'TAKEOVER_USDT',
+      resourceId: takeover.caseId,
+      orderId: intent.orderId,
+      accountId: takeoverAccount,
+      recipient: replacementRecipient,
+      fulfillmentTargetHash: HASH,
+      amount: '10',
+      idempotencyKey: 'governed-takeover-intent-1',
+      approval: takeoverApproval,
+    });
+    assert.equal((await settlements.createGovernedIntent(operator, {
+      rail: 'TAKEOVER_USDT',
+      resourceId: takeover.caseId,
+      orderId: intent.orderId,
+      accountId: takeoverAccount,
+      recipient: replacementRecipient,
+      fulfillmentTargetHash: HASH,
+      amount: '10',
+      idempotencyKey: 'governed-takeover-intent-1',
+      approval: takeoverApproval,
+    })).digest, takeoverChallenge.digest);
+    await assert.rejects(
+      settlements.createGovernedIntent(operator, {
+        rail: 'TAKEOVER_USDT',
+        resourceId: takeover.caseId,
+        orderId: intent.orderId,
+        accountId: takeoverAccount,
+        recipient: replacementRecipient,
+        fulfillmentTargetHash: HASH,
+        amount: '10',
+        idempotencyKey: 'governed-takeover-intent-replay',
+        approval: takeoverApproval,
+      }),
+      /already consumed/,
+    );
+    const changedRecipient = '0x9999999999999999999999999999999999999999';
+    const changedRecipientApprovalIntent: SensitiveActionIntent = {
+      ...takeoverApprovalIntent,
+      nonce: 99n,
+      newValueHash: stableHash({
+        rail: 'TAKEOVER_USDT',
+        resourceId: takeover.caseId,
+        orderId: intent.orderId,
+        accountId: takeoverAccount,
+        recipient: changedRecipient,
+        amount: '10',
+        fulfillmentTargetHash: HASH,
+      }),
+    };
+    await assert.rejects(
+      settlements.createGovernedIntent(operator, {
+        rail: 'TAKEOVER_USDT',
+        resourceId: takeover.caseId,
+        orderId: intent.orderId,
+        accountId: takeoverAccount,
+        recipient: changedRecipient,
+        fulfillmentTargetHash: HASH,
+        amount: '10',
+        idempotencyKey: 'governed-takeover-recipient-change',
+        approval: await signedGovernedApproval(secondary, governanceSafe, changedRecipientApprovalIntent),
+      }),
+      /already frozen/,
+    );
+    const takeoverWalletSignature = await operatorWallet.signTypedData(
+      takeoverChallenge.typedData.domain,
+      takeoverChallenge.typedData.types,
+      takeoverChallenge.typedData.message,
+    );
+    await assert.rejects(
+      settlements.submitRequest(
+        { walletAddress: operatorWallet.address, roles: ['BUYER'] },
+        { intentId: takeoverChallenge.intent.intentId, signature: takeoverWalletSignature },
+      ),
+      /ADMIN or OPERATOR or ARBITRATOR role is required/,
+    );
+    const takeoverRequest = await settlements.submitRequest(operator, {
+      intentId: takeoverChallenge.intent.intentId,
+      signature: takeoverWalletSignature,
+    });
+    assert.equal(takeoverRequest.state, 'REQUESTED');
+    assert.equal((takeoverRequest as Record<string, unknown>).recipient_address, replacementRecipient);
+    const remainingTakeoverApprovalIntent: SensitiveActionIntent = {
+      ...takeoverApprovalIntent,
+      nonce: 100n,
+      oldValueHash: stableHash({
+        accountId: takeoverAccount,
+        availableAmount: '10',
+        backingSafeAddress: operationsSafe,
+      }),
+    };
+    const remainingTakeoverChallenge = await settlements.createGovernedIntent(operator, {
+      rail: 'TAKEOVER_USDT',
+      resourceId: takeover.caseId,
+      orderId: intent.orderId,
+      accountId: takeoverAccount,
+      recipient: replacementRecipient,
+      fulfillmentTargetHash: HASH,
+      amount: '10',
+      idempotencyKey: 'governed-takeover-remaining-intent',
+      approval: await signedGovernedApproval(secondary, governanceSafe, remainingTakeoverApprovalIntent),
+    });
+    assert.equal(remainingTakeoverChallenge.intent.amount, '10');
+    await db.query(
+      "UPDATE core.settlement_intents SET state = 'CANCELLED' WHERE intent_id = $1",
+      [remainingTakeoverChallenge.intent.intentId],
+    );
+    await assert.rejects(
+      db.query(
+        "UPDATE core.settlement_intents SET state = 'ISSUED' WHERE intent_id = $1",
+        [remainingTakeoverChallenge.intent.intentId],
+      ),
+      /InvalidSettlementIntentTransition/,
+    );
+    await assert.rejects(
+      db.query(
+        `UPDATE core.takeover_replacement_fulfillment_snapshots
+         SET recipient_address = $1 WHERE case_id = $2`,
+        ['0x9999999999999999999999999999999999999999', takeover.caseId],
+      ),
+      /ImmutableRecord/,
+    );
+    await assert.rejects(
+      db.query('UPDATE core.settlement_intents SET amount = 11 WHERE intent_id = $1', [takeoverChallenge.intent.intentId]),
+      /ImmutableSettlementIntent/,
+    );
+    await assert.rejects(
+      db.query(
+        'UPDATE core.settlement_intent_items SET amount = 11 WHERE intent_id = $1',
+        [takeoverChallenge.intent.intentId],
+      ),
+      /ImmutableRecord/,
+    );
+    await assert.rejects(
+      db.query(
+        'UPDATE core.settlement_requests SET recipient_address = $1 WHERE request_id = $2',
+        [operationsSafe, takeoverRequest.request_id],
+      ),
+      /ImmutableSettlementRequest/,
+    );
+
+    await db.query(
+      `UPDATE core.skus SET stock_total = stock_total + 1,
+         stock_available = stock_available + 1 WHERE sku_id = 'sku-1'`,
+    );
+    const futureIntent = paymentIntent();
+    futureIntent.orderId = `0x${'9'.repeat(64)}`;
+    futureIntent.reservationId = `0x${'a'.repeat(64)}`;
+    futureIntent.reservationHash = `0x${'b'.repeat(64)}`;
+    futureIntent.nonce = '2';
+    await reserveInventory(adapter(db), {
+      reservationId: futureIntent.reservationId,
+      reservationHash: futureIntent.reservationHash,
+      policyVersion: futureIntent.policyVersion,
+      skuId: 'sku-1',
+      buyerWallet: futureIntent.buyer,
+      quantity: futureIntent.quantity,
+      classification: 'ORDINARY',
+      expiresAt: new Date(futureIntent.reservationDeadline * 1000),
+    });
+    await insertPaymentQuote(db, futureIntent, 'governed-future-proceeds-quote');
+    const futurePayment = paymentInput(futureIntent);
+    futurePayment.event.transactionHash = `0x${'c'.repeat(64)}`;
+    futurePayment.event.blockHash = `0x${'d'.repeat(64)}`;
+    await new PostgresPaymentStore(transactionAdapter(db)).record(futurePayment);
+    const merchant = {
+      walletAddress: MERCHANT,
+      roles: ['MERCHANT'] as const,
+      merchantId: 'merchant-1',
+    };
+    await fulfillment.recordShipment(merchant, futureIntent.orderId, {
+      idempotencyKey: 'governed-future-shipment-1',
+      evidenceHash: `0x${'e'.repeat(64)}`,
+      carrierCode: 'SF',
+      trackingNumberHash: `0x${'f'.repeat(64)}`,
+    });
+    await fulfillment.recordDelivery(operator, futureIntent.orderId, {
+      idempotencyKey: 'governed-future-delivery-1',
+      evidenceHash: `0x${'1'.repeat(64)}`,
+    });
+    await fulfillment.confirmReceipt(
+      { walletAddress: BUYER, roles: ['BUYER'] },
+      futureIntent.orderId,
+      { idempotencyKey: 'governed-future-receipt-1', evidenceHash: `0x${'2'.repeat(64)}` },
+    );
+    const recovery = (await db.query<{
+      recovery_id: string;
+      amount_usdt: string;
+      operations_safe_address: string;
+      backing_safe_address: string;
+    }>(
+      `SELECT recovery_id, amount_usdt::text, operations_safe_address, backing_safe_address
+       FROM core.merchant_debt_recoveries WHERE order_id = $1`,
+      [futureIntent.orderId],
+    )).rows[0]!;
+    assert.deepEqual(
+      { amount: recovery.amount_usdt, recipient: recovery.operations_safe_address, backing: recovery.backing_safe_address },
+      { amount: '20', recipient: operationsSafe, backing: custodySafe },
+    );
+    await assert.rejects(
+      db.query('UPDATE core.merchant_debt_recoveries SET amount_usdt = 19 WHERE recovery_id = $1', [recovery.recovery_id]),
+      /ImmutableMerchantDebtRecovery/,
+    );
+    const reimbursementAccount = `operations-reimbursement:${operationsSafe}:usdt`;
+    const reimbursementApprovalIntent: SensitiveActionIntent = {
+      action: 'CREATE_OPERATIONS_REIMBURSEMENT',
+      resourceType: 'MERCHANT_DEBT_RECOVERY',
+      resourceId: recovery.recovery_id,
+      policyVersion: 1n,
+      oldValueHash: stableHash({
+        accountId: reimbursementAccount,
+        availableAmount: '20',
+        backingSafeAddress: custodySafe,
+      }),
+      newValueHash: stableHash({
+        rail: 'OPERATIONS_REIMBURSEMENT_USDT',
+        resourceId: recovery.recovery_id,
+        orderId: futureIntent.orderId,
+        accountId: reimbursementAccount,
+        recipient: operationsSafe,
+        amount: '20',
+        fulfillmentTargetHash: null,
+      }),
+      safeAddress: custodySafe,
+      nonce: 2n,
+      deadline: BigInt(Math.floor(now.getTime() / 1000) + 300),
+    };
+    const wrongRecipientApprovalIntent: SensitiveActionIntent = {
+      ...reimbursementApprovalIntent,
+      newValueHash: stableHash({
+        rail: 'OPERATIONS_REIMBURSEMENT_USDT',
+        resourceId: recovery.recovery_id,
+        orderId: futureIntent.orderId,
+        accountId: reimbursementAccount,
+        recipient: custodySafe,
+        amount: '20',
+        fulfillmentTargetHash: null,
+      }),
+    };
+    await assert.rejects(
+      settlements.createGovernedIntent(operator, {
+        rail: 'OPERATIONS_REIMBURSEMENT_USDT',
+        resourceId: recovery.recovery_id,
+        orderId: futureIntent.orderId,
+        accountId: reimbursementAccount,
+        recipient: custodySafe,
+        amount: '20',
+        idempotencyKey: 'governed-reimbursement-wrong-recipient',
+        approval: await signedGovernedApproval(secondary, governanceSafe, wrongRecipientApprovalIntent),
+      }),
+      /must return to the Operations Safe/,
+    );
+    const reimbursementChallenge = await settlements.createGovernedIntent(operator, {
+      rail: 'OPERATIONS_REIMBURSEMENT_USDT',
+      resourceId: recovery.recovery_id,
+      orderId: futureIntent.orderId,
+      accountId: reimbursementAccount,
+      recipient: operationsSafe,
+      amount: '20',
+      idempotencyKey: 'governed-reimbursement-intent-1',
+      approval: await signedGovernedApproval(secondary, governanceSafe, reimbursementApprovalIntent),
+    });
+    const reimbursementWalletSignature = await operatorWallet.signTypedData(
+      reimbursementChallenge.typedData.domain,
+      reimbursementChallenge.typedData.types,
+      reimbursementChallenge.typedData.message,
+    );
+    const reimbursementRequest = await settlements.submitRequest(operator, {
+      intentId: reimbursementChallenge.intent.intentId,
+      signature: reimbursementWalletSignature,
+    });
+    assert.equal(reimbursementRequest.state, 'REQUESTED');
+    assert.equal((reimbursementRequest as Record<string, unknown>).recipient_address, operationsSafe);
+
+    await db.query(
+      `INSERT INTO core.coverage_snapshots (
+         snapshot_id, chain_id, block_number, block_hash, canonical, evidence_hash, recorded_at
+       ) VALUES ('coverage:governed:1', 56, 1000, $1, true, $2, $3)`,
+      [`0x${'3'.repeat(64)}`, `0x${'4'.repeat(64)}`, now],
+    );
+    for (const [safeAddress, liability] of [[operationsSafe, '10'], [custodySafe, '20']] as const) {
+      await db.query(
+        `INSERT INTO core.coverage_snapshot_items (
+           snapshot_id, safe_address, asset, verified_asset_balance,
+           unsettled_liability, coverage_met
+         ) VALUES ('coverage:governed:1', $1, 'USDT', $2, $2, true)`,
+        [safeAddress, liability],
+      );
+    }
+    await db.query(
+      `INSERT INTO core.coverage_snapshot_canonicality (
+         observation_id, snapshot_id, canonical, observed_block_hash, evidence_hash, observed_at
+       ) VALUES ('coverage-observation:governed:1', 'coverage:governed:1', true, $1, $2, $3)`,
+      [`0x${'3'.repeat(64)}`, `0x${'4'.repeat(64)}`, now],
+    );
+    const runtime = (safeAddress: string, safeNonce: string) => ({
+      safeAddress,
+      safeVersion: SAFE_VERSION,
+      singletonAddress: SAFE_L2_SINGLETON_ADDRESS,
+      singletonCodeHash: SAFE_L2_SINGLETON_CODE_HASH,
+      safeNonce,
+      ownerSetHash: HASH,
+      approvalThreshold: 2,
+      multisendAddress: MULTISEND_CALL_ONLY_ADDRESS,
+      multisendCodeHash: MULTISEND_CALL_ONLY_CODE_HASH,
+      tokenCodeHash: `0x${'5'.repeat(64)}`,
+      tokenTransferConformanceEvidenceHash: `0x${'6'.repeat(64)}`,
+      evidenceHash: `0x${'7'.repeat(64)}`,
+      checkedAt: now,
+    });
+    const operationsBatch = await settlements.createBatch(operator, {
+      asset: 'USDT',
+      idempotencyKey: 'governed-operations-safe-batch-1',
+      runtime: runtime(operationsSafe, '1'),
+    });
+    const custodyBatch = await settlements.createBatch(operator, {
+      asset: 'USDT',
+      idempotencyKey: 'governed-custody-safe-batch-1',
+      runtime: runtime(custodySafe, '1'),
+    });
+    assert.deepEqual(
+      (operationsBatch.items as Array<{ recipient_address: string }>).map((item) => item.recipient_address),
+      [replacementRecipient],
+    );
+    assert.deepEqual(
+      (custodyBatch.items as Array<{ recipient_address: string }>).map((item) => item.recipient_address),
+      [operationsSafe],
+    );
+    assert.notEqual(operationsBatch.safe_tx_hash, custodyBatch.safe_tx_hash);
+    await assertLedgerBalanced(db, 2);
+  } finally {
+    await db.close();
+  }
+});
+
+async function prepareRequestedSettlement(db: PGlite) {
+  const merchantWallet = Wallet.createRandom();
+  const intent = paymentIntent();
+  intent.merchant = merchantWallet.address.toLowerCase();
+  await recordFinalPayment(db, intent);
+  let now = new Date((intent.issuedAt + 60) * 1000);
+  const fulfillment = new FulfillmentService({ transactions: transactionAdapter(db), clock: () => now });
+  const merchant = {
+    walletAddress: merchantWallet.address,
+    roles: ['MERCHANT'] as const,
+    merchantId: 'merchant-1',
+  };
+  await fulfillment.recordShipment(merchant, intent.orderId, {
+    idempotencyKey: 'retry-shipment-1',
+    evidenceHash: `0x${'3'.repeat(64)}`,
+    carrierCode: 'SF',
+    trackingNumberHash: `0x${'4'.repeat(64)}`,
+  });
+  await fulfillment.recordDelivery(
+    { walletAddress: '0x3333333333333333333333333333333333333333', roles: ['OPERATOR'] },
+    intent.orderId,
+    { idempotencyKey: 'retry-delivery-1', evidenceHash: `0x${'5'.repeat(64)}` },
+  );
+  await fulfillment.confirmReceipt(
+    { walletAddress: BUYER, roles: ['BUYER'] },
+    intent.orderId,
+    { idempotencyKey: 'retry-receipt-1', evidenceHash: `0x${'6'.repeat(64)}` },
+  );
+  now = new Date(now.getTime() + 60_000);
+  const settlements = new SettlementService({ transactions: transactionAdapter(db), clock: () => now });
+  const challenge = await settlements.createIntent(merchant, {
+    rail: 'MERCHANT_USDT',
+    amount: '45',
+    idempotencyKey: 'retry-settlement-intent-1',
+  });
+  const signature = await merchantWallet.signTypedData(
+    challenge.typedData.domain,
+    challenge.typedData.types,
+    challenge.typedData.message,
+  );
+  const request = await settlements.submitRequest(merchant, {
+    intentId: challenge.intent.intentId,
+    signature,
+  });
+  await db.query(
+    `INSERT INTO core.coverage_snapshots (
+       snapshot_id, chain_id, block_number, block_hash, canonical, evidence_hash, recorded_at
+     ) VALUES ('coverage:retry:1', 56, 1000, $1, true, $2, $3)`,
+    [`0x${'7'.repeat(64)}`, `0x${'8'.repeat(64)}`, now],
+  );
+  await db.query(
+    `INSERT INTO core.coverage_snapshot_items (
+       snapshot_id, safe_address, asset, verified_asset_balance,
+       unsettled_liability, coverage_met
+     ) VALUES ('coverage:retry:1', $1, 'USDT', 70, 70, true)`,
+    ['0x3333333333333333333333333333333333333333'],
+  );
+  await db.query(
+    `INSERT INTO core.coverage_snapshot_canonicality (
+       observation_id, snapshot_id, canonical, observed_block_hash, evidence_hash, observed_at
+     ) VALUES ('coverage-observation:retry:1', 'coverage:retry:1', true, $1, $2, $3)`,
+    [`0x${'7'.repeat(64)}`, `0x${'8'.repeat(64)}`, now],
+  );
+  const operator = {
+    walletAddress: '0x9999999999999999999999999999999999999999',
+    roles: ['OPERATOR'] as const,
+  };
+  const runtime = {
+    safeAddress: '0x3333333333333333333333333333333333333333',
+    safeVersion: SAFE_VERSION,
+    singletonAddress: SAFE_L2_SINGLETON_ADDRESS,
+    singletonCodeHash: SAFE_L2_SINGLETON_CODE_HASH,
+    safeNonce: '7',
+    ownerSetHash: HASH,
+    approvalThreshold: 2,
+    multisendAddress: MULTISEND_CALL_ONLY_ADDRESS,
+    multisendCodeHash: MULTISEND_CALL_ONLY_CODE_HASH,
+    tokenCodeHash: `0x${'9'.repeat(64)}`,
+    tokenTransferConformanceEvidenceHash: `0x${'a'.repeat(64)}`,
+    evidenceHash: `0x${'b'.repeat(64)}`,
+    checkedAt: now,
+  };
+  return { merchantWallet, intent, now, settlements, merchant, operator, runtime, request };
+}
+
+async function prepareBatchedSettlement(db: PGlite) {
+  const prepared = await prepareRequestedSettlement(db);
+  const batch = await prepared.settlements.createBatch(prepared.operator, {
+    asset: 'USDT',
+    idempotencyKey: 'safe-settlement-batch-failure',
+    runtime: prepared.runtime,
+  });
+  return { ...prepared, batch };
+}
+
 async function recordFinalPayment(db: PGlite, intent = paymentIntent()) {
-  await seedCatalog(db, 1);
+  await seedCatalog(db, 1, intent.merchant);
   await reserveInventory(adapter(db), {
     reservationId: intent.reservationId,
     reservationHash: intent.reservationHash,
@@ -2659,6 +5803,68 @@ async function createBusinessDatabase() {
   return db;
 }
 
+function governedTakeoverFundingService(
+  db: PGlite,
+  secondary: { address: string },
+  governanceSafe: string,
+  clock: () => Date,
+) {
+  return new TakeoverFundingService({
+    transactions: transactionAdapter(db),
+    approver: {
+      verify: async (input) => ({
+        safeTxHash: stableHash({ type: 'takeover-safe-tx', input }),
+        proposalReferenceHash: stableHash({ type: 'takeover-safe-proposal', input }),
+        approvalEvidenceHash: stableHash({ type: 'takeover-safe-approval', input }),
+        ownerSetHash: stableHash({
+          owners: [
+            '0x1000000000000000000000000000000000000001',
+            '0x1000000000000000000000000000000000000002',
+          ],
+          threshold: 2,
+        }),
+        threshold: 2,
+        approvals: [
+          { ownerAddress: '0x1000000000000000000000000000000000000001', signatureHash: HASH },
+          { ownerAddress: '0x1000000000000000000000000000000000000002', signatureHash: HASH_2 },
+        ],
+      }),
+    },
+    secondarySigner: secondary.address,
+    governanceSafe,
+    verifyingContract: governanceSafe,
+    auditReady: () => true,
+    clock,
+  });
+}
+
+async function signedTakeoverFundingApproval(
+  service: TakeoverFundingService,
+  actor: { walletAddress: string; roles: readonly ['OPERATOR'] },
+  input: { caseId: string; requiredUsdt: string; operationsSafeAddress: string },
+  secondary: Signer,
+  nonce: string,
+  deadline: string,
+): Promise<TakeoverFundingApprovalInput> {
+  const challenge = await service.fundingApprovalChallenge(actor, { ...input, nonce, deadline });
+  const signature = await secondary.signTypedData(
+    challenge.typedData.domain,
+    challenge.typedData.types,
+    challenge.typedData.message,
+  );
+  return { ...challenge.typedData.message, signature };
+}
+
+async function grantRole(db: PGlite, walletAddress: string, role: 'ADMIN' | 'OPERATOR' | 'ARBITRATOR') {
+  await db.query(
+    `INSERT INTO core.wallet_role_bindings (
+       wallet_address, role, merchant_id, status, evidence_hash
+     ) VALUES ($1,$2,NULL,'ACTIVE',$3)
+     ON CONFLICT (wallet_address, role) DO UPDATE SET status = 'ACTIVE', revoked_at = NULL`,
+    [walletAddress.toLowerCase(), role, HASH],
+  );
+}
+
 function adapter(db: PGlite): SqlExecutor {
   return {
     exec: (sql) => db.exec(sql),
@@ -2693,7 +5899,7 @@ function transactionAdapter(db: PGlite, beforeQuery?: (sql: string) => void): Sq
   };
 }
 
-async function seedCatalog(db: PGlite, stock: number) {
+async function seedCatalog(db: PGlite, stock: number, settlementWallet = MERCHANT) {
   await db.query(
     `INSERT INTO core.policy_snapshots (
        policy_version, artifact_version, policy_hash, oracle_version,
@@ -2702,10 +5908,36 @@ async function seedCatalog(db: PGlite, stock: number) {
     [HASH, HASH_2, JSON.stringify(paymentPolicyPayload())],
   );
   await db.query(
+    `INSERT INTO core.policy_publication_transitions (
+       transition_id, policy_version, event_type, safe_tx_hash, execution_tx_hash,
+       block_number, block_hash, confirmations, canonical, evidence_hash, evidence, observed_at
+     ) VALUES (
+       'seed:policy-final:1', 1, 'FINAL', $1, $2, 1, $1, 15, true, $3,
+       $4::jsonb,
+       clock_timestamp()
+     )
+     ON CONFLICT (policy_version, evidence_hash) DO NOTHING`,
+    [
+      HASH,
+      HASH_2,
+      `0x${'0'.repeat(63)}1`,
+      JSON.stringify({
+        source: 'test-seed',
+        policyVersion: 1,
+        safeTxHash: HASH,
+        executionTxHash: HASH_2,
+        blockNumber: 1,
+        blockHash: HASH,
+        confirmations: 15,
+        canonical: true,
+      }),
+    ],
+  );
+  await db.query(
     `INSERT INTO core.merchants (
        merchant_id, settlement_wallet, status, level, guarantee_status
      ) VALUES ('merchant-1', $1, 'APPROVED', 'V1', 'READY')`,
-    [MERCHANT],
+    [settlementWallet],
   );
   await db.query(
     `INSERT INTO core.administrative_regions (
@@ -2805,6 +6037,45 @@ function paymentPolicyPayload() {
   };
 }
 
+async function signedGovernedApproval(
+  secondary: ReturnType<typeof Wallet.createRandom>,
+  governanceVerifyingContract: string,
+  intent: SensitiveActionIntent,
+) {
+  return {
+    action: intent.action,
+    resourceType: intent.resourceType,
+    resourceId: intent.resourceId,
+    policyVersion: intent.policyVersion.toString(),
+    oldValueHash: intent.oldValueHash,
+    newValueHash: intent.newValueHash,
+    safeAddress: intent.safeAddress,
+    nonce: intent.nonce.toString(),
+    deadline: intent.deadline.toString(),
+    signature: await secondary.signTypedData(
+      sensitiveActionDomain(governanceVerifyingContract),
+      sensitiveActionTypes,
+      intent,
+    ),
+  };
+}
+
+function stableHash(value: unknown) {
+  return keccak256(toUtf8Bytes(stableJson(value))).toLowerCase();
+}
+
+function stableJson(value: unknown): string {
+  if (value instanceof Date) return JSON.stringify(value.toISOString());
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => `${JSON.stringify(key)}:${stableJson(child)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
 async function insertPaymentQuote(
   db: PGlite,
   intent: CanonicalPaymentIntent,
@@ -2818,7 +6089,7 @@ async function insertPaymentQuote(
        list_price_usdt, merchant_cost_usdt, merchant_concession_bps,
        policy_version, quote_kind, authorization_digest, quote_signature, deadline, state
      ) VALUES ($1, $2, $3, $4, 'merchant-1', $5, 'product-1', 'sku-1', $6, $7, $8,
-       100, 60, 2500, 1, 'ORDINARY', $9, $10, $11, 'QUOTED')`,
+       100, 60, 2500, $9, 'ORDINARY', $10, $11, $12, 'QUOTED')`,
     [
       intent.orderId,
       idempotencyKey,
@@ -2828,6 +6099,7 @@ async function insertPaymentQuote(
       intent.productId,
       intent.skuId,
       intent.productPolicyHash,
+      intent.policyVersion,
       snapshotHash,
       `0x${'1'.repeat(130)}`,
       new Date(intent.deadline * 1000),
