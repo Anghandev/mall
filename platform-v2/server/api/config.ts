@@ -1,4 +1,6 @@
-import { BSC_CHAIN_ID, NPL_ADDRESS, USDT_ADDRESS } from './enums.ts';
+import { BSC_CHAIN_ID, CORE_ARTIFACT_VERSION, NPL_ADDRESS, USDT_ADDRESS } from './enums.ts';
+import coordinatedManifest from '../../../packages/core-artifacts/coordinated-manifest.json' with { type: 'json' };
+import contractManifest from '../../../packages/core-artifacts/contracts/contract-manifest.json' with { type: 'json' };
 import { CoreError } from './errors.ts';
 
 const decisionVariables = [
@@ -13,6 +15,12 @@ const decisionVariables = [
   'GENESIS_CREDENTIAL_ADDRESS',
   'GENESIS_CREDENTIAL_TOKEN_ID',
   'REQUIRED_CONFIRMATIONS',
+] as const;
+
+const unresolvedPublishedDecisions = [
+  'FIXED_REMAINDER_ACCOUNTS',
+  'PICKUP_TIMEOUT_AND_TAKEOVER_EVIDENCE',
+  'EMPTY_SESSION_INJECTED_PRIZE_ALLOCATION',
 ] as const;
 
 const externalVariables = [
@@ -31,6 +39,7 @@ const externalVariables = [
   'SETTLEMENT_EXECUTOR_URL',
   'SETTLEMENT_EXECUTOR_TOKEN',
   'EXECUTOR_MAX_GAS_LIMIT',
+  'BACKUP_STORAGE_ENCRYPTED',
 ] as const;
 
 export type ProviderName = 'AMAP' | 'KUAIDI100' | 'FEIE' | 'ALIYUN_SMS' | 'ALIYUN_OSS' | 'SMTP' | 'JPUSH';
@@ -65,9 +74,29 @@ export interface CoreConfig {
   executorToken: string | undefined;
   executorMaxGasLimit: bigint | undefined;
   requiredConfirmations: number | undefined;
+  deploymentReady: boolean;
   decisionBlocked: readonly string[];
   externalBlocked: readonly string[];
   providerReadiness: Readonly<Record<ProviderName, 'READY' | 'CONFIGURATION_REQUIRED'>>;
+}
+
+export interface RuntimeReadinessSnapshot {
+  artifactVersion: string;
+  checkedAt: string;
+  expiresAt: string;
+  componentHashesVerified: boolean;
+  deployedRuntimeCodeVerified: boolean;
+  roleGrantsVerified: boolean;
+  safeAdminVerified: boolean;
+  signerBindingsVerified: boolean;
+  httpsVerified: boolean;
+  mutualTlsVerified: boolean;
+  databaseHealthy: boolean;
+  auditDatabaseHealthy: boolean;
+  redisHealthy: boolean;
+  rpcChain56Healthy: boolean;
+  signerHealthy: boolean;
+  executorHealthy: boolean;
 }
 
 export function loadConfig(env: Readonly<Record<string, string | undefined>>): CoreConfig {
@@ -78,9 +107,16 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     throw new CoreError('InvalidRequest', 'V2 runtime identity must use BSC 56 and fixed USDT/NPL', 500);
   }
 
-  const decisionBlocked = decisionVariables.filter((name) => !env[name]);
-  const externalBlocked = externalVariables.filter((name) => !env[name]);
-  if (decisionBlocked.length === 0) validateDecisionValues(env);
+  const missingDecisionVariables = decisionVariables.filter((name) => !env[name]);
+  const decisionBlocked = [...missingDecisionVariables, ...unresolvedPublishedDecisions];
+  const deploymentReady = coordinatedDeploymentReady();
+  const externalBlocked = [
+    ...externalVariables.filter((name) => !env[name]),
+    ...(!deploymentReady ? ['COORDINATED_DEPLOYMENT_AUTHORIZATION'] : []),
+  ];
+  if (missingDecisionVariables.length === 0) validateDecisionValues(env);
+  validateProductionEndpoints(env);
+  validateDistinctAuthorities(env);
   if (env.JWT_SECRET && Buffer.byteLength(env.JWT_SECRET) < 32) {
     throw new CoreError('InvalidRequest', 'JWT_SECRET must be at least 32 bytes', 500);
   }
@@ -111,21 +147,104 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     executorToken: env.SETTLEMENT_EXECUTOR_TOKEN,
     executorMaxGasLimit: parseOptionalPositiveBigInt(env.EXECUTOR_MAX_GAS_LIMIT, 'EXECUTOR_MAX_GAS_LIMIT'),
     requiredConfirmations: parseOptionalPositiveUint32(env.REQUIRED_CONFIRMATIONS, 'REQUIRED_CONFIRMATIONS'),
+    deploymentReady,
     decisionBlocked,
     externalBlocked,
     providerReadiness: Object.freeze(providerReadiness),
   });
 }
 
-export function publicReadiness(config: CoreConfig) {
+export function publicReadiness(config: CoreConfig, runtime?: RuntimeReadinessSnapshot, now = new Date()) {
+  const providersReady = Object.values(config.providerReadiness).every((status) => status === 'READY');
   return {
     chainId: config.chainId,
     assets: { usdt: config.usdtAddress, npl: config.nplAddress },
     decisionBlocked: config.decisionBlocked,
     externalBlocked: config.externalBlocked,
     providers: config.providerReadiness,
-    writesEnabled: config.decisionBlocked.length === 0 && config.externalBlocked.length === 0,
+    writesEnabled:
+      config.deploymentReady &&
+      config.decisionBlocked.length === 0 &&
+      config.externalBlocked.length === 0 &&
+      providersReady &&
+      runtimeReadinessValid(runtime, now),
   } as const;
+}
+
+function coordinatedDeploymentReady() {
+  if (
+    coordinatedManifest.artifactVersion !== CORE_ARTIFACT_VERSION ||
+    coordinatedManifest.artifactVersion !== contractManifest.artifactVersion ||
+    coordinatedManifest.chain.chainId !== BSC_CHAIN_ID ||
+    contractManifest.chain.chainId !== BSC_CHAIN_ID
+  ) {
+    throw new CoreError('ArtifactVersionMismatch', 'Deployment manifests do not match the coordinated artifact', 503);
+  }
+  return (
+    coordinatedManifest.deploymentAuthorized === true &&
+    contractManifest.deploymentStatus === 'DEPLOYED' &&
+    contractManifest.contracts.every(
+      (contract) =>
+        contract.status === 'DEPLOYED' &&
+        typeof contract.address === 'string' &&
+        /^0x[0-9a-fA-F]{40}$/.test(contract.address),
+    )
+  );
+}
+
+function runtimeReadinessValid(snapshot: RuntimeReadinessSnapshot | undefined, now: Date) {
+  if (!snapshot || snapshot.artifactVersion !== CORE_ARTIFACT_VERSION) return false;
+  const checkedAt = Date.parse(snapshot.checkedAt);
+  const expiresAt = Date.parse(snapshot.expiresAt);
+  if (!Number.isFinite(checkedAt) || !Number.isFinite(expiresAt) || checkedAt > now.getTime() || expiresAt <= now.getTime()) {
+    return false;
+  }
+  return [
+    snapshot.componentHashesVerified,
+    snapshot.deployedRuntimeCodeVerified,
+    snapshot.roleGrantsVerified,
+    snapshot.safeAdminVerified,
+    snapshot.signerBindingsVerified,
+    snapshot.httpsVerified,
+    snapshot.mutualTlsVerified,
+    snapshot.databaseHealthy,
+    snapshot.auditDatabaseHealthy,
+    snapshot.redisHealthy,
+    snapshot.rpcChain56Healthy,
+    snapshot.signerHealthy,
+    snapshot.executorHealthy,
+  ].every((value) => value === true);
+}
+
+function validateProductionEndpoints(env: Readonly<Record<string, string | undefined>>) {
+  for (const name of ['SIGNER_SERVICE_URL', 'SETTLEMENT_EXECUTOR_URL']) {
+    const value = env[name];
+    if (value && protocol(value) !== 'https:') throw new CoreError('InvalidRequest', `${name} must use HTTPS`, 500);
+  }
+  if (env.BSC_RPC_URL && !['https:', 'wss:'].includes(protocol(env.BSC_RPC_URL))) {
+    throw new CoreError('InvalidRequest', 'BSC_RPC_URL must use HTTPS or WSS', 500);
+  }
+}
+
+function validateDistinctAuthorities(env: Readonly<Record<string, string | undefined>>) {
+  const names = [
+    'PLATFORM_SAFE_ADDRESS',
+    'SECONDARY_SIGNER_ADDRESS',
+    'QUOTE_SIGNER_ADDRESS',
+    'FINALITY_SIGNER_ADDRESS',
+  ];
+  const configured = names.map((name) => env[name]?.toLowerCase()).filter((value): value is string => Boolean(value));
+  if (new Set(configured).size !== configured.length) {
+    throw new CoreError('InvalidRequest', 'Safe and signer authorities must use distinct addresses', 500);
+  }
+}
+
+function protocol(value: string) {
+  try {
+    return new URL(value).protocol;
+  } catch {
+    throw new CoreError('InvalidRequest', 'Configured service URL is invalid', 500);
+  }
 }
 
 export function requireProvider(config: CoreConfig, provider: ProviderName) {

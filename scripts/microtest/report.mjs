@@ -8,11 +8,11 @@ const chain = targetChain(env);
 const deploymentPath = 'deployments/mainnet-micro-test.json';
 const reportPath = 'MAINNET_MICRO_TEST_REPORT.md';
 const txLog = readTxLog();
-const totalCostWei = txLog.reduce((sum, tx) => sum + BigInt(tx.costWei || 0), 0n);
+const totalCostWei = txLog.reduce((sum, tx) => sum + BigInt(tx.totalSpentWei), 0n);
 const deployment = fs.existsSync(deploymentPath) ? JSON.parse(fs.readFileSync(deploymentPath, 'utf8')) : {};
 
 const txRows = txLog.map((tx, index) => (
-  `| ${index + 1} | ${tx.operation || ''} | ${tx.functionCall || ''} | ${tx.value || ''} | ${tx.gasUsed || tx.estimatedGas || ''} | ${tx.costWei ? weiToNativeString(BigInt(tx.costWei)) : ''} | ${tx.hash || ''} | ${tx.result || ''} |`
+  `| ${index + 1} | ${tx.operation || ''} | ${tx.functionCall || ''} | ${weiToNativeString(BigInt(tx.valueWei))} | ${tx.gasUsed || tx.estimatedGas || ''} | ${weiToNativeString(BigInt(tx.totalSpentWei))} | ${tx.hash || ''} | ${tx.status || ''} |`
 )).join('\n');
 
 const report = `# Mainnet Micro-Test Report

@@ -1,4 +1,4 @@
-export const artifactVersion = "2.0.0-rc.1";
+export const artifactVersion = "2.0.0-rc.2";
 export const chainIdentity = Object.freeze({"chainId":56,"usdtAddress":"0x55d398326f99059ff775485246999027b3197955","nplAddress":"0x4e8277ab31e4956b2cd48449793a57656dfc03d2"});
 export const orderProjectionStates = Object.freeze(["QUOTED","SUBMITTED","PAID","SHIPPED","DELIVERED","ARBITRATION","TAKEOVER","FULFILLMENT_PENDING","FULFILLED","REORG_PENDING"]);
 export const contractOrderStates = Object.freeze(["NONE","PAID","SHIPPED","DELIVERED","ARBITRATION","TAKEOVER","FULFILLMENT_PENDING","FULFILLED"]);

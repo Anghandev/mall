@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-rc.1",
+  "artifactVersion": "2.0.0-rc.2",
   "protocolVersion": 1,
   "transport": "wss",
   "publicationStatus": "FAIL_CLOSED",
@@ -22,7 +22,7 @@
     ],
     "properties": {
       "artifactVersion": {
-        "const": "2.0.0-rc.1"
+        "const": "2.0.0-rc.2"
       },
       "protocolVersion": {
         "const": 1

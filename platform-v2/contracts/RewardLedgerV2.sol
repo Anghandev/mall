@@ -39,6 +39,7 @@ contract RewardLedgerV2 is AccessControl, ReentrancyGuard {
     error InexactTransfer();
     error InvalidEvidence();
     error InsufficientSurplus();
+    error SafeExecutionRequired();
 
     event OrderRewardsLocked(
         bytes32 indexed orderId,
@@ -57,7 +58,7 @@ contract RewardLedgerV2 is AccessControl, ReentrancyGuard {
         if (
             safe == address(0) || address(npl_) == address(0) || address(policyRegistry_) == address(0)
                 || address(claimVault_) == address(0) || block.chainid != V2Types.BSC_CHAIN_ID
-                || address(npl_) != V2Types.NPL
+                || address(npl_) != V2Types.NPL || safe != policyRegistry_.safe()
         ) revert InvalidAddress();
         npl = npl_;
         policyRegistry = policyRegistry_;
@@ -132,6 +133,7 @@ contract RewardLedgerV2 is AccessControl, ReentrancyGuard {
         onlyRole(RECOVERY_ROLE)
         nonReentrant
     {
+        if (msg.sender != policyRegistry.safe()) revert SafeExecutionRequired();
         if (recipient == address(0) || incidentHash == bytes32(0)) revert InvalidEvidence();
         uint256 balance = npl.balanceOf(address(this));
         if (balance < totalLockedNpl || amount > balance - totalLockedNpl) revert InsufficientSurplus();

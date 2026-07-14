@@ -1,15 +1,25 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { createSiweChallenge, issueSessionToken, verifySessionToken, verifySiwe, type NonceStore } from './auth.ts';
+import {
+  createSiweChallenge,
+  issueSessionToken,
+  normalizeAddress,
+  verifySessionToken,
+  verifySiwe,
+  type NonceRateLimiter,
+  type NonceStore,
+} from './auth.ts';
 import { orderAllowedActions, type ActionContext, type OrderProjection } from './allowed-actions.ts';
-import type { CoreConfig } from './config.ts';
+import type { CoreConfig, RuntimeReadinessSnapshot } from './config.ts';
 import { publicReadiness } from './config.ts';
 import { CORE_ARTIFACT_VERSION, executableOrderActionNames, type UserRole } from './enums.ts';
 import { CoreError, errorBody } from './errors.ts';
 
 export interface ApiDependencies {
   config: CoreConfig;
+  runtimeReadiness?: RuntimeReadinessSnapshot;
   nonceStore: NonceStore;
+  nonceRateLimiter: NonceRateLimiter;
   authDomain: string;
   authUri: string;
   resolveRoles(walletAddress: string): Promise<{ roles: readonly UserRole[]; merchantId?: string }>;
@@ -41,7 +51,11 @@ async function route(
     sendJson(
       response,
       200,
-      { artifactVersion: CORE_ARTIFACT_VERSION, status: 'CORE_API_READY', readiness: publicReadiness(dependencies.config) },
+      {
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        status: 'CORE_API_READY',
+        readiness: publicReadiness(dependencies.config, dependencies.runtimeReadiness, dependencies.clock()),
+      },
       correlationId,
     );
     return;
@@ -49,13 +63,19 @@ async function route(
   if (request.method === 'POST' && url.pathname === '/v2/auth/nonce') {
     const body = await readJson(request);
     assertOnlyKeys(body, ['walletAddress']);
-    const walletAddress = requiredString(body, 'walletAddress');
+    const walletAddress = normalizeAddress(requiredString(body, 'walletAddress'));
+    const now = dependencies.clock();
+    await dependencies.nonceRateLimiter.consume({
+      walletAddress,
+      clientAddress: request.socket.remoteAddress ?? 'unknown',
+      now,
+    });
     const challenge = await createSiweChallenge(dependencies.nonceStore, {
       walletAddress,
       domain: dependencies.authDomain,
       uri: dependencies.authUri,
       statement: 'Sign in to Abu 24K V2',
-    });
+    }, now);
     sendJson(response, 201, challenge, correlationId);
     return;
   }
@@ -67,7 +87,7 @@ async function route(
       signature: requiredString(body, 'signature'),
       expectedDomain: dependencies.authDomain,
       expectedUri: dependencies.authUri,
-    });
+    }, dependencies.clock());
     const binding = await dependencies.resolveRoles(verified.walletAddress);
     if (binding.roles.length === 0) throw new CoreError('Forbidden', 'Wallet is not authorized', 403);
     if (!dependencies.config.jwtSecret) throw new CoreError('ConfigurationRequired', 'JWT service is unavailable', 503);
@@ -78,12 +98,13 @@ async function route(
         ...(binding.merchantId ? { merchantId: binding.merchantId } : {}),
       },
       dependencies.config.jwtSecret,
+      dependencies.clock(),
     );
     sendJson(response, 200, { token, walletAddress: verified.walletAddress, roles: binding.roles }, correlationId);
     return;
   }
   if (request.method === 'POST' && url.pathname === '/v2/actions/order') {
-    const claims = authorize(request, dependencies.config);
+    const claims = authorize(request, dependencies.config, dependencies.clock());
     const body = await readJson(request);
     assertOnlyKeys(body, ['orderId']);
     const orderId = requiredString(body, 'orderId');
@@ -102,12 +123,12 @@ async function route(
   throw new CoreError('InvalidRequest', 'Route not found', 404);
 }
 
-function authorize(request: IncomingMessage, config: CoreConfig) {
+function authorize(request: IncomingMessage, config: CoreConfig, now: Date) {
   const header = request.headers.authorization;
   if (!header?.startsWith('Bearer ') || !config.jwtSecret) {
     throw new CoreError('Unauthorized', 'Bearer session is required', 401);
   }
-  return verifySessionToken(header.slice('Bearer '.length), config.jwtSecret);
+  return verifySessionToken(header.slice('Bearer '.length), config.jwtSecret, now);
 }
 
 function assertOnlyKeys(body: Record<string, unknown>, allowed: readonly string[]) {

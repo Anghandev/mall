@@ -11,6 +11,10 @@ export interface SqlExecutor {
   exec?(sql: string): Promise<unknown>;
 }
 
+export interface SqlTransactionRunner {
+  transaction<Result>(operation: (executor: SqlExecutor) => Promise<Result>): Promise<Result>;
+}
+
 export async function applyMigrations(executor: SqlExecutor, schema: 'core' | 'audit', directory: string) {
   await execute(
     executor,

@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { SqlExecutor } from './migrations.ts';
+import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 
 const GENESIS_HASH = '0'.repeat(64);
 
 export interface AuditInput {
-  streamName: string;
+  streamName: 'financial' | 'governance' | 'authentication' | 'operational' | 'backup';
   eventType: string;
   resourceType: string;
   resourceId: string;
@@ -13,9 +13,32 @@ export interface AuditInput {
   correlationId: string;
   requestHash: string;
   payload: Record<string, unknown>;
-  signatureEvidence?: Record<string, unknown>;
-  transactionEvidence?: Record<string, unknown>;
+  signatureEvidence?: SignatureAuditEvidence;
+  transactionEvidence?: TransactionAuditEvidence;
   createdAt?: Date;
+}
+
+export interface SignatureAuditEvidence {
+  scheme: 'EIP712' | 'SIWE' | 'ERC1271';
+  signatureHash: string;
+  signer: string;
+  digest: string;
+  domain: string;
+  nonce: string;
+  deadline: string;
+}
+
+export interface TransactionAuditEvidence {
+  txHash: string;
+  chainId: 56;
+  contractAddress: string;
+  selector: string;
+  calldataHash: string;
+  resourceId: string;
+  policyVersion: number;
+  blockHash?: string;
+  confirmations?: number;
+  replacementForTxHash?: string;
 }
 
 export interface AuditRow {
@@ -37,7 +60,11 @@ export interface AuditRow {
   created_at: Date | string;
 }
 
-export async function appendAuditEntry(executor: SqlExecutor, input: AuditInput): Promise<AuditRow> {
+export async function appendAuditEntry(runner: SqlTransactionRunner, input: AuditInput): Promise<AuditRow> {
+  return runner.transaction((executor) => appendAuditEntryInTransaction(executor, input));
+}
+
+async function appendAuditEntryInTransaction(executor: SqlExecutor, input: AuditInput): Promise<AuditRow> {
   const redactedPayload = redact(input.payload) as Record<string, unknown>;
   const createdAt = input.createdAt ?? new Date();
   await executor.query(
@@ -54,8 +81,9 @@ export async function appendAuditEntry(executor: SqlExecutor, input: AuditInput)
   if (!head) throw new Error('AuditHeadUnavailable');
   const sequence = Number(head.last_sequence) + 1;
   const entryId = randomUUID();
-  const signatureEvidence = input.signatureEvidence ?? {};
-  const transactionEvidence = input.transactionEvidence ?? {};
+  const signatureEvidence = sanitizeSignatureEvidence(input.signatureEvidence);
+  const transactionEvidence = sanitizeTransactionEvidence(input.transactionEvidence);
+  assertRequiredEvidence(input, signatureEvidence, transactionEvidence);
   const entryHash = hashAuditEntry({
     entryId,
     streamName: input.streamName,
@@ -149,11 +177,109 @@ export function redact(value: unknown): unknown {
   if (!value || typeof value !== 'object') return value;
   const output: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value)) {
-    output[key] = /(authorization|cookie|password|secret|token|private|mnemonic|phone|legalName|legalId)/i.test(key)
+    output[key] = isSensitiveField(key)
       ? '[REDACTED]'
       : redact(child);
   }
   return output;
+}
+
+function isSensitiveField(key: string) {
+  const normalized = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+  if (/(?:hash|digest)$/.test(normalized)) return false;
+  return /^(?:authorization|auth|bearer|cookie|setcookie|password|passphrase|secret|credential|apikey|accesskey(?:id|secret)?|ukey|token|accesstoken|refreshtoken|sessiontoken|privatekey|mnemonic|seed|seedphrase|signature|rawsignature|rawtransaction|signedtransaction|calldata|transactiondata|phone|email|legalname|legalid|shippingaddress|billingaddress|deliveryaddress|streetaddress|recipientname|contactname)$/.test(
+    normalized,
+  );
+}
+
+function sanitizeSignatureEvidence(evidence: SignatureAuditEvidence | undefined): Record<string, unknown> {
+  if (!evidence) return {};
+  assertAllowedKeys(evidence, ['scheme', 'signatureHash', 'signer', 'digest', 'domain', 'nonce', 'deadline']);
+  if (
+    !['EIP712', 'SIWE', 'ERC1271'].includes(evidence.scheme) ||
+    !isHash(evidence.signatureHash) ||
+    !isAddress(evidence.signer) ||
+    !isHash(evidence.digest) ||
+    typeof evidence.domain !== 'string' ||
+    evidence.domain.length === 0 ||
+    evidence.domain.length > 256 ||
+    !isUint(evidence.nonce) ||
+    !isUint(evidence.deadline)
+  ) {
+    throw new Error('InvalidSignatureAuditEvidence');
+  }
+  return { ...evidence, signer: evidence.signer.toLowerCase() };
+}
+
+function sanitizeTransactionEvidence(evidence: TransactionAuditEvidence | undefined): Record<string, unknown> {
+  if (!evidence) return {};
+  assertAllowedKeys(evidence, [
+    'txHash',
+    'chainId',
+    'contractAddress',
+    'selector',
+    'calldataHash',
+    'resourceId',
+    'policyVersion',
+    'blockHash',
+    'confirmations',
+    'replacementForTxHash',
+  ]);
+  if (
+    !isHash(evidence.txHash) ||
+    evidence.chainId !== 56 ||
+    !isAddress(evidence.contractAddress) ||
+    !/^0x[0-9a-fA-F]{8}$/.test(evidence.selector) ||
+    !isHash(evidence.calldataHash) ||
+    typeof evidence.resourceId !== 'string' ||
+    evidence.resourceId.length === 0 ||
+    evidence.resourceId.length > 256 ||
+    !Number.isSafeInteger(evidence.policyVersion) ||
+    evidence.policyVersion <= 0 ||
+    (evidence.blockHash !== undefined && !isHash(evidence.blockHash)) ||
+    (evidence.confirmations !== undefined &&
+      (!Number.isSafeInteger(evidence.confirmations) || evidence.confirmations < 0)) ||
+    (evidence.replacementForTxHash !== undefined && !isHash(evidence.replacementForTxHash))
+  ) {
+    throw new Error('InvalidTransactionAuditEvidence');
+  }
+  return { ...evidence, contractAddress: evidence.contractAddress.toLowerCase() };
+}
+
+function assertRequiredEvidence(
+  input: AuditInput,
+  signatureEvidence: Record<string, unknown>,
+  transactionEvidence: Record<string, unknown>,
+) {
+  if (!['financial', 'governance', 'authentication', 'operational', 'backup'].includes(input.streamName)) {
+    throw new Error('UnknownAuditStream');
+  }
+  const hasSignature = Object.keys(signatureEvidence).length > 0;
+  const hasTransaction = Object.keys(transactionEvidence).length > 0;
+  if ((input.streamName === 'financial' || input.streamName === 'governance') && (!hasSignature || !hasTransaction)) {
+    throw new Error('MissingSensitiveAuditEvidence');
+  }
+  if (input.streamName === 'authentication' && !hasSignature) throw new Error('MissingAuthenticationAuditEvidence');
+  if (input.streamName === 'operational' && !hasSignature && !hasTransaction) throw new Error('MissingAuditEvidence');
+  if (input.streamName === 'backup' && input.eventType !== 'BackupEvidence' && !hasSignature && !hasTransaction) {
+    throw new Error('MissingAuditEvidence');
+  }
+}
+
+function assertAllowedKeys(value: object, allowed: readonly string[]) {
+  if (Object.keys(value).some((key) => !allowed.includes(key))) throw new Error('UnknownAuditEvidenceField');
+}
+
+function isHash(value: unknown): value is string {
+  return typeof value === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value);
+}
+
+function isAddress(value: unknown): value is string {
+  return typeof value === 'string' && /^0x[0-9a-fA-F]{40}$/.test(value);
+}
+
+function isUint(value: unknown): value is string {
+  return typeof value === 'string' && /^(?:0|[1-9][0-9]*)$/.test(value);
 }
 
 function canonicalJson(value: unknown): string {

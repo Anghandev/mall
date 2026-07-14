@@ -306,13 +306,15 @@ contract SeckillV2 is AccessControl, EIP712, ReentrancyGuard {
     }
 
     function setPurchasePause(bool paused, bytes32 evidenceHash) external onlyRole(PAUSER_ROLE) {
-        if (msg.sender != safe || evidenceHash == bytes32(0)) revert InvalidEvidence();
+        if (msg.sender != safe) revert SafeExecutionRequired();
+        if (evidenceHash == bytes32(0)) revert InvalidEvidence();
         purchasesPaused = paused;
         emit SeckillPauseChanged("PURCHASE", paused, evidenceHash);
     }
 
     function setSettlementPause(bool paused, bytes32 evidenceHash) external onlyRole(PAUSER_ROLE) {
-        if (msg.sender != safe || evidenceHash == bytes32(0)) revert InvalidEvidence();
+        if (msg.sender != safe) revert SafeExecutionRequired();
+        if (evidenceHash == bytes32(0)) revert InvalidEvidence();
         settlementPaused = paused;
         emit SeckillPauseChanged("SETTLEMENT", paused, evidenceHash);
     }
@@ -322,9 +324,8 @@ contract SeckillV2 is AccessControl, EIP712, ReentrancyGuard {
         onlyRole(RECOVERY_ROLE)
         nonReentrant
     {
-        if (msg.sender != safe || recipient == address(0) || incidentHash == bytes32(0)) {
-            revert InvalidEvidence();
-        }
+        if (msg.sender != safe) revert SafeExecutionRequired();
+        if (recipient == address(0) || incidentHash == bytes32(0)) revert InvalidEvidence();
         uint256 balance = usdt.balanceOf(address(this));
         if (balance < totalUnsettledPrize || amount > balance - totalUnsettledPrize) revert InsufficientSurplus();
         usdt.safeTransfer(recipient, amount);

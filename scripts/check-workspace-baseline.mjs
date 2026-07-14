@@ -20,8 +20,16 @@ const requiredRootScripts = [
   'mall:check',
   'consumer:check',
   'e2e:full',
+  'micro:guard:test',
   'verify',
 ];
+const immutableLegacyCredentialDebt = new Map([
+  ['legacy/v1-npl-only/.env.deploy.example', '30eb9122119a1b4f29535fc13b7483bce0154514'],
+  ['legacy/v1-npl-only/.env.example', '2f86f2988a32034dfffa83c949a08a13f71d3002'],
+  ['legacy/v1-npl-only/.env.production.example', 'b287a2d899c8b27f818aefc429ce0132507cf7fb'],
+  ['legacy/v1-npl-only/scripts/export-production-env.mjs', 'f8abee5c875a173fa3c63c74e54e45ee5168d8bb'],
+  ['legacy/v1-npl-only/scripts/microtest/init-env.mjs', '3351c9bfb63a844fad3ec03533ae8aad5c656738'],
+]);
 
 const rootPackage = readJson('package.json');
 if (rootPackage.packageManager !== 'pnpm@10.30.2') {
@@ -104,10 +112,19 @@ for (const path of working) {
   }
 }
 
+const detectedLegacyCredentialDebt = new Set();
 for (const path of working) {
-  if (path.startsWith('legacy/') || !isTextPath(path)) continue;
+  if (!isTextPath(path)) continue;
   for (const text of contentVariants(path, tracked.has(path))) {
-    assertNoCredentialValue(path, text);
+    try {
+      assertNoCredentialValue(path, text);
+    } catch (error) {
+      if (path.startsWith('legacy/') && immutableLegacyCredentialDebt.get(path) === indexBlob(path)) {
+        detectedLegacyCredentialDebt.add(path);
+        continue;
+      }
+      throw error;
+    }
   }
 }
 
@@ -135,6 +152,9 @@ console.log(`OK workspace packages: ${expectedPackages.size}`);
 console.log(`OK root gates: ${requiredRootScripts.length}`);
 console.log('OK one root lockfile policy and immutable legacy');
 console.log('OK index/worktree runtime, fixture and credential guards');
+if (detectedLegacyCredentialDebt.size > 0) {
+  console.log(`ExternalBlocked legacy credential rotation: ${detectedLegacyCredentialDebt.size} immutable Phase 1 blobs`);
+}
 console.log('OK microtest syntax and optional local .env protection');
 
 function assertNoCredentialValue(path, text) {
@@ -166,6 +186,11 @@ function contentVariants(path, inIndex) {
 
 function gitFiles(args) {
   return execFileSync('git', args, { encoding: 'utf8' }).split('\0').filter(Boolean);
+}
+
+function indexBlob(path) {
+  const output = execFileSync('git', ['ls-files', '-s', '--', path], { encoding: 'utf8' }).trim();
+  return output.split(/\s+/)[1];
 }
 
 function isTextPath(path) {

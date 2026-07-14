@@ -4,7 +4,17 @@ pragma solidity 0.8.26;
 import {CoreFixture} from "./helpers/CoreFixture.sol";
 import {ClaimVaultV2} from "../contracts/ClaimVaultV2.sol";
 import {PaymentEscrowV2} from "../contracts/PaymentEscrowV2.sol";
+import {RewardLedgerV2} from "../contracts/RewardLedgerV2.sol";
+import {MerchantGuaranteeVaultV2} from "../contracts/MerchantGuaranteeVaultV2.sol";
 import {SeckillV2} from "../contracts/SeckillV2.sol";
+import {
+    IBeneficiaryRegistryV2,
+    IClaimVaultV2,
+    IMerchantGuaranteeVaultV2,
+    IPolicyRegistryV2,
+    IRewardLedgerV2,
+    ITwapOracleV2
+} from "../contracts/interfaces/IV2Core.sol";
 import {V2Types} from "../contracts/types/V2Types.sol";
 
 contract CircuitBreakersV2Test is CoreFixture {
@@ -172,6 +182,97 @@ contract CircuitBreakersV2Test is CoreFixture {
         claimVault.setClaimPause(V2Types.ClaimRail.MerchantUsdt, true, keccak256("unauthorized"));
         vm.expectRevert();
         seckill.setPurchasePause(true, keccak256("unauthorized"));
+    }
+
+    function testGrantedPauseRoleStillRequiresActualSafe() public {
+        vm.startPrank(safe);
+        paymentEscrow.grantRole(paymentEscrow.PAUSER_ROLE(), address(this));
+        claimVault.grantRole(claimVault.PAUSER_ROLE(), address(this));
+        seckill.grantRole(seckill.PAUSER_ROLE(), address(this));
+        vm.stopPrank();
+
+        vm.expectRevert(PaymentEscrowV2.SafeExecutionRequired.selector);
+        paymentEscrow.setNewOrdersPause(true, keccak256("wrong-caller"));
+        vm.expectRevert(ClaimVaultV2.SafeExecutionRequired.selector);
+        claimVault.setClaimPause(V2Types.ClaimRail.MerchantUsdt, true, keccak256("wrong-caller"));
+        vm.expectRevert(SeckillV2.SafeExecutionRequired.selector);
+        seckill.setPurchasePause(true, keccak256("wrong-caller"));
+        assertFalse(paymentEscrow.newOrdersPaused());
+        assertFalse(claimVault.merchantClaimsPaused());
+        assertFalse(seckill.purchasesPaused());
+    }
+
+    function testGrantedRecoveryRoleStillRequiresActualSafeAndSafeCanRecoverOnlySurplus() public {
+        vm.startPrank(safe);
+        paymentEscrow.grantRole(paymentEscrow.RECOVERY_ROLE(), address(this));
+        claimVault.grantRole(claimVault.RECOVERY_ROLE(), address(this));
+        rewardLedger.grantRole(rewardLedger.RECOVERY_ROLE(), address(this));
+        guaranteeVault.grantRole(guaranteeVault.RECOVERY_ROLE(), address(this));
+        seckill.grantRole(seckill.RECOVERY_ROLE(), address(this));
+        vm.stopPrank();
+
+        usdt.mint(address(paymentEscrow), 2 ether);
+        usdt.mint(address(claimVault), 2 ether);
+        npl.mint(address(rewardLedger), 2 ether);
+        usdt.mint(address(guaranteeVault), 2 ether);
+        usdt.mint(address(seckill), 2 ether);
+
+        vm.expectRevert(PaymentEscrowV2.SafeExecutionRequired.selector);
+        paymentEscrow.recoverSurplus(address(usdt), buyer, 1 ether, keccak256("wrong-caller"));
+        vm.expectRevert(ClaimVaultV2.SafeExecutionRequired.selector);
+        claimVault.recoverSurplus(address(usdt), buyer, 1 ether, keccak256("wrong-caller"));
+        vm.expectRevert(RewardLedgerV2.SafeExecutionRequired.selector);
+        rewardLedger.recoverSurplus(buyer, 1 ether, keccak256("wrong-caller"));
+        vm.expectRevert(MerchantGuaranteeVaultV2.SafeExecutionRequired.selector);
+        guaranteeVault.recoverSurplus(buyer, 1 ether, keccak256("wrong-caller"));
+        vm.expectRevert(SeckillV2.SafeExecutionRequired.selector);
+        seckill.recoverSurplus(buyer, 1 ether, keccak256("wrong-caller"));
+
+        uint256 buyerUsdtBefore = usdt.balanceOf(buyer);
+        uint256 buyerNplBefore = npl.balanceOf(buyer);
+        uint256 protectedGuaranteeBefore = guaranteeVault.totalGuarantees() + guaranteeVault.riskReserveBalance();
+        vm.startPrank(safe);
+        paymentEscrow.recoverSurplus(address(usdt), buyer, 1 ether, keccak256("payment-incident"));
+        claimVault.recoverSurplus(address(usdt), buyer, 1 ether, keccak256("claim-incident"));
+        rewardLedger.recoverSurplus(buyer, 1 ether, keccak256("reward-incident"));
+        guaranteeVault.recoverSurplus(buyer, 1 ether, keccak256("guarantee-incident"));
+        seckill.recoverSurplus(buyer, 1 ether, keccak256("seckill-incident"));
+        vm.stopPrank();
+        assertEq(usdt.balanceOf(buyer) - buyerUsdtBefore, 4 ether);
+        assertEq(npl.balanceOf(buyer) - buyerNplBefore, 1 ether);
+        assertEq(paymentEscrow.totalLockedUsdt(), 0);
+        assertEq(claimVault.totalUsdtLiability(), 0);
+        assertEq(rewardLedger.totalLockedNpl(), 0);
+        assertEq(guaranteeVault.totalGuarantees() + guaranteeVault.riskReserveBalance(), protectedGuaranteeBefore);
+        assertEq(seckill.totalUnsettledPrize(), 0);
+    }
+
+    function testRegistryBoundContractsRejectMismatchedSafeAtConstruction() public {
+        address wrongSafe = address(0xBAD);
+        vm.expectRevert(RewardLedgerV2.InvalidAddress.selector);
+        new RewardLedgerV2(
+            wrongSafe, npl, IPolicyRegistryV2(address(policyRegistry)), IClaimVaultV2(address(claimVault))
+        );
+        vm.expectRevert(MerchantGuaranteeVaultV2.InvalidAddress.selector);
+        new MerchantGuaranteeVaultV2(
+            wrongSafe, usdt, IPolicyRegistryV2(address(policyRegistry)), IClaimVaultV2(address(claimVault))
+        );
+        vm.expectRevert(PaymentEscrowV2.InvalidAddress.selector);
+        new PaymentEscrowV2(
+            wrongSafe,
+            usdt,
+            npl,
+            IPolicyRegistryV2(address(policyRegistry)),
+            IBeneficiaryRegistryV2(address(beneficiaryRegistry)),
+            ITwapOracleV2(address(oracle)),
+            IRewardLedgerV2(address(rewardLedger)),
+            IClaimVaultV2(address(claimVault)),
+            IMerchantGuaranteeVaultV2(address(guaranteeVault)),
+            quoteSigner,
+            finalitySigner,
+            12
+        );
+        assertEq(claimVault.safe(), safe);
     }
 
     function _claimIntent(address claimant, V2Types.ClaimRail rail, address asset, uint256 amount, uint256 nonce)

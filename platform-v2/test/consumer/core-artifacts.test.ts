@@ -27,7 +27,7 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
 test('coordinated publication has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-rc.1');
+  assert.equal(artifactVersion, '2.0.0-rc.2');
   assert.equal(manifest.artifactVersion, artifactVersion);
   assert.equal(openapi['x-artifactVersion'], artifactVersion);
   assert.equal(websocket.artifactVersion, artifactVersion);

@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-rc.1",
+  "artifactVersion": "2.0.0-rc.2",
   "publicationStatus": "coordinated-rc",
   "chain": {
     "name": "BSC Mainnet",
@@ -18,7 +18,7 @@
     "viaIR": true,
     "evmVersion": "cancun"
   },
-  "sourceDigestSha256": "d6fe016fa6fe6c687869df1f33fb823af7d225732aad6b583997476265825ea0",
+  "sourceDigestSha256": "bc99727a8b3815c8db8ae0176fe930111245b6d022026210fd8860a1da2badfe",
   "deploymentStatus": "ExternalBlocked",
   "externalBlocked": [
     "SAFE_ADDRESS",
@@ -136,7 +136,7 @@
       "status": "ExternalBlocked",
       "constructorInputs": [
         {
-          "name": "safe",
+          "name": "safe_",
           "type": "address",
           "internalType": "address"
         },
@@ -156,8 +156,8 @@
           "internalType": "contract IBNMTokenV2"
         }
       ],
-      "bytecodeSha256": "0c88f652e98880a447c37399d4d097250ddd33425f95c814d1c84c6cf7554e2b",
-      "deployedBytecodeSha256": "fbdda1529550ee701eedca83f3a077ee00cd142d9b863a516b5b8ba3a342a733"
+      "bytecodeSha256": "996ae94bb8c6c726e7b1afc68818fea044c74c5569a8e457c639d53f676d23be",
+      "deployedBytecodeSha256": "a60430e59bcbe58866825924694d824fc90bf64d722f1f0dcc7bd86d59f0d48f"
     },
     {
       "name": "RewardLedgerV2",
@@ -186,8 +186,8 @@
           "internalType": "contract IClaimVaultV2"
         }
       ],
-      "bytecodeSha256": "bdba2c2b4900927bc03a1d2f101bd2e92ed18e3c20ced6e284c71ac39f71e8b7",
-      "deployedBytecodeSha256": "f187a2842d4bbdc70076244045da1a1cdb5d97694a6451eeb5dffc5c0994d5b4"
+      "bytecodeSha256": "94dcce6142f26e322a421b7482354b24ae34ed364a55fa5af8e25b8cb11d43d6",
+      "deployedBytecodeSha256": "4e2db151c17cea6ada3e1e8fdf4c56c89f9eba5f350b17a1e23134b36c53b7f2"
     },
     {
       "name": "MerchantGuaranteeVaultV2",
@@ -216,8 +216,8 @@
           "internalType": "contract IClaimVaultV2"
         }
       ],
-      "bytecodeSha256": "726f32d36c4aafec99fbbedac1908cad6b02dfcfd3d89f4df25f4a69d513e4ee",
-      "deployedBytecodeSha256": "13d89d1c6cd43af1fe2b2fe0b61d7dd480150e0ce1e7932455d80753f8e323a7"
+      "bytecodeSha256": "aa2118124feff776af63336899a0cc0fb30da4ca98cc286bd3a7663fa9352f5c",
+      "deployedBytecodeSha256": "bb42a39b72e718a6079ec6f9635a306a7eadcee7d650854c0e4a9882401539fb"
     },
     {
       "name": "PaymentEscrowV2",
@@ -286,8 +286,8 @@
           "internalType": "uint32"
         }
       ],
-      "bytecodeSha256": "b976d28aaa71ee6a236d5ee6e91ef70ce5ecd364001675031f578903a951772e",
-      "deployedBytecodeSha256": "034736ec95f9ed6e490221a5576926bdda26949d2b6050d8ad5bfef1091682d6"
+      "bytecodeSha256": "0ec820010604d60f9cd75e7371b411ea8e532632c4a3cb49dd46f09bcd3920c6",
+      "deployedBytecodeSha256": "5f7e4340e2f90370b0c1a4bdad152209c291a7d717d3872401f5921da189616c"
     },
     {
       "name": "SeckillV2",
@@ -326,8 +326,8 @@
           "internalType": "address"
         }
       ],
-      "bytecodeSha256": "58507fcb8016b9143dcb2e4994920fea99e4f4efcafd40e5d9c22e300b62e88f",
-      "deployedBytecodeSha256": "f199dbd5397b0c43e45df28e9371f29be3cc1f09f852882620fdf0befa6ee8cd"
+      "bytecodeSha256": "3d07b95886691bbfc0d7a8c529decdae999fd17f39e5f1126128288716efb493",
+      "deployedBytecodeSha256": "a58ed4afe524b4ec0c005d05498b169d0584a9b6425c1a3a2b7d713c03ad4516"
     }
   ],
   "postDeploymentRoleGrants": [

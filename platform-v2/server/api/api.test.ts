@@ -39,6 +39,7 @@ test('typed config reports blocked inputs without exposing secret values', () =>
   const blocked = loadConfig({ CHAIN_ID: '56' });
   assert.ok(blocked.decisionBlocked.includes('PLATFORM_SERVICE_FEE_BPS'));
   assert.ok(blocked.decisionBlocked.includes('REQUIRED_CONFIRMATIONS'));
+  assert.ok(blocked.decisionBlocked.includes('PICKUP_TIMEOUT_AND_TAKEOVER_EVIDENCE'));
   assert.ok(blocked.externalBlocked.includes('DATABASE_URL'));
   assert.equal(blocked.providerReadiness.KUAIDI100, 'CONFIGURATION_REQUIRED');
   assert.equal(publicReadiness(blocked).writesEnabled, false);
@@ -46,7 +47,8 @@ test('typed config reports blocked inputs without exposing secret values', () =>
 
   const ready = loadConfig(completeEnvironment());
   const serialized = JSON.stringify(publicReadiness(ready));
-  assert.equal(publicReadiness(ready).writesEnabled, true);
+  assert.equal(publicReadiness(ready).writesEnabled, false);
+  assert.ok(ready.externalBlocked.includes('COORDINATED_DEPLOYMENT_AUTHORIZATION'));
   assert.equal(serialized.includes('test-jwt-secret'), false);
   assert.equal(serialized.includes('provider-secret'), false);
   assert.throws(
@@ -54,6 +56,14 @@ test('typed config reports blocked inputs without exposing secret values', () =>
     /integer BPS/,
   );
   assert.throws(() => loadConfig({ ...completeEnvironment(), REQUIRED_CONFIRMATIONS: '4294967296' }), /uint32/);
+  assert.throws(
+    () => loadConfig({ ...completeEnvironment(), SETTLEMENT_EXECUTOR_URL: 'http://executor.example.invalid' }),
+    /must use HTTPS/,
+  );
+  assert.throws(
+    () => loadConfig({ ...completeEnvironment(), QUOTE_SIGNER_ADDRESS: SAFE }),
+    /distinct addresses/,
+  );
 });
 
 test('SIWE nonce is domain-bound, one-use and yields an expiring RBAC session', async () => {
@@ -61,6 +71,16 @@ test('SIWE nonce is domain-bound, one-use and yields an expiring RBAC session', 
   const store = new MemoryNonceStore();
   const now = new Date('2026-07-14T01:00:00.000Z');
   const challenge = await createSiweChallenge(
+    store,
+    {
+      walletAddress: wallet.address,
+      domain: 'mall.abu.test',
+      uri: 'https://mall.abu.test',
+      statement: 'Sign in to Abu 24K V2',
+    },
+    now,
+  );
+  const parallelChallenge = await createSiweChallenge(
     store,
     {
       walletAddress: wallet.address,
@@ -82,6 +102,17 @@ test('SIWE nonce is domain-bound, one-use and yields an expiring RBAC session', 
     now,
   );
   assert.equal(verified.walletAddress, wallet.address.toLowerCase());
+  const parallelVerified = await verifySiwe(
+    store,
+    {
+      message: parallelChallenge.message,
+      signature: await wallet.signMessage(parallelChallenge.message),
+      expectedDomain: 'mall.abu.test',
+      expectedUri: 'https://mall.abu.test',
+    },
+    now,
+  );
+  assert.equal(parallelVerified.walletAddress, wallet.address.toLowerCase());
   await assert.rejects(
     verifySiwe(
       store,
@@ -367,6 +398,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
   const server = createApiServer({
     config: loadConfig(completeEnvironment()),
     nonceStore: store,
+    nonceRateLimiter: { consume: async () => undefined },
     authDomain: 'mall.abu.test',
     authUri: 'https://mall.abu.test',
     resolveRoles: async () => ({ roles: ['BUYER'] }),
@@ -441,12 +473,12 @@ class MemoryNonceStore implements NonceStore {
   readonly #values = new Map<string, StoredNonce>();
 
   async save(nonce: StoredNonce) {
-    this.#values.set(nonce.walletAddress, nonce);
+    this.#values.set(nonce.nonceHash, nonce);
   }
 
   async consume(walletAddress: string, nonceHash: string, now: Date) {
-    const value = this.#values.get(walletAddress);
-    if (!value || value.nonceHash !== nonceHash || value.consumedAt || value.expiresAt < now) return undefined;
+    const value = this.#values.get(nonceHash);
+    if (!value || value.walletAddress !== walletAddress || value.consumedAt || value.expiresAt < now) return undefined;
     value.consumedAt = now;
     return value;
   }

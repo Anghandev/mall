@@ -1,6 +1,6 @@
 # Abu 24K V2 Contract Freeze
 
-Status: coordinated local artifact `2.0.0-rc.1`. This freeze implements the
+Status: coordinated local artifact `2.0.0-rc.2`. This freeze implements the
 Phase 1 system authority and is included in the coordinated local publication.
 It does not prove product consumption or authorize deployment or a transaction.
 

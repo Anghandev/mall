@@ -1,6 +1,6 @@
 # Abu 24K V2 Core API Contract
 
-Status: coordinated local artifact `2.0.0-rc.1`. The implemented HTTP surface,
+Status: coordinated local artifact `2.0.0-rc.2`. The implemented HTTP surface,
 generated types and consumer checks are frozen together. This file does not
 authorize deployment or production signing.
 

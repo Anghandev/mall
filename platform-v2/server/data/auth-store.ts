@@ -1,5 +1,7 @@
+import { createHash } from 'node:crypto';
 import type { SqlExecutor } from './migrations.ts';
-import type { NonceStore, StoredNonce } from '../api/auth.ts';
+import type { NonceRateLimiter, NonceStore, StoredNonce } from '../api/auth.ts';
+import { CoreError } from '../api/errors.ts';
 
 export class PostgresNonceStore implements NonceStore {
   readonly #database: SqlExecutor;
@@ -9,19 +11,11 @@ export class PostgresNonceStore implements NonceStore {
   }
 
   async save(nonce: StoredNonce) {
+    await this.cleanupExpired(nonce.issuedAt, 100);
     await this.#database.query(
       `INSERT INTO core.auth_nonces (
          wallet_address, nonce_hash, domain, uri, chain_id, issued_at, expires_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT (wallet_address) DO UPDATE SET
-         nonce_hash = EXCLUDED.nonce_hash,
-         domain = EXCLUDED.domain,
-         uri = EXCLUDED.uri,
-         chain_id = EXCLUDED.chain_id,
-         issued_at = EXCLUDED.issued_at,
-         expires_at = EXCLUDED.expires_at,
-         consumed_at = NULL,
-         created_at = clock_timestamp()`,
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [
         nonce.walletAddress,
         nonce.nonceHash,
@@ -31,6 +25,21 @@ export class PostgresNonceStore implements NonceStore {
         nonce.issuedAt,
         nonce.expiresAt,
       ],
+    );
+  }
+
+  async cleanupExpired(now: Date, limit = 1_000) {
+    if (!Number.isSafeInteger(limit) || limit <= 0 || limit > 10_000) throw new Error('InvalidNonceCleanupLimit');
+    await this.#database.query(
+      `DELETE FROM core.auth_nonces
+       WHERE nonce_hash IN (
+         SELECT nonce_hash
+         FROM core.auth_nonces
+         WHERE expires_at < $1 OR consumed_at IS NOT NULL
+         ORDER BY expires_at
+         LIMIT $2
+       )`,
+      [now, limit],
     );
   }
 
@@ -47,6 +56,44 @@ export class PostgresNonceStore implements NonceStore {
     );
     const row = result.rows[0];
     return row ? fromRow(row) : undefined;
+  }
+}
+
+interface RedisEvalClient {
+  eval(script: string, options: { keys: string[]; arguments: string[] }): Promise<unknown>;
+}
+
+export class RedisNonceRateLimiter implements NonceRateLimiter {
+  readonly #redis: RedisEvalClient;
+
+  constructor(redis: RedisEvalClient) {
+    this.#redis = redis;
+  }
+
+  async consume(input: { walletAddress: string; clientAddress: string; now: Date }) {
+    const walletWindow = Math.floor(input.now.getTime() / (5 * 60_000));
+    const requestWindow = Math.floor(input.now.getTime() / 60_000);
+    const keys = [
+      `siwe:rate:wallet:${digest(input.walletAddress.toLowerCase())}:${walletWindow}`,
+      `siwe:rate:client:${digest(input.clientAddress)}:${requestWindow}`,
+      `siwe:rate:global:${requestWindow}`,
+    ];
+    let allowed: unknown;
+    try {
+      allowed = await this.#redis.eval(
+        `local allowed = 1
+         for index, key in ipairs(KEYS) do
+           local count = redis.call('INCR', key)
+           if count == 1 then redis.call('PEXPIRE', key, ARGV[4]) end
+           if count > tonumber(ARGV[index]) then allowed = 0 end
+         end
+         return allowed`,
+        { keys, arguments: ['3', '20', '500', '360000'] },
+      );
+    } catch {
+      throw new CoreError('ExternalBlocked', 'SIWE rate limiter is unavailable', 503);
+    }
+    if (Number(allowed) !== 1) throw new CoreError('InvalidRequest', 'SIWE challenge rate limit exceeded', 429);
   }
 }
 
@@ -72,4 +119,8 @@ function fromRow(row: NonceRow): StoredNonce {
     expiresAt: new Date(row.expires_at),
     ...(row.consumed_at ? { consumedAt: new Date(row.consumed_at) } : {}),
   };
+}
+
+function digest(value: string) {
+  return createHash('sha256').update(value).digest('hex');
 }

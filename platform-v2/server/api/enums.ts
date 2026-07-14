@@ -1,4 +1,4 @@
-export const CORE_ARTIFACT_VERSION = '2.0.0-rc.1';
+export const CORE_ARTIFACT_VERSION = '2.0.0-rc.2';
 export const BSC_CHAIN_ID = 56;
 export const USDT_ADDRESS = '0x55d398326f99059ff775485246999027b3197955';
 export const NPL_ADDRESS = '0x4e8277ab31e4956b2cd48449793a57656dfc03d2';

@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Abu 24K V2 Core API",
-    "version": "2.0.0-rc.1"
+    "version": "2.0.0-rc.2"
   },
-  "x-artifactVersion": "2.0.0-rc.1",
+  "x-artifactVersion": "2.0.0-rc.2",
   "servers": [],
   "paths": {
     "/v2/bootstrap": {
@@ -384,7 +384,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-rc.1"
+            "const": "2.0.0-rc.2"
           },
           "status": {
             "const": "CORE_API_READY"

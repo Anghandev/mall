@@ -14,10 +14,26 @@ export interface CanonicalCheckpoint {
   blockHash: string;
 }
 
+export interface IndexedChainBlock {
+  block: ChainBlock;
+  events: DecodedDomainEvent[];
+}
+
 export interface IndexerStore {
   checkpoint(): Promise<CanonicalCheckpoint | undefined>;
-  commit(block: ChainBlock, events: DecodedDomainEvent[]): Promise<void>;
+  canonicalAt(blockNumber: number): Promise<CanonicalCheckpoint | undefined>;
+  appendCanonical(expectedHead: CanonicalCheckpoint | undefined, segment: IndexedChainBlock[]): Promise<void>;
+  replaceCanonical(
+    expectedHead: CanonicalCheckpoint,
+    commonAncestor: CanonicalCheckpoint,
+    segment: IndexedChainBlock[],
+  ): Promise<void>;
   markReorg(fromBlock: number, expectedParentHash: string, observedParentHash: string): Promise<void>;
+}
+
+export interface ChainSegmentBlock {
+  block: ChainBlock;
+  logs: IndexedLog[];
 }
 
 export class ChainIndexer {
@@ -30,31 +46,69 @@ export class ChainIndexer {
   }
 
   async ingest(block: ChainBlock, logs: IndexedLog[]) {
-    validateBlock(block);
+    return this.ingestSegment([{ block, logs }]);
+  }
+
+  async ingestSegment(input: ChainSegmentBlock[]) {
+    if (input.length === 0) throw new CoreError('InvalidFinality', 'Indexer segment is empty');
+    validateSegment(input);
     const checkpoint = await this.#store.checkpoint();
-    if (checkpoint && block.number <= checkpoint.blockNumber) {
-      if (block.number === checkpoint.blockNumber && block.hash.toLowerCase() === checkpoint.blockHash.toLowerCase()) {
-        return { status: 'IDEMPOTENT' as const, events: 0 };
-      }
-      await this.#store.markReorg(block.number, checkpoint.blockHash, block.hash);
-      throw new CoreError('ReorgPending', 'Observed block conflicts with indexed canonical history', 409);
+    const first = input[0]!.block;
+    const existing = await this.#store.canonicalAt(first.number);
+    if (existing?.blockHash.toLowerCase() === first.hash.toLowerCase()) {
+      if (input.length === 1) return { status: 'IDEMPOTENT' as const, events: 0 };
+      throw new CoreError('InvalidFinality', 'Indexer segment overlaps canonical history');
     }
-    if (checkpoint && block.number !== checkpoint.blockNumber + 1) {
+    const segment = input.map(({ block, logs }) => ({ block, events: this.#decode(block, logs) }));
+
+    if (existing) {
+      if (!checkpoint || first.number === 0) {
+        await this.#store.markReorg(first.number, existing.blockHash, first.hash);
+        throw new CoreError('ReorgPending', 'Replacement segment has no provable common ancestor', 409);
+      }
+      const commonAncestor = await this.#store.canonicalAt(first.number - 1);
+      if (!commonAncestor || commonAncestor.blockHash.toLowerCase() !== first.parentHash.toLowerCase()) {
+        await this.#store.markReorg(
+          first.number - 1,
+          commonAncestor?.blockHash ?? existing.blockHash,
+          first.parentHash,
+        );
+        throw new CoreError('ReorgPending', 'Replacement segment does not identify the common ancestor', 409);
+      }
+      await this.#store.replaceCanonical(checkpoint, commonAncestor, segment);
+      return { status: 'REORG_COMMITTED' as const, events: segment.reduce((count, item) => count + item.events.length, 0) };
+    }
+
+    if (checkpoint && first.number !== checkpoint.blockNumber + 1) {
       throw new CoreError('FinalityPending', 'Indexer block gap detected', 409, {
         expected: checkpoint.blockNumber + 1,
-        observed: block.number,
+        observed: first.number,
       });
     }
-    if (checkpoint && block.parentHash.toLowerCase() !== checkpoint.blockHash.toLowerCase()) {
-      await this.#store.markReorg(block.number - 1, checkpoint.blockHash, block.parentHash);
+    if (checkpoint && first.parentHash.toLowerCase() !== checkpoint.blockHash.toLowerCase()) {
+      await this.#store.markReorg(first.number - 1, checkpoint.blockHash, first.parentHash);
       throw new CoreError('ReorgPending', 'Block parent no longer matches the canonical checkpoint', 409);
     }
-    const events = logs
+    await this.#store.appendCanonical(checkpoint, segment);
+    return { status: 'COMMITTED' as const, events: segment.reduce((count, item) => count + item.events.length, 0) };
+  }
+
+  #decode(block: ChainBlock, logs: IndexedLog[]) {
+    return logs
       .filter((log) => log.blockNumber === block.number && log.blockHash.toLowerCase() === block.hash.toLowerCase())
       .map((log) => this.#decoder.decode(log))
       .filter((event): event is DecodedDomainEvent => Boolean(event));
-    await this.#store.commit(block, events);
-    return { status: 'COMMITTED' as const, events: events.length };
+  }
+}
+
+function validateSegment(segment: ChainSegmentBlock[]) {
+  for (let index = 0; index < segment.length; index += 1) {
+    const block = segment[index]!.block;
+    validateBlock(block);
+    const previous = segment[index - 1]?.block;
+    if (previous && (block.number !== previous.number + 1 || block.parentHash.toLowerCase() !== previous.hash.toLowerCase())) {
+      throw new CoreError('InvalidFinality', 'Indexer segment is not a continuous canonical chain');
+    }
   }
 }
 

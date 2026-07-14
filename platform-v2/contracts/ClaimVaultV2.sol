@@ -26,6 +26,7 @@ contract ClaimVaultV2 is AccessControl, EIP712, ReentrancyGuard {
     IERC20 public immutable usdt;
     IERC20 public immutable npl;
     IBNMTokenV2 public immutable bnm;
+    address public immutable safe;
 
     mapping(address merchant => uint256 amount) public merchantClaimable;
     mapping(address beneficiary => uint256 amount) public rewardClaimable;
@@ -54,6 +55,7 @@ contract ClaimVaultV2 is AccessControl, EIP712, ReentrancyGuard {
     error InexactTransfer();
     error InvalidEvidence();
     error InsufficientSurplus();
+    error SafeExecutionRequired();
 
     event ClaimCredited(
         bytes32 indexed resourceId, address indexed beneficiary, V2Types.ClaimRail indexed rail, uint256 amount
@@ -68,9 +70,9 @@ contract ClaimVaultV2 is AccessControl, EIP712, ReentrancyGuard {
         address indexed token, address indexed recipient, uint256 amount, bytes32 indexed incidentHash
     );
 
-    constructor(address safe, IERC20 usdt_, IERC20 npl_, IBNMTokenV2 bnm_) EIP712("Abu24KClaimVault", "2") {
+    constructor(address safe_, IERC20 usdt_, IERC20 npl_, IBNMTokenV2 bnm_) EIP712("Abu24KClaimVault", "2") {
         if (
-            safe == address(0) || address(usdt_) == address(0) || address(npl_) == address(0)
+            safe_ == address(0) || address(usdt_) == address(0) || address(npl_) == address(0)
                 || address(bnm_) == address(0) || address(usdt_) == address(npl_)
                 || block.chainid != V2Types.BSC_CHAIN_ID || address(usdt_) != V2Types.USDT
                 || address(npl_) != V2Types.NPL
@@ -78,9 +80,10 @@ contract ClaimVaultV2 is AccessControl, EIP712, ReentrancyGuard {
         usdt = usdt_;
         npl = npl_;
         bnm = bnm_;
-        _grantRole(DEFAULT_ADMIN_ROLE, safe);
-        _grantRole(PAUSER_ROLE, safe);
-        _grantRole(RECOVERY_ROLE, safe);
+        safe = safe_;
+        _grantRole(DEFAULT_ADMIN_ROLE, safe_);
+        _grantRole(PAUSER_ROLE, safe_);
+        _grantRole(RECOVERY_ROLE, safe_);
     }
 
     function depositMerchant(bytes32 orderId, address merchant, uint256 amount)
@@ -161,6 +164,7 @@ contract ClaimVaultV2 is AccessControl, EIP712, ReentrancyGuard {
     }
 
     function setClaimPause(V2Types.ClaimRail rail, bool paused, bytes32 evidenceHash) external onlyRole(PAUSER_ROLE) {
+        if (msg.sender != safe) revert SafeExecutionRequired();
         if (evidenceHash == bytes32(0)) revert InvalidEvidence();
         if (rail == V2Types.ClaimRail.MerchantUsdt) merchantClaimsPaused = paused;
         else if (rail == V2Types.ClaimRail.PrizeUsdt) prizeClaimsPaused = paused;
@@ -174,6 +178,7 @@ contract ClaimVaultV2 is AccessControl, EIP712, ReentrancyGuard {
         onlyRole(RECOVERY_ROLE)
         nonReentrant
     {
+        if (msg.sender != safe) revert SafeExecutionRequired();
         if (recipient == address(0) || incidentHash == bytes32(0)) revert InvalidEvidence();
         IERC20 asset = IERC20(token);
         uint256 protectedAmount;

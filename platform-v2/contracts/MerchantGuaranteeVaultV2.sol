@@ -113,7 +113,7 @@ contract MerchantGuaranteeVaultV2 is AccessControl, EIP712, ReentrancyGuard {
         if (
             safe == address(0) || address(usdt_) == address(0) || address(policyRegistry_) == address(0)
                 || address(claimVault_) == address(0) || block.chainid != V2Types.BSC_CHAIN_ID
-                || address(usdt_) != V2Types.USDT
+                || address(usdt_) != V2Types.USDT || safe != policyRegistry_.safe()
         ) revert InvalidAddress();
         usdt = usdt_;
         policyRegistry = policyRegistry_;
@@ -325,6 +325,7 @@ contract MerchantGuaranteeVaultV2 is AccessControl, EIP712, ReentrancyGuard {
         onlyRole(RECOVERY_ROLE)
         nonReentrant
     {
+        if (msg.sender != policyRegistry.safe()) revert SafeExecutionRequired();
         if (recipient == address(0) || incidentHash == bytes32(0)) revert InvalidEvidence();
         uint256 protectedAmount = totalGuarantees + riskReserveBalance + totalTakeoverLocked;
         uint256 balance = usdt.balanceOf(address(this));

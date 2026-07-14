@@ -1,6 +1,6 @@
 # Core Artifacts
 
-Version `2.0.0-rc.1` is the coordinated local release candidate for OpenAPI,
+Version `2.0.0-rc.2` is the coordinated local release candidate for OpenAPI,
 generated public types, state/error catalogs, the fail-closed WebSocket
 protocol, ABI/event/role bundles, manifests and SHA-256 checksums.
 

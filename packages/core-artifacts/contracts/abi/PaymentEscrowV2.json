@@ -194,6 +194,11 @@
   },
   {
     "type": "error",
+    "name": "SafeExecutionRequired",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "ShipmentAlreadyRecorded",
     "inputs": []
   },

@@ -11,6 +11,9 @@ if (!['business', 'audit'].includes(scope) || !input) {
 const variable = scope === 'business' ? 'DATABASE_URL' : 'AUDIT_DATABASE_URL';
 const connectionString = process.env[variable];
 if (!connectionString) throw new Error(`${variable}: ConfigurationRequired`);
+if (process.env.BACKUP_STORAGE_ENCRYPTED !== 'true') {
+  throw new Error('BACKUP_STORAGE_ENCRYPTED: ExternalBlocked');
+}
 const databaseUrl = new URL(connectionString);
 const databaseName = decodeURIComponent(databaseUrl.pathname.replace(/^\//, ''));
 if (!databaseName) throw new Error(`${variable}: database name is required`);

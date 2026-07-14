@@ -19,6 +19,10 @@ export interface NonceStore {
   consume(walletAddress: string, nonceHash: string, now: Date): Promise<StoredNonce | undefined>;
 }
 
+export interface NonceRateLimiter {
+  consume(input: { walletAddress: string; clientAddress: string; now: Date }): Promise<void>;
+}
+
 export interface SiweChallenge {
   message: string;
   nonce: string;
@@ -263,7 +267,7 @@ function parseSiweMessage(message: string) {
   };
 }
 
-function normalizeAddress(value: string) {
+export function normalizeAddress(value: string) {
   try {
     return getAddress(value).toLowerCase();
   } catch {

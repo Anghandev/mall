@@ -4,7 +4,13 @@ import test from 'node:test';
 import { Interface, Wallet, type InterfaceAbi } from 'ethers';
 import { AbiEventDecoder, type DecodedDomainEvent } from './abi-decoder.ts';
 import { RemoteExecutorClient } from './executor.ts';
-import { ChainIndexer, type CanonicalCheckpoint, type ChainBlock, type IndexerStore } from './indexer.ts';
+import {
+  ChainIndexer,
+  type CanonicalCheckpoint,
+  type ChainBlock,
+  type IndexedChainBlock,
+  type IndexerStore,
+} from './indexer.ts';
 import { scheduleFulfillmentJobs } from './scheduler.ts';
 import { RemoteSignerClient } from './signer.ts';
 
@@ -15,6 +21,8 @@ const ORDER_ID = `0x${'a'.repeat(64)}`;
 const HASH_1 = `0x${'1'.repeat(64)}`;
 const HASH_2 = `0x${'2'.repeat(64)}`;
 const HASH_3 = `0x${'3'.repeat(64)}`;
+const EXECUTOR_INTERFACE = new Interface(['function settle(bytes32 resourceId,uint64 policyVersion,uint256 amount)']);
+const ALLOWED_CALLDATA = EXECUTOR_INTERFACE.encodeFunctionData('settle', [ORDER_ID, 1, 25]);
 const BUNDLE_PATH = fileURLToPath(
   new URL('../../../packages/core-artifacts/contracts/abi-bundle.json', import.meta.url),
 );
@@ -60,9 +68,36 @@ test('Indexer decodes the frozen ABI, is idempotent and fails closed on reorg', 
   assert.equal(store.events[0]?.resourceId, ORDER_ID);
   assert.deepEqual(await indexer.ingest(block, []), { status: 'IDEMPOTENT', events: 0 });
 
+  const block101: ChainBlock = { number: 101, hash: HASH_2, parentHash: HASH_1, timestamp: 1_800_000_001 };
+  const block102: ChainBlock = { number: 102, hash: HASH_3, parentHash: HASH_2, timestamp: 1_800_000_002 };
+  assert.deepEqual(await indexer.ingestSegment([{ block: block101, logs: [] }, { block: block102, logs: [] }]), {
+    status: 'COMMITTED',
+    events: 0,
+  });
+  assert.deepEqual(await indexer.ingest(block101, []), { status: 'IDEMPOTENT', events: 0 });
+  assert.equal(store.reorgs.length, 0);
+
+  const replacement101: ChainBlock = {
+    number: 101,
+    hash: `0x${'5'.repeat(64)}`,
+    parentHash: HASH_1,
+    timestamp: 1_800_000_003,
+  };
+  const replacement102: ChainBlock = {
+    number: 102,
+    hash: `0x${'6'.repeat(64)}`,
+    parentHash: replacement101.hash,
+    timestamp: 1_800_000_004,
+  };
+  assert.deepEqual(
+    await indexer.ingestSegment([{ block: replacement101, logs: [] }, { block: replacement102, logs: [] }]),
+    { status: 'REORG_COMMITTED', events: 0 },
+  );
+  assert.deepEqual(await store.checkpoint(), { blockNumber: 102, blockHash: replacement102.hash });
+
   await assert.rejects(
-    indexer.ingest({ number: 101, hash: HASH_3, parentHash: `0x${'4'.repeat(64)}`, timestamp: 1_800_000_001 }, []),
-    /parent no longer matches/,
+    indexer.ingest({ number: 102, hash: `0x${'7'.repeat(64)}`, parentHash: `0x${'4'.repeat(64)}`, timestamp: 1_800_000_005 }, []),
+    /common ancestor/,
   );
   assert.equal(store.reorgs.length, 1);
 });
@@ -112,6 +147,7 @@ test('remote executor enforces chain, zero native value, gas cap and replacement
     url: 'https://executor.example.invalid',
     token: 'test-executor-service-token',
     maxGasLimit: 1_000_000n,
+    deployment: executorDeployment(),
     fetch: async (_input, init) => {
       const request = JSON.parse(String(init?.body)) as { replacementForTxHash?: string };
       return new Response(
@@ -123,12 +159,13 @@ test('remote executor enforces chain, zero native value, gas cap and replacement
   const result = await executor.execute({
     chainId: 56,
     to: CONTRACT,
-    data: '0x1234',
+    data: ALLOWED_CALLDATA,
     value: '0',
     resourceId: ORDER_ID,
     policyVersion: 1,
     idempotencyKey: 'execute-order-1',
     gasLimit: '500000',
+    amounts: { amount: '25' },
     replacementForTxHash: HASH_2,
   });
   assert.equal(result.txHash, HASH_3);
@@ -137,14 +174,51 @@ test('remote executor enforces chain, zero native value, gas cap and replacement
     executor.execute({
       chainId: 56,
       to: CONTRACT,
-      data: '0x1234',
+      data: ALLOWED_CALLDATA,
       value: '0',
       resourceId: ORDER_ID,
       policyVersion: 1,
       idempotencyKey: 'execute-order-2',
       gasLimit: '1000001',
+      amounts: { amount: '25' },
     }),
     /bounded transaction plan/,
+  );
+  for (const request of [
+    { to: '0x4444444444444444444444444444444444444444' },
+    { data: '0x87654321' },
+    { resourceId: '' },
+    { resourceId: HASH_1 },
+    { policyVersion: 0 },
+    { policyVersion: 2 },
+    { idempotencyKey: '' },
+    { amounts: { amount: '26' } },
+    { replacementForTxHash: '0x1234' },
+  ]) {
+    await assert.rejects(
+      executor.execute({
+        chainId: 56,
+        to: CONTRACT,
+        data: ALLOWED_CALLDATA,
+        value: '0',
+        resourceId: ORDER_ID,
+        policyVersion: 1,
+        idempotencyKey: 'execute-order-rejected',
+        gasLimit: '500000',
+        amounts: { amount: '25' },
+        ...request,
+      }),
+      /bounded transaction plan/,
+    );
+  }
+  assert.throws(
+    () =>
+      new RemoteExecutorClient({
+        url: 'https://executor.example.invalid',
+        token: 'test-executor-service-token',
+        maxGasLimit: 1_000_000n,
+      }),
+    /unavailable/,
   );
 });
 
@@ -187,19 +261,66 @@ test('scheduler opens eligible delivery takeover and records pickup DecisionBloc
 
 class MemoryIndexerStore implements IndexerStore {
   current: CanonicalCheckpoint | undefined;
-  readonly events: DecodedDomainEvent[] = [];
+  readonly blocks = new Map<number, IndexedChainBlock>();
+  get events() {
+    return [...this.blocks.values()].flatMap((item) => item.events);
+  }
   readonly reorgs: Array<{ fromBlock: number; expected: string; observed: string }> = [];
 
   async checkpoint() {
     return this.current;
   }
 
-  async commit(block: ChainBlock, events: DecodedDomainEvent[]) {
-    this.current = { blockNumber: block.number, blockHash: block.hash };
-    this.events.push(...events);
+  async canonicalAt(blockNumber: number) {
+    const block = this.blocks.get(blockNumber)?.block;
+    return block ? { blockNumber, blockHash: block.hash } : undefined;
+  }
+
+  async appendCanonical(expectedHead: CanonicalCheckpoint | undefined, segment: IndexedChainBlock[]) {
+    assert.deepEqual(this.current, expectedHead);
+    for (const item of segment) this.blocks.set(item.block.number, item);
+    const last = segment.at(-1)!.block;
+    this.current = { blockNumber: last.number, blockHash: last.hash };
+  }
+
+  async replaceCanonical(
+    expectedHead: CanonicalCheckpoint,
+    commonAncestor: CanonicalCheckpoint,
+    segment: IndexedChainBlock[],
+  ) {
+    assert.deepEqual(this.current, expectedHead);
+    for (const height of [...this.blocks.keys()]) {
+      if (height > commonAncestor.blockNumber) this.blocks.delete(height);
+    }
+    for (const item of segment) this.blocks.set(item.block.number, item);
+    const last = segment.at(-1)!.block;
+    this.current = { blockNumber: last.number, blockHash: last.hash };
   }
 
   async markReorg(fromBlock: number, expected: string, observed: string) {
     this.reorgs.push({ fromBlock, expected, observed });
   }
+}
+
+function executorDeployment() {
+  return {
+    coordinatedManifest: { artifactVersion: '2.0.0-rc.2', deploymentAuthorized: true, chain: { chainId: 56 } },
+    contractManifest: {
+      artifactVersion: '2.0.0-rc.2',
+      deploymentStatus: 'DEPLOYED',
+      chain: { chainId: 56 },
+      contracts: [{ name: 'PaymentEscrowV2', address: CONTRACT, status: 'DEPLOYED' }],
+    },
+    allowedCalls: {
+      PaymentEscrowV2: [
+        {
+          signature: 'settle(bytes32 resourceId,uint64 policyVersion,uint256 amount)',
+          resourcePath: ['resourceId'],
+          policyVersionPath: ['policyVersion'],
+          amountPaths: { amount: ['amount'] },
+        },
+      ],
+    },
+    mutualTls: true as const,
+  };
 }

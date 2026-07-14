@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-rc.1",
+  "artifactVersion": "2.0.0-rc.2",
   "contracts": {
     "PolicyRegistryV2": [
       {
@@ -2451,7 +2451,7 @@
         "type": "constructor",
         "inputs": [
           {
-            "name": "safe",
+            "name": "safe_",
             "type": "address",
             "internalType": "address"
           },
@@ -2579,6 +2579,11 @@
             "internalType": "address"
           }
         ]
+      },
+      {
+        "type": "error",
+        "name": "SafeExecutionRequired",
+        "inputs": []
       },
       {
         "type": "error",
@@ -3523,6 +3528,19 @@
       },
       {
         "type": "function",
+        "name": "safe",
+        "inputs": [],
+        "outputs": [
+          {
+            "name": "",
+            "type": "address",
+            "internalType": "address"
+          }
+        ],
+        "stateMutability": "view"
+      },
+      {
+        "type": "function",
         "name": "setClaimPause",
         "inputs": [
           {
@@ -3766,6 +3784,11 @@
             "internalType": "address"
           }
         ]
+      },
+      {
+        "type": "error",
+        "name": "SafeExecutionRequired",
+        "inputs": []
       },
       {
         "type": "error",
@@ -5877,6 +5900,11 @@
             "internalType": "address"
           }
         ]
+      },
+      {
+        "type": "error",
+        "name": "SafeExecutionRequired",
+        "inputs": []
       },
       {
         "type": "error",

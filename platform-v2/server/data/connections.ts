@@ -1,5 +1,6 @@
 import { Pool, type PoolClient } from 'pg';
 import { createClient, type RedisClientType } from 'redis';
+import type { SqlTransactionRunner } from './migrations.ts';
 
 export function createPostgresPool(connectionString: string) {
   if (!connectionString) throw new Error('Database connection string is required');
@@ -23,6 +24,10 @@ export async function withTransaction<Result>(pool: Pool, operation: (client: Po
   } finally {
     client.release();
   }
+}
+
+export function postgresTransactionRunner(pool: Pool): SqlTransactionRunner {
+  return { transaction: (operation) => withTransaction(pool, operation) };
 }
 
 export async function createRedisConnection(url: string): Promise<RedisClientType> {

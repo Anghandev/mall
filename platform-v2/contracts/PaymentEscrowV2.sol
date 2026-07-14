@@ -101,6 +101,7 @@ contract PaymentEscrowV2 is AccessControl, EIP712, ReentrancyGuard {
     error UnauthorizedBuyerOrMerchant();
     error InvalidEvidence();
     error InsufficientSurplus();
+    error SafeExecutionRequired();
 
     event OrderPaid(
         bytes32 indexed orderId,
@@ -162,7 +163,7 @@ contract PaymentEscrowV2 is AccessControl, EIP712, ReentrancyGuard {
                 || address(claimVault_) == address(0) || address(guaranteeVault_) == address(0)
                 || quoteSigner_ == address(0) || finalitySigner_ == address(0) || requiredConfirmations_ == 0
                 || block.chainid != V2Types.BSC_CHAIN_ID || address(usdt_) != V2Types.USDT
-                || address(npl_) != V2Types.NPL
+                || address(npl_) != V2Types.NPL || safe != policyRegistry_.safe()
         ) revert InvalidAddress();
         usdt = usdt_;
         npl = npl_;
@@ -400,6 +401,7 @@ contract PaymentEscrowV2 is AccessControl, EIP712, ReentrancyGuard {
     }
 
     function setNewOrdersPause(bool paused, bytes32 evidenceHash) external onlyRole(PAUSER_ROLE) {
+        if (msg.sender != policyRegistry.safe()) revert SafeExecutionRequired();
         if (evidenceHash == bytes32(0)) revert InvalidEvidence();
         newOrdersPaused = paused;
         emit NewOrdersPauseChanged(paused, evidenceHash);
@@ -419,6 +421,7 @@ contract PaymentEscrowV2 is AccessControl, EIP712, ReentrancyGuard {
         onlyRole(RECOVERY_ROLE)
         nonReentrant
     {
+        if (msg.sender != policyRegistry.safe()) revert SafeExecutionRequired();
         if (recipient == address(0) || incidentHash == bytes32(0)) revert InvalidEvidence();
         IERC20 asset = IERC20(token);
         uint256 protectedAmount = token == address(usdt) ? totalLockedUsdt : 0;

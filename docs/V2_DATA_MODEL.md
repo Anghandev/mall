@@ -1,7 +1,7 @@
 # Abu 24K V2 Data Model
 
 Status: Core database checkpoint included in coordinated local artifact
-`2.0.0-rc.1`. This document does not authorize a deployment.
+`2.0.0-rc.2`. This document does not authorize a deployment.
 
 ## Storage Boundary
 

@@ -20,7 +20,8 @@
     "mall:check": "pnpm --filter @abu24k/mall check",
     "consumer:check": "pnpm --filter @abu24k/core consumer:check",
     "e2e:full": "pnpm --filter @abu24k/core e2e:full",
-    "verify": "pnpm baseline:check && pnpm typecheck && pnpm contracts:test && pnpm requirements:check && pnpm database:check && pnpm api:check && pnpm admin:check && pnpm merchant:check && pnpm mall:check && pnpm consumer:check && pnpm e2e:full",
+    "micro:guard:test": "./scripts/node --test scripts/microtest/tx-guard.test.mjs",
+    "verify": "pnpm baseline:check && pnpm typecheck && pnpm contracts:test && pnpm requirements:check && pnpm database:check && pnpm api:check && pnpm micro:guard:test && pnpm admin:check && pnpm merchant:check && pnpm mall:check && pnpm consumer:check && pnpm e2e:full",
     "micro:init-env": "./scripts/node scripts/microtest/init-env.mjs",
     "micro:preflight": "./scripts/node scripts/microtest/preflight.mjs",
     "micro:report": "./scripts/node scripts/microtest/report.mjs"
