@@ -1,6 +1,7 @@
 # Abu 24K V2 Payment Contract Freeze
 
-Status: coordinated local fulfillment checkpoint `2.0.0-fulfillment.1`. The generated
+Status: coordinated local settlement/admin checkpoint
+`2.0.0-settlement-admin.1`. The generated
 manifest contains no deployment addresses and has `deploymentAuthorized:
 false`. This document does not authorize deployment or a transaction.
 
@@ -14,9 +15,10 @@ false`. This document does not authorize deployment or a transaction.
 | `PaymentRouterV2` | Signed ordinary/seckill payment, replay protection, Safe transfers, boundary classification and payment breakers | Normally zero |
 
 V2 deploys no BNM token, Claim vault, reward ledger, payment escrow, guarantee
-vault or separate seckill funds contract. Fulfillment and arbitration are
-published PostgreSQL-ledger/Core responsibilities in the current checkpoint;
-guarantees, transferable rewards and Safe settlement remain later Core work.
+vault or separate seckill funds contract. Fulfillment, arbitration, guarantees,
+transferable rewards and Safe settlement are published PostgreSQL-ledger/Core
+responsibilities; the Router contract set remains limited to payment policy,
+beneficiary validation, Oracle validation and atomic collection.
 
 ## Payment Intent
 

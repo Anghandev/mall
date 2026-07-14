@@ -1,6 +1,6 @@
 # Abu 24K V2 Payment And Fulfillment Workers
 
-Status: local fulfillment checkpoint `2.0.0-fulfillment.1`. Production RPCs, deployed
+Status: local settlement/admin checkpoint `2.0.0-settlement-admin.1`. Production RPCs, deployed
 addresses, signer service and credentials remain `ExternalBlocked`.
 
 ## Indexer
@@ -73,12 +73,26 @@ new quotes are enabled; each quote signature is still recovered independently.
 Signer URL/token and public signer address are independent configuration. A
 public address without a reachable isolated signer is not ready.
 
-## Executor And Later Workers
+## Executor And Settlement Workers
 
 The bounded executor validates chain, target, exact calldata, resource, policy,
 integer amounts, zero native value, gas cap and replacement evidence. An
 executor response is only `Submitted`; indexed receipt and canonical finality
 remain separate evidence.
+
+The settlement worker reserves the governed Safe nonce, builds an immutable
+MultiSend batch from exact request items, attests the Safe runtime and submits
+only matching calldata. Request, batch and finality transitions are append-only
+and idempotent. A status-1 receipt becomes `Settled` only after 15 canonical
+confirmations; replacements and reorgs preserve the old evidence and reopen the
+affected liabilities without duplicating a payout.
+
+Guarantee polling verifies exact ERC-20 Transfer evidence and rotates fairly
+across pending and finalized deposits. Coverage polling reconciles each Safe
+asset against unsettled liabilities and controls only the documented breaker.
+Policy publication, notification, audit-outbox and monitoring workers use the
+same bounded command and evidence rules; missing providers remain typed
+`ConfigurationRequired` or `ExternalBlocked` rather than simulated success.
 
 ## Fulfillment Scheduling And Providers
 
@@ -127,8 +141,8 @@ Outer lease or retry-write failures remain visible in worker status and do not
 make `stop()` reject.
 BNM has no token, mint, Claim, Safe transfer or settlement executor path.
 
-Safe MultiSend settlement and administrative batch workers belong to the next
-checkpoint. The bounded executor remains internal until those exact request,
-batch and finality contracts are published. Payment breakers never stop
-Indexer, finality, reorg recovery, fulfillment, reconciliation or audit
-processing.
+Safe MultiSend settlement and administrative workers are published in this
+checkpoint. Their production execution remains disabled until same-version
+deployment evidence and external Safe/RPC/signer inputs are present. Payment
+breakers never stop Indexer, finality, reorg recovery, fulfillment,
+reconciliation or audit processing.

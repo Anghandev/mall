@@ -1,8 +1,9 @@
 # Abu 24K V2 Data Model
 
-Status: coordinated local fulfillment checkpoint `2.0.0-fulfillment.1`. This
-document describes implemented payment and fulfillment storage and does not
-authorize deployment.
+Status: coordinated local settlement/admin checkpoint
+`2.0.0-settlement-admin.1`. This document describes implemented payment,
+fulfillment, settlement and administrative storage and does not authorize
+deployment.
 
 ## Storage Boundary
 
@@ -65,7 +66,7 @@ Safe asset account IDs include the normalized Safe address. Existing account
 metadata is verified field by field before posting, so a governed Safe rotation
 cannot silently post new assets into an account bound to an old Safe.
 
-The payment and fulfillment checkpoints publish these journal events:
+The coordinated checkpoints publish these journal events:
 
 - `PAYMENT_LOCKED` records Custody Safe assets, merchant and policy USDT
   liabilities, Reward Safe assets and beneficiary NPL liabilities, Burn, and
@@ -82,9 +83,9 @@ The payment and fulfillment checkpoints publish these journal events:
   state, including balances already moved by fulfillment.
 
 BNM is a backend-points liability, not an ERC-20, mint or Safe-transfer asset.
-This checkpoint publishes only its `Locked -> Available` fulfillment lifecycle.
-`Requested`, `Batched` and `Settled` remain reserved for transferable assets in
-the settlement checkpoint and never apply to BNM. `core.orders.bnm_state_version`
+BNM publishes only its `Locked -> Available` fulfillment lifecycle.
+`Requested`, `Batched` and `Settled` are implemented only for transferable
+assets and never apply to BNM. `core.orders.bnm_state_version`
 is incremented in the same transaction that appends each BNM state command, and
 `core.bnm_state_syncs` records the version acknowledged by the backend. Versions
 are order-scoped and never reused, so a timed-out lower-version request cannot
@@ -111,15 +112,36 @@ overwrite a later reorg `LOCKED` state.
   receipt state. Only one open request of each kind exists per order.
 - `core.takeover_cases` starts seven days after payment finality when delivery
   has no valid shipment evidence. Opening a case freezes the merchant and its
-  active/review products while customer funds and rewards remain Locked. This
-  checkpoint keeps replacement `required_usdt` null and all funding usage zero;
-  the settlement checkpoint must publish the balanced guarantee, frozen
-  receivable, future-proceeds and platform-advance/debt entries before funding.
+  active/review products while customer funds and rewards remain Locked.
+  Replacement funding uses balanced guarantee, frozen-receivable,
+  future-proceeds and platform-advance/debt entries. Each governed command and
+  resulting debt recovery remains linked to the takeover evidence.
 
 Fulfillment completion stores the method and immutable evidence, closes an
 active takeover case, resolves eligible requests and writes BNM availability to
 the outbox in the same business transaction. There is no refund table or
 payment-reversal fulfillment action.
+
+## Settlement And Administrative Storage
+
+- `core.settlement_intents`, intent items, wallet nonces, requests and request
+  items bind the wallet signature, exact asset/amount, available liabilities,
+  expiry and idempotency identity.
+- Safe nonce reservations, immutable batches, batch items, approvals and
+  execution attempts bind the complete MultiSend content hash. Final
+  `Settled` state requires a status-1 canonical receipt and 15 confirmations;
+  replacement and reorg exposure remain append-only evidence.
+- Coverage snapshots reconcile verified Safe assets against unsettled
+  liabilities per asset. Breaker events and causes preserve independent new
+  payment, seckill-purchase and new-settlement-batch controls.
+- Merchant guarantees, immutable deposit submissions, reorg exposures, debts,
+  debt recoveries and takeover-funding items preserve the required funding
+  order and never rewrite a prior balance.
+- Policy drafts and publication transitions bind RBAC, the secondary wallet
+  signature, Safe proposal and future-only `policyVersion` activation.
+- CMS versions/publication events, notification endpoints/campaigns/deliveries,
+  system-config versions, the audit outbox, monitoring snapshots and alert
+  events are versioned or append-only as appropriate.
 
 ## Immutability And Recovery
 

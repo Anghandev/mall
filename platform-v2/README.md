@@ -24,6 +24,7 @@ workers and the `admin/` product consumer. It must not import V1 runtime code.
   provider configuration is unavailable.
 
 The binding authority is `../docs/V2_SYSTEM_CONTRACT.md`. The current coordinated
-fulfillment checkpoint is `2.0.0-fulfillment.1`; settlement and administrative
-capabilities remain fail closed until their matching checkpoint and consumer
-tests are published.
+settlement/admin checkpoint is `2.0.0-settlement-admin.1`; production execution
+remains fail closed until same-version consumers, deployment evidence and the
+required external Safe, signer, RPC and provider inputs pass their release
+gates.

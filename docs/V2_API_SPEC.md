@@ -1,6 +1,6 @@
 # Abu 24K V2 Core API Contract
 
-Status: coordinated local fulfillment checkpoint `2.0.0-fulfillment.1`. OpenAPI,
+Status: coordinated local settlement/admin checkpoint `2.0.0-settlement-admin.1`. OpenAPI,
 generated types, ABI, manifests, enums, the fail-closed WebSocket protocol and
 consumer tests share this version. This checkpoint does not authorize a
 deployment, production signing or a transaction.
@@ -149,14 +149,16 @@ order even when it belongs to the same merchant.
 
 ## Publication Boundary
 
-The fulfillment checkpoint includes all payment capabilities plus stores,
-encrypted delivery/pickup targets, order projections, shipment and signed
-logistics evidence, one-use pickup verification, exchange/delay, arbitration,
-platform-reviewed forced receipt, delivery takeover and BNM
-Locked-to-Available synchronization.
+The settlement/admin checkpoint includes all payment and fulfillment
+capabilities plus signed settlement intents and requests, merchant finance and
+guarantee deposits, takeover funding, Safe MultiSend batching and finality,
+policy governance, CMS, notifications, versioned system configuration,
+append-only audit queries and operations monitoring. The coordinated OpenAPI
+publishes 63 HTTP operations and the generated types, state/error enums,
+Schema and ABI share the same artifact version.
 
-Settlement requests, Safe MultiSend, guarantees, transferable reward payout,
-CMS, notifications and live WebSocket channels are not published in this
-checkpoint. They remain `NOT_PUBLISHED_FAIL_CLOSED`; a disabled control, empty
-endpoint or fixture does not count as implementation. V2 exposes no
-business-refund or on-chain Claim API, and BNM is never a token payout.
+Live WebSocket delivery remains explicitly fail closed; consumers use the
+published HTTP projections until a coordinated WebSocket checkpoint exists.
+A disabled control, empty endpoint or fixture does not count as implementation.
+V2 exposes no business-refund or on-chain Claim API, and BNM is never a token
+payout.
