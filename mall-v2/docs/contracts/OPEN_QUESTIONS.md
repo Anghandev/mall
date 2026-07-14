@@ -12,7 +12,7 @@ invitation to infer a default.
 | Q-005 exact payment legs | D-V2-001 and D-V2-002 |
 | Q-006 timers and boundary classification | D-V2-011 and D-V2-013 |
 | Q-007 BNM lifecycle | D-V2-008 |
-| Q-008 prize Claim timing | D-V2-007 |
+| Q-008 prize settlement timing | D-V2-007 |
 | Q-009 reward section count | Matrix rows MAL-RWD-001 through MAL-RWD-006 |
 | Q-010 genesis credential | D-V2-010 plus production credential configuration |
 | Q-011 referral and region snapshots | D-V2-009 and D-V2-010 |
