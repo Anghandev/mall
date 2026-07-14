@@ -5,8 +5,8 @@ import {
   executableOrderActionNames,
   type AllowedActionName,
 } from '@abu24k/core-artifacts';
-import coordinatedManifest from '@abu24k/core-artifacts/manifest';
-import contractManifest from '@abu24k/core-artifacts/contracts/manifest';
+import coordinatedManifest from '@abu24k/core-artifacts/manifest' with { type: 'json' };
+import contractManifest from '@abu24k/core-artifacts/contracts/manifest' with { type: 'json' };
 
 const paymentRouterDeployment = (contractManifest.contracts as readonly Readonly<{
   name: string;
