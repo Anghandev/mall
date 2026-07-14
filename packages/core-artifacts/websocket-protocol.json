@@ -1,0 +1,83 @@
+{
+  "artifactVersion": "2.0.0-rc.1",
+  "protocolVersion": 1,
+  "transport": "wss",
+  "publicationStatus": "FAIL_CLOSED",
+  "endpoint": null,
+  "channels": [],
+  "reasonCode": "ConfigurationRequired",
+  "reason": "No Core WebSocket endpoint is implemented in this checkpoint",
+  "clientRule": "Products must not connect or infer live state while endpoint is null",
+  "envelope": {
+    "required": [
+      "artifactVersion",
+      "protocolVersion",
+      "eventId",
+      "channel",
+      "cursor",
+      "resourceType",
+      "resourceId",
+      "occurredAt",
+      "payload"
+    ],
+    "properties": {
+      "artifactVersion": {
+        "const": "2.0.0-rc.1"
+      },
+      "protocolVersion": {
+        "const": 1
+      },
+      "eventId": {
+        "type": "string",
+        "minLength": 1
+      },
+      "channel": {
+        "type": "string",
+        "minLength": 1
+      },
+      "cursor": {
+        "type": "string",
+        "pattern": "^(0|[1-9][0-9]*)$"
+      },
+      "resourceType": {
+        "type": "string",
+        "minLength": 1
+      },
+      "resourceId": {
+        "type": "string",
+        "minLength": 1
+      },
+      "occurredAt": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "finality": {
+        "enum": [
+          "SUBMITTED",
+          "MINED",
+          "REPLACED",
+          "REORGED",
+          "FINAL",
+          "FAILED"
+        ]
+      },
+      "payload": {
+        "type": "object"
+      }
+    }
+  },
+  "delivery": {
+    "order": "ASCENDING_CURSOR_PER_CHANNEL",
+    "deduplicateBy": "eventId",
+    "reconnectWith": "lastAcceptedCursor",
+    "replay": "AT_LEAST_ONCE",
+    "unknownEvent": "FAIL_CLOSED_AND_RESYNC",
+    "artifactMismatch": "CLOSE_4409_AND_RELOAD_MANIFEST"
+  },
+  "closeCodes": {
+    "4401": "Unauthorized",
+    "4403": "Forbidden",
+    "4409": "ArtifactVersionMismatch",
+    "4503": "ConfigurationRequired"
+  }
+}

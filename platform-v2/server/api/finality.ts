@@ -1,4 +1,5 @@
 import { BSC_CHAIN_ID, type FinalityState } from './enums.ts';
+import type { CoreConfig } from './config.ts';
 import { CoreError } from './errors.ts';
 
 export interface FinalityRecord {
@@ -12,6 +13,7 @@ export interface FinalityRecord {
   blockNumber?: number;
   blockHash?: string;
   confirmations: number;
+  requiredConfirmations: number;
   receiptStatus?: 0 | 1;
   eventResourceId?: string;
   observedEventHash?: string;
@@ -19,17 +21,24 @@ export interface FinalityRecord {
   state: FinalityState;
 }
 
-export function submittedFinality(input: {
-  resourceType: string;
-  resourceId: string;
-  contractAddress: string;
-  expectedEventHash: string;
-  txHash: string;
-}): FinalityRecord {
+export function submittedFinality(
+  config: Pick<CoreConfig, 'requiredConfirmations'>,
+  input: {
+    resourceType: string;
+    resourceId: string;
+    contractAddress: string;
+    expectedEventHash: string;
+    txHash: string;
+  },
+): FinalityRecord {
+  if (!config.requiredConfirmations) {
+    throw new CoreError('DecisionBlocked', 'Required finality confirmations are not frozen', 409);
+  }
   return {
     ...input,
     chainId: BSC_CHAIN_ID,
     confirmations: 0,
+    requiredConfirmations: config.requiredConfirmations,
     canonicalBlock: false,
     state: 'SUBMITTED',
   };
@@ -49,7 +58,6 @@ export function applyReceipt(
     status: 0 | 1;
     canonicalBlock: boolean;
   },
-  requiredConfirmations: number,
 ): FinalityRecord {
   if (
     receipt.txHash.toLowerCase() !== record.txHash.toLowerCase() ||
@@ -57,8 +65,7 @@ export function applyReceipt(
     receipt.contractAddress.toLowerCase() !== record.contractAddress.toLowerCase() ||
     receipt.eventHash.toLowerCase() !== record.expectedEventHash.toLowerCase() ||
     receipt.eventResourceId !== record.resourceId ||
-    !receipt.blockHash ||
-    requiredConfirmations < 1
+    !receipt.blockHash
   ) {
     throw new CoreError('InvalidFinality', 'Receipt does not bind the expected resource/event domain');
   }
@@ -83,7 +90,7 @@ export function applyReceipt(
     eventResourceId: receipt.eventResourceId,
     observedEventHash: receipt.eventHash,
     canonicalBlock: true,
-    state: receipt.confirmations >= requiredConfirmations ? 'FINAL' : 'MINED',
+    state: receipt.confirmations >= record.requiredConfirmations ? 'FINAL' : 'MINED',
   };
 }
 
@@ -99,6 +106,7 @@ export function replaceTransaction(record: FinalityRecord, replacementTxHash: st
     replacementForTxHash: record.txHash,
     txHash: replacementTxHash,
     confirmations: 0,
+    requiredConfirmations: record.requiredConfirmations,
     canonicalBlock: false,
     state: 'REPLACED',
   };

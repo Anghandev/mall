@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { PGlite } from '@electric-sql/pglite';
+import { CORE_ARTIFACT_VERSION } from '../api/enums.ts';
 import { appendAuditEntry, verifyAuditChain, type AuditRow } from './audit-chain.ts';
 import { PostgresNonceStore } from './auth-store.ts';
 import { reserveInventory } from './inventory.ts';
@@ -29,6 +30,10 @@ test('business and audit migrations apply from empty databases', async () => {
     );
     assert.ok(businessTables.rows.some((row) => row.table_name === 'orders'));
     assert.ok(businessTables.rows.some((row) => row.table_name === 'outbox_events'));
+    const finalityColumns = await business.query<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'transaction_finality'",
+    );
+    assert.ok(finalityColumns.rows.some((row) => row.column_name === 'required_confirmations'));
     const auditTables = await audit.query<{ table_name: string }>(
       "SELECT table_name FROM information_schema.tables WHERE table_schema = 'audit' ORDER BY table_name",
     );
@@ -309,7 +314,7 @@ async function seedCatalog(db: PGlite, stock: number) {
     `INSERT INTO core.policy_snapshots (
        policy_version, artifact_version, policy_hash, oracle_version,
        rules_content_hash, beneficiary_set_hash, payload, publication_status
-     ) VALUES (1, '2.0.0-contracts.1', $1, $2, $1, $2, '{}', 'PUBLISHED')`,
+     ) VALUES (1, '${CORE_ARTIFACT_VERSION}', $1, $2, $1, $2, '{}', 'PUBLISHED')`,
     [HASH, HASH_2],
   );
   await db.query(
@@ -342,7 +347,7 @@ async function insertOrder(db: PGlite, orderId: string, reservationId: string) {
        quote_snapshot, allocation_snapshot, exact_amounts, buyer_nonce, quote_deadline,
        state, finality_status
      ) VALUES (
-       $1, '2.0.0-contracts.1', 1, $2, $3, 'merchant-1', $4,
+       $1, '${CORE_ARTIFACT_VERSION}', 1, $2, $3, 'merchant-1', $4,
        'product-1', 'sku-1', 1, 'DELIVERY', $2, $2, $2, $5,
        '{}', '{}', '{"usdt":"50","npl":"500"}', 1,
        clock_timestamp() + interval '1 hour', 'QUOTED', 'NOT_SUBMITTED'

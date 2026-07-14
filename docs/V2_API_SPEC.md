@@ -1,7 +1,7 @@
 # Abu 24K V2 Core API Contract
 
-Status: Core API checkpoint draft `2.0.0-rc.1`. The coordinated artifacts and
-consumer tests are published in the next checkpoint. This file does not
+Status: coordinated local artifact `2.0.0-rc.1`. The implemented HTTP surface,
+generated types and consumer checks are frozen together. This file does not
 authorize deployment or production signing.
 
 ## Authority
@@ -11,6 +11,8 @@ inventory reservations, classification, finality and `allowedActions`.
 Products submit user choices and signatures; they never submit a trusted order
 state, calculate an allocation, classify a boundary transaction or infer
 finality from a transaction hash.
+The production confirmation threshold is `DecisionBlocked`; local test values
+must never be treated as a deployment default.
 
 Every response carries a correlation ID. Unknown states and missing artifacts,
 decisions, credentials, providers, Safe evidence or chain evidence fail closed.

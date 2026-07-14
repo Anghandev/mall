@@ -17,6 +17,7 @@ import {
 } from './auth.ts';
 import { createApiServer } from './app.ts';
 import { buildDualQuote, buildOrderIntent, type FrozenPolicyTerms, type QuoteRequest } from './checkout.ts';
+import { allowedActionNames } from './enums.ts';
 import { loadConfig, publicReadiness, requireProvider } from './config.ts';
 import { applyReceipt, replaceTransaction, requireFinal, submittedFinality } from './finality.ts';
 import { assertEmptySessionPrizeDecision, evaluateForcedReceipt, evaluateTakeover } from './fulfillment.ts';
@@ -32,10 +33,12 @@ const FALLBACK_RESERVATION_ID = `0x${'e'.repeat(64)}`;
 const SESSION_ID = `0x${'f'.repeat(64)}`;
 const CONTRACT = '0x3333333333333333333333333333333333333333';
 const SAFE = '0x4444444444444444444444444444444444444444';
+const EXECUTABLE_ACTIONS = new Set(allowedActionNames);
 
 test('typed config reports blocked inputs without exposing secret values', () => {
   const blocked = loadConfig({ CHAIN_ID: '56' });
   assert.ok(blocked.decisionBlocked.includes('PLATFORM_SERVICE_FEE_BPS'));
+  assert.ok(blocked.decisionBlocked.includes('REQUIRED_CONFIRMATIONS'));
   assert.ok(blocked.externalBlocked.includes('DATABASE_URL'));
   assert.equal(blocked.providerReadiness.KUAIDI100, 'CONFIGURATION_REQUIRED');
   assert.equal(publicReadiness(blocked).writesEnabled, false);
@@ -50,6 +53,7 @@ test('typed config reports blocked inputs without exposing secret values', () =>
     () => loadConfig({ ...completeEnvironment(), PLATFORM_SERVICE_FEE_BPS: 'not-a-number' }),
     /integer BPS/,
   );
+  assert.throws(() => loadConfig({ ...completeEnvironment(), REQUIRED_CONFIRMATIONS: '4294967296' }), /uint32/);
 });
 
 test('SIWE nonce is domain-bound, one-use and yields an expiring RBAC session', async () => {
@@ -215,9 +219,23 @@ test('allowedActions obey breakers, timeouts, roles and merchant prize exception
       shipmentEvidence: false,
       takeoverOpened: false,
     },
-    { actorWallet: buyer, roles: ['BUYER'], now, pausedScopes: new Set() },
+    { actorWallet: buyer, roles: ['BUYER'], now, pausedScopes: new Set(), executableActions: EXECUTABLE_ACTIONS },
   );
   assert.equal(takeover.find((item) => item.action === 'OPEN_TAKEOVER')?.enabled, true);
+
+  const unrelated = orderAllowedActions(
+    {
+      state: 'PAID',
+      fulfillmentMode: 'DELIVERY',
+      buyerWallet: buyer,
+      merchantWallet: merchant,
+      paidAt: new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000),
+      shipmentEvidence: false,
+      takeoverOpened: false,
+    },
+    { actorWallet: SAFE, roles: ['BUYER'], now, pausedScopes: new Set(), executableActions: EXECUTABLE_ACTIONS },
+  );
+  assert.equal(unrelated.some((item) => item.action === 'OPEN_TAKEOVER'), false);
 
   const pickup = orderAllowedActions(
     {
@@ -229,22 +247,54 @@ test('allowedActions obey breakers, timeouts, roles and merchant prize exception
       shipmentEvidence: false,
       takeoverOpened: false,
     },
-    { actorWallet: SAFE, roles: ['OPERATOR'], now, pausedScopes: new Set() },
+    { actorWallet: buyer, roles: ['BUYER'], now, pausedScopes: new Set(), executableActions: EXECUTABLE_ACTIONS },
   );
   assert.equal(pickup.find((item) => item.action === 'OPEN_TAKEOVER')?.reasonCode, 'PickupTakeoverDecisionBlocked');
   assert.equal(claimAllowedAction('PRIZE_USDT', 10n, true, new Set()).enabled, true);
   assert.equal(claimAllowedAction('MERCHANT_USDT', 10n, true, new Set()).enabled, false);
   assert.equal(claimAllowedAction('BNM', 10n, false, new Set(['REWARD_CLAIM'])).reasonCode, 'BreakerActive');
+
+  const merchantShipment = orderAllowedActions(
+    {
+      state: 'PAID',
+      fulfillmentMode: 'DELIVERY',
+      buyerWallet: buyer,
+      merchantWallet: merchant,
+      paidAt: now,
+      shipmentEvidence: false,
+      takeoverOpened: false,
+    },
+    { actorWallet: merchant, roles: ['MERCHANT'], now, pausedScopes: new Set(), executableActions: EXECUTABLE_ACTIONS },
+  );
+  assert.equal(merchantShipment.some((item) => item.action === 'RECORD_SHIPMENT'), true);
 });
 
 test('finality rejects mismatched events and handles confirmation, replacement and reorg', () => {
-  const submitted = submittedFinality({
-    resourceType: 'FULFILLMENT',
-    resourceId: 'order-1',
-    contractAddress: CONTRACT,
-    expectedEventHash: HASH,
-    txHash: HASH_2,
-  });
+  const submitted = submittedFinality(
+    loadConfig(completeEnvironment()),
+    {
+      resourceType: 'FULFILLMENT',
+      resourceId: 'order-1',
+      contractAddress: CONTRACT,
+      expectedEventHash: HASH,
+      txHash: HASH_2,
+    },
+  );
+  assert.equal(submitted.requiredConfirmations, 12);
+  assert.throws(
+    () =>
+      submittedFinality(
+        { requiredConfirmations: undefined },
+        {
+          resourceType: 'FULFILLMENT',
+          resourceId: 'order-1',
+          contractAddress: CONTRACT,
+          expectedEventHash: HASH,
+          txHash: HASH_2,
+        },
+      ),
+    /not frozen/,
+  );
   const receipt = {
     txHash: HASH_2,
     chainId: 56,
@@ -257,17 +307,16 @@ test('finality rejects mismatched events and handles confirmation, replacement a
     status: 1 as const,
     canonicalBlock: true,
   };
-  assert.throws(() => applyReceipt(submitted, { ...receipt, eventHash: `0x${'4'.repeat(64)}` }, 12), /bind/);
-  const mined = applyReceipt(submitted, receipt, 12);
+  assert.throws(() => applyReceipt(submitted, { ...receipt, eventHash: `0x${'4'.repeat(64)}` }), /bind/);
+  const mined = applyReceipt(submitted, receipt);
   assert.equal(mined.state, 'MINED');
   assert.throws(() => requireFinal(mined), /not reached finality/);
-  assert.equal(requireFinal(applyReceipt(submitted, { ...receipt, confirmations: 12 }, 12)).state, 'FINAL');
+  assert.equal(requireFinal(applyReceipt(submitted, { ...receipt, confirmations: 12 })).state, 'FINAL');
   const replaced = replaceTransaction(submitted, `0x${'5'.repeat(64)}`);
   assert.equal(replaced.replacementForTxHash, HASH_2);
   const reorged = applyReceipt(
     replaced,
     { ...receipt, txHash: replaced.txHash, confirmations: 12, canonicalBlock: false },
-    12,
   );
   assert.equal(reorged.state, 'REORGED');
   assert.throws(() => requireFinal(reorged), /canonical chain/);
@@ -344,6 +393,13 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     assert.equal(bootstrap.status, 200);
     assert.ok(bootstrap.headers.get('x-correlation-id'));
 
+    const extraField = await fetch(`${base}/v2/auth/nonce`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ walletAddress: wallet.address, ignored: true }),
+    });
+    assert.equal(extraField.status, 400);
+
     const nonceResponse = await fetch(`${base}/v2/auth/nonce`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -367,8 +423,15 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       body: JSON.stringify({ orderId: 'order-1' }),
     });
     assert.equal(actions.status, 200);
-    const projection = (await actions.json()) as { allowedActions: Array<{ action: string }> };
-    assert.ok(projection.allowedActions.some((item) => item.action === 'CONFIRM_RECEIPT'));
+    const projection = (await actions.json()) as {
+      allowedActions: Array<{ action: string; enabled: boolean; reasonCode?: string }>;
+    };
+    const confirmReceipt = projection.allowedActions.find((item) => item.action === 'CONFIRM_RECEIPT');
+    assert.deepEqual(confirmReceipt, {
+      action: 'CONFIRM_RECEIPT',
+      enabled: false,
+      reasonCode: 'ConfigurationRequired',
+    });
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }
@@ -460,6 +523,7 @@ function completeEnvironment(): Record<string, string> {
     ORACLE_MINIMUM_LIQUIDITY: '100',
     GENESIS_CREDENTIAL_ADDRESS: '0x9999999999999999999999999999999999999999',
     GENESIS_CREDENTIAL_TOKEN_ID: '1',
+    REQUIRED_CONFIRMATIONS: '12',
     AMAP_WEB_SERVICE_KEY: 'provider-secret',
     KUAIDI100_CUSTOMER: 'provider-secret',
     KUAIDI100_KEY: 'provider-secret',

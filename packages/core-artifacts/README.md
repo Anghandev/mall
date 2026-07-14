@@ -1,11 +1,11 @@
 # Core Artifacts
 
-This package has no runtime exports while the coordinated Core artifact set is
-unpublished. `contracts/` contains the deterministic contract-only freeze at
-`2.0.0-contracts.1`: ABI bundle, event and role catalogs, deployment manifest
-template and SHA-256 checksums.
+Version `2.0.0-rc.1` is the coordinated local release candidate for OpenAPI,
+generated public types, state/error catalogs, the fail-closed WebSocket
+protocol, ABI/event/role bundles, manifests and SHA-256 checksums.
 
-The contract snapshot is not permission to deploy and is not yet consumable by
-products. Core will publish OpenAPI, generated types, enums, WebSocket protocol
-and consumer tests at the same coordinated checkpoint. Products must not add
-parallel schemas or copy these ABIs into their own source trees.
+This package does not authorize deployment. Contract addresses, production
+accounts, providers, devices and domains remain `ExternalBlocked`; unresolved
+commercial and pickup/empty-session decisions remain `DecisionBlocked`.
+Products must verify the coordinated manifest and keep unpublished capabilities
+fail closed. They must not add parallel schemas or copy ABIs into product code.

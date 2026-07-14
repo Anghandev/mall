@@ -1,6 +1,6 @@
 {
-  "artifactVersion": "2.0.0-contracts.1",
-  "publicationStatus": "contracts-frozen-not-coordinated",
+  "artifactVersion": "2.0.0-rc.1",
+  "publicationStatus": "coordinated-rc",
   "chain": {
     "name": "BSC Mainnet",
     "chainId": 56,
@@ -34,7 +34,8 @@
     "Oracle maxAge and minimum liquidity",
     "genesis credential contract and token ID",
     "pickup timeout and takeover evidence",
-    "empty-session injected prize allocation"
+    "empty-session injected prize allocation",
+    "required fulfillment confirmations"
   ],
   "deploymentOrder": [
     "PolicyRegistryV2",
@@ -401,11 +402,5 @@
       "grantee": "SeckillV2"
     }
   ],
-  "coordinatedPublicationRequired": [
-    "OpenAPI",
-    "generated types",
-    "state and error enums",
-    "WebSocket protocol",
-    "consumer tests"
-  ]
+  "coordinatedPublication": "packages/core-artifacts/coordinated-manifest.json"
 }

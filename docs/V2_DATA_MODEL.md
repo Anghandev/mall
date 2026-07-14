@@ -1,7 +1,7 @@
 # Abu 24K V2 Data Model
 
-Status: Core database checkpoint. This document does not publish the
-coordinated product artifact and does not authorize a deployment.
+Status: Core database checkpoint included in coordinated local artifact
+`2.0.0-rc.1`. This document does not authorize a deployment.
 
 ## Storage Boundary
 
@@ -28,6 +28,8 @@ allowing state/finality projections to advance.
 Token amounts use `numeric(78, 0)` and are serialized as decimal strings. No
 floating-point amount enters a quote, order, takeover, Claim or finality row.
 The API and products never recompute financial allocation from current config.
+Each transaction-finality row snapshots the configured required confirmation
+count; receipt and replacement processing cannot lower it per call.
 
 ## Concurrency And Recovery
 
@@ -63,6 +65,8 @@ The database represents missing commercial values as `DecisionBlocked` and
 missing credentials/providers as `ConfigurationRequired` or `ExternalBlocked`.
 It contains no success fixture path. Pickup timeout/takeover evidence and the
 allocation of an injected prize in an empty session remain explicitly blocked.
+The production fulfillment-finality confirmation count is also
+`DecisionBlocked`; test thresholds are never production defaults.
 
 Production PostgreSQL URLs, Redis, backup storage/retention and restore target
 are `ExternalBlocked` until supplied outside the repository. No `.env` value is

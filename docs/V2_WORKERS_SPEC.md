@@ -2,6 +2,9 @@
 
 Status: local Core worker checkpoint. Production RPC, deployed contract
 addresses, signer/executor services and credentials remain `ExternalBlocked`.
+The production confirmation count remains `DecisionBlocked`; each finality
+record snapshots it from validated Core config and reuses it for receipt and
+replacement processing.
 
 ## Indexer
 

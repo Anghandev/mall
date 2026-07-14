@@ -4,7 +4,7 @@ import { createSiweChallenge, issueSessionToken, verifySessionToken, verifySiwe,
 import { orderAllowedActions, type ActionContext, type OrderProjection } from './allowed-actions.ts';
 import type { CoreConfig } from './config.ts';
 import { publicReadiness } from './config.ts';
-import { CORE_ARTIFACT_VERSION, type UserRole } from './enums.ts';
+import { CORE_ARTIFACT_VERSION, executableOrderActionNames, type UserRole } from './enums.ts';
 import { CoreError, errorBody } from './errors.ts';
 
 export interface ApiDependencies {
@@ -48,6 +48,7 @@ async function route(
   }
   if (request.method === 'POST' && url.pathname === '/v2/auth/nonce') {
     const body = await readJson(request);
+    assertOnlyKeys(body, ['walletAddress']);
     const walletAddress = requiredString(body, 'walletAddress');
     const challenge = await createSiweChallenge(dependencies.nonceStore, {
       walletAddress,
@@ -60,6 +61,7 @@ async function route(
   }
   if (request.method === 'POST' && url.pathname === '/v2/auth/verify') {
     const body = await readJson(request);
+    assertOnlyKeys(body, ['message', 'signature']);
     const verified = await verifySiwe(dependencies.nonceStore, {
       message: requiredString(body, 'message'),
       signature: requiredString(body, 'signature'),
@@ -83,6 +85,7 @@ async function route(
   if (request.method === 'POST' && url.pathname === '/v2/actions/order') {
     const claims = authorize(request, dependencies.config);
     const body = await readJson(request);
+    assertOnlyKeys(body, ['orderId']);
     const orderId = requiredString(body, 'orderId');
     const order = await dependencies.getOrderProjection(orderId);
     if (!order) throw new CoreError('InvalidRequest', 'Order not found', 404);
@@ -91,6 +94,7 @@ async function route(
       roles: claims.roles,
       now: dependencies.clock(),
       pausedScopes: await dependencies.getPausedScopes(),
+      executableActions: new Set(executableOrderActionNames),
     };
     sendJson(response, 200, { allowedActions: orderAllowedActions(order, context) }, correlationId);
     return;
@@ -104,6 +108,13 @@ function authorize(request: IncomingMessage, config: CoreConfig) {
     throw new CoreError('Unauthorized', 'Bearer session is required', 401);
   }
   return verifySessionToken(header.slice('Bearer '.length), config.jwtSecret);
+}
+
+function assertOnlyKeys(body: Record<string, unknown>, allowed: readonly string[]) {
+  const unexpected = Object.keys(body).filter((key) => !allowed.includes(key));
+  if (unexpected.length > 0) {
+    throw new CoreError('InvalidRequest', 'Request contains unsupported fields', 400, { unexpected });
+  }
 }
 
 async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {

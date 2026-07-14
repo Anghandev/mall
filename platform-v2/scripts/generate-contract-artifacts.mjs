@@ -3,12 +3,13 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CORE_ARTIFACT_VERSION } from '../server/api/enums.ts';
 
 const coreRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = resolve(coreRoot, '..');
 const outputRoot = join(repoRoot, 'packages/core-artifacts/contracts');
 const checkOnly = process.argv.includes('--check');
-const artifactVersion = '2.0.0-contracts.1';
+const artifactVersion = CORE_ARTIFACT_VERSION;
 const contracts = [
   'PolicyRegistryV2',
   'BeneficiaryRegistryV2',
@@ -92,7 +93,7 @@ roles.sort((left, right) => `${left.contract}.${left.role}`.localeCompare(`${rig
 const sourceDigest = sha256(sourceFiles.map((path) => `${relative(repoRoot, path)}\0${readFileSync(path)}`).join('\0'));
 const manifest = {
   artifactVersion,
-  publicationStatus: 'contracts-frozen-not-coordinated',
+  publicationStatus: 'coordinated-rc',
   chain: {
     name: 'BSC Mainnet',
     chainId: 56,
@@ -114,17 +115,12 @@ const manifest = {
     'genesis credential contract and token ID',
     'pickup timeout and takeover evidence',
     'empty-session injected prize allocation',
+    'required fulfillment confirmations',
   ],
   deploymentOrder: contracts,
   contracts: contractEntries,
   postDeploymentRoleGrants: roleGrants.map(([contract, role, grantee]) => ({ contract, role, grantee })),
-  coordinatedPublicationRequired: [
-    'OpenAPI',
-    'generated types',
-    'state and error enums',
-    'WebSocket protocol',
-    'consumer tests',
-  ],
+  coordinatedPublication: 'packages/core-artifacts/coordinated-manifest.json',
 };
 
 const files = new Map();

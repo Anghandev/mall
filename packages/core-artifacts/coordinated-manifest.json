@@ -1,0 +1,126 @@
+{
+  "artifactVersion": "2.0.0-rc.1",
+  "publicationStatus": "COORDINATED_RC",
+  "deploymentAuthorized": false,
+  "chain": {
+    "name": "BSC Mainnet",
+    "chainId": 56
+  },
+  "fixedAssets": {
+    "USDT": "0x55d398326f99059ff775485246999027b3197955",
+    "NPL": "0x4e8277ab31e4956b2cd48449793a57656dfc03d2"
+  },
+  "components": {
+    "packageMetadata": {
+      "path": "package.json",
+      "sha256": "d5286ad917febba184299bab5840a6305a32bce79224608453a072d0616a9755"
+    },
+    "openapi": {
+      "path": "openapi/openapi.json",
+      "sha256": "79c26d89c28075b2f5282747157d28efd5a979ec7ce26640289fe81725f800da"
+    },
+    "generatedRuntime": {
+      "path": "generated/index.js",
+      "sha256": "893c7ed3a9505f09520dec30391384811bc8c40a8c6a90a184b6b73c861b44b3"
+    },
+    "generatedTypes": {
+      "path": "generated/index.d.ts",
+      "sha256": "562b1c1dca5f7bbb28fa9bea64e3c270728e2f358b49e835aea2ecab15af13b0"
+    },
+    "stateErrorEnums": {
+      "path": "state-error-enums.json",
+      "sha256": "a7b88507cc8fdff78031a85a6c250da09dcd064e2af4781f517317343dc83acd"
+    },
+    "websocketProtocol": {
+      "path": "websocket-protocol.json",
+      "sha256": "89c2af7a443ad3bdfc143fe6535255987fa88abadafd713f819513a8004fa062"
+    },
+    "abiBundle": {
+      "path": "contracts/abi-bundle.json",
+      "sha256": "fd19ac2d7c2c53bee6c167fbabe1c26cf37f95ab54d349c5ea009f4d77124945"
+    },
+    "contractManifest": {
+      "path": "contracts/contract-manifest.json",
+      "sha256": "35a20c7a98abea6d72584a4a73e88a41b73fbbe30333c4d95239bf0f373af681"
+    },
+    "eventCatalog": {
+      "path": "contracts/event-catalog.json",
+      "sha256": "cf2cb377fd55f641e5dcbb260cce9a164d46b976dfa80976af52056b4763782a"
+    },
+    "roleCatalog": {
+      "path": "contracts/role-catalog.json",
+      "sha256": "e7f7ca9c8d8064f34485fc05bd514473e7ae2512b22575867bcbe64f929f925d"
+    }
+  },
+  "consumerTests": [
+    {
+      "path": "platform-v2/server/api/api.test.ts",
+      "sha256": "f2aec01f61d943f21bd33f49d292726b36e9f34650f13adee2dd8d6f1cf075d5"
+    },
+    {
+      "path": "platform-v2/test/consumer/core-artifacts.test.ts",
+      "sha256": "5390276adc96545999a3f71c66ea2dfedf3524cc8bc33e39e2250b060eafecc9"
+    }
+  ],
+  "httpSurface": [
+    "GET /v2/bootstrap",
+    "POST /v2/auth/nonce",
+    "POST /v2/auth/verify",
+    "POST /v2/actions/order"
+  ],
+  "capabilityStatus": {
+    "bootstrap": "AVAILABLE",
+    "siweAuthentication": "AVAILABLE",
+    "orderAllowedActions": "AVAILABLE",
+    "paymentQuoteHttp": "NOT_PUBLISHED_FAIL_CLOSED",
+    "reservationHttp": "NOT_PUBLISHED_FAIL_CLOSED",
+    "settlementHttp": "NOT_PUBLISHED_FAIL_CLOSED",
+    "takeoverHttp": "NOT_PUBLISHED_FAIL_CLOSED",
+    "fulfillmentHttp": "NOT_PUBLISHED_FAIL_CLOSED",
+    "claimHttp": "NOT_PUBLISHED_FAIL_CLOSED",
+    "seckillHttp": "NOT_PUBLISHED_FAIL_CLOSED",
+    "websocket": "NOT_PUBLISHED_FAIL_CLOSED"
+  },
+  "executableOrderActionNames": [],
+  "decisionBlocked": [
+    "PLATFORM_SERVICE_FEE_BPS",
+    "SECKILL_PRIZE_POOL_BPS",
+    "MERCHANT_STORE_NPL_REWARD_BPS",
+    "MERCHANT_GUARANTEE_MINIMUM_USDT",
+    "PLATFORM_RISK_RESERVE_MINIMUM_USDT",
+    "GUARANTEE_TOP_UP_LINE_USDT",
+    "FIXED_REMAINDER_ACCOUNTS",
+    "ORACLE_MAX_AGE_SECONDS",
+    "ORACLE_MINIMUM_LIQUIDITY",
+    "GENESIS_CREDENTIAL_CONTRACT_AND_TOKEN_ID",
+    "PICKUP_TIMEOUT_AND_TAKEOVER_EVIDENCE",
+    "EMPTY_SESSION_INJECTED_PRIZE_ALLOCATION",
+    "REQUIRED_CONFIRMATIONS"
+  ],
+  "externalBlocked": [
+    "SAFE_AND_ROLE_ADDRESSES",
+    "SECONDARY_QUOTE_AND_FINALITY_SIGNERS",
+    "TWAP_SOURCE",
+    "BSC_RPC_URL",
+    "DEPLOYED_CONTRACT_ADDRESSES",
+    "REMOTE_SIGNER_AND_EXECUTOR",
+    "DATABASE_AUDIT_DATABASE_AND_REDIS",
+    "PROVIDER_ACCOUNTS_AND_CREDENTIALS",
+    "PHYSICAL_PRINTER_AND_MOBILE_DEVICE_EVIDENCE",
+    "PRODUCTION_DOMAINS_AND_HTTPS",
+    "APPROVED_MERCHANT_AND_ADMIN_WALLETS"
+  ],
+  "requiredConsumerContracts": [
+    "ProductPolicy",
+    "SignedOrderIntent",
+    "SeckillQuote",
+    "FallbackRetailQuote",
+    "InventoryReservation",
+    "AllocationSnapshot",
+    "FulfillmentEvidence",
+    "FulfillmentFinality",
+    "MerchantTakeoverCase",
+    "AllowedAction",
+    "TransactionFinality"
+  ]
+}

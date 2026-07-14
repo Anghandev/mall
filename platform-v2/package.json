@@ -9,10 +9,12 @@
     "contracts:build": "forge build",
     "contracts:artifacts": "../scripts/node scripts/generate-contract-artifacts.mjs",
     "contracts:artifacts:check": "../scripts/node scripts/generate-contract-artifacts.mjs --check",
+    "artifacts": "pnpm contracts:artifacts && ../scripts/node scripts/generate-core-artifacts.mjs",
+    "artifacts:check": "pnpm contracts:artifacts:check && ../scripts/node scripts/generate-core-artifacts.mjs --check",
     "contracts:test": "forge fmt --check && forge test && ../scripts/node scripts/generate-contract-artifacts.mjs --check",
     "database:check": "../scripts/node --test --test-concurrency=1 server/data/database.test.ts",
     "api:check": "../scripts/node --test --test-concurrency=1 server/api/api.test.ts server/chain/workers.test.ts",
-    "consumer:check": "../scripts/node ../scripts/pending-gate.mjs consumer:check",
+    "consumer:check": "pnpm artifacts:check && ../scripts/node --test --test-concurrency=1 server/api/api.test.ts test/consumer/core-artifacts.test.ts",
     "e2e:full": "../scripts/node ../scripts/pending-gate.mjs e2e:full"
   },
   "dependencies": {

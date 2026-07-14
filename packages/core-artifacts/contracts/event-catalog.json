@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-contracts.1",
+  "artifactVersion": "2.0.0-rc.1",
   "events": [
     {
       "contract": "BeneficiaryRegistryV2",

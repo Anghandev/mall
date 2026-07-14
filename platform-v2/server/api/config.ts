@@ -12,6 +12,7 @@ const decisionVariables = [
   'ORACLE_MINIMUM_LIQUIDITY',
   'GENESIS_CREDENTIAL_ADDRESS',
   'GENESIS_CREDENTIAL_TOKEN_ID',
+  'REQUIRED_CONFIRMATIONS',
 ] as const;
 
 const externalVariables = [
@@ -63,6 +64,7 @@ export interface CoreConfig {
   executorUrl: string | undefined;
   executorToken: string | undefined;
   executorMaxGasLimit: bigint | undefined;
+  requiredConfirmations: number | undefined;
   decisionBlocked: readonly string[];
   externalBlocked: readonly string[];
   providerReadiness: Readonly<Record<ProviderName, 'READY' | 'CONFIGURATION_REQUIRED'>>;
@@ -108,6 +110,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     executorUrl: env.SETTLEMENT_EXECUTOR_URL,
     executorToken: env.SETTLEMENT_EXECUTOR_TOKEN,
     executorMaxGasLimit: parseOptionalPositiveBigInt(env.EXECUTOR_MAX_GAS_LIMIT, 'EXECUTOR_MAX_GAS_LIMIT'),
+    requiredConfirmations: parseOptionalPositiveUint32(env.REQUIRED_CONFIRMATIONS, 'REQUIRED_CONFIRMATIONS'),
     decisionBlocked,
     externalBlocked,
     providerReadiness: Object.freeze(providerReadiness),
@@ -166,6 +169,7 @@ function validateDecisionValues(env: Readonly<Record<string, string | undefined>
   } catch {
     throw new CoreError('InvalidRequest', 'GENESIS_CREDENTIAL_TOKEN_ID must be a non-negative integer', 500);
   }
+  parseOptionalPositiveUint32(env.REQUIRED_CONFIRMATIONS, 'REQUIRED_CONFIRMATIONS');
 }
 
 function parseOptionalPositiveBigInt(value: string | undefined, name: string) {
@@ -177,4 +181,13 @@ function parseOptionalPositiveBigInt(value: string | undefined, name: string) {
   } catch {
     throw new CoreError('InvalidRequest', `${name} must be a positive integer`, 500);
   }
+}
+
+function parseOptionalPositiveUint32(value: string | undefined, name: string) {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 0xffff_ffff) {
+    throw new CoreError('InvalidRequest', `${name} must be a positive uint32`, 500);
+  }
+  return parsed;
 }

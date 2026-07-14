@@ -225,6 +225,7 @@ CREATE TABLE core.transaction_finality (
     block_number bigint,
     block_hash text,
     confirmations bigint NOT NULL DEFAULT 0 CHECK (confirmations >= 0),
+    required_confirmations bigint NOT NULL CHECK (required_confirmations > 0 AND required_confirmations <= 4294967295),
     receipt_status smallint CHECK (receipt_status IN (0, 1)),
     state text NOT NULL CHECK (state IN ('SUBMITTED', 'MINED', 'REPLACED', 'REORGED', 'FINAL', 'FAILED')),
     evidence jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(evidence) = 'object'),

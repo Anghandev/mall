@@ -1,8 +1,8 @@
 # Abu 24K V2 Contract Freeze
 
-Status: contract-only artifact `2.0.0-contracts.1`. This freeze implements the
-Phase 1 system authority but is not a coordinated product publication and does
-not authorize deployment or a transaction.
+Status: coordinated local artifact `2.0.0-rc.1`. This freeze implements the
+Phase 1 system authority and is included in the coordinated local publication.
+It does not prove product consumption or authorize deployment or a transaction.
 
 ## Requirement And Decision Coverage
 
@@ -16,8 +16,9 @@ The contract set implements the on-chain portions of:
   through `ADM-CLEAR-004`;
 - `D-V2-001` through `D-V2-021` where the decision has an on-chain effect.
 
-Database, API, indexer, signer, executor, product and provider evidence remains
-in later Core phases. A contract event alone is not final product evidence.
+Database, API, indexer, signer and executor evidence is maintained by their
+separate Core gates. Product consumption and provider evidence remain later
+integration work. A contract event alone is not final product evidence.
 
 ## Contracts
 
