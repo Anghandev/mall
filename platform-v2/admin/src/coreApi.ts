@@ -1,11 +1,26 @@
 import {
+  allowedActionNames,
+  allowedActionReasonCodes,
   artifactVersion,
+  balanceStates,
   chainIdentity,
   coreErrorCodes,
+  fulfillmentAssets,
+  fulfillmentModes,
+  fulfillmentRequestStates,
+  fulfillmentRequestTypes,
+  logisticsProviders,
+  logisticsStatuses,
+  orderFinalityStatuses,
+  orderProjectionStates,
   userRoles,
+  type AllowedAction,
   type CatalogProduct,
   type CoreErrorCode,
+  type FulfillmentOrder,
+  type FulfillmentReasonRequest,
   type PaymentProjection,
+  type TakeoverOpenedResult,
   type UserRole,
 } from '@abu24k/core-artifacts';
 
@@ -67,6 +82,67 @@ export async function fetchPaymentProjection(
   });
   if (!isPaymentProjection(body)) {
     throw invalidResponse('Payment projection does not match the coordinated generated type');
+  }
+  return body;
+}
+
+export async function fetchFulfillmentOrders(
+  token: string,
+  signal?: AbortSignal,
+): Promise<readonly FulfillmentOrder[]> {
+  const body = record(await requestJson('/v2/orders', {
+    headers: { authorization: `Bearer ${token}` },
+    ...(signal ? { signal } : {}),
+  }));
+  if (!Array.isArray(body.orders) || !body.orders.every(isFulfillmentOrder)) {
+    throw invalidResponse('Fulfillment order list does not match the coordinated generated type');
+  }
+  return Object.freeze([...body.orders]);
+}
+
+export async function fetchOrderAllowedActions(
+  orderId: string,
+  token: string,
+  signal?: AbortSignal,
+): Promise<readonly AllowedAction[]> {
+  if (!bytes32Pattern.test(orderId)) throw invalidResponse('Order ID must be a bytes32 value');
+  const body = record(await requestJson('/v2/actions/order', {
+    body: JSON.stringify({ orderId }),
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
+    method: 'POST',
+    ...(signal ? { signal } : {}),
+  }));
+  if (!Array.isArray(body.allowedActions) || !body.allowedActions.every(isAllowedAction)) {
+    throw invalidResponse('Order allowedActions do not match the coordinated generated type');
+  }
+  return Object.freeze([...body.allowedActions]);
+}
+
+export async function openTakeover(
+  orderId: string,
+  input: FulfillmentReasonRequest,
+  token: string,
+): Promise<TakeoverOpenedResult> {
+  if (!bytes32Pattern.test(orderId)) throw invalidResponse('Order ID must be a bytes32 value');
+  if (
+    input.idempotencyKey.length < 8
+      || input.idempotencyKey.length > 128
+      || !bytes32Pattern.test(input.evidenceHash)
+      || !/^[A-Z0-9_:-]{2,64}$/.test(input.reasonCode)
+  ) throw invalidResponse('Takeover command input does not match the coordinated generated type');
+  const body = await requestJson(`/v2/orders/${encodeURIComponent(orderId)}/takeover`, {
+    body: JSON.stringify(input),
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
+    method: 'POST',
+  });
+  if (!isTakeoverOpenedResult(body) || body.orderId.toLowerCase() !== orderId.toLowerCase()) {
+    throw invalidResponse('Takeover result does not match the coordinated generated type');
   }
   return body;
 }
@@ -145,7 +221,7 @@ function parseBootstrap(value: unknown) {
       || assets.usdt !== chainIdentity.usdtAddress
       || assets.npl !== chainIdentity.nplAddress
       || typeof readiness.writesEnabled !== 'boolean'
-  ) throw invalidResponse('Core bootstrap is incompatible with this payment checkpoint');
+  ) throw invalidResponse('Core bootstrap is incompatible with this fulfillment checkpoint');
 
   return Object.freeze({
     artifactVersion,
@@ -251,6 +327,104 @@ function isCanonicalIntent(value: unknown) {
     && atomicAmountPattern.test(String(value.nplBurnAmount))
     && atomicAmountPattern.test(String(value.nplRewardAmount))
     && atomicAmountPattern.test(String(value.merchantNetReceivableUsdt));
+}
+
+function isFulfillmentOrder(value: unknown): value is FulfillmentOrder {
+  if (
+    !isRecord(value)
+      || value.artifactVersion !== artifactVersion
+      || !bytes32Pattern.test(String(value.orderId))
+      || !addressPattern.test(String(value.buyerWallet))
+      || !addressPattern.test(String(value.merchantWallet))
+      || !nonEmptyStrings(value, ['merchantId', 'productId', 'skuId'])
+      || !fulfillmentModes.includes(value.fulfillmentMode as never)
+      || !orderProjectionStates.includes(value.state as never)
+      || !orderFinalityStatuses.includes(value.finalityStatus as never)
+      || !nullableDates(value, [
+        'paidAt',
+        'paymentFinalizedAt',
+        'shippedAt',
+        'deliveredAt',
+        'fulfilledAt',
+        'takeoverOpenedAt',
+        'arbitrationOpenedAt',
+      ])
+      || !isFulfillmentExactAmounts(value.exactAmounts)
+  ) return false;
+  return Array.isArray(value.requests)
+    && value.requests.every((item) => isRecord(item)
+      && nonEmptyStrings(item, ['requestId'])
+      && fulfillmentRequestTypes.includes(item.requestType as never)
+      && fulfillmentRequestStates.includes(item.state as never)
+      && isDateTime(item.requestedAt)
+      && isNullableDateTime(item.resolvedAt))
+    && Array.isArray(value.shipments)
+    && value.shipments.every((item) => isRecord(item)
+      && nonEmptyStrings(item, ['shipmentId', 'carrierCode'])
+      && bytes32Pattern.test(String(item.trackingNumberHash))
+      && (item.providerReferenceHash === null || bytes32Pattern.test(String(item.providerReferenceHash)))
+      && isDateTime(item.createdAt))
+    && Array.isArray(value.logistics)
+    && value.logistics.every((item) => isRecord(item)
+      && nonEmptyStrings(item, ['logisticsEventId'])
+      && logisticsProviders.includes(item.provider as never)
+      && logisticsStatuses.includes(item.status as never)
+      && (item.locationHash === null || bytes32Pattern.test(String(item.locationHash)))
+      && isDateTime(item.occurredAt))
+    && Array.isArray(value.balances)
+    && value.balances.every((item) => isRecord(item)
+      && fulfillmentAssets.includes(item.asset as never)
+      && balanceStates.includes(item.state as never)
+      && atomicAmountPattern.test(String(item.amount)));
+}
+
+function isFulfillmentExactAmounts(value: unknown) {
+  if (!isRecord(value)) return false;
+  return [
+    'listPriceUsdt',
+    'usdtPaymentAmount',
+    'nplQuoteAmount',
+    'nplPaymentAmount',
+    'nplBurnAmount',
+    'nplRewardAmount',
+    'merchantBaseReceivableUsdt',
+    'merchantConcessionAmount',
+    'merchantNetReceivableUsdt',
+    'bnmAmount',
+  ].every((field) => atomicAmountPattern.test(String(value[field])));
+}
+
+function isAllowedAction(value: unknown): value is AllowedAction {
+  return isRecord(value)
+    && allowedActionNames.includes(value.action as never)
+    && typeof value.enabled === 'boolean'
+    && (value.reasonCode === undefined || allowedActionReasonCodes.includes(value.reasonCode as never))
+    && (value.deadline === undefined || isDateTime(value.deadline));
+}
+
+function isTakeoverOpenedResult(value: unknown): value is TakeoverOpenedResult {
+  return isRecord(value)
+    && bytes32Pattern.test(String(value.orderId))
+    && typeof value.caseId === 'string'
+    && value.caseId.length > 0
+    && value.state === 'TAKEOVER'
+    && value.customerFundsRemainLocked === true;
+}
+
+function nonEmptyStrings(value: Record<string, unknown>, fields: readonly string[]) {
+  return fields.every((field) => typeof value[field] === 'string' && String(value[field]).length > 0);
+}
+
+function nullableDates(value: Record<string, unknown>, fields: readonly string[]) {
+  return fields.every((field) => isNullableDateTime(value[field]));
+}
+
+function isNullableDateTime(value: unknown) {
+  return value === null || isDateTime(value);
+}
+
+function isDateTime(value: unknown) {
+  return typeof value === 'string' && value.length > 0 && Number.isFinite(Date.parse(value));
 }
 
 function readCoreError(value: unknown) {

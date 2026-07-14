@@ -27,15 +27,16 @@ describe('platform admin fail-closed experience', () => {
     expect(packageJson.dependencies['@abu24k/core-artifacts']).toBe(`workspace:${artifactVersion}`);
     expect(productBaseline.artifactVersion).toBe(artifactVersion);
     expect(coreState.artifactVersion).toBe(artifactVersion);
-    expect(coreState.artifactStatus).toBe('coordinated-payment-checkpoint');
+    expect(coreState.artifactStatus).toBe('coordinated-fulfillment-checkpoint');
     expect(coreState.connectionLabel).toContain(artifactVersion);
   });
 
-  it('keeps every write disabled when Core publishes no executable order action', () => {
-    expect(executableOrderActionNames).toEqual([]);
+  it('treats the static action catalog as capability metadata, not runtime authorization', () => {
+    expect(executableOrderActionNames).toContain('OPEN_TAKEOVER');
     expect(coreState.executableOrderActionNames).toEqual(executableOrderActionNames);
-    expect(productBaseline.adminCapabilities.writes).toBe(false);
-    expect(coreState.canWrite).toBe(false);
+    expect(productBaseline.adminCapabilities.orderAllowedActions).toBe(true);
+    expect(productBaseline.adminCapabilities.writesWithoutRuntimeAuthorization).toBe(false);
+    expect(coreState.canWriteWithoutRuntimeAuthorization).toBe(false);
 
     renderAt('/policy');
     expect(screen.getByRole('button', { name: '发布新 policyVersion' }).hasAttribute('disabled')).toBe(true);
@@ -63,12 +64,95 @@ describe('platform admin fail-closed experience', () => {
     expect(screen.getByText(/不可删除资源/)).toBeTruthy();
   });
 
-  it('makes the takeover center visible while execution remains blocked', () => {
+  it('keeps takeover execution closed before an authenticated Core session exists', () => {
     renderAt('/takeover');
     expect(screen.getByRole('heading', { name: '商家接管履约中心' })).toBeTruthy();
     expect(screen.getByText('保证金 → 冻结应收 → 未来货款')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '打开履约证据' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'SIWE 连接' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '打开接管案件' })).toBeNull();
     expect(screen.queryByRole('button', { name: /删除/ })).toBeNull();
+  });
+
+  it('rejects a valid SIWE session that has no platform role before reading orders', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    window.ethereum = walletProvider(wallet);
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['BUYER'] });
+      return jsonResponse({ error: { code: 'Forbidden', message: 'Unexpected request', correlationId: 'role-test' } }, 403);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderAt('/takeover');
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+
+    expect(await screen.findByText(/缺少 ADMIN 或 OPERATOR/)).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/v2/orders'))).toBe(false);
+    expect(screen.queryByRole('button', { name: '打开接管案件' })).toBeNull();
+  });
+
+  it('requires current Core allowedActions before an admin can open takeover', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    const order = fulfillmentOrder();
+    window.ethereum = walletProvider(wallet);
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['ADMIN'] });
+      if (url.endsWith('/v2/orders') && !init?.method) return jsonResponse({ orders: [order] });
+      if (url.endsWith('/v2/actions/order')) return jsonResponse({ allowedActions: [{ action: 'OPEN_TAKEOVER', enabled: true }] });
+      if (url.endsWith(`/v2/orders/${order.orderId}/takeover`)) {
+        return jsonResponse({ orderId: order.orderId, caseId: 'takeover-case-1', state: 'TAKEOVER', customerFundsRemainLocked: true }, 201);
+      }
+      return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected request', correlationId: 'takeover-test' } }, 400);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderAt('/takeover');
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    expect(await screen.findByText('Core allowed')).toBeTruthy();
+    const submit = screen.getByRole('button', { name: '打开接管案件' });
+    expect(submit.hasAttribute('disabled')).toBe(true);
+
+    await user.type(screen.getByLabelText('履约证据哈希 · bytes32'), hash('9'));
+    await user.type(screen.getByLabelText('原因代码'), 'NO_SHIPMENT_AFTER_FINALITY');
+    expect(submit.hasAttribute('disabled')).toBe(false);
+    await user.click(submit);
+
+    expect(await screen.findByText(/takeover-case-1 已打开/)).toBeTruthy();
+    const commandCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith(`/v2/orders/${order.orderId}/takeover`));
+    expect(commandCall?.[1]).toMatchObject({ method: 'POST' });
+    expect(JSON.parse(String(commandCall?.[1]?.body))).toMatchObject({
+      evidenceHash: hash('9'),
+      reasonCode: 'NO_SHIPMENT_AFTER_FINALITY',
+    });
+  });
+
+  it('keeps takeover disabled when Core returns a denied order action', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    const order = fulfillmentOrder();
+    window.ethereum = walletProvider(wallet);
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['OPERATOR'] });
+      if (url.endsWith('/v2/orders') && !init?.method) return jsonResponse({ orders: [order] });
+      if (url.endsWith('/v2/actions/order')) return jsonResponse({ allowedActions: [{ action: 'OPEN_TAKEOVER', enabled: false, reasonCode: 'FinalityPending', deadline: '2026-07-21T00:00:00.000Z' }] });
+      return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected request', correlationId: 'denied-test' } }, 400);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderAt('/takeover');
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    expect(await screen.findByText('FinalityPending')).toBeTruthy();
+    await user.type(screen.getByLabelText('履约证据哈希 · bytes32'), hash('9'));
+    await user.type(screen.getByLabelText('原因代码'), 'NO_SHIPMENT_AFTER_FINALITY');
+    expect(screen.getByRole('button', { name: '打开接管案件' }).hasAttribute('disabled')).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/takeover'))).toBe(false);
   });
 
   it('shows every governance gate and blocks publication', () => {
@@ -156,6 +240,25 @@ function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
+function nonceResponse() {
+  return jsonResponse({
+    message: 'SIWE message',
+    nonce: 'nonce',
+    issuedAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  }, 201);
+}
+
+function walletProvider(wallet: string) {
+  return {
+    request: vi.fn(async ({ method }: { method: string }) => {
+      if (method === 'eth_requestAccounts') return [wallet];
+      if (method === 'personal_sign') return '0xsigned';
+      throw new Error(`Unexpected wallet method ${method}`);
+    }),
+  };
+}
+
 function hash(digit: string) {
   return `0x${digit.repeat(64)}`;
 }
@@ -214,5 +317,43 @@ function paymentProjection() {
       canonicalBlock: true,
       classification: 'ORDINARY',
     },
+  };
+}
+
+function fulfillmentOrder() {
+  return {
+    orderId: hash('8'),
+    artifactVersion,
+    buyerWallet: '0x1111111111111111111111111111111111111111',
+    merchantId: 'merchant-1',
+    merchantWallet: '0x2222222222222222222222222222222222222222',
+    productId: 'product-24k',
+    skuId: 'sku-10g',
+    fulfillmentMode: 'DELIVERY',
+    state: 'PAID',
+    finalityStatus: 'FINAL',
+    exactAmounts: {
+      listPriceUsdt: '100000000',
+      usdtPaymentAmount: '70000000',
+      nplQuoteAmount: '30000000',
+      nplPaymentAmount: '30000000',
+      nplBurnAmount: '20000000',
+      nplRewardAmount: '10000000',
+      merchantBaseReceivableUsdt: '70000000',
+      merchantConcessionAmount: '5000000',
+      merchantNetReceivableUsdt: '65000000',
+      bnmAmount: '100000000',
+    },
+    paidAt: '2026-07-01T00:00:00.000Z',
+    paymentFinalizedAt: '2026-07-01T00:03:00.000Z',
+    shippedAt: null,
+    deliveredAt: null,
+    fulfilledAt: null,
+    takeoverOpenedAt: null,
+    arbitrationOpenedAt: null,
+    requests: [],
+    shipments: [],
+    logistics: [],
+    balances: [{ asset: 'USDT', state: 'LOCKED', amount: '65000000' }],
   };
 }

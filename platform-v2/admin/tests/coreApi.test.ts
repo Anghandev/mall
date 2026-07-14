@@ -4,7 +4,7 @@ import { fetchCatalogProducts, fetchCoreBootstrap } from '../src/coreApi';
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe('coordinated payment Core client', () => {
+describe('coordinated fulfillment Core client', () => {
   it('rejects a bootstrap from a different artifact version', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       artifactVersion: '2.0.0-stale',

@@ -74,7 +74,7 @@ export function AppShell({ children }: AppShellProps) {
         <div className="sidebar-footer">
           <p>Artifact contract</p>
           <strong>{coreState.artifactVersion}</strong>
-          <span>支付读取已发布，Admin 写入 fail-closed</span>
+          <span>履约写入以会话与 allowedActions 为准</span>
         </div>
       </aside>
 
