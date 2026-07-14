@@ -1,8 +1,10 @@
 import type {
   ApprovalRequirement,
+  Eip712TypedData,
   PaymentQuoteResponse,
   PaymentRouterIntent,
   SeckillQuoteResponse,
+  SettlementIntentProjection,
 } from '@abu24k/core-artifacts';
 import { chainIdentity } from '@abu24k/core-artifacts';
 import type {
@@ -18,9 +20,24 @@ import { assertPaymentQuoteIntegrity, authorizationTypesForQuote } from './payme
 
 type SignedQuote = PaymentQuoteResponse | SeckillQuoteResponse;
 
+const settlementRequestFields = [
+  { name: 'intentId', type: 'bytes32' },
+  { name: 'artifactVersion', type: 'string' },
+  { name: 'wallet', type: 'address' },
+  { name: 'recipient', type: 'address' },
+  { name: 'rail', type: 'string' },
+  { name: 'asset', type: 'address' },
+  { name: 'safeAddress', type: 'address' },
+  { name: 'amount', type: 'uint256' },
+  { name: 'itemsHash', type: 'bytes32' },
+  { name: 'nonce', type: 'uint256' },
+  { name: 'deadline', type: 'uint64' },
+] as const;
+
 export interface WalletGateway {
   connect(): Promise<string>;
   signMessage(message: string): Promise<string>;
+  signSettlementIntent(projection: SettlementIntentProjection): Promise<string>;
   inspectApprovals(requirements: readonly ApprovalRequirement[]): Promise<readonly ApprovalStatus[]>;
   broadcastPayment(quote: SignedQuote, acknowledgeUnlimitedApproval: boolean): Promise<string>;
   revokeApproval(requirement: ApprovalRequirement): Promise<string>;
@@ -51,6 +68,15 @@ export function createBrowserWalletGateway(
 
     async signMessage(message) {
       return (await requireSigner()).signMessage(message);
+    },
+
+    async signSettlementIntent(projection) {
+      if (!provider) throw new WalletGatewayError('WalletUnavailable', '未检测到可用的浏览器钱包');
+      await ensureBsc(provider);
+      const activeSigner = await requireSigner();
+      const walletAddress = (await activeSigner.getAddress()).toLowerCase();
+      const { domain, types, message } = await validateSettlementIntentForWallet(projection, walletAddress);
+      return activeSigner.signTypedData(domain, types, message);
     },
 
     async inspectApprovals(requirements) {
@@ -201,6 +227,72 @@ function mutableTypedDataTypes(types: Readonly<Record<string, readonly Readonly<
   return Object.fromEntries(
     Object.entries(types).map(([name, fields]) => [name, fields.map((field) => ({ ...field }))]),
   ) as Record<string, TypedDataField[]>;
+}
+
+export async function validateSettlementIntentForWallet(projection: SettlementIntentProjection, walletAddress: string) {
+  const { intent, typedData } = projection;
+  const now = Math.floor(Date.now() / 1000);
+  const expectedAsset = intent.rail === 'REWARD_NPL'
+    ? chainIdentity.nplAddress
+    : intent.rail === 'PRIZE_USDT'
+      ? chainIdentity.usdtAddress
+      : null;
+  if (
+    intent.artifactVersion !== productBaseline.coreArtifacts
+    || intent.wallet.toLowerCase() !== walletAddress
+    || intent.recipient.toLowerCase() !== walletAddress
+    || expectedAsset === null
+    || intent.asset.toLowerCase() !== expectedAsset.toLowerCase()
+    || intent.deadline <= now
+  ) throw new WalletGatewayError('InvalidIntent', '结算申请与当前钱包、资产或有效期不一致');
+
+  if (typedData.primaryType !== 'SettlementRequest') {
+    throw new WalletGatewayError('InvalidIntent', '结算签名类型无效');
+  }
+  const domain = typedData.domain as TypedDataDomain;
+  if (
+    domain.name !== 'Abu24KV2Settlement'
+    || domain.version !== '2'
+    || Number(domain.chainId) !== chainIdentity.chainId
+    || String(domain.verifyingContract).toLowerCase() !== intent.safeAddress.toLowerCase()
+  ) throw new WalletGatewayError('InvalidIntent', '结算签名的链或 Safe 不一致');
+
+  const message = typedData.message as Record<string, unknown>;
+  for (const [field, value] of Object.entries(intent)) {
+    if (String(message[field]).toLowerCase() !== String(value).toLowerCase()) {
+      throw new WalletGatewayError('InvalidIntent', '结算签名内容与权威意图不一致');
+    }
+  }
+  const types = settlementTypedDataTypes(typedData);
+  const { TypedDataEncoder } = await import('ethers');
+  if (TypedDataEncoder.hash(domain, types, message).toLowerCase() !== projection.digest.toLowerCase()) {
+    throw new WalletGatewayError('InvalidIntent', '结算签名摘要与权威意图不一致');
+  }
+  return { domain, types, message };
+}
+
+function settlementTypedDataTypes(typedData: Eip712TypedData) {
+  const parsed: Record<string, TypedDataField[]> = {};
+  for (const [typeName, fields] of Object.entries(typedData.types)) {
+    if (typeName === 'EIP712Domain') continue;
+    if (!Array.isArray(fields)) throw new WalletGatewayError('InvalidIntent', '结算签名字段无效');
+    parsed[typeName] = fields.map((field) => {
+      if (!field || typeof field !== 'object' || Array.isArray(field)) {
+        throw new WalletGatewayError('InvalidIntent', '结算签名字段无效');
+      }
+      const entry = field as Record<string, unknown>;
+      if (typeof entry.name !== 'string' || typeof entry.type !== 'string') {
+        throw new WalletGatewayError('InvalidIntent', '结算签名字段无效');
+      }
+      return { name: entry.name, type: entry.type };
+    });
+  }
+  if (
+    Object.keys(parsed).length !== 1
+    || !parsed.SettlementRequest
+    || JSON.stringify(parsed.SettlementRequest) !== JSON.stringify(settlementRequestFields)
+  ) throw new WalletGatewayError('InvalidIntent', '结算签名字段与发布协议不一致');
+  return parsed;
 }
 
 export async function validatePaymentQuoteForWallet(quote: SignedQuote, publishedRouterAddress: string | null) {

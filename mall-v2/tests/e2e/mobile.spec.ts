@@ -31,13 +31,19 @@ test('primary mobile shell is usable and does not overflow', async ({ page }, te
   }
 });
 
-test('detail routes stay inside the mobile frame', async ({ page }) => {
-  for (const path of ['/assets/addresses', '/assets/orders', '/assets/activity', '/assets/rewards', '/checkout', '/checkout/review']) {
+test('detail routes stay inside the mobile frame', async ({ page }, testInfo) => {
+  for (const path of ['/assets/addresses', '/assets/orders', '/assets/activity', '/assets/rewards', '/assets/notifications', '/checkout', '/checkout/review']) {
     await page.goto(path);
     await expect(page.locator('.app-frame')).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);
     await expectHealthyDocument(page);
+    if (testInfo.project.name === 'mobile-393' && ['/assets/rewards', '/assets/notifications'].includes(path)) {
+      await page.screenshot({
+        path: `test-results/screenshots/${testInfo.project.name}-${path.split('/').at(-1)}.png`,
+        fullPage: true,
+      });
+    }
   }
 });
 

@@ -11,13 +11,18 @@ import type {
   AllowedAction,
   CatalogProduct,
   CatalogSku,
+  CmsPublicItem,
   FulfillmentOrder,
   FulfillmentTarget,
   MerchantStore,
+  NotificationEndpointProjection,
+  NotificationInboxItem,
   PaymentProjection,
   PaymentQuoteResponse,
   PaymentSubmissionRequest,
   SeckillQuoteResponse,
+  SettlementListProjection,
+  SettlementRail,
 } from '@abu24k/core-artifacts';
 
 import {
@@ -82,6 +87,13 @@ export interface MallRuntimeValue {
   orderTargets: Readonly<Record<string, FulfillmentTarget>>;
   orderCapabilityErrors: Readonly<Record<string, string>>;
   fulfillmentEvidenceStatus: 'NOT_PUBLISHED_FAIL_CLOSED';
+  settlements: SettlementListProjection | null;
+  settlementsState: 'idle' | LoadState;
+  notifications: readonly NotificationInboxItem[];
+  notificationsState: 'idle' | LoadState;
+  notificationEndpoint: NotificationEndpointProjection | null;
+  cmsItems: readonly CmsPublicItem[];
+  cmsState: LoadState;
   session: WalletSession | null;
   selectedProduct: CatalogProduct | null;
   selectedSku: CatalogSku | null;
@@ -102,6 +114,11 @@ export interface MallRuntimeValue {
   createDeliveryTarget(draft: DeliveryTargetDraft): Promise<void>;
   createPickupTarget(storeId: string): Promise<void>;
   reloadOrders(): Promise<void>;
+  reloadSettlements(): Promise<void>;
+  requestSettlement(rail: 'REWARD_NPL' | 'PRIZE_USDT', amount: string): Promise<void>;
+  reloadNotifications(): Promise<void>;
+  enableInAppNotifications(): Promise<void>;
+  reloadCms(): Promise<void>;
   selectProduct(productId: string): void;
   selectSku(skuId: string): void;
   setQuantity(quantity: number): void;
@@ -137,6 +154,13 @@ export function MallRuntimeProvider({
   const [orderActions, setOrderActions] = useState<Readonly<Record<string, readonly AllowedAction[]>>>({});
   const [orderTargets, setOrderTargets] = useState<Readonly<Record<string, FulfillmentTarget>>>({});
   const [orderCapabilityErrors, setOrderCapabilityErrors] = useState<Readonly<Record<string, string>>>({});
+  const [settlements, setSettlements] = useState<SettlementListProjection | null>(null);
+  const [settlementsState, setSettlementsState] = useState<'idle' | LoadState>('idle');
+  const [notifications, setNotifications] = useState<readonly NotificationInboxItem[]>([]);
+  const [notificationsState, setNotificationsState] = useState<'idle' | LoadState>('idle');
+  const [notificationEndpoint, setNotificationEndpoint] = useState<NotificationEndpointProjection | null>(null);
+  const [cmsItems, setCmsItems] = useState<readonly CmsPublicItem[]>([]);
+  const [cmsState, setCmsState] = useState<LoadState>('loading');
   const [session, setSession] = useState<WalletSession | null>(null);
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const [selectedSkuId, setSelectedSkuId] = useState<string | null>(null);
@@ -175,6 +199,20 @@ export function MallRuntimeProvider({
 
   useEffect(() => {
     let active = true;
+    void services.core.listPublicCms()
+      .then((items) => {
+        if (!active) return;
+        setCmsItems(items);
+        setCmsState(items.length > 0 ? 'ready' : 'empty');
+      })
+      .catch(() => {
+        if (active) setCmsState('error');
+      });
+    return () => { active = false; };
+  }, [services]);
+
+  useEffect(() => {
+    let active = true;
     void services.core.listStores()
       .then((nextStores) => {
         if (!active) return;
@@ -203,6 +241,13 @@ export function MallRuntimeProvider({
     orderTargets,
     orderCapabilityErrors,
     fulfillmentEvidenceStatus: 'NOT_PUBLISHED_FAIL_CLOSED',
+    settlements,
+    settlementsState,
+    notifications,
+    notificationsState,
+    notificationEndpoint,
+    cmsItems,
+    cmsState,
     session,
     selectedProduct,
     selectedSku,
@@ -229,12 +274,8 @@ export function MallRuntimeProvider({
         setPendingSubmission(recovered);
         setSubmittedTxHash(recovered?.txHash ?? null);
         setSession(nextSession);
-        try {
-          await loadOrderBundle(nextSession);
-        } catch (reason) {
-          setOrdersState('error');
-          setError(errorMessage(reason));
-        }
+        await loadAuthenticatedBundles(nextSession);
+        await loadCms(nextSession.walletAddress).catch(() => setCmsState('error'));
       });
     },
 
@@ -308,6 +349,50 @@ export function MallRuntimeProvider({
 
     async reloadOrders() {
       await run(async () => loadOrderBundle(requireSession()), () => setOrdersState('error'));
+    },
+
+    async reloadSettlements() {
+      await run(async () => loadSettlementBundle(requireSession()), () => setSettlementsState('error'));
+    },
+
+    async requestSettlement(rail, amount) {
+      await run(async () => {
+        const activeSession = requireSession();
+        assertBuyerSettlement(rail, amount);
+        const intent = await services.core.createSettlementIntent(activeSession.token, {
+          rail,
+          amount,
+          idempotencyKey: services.createIdempotencyKey(),
+        });
+        const signature = await services.wallet.signSettlementIntent(intent);
+        await services.core.submitSettlementRequest(activeSession.token, {
+          intentId: intent.intent.intentId,
+          signature,
+        });
+        await loadSettlementBundle(activeSession);
+      });
+    },
+
+    async reloadNotifications() {
+      await run(async () => loadNotificationBundle(requireSession()), () => setNotificationsState('error'));
+    },
+
+    async enableInAppNotifications() {
+      await run(async () => {
+        const activeSession = requireSession();
+        const endpoint = await services.core.registerNotificationEndpoint(activeSession.token, {
+          channel: 'IN_APP',
+          provider: 'CORE',
+          endpointReference: `recipient://wallet/${activeSession.walletAddress.toLowerCase()}`,
+          topics: ['*'],
+        });
+        setNotificationEndpoint(endpoint);
+        await loadNotificationBundle(activeSession);
+      });
+    },
+
+    async reloadCms() {
+      await run(async () => loadCms(session?.walletAddress), () => setCmsState('error'));
     },
 
     selectProduct(productId) {
@@ -441,6 +526,13 @@ export function MallRuntimeProvider({
     orders,
     ordersState,
     orderTargets,
+    settlements,
+    settlementsState,
+    notifications,
+    notificationsState,
+    notificationEndpoint,
+    cmsItems,
+    cmsState,
     projection,
     pendingSubmission,
     quantity,
@@ -540,6 +632,44 @@ export function MallRuntimeProvider({
     setOrdersState(nextOrders.length > 0 ? 'ready' : 'empty');
   }
 
+  async function loadAuthenticatedBundles(activeSession: WalletSession) {
+    const results = await Promise.allSettled([
+      loadOrderBundle(activeSession),
+      loadSettlementBundle(activeSession),
+      loadNotificationBundle(activeSession),
+    ]);
+    if (results[0]?.status === 'rejected') setOrdersState('error');
+    if (results[1]?.status === 'rejected') setSettlementsState('error');
+    if (results[2]?.status === 'rejected') setNotificationsState('error');
+    if (results.some((result) => result.status === 'rejected')) {
+      setError('部分账户数据同步失败，可在对应页面重试');
+    }
+  }
+
+  async function loadSettlementBundle(activeSession: WalletSession) {
+    setSettlementsState('loading');
+    const nextSettlements = await services.core.listSettlements(activeSession.token);
+    if (nextSettlements.wallet.toLowerCase() !== activeSession.walletAddress.toLowerCase()) {
+      throw new CoreClientError('WalletMismatch', '收益结算投影与当前钱包不一致');
+    }
+    setSettlements(nextSettlements);
+    setSettlementsState(nextSettlements.balances.length > 0 || nextSettlements.requests.length > 0 ? 'ready' : 'empty');
+  }
+
+  async function loadNotificationBundle(activeSession: WalletSession) {
+    setNotificationsState('loading');
+    const nextNotifications = await services.core.listNotifications(activeSession.token);
+    setNotifications(nextNotifications);
+    setNotificationsState(nextNotifications.length > 0 ? 'ready' : 'empty');
+  }
+
+  async function loadCms(walletAddress?: string) {
+    setCmsState('loading');
+    const items = await services.core.listPublicCms(walletAddress);
+    setCmsItems(items);
+    setCmsState(items.length > 0 ? 'ready' : 'empty');
+  }
+
   async function submitAndRefresh(submission: PendingSubmission) {
     await services.core.submitPayment(requireSession().token, paymentSubmissionRequest(submission));
     const awaitingProjection = { ...submission, phase: 'AWAITING_PROJECTION' as const };
@@ -554,6 +684,12 @@ export function MallRuntimeProvider({
     setProjection(nextProjection);
     services.submissionStore.clear(submission);
     setPendingSubmission(null);
+  }
+}
+
+function assertBuyerSettlement(rail: SettlementRail, amount: string): asserts rail is 'REWARD_NPL' | 'PRIZE_USDT' {
+  if (!['REWARD_NPL', 'PRIZE_USDT'].includes(rail) || !/^[1-9][0-9]*$/.test(amount)) {
+    throw new CoreClientError('InvalidRequest', '结算轨道或金额无效');
   }
 }
 

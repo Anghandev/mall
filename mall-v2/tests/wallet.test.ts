@@ -6,8 +6,10 @@ import {
   createBrowserWalletGateway,
   encodeRouterPaymentCall,
   validatePaymentQuoteForWallet,
+  validateSettlementIntentForWallet,
 } from '../src/wallet';
 import { paymentQuote, seckillQuote } from './payment-fixtures';
+import { settlementBuyer, settlementIntent } from './settlement-fixtures';
 
 describe('published PaymentRouter wallet call', () => {
   it('encodes the ABI-shaped routerCall without a copied Router fragment', async () => {
@@ -67,6 +69,24 @@ describe('published PaymentRouter wallet call', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('binds settlement signatures to the current wallet, Safe, asset and published digest', async () => {
+    await expect(validateSettlementIntentForWallet(settlementIntent, settlementBuyer)).resolves.toMatchObject({
+      message: settlementIntent.intent,
+    });
+
+    const wrongWallet = structuredClone(settlementIntent);
+    wrongWallet.intent.wallet = '0x2222222222222222222222222222222222222222';
+    await expect(validateSettlementIntentForWallet(wrongWallet, settlementBuyer)).rejects.toThrow(/当前钱包/);
+
+    const wrongDigest = structuredClone(settlementIntent);
+    wrongDigest.digest = `0x${'1'.repeat(64)}`;
+    await expect(validateSettlementIntentForWallet(wrongDigest, settlementBuyer)).rejects.toThrow(/摘要/);
+
+    const rewrittenTypes = structuredClone(settlementIntent);
+    (rewrittenTypes.typedData.types.SettlementRequest as Array<{ name: string }>)[0]!.name = 'otherId';
+    await expect(validateSettlementIntentForWallet(rewrittenTypes, settlementBuyer)).rejects.toThrow(/发布协议/);
   });
 
   it('fails closed when the wallet refuses the BSC chain switch', async () => {
