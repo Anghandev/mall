@@ -5,16 +5,16 @@ schemas, financial logic, calldata, signers or database behavior.
 
 | Gap ID | Required Core capability | Fail-closed behavior |
 |---|---|---|
-| GAP-ADM-001 | Admin-wide projection/action consumer contract after coordinated `2.0.0-payment.1`; payment readiness, public catalog and wallet-bound payment trace are published | Published payment reads work; unpublished Admin reads and writes remain disabled |
-| GAP-ADM-002 | Admin-resource RBAC and permissions; SIWE/JWT role binding is published | Public payment reads remain available; protected Admin resources are unavailable |
-| GAP-ADM-003 | Resource/list/batch allowedActions and disabled reasons | Controls disabled with Core reason |
+| GAP-ADM-001 | Admin-wide projection/action consumer contract after coordinated `2.0.0-fulfillment.1`; payment reads plus ADMIN/OPERATOR fulfillment-order reads and order commands are published | Published payment/fulfillment paths work; unrelated Admin reads and writes remain disabled |
+| GAP-ADM-002 | Admin-resource RBAC and permissions; SIWE/JWT and fulfillment-order role binding are published | Fulfillment orders require ADMIN/OPERATOR in this product; other protected Admin resources remain unavailable |
+| GAP-ADM-003 | Resource/list/batch allowedActions and disabled reasons; order-level allowedActions are published | Order commands obey current Core action results; unrelated list/batch controls remain disabled |
 | GAP-ADM-004 | Secondary-signature and Safe proposal/execution evidence contract | High-risk actions cannot begin |
 | GAP-ADM-005 | Dashboard business/risk/infrastructure aggregates | Values unavailable, never synthetic |
 | GAP-ADM-006 | Merchant qualification/level/detail/proceeds/takeover projections | Merchant module read-only unavailable |
 | GAP-ADM-007 | Admin Product/SKU/inventory/category/tag/lock/version projection and writes; public active catalog read is published | Active catalog is read-only; all Admin catalog writes remain disabled |
 | GAP-ADM-008 | ProductPolicy and signed AllocationSnapshot validation/publication | Policy save/publish disabled |
 | GAP-ADM-009 | Seckill session/quotes/inventory/prize/rules/breaker controls | Publish/inject/force-close disabled |
-| GAP-ADM-010 | MerchantTakeoverCase, guarantees/reserve/debt, fulfillment evidence/finality | Takeover actions disabled; case remains visible as unavailable |
+| GAP-ADM-010 | Fulfillment order evidence/finality and order-level takeover initiation are published; MerchantTakeoverCase funding, guarantee, frozen-receivable, future-proceeds and debt projections are not | Current-session takeover follows Core allowedActions; unpublished case finance and recovery controls remain disabled |
 | GAP-ADM-011 | Risk event, blacklist, trade-lock and breaker action contracts | Risk writes disabled |
 | GAP-ADM-012 | Provider readiness, carriers, addresses, freight, shipment and print jobs | ConfigurationRequired; no fake success |
 | GAP-ADM-013 | CMS placement/content/version/publish/rollback contracts | CMS writes disabled |

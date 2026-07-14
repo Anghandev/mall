@@ -93,9 +93,9 @@ and Merchant. A disabled control, empty API/action catalog, static record,
 fixture-only path or fail-closed placeholder is temporary safety behavior, not
 completion evidence. External inputs cannot be replaced by fixture success.
 
-## Payment Checkpoint Consumer Evidence
+## Fulfillment Checkpoint Consumer Evidence
 
-The Admin consumer is pinned to `@abu24k/core-artifacts@2.0.0-payment.1`.
+The Admin consumer is pinned to `@abu24k/core-artifacts@2.0.0-fulfillment.1`.
 
 - `ADM-SYS-005`: consumes the coordinated manifest plus live bootstrap chain,
   fixed-asset and payment-readiness values; missing deployment/Safe evidence is
@@ -107,5 +107,11 @@ The Admin consumer is pinned to `@abu24k/core-artifacts@2.0.0-payment.1`.
   renders submission, reservation, Router call and indexed finality. Admin-wide
   RBAC audit, Gas, Safe and ledger evidence remain `GAP-ADM-017`, so these rows
   are not complete.
+- `ADM-TAKE-001` and `ADM-TAKE-002`: ADMIN/OPERATOR sessions consume the
+  authoritative fulfillment-order list, shipment/logistics/balance evidence,
+  order-level `allowedActions` and idempotent takeover command. Static action
+  metadata never authorizes a button. Merchant guarantee funding, receivable
+  deductions, future-proceeds debt and replacement-merchant case projections
+  remain `GAP-ADM-010` / `GAP-ADM-017`, so the full rows are not complete.
 
 All test records stay under `tests/**`; no production fixture is shipped.

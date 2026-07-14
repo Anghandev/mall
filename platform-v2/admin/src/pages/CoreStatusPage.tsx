@@ -13,7 +13,7 @@ export function CoreStatusPage() {
       <header className="page-header">
         <div className="page-icon"><RadioTower aria-hidden="true" /></div>
         <div>
-          <p className="eyebrow">Coordinated payment checkpoint</p>
+          <p className="eyebrow">Coordinated fulfillment checkpoint</p>
           <h1>Core 状态</h1>
           <p>版本、HTTP 能力和运行时 readiness 均来自同一发布物。未部署、未配置或未发布不会显示为健康。</p>
         </div>
@@ -74,7 +74,7 @@ export function CoreStatusPage() {
 
       <section className="snapshot-rule">
         <ShieldCheck aria-hidden="true" />
-        <div><strong>Admin 边界</strong><p>政策发布、履约、Safe 结算、CMS、审计与监控契约尚未发布，本页不会用 artifact 元数据替代运行时成功证据。</p></div>
+        <div><strong>Admin 边界</strong><p>履约订单、订单级 allowedActions 和接管命令已发布；政策、保证金/债务、Safe 结算、CMS、审计与监控仍未发布。</p></div>
       </section>
     </>
   );
