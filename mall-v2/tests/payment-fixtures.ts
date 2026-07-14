@@ -1,4 +1,5 @@
 import {
+  artifactVersion,
   chainIdentity,
   type CatalogProduct,
   type PaymentQuoteResponse,
@@ -98,7 +99,7 @@ export function paymentQuote(): PaymentQuoteResponse {
     PaymentAuthorization: paymentAuthorizationTypes.PaymentAuthorization.map((field) => ({ ...field })),
   }, authorizationMessage);
   return {
-    artifactVersion: '2.0.0-payment.1',
+    artifactVersion,
     orderId: intent.orderId,
     state: 'QUOTED',
     paymentRouterAddress: router,
@@ -158,7 +159,7 @@ export function seckillQuote(): SeckillQuoteResponse {
     authorizationMessage,
   );
   return {
-    artifactVersion: '2.0.0-payment.1',
+    artifactVersion,
     orderId: ordinary.orderId,
     state: 'QUOTED',
     paymentRouterAddress: ordinary.paymentRouterAddress,

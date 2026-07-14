@@ -25,18 +25,20 @@ function renderAt(path = '/seckill', services = offlineServices()) {
 }
 
 describe('Mall V2 payment consumer', () => {
-  it('consumes the coordinated payment checkpoint and keeps deployment writes fail closed', async () => {
+  it('consumes the coordinated fulfillment checkpoint and keeps payment writes fail closed', async () => {
     renderAt('/mall');
 
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
-    expect(artifactVersion).toBe('2.0.0-payment.1');
+    expect(artifactVersion).toBe('2.0.0-fulfillment.1');
     expect(productBaseline.knownOrderActions).toBe(allowedActionNames);
     expect(productBaseline.executableOrderActions).toBe(executableOrderActionNames);
-    expect(executableOrderActionNames).toHaveLength(0);
-    expect(allowedActionNames.every((action) => !isCoreOrderActionExecutable(action))).toBe(true);
+    expect(executableOrderActionNames).toContain('CONFIRM_RECEIPT');
+    expect(executableOrderActionNames).not.toContain('PAY_ORDER');
+    expect(isCoreOrderActionExecutable('CONFIRM_RECEIPT')).toBe(true);
+    expect(isCoreOrderActionExecutable('PAY_ORDER')).toBe(false);
     expect(mallRuntimeBoundary).toMatchObject({
-      artifactStatus: '2.0.0-payment.1',
-      executableOrderActions: [],
+      artifactStatus: '2.0.0-fulfillment.1',
+      executableOrderActions: executableOrderActionNames,
       deploymentAuthorized: false,
       sharedInterface: '@abu24k/core-artifacts',
     });

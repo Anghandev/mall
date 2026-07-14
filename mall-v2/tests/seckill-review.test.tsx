@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { artifactVersion } from '@abu24k/core-artifacts';
 import { MemoryRouter } from 'react-router-dom';
 import { vi } from 'vitest';
 
@@ -21,7 +22,7 @@ describe('seckill signed quote review', () => {
     const quote = seckillQuote();
     const broadcastPayment = vi.fn().mockResolvedValue(undefined);
     mocked.runtime = {
-      bootstrap: { artifactVersion: '2.0.0-payment.1', writesEnabled: true, blockCode: null },
+      bootstrap: { artifactVersion, writesEnabled: true, blockCode: null },
       catalog: [],
       catalogState: 'ready',
       session: { token: 'session', walletAddress: quote.dual.seckill.buyer, roles: ['BUYER'] },
