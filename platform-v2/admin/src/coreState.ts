@@ -3,13 +3,11 @@ import { productBaseline } from './bootstrap';
 export const coreState = Object.freeze({
   artifactStatus: productBaseline.coreArtifacts,
   artifactVersion: productBaseline.artifactVersion,
-  connectionLabel: `Core ${productBaseline.artifactVersion} · Payment checkpoint`,
-  reason: '支付 readiness、公开目录和钱包绑定支付投影已发布；Admin 全局投影、监控、政策与写入契约尚未发布。',
+  connectionLabel: `Core ${productBaseline.artifactVersion} · Fulfillment checkpoint`,
+  reason: '支付与履约订单投影已发布；保证金、债务、政策、Safe 结算、监控和其他 Admin 资源仍等待 settlement/admin checkpoint。',
   executableOrderActionNames: productBaseline.publicCatalogs.executableOrderActionNames,
   canRead: productBaseline.adminCapabilities.projections,
-  canWrite:
-    productBaseline.adminCapabilities.writes
-    && productBaseline.publicCatalogs.executableOrderActionNames.length > 0,
+  canWriteWithoutRuntimeAuthorization: productBaseline.adminCapabilities.writesWithoutRuntimeAuthorization,
 } as const);
 
 export type CoreState = typeof coreState;
