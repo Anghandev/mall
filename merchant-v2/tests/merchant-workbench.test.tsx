@@ -23,7 +23,7 @@ function renderPage(page: React.ReactNode) {
 
 describe('00 wallet gateway', () => {
   it('consumes the coordinated artifact version and keeps unpublished actions disabled', () => {
-    expect(artifactVersion).toBe('2.0.0-rc.1');
+    expect(artifactVersion).toBe('2.0.0-rc.2');
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
     expect(coreBoundary.artifactVersion).toBe(artifactVersion);
     expect(coreBoundary.artifactsAvailable).toBe(true);
