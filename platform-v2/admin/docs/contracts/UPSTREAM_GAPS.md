@@ -5,7 +5,7 @@ schemas, financial logic, calldata, signers or database behavior.
 
 | Gap ID | Required Core capability | Fail-closed behavior |
 |---|---|---|
-| GAP-ADM-001 | Coordinated OpenAPI/types/ABI/manifest/enums/WebSocket artifacts | Disconnected contract state; all writes disabled |
+| GAP-ADM-001 | Admin projection/action consumer contract on coordinated `2.0.0-rc.1` artifacts | Artifact version is visible; Admin reads and writes remain disabled |
 | GAP-ADM-002 | Admin SIWE/JWT/RBAC role and permissions | Protected navigation/actions unavailable |
 | GAP-ADM-003 | Resource/list/batch allowedActions and disabled reasons | Controls disabled with Core reason |
 | GAP-ADM-004 | Secondary-signature and Safe proposal/execution evidence contract | High-risk actions cannot begin |
