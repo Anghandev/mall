@@ -174,7 +174,7 @@ a {
 .wallet-button {
   display: inline-flex;
   align-items: center;
-  min-height: 40px;
+  min-height: 44px;
   gap: 6px;
   padding: 0 11px;
   border: 1px solid var(--line);
@@ -188,6 +188,79 @@ a {
 .app-content {
   min-height: calc(100dvh - 64px);
   padding-bottom: calc(82px + env(safe-area-inset-bottom));
+}
+
+.runtime-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 16px 0;
+  padding: 12px 14px;
+  border: 1px solid oklch(78% 0.09 30);
+  border-radius: 7px;
+  background: oklch(96% 0.025 30);
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.runtime-pending {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 16px 0;
+  padding: 12px 14px;
+  border: 1px solid oklch(82% 0.06 80);
+  border-radius: 7px;
+  background: var(--amber-soft);
+}
+
+.runtime-pending__info {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.runtime-pending__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.runtime-pending strong,
+.runtime-pending span {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.runtime-pending span {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.runtime-pending button {
+  min-width: 92px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.runtime-error button,
+.text-button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: currentColor;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .screen {
@@ -368,6 +441,97 @@ a {
   border-radius: 7px;
   background: var(--surface);
   box-shadow: var(--shadow-sm);
+}
+
+.section-copy {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.catalog-retry {
+  display: grid;
+  gap: 12px;
+}
+
+.product-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.product-card {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.product-card__visual {
+  display: grid;
+  min-height: 176px;
+  place-items: center;
+  background: var(--black-gold);
+  color: var(--gold);
+}
+
+.product-card__body {
+  display: grid;
+  min-width: 0;
+  gap: 9px;
+  padding: 14px;
+}
+
+.product-card h2 {
+  overflow-wrap: anywhere;
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+.product-card p,
+.product-card dt,
+.product-card dd {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.product-card dl,
+.reservation-summary dl,
+.payment-intent dl,
+.payment-status dl {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+.product-card dl > div,
+.reservation-summary dl > div,
+.payment-intent dl > div,
+.payment-status dl > div {
+  display: flex;
+  min-width: 0;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.product-card dd,
+.reservation-summary dd,
+.payment-intent dd,
+.payment-status dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.product-card .button {
+  min-height: 44px;
+  padding-inline: 12px;
+  font-size: 13px;
 }
 
 .section-block--flat {
@@ -1009,6 +1173,50 @@ input[aria-invalid="true"] {
   font-size: 13px;
 }
 
+.sku-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sku-option {
+  display: grid;
+  min-width: 0;
+  min-height: 60px;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: start;
+  cursor: pointer;
+}
+
+.sku-option.is-active {
+  border-color: var(--green-dark);
+  box-shadow: 0 0 0 2px oklch(62% 0.14 154 / 0.16);
+}
+
+.sku-option:disabled {
+  opacity: 0.48;
+}
+
+.sku-option strong,
+.sku-option span {
+  overflow-wrap: anywhere;
+}
+
+.sku-option strong {
+  font-size: 13px;
+}
+
+.sku-option span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .stepper {
   display: grid;
   grid-template-columns: 44px 72px 44px;
@@ -1046,6 +1254,106 @@ input[aria-invalid="true"] {
 .checkout-total strong {
   font-size: 22px;
   font-variant-numeric: tabular-nums;
+}
+
+.reservation-summary,
+.payment-intent,
+.payment-status,
+.dual-quote {
+  display: grid;
+  gap: 14px;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+}
+
+.reservation-summary h2,
+.payment-intent h2,
+.payment-status h2 {
+  font-size: 16px;
+}
+
+.dual-quote h2 {
+  font-size: 16px;
+}
+
+.dual-quote__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.dual-quote__grid > div {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-soft);
+}
+
+.dual-quote__grid strong,
+.dual-quote__grid span {
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.dual-quote__grid span {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.reservation-summary dt,
+.reservation-summary dd,
+.payment-intent dt,
+.payment-intent dd,
+.payment-status dt,
+.payment-status dd {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.reservation-summary dd,
+.payment-status dd {
+  max-width: 60%;
+}
+
+.approval-row {
+  display: grid;
+  gap: 8px;
+  padding-block: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.approval-row > div {
+  display: flex;
+  min-width: 0;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.approval-row strong,
+.approval-row span {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.approval-row span {
+  color: var(--muted);
+}
+
+.approval-row .text-button {
+  justify-self: end;
+  color: var(--danger);
+}
+
+.approval-check {
+  align-items: flex-start;
 }
 
 .review-list {
