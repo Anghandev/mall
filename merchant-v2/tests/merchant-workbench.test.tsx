@@ -90,14 +90,23 @@ function installWallet() {
 }
 
 describe('00 wallet gateway', () => {
-  it('consumes payment.1 and keeps unpublished executable actions disabled', () => {
-    expect(artifactVersion).toBe('2.0.0-payment.1');
+  it('consumes fulfillment.1 and requires a server-authoritative action grant', () => {
+    expect(artifactVersion).toBe('2.0.0-fulfillment.1');
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
     expect(coreBoundary.artifactVersion).toBe(artifactVersion);
     expect(coreBoundary.artifactsAvailable).toBe(true);
-    expect(coreBoundary.executableOrderActionNames).toEqual([]);
+    expect(coreBoundary.executableOrderActionNames).toContain('RECORD_SHIPMENT');
     expect(canExecuteOrderAction('RECORD_SHIPMENT')).toBe(false);
-    expect(canExecuteOrderAction('REQUEST_MERCHANT_SETTLEMENT')).toBe(false);
+    expect(canExecuteOrderAction('RECORD_SHIPMENT', [{ action: 'RECORD_SHIPMENT', enabled: true }])).toBe(true);
+    expect(canExecuteOrderAction('RECORD_SHIPMENT', [{
+      action: 'RECORD_SHIPMENT',
+      enabled: false,
+      reasonCode: 'FinalityPending',
+    }])).toBe(false);
+    expect(canExecuteOrderAction('REQUEST_MERCHANT_SETTLEMENT', [{
+      action: 'REQUEST_MERCHANT_SETTLEMENT',
+      enabled: true,
+    }])).toBe(false);
   });
 
   it('performs the published BSC SIWE flow and enters only with a merchant role', async () => {
@@ -230,6 +239,33 @@ describe('03 fulfillment center', () => {
 
     expect(await screen.findByText('ConfigurationRequired')).toBeTruthy();
     expect(getOrderAllowedActions).toHaveBeenCalledWith('order-payment-check', 'test-session');
+  });
+
+  it('enables platform receipt review only after the merchant session receives an eligible Core action', async () => {
+    const user = userEvent.setup();
+    installWallet();
+    const client = createMockCoreApi({
+      getOrderAllowedActions: async () => [
+        { action: 'REQUEST_FORCED_RECEIPT', enabled: true, deadline: '2026-07-14T12:00:00.000Z' },
+        { action: 'RECORD_SHIPMENT', enabled: false, reasonCode: 'FinalityPending' },
+      ],
+    });
+    render(<MemoryRouter><App client={client} /></MemoryRouter>);
+
+    const connect = screen.getByRole('button', { name: '连接钱包' });
+    await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
+    await user.click(connect);
+    const navigation = await screen.findByRole('navigation', { name: '商家工作台导航' });
+    await user.click(within(navigation).getByRole('link', { name: /履约交付/ }));
+
+    const review = screen.getByRole('button', { name: '申请平台审核' }) as HTMLButtonElement;
+    expect(review.disabled).toBe(true);
+    await user.type(screen.getByLabelText('订单 ID'), 'eligible-delivery-order');
+    await user.click(screen.getByRole('button', { name: '核验可用操作' }));
+
+    await waitFor(() => expect(review.disabled).toBe(false));
+    expect((screen.getByRole('button', { name: '去发货' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('FinalityPending')).toBeTruthy();
   });
 
   it('contains wide tables inside their horizontal scroll region', () => {

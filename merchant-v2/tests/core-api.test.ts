@@ -10,7 +10,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('payment.1 Core HTTP consumer', () => {
+describe('fulfillment.1 Core HTTP consumer', () => {
   it('uses the published SIWE nonce and verify request bodies without a password fallback', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
@@ -64,7 +64,7 @@ describe('payment.1 Core HTTP consumer', () => {
       'https://core.example.test/v2/catalog/products',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-payment.1' }),
+        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-fulfillment.1' }),
       }),
     );
   });

@@ -9,6 +9,7 @@ const forbidden = [
   'legacy/' + 'v1-npl-only',
   '__merchant_visual_review__',
   '2.0.0-rc.2',
+  '2.0.0-payment.1',
   'CLAIM_' + 'MERCHANT_USDT',
   'Payment' + 'Escrow',
   'Claim' + 'Vault',
@@ -21,22 +22,22 @@ const forbidden = [
 ];
 
 let filesChecked = 0;
-let sawPaymentBoundary = false;
+let sawFulfillmentBoundary = false;
 let sawArtifactVersion = false;
 
 for (const path of walk(dist)) {
   if (!textExtensions.has(extname(path))) continue;
   filesChecked += 1;
   const contents = readFileSync(path, 'utf8');
-  sawPaymentBoundary ||= contents.includes('支付批次已发布');
+  sawFulfillmentBoundary ||= contents.includes('支付与履约批次已发布');
   sawArtifactVersion ||= contents.includes(artifactVersion);
   for (const token of forbidden) {
     if (contents.includes(token)) throw new Error(`Production bundle contains forbidden token: ${token}`);
   }
 }
 
-if (!sawPaymentBoundary) {
-  throw new Error('Production bundle is missing the coordinated payment boundary');
+if (!sawFulfillmentBoundary) {
+  throw new Error('Production bundle is missing the coordinated fulfillment boundary');
 }
 
 if (!sawArtifactVersion) {
