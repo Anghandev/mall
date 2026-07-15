@@ -25,11 +25,11 @@ are never soft-deletable.
 | ADM-MER-005 | 38 | Historical NPL Burn and successfully Available BNM totals | D-V2-003, D-V2-008 | Totals reconcile indexed final events and order snapshots | Frozen | GAP-ADM-006 |
 | ADM-MER-006 | 39 | Source Locked/PendingSettlement/Available/Claimed withdrawal view, TxHash and Gas | D-V2-007, D-V2-023 | USDT proceeds use Locked/Available/Requested/Batched/Settled, signed gasless requests and final Safe TxHash; merchant never broadcasts or pays settlement Gas | Overridden | GAP-ADM-006, GAP-ADM-017 |
 | ADM-CAT-001 | 41-43 | Three-level category tree; name/icon/sort/enabled/service-fee fields | D-V2-014, D-V2-018 | Fee is DecisionBlocked until versioned; other edits audited | DecisionBlocked | GAP-ADM-007, GAP-ADM-008 |
-| ADM-CAT-002 | 44 | Tag library, examples, batch tagging and frontend feed | - | Versioned tags and placement state; no production fixture | Frozen | GAP-ADM-007 |
-| ADM-CAT-003 | 45 | Category/tag delete-disable lock while a seckill product or order with Locked funds exists | D-V2-017, D-V2-025 | Core and UI deny delete/disable with the exact blocking resource; historical products only delist, and funds/policies/batches/chain/audit evidence never delete | Overridden | GAP-ADM-007 |
-| ADM-CAT-004 | 46-50 | Create/proxy-list; title/subtitle/main images/video/rich detail/default freight; settlement merchant allowlist; multi-SKU attributes/stock/USDT cost | D-V2-002 | Exact amounts, signed uploads and merchant eligibility required | Frozen | GAP-ADM-007 |
-| ADM-CAT-005 | 51 | Platform inventory +/- and USDT cost edit | D-V2-014, D-V2-017 | Cannot mutate active order/session snapshot; new policy/version only | Overridden | GAP-ADM-007, GAP-ADM-008 |
-| ADM-CAT-006 | 52 | Historical product cannot physically delete; delist/hide only | D-V2-017 | Chain/order evidence remains queryable forever | Frozen | GAP-ADM-007 |
+| ADM-CAT-002 | 44 | Tag library, examples, batch tagging and frontend feed | - | Versioned tags and placement state; no production fixture | Frozen | GAP-ADM-003 (cross-resource batch only) |
+| ADM-CAT-003 | 45 | Category/tag delete-disable lock while a seckill product or order with Locked funds exists | D-V2-017, D-V2-025 | Core and UI deny delete/disable with the exact blocking resource; historical products only delist, and funds/policies/batches/chain/audit evidence never delete | Overridden | - |
+| ADM-CAT-004 | 46-50 | Create/proxy-list; title/subtitle/main images/video/rich detail/default freight; settlement merchant allowlist; multi-SKU attributes/stock/USDT cost | D-V2-002 | Exact amounts, signed uploads and merchant eligibility required | Frozen | - |
+| ADM-CAT-005 | 51 | Platform inventory +/- and USDT cost edit | D-V2-014, D-V2-017 | Cannot mutate active order/session snapshot; new policy/version only | Overridden | - |
+| ADM-CAT-006 | 52 | Historical product cannot physically delete; delist/hide only | D-V2-017 | Chain/order evidence remains queryable forever | Frozen | - |
 | ADM-POL-001 | 54-57 | Product/session financial-policy panel; merchant base receivable, concession, net receivable and USDT settlement destinations | D-V2-002, D-V2-014, D-V2-022 | Signed Core preview validates exact base/concession/net values, configured destinations, future-only scope and governed publish | Overridden | GAP-ADM-008, GAP-ADM-017 |
 | ADM-POL-002 | 58-59 | Source buyer payment weights and NPL Burn/Route control | D-V2-002, D-V2-003, D-V2-014 | Launch buyer payment is fixed 70% USDT plus 30% Oracle-equivalent NPL; Router sends 20%-of-list-price NPL to Burn and 10%-of-list-price NPL to Reward Safe; future changes require governed policyVersion and an NPL leg below 30% requires a funded subsidy | Overridden | GAP-ADM-008 |
 | ADM-POL-003 | 60-61 | Platform fee, seckill pool, regional/referral proportions and merchant-concession destination weights | D-V2-009, D-V2-014, D-V2-018, D-V2-022 | Fixed Reward-Safe roles total 10%-of-list-price NPL; unresolved service/prize/store/concession-destination values remain DecisionBlocked and publish future-only | DecisionBlocked | GAP-ADM-008, GAP-ADM-017 |
@@ -121,7 +121,8 @@ All test records stay under `tests/**`; no production fixture is shipped.
 
 ## Settlement/Admin Checkpoint Evidence
 
-The product consumes coordinated artifact `2.0.0-settlement-admin.2` without a
+The earlier product checkpoint consumed coordinated artifact
+`2.0.0-settlement-admin.2` without a
 parallel API or local financial calculation:
 
 - `ADM-MER-004`, `ADM-TAKE-003` and `ADM-TAKE-004`: merchant guarantee,
@@ -158,3 +159,35 @@ parallel API or local financial calculation:
   row is not reported complete.
 
 All test records stay under `tests/**`; no production fixture is shipped.
+
+## Catalog Checkpoint Evidence
+
+The current product consumes coordinated artifact
+`@abu24k/core-artifacts@2.0.0-settlement-admin.4` for the Catalog workflow:
+
+- `ADM-CAT-001` and `ADM-CAT-002`: ADMIN/OPERATOR/AUDITOR consume the
+  versioned three-level category tree and tag library. ADMIN/OPERATOR can
+  create and update name, parent, icon, sort and status. Because `.4` cannot
+  express a nullable parent on update, moving an existing child back to the
+  root remains fail-closed under `GAP-ADM-007`; the unresolved service fee
+  remains visibly `DecisionBlocked` and is never submitted.
+- `ADM-CAT-003` and `ADM-CAT-006`: taxonomy disable/delete, product HIDE and
+  DELIST use Core commands. `ProductWriteLocked` retains and renders the exact
+  `blockingResource`; no physical-delete endpoint or UI action exists.
+- `ADM-CAT-004` and `ADM-CAT-005`: the full managed-product list, authoritative
+  store slot, merchant ownership, structured multi-SKU form, exact atomic
+  values, category/tags, controlled product image/video reads, append-only
+  inventory adjustments and historical `supersedesProductId` are consumed.
+- `ADM-POL-001` and `ADM-POL-006`: Core signs the exact concession preview;
+  the UI renders base receivable, concession, net receivable, every configured
+  destination, policy version, fingerprint, signer and digest before review
+  submission. It never calculates those values locally.
+- `ADM-GOAL-001` and `ADM-GOAL-002`: ADMIN/OPERATOR controls require both the
+  current session role and product/store `allowedActions`; AUDITOR receives the
+  same reads with no write forms. Desktop/mobile layouts and loading, empty,
+  error, blocked and disabled states are covered by product tests.
+
+Global cross-resource batch tagging/export remains `GAP-ADM-003`. Missing
+commercial decisions remain `DecisionBlocked`; real production media/provider,
+wallet, Safe, RPC, domain and device evidence remains `ExternalBlocked` under
+`ADM-GOAL-003`. All fixtures remain under `tests/**`.

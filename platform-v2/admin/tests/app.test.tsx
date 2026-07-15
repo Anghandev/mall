@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { artifactVersion, executableOrderActionNames } from '@abu24k/core-artifacts';
+import { artifactVersion, executableOrderActionNames, type ManagedCatalogProduct, type UserRole } from '@abu24k/core-artifacts';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
@@ -50,12 +50,15 @@ describe('platform admin fail-closed experience', () => {
     expect(screen.getAllByText(coreState.connectionLabel).length).toBeGreaterThan(0);
   });
 
-  it('keeps global query and every batch action disabled without Core contracts', () => {
+  it('keeps every Catalog read and write behind a Core SIWE session', () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
     renderAt('/catalog');
     expect(screen.getByRole('heading', { name: '商品主数据' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '查询' }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByRole('button', { name: /逻辑软删除/ }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByText(/普通资源也必须由 Core/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'SIWE 连接' })).toBeTruthy();
+    expect(screen.queryByRole('tab', { name: '商品与库存' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /保存 Core 商品版本/ })).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('never renders a delete action for append-only audit records', () => {
@@ -353,28 +356,83 @@ describe('platform admin fail-closed experience', () => {
     expect(screen.getByText('PAYMENT_ROUTER_ADDRESS_MANIFEST')).toBeTruthy();
   });
 
-  it('renders Core-authoritative product, SKU, amount and stock values', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
-      products: [{
-        productId: 'product-24k',
-        chainProductId: hash('1'),
-        title: '24K 金章',
-        metadata: {},
-        skus: [{
-          skuId: 'sku-10g',
-          chainSkuId: hash('2'),
-          attributes: { weight: '10g' },
-          listPriceUsdt: '7200000000',
-          stockAvailable: '18',
-        }],
-      }],
-    })));
+  it('renders the authenticated Core-managed product, SKU, amount and stock values', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    window.ethereum = walletProvider(wallet);
+    const fetchMock = catalogFetchMock('ADMIN', [managedProduct()]);
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
     renderAt('/catalog');
 
-    expect(await screen.findByText('24K 金章')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    await user.click(await screen.findByRole('button', { name: /24K 金章/ }));
     expect(screen.getByText('7200000000')).toBeTruthy();
-    expect(screen.getByText('18')).toBeTruthy();
+    expect(screen.getByText('18 available')).toBeTruthy();
     expect(screen.getByText('weight: 10g')).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/v2/admin/catalog/products'))).toBe(true);
+  });
+
+  it('keeps AUDITOR Catalog access read-only even when projections contain data', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    window.ethereum = walletProvider(wallet);
+    vi.stubGlobal('fetch', catalogFetchMock('AUDITOR', [managedProduct({ allowedActions: [] })]));
+    const user = userEvent.setup();
+    renderAt('/catalog');
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    await user.click(await screen.findByRole('button', { name: /24K 金章/ }));
+
+    expect(screen.getAllByText(/AUDITOR 只读/).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('heading', { name: '门店代理建品' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'APPROVE' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /追加调整记录/ })).toBeNull();
+  });
+
+  it('renders only review decisions present in the current Core allowedActions', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    window.ethereum = walletProvider(wallet);
+    vi.stubGlobal('fetch', catalogFetchMock('ADMIN', [managedProduct({ lifecycleState: 'REVIEW', allowedActions: ['APPROVE', 'HIDE'] })]));
+    const user = userEvent.setup();
+    renderAt('/catalog');
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    await user.click(await screen.findByRole('button', { name: /24K 金章/ }));
+
+    expect(screen.getByRole('button', { name: 'APPROVE' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'HIDE' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'REJECT' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'PUBLISH' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'DELIST' })).toBeNull();
+  });
+
+  it('shows the exact Core blockingResource when a category disable is denied', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    window.ethereum = walletProvider(wallet);
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['ADMIN'] });
+      if (url.endsWith('/v2/admin/catalog/categories') && !init?.method) return jsonResponse({ categories: [{ categoryId: 'category-1', version: '1', parentCategoryId: null, level: 1, name: '黄金', iconAssetId: null, sortOrder: 1, status: 'ENABLED', serviceFee: { state: 'DecisionBlocked', valueBps: null } }] });
+      if (url.endsWith('/v2/admin/catalog/tags') && !init?.method) return jsonResponse({ tags: [] });
+      if (url.endsWith('/v2/admin/catalog/products') && !init?.method) return jsonResponse({ products: [] });
+      if (url.endsWith('/v2/admin/catalog/categories/category-1') && init?.method === 'PUT') return jsonResponse({ error: { code: 'ProductWriteLocked', message: 'Category contains a live seckill product', correlationId: 'taxonomy-lock-1', details: { blockingResource: { type: 'SECKILL_SESSION', id: 'session-live-1', state: 'LIVE' } } } }, 409);
+      return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected request', correlationId: 'taxonomy-test' } }, 400);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderAt('/catalog');
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    await user.click(await screen.findByRole('tab', { name: '类目与标签' }));
+    await user.click(screen.getByRole('button', { name: /黄金/ }));
+    await user.selectOptions(screen.getAllByLabelText('状态')[0]!, 'DISABLED');
+    await user.type(screen.getAllByLabelText('Idempotency key')[0]!, 'disable-category-1');
+    await user.click(screen.getByRole('button', { name: '保存类目版本' }));
+
+    expect(await screen.findByText(/blockingResource: SECKILL_SESSION · session-live-1 · LIVE/)).toBeTruthy();
+    expect(screen.getByText(/Correlation ID: taxonomy-lock-1/)).toBeTruthy();
+    const write = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/v2/admin/catalog/categories/category-1'));
+    expect(JSON.parse(String(write?.[1]?.body))).toMatchObject({ status: 'DISABLED', idempotencyKey: 'disable-category-1' });
   });
 
   it('uses SIWE and renders the wallet-bound payment submission projection', async () => {
@@ -421,6 +479,51 @@ describe('platform admin fail-closed experience', () => {
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+}
+
+function catalogFetchMock(role: UserRole, products: readonly ManagedCatalogProduct[]) {
+  return vi.fn(async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
+    if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: '0x1111111111111111111111111111111111111111', roles: [role] });
+    if (url.endsWith('/v2/admin/catalog/categories')) return jsonResponse({ categories: [{ categoryId: 'category-1', version: '1', parentCategoryId: null, level: 1, name: '黄金', iconAssetId: null, sortOrder: 1, status: 'ENABLED', serviceFee: { state: 'DecisionBlocked', valueBps: null } }] });
+    if (url.endsWith('/v2/admin/catalog/tags')) return jsonResponse({ tags: [{ tagId: 'tag-1', version: '1', name: '新品', example: '新品上架', sortOrder: 1, status: 'ENABLED' }] });
+    if (url.endsWith('/v2/admin/catalog/products')) return jsonResponse({ products });
+    return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected Catalog request', correlationId: 'catalog-ui-test' } }, 400);
+  });
+}
+
+function managedProduct(overrides: Partial<ManagedCatalogProduct> = {}): ManagedCatalogProduct {
+  return {
+    artifactVersion,
+    productId: 'product-24k',
+    chainProductId: hash('1'),
+    merchantId: 'merchant-1',
+    storeId: 'store-1',
+    supersedesProductId: null,
+    version: '1',
+    title: '24K 金章',
+    subtitle: '10g',
+    lifecycleState: 'DRAFT',
+    productPolicyHash: hash('2'),
+    merchantConcessionBps: 2500,
+    mainImageAssetIds: [],
+    videoAssetId: null,
+    richDetail: {},
+    defaultFreightUsdt: '1000000',
+    fulfillmentModes: ['DELIVERY'],
+    categoryId: 'category-1',
+    tagIds: ['tag-1'],
+    skus: [{
+      skuId: 'sku-10g', chainSkuId: hash('3'), version: '1', attributes: { weight: '10g' }, listPriceUsdt: '7200000000',
+      merchantBaseReceivableUsdt: '7000000000', stockTotal: '20', stockAvailable: '18', stockReserved: '2', proposedSeckillInventory: '5', lifecycleState: 'DRAFT',
+    }],
+    allowedActions: ['SAVE_DRAFT', 'CREATE_CONCESSION_PREVIEW', 'SUBMIT_REVIEW', 'ADJUST_INVENTORY', 'HIDE', 'DELIST'],
+    writeLock: null,
+    createdAt: '2026-07-15T00:00:00.000Z',
+    updatedAt: '2026-07-15T00:00:00.000Z',
+    ...overrides,
+  };
 }
 
 function nonceResponse() {

@@ -18,6 +18,9 @@ export const productBaseline = Object.freeze({
   adminCapabilities: Object.freeze({
     bootstrapReadiness: true,
     catalogRead: true,
+    catalogAdmin: true,
+    catalogMediaReadAccess: true,
+    catalogSignedConcessionPreview: true,
     paymentProjection: 'BUYER_WALLET_SCOPED',
     fulfillmentOrderProjection: 'ADMIN_RBAC_SCOPED',
     orderAllowedActions: true,
