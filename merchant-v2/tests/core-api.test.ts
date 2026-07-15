@@ -33,6 +33,12 @@ import {
   settlementIntent,
   settlementList,
 } from './settlement-fixtures';
+import {
+  printerBinding,
+  printerChallenge,
+  waybillBatchResult,
+  waybillPrintJob,
+} from './logistics-fixtures';
 
 const originalFetch = globalThis.fetch;
 const productHash = `0x${'a'.repeat(64)}`;
@@ -43,7 +49,89 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('settlement-admin.9 Core HTTP consumer', () => {
+describe('logistics.1 Core HTTP consumer', () => {
+  it('consumes signed printer binding, provider waybill and durable print job routes', async () => {
+    const acceptedJob = { ...waybillPrintJob, state: 'QUEUED' as const, attempts: 0, errorCode: null };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(null))
+      .mockResolvedValueOnce(jsonResponse(printerChallenge, 201))
+      .mockResolvedValueOnce(jsonResponse(printerBinding))
+      .mockResolvedValueOnce(jsonResponse(waybillBatchResult, 201))
+      .mockResolvedValueOnce(jsonResponse([waybillPrintJob]))
+      .mockResolvedValueOnce(jsonResponse(acceptedJob));
+    globalThis.fetch = fetchMock as typeof fetch;
+    const api = createCoreApi('https://core.example.test');
+    const challengeInput = {
+      provider: 'FEIE' as const,
+      deviceId: printerBinding.deviceId,
+      idempotencyKey: 'printer-challenge-consumer-1',
+    };
+    const applyInput = {
+      challengeId: printerChallenge.challengeId,
+      signature: `0x${'12'.repeat(65)}`,
+      idempotencyKey: 'printer-apply-consumer-1',
+    };
+    const waybillInput = {
+      provider: 'KUAIDI100' as const,
+      carrierCode: 'SF' as const,
+      storeId,
+      orderIds: [deliveryOrderId],
+      idempotencyKey: 'waybill-batch-consumer-1',
+    };
+
+    await expect(api.getMerchantPrinterBinding(storeId, 'merchant-session')).resolves.toBeNull();
+    await expect(api.createMerchantPrinterBindingChallenge(storeId, challengeInput, 'merchant-session'))
+      .resolves.toEqual(printerChallenge);
+    await expect(api.applyMerchantPrinterBinding(storeId, applyInput, 'merchant-session'))
+      .resolves.toEqual(printerBinding);
+    await expect(api.createMerchantWaybillBatch(waybillInput, 'merchant-session'))
+      .resolves.toEqual(waybillBatchResult);
+    await expect(api.listMerchantPrintJobs('merchant-session', 100)).resolves.toEqual([waybillPrintJob]);
+    await expect(api.retryMerchantPrintJob(waybillPrintJob.printJobId, 'print-retry-consumer-1', 'merchant-session'))
+      .resolves.toEqual(acceptedJob);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `https://core.example.test/v2/merchant/stores/${storeId}/printer-binding/challenge`,
+      expect.objectContaining({ body: JSON.stringify(challengeInput) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      `https://core.example.test/v2/merchant/stores/${storeId}/printer-binding`,
+      expect.objectContaining({ method: 'PUT', body: JSON.stringify(applyInput) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      'https://core.example.test/v2/merchant/waybills/batches',
+      expect.objectContaining({ body: JSON.stringify(waybillInput) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      'https://core.example.test/v2/merchant/print-jobs?limit=100',
+      expect.objectContaining({ headers: expect.objectContaining({ authorization: 'Bearer merchant-session' }) }),
+    );
+  });
+
+  it('fails closed on an unknown logistics state and mismatched printer signer fields', async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse([{ ...waybillPrintJob, state: 'PRINTED' }])) as typeof fetch;
+    await expect(createCoreApi().listMerchantPrintJobs('merchant-session')).rejects.toMatchObject({
+      code: 'InvalidResponse',
+    });
+
+    globalThis.fetch = vi.fn(async () => jsonResponse({
+      ...printerChallenge,
+      typedData: {
+        ...printerChallenge.typedData,
+        message: { ...printerChallenge.typedData.message, provider: 'YILIANYUN' },
+      },
+    }, 201)) as typeof fetch;
+    await expect(createCoreApi().createMerchantPrinterBindingChallenge(storeId, {
+      provider: 'FEIE',
+      deviceId: printerBinding.deviceId,
+      idempotencyKey: 'printer-challenge-mismatch-1',
+    }, 'merchant-session')).rejects.toMatchObject({ code: 'InvalidResponse' });
+  });
+
   it('uses the published SIWE nonce and verify request bodies without a password fallback', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
@@ -206,7 +294,7 @@ describe('settlement-admin.9 Core HTTP consumer', () => {
       'https://core.example.test/v2/catalog/products',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.9' }),
+        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-logistics.1' }),
       }),
     );
   });

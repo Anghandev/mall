@@ -1569,6 +1569,40 @@ h2 {
   min-width: 84px;
 }
 
+.waybill-panel {
+  display: grid;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.waybill-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0 20px 16px;
+}
+
+.waybill-results {
+  min-width: 0;
+  margin: 0 20px 18px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.waybill-results > .section-heading {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-muted);
+}
+
+.waybill-results h4 {
+  max-width: 56ch;
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
 .table-wrap {
   width: 100%;
   max-width: 100%;
@@ -1819,6 +1853,117 @@ td .empty-state {
 .printer-setting span {
   color: var(--muted);
   font-size: 0.75rem;
+}
+
+.store-options {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.store-option {
+  display: grid;
+  width: 100%;
+  min-height: 76px;
+  gap: 3px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--ink);
+  background: var(--surface);
+  text-align: left;
+}
+
+.store-option:hover,
+.store-option.selected {
+  border-color: var(--accent-dark);
+  background: var(--accent-soft);
+}
+
+.store-option span,
+.store-option small {
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.printer-binding-panel,
+.print-jobs-panel {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.printer-binding-panel {
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.print-jobs-panel {
+  padding: 20px;
+}
+
+.binding-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.binding-summary div {
+  min-width: 0;
+  padding: 11px 12px;
+  border-right: 1px solid var(--border);
+}
+
+.binding-summary div:last-child {
+  border-right: 0;
+}
+
+.binding-summary dt {
+  color: var(--muted);
+  font-size: 0.6875rem;
+}
+
+.binding-summary dd {
+  margin: 5px 0 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.binding-success {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid oklch(84% 0.06 151);
+  border-radius: 6px;
+  color: oklch(35% 0.07 151);
+  background: var(--success-soft);
+}
+
+.binding-success div,
+.binding-success span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.binding-success span {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.6875rem;
+  overflow-wrap: anywhere;
+}
+
+.table-subline {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.6875rem;
+  overflow-wrap: anywhere;
 }
 
 .section-label {
@@ -3326,6 +3471,20 @@ td > small {
 
   .printer-setting .button {
     grid-column: span 2;
+  }
+
+  .waybill-controls,
+  .binding-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .binding-summary div {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .binding-summary div:last-child {
+    border-bottom: 0;
   }
 
   .audit-tools {

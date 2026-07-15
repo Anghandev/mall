@@ -22,6 +22,8 @@ import {
   mediaResourceTypes,
   orderFinalityStatuses,
   orderProjectionStates,
+  printJobStates,
+  printProviders,
   rewardSubtypes,
   seckillStates,
   settlementRails,
@@ -29,6 +31,9 @@ import {
   storeStatuses,
   takeoverStates,
   userRoles,
+  waybillProviders,
+  waybillRequestStates,
+  type ApplyPrinterBindingRequest,
   type AllowedAction,
   type AllowedActionName,
   type AllowedActionReasonCode,
@@ -76,6 +81,10 @@ import {
   type PickupVerificationRequest,
   type OrderKind,
   type OrderProjectionState,
+  type PrintJob,
+  type PrinterBinding,
+  type PrinterBindingChallenge,
+  type PrinterBindingChallengeRequest,
   type RewardSubtype,
   type ShipmentBatchRequest,
   type ShipmentBatchResult,
@@ -90,6 +99,9 @@ import {
   type ProductSlotInput,
   type ProductSlotProjection,
   type UserRole,
+  type WaybillBatchRequest,
+  type WaybillBatchResult,
+  type WaybillResult,
 } from '@abu24k/core-artifacts';
 
 const allowedActionSet = new Set<string>(allowedActionNames);
@@ -123,6 +135,11 @@ const catalogTaxonomyStatusSet = new Set<string>(catalogTaxonomyStatuses);
 const mediaContentTypeSet = new Set<string>(mediaContentTypes);
 const mediaPurposeSet = new Set<string>(mediaPurposes);
 const mediaResourceTypeSet = new Set<string>(mediaResourceTypes);
+const printJobStateSet = new Set<string>(printJobStates);
+const printProviderSet = new Set<string>(printProviders);
+const waybillProviderSet = new Set<string>(waybillProviders);
+const waybillRequestStateSet = new Set<string>(waybillRequestStates);
+const waybillCarrierSet = new Set<string>(['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS']);
 const orderKindSet = new Set<string>(['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] satisfies readonly OrderKind[]);
 
 export interface CoreReadiness {
@@ -231,6 +248,20 @@ export interface CoreApi {
   listCatalogCategories(): Promise<readonly CatalogCategory[]>;
   listCatalogTags(): Promise<readonly CatalogTag[]>;
   listMerchantStores(): Promise<readonly MerchantStore[]>;
+  getMerchantPrinterBinding(storeId: string, token: string): Promise<PrinterBinding | null>;
+  createMerchantPrinterBindingChallenge(
+    storeId: string,
+    input: PrinterBindingChallengeRequest,
+    token: string,
+  ): Promise<PrinterBindingChallenge>;
+  applyMerchantPrinterBinding(
+    storeId: string,
+    input: ApplyPrinterBindingRequest,
+    token: string,
+  ): Promise<PrinterBinding>;
+  createMerchantWaybillBatch(input: WaybillBatchRequest, token: string): Promise<WaybillBatchResult>;
+  listMerchantPrintJobs(token: string, limit?: number): Promise<readonly PrintJob[]>;
+  retryMerchantPrintJob(printJobId: string, idempotencyKey: string, token: string): Promise<PrintJob>;
   getMerchantProductSlot(storeId: string, token: string): Promise<ProductSlotProjection>;
   saveMerchantProductSlot(
     storeId: string,
@@ -393,6 +424,61 @@ export function createCoreApi(baseUrl = import.meta.env.VITE_CORE_API_BASE_URL ?
     async listMerchantStores() {
       const body = await request(normalizedBaseUrl, '/v2/stores');
       return array(record(body, 'merchant stores response').stores, 'stores').map(parseMerchantStore);
+    },
+
+    async getMerchantPrinterBinding(storeId, token) {
+      const body = await request(
+        normalizedBaseUrl,
+        `/v2/merchant/stores/${encodeURIComponent(storeId)}/printer-binding`,
+        { token },
+      );
+      return body === null ? null : parsePrinterBinding(body, storeId);
+    },
+
+    async createMerchantPrinterBindingChallenge(storeId, input, token) {
+      const body = await request(
+        normalizedBaseUrl,
+        `/v2/merchant/stores/${encodeURIComponent(storeId)}/printer-binding/challenge`,
+        { method: 'POST', body: JSON.stringify(input), token },
+      );
+      return parsePrinterBindingChallenge(body, storeId, input.provider);
+    },
+
+    async applyMerchantPrinterBinding(storeId, input, token) {
+      const body = await request(
+        normalizedBaseUrl,
+        `/v2/merchant/stores/${encodeURIComponent(storeId)}/printer-binding`,
+        { method: 'PUT', body: JSON.stringify(input), token },
+      );
+      return parsePrinterBinding(body, storeId);
+    },
+
+    async createMerchantWaybillBatch(input, token) {
+      const body = await request(normalizedBaseUrl, '/v2/merchant/waybills/batches', {
+        method: 'POST',
+        body: JSON.stringify(input),
+        token,
+      });
+      return parseWaybillBatchResult(body, input);
+    },
+
+    async listMerchantPrintJobs(token, limit = 50) {
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+        throw new CoreApiError('InvalidResponse', 'Print job limit must be an integer from 1 to 100.');
+      }
+      const body = await request(normalizedBaseUrl, `/v2/merchant/print-jobs?limit=${limit}`, { token });
+      return array(body, 'print jobs response').map(parsePrintJob);
+    },
+
+    async retryMerchantPrintJob(printJobId, idempotencyKey, token) {
+      const body = await request(
+        normalizedBaseUrl,
+        `/v2/merchant/print-jobs/${encodeURIComponent(printJobId)}/retry`,
+        { method: 'POST', body: JSON.stringify({ idempotencyKey }), token },
+      );
+      const job = parsePrintJob(body);
+      exact(job.printJobId, printJobId, 'retried print job ID');
+      return job;
     },
 
     async getMerchantProductSlot(storeId, token) {
@@ -1502,6 +1588,173 @@ function parseMerchantStore(input: unknown): MerchantStore {
     phone: string(value.phone, 'store.phone'),
     status: enumValue(value.status, storeStatusSet, 'store.status'),
     version: positiveInteger(value.version, 'store.version'),
+  };
+}
+
+function parsePrinterBindingChallenge(
+  input: unknown,
+  expectedStoreId: string,
+  expectedProvider: PrinterBindingChallengeRequest['provider'],
+): PrinterBindingChallenge {
+  const value = record(input, 'printer binding challenge');
+  exact(value.artifactVersion, artifactVersion, 'printer binding challenge artifactVersion');
+  const storeId = string(value.storeId, 'printer binding challenge.storeId');
+  exact(storeId, expectedStoreId, 'printer binding challenge.storeId');
+  const merchantId = string(value.merchantId, 'printer binding challenge.merchantId');
+  const signer = address(value.signer, 'printer binding challenge.signer');
+  const expiresAt = dateTime(value.expiresAt, 'printer binding challenge.expiresAt');
+  const typedData = record(value.typedData, 'printer binding challenge.typedData');
+  const domain = record(typedData.domain, 'printer binding challenge.typedData.domain');
+  const types = record(typedData.types, 'printer binding challenge.typedData.types');
+  const message = record(typedData.message, 'printer binding challenge.typedData.message');
+  exactObjectKeys(domain, ['name', 'version', 'chainId', 'verifyingContract'], 'printer binding domain');
+  exact(domain.name, 'Abu24KMerchantPrinter', 'printer binding domain.name');
+  exact(domain.version, '2', 'printer binding domain.version');
+  exact(domain.chainId, 56, 'printer binding domain.chainId');
+  address(domain.verifyingContract, 'printer binding domain.verifyingContract');
+  exactObjectKeys(types, ['MerchantPrinterBinding'], 'printer binding types');
+  const fields = array(types.MerchantPrinterBinding, 'printer binding type fields');
+  const expectedFields = [
+    ['storeId', 'string'],
+    ['merchantId', 'string'],
+    ['provider', 'string'],
+    ['deviceIdHash', 'bytes32'],
+    ['oldValueHash', 'bytes32'],
+    ['newValueHash', 'bytes32'],
+    ['nonce', 'uint256'],
+    ['deadline', 'uint64'],
+  ] as const;
+  if (fields.length !== expectedFields.length) invalid('printer binding type fields do not match');
+  expectedFields.forEach(([name, type], index) => {
+    const field = record(fields[index], `printer binding type field ${index}`);
+    exactObjectKeys(field, ['name', 'type'], `printer binding type field ${index}`);
+    exact(field.name, name, `printer binding type field ${index}.name`);
+    exact(field.type, type, `printer binding type field ${index}.type`);
+  });
+  exact(typedData.primaryType, 'MerchantPrinterBinding', 'printer binding primaryType');
+  exactObjectKeys(
+    message,
+    ['storeId', 'merchantId', 'provider', 'deviceIdHash', 'oldValueHash', 'newValueHash', 'nonce', 'deadline'],
+    'printer binding message',
+  );
+  exact(message.storeId, storeId, 'printer binding message.storeId');
+  exact(message.merchantId, merchantId, 'printer binding message.merchantId');
+  exact(message.provider, expectedProvider, 'printer binding message.provider');
+  bytes32(message.deviceIdHash, 'printer binding message.deviceIdHash');
+  bytes32(message.oldValueHash, 'printer binding message.oldValueHash');
+  bytes32(message.newValueHash, 'printer binding message.newValueHash');
+  atomicAmount(message.nonce, 'printer binding message.nonce');
+  const deadline = atomicAmount(message.deadline, 'printer binding message.deadline');
+  exact(deadline, String(Math.floor(Date.parse(expiresAt) / 1000)), 'printer binding message.deadline');
+  return {
+    artifactVersion,
+    challengeId: bytes32(value.challengeId, 'printer binding challenge.challengeId'),
+    storeId,
+    merchantId,
+    signer,
+    expiresAt,
+    typedData: { domain, types, primaryType: 'MerchantPrinterBinding', message },
+    digest: bytes32(value.digest, 'printer binding challenge.digest'),
+  };
+}
+
+function parsePrinterBinding(input: unknown, expectedStoreId: string): PrinterBinding {
+  const value = record(input, 'printer binding');
+  exact(value.artifactVersion, artifactVersion, 'printer binding artifactVersion');
+  const storeId = string(value.storeId, 'printer binding.storeId');
+  exact(storeId, expectedStoreId, 'printer binding.storeId');
+  const deviceId = string(value.deviceId, 'printer binding.deviceId');
+  if (deviceId.length < 3 || deviceId.length > 128) invalid('printer binding.deviceId has invalid length');
+  return {
+    artifactVersion,
+    bindingId: bytes32(value.bindingId, 'printer binding.bindingId'),
+    storeId,
+    merchantId: string(value.merchantId, 'printer binding.merchantId'),
+    provider: enumValue(value.provider, printProviderSet, 'printer binding.provider'),
+    deviceId,
+    bindingHash: bytes32(value.bindingHash, 'printer binding.bindingHash'),
+    version: positiveInteger(value.version, 'printer binding.version'),
+    verifiedByWallet: address(value.verifiedByWallet, 'printer binding.verifiedByWallet'),
+    signatureHash: bytes32(value.signatureHash, 'printer binding.signatureHash'),
+    updatedAt: dateTime(value.updatedAt, 'printer binding.updatedAt'),
+  };
+}
+
+function parseWaybillBatchResult(input: unknown, expected: WaybillBatchRequest): WaybillBatchResult {
+  const value = record(input, 'waybill batch result');
+  exact(value.artifactVersion, artifactVersion, 'waybill batch artifactVersion');
+  const batchId = bytes32(value.batchId, 'waybill batch.batchId');
+  const items = array(value.items, 'waybill batch.items').map((item) => (
+    parseWaybillResult(item, { ...expected, batchId })
+  ));
+  if (items.length !== expected.orderIds.length) invalid('waybill batch item count does not match request');
+  const requested = new Set(expected.orderIds);
+  if (requested.size !== expected.orderIds.length || items.some((item) => !requested.delete(item.orderId)) || requested.size) {
+    invalid('waybill batch order IDs do not match request');
+  }
+  return { artifactVersion, batchId, items };
+}
+
+function parseWaybillResult(
+  input: unknown,
+  expected: WaybillBatchRequest & { batchId: string },
+): WaybillResult {
+  const value = record(input, 'waybill result');
+  exact(value.artifactVersion, artifactVersion, 'waybill result artifactVersion');
+  exact(value.batchId, expected.batchId, 'waybill result.batchId');
+  exact(value.storeId, expected.storeId, 'waybill result.storeId');
+  exact(value.provider, expected.provider, 'waybill result.provider');
+  exact(value.carrierCode, expected.carrierCode, 'waybill result.carrierCode');
+  return {
+    artifactVersion,
+    requestId: bytes32(value.requestId, 'waybill result.requestId'),
+    batchId: expected.batchId,
+    orderId: string(value.orderId, 'waybill result.orderId'),
+    storeId: expected.storeId,
+    provider: enumValue(value.provider, waybillProviderSet, 'waybill result.provider'),
+    carrierCode: enumValue(value.carrierCode, waybillCarrierSet, 'waybill result.carrierCode'),
+    state: enumValue(value.state, waybillRequestStateSet, 'waybill result.state'),
+    providerReference: nullableString(value.providerReference, 'waybill result.providerReference'),
+    trackingNumber: nullableString(value.trackingNumber, 'waybill result.trackingNumber'),
+    trackingNumberHash: nullableBytes32(value.trackingNumberHash, 'waybill result.trackingNumberHash'),
+    shipmentEvidenceHash: nullableBytes32(value.shipmentEvidenceHash, 'waybill result.shipmentEvidenceHash'),
+    printJobId: nullableBytes32(value.printJobId, 'waybill result.printJobId'),
+    errorCode: nullableString(value.errorCode, 'waybill result.errorCode'),
+    updatedAt: dateTime(value.updatedAt, 'waybill result.updatedAt'),
+  };
+}
+
+function parsePrintJob(input: unknown): PrintJob {
+  const value = record(input, 'print job');
+  exact(value.artifactVersion, artifactVersion, 'print job artifactVersion');
+  const state = enumValue<PrintJob['state']>(value.state, printJobStateSet, 'print job.state');
+  const provider = value.provider === null
+    ? null
+    : enumValue<NonNullable<PrintJob['provider']>>(value.provider, printProviderSet, 'print job.provider');
+  const deviceId = nullableString(value.deviceId, 'print job.deviceId');
+  if (state !== 'CONFIGURATION_REQUIRED' && (!provider || !deviceId)) {
+    invalid('configured print job is missing provider or device');
+  }
+  const copyCount = enumNumber<PrintJob['copyCount']>(value.copyCount, new Set([1, 2]), 'print job.copyCount');
+  const attempts = nonNegativeInteger(value.attempts, 'print job.attempts');
+  if (attempts > 5) invalid('print job.attempts exceeds the published retry bound');
+  return {
+    artifactVersion,
+    printJobId: bytes32(value.printJobId, 'print job.printJobId'),
+    orderId: string(value.orderId, 'print job.orderId'),
+    storeId: string(value.storeId, 'print job.storeId'),
+    jobKind: enumValue(value.jobKind, new Set(['WAYBILL', 'PICKUP_RECEIPT']), 'print job.jobKind'),
+    provider,
+    deviceId,
+    copyCount,
+    contentHash: bytes32(value.contentHash, 'print job.contentHash'),
+    state,
+    attempts,
+    providerReference: nullableString(value.providerReference, 'print job.providerReference'),
+    errorCode: nullableString(value.errorCode, 'print job.errorCode'),
+    nextAttemptAt: nullableDateTime(value.nextAttemptAt, 'print job.nextAttemptAt'),
+    createdAt: dateTime(value.createdAt, 'print job.createdAt'),
+    updatedAt: dateTime(value.updatedAt, 'print job.updatedAt'),
   };
 }
 

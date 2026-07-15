@@ -20,6 +20,7 @@ interface CoreRuntimeValue {
   signingIn: boolean;
   authError: string | undefined;
   signIn(provider: Eip1193Provider): Promise<void>;
+  signTypedData(typedData: Eip712TypedData): Promise<string>;
   signSettlementTypedData(typedData: Eip712TypedData): Promise<string>;
   signOut(): void;
   refreshBootstrap(): Promise<void>;
@@ -84,7 +85,7 @@ export function CoreRuntimeProvider({
     }
   }, [api, bootstrap.phase]);
 
-  const signSettlementTypedData = useCallback(async (typedData: Eip712TypedData) => {
+  const signTypedData = useCallback(async (typedData: Eip712TypedData) => {
     if (!session || !activeProvider) throw new Error('请先连接并验证商家钱包。');
     return signWalletTypedData(activeProvider, session.walletAddress, typedData);
   }, [activeProvider, session]);
@@ -102,7 +103,8 @@ export function CoreRuntimeProvider({
     signingIn,
     authError,
     signIn,
-    signSettlementTypedData,
+    signTypedData,
+    signSettlementTypedData: signTypedData,
     signOut,
     refreshBootstrap,
   }), [
@@ -113,7 +115,7 @@ export function CoreRuntimeProvider({
     session,
     signIn,
     signOut,
-    signSettlementTypedData,
+    signTypedData,
     signingIn,
   ]);
 
