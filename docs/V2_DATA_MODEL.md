@@ -1,7 +1,7 @@
 # Abu 24K V2 Data Model
 
 Status: coordinated local settlement/admin checkpoint
-`2.0.0-settlement-admin.5`. This document describes implemented catalog, media, payment,
+`2.0.0-settlement-admin.6`. This document describes implemented catalog, media, payment,
 fulfillment, settlement and administrative storage and does not authorize
 deployment.
 
@@ -74,6 +74,19 @@ to `REORG_PENDING` until a valid replacement is indexed. A pre-finality reorg
 restores the reservation. A post-finality reorg keeps selected inventory
 consumed, creates a reconciliation job and quarantines a replacement using a
 different signed seckill/fallback leg.
+
+Business analytics never copy financial facts into a mutable summary table.
+Migration `013_business_analytics.sql` adds only query indexes. Merchant and
+platform dashboards derive their `Asia/Shanghai` natural-day cohort from the
+latest canonical `ORDER_PAYMENT` finality row whose `finalized_at` is inside the
+published `[start,end)` window, then sum immutable `orders.exact_amounts`.
+Current fulfillment queues are labeled separately from that cohort. This keeps
+replacement and reorg evidence from being double-counted and preserves the
+distinction between zero and unavailable.
+Dashboard coverage resolves the newest snapshot's append-only latest
+canonicality observation and applies the same five-minute freshness boundary as
+settlement batching. It never falls back to an older canonical snapshot after a
+newer observation proves a reorg.
 
 ## Double-Entry Ledger
 

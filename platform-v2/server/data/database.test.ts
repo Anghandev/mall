@@ -55,6 +55,7 @@ import { PolicyService } from './policy-service.ts';
 import { NotificationService } from './notification-service.ts';
 import { SystemConfigService } from './system-config-service.ts';
 import { MonitoringService } from './monitoring-service.ts';
+import { BusinessAnalyticsService } from './business-analytics-service.ts';
 import {
   MULTISEND_CALL_ONLY_ADDRESS,
   MULTISEND_CALL_ONLY_CODE_HASH,
@@ -92,6 +93,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '010_evidence_media.sql',
       '011_catalog_management.sql',
       '012_order_operations.sql',
+      '013_business_analytics.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -735,6 +737,179 @@ test('catalog payment service builds an authoritative idempotent quote and recor
       txHash: reorgReplacement,
       replacementForTxHash: replacementTx,
     })).state, 'SUBMITTED');
+  } finally {
+    await db.close();
+  }
+});
+
+test('business analytics uses canonical Asia Shanghai finality windows and fail-closed live projections', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const intent = await recordFinalPayment(db, { ...paymentIntent(), fulfillmentMode: 'PICKUP' });
+    const admin = '0x3333333333333333333333333333333333333333';
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES
+         ($1, 'MERCHANT', 'merchant-1', 'ACTIVE', $3),
+         ($2, 'ADMIN', NULL, 'ACTIVE', $3)`,
+      [MERCHANT, admin, HASH],
+    );
+    const now = new Date((intent.issuedAt + 120) * 1_000);
+    const service = new BusinessAnalyticsService({ transactions: transactionAdapter(db), clock: () => now });
+    const merchant = await service.merchantDashboard({
+      walletAddress: MERCHANT,
+      roles: ['MERCHANT'],
+      merchantId: 'merchant-1',
+    });
+    assert.equal(merchant.artifactVersion, CORE_ARTIFACT_VERSION);
+    assert.equal(merchant.timezone, 'Asia/Shanghai');
+    assert.equal(merchant.window.start.slice(11), '16:00:00.000Z');
+    assert.equal(merchant.orders.finalizedToday, '1');
+    assert.equal(merchant.orders.pendingShipment, '0');
+    assert.deepEqual(merchant.sales, {
+      listPriceUsdt: '100',
+      buyerUsdtPaid: '70',
+      merchantBaseReceivableUsdt: '60',
+      merchantNetReceivableUsdt: '45',
+    });
+    assert.deepEqual(merchant.shipmentRate, { numerator: '0', denominator: '1', bps: '0' });
+    assert.equal(merchant.product?.state, 'SOLD_OUT');
+
+    const platform = await service.adminDashboard({ walletAddress: admin, roles: ['ADMIN'] });
+    assert.equal(platform.orders.finalizedToday, '1');
+    assert.equal(platform.orders.listPriceUsdt, '100');
+    assert.equal(platform.orders.pendingShipment, '1');
+    assert.equal(platform.merchants.total, '1');
+    assert.equal(platform.products.total, '1');
+    assert.equal(platform.unavailable.find((metric) => metric.metric === 'NEW_UID_USERS')?.reasonCode, 'DecisionBlocked');
+    assert.deepEqual(platform.breakers, [
+      { scope: 'NEW_PAYMENT', paused: false },
+      { scope: 'SECKILL_PURCHASE', paused: false },
+      { scope: 'NEW_SETTLEMENT_BATCH', paused: false },
+    ]);
+    assert.equal(platform.coverage.length, 0);
+    assert.equal(platform.unavailable.find((metric) => metric.metric === 'SAFE_COVERAGE')?.reasonCode, 'ExternalBlocked');
+
+    await db.query(
+      `INSERT INTO core.coverage_snapshots (
+         snapshot_id, chain_id, block_number, block_hash, canonical, evidence_hash, recorded_at
+       ) VALUES ('coverage:analytics:1', 56, 1000, $1, true, $2, $3)`,
+      [`0x${'3'.repeat(64)}`, `0x${'4'.repeat(64)}`, now],
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshot_items (
+         snapshot_id, safe_address, asset, verified_asset_balance,
+         unsettled_liability, coverage_met
+       ) VALUES ('coverage:analytics:1', $1, 'USDT', 70, 70, true)`,
+      ['0x3333333333333333333333333333333333333333'],
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshot_canonicality (
+         observation_id, snapshot_id, canonical, observed_block_hash, evidence_hash, observed_at
+       ) VALUES ('coverage-observation:analytics:true', 'coverage:analytics:1', true, $1, $2, $3)`,
+      [`0x${'3'.repeat(64)}`, `0x${'4'.repeat(64)}`, now],
+    );
+    assert.equal((await service.adminDashboard({ walletAddress: admin, roles: ['ADMIN'] })).coverage.length, 1);
+    await db.query(
+      `INSERT INTO core.coverage_snapshot_canonicality (
+         observation_id, snapshot_id, canonical, observed_block_hash, evidence_hash, observed_at
+       ) VALUES ('coverage-observation:analytics:false', 'coverage:analytics:1', false, $1, $2, $3)`,
+      [`0x${'5'.repeat(64)}`, `0x${'6'.repeat(64)}`, new Date(now.getTime() + 1_000)],
+    );
+    const reorgedCoverage = await service.adminDashboard({ walletAddress: admin, roles: ['ADMIN'] });
+    assert.equal(reorgedCoverage.coverage.length, 0);
+    assert.equal(reorgedCoverage.unavailable.find((metric) => metric.metric === 'SAFE_COVERAGE')?.reasonCode, 'ExternalBlocked');
+
+    await db.query('UPDATE core.payment_events SET canonical = false WHERE order_id = $1', [intent.orderId]);
+    const reorged = await service.merchantDashboard({
+      walletAddress: MERCHANT,
+      roles: ['MERCHANT'],
+      merchantId: 'merchant-1',
+    });
+    assert.equal(reorged.orders.finalizedToday, '0');
+    assert.equal(reorged.orders.pendingShipment, '0');
+    assert.deepEqual(reorged.shipmentRate, { numerator: '0', denominator: '0', bps: null });
+    await db.query('UPDATE core.payment_events SET canonical = true WHERE order_id = $1', [intent.orderId]);
+
+    const malformedOrderId = `0x${'9'.repeat(64)}`;
+    const malformedReservationId = 'reservation:analytics:malformed';
+    const malformedTxHash = `0x${'8'.repeat(64)}`;
+    const malformedBlockHash = `0x${'7'.repeat(64)}`;
+    await db.query(
+      `INSERT INTO core.inventory_reservations (
+         reservation_id, reservation_hash, policy_version, sku_id, buyer_wallet,
+         quantity, classification, state, expires_at, consumed_order_id
+       ) VALUES ($1, $2, 1, 'sku-1', $3, 1, 'ORDINARY', 'CONSUMED', $4, $5)`,
+      [malformedReservationId, `0x${'6'.repeat(64)}`, BUYER, new Date(now.getTime() + 60_000), malformedOrderId],
+    );
+    await insertOrder(db, malformedOrderId, malformedReservationId);
+    await db.query(
+      `UPDATE core.orders SET state = 'PAID', finality_status = 'FINAL',
+         payment_tx_hash = $2, payment_block_hash = $3, paid_at = $4
+       WHERE order_id = $1`,
+      [malformedOrderId, malformedTxHash, malformedBlockHash, now],
+    );
+    await db.query(
+      `INSERT INTO core.ledger_journals (
+         journal_id, event_key, event_type, order_id, policy_version, content_hash,
+         source_tx_hash, source_block_hash, resource_type, resource_id,
+         source_reference_hash, payload, created_at
+       ) VALUES ('journal:analytics:malformed', 'event:analytics:malformed',
+         'PAYMENT_LOCKED', $1, 1, $2, $3, $4, 'ORDER', $1, $3, '{}', $5)`,
+      [malformedOrderId, HASH, malformedTxHash, malformedBlockHash, now],
+    );
+    await db.query(
+      `INSERT INTO core.payment_events (
+         event_key, order_id, journal_id, transaction_hash, log_index, block_number,
+         block_hash, snapshot_hash, classification, confirmations, canonical, observed_at
+       ) VALUES ('event:analytics:malformed', $1, 'journal:analytics:malformed',
+         $2, 0, 2, $3, $4, 'ORDINARY', 15, true, $5)`,
+      [malformedOrderId, malformedTxHash, malformedBlockHash, HASH, now],
+    );
+    await db.query(
+      `INSERT INTO core.transaction_finality (
+         transaction_id, resource_type, resource_id, chain_id, contract_address,
+         expected_event_hash, tx_hash, block_number, block_hash, confirmations,
+         required_confirmations, receipt_status, state, evidence, submitted_at, finalized_at
+       ) VALUES ('payment:analytics:malformed', 'ORDER_PAYMENT', $1, 56, $2,
+         $3, $4, 2, $5, 15, 15, 1, 'FINAL', '{}', $6, $6)`,
+      [malformedOrderId, '0x9999999999999999999999999999999999999999', HASH,
+        malformedTxHash, malformedBlockHash, now],
+    );
+    await assert.rejects(
+      service.adminDashboard({ walletAddress: admin, roles: ['ADMIN'] }),
+      /exact payment snapshot is invalid/,
+    );
+    await db.query("UPDATE core.payment_events SET canonical = false WHERE event_key = 'event:analytics:malformed'");
+
+    const expiredSession = (character: string) => db.query(
+      `INSERT INTO core.seckill_sessions (
+         session_id, policy_version, merchant_id, product_id, sku_id,
+         product_policy_hash, starts_at, main_deadline, relay_deadline,
+         inventory, seckill_list_price_usdt, phase, snapshot
+       ) VALUES ($1, 1, 'merchant-1', 'product-1', 'sku-1', $2, $3, $4, $4, 1, 80, 'PREHEAT', '{}')`,
+      [`0x${character.repeat(64)}`, HASH, new Date(now.getTime() - 3_700_000), new Date(now.getTime() - 100_000)],
+    );
+    await expiredSession('7');
+    await expiredSession('8');
+    const effectiveSessions = await service.adminDashboard({ walletAddress: admin, roles: ['ADMIN'] });
+    assert.equal(effectiveSessions.seckill.active, '0');
+    assert.equal(effectiveSessions.seckill.settling, '2');
+    await assert.rejects(
+      service.merchantDashboard({ walletAddress: MERCHANT, roles: ['MERCHANT'], merchantId: 'merchant-1' }),
+      /overlapping active seckill sessions/,
+    );
+
+    await db.query(
+      `UPDATE core.wallet_role_bindings SET status = 'REVOKED', revoked_at = $2
+       WHERE wallet_address = $1 AND role = 'MERCHANT'`,
+      [MERCHANT, now],
+    );
+    await assert.rejects(
+      service.merchantDashboard({ walletAddress: MERCHANT, roles: ['MERCHANT'], merchantId: 'merchant-1' }),
+      /Merchant dashboard scope is unavailable/,
+    );
   } finally {
     await db.close();
   }

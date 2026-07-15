@@ -374,6 +374,11 @@ export interface MonitoringApiService {
   acknowledge(actor: FulfillmentActor, alertKey: string, correlationId: string): Promise<unknown>;
 }
 
+export interface BusinessAnalyticsApiService {
+  merchantDashboard(actor: FulfillmentActor): Promise<unknown>;
+  adminDashboard(actor: FulfillmentActor): Promise<unknown>;
+}
+
 export interface ApiDependencies {
   config: CoreConfig;
   runtimeReadiness?: RuntimeReadinessSnapshot | (() => RuntimeReadinessSnapshot | undefined);
@@ -400,6 +405,7 @@ export interface ApiDependencies {
   systemConfigService: SystemConfigApiService;
   auditService: AuditApiService;
   monitoringService: MonitoringApiService;
+  businessAnalyticsService: BusinessAnalyticsApiService;
   recordRuntimeMetric?(kind: 'HTTP' | 'PAYMENT' | 'FULFILLMENT', durationMs: number, error: boolean, at: Date): void;
   logisticsWebhookSecrets?: Readonly<Partial<Record<'KUAIDI100' | 'CAINIAO', string>>>;
   clock(): Date;
@@ -563,6 +569,16 @@ async function route(
       executableActions: new Set(executableOrderActionNames),
     };
     sendJson(response, 200, { allowedActions: orderAllowedActions(order, context) }, correlationId);
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/merchant/dashboard') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
+    sendJson(
+      response,
+      200,
+      await dependencies.businessAnalyticsService.merchantDashboard(fulfillmentActor(claims)),
+      correlationId,
+    );
     return;
   }
   if (request.method === 'POST' && url.pathname === '/v2/settlement-intents') {
@@ -1770,6 +1786,16 @@ async function routeAdminServices(
   if (request.method === 'GET' && url.pathname === '/v2/admin/monitoring') {
     const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
     sendJson(response, 200, await dependencies.monitoringService.dashboard(fulfillmentActor(claims)), correlationId);
+    return true;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/admin/dashboard') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
+    sendJson(
+      response,
+      200,
+      await dependencies.businessAnalyticsService.adminDashboard(fulfillmentActor(claims)),
+      correlationId,
+    );
     return true;
   }
   const alertPath = matchResourceAction(url.pathname, '/v2/admin/monitoring/alerts/');

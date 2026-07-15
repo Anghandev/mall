@@ -1121,6 +1121,18 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
         return { alertKey, state: 'ACKNOWLEDGED' };
       },
     },
+    businessAnalyticsService: {
+      merchantDashboard: async (actor) => ({
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        merchantId: actor.merchantId,
+        timezone: 'Asia/Shanghai',
+      }),
+      adminDashboard: async (actor) => ({
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        actor: actor.walletAddress,
+        timezone: 'Asia/Shanghai',
+      }),
+    },
     logisticsWebhookSecrets: {
       KUAIDI100: 'kuaidi-webhook-secret',
       CAINIAO: 'cainiao-webhook-secret',
@@ -1209,6 +1221,22 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     assert.equal((await fetch(`${base}/v2/admin/catalog/categories`, {
       headers: { authorization: `Bearer ${buyerOnlyToken}` },
     })).status, 403);
+    assert.equal((await fetch(`${base}/v2/merchant/dashboard`, {
+      headers: { authorization: `Bearer ${buyerOnlyToken}` },
+    })).status, 403);
+    assert.equal((await fetch(`${base}/v2/admin/dashboard`, {
+      headers: { authorization: `Bearer ${buyerOnlyToken}` },
+    })).status, 403);
+    const merchantDashboard = await fetch(`${base}/v2/merchant/dashboard`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    });
+    assert.equal(merchantDashboard.status, 200);
+    assert.equal(((await merchantDashboard.json()) as { merchantId: string }).merchantId, 'merchant-1');
+    const adminDashboard = await fetch(`${base}/v2/admin/dashboard`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    });
+    assert.equal(adminDashboard.status, 200);
+    assert.equal(((await adminDashboard.json()) as { timezone: string }).timezone, 'Asia/Shanghai');
 
     const productSlotBody = {
       idempotencyKey: 'http-product-slot-save-1',

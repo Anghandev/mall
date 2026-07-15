@@ -83,6 +83,7 @@ import { MonitoringService } from './data/monitoring-service.ts';
 import { NotificationService } from './data/notification-service.ts';
 import { PolicyService } from './data/policy-service.ts';
 import { SystemConfigService } from './data/system-config-service.ts';
+import { BusinessAnalyticsService } from './data/business-analytics-service.ts';
 
 const ARTIFACT_ROOT = fileURLToPath(new URL('../../packages/core-artifacts/', import.meta.url));
 const ABI_BUNDLE_PATH = fileURLToPath(
@@ -234,6 +235,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   const auditWorker = new AuditOutboxWorker({ business: transactions, audit: auditTransactions });
   const runtimeMetrics = new RuntimeMetricsRegistry();
   const monitoringService = new MonitoringService({ transactions });
+  const businessAnalyticsService = new BusinessAnalyticsService({ transactions });
   const monitoringWorker = new OperationsMonitoringWorker({
     transactions,
     sources: [
@@ -455,6 +457,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     systemConfigService,
     auditService: new AuditQueryService(auditDatabase),
     monitoringService,
+    businessAnalyticsService,
     recordRuntimeMetric: (kind, durationMs, error, at) => runtimeMetrics.record(kind, durationMs, error, at),
     takeoverFundingService: {
       fundingApprovalChallenge: (actor, input) => takeoverFundingService.fundingApprovalChallenge(actor, {

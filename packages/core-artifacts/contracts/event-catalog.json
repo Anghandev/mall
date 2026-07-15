@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.5",
+  "artifactVersion": "2.0.0-settlement-admin.6",
   "events": [
     {
       "contract": "BeneficiaryRegistryV2",

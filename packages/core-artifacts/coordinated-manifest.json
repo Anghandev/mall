@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.5",
+  "artifactVersion": "2.0.0-settlement-admin.6",
   "publicationStatus": "COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
@@ -14,57 +14,57 @@
   "components": {
     "packageMetadata": {
       "path": "package.json",
-      "sha256": "27267e656f519969955e5424aa06c3d9a3529eea223420a5368e1b8a497e65a1"
+      "sha256": "714a4acf241f56ecc3195fd851bdfa18e86687de6a3497375684e87112106922"
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "b7a6e8da9c375dae4d60e6244e82aeeed1d4ddb77c03f29b952c52b4fcf25a41"
+      "sha256": "60368f57c0e6cef5675e8e96a094605c79ec037624f7b0dd4980e2213d4665dc"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "ca7c118a95ae60095ce1569042568291b079c276f48050e3872401b7a6e8b156"
+      "sha256": "ec367274b5353f2885abe449cebf813913287176937d9770600678052b11ad5a"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "26d2eb937a060ef92553ebec9c2c73585d83764210358491387f5806b22f39c6"
+      "sha256": "003fe2563b0477bdcbbad62d70a3700b2c485c17421da9bbce97d7bbef10e0fb"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "ef2391aaeb642fa6ea929ded18522b37f31b806d4e95fbac09a67f4b77a1b8fe"
+      "sha256": "f2a4910b1995bf59992343e209154b46105169a5417ddee2017d133361f104f2"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "2ac8d9c6adf1bc229394b80f4da68b03811aca4c693b572dde8c122b27fd05e2"
+      "sha256": "d15e2d7d861d380cf1626f02183bbcc685e3ad00f3c5703c6ef011e5fbf25406"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
-      "sha256": "b33407529b198e5c834c020b0331c0376b97f250d7f72d6d521b5d81e19c16ac"
+      "sha256": "c5451e8c17ed44e5a236173dba47314becbb064804727dbf817e2f7b564851cd"
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "7ad23bc2522d0ca80a2d483b1a80ff361fce03b3b5a5d09968aa1f88b0d3c56e"
+      "sha256": "f7ea3f51c41934c88df85b64e85bd0e1354fbf59877d2c81d6828f143cce4635"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "c86410ead586c9f7a2c1b88bd3f10ffcf21836e1cf8b37602fc24235818e7f1c"
+      "sha256": "0d1d296bc1d2caa10bda407f0d20e21fc1a00a775af9953cd6eb4078ae32348c"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "2a7595e6536e6edfc1dd3514197d5431a278b5eeb517edb52b3f1597609ae105"
+      "sha256": "69d854e27ce02f5df5b3610d62c277421e200673179feaa2bafb37369be03a25"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
-      "sha256": "578e91102fe6eace1845d34c296c160e0bb6c8a0361c6f7e3e102db113af4cfa"
+      "sha256": "122c3b47e4e755503c9001bdd57bbb104fe56a48ab0da4dd1420a7c05c19c225"
     }
   },
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "4d2f1bf04f5b276809a737b49f53fc8b55f91279a8417c3788bff8ca4d3d74ba"
+      "sha256": "a2b4b3917be7135b6ec306cbdf65fec0a3dac26952ab5943e13bcf8aa8fd2efd"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "1fe568eb77463400068cec48c20500e24eb5a6fc1ff0af082c5d979933f5e59b"
+      "sha256": "ccbe1d04e2fb8dc7ef39c45fa0f30870b8cf8aea73952edf04ed974e8faf8d70"
     }
   ],
   "httpSurface": [
@@ -74,6 +74,7 @@
     "GET /v2/admin/catalog/stores/{storeId}/product-slot",
     "GET /v2/admin/catalog/tags",
     "GET /v2/admin/cms/versions/{versionId}",
+    "GET /v2/admin/dashboard",
     "GET /v2/admin/monitoring",
     "GET /v2/admin/orders",
     "GET /v2/admin/policy-drafts",
@@ -88,6 +89,7 @@
     "GET /v2/cms/public",
     "GET /v2/finance/merchant",
     "GET /v2/media/assets/{assetId}/access",
+    "GET /v2/merchant/dashboard",
     "GET /v2/merchant/stores/{storeId}/product-slot",
     "GET /v2/notifications",
     "GET /v2/orders",
@@ -292,6 +294,8 @@
     "NotificationInboxItem",
     "SystemConfigProjection",
     "AuditListResponse",
-    "MonitoringDashboard"
+    "MonitoringDashboard",
+    "MerchantBusinessDashboard",
+    "AdminBusinessDashboard"
   ]
 }

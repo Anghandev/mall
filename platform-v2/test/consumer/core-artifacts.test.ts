@@ -23,8 +23,8 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('settlement/admin .5 checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-settlement-admin.5');
+test('settlement/admin .6 checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-settlement-admin.6');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
@@ -54,7 +54,7 @@ test('settlement/admin .5 checkpoint has one identity, resolvable exports and ex
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 12);
+  assert.equal(schemaManifest.schemas.core.migrations.length, 13);
   assert.equal(schemaManifest.schemas.audit.migrations.length, 3);
   for (const migration of [
     ...schemaManifest.schemas.core.migrations,
@@ -80,6 +80,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'GET /v2/admin/catalog/stores/{storeId}/product-slot',
     'GET /v2/admin/catalog/tags',
     'GET /v2/admin/cms/versions/{versionId}',
+    'GET /v2/admin/dashboard',
     'GET /v2/admin/monitoring',
     'GET /v2/admin/orders',
     'GET /v2/admin/policy-drafts',
@@ -94,6 +95,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'GET /v2/cms/public',
     'GET /v2/finance/merchant',
     'GET /v2/media/assets/{assetId}/access',
+    'GET /v2/merchant/dashboard',
     'GET /v2/merchant/stores/{storeId}/product-slot',
     'GET /v2/notifications',
     'GET /v2/orders',

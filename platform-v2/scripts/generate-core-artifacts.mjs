@@ -95,6 +95,7 @@ const schemaSources = [
       '010_evidence_media.sql',
       '011_catalog_management.sql',
       '012_order_operations.sql',
+      '013_business_analytics.sql',
     ],
   },
   {
@@ -403,6 +404,8 @@ const coordinatedManifest = {
     'SystemConfigProjection',
     'AuditListResponse',
     'MonitoringDashboard',
+    'MerchantBusinessDashboard',
+    'AdminBusinessDashboard',
   ],
 };
 files.set('coordinated-manifest.json', json(coordinatedManifest));
@@ -1202,6 +1205,12 @@ function settlementAdminOpenApiPaths(errorResponse) {
     '/v2/settlements': {
       get: operation('listSettlements', { $ref: '#/components/schemas/SettlementListProjection' }),
     },
+    '/v2/merchant/dashboard': {
+      get: operation('getMerchantBusinessDashboard', { $ref: '#/components/schemas/MerchantBusinessDashboard' }),
+    },
+    '/v2/admin/dashboard': {
+      get: operation('getAdminBusinessDashboard', { $ref: '#/components/schemas/AdminBusinessDashboard' }),
+    },
     '/v2/finance/merchant': {
       get: {
         ...operation('getMerchantFinance', { $ref: '#/components/schemas/MerchantFinanceProjection' }),
@@ -1834,6 +1843,53 @@ function settlementAdminOpenApiSchemas() {
       coverage: { type: 'array', items: ref('MonitoringCoverage') },
     }),
     MonitoringAcknowledgeResult: object({ alertKey: string, state: { const: 'ACKNOWLEDGED' } }),
+    BusinessDayWindow: object({ start: timestamp, end: timestamp, generatedAt: timestamp }),
+    BusinessRatio: object({ numerator: atomic, denominator: atomic, bps: nullableAtomic }),
+    MerchantBusinessDashboard: object({
+      artifactVersion: { const: artifactVersion },
+      timezone: { const: 'Asia/Shanghai' },
+      window: ref('BusinessDayWindow'),
+      merchant: object({ merchantId: string, status: string, level: string, guaranteeStatus: { enum: [...guaranteeStatuses] } }),
+      product: nullable(object({
+        productId: string,
+        title: string,
+        state: { enum: [...catalogProductLifecycleStates] },
+        stock: object({ total: atomic, available: atomic, reserved: atomic }),
+        seckill: nullable(object({ sessionId: hash, phase: { enum: [...seckillStates] } })),
+        updatedAt: timestamp,
+      })),
+      orders: object({
+        finalizedToday: atomic, pendingShipment: atomic, shipped: atomic, delivered: atomic,
+        fulfilled: atomic, arbitration: atomic, takeover: atomic, pickupVerifiedToday: atomic,
+      }),
+      sales: object({
+        listPriceUsdt: atomic, buyerUsdtPaid: atomic,
+        merchantBaseReceivableUsdt: atomic, merchantNetReceivableUsdt: atomic,
+      }),
+      shipmentRate: ref('BusinessRatio'),
+      settlements: object({ requestedCount: atomic, requestedUsdt: atomic, settledCount: atomic, settledUsdt: atomic }),
+    }),
+    AdminBusinessDashboard: object({
+      artifactVersion: { const: artifactVersion },
+      timezone: { const: 'Asia/Shanghai' },
+      window: ref('BusinessDayWindow'),
+      orders: object({
+        finalizedToday: atomic, listPriceUsdt: atomic, buyerUsdtPaid: atomic,
+        pendingShipment: atomic, shipped: atomic, delivered: atomic, fulfilled: atomic,
+        shipmentRate: ref('BusinessRatio'),
+      }),
+      merchants: object({ total: atomic, newToday: atomic, pending: atomic, approved: atomic, suspended: atomic }),
+      products: object({ total: atomic, pendingReview: atomic, soldOut: atomic }),
+      seckill: object({ createdToday: atomic, active: atomic, settling: atomic }),
+      fulfillmentQueues: object({ exchange: atomic, delay: atomic, arbitration: atomic, forcedReceipt: atomic, takeover: atomic }),
+      settlements: object({ requestedCount: atomic, requestedUsdt: atomic, settledCount: atomic, settledUsdt: atomic, failedTransactions: atomic }),
+      coverage: { type: 'array', items: object({
+        snapshotId: string, blockNumber: atomic, recordedAt: timestamp, asset: { enum: ['USDT', 'NPL'] },
+        safeAddress: address, verifiedAssets: atomic, unsettledLiabilities: atomic, covered: { type: 'boolean' },
+      }) },
+      breakers: { type: 'array', items: object({ scope: { enum: [...breakerScopes] }, paused: { type: 'boolean' } }) },
+      unavailable: { type: 'array', items: object({ metric: string, reasonCode: { enum: ['DecisionBlocked', 'ExternalBlocked'] }, detail: string }) },
+    }),
   };
 }
 
@@ -4095,6 +4151,57 @@ export interface MonitoringDashboard {
 }
 
 export interface MonitoringAcknowledgeResult { alertKey: string; state: 'ACKNOWLEDGED' }
+
+export interface BusinessDayWindow { start: string; end: string; generatedAt: string }
+export interface BusinessRatio { numerator: AtomicAmount; denominator: AtomicAmount; bps: AtomicAmount | null }
+
+export interface MerchantBusinessDashboard {
+  artifactVersion: typeof artifactVersion;
+  timezone: 'Asia/Shanghai';
+  window: BusinessDayWindow;
+  merchant: { merchantId: string; status: string; level: string; guaranteeStatus: GuaranteeStatus };
+  product: {
+    productId: string;
+    title: string;
+    state: CatalogProductLifecycleState;
+    stock: { total: AtomicAmount; available: AtomicAmount; reserved: AtomicAmount };
+    seckill: { sessionId: Bytes32; phase: SeckillState } | null;
+    updatedAt: string;
+  } | null;
+  orders: {
+    finalizedToday: AtomicAmount; pendingShipment: AtomicAmount; shipped: AtomicAmount;
+    delivered: AtomicAmount; fulfilled: AtomicAmount; arbitration: AtomicAmount;
+    takeover: AtomicAmount; pickupVerifiedToday: AtomicAmount;
+  };
+  sales: {
+    listPriceUsdt: AtomicAmount; buyerUsdtPaid: AtomicAmount;
+    merchantBaseReceivableUsdt: AtomicAmount; merchantNetReceivableUsdt: AtomicAmount;
+  };
+  shipmentRate: BusinessRatio;
+  settlements: { requestedCount: AtomicAmount; requestedUsdt: AtomicAmount; settledCount: AtomicAmount; settledUsdt: AtomicAmount };
+}
+
+export interface AdminBusinessDashboard {
+  artifactVersion: typeof artifactVersion;
+  timezone: 'Asia/Shanghai';
+  window: BusinessDayWindow;
+  orders: {
+    finalizedToday: AtomicAmount; listPriceUsdt: AtomicAmount; buyerUsdtPaid: AtomicAmount;
+    pendingShipment: AtomicAmount; shipped: AtomicAmount; delivered: AtomicAmount;
+    fulfilled: AtomicAmount; shipmentRate: BusinessRatio;
+  };
+  merchants: { total: AtomicAmount; newToday: AtomicAmount; pending: AtomicAmount; approved: AtomicAmount; suspended: AtomicAmount };
+  products: { total: AtomicAmount; pendingReview: AtomicAmount; soldOut: AtomicAmount };
+  seckill: { createdToday: AtomicAmount; active: AtomicAmount; settling: AtomicAmount };
+  fulfillmentQueues: { exchange: AtomicAmount; delay: AtomicAmount; arbitration: AtomicAmount; forcedReceipt: AtomicAmount; takeover: AtomicAmount };
+  settlements: { requestedCount: AtomicAmount; requestedUsdt: AtomicAmount; settledCount: AtomicAmount; settledUsdt: AtomicAmount; failedTransactions: AtomicAmount };
+  coverage: readonly {
+    snapshotId: string; blockNumber: AtomicAmount; recordedAt: string; asset: 'USDT' | 'NPL';
+    safeAddress: Address; verifiedAssets: AtomicAmount; unsettledLiabilities: AtomicAmount; covered: boolean;
+  }[];
+  breakers: readonly { scope: BreakerScope; paused: boolean }[];
+  unavailable: readonly { metric: string; reasonCode: 'DecisionBlocked' | 'ExternalBlocked'; detail: string }[];
+}
 
 export interface ProductPolicy {
   policyVersion: number;

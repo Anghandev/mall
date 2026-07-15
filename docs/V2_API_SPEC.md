@@ -1,6 +1,6 @@
 # Abu 24K V2 Core API Contract
 
-Status: coordinated local settlement/admin checkpoint `2.0.0-settlement-admin.5`. OpenAPI,
+Status: coordinated local settlement/admin checkpoint `2.0.0-settlement-admin.6`. OpenAPI,
 generated types, ABI, manifests, enums, the fail-closed WebSocket protocol and
 consumer tests share this version. This checkpoint does not authorize a
 deployment, production signing or a transaction.
@@ -215,6 +215,22 @@ cannot duplicate or ambiguously conflict on one shipment command.
 Electronic-waybill creation, label printing and raw tracking-number export are
 not part of this endpoint.
 
+`GET /v2/merchant/dashboard` and `GET /v2/admin/dashboard` publish an
+`Asia/Shanghai` `[start,end)` natural-day window. Today payment counts and
+amounts include an order only when its canonical payment reaches 15-confirmation
+finality inside that window. Amounts come from immutable `exactAmounts`; current
+order queues remain separate from the finality-window cohort. Shipment rates
+return numerator, denominator and nullable basis points, so an empty cohort is
+not reported as zero percent. Metrics whose identity or threshold is not frozen
+(buyer UID, low stock, abnormal orders and blacklist blocks) are explicit
+`DecisionBlocked` entries rather than synthetic zeroes.
+Safe coverage is included only when the latest snapshot has a fresh canonical
+observation; missing, stale or reorged evidence is an explicit
+`SAFE_COVERAGE / ExternalBlocked` metric and never reuses an older covered row.
+Settlement transaction failures count status-0 `SETTLEMENT_BATCH` finality rows
+whose failure evidence was recorded inside the same business-day window; a
+quarantined batch is not automatically labeled as a chain failure.
+
 Pickup verification includes the order snapshot's exact `storeId`. Core stores
 only salted code hashes, persists each idempotent failed attempt and invalidates
 the active credential after five failures. A different store cannot release the
@@ -227,7 +243,7 @@ capabilities plus signed settlement intents and requests, merchant finance and
 guarantee deposits, takeover funding, Safe MultiSend batching and finality,
 policy governance, CMS, notifications, versioned system configuration,
 append-only audit queries and operations monitoring. The coordinated OpenAPI
-publishes 95 HTTP operations and the generated types, state/error enums,
+publishes 97 HTTP operations and the generated types, state/error enums,
 Schema and ABI share the same artifact version.
 
 Seckill session reads, numeric-cursor HTTP replay and `/v2/ws` publish only

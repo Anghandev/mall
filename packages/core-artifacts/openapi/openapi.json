@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Abu 24K V2 Core API",
-    "version": "2.0.0-settlement-admin.5"
+    "version": "2.0.0-settlement-admin.6"
   },
-  "x-artifactVersion": "2.0.0-settlement-admin.5",
+  "x-artifactVersion": "2.0.0-settlement-admin.6",
   "servers": [],
   "paths": {
     "/v2/settlement-intents": {
@@ -197,6 +197,98 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SettlementListProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/merchant/dashboard": {
+      "get": {
+        "operationId": "getMerchantBusinessDashboard",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantBusinessDashboard"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/dashboard": {
+      "get": {
+        "operationId": "getAdminBusinessDashboard",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBusinessDashboard"
                 }
               }
             }
@@ -6295,7 +6387,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.5"
+            "const": "2.0.0-settlement-admin.6"
           },
           "status": {
             "const": "CORE_API_READY"
@@ -9367,7 +9459,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.5"
+            "const": "2.0.0-settlement-admin.6"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -9466,7 +9558,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.5"
+            "const": "2.0.0-settlement-admin.6"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -10406,7 +10498,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.5"
+            "const": "2.0.0-settlement-admin.6"
           },
           "productId": {
             "type": "string",
@@ -10579,7 +10671,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.5"
+            "const": "2.0.0-settlement-admin.6"
           },
           "storeId": {
             "type": "string",
@@ -10705,7 +10797,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.5"
+            "const": "2.0.0-settlement-admin.6"
           },
           "productId": {
             "type": "string",
@@ -10807,7 +10899,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.5"
+            "const": "2.0.0-settlement-admin.6"
           },
           "previewId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -10966,7 +11058,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.5"
+            "const": "2.0.0-settlement-admin.6"
           },
           "adjustmentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -11086,7 +11178,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.5"
+            "const": "2.0.0-settlement-admin.6"
           },
           "uploadIntentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -11179,7 +11271,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.5"
+            "const": "2.0.0-settlement-admin.6"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -11260,7 +11352,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.5"
+            "const": "2.0.0-settlement-admin.6"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -11416,7 +11508,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.5"
+            "const": "2.0.0-settlement-admin.6"
           },
           "evidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
@@ -11675,7 +11767,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.5"
+            "const": "2.0.0-settlement-admin.6"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -11950,7 +12042,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifact_version": {
-            "const": "2.0.0-settlement-admin.5"
+            "const": "2.0.0-settlement-admin.6"
           },
           "wallet_address": {
             "$ref": "#/components/schemas/Address"
@@ -12276,7 +12368,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.5"
+            "const": "2.0.0-settlement-admin.6"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -15012,6 +15104,591 @@
           }
         }
       },
+      "BusinessDayWindow": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "start",
+          "end",
+          "generatedAt"
+        ],
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "BusinessRatio": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "numerator",
+          "denominator",
+          "bps"
+        ],
+        "properties": {
+          "numerator": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "denominator": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "bps": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "MerchantBusinessDashboard": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "timezone",
+          "window",
+          "merchant",
+          "product",
+          "orders",
+          "sales",
+          "shipmentRate",
+          "settlements"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.6"
+          },
+          "timezone": {
+            "const": "Asia/Shanghai"
+          },
+          "window": {
+            "$ref": "#/components/schemas/BusinessDayWindow"
+          },
+          "merchant": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "merchantId",
+              "status",
+              "level",
+              "guaranteeStatus"
+            ],
+            "properties": {
+              "merchantId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "status": {
+                "type": "string",
+                "minLength": 1
+              },
+              "level": {
+                "type": "string",
+                "minLength": 1
+              },
+              "guaranteeStatus": {
+                "enum": [
+                  "DECISION_BLOCKED",
+                  "BELOW_MINIMUM",
+                  "READY",
+                  "FROZEN"
+                ]
+              }
+            }
+          },
+          "product": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "productId",
+                  "title",
+                  "state",
+                  "stock",
+                  "seckill",
+                  "updatedAt"
+                ],
+                "properties": {
+                  "productId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "state": {
+                    "enum": [
+                      "DRAFT",
+                      "REVIEW",
+                      "SCHEDULED",
+                      "ACTIVE",
+                      "SOLD_OUT",
+                      "HIDDEN",
+                      "DELISTED",
+                      "LOCKED"
+                    ]
+                  },
+                  "stock": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "total",
+                      "available",
+                      "reserved"
+                    ],
+                    "properties": {
+                      "total": {
+                        "$ref": "#/components/schemas/AtomicAmount"
+                      },
+                      "available": {
+                        "$ref": "#/components/schemas/AtomicAmount"
+                      },
+                      "reserved": {
+                        "$ref": "#/components/schemas/AtomicAmount"
+                      }
+                    }
+                  },
+                  "seckill": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "sessionId",
+                          "phase"
+                        ],
+                        "properties": {
+                          "sessionId": {
+                            "$ref": "#/components/schemas/Bytes32"
+                          },
+                          "phase": {
+                            "enum": [
+                              "PREHEAT",
+                              "LIVE",
+                              "SETTLING",
+                              "SETTLED",
+                              "FORCE_CLOSED"
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "updatedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "orders": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "finalizedToday",
+              "pendingShipment",
+              "shipped",
+              "delivered",
+              "fulfilled",
+              "arbitration",
+              "takeover",
+              "pickupVerifiedToday"
+            ],
+            "properties": {
+              "finalizedToday": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "pendingShipment": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "shipped": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "delivered": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "fulfilled": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "arbitration": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "takeover": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "pickupVerifiedToday": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              }
+            }
+          },
+          "sales": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "listPriceUsdt",
+              "buyerUsdtPaid",
+              "merchantBaseReceivableUsdt",
+              "merchantNetReceivableUsdt"
+            ],
+            "properties": {
+              "listPriceUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "buyerUsdtPaid": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "merchantBaseReceivableUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "merchantNetReceivableUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              }
+            }
+          },
+          "shipmentRate": {
+            "$ref": "#/components/schemas/BusinessRatio"
+          },
+          "settlements": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "requestedCount",
+              "requestedUsdt",
+              "settledCount",
+              "settledUsdt"
+            ],
+            "properties": {
+              "requestedCount": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "requestedUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "settledCount": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "settledUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              }
+            }
+          }
+        }
+      },
+      "AdminBusinessDashboard": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "timezone",
+          "window",
+          "orders",
+          "merchants",
+          "products",
+          "seckill",
+          "fulfillmentQueues",
+          "settlements",
+          "coverage",
+          "breakers",
+          "unavailable"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.6"
+          },
+          "timezone": {
+            "const": "Asia/Shanghai"
+          },
+          "window": {
+            "$ref": "#/components/schemas/BusinessDayWindow"
+          },
+          "orders": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "finalizedToday",
+              "listPriceUsdt",
+              "buyerUsdtPaid",
+              "pendingShipment",
+              "shipped",
+              "delivered",
+              "fulfilled",
+              "shipmentRate"
+            ],
+            "properties": {
+              "finalizedToday": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "listPriceUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "buyerUsdtPaid": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "pendingShipment": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "shipped": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "delivered": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "fulfilled": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "shipmentRate": {
+                "$ref": "#/components/schemas/BusinessRatio"
+              }
+            }
+          },
+          "merchants": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "total",
+              "newToday",
+              "pending",
+              "approved",
+              "suspended"
+            ],
+            "properties": {
+              "total": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "newToday": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "pending": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "approved": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "suspended": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              }
+            }
+          },
+          "products": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "total",
+              "pendingReview",
+              "soldOut"
+            ],
+            "properties": {
+              "total": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "pendingReview": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "soldOut": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              }
+            }
+          },
+          "seckill": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "createdToday",
+              "active",
+              "settling"
+            ],
+            "properties": {
+              "createdToday": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "active": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "settling": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              }
+            }
+          },
+          "fulfillmentQueues": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "exchange",
+              "delay",
+              "arbitration",
+              "forcedReceipt",
+              "takeover"
+            ],
+            "properties": {
+              "exchange": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "delay": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "arbitration": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "forcedReceipt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "takeover": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              }
+            }
+          },
+          "settlements": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "requestedCount",
+              "requestedUsdt",
+              "settledCount",
+              "settledUsdt",
+              "failedTransactions"
+            ],
+            "properties": {
+              "requestedCount": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "requestedUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "settledCount": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "settledUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "failedTransactions": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              }
+            }
+          },
+          "coverage": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "snapshotId",
+                "blockNumber",
+                "recordedAt",
+                "asset",
+                "safeAddress",
+                "verifiedAssets",
+                "unsettledLiabilities",
+                "covered"
+              ],
+              "properties": {
+                "snapshotId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "blockNumber": {
+                  "$ref": "#/components/schemas/AtomicAmount"
+                },
+                "recordedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "asset": {
+                  "enum": [
+                    "USDT",
+                    "NPL"
+                  ]
+                },
+                "safeAddress": {
+                  "$ref": "#/components/schemas/Address"
+                },
+                "verifiedAssets": {
+                  "$ref": "#/components/schemas/AtomicAmount"
+                },
+                "unsettledLiabilities": {
+                  "$ref": "#/components/schemas/AtomicAmount"
+                },
+                "covered": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "breakers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "scope",
+                "paused"
+              ],
+              "properties": {
+                "scope": {
+                  "enum": [
+                    "NEW_PAYMENT",
+                    "SECKILL_PURCHASE",
+                    "NEW_SETTLEMENT_BATCH"
+                  ]
+                },
+                "paused": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "unavailable": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "metric",
+                "reasonCode",
+                "detail"
+              ],
+              "properties": {
+                "metric": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "reasonCode": {
+                  "enum": [
+                    "DecisionBlocked",
+                    "ExternalBlocked"
+                  ]
+                },
+                "detail": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        }
+      },
       "SeckillSessionProjection": {
         "type": "object",
         "additionalProperties": false,
@@ -15039,7 +15716,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.5"
+            "const": "2.0.0-settlement-admin.6"
           },
           "sessionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15263,7 +15940,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.5"
+            "const": "2.0.0-settlement-admin.6"
           },
           "protocolVersion": {
             "const": 1
