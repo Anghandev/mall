@@ -117,6 +117,20 @@ describe('settlement/admin coordinated Core client', () => {
     await expect(createCoverageBreakerResumeChallenge({ nonce, deadline }, 'jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
+  it('accepts the coordinated SUPERSEDED terminal state for a stale resume action', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([coverageAction({
+      action: 'RESUME',
+      targetPaused: false,
+      state: 'SUPERSEDED',
+    })])));
+
+    await expect(fetchCoverageBreakerActions('jwt')).resolves.toMatchObject([{
+      action: 'RESUME',
+      state: 'SUPERSEDED',
+      targetPaused: false,
+    }]);
+  });
+
   it('rejects a resume action that is not bound to the challenge signer and session actor', async () => {
     const nonce = '7';
     const deadline = '1800000000';

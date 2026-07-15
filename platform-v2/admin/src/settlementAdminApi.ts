@@ -640,7 +640,7 @@ function isCoverageBreakerAction(value: unknown): value is CoverageBreakerAction
     && addressPattern.test(String(value.governanceSafeAddress))
     && addressPattern.test(String(value.routerAddress))
     && bytes32Pattern.test(String(value.calldataHash))
-    && ['PENDING_PROPOSAL', 'SAFE_PROPOSED', 'MINED', 'FINAL', 'REORGED', 'FAILED'].includes(String(value.state))
+    && ['PENDING_PROPOSAL', 'SAFE_PROPOSED', 'MINED', 'FINAL', 'REORGED', 'FAILED', 'SUPERSEDED'].includes(String(value.state))
     && nullableHash(value.safeTxHash)
     && nullableHash(value.proposalHash)
     && nullableHash(value.executionTxHash)

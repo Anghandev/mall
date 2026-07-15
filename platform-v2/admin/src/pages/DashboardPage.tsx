@@ -287,6 +287,7 @@ function CoverageBreakerActionTable({ actions }: { actions: readonly CoverageBre
 
 function coverageActionState(action: CoverageBreakerActionProjection) {
   if (action.state === 'FINAL') return action.action === 'RESUME' ? '恢复已生效 · FINAL' : '暂停已生效 · FINAL';
+  if (action.state === 'SUPERSEDED') return action.action === 'RESUME' ? '已被更新 PAUSE 废止 · 未生效' : 'SUPERSEDED · 未生效';
   if (action.state === 'MINED') return `MINED · 等待 15 确认 (${action.confirmations})`;
   if (action.state === 'SAFE_PROPOSED') return 'SAFE_PROPOSED · 等待 Safe 执行';
   if (action.state === 'PENDING_PROPOSAL') return 'PENDING_PROPOSAL · 等待 Safe 提案';

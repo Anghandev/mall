@@ -181,6 +181,28 @@ describe('platform admin fail-closed experience', () => {
     expect(screen.getByText('PAUSE')).toBeTruthy();
   });
 
+  it('renders a superseded resume as invalidated by the newer PAUSE, never as restored', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    window.ethereum = walletProvider(wallet);
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['OPERATOR'] });
+      if (url.endsWith('/v2/admin/dashboard')) return jsonResponse(healthyCoverageDashboard());
+      if (url.endsWith('/v2/admin/coverage-breaker/actions')) return jsonResponse([coverageBreakerAction({ action: 'RESUME', targetPaused: false, state: 'SUPERSEDED' })]);
+      return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected superseded request', correlationId: 'coverage-superseded-ui' } }, 400);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderAt('/');
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+
+    const state = await screen.findByText('已被更新 PAUSE 废止 · 未生效');
+    expect(state.className).toContain('status-blocked');
+    expect(state.className).not.toContain('status-ready');
+    expect(screen.queryByText(/恢复已生效/)).toBeNull();
+  });
+
   it('keeps every Catalog read and write behind a Core SIWE session', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
