@@ -58,7 +58,8 @@ describe('platform admin fail-closed experience', () => {
 
     renderAt('/');
     expect(screen.getByRole('heading', { name: '今日运营态势' })).toBeTruthy();
-    expect(screen.getByText(/未认证时数据不可用，不显示合成数据/)).toBeTruthy();
+    const dashboardStatus = screen.getByRole('status', { name: 'Dashboard 数据状态' });
+    expect(within(dashboardStatus).getByText(/未认证时数据不可用，不显示合成数据/)).toBeTruthy();
     expect(screen.queryByText('300000000')).toBeNull();
 
     await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));

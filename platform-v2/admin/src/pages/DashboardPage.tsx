@@ -67,7 +67,7 @@ export function DashboardPage() {
       </header>
 
       {!session ? (
-        <section className="panel session-prompt dashboard-session-prompt">
+        <section className="panel session-prompt dashboard-session-prompt" role="status" aria-label="Dashboard 数据状态">
           <div><KeyRound aria-hidden="true" /><span><strong>连接平台钱包</strong><small>仅 ADMIN、OPERATOR 或 AUDITOR 可读取业务聚合；未认证时数据不可用，不显示合成数据。</small></span></div>
           <button className="button button-primary" type="button" onClick={() => void connect()} disabled={status === 'CONNECTING'}>
             <KeyRound aria-hidden="true" />{status === 'CONNECTING' ? '等待签名' : 'SIWE 连接'}
