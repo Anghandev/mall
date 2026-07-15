@@ -1121,6 +1121,22 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       getDraft: async (_actor, draftId) => ({ draftId, state: 'DRAFT' }),
       listDrafts: async () => [],
     },
+    coverageBreakerService: {
+      resumeChallenge: async (actor, input) => ({
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        actor: actor.walletAddress,
+        signer: SAFE,
+        ...input,
+      }),
+      submitResume: async (actor, input) => ({
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        actor: actor.walletAddress,
+        actionId: HASH,
+        state: 'PENDING_PROPOSAL',
+        ...input,
+      }),
+      listActions: async (actor) => [{ actor: actor.walletAddress, actionId: HASH, state: 'FINAL' }],
+    },
     cmsService: {
       createVersion: async (_actor, input) => ({ versionId: 'cms-version-1', ...input }),
       publish: async (_actor, versionId) => ({ versionId, published: true }),
@@ -1770,6 +1786,19 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       headers: bearerHeaders,
       body: '{}',
     })).status, 202);
+    assert.equal((await fetch(`${base}/v2/admin/coverage-breaker/actions`, {
+      headers: bearerHeaders,
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/coverage-breaker/resume-challenge`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ nonce: '2', deadline: '1800000000' }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/coverage-breaker/resume-actions`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ snapshotId: HASH, nonce: '2', deadline: '1800000000', signature: '0x1234' }),
+    })).status, 201);
 
     assert.equal((await fetch(`${base}/v2/admin/cms/versions`, {
       method: 'POST',

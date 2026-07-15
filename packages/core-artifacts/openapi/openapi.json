@@ -2108,6 +2108,167 @@
         ]
       }
     },
+    "/v2/admin/coverage-breaker/actions": {
+      "get": {
+        "operationId": "listCoverageBreakerActions",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CoverageBreakerActionProjection"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/coverage-breaker/resume-challenge": {
+      "post": {
+        "operationId": "createCoverageBreakerResumeChallenge",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CoverageBreakerResumeChallengeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoverageBreakerResumeChallenge"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/coverage-breaker/resume-actions": {
+      "post": {
+        "operationId": "authorizeCoverageBreakerResume",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CoverageBreakerResumeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoverageBreakerActionProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v2/admin/cms/versions": {
       "post": {
         "operationId": "createCmsVersion",
@@ -14903,6 +15064,282 @@
           },
           "digest": {
             "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "CoverageBreakerResumeChallengeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "nonce",
+          "deadline"
+        ],
+        "properties": {
+          "nonce": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "deadline": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          }
+        }
+      },
+      "CoverageBreakerResumeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "snapshotId",
+          "nonce",
+          "deadline",
+          "signature"
+        ],
+        "properties": {
+          "snapshotId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "nonce": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "deadline": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^0x(?:[0-9a-fA-F]{2})+$"
+          }
+        }
+      },
+      "CoverageBreakerResumeChallenge": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "snapshotId",
+          "evidenceHash",
+          "policyVersion",
+          "signer",
+          "safeAddress",
+          "routerAddress",
+          "typedData",
+          "digest"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.7"
+          },
+          "snapshotId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "policyVersion": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "signer": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "safeAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "routerAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "typedData": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "domain",
+              "types",
+              "primaryType",
+              "message"
+            ],
+            "properties": {
+              "domain": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "types": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "primaryType": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "digest": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "CoverageBreakerActionProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "actionId",
+          "snapshotId",
+          "policyVersion",
+          "action",
+          "targetPaused",
+          "evidenceHash",
+          "governanceSafeAddress",
+          "routerAddress",
+          "calldataHash",
+          "state",
+          "safeTxHash",
+          "proposalHash",
+          "executionTxHash",
+          "confirmations",
+          "actorWallet",
+          "secondarySigner",
+          "secondarySignatureHash",
+          "approvalNonce",
+          "approvalDeadline",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.7"
+          },
+          "actionId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "snapshotId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "policyVersion": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "action": {
+            "enum": [
+              "PAUSE",
+              "RESUME"
+            ]
+          },
+          "targetPaused": {
+            "type": "boolean"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "governanceSafeAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "routerAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "calldataHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "state": {
+            "enum": [
+              "PENDING_PROPOSAL",
+              "SAFE_PROPOSED",
+              "MINED",
+              "FINAL",
+              "REORGED",
+              "FAILED"
+            ]
+          },
+          "safeTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "proposalHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "executionTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confirmations": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "actorWallet": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "secondarySigner": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "secondarySignatureHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approvalNonce": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approvalDeadline": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },

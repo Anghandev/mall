@@ -68,6 +68,7 @@ import { HttpTakeoverFundingSafeApprover } from './chain/takeover-funding-govern
 import { PostgresNonceStore, RedisNonceRateLimiter } from './data/auth-store.ts';
 import { CatalogPaymentService } from './data/catalog-payment-service.ts';
 import { CatalogManagementService } from './data/catalog-management-service.ts';
+import { CoverageBreakerService } from './data/coverage-breaker-service.ts';
 import { EvidenceService, HttpMediaStorageAdapter } from './data/evidence-service.ts';
 import { FulfillmentService } from './data/fulfillment-service.ts';
 import { FulfillmentTargetService } from './data/fulfillment-target-service.ts';
@@ -312,6 +313,12 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     paymentRouterAddress: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),
     governanceSafeAddress: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
   });
+  const coverageBreakerService = new CoverageBreakerService({
+    transactions,
+    paymentRouterAddress: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),
+    governanceSafeAddress: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    secondarySignerAddress: required(config.secondarySignerAddress, 'SECONDARY_SIGNER_ADDRESS'),
+  });
   const coverageBreakerGovernanceWorker = new CoverageBreakerGovernanceWorker({
     transactions,
     proposer: new HttpCoverageBreakerSafeProposer({
@@ -489,6 +496,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     evidenceService,
     settlementService,
     policyService,
+    coverageBreakerService,
     cmsService,
     notificationService,
     systemConfigService,

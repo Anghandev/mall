@@ -79,7 +79,7 @@
         {
           "name": "015_coverage_breaker_governance.sql",
           "path": "schema/business/015_coverage_breaker_governance.sql",
-          "sha256": "0d334b7978b4f58eec59b9304094b52c46be70d39f43eadd693ffb4b50622490"
+          "sha256": "4b35bcd45b2bb9277fc8434ceed2f93126078458dc51981cfaf774f972e27bfe"
         }
       ]
     },

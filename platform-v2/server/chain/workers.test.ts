@@ -728,6 +728,53 @@ test('coverage breaker finality fails closed on wrong authority, event, Router s
   }
 });
 
+test('coverage breaker network adapters time out black-hole proposal, lookup and RPC requests', async () => {
+  const blackHole: typeof fetch = async () => new Promise<Response>(() => undefined);
+  const candidate = coverageBreakerCandidate();
+  await assert.rejects(
+    new HttpCoverageBreakerSafeProposer({
+      url: 'https://safe-proposer.example.invalid/coverage-breaker',
+      token: 'safe-token',
+      mutualTls: true,
+      fetchImpl: blackHole,
+      requestTimeoutMs: 5,
+    }).propose(candidate),
+    /timed out/,
+  );
+  await assert.rejects(
+    new ResilientCoverageBreakerChainSource({
+      lookupUrl: 'https://safe-lookup.example.invalid/coverage-breaker',
+      lookupToken: 'lookup-token',
+      primaryRpcUrl: 'https://coverage-primary-rpc.example.invalid',
+      fallbackRpcUrl: 'https://coverage-fallback-rpc.example.invalid',
+      fetchImpl: blackHole,
+      requestTimeoutMs: 5,
+    }).observe(candidate),
+    /timed out/,
+  );
+  const rpcBlackHole: typeof fetch = async (input) => {
+    if (String(input).startsWith('https://safe-lookup.example.invalid')) {
+      return jsonResponse({
+        safeTxHash: candidate.safeTxHash,
+        resourceId: candidate.actionId,
+        executionTxHash: HASH_3,
+      });
+    }
+    return new Promise<Response>(() => undefined);
+  };
+  await assert.rejects(
+    new ResilientCoverageBreakerChainSource({
+      lookupUrl: 'https://safe-lookup.example.invalid/coverage-breaker',
+      lookupToken: 'lookup-token',
+      primaryRpcUrl: 'https://coverage-primary-rpc.example.invalid',
+      fallbackRpcUrl: 'https://coverage-fallback-rpc.example.invalid',
+      fetchImpl: rpcBlackHole,
+      requestTimeoutMs: 5,
+    }).observe(candidate),
+    /timed out/,
+  );
+});
+
 test('payment RPC sources enforce the frozen Oracle and beneficiary snapshot rules', async () => {
   const now = 1_800_000_000;
   const reader = new StubContractReader({

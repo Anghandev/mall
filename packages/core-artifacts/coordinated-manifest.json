@@ -18,7 +18,7 @@
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "d9446f564f3113a888db1e75e8eb53103c4136f42c70557b58040c03a50f8236"
+      "sha256": "99dc99a66fecaf36b1fa6eb8f71103cd3e21668e7ad7d8eacd418a9953654135"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
@@ -26,11 +26,11 @@
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "a2cffc8f1dc1d281275f2e654fdd3a3adba5ae6640c1f2adaa30a5570e5f6432"
+      "sha256": "c1de0e0b9d5814466baad518e29e328d547d6b55a5a28f99b55b3dbd6c4d29d8"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "1a195fefec9836bca4d894b84570c4b6a23c98d167c8096d11d264fcc0c76327"
+      "sha256": "ae043988c8fcf2afe9aea0517506cba7fcd0992e545d7ff59be4e9b2ed141909"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
@@ -60,11 +60,11 @@
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "18f0862cee040b77ddcf0ae4a23f73a812e74352cacee88eaefa774491f07582"
+      "sha256": "c95bc4fd6f71b2b59621d74a16248ef07cd84ac8ac378d5abdc7f83308778a7a"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "e9395119cd200ca9d2b4531777214f0b439f8fbf6d813355cc8c9019fe3adcd1"
+      "sha256": "d907bda26a5ba1307b5d48583f87f2854836c48887783b3698b373fef6a3a07f"
     }
   ],
   "httpSurface": [
@@ -75,6 +75,7 @@
     "GET /v2/admin/catalog/stores/{storeId}/product-slot",
     "GET /v2/admin/catalog/tags",
     "GET /v2/admin/cms/versions/{versionId}",
+    "GET /v2/admin/coverage-breaker/actions",
     "GET /v2/admin/dashboard",
     "GET /v2/admin/monitoring",
     "GET /v2/admin/orders",
@@ -120,6 +121,8 @@
     "POST /v2/admin/cms/versions",
     "POST /v2/admin/cms/versions/{versionId}/publish",
     "POST /v2/admin/cms/versions/{versionId}/rollback",
+    "POST /v2/admin/coverage-breaker/resume-actions",
+    "POST /v2/admin/coverage-breaker/resume-challenge",
     "POST /v2/admin/monitoring/alerts/{alertKey}/acknowledge",
     "POST /v2/admin/notification-campaigns",
     "POST /v2/admin/notification-campaigns/{campaignId}/publish",
@@ -323,6 +326,8 @@
     "BuyerTakeoverTimeline",
     "MerchantProfile",
     "MerchantAuditList",
-    "MerchantAuditExport"
+    "MerchantAuditExport",
+    "CoverageBreakerResumeChallenge",
+    "CoverageBreakerActionProjection"
   ]
 }

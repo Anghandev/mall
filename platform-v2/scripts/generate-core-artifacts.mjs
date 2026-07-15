@@ -425,6 +425,8 @@ const coordinatedManifest = {
     'MerchantProfile',
     'MerchantAuditList',
     'MerchantAuditExport',
+    'CoverageBreakerResumeChallenge',
+    'CoverageBreakerActionProjection',
   ],
 };
 files.set('coordinated-manifest.json', json(coordinatedManifest));
@@ -1600,6 +1602,27 @@ function settlementAdminOpenApiPaths(errorResponse) {
     '/v2/admin/policy-drafts/{draftId}/safe-proposal': {
       post: resourceOperation('proposePolicyToSafe', 'draftId', { $ref: '#/components/schemas/PolicyDraftDetail' }, 202, 'EmptyObject'),
     },
+    '/v2/admin/coverage-breaker/actions': {
+      get: operation('listCoverageBreakerActions', {
+        type: 'array', items: { $ref: '#/components/schemas/CoverageBreakerActionProjection' },
+      }),
+    },
+    '/v2/admin/coverage-breaker/resume-challenge': {
+      post: operation(
+        'createCoverageBreakerResumeChallenge',
+        { $ref: '#/components/schemas/CoverageBreakerResumeChallenge' },
+        200,
+        'CoverageBreakerResumeChallengeRequest',
+      ),
+    },
+    '/v2/admin/coverage-breaker/resume-actions': {
+      post: operation(
+        'authorizeCoverageBreakerResume',
+        { $ref: '#/components/schemas/CoverageBreakerActionProjection' },
+        201,
+        'CoverageBreakerResumeRequest',
+      ),
+    },
     '/v2/admin/cms/versions': {
       post: operation('createCmsVersion', { $ref: '#/components/schemas/CmsVersionProjection' }, 201, 'CmsVersionCreateRequest'),
     },
@@ -2034,6 +2057,48 @@ function settlementAdminOpenApiSchemas() {
       signer: address,
       typedData: eip712TypedData,
       digest: hash,
+    }),
+    CoverageBreakerResumeChallengeRequest: object({ nonce: atomic, deadline: atomic }),
+    CoverageBreakerResumeRequest: object({
+      snapshotId: hash,
+      nonce: atomic,
+      deadline: atomic,
+      signature: { type: 'string', pattern: '^0x(?:[0-9a-fA-F]{2})+$' },
+    }),
+    CoverageBreakerResumeChallenge: object({
+      artifactVersion: { const: artifactVersion },
+      snapshotId: hash,
+      evidenceHash: hash,
+      policyVersion: atomic,
+      signer: address,
+      safeAddress: address,
+      routerAddress: address,
+      typedData: eip712TypedData,
+      digest: hash,
+    }),
+    CoverageBreakerActionProjection: object({
+      artifactVersion: { const: artifactVersion },
+      actionId: hash,
+      snapshotId: hash,
+      policyVersion: atomic,
+      action: { enum: ['PAUSE', 'RESUME'] },
+      targetPaused: { type: 'boolean' },
+      evidenceHash: hash,
+      governanceSafeAddress: address,
+      routerAddress: address,
+      calldataHash: hash,
+      state: { enum: ['PENDING_PROPOSAL', 'SAFE_PROPOSED', 'MINED', 'FINAL', 'REORGED', 'FAILED'] },
+      safeTxHash: nullableHash,
+      proposalHash: nullableHash,
+      executionTxHash: nullableHash,
+      confirmations: { type: 'integer', minimum: 0 },
+      actorWallet: nullableAddress,
+      secondarySigner: nullableAddress,
+      secondarySignatureHash: nullableHash,
+      approvalNonce: nullableAtomic,
+      approvalDeadline: nullableTimestamp,
+      createdAt: timestamp,
+      updatedAt: timestamp,
     }),
     CmsVersionCreateRequest: object({
       entryId: string,
@@ -4294,6 +4359,49 @@ export interface PolicyApprovalChallenge {
   signer: Address;
   typedData: Eip712TypedData;
   digest: Bytes32;
+}
+
+export interface CoverageBreakerResumeChallengeRequest { nonce: AtomicAmount; deadline: AtomicAmount }
+export interface CoverageBreakerResumeRequest extends CoverageBreakerResumeChallengeRequest {
+  snapshotId: Bytes32;
+  signature: string;
+}
+
+export interface CoverageBreakerResumeChallenge {
+  artifactVersion: string;
+  snapshotId: Bytes32;
+  evidenceHash: Bytes32;
+  policyVersion: AtomicAmount;
+  signer: Address;
+  safeAddress: Address;
+  routerAddress: Address;
+  typedData: Eip712TypedData;
+  digest: Bytes32;
+}
+
+export interface CoverageBreakerActionProjection {
+  artifactVersion: string;
+  actionId: Bytes32;
+  snapshotId: Bytes32;
+  policyVersion: AtomicAmount;
+  action: 'PAUSE' | 'RESUME';
+  targetPaused: boolean;
+  evidenceHash: Bytes32;
+  governanceSafeAddress: Address;
+  routerAddress: Address;
+  calldataHash: Bytes32;
+  state: 'PENDING_PROPOSAL' | 'SAFE_PROPOSED' | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED';
+  safeTxHash: Bytes32 | null;
+  proposalHash: Bytes32 | null;
+  executionTxHash: Bytes32 | null;
+  confirmations: number;
+  actorWallet: Address | null;
+  secondarySigner: Address | null;
+  secondarySignatureHash: Bytes32 | null;
+  approvalNonce: AtomicAmount | null;
+  approvalDeadline: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface CmsVersionCreateRequest {

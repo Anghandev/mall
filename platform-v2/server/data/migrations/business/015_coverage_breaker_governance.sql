@@ -47,6 +47,9 @@ CREATE UNIQUE INDEX coverage_breaker_one_open_target_idx
     WHERE state IN ('PENDING_PROPOSAL', 'SAFE_PROPOSED', 'MINED');
 CREATE INDEX coverage_breaker_actions_state_idx
     ON core.coverage_breaker_actions (state, updated_at, action_id);
+CREATE UNIQUE INDEX coverage_breaker_resume_approval_nonce_idx
+    ON core.coverage_breaker_actions (secondary_signer, approval_nonce)
+    WHERE action = 'RESUME' AND replaces_action_id IS NULL;
 
 CREATE TABLE core.coverage_breaker_action_transitions (
     transition_id text PRIMARY KEY CHECK (transition_id ~ '^0x[0-9a-f]{64}$'),

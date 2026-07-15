@@ -309,6 +309,15 @@ export interface PolicyApiService {
   listDrafts(actor: FulfillmentActor): Promise<unknown>;
 }
 
+export interface CoverageBreakerApiService {
+  resumeChallenge(actor: FulfillmentActor, input: { nonce: string; deadline: string }): Promise<unknown>;
+  submitResume(
+    actor: FulfillmentActor,
+    input: { snapshotId: string; nonce: string; deadline: string; signature: string; correlationId: string },
+  ): Promise<unknown>;
+  listActions(actor: FulfillmentActor): Promise<unknown>;
+}
+
 export interface CmsApiService {
   createVersion(actor: FulfillmentActor, input: {
     entryId?: string;
@@ -441,6 +450,7 @@ export interface ApiDependencies {
   takeoverFundingService: TakeoverFundingApiService;
   guaranteeDepositService: GuaranteeDepositApiService;
   policyService: PolicyApiService;
+  coverageBreakerService: CoverageBreakerApiService;
   cmsService: CmsApiService;
   notificationService: NotificationApiService;
   systemConfigService: SystemConfigApiService;
@@ -1806,6 +1816,34 @@ async function routeAdminServices(
   if (request.method === 'GET' && url.pathname === '/v2/admin/policy-drafts') {
     const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
     sendJson(response, 200, await dependencies.policyService.listDrafts(fulfillmentActor(claims)), correlationId);
+    return true;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/admin/coverage-breaker/actions') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
+    sendJson(response, 200, await dependencies.coverageBreakerService.listActions(fulfillmentActor(claims)), correlationId);
+    return true;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/coverage-breaker/resume-challenge') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['nonce', 'deadline']);
+    sendJson(response, 200, await dependencies.coverageBreakerService.resumeChallenge(fulfillmentActor(claims), {
+      nonce: requiredString(body, 'nonce'),
+      deadline: requiredString(body, 'deadline'),
+    }), correlationId);
+    return true;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/coverage-breaker/resume-actions') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['snapshotId', 'nonce', 'deadline', 'signature']);
+    sendJson(response, 201, await dependencies.coverageBreakerService.submitResume(fulfillmentActor(claims), {
+      snapshotId: requiredString(body, 'snapshotId'),
+      nonce: requiredString(body, 'nonce'),
+      deadline: requiredString(body, 'deadline'),
+      signature: requiredString(body, 'signature'),
+      correlationId,
+    }), correlationId);
     return true;
   }
   if (request.method === 'POST' && url.pathname === '/v2/admin/policy-drafts') {

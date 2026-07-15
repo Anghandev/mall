@@ -209,12 +209,12 @@ async function ensurePaymentPauseAction(executor: SqlExecutor, input: {
   governanceSafeAddress: string;
   at: Date;
 }) {
-  const existing = await executor.query<{ action_id: string }>(
-    `SELECT action_id FROM core.coverage_breaker_actions
-     WHERE target_paused AND state IN ('PENDING_PROPOSAL','SAFE_PROPOSED','MINED','FINAL')
+  const existing = await executor.query<{ action_id: string; target_paused: boolean }>(
+    `SELECT action_id, target_paused FROM core.coverage_breaker_actions
+     WHERE state IN ('PENDING_PROPOSAL','SAFE_PROPOSED','MINED','FINAL')
      ORDER BY created_at DESC, action_id DESC LIMIT 1`,
   );
-  if (existing.rows[0]) return existing.rows[0].action_id;
+  if (existing.rows[0]?.target_paused) return existing.rows[0].action_id;
   const replaced = await executor.query<{ action_id: string }>(
     `SELECT action_id FROM core.coverage_breaker_actions
      WHERE target_paused AND state IN ('REORGED','FAILED')

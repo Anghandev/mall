@@ -34,6 +34,7 @@ import { AuditQueryService, enqueueAudit } from './audit-service.ts';
 import { PostgresNonceStore, RedisNonceRateLimiter } from './auth-store.ts';
 import { CatalogPaymentService } from './catalog-payment-service.ts';
 import { CatalogManagementService } from './catalog-management-service.ts';
+import { CoverageBreakerService } from './coverage-breaker-service.ts';
 import { CmsService, sanitizeStructuredContent } from './cms-service.ts';
 import { EvidenceService, HttpMediaStorageAdapter, type MediaStorageAdapter } from './evidence-service.ts';
 import { FulfillmentService } from './fulfillment-service.ts';
@@ -5829,6 +5830,17 @@ test('coverage breaker Safe action retries, reaches finality and replaces reorge
     assert.equal((await db.query<{ state: string; confirmations: number }>(
       'SELECT state, confirmations FROM core.coverage_breaker_actions',
     )).rows[0]?.state, 'FINAL');
+    const finalEvidenceCounts = async () => ({
+      transitions: (await db.query<{ count: string }>(
+        'SELECT count(*)::text AS count FROM core.coverage_breaker_action_transitions',
+      )).rows[0]?.count,
+      audits: (await db.query<{ count: string }>(
+        "SELECT count(*)::text AS count FROM core.audit_outbox_events WHERE resource_type = 'COVERAGE_BREAKER_ACTION'",
+      )).rows[0]?.count,
+    });
+    const beforeRepeatedFinal = await finalEvidenceCounts();
+    await governance.pollOnce();
+    assert.deepEqual(await finalEvidenceCounts(), beforeRepeatedFinal);
 
     phase = 'REORGED';
     await governance.pollOnce();
@@ -5840,6 +5852,211 @@ test('coverage breaker Safe action retries, reaches finality and replaces reorge
     assert.equal((await db.query<{ paused: boolean }>(
       "SELECT paused FROM core.circuit_breakers WHERE scope = 'NEW_PAYMENT'",
     )).rows[0]?.paused, true);
+  } finally {
+    await db.close();
+  }
+});
+
+test('coverage recovery requires independent EIP-712 approval and Safe finality, then re-pauses on reorg', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    await recordFinalPayment(db);
+    const admin = Wallet.createRandom();
+    const secondary = Wallet.createRandom();
+    const governanceSafe = '0x8888888888888888888888888888888888888888';
+    const paymentRouter = '0x9999999999999999999999999999999999999999';
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES ($1,'ADMIN',NULL,'ACTIVE',$2)`,
+      [admin.address.toLowerCase(), `0x${'1'.repeat(64)}`],
+    );
+    let observation: CoverageObservation = {
+      chainId: 56,
+      blockNumber: 3_000,
+      blockHash: `0x${'2'.repeat(64)}`,
+      canonical: true,
+      evidenceHash: `0x${'3'.repeat(64)}`,
+      observedAt: new Date('2026-07-15T10:00:00.000Z'),
+      assets: [{
+        safeAddress: '0x3333333333333333333333333333333333333333',
+        asset: 'USDT',
+        tokenAddress: '0x55d398326f99059ff775485246999027b3197955',
+        balance: '69',
+      }],
+    };
+    const coverage = new CoverageWorker({
+      transactions: transactionAdapter(db),
+      source: { observe: async () => observation },
+      expectedAssets: observation.assets,
+      paymentRouterAddress: paymentRouter,
+      governanceSafeAddress: governanceSafe,
+    });
+    await coverage.pollOnce();
+
+    let proposalNumber = 0;
+    let resumePhase: 'FINAL' | 'REORGED' = 'FINAL';
+    const governance = new CoverageBreakerGovernanceWorker({
+      transactions: transactionAdapter(db),
+      proposer: {
+        propose: async () => {
+          proposalNumber += 1;
+          return {
+            safeTxHash: `0x${String((proposalNumber % 6) + 3).repeat(64)}`,
+            proposalHash: `0x${String((proposalNumber % 6) + 4).repeat(64)}`,
+          };
+        },
+      },
+      chain: {
+        observe: async (candidate): Promise<CoverageBreakerObservation> => {
+          const executionTxHash = candidate.targetPaused ? `0x${'a'.repeat(64)}` : `0x${'b'.repeat(64)}`;
+          const blockHash = candidate.targetPaused ? `0x${'c'.repeat(64)}` : `0x${'d'.repeat(64)}`;
+          const base = {
+            safeTxHash: candidate.safeTxHash,
+            executionTxHash,
+            blockNumber: candidate.targetPaused ? 3_001 : 3_003,
+            blockHash,
+            targetPaused: candidate.targetPaused,
+            evidenceHash: candidate.evidenceHash,
+          };
+          if (!candidate.targetPaused && resumePhase === 'REORGED') return {
+            state: 'REORGED',
+            ...base,
+            canonicalBlockHash: `0x${'e'.repeat(64)}`,
+            confirmations: 0,
+            canonical: false,
+            observationEvidenceHash: `0x${'f'.repeat(64)}`,
+          };
+          return {
+            state: 'FINAL',
+            ...base,
+            confirmations: 15,
+            canonical: true,
+            observationEvidenceHash: candidate.targetPaused ? `0x${'4'.repeat(64)}` : `0x${'5'.repeat(64)}`,
+          };
+        },
+      },
+    });
+    await governance.pollOnce();
+    assert.equal((await db.query<{ state: string }>(
+      "SELECT state FROM core.coverage_breaker_actions WHERE action = 'PAUSE'",
+    )).rows[0]?.state, 'FINAL');
+
+    observation = {
+      ...observation,
+      blockNumber: 3_002,
+      blockHash: `0x${'6'.repeat(64)}`,
+      evidenceHash: `0x${'7'.repeat(64)}`,
+      observedAt: new Date('2026-07-15T10:02:00.000Z'),
+      assets: observation.assets.map((item) => ({ ...item, balance: '70' })),
+    };
+    await coverage.pollOnce();
+    let clock = new Date('2026-07-15T10:03:00.000Z');
+    const service = new CoverageBreakerService({
+      transactions: transactionAdapter(db),
+      governanceSafeAddress: governanceSafe,
+      paymentRouterAddress: paymentRouter,
+      secondarySignerAddress: secondary.address,
+      clock: () => clock,
+    });
+    const actor = { walletAddress: admin.address, roles: ['ADMIN'] as const };
+    const deadline = String(Math.floor(clock.getTime() / 1_000) + 600);
+    await assert.rejects(
+      service.resumeChallenge({ walletAddress: admin.address, roles: ['OPERATOR'] }, { nonce: '9', deadline }),
+      /cannot govern coverage recovery/,
+    );
+    const challenge = await service.resumeChallenge(actor, { nonce: '9', deadline });
+    assert.equal(challenge.signer, secondary.address.toLowerCase());
+    observation = {
+      ...observation,
+      blockNumber: 3_003,
+      blockHash: `0x${'8'.repeat(64)}`,
+      evidenceHash: `0x${'9'.repeat(64)}`,
+      observedAt: new Date('2026-07-15T10:02:30.000Z'),
+    };
+    await coverage.pollOnce();
+    const wrongSignature = await admin.signTypedData(
+      challenge.typedData.domain,
+      challenge.typedData.types,
+      challenge.typedData.message,
+    );
+    await assert.rejects(
+      service.submitResume(actor, {
+        snapshotId: challenge.snapshotId,
+        nonce: '9',
+        deadline,
+        signature: wrongSignature,
+        correlationId: 'coverage-resume-wrong-signer',
+      }),
+      /Secondary signer mismatch/,
+    );
+    const signature = await secondary.signTypedData(
+      challenge.typedData.domain,
+      challenge.typedData.types,
+      challenge.typedData.message,
+    );
+    const requested = await service.submitResume(actor, {
+      snapshotId: challenge.snapshotId,
+      nonce: '9',
+      deadline,
+      signature,
+      correlationId: 'coverage-resume-test',
+    });
+    assert.equal(requested.action, 'RESUME');
+    assert.equal(requested.state, 'PENDING_PROPOSAL');
+    assert.equal((await service.submitResume(actor, {
+      snapshotId: challenge.snapshotId,
+      nonce: '9',
+      deadline,
+      signature,
+      correlationId: 'coverage-resume-retry',
+    })).actionId, requested.actionId);
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.breaker_causes WHERE cause_type = 'COVERAGE' AND active",
+    )).rows[0]?.count, '2');
+
+    await governance.pollOnce();
+    assert.equal((await db.query<{ state: string }>(
+      "SELECT state FROM core.coverage_breaker_actions WHERE action = 'RESUME' ORDER BY created_at LIMIT 1",
+    )).rows[0]?.state, 'FINAL');
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.breaker_causes WHERE cause_type = 'COVERAGE' AND active",
+    )).rows[0]?.count, '0');
+    assert.deepEqual((await db.query<{ paused: boolean }>(
+      'SELECT paused FROM core.circuit_breakers ORDER BY scope',
+    )).rows.map((row) => row.paused), [false, false]);
+
+    resumePhase = 'REORGED';
+    clock = new Date('2026-07-15T10:04:00.000Z');
+    await governance.pollOnce();
+    const reorgBreakers = (await db.query<{ paused: boolean }>(
+      'SELECT paused FROM core.circuit_breakers ORDER BY scope',
+    )).rows.map((row) => row.paused);
+    const reorgEvidence = {
+      worker: governance.status(),
+      actions: (await db.query<{
+        action: string;
+        state: string;
+        replaces_action_id: string | null;
+      }>(
+        'SELECT action, state, replaces_action_id FROM core.coverage_breaker_actions ORDER BY created_at, action_id',
+      )).rows,
+      causes: (await db.query<{ scope: string; cause_id: string; active: boolean }>(
+        "SELECT scope, cause_id, active FROM core.breaker_causes WHERE cause_type = 'COVERAGE' ORDER BY scope, cause_id",
+      )).rows,
+    };
+    assert.deepEqual(reorgBreakers, [true, true], JSON.stringify(reorgEvidence));
+    assert.equal((await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM core.coverage_breaker_actions
+       WHERE action = 'RESUME' AND state = 'PENDING_PROPOSAL'`,
+    )).rows[0]?.count, '1');
+
+    resumePhase = 'FINAL';
+    clock = new Date('2026-07-15T10:05:00.000Z');
+    await governance.pollOnce();
+    assert.deepEqual((await db.query<{ paused: boolean }>(
+      'SELECT paused FROM core.circuit_breakers ORDER BY scope',
+    )).rows.map((row) => row.paused), [false, false]);
   } finally {
     await db.close();
   }

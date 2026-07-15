@@ -32,6 +32,11 @@ interface CoverageBreakerActionRow {
   confirmations: number;
   canonical: boolean | null;
   replaces_action_id: string | null;
+  actor_wallet: string | null;
+  secondary_signer: string | null;
+  secondary_signature_hash: string | null;
+  approval_nonce: string | number | null;
+  approval_deadline: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -108,11 +113,17 @@ export class HttpCoverageBreakerSafeProposer implements CoverageBreakerSafePropo
   readonly #mutualTls: boolean;
   readonly #fetch: typeof fetch;
 
-  constructor(input: { url?: string; token?: string; mutualTls?: boolean; fetchImpl?: typeof fetch }) {
+  constructor(input: {
+    url?: string;
+    token?: string;
+    mutualTls?: boolean;
+    fetchImpl?: typeof fetch;
+    requestTimeoutMs?: number;
+  }) {
     this.#url = input.url;
     this.#token = input.token;
     this.#mutualTls = input.mutualTls === true;
-    this.#fetch = input.fetchImpl ?? fetch;
+    this.#fetch = fetchWithDeadline(input.fetchImpl ?? fetch, input.requestTimeoutMs);
   }
 
   async propose(input: CoverageBreakerSafeProposal) {
@@ -170,12 +181,13 @@ export class ResilientCoverageBreakerChainSource implements CoverageBreakerChain
     primaryRpcUrl?: string;
     fallbackRpcUrl?: string;
     fetchImpl?: typeof fetch;
+    requestTimeoutMs?: number;
   }) {
     this.#lookupUrl = input.lookupUrl;
     this.#lookupToken = input.lookupToken;
     this.#primaryRpcUrl = input.primaryRpcUrl;
     this.#fallbackRpcUrl = input.fallbackRpcUrl;
-    this.#fetch = input.fetchImpl ?? fetch;
+    this.#fetch = fetchWithDeadline(input.fetchImpl ?? fetch, input.requestTimeoutMs);
   }
 
   async observe(input: CoverageBreakerFinalityCandidate): Promise<CoverageBreakerObservation> {
@@ -316,15 +328,15 @@ export class CoverageBreakerGovernanceWorker {
   }
 
   async pollOnce() {
+    let pollErrorCode: string | undefined;
     const proposals = await this.#pendingProposals(10);
     for (const action of proposals) {
       try {
         const proposal = proposalFromRow(action);
         const result = await this.#proposer.propose(proposal);
         await this.#recordProposal(action.action_id, result);
-        this.#lastErrorCode = undefined;
       } catch (error) {
-        this.#lastErrorCode = errorCode(error);
+        pollErrorCode ??= errorCode(error);
       }
     }
     const finality = await this.#pendingFinality(25);
@@ -332,11 +344,11 @@ export class CoverageBreakerGovernanceWorker {
       try {
         const observation = await this.#chain.observe(finalityCandidate(action));
         if (observation.state !== 'NOT_FOUND') await this.#recordObservation(action.action_id, observation);
-        this.#lastErrorCode = undefined;
       } catch (error) {
-        this.#lastErrorCode = errorCode(error);
+        pollErrorCode ??= errorCode(error);
       }
     }
+    this.#lastErrorCode = pollErrorCode;
     return { proposals: proposals.length, finality: finality.length };
   }
 
@@ -415,6 +427,20 @@ export class CoverageBreakerGovernanceWorker {
       const action = await lockedAction(executor, actionId);
       validateObservation(action, observation);
       const now = new Date();
+      if (
+        action.state === 'FINAL'
+        && observation.state === 'FINAL'
+        && action.execution_tx_hash === observation.executionTxHash
+        && Number(action.block_number) === observation.blockNumber
+        && action.block_hash === observation.blockHash
+        && action.canonical === observation.canonical
+      ) {
+        await executor.query(
+          'UPDATE core.coverage_breaker_actions SET updated_at = $2 WHERE action_id = $1',
+          [actionId, now],
+        );
+        return;
+      }
       await executor.query(
         `UPDATE core.coverage_breaker_actions
          SET state = $2, execution_tx_hash = $3, block_number = $4, block_hash = $5,
@@ -440,7 +466,11 @@ export class CoverageBreakerGovernanceWorker {
         observation,
         now,
       );
+      if (observation.state === 'FINAL' && !action.target_paused) {
+        await finalizeResume(executor, action, now);
+      }
       if (observation.state === 'REORGED' || observation.state === 'FAILED') {
+        if (!action.target_paused) await pauseAfterResumeReversal(executor, action, observation, now);
         await insertReplacement(executor, action, observation, now);
       }
     });
@@ -578,11 +608,11 @@ async function insertReplacement(
       action.calldata,
       action.calldata_hash,
       action.action_id,
-      null,
-      null,
-      null,
-      null,
-      null,
+      action.actor_wallet,
+      action.secondary_signer,
+      action.secondary_signature_hash,
+      action.approval_nonce,
+      action.approval_deadline,
       at,
     ],
   );
@@ -591,6 +621,80 @@ async function insertReplacement(
     replacesActionId: action.action_id,
     observationEvidenceHash: observation.observationEvidenceHash,
   }, at);
+}
+
+async function finalizeResume(executor: SqlExecutor, action: CoverageBreakerActionRow, at: Date) {
+  await executor.query(
+    `UPDATE core.breaker_causes SET active = false, evidence_hash = $2, updated_at = $3
+     WHERE cause_type = 'COVERAGE' AND active AND updated_at <= $1`,
+    [action.created_at, action.evidence_hash, at],
+  );
+  for (const scope of ['NEW_PAYMENT', 'NEW_SETTLEMENT_BATCH'] as const) {
+    const active = await executor.query<{ blocked: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM core.breaker_causes WHERE scope = $1 AND active
+       ) AS blocked`,
+      [scope],
+    );
+    const paused = active.rows[0]?.blocked !== false;
+    await executor.query(
+      `INSERT INTO core.circuit_breakers (
+         scope, paused, evidence_hash, policy_version, changed_by, changed_at
+       ) VALUES ($1,$2,$3,$4,'COVERAGE_GOVERNANCE',$5)
+       ON CONFLICT (scope) DO UPDATE SET paused = EXCLUDED.paused,
+         evidence_hash = EXCLUDED.evidence_hash, policy_version = EXCLUDED.policy_version,
+         changed_by = EXCLUDED.changed_by, changed_at = EXCLUDED.changed_at`,
+      [scope, paused, action.evidence_hash, action.policy_version, at],
+    );
+    if (!paused) {
+      const eventId = hashJson({ scope, actionId: action.action_id, action: 'RESUME' });
+      await executor.query(
+        `INSERT INTO core.breaker_events (
+           breaker_event_id, scope, action, cause_type, cause_id,
+           evidence_hash, policy_version, changed_by, changed_at
+         ) VALUES ($1,$2,'RESUME','COVERAGE',$3,$4,$5,'COVERAGE_GOVERNANCE',$6)
+         ON CONFLICT (breaker_event_id) DO NOTHING`,
+        [eventId, scope, action.action_id, action.evidence_hash, action.policy_version, at],
+      );
+    }
+  }
+}
+
+async function pauseAfterResumeReversal(
+  executor: SqlExecutor,
+  action: CoverageBreakerActionRow,
+  observation: Extract<CoverageBreakerObservation, { state: 'REORGED' | 'FAILED' }>,
+  at: Date,
+) {
+  const causeId = `coverage-resume:${action.action_id}`;
+  for (const scope of ['NEW_PAYMENT', 'NEW_SETTLEMENT_BATCH'] as const) {
+    await executor.query(
+      `INSERT INTO core.breaker_causes (
+         scope, cause_type, cause_id, active, evidence_hash, updated_at
+       ) VALUES ($1,'COVERAGE',$2,true,$3,$4)
+       ON CONFLICT (scope, cause_type, cause_id) DO UPDATE SET active = true,
+         evidence_hash = EXCLUDED.evidence_hash, updated_at = EXCLUDED.updated_at`,
+      [scope, causeId, observation.observationEvidenceHash, at],
+    );
+    const eventId = hashJson({ scope, causeId, action: 'PAUSE', evidenceHash: observation.observationEvidenceHash });
+    await executor.query(
+      `INSERT INTO core.breaker_events (
+         breaker_event_id, scope, action, cause_type, cause_id,
+         evidence_hash, policy_version, changed_by, changed_at
+       ) VALUES ($1,$2,'PAUSE','COVERAGE',$3,$4,$5,'COVERAGE_GOVERNANCE',$6)
+       ON CONFLICT (breaker_event_id) DO NOTHING`,
+      [eventId, scope, causeId, observation.observationEvidenceHash, action.policy_version, at],
+    );
+    await executor.query(
+      `INSERT INTO core.circuit_breakers (
+         scope, paused, evidence_hash, policy_version, changed_by, changed_at
+       ) VALUES ($1,true,$2,$3,'COVERAGE_GOVERNANCE',$4)
+       ON CONFLICT (scope) DO UPDATE SET paused = true,
+         evidence_hash = EXCLUDED.evidence_hash, policy_version = EXCLUDED.policy_version,
+         changed_by = EXCLUDED.changed_by, changed_at = EXCLUDED.changed_at`,
+      [scope, observation.observationEvidenceHash, action.policy_version, at],
+    );
+  }
 }
 
 function validateObservation(
@@ -711,6 +815,35 @@ async function rpc(fetchImpl: typeof fetch, url: string, method: string, params:
     throw new CoreError('ExternalBlocked', `Coverage-breaker RPC ${method} returned an error`, 503);
   }
   return body.result;
+}
+
+function fetchWithDeadline(fetchImpl: typeof fetch, timeoutMs = 10_000): typeof fetch {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 60_000) {
+    throw new CoreError('InvalidRequest', 'Coverage-breaker request timeout is invalid', 500);
+  }
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<Response>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new CoreError('ExternalBlocked', 'Coverage-breaker external request timed out', 503));
+      }, timeoutMs);
+    });
+    try {
+      return await Promise.race([
+        fetchImpl(input, { ...init, signal: controller.signal }),
+        deadline,
+      ]);
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new CoreError('ExternalBlocked', 'Coverage-breaker external request timed out', 503);
+      }
+      throw error;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }) as typeof fetch;
 }
 
 function recordValue(value: unknown, name: string): Record<string, any> {

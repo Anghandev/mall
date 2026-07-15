@@ -569,6 +569,49 @@ export interface PolicyApprovalChallenge {
   digest: Bytes32;
 }
 
+export interface CoverageBreakerResumeChallengeRequest { nonce: AtomicAmount; deadline: AtomicAmount }
+export interface CoverageBreakerResumeRequest extends CoverageBreakerResumeChallengeRequest {
+  snapshotId: Bytes32;
+  signature: string;
+}
+
+export interface CoverageBreakerResumeChallenge {
+  artifactVersion: string;
+  snapshotId: Bytes32;
+  evidenceHash: Bytes32;
+  policyVersion: AtomicAmount;
+  signer: Address;
+  safeAddress: Address;
+  routerAddress: Address;
+  typedData: Eip712TypedData;
+  digest: Bytes32;
+}
+
+export interface CoverageBreakerActionProjection {
+  artifactVersion: string;
+  actionId: Bytes32;
+  snapshotId: Bytes32;
+  policyVersion: AtomicAmount;
+  action: 'PAUSE' | 'RESUME';
+  targetPaused: boolean;
+  evidenceHash: Bytes32;
+  governanceSafeAddress: Address;
+  routerAddress: Address;
+  calldataHash: Bytes32;
+  state: 'PENDING_PROPOSAL' | 'SAFE_PROPOSED' | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED';
+  safeTxHash: Bytes32 | null;
+  proposalHash: Bytes32 | null;
+  executionTxHash: Bytes32 | null;
+  confirmations: number;
+  actorWallet: Address | null;
+  secondarySigner: Address | null;
+  secondarySignatureHash: Bytes32 | null;
+  approvalNonce: AtomicAmount | null;
+  approvalDeadline: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CmsVersionCreateRequest {
   entryId?: string;
   slug: string;
