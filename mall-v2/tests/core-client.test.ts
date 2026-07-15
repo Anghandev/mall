@@ -44,7 +44,14 @@ import {
   verifiedEvidenceAsset,
 } from './evidence-fixtures';
 import { paymentQuote, product, seckillQuote } from './payment-fixtures';
-import { relayEvent, seckillSession, seckillSessionId } from './seckill-fixtures';
+import {
+  relayEvent,
+  seckillGovernanceActionId,
+  seckillPublicationTxHash,
+  seckillRulesContentHash,
+  seckillSession,
+  seckillSessionId,
+} from './seckill-fixtures';
 import {
   publicCmsItem,
   requestedSettlement,
@@ -534,11 +541,33 @@ describe('coordinated Core HTTP client', () => {
     });
     const client = createCoreClient({ baseUrl: 'https://core.mall.test', fetch: fetcher });
 
-    expect((await client.getCurrentSeckillSession()).phase).toBe('LIVE');
+    expect(await client.getCurrentSeckillSession()).toMatchObject({
+      phase: 'LIVE',
+      governanceActionId: seckillGovernanceActionId,
+      rulesContentHash: seckillRulesContentHash,
+      publicationTxHash: seckillPublicationTxHash,
+    });
     expect((await client.listSeckillSessionHistory()).items[0]?.winnerWallet).toBe(live.lastBuyerWallet);
     expect((await client.getSeckillSession(seckillSessionId)).timers.relayIncrementSeconds).toBe(30);
     expect((await client.listSeckillSessionEvents(seckillSessionId)).items).toEqual([event]);
     expect(calls).toHaveLength(4);
+  });
+
+  it.each(['governanceActionId', 'rulesContentHash', 'publicationTxHash'] as const)(
+    'rejects a public seckill session without final publication field %s',
+    async (field) => {
+      const malformed = { ...seckillSession(), [field]: null };
+      await expect(createCoreClient({
+        fetch: vi.fn().mockResolvedValue(json(malformed)),
+      }).getCurrentSeckillSession()).rejects.toMatchObject({ code: 'InvalidResponse' });
+    },
+  );
+
+  it('rejects a seckill session whose snapshot is not bound to its published rules hash', async () => {
+    const malformed = seckillSession({ snapshot: { rulesContentHash: HASH } });
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json(malformed)),
+    }).getCurrentSeckillSession()).rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
   it('rejects non-final realtime events and malformed reward/BNM projections', async () => {

@@ -1,16 +1,19 @@
 import {
   artifactVersion,
   type RealtimeEventEnvelope,
-  type SeckillSessionProjection,
 } from '@abu24k/core-artifacts';
+import type { PublishedSeckillSessionProjection } from '../src/core-client';
 import { product } from './payment-fixtures';
 
 export const seckillSessionId = `0x${'9'.repeat(64)}`;
 export const seckillBuyer = `0x${'1'.repeat(40)}`;
+export const seckillGovernanceActionId = `0x${'a'.repeat(64)}`;
+export const seckillRulesContentHash = `0x${'b'.repeat(64)}`;
+export const seckillPublicationTxHash = `0x${'c'.repeat(64)}`;
 
 export function seckillSession(
-  overrides: Partial<SeckillSessionProjection> = {},
-): SeckillSessionProjection {
+  overrides: Partial<PublishedSeckillSessionProjection> = {},
+): PublishedSeckillSessionProjection {
   return {
     artifactVersion,
     sessionId: seckillSessionId,
@@ -42,7 +45,10 @@ export function seckillSession(
     prizePoolUsdt: '240000000000000000000',
     lastBuyerWallet: seckillBuyer,
     winnerWallet: null,
-    snapshot: { rulesContentHash: `0x${'b'.repeat(64)}` },
+    snapshot: { rulesContentHash: seckillRulesContentHash },
+    governanceActionId: seckillGovernanceActionId,
+    rulesContentHash: seckillRulesContentHash,
+    publicationTxHash: seckillPublicationTxHash,
     allowedActions: [],
     ...overrides,
   };

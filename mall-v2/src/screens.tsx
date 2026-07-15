@@ -68,7 +68,7 @@ import {
   ScreenHeader,
   StatusNotice,
 } from './components';
-import type { BuyerEvidenceAction } from './core-client';
+import type { BuyerEvidenceAction, PublishedSeckillSessionProjection } from './core-client';
 import { useMallRuntime, type BrowserPosition, type MallRuntimeValue } from './mall-runtime';
 
 export function SeckillScreen() {
@@ -82,6 +82,10 @@ export function SeckillScreen() {
     session?.serverTime,
     session?.phase === 'LIVE' ? session.relayDeadline : undefined,
   );
+  const publishedRules = runtime.cmsItems.filter((item) => (
+    item.contentType === 'SECKILL_RULES'
+      && item.contentHash.toLowerCase() === session?.rulesContentHash.toLowerCase()
+  ));
   const productAvailable = Boolean(session && runtime.catalog.some((product) =>
     product.productId === session.product.productId
       && product.skus.some((sku) => sku.skuId === session.product.skuId)));
@@ -103,7 +107,7 @@ export function SeckillScreen() {
       />
 
       <PublishedContent
-        items={runtime.cmsItems.filter((item) => item.contentType === 'SECKILL_RULES')}
+        items={publishedRules}
         state={runtime.cmsState}
         onRetry={() => void runtime.reloadCms()}
       />
@@ -192,7 +196,7 @@ export function SeckillScreen() {
   );
 }
 
-function SeckillSessionDashboard({ session }: { session: SeckillSessionProjection }) {
+function SeckillSessionDashboard({ session }: { session: PublishedSeckillSessionProjection }) {
   return (
     <section className="section-block seckill-dashboard" aria-labelledby="current-session-title">
       <div className="section-heading">
@@ -206,6 +210,11 @@ function SeckillSessionDashboard({ session }: { session: SeckillSessionProjectio
         <div><dt>策略版本</dt><dd>{session.policyVersion}</dd></div>
       </dl>
       <p className="phase-copy">{seckillPhaseCopy(session)}</p>
+      <dl className="seckill-publication" aria-label="场次最终发布证据">
+        <div><dt>治理动作</dt><dd><code>{session.governanceActionId}</code></dd></div>
+        <div><dt>规则内容哈希</dt><dd><code>{session.rulesContentHash}</code></dd></div>
+        <div><dt>最终发布交易</dt><dd><code>{session.publicationTxHash}</code></dd></div>
+      </dl>
       {session.lastBuyerWallet ? <p className="last-buyer">最后接力 {shortAddress(session.lastBuyerWallet)}</p> : null}
       {session.phase === 'SETTLED' ? (
         session.winnerWallet
@@ -216,7 +225,7 @@ function SeckillSessionDashboard({ session }: { session: SeckillSessionProjectio
   );
 }
 
-function SeckillHistory({ sessions }: { sessions: readonly SeckillSessionProjection[] }) {
+function SeckillHistory({ sessions }: { sessions: readonly PublishedSeckillSessionProjection[] }) {
   return (
     <section className="section-block" aria-labelledby="seckill-history-title">
       <div className="section-heading"><h2 id="seckill-history-title">历史战报</h2><History aria-hidden="true" size={18} /></div>
@@ -227,6 +236,7 @@ function SeckillHistory({ sessions }: { sessions: readonly SeckillSessionProject
               <div><strong>{session.product.title}</strong><SeckillPhasePill phase={session.phase} /></div>
               <p>奖池 {session.prizePoolUsdt} USDT 原子单位 · 已售 {session.inventory.sold}</p>
               <p>{session.winnerWallet ? `赢家 ${shortAddress(session.winnerWallet)}` : '无已发布赢家'}</p>
+              <p>发布证据 {shortHash(session.publicationTxHash)}</p>
             </article>
           ))}
         </div>
@@ -1949,7 +1959,7 @@ function SeckillPhasePill({ phase }: { phase?: SeckillSessionProjection['phase']
   return <span className={`status-pill ${tone}`}>{label}</span>;
 }
 
-function seckillPhaseCopy(session: SeckillSessionProjection) {
+function seckillPhaseCopy(session: PublishedSeckillSessionProjection) {
   return ({
     PREHEAT: `预热中，Core 发布开始时间 ${formatIso(session.startsAt)}。`,
     LIVE: '主场和接力均以 Core 时间锚与已发布截止时间显示，页面不改变阶段。',
@@ -1959,7 +1969,7 @@ function seckillPhaseCopy(session: SeckillSessionProjection) {
   } as const)[session.phase];
 }
 
-function seckillActionReason(runtime: MallRuntimeValue, session: SeckillSessionProjection, productAvailable: boolean) {
+function seckillActionReason(runtime: MallRuntimeValue, session: PublishedSeckillSessionProjection, productAvailable: boolean) {
   if (session.phase !== 'LIVE') return `Core 当前阶段为 ${session.phase}，不创建秒杀报价`;
   if (BigInt(session.inventory.available) === 0n) return 'Core 场次库存已售罄';
   if (!productAvailable) return '场次商品与当前可售目录不一致';

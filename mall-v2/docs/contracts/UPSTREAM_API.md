@@ -2,7 +2,7 @@
 
 Status: the previous handwritten `mall-api-v1` proposal is retired. Mall now
 consumes coordinated Core settlement/admin artifacts
-`2.0.0-settlement-admin.8`.
+`2.0.0-settlement-admin.9`.
 
 The published boundary currently covers:
 
@@ -34,7 +34,8 @@ The published boundary currently covers:
 - wallet settlement balances and requests, signed EIP-712 settlement intents,
   Safe batching state and final Safe TxHash;
 - seckill current/history/session projections, authoritative timer anchors,
-  prize/winner state and final-event numeric cursor replay;
+  prize/winner state, FINAL governance/rules/publication evidence and
+  final-event numeric cursor replay;
 - public `/v2/ws` delivery bound to artifact version, session channel and last
   accepted cursor;
 - NPL reward subtype attribution and wallet-level BNM Locked/Available totals;

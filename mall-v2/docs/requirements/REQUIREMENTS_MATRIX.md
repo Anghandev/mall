@@ -55,7 +55,7 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
 | MAL-GOAL-005 | Final Goal | Payment batch real Core path: product/SKU -> atomic reservation -> five-minute signed 70/30 quote -> allowance -> PaymentRouter -> indexed event -> order projection | D-V2-001, D-V2-002, D-V2-003, D-V2-011, D-V2-012, D-V2-017, D-V2-021, D-V2-028 | Mall consumer and integration tests use the published payment-batch Core artifact and real local API/indexer; inventory and both assets are atomic; no static fixture, local formula, handwritten calldata or disabled action counts | Frozen | GAP-MAL-001, GAP-MAL-003, GAP-MAL-004, GAP-MAL-015 |
 | MAL-GOAL-006 | Final Goal | Transferable-asset ledger lifecycle and BNM backend-points lifecycle | D-V2-007, D-V2-008, D-V2-017, D-V2-023 | USDT/NPL/prize rows prove Locked/Available/Requested/Batched/Settled, immutable batch identity and final 15-confirmation Safe TxHash; BNM proves only Locked/Available with no ERC-20, mint, Safe transfer or on-chain withdrawal | Verified | - |
 
-## Settlement/Admin .8 Verification Evidence
+## Settlement/Admin .9 Verification Evidence
 
 - `MAL-ASSET-001`: authenticated profile reads/writes preserve the frozen
   `accountIdStatus=DecisionBlocked`, display canonical overview counts and bind
@@ -71,14 +71,14 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
   public state transitions, evidence type and occurrence time. Internal evidence
   hashes are rejected by the strict client parser.
 
-- `MAL-CAT-001`: the Mall consumes `.8` `categoryId`, `tagIds`, `subtitle`,
+- `MAL-CAT-001`: the Mall consumes `.9` `categoryId`, `tagIds`, `subtitle`,
   `richDetail`, `defaultFreightUsdt`, `fulfillmentModes` and each SKU's
   authoritative seckill overlay. Category descendants and tags filter the real
   product list; a SKU with a PREHEAT/LIVE/SETTLING overlay cannot enter ordinary
   checkout. `MAL-CAT-002` remains `Frozen` because its complete sticky-detail and
   configuration-sheet interaction is not yet delivered.
 
-- `MAL-ORDER-001` and `MAL-AFTER-001`: stable `.8` order pages use the
+- `MAL-ORDER-001` and `MAL-AFTER-001`: stable `.9` order pages use the
   `(createdAt, orderId)` cursor and complete rows expose quantity, order kind,
   payment TxHash and authoritative `allowedActions`. Enabled exchange, delay,
   receipt-confirmation and arbitration actions perform `local SHA-256 ->
@@ -87,8 +87,12 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
   `MAL-FLOW-003` remains `Frozen`; `OPEN_TAKEOVER` still lacks a matching evidence
   action and buyer pickup evidence is not authorized.
 
-- `MAL-SEK-002`, `MAL-SEK-003`: strict OpenAPI-derived HTTP operations,
-  final-only event validation, HTTP replay, `eventId` deduplication, last-cursor
+- `MAL-SEK-001`, `MAL-SEK-002`, `MAL-SEK-003`: strict OpenAPI-derived HTTP
+  operations require the `.9` FINAL governance action, matching snapshot/rules
+  content hash and publication TxHash before a session enters Mall state. The
+  dashboard renders all three proofs and only shows `SECKILL_RULES` CMS content
+  whose hash matches the current session. Final-only event validation, HTTP
+  replay, `eventId` deduplication, last-cursor
   reconnect and `4409` artifact reload are covered by
   `tests/core-client.test.ts`, `tests/seckill-realtime.test.ts` and
   `tests/app.test.tsx`.
