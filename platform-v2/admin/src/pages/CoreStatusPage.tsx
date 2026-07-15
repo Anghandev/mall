@@ -1,5 +1,5 @@
 import { artifactVersion, chainIdentity } from '@abu24k/core-artifacts';
-import manifest from '@abu24k/core-artifacts/manifest';
+import { capabilityStatus, deploymentAuthorized, publicationStatus } from '@abu24k/core-artifacts/manifest';
 import { Ban, CheckCircle2, CircleDot, RadioTower, RefreshCw, ShieldCheck } from 'lucide-react';
 import { fetchCoreBootstrap } from '../coreApi';
 import { useCoreResource } from '../useCoreResource';
@@ -13,7 +13,7 @@ export function CoreStatusPage() {
       <header className="page-header">
         <div className="page-icon"><RadioTower aria-hidden="true" /></div>
         <div>
-          <p className="eyebrow">Coordinated settlement/admin checkpoint</p>
+          <p className="eyebrow">Coordinated logistics checkpoint</p>
           <h1>Core 状态</h1>
           <p>版本、HTTP 能力和运行时 readiness 均来自同一发布物。未部署、未配置或未发布不会显示为健康。</p>
         </div>
@@ -21,9 +21,9 @@ export function CoreStatusPage() {
       </header>
 
       <section className="status-overview" aria-label="Core 发布状态">
-        <article><span>Artifact</span><strong>{artifactVersion}</strong><small>{manifest.publicationStatus}</small></article>
+        <article><span>Artifact</span><strong>{artifactVersion}</strong><small>{publicationStatus}</small></article>
         <article><span>Network</span><strong>BSC · {chainIdentity.chainId}</strong><small>固定链身份</small></article>
-        <article><span>Deployment</span><strong>{manifest.deploymentAuthorized ? 'Authorized' : 'ExternalBlocked'}</strong><small>没有地址时不推断</small></article>
+        <article><span>Deployment</span><strong>{deploymentAuthorized ? 'Authorized' : 'ExternalBlocked'}</strong><small>没有地址时不推断</small></article>
         <article>
           <span>New payment</span>
           <strong>{bootstrap.loading ? 'Checking' : bootstrap.error ? 'Unavailable' : readiness?.writesEnabled ? 'Enabled' : 'Fail closed'}</strong>
@@ -55,9 +55,9 @@ export function CoreStatusPage() {
         </article>
 
         <aside className="panel">
-          <p className="section-kicker">Checkpoint capabilities</p><h2>发布面</h2>
+          <p className="section-kicker">Checkpoint capabilities</p><h2>Core 全局发布面</h2>
           <ul className="capability-list">
-            {Object.entries(manifest.capabilityStatus).map(([name, status]) => (
+            {Object.entries(capabilityStatus).map(([name, status]) => (
               <li key={name} className={status === 'AVAILABLE' ? 'capability-available' : 'capability-blocked'}>
                 {status === 'AVAILABLE' ? <CheckCircle2 aria-hidden="true" /> : <CircleDot aria-hidden="true" />}
                 <span><strong>{name}</strong><small>{status}</small></span>
@@ -74,7 +74,7 @@ export function CoreStatusPage() {
 
       <section className="snapshot-rule">
         <ShieldCheck aria-hidden="true" />
-        <div><strong>Admin 边界</strong><p>签名结算、奖励 subtype、BNM points、秒杀 HTTP/WebSocket、政策、CMS、审计与监控已同版本发布；生产部署仍保持 fail-closed。</p></div>
+        <div><strong>Admin 边界</strong><p>运单、打印机绑定与打印作业仅发布 Merchant 路径，不会因 Core 全局能力显示 AVAILABLE 而成为 Admin 操作。Admin 物流配置、批量打印和生产部署仍保持 fail-closed。</p></div>
       </section>
     </>
   );
