@@ -5,14 +5,19 @@ implements shared funds, contracts, API, Schema or signer behavior.
 
 ## Current Product Boundary
 
-- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.1`.
+- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.2`.
 - SIWE/JWT stays in memory. Every protected read and write is role-bound by
   Core and preserves typed `DecisionBlocked`, `ExternalBlocked`,
   `ConfigurationRequired` and correlation evidence.
 - The Admin UI consumes payment/fulfillment, wallet-scoped signed settlement,
-  merchant guarantee/debt, governed takeover funding, policy draft governance,
-  CMS version publication, typed system configuration, append-only audit and
-  operations/coverage monitoring.
+  reward subtypes and non-transferable BNM points, merchant guarantee/debt,
+  governed takeover funding, policy draft governance, CMS version publication,
+  typed system configuration, append-only audit and operations/coverage
+  monitoring.
+- Seckill control consumes current/history session snapshots, numeric-cursor
+  HTTP replay and the artifact-bound `/v2/ws` finalized relay stream. Scheduling,
+  force-close, breaker and prize-injection writes remain fail-closed because no
+  coordinated Admin write operation is published.
 - Policy and takeover funding use Core-issued typed data. The wallet signs the
   exact typed payload; the frontend does not construct calldata, calculate
   funds or set final states.

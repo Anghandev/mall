@@ -74,7 +74,7 @@ export function CoreStatusPage() {
 
       <section className="snapshot-rule">
         <ShieldCheck aria-hidden="true" />
-        <div><strong>Admin 边界</strong><p>签名结算、保证金/债务、接管筹资、政策治理、CMS、通知、系统配置、审计与监控已同版本发布；WebSocket 和生产部署仍保持 fail-closed。</p></div>
+        <div><strong>Admin 边界</strong><p>签名结算、奖励 subtype、BNM points、秒杀 HTTP/WebSocket、政策、CMS、审计与监控已同版本发布；生产部署仍保持 fail-closed。</p></div>
       </section>
     </>
   );

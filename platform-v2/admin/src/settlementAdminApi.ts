@@ -16,6 +16,7 @@ import {
   notificationCampaignTopics,
   notificationDeliveryStates,
   policyDraftStates,
+  rewardSubtypes,
   settlementRails,
   settlementRequestStates,
   systemConfigKeys,
@@ -273,7 +274,19 @@ function resourcePath(prefix: string, resourceId: string) {
 function isSettlementList(value: unknown): value is SettlementListProjection {
   if (!isRecord(value) || value.artifactVersion !== artifactVersion || !addressPattern.test(String(value.wallet))) return false;
   return Array.isArray(value.balances)
-    && value.balances.every((item) => isRecord(item) && ['USDT', 'NPL'].includes(String(item.asset)) && balanceStates.includes(item.state as never) && amountPattern.test(String(item.amount)) && typeof item.purpose === 'string')
+    && value.balances.every((item) => isRecord(item)
+      && ['USDT', 'NPL'].includes(String(item.asset))
+      && balanceStates.includes(item.state as never)
+      && (item.rewardSubtype === null || rewardSubtypes.includes(item.rewardSubtype as never))
+      && amountPattern.test(String(item.amount))
+      && typeof item.purpose === 'string')
+    && Array.isArray(value.points)
+    && value.points.every((item) => isRecord(item)
+      && item.pointsType === 'BNM'
+      && item.purpose === 'BNM_LIABILITY'
+      && ['LOCKED', 'AVAILABLE'].includes(String(item.state))
+      && amountPattern.test(String(item.amount))
+      && item.transferable === false)
     && Array.isArray(value.requests)
     && value.requests.every((item) => isRecord(item)
       && settlementRails.includes(item.rail as never)

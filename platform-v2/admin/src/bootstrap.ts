@@ -27,6 +27,8 @@ export const productBaseline = Object.freeze({
     merchantFinance: true,
     takeoverFunding: true,
     policyPublication: true,
+    seckillSessionHttp: true,
+    seckillRealtime: true,
     cms: true,
     notifications: true,
     systemConfig: true,

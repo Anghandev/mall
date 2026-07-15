@@ -21,7 +21,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe('settlement/admin coordinated Core client', () => {
   it('rejects a settlement projection from a stale artifact', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
-      artifactVersion: '2.0.0-stale', wallet: address('1'), balances: [], requests: [],
+      artifactVersion: '2.0.0-stale', wallet: address('1'), balances: [], points: [], requests: [],
     })));
 
     await expect(fetchSettlementLedger('jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
@@ -31,14 +31,31 @@ describe('settlement/admin coordinated Core client', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       artifactVersion,
       wallet: address('1'),
-      balances: [{ asset: 'USDT', purpose: 'MERCHANT_RECEIVABLE', state: 'BATCHED', amount: '45' }],
+      balances: [
+        { asset: 'USDT', purpose: 'MERCHANT_RECEIVABLE', rewardSubtype: null, state: 'BATCHED', amount: '45' },
+        { asset: 'NPL', purpose: 'REWARD', rewardSubtype: 'GENESIS', state: 'AVAILABLE', amount: '8' },
+      ],
+      points: [{ pointsType: 'BNM', purpose: 'BNM_LIABILITY', state: 'AVAILABLE', amount: '100', transferable: false }],
       requests: [{ rail: 'MERCHANT_USDT', state: 'SETTLED', amount: '45', recipient_address: address('1'), final_safe_tx_hash: hash('2') }],
     })));
 
     await expect(fetchSettlementLedger('jwt')).resolves.toMatchObject({
       artifactVersion,
+      balances: [{ rewardSubtype: null }, { rewardSubtype: 'GENESIS' }],
+      points: [{ pointsType: 'BNM', state: 'AVAILABLE', transferable: false }],
       requests: [{ state: 'SETTLED', final_safe_tx_hash: hash('2') }],
     });
+  });
+
+  it('rejects a pre-.2 settlement projection without reward subtype and BNM points', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      artifactVersion,
+      wallet: address('1'),
+      balances: [{ asset: 'NPL', purpose: 'REWARD', state: 'AVAILABLE', amount: '8' }],
+      requests: [],
+    })));
+
+    await expect(fetchSettlementLedger('jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
   it('binds policy, CMS and system-config writes to their published endpoints', async () => {

@@ -390,6 +390,8 @@ input::placeholder { color: #8b8b82; }
 .alert-list article > svg { width: 19px; color: var(--warning); }
 .alert-list p { margin: 3px 0 0; color: var(--ink-muted); font-size: 12px; }
 .audit-search { margin-bottom: 4px; }
+.seckill-event-table { min-width: 700px; }
+.seckill-history-table { min-width: 760px; }
 
 @media (max-width: 760px) {
   .inline-query-form, .coverage-grid { grid-template-columns: 1fr; }

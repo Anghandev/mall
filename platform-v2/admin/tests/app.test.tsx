@@ -271,6 +271,33 @@ describe('platform admin fail-closed experience', () => {
     expect(screen.getByRole('button', { name: '提交 Safe 多签提案' }).hasAttribute('disabled')).toBe(true);
   });
 
+  it('renders the .2 seckill session, HTTP replay and realtime channel without inventing write actions', async () => {
+    const sockets: TestWebSocket[] = [];
+    vi.stubGlobal('WebSocket', class extends TestWebSocket {
+      constructor(url: string) { super(url); sockets.push(this); }
+    });
+    const session = seckillSession();
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/v2/seckill/sessions/current')) return jsonResponse(session);
+      if (url.endsWith('/v2/seckill/sessions/history?limit=50')) return jsonResponse({ items: [{ ...session, phase: 'SETTLED', storedPhase: 'SETTLED', winnerWallet: session.lastBuyerWallet }], nextCursor: null });
+      if (url.endsWith(`/v2/seckill/sessions/${session.sessionId}/events?cursor=0&limit=100`)) return jsonResponse({ items: [realtimeEvent(session.sessionId)], nextCursor: '1' });
+      return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected request', correlationId: 'seckill-admin-test' } }, 400);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderAt('/seckill');
+
+    expect((await screen.findAllByText('24K live session')).length).toBe(2);
+    expect(screen.getByText('3600s / 60s / +30s / cap 60s')).toBeTruthy();
+    expect(await screen.findByText('relay-event-1')).toBeTruthy();
+    await waitFor(() => expect(sockets.length).toBe(1));
+    expect(sockets[0]?.url).toContain(`channel=seckill%3A${session.sessionId}`);
+    expect(sockets[0]?.url).toContain(`artifactVersion=${encodeURIComponent(artifactVersion)}`);
+    expect(screen.queryByText('等待 Core 投影')).toBeNull();
+    expect(screen.queryByRole('button', { name: /强截止|注入大奖池|发布场次/ })).toBeNull();
+  });
+
   it('uses the Core policy challenge for typed-data signing before a Safe proposal', async () => {
     const wallet = '0x1111111111111111111111111111111111111111';
     const providerRequest = vi.fn(async ({ method }: { method: string }) => {
@@ -364,6 +391,13 @@ describe('platform admin fail-closed experience', () => {
       if (url.endsWith('/v2/auth/nonce')) return jsonResponse({ message: 'SIWE message', nonce: 'nonce', issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString() }, 201);
       if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['BUYER', 'ADMIN'] });
       if (url.includes('/v2/payments/')) return jsonResponse(paymentProjection());
+      if (url.endsWith('/v2/settlements')) return jsonResponse({
+        artifactVersion,
+        wallet,
+        balances: [{ asset: 'NPL', purpose: 'REWARD', rewardSubtype: 'GENESIS', state: 'AVAILABLE', amount: '2000000' }],
+        points: [{ pointsType: 'BNM', purpose: 'BNM_LIABILITY', state: 'LOCKED', amount: '100000000', transferable: false }],
+        requests: [],
+      });
       return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected request', correlationId: 'test' } }, 400);
     }));
     const user = userEvent.setup();
@@ -379,6 +413,9 @@ describe('platform admin fail-closed experience', () => {
     expect(screen.getByText('30000000')).toBeTruthy();
     expect(screen.getByText('12 / 15')).toBeTruthy();
     expect(screen.getByText('pay')).toBeTruthy();
+    expect(await screen.findByText('GENESIS · AVAILABLE')).toBeTruthy();
+    expect(screen.getByText('BNM backend points')).toBeTruthy();
+    expect(screen.getByText('LOCKED · NON_TRANSFERABLE')).toBeTruthy();
   });
 });
 
@@ -530,4 +567,48 @@ function policyDraft(overrides: Record<string, unknown> = {}) {
     updatedAt: '2026-07-15T00:00:00.000Z',
     ...overrides,
   };
+}
+
+function seckillSession() {
+  return {
+    artifactVersion,
+    sessionId: hash('a'),
+    policyVersion: '2',
+    merchantId: 'merchant-1',
+    product: { productId: 'product-1', skuId: 'sku-1', title: '24K live session', metadata: {}, attributes: {}, seckillListPriceUsdt: '88000000' },
+    phase: 'LIVE',
+    storedPhase: 'LIVE',
+    serverTime: '2026-07-15T05:00:00.000Z',
+    startsAt: '2026-07-15T05:00:00.000Z',
+    mainDeadline: '2026-07-15T06:00:00.000Z',
+    relayDeadline: '2026-07-15T05:01:00.000Z',
+    settlementEarliestAt: '2026-07-15T05:06:00.000Z',
+    settlementDeadline: '2026-07-15T05:11:00.000Z',
+    timers: { mainDurationSeconds: 3600, relayInitialSeconds: 60, relayIncrementSeconds: 30, relayCapSeconds: 60 },
+    inventory: { total: '100', sold: '5', reserved: '2', available: '93' },
+    prizePoolUsdt: '9000000',
+    lastBuyerWallet: '0x1111111111111111111111111111111111111111',
+    winnerWallet: null,
+    snapshot: {},
+    allowedActions: [],
+  };
+}
+
+function realtimeEvent(sessionId: string) {
+  return { artifactVersion, protocolVersion: 1, eventId: 'relay-event-1', channel: `seckill:${sessionId}`, cursor: '1', eventType: 'SeckillRelayExtended', resourceType: 'SECKILL_SESSION', resourceId: sessionId, occurredAt: '2026-07-15T05:00:30.000Z', finality: 'FINAL', payload: {} };
+}
+
+class TestWebSocket {
+  readonly url: string;
+  onopen: ((event: Event) => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+  onclose: ((event: CloseEvent) => void) | null = null;
+
+  constructor(url: string) {
+    this.url = url;
+    queueMicrotask(() => this.onopen?.(new Event('open')));
+  }
+
+  close() {}
 }

@@ -121,7 +121,7 @@ All test records stay under `tests/**`; no production fixture is shipped.
 
 ## Settlement/Admin Checkpoint Evidence
 
-The product consumes coordinated artifact `2.0.0-settlement-admin.1` without a
+The product consumes coordinated artifact `2.0.0-settlement-admin.2` without a
 parallel API or local financial calculation:
 
 - `ADM-MER-004`, `ADM-TAKE-003` and `ADM-TAKE-004`: merchant guarantee,
@@ -144,7 +144,17 @@ parallel API or local financial calculation:
   per-asset Safe coverage are consumed without turning missing probes into
   zero or healthy states.
 - `ADM-MER-006`, `ADM-CLEAR-004` and `ADM-CLEAR-006`: the wallet-scoped
-  settlement projection renders balance states, immutable request states and
-  the final Safe TxHash. Admin-wide settlement search remains a Core gap.
+  settlement projection renders balance states, NPL reward subtype, backend
+  BNM Locked/Available points, immutable request states and the final Safe
+  TxHash. BNM is never presented as transferable or Safe-settled. Admin-wide
+  settlement search remains a Core gap.
+- `ADM-SEK-001` through `ADM-SEK-004`: the current/history/session projections,
+  canonical timers, inventory, prize liability, numeric-cursor HTTP replay and
+  artifact-bound finalized relay WebSocket are rendered. Scheduling, inventory
+  lock, force-close, breaker and prize-injection writes remain
+  `GAP-ADM-004 / 009 / 017`, so these rows are not reported complete.
+- `ADM-MER-005`: wallet-scoped BNM points are now visible, but merchant-wide
+  historical Burn and Available-BNM aggregates remain `GAP-ADM-006` and this
+  row is not reported complete.
 
 All test records stay under `tests/**`; no production fixture is shipped.

@@ -42,9 +42,10 @@ export function SettlementLedgerPanel() {
       ) : loading ? <div className="catalog-loading" aria-label="正在读取签名结算"><span /><span /><span /></div>
         : projection ? (
           <>
-            <div className="status-overview compact-overview">
-              {projection.balances.map((balance) => <article key={`${balance.asset}:${balance.purpose}:${balance.state}`}><span>{balance.asset} · {balance.purpose}</span><strong>{balance.amount}</strong><small>{balance.state}</small></article>)}
-            </div>
+            {projection.balances.length || projection.points.length ? <div className="status-overview compact-overview">
+              {projection.balances.map((balance) => <article key={`${balance.asset}:${balance.purpose}:${balance.rewardSubtype ?? 'NONE'}:${balance.state}`}><span>{balance.asset} · {balance.purpose}</span><strong>{balance.amount}</strong><small>{balance.rewardSubtype ?? 'NO_SUBTYPE'} · {balance.state}</small></article>)}
+              {projection.points.map((points) => <article key={`${points.pointsType}:${points.purpose}:${points.state}`}><span>{points.pointsType} backend points</span><strong>{points.amount}</strong><small>{points.state} · NON_TRANSFERABLE</small></article>)}
+            </div> : <div className="empty-inline"><WalletCards aria-hidden="true" /><div><strong>当前钱包没有资产或 BNM points 余额</strong><p>这是 Core 返回的真实空投影。</p></div></div>}
             {projection.requests.length ? (
               <div className="table-scroll"><table className="data-table"><thead><tr><th>申请</th><th>Rail / Asset</th><th>金额</th><th>状态</th><th>Safe TxHash</th></tr></thead><tbody>{projection.requests.map((request) => <tr key={request.request_id}><td><code>{request.request_id}</code><small>{request.requested_at}</small></td><td><strong>{request.rail}</strong><small>{request.asset}</small></td><td><strong>{request.amount}</strong><small>{request.recipient_address}</small></td><td><span className="status-chip status-ready"><CheckCircle2 aria-hidden="true" />{request.state}</span></td><td><code>{request.final_safe_tx_hash ?? '等待最终确认'}</code></td></tr>)}</tbody></table></div>
             ) : <div className="empty-inline"><WalletCards aria-hidden="true" /><div><strong>当前钱包没有结算申请</strong><p>这是 Core 返回的真实空列表。</p></div></div>}
