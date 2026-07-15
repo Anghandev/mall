@@ -11,7 +11,7 @@ pnpm --filter @abu24k/merchant check
 ```
 
 The app consumes the coordinated `@abu24k/core-artifacts` workspace package at
-`2.0.0-settlement-admin.8`. In addition to Bootstrap, merchant SIWE and the
+`2.0.0-settlement-admin.9`. In addition to Bootstrap, merchant SIWE and the
 payment/fulfillment surfaces, the workbench consumes merchant finance,
 guarantee-deposit evidence, settlement intents, signed settlement requests and
 Safe-finality history. The help center reads wallet-targeted published CMS
