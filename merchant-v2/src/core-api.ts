@@ -3,6 +3,9 @@ import {
   allowedActionReasonCodes,
   artifactVersion,
   balanceStates,
+  catalogProductActions,
+  catalogProductLifecycleStates,
+  catalogTaxonomyStatuses,
   cmsContentTypes,
   coreErrorCodes,
   fulfillmentAssets,
@@ -14,6 +17,9 @@ import {
   logisticsProviders,
   logisticsStatuses,
   merchantGuaranteeDepositStates,
+  mediaContentTypes,
+  mediaPurposes,
+  mediaResourceTypes,
   orderFinalityStatuses,
   orderProjectionStates,
   rewardSubtypes,
@@ -25,8 +31,13 @@ import {
   type AllowedAction,
   type AllowedActionName,
   type AllowedActionReasonCode,
+  type CatalogCategory,
   type CatalogProduct,
+  type CatalogProductAction,
+  type CatalogProductLifecycleState,
   type CatalogSku,
+  type CatalogTag,
+  type CatalogWriteLock,
   type CmsPublicItem,
   type CoreErrorCode,
   type ForcedReceiptRequestResult,
@@ -40,6 +51,16 @@ import {
   type GuaranteeDepositProjection,
   type GuaranteeDepositRequest,
   type LogisticsProjection,
+  type JsonObject,
+  type ManagedCatalogProduct,
+  type ManagedCatalogSku,
+  type MediaAssetProjection,
+  type MediaContentType,
+  type MediaPurpose,
+  type MediaReadAccessProjection,
+  type MediaResourceType,
+  type MediaUploadIntentProjection,
+  type MerchantConcessionPreview,
   type MerchantFinanceProjection,
   type MerchantStore,
   type PickupVerificationRequest,
@@ -52,6 +73,8 @@ import {
   type SettlementListProjection,
   type SettlementRequestProjection,
   type SettlementRequestSubmission,
+  type ProductSlotInput,
+  type ProductSlotProjection,
   type UserRole,
 } from '@abu24k/core-artifacts';
 
@@ -79,6 +102,12 @@ const cmsContentTypeSet = new Set<string>(cmsContentTypes);
 const settlementAssetSet = new Set<string>(['USDT', 'NPL']);
 const rewardSubtypeSet = new Set<string>(rewardSubtypes);
 const bnmPointStateSet = new Set<string>(['LOCKED', 'AVAILABLE']);
+const catalogProductActionSet = new Set<string>(catalogProductActions);
+const catalogProductLifecycleSet = new Set<string>(catalogProductLifecycleStates);
+const catalogTaxonomyStatusSet = new Set<string>(catalogTaxonomyStatuses);
+const mediaContentTypeSet = new Set<string>(mediaContentTypes);
+const mediaPurposeSet = new Set<string>(mediaPurposes);
+const mediaResourceTypeSet = new Set<string>(mediaResourceTypes);
 
 export interface CoreReadiness {
   chainId: 56;
@@ -109,11 +138,74 @@ export interface MerchantSession {
   roles: readonly UserRole[];
 }
 
+export interface ConcessionPreviewRequest {
+  merchantConcessionBps: number;
+  idempotencyKey: string;
+}
+
+export interface ProductReviewSubmissionRequest {
+  previewId: string;
+  idempotencyKey: string;
+}
+
+export interface CatalogReasonRequest {
+  reasonCode: string;
+  idempotencyKey: string;
+}
+
+export interface MediaUploadIntentRequest {
+  purpose: MediaPurpose;
+  resourceType: MediaResourceType;
+  resourceId: string;
+  contentType: MediaContentType;
+  sizeBytes: number;
+  contentSha256: string;
+  idempotencyKey: string;
+}
+
 export interface CoreApi {
   bootstrap(): Promise<CoreBootstrap>;
   createSiweChallenge(walletAddress: string): Promise<SiweChallenge>;
   verifySiwe(message: string, signature: string): Promise<MerchantSession>;
   listCatalog(): Promise<readonly CatalogProduct[]>;
+  listCatalogCategories(): Promise<readonly CatalogCategory[]>;
+  listCatalogTags(): Promise<readonly CatalogTag[]>;
+  listMerchantStores(): Promise<readonly MerchantStore[]>;
+  getMerchantProductSlot(storeId: string, token: string): Promise<ProductSlotProjection>;
+  saveMerchantProductSlot(
+    storeId: string,
+    input: ProductSlotInput,
+    token: string,
+  ): Promise<ManagedCatalogProduct>;
+  createMerchantConcessionPreview(
+    productId: string,
+    input: ConcessionPreviewRequest,
+    token: string,
+  ): Promise<MerchantConcessionPreview>;
+  submitMerchantProductReview(
+    productId: string,
+    input: ProductReviewSubmissionRequest,
+    token: string,
+  ): Promise<ManagedCatalogProduct>;
+  delistMerchantProduct(
+    productId: string,
+    input: CatalogReasonRequest,
+    token: string,
+  ): Promise<ManagedCatalogProduct>;
+  createMediaUploadIntent(
+    input: MediaUploadIntentRequest,
+    token: string,
+    ownerWallet: string,
+  ): Promise<MediaUploadIntentProjection>;
+  completeMediaUpload(
+    uploadIntent: MediaUploadIntentProjection,
+    token: string,
+  ): Promise<MediaAssetProjection>;
+  getMediaReadAccess(
+    assetId: string,
+    token: string,
+    expected?: { resourceType: MediaResourceType; resourceId: string; purpose: MediaPurpose },
+  ): Promise<MediaReadAccessProjection>;
   listFulfillmentOrders(token: string): Promise<readonly FulfillmentOrder[]>;
   getOrderFulfillmentTarget(orderId: string, token: string): Promise<FulfillmentTarget>;
   getOrderAllowedActions(orderId: string, token: string): Promise<readonly AllowedAction[]>;
@@ -145,16 +237,19 @@ export interface CoreApi {
 export class CoreApiError extends Error {
   readonly code: CoreErrorCode | 'InvalidResponse' | 'NetworkUnavailable';
   readonly correlationId: string | undefined;
+  readonly blockingResource: CatalogWriteLock | undefined;
 
   constructor(
     code: CoreErrorCode | 'InvalidResponse' | 'NetworkUnavailable',
     message: string,
     correlationId?: string,
+    blockingResource?: CatalogWriteLock,
   ) {
     super(message);
     this.name = 'CoreApiError';
     this.code = code;
     this.correlationId = correlationId;
+    this.blockingResource = blockingResource;
   }
 }
 
@@ -210,6 +305,102 @@ export function createCoreApi(baseUrl = import.meta.env.VITE_CORE_API_BASE_URL ?
       const body = await request(normalizedBaseUrl, '/v2/catalog/products');
       const value = record(body, 'catalog response');
       return array(value.products, 'products').map(parseCatalogProduct);
+    },
+
+    async listCatalogCategories() {
+      const body = await request(normalizedBaseUrl, '/v2/catalog/categories');
+      return array(record(body, 'catalog categories response').categories, 'categories')
+        .map(parseCatalogCategory);
+    },
+
+    async listCatalogTags() {
+      const body = await request(normalizedBaseUrl, '/v2/catalog/tags');
+      return array(record(body, 'catalog tags response').tags, 'tags').map(parseCatalogTag);
+    },
+
+    async listMerchantStores() {
+      const body = await request(normalizedBaseUrl, '/v2/stores');
+      return array(record(body, 'merchant stores response').stores, 'stores').map(parseMerchantStore);
+    },
+
+    async getMerchantProductSlot(storeId, token) {
+      const body = await request(
+        normalizedBaseUrl,
+        `/v2/merchant/stores/${encodeURIComponent(storeId)}/product-slot`,
+        { token },
+      );
+      return parseProductSlot(body, storeId);
+    },
+
+    async saveMerchantProductSlot(storeId, input, token) {
+      const body = await request(
+        normalizedBaseUrl,
+        `/v2/merchant/stores/${encodeURIComponent(storeId)}/product-slot`,
+        { method: 'PUT', body: JSON.stringify(input), token },
+      );
+      const product = parseManagedCatalogProduct(body);
+      exact(product.storeId, storeId, 'saved product storeId');
+      return product;
+    },
+
+    async createMerchantConcessionPreview(productId, input, token) {
+      const body = await request(
+        normalizedBaseUrl,
+        `/v2/merchant/products/${encodeURIComponent(productId)}/concession-previews`,
+        { method: 'POST', body: JSON.stringify(input), token },
+      );
+      return parseMerchantConcessionPreview(body, productId, input.merchantConcessionBps);
+    },
+
+    async submitMerchantProductReview(productId, input, token) {
+      const body = await request(
+        normalizedBaseUrl,
+        `/v2/merchant/products/${encodeURIComponent(productId)}/review-submissions`,
+        { method: 'POST', body: JSON.stringify(input), token },
+      );
+      const product = parseManagedCatalogProduct(body);
+      exact(product.productId, productId, 'submitted productId');
+      exact(product.lifecycleState, 'REVIEW', 'submitted product lifecycleState');
+      return product;
+    },
+
+    async delistMerchantProduct(productId, input, token) {
+      const body = await request(
+        normalizedBaseUrl,
+        `/v2/merchant/products/${encodeURIComponent(productId)}/delist`,
+        { method: 'POST', body: JSON.stringify(input), token },
+      );
+      const product = parseManagedCatalogProduct(body);
+      exact(product.productId, productId, 'delisted productId');
+      exact(product.lifecycleState, 'DELISTED', 'delisted product lifecycleState');
+      return product;
+    },
+
+    async createMediaUploadIntent(input, token, ownerWallet) {
+      const body = await request(normalizedBaseUrl, '/v2/media/upload-intents', {
+        method: 'POST',
+        body: JSON.stringify(input),
+        token,
+      });
+      return parseMediaUploadIntent(body, input, ownerWallet);
+    },
+
+    async completeMediaUpload(uploadIntent, token) {
+      const body = await request(
+        normalizedBaseUrl,
+        `/v2/media/upload-intents/${encodeURIComponent(uploadIntent.uploadIntentId)}/complete`,
+        { method: 'POST', body: '{}', token },
+      );
+      return parseMediaAsset(body, uploadIntent);
+    },
+
+    async getMediaReadAccess(assetId, token, expected) {
+      const body = await request(
+        normalizedBaseUrl,
+        `/v2/media/assets/${encodeURIComponent(assetId)}/access`,
+        { token },
+      );
+      return parseMediaReadAccess(body, assetId, expected);
     },
 
     async listFulfillmentOrders(token) {
@@ -306,6 +497,32 @@ export function createCoreApi(baseUrl = import.meta.env.VITE_CORE_API_BASE_URL ?
   };
 }
 
+export async function sha256File(file: File) {
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return `0x${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
+export async function putMediaFile(uploadIntent: MediaUploadIntentProjection, file: File) {
+  exact(uploadIntent.method, 'PUT', 'media upload method');
+  exact(String(file.size), uploadIntent.sizeBytes, 'media upload size');
+  exact(file.type, uploadIntent.contentType, 'media upload content type');
+  const headers = new Headers(uploadIntent.headers);
+  if (!headers.has('content-type')) headers.set('content-type', uploadIntent.contentType);
+  let response: Response;
+  try {
+    response = await fetch(uploadIntent.uploadUrl, {
+      method: 'PUT',
+      headers,
+      body: file,
+    });
+  } catch {
+    throw new CoreApiError('NetworkUnavailable', '媒体文件上传失败，请检查网络后重试。');
+  }
+  if (!response.ok) {
+    throw new CoreApiError('ExternalBlocked', '媒体存储服务拒绝了文件上传。');
+  }
+}
+
 async function request(baseUrl: string, path: string, options: { method?: string; body?: string; token?: string } = {}) {
   let response: Response;
   const controller = new AbortController();
@@ -349,7 +566,11 @@ async function request(baseUrl: string, path: string, options: { method?: string
   const message = typeof error?.message === 'string' && error.message.length > 0
     ? error.message
     : 'Core 请求失败。';
-  throw new CoreApiError(code, message, correlationId);
+  const details = recordOrUndefined(error?.details);
+  const blockingResource = details?.blockingResource === undefined
+    ? undefined
+    : parseCatalogWriteLock(details.blockingResource);
+  throw new CoreApiError(code, message, correlationId, blockingResource);
 }
 
 function parseReadiness(input: unknown): CoreReadiness {
@@ -391,6 +612,9 @@ function parseCatalogProduct(input: unknown): CatalogProduct {
     chainProductId: bytes32(value.chainProductId, 'chainProductId'),
     title: string(value.title, 'title'),
     metadata,
+    mainImageAssetIds: array(value.mainImageAssetIds, 'product.mainImageAssetIds')
+      .map((assetId) => bytes32(assetId, 'product.mainImageAssetId')),
+    videoAssetId: nullableBytes32(value.videoAssetId, 'product.videoAssetId'),
     skus: array(value.skus, 'skus').map(parseCatalogSku),
   };
 }
@@ -403,6 +627,419 @@ function parseCatalogSku(input: unknown): CatalogSku {
     attributes: record(value.attributes, 'sku.attributes'),
     listPriceUsdt: atomicAmount(value.listPriceUsdt, 'listPriceUsdt'),
     stockAvailable: atomicAmount(value.stockAvailable, 'stockAvailable'),
+  };
+}
+
+function parseCatalogCategory(input: unknown): CatalogCategory {
+  const value = record(input, 'catalog category');
+  const serviceFee = record(value.serviceFee, 'category.serviceFee');
+  const state = enumValue<'Frozen' | 'DecisionBlocked'>(
+    serviceFee.state,
+    new Set(['Frozen', 'DecisionBlocked']),
+    'category.serviceFee.state',
+  );
+  const valueBps = serviceFee.valueBps === null ? null : bps(serviceFee.valueBps, 'category.serviceFee.valueBps');
+  if ((state === 'Frozen') !== (valueBps !== null)) invalid('category service-fee state and value do not match');
+  return {
+    categoryId: string(value.categoryId, 'category.categoryId'),
+    version: atomicAmount(value.version, 'category.version'),
+    parentCategoryId: nullableString(value.parentCategoryId, 'category.parentCategoryId'),
+    level: enumNumber<1 | 2 | 3>(value.level, new Set([1, 2, 3]), 'category.level'),
+    name: string(value.name, 'category.name'),
+    iconAssetId: nullableBytes32(value.iconAssetId, 'category.iconAssetId'),
+    sortOrder: nonNegativeInteger(value.sortOrder, 'category.sortOrder'),
+    status: enumValue(value.status, catalogTaxonomyStatusSet, 'category.status'),
+    serviceFee: { state, valueBps },
+  };
+}
+
+function parseCatalogTag(input: unknown): CatalogTag {
+  const value = record(input, 'catalog tag');
+  return {
+    tagId: string(value.tagId, 'tag.tagId'),
+    version: atomicAmount(value.version, 'tag.version'),
+    name: string(value.name, 'tag.name'),
+    example: optionalString(value.example, 'tag.example'),
+    sortOrder: nonNegativeInteger(value.sortOrder, 'tag.sortOrder'),
+    status: enumValue(value.status, catalogTaxonomyStatusSet, 'tag.status'),
+  };
+}
+
+function parseProductSlot(input: unknown, expectedStoreId: string): ProductSlotProjection {
+  const value = record(input, 'merchant product slot');
+  exact(value.artifactVersion, artifactVersion, 'product slot artifactVersion');
+  const storeId = string(value.storeId, 'product slot storeId');
+  exact(storeId, expectedStoreId, 'product slot storeId');
+  const merchantId = string(value.merchantId, 'product slot merchantId');
+  const product = value.product === null ? null : parseManagedCatalogProduct(value.product);
+  if (product) {
+    exact(product.storeId, storeId, 'product slot product storeId');
+    exact(product.merchantId, merchantId, 'product slot product merchantId');
+  }
+  return {
+    artifactVersion,
+    storeId,
+    merchantId,
+    product,
+    allowedActions: parseCatalogProductActions(value.allowedActions, 'product slot allowedActions'),
+    writeLock: value.writeLock === null ? null : parseCatalogWriteLock(value.writeLock),
+  };
+}
+
+function parseManagedCatalogProduct(input: unknown): ManagedCatalogProduct {
+  const value = record(input, 'managed catalog product');
+  exact(value.artifactVersion, artifactVersion, 'managed product artifactVersion');
+  const productId = string(value.productId, 'managed product.productId');
+  return {
+    artifactVersion,
+    productId,
+    chainProductId: bytes32(value.chainProductId, 'managed product.chainProductId'),
+    merchantId: string(value.merchantId, 'managed product.merchantId'),
+    storeId: nullableString(value.storeId, 'managed product.storeId'),
+    supersedesProductId: nullableString(value.supersedesProductId, 'managed product.supersedesProductId'),
+    version: atomicAmount(value.version, 'managed product.version'),
+    title: string(value.title, 'managed product.title'),
+    subtitle: optionalString(value.subtitle, 'managed product.subtitle'),
+    lifecycleState: enumValue<CatalogProductLifecycleState>(
+      value.lifecycleState,
+      catalogProductLifecycleSet,
+      'managed product.lifecycleState',
+    ),
+    productPolicyHash: bytes32(value.productPolicyHash, 'managed product.productPolicyHash'),
+    merchantConcessionBps: bps(value.merchantConcessionBps, 'managed product.merchantConcessionBps'),
+    mainImageAssetIds: array(value.mainImageAssetIds, 'managed product.mainImageAssetIds')
+      .map((assetId) => bytes32(assetId, 'managed product.mainImageAssetId')),
+    videoAssetId: nullableBytes32(value.videoAssetId, 'managed product.videoAssetId'),
+    richDetail: jsonObject(value.richDetail, 'managed product.richDetail'),
+    defaultFreightUsdt: atomicAmount(value.defaultFreightUsdt, 'managed product.defaultFreightUsdt'),
+    fulfillmentModes: array(value.fulfillmentModes, 'managed product.fulfillmentModes')
+      .map((mode) => enumValue(mode, fulfillmentModeSet, 'managed product.fulfillmentMode')),
+    categoryId: nullableString(value.categoryId, 'managed product.categoryId'),
+    tagIds: stringArray(value.tagIds, 'managed product.tagIds'),
+    skus: array(value.skus, 'managed product.skus').map(parseManagedCatalogSku),
+    allowedActions: parseCatalogProductActions(value.allowedActions, 'managed product.allowedActions'),
+    writeLock: value.writeLock === null ? null : parseCatalogWriteLock(value.writeLock),
+    createdAt: dateTime(value.createdAt, 'managed product.createdAt'),
+    updatedAt: dateTime(value.updatedAt, 'managed product.updatedAt'),
+  };
+}
+
+function parseManagedCatalogSku(input: unknown): ManagedCatalogSku {
+  const value = record(input, 'managed catalog SKU');
+  return {
+    skuId: string(value.skuId, 'managed SKU.skuId'),
+    chainSkuId: bytes32(value.chainSkuId, 'managed SKU.chainSkuId'),
+    version: atomicAmount(value.version, 'managed SKU.version'),
+    attributes: jsonObject(value.attributes, 'managed SKU.attributes'),
+    listPriceUsdt: atomicAmount(value.listPriceUsdt, 'managed SKU.listPriceUsdt'),
+    merchantBaseReceivableUsdt: atomicAmount(
+      value.merchantBaseReceivableUsdt,
+      'managed SKU.merchantBaseReceivableUsdt',
+    ),
+    stockTotal: atomicAmount(value.stockTotal, 'managed SKU.stockTotal'),
+    stockAvailable: atomicAmount(value.stockAvailable, 'managed SKU.stockAvailable'),
+    stockReserved: atomicAmount(value.stockReserved, 'managed SKU.stockReserved'),
+    proposedSeckillInventory: atomicAmount(
+      value.proposedSeckillInventory,
+      'managed SKU.proposedSeckillInventory',
+    ),
+    lifecycleState: enumValue<CatalogProductLifecycleState>(
+      value.lifecycleState,
+      catalogProductLifecycleSet,
+      'managed SKU.lifecycleState',
+    ),
+  };
+}
+
+function parseCatalogProductActions(input: unknown, name: string) {
+  return array(input, name).map((action) => enumValue<CatalogProductAction>(action, catalogProductActionSet, name));
+}
+
+function parseCatalogWriteLock(input: unknown): CatalogWriteLock {
+  const value = record(input, 'catalog write lock');
+  return {
+    type: string(value.type, 'writeLock.type'),
+    id: string(value.id, 'writeLock.id'),
+    state: string(value.state, 'writeLock.state'),
+  };
+}
+
+function parseMerchantConcessionPreview(
+  input: unknown,
+  expectedProductId: string,
+  expectedConcessionBps: number,
+): MerchantConcessionPreview {
+  const value = record(input, 'merchant concession preview');
+  exact(value.artifactVersion, artifactVersion, 'concession preview artifactVersion');
+  const productId = string(value.productId, 'concession preview.productId');
+  exact(productId, expectedProductId, 'concession preview.productId');
+  const productVersion = atomicAmount(value.productVersion, 'concession preview.productVersion');
+  const merchantId = string(value.merchantId, 'concession preview.merchantId');
+  const policyVersion = atomicAmount(value.policyVersion, 'concession preview.policyVersion');
+  const merchantConcessionBps = bps(value.merchantConcessionBps, 'concession preview.merchantConcessionBps');
+  exact(merchantConcessionBps, expectedConcessionBps, 'concession preview.merchantConcessionBps');
+  const previewId = bytes32(value.previewId, 'concession preview.previewId');
+  const catalogFingerprint = bytes32(value.catalogFingerprint, 'concession preview.catalogFingerprint');
+  const destinationSetHash = bytes32(value.destinationSetHash, 'concession preview.destinationSetHash');
+  const previewHash = bytes32(value.previewHash, 'concession preview.previewHash');
+  const expiresAt = dateTime(value.expiresAt, 'concession preview.expiresAt');
+  const payloadValue = record(value.payload, 'concession preview.payload');
+  exact(payloadValue.artifactVersion, artifactVersion, 'concession preview payload artifactVersion');
+  exact(string(payloadValue.productId, 'concession preview payload.productId'), productId, 'preview payload productId');
+  exact(
+    String(positiveInteger(payloadValue.productVersion, 'concession preview payload.productVersion')),
+    productVersion,
+    'preview payload productVersion',
+  );
+  exact(string(payloadValue.merchantId, 'concession preview payload.merchantId'), merchantId, 'preview payload merchantId');
+  exact(
+    String(positiveInteger(payloadValue.policyVersion, 'concession preview payload.policyVersion')),
+    policyVersion,
+    'preview payload policyVersion',
+  );
+  exact(
+    bps(payloadValue.merchantConcessionBps, 'concession preview payload.merchantConcessionBps'),
+    merchantConcessionBps,
+    'preview payload merchantConcessionBps',
+  );
+  exact(
+    bytes32(payloadValue.destinationSetHash, 'concession preview payload.destinationSetHash'),
+    destinationSetHash,
+    'preview payload destinationSetHash',
+  );
+  exact(
+    bytes32(payloadValue.catalogFingerprint, 'concession preview payload.catalogFingerprint'),
+    catalogFingerprint,
+    'preview payload catalogFingerprint',
+  );
+  exact(dateTime(payloadValue.expiresAt, 'concession preview payload.expiresAt'), expiresAt, 'preview payload expiresAt');
+  const items = array(payloadValue.items, 'concession preview payload.items').map((itemInput) => {
+    const item = record(itemInput, 'concession preview item');
+    const concessionAmount = atomicAmount(item.merchantConcessionAmount, 'preview item.merchantConcessionAmount');
+    const allocations = array(item.allocations, 'preview item.allocations').map((allocationInput) => {
+      const allocation = record(allocationInput, 'concession allocation');
+      return {
+        account: address(allocation.account, 'concession allocation.account'),
+        amount: atomicAmount(allocation.amount, 'concession allocation.amount'),
+      };
+    });
+    if (allocations.reduce((total, allocation) => total + BigInt(allocation.amount), 0n) !== BigInt(concessionAmount)) {
+      invalid('concession allocation total does not match the authoritative concession amount');
+    }
+    const base = atomicAmount(item.merchantBaseReceivableUsdt, 'preview item.merchantBaseReceivableUsdt');
+    const net = atomicAmount(item.merchantNetReceivableUsdt, 'preview item.merchantNetReceivableUsdt');
+    if (BigInt(base) - BigInt(concessionAmount) !== BigInt(net)) {
+      invalid('merchant net receivable does not reconcile to the signed preview');
+    }
+    const itemBps = bps(item.merchantConcessionBps, 'preview item.merchantConcessionBps');
+    exact(itemBps, merchantConcessionBps, 'preview item.merchantConcessionBps');
+    return {
+      skuId: string(item.skuId, 'preview item.skuId'),
+      merchantBaseReceivableUsdt: base,
+      merchantConcessionBps: itemBps,
+      merchantConcessionAmount: concessionAmount,
+      merchantNetReceivableUsdt: net,
+      allocations,
+    };
+  });
+  if (items.length === 0) invalid('concession preview requires at least one item');
+  const payload = {
+    artifactVersion,
+    productId,
+    productVersion: Number(productVersion),
+    merchantId,
+    policyVersion: Number(policyVersion),
+    merchantConcessionBps,
+    destinationSetHash,
+    catalogFingerprint,
+    items,
+    expiresAt,
+  } as const;
+  const authorization = parseCatalogAuthorization(value.authorization, {
+    previewId,
+    previewHash,
+    policyVersion: Number(policyVersion),
+    expiresAt,
+  });
+  return {
+    artifactVersion,
+    previewId,
+    productId,
+    productVersion,
+    merchantId,
+    policyVersion,
+    merchantConcessionBps,
+    catalogFingerprint,
+    destinationSetHash,
+    previewHash,
+    payload,
+    authorization,
+    expiresAt,
+    createdAt: dateTime(value.createdAt, 'concession preview.createdAt'),
+  };
+}
+
+function parseCatalogAuthorization(input: unknown, expected: {
+  previewId: string;
+  previewHash: string;
+  policyVersion: number;
+  expiresAt: string;
+}): MerchantConcessionPreview['authorization'] {
+  const value = record(input, 'concession preview authorization');
+  const domain = record(value.domain, 'concession authorization.domain');
+  exactObjectKeys(domain, ['name', 'version', 'chainId'], 'concession authorization.domain');
+  exact(domain.name, 'Abu24KCatalog', 'concession authorization.domain.name');
+  exact(domain.version, '2', 'concession authorization.domain.version');
+  exact(domain.chainId, 56, 'concession authorization.domain.chainId');
+  const types = record(value.types, 'concession authorization.types');
+  exactObjectKeys(types, ['MerchantConcessionPreview'], 'concession authorization.types');
+  const fields = array(types.MerchantConcessionPreview, 'concession authorization type fields');
+  const expectedFields = [
+    ['previewHash', 'bytes32'],
+    ['previewId', 'bytes32'],
+    ['productIdHash', 'bytes32'],
+    ['policyVersion', 'uint64'],
+    ['expiresAt', 'uint64'],
+  ] as const;
+  if (fields.length !== expectedFields.length) invalid('concession authorization type fields do not match');
+  fields.forEach((field, index) => {
+    const parsed = record(field, `concession authorization field ${index}`);
+    exactObjectKeys(parsed, ['name', 'type'], `concession authorization field ${index}`);
+    exact(parsed.name, expectedFields[index]![0], `concession authorization field ${index} name`);
+    exact(parsed.type, expectedFields[index]![1], `concession authorization field ${index} type`);
+  });
+  exact(value.primaryType, 'MerchantConcessionPreview', 'concession authorization.primaryType');
+  const message = record(value.message, 'concession authorization.message');
+  exactObjectKeys(
+    message,
+    ['previewHash', 'previewId', 'productIdHash', 'policyVersion', 'expiresAt'],
+    'concession authorization.message',
+  );
+  exact(bytes32(message.previewHash, 'authorization.message.previewHash'), expected.previewHash, 'authorization previewHash');
+  exact(bytes32(message.previewId, 'authorization.message.previewId'), expected.previewId, 'authorization previewId');
+  bytes32(message.productIdHash, 'authorization.message.productIdHash');
+  exact(message.policyVersion, expected.policyVersion, 'authorization policyVersion');
+  exact(
+    message.expiresAt,
+    Math.floor(new Date(expected.expiresAt).getTime() / 1000),
+    'authorization expiresAt',
+  );
+  const signature = string(value.signature, 'concession authorization.signature');
+  if (!/^0x[0-9a-fA-F]+$/.test(signature)) invalid('concession authorization.signature must be hexadecimal');
+  return {
+    domain,
+    types,
+    primaryType: 'MerchantConcessionPreview',
+    message,
+    digest: bytes32(value.digest, 'concession authorization.digest'),
+    signature,
+    signer: address(value.signer, 'concession authorization.signer'),
+  };
+}
+
+function parseMediaUploadIntent(
+  input: unknown,
+  expected: MediaUploadIntentRequest,
+  expectedOwnerWallet: string,
+): MediaUploadIntentProjection {
+  const value = record(input, 'media upload intent');
+  exact(value.artifactVersion, artifactVersion, 'media upload artifactVersion');
+  exact(address(value.ownerWallet, 'media upload.ownerWallet').toLowerCase(), expectedOwnerWallet.toLowerCase(), 'media upload owner');
+  exact(value.purpose, expected.purpose, 'media upload purpose');
+  exact(value.resourceType, expected.resourceType, 'media upload resourceType');
+  exact(value.resourceId, expected.resourceId, 'media upload resourceId');
+  exact(value.contentType, expected.contentType, 'media upload contentType');
+  exact(atomicAmount(value.sizeBytes, 'media upload.sizeBytes'), String(expected.sizeBytes), 'media upload sizeBytes');
+  exact(bytes32(value.contentSha256, 'media upload.contentSha256').toLowerCase(), expected.contentSha256.toLowerCase(), 'media upload contentSha256');
+  exact(value.state, 'UPLOADED', 'media upload state');
+  exact(value.method, 'PUT', 'media upload method');
+  exact(value.writeOnce, true, 'media upload writeOnce');
+  const headersValue = record(value.headers, 'media upload.headers');
+  const headers: Record<string, string> = {};
+  Object.entries(headersValue).forEach(([name, headerValue]) => {
+    headers[name] = string(headerValue, `media upload header ${name}`);
+  });
+  return {
+    artifactVersion,
+    uploadIntentId: bytes32(value.uploadIntentId, 'media upload.uploadIntentId'),
+    ownerWallet: address(value.ownerWallet, 'media upload.ownerWallet'),
+    purpose: enumValue(value.purpose, mediaPurposeSet, 'media upload.purpose'),
+    resourceType: enumValue(value.resourceType, mediaResourceTypeSet, 'media upload.resourceType'),
+    resourceId: string(value.resourceId, 'media upload.resourceId'),
+    contentType: enumValue(value.contentType, mediaContentTypeSet, 'media upload.contentType'),
+    sizeBytes: atomicAmount(value.sizeBytes, 'media upload.sizeBytes'),
+    contentSha256: bytes32(value.contentSha256, 'media upload.contentSha256'),
+    state: 'UPLOADED',
+    expiresAt: dateTime(value.expiresAt, 'media upload.expiresAt'),
+    method: 'PUT',
+    uploadUrl: absoluteUrl(value.uploadUrl, 'media upload.uploadUrl'),
+    headers,
+    providerReferenceHash: bytes32(value.providerReferenceHash, 'media upload.providerReferenceHash'),
+    writeOnce: true,
+  };
+}
+
+function parseMediaAsset(input: unknown, upload: MediaUploadIntentProjection): MediaAssetProjection {
+  const value = record(input, 'media asset');
+  exact(value.artifactVersion, artifactVersion, 'media asset artifactVersion');
+  exact(value.uploadIntentId, upload.uploadIntentId, 'media asset uploadIntentId');
+  exact(address(value.ownerWallet, 'media asset.ownerWallet').toLowerCase(), upload.ownerWallet.toLowerCase(), 'media asset owner');
+  exact(value.purpose, upload.purpose, 'media asset purpose');
+  exact(value.resourceType, upload.resourceType, 'media asset resourceType');
+  exact(value.resourceId, upload.resourceId, 'media asset resourceId');
+  exact(value.contentType, upload.contentType, 'media asset contentType');
+  exact(value.sizeBytes, upload.sizeBytes, 'media asset sizeBytes');
+  exact(bytes32(value.contentSha256, 'media asset.contentSha256').toLowerCase(), upload.contentSha256.toLowerCase(), 'media asset contentSha256');
+  return {
+    artifactVersion,
+    assetId: bytes32(value.assetId, 'media asset.assetId'),
+    uploadIntentId: upload.uploadIntentId,
+    ownerWallet: address(value.ownerWallet, 'media asset.ownerWallet'),
+    purpose: upload.purpose,
+    resourceType: upload.resourceType,
+    resourceId: upload.resourceId,
+    contentType: upload.contentType,
+    sizeBytes: upload.sizeBytes,
+    contentSha256: upload.contentSha256,
+    providerEvidenceHash: bytes32(value.providerEvidenceHash, 'media asset.providerEvidenceHash'),
+    objectVersionHash: bytes32(value.objectVersionHash, 'media asset.objectVersionHash'),
+    createdAt: dateTime(value.createdAt, 'media asset.createdAt'),
+  };
+}
+
+function parseMediaReadAccess(
+  input: unknown,
+  expectedAssetId: string,
+  expected?: { resourceType: MediaResourceType; resourceId: string; purpose: MediaPurpose },
+): MediaReadAccessProjection {
+  const value = record(input, 'media read access');
+  exact(value.artifactVersion, artifactVersion, 'media read artifactVersion');
+  const assetId = bytes32(value.assetId, 'media read.assetId');
+  exact(assetId, expectedAssetId, 'media read assetId');
+  const purpose = enumValue<MediaPurpose>(value.purpose, mediaPurposeSet, 'media read.purpose');
+  const resourceType = enumValue<MediaResourceType>(value.resourceType, mediaResourceTypeSet, 'media read.resourceType');
+  const resourceId = string(value.resourceId, 'media read.resourceId');
+  if (expected) {
+    exact(purpose, expected.purpose, 'media read purpose');
+    exact(resourceType, expected.resourceType, 'media read resourceType');
+    exact(resourceId, expected.resourceId, 'media read resourceId');
+  }
+  exact(value.method, 'GET', 'media read method');
+  return {
+    artifactVersion,
+    assetId,
+    purpose,
+    resourceType,
+    resourceId,
+    contentType: enumValue(value.contentType, mediaContentTypeSet, 'media read.contentType'),
+    sizeBytes: atomicAmount(value.sizeBytes, 'media read.sizeBytes'),
+    contentSha256: bytes32(value.contentSha256, 'media read.contentSha256'),
+    objectVersionHash: bytes32(value.objectVersionHash, 'media read.objectVersionHash'),
+    accessScope: enumValue(value.accessScope, new Set(['PUBLIC', 'AUTHENTICATED']), 'media read.accessScope'),
+    method: 'GET',
+    readUrl: absoluteUrl(value.readUrl, 'media read.readUrl'),
+    expiresAt: dateTime(value.expiresAt, 'media read.expiresAt'),
+    providerReferenceHash: bytes32(value.providerReferenceHash, 'media read.providerReferenceHash'),
   };
 }
 
@@ -993,6 +1630,11 @@ function string(input: unknown, name: string) {
   return input;
 }
 
+function optionalString(input: unknown, name: string) {
+  if (typeof input !== 'string') invalid(`${name} must be a string`);
+  return input;
+}
+
 function stringArray(input: unknown, name: string) {
   return array(input, name).map((value) => string(value, name));
 }
@@ -1006,6 +1648,11 @@ function enumValue<T extends string>(input: unknown, allowed: ReadonlySet<string
   const value = string(input, name);
   if (!allowed.has(value)) invalid(`${name} contains an unknown enum value`);
   return value as T;
+}
+
+function enumNumber<T extends number>(input: unknown, allowed: ReadonlySet<number>, name: string): T {
+  if (typeof input !== 'number' || !allowed.has(input)) invalid(`${name} contains an unknown enum value`);
+  return input as T;
 }
 
 function exact<T>(input: unknown, expected: T, name: string): asserts input is T {
@@ -1065,6 +1712,13 @@ function finiteNumber(input: unknown, name: string) {
   return input;
 }
 
+function bps(input: unknown, name: string) {
+  if (typeof input !== 'number' || !Number.isSafeInteger(input) || input < 0 || input > 10_000) {
+    invalid(`${name} must be an integer from 0 to 10000`);
+  }
+  return input;
+}
+
 function positiveInteger(input: unknown, name: string) {
   if (typeof input !== 'number' || !Number.isSafeInteger(input) || input < 1) {
     invalid(`${name} must be a positive integer`);
@@ -1093,6 +1747,31 @@ function exactObjectKeys(input: Record<string, unknown>, expected: readonly stri
   if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) {
     invalid(`${name} contains unexpected fields`);
   }
+}
+
+function absoluteUrl(input: unknown, name: string) {
+  const value = string(input, name);
+  try {
+    new URL(value);
+  } catch {
+    invalid(`${name} must be an absolute URL`);
+  }
+  return value;
+}
+
+function jsonObject(input: unknown, name: string): JsonObject {
+  const value = record(input, name);
+  const output: Record<string, JsonObject[string]> = {};
+  for (const [key, entry] of Object.entries(value)) output[key] = jsonValue(entry, `${name}.${key}`);
+  return output;
+}
+
+function jsonValue(input: unknown, name: string): JsonObject[string] {
+  if (input === null || typeof input === 'string' || typeof input === 'boolean') return input;
+  if (typeof input === 'number' && Number.isFinite(input)) return input;
+  if (Array.isArray(input)) return input.map((entry, index) => jsonValue(entry, `${name}[${index}]`));
+  if (typeof input === 'object') return jsonObject(input, name);
+  invalid(`${name} is not a JSON value`);
 }
 
 function invalid(message: string): never {

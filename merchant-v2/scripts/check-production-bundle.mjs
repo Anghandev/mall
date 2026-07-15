@@ -5,12 +5,15 @@ import { artifactVersion } from '@abu24k/core-artifacts';
 
 const dist = fileURLToPath(new URL('../dist/', import.meta.url));
 const textExtensions = new Set(['.css', '.html', '.js', '.map']);
+const coreBoundary = '支付、履约、结算、商品管理与媒体批次已发布';
 const forbidden = [
   'legacy/' + 'v1-npl-only',
   '__merchant_visual_review__',
   '2.0.0-rc.2',
   '2.0.0-payment.1',
   '2.0.0-fulfillment.1',
+  '2.0.0-settlement-admin.2',
+  '2.0.0-settlement-admin.3',
   'CLAIM_' + 'MERCHANT_USDT',
   'Payment' + 'Escrow',
   'Claim' + 'Vault',
@@ -30,7 +33,7 @@ for (const path of walk(dist)) {
   if (!textExtensions.has(extname(path))) continue;
   filesChecked += 1;
   const contents = readFileSync(path, 'utf8');
-  sawCoreBoundary ||= contents.includes('支付、履约与结算后台批次已发布');
+  sawCoreBoundary ||= contents.includes(coreBoundary);
   sawArtifactVersion ||= contents.includes(artifactVersion);
   for (const token of forbidden) {
     if (contents.includes(token)) throw new Error(`Production bundle contains forbidden token: ${token}`);
