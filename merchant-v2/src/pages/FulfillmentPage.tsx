@@ -7,9 +7,15 @@ import {
   type FulfillmentOrderCursor,
   type FulfillmentOrderPage,
   type FulfillmentTarget,
+  type MerchantStore,
   type OrderKind,
   type OrderProjectionState,
+  type PrintJob,
   type ShipmentBatchItemRequest,
+  type WaybillBatchRequest,
+  type WaybillBatchResult,
+  type WaybillProvider,
+  waybillProviders,
 } from '@abu24k/core-artifacts';
 import {
   Box,
@@ -38,7 +44,14 @@ type CommandState =
   | { phase: 'success'; message: string }
   | { phase: 'error'; message: string };
 
+type WaybillCommandState =
+  | { phase: 'idle' }
+  | { phase: 'submitting' }
+  | { phase: 'ready'; value: WaybillBatchResult }
+  | { phase: 'error'; message: string };
+
 type BatchCarrierCode = ShipmentBatchItemRequest['carrierCode'];
+type WaybillCarrierCode = WaybillBatchRequest['carrierCode'];
 type BatchItemDraft = Readonly<{
   carrierCode: BatchCarrierCode;
   trackingNumberHash: string;
@@ -76,6 +89,14 @@ export function FulfillmentPage() {
   const [pageIndex, setPageIndex] = useState(0);
   const [batchSelection, setBatchSelection] = useState<readonly string[]>([]);
   const [batchItems, setBatchItems] = useState<Readonly<Record<string, BatchItemDraft>>>({});
+  const [storesState, setStoresState] = useState<LoadState<readonly MerchantStore[]>>({ phase: 'idle' });
+  const [waybillProvider, setWaybillProvider] = useState<WaybillProvider>('KUAIDI100');
+  const [waybillCarrierCode, setWaybillCarrierCode] = useState<WaybillCarrierCode>('SF');
+  const [waybillStoreId, setWaybillStoreId] = useState('');
+  const [waybillState, setWaybillState] = useState<WaybillCommandState>({ phase: 'idle' });
+  const [printJobsState, setPrintJobsState] = useState<LoadState<readonly PrintJob[]>>({ phase: 'idle' });
+  const [retryingPrintJobId, setRetryingPrintJobId] = useState<string>();
+  const [printRetryError, setPrintRetryError] = useState<string>();
   const [carrierCode, setCarrierCode] = useState('');
   const [trackingNumberHash, setTrackingNumberHash] = useState('');
   const [shipmentEvidenceHash, setShipmentEvidenceHash] = useState('');
@@ -85,6 +106,8 @@ export function FulfillmentPage() {
   const [pickupEvidenceHash, setPickupEvidenceHash] = useState('');
   const commandKeys = useRef<Partial<Record<CommandKind, string>>>({});
   const batchItemKeys = useRef<Record<string, string>>({});
+  const waybillAttempt = useRef<{ fingerprint: string; key: string } | undefined>(undefined);
+  const printRetryKeys = useRef<Record<string, string>>({});
   const selectedOrderRef = useRef<string | undefined>(undefined);
   const sessionTokenRef = useRef(session?.token);
   sessionTokenRef.current = session?.token;
@@ -135,6 +158,43 @@ export function FulfillmentPage() {
     }
   }, [api, selectedOrderId, session]);
 
+  const loadStores = useCallback(async () => {
+    if (!session) {
+      setStoresState({ phase: 'idle' });
+      setWaybillStoreId('');
+      return;
+    }
+    const token = session.token;
+    setStoresState({ phase: 'loading' });
+    try {
+      const stores = (await api.listMerchantStores()).filter((store) => store.merchantId === session.merchantId);
+      if (sessionTokenRef.current !== token) return;
+      setStoresState({ phase: 'ready', value: stores });
+      setWaybillStoreId((current) => stores.some((store) => store.storeId === current)
+        ? current
+        : stores[0]?.storeId ?? '');
+    } catch (error) {
+      if (sessionTokenRef.current === token) setStoresState({ phase: 'error', message: readableError(error) });
+    }
+  }, [api, session]);
+
+  const loadPrintJobs = useCallback(async (quiet = false) => {
+    if (!session) {
+      setPrintJobsState({ phase: 'idle' });
+      return;
+    }
+    const token = session.token;
+    if (!quiet) setPrintJobsState({ phase: 'loading' });
+    try {
+      const jobs = await api.listMerchantPrintJobs(token, 100);
+      if (sessionTokenRef.current === token) setPrintJobsState({ phase: 'ready', value: jobs });
+    } catch (error) {
+      if (sessionTokenRef.current === token) {
+        setPrintJobsState({ phase: 'error', message: readableError(error) });
+      }
+    }
+  }, [api, session]);
+
   useEffect(() => {
     void loadOrders();
   }, [loadOrders]);
@@ -142,6 +202,11 @@ export function FulfillmentPage() {
   useEffect(() => {
     void loadTarget();
   }, [loadTarget]);
+
+  useEffect(() => {
+    void loadStores();
+    void loadPrintJobs();
+  }, [loadPrintJobs, loadStores]);
 
   const orders = ordersState.phase === 'ready' ? ordersState.value.orders : [];
   const selectedOrder = orders.find((order) => order.orderId === selectedOrderId);
@@ -156,6 +221,8 @@ export function FulfillmentPage() {
   );
   const columns = tab === 'delivery' ? deliveryColumns : pickupColumns;
   const submitting = commandState.phase === 'submitting';
+  const waybillSubmitting = waybillState.phase === 'submitting';
+  const operationPending = submitting || waybillSubmitting || Boolean(retryingPrintJobId);
   const canExecute = (action: AllowedActionName) => (
     Boolean(session && selectedOrder && targetMatchesOrder)
     && canExecuteOrderAction(action, allowedActions)
@@ -184,6 +251,28 @@ export function FulfillmentPage() {
         && bytes32Pattern.test(draft.evidenceHash)
         && canExecuteOrderAction('RECORD_SHIPMENT', order.allowedActions);
     });
+  const merchantStores = storesState.phase === 'ready' ? storesState.value : [];
+  const waybillStore = merchantStores.find((store) => store.storeId === waybillStoreId);
+  const waybillProviderReadiness = bootstrap.phase === 'ready'
+    ? bootstrap.value.readiness.providers[waybillProvider]
+    : undefined;
+  const waybillProviderReady = waybillProviderReadiness === 'READY';
+  const waybillValid = Boolean(
+    session
+    && waybillStore
+    && waybillStore.merchantId === session.merchantId
+    && waybillProviderReady
+    && selectedBatchOrders.length > 0
+    && selectedBatchOrders.length <= 100
+    && selectedBatchOrders.every((order) => (
+      order.fulfillmentMode === 'DELIVERY'
+      && canExecuteOrderAction('RECORD_SHIPMENT', order.allowedActions)
+    )),
+  );
+  const printJobs = printJobsState.phase === 'ready' ? printJobsState.value : [];
+  const selectedPickupJob = selectedOrder?.fulfillmentMode === 'PICKUP'
+    ? printJobs.find((job) => job.orderId === selectedOrder.orderId && job.jobKind === 'PICKUP_RECEIPT')
+    : undefined;
 
   function selectOrder(order: FulfillmentOrder) {
     selectedOrderRef.current = order.orderId;
@@ -209,6 +298,7 @@ export function FulfillmentPage() {
     setBatchItems({});
     delete commandKeys.current['batch-shipment'];
     batchItemKeys.current = {};
+    resetWaybillAttempt();
   }
 
   function changeTab(next: 'delivery' | 'pickup') {
@@ -272,7 +362,18 @@ export function FulfillmentPage() {
     });
     delete commandKeys.current['batch-shipment'];
     delete batchItemKeys.current[order.orderId];
+    resetWaybillAttempt();
     setCommandState({ phase: 'idle' });
+  }
+
+  function resetWaybillAttempt() {
+    waybillAttempt.current = undefined;
+    setWaybillState({ phase: 'idle' });
+  }
+
+  function updateWaybillInput(update: () => void) {
+    resetWaybillAttempt();
+    update();
   }
 
   function updateBatchItem(orderId: string, patch: Partial<BatchItemDraft>) {
@@ -309,6 +410,7 @@ export function FulfillmentPage() {
       setCommandState({ phase: 'success', message });
       void loadOrders(true);
       void loadTarget(true);
+      void loadPrintJobs(true);
     } catch (error) {
       setCommandState({ phase: 'error', message: readableError(error) });
     }
@@ -377,12 +479,57 @@ export function FulfillmentPage() {
     });
   }
 
+  async function submitWaybillBatch() {
+    if (!session || !waybillStore || !waybillValid || waybillSubmitting) return;
+    const orderIds = selectedBatchOrders.map((order) => order.orderId);
+    const fingerprint = [waybillProvider, waybillCarrierCode, waybillStore.storeId, ...orderIds].join(':');
+    const attempt = waybillAttempt.current?.fingerprint === fingerprint
+      ? waybillAttempt.current
+      : { fingerprint, key: idempotencyKeyForOrder('waybill-batch', orderIds.join('-')) };
+    waybillAttempt.current = attempt;
+    setWaybillState({ phase: 'submitting' });
+    try {
+      const result = await api.createMerchantWaybillBatch({
+        provider: waybillProvider,
+        carrierCode: waybillCarrierCode,
+        storeId: waybillStore.storeId,
+        orderIds,
+        idempotencyKey: attempt.key,
+      }, session.token);
+      setWaybillState({ phase: 'ready', value: result });
+      void loadOrders(true);
+      void loadPrintJobs(true);
+    } catch (error) {
+      setWaybillState({ phase: 'error', message: readableError(error) });
+    }
+  }
+
+  async function retryPrintJob(job: PrintJob) {
+    if (!session || job.state === 'ACCEPTED' || !job.provider || !job.deviceId || retryingPrintJobId) return;
+    const key = printRetryKeys.current[job.printJobId]
+      ?? idempotencyKeyForOrder('print-retry', job.printJobId);
+    printRetryKeys.current[job.printJobId] = key;
+    setRetryingPrintJobId(job.printJobId);
+    setPrintRetryError(undefined);
+    try {
+      const updated = await api.retryMerchantPrintJob(job.printJobId, key, session.token);
+      delete printRetryKeys.current[job.printJobId];
+      setPrintJobsState((state) => state.phase === 'ready'
+        ? { phase: 'ready', value: state.value.map((item) => item.printJobId === updated.printJobId ? updated : item) }
+        : state);
+    } catch (error) {
+      setPrintRetryError(readableError(error));
+    } finally {
+      setRetryingPrintJobId(undefined);
+    }
+  }
+
   return (
     <div className="page-stack">
       <PageHeader
         actions={(
           <div className="button-group">
-            <button className="button secondary" disabled type="button"><Printer aria-hidden="true" size={16} /> 批量打印</button>
+            <button className="button secondary" disabled={!session || printJobsState.phase === 'loading'} onClick={() => void loadPrintJobs()} type="button"><Printer aria-hidden="true" size={16} /> 刷新打印任务</button>
             <button className="button secondary" disabled type="button"><Download aria-hidden="true" size={16} /> 导出 Excel</button>
             <button className="button primary" disabled={!session || ordersState.phase === 'loading'} onClick={() => void loadOrders()} type="button"><RefreshCw aria-hidden="true" size={16} /> 刷新订单</button>
           </div>
@@ -424,7 +571,7 @@ export function FulfillmentPage() {
                   batchSelected={batchSelection.includes(order.orderId)}
                   onToggleBatch={() => toggleBatchOrder(order)}
                   selected={order.orderId === selectedOrderId}
-                  selectionDisabled={submitting}
+                  selectionDisabled={operationPending}
                   target={order.orderId === selectedOrderId ? selectedTarget : undefined}
                 />
               ))}
@@ -436,16 +583,32 @@ export function FulfillmentPage() {
           <div className="button-group"><button className="button secondary" disabled={pageIndex === 0 || ordersState.phase === 'loading'} onClick={goToPreviousPage} type="button">上一页</button><button className="button secondary" disabled={ordersState.phase !== 'ready' || !ordersState.value.nextCursor} onClick={goToNextPage} type="button">下一页</button></div>
         </div>
         {tab === 'delivery' && batchSelection.length > 0 ? (
+          <>
+          <form className="batch-shipment-panel waybill-panel" onSubmit={(event) => { event.preventDefault(); void submitWaybillBatch(); }}>
+            <div className="section-heading"><div><p className="eyebrow">Provider waybill batch</p><h3>电子面单与自动发货</h3></div><span>{batchSelection.length} / 100</span></div>
+            <div className="waybill-controls">
+              <div className="field"><label htmlFor="waybill-provider">面单服务</label><select disabled={operationPending} id="waybill-provider" onChange={(event) => updateWaybillInput(() => setWaybillProvider(event.target.value as WaybillProvider))} value={waybillProvider}>{waybillProviders.map((name) => <option key={name} value={name}>{name}</option>)}</select></div>
+              <div className="field"><label htmlFor="waybill-carrier">承运商</label><select disabled={operationPending} id="waybill-carrier" onChange={(event) => updateWaybillInput(() => setWaybillCarrierCode(event.target.value as WaybillCarrierCode))} value={waybillCarrierCode}>{batchCarrierCodes.map((code) => <option key={code} value={code}>{code}</option>)}</select></div>
+              <div className="field"><label htmlFor="waybill-store">发货门店</label><select disabled={operationPending || storesState.phase !== 'ready' || merchantStores.length === 0} id="waybill-store" onChange={(event) => updateWaybillInput(() => setWaybillStoreId(event.target.value))} value={waybillStoreId}><option value="">选择门店</option>{merchantStores.map((store) => <option key={store.storeId} value={store.storeId}>{store.name} / {store.storeId}</option>)}</select></div>
+            </div>
+            {storesState.phase === 'error' ? <p className="form-error" role="alert">{storesState.message}</p> : null}
+            {storesState.phase === 'ready' && merchantStores.length === 0 ? <p className="form-error" role="alert">ConfigurationRequired：当前商家没有可用发货门店。</p> : null}
+            {waybillProviderReadiness !== 'READY' ? <p className="form-error" role="alert">ConfigurationRequired：{waybillProvider} 服务未就绪，面单提交已关闭。</p> : null}
+            <div className="selection-bar"><span>Core 向服务商取号，写入真实 tracking number、发货证据和打印任务。</span><button className="button primary" disabled={!waybillValid || operationPending} type="submit"><Printer aria-hidden="true" size={16} /> {waybillSubmitting ? '正在创建面单' : '创建电子面单批次'}</button></div>
+            {waybillState.phase === 'error' ? <p className="form-error" role="alert">{waybillState.message}</p> : null}
+            {waybillState.phase === 'ready' ? <WaybillResults result={waybillState.value} /> : null}
+          </form>
           <form className="batch-shipment-panel" onSubmit={(event) => { event.preventDefault(); submitShipmentBatch(); }}>
             <div className="section-heading"><div><p className="eyebrow">Atomic manual batch</p><h3>手工批量发货</h3></div><span>{batchSelection.length} / 100</span></div>
             <div className="table-wrap compact-table"><table><thead><tr><th scope="col">订单号</th><th scope="col">承运商</th><th scope="col">物流单号哈希</th><th scope="col">发货证据哈希</th></tr></thead><tbody>{selectedBatchOrders.map((order) => {
               const draft = batchItems[order.orderId]!;
               return <tr key={order.orderId}><td><code className="hash-value">{order.orderId}</code></td><td><select aria-label={`批量承运商 ${order.orderId}`} disabled={submitting} onChange={(event) => updateBatchItem(order.orderId, { carrierCode: event.target.value as BatchCarrierCode })} value={draft.carrierCode}>{batchCarrierCodes.map((code) => <option key={code} value={code}>{code}</option>)}</select></td><td><input aria-label={`批量物流单号哈希 ${order.orderId}`} disabled={submitting} onChange={(event) => updateBatchItem(order.orderId, { trackingNumberHash: event.target.value })} placeholder="0x + 64 位十六进制" value={draft.trackingNumberHash} /></td><td><input aria-label={`批量发货证据哈希 ${order.orderId}`} disabled={submitting} onChange={(event) => updateBatchItem(order.orderId, { evidenceHash: event.target.value })} placeholder="0x + 64 位十六进制" value={draft.evidenceHash} /></td></tr>;
             })}</tbody></table></div>
-            <div className="selection-bar"><span>整批在 Core 单事务中成功或失败；失败重试复用同一批次和单项幂等键。</span><button className="button primary" disabled={!batchValid || submitting} type="submit"><Send aria-hidden="true" size={16} /> 原子提交批量发货</button></div>
+            <div className="selection-bar"><span>整批在 Core 单事务中成功或失败；失败重试复用同一批次和单项幂等键。</span><button className="button primary" disabled={!batchValid || operationPending} type="submit"><Send aria-hidden="true" size={16} /> 原子提交批量发货</button></div>
           </form>
+          </>
         ) : null}
-        <p className="panel-note">PII-safe Excel 导出、电子面单和打印契约仍未发布；相关控件保持关闭。批量发货仅消费 Core 发布的 canonical tracking evidence，不在浏览器生成原始运单号或哈希。</p>
+        <p className="panel-note">PII-safe Excel 导出仍保持关闭。电子面单路径仅提交 provider、carrier、store 和 orderIds，不在浏览器生成运单号、证据哈希或打印内容。</p>
       </section>
 
       <section className="section-block order-check" aria-labelledby="order-check-title">
@@ -499,12 +662,32 @@ export function FulfillmentPage() {
           </form>
           <section className="section-block compact-section" aria-labelledby="pickup-print-title">
             <div className="section-heading"><div><p className="eyebrow">Two-copy receipt</p><h2 id="pickup-print-title">核销双联小票</h2></div><Printer aria-hidden="true" size={19} /></div>
-            <p>核销最终确认后才可生成双联打印任务。当前打印 provider 完整契约和真实设备尚未具备。</p>
-            <button className="button secondary wide" disabled type="button">检查打印设备</button>
-            <p className="panel-note">Requirement MER-FUL-003：需要 Feie/Yilianyun 任务、重试与设备状态契约；当前 fail closed。</p>
+            {printJobsState.phase === 'loading' ? <LoadingRows count={2} /> : null}
+            {printJobsState.phase === 'error' ? <EmptyState blocked description={printJobsState.message} title="打印任务读取失败" /> : null}
+            {printJobsState.phase === 'ready' && !selectedPickupJob ? <EmptyState description="核销最终确认后，Core 会自动创建一份双联小票任务。" title="尚未生成小票" /> : null}
+            {selectedPickupJob ? <dl className="binding-summary">
+              <div><dt>任务状态</dt><dd>{selectedPickupJob.state}</dd></div>
+              <div><dt>打印份数</dt><dd>{selectedPickupJob.copyCount}</dd></div>
+              <div><dt>设备</dt><dd>{selectedPickupJob.provider ?? '未绑定'} / {selectedPickupJob.deviceId ?? '未绑定'}</dd></div>
+              <div><dt>内容哈希</dt><dd><code>{selectedPickupJob.contentHash}</code></dd></div>
+            </dl> : null}
+            <p className="panel-note">浏览器只读取 Core 的 PICKUP_RECEIPT / 2 联任务，不生成、编辑或重算打印内容。</p>
           </section>
         </div>
       ) : null}
+
+      <section className="section-block print-jobs-panel" aria-labelledby="print-jobs-title">
+        <div className="section-heading"><div><p className="eyebrow">Durable print queue</p><h2 id="print-jobs-title">打印作业</h2></div><button className="button secondary" disabled={!session || printJobsState.phase === 'loading'} onClick={() => void loadPrintJobs()} type="button"><RefreshCw aria-hidden="true" size={16} /> 刷新</button></div>
+        {printJobsState.phase === 'loading' ? <LoadingRows count={3} /> : null}
+        {printJobsState.phase === 'idle' ? <EmptyState blocked description="连接授权商家钱包后读取作业。" title="商家会话不可用" /> : null}
+        {printJobsState.phase === 'error' ? <EmptyState blocked description={printJobsState.message} title="打印作业读取失败" /> : null}
+        {printRetryError ? <p className="form-error" role="alert">{printRetryError}</p> : null}
+        {printJobsState.phase === 'ready' && printJobs.length === 0 ? <EmptyState description="电子面单或到店核销后，Core 会在此创建作业。" title="暂无打印作业" /> : null}
+        {printJobs.length > 0 ? <div className="table-wrap"><table><thead><tr><th scope="col">任务</th><th scope="col">类型</th><th scope="col">订单 / 门店</th><th scope="col">设备</th><th scope="col">份数</th><th scope="col">状态</th><th scope="col">Provider reference</th><th scope="col">错误 / 下次重试</th><th scope="col">操作</th></tr></thead><tbody>{printJobs.map((job) => {
+          const retryBlocked = !job.provider || !job.deviceId;
+          return <tr key={job.printJobId}><td><code className="hash-value">{job.printJobId}</code></td><td>{job.jobKind}</td><td><code className="hash-value">{job.orderId}</code><small className="table-subline">{job.storeId}</small></td><td>{job.provider ?? '—'}<small className="table-subline">{job.deviceId ?? '未绑定设备'}</small></td><td className="numeric-cell">{job.copyCount}</td><td><span className={`state-text ${job.state === 'ACCEPTED' ? 'success' : job.state === 'FAILED' || job.state === 'CONFIGURATION_REQUIRED' ? 'blocked' : ''}`}>{job.state}</span></td><td>{job.providerReference ?? '—'}</td><td>{job.errorCode ?? '—'}<small className="table-subline">{job.nextAttemptAt ?? '无调度时间'}</small></td><td>{job.state === 'ACCEPTED' ? <span className="state-text success">已受理</span> : <button className="button secondary" disabled={!session || retryBlocked || Boolean(retryingPrintJobId)} onClick={() => void retryPrintJob(job)} type="button"><RefreshCw aria-hidden="true" size={15} /> {retryingPrintJobId === job.printJobId ? '重试中' : '重试'}</button>}{retryBlocked && job.state !== 'ACCEPTED' ? <small className="table-subline">ConfigurationRequired</small> : null}</td></tr>;
+        })}</tbody></table></div> : null}
+      </section>
 
       {commandState.phase === 'submitting' ? <div className="system-notice" role="status"><RefreshCw aria-hidden="true" size={18} /><div><strong>正在提交 Core</strong><span>使用稳定幂等键等待权威响应。</span></div></div> : null}
       {commandState.phase === 'success' ? <div className="system-notice ready" role="status"><PackageCheck aria-hidden="true" size={18} /><div><strong>履约命令已确认</strong><span>{commandState.message}</span></div></div> : null}
@@ -512,9 +695,30 @@ export function FulfillmentPage() {
 
       <div className="provider-strip" role="status">
         <ProviderStatus bootstrap={bootstrap} name="KUAIDI100" label="快递接口" />
+        <ProviderStatus bootstrap={bootstrap} name="CAINIAO" label="菜鸟面单" />
         <ProviderStatus bootstrap={bootstrap} name="FEIE" label="云打印机" />
+        <ProviderStatus bootstrap={bootstrap} name="YILIANYUN" label="易联云打印" />
         <span><i className={`provider-dot ${ordersState.phase === 'ready' ? 'ready' : 'offline'}`} />Core 订单流：{ordersState.phase === 'ready' ? 'Connected' : 'Unavailable'}</span>
       </div>
+    </div>
+  );
+}
+
+function WaybillResults({ result }: { result: WaybillBatchResult }) {
+  return (
+    <div aria-live="polite" className="waybill-results">
+      <div className="section-heading"><div><p className="eyebrow">Core result</p><h4>面单批次 {result.batchId}</h4></div><span>{result.items.length} 笔</span></div>
+      <div className="table-wrap compact-table"><table><thead><tr><th scope="col">订单</th><th scope="col">状态</th><th scope="col">真实运单号</th><th scope="col">Provider reference</th><th scope="col">跟踪 / 证据哈希</th><th scope="col">打印任务</th><th scope="col">错误</th></tr></thead><tbody>{result.items.map((item) => (
+        <tr key={item.requestId}>
+          <td><code className="hash-value">{item.orderId}</code></td>
+          <td><span className={`state-text ${item.state === 'COMPLETED' ? 'success' : item.state === 'FAILED' || item.state === 'CONFIGURATION_REQUIRED' ? 'blocked' : ''}`}>{item.state}</span></td>
+          <td>{item.trackingNumber ?? '—'}</td>
+          <td>{item.providerReference ?? '—'}</td>
+          <td>{item.trackingNumberHash ? <code className="hash-value">{item.trackingNumberHash}</code> : '—'}{item.shipmentEvidenceHash ? <code className="hash-value table-subline">{item.shipmentEvidenceHash}</code> : null}</td>
+          <td>{item.printJobId ? <code className="hash-value">{item.printJobId}</code> : '—'}</td>
+          <td>{item.errorCode ?? '—'}</td>
+        </tr>
+      ))}</tbody></table></div>
     </div>
   );
 }

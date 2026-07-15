@@ -39,6 +39,13 @@ import {
   settlementList,
 } from './settlement-fixtures';
 import {
+  pickupPrintJob,
+  printerBinding,
+  printerChallenge,
+  waybillBatchResult,
+  waybillPrintJob,
+} from './logistics-fixtures';
+import {
   catalogCategories,
   catalogTags,
   completedMediaAsset,
@@ -69,7 +76,12 @@ const bootstrap: CoreBootstrap = {
     externalBlocked: [],
     paymentDecisionBlocked: [],
     paymentExternalBlocked: [],
-    providers: {},
+    providers: {
+      KUAIDI100: 'READY',
+      CAINIAO: 'READY',
+      FEIE: 'READY',
+      YILIANYUN: 'READY',
+    },
     writesEnabled: false,
   },
 };
@@ -117,6 +129,12 @@ function createMockCoreApi(overrides: Partial<CoreApi> = {}): CoreApi {
     listCatalogCategories: async () => catalogCategories,
     listCatalogTags: async () => catalogTags,
     listMerchantStores: async () => [merchantStore],
+    getMerchantPrinterBinding: async () => null,
+    createMerchantPrinterBindingChallenge: async () => printerChallenge,
+    applyMerchantPrinterBinding: async () => printerBinding,
+    createMerchantWaybillBatch: async () => waybillBatchResult,
+    listMerchantPrintJobs: async () => [],
+    retryMerchantPrintJob: async () => ({ ...waybillPrintJob, state: 'QUEUED', attempts: 0, errorCode: null }),
     getMerchantProductSlot: async () => productSlot,
     saveMerchantProductSlot: async () => managedProduct,
     createMerchantConcessionPreview: async () => concessionPreview,
@@ -228,6 +246,18 @@ async function enterFulfillment(client: CoreApi) {
   return user;
 }
 
+async function enterStores(client: CoreApi) {
+  const user = userEvent.setup();
+  const walletRequest = installWallet();
+  render(<MemoryRouter><App client={client} /></MemoryRouter>);
+  const connect = screen.getByRole('button', { name: '连接钱包' });
+  await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
+  await user.click(connect);
+  const navigation = await screen.findByRole('navigation', { name: '商家工作台导航' });
+  await user.click(within(navigation).getByRole('link', { name: /门店管理/ }));
+  return { user, walletRequest };
+}
+
 async function enterAssets(client: CoreApi) {
   const user = userEvent.setup();
   const walletRequest = installWallet();
@@ -266,8 +296,8 @@ async function enterSettings(client: CoreApi) {
 }
 
 describe('00 wallet gateway', () => {
-  it('consumes settlement-admin.9 and requires a server-authoritative order-action grant', () => {
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.9');
+  it('consumes logistics.1 and requires a server-authoritative order-action grant', () => {
+    expect(artifactVersion).toBe('2.0.0-logistics.1');
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
     expect(coreBoundary.artifactVersion).toBe(artifactVersion);
     expect(coreBoundary.artifactsAvailable).toBe(true);
@@ -472,7 +502,7 @@ describe('02 one-product form', () => {
     expect((screen.getByLabelText('商家基础应收（USDT 原子值）') as HTMLInputElement).value).toBe('600');
     expect((screen.getByLabelText('总库存') as HTMLInputElement).value).toBe('20');
     expect(screen.getByText(/product-history-1/)).toBeTruthy();
-    expect(screen.getByAltText('商品主图 1')).toBeTruthy();
+    expect(await screen.findByAltText('商品主图 1')).toBeTruthy();
     expect(screen.getByLabelText('商品视频')).toBeTruthy();
     expect(screen.queryByText('其他商家门店')).toBeNull();
     expect(getMerchantProductSlot).toHaveBeenCalledWith(storeId, 'test-session');
@@ -611,7 +641,7 @@ describe('03 fulfillment center', () => {
 
     expect(screen.getByRole('columnheader', { name: '物流单号哈希' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /商家强制签收|直接完成订单/ })).toBeNull();
-    expect(screen.getByText('商家会话不可用')).toBeTruthy();
+    expect(screen.getAllByText('商家会话不可用').length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole('button', { name: '到店自提' }));
     expect(screen.getByRole('columnheader', { name: '核销门店' })).toBeTruthy();
@@ -717,6 +747,73 @@ describe('03 fulfillment center', () => {
     expect(recordShipmentBatch.mock.calls[0]?.[0]).toEqual(recordShipmentBatch.mock.calls[1]?.[0]);
     expect(recordShipmentBatch.mock.calls[1]?.[0].items.map((item: { carrierCode: string }) => item.carrierCode))
       .toEqual(['SF', 'JD']);
+  });
+
+  it('creates a provider waybill batch from selected delivery orders and renders Core tracking evidence', async () => {
+    const shippableOrder = {
+      ...deliveryOrder,
+      state: 'PAID' as const,
+      shippedAt: null,
+      deliveredAt: null,
+      shipments: [],
+      logistics: [],
+      allowedActions: [{ action: 'RECORD_SHIPMENT' as const, enabled: true }],
+    };
+    const createMerchantWaybillBatch = vi.fn()
+      .mockRejectedValueOnce(new CoreApiError('NetworkUnavailable', '面单网络中断'))
+      .mockResolvedValueOnce(waybillBatchResult);
+    const client = createMockCoreApi({
+      listFulfillmentOrders: async () => ({ orders: [shippableOrder], nextCursor: null }),
+      createMerchantWaybillBatch,
+      listMerchantPrintJobs: async () => [waybillPrintJob],
+    });
+    const user = await enterFulfillment(client);
+    await user.click(await screen.findByLabelText(`选择批量发货 ${deliveryOrderId}`));
+    const submit = screen.getByRole('button', { name: '创建电子面单批次' });
+    await user.click(submit);
+    expect((await screen.findByRole('alert')).textContent).toContain('面单网络中断');
+    await user.click(submit);
+
+    expect(await screen.findByText('SF1234567890')).toBeTruthy();
+    expect(screen.getByText('kuaidi-task-24k')).toBeTruthy();
+    expect(screen.getAllByText(waybillBatchResult.items[0]!.trackingNumberHash!).length).toBeGreaterThan(0);
+    expect(createMerchantWaybillBatch).toHaveBeenCalledTimes(2);
+    expect(createMerchantWaybillBatch.mock.calls[0]?.[0]).toEqual(createMerchantWaybillBatch.mock.calls[1]?.[0]);
+    expect(createMerchantWaybillBatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      provider: 'KUAIDI100',
+      carrierCode: 'SF',
+      storeId,
+      orderIds: [deliveryOrderId],
+      idempotencyKey: expect.stringMatching(/^merchant-waybill-batch-/),
+    }), 'test-session');
+  });
+
+  it('reads durable waybill and pickup receipt jobs and retries a non-accepted job with one stable command', async () => {
+    const queuedJob = { ...waybillPrintJob, state: 'QUEUED' as const, attempts: 0, errorCode: null };
+    const retryMerchantPrintJob = vi.fn()
+      .mockRejectedValueOnce(new CoreApiError('NetworkUnavailable', '打印重试网络中断'))
+      .mockResolvedValueOnce(queuedJob);
+    const client = createMockCoreApi({
+      listMerchantPrintJobs: async () => [waybillPrintJob, pickupPrintJob],
+      retryMerchantPrintJob,
+    });
+    const user = await enterFulfillment(client);
+
+    expect(await screen.findByText('PICKUP_RECEIPT')).toBeTruthy();
+    expect(screen.getByText('PROVIDER_TIMEOUT')).toBeTruthy();
+    expect(screen.getByText('yly-print-24k')).toBeTruthy();
+    const retry = screen.getByRole('button', { name: '重试' });
+    await user.click(retry);
+    expect((await screen.findByRole('alert')).textContent).toContain('打印重试网络中断');
+    await user.click(retry);
+
+    await waitFor(() => expect(retryMerchantPrintJob).toHaveBeenCalledTimes(2));
+    expect(retryMerchantPrintJob.mock.calls[0]?.[1]).toBe(retryMerchantPrintJob.mock.calls[1]?.[1]);
+    expect(retryMerchantPrintJob).toHaveBeenLastCalledWith(
+      waybillPrintJob.printJobId,
+      expect.stringMatching(/^merchant-print-retry-/),
+      'test-session',
+    );
   });
 
   it('submits a platform-review request but never exposes direct merchant receipt completion', async () => {
@@ -840,13 +937,48 @@ describe('03 fulfillment center', () => {
 });
 
 describe('04 store controls', () => {
-  it('forbids manual region entry and blocks device binding', () => {
-    renderPage(<StoresPage />);
+  it('loads merchant stores and signs then applies an exact printer binding challenge', async () => {
+    const createMerchantPrinterBindingChallenge = vi.fn(async () => printerChallenge);
+    const applyMerchantPrinterBinding = vi.fn()
+      .mockRejectedValueOnce(new CoreApiError('NetworkUnavailable', '绑定网络中断'))
+      .mockResolvedValueOnce(printerBinding);
+    const { user, walletRequest } = await enterStores(createMockCoreApi({
+      createMerchantPrinterBindingChallenge,
+      applyMerchantPrinterBinding,
+    }));
 
+    expect(await screen.findByText(merchantStore.address)).toBeTruthy();
     const region = screen.getByLabelText('6 位行政区划代码') as HTMLInputElement;
     expect(region.disabled).toBe(true);
     expect(region.readOnly).toBe(true);
-    expect(screen.getByText('禁止手工回填。')).toBeTruthy();
+    await user.type(screen.getByLabelText('Device ID'), printerBinding.deviceId);
+    const submit = screen.getByRole('button', { name: '绑定设备' });
+    await user.click(submit);
+    expect((await screen.findByRole('alert')).textContent).toContain('绑定网络中断');
+    await user.click(submit);
+
+    expect(await screen.findByText('绑定版本 v2 已生效')).toBeTruthy();
+    expect(screen.getByText(new RegExp(printerChallenge.digest))).toBeTruthy();
+    expect(createMerchantPrinterBindingChallenge).toHaveBeenCalledTimes(1);
+    expect(applyMerchantPrinterBinding).toHaveBeenCalledTimes(2);
+    expect(applyMerchantPrinterBinding.mock.calls[0]?.[1]).toEqual(applyMerchantPrinterBinding.mock.calls[1]?.[1]);
+    const typedCalls = walletRequest.mock.calls.filter(([request]) => request.method === 'eth_signTypedData_v4');
+    expect(typedCalls).toHaveLength(1);
+    expect(JSON.parse(String(typedCalls[0]?.[0].params?.[1]))).toEqual(printerChallenge.typedData);
+  });
+
+  it('fails closed when the selected print provider is not configured', async () => {
+    const blockedBootstrap: CoreBootstrap = {
+      ...bootstrap,
+      readiness: {
+        ...bootstrap.readiness,
+        providers: { ...bootstrap.readiness.providers, FEIE: 'CONFIGURATION_REQUIRED' },
+      },
+    };
+    const { user } = await enterStores(createMockCoreApi({ bootstrap: async () => blockedBootstrap }));
+    await user.type(await screen.findByLabelText('Device ID'), 'FEIE-DEVICE-001');
+
+    expect(screen.getByText(/ConfigurationRequired：FEIE/)).toBeTruthy();
     expect((screen.getByRole('button', { name: '绑定设备' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
