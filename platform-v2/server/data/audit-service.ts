@@ -202,6 +202,7 @@ export class AuditQueryService {
     const rows = await this.merchantRows(merchantId, query, 1_000);
     const entries = rows.map(publicMerchantAuditRow);
     return {
+      merchantId,
       contentType: 'text/csv; charset=utf-8' as const,
       filename: `merchant-audit-${query.from!.toISOString().slice(0, 10)}-${query.to!.toISOString().slice(0, 10)}.csv`,
       entryCount: entries.length,

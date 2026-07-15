@@ -1422,6 +1422,7 @@ function accountOpenApiSchemas() {
       idempotencyKey,
     }, ['from', 'to', 'idempotencyKey']),
     MerchantAuditExport: object({
+      merchantId: string,
       contentType: { const: 'text/csv; charset=utf-8' },
       filename: string,
       entryCount: { type: 'integer', minimum: 0, maximum: 1000 },
@@ -5510,6 +5511,7 @@ export interface MerchantAuditList {
 }
 
 export interface MerchantAuditExport {
+  merchantId: string;
   contentType: 'text/csv; charset=utf-8';
   filename: string;
   entryCount: number;

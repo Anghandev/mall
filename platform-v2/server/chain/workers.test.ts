@@ -39,6 +39,7 @@ import {
   HttpSafeApprovalVerifier,
   HttpSafeSettlementBroadcaster,
   ResilientBscSafeSettlementChainSource,
+  reconcileTransactionBalanceDeltas,
 } from './safe-settlement-adapters.ts';
 import {
   RpcSafeRuntimeAttestor,
@@ -549,6 +550,23 @@ test('Safe approval and broadcaster adapters require HTTPS mTLS and echo-bound e
     }),
     /did not bind/,
   );
+});
+
+test('Safe settlement balance evidence excludes unrelated same-block token transfers', () => {
+  const token = USDT_ADDRESS.toLowerCase();
+  const safe = CONTRACT.toLowerCase();
+  const recipient = BUYER.toLowerCase();
+  const attacker = MERCHANT.toLowerCase();
+  assert.deepEqual(reconcileTransactionBalanceDeltas([
+    { tokenAddress: token, account: safe, delta: -99n },
+    { tokenAddress: token, account: recipient, delta: 101n },
+  ], [
+    { tokenAddress: token, from: attacker, to: safe, amount: '1' },
+    { tokenAddress: token, from: attacker, to: recipient, amount: '1' },
+  ]), [
+    { tokenAddress: token, account: safe, delta: '-100' },
+    { tokenAddress: token, account: recipient, delta: '100' },
+  ]);
 });
 
 test('takeover Safe approver rejects malformed owner evidence with a controlled finality error', async () => {
