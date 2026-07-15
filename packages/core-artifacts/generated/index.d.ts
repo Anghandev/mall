@@ -599,6 +599,7 @@ export interface CoverageBreakerActionProjection {
   routerAddress: Address;
   calldataHash: Bytes32;
   state: 'PENDING_PROPOSAL' | 'SAFE_PROPOSED' | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'SUPERSEDED';
+  safeNonce: AtomicAmount | null;
   safeTxHash: Bytes32 | null;
   proposalHash: Bytes32 | null;
   executionTxHash: Bytes32 | null;

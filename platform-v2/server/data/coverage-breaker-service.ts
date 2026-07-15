@@ -24,6 +24,7 @@ interface ActionRow {
   router_address: string;
   calldata_hash: string;
   state: 'PENDING_PROPOSAL' | 'SAFE_PROPOSED' | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'SUPERSEDED';
+  safe_nonce: string | number | null;
   safe_tx_hash: string | null;
   proposal_hash: string | null;
   execution_tx_hash: string | null;
@@ -405,6 +406,7 @@ function actionProjection(row: ActionRow) {
     routerAddress: row.router_address,
     calldataHash: row.calldata_hash,
     state: row.state,
+    safeNonce: row.safe_nonce === null ? null : String(row.safe_nonce),
     safeTxHash: row.safe_tx_hash,
     proposalHash: row.proposal_hash,
     executionTxHash: row.execution_tx_hash,

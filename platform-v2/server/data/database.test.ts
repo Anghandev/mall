@@ -21,6 +21,7 @@ import { FulfillmentSchedulerWorker } from '../chain/fulfillment-scheduler-worke
 import { GuaranteeDepositWorker } from '../chain/guarantee-deposit-worker.ts';
 import { CoverageWorker, type CoverageObservation } from '../chain/coverage-worker.ts';
 import {
+  coverageBreakerSafeTxHash,
   CoverageBreakerGovernanceWorker,
   type CoverageBreakerObservation,
 } from '../chain/coverage-breaker-governance.ts';
@@ -102,6 +103,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '013_business_analytics.sql',
       '014_accounts_and_profiles.sql',
       '015_coverage_breaker_governance.sql',
+      '016_coverage_breaker_safe_nonce.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -5776,10 +5778,15 @@ test('coverage breaker Safe action retries, reaches finality and replaces reorge
     const governance = new CoverageBreakerGovernanceWorker({
       transactions: transactionAdapter(db),
       proposer: {
-        propose: async () => {
+        propose: async (input) => {
           proposals += 1;
           if (rejectProposal) throw new CoreError('ExternalBlocked', 'Safe unavailable', 503);
-          return { safeTxHash: `0x${'3'.repeat(64)}`, proposalHash: `0x${'4'.repeat(64)}` };
+          const safeNonce = String(proposals);
+          return {
+            safeNonce,
+            safeTxHash: coverageBreakerSafeTxHash(input, safeNonce),
+            proposalHash: `0x${'4'.repeat(64)}`,
+          };
         },
       },
       chain: {
@@ -5857,6 +5864,136 @@ test('coverage breaker Safe action retries, reaches finality and replaces reorge
   }
 });
 
+test('coverage breaker Safe nonces keep a proposed RESUME before every later PAUSE', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    await recordFinalPayment(db);
+    const governanceSafe = '0x8888888888888888888888888888888888888888';
+    const paymentRouter = '0x9999999999999999999999999999999999999999';
+    const breaker = new Interface(['function setNewPaymentsPaused(bool paused,bytes32 evidenceHash)']);
+    const resumeActionId = `0x${'d'.repeat(64)}`;
+    const pauseActionId = `0x${'e'.repeat(64)}`;
+    const resumeSnapshotId = `0x${'f'.repeat(64)}`;
+    const pauseSnapshotId = `0x${'a'.repeat(64)}`;
+    const resumeEvidenceHash = `0x${'b'.repeat(64)}`;
+    const pauseEvidenceHash = `0x${'c'.repeat(64)}`;
+    const resumeCalldata = breaker.encodeFunctionData(
+      'setNewPaymentsPaused',
+      [false, resumeEvidenceHash],
+    ).toLowerCase();
+    const pauseCalldata = breaker.encodeFunctionData(
+      'setNewPaymentsPaused',
+      [true, pauseEvidenceHash],
+    ).toLowerCase();
+    const resumeCreatedAt = new Date('2026-07-15T11:00:00.000Z');
+    const pauseCreatedAt = new Date('2026-07-15T11:01:00.000Z');
+    await db.query(
+      `INSERT INTO core.coverage_snapshots (
+         snapshot_id, chain_id, block_number, block_hash, canonical, evidence_hash, recorded_at
+       ) VALUES
+         ($1,56,4000,$2,true,$3,$4),
+         ($5,56,4001,$6,true,$7,$8)`,
+      [
+        resumeSnapshotId,
+        `0x${'1'.repeat(64)}`,
+        resumeEvidenceHash,
+        resumeCreatedAt,
+        pauseSnapshotId,
+        `0x${'2'.repeat(64)}`,
+        pauseEvidenceHash,
+        pauseCreatedAt,
+      ],
+    );
+    await db.query(
+      `INSERT INTO core.coverage_breaker_actions (
+         action_id, snapshot_id, policy_version, action, target_paused, evidence_hash,
+         governance_safe_address, router_address, calldata, calldata_hash, state,
+         actor_wallet, secondary_signer, secondary_signature_hash,
+         approval_nonce, approval_deadline, created_at, updated_at
+       ) VALUES (
+         $1,$2,1,'RESUME',false,$3,$4,$5,$6,$7,'PENDING_PROPOSAL',
+         $8,$9,$10,1,$11,$12,$12
+       )`,
+      [
+        resumeActionId,
+        resumeSnapshotId,
+        resumeEvidenceHash,
+        governanceSafe,
+        paymentRouter,
+        resumeCalldata,
+        keccak256(resumeCalldata).toLowerCase(),
+        BUYER,
+        MERCHANT,
+        HASH,
+        new Date('2026-07-15T11:15:00.000Z'),
+        resumeCreatedAt,
+      ],
+    );
+
+    let proposedSafeNonce = '20';
+    const requestedMinimums: string[] = [];
+    const governance = new CoverageBreakerGovernanceWorker({
+      transactions: transactionAdapter(db),
+      proposer: {
+        propose: async (input) => {
+          requestedMinimums.push(input.minimumSafeNonce);
+          return {
+            safeNonce: proposedSafeNonce,
+            safeTxHash: coverageBreakerSafeTxHash(input, proposedSafeNonce),
+            proposalHash: `0x${'3'.repeat(64)}`,
+          };
+        },
+      },
+      chain: { observe: async () => ({ state: 'NOT_FOUND' }) },
+    });
+    await governance.pollOnce();
+
+    await db.query(
+      `INSERT INTO core.coverage_breaker_actions (
+         action_id, snapshot_id, policy_version, action, target_paused, evidence_hash,
+         governance_safe_address, router_address, calldata, calldata_hash,
+         state, created_at, updated_at
+       ) VALUES ($1,$2,1,'PAUSE',true,$3,$4,$5,$6,$7,'PENDING_PROPOSAL',$8,$8)`,
+      [
+        pauseActionId,
+        pauseSnapshotId,
+        pauseEvidenceHash,
+        governanceSafe,
+        paymentRouter,
+        pauseCalldata,
+        keccak256(pauseCalldata).toLowerCase(),
+        pauseCreatedAt,
+      ],
+    );
+
+    proposedSafeNonce = '19';
+    await governance.pollOnce();
+    assert.deepEqual((await db.query<{ state: string; safe_nonce: string | null }>(
+      'SELECT state, safe_nonce::text FROM core.coverage_breaker_actions WHERE action_id = $1',
+      [pauseActionId],
+    )).rows[0], { state: 'PENDING_PROPOSAL', safe_nonce: null });
+    assert.equal(governance.status().errorCode, 'InvalidFinality');
+
+    proposedSafeNonce = '21';
+    await governance.pollOnce();
+    const actions = await db.query<{ action: string; state: string; safe_nonce: string }>(
+      `SELECT action, state, safe_nonce::text
+       FROM core.coverage_breaker_actions ORDER BY created_at, action_id`,
+    );
+    assert.deepEqual(actions.rows, [
+      { action: 'RESUME', state: 'SAFE_PROPOSED', safe_nonce: '20' },
+      { action: 'PAUSE', state: 'SAFE_PROPOSED', safe_nonce: '21' },
+    ]);
+    assert.deepEqual(requestedMinimums, ['0', '21', '21']);
+    await assert.rejects(
+      db.query('UPDATE core.coverage_breaker_actions SET safe_nonce = 22 WHERE action_id = $1', [pauseActionId]),
+      /ImmutableRecord/,
+    );
+  } finally {
+    await db.close();
+  }
+});
+
 test('coverage recovery requires independent EIP-712 approval and Safe finality, then re-pauses on reorg', async () => {
   const db = await createBusinessDatabase();
   try {
@@ -5899,10 +6036,12 @@ test('coverage recovery requires independent EIP-712 approval and Safe finality,
     const governance = new CoverageBreakerGovernanceWorker({
       transactions: transactionAdapter(db),
       proposer: {
-        propose: async () => {
+        propose: async (input) => {
           proposalNumber += 1;
+          const safeNonce = String(proposalNumber);
           return {
-            safeTxHash: `0x${String((proposalNumber % 6) + 3).repeat(64)}`,
+            safeNonce,
+            safeTxHash: coverageBreakerSafeTxHash(input, safeNonce),
             proposalHash: `0x${String((proposalNumber % 6) + 4).repeat(64)}`,
           };
         },

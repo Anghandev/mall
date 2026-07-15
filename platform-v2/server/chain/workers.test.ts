@@ -57,6 +57,7 @@ import {
   type PolicyFinalityCandidate,
 } from './policy-publication-worker.ts';
 import {
+  coverageBreakerSafeTxHash,
   HttpCoverageBreakerSafeProposer,
   ResilientCoverageBreakerChainSource,
   type CoverageBreakerFinalityCandidate,
@@ -670,23 +671,48 @@ test('coverage breaker proposer and dual-RPC finality bind Safe, Router event, s
     mutualTls: true,
     fetchImpl: async (_input, init) => {
       proposedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      const safeNonce = '7';
       return jsonResponse({
-        safeTxHash: candidate.safeTxHash,
+        safeNonce,
+        safeTxHash: coverageBreakerSafeTxHash(candidate, safeNonce),
         proposalHash: HASH_3,
         dataHash: candidate.calldataHash,
         resourceId: candidate.actionId,
         targetPaused: true,
         evidenceHash: candidate.evidenceHash,
         policyVersion: 1,
+        minimumSafeNonce: candidate.minimumSafeNonce,
       });
     },
   });
   assert.deepEqual(await proposer.propose(candidate), {
-    safeTxHash: candidate.safeTxHash,
+    safeNonce: '7',
+    safeTxHash: coverageBreakerSafeTxHash(candidate, '7'),
     proposalHash: HASH_3,
   });
   assert.equal(proposedBody?.to, candidate.routerAddress);
   assert.equal(proposedBody?.safeAddress, candidate.safeAddress);
+  assert.equal(proposedBody?.minimumSafeNonce, candidate.minimumSafeNonce);
+
+  await assert.rejects(
+    new HttpCoverageBreakerSafeProposer({
+      url: 'https://safe-proposer.example.invalid/coverage-breaker',
+      token: 'safe-token',
+      mutualTls: true,
+      fetchImpl: async () => jsonResponse({
+        safeNonce: '7',
+        safeTxHash: HASH_2,
+        proposalHash: HASH_3,
+        dataHash: candidate.calldataHash,
+        resourceId: candidate.actionId,
+        targetPaused: true,
+        evidenceHash: candidate.evidenceHash,
+        policyVersion: 1,
+        minimumSafeNonce: candidate.minimumSafeNonce,
+      }),
+    }).propose(candidate),
+    /hash does not match its nonce/,
+  );
 
   const harness = coverageBreakerRpcHarness();
   const source = coverageBreakerChainSource(harness.fetch);
@@ -1624,7 +1650,7 @@ function policyRpcHarness() {
 function coverageBreakerCandidate(): CoverageBreakerFinalityCandidate {
   const iface = new Interface(['function setNewPaymentsPaused(bool paused,bytes32 evidenceHash)']);
   const calldata = iface.encodeFunctionData('setNewPaymentsPaused', [true, HASH_1]).toLowerCase();
-  return {
+  const proposal = {
     actionId: ORDER_ID,
     safeAddress: BUYER,
     routerAddress: CONTRACT,
@@ -1633,7 +1659,11 @@ function coverageBreakerCandidate(): CoverageBreakerFinalityCandidate {
     targetPaused: true,
     evidenceHash: HASH_1,
     policyVersion: 1,
-    safeTxHash: HASH_2,
+    minimumSafeNonce: '7',
+  };
+  return {
+    ...proposal,
+    safeTxHash: coverageBreakerSafeTxHash(proposal, '7'),
     priorState: 'SAFE_PROPOSED',
   };
 }

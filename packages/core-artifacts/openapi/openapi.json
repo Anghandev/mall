@@ -15192,6 +15192,7 @@
           "routerAddress",
           "calldataHash",
           "state",
+          "safeNonce",
           "safeTxHash",
           "proposalHash",
           "executionTxHash",
@@ -15247,6 +15248,16 @@
               "REORGED",
               "FAILED",
               "SUPERSEDED"
+            ]
+          },
+          "safeNonce": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "safeTxHash": {

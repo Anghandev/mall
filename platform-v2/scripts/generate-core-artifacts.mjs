@@ -98,6 +98,7 @@ const schemaSources = [
       '013_business_analytics.sql',
       '014_accounts_and_profiles.sql',
       '015_coverage_breaker_governance.sql',
+      '016_coverage_breaker_safe_nonce.sql',
     ],
   },
   {
@@ -2088,6 +2089,7 @@ function settlementAdminOpenApiSchemas() {
       routerAddress: address,
       calldataHash: hash,
       state: { enum: ['PENDING_PROPOSAL', 'SAFE_PROPOSED', 'MINED', 'FINAL', 'REORGED', 'FAILED', 'SUPERSEDED'] },
+      safeNonce: nullableAtomic,
       safeTxHash: nullableHash,
       proposalHash: nullableHash,
       executionTxHash: nullableHash,
@@ -4391,6 +4393,7 @@ export interface CoverageBreakerActionProjection {
   routerAddress: Address;
   calldataHash: Bytes32;
   state: 'PENDING_PROPOSAL' | 'SAFE_PROPOSED' | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'SUPERSEDED';
+  safeNonce: AtomicAmount | null;
   safeTxHash: Bytes32 | null;
   proposalHash: Bytes32 | null;
   executionTxHash: Bytes32 | null;

@@ -1,8 +1,9 @@
-import { Interface, getAddress, keccak256, toUtf8Bytes } from 'ethers';
-import { CORE_ARTIFACT_VERSION } from '../api/enums.ts';
+import { Interface, TypedDataEncoder, getAddress, keccak256, toUtf8Bytes } from 'ethers';
+import { BSC_CHAIN_ID, CORE_ARTIFACT_VERSION } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import { auditSourceId, enqueueAudit } from '../data/audit-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from '../data/migrations.ts';
+import { ZERO_ADDRESS, safeTransactionTypes } from './safe-multisend.ts';
 
 const ROUTER = new Interface([
   'event PaymentPauseChanged(bool paused,bytes32 indexed evidenceHash)',
@@ -25,6 +26,7 @@ interface CoverageBreakerActionRow {
   calldata: string;
   calldata_hash: string;
   state: ActionState;
+  safe_nonce: string | number | null;
   safe_tx_hash: string | null;
   proposal_hash: string | null;
   execution_tx_hash: string | null;
@@ -51,10 +53,15 @@ export interface CoverageBreakerSafeProposal {
   targetPaused: boolean;
   evidenceHash: string;
   policyVersion: number;
+  minimumSafeNonce: string;
 }
 
 export interface CoverageBreakerSafeProposer {
-  propose(input: CoverageBreakerSafeProposal): Promise<{ safeTxHash: string; proposalHash: string }>;
+  propose(input: CoverageBreakerSafeProposal): Promise<{
+    safeNonce: string;
+    safeTxHash: string;
+    proposalHash: string;
+  }>;
 }
 
 export interface CoverageBreakerFinalityCandidate extends CoverageBreakerSafeProposal {
@@ -152,20 +159,29 @@ export class HttpCoverageBreakerSafeProposer implements CoverageBreakerSafePropo
         targetPaused: input.targetPaused,
         evidenceHash: input.evidenceHash,
         policyVersion: input.policyVersion,
+        minimumSafeNonce: input.minimumSafeNonce,
       }),
     });
     if (!response.ok) throw new CoreError('ExternalBlocked', 'Safe coverage-breaker proposal was rejected', 503);
     const body = await responseJson(response) as Record<string, unknown>;
     if (
-      !isHash(body.safeTxHash)
+      !isCanonicalSafeNonce(body.safeNonce)
+      || BigInt(body.safeNonce) < BigInt(input.minimumSafeNonce)
+      || !isHash(body.safeTxHash)
       || !isHash(body.proposalHash)
       || body.dataHash !== input.calldataHash
       || body.resourceId !== input.actionId
       || body.targetPaused !== input.targetPaused
       || body.evidenceHash !== input.evidenceHash
       || Number(body.policyVersion) !== input.policyVersion
+      || body.minimumSafeNonce !== input.minimumSafeNonce
     ) throw new CoreError('InvalidFinality', 'Safe coverage-breaker proposal response is not echo-bound', 502);
-    return { safeTxHash: body.safeTxHash.toLowerCase(), proposalHash: body.proposalHash.toLowerCase() };
+    const safeNonce = body.safeNonce;
+    const safeTxHash = coverageBreakerSafeTxHash(input, safeNonce);
+    if (body.safeTxHash.toLowerCase() !== safeTxHash) {
+      throw new CoreError('InvalidFinality', 'Safe coverage-breaker proposal hash does not match its nonce', 502);
+    }
+    return { safeNonce, safeTxHash, proposalHash: body.proposalHash.toLowerCase() };
   }
 }
 
@@ -337,7 +353,7 @@ export class CoverageBreakerGovernanceWorker {
           await this.#supersedeResume(action.action_id);
           continue;
         }
-        const proposal = proposalFromRow(action);
+        const proposal = await this.#proposalFor(action);
         const result = await this.#proposer.propose(proposal);
         await this.#recordProposal(action.action_id, result);
       } catch (error) {
@@ -402,6 +418,30 @@ export class CoverageBreakerGovernanceWorker {
     ).rows);
   }
 
+  #proposalFor(action: CoverageBreakerActionRow) {
+    return this.#transactions.transaction(async (executor) => {
+      const prior = await executor.query<{ max_safe_nonce: string | null; earlier_pending: boolean }>(
+        `SELECT
+           (SELECT max(safe_nonce)::text FROM core.coverage_breaker_actions
+            WHERE governance_safe_address = $1 AND safe_nonce IS NOT NULL) AS max_safe_nonce,
+           EXISTS (
+             SELECT 1 FROM core.coverage_breaker_actions earlier
+             WHERE earlier.governance_safe_address = $1
+               AND earlier.state = 'PENDING_PROPOSAL'
+               AND (earlier.created_at, earlier.action_id) < ($2, $3)
+           ) AS earlier_pending`,
+        [action.governance_safe_address, action.created_at, action.action_id],
+      );
+      if (prior.rows[0]?.earlier_pending) {
+        throw new CoreError('FinalityPending', 'Earlier coverage-breaker action is awaiting a Safe nonce', 409);
+      }
+      const minimumSafeNonce = prior.rows[0]?.max_safe_nonce === null
+        ? '0'
+        : (BigInt(prior.rows[0]!.max_safe_nonce) + 1n).toString();
+      return proposalFromRow(action, minimumSafeNonce);
+    });
+  }
+
   #hasSupersedingPause(action: CoverageBreakerActionRow) {
     return this.#transactions.transaction(async (executor) => (
       await executor.query<{ superseded: boolean }>(
@@ -445,25 +485,50 @@ export class CoverageBreakerGovernanceWorker {
     });
   }
 
-  #recordProposal(actionId: string, proposal: { safeTxHash: string; proposalHash: string }) {
-    if (!isHash(proposal.safeTxHash) || !isHash(proposal.proposalHash)) {
+  #recordProposal(actionId: string, proposal: { safeNonce: string; safeTxHash: string; proposalHash: string }) {
+    if (!isCanonicalSafeNonce(proposal.safeNonce) || !isHash(proposal.safeTxHash) || !isHash(proposal.proposalHash)) {
       throw new CoreError('InvalidFinality', 'Coverage-breaker Safe proposal evidence is invalid', 502);
     }
     return this.#transactions.transaction(async (executor) => {
       const action = await lockedAction(executor, actionId);
       if (action.state !== 'PENDING_PROPOSAL') {
-        if (action.safe_tx_hash === proposal.safeTxHash.toLowerCase()) return;
+        if (
+          String(action.safe_nonce) === proposal.safeNonce
+          && action.safe_tx_hash === proposal.safeTxHash.toLowerCase()
+        ) return;
         throw new CoreError('IdempotencyConflict', 'Coverage-breaker action changed during Safe proposal', 409);
+      }
+      const prior = await executor.query<{ max_safe_nonce: string | null; earlier_pending: boolean }>(
+        `SELECT
+           (SELECT max(safe_nonce)::text FROM core.coverage_breaker_actions
+            WHERE governance_safe_address = $1 AND safe_nonce IS NOT NULL) AS max_safe_nonce,
+           EXISTS (
+             SELECT 1 FROM core.coverage_breaker_actions earlier
+             WHERE earlier.governance_safe_address = $1
+               AND earlier.state = 'PENDING_PROPOSAL'
+               AND (earlier.created_at, earlier.action_id) < ($2, $3)
+           ) AS earlier_pending`,
+        [action.governance_safe_address, action.created_at, action.action_id],
+      );
+      if (
+        prior.rows[0]?.earlier_pending
+        || (prior.rows[0]?.max_safe_nonce !== null
+          && BigInt(proposal.safeNonce) <= BigInt(prior.rows[0]!.max_safe_nonce))
+      ) throw new CoreError('InvalidFinality', 'Coverage-breaker Safe nonce does not preserve action order', 409);
+      const expectedSafeTxHash = coverageBreakerSafeTxHash(proposalFromRow(action, proposal.safeNonce), proposal.safeNonce);
+      if (proposal.safeTxHash.toLowerCase() !== expectedSafeTxHash) {
+        throw new CoreError('InvalidFinality', 'Coverage-breaker Safe hash does not match the frozen action nonce', 409);
       }
       const now = new Date();
       await executor.query(
         `UPDATE core.coverage_breaker_actions
-         SET state = 'SAFE_PROPOSED', safe_tx_hash = $2, proposal_hash = $3, updated_at = $4
+         SET state = 'SAFE_PROPOSED', safe_nonce = $2, safe_tx_hash = $3, proposal_hash = $4, updated_at = $5
          WHERE action_id = $1`,
-        [actionId, proposal.safeTxHash.toLowerCase(), proposal.proposalHash.toLowerCase(), now],
+        [actionId, proposal.safeNonce, proposal.safeTxHash.toLowerCase(), proposal.proposalHash.toLowerCase(), now],
       );
       await appendTransition(executor, action, 'SAFE_PROPOSED', proposal, now);
       await enqueueActionAudit(executor, action, 'CoverageBreakerSafeProposed', 'SYSTEM', {
+        safeNonce: proposal.safeNonce,
         safeTxHash: proposal.safeTxHash.toLowerCase(),
         proposalHash: proposal.proposalHash.toLowerCase(),
       }, now);
@@ -525,7 +590,7 @@ export class CoverageBreakerGovernanceWorker {
   }
 }
 
-function proposalFromRow(row: CoverageBreakerActionRow): CoverageBreakerSafeProposal {
+function proposalFromRow(row: CoverageBreakerActionRow, minimumSafeNonce: string): CoverageBreakerSafeProposal {
   return {
     actionId: row.action_id,
     safeAddress: row.governance_safe_address,
@@ -535,13 +600,16 @@ function proposalFromRow(row: CoverageBreakerActionRow): CoverageBreakerSafeProp
     targetPaused: row.target_paused,
     evidenceHash: row.evidence_hash,
     policyVersion: Number(row.policy_version),
+    minimumSafeNonce,
   };
 }
 
 function finalityCandidate(row: CoverageBreakerActionRow): CoverageBreakerFinalityCandidate {
-  if (!row.safe_tx_hash) throw new CoreError('InvalidFinality', 'Coverage-breaker Safe hash is unavailable', 409);
+  if (row.safe_nonce === null || !row.safe_tx_hash) {
+    throw new CoreError('InvalidFinality', 'Coverage-breaker Safe nonce or hash is unavailable', 409);
+  }
   return {
-    ...proposalFromRow(row),
+    ...proposalFromRow(row, String(row.safe_nonce)),
     safeTxHash: row.safe_tx_hash,
     priorState: row.state as CoverageBreakerFinalityCandidate['priorState'],
     ...(row.execution_tx_hash && row.block_number !== null && row.block_hash
@@ -554,6 +622,40 @@ function finalityCandidate(row: CoverageBreakerActionRow): CoverageBreakerFinali
         }
       : {}),
   };
+}
+
+export function coverageBreakerSafeTxHash(input: CoverageBreakerSafeProposal, safeNonce: string) {
+  if (!isCanonicalSafeNonce(safeNonce)) {
+    throw new CoreError('InvalidFinality', 'Coverage-breaker Safe nonce is invalid', 409);
+  }
+  if (keccak256(input.calldata).toLowerCase() !== input.calldataHash.toLowerCase()) {
+    throw new CoreError('InvalidFinality', 'Coverage-breaker calldata hash does not match the frozen action', 409);
+  }
+  return TypedDataEncoder.hash(
+    { chainId: BSC_CHAIN_ID, verifyingContract: getAddress(input.safeAddress) },
+    safeTransactionTypes,
+    {
+      to: getAddress(input.routerAddress),
+      value: '0',
+      data: input.calldata,
+      operation: 0,
+      safeTxGas: '0',
+      baseGas: '0',
+      gasPrice: '0',
+      gasToken: ZERO_ADDRESS,
+      refundReceiver: ZERO_ADDRESS,
+      nonce: safeNonce,
+    },
+  ).toLowerCase();
+}
+
+function isCanonicalSafeNonce(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value)) return false;
+  try {
+    return BigInt(value) < (1n << 256n);
+  } catch {
+    return false;
+  }
 }
 
 async function lockedAction(executor: SqlExecutor, actionId: string) {
