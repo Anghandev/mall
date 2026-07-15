@@ -71,11 +71,11 @@ function renderAt(path = '/seckill', services = offlineServices()) {
 }
 
 describe('Mall V2 payment consumer', () => {
-  it('consumes the coordinated fulfillment checkpoint and keeps payment writes fail closed', async () => {
+  it('consumes the coordinated logistics checkpoint and keeps payment writes fail closed', async () => {
     renderAt('/mall');
 
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.9');
+    expect(artifactVersion).toBe('2.0.0-logistics.1');
     expect(productBaseline.manifestsAligned).toBe(true);
     expect(productBaseline.knownOrderActions).toBe(allowedActionNames);
     expect(productBaseline.executableOrderActions).toBe(executableOrderActionNames);
@@ -84,7 +84,7 @@ describe('Mall V2 payment consumer', () => {
     expect(isCoreOrderActionExecutable('CONFIRM_RECEIPT')).toBe(true);
     expect(isCoreOrderActionExecutable('PAY_ORDER')).toBe(false);
     expect(mallRuntimeBoundary).toMatchObject({
-      artifactStatus: '2.0.0-settlement-admin.9',
+      artifactStatus: '2.0.0-logistics.1',
       executableOrderActions: executableOrderActionNames,
       deploymentAuthorized: false,
       settlementAdminCapabilities: {
