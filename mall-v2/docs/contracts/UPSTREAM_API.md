@@ -2,7 +2,7 @@
 
 Status: the previous handwritten `mall-api-v1` proposal is retired. Mall now
 consumes coordinated Core settlement/admin artifacts
-`2.0.0-settlement-admin.6`.
+`2.0.0-settlement-admin.7`.
 
 The published boundary currently covers:
 
@@ -26,6 +26,11 @@ The published boundary currently covers:
   row-level `allowedActions` projections;
 - fulfillment requests, receipt, pickup, arbitration and takeover actions with
   generated `allowedActions`.
+- encrypted buyer profile reads/writes, provider-sealed `BUYER_AVATAR` media,
+  canonical buyer overview counts, encrypted saved-address parse/CRUD/default
+  operations and saved-address fulfillment-target creation;
+- buyer-scoped takeover timelines with explicit `COMPLETE` /
+  `PARTIAL_LEGACY` history status and public transitions only;
 - wallet settlement balances and requests, signed EIP-712 settlement intents,
   Safe batching state and final Safe TxHash;
 - seckill current/history/session projections, authoritative timer anchors,
@@ -41,7 +46,6 @@ the generated response types. It does not maintain a parallel API schema.
 
 The following Mall capabilities remain incomplete:
 
-- saved-address/profile persistence and PII-safe address parsing;
 - an `OPEN_TAKEOVER` evidence action matching the published takeover command;
 - buyer authority for `VERIFY_PICKUP` evidence, if buyer-side pickup execution
   is ever intended; current Core authority is merchant/platform only;

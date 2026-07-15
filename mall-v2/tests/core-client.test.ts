@@ -4,12 +4,25 @@ import { vi } from 'vitest';
 
 import {
   coordinatedCatalogMediaOperations,
+  coordinatedBuyerAccountOperations,
   coordinatedFulfillmentOperations,
   coordinatedPaymentOperations,
   coordinatedSettlementAdminOperations,
   createCoreClient,
   type QuoteSelection,
 } from '../src/core-client';
+import {
+  authenticatedAvatarAccess,
+  avatarAssetId,
+  avatarUploadIntent,
+  avatarUploadIntentId,
+  buyerOverview,
+  buyerProfile,
+  buyerSavedAddress,
+  buyerTakeoverTimeline,
+  parsedBuyerAddress,
+  verifiedAvatarAsset,
+} from './account-fixtures';
 import { paymentAuthorizationTypes } from '../src/payment-integrity';
 import {
   deliveryActions,
@@ -81,6 +94,99 @@ describe('coordinated Core HTTP client', () => {
       mediaUploadIntent: '/v2/media/upload-intents',
       mediaUploadComplete: '/v2/media/upload-intents/{uploadIntentId}/complete',
     });
+  });
+
+  it('derives every buyer account path from coordinated OpenAPI', () => {
+    expect(coordinatedBuyerAccountOperations).toEqual({
+      profile: '/v2/buyer/profile',
+      profileUpdate: '/v2/buyer/profile',
+      addressParse: '/v2/buyer/addresses/parse',
+      addresses: '/v2/buyer/addresses',
+      addressCreate: '/v2/buyer/addresses',
+      addressUpdate: '/v2/buyer/addresses/{addressId}',
+      addressDelete: '/v2/buyer/addresses/{addressId}',
+      addressDefault: '/v2/buyer/addresses/{addressId}/default',
+      addressTarget: '/v2/buyer/addresses/{addressId}/fulfillment-target',
+      overview: '/v2/buyer/overview',
+      takeoverTimeline: '/v2/orders/{orderId}/takeover-timeline',
+    });
+  });
+
+  it('consumes the complete buyer profile, address, overview and takeover chain with exact versions', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const updatedProfile = { ...buyerProfile, nickname: '新昵称', version: 3 };
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, ...(init ? { init } : {}) });
+      if (url.endsWith('/v2/buyer/profile') && init?.method === 'PUT') return json(updatedProfile);
+      if (url.endsWith('/v2/buyer/profile')) return json(buyerProfile);
+      if (url.endsWith('/v2/buyer/addresses/parse')) return json(parsedBuyerAddress);
+      if (url.endsWith('/v2/buyer/addresses') && init?.method === 'POST') return json(buyerSavedAddress, 201);
+      if (url.endsWith('/v2/buyer/addresses')) return json({ artifactVersion, addresses: [buyerSavedAddress] });
+      if (url.endsWith(`/v2/buyer/addresses/${buyerSavedAddress.addressId}/default`)) return json(buyerSavedAddress);
+      if (url.endsWith(`/v2/buyer/addresses/${buyerSavedAddress.addressId}/fulfillment-target`)) return json(deliveryTarget, 201);
+      if (url.endsWith(`/v2/buyer/addresses/${buyerSavedAddress.addressId}`) && init?.method === 'PUT') return json({ ...buyerSavedAddress, version: 4 });
+      if (url.endsWith(`/v2/buyer/addresses/${buyerSavedAddress.addressId}`) && init?.method === 'DELETE') return json({ addressId: buyerSavedAddress.addressId, status: 'DELETED' });
+      if (url.endsWith('/v2/buyer/overview')) return json(buyerOverview);
+      if (url.endsWith(`/v2/orders/${deliveryOrder.orderId}/takeover-timeline`)) return json(buyerTakeoverTimeline);
+      throw new Error(`unexpected URL ${url}`);
+    });
+    const client = createCoreClient({ baseUrl: 'https://core.mall.test', fetch: fetcher });
+    const addressRequest = {
+      label: '家', recipientName: '张三', phone: '13800138000', detailAddress: parsedBuyerAddress.detailAddress!,
+      longitude: parsedBuyerAddress.longitude!, latitude: parsedBuyerAddress.latitude!, isDefault: true,
+      idempotencyKey: 'mall-address-1',
+    };
+
+    expect(await client.getBuyerProfile('session')).toEqual(buyerProfile);
+    expect(await client.updateBuyerProfile('session', {
+      nickname: '新昵称', avatarAssetId: null, expectedVersion: 2, idempotencyKey: 'mall-profile-1',
+    })).toEqual(updatedProfile);
+    expect(await client.parseBuyerAddress('session', '张三 13800138000 辽宁省大连市中山区示例路 24 号')).toEqual(parsedBuyerAddress);
+    expect(await client.listBuyerAddresses('session')).toEqual([buyerSavedAddress]);
+    expect(await client.createBuyerAddress('session', addressRequest)).toEqual(buyerSavedAddress);
+    expect((await client.updateBuyerAddress('session', buyerSavedAddress.addressId, { ...addressRequest, expectedVersion: 3 })).version).toBe(4);
+    expect((await client.setDefaultBuyerAddress('session', buyerSavedAddress.addressId, 3, 'mall-default-1')).isDefault).toBe(true);
+    expect(await client.createBuyerAddressTarget('session', buyerSavedAddress.addressId, 'mall-target-1')).toEqual(deliveryTarget);
+    expect(await client.getBuyerOverview('session')).toEqual(buyerOverview);
+    expect(await client.getBuyerTakeoverTimeline('session', deliveryOrder.orderId)).toEqual(buyerTakeoverTimeline);
+    await client.deleteBuyerAddress('session', buyerSavedAddress.addressId, 3, 'mall-delete-1');
+
+    expect(calls.every((call) => (call.init?.headers as Record<string, string>)?.authorization === 'Bearer session')).toBe(true);
+    expect(JSON.parse(String(calls.find((call) => call.url.endsWith('/v2/buyer/addresses/parse'))?.init?.body))).toEqual({
+      rawText: '张三 13800138000 辽宁省大连市中山区示例路 24 号',
+    });
+  });
+
+  it('consumes only authenticated buyer avatar media and rejects internal takeover evidence', async () => {
+    const intent = avatarUploadIntent();
+    const asset = verifiedAvatarAsset();
+    const access = authenticatedAvatarAccess();
+    const client = createCoreClient({ fetch: vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/v2/media/upload-intents')) return json(intent, 201);
+      if (url.endsWith(`/v2/media/upload-intents/${avatarUploadIntentId}/complete`)) return json(asset);
+      return json(access);
+    }) });
+    const request = {
+      purpose: 'BUYER_AVATAR' as const,
+      resourceType: 'BUYER' as const,
+      resourceId: deliveryOrder.buyerWallet,
+      contentType: 'image/png' as const,
+      sizeBytes: 4,
+      contentSha256: asset.contentSha256,
+      idempotencyKey: 'mall-avatar-1',
+    };
+    expect(await client.createMediaUploadIntent('session', request)).toEqual(intent);
+    expect(await client.completeMediaUpload('session', avatarUploadIntentId)).toEqual(asset);
+    expect(await client.createAuthenticatedMediaReadAccess('session', avatarAssetId)).toEqual(access);
+
+    await expect(createCoreClient({ fetch: vi.fn().mockResolvedValue(json({
+      ...buyerTakeoverTimeline,
+      transitions: [{ ...buyerTakeoverTimeline.transitions[0], evidenceHash: HASH }],
+    })) }).getBuyerTakeoverTimeline('session', deliveryOrder.orderId)).rejects.toMatchObject({ code: 'InvalidResponse' });
+    await expect(createCoreClient({ fetch: vi.fn().mockResolvedValue(json({ ...access, accessScope: 'PUBLIC' })) })
+      .createAuthenticatedMediaReadAccess('session', avatarAssetId)).rejects.toMatchObject({ code: 'Forbidden' });
   });
 
   it('uploads, verifies and binds buyer evidence before submitting generated command routes', async () => {
