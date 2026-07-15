@@ -1,7 +1,7 @@
 # Merchant Workbench Core Gaps
 
 The merchant product consumes Core's coordinated
-`2.0.0-settlement-admin.6` artifact workspace package. Bootstrap, SIWE,
+`2.0.0-settlement-admin.7` artifact workspace package. Bootstrap, SIWE,
 merchant-bound Catalog/SKU/inventory management, immutable media, wallet-scoped fulfillment, merchant finance,
 guarantee-deposit evidence, signed settlement requests and Safe-finality
 history are connected through their published HTTP surfaces. The browser
@@ -22,6 +22,8 @@ state mismatches.
 | GAP-MER-017 | Write-once signed media upload plus owned-asset metadata and controlled reads | Product image/video uses intent -> provider PUT -> completion -> authorized read; purpose/content/resource/owner fields must match before the asset enters the form |
 | GAP-MER-005 (order-page/manual-batch slice) | Stable merchant order cursor, date/SKU/state/mode/kind filters, complete authoritative rows and atomic manual-shipment batch | The workbench serializes only published filters, preserves the full cursor, renders quantity/TxHash/kind/actions and submits 1-100 canonical shipment evidence rows with stable retry keys |
 | GAP-MER-003 | Merchant business dashboard with authoritative timezone/day, exact payment snapshots, current fulfillment queues and generated product/seckill state | Dashboard and finance Today metric consume `/v2/merchant/dashboard`; zero remains a real Core value while request failure stays visibly unavailable |
+| GAP-MER-014 | Tenant-scoped merchant profile, immutable settlement identity and owned Logo media validation | Settings consumes GET/PUT profile with expectedVersion/idempotency; only shopName/logoAssetId are editable and settlement wallet never enters the PUT body |
+| GAP-MER-015 | Merchant-scoped reverse-time audit read model and bounded CSV export | Filters/cursor, partial-history label, signature/Safe-or-chain hashes and exact Core CSV download are live without a browser-side audit replica |
 
 ## Remaining Gaps
 
@@ -35,6 +37,4 @@ state mismatches.
 | GAP-MER-009 | Feie device binding/status/two-copy print job/retry contract | Printer controls return ConfigurationRequired |
 | GAP-MER-010 | Canonical raw tracking-number hashing plus Kuaidi100 waybill and callback integration | Exact precomputed shipment/evidence hashes can submit; raw number generation and provider controls return ConfigurationRequired |
 | GAP-MER-013 | Authoritative seckill revenue detail | Published NPL subtype balances and finance-center BNM totals are live; only the unpublished seckill revenue projection remains unavailable |
-| GAP-MER-014 | Shop profile, immutable settlement wallet and governed migration intent | Wallet read-only; profile writes disabled |
-| GAP-MER-015 | Merchant append-only audit read model with signature/Tx proof | Audit unavailable, never local fake history |
 | GAP-MER-018 | Provider accounts/devices, authorized merchant wallet, RPC/domain/Safe inputs | ExternalBlocked; no simulated success |

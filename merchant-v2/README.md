@@ -11,7 +11,7 @@ pnpm --filter @abu24k/merchant check
 ```
 
 The app consumes the coordinated `@abu24k/core-artifacts` workspace package at
-`2.0.0-settlement-admin.6`. In addition to Bootstrap, merchant SIWE and the
+`2.0.0-settlement-admin.7`. In addition to Bootstrap, merchant SIWE and the
 payment/fulfillment surfaces, the workbench consumes merchant finance,
 guarantee-deposit evidence, settlement intents, signed settlement requests and
 Safe-finality history. The help center reads wallet-targeted published CMS
@@ -41,10 +41,22 @@ TxHash/order-kind/`allowedActions` rows, and the atomic manual-shipment batch.
 Batch retries preserve the batch and item idempotency keys. The browser submits
 only Core-issued canonical tracking/evidence hashes and does not derive them.
 
-PII-safe Excel export, electronic-waybill and printer providers, profile
-migration and merchant audit remain fail
-closed until their coordinated capabilities are
-published or configured. The browser never calls the buyer-only payment
+The settings center consumes the tenant-scoped merchant profile with optimistic
+versioning and stable retry keys. Shop name and a provider-sealed,
+merchant-owned `MERCHANT_LOGO` asset are editable; the settlement wallet is
+always read-only and is never sent in the profile PUT body. Concurrent profile
+updates fail closed and require a fresh Core version before resubmission.
+
+Merchant audit consumes the reverse-time, tenant-scoped entry stream with
+server-side time/stream/event/module filters and cursor pagination. The UI
+shows signature and Safe/chain transaction hashes while labeling
+`PARTIAL_PRE_MERCHANT_SCOPE` accurately instead of presenting a scoped page
+count as global chain proof. Bounded CSV export downloads only Core-returned
+content for ranges of at most 31 days and at most 1,000 rows.
+
+PII-safe Excel export, electronic-waybill providers, governed settlement-wallet
+migration and physical printer evidence remain fail closed until their
+coordinated capabilities are published or configured. The browser never calls the buyer-only payment
 projection with a merchant session.
 
 Core is expected on the same origin. A separately hosted local Core can be

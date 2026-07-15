@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCoreApi, putMediaFile } from '../src/core-api';
 import { merchantBusinessDashboard } from './business-dashboard-fixtures';
+import { merchantAudit, merchantAuditExport, merchantProfile } from './account-fixtures';
 import {
   catalogCategories,
   catalogTags,
@@ -42,7 +43,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('settlement-admin.6 Core HTTP consumer', () => {
+describe('settlement-admin.7 Core HTTP consumer', () => {
   it('uses the published SIWE nonce and verify request bodies without a password fallback', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
@@ -69,6 +70,95 @@ describe('settlement-admin.6 Core HTTP consumer', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/v2/auth/verify', expect.objectContaining({
       body: JSON.stringify({ message: challenge.message, signature: '0xsigned' }),
     }));
+  });
+
+  it('consumes versioned merchant profile and tenant audit routes with exact request fields', async () => {
+    const updatedProfile = { ...merchantProfile, shopName: '阿步新金店', version: 4 };
+    const cursor = { createdAt: '2026-07-15T09:30:00.000Z', entryId: 'audit-merchant-1' };
+    const pagedAudit = { ...merchantAudit, nextCursor: cursor };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(merchantProfile))
+      .mockResolvedValueOnce(jsonResponse(updatedProfile))
+      .mockResolvedValueOnce(jsonResponse(pagedAudit))
+      .mockResolvedValueOnce(jsonResponse(merchantAuditExport));
+    globalThis.fetch = fetchMock as typeof fetch;
+    const api = createCoreApi('https://core.example.test');
+    const update = {
+      shopName: '阿步新金店',
+      logoAssetId: merchantProfile.logoAssetId,
+      expectedVersion: 3,
+      idempotencyKey: 'merchant-profile-update-1',
+    };
+
+    expect((await api.getMerchantProfile('merchant-session')).settlementWalletMutable).toBe(false);
+    expect((await api.updateMerchantProfile(update, 'merchant-session')).version).toBe(4);
+    const audit = await api.listMerchantAuditEntries('merchant-session', {
+      streamName: 'financial',
+      eventType: 'SettlementRequestAuthorized',
+      resourceType: 'SETTLEMENT_REQUEST',
+      cursor,
+      from: '2026-07-01T00:00:00.000Z',
+      to: '2026-07-15T23:59:59.000Z',
+      limit: 50,
+    });
+    const exported = await api.exportMerchantAuditEntries({
+      from: '2026-07-01T00:00:00.000Z',
+      to: '2026-07-15T23:59:59.000Z',
+      streamName: 'financial',
+      eventType: 'SettlementRequestAuthorized',
+      resourceType: 'SETTLEMENT_REQUEST',
+      idempotencyKey: 'merchant-audit-export-1',
+    }, 'merchant-session');
+
+    expect(audit.historyStatus).toBe('PARTIAL_PRE_MERCHANT_SCOPE');
+    expect(exported.csv).toBe(merchantAuditExport.csv);
+    expect(fetchMock).toHaveBeenNthCalledWith(1, 'https://core.example.test/v2/merchant/profile', expect.objectContaining({
+      headers: expect.objectContaining({ authorization: 'Bearer merchant-session' }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, 'https://core.example.test/v2/merchant/profile', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify(update),
+    }));
+    const auditUrl = String(fetchMock.mock.calls[2]?.[0]);
+    expect(auditUrl).toContain('/v2/merchant/audit/entries?');
+    expect(auditUrl).toContain('streamName=financial');
+    expect(auditUrl).toContain('cursorEntryId=audit-merchant-1');
+    expect(auditUrl).toContain('limit=50');
+    expect(fetchMock).toHaveBeenNthCalledWith(4, 'https://core.example.test/v2/merchant/audit/exports', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        from: '2026-07-01T00:00:00.000Z',
+        to: '2026-07-15T23:59:59.000Z',
+        streamName: 'financial',
+        eventType: 'SettlementRequestAuthorized',
+        resourceType: 'SETTLEMENT_REQUEST',
+        idempotencyKey: 'merchant-audit-export-1',
+      }),
+    }));
+  });
+
+  it('rejects mutable settlement identity, wrong audit order and unsafe export metadata', async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({
+      ...merchantProfile,
+      settlementWalletMutable: true,
+    })) as typeof fetch;
+    await expect(createCoreApi().getMerchantProfile('merchant-session')).rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    globalThis.fetch = vi.fn(async () => jsonResponse({
+      ...merchantAudit,
+      entries: [...merchantAudit.entries].reverse(),
+    })) as typeof fetch;
+    await expect(createCoreApi().listMerchantAuditEntries('merchant-session')).rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    globalThis.fetch = vi.fn(async () => jsonResponse({
+      ...merchantAuditExport,
+      filename: '../merchant-audit.csv',
+    })) as typeof fetch;
+    await expect(createCoreApi().exportMerchantAuditEntries({
+      from: '2026-07-01T00:00:00.000Z',
+      to: '2026-07-02T00:00:00.000Z',
+      idempotencyKey: 'merchant-audit-export-2',
+    }, 'merchant-session')).rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
   it('calls the official Catalog endpoint and validates generated product fields', async () => {
@@ -105,7 +195,7 @@ describe('settlement-admin.6 Core HTTP consumer', () => {
       'https://core.example.test/v2/catalog/products',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.6' }),
+        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.7' }),
       }),
     );
   });

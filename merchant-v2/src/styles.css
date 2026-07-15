@@ -2299,6 +2299,68 @@ td > small {
   gap: 16px;
 }
 
+.profile-logo-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.profile-logo-preview {
+  display: grid;
+  width: 96px;
+  aspect-ratio: 1;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--surface-muted);
+}
+
+.profile-logo-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.profile-logo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.profile-asset-id,
+.hash-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.6875rem;
+  overflow-wrap: anywhere;
+}
+
+.profile-meta {
+  display: grid;
+  margin: 0;
+  border-top: 1px solid var(--border);
+}
+
+.profile-meta > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.75rem;
+}
+
+.profile-meta dt {
+  color: var(--muted);
+}
+
+.profile-meta dd {
+  margin: 0;
+  text-align: right;
+}
+
 .wallet-address {
   display: grid;
   gap: 6px;
@@ -2346,8 +2408,135 @@ td > small {
   gap: 8px;
 }
 
-.audit-tools .search-field {
-  min-width: 230px;
+.audit-section {
+  padding-bottom: 18px;
+}
+
+.audit-section > .section-heading {
+  padding: 18px 20px;
+}
+
+.audit-filter-bar {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(130px, 1fr)) auto;
+  gap: 10px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.audit-filter-bar label {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.audit-filter-bar label > span {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.audit-filter-bar input,
+.audit-filter-bar select {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--ink);
+  background: var(--surface-muted);
+  font-size: 0.75rem;
+}
+
+.audit-scope-notice,
+.external-block-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 14px 20px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--surface-muted);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.audit-scope-notice {
+  border-color: oklch(84% 0.035 151);
+  color: oklch(35% 0.055 151);
+  background: var(--success-soft);
+}
+
+.audit-scope-notice div {
+  display: grid;
+  gap: 2px;
+}
+
+.external-block-note {
+  border-color: oklch(86% 0.04 78);
+  color: oklch(39% 0.058 72);
+  background: var(--warning-soft);
+}
+
+.audit-feedback {
+  margin: 14px 20px 0;
+}
+
+.audit-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  padding: 14px 20px 8px;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.audit-table-wrap table {
+  min-width: 1180px;
+}
+
+.audit-time {
+  white-space: nowrap;
+}
+
+.audit-detail {
+  max-width: 360px;
+}
+
+.audit-detail span,
+.audit-detail small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.audit-detail small {
+  margin-top: 5px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.hash-link {
+  color: var(--info);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 700;
+}
+
+.hash-link:hover {
+  text-decoration: underline;
+}
+
+.muted-value {
+  color: var(--muted);
+}
+
+.audit-pagination {
+  display: flex;
+  justify-content: center;
+  padding: 16px 20px 0;
 }
 
 .append-only-note {
@@ -2802,6 +2991,10 @@ td > small {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .audit-filter-bar {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .search-field {
     grid-column: span 2;
   }
@@ -2952,7 +3145,9 @@ td > small {
   .field textarea,
   .filter-bar input,
   .filter-bar select,
-  .search-field input {
+  .search-field input,
+  .audit-filter-bar input,
+  .audit-filter-bar select {
     min-height: 44px;
   }
 
@@ -2961,7 +3156,9 @@ td > small {
   .field textarea,
   .filter-bar input,
   .filter-bar select,
-  .search-field input {
+  .search-field input,
+  .audit-filter-bar input,
+  .audit-filter-bar select {
     font-size: 1rem;
   }
 
@@ -3141,9 +3338,25 @@ td > small {
     flex-direction: column;
   }
 
-  .audit-tools .search-field {
+  .audit-tools .button {
     width: 100%;
-    min-width: 0;
+  }
+
+  .audit-filter-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .audit-filter-bar .filter-actions,
+  .audit-filter-bar .button {
+    width: 100%;
+  }
+
+  .profile-logo-row {
+    grid-template-columns: 80px minmax(0, 1fr);
+  }
+
+  .profile-logo-preview {
+    width: 80px;
   }
 
   .merchant-rules article,

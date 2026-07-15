@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -14,9 +14,13 @@ import { FulfillmentPage } from '../src/pages/FulfillmentPage';
 import { HelpPage } from '../src/pages/HelpPage';
 import { LoginPage } from '../src/pages/LoginPage';
 import { ProductPage } from '../src/pages/ProductPage';
-import { SettingsPage } from '../src/pages/SettingsPage';
 import { StoresPage } from '../src/pages/StoresPage';
 import { merchantBusinessDashboard } from './business-dashboard-fixtures';
+import {
+  merchantAudit,
+  merchantAuditExport,
+  merchantProfile,
+} from './account-fixtures';
 import {
   deliveryOrder,
   deliveryOrderId,
@@ -133,6 +137,15 @@ function createMockCoreApi(overrides: Partial<CoreApi> = {}): CoreApi {
       resourceType: expected?.resourceType ?? mediaReadAccess.resourceType,
       resourceId: expected?.resourceId ?? mediaReadAccess.resourceId,
     }),
+    getMerchantProfile: async () => merchantProfile,
+    updateMerchantProfile: async (input) => ({
+      ...merchantProfile,
+      shopName: input.shopName,
+      logoAssetId: input.logoAssetId,
+      version: input.expectedVersion + 1,
+    }),
+    listMerchantAuditEntries: async () => merchantAudit,
+    exportMerchantAuditEntries: async () => merchantAuditExport,
     listFulfillmentOrders: async () => ({ orders: [], nextCursor: null }),
     getMerchantBusinessDashboard: async () => merchantBusinessDashboard,
     getOrderFulfillmentTarget: async () => deliveryTarget,
@@ -240,9 +253,22 @@ async function enterProduct(client: CoreApi) {
   return user;
 }
 
+async function enterSettings(client: CoreApi) {
+  const user = userEvent.setup();
+  installWallet();
+  render(<MemoryRouter><App client={client} /></MemoryRouter>);
+  const connect = screen.getByRole('button', { name: '连接钱包' });
+  await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
+  await user.click(connect);
+  const navigation = await screen.findByRole('navigation', { name: '商家工作台导航' });
+  await user.click(within(navigation).getByRole('link', { name: /系统配置/ }));
+  await screen.findByRole('heading', { name: '系统配置' });
+  return user;
+}
+
 describe('00 wallet gateway', () => {
-  it('consumes settlement-admin.6 and requires a server-authoritative order-action grant', () => {
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.6');
+  it('consumes settlement-admin.7 and requires a server-authoritative order-action grant', () => {
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.7');
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
     expect(coreBoundary.artifactVersion).toBe(artifactVersion);
     expect(coreBoundary.artifactsAvailable).toBe(true);
@@ -886,12 +912,176 @@ describe('05 asset rails', () => {
 });
 
 describe('06 audit and 07 rules', () => {
-  it('keeps settlement wallet immutable and audit history unavailable', () => {
-    renderPage(<SettingsPage />);
+  it('loads tenant profile and audit, saves only editable fields and keeps settlement wallet read-only', async () => {
+    const updateMerchantProfile = vi.fn(createMockCoreApi().updateMerchantProfile);
+    const listMerchantAuditEntries = vi.fn(createMockCoreApi().listMerchantAuditEntries);
+    const user = await enterSettings(createMockCoreApi({ updateMerchantProfile, listMerchantAuditEntries }));
 
+    const name = await screen.findByLabelText('店铺名称') as HTMLInputElement;
+    expect(name.value).toBe('阿步金店');
+    expect(screen.getByText(merchantProfile.settlementWallet)).toBeTruthy();
     expect(screen.getByText('普通编辑不可更换')).toBeTruthy();
-    expect((screen.getByRole('button', { name: '申请治理迁移' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText('审计日志不可用')).toBeTruthy();
+    expect(await screen.findByText('SettlementRequestAuthorized')).toBeTruthy();
+    expect(screen.getByText(/PARTIAL_PRE_MERCHANT_SCOPE/)).toBeTruthy();
+    expect(screen.getByText(/不代表全局链证明/)).toBeTruthy();
+    expect(screen.getByText(/ExternalBlocked/)).toBeTruthy();
+
+    await user.clear(name);
+    await user.type(name, '阿步新金店');
+    await user.click(screen.getByRole('button', { name: '保存资料' }));
+
+    await waitFor(() => expect(updateMerchantProfile).toHaveBeenCalledWith({
+      shopName: '阿步新金店',
+      logoAssetId: merchantProfile.logoAssetId,
+      expectedVersion: 3,
+      idempotencyKey: expect.stringMatching(/^merchant-profile-/),
+    }, 'test-session'));
+    expect(updateMerchantProfile.mock.calls[0]?.[0]).not.toHaveProperty('settlementWallet');
+    expect(await screen.findByText(/已保存为版本 4/)).toBeTruthy();
+    expect(listMerchantAuditEntries).toHaveBeenCalledWith('test-session', { limit: 50 });
+  });
+
+  it('surfaces a concurrent 409 and requires an explicit refresh before another versioned save', async () => {
+    const updateMerchantProfile = vi.fn(async () => {
+      throw new CoreApiError('UnknownState', 'Merchant profile version changed', undefined, undefined, 409);
+    });
+    const getMerchantProfile = vi.fn(async () => merchantProfile);
+    const user = await enterSettings(createMockCoreApi({ getMerchantProfile, updateMerchantProfile }));
+    const name = await screen.findByLabelText('店铺名称');
+    await user.clear(name);
+    await user.type(name, '并发版本店铺');
+    await user.click(screen.getByRole('button', { name: '保存资料' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('资料已被其他会话更新');
+    expect(getMerchantProfile).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: '刷新店铺资料' })).toBeTruthy();
+  });
+
+  it('rejects a profile response or audit projection that crosses the current merchant scope', async () => {
+    const user = await enterSettings(createMockCoreApi({
+      updateMerchantProfile: async (input) => ({
+        ...merchantProfile,
+        shopName: input.shopName,
+        logoAssetId: input.logoAssetId,
+        settlementWallet: '0x2222222222222222222222222222222222222222',
+        version: 4,
+      }),
+      listMerchantAuditEntries: async () => ({
+        ...merchantAudit,
+        chainProof: { merchantId: 'merchant-other', entries: 2 },
+      }),
+    }));
+
+    expect(await screen.findByText('商家范围不匹配')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('起始时间'), { target: { value: '2026-07-01T00:00' } });
+    fireEvent.change(screen.getByLabelText('结束时间'), { target: { value: '2026-07-02T00:00' } });
+    expect((screen.getByRole('button', { name: '导出 CSV' }) as HTMLButtonElement).disabled).toBe(true);
+
+    const name = screen.getByLabelText('店铺名称');
+    await user.clear(name);
+    await user.type(name, '范围校验店铺');
+    await user.click(screen.getByRole('button', { name: '保存资料' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('保存结果与当前商家资料快照不一致');
+  });
+
+  it('uploads a provider-sealed merchant logo and binds its verified asset on profile save', async () => {
+    const {
+      merchantLogoAsset,
+      merchantLogoReadAccess,
+      merchantLogoUploadIntent,
+    } = await import('./account-fixtures');
+    const createMediaUploadIntent = vi.fn(async () => merchantLogoUploadIntent);
+    const completeMediaUpload = vi.fn(async () => merchantLogoAsset);
+    const getMediaReadAccess = vi.fn(async () => merchantLogoReadAccess);
+    const updateMerchantProfile = vi.fn(createMockCoreApi().updateMerchantProfile);
+    const providerFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+    const user = await enterSettings(createMockCoreApi({
+      createMediaUploadIntent,
+      completeMediaUpload,
+      getMediaReadAccess,
+      updateMerchantProfile,
+    }));
+
+    await user.upload(
+      screen.getByLabelText('上传 Logo'),
+      new File([new Uint8Array([1, 2, 3, 4])], 'logo.png', { type: 'image/png' }),
+    );
+    await waitFor(() => expect(completeMediaUpload).toHaveBeenCalledWith(merchantLogoUploadIntent, 'test-session'));
+    expect(createMediaUploadIntent).toHaveBeenCalledWith(expect.objectContaining({
+      purpose: 'MERCHANT_LOGO',
+      resourceType: 'MERCHANT',
+      resourceId: merchantProfile.merchantId,
+      contentType: 'image/png',
+    }), 'test-session', walletAddress);
+    expect(providerFetch).toHaveBeenCalledWith(merchantLogoUploadIntent.uploadUrl, expect.objectContaining({ method: 'PUT' }));
+    expect(await screen.findByText(/已完成存储封存/)).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: '保存资料' }));
+    await waitFor(() => expect(updateMerchantProfile).toHaveBeenCalledWith(expect.objectContaining({
+      logoAssetId: merchantLogoAsset.assetId,
+    }), 'test-session'));
+  });
+
+  it('fails closed when the merchant logo provider is not configured', async () => {
+    const user = await enterSettings(createMockCoreApi({
+      createMediaUploadIntent: async () => {
+        throw new CoreApiError('ConfigurationRequired', 'media provider is not configured');
+      },
+    }));
+    await user.upload(
+      screen.getByLabelText('上传 Logo'),
+      new File([new Uint8Array([1, 2, 3, 4])], 'logo.png', { type: 'image/png' }),
+    );
+    expect((await screen.findByRole('alert')).textContent).toContain('ConfigurationRequired');
+  });
+
+  it('downloads the exact bounded CSV returned by Core with the active filters', async () => {
+    const exportMerchantAuditEntries = vi.fn(async () => merchantAuditExport);
+    const createObjectUrl = vi.fn(() => 'blob:merchant-audit');
+    const revokeObjectUrl = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const user = await enterSettings(createMockCoreApi({ exportMerchantAuditEntries }));
+
+    fireEvent.change(screen.getByLabelText('起始时间'), { target: { value: '2026-07-01T00:00' } });
+    fireEvent.change(screen.getByLabelText('结束时间'), { target: { value: '2026-07-15T00:00' } });
+    await user.selectOptions(screen.getByLabelText('日志流'), 'financial');
+    await user.type(screen.getByLabelText('操作类型'), 'SettlementRequestAuthorized');
+    await user.type(screen.getByLabelText('影响模块'), 'SETTLEMENT_REQUEST');
+    await user.click(screen.getByRole('button', { name: '导出 CSV' }));
+
+    await waitFor(() => expect(exportMerchantAuditEntries).toHaveBeenCalledWith(expect.objectContaining({
+      from: expect.any(String),
+      to: expect.any(String),
+      streamName: 'financial',
+      eventType: 'SettlementRequestAuthorized',
+      resourceType: 'SETTLEMENT_REQUEST',
+      idempotencyKey: expect.stringMatching(/^merchant-audit-export-/),
+    }), 'test-session'));
+    expect(createObjectUrl).toHaveBeenCalledWith(expect.any(Blob));
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:merchant-audit');
+    expect(await screen.findByText(/已下载 2 条/)).toBeTruthy();
+  });
+
+  it('handles empty exports and audit permission failures without simulating content', async () => {
+    const user = await enterSettings(createMockCoreApi({
+      exportMerchantAuditEntries: async () => ({ ...merchantAuditExport, entryCount: 0, csv: 'operationTime,operationType\n' }),
+    }));
+    fireEvent.change(screen.getByLabelText('起始时间'), { target: { value: '2026-07-01T00:00' } });
+    fireEvent.change(screen.getByLabelText('结束时间'), { target: { value: '2026-07-02T00:00' } });
+    await user.click(screen.getByRole('button', { name: '导出 CSV' }));
+    expect(await screen.findByText(/没有可导出/)).toBeTruthy();
+
+    cleanup();
+    await enterSettings(createMockCoreApi({
+      listMerchantAuditEntries: async () => {
+        throw new CoreApiError('Forbidden', 'merchant audit scope denied');
+      },
+    }));
+    expect(await screen.findByText('审计日志加载失败')).toBeTruthy();
+    expect(screen.getByText(/merchant audit scope denied/)).toBeTruthy();
   });
 
   it('shows published versioned policy content and the frozen merchant boundaries', async () => {

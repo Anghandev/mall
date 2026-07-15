@@ -5,7 +5,7 @@ import { artifactVersion } from '@abu24k/core-artifacts';
 
 const dist = fileURLToPath(new URL('../dist/', import.meta.url));
 const textExtensions = new Set(['.css', '.html', '.js', '.map']);
-const coreBoundary = '支付、履约、结算、商品管理、媒体与经营聚合批次已发布';
+const coreBoundary = '支付、履约、结算、商品、媒体、商家资料与审计能力已发布';
 const forbidden = [
   'legacy/' + 'v1-npl-only',
   '__merchant_visual_review__',
@@ -14,6 +14,7 @@ const forbidden = [
   '2.0.0-fulfillment.1',
   '2.0.0-settlement-admin.2',
   '2.0.0-settlement-admin.3',
+  '2.0.0-settlement-admin.6',
   'CLAIM_' + 'MERCHANT_USDT',
   'Payment' + 'Escrow',
   'Claim' + 'Vault',
