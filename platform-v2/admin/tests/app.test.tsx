@@ -27,7 +27,7 @@ describe('platform admin fail-closed experience', () => {
     expect(packageJson.dependencies['@abu24k/core-artifacts']).toBe(`workspace:${artifactVersion}`);
     expect(productBaseline.artifactVersion).toBe(artifactVersion);
     expect(coreState.artifactVersion).toBe(artifactVersion);
-    expect(coreState.artifactStatus).toBe('coordinated-fulfillment-checkpoint');
+    expect(coreState.artifactStatus).toBe('coordinated-settlement-admin-checkpoint');
     expect(coreState.connectionLabel).toContain(artifactVersion);
   });
 
@@ -40,7 +40,7 @@ describe('platform admin fail-closed experience', () => {
     expect(coreState.canWriteWithoutRuntimeAuthorization).toBe(false);
 
     renderAt('/policy');
-    expect(screen.getByRole('button', { name: '发布新 policyVersion' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '请求并提交二次签名' }).hasAttribute('disabled')).toBe(true);
   });
 
   it('renders unavailable dashboard values instead of synthetic zeroes', () => {
@@ -62,7 +62,49 @@ describe('platform admin fail-closed experience', () => {
     renderAt('/audit');
     expect(screen.getByRole('heading', { name: '日志中心' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /删除/ })).toBeNull();
-    expect(screen.getByText(/不可删除资源/)).toBeTruthy();
+    expect(screen.getByText(/从不提供删除或修改操作/)).toBeTruthy();
+  });
+
+  it.each(['ADMIN', 'AUDITOR'] as const)('allows the %s role to query append-only audit evidence', async (role) => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    window.ethereum = walletProvider(wallet);
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: [role] });
+      if (url.includes('/v2/admin/audit/entries')) return jsonResponse({ entries: [], chainProof: {}, nextCursor: null });
+      return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected request', correlationId: 'audit-role-test' } }, 400);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderAt('/audit');
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    const queryButton = await screen.findByRole('button', { name: '查询审计链' });
+    await user.click(queryButton);
+
+    expect(await screen.findByText(/Core 返回真实空结果/)).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/v2/admin/audit/entries?limit=50'))).toBe(true);
+  });
+
+  it('denies the OPERATOR role before an audit query reaches Core', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    window.ethereum = walletProvider(wallet);
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['OPERATOR'] });
+      return jsonResponse({ error: { code: 'Forbidden', message: 'Unexpected request', correlationId: 'audit-role-test' } }, 403);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderAt('/audit');
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+
+    expect(await screen.findByText(/当前会话没有审计读取权限/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '查询审计链' })).toBeNull();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/v2/admin/audit/entries'))).toBe(false);
   });
 
   it('keeps takeover execution closed before an authenticated Core session exists', () => {
@@ -220,12 +262,51 @@ describe('platform admin fail-closed experience', () => {
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/arbitration-decisions'))).toBe(false);
   });
 
-  it('shows every governance gate and blocks publication', () => {
+  it('shows every governance gate and requires an authenticated draft before signing', () => {
     renderAt('/policy');
     expect(screen.getByText('RBAC 授权')).toBeTruthy();
     expect(screen.getByText('二次钱包签名')).toBeTruthy();
     expect(screen.getByText('Safe 多签')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '发布新 policyVersion' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '请求并提交二次签名' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '提交 Safe 多签提案' }).hasAttribute('disabled')).toBe(true);
+  });
+
+  it('uses the Core policy challenge for typed-data signing before a Safe proposal', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    const providerRequest = vi.fn(async ({ method }: { method: string }) => {
+      if (method === 'eth_requestAccounts') return [wallet];
+      if (method === 'personal_sign') return '0xsiwe';
+      if (method === 'eth_signTypedData_v4') return '0xsecondary';
+      throw new Error(`Unexpected wallet method ${method}`);
+    });
+    window.ethereum = { request: providerRequest };
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['ADMIN'] });
+      if (url.endsWith('/v2/admin/policy-drafts') && !init?.method) return jsonResponse([policyDraft()]);
+      if (url.endsWith('/approval-challenge')) return jsonResponse({ draftId: 'draft-1', policyVersion: 2, signer: wallet, typedData: { domain: { name: 'Abu24KPolicyRegistry' }, types: { PolicyPublication: [] }, primaryType: 'PolicyPublication', message: { policyHash: hash('1') } }, digest: hash('2') });
+      if (url.endsWith('/secondary-signature')) return jsonResponse(policyDraft({ state: 'SECONDARY_SIGNED', secondarySigner: wallet, secondarySignatureHash: hash('3') }));
+      if (url.endsWith('/safe-proposal')) return jsonResponse(policyDraft({ state: 'SAFE_PROPOSED', secondarySigner: wallet, secondarySignatureHash: hash('3'), safeAddress: '0x2222222222222222222222222222222222222222', safeCalldataHash: hash('4'), safeTxHash: hash('5'), safeProposalHash: hash('6') }), 202);
+      return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected request', correlationId: 'policy-test' } }, 400);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderAt('/policy');
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    expect(await screen.findByRole('button', { name: 'draft-1' })).toBeTruthy();
+    await user.type(screen.getByLabelText('二次签名 nonce'), '7');
+    await user.type(screen.getByLabelText('签名 deadline · Unix 秒'), '1800000000');
+    await user.click(screen.getByRole('button', { name: '请求并提交二次签名' }));
+
+    expect(await screen.findByText(/二次签名已由 Core 验证/)).toBeTruthy();
+    expect(providerRequest).toHaveBeenCalledWith(expect.objectContaining({ method: 'eth_signTypedData_v4' }));
+    const safeButton = screen.getByRole('button', { name: '提交 Safe 多签提案' });
+    expect(safeButton.hasAttribute('disabled')).toBe(false);
+    await user.click(safeButton);
+    expect(await screen.findByText(/Safe 提案已创建/)).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/safe-proposal'))).toBe(true);
   });
 
   it('supports keyboard navigation between product modules', async () => {
@@ -420,6 +501,33 @@ function fulfillmentOrder(overrides: Record<string, unknown> = {}) {
     shipments: [],
     logistics: [],
     balances: [{ asset: 'USDT', state: 'LOCKED', amount: '65000000' }],
+    ...overrides,
+  };
+}
+
+function policyDraft(overrides: Record<string, unknown> = {}) {
+  return {
+    draftId: 'draft-1',
+    nextPolicyVersion: '2',
+    basePolicyVersion: '1',
+    artifactVersion,
+    payload: {},
+    validationErrors: [],
+    state: 'DRAFT',
+    policyHash: hash('1'),
+    operationsHash: hash('2'),
+    publicationDigest: null,
+    publicationNonce: null,
+    publicationDeadline: null,
+    secondarySigner: null,
+    secondarySignatureHash: null,
+    safeAddress: null,
+    safeCalldataHash: null,
+    safeTxHash: null,
+    safeProposalHash: null,
+    createdBy: '0x1111111111111111111111111111111111111111',
+    createdAt: '2026-07-15T00:00:00.000Z',
+    updatedAt: '2026-07-15T00:00:00.000Z',
     ...overrides,
   };
 }

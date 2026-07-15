@@ -7,7 +7,7 @@ import {
 } from '@abu24k/core-artifacts';
 
 export const productBaseline = Object.freeze({
-  coreArtifacts: 'coordinated-fulfillment-checkpoint',
+  coreArtifacts: 'coordinated-settlement-admin-checkpoint',
   artifactVersion,
   publicCatalogs: Object.freeze({
     breakerScopes,
@@ -23,8 +23,15 @@ export const productBaseline = Object.freeze({
     orderAllowedActions: true,
     fulfillmentCommands: true,
     projections: true,
-    monitoring: false,
-    policyPublication: false,
+    settlement: true,
+    merchantFinance: true,
+    takeoverFunding: true,
+    policyPublication: true,
+    cms: true,
+    notifications: true,
+    systemConfig: true,
+    audit: true,
+    monitoring: true,
     writesWithoutRuntimeAuthorization: false,
   }),
   surface: 'platform-admin',

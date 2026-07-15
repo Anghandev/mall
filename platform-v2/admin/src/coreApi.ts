@@ -313,6 +313,10 @@ async function requestJson(path: string, init: RequestInit) {
   });
 }
 
+export function requestCoreJson(path: string, init: RequestInit = {}) {
+  return requestJson(path, init);
+}
+
 function parseBootstrap(value: unknown) {
   const body = record(value);
   const readiness = record(body.readiness);
@@ -325,7 +329,7 @@ function parseBootstrap(value: unknown) {
       || assets.usdt !== chainIdentity.usdtAddress
       || assets.npl !== chainIdentity.nplAddress
       || typeof readiness.writesEnabled !== 'boolean'
-  ) throw invalidResponse('Core bootstrap is incompatible with this fulfillment checkpoint');
+  ) throw invalidResponse('Core bootstrap is incompatible with this settlement/admin checkpoint');
 
   return Object.freeze({
     artifactVersion,

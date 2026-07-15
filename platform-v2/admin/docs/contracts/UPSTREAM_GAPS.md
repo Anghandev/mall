@@ -3,23 +3,27 @@
 The platform-admin product is a consumer. It cannot add shared endpoints,
 schemas, financial logic, calldata, signers or database behavior.
 
-| Gap ID | Required Core capability | Fail-closed behavior |
+The coordinated consumer is `@abu24k/core-artifacts@2.0.0-settlement-admin.1`.
+Published paths still fail closed when Core returns `DecisionBlocked`,
+`ExternalBlocked` or `ConfigurationRequired`.
+
+| Gap ID | Current Core capability | Remaining fail-closed behavior |
 |---|---|---|
-| GAP-ADM-001 | Admin-wide projection/action consumer contract after coordinated `2.0.0-fulfillment.1`; payment reads plus ADMIN/OPERATOR fulfillment-order reads and order commands are published | Published payment/fulfillment paths work; unrelated Admin reads and writes remain disabled |
-| GAP-ADM-002 | Admin-resource RBAC and permissions; SIWE/JWT and fulfillment-order role binding are published | Fulfillment orders require ADMIN/OPERATOR in this product; other protected Admin resources remain unavailable |
-| GAP-ADM-003 | Resource/list/batch allowedActions and disabled reasons; order-level allowedActions are published | Order commands obey current Core action results; unrelated list/batch controls remain disabled |
-| GAP-ADM-004 | Secondary-signature and Safe proposal/execution evidence contract | High-risk actions cannot begin |
-| GAP-ADM-005 | Dashboard business/risk/infrastructure aggregates | Values unavailable, never synthetic |
-| GAP-ADM-006 | Merchant qualification/level/detail/proceeds/takeover projections | Merchant module read-only unavailable |
-| GAP-ADM-007 | Admin Product/SKU/inventory/category/tag/lock/version projection and writes; public active catalog read is published | Active catalog is read-only; all Admin catalog writes remain disabled |
-| GAP-ADM-008 | ProductPolicy and signed AllocationSnapshot validation/publication | Policy save/publish disabled |
-| GAP-ADM-009 | Seckill session/quotes/inventory/prize/rules/breaker controls | Publish/inject/force-close disabled |
-| GAP-ADM-010 | Fulfillment order evidence/finality plus shipment, delivery, after-sale decision, arbitration, forced-receipt and takeover commands are published; MerchantTakeoverCase funding, guarantee, frozen-receivable, future-proceeds, replacement-merchant and debt projections are not | Current-session commands follow Core allowedActions; unpublished case finance and recovery controls remain disabled |
-| GAP-ADM-011 | Risk event, blacklist, trade-lock and breaker action contracts | Risk writes disabled |
-| GAP-ADM-012 | Order-level shipment/delivery commands are published; provider readiness, carrier configuration, addresses, freight, waybill and print jobs are not | Authorized order commands work; provider/config/print controls stay ConfigurationRequired with no fake success |
-| GAP-ADM-013 | CMS placement/content/version/publish/rollback contracts | CMS writes disabled |
-| GAP-ADM-014 | Notification campaign/audience/gateway/delivery contracts | Send disabled; ConfigurationRequired where applicable |
-| GAP-ADM-015 | Typed business/RPC/Oracle/Gas/Safe/contract/integration config; payment bootstrap publishes chain/assets/readiness | Published identity/readiness is visible; config writes and unpublished values remain unavailable |
-| GAP-ADM-016 | Append-only operation/login/RPC/error/financial/takeover/recovery audit streams | Read-only unavailable; no local proof generation |
-| GAP-ADM-017 | Admin-wide PaymentRouter audit, Safe approvals, policy diffs, signed settlement and reconciliation | Buyer-wallet payment trace is available; Admin audit evidence and execution remain disabled |
-| GAP-ADM-018 | Host/Redis/MQ/database/API/block-sync monitoring | Probe unavailable, never healthy by default |
+| GAP-ADM-001 | Payment, fulfillment and settlement/admin artifacts are coordinated at one version | WebSocket is not published and production deployment is unauthorized |
+| GAP-ADM-002 | SIWE/JWT plus route-specific ADMIN/OPERATOR/ARBITRATOR/AUDITOR enforcement is published | A role absent from the session never enables a product control |
+| GAP-ADM-003 | Order-level `allowedActions` is published | Global resource list/batch `allowedActions`, export and print contracts are absent |
+| GAP-ADM-004 | Policy and takeover-funding EIP-712 challenge/signature/Safe proposal evidence is published | Seckill force-close, breaker and prize-injection governance remain absent |
+| GAP-ADM-005 | Monitoring metrics and per-asset coverage are published | Business GMV/order/review aggregates and risk queues remain unavailable |
+| GAP-ADM-006 | Merchant guarantee, deposit finality, debt and takeover-finance projection is published | Qualification, level, PII, sales and wallet-change governance remain unavailable |
+| GAP-ADM-007 | Active public product/SKU/price/stock read is published | Admin category/tag/product/inventory writes remain disabled |
+| GAP-ADM-008 | Policy draft, validation, secondary signature and Safe proposal workflow is published | Missing commercial decisions remain `DecisionBlocked`; product/session preview is not inferred |
+| GAP-ADM-009 | Payment-side seckill quotes are published | Admin session scheduling, inventory lock, force-close, prize injection and rule binding remain disabled |
+| GAP-ADM-010 | Fulfillment commands plus takeover funding, ordered deductions, platform advance and debt projections are published | Replacement-merchant administration and case-wide list projection remain unavailable |
+| GAP-ADM-011 | Monitoring accepts real risk/operations alerts | Risk rule, blacklist, trade-lock and breaker-action contracts remain disabled |
+| GAP-ADM-012 | Order shipment/delivery commands are published | Carrier config, warehouse, freight, waybill and print jobs are absent or `ConfigurationRequired` |
+| GAP-ADM-013 | CMS create/read/publish/rollback contracts are published and consumed | Real content, audience and production approval evidence must be supplied externally |
+| GAP-ADM-014 | Notification endpoints, inbox, campaign create/publish and worker states are published | Real SMS/SMTP/Push accounts remain `ConfigurationRequired` / `ExternalBlocked` |
+| GAP-ADM-015 | Typed versioned system-config create/list/publish is published and consumed | Real RPC/Safe/provider secret references and deployment addresses remain external blockers |
+| GAP-ADM-016 | Append-only audit query, cursor and per-stream hash-chain proof are published and consumed | Real audit database, retention and backup/restore environment evidence remain external blockers |
+| GAP-ADM-017 | Signed settlement projections, immutable Safe batching/finality, policy evidence, coverage and takeover funding are published | Admin-wide payment search and a batch-wide settlement list are not published; wallet and resource scope remains enforced |
+| GAP-ADM-018 | Host/middleware/HTTP/chain metrics, alerts and acknowledgement are published and consumed | Real production probes and independent explorer credentials remain external blockers |
