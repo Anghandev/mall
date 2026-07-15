@@ -11,14 +11,17 @@ pnpm --filter @abu24k/merchant check
 ```
 
 The app consumes the coordinated `@abu24k/core-artifacts` workspace package at
-`2.0.0-settlement-admin.1`. In addition to Bootstrap, merchant SIWE and the
+`2.0.0-settlement-admin.2`. In addition to Bootstrap, merchant SIWE and the
 payment/fulfillment surfaces, the workbench consumes merchant finance,
 guarantee-deposit evidence, settlement intents, signed settlement requests and
 Safe-finality history. The help center reads wallet-targeted published CMS
 rules and displays their bound policy version. Settlement typed data is checked against the immutable
 Core intent before the connected merchant wallet signs it. Guarantee, debt,
-takeover and five-state balances are rendered as exact Core atomic amounts; the
-browser does not aggregate or recalculate authoritative funds.
+takeover and five-state balances are rendered as exact Core atomic amounts. NPL
+reward rows consume Core's generated subtype enum, while BNM consumes the
+Core-projected Locked/Available points totals and remains explicitly
+non-transferable with no settlement action. The browser does not aggregate or
+recalculate authoritative funds.
 
 Product writes, merchant dashboard/day aggregates, server-side export/batch
 shipping, provider devices, profile migration and merchant audit remain fail

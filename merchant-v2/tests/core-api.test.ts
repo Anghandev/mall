@@ -27,7 +27,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('settlement-admin.1 Core HTTP consumer', () => {
+describe('settlement-admin.2 Core HTTP consumer', () => {
   it('uses the published SIWE nonce and verify request bodies without a password fallback', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
@@ -81,7 +81,7 @@ describe('settlement-admin.1 Core HTTP consumer', () => {
       'https://core.example.test/v2/catalog/products',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.1' }),
+        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.2' }),
       }),
     );
   });
@@ -245,8 +245,14 @@ describe('settlement-admin.1 Core HTTP consumer', () => {
     };
 
     expect((await api.getMerchantFinance('merchant-session')).merchant.guarantee_status).toBe('READY');
-    expect((await api.listSettlements('merchant-session')).requests[2]?.final_safe_tx_hash)
-      .toBe(settlementList.requests[2]?.final_safe_tx_hash);
+    const settlements = await api.listSettlements('merchant-session');
+    expect(settlements.requests[2]?.final_safe_tx_hash).toBe(settlementList.requests[2]?.final_safe_tx_hash);
+    expect(settlements.balances.filter((balance) => balance.asset === 'NPL').map((balance) => balance.rewardSubtype))
+      .toEqual(['GENESIS', 'DIRECT_REFERRAL', 'DISTRICT', 'CITY', 'PROVINCE', 'REGION', 'OPERATIONS', 'ROUNDING_REMAINDER']);
+    expect(settlements.points).toEqual([
+      { pointsType: 'BNM', purpose: 'BNM_LIABILITY', state: 'LOCKED', amount: '8800', transferable: false },
+      { pointsType: 'BNM', purpose: 'BNM_LIABILITY', state: 'AVAILABLE', amount: '3600', transferable: false },
+    ]);
     expect((await api.createSettlementIntent(settlementInput, 'merchant-session')).typedData)
       .toEqual(settlementIntent.typedData);
     expect((await api.submitSettlementRequest(requestInput, 'merchant-session')).state).toBe('REQUESTED');
@@ -268,6 +274,26 @@ describe('settlement-admin.1 Core HTTP consumer', () => {
       'https://core.example.test/v2/finance/merchant/guarantee-deposits',
       expect.objectContaining({ body: JSON.stringify(depositInput) }),
     );
+  });
+
+  it('rejects unknown reward subtypes and transferable BNM projections', async () => {
+    const unknownSubtype = structuredClone(settlementList) as unknown as {
+      balances: Array<Record<string, unknown>>;
+    };
+    unknownSubtype.balances[5]!.rewardSubtype = 'AFFILIATE';
+    globalThis.fetch = vi.fn(async () => jsonResponse(unknownSubtype)) as typeof fetch;
+    await expect(createCoreApi().listSettlements('merchant-session')).rejects.toMatchObject({
+      code: 'InvalidResponse',
+    });
+
+    const transferablePoints = structuredClone(settlementList) as unknown as {
+      points: Array<Record<string, unknown>>;
+    };
+    transferablePoints.points[0]!.transferable = true;
+    globalThis.fetch = vi.fn(async () => jsonResponse(transferablePoints)) as typeof fetch;
+    await expect(createCoreApi().listSettlements('merchant-session')).rejects.toMatchObject({
+      code: 'InvalidResponse',
+    });
   });
 
   it('refuses to sign a settlement typed-data message that differs from the immutable intent', async () => {

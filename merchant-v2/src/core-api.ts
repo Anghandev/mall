@@ -16,6 +16,7 @@ import {
   merchantGuaranteeDepositStates,
   orderFinalityStatuses,
   orderProjectionStates,
+  rewardSubtypes,
   settlementRails,
   settlementRequestStates,
   storeStatuses,
@@ -42,6 +43,7 @@ import {
   type MerchantFinanceProjection,
   type MerchantStore,
   type PickupVerificationRequest,
+  type RewardSubtype,
   type ShipmentProjection,
   type ShipmentRequest,
   type ShipmentResult,
@@ -75,6 +77,8 @@ const settlementRequestStateSet = new Set<string>(settlementRequestStates);
 const takeoverStateSet = new Set<string>(takeoverStates);
 const cmsContentTypeSet = new Set<string>(cmsContentTypes);
 const settlementAssetSet = new Set<string>(['USDT', 'NPL']);
+const rewardSubtypeSet = new Set<string>(rewardSubtypes);
+const bnmPointStateSet = new Set<string>(['LOCKED', 'AVAILABLE']);
 
 export interface CoreReadiness {
   chainId: 56;
@@ -712,8 +716,32 @@ function parseSettlementList(input: unknown): SettlementListProjection {
       return {
         asset: enumValue(balance.asset, settlementAssetSet, 'settlement balance.asset'),
         purpose: string(balance.purpose, 'settlement balance.purpose'),
+        rewardSubtype: balance.rewardSubtype === null
+          ? null
+          : enumValue<RewardSubtype>(
+              balance.rewardSubtype,
+              rewardSubtypeSet,
+              'settlement balance.rewardSubtype',
+            ),
         state: enumValue(balance.state, balanceStateSet, 'settlement balance.state'),
         amount: atomicAmount(balance.amount, 'settlement balance.amount'),
+      };
+    }),
+    points: array(value.points, 'settlement points').map((inputPoints) => {
+      const points = record(inputPoints, 'settlement points balance');
+      exact(points.pointsType, 'BNM', 'settlement points.pointsType');
+      exact(points.purpose, 'BNM_LIABILITY', 'settlement points.purpose');
+      exact(points.transferable, false, 'settlement points.transferable');
+      return {
+        pointsType: 'BNM',
+        purpose: 'BNM_LIABILITY',
+        state: enumValue<'LOCKED' | 'AVAILABLE'>(
+          points.state,
+          bnmPointStateSet,
+          'settlement points.state',
+        ),
+        amount: atomicAmount(points.amount, 'settlement points.amount'),
+        transferable: false,
       };
     }),
     requests: array(value.requests, 'settlement requests').map(parseSettlementRequest),
