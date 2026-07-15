@@ -741,6 +741,20 @@ test('coverage breaker network adapters time out black-hole proposal, lookup and
     }).propose(candidate),
     /timed out/,
   );
+  const blackHoleBody: typeof fetch = async () => new Response(
+    new ReadableStream({ start() { /* Response headers arrive, body never completes. */ } }),
+    { status: 200, headers: { 'content-type': 'application/json' } },
+  );
+  await assert.rejects(
+    new HttpCoverageBreakerSafeProposer({
+      url: 'https://safe-proposer.example.invalid/coverage-breaker',
+      token: 'safe-token',
+      mutualTls: true,
+      fetchImpl: blackHoleBody,
+      requestTimeoutMs: 5,
+    }).propose(candidate),
+    /timed out/,
+  );
   await assert.rejects(
     new ResilientCoverageBreakerChainSource({
       lookupUrl: 'https://safe-lookup.example.invalid/coverage-breaker',

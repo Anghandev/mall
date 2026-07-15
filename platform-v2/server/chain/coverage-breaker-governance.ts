@@ -154,7 +154,7 @@ export class HttpCoverageBreakerSafeProposer implements CoverageBreakerSafePropo
       }),
     });
     if (!response.ok) throw new CoreError('ExternalBlocked', 'Safe coverage-breaker proposal was rejected', 503);
-    const body = await response.json() as Record<string, unknown>;
+    const body = await responseJson(response) as Record<string, unknown>;
     if (
       !isHash(body.safeTxHash)
       || !isHash(body.proposalHash)
@@ -200,7 +200,7 @@ export class ResilientCoverageBreakerChainSource implements CoverageBreakerChain
       body: JSON.stringify({ safeTxHash: input.safeTxHash, resourceId: input.actionId }),
     });
     if (!lookup.ok) throw new CoreError('ExternalBlocked', 'Coverage-breaker execution lookup failed', 503);
-    const lookupBody = await lookup.json() as Record<string, unknown>;
+    const lookupBody = await responseJson(lookup) as Record<string, unknown>;
     if (lookupBody.safeTxHash !== input.safeTxHash || lookupBody.resourceId !== input.actionId) {
       throw new CoreError('InvalidFinality', 'Coverage-breaker execution lookup is not Safe-hash-bound', 502);
     }
@@ -810,12 +810,14 @@ async function rpc(fetchImpl: typeof fetch, url: string, method: string, params:
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
   });
   if (!response.ok) throw new CoreError('ExternalBlocked', `Coverage-breaker RPC ${method} failed`, 503);
-  const body = await response.json() as Record<string, unknown>;
+  const body = await responseJson(response) as Record<string, unknown>;
   if (body.error || !Object.prototype.hasOwnProperty.call(body, 'result')) {
     throw new CoreError('ExternalBlocked', `Coverage-breaker RPC ${method} returned an error`, 503);
   }
   return body.result;
 }
+
+const responseDeadlines = new WeakMap<Response, { controller: AbortController; deadlineAt: number }>();
 
 function fetchWithDeadline(fetchImpl: typeof fetch, timeoutMs = 10_000): typeof fetch {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 60_000) {
@@ -823,27 +825,47 @@ function fetchWithDeadline(fetchImpl: typeof fetch, timeoutMs = 10_000): typeof 
   }
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const deadline = new Promise<Response>((_resolve, reject) => {
-      timer = setTimeout(() => {
-        controller.abort();
-        reject(new CoreError('ExternalBlocked', 'Coverage-breaker external request timed out', 503));
-      }, timeoutMs);
-    });
-    try {
-      return await Promise.race([
-        fetchImpl(input, { ...init, signal: controller.signal }),
-        deadline,
-      ]);
-    } catch (error) {
-      if (controller.signal.aborted) {
-        throw new CoreError('ExternalBlocked', 'Coverage-breaker external request timed out', 503);
-      }
-      throw error;
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
+    const deadlineAt = Date.now() + timeoutMs;
+    const response = await withExternalDeadline(
+      () => fetchImpl(input, { ...init, signal: controller.signal }),
+      controller,
+      deadlineAt,
+    );
+    responseDeadlines.set(response, { controller, deadlineAt });
+    return response;
   }) as typeof fetch;
+}
+
+function responseJson(response: Response) {
+  const deadline = responseDeadlines.get(response);
+  return deadline
+    ? withExternalDeadline(() => response.json(), deadline.controller, deadline.deadlineAt)
+    : response.json();
+}
+
+async function withExternalDeadline<T>(request: () => Promise<T>, controller: AbortController, deadlineAt: number) {
+  const remainingMs = deadlineAt - Date.now();
+  if (remainingMs <= 0) {
+    controller.abort();
+    throw new CoreError('ExternalBlocked', 'Coverage-breaker external request timed out', 503);
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<T>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new CoreError('ExternalBlocked', 'Coverage-breaker external request timed out', 503));
+    }, remainingMs);
+  });
+  try {
+    return await Promise.race([request(), deadline]);
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new CoreError('ExternalBlocked', 'Coverage-breaker external request timed out', 503);
+    }
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function recordValue(value: unknown, name: string): Record<string, any> {
