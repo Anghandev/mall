@@ -8,6 +8,7 @@ export const deliveryOrderId = `0x${'1'.repeat(64)}`;
 export const pickupOrderId = `0x${'2'.repeat(64)}`;
 export const evidenceHash = `0x${'3'.repeat(64)}`;
 export const trackingNumberHash = `0x${'4'.repeat(64)}`;
+export const paymentTxHash = `0x${'9'.repeat(64)}`;
 
 const exactAmounts = {
   listPriceUsdt: '100000000000000000000',
@@ -30,6 +31,10 @@ export const deliveryOrder: FulfillmentOrder = {
   merchantWallet: '0x1111111111111111111111111111111111111111',
   productId: 'product-1',
   skuId: 'sku-delivery',
+  quantity: '2',
+  createdAt: '2026-07-01T07:59:00.000Z',
+  orderKind: 'SECKILL',
+  paymentTxHash,
   fulfillmentMode: 'DELIVERY',
   state: 'DELIVERED',
   finalityStatus: 'FINAL',
@@ -60,6 +65,7 @@ export const deliveryOrder: FulfillmentOrder = {
     { asset: 'USDT', state: 'LOCKED', amount: '72000000000000000000' },
     { asset: 'BNM_POINTS', state: 'LOCKED', amount: '100000000000000000000' },
   ],
+  allowedActions: [{ action: 'REQUEST_FORCED_RECEIPT', enabled: true }],
 };
 
 export const pickupOrder: FulfillmentOrder = {
@@ -72,6 +78,7 @@ export const pickupOrder: FulfillmentOrder = {
   deliveredAt: null,
   shipments: [],
   logistics: [],
+  allowedActions: [{ action: 'VERIFY_PICKUP', enabled: true }],
 };
 
 export const deliveryTarget = {

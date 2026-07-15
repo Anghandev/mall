@@ -4,17 +4,21 @@ import {
   type AllowedAction,
   type AllowedActionName,
   type FulfillmentOrder,
+  type FulfillmentOrderCursor,
+  type FulfillmentOrderPage,
   type FulfillmentTarget,
+  type OrderKind,
+  type OrderProjectionState,
+  type ShipmentBatchItemRequest,
 } from '@abu24k/core-artifacts';
 import {
   Box,
   Download,
-  FileSpreadsheet,
+  ListFilter,
   PackageCheck,
   Printer,
   RefreshCw,
   ScanLine,
-  Search,
   Send,
 } from 'lucide-react';
 import { EmptyState, LoadingRows, PageHeader } from '../components/ui';
@@ -27,31 +31,51 @@ type LoadState<T> =
   | { phase: 'ready'; value: T }
   | { phase: 'error'; message: string };
 
-type CommandKind = 'shipment' | 'forced-receipt' | 'pickup';
+type CommandKind = 'shipment' | 'batch-shipment' | 'forced-receipt' | 'pickup';
 type CommandState =
   | { phase: 'idle' }
   | { phase: 'submitting'; kind: CommandKind }
   | { phase: 'success'; message: string }
   | { phase: 'error'; message: string };
 
+type BatchCarrierCode = ShipmentBatchItemRequest['carrierCode'];
+type BatchItemDraft = Readonly<{
+  carrierCode: BatchCarrierCode;
+  trackingNumberHash: string;
+  evidenceHash: string;
+}>;
+
+type FilterDraft = Readonly<{
+  from: string;
+  to: string;
+  skuId: string;
+  state: '' | OrderProjectionState;
+  orderKind: '' | OrderKind;
+}>;
+
 const bytes32Pattern = /^0x[0-9a-fA-F]{64}$/;
 const carrierPattern = /^[A-Z0-9_-]{2,32}$/;
 const reasonCodePattern = /^[A-Z0-9_:-]{2,64}$/;
 const pickupCodePattern = /^[0-9]{6}$/;
-const deliveryColumns = ['订单号', '订单类型', 'SKU', '订单状态', '支付最终性', '下单时间', '物流单号哈希', '操作'];
-const pickupColumns = ['订单号', '订单类型', 'SKU', '订单状态', '核销门店', '完成时间', '支付最终性', '操作'];
+const orderKinds = ['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] satisfies readonly OrderKind[];
+const batchCarrierCodes = ['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS'] satisfies readonly BatchCarrierCode[];
+const emptyFilters: FilterDraft = { from: '', to: '', skuId: '', state: '', orderKind: '' };
+const deliveryColumns = ['选择', '订单号', '订单类型', 'SKU', '数量', '订单状态', '支付 TxHash', '下单时间', '支付最终性', '物流单号哈希', '操作'];
+const pickupColumns = ['订单号', '订单类型', 'SKU', '数量', '订单状态', '支付 TxHash', '下单时间', '核销门店', '完成时间', '支付最终性', '操作'];
 
 export function FulfillmentPage() {
   const { api, bootstrap, session } = useCoreRuntime();
   const [tab, setTab] = useState<'delivery' | 'pickup'>('delivery');
-  const [ordersState, setOrdersState] = useState<LoadState<readonly FulfillmentOrder[]>>({ phase: 'idle' });
+  const [ordersState, setOrdersState] = useState<LoadState<FulfillmentOrderPage>>({ phase: 'idle' });
   const [selectedOrderId, setSelectedOrderId] = useState<string>();
-  const [actionsState, setActionsState] = useState<LoadState<readonly AllowedAction[]>>({ phase: 'idle' });
   const [targetState, setTargetState] = useState<LoadState<FulfillmentTarget>>({ phase: 'idle' });
   const [commandState, setCommandState] = useState<CommandState>({ phase: 'idle' });
-  const [search, setSearch] = useState('');
-  const [stateFilter, setStateFilter] = useState('');
-  const [skuFilter, setSkuFilter] = useState('');
+  const [filterDraft, setFilterDraft] = useState<FilterDraft>(emptyFilters);
+  const [activeFilters, setActiveFilters] = useState<FilterDraft>(emptyFilters);
+  const [cursorHistory, setCursorHistory] = useState<readonly (FulfillmentOrderCursor | undefined)[]>([undefined]);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [batchSelection, setBatchSelection] = useState<readonly string[]>([]);
+  const [batchItems, setBatchItems] = useState<Readonly<Record<string, BatchItemDraft>>>({});
   const [carrierCode, setCarrierCode] = useState('');
   const [trackingNumberHash, setTrackingNumberHash] = useState('');
   const [shipmentEvidenceHash, setShipmentEvidenceHash] = useState('');
@@ -60,6 +84,7 @@ export function FulfillmentPage() {
   const [pickupCode, setPickupCode] = useState('');
   const [pickupEvidenceHash, setPickupEvidenceHash] = useState('');
   const commandKeys = useRef<Partial<Record<CommandKind, string>>>({});
+  const batchItemKeys = useRef<Record<string, string>>({});
   const selectedOrderRef = useRef<string | undefined>(undefined);
   const sessionTokenRef = useRef(session?.token);
   sessionTokenRef.current = session?.token;
@@ -72,34 +97,23 @@ export function FulfillmentPage() {
     if (!quiet) setOrdersState({ phase: 'loading' });
     const token = session.token;
     try {
-      const value = await api.listFulfillmentOrders(token);
+      const value = await api.listFulfillmentOrders(token, {
+        limit: 100,
+        fulfillmentMode: tab === 'delivery' ? 'DELIVERY' : 'PICKUP',
+        ...(cursorHistory[pageIndex] ? { cursor: cursorHistory[pageIndex] } : {}),
+        ...(activeFilters.from ? { from: localDateTimeToIso(activeFilters.from) } : {}),
+        ...(activeFilters.to ? { to: localDateTimeToIso(activeFilters.to) } : {}),
+        ...(activeFilters.skuId ? { skuId: activeFilters.skuId } : {}),
+        ...(activeFilters.state ? { state: activeFilters.state } : {}),
+        ...(activeFilters.orderKind ? { orderKind: activeFilters.orderKind } : {}),
+      });
       if (sessionTokenRef.current === token) setOrdersState({ phase: 'ready', value });
     } catch (error) {
       if (sessionTokenRef.current === token) {
         setOrdersState({ phase: 'error', message: readableError(error) });
       }
     }
-  }, [api, session]);
-
-  const loadActions = useCallback(async (quiet = false) => {
-    if (!session || !selectedOrderId) {
-      setActionsState({ phase: 'idle' });
-      return;
-    }
-    if (!quiet) setActionsState({ phase: 'loading' });
-    const orderId = selectedOrderId;
-    const token = session.token;
-    try {
-      const value = await api.getOrderAllowedActions(orderId, token);
-      if (selectedOrderRef.current === orderId && sessionTokenRef.current === token) {
-        setActionsState({ phase: 'ready', value });
-      }
-    } catch (error) {
-      if (selectedOrderRef.current === orderId && sessionTokenRef.current === token) {
-        setActionsState({ phase: 'error', message: readableError(error) });
-      }
-    }
-  }, [api, selectedOrderId, session]);
+  }, [activeFilters, api, cursorHistory, pageIndex, session, tab]);
 
   const loadTarget = useCallback(async (quiet = false) => {
     if (!session || !selectedOrderId) {
@@ -126,24 +140,20 @@ export function FulfillmentPage() {
   }, [loadOrders]);
 
   useEffect(() => {
-    void loadActions();
     void loadTarget();
-  }, [loadActions, loadTarget]);
+  }, [loadTarget]);
 
-  const orders = ordersState.phase === 'ready' ? ordersState.value : [];
+  const orders = ordersState.phase === 'ready' ? ordersState.value.orders : [];
   const selectedOrder = orders.find((order) => order.orderId === selectedOrderId);
-  const allowedActions = actionsState.phase === 'ready' ? actionsState.value : undefined;
+  const allowedActions = selectedOrder?.allowedActions;
   const selectedTarget = targetState.phase === 'ready' ? targetState.value : undefined;
   const targetMatchesOrder = Boolean(
     selectedOrder && selectedTarget && selectedOrder.fulfillmentMode === selectedTarget.fulfillmentMode,
   );
-  const visibleOrders = useMemo(() => orders.filter((order) => {
-    if (order.fulfillmentMode !== (tab === 'delivery' ? 'DELIVERY' : 'PICKUP')) return false;
-    if (stateFilter && order.state !== stateFilter) return false;
-    if (skuFilter && !order.skuId.toLowerCase().includes(skuFilter.trim().toLowerCase())) return false;
-    const query = search.trim().toLowerCase();
-    return !query || order.orderId.toLowerCase().includes(query) || order.skuId.toLowerCase().includes(query);
-  }), [orders, search, skuFilter, stateFilter, tab]);
+  const visibleOrders = useMemo(
+    () => orders.filter((order) => order.fulfillmentMode === (tab === 'delivery' ? 'DELIVERY' : 'PICKUP')),
+    [orders, tab],
+  );
   const columns = tab === 'delivery' ? deliveryColumns : pickupColumns;
   const submitting = commandState.phase === 'submitting';
   const canExecute = (action: AllowedActionName) => (
@@ -161,11 +171,23 @@ export function FulfillmentPage() {
   const pickupValid = pickupCodePattern.test(pickupCode)
     && bytes32Pattern.test(pickupEvidenceHash)
     && selectedTarget?.fulfillmentMode === 'PICKUP';
+  const selectedBatchOrders = batchSelection
+    .map((orderId) => orders.find((order) => order.orderId === orderId))
+    .filter((order): order is FulfillmentOrder => Boolean(order));
+  const batchValid = selectedBatchOrders.length > 0
+    && selectedBatchOrders.length <= 100
+    && selectedBatchOrders.every((order) => {
+      const draft = batchItems[order.orderId];
+      return draft !== undefined
+        && batchCarrierCodes.includes(draft.carrierCode)
+        && bytes32Pattern.test(draft.trackingNumberHash)
+        && bytes32Pattern.test(draft.evidenceHash)
+        && canExecuteOrderAction('RECORD_SHIPMENT', order.allowedActions);
+    });
 
   function selectOrder(order: FulfillmentOrder) {
     selectedOrderRef.current = order.orderId;
     setSelectedOrderId(order.orderId);
-    setActionsState({ phase: 'loading' });
     setTargetState({ phase: 'loading' });
     setTab(order.fulfillmentMode === 'DELIVERY' ? 'delivery' : 'pickup');
     setCommandState({ phase: 'idle' });
@@ -177,6 +199,87 @@ export function FulfillmentPage() {
     setReceiptReasonCode('');
     setPickupCode('');
     setPickupEvidenceHash('');
+  }
+
+  function resetOrderContext() {
+    selectedOrderRef.current = undefined;
+    setSelectedOrderId(undefined);
+    setTargetState({ phase: 'idle' });
+    setBatchSelection([]);
+    setBatchItems({});
+    delete commandKeys.current['batch-shipment'];
+    batchItemKeys.current = {};
+  }
+
+  function changeTab(next: 'delivery' | 'pickup') {
+    if (next === tab) return;
+    setTab(next);
+    setCursorHistory([undefined]);
+    setPageIndex(0);
+    resetOrderContext();
+  }
+
+  function applyFilters() {
+    if (filterDraft.from && filterDraft.to && filterDraft.from > filterDraft.to) return;
+    setActiveFilters(filterDraft);
+    setCursorHistory([undefined]);
+    setPageIndex(0);
+    resetOrderContext();
+  }
+
+  function resetFilters() {
+    setFilterDraft(emptyFilters);
+    setActiveFilters(emptyFilters);
+    setCursorHistory([undefined]);
+    setPageIndex(0);
+    resetOrderContext();
+  }
+
+  function goToPreviousPage() {
+    if (pageIndex === 0) return;
+    setPageIndex((current) => current - 1);
+    resetOrderContext();
+  }
+
+  function goToNextPage() {
+    if (ordersState.phase !== 'ready' || !ordersState.value.nextCursor) return;
+    const nextCursor = ordersState.value.nextCursor;
+    setCursorHistory((history) => [
+      ...history.slice(0, pageIndex + 1),
+      nextCursor,
+    ]);
+    setPageIndex((current) => current + 1);
+    resetOrderContext();
+  }
+
+  function toggleBatchOrder(order: FulfillmentOrder) {
+    if (!canExecuteOrderAction('RECORD_SHIPMENT', order.allowedActions)) return;
+    setBatchSelection((selection) => (
+      selection.includes(order.orderId)
+        ? selection.filter((orderId) => orderId !== order.orderId)
+        : [...selection, order.orderId]
+    ));
+    setBatchItems((items) => {
+      if (batchSelection.includes(order.orderId)) {
+        const remaining = { ...items };
+        delete remaining[order.orderId];
+        return remaining;
+      }
+      return {
+        ...items,
+        [order.orderId]: { carrierCode: 'SF', trackingNumberHash: '', evidenceHash: '' },
+      };
+    });
+    delete commandKeys.current['batch-shipment'];
+    delete batchItemKeys.current[order.orderId];
+    setCommandState({ phase: 'idle' });
+  }
+
+  function updateBatchItem(orderId: string, patch: Partial<BatchItemDraft>) {
+    setBatchItems((items) => ({ ...items, [orderId]: { ...items[orderId]!, ...patch } }));
+    delete commandKeys.current['batch-shipment'];
+    delete batchItemKeys.current[orderId];
+    setCommandState({ phase: 'idle' });
   }
 
   function updateCommandInput(kind: CommandKind, update: () => void) {
@@ -197,14 +300,14 @@ export function FulfillmentPage() {
   }
 
   async function runCommand(kind: CommandKind, operation: (key: string) => Promise<string>) {
-    if (!session || !selectedOrder) return;
+    if (!session) return;
     setCommandState({ phase: 'submitting', kind });
     try {
       const message = await operation(idempotencyKey(kind));
       delete commandKeys.current[kind];
+      if (kind === 'batch-shipment') batchItemKeys.current = {};
       setCommandState({ phase: 'success', message });
       void loadOrders(true);
-      void loadActions(true);
       void loadTarget(true);
     } catch (error) {
       setCommandState({ phase: 'error', message: readableError(error) });
@@ -221,6 +324,25 @@ export function FulfillmentPage() {
         trackingNumberHash,
       }, session.token);
       return `发货证据已记录：${result.shipmentId}`;
+    });
+  }
+
+  function submitShipmentBatch() {
+    if (!session || !batchValid) return;
+    void runCommand('batch-shipment', async (key) => {
+      const result = await api.recordShipmentBatch({
+        idempotencyKey: key,
+        items: selectedBatchOrders.map((order) => {
+          const draft = batchItems[order.orderId]!;
+          const itemKey = batchItemKeys.current[order.orderId]
+            ?? idempotencyKeyForOrder('shipment-item', order.orderId);
+          batchItemKeys.current[order.orderId] = itemKey;
+          return { orderId: order.orderId, idempotencyKey: itemKey, ...draft };
+        }),
+      }, session.token);
+      setBatchSelection([]);
+      setBatchItems({});
+      return `批量发货已原子确认：${result.batchId} / ${result.shipments.length} 笔`;
     });
   }
 
@@ -272,18 +394,20 @@ export function FulfillmentPage() {
 
       <section className="section-block fulfillment-workspace" aria-labelledby="orders-title">
         <div className="tabs" role="group" aria-label="履约方式">
-          <button aria-controls="fulfillment-orders" aria-pressed={tab === 'delivery'} className={tab === 'delivery' ? 'active' : undefined} id="delivery-tab" onClick={() => setTab('delivery')} type="button"><Box aria-hidden="true" size={17} /> 快递邮寄</button>
-          <button aria-controls="fulfillment-orders" aria-pressed={tab === 'pickup'} className={tab === 'pickup' ? 'active' : undefined} id="pickup-tab" onClick={() => setTab('pickup')} type="button"><ScanLine aria-hidden="true" size={17} /> 到店自提</button>
+          <button aria-controls="fulfillment-orders" aria-pressed={tab === 'delivery'} className={tab === 'delivery' ? 'active' : undefined} id="delivery-tab" onClick={() => changeTab('delivery')} type="button"><Box aria-hidden="true" size={17} /> 快递邮寄</button>
+          <button aria-controls="fulfillment-orders" aria-pressed={tab === 'pickup'} className={tab === 'pickup' ? 'active' : undefined} id="pickup-tab" onClick={() => changeTab('pickup')} type="button"><ScanLine aria-hidden="true" size={17} /> 到店自提</button>
         </div>
         <div className="section-heading"><div><p className="eyebrow">Merchant-scoped orders</p><h2 id="orders-title">商家履约订单</h2></div><span>{ordersState.phase === 'ready' ? `${visibleOrders.length} 笔` : '实时 Core 读取'}</span></div>
-        <p className="section-intro">订单来自当前 SIWE 商家会话的 `GET /v2/orders`。当前 artifact 未提供普通/秒杀分类字段，列表明确显示未发布，不按价格、商品或时间猜测。</p>
-        <div className="filter-bar" aria-label="订单筛选">
-          <div className="search-field"><Search aria-hidden="true" size={17} /><input aria-label="搜索订单号或 SKU" disabled={ordersState.phase !== 'ready'} onChange={(event) => setSearch(event.target.value)} placeholder="搜索订单号 / SKU" type="search" value={search} /></div>
-          <label><span>SKU</span><input aria-label="SKU 筛选" disabled={ordersState.phase !== 'ready'} onChange={(event) => setSkuFilter(event.target.value)} placeholder="输入 SKU" type="text" value={skuFilter} /></label>
-          <label><span>订单状态</span><select aria-label="订单状态" disabled={ordersState.phase !== 'ready'} onChange={(event) => setStateFilter(event.target.value)} value={stateFilter}><option value="">全部状态</option>{orderProjectionStates.map((state) => <option key={state} value={state}>{state}</option>)}</select></label>
-          <label><span>时间范围</span><input disabled aria-label="开始日期" type="date" /></label>
-          <button className="button secondary" disabled type="button"><FileSpreadsheet aria-hidden="true" size={16} /> 批量发货</button>
-        </div>
+        <p className="section-intro">筛选、订单分类、数量、支付 TxHash、下单时间和可执行动作均来自 Core `.5`。浏览器只提交筛选条件，不重算或补写订单字段。</p>
+        <form className="filter-bar" aria-label="订单筛选" onSubmit={(event) => { event.preventDefault(); applyFilters(); }}>
+          <label><span>开始时间</span><input aria-label="开始时间" disabled={!session} onChange={(event) => setFilterDraft((value) => ({ ...value, from: event.target.value }))} type="datetime-local" value={filterDraft.from} /></label>
+          <label><span>结束时间</span><input aria-label="结束时间" disabled={!session} onChange={(event) => setFilterDraft((value) => ({ ...value, to: event.target.value }))} type="datetime-local" value={filterDraft.to} /></label>
+          <label><span>SKU</span><input aria-label="SKU 筛选" disabled={!session} onChange={(event) => setFilterDraft((value) => ({ ...value, skuId: event.target.value }))} placeholder="精确 SKU ID" type="text" value={filterDraft.skuId} /></label>
+          <label><span>订单状态</span><select aria-label="订单状态" disabled={!session} onChange={(event) => setFilterDraft((value) => ({ ...value, state: event.target.value as FilterDraft['state'] }))} value={filterDraft.state}><option value="">全部状态</option>{orderProjectionStates.map((state) => <option key={state} value={state}>{state}</option>)}</select></label>
+          <label><span>订单类型</span><select aria-label="订单类型" disabled={!session} onChange={(event) => setFilterDraft((value) => ({ ...value, orderKind: event.target.value as FilterDraft['orderKind'] }))} value={filterDraft.orderKind}><option value="">全部类型</option>{orderKinds.map((kind) => <option key={kind} value={kind}>{kind}</option>)}</select></label>
+          <div className="filter-actions"><button className="button primary" disabled={!session || (Boolean(filterDraft.from && filterDraft.to && filterDraft.from > filterDraft.to))} type="submit"><ListFilter aria-hidden="true" size={16} /> 应用筛选</button><button className="button secondary" disabled={!session} onClick={resetFilters} type="button">重置</button></div>
+        </form>
+        {filterDraft.from && filterDraft.to && filterDraft.from > filterDraft.to ? <p className="form-error filter-error" role="alert">开始时间不能晚于结束时间。</p> : null}
         <div aria-live="polite" className="table-wrap" id="fulfillment-orders">
           <table>
             <thead><tr>{columns.map((column) => <th key={column} scope="col">{column}</th>)}</tr></thead>
@@ -297,6 +421,8 @@ export function FulfillmentPage() {
                   key={order.orderId}
                   onSelect={() => selectOrder(order)}
                   order={order}
+                  batchSelected={batchSelection.includes(order.orderId)}
+                  onToggleBatch={() => toggleBatchOrder(order)}
                   selected={order.orderId === selectedOrderId}
                   selectionDisabled={submitting}
                   target={order.orderId === selectedOrderId ? selectedTarget : undefined}
@@ -305,7 +431,21 @@ export function FulfillmentPage() {
             </tbody>
           </table>
         </div>
-        <p className="panel-note">Cursor pagination、PII-safe Excel 导出和批量发货契约尚未发布；相关控件保持关闭，不在浏览器拼装平行接口。</p>
+        <div className="selection-bar">
+          <span>第 {pageIndex + 1} 页 · {tab === 'delivery' ? `已选 ${batchSelection.length} 笔可发货订单` : '到店自提不进入发货批次'}</span>
+          <div className="button-group"><button className="button secondary" disabled={pageIndex === 0 || ordersState.phase === 'loading'} onClick={goToPreviousPage} type="button">上一页</button><button className="button secondary" disabled={ordersState.phase !== 'ready' || !ordersState.value.nextCursor} onClick={goToNextPage} type="button">下一页</button></div>
+        </div>
+        {tab === 'delivery' && batchSelection.length > 0 ? (
+          <form className="batch-shipment-panel" onSubmit={(event) => { event.preventDefault(); submitShipmentBatch(); }}>
+            <div className="section-heading"><div><p className="eyebrow">Atomic manual batch</p><h3>手工批量发货</h3></div><span>{batchSelection.length} / 100</span></div>
+            <div className="table-wrap compact-table"><table><thead><tr><th scope="col">订单号</th><th scope="col">承运商</th><th scope="col">物流单号哈希</th><th scope="col">发货证据哈希</th></tr></thead><tbody>{selectedBatchOrders.map((order) => {
+              const draft = batchItems[order.orderId]!;
+              return <tr key={order.orderId}><td><code className="hash-value">{order.orderId}</code></td><td><select aria-label={`批量承运商 ${order.orderId}`} disabled={submitting} onChange={(event) => updateBatchItem(order.orderId, { carrierCode: event.target.value as BatchCarrierCode })} value={draft.carrierCode}>{batchCarrierCodes.map((code) => <option key={code} value={code}>{code}</option>)}</select></td><td><input aria-label={`批量物流单号哈希 ${order.orderId}`} disabled={submitting} onChange={(event) => updateBatchItem(order.orderId, { trackingNumberHash: event.target.value })} placeholder="0x + 64 位十六进制" value={draft.trackingNumberHash} /></td><td><input aria-label={`批量发货证据哈希 ${order.orderId}`} disabled={submitting} onChange={(event) => updateBatchItem(order.orderId, { evidenceHash: event.target.value })} placeholder="0x + 64 位十六进制" value={draft.evidenceHash} /></td></tr>;
+            })}</tbody></table></div>
+            <div className="selection-bar"><span>整批在 Core 单事务中成功或失败；失败重试复用同一批次和单项幂等键。</span><button className="button primary" disabled={!batchValid || submitting} type="submit"><Send aria-hidden="true" size={16} /> 原子提交批量发货</button></div>
+          </form>
+        ) : null}
+        <p className="panel-note">PII-safe Excel 导出、电子面单和打印契约仍未发布；相关控件保持关闭。批量发货仅消费 Core 发布的 canonical tracking evidence，不在浏览器生成原始运单号或哈希。</p>
       </section>
 
       <section className="section-block order-check" aria-labelledby="order-check-title">
@@ -318,9 +458,7 @@ export function FulfillmentPage() {
               <BalancePanel order={selectedOrder} />
             </div>
             {targetState.phase === 'ready' && !targetMatchesOrder ? <p className="form-error" role="alert">订单履约方式与 Core 目标快照不一致，所有命令已关闭。</p> : null}
-            {actionsState.phase === 'loading' ? <LoadingRows count={3} /> : null}
-            {actionsState.phase === 'error' ? <p className="form-error" role="alert">{actionsState.message}</p> : null}
-            {actionsState.phase === 'ready' ? <AllowedActionsTable actions={actionsState.value} /> : null}
+            <AllowedActionsTable actions={selectedOrder.allowedActions} />
           </>
         )}
       </section>
@@ -383,32 +521,41 @@ export function FulfillmentPage() {
 
 function OrderRow({
   order,
+  batchSelected,
   selected,
   selectionDisabled,
   target,
+  onToggleBatch,
   onSelect,
 }: {
   order: FulfillmentOrder;
+  batchSelected: boolean;
   selected: boolean;
   selectionDisabled: boolean;
   target: FulfillmentTarget | undefined;
+  onToggleBatch(): void;
   onSelect(): void;
 }) {
   const latestShipment = order.shipments.at(-1);
   const pickupStore = target?.fulfillmentMode === 'PICKUP' ? target.payload.name : '选择后读取';
+  const batchAllowed = order.fulfillmentMode === 'DELIVERY'
+    && canExecuteOrderAction('RECORD_SHIPMENT', order.allowedActions);
   const shared = [
     <td key="order"><code className="hash-value">{order.orderId}</code></td>,
-    <td key="type"><span className="state-text blocked" title="FulfillmentOrder 未发布普通/秒杀分类字段">未发布</span></td>,
+    <td key="type"><span className="state-text">{order.orderKind}</span></td>,
     <td key="sku">{order.skuId}</td>,
+    <td className="numeric-cell" key="quantity">{order.quantity}</td>,
     <td key="state"><span className="state-text">{order.state}</span></td>,
+    <td key="tx">{order.paymentTxHash ? <code className="hash-value">{order.paymentTxHash}</code> : '—'}</td>,
+    <td key="created">{timestamp(order.createdAt)}</td>,
   ];
   return (
     <tr aria-selected={selected}>
+      {order.fulfillmentMode === 'DELIVERY' ? <td><input aria-label={`选择批量发货 ${order.orderId}`} checked={batchSelected} disabled={!batchAllowed || selectionDisabled} onChange={onToggleBatch} type="checkbox" /></td> : null}
       {shared}
       {order.fulfillmentMode === 'DELIVERY' ? (
         <>
           <td><span className={order.finalityStatus === 'FINAL' ? 'state-text success' : 'state-text blocked'}>{order.finalityStatus}</span></td>
-          <td>{timestamp(order.paidAt)}</td>
           <td>{latestShipment ? <code className="hash-value">{latestShipment.trackingNumberHash}</code> : '—'}</td>
         </>
       ) : (
@@ -427,8 +574,8 @@ function OrderSummary({ order }: { order: FulfillmentOrder }) {
   return (
     <div className="table-wrap compact-table">
       <table>
-        <thead><tr><th scope="col">订单号</th><th scope="col">SKU</th><th scope="col">状态</th><th scope="col">支付最终性</th><th scope="col">付款最终确认</th><th scope="col">履约完成</th></tr></thead>
-        <tbody><tr><td><code className="hash-value">{order.orderId}</code></td><td>{order.skuId}</td><td>{order.state}</td><td>{order.finalityStatus}</td><td>{timestamp(order.paymentFinalizedAt)}</td><td>{timestamp(order.fulfilledAt)}</td></tr></tbody>
+        <thead><tr><th scope="col">订单号</th><th scope="col">类型</th><th scope="col">SKU</th><th scope="col">数量</th><th scope="col">支付 TxHash</th><th scope="col">状态</th><th scope="col">支付最终性</th><th scope="col">付款最终确认</th><th scope="col">履约完成</th></tr></thead>
+        <tbody><tr><td><code className="hash-value">{order.orderId}</code></td><td>{order.orderKind}</td><td>{order.skuId}</td><td>{order.quantity}</td><td>{order.paymentTxHash ? <code className="hash-value">{order.paymentTxHash}</code> : '—'}</td><td>{order.state}</td><td>{order.finalityStatus}</td><td>{timestamp(order.paymentFinalizedAt)}</td><td>{timestamp(order.fulfilledAt)}</td></tr></tbody>
       </table>
     </div>
   );
@@ -528,4 +675,15 @@ function ProviderStatus({
 
 function timestamp(value: string | null) {
   return value ? <time dateTime={value}>{value}</time> : '—';
+}
+
+function localDateTimeToIso(value: string) {
+  return new Date(value).toISOString();
+}
+
+function idempotencyKeyForOrder(kind: string, orderId: string) {
+  const random = typeof globalThis.crypto?.randomUUID === 'function'
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `merchant-${kind}-${orderId.slice(2, 10)}-${random}`;
 }
