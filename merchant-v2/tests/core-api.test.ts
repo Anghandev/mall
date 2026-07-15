@@ -1,5 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createCoreApi } from '../src/core-api';
+import { createCoreApi, putMediaFile } from '../src/core-api';
+import {
+  catalogCategories,
+  catalogTags,
+  completedMediaAsset,
+  concessionPreview,
+  managedProduct,
+  mediaReadAccess,
+  mediaUploadIntent,
+  merchantStore,
+  merchantWallet,
+  productId,
+  productSlot,
+  storeId,
+} from './catalog-fixtures';
 import {
   deliveryOrder,
   deliveryOrderId,
@@ -27,7 +41,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('settlement-admin.2 Core HTTP consumer', () => {
+describe('settlement-admin.4 Core HTTP consumer', () => {
   it('uses the published SIWE nonce and verify request bodies without a password fallback', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
@@ -63,6 +77,8 @@ describe('settlement-admin.2 Core HTTP consumer', () => {
         chainProductId: productHash,
         title: '核验商品',
         metadata: {},
+        mainImageAssetIds: [productHash],
+        videoAssetId: null,
         skus: [{
           skuId: 'sku-consumer',
           chainSkuId: skuHash,
@@ -81,9 +97,150 @@ describe('settlement-admin.2 Core HTTP consumer', () => {
       'https://core.example.test/v2/catalog/products',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.2' }),
+        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.4' }),
       }),
     );
+  });
+
+  it('consumes the merchant-bound product slot, signed preview and review lifecycle routes', async () => {
+    const reviewed = {
+      ...managedProduct,
+      lifecycleState: 'REVIEW',
+      allowedActions: [],
+      writeLock: { type: 'PRODUCT_STATE', id: productId, state: 'REVIEW' },
+    } as const;
+    const delisted = { ...managedProduct, lifecycleState: 'DELISTED', allowedActions: [], writeLock: null } as const;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ categories: catalogCategories }))
+      .mockResolvedValueOnce(jsonResponse({ tags: catalogTags }))
+      .mockResolvedValueOnce(jsonResponse({ stores: [merchantStore] }))
+      .mockResolvedValueOnce(jsonResponse(productSlot))
+      .mockResolvedValueOnce(jsonResponse(managedProduct))
+      .mockResolvedValueOnce(jsonResponse(concessionPreview, 201))
+      .mockResolvedValueOnce(jsonResponse(reviewed, 201))
+      .mockResolvedValueOnce(jsonResponse(delisted));
+    globalThis.fetch = fetchMock as typeof fetch;
+    const api = createCoreApi('https://core.example.test');
+    const saveInput = {
+      idempotencyKey: 'merchant-product-save-1',
+      title: managedProduct.title,
+      subtitle: managedProduct.subtitle,
+      mainImageAssetIds: managedProduct.mainImageAssetIds,
+      videoAssetId: managedProduct.videoAssetId!,
+      richDetail: managedProduct.richDetail,
+      defaultFreightUsdt: managedProduct.defaultFreightUsdt,
+      merchantConcessionBps: managedProduct.merchantConcessionBps,
+      fulfillmentModes: managedProduct.fulfillmentModes,
+      categoryId: managedProduct.categoryId!,
+      tagIds: managedProduct.tagIds,
+      skus: managedProduct.skus.map((sku) => ({
+        skuId: sku.skuId,
+        attributes: sku.attributes,
+        listPriceUsdt: sku.listPriceUsdt,
+        merchantBaseReceivableUsdt: sku.merchantBaseReceivableUsdt,
+        stockTotal: Number(sku.stockTotal),
+        proposedSeckillInventory: Number(sku.proposedSeckillInventory),
+      })),
+    };
+
+    expect((await api.listCatalogCategories())[0]?.serviceFee.state).toBe('DecisionBlocked');
+    expect((await api.listCatalogTags())[0]?.tagId).toBe('tag-24k');
+    expect((await api.listMerchantStores())[0]?.merchantId).toBe('merchant-1');
+    expect((await api.getMerchantProductSlot(storeId, 'merchant-session')).product?.supersedesProductId)
+      .toBe('product-history-1');
+    expect((await api.saveMerchantProductSlot(storeId, saveInput, 'merchant-session')).skus[0]?.stockAvailable)
+      .toBe('17');
+    expect((await api.createMerchantConcessionPreview(productId, {
+      merchantConcessionBps: 2500,
+      idempotencyKey: 'merchant-preview-1',
+    }, 'merchant-session')).payload.items[0]?.merchantNetReceivableUsdt).toBe('450');
+    expect((await api.submitMerchantProductReview(productId, {
+      previewId: concessionPreview.previewId,
+      idempotencyKey: 'merchant-review-1',
+    }, 'merchant-session')).lifecycleState).toBe('REVIEW');
+    expect((await api.delistMerchantProduct(productId, {
+      reasonCode: 'MERCHANT_REQUEST',
+      idempotencyKey: 'merchant-delist-1',
+    }, 'merchant-session')).lifecycleState).toBe('DELISTED');
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      `https://core.example.test/v2/merchant/stores/${storeId}/product-slot`,
+      expect.objectContaining({ headers: expect.objectContaining({ authorization: 'Bearer merchant-session' }) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      `https://core.example.test/v2/merchant/stores/${storeId}/product-slot`,
+      expect.objectContaining({ method: 'PUT', body: JSON.stringify(saveInput) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      6,
+      `https://core.example.test/v2/merchant/products/${productId}/concession-previews`,
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      7,
+      `https://core.example.test/v2/merchant/products/${productId}/review-submissions`,
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('validates the coordinated media intent, uploads only to its target and completes controlled read access', async () => {
+    const createdAccess = { ...mediaReadAccess, assetId: completedMediaAsset.assetId };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(mediaUploadIntent, 201))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(jsonResponse(completedMediaAsset))
+      .mockResolvedValueOnce(jsonResponse(createdAccess));
+    globalThis.fetch = fetchMock as typeof fetch;
+    const api = createCoreApi('https://core.example.test');
+    const request = {
+      purpose: 'PRODUCT_IMAGE' as const,
+      resourceType: 'PRODUCT' as const,
+      resourceId: productId,
+      contentType: 'image/webp' as const,
+      sizeBytes: 512,
+      contentSha256: mediaUploadIntent.contentSha256,
+      idempotencyKey: 'merchant-media-upload-1',
+    };
+    const file = new File([new Uint8Array(512)], 'product.webp', { type: 'image/webp' });
+
+    const intent = await api.createMediaUploadIntent(request, 'merchant-session', merchantWallet);
+    await putMediaFile(intent, file);
+    const asset = await api.completeMediaUpload(intent, 'merchant-session');
+    const access = await api.getMediaReadAccess(asset.assetId, 'merchant-session', {
+      purpose: 'PRODUCT_IMAGE',
+      resourceType: 'PRODUCT',
+      resourceId: productId,
+    });
+
+    expect(access.readUrl).toBe(createdAccess.readUrl);
+    expect(fetchMock).toHaveBeenNthCalledWith(2, mediaUploadIntent.uploadUrl, expect.objectContaining({
+      method: 'PUT',
+      body: file,
+      headers: expect.any(Headers),
+    }));
+    const providerOptions = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    expect(new Headers(providerOptions.headers).has('authorization')).toBe(false);
+    expect(new Headers(providerOptions.headers).has('x-abu-artifact-version')).toBe(false);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      `https://core.example.test/v2/media/upload-intents/${mediaUploadIntent.uploadIntentId}/complete`,
+      expect.objectContaining({ method: 'POST', body: '{}' }),
+    );
+  });
+
+  it('rejects a concession authorization whose EIP-712 identity no longer binds the preview', async () => {
+    const malformed = structuredClone(concessionPreview) as unknown as {
+      authorization: { message: Record<string, unknown> };
+    };
+    malformed.authorization.message.previewId = productHash;
+    globalThis.fetch = vi.fn(async () => jsonResponse(malformed, 201)) as typeof fetch;
+
+    await expect(createCoreApi().createMerchantConcessionPreview(productId, {
+      merchantConcessionBps: 2500,
+      idempotencyKey: 'merchant-preview-invalid-1',
+    }, 'merchant-session')).rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
   it('sends the bearer session only to the published order-action endpoint', async () => {
@@ -340,16 +497,18 @@ describe('settlement-admin.2 Core HTTP consumer', () => {
   it('preserves a typed Core error and correlation ID', async () => {
     globalThis.fetch = vi.fn(async () => jsonResponse({
       error: {
-        code: 'Forbidden',
-        message: 'Wallet is not authorized',
+        code: 'ProductWriteLocked',
+        message: 'Product is locked by an active reservation',
+        details: { blockingResource: { type: 'RESERVATION', id: 'reservation-7', state: 'ACTIVE' } },
         correlationId: 'body-correlation',
       },
-    }, 403, { 'x-correlation-id': 'header-correlation' })) as typeof fetch;
+    }, 409, { 'x-correlation-id': 'header-correlation' })) as typeof fetch;
 
     await expect(createCoreApi().createSiweChallenge('0x1111111111111111111111111111111111111111'))
       .rejects.toMatchObject({
-        code: 'Forbidden',
+        code: 'ProductWriteLocked',
         correlationId: 'header-correlation',
+        blockingResource: { type: 'RESERVATION', id: 'reservation-7', state: 'ACTIVE' },
       });
   });
 });

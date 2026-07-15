@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
-import { artifactVersion, rewardSubtypes, type CatalogProduct } from '@abu24k/core-artifacts';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { artifactVersion, rewardSubtypes, type CatalogProduct, type ManagedCatalogProduct } from '@abu24k/core-artifacts';
 import { App } from '../src/App';
 import { productBaseline } from '../src/bootstrap';
 import { CoreApiError, type CoreApi, type CoreBootstrap } from '../src/core-api';
@@ -34,11 +34,27 @@ import {
   settlementIntent,
   settlementList,
 } from './settlement-fixtures';
+import {
+  catalogCategories,
+  catalogTags,
+  completedMediaAsset,
+  concessionPreview,
+  managedProduct,
+  mediaReadAccess,
+  mediaUploadIntent,
+  merchantStore,
+  productSlot,
+  storeId,
+} from './catalog-fixtures';
 
 const styles = readFileSync('src/styles.css', 'utf8');
 const walletAddress = '0x1111111111111111111111111111111111111111';
 const chainProductId = `0x${'a'.repeat(64)}`;
 const chainSkuId = `0x${'b'.repeat(64)}`;
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const bootstrap: CoreBootstrap = {
   artifactVersion,
@@ -59,6 +75,8 @@ const catalogProduct: CatalogProduct = {
   chainProductId,
   title: '支付批次商品',
   metadata: {},
+  mainImageAssetIds: [chainProductId],
+  videoAssetId: null,
   skus: [{
     skuId: 'sku-gold',
     chainSkuId,
@@ -69,6 +87,12 @@ const catalogProduct: CatalogProduct = {
 };
 
 function createMockCoreApi(overrides: Partial<CoreApi> = {}): CoreApi {
+  const reviewedProduct: ManagedCatalogProduct = {
+    ...managedProduct,
+    lifecycleState: 'REVIEW',
+    allowedActions: [],
+    writeLock: { type: 'PRODUCT_STATE', id: managedProduct.productId, state: 'REVIEW' },
+  };
   return {
     bootstrap: async () => bootstrap,
     createSiweChallenge: async () => ({
@@ -79,6 +103,28 @@ function createMockCoreApi(overrides: Partial<CoreApi> = {}): CoreApi {
     }),
     verifySiwe: async () => ({ token: 'test-session', walletAddress, roles: ['MERCHANT'] }),
     listCatalog: async () => [catalogProduct],
+    listCatalogCategories: async () => catalogCategories,
+    listCatalogTags: async () => catalogTags,
+    listMerchantStores: async () => [merchantStore],
+    getMerchantProductSlot: async () => productSlot,
+    saveMerchantProductSlot: async () => managedProduct,
+    createMerchantConcessionPreview: async () => concessionPreview,
+    submitMerchantProductReview: async () => reviewedProduct,
+    delistMerchantProduct: async () => ({
+      ...managedProduct,
+      lifecycleState: 'DELISTED',
+      allowedActions: [],
+      writeLock: null,
+    }),
+    createMediaUploadIntent: async () => mediaUploadIntent,
+    completeMediaUpload: async () => completedMediaAsset,
+    getMediaReadAccess: async (assetId, _token, expected) => ({
+      ...mediaReadAccess,
+      assetId,
+      purpose: expected?.purpose ?? mediaReadAccess.purpose,
+      resourceType: expected?.resourceType ?? mediaReadAccess.resourceType,
+      resourceId: expected?.resourceId ?? mediaReadAccess.resourceId,
+    }),
     listFulfillmentOrders: async () => [],
     getOrderFulfillmentTarget: async () => deliveryTarget,
     getOrderAllowedActions: async () => [{
@@ -161,9 +207,21 @@ async function enterAssets(client: CoreApi) {
   return { user, walletRequest };
 }
 
+async function enterProduct(client: CoreApi) {
+  const user = userEvent.setup();
+  installWallet();
+  render(<MemoryRouter><App client={client} /></MemoryRouter>);
+  const connect = screen.getByRole('button', { name: '连接钱包' });
+  await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
+  await user.click(connect);
+  const navigation = await screen.findByRole('navigation', { name: '商家工作台导航' });
+  await user.click(within(navigation).getByRole('link', { name: /单品提报/ }));
+  return user;
+}
+
 describe('00 wallet gateway', () => {
-  it('consumes settlement-admin.2 and requires a server-authoritative order-action grant', () => {
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.2');
+  it('consumes settlement-admin.4 and requires a server-authoritative order-action grant', () => {
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.4');
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
     expect(coreBoundary.artifactVersion).toBe(artifactVersion);
     expect(coreBoundary.artifactsAvailable).toBe(true);
@@ -263,18 +321,150 @@ describe('00 wallet gateway', () => {
 });
 
 describe('02 one-product form', () => {
-  it('reads official Catalog/SKU/stock values but does not invent merchant ownership or costs', async () => {
-    renderPage(<ProductPage />);
+  it('reads the merchant-bound unique slot with complete SKU, inventory, media and replacement history', async () => {
+    const getMerchantProductSlot = vi.fn(async () => productSlot);
+    const listMerchantStores = vi.fn(async () => [
+      merchantStore,
+      { ...merchantStore, storeId: 'store-other', merchantId: 'merchant-other', name: '其他商家门店' },
+    ]);
+    const client = createMockCoreApi({ getMerchantProductSlot, listMerchantStores });
 
-    expect(screen.getByRole('heading', { name: '单品提报' })).toBeTruthy();
-    expect(await screen.findByText('支付批次商品')).toBeTruthy();
-    expect(screen.getByText('24000000000000000000')).toBeTruthy();
-    expect(screen.getByText('19')).toBeTruthy();
-    expect(screen.getByText(/color: 金色/)).toBeTruthy();
-    expect(screen.getByText(/不将任何一条冒充为/)).toBeTruthy();
-    expect((screen.getByRole('button', { name: '保存提报' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByLabelText('商家基础应收') as HTMLInputElement).disabled).toBe(true);
-    expect(screen.getByText(/前端不从售价反推/)).toBeTruthy();
+    await enterProduct(client);
+
+    expect(await screen.findByRole('heading', { name: '单品提报' })).toBeTruthy();
+    expect((await screen.findByLabelText('商品标题') as HTMLInputElement).value).toBe('24K 足金金片');
+    expect((screen.getByLabelText('商家基础应收（USDT 原子值）') as HTMLInputElement).value).toBe('600');
+    expect((screen.getByLabelText('总库存') as HTMLInputElement).value).toBe('20');
+    expect(screen.getByText(/product-history-1/)).toBeTruthy();
+    expect(screen.getByAltText('商品主图 1')).toBeTruthy();
+    expect(screen.getByLabelText('商品视频')).toBeTruthy();
+    expect(screen.queryByText('其他商家门店')).toBeNull();
+    expect(getMerchantProductSlot).toHaveBeenCalledWith(storeId, 'test-session');
+  });
+
+  it('saves the exact product form, renders the signed concession allocation and submits its preview', async () => {
+    const reviewedProduct: ManagedCatalogProduct = {
+      ...managedProduct,
+      lifecycleState: 'REVIEW',
+      allowedActions: [],
+      writeLock: { type: 'PRODUCT_STATE', id: managedProduct.productId, state: 'REVIEW' },
+    };
+    const reviewedSlot = {
+      ...productSlot,
+      product: reviewedProduct,
+      allowedActions: [],
+      writeLock: reviewedProduct.writeLock,
+    };
+    const getMerchantProductSlot = vi.fn()
+      .mockResolvedValueOnce(productSlot)
+      .mockResolvedValueOnce(productSlot)
+      .mockResolvedValueOnce(reviewedSlot);
+    const saveMerchantProductSlot = vi.fn(async () => managedProduct);
+    const createMerchantConcessionPreview = vi.fn(async () => concessionPreview);
+    const submitMerchantProductReview = vi.fn(async () => reviewedProduct);
+    const client = createMockCoreApi({
+      getMerchantProductSlot,
+      saveMerchantProductSlot,
+      createMerchantConcessionPreview,
+      submitMerchantProductReview,
+    });
+    const user = await enterProduct(client);
+    const title = await screen.findByLabelText('商品标题');
+
+    await user.clear(title);
+    await user.type(title, '24K 足金新标题');
+    await user.click(screen.getByRole('button', { name: '保存草稿' }));
+
+    await waitFor(() => expect(saveMerchantProductSlot).toHaveBeenCalledTimes(1));
+    expect(saveMerchantProductSlot).toHaveBeenCalledWith(
+      storeId,
+      expect.objectContaining({
+        title: '24K 足金新标题',
+        merchantConcessionBps: 2500,
+        mainImageAssetIds: managedProduct.mainImageAssetIds,
+        fulfillmentModes: ['DELIVERY', 'PICKUP'],
+        skus: [expect.objectContaining({
+          skuId: managedProduct.skus[0]!.skuId,
+          listPriceUsdt: '1000',
+          merchantBaseReceivableUsdt: '600',
+          stockTotal: 20,
+          proposedSeckillInventory: 10,
+        })],
+        idempotencyKey: expect.stringMatching(/^save-product-store-1-/),
+      }),
+      'test-session',
+    );
+
+    await user.click(screen.getByRole('button', { name: '生成签名预览' }));
+    expect(await screen.findByRole('heading', { name: '商家让利预览' })).toBeTruthy();
+    expect(screen.getByRole('cell', { name: '450' })).toBeTruthy();
+    expect(screen.getByText(/digest: 0x/)).toBeTruthy();
+    expect(createMerchantConcessionPreview).toHaveBeenCalledWith(
+      managedProduct.productId,
+      expect.objectContaining({ merchantConcessionBps: 2500 }),
+      'test-session',
+    );
+
+    await user.click(screen.getByRole('button', { name: '提交平台审核' }));
+    await waitFor(() => expect(submitMerchantProductReview).toHaveBeenCalledWith(
+      managedProduct.productId,
+      expect.objectContaining({ previewId: concessionPreview.previewId }),
+      'test-session',
+    ));
+    expect(await screen.findByText(/blockingResource: PRODUCT_STATE/)).toBeTruthy();
+    expect((screen.getByRole('button', { name: '保存草稿' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('renders the exact Core blocking resource and never unlocks a review product locally', async () => {
+    const lockedProduct: ManagedCatalogProduct = {
+      ...managedProduct,
+      lifecycleState: 'REVIEW',
+      allowedActions: [],
+      writeLock: { type: 'SECKILL_SESSION', id: 'session-24k-1', state: 'LIVE' },
+    };
+    const client = createMockCoreApi({
+      getMerchantProductSlot: async () => ({
+        ...productSlot,
+        product: lockedProduct,
+        allowedActions: [],
+        writeLock: lockedProduct.writeLock,
+      }),
+    });
+
+    await enterProduct(client);
+
+    expect(await screen.findByText('blockingResource: SECKILL_SESSION / session-24k-1 / LIVE')).toBeTruthy();
+    expect((screen.getByLabelText('商品标题') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: '保存草稿' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('uploads a product image through the issued target and keeps it unsaved until the draft command', async () => {
+    const createMediaUploadIntent = vi.fn(async () => mediaUploadIntent);
+    const completeMediaUpload = vi.fn(async () => completedMediaAsset);
+    const client = createMockCoreApi({ createMediaUploadIntent, completeMediaUpload });
+    const providerFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+    const user = await enterProduct(client);
+    await screen.findByLabelText('商品标题');
+    const input = document.querySelector<HTMLInputElement>('input[accept="image/jpeg,image/png,image/webp"]');
+    expect(input).toBeTruthy();
+    const file = new File([new Uint8Array(512)], 'new-product.webp', { type: 'image/webp' });
+
+    await user.upload(input!, file);
+
+    await waitFor(() => expect(completeMediaUpload).toHaveBeenCalledWith(mediaUploadIntent, 'test-session'));
+    expect(createMediaUploadIntent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purpose: 'PRODUCT_IMAGE',
+        resourceType: 'PRODUCT',
+        resourceId: managedProduct.productId,
+        contentType: 'image/webp',
+        sizeBytes: 512,
+      }),
+      'test-session',
+      walletAddress,
+    );
+    expect(providerFetch).toHaveBeenCalledWith(mediaUploadIntent.uploadUrl, expect.objectContaining({ method: 'PUT' }));
+    expect(await screen.findByText(/请保存草稿以绑定到商品/)).toBeTruthy();
   });
 });
 
