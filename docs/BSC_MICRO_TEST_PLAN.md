@@ -3,7 +3,7 @@
 Status: `DRAFT`, `NOT AUTHORIZED` and `NON-EXECUTABLE`.
 
 This draft is bound to local settlement/admin artifact
-`2.0.0-settlement-admin.8`. It does not
+`2.0.0-settlement-admin.9`. It does not
 authorize deployment, approval, token transfer or any transaction. No `.env` or
 private key is read for this plan. `pnpm micro:preflight` must not be run until
 the full local release gate passes and the project-specific preflight described
