@@ -22,7 +22,8 @@ import {
   pickupTarget,
   store,
 } from './fulfillment-fixtures';
-import { paymentQuote, product } from './payment-fixtures';
+import { paymentQuote, product, seckillQuote } from './payment-fixtures';
+import { relayEvent, seckillSession, seckillSessionId } from './seckill-fixtures';
 import {
   finalSafeTxHash,
   notificationItem,
@@ -45,7 +46,7 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/mall');
 
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.1');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.2');
     expect(productBaseline.knownOrderActions).toBe(allowedActionNames);
     expect(productBaseline.executableOrderActions).toBe(executableOrderActionNames);
     expect(executableOrderActionNames).toContain('CONFIRM_RECEIPT');
@@ -53,10 +54,16 @@ describe('Mall V2 payment consumer', () => {
     expect(isCoreOrderActionExecutable('CONFIRM_RECEIPT')).toBe(true);
     expect(isCoreOrderActionExecutable('PAY_ORDER')).toBe(false);
     expect(mallRuntimeBoundary).toMatchObject({
-      artifactStatus: '2.0.0-settlement-admin.1',
+      artifactStatus: '2.0.0-settlement-admin.2',
       executableOrderActions: executableOrderActionNames,
       deploymentAuthorized: false,
-      settlementAdminCapabilities: { settlements: true, cms: true, notifications: true },
+      settlementAdminCapabilities: {
+        settlements: true,
+        cms: true,
+        notifications: true,
+        seckillSessions: true,
+        websocket: true,
+      },
       sharedInterface: '@abu24k/core-artifacts',
     });
     await waitFor(() => expect(screen.getByText('暂无可售商品')).toBeTruthy());
@@ -262,7 +269,7 @@ describe('Mall V2 payment consumer', () => {
     expect(services.wallet.broadcastPayment).toHaveBeenCalledTimes(1);
   });
 
-  it('shows only frozen seckill rules and does not invent an unpublished session', async () => {
+  it('shows frozen rules and stays fail closed when Core has no published session', async () => {
     const user = userEvent.setup();
     renderAt('/seckill');
 
@@ -270,7 +277,82 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText(/主场固定 60 分钟/)).toBeTruthy();
     expect(screen.getByText(/增加 30 秒/)).toBeTruthy();
     expect(screen.getByText(/区块时间决定订单归类/)).toBeTruthy();
-    expect(screen.getByRole('button', { name: '支付并广播' }).hasAttribute('disabled')).toBe(true);
+    expect(await screen.findByText('暂无已发布场次')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '配置秒杀订单' }).hasAttribute('disabled')).toBe(true);
+  });
+
+  it.each([
+    ['PREHEAT', '预热中'],
+    ['LIVE', '主场和接力均以 Core 时间锚'],
+    ['SETTLING', '大奖结算窗口'],
+    ['SETTLED', '本场赢家'],
+  ] as const)('renders authoritative %s seckill state without deriving phase locally', async (phase, expected) => {
+    const current = seckillSession({
+      phase,
+      storedPhase: phase,
+      ...(phase === 'PREHEAT' ? { startsAt: '2033-05-18T05:10:00.000Z' } : {}),
+      ...(phase === 'SETTLED' ? { winnerWallet: BUYER } : {}),
+    });
+    renderAt('/seckill', readyServices({ getCurrentSeckillSession: vi.fn().mockResolvedValue(current) }));
+
+    expect(await screen.findByText(new RegExp(expected))).toBeTruthy();
+    expect(screen.getByText(current.product.seckillListPriceUsdt, { exact: false })).toBeTruthy();
+    expect(screen.getByText(current.prizePoolUsdt, { exact: false })).toBeTruthy();
+    if (phase === 'LIVE') {
+      expect(screen.getByText('00:59:00')).toBeTruthy();
+      expect(screen.getByText('00:01:00')).toBeTruthy();
+    }
+  });
+
+  it('renders history and final-only relay wall from the coordinated realtime consumer', async () => {
+    const current = seckillSession();
+    const history = seckillSession({ phase: 'SETTLED', storedPhase: 'SETTLED', winnerWallet: BUYER });
+    const event = relayEvent();
+    const services = readyServices({
+      getCurrentSeckillSession: vi.fn().mockResolvedValue(current),
+      getSeckillSession: vi.fn().mockResolvedValue({ ...current, relayDeadline: String(event.payload.relayDeadline) }),
+      listSeckillSessionHistory: vi.fn().mockResolvedValue({ items: [history], nextCursor: null }),
+    });
+    services.realtime = {
+      subscribe: (_sessionId, handlers) => {
+        queueMicrotask(() => {
+          handlers.onState('LIVE');
+          handlers.onEvent(event);
+        });
+        return { close() {} };
+      },
+    };
+    const user = userEvent.setup();
+    renderAt('/seckill', services);
+
+    expect(await screen.findByText(/链上最终购买，接力时间增加 30 秒/)).toBeTruthy();
+    expect(screen.getByText('实时')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '历史战报' }));
+    expect(screen.getByText(`赢家 0x1111…1111`)).toBeTruthy();
+  });
+
+  it('binds the current Core session to the existing dual-quote checkout', async () => {
+    const current = seckillSession();
+    const quote = seckillQuote();
+    const createSeckillQuote = vi.fn<CoreClient['createSeckillQuote']>().mockResolvedValue(quote);
+    const services = readyServices({
+      getCurrentSeckillSession: vi.fn().mockResolvedValue(current),
+      createSeckillQuote,
+    });
+    const user = userEvent.setup();
+    renderAt('/seckill', services);
+
+    await user.click(await screen.findByRole('button', { name: '配置秒杀订单' }));
+    expect(screen.getByRole('heading', { name: '秒杀订单配置' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await prepareDeliveryTarget(user);
+    await user.click(screen.getByRole('button', { name: '创建双腿秒杀报价' }));
+
+    await screen.findByRole('heading', { name: '库存已预留' });
+    expect(createSeckillQuote).toHaveBeenCalledWith('buyer-session', seckillSessionId, expect.objectContaining({
+      productId: product.productId,
+      skuId: product.skus[0]!.skuId,
+    }));
   });
 
   it('renders Core stores, browser distance and keeps native navigation ExternalBlocked', async () => {
@@ -373,6 +455,11 @@ describe('Mall V2 payment consumer', () => {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
     expect(screen.getByText(finalSafeTxHash)).toBeTruthy();
+    for (const label of ['创世', '直推', '区县', '城市', '省', '大区', '运维', '取整余数']) {
+      expect(screen.getByText(label)).toBeTruthy();
+    }
+    expect(screen.getByLabelText('BNM 账户总额').textContent).toContain('700');
+    expect(screen.getByLabelText('BNM 账户总额').textContent).toContain('300');
     await user.click(screen.getByRole('button', { name: '签名申请结算 200' }));
 
     await waitFor(() => expect(createSettlementIntent).toHaveBeenCalledWith('buyer-session', {
@@ -386,6 +473,21 @@ describe('Mall V2 payment consumer', () => {
       signature: '0xsettlement-signature',
     });
     expect(document.body.textContent).not.toMatch(/申请退款|强制退款|无理由退款/i);
+  });
+
+  it('hides genesis attribution when Core does not project genesis eligibility', async () => {
+    const withoutGenesis = {
+      ...settlementProjection,
+      balances: settlementProjection.balances.filter((balance) => balance.rewardSubtype !== 'GENESIS'),
+    };
+    const services = readyServices({ listSettlements: vi.fn().mockResolvedValue(withoutGenesis) });
+    const user = userEvent.setup();
+    renderAt('/assets/rewards', services);
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await screen.findByRole('heading', { name: 'NPL 收益' });
+    expect(screen.queryByText('创世')).toBeNull();
+    expect(screen.getByText('直推')).toBeTruthy();
   });
 
   it('loads the real notification inbox and registers the wallet-bound in-app endpoint', async () => {
@@ -453,6 +555,10 @@ function servicesWith(overrides: Partial<CoreClient>): MallServices {
     createSeckillQuote: vi.fn().mockRejectedValue(new Error('not configured')),
     submitPayment: vi.fn().mockRejectedValue(new Error('not configured')),
     getPayment: vi.fn().mockRejectedValue(new Error('not configured')),
+    getCurrentSeckillSession: vi.fn().mockRejectedValue(new CoreClientError('UnknownState', 'no session')),
+    listSeckillSessionHistory: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
+    getSeckillSession: vi.fn().mockRejectedValue(new Error('not configured')),
+    listSeckillSessionEvents: vi.fn().mockResolvedValue({ items: [], nextCursor: '0' }),
     listStores: vi.fn().mockResolvedValue([]),
     createDeliveryTarget: vi.fn().mockResolvedValue(deliveryTarget),
     createPickupTarget: vi.fn().mockResolvedValue(pickupTarget),
@@ -460,7 +566,7 @@ function servicesWith(overrides: Partial<CoreClient>): MallServices {
     getOrder: vi.fn().mockRejectedValue(new Error('not configured')),
     getOrderTarget: vi.fn().mockRejectedValue(new Error('not configured')),
     getOrderAllowedActions: vi.fn().mockResolvedValue([]),
-    listSettlements: vi.fn().mockResolvedValue({ artifactVersion, wallet: BUYER, balances: [], requests: [] }),
+    listSettlements: vi.fn().mockResolvedValue({ artifactVersion, wallet: BUYER, balances: [], points: [], requests: [] }),
     createSettlementIntent: vi.fn().mockRejectedValue(new Error('not configured')),
     submitSettlementRequest: vi.fn().mockRejectedValue(new Error('not configured')),
     listPublicCms: vi.fn().mockResolvedValue([]),
@@ -488,6 +594,9 @@ function servicesWith(overrides: Partial<CoreClient>): MallServices {
       load: (walletAddress) => pendingSubmission?.walletAddress === walletAddress.toLowerCase() ? pendingSubmission : null,
       save: (submission) => { pendingSubmission = submission; },
       clear: () => { pendingSubmission = null; },
+    },
+    realtime: {
+      subscribe: () => ({ close() {} }),
     },
     walletWritesAuthorized: false,
   };

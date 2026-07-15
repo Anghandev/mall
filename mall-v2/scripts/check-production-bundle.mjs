@@ -7,6 +7,7 @@ const forbidden = [
   { pattern: /__MALL_TEST_FIXTURE__/i, reason: 'test fixture marker entered production' },
   { pattern: /2\.0\.0-rc\.2/i, reason: 'stale coordinated artifact entered production' },
   { pattern: /2\.0\.0-fulfillment\.1/i, reason: 'stale fulfillment checkpoint entered production' },
+  { pattern: /2\.0\.0-settlement-admin\.1/i, reason: 'stale settlement checkpoint entered production' },
   { pattern: /PaymentEscrowV2|ClaimVaultV2|BNMTokenV2|CLAIM_[A-Z_]+/i, reason: 'retired funds surface entered production' },
   { pattern: /申请退款|强制退款|无理由退款/i, reason: 'business-refund copy entered production' },
 ];

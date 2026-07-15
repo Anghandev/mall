@@ -20,7 +20,9 @@ import type {
   PaymentProjection,
   PaymentQuoteResponse,
   PaymentSubmissionRequest,
+  RealtimeEventEnvelope,
   SeckillQuoteResponse,
+  SeckillSessionProjection,
   SettlementListProjection,
   SettlementRail,
 } from '@abu24k/core-artifacts';
@@ -34,6 +36,11 @@ import {
   type WalletSession,
 } from './core-client';
 import { productBaseline } from './bootstrap';
+import {
+  createSeckillRealtimeClient,
+  type SeckillRealtimeClient,
+  type SeckillRealtimeState,
+} from './seckill-realtime';
 import { createBrowserWalletGateway, type ApprovalStatus, type WalletGateway } from './wallet';
 
 type SignedQuote = PaymentQuoteResponse | SeckillQuoteResponse;
@@ -56,6 +63,7 @@ export interface MallServices {
   getCurrentPosition(): Promise<BrowserPosition>;
   createIdempotencyKey(): string;
   submissionStore: SubmissionStore;
+  realtime: SeckillRealtimeClient;
   walletWritesAuthorized: boolean;
 }
 
@@ -81,6 +89,13 @@ export interface MallRuntimeValue {
   location: BrowserPosition | null;
   locationState: 'idle' | 'loading' | 'ready' | 'error';
   checkoutTarget: CheckoutTarget | null;
+  seckillSession: SeckillSessionProjection | null;
+  seckillSessionState: LoadState;
+  seckillHistory: readonly SeckillSessionProjection[];
+  seckillEvents: readonly RealtimeEventEnvelope[];
+  seckillRealtimeState: SeckillRealtimeState | 'IDLE';
+  seckillRealtimeError: string | null;
+  selectedSeckillSessionId: string | null;
   orders: readonly FulfillmentOrder[];
   ordersState: 'idle' | LoadState;
   orderActions: Readonly<Record<string, readonly AllowedAction[]>>;
@@ -109,6 +124,8 @@ export interface MallRuntimeValue {
   walletWritesAuthorized: boolean;
   connectWallet(): Promise<void>;
   reloadCatalog(): Promise<void>;
+  reloadSeckill(): Promise<void>;
+  selectSeckillSession(): void;
   reloadStores(regionCode?: string): Promise<void>;
   requestLocation(): Promise<void>;
   createDeliveryTarget(draft: DeliveryTargetDraft): Promise<void>;
@@ -149,6 +166,13 @@ export function MallRuntimeProvider({
   const [location, setLocation] = useState<BrowserPosition | null>(null);
   const [locationState, setLocationState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [checkoutTarget, setCheckoutTarget] = useState<CheckoutTarget | null>(null);
+  const [seckillSession, setSeckillSession] = useState<SeckillSessionProjection | null>(null);
+  const [seckillSessionState, setSeckillSessionState] = useState<LoadState>('loading');
+  const [seckillHistory, setSeckillHistory] = useState<readonly SeckillSessionProjection[]>([]);
+  const [seckillEvents, setSeckillEvents] = useState<readonly RealtimeEventEnvelope[]>([]);
+  const [seckillRealtimeState, setSeckillRealtimeState] = useState<SeckillRealtimeState | 'IDLE'>('IDLE');
+  const [seckillRealtimeError, setSeckillRealtimeError] = useState<string | null>(null);
+  const [selectedSeckillSessionId, setSelectedSeckillSessionId] = useState<string | null>(null);
   const [orders, setOrders] = useState<readonly FulfillmentOrder[]>([]);
   const [ordersState, setOrdersState] = useState<'idle' | LoadState>('idle');
   const [orderActions, setOrderActions] = useState<Readonly<Record<string, readonly AllowedAction[]>>>({});
@@ -199,6 +223,51 @@ export function MallRuntimeProvider({
 
   useEffect(() => {
     let active = true;
+    void loadSeckillSurface(() => active).catch((reason: unknown) => {
+      if (active) setSeckillRealtimeError(errorMessage(reason));
+    });
+    return () => { active = false; };
+  }, [services]);
+
+  useEffect(() => {
+    if (!seckillSession) {
+      setSeckillRealtimeState('IDLE');
+      return;
+    }
+    const sessionId = seckillSession.sessionId;
+    const subscription = services.realtime.subscribe(sessionId, {
+      onEvent(event) {
+        setSeckillEvents((current) => current.some((item) => item.eventId === event.eventId)
+          ? current
+          : [event, ...current].slice(0, 50));
+        void services.core.getSeckillSession(sessionId)
+          .then((next) => setSeckillSession((current) => current?.sessionId === sessionId ? next : current))
+          .catch((reason: unknown) => setSeckillRealtimeError(errorMessage(reason)));
+      },
+      onState: setSeckillRealtimeState,
+      onError: (reason) => setSeckillRealtimeError(errorMessage(reason)),
+      onArtifactMismatch() {
+        setSeckillSession(null);
+        setSeckillEvents([]);
+        setSeckillSessionState('error');
+      },
+    });
+    return () => subscription.close();
+  }, [seckillSession?.sessionId, services]);
+
+  useEffect(() => {
+    if (!seckillSession) return;
+    const sessionId = seckillSession.sessionId;
+    const timer = setInterval(() => {
+      void services.core.getSeckillSession(sessionId)
+        .then((next) => setSeckillSession((current) => current?.sessionId === sessionId ? next : current))
+        .catch((reason: unknown) => setSeckillRealtimeError(errorMessage(reason)));
+    }, 15_000);
+    return () => clearInterval(timer);
+  }, [seckillSession?.sessionId, services]);
+
+  useEffect(() => {
+    let active = true;
     void services.core.listPublicCms()
       .then((items) => {
         if (!active) return;
@@ -235,6 +304,13 @@ export function MallRuntimeProvider({
     location,
     locationState,
     checkoutTarget,
+    seckillSession,
+    seckillSessionState,
+    seckillHistory,
+    seckillEvents,
+    seckillRealtimeState,
+    seckillRealtimeError,
+    selectedSeckillSessionId,
     orders,
     ordersState,
     orderActions,
@@ -286,6 +362,26 @@ export function MallRuntimeProvider({
         setCatalog(products);
         setCatalogState(products.length > 0 ? 'ready' : 'empty');
       }, () => setCatalogState('error'));
+    },
+
+    async reloadSeckill() {
+      await run(async () => loadSeckillSurface(() => true));
+    },
+
+    selectSeckillSession() {
+      if (pendingSubmission) return setError('当前链上交易尚未提交到 Core，请先恢复跟踪');
+      if (!seckillSession) return setError('当前没有 Core 发布的秒杀场次');
+      if (seckillSession.phase !== 'LIVE' || BigInt(seckillSession.inventory.available) === 0n) {
+        return setError('Core 当前场次阶段或库存不允许创建秒杀订单');
+      }
+      const product = catalog.find((item) => item.productId === seckillSession.product.productId);
+      const sku = product?.skus.find((item) => item.skuId === seckillSession.product.skuId);
+      if (!product || !sku) return setError('秒杀商品与当前可售目录不一致，已停止进入结算');
+      setSelectedProductId(product.productId);
+      setSelectedSkuId(sku.skuId);
+      setSelectedSeckillSessionId(seckillSession.sessionId);
+      setQuantityState(1);
+      clearPaymentState();
     },
 
     async reloadStores(regionCode) {
@@ -400,12 +496,16 @@ export function MallRuntimeProvider({
       const product = catalog.find((item) => item.productId === productId);
       setSelectedProductId(product?.productId ?? null);
       setSelectedSkuId(null);
+      setSelectedSeckillSessionId(null);
       setQuantityState(1);
       clearPaymentState();
     },
 
     selectSku(skuId) {
       if (pendingSubmission) return setError('当前链上交易尚未提交到 Core，请先恢复跟踪');
+      if (selectedSeckillSessionId && skuId !== seckillSession?.product.skuId) {
+        return setError('秒杀订单只能使用 Core 场次绑定的 SKU');
+      }
       setSelectedSkuId(selectedProduct?.skus.some((sku) => sku.skuId === skuId) ? skuId : null);
       clearPaymentState();
     },
@@ -435,6 +535,11 @@ export function MallRuntimeProvider({
 
     async requestSeckillQuote(sessionId) {
       await run(async () => {
+        if (sessionId !== selectedSeckillSessionId
+          || sessionId !== seckillSession?.sessionId
+          || seckillSession.phase !== 'LIVE') {
+          throw new CoreClientError('InvalidRequest', '秒杀场次选择已失效，请返回大厅重新同步');
+        }
         const selection = await buildSelection();
         const nextQuote = await services.core.createSeckillQuote(requireSession().token, sessionId, selection);
         setQuote(nextQuote);
@@ -521,6 +626,13 @@ export function MallRuntimeProvider({
     fulfillmentMode,
     location,
     locationState,
+    seckillSession,
+    seckillSessionState,
+    seckillHistory,
+    seckillEvents,
+    seckillRealtimeState,
+    seckillRealtimeError,
+    selectedSeckillSessionId,
     orderActions,
     orderCapabilityErrors,
     orders,
@@ -653,7 +765,35 @@ export function MallRuntimeProvider({
       throw new CoreClientError('WalletMismatch', '收益结算投影与当前钱包不一致');
     }
     setSettlements(nextSettlements);
-    setSettlementsState(nextSettlements.balances.length > 0 || nextSettlements.requests.length > 0 ? 'ready' : 'empty');
+    setSettlementsState(
+      nextSettlements.balances.length > 0 || nextSettlements.points.length > 0 || nextSettlements.requests.length > 0
+        ? 'ready'
+        : 'empty',
+    );
+  }
+
+  async function loadSeckillSurface(isActive: () => boolean) {
+    if (isActive()) setSeckillSessionState('loading');
+    const [current, history] = await Promise.allSettled([
+      services.core.getCurrentSeckillSession(),
+      services.core.listSeckillSessionHistory(undefined, 20),
+    ]);
+    if (!isActive()) return;
+    if (history.status === 'fulfilled') setSeckillHistory(history.value.items);
+    if (current.status === 'fulfilled') {
+      setSeckillSession(current.value);
+      setSeckillSessionState('ready');
+      setSeckillRealtimeError(null);
+      return;
+    }
+    if (current.reason instanceof CoreClientError && current.reason.code === 'UnknownState') {
+      setSeckillSession(null);
+      setSeckillEvents([]);
+      setSeckillSessionState('empty');
+      return;
+    }
+    setSeckillSessionState('error');
+    throw current.reason;
   }
 
   async function loadNotificationBundle(activeSession: WalletSession) {
@@ -699,8 +839,11 @@ export function useMallRuntime() {
   return value;
 }
 
+const defaultCoreClient = createCoreClient();
+
 export const defaultMallServices: MallServices = Object.freeze({
-  core: createCoreClient(),
+  core: defaultCoreClient,
+  realtime: createSeckillRealtimeClient(defaultCoreClient),
   wallet: createBrowserWalletGateway(),
   async getCurrentPosition() {
     if (!globalThis.navigator?.geolocation) {

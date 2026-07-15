@@ -5,7 +5,7 @@ Requirement Matrix and consumes only coordinated Core artifacts.
 
 ## Current Runtime Boundary
 
-- Production consumes coordinated Core artifacts `2.0.0-settlement-admin.1` and derives
+- Production consumes coordinated Core artifacts `2.0.0-settlement-admin.2` and derives
   its HTTP paths from the published OpenAPI document.
 - The real payment consumer covers SIWE, product/SKU reads, ordinary and dual
   seckill quotes, atomic reservations, approval requirements, ABI-shaped
@@ -21,18 +21,23 @@ Requirement Matrix and consumes only coordinated Core artifacts.
   Batched and Settled states. Available NPL reward and USDT prize balances use
   a wallet-bound EIP-712 settlement intent; the Mall never creates settlement
   calldata or pays Safe Gas. Settled requests show the final Safe TxHash.
+- Seckill current/history/session/event reads and `/v2/ws` use the same artifact
+  version. The consumer performs HTTP replay before WebSocket delivery,
+  deduplicates `eventId`, resumes from the last numeric cursor, accepts only
+  `FINAL` events and reloads artifacts after close `4409`.
 - Published CMS content, the wallet notification inbox and the IN_APP/CORE
   endpoint are consumed from the same OpenAPI and generated-types checkpoint.
-  Reward sub-type attribution remains hidden because Core does not yet project
-  genesis/referral/region/operations taxonomy separately.
+  Reward sub-type attribution renders only when Core projects the wallet's
+  genesis, direct, district, city, province, region, operations or rounding
+  subtype. BNM account totals render only Locked/Available and never enter a
+  settlement action.
 - Buyer fulfillment commands remain fail closed even when `allowedActions`
   enables them because Core has not published canonical buyer-evidence
   creation/upload semantics for the required `evidenceHash`.
 - The coordinated manifest still has `deploymentAuthorized=false` and no
   executable `PAY_ORDER`. Wallet broadcast therefore remains fail closed until
   Core publishes deployment evidence. Native navigation, production-device GPS
-  evidence and seckill-session projections also remain externally blocked or
-  unpublished rather than using production fixtures.
+  evidence remain externally blocked rather than using production fixtures.
 - The copied brand assets in `public/brand/` have no runtime dependency on the
   read-only legacy tree.
 

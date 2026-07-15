@@ -19,6 +19,7 @@ import {
   store,
 } from './fulfillment-fixtures';
 import { paymentQuote, product, seckillQuote } from './payment-fixtures';
+import { relayEvent, seckillSession, seckillSessionId } from './seckill-fixtures';
 import {
   publicCmsItem,
   requestedSettlement,
@@ -205,6 +206,48 @@ describe('coordinated Core HTTP client', () => {
     const response = await createCoreClient({ fetch: fetcher }).createSeckillQuote('session', sessionId, selection());
     expect(response.dual.classificationAuthority).toBe('PAYMENT_ROUTER_BLOCK_TIMESTAMP');
     expect(response.routerCall).toStrictEqual(seckill.routerCall);
+  });
+
+  it('consumes authoritative seckill current/history/session/events operations', async () => {
+    const live = seckillSession();
+    const settled = seckillSession({ phase: 'SETTLED', storedPhase: 'SETTLED', winnerWallet: live.lastBuyerWallet });
+    const event = relayEvent();
+    const calls: string[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith('/v2/seckill/sessions/current')) return json(live);
+      if (url.endsWith('/v2/seckill/sessions/history?limit=20')) return json({ items: [settled], nextCursor: null });
+      if (url.endsWith(`/v2/seckill/sessions/${seckillSessionId}`)) return json(live);
+      if (url.endsWith(`/v2/seckill/sessions/${seckillSessionId}/events?cursor=0&limit=100`)) {
+        return json({ items: [event], nextCursor: '1' });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    const client = createCoreClient({ baseUrl: 'https://core.mall.test', fetch: fetcher });
+
+    expect((await client.getCurrentSeckillSession()).phase).toBe('LIVE');
+    expect((await client.listSeckillSessionHistory()).items[0]?.winnerWallet).toBe(live.lastBuyerWallet);
+    expect((await client.getSeckillSession(seckillSessionId)).timers.relayIncrementSeconds).toBe(30);
+    expect((await client.listSeckillSessionEvents(seckillSessionId)).items).toEqual([event]);
+    expect(calls).toHaveLength(4);
+  });
+
+  it('rejects non-final realtime events and malformed reward/BNM projections', async () => {
+    const nonFinal = { ...relayEvent(), finality: 'PENDING' };
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json({ items: [nonFinal], nextCursor: '1' })),
+    }).listSeckillSessionEvents(seckillSessionId)).rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    const malformedReward = structuredClone(settlementProjection);
+    (malformedReward.balances[0] as { rewardSubtype: string | null }).rewardSubtype = 'UNKNOWN';
+    await expect(createCoreClient({ fetch: vi.fn().mockResolvedValue(json(malformedReward)) }).listSettlements('session'))
+      .rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    const transferableBnm = structuredClone(settlementProjection);
+    (transferableBnm.points[0] as { transferable: boolean }).transferable = true;
+    await expect(createCoreClient({ fetch: vi.fn().mockResolvedValue(json(transferableBnm)) }).listSettlements('session'))
+      .rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
   it('surfaces typed Core blocks without inventing a successful fallback', async () => {

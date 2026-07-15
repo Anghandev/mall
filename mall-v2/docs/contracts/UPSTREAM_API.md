@@ -2,7 +2,7 @@
 
 Status: the previous handwritten `mall-api-v1` proposal is retired. Mall now
 consumes coordinated Core settlement/admin artifacts
-`2.0.0-settlement-admin.1`.
+`2.0.0-settlement-admin.2`.
 
 The published boundary currently covers:
 
@@ -18,6 +18,11 @@ The published boundary currently covers:
   generated `allowedActions`.
 - wallet settlement balances and requests, signed EIP-712 settlement intents,
   Safe batching state and final Safe TxHash;
+- seckill current/history/session projections, authoritative timer anchors,
+  prize/winner state and final-event numeric cursor replay;
+- public `/v2/ws` delivery bound to artifact version, session channel and last
+  accepted cursor;
+- NPL reward subtype attribution and wallet-level BNM Locked/Available totals;
 - public CMS items, wallet notification inbox and wallet-bound IN_APP endpoint
   registration.
 
@@ -26,13 +31,10 @@ the generated response types. It does not maintain a parallel API schema.
 
 The following Mall capabilities remain unpublished:
 
-- seckill session state, timers, reports and event cursor;
 - saved-address/profile persistence and PII-safe address parsing;
 - canonical buyer-evidence generation/upload required before Mall may execute
   exchange, delay, receipt, pickup, arbitration or takeover commands;
-- reward sub-type attribution separating genesis, direct referral, four region
-  levels and operations within the aggregate `REWARD_NPL` rail;
-- BNM account totals beyond order-linked Locked/Available projections;
-- fulfillment and settlement WebSocket cursor replay.
+- fulfillment and settlement WebSocket cursor replay beyond the published
+  seckill channel.
 
 No business-refund endpoint or action is part of V2.
