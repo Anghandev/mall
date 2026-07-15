@@ -3002,6 +3002,11 @@ test('printer binding, provider waybill and durable print jobs form one merchant
       deviceId: 'printer-device-001',
       idempotencyKey: 'printer-binding-challenge-1',
     });
+    const serializedChallenge = JSON.parse(JSON.stringify(challenge)) as {
+      typedData: { message: { nonce: string; deadline: string } };
+    };
+    assert.match(serializedChallenge.typedData.message.nonce, /^\d+$/);
+    assert.match(serializedChallenge.typedData.message.deadline, /^\d+$/);
     const signature = await merchantWallet.signTypedData(
       challenge.typedData.domain,
       challenge.typedData.types,

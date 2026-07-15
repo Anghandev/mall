@@ -947,8 +947,8 @@ function bindingMessage(row: BindingChallengeRow) {
     deviceIdHash: hashText(row.device_id),
     oldValueHash: row.old_value_hash,
     newValueHash: row.new_value_hash,
-    nonce: BigInt(row.nonce),
-    deadline: BigInt(Math.floor(row.deadline.getTime() / 1000)),
+    nonce: BigInt(row.nonce).toString(),
+    deadline: BigInt(Math.floor(row.deadline.getTime() / 1000)).toString(),
   };
 }
 
