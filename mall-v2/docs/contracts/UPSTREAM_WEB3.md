@@ -4,7 +4,7 @@ Status: the previous handwritten `mall-web3-v1` proposal is retired. Mall uses
 the coordinated payment ABI and ABI-shaped `routerCall`; it does not copy
 PaymentRouter fragments or infer event signatures.
 
-The `2.0.0-settlement-admin.5` publication provides BSC chain 56, fixed USDT/NPL
+The `2.0.0-settlement-admin.6` publication provides BSC chain 56, fixed USDT/NPL
 identity, exact versioned payment legs, MaxUint256 approval requirements with
 revocation metadata, EIP-712 buyer authorization, PaymentRouter ABI-shaped
 calls, submission binding and payment finality projections.

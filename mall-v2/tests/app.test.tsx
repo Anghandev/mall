@@ -56,7 +56,7 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/mall');
 
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.5');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.6');
     expect(productBaseline.knownOrderActions).toBe(allowedActionNames);
     expect(productBaseline.executableOrderActions).toBe(executableOrderActionNames);
     expect(executableOrderActionNames).toContain('CONFIRM_RECEIPT');
@@ -64,7 +64,7 @@ describe('Mall V2 payment consumer', () => {
     expect(isCoreOrderActionExecutable('CONFIRM_RECEIPT')).toBe(true);
     expect(isCoreOrderActionExecutable('PAY_ORDER')).toBe(false);
     expect(mallRuntimeBoundary).toMatchObject({
-      artifactStatus: '2.0.0-settlement-admin.5',
+      artifactStatus: '2.0.0-settlement-admin.6',
       executableOrderActions: executableOrderActionNames,
       deploymentAuthorized: false,
       settlementAdminCapabilities: {
