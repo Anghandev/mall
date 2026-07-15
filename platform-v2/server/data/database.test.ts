@@ -25,6 +25,13 @@ import {
   CoverageBreakerGovernanceWorker,
   type CoverageBreakerObservation,
 } from '../chain/coverage-breaker-governance.ts';
+import {
+  seckillSafeTxHash,
+  SeckillGovernanceWorker,
+  type SeckillFinalityCandidate,
+  type SeckillObservation,
+  type SeckillSafeProposal,
+} from '../chain/seckill-governance.ts';
 import { AuditOutboxWorker } from '../chain/audit-outbox-worker.ts';
 import { NotificationWorker } from '../chain/notification-worker.ts';
 import { OperationsMonitoringWorker, RuntimeMetricsRegistry } from '../chain/monitoring-worker.ts';
@@ -56,6 +63,7 @@ import {
 import { leaseDurableJobs } from './queue.ts';
 import { SettlementService } from './settlement-service.ts';
 import { SeckillService } from './seckill-service.ts';
+import { SeckillOperationsService } from './seckill-operations-service.ts';
 import { TakeoverFundingService, type TakeoverFundingApprovalInput } from './takeover-funding-service.ts';
 import { PolicyService } from './policy-service.ts';
 import { NotificationService } from './notification-service.ts';
@@ -106,6 +114,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '015_coverage_breaker_governance.sql',
       '016_coverage_breaker_safe_nonce.sql',
       '017_risk_management.sql',
+      '018_seckill_operations.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -138,6 +147,9 @@ test('business and audit migrations apply from empty databases', async () => {
     assert.ok(businessTables.rows.some((row) => row.table_name === 'buyer_profiles'));
     assert.ok(businessTables.rows.some((row) => row.table_name === 'buyer_saved_addresses'));
     assert.ok(businessTables.rows.some((row) => row.table_name === 'takeover_case_transitions'));
+    assert.ok(businessTables.rows.some((row) => row.table_name === 'seckill_governance_actions'));
+    assert.ok(businessTables.rows.some((row) => row.table_name === 'seckill_session_plans'));
+    assert.ok(businessTables.rows.some((row) => row.table_name === 'seckill_prize_injections'));
     assert.equal(businessTables.rows.some((row) => row.table_name === 'claim_projections'), false);
     const finalityColumns = await business.query<{ column_name: string }>(
       "SELECT column_name FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'transaction_finality'",
@@ -1117,6 +1129,302 @@ test('seckill and fallback reservations use independent session and retail inven
       [sessionId],
     );
     assert.deepEqual(restored.rows[0], { reserved: 1, sold: 0 });
+  } finally {
+    await db.close();
+  }
+});
+
+test('seckill operations publish locked inventory, reconcile prize funding and govern force-close recovery', async () => {
+  const db = await createBusinessDatabase();
+  const admin = Wallet.createRandom();
+  const operator = Wallet.createRandom();
+  const secondary = Wallet.createRandom();
+  const governanceSafe = '0x3333333333333333333333333333333333333333';
+  const custodySafe = '0x4444444444444444444444444444444444444444';
+  const operationsSafe = '0x5555555555555555555555555555555555555555';
+  const router = '0x6666666666666666666666666666666666666666';
+  const now = new Date('2026-07-15T08:00:00.000Z');
+  let clock = now;
+  try {
+    await seedCatalog(db, 10);
+    await db.query('UPDATE core.skus SET proposed_seckill_inventory = 4 WHERE sku_id = $1', ['sku-1']);
+    for (const [wallet, role] of [[admin.address, 'ADMIN'], [operator.address, 'OPERATOR']] as const) {
+      await db.query(
+        `INSERT INTO core.wallet_role_bindings (
+           wallet_address, role, merchant_id, status, evidence_hash
+         ) VALUES ($1,$2,NULL,'ACTIVE',$3)`,
+        [wallet.toLowerCase(), role, HASH],
+      );
+    }
+    await db.query(
+      `INSERT INTO core.merchant_guarantees (
+         merchant_id, backing_safe_address, balance_usdt, minimum_usdt,
+         source_evidence_hash, updated_at
+       ) VALUES ('merchant-1',$1,$2,$2,$3,$4)`,
+      [operationsSafe, (1_000n * 10n ** 18n).toString(), HASH_2, now],
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshots (
+         snapshot_id, chain_id, block_number, block_hash, canonical, evidence_hash, recorded_at
+       ) VALUES ('coverage:seckill',56,100,$1,true,$2,$3)`,
+      [HASH, HASH_2, now],
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshot_items (
+         snapshot_id, safe_address, asset, verified_asset_balance,
+         unsettled_liability, coverage_met
+       ) VALUES ('coverage:seckill',$1,'USDT',1000,1000,true)`,
+      [custodySafe],
+    );
+    await db.query(
+      `INSERT INTO core.circuit_breakers (
+         scope, paused, evidence_hash, policy_version, changed_by, changed_at
+       ) VALUES ('SECKILL_PURCHASE',false,$1,1,'TEST',$2)
+       ON CONFLICT (scope) DO UPDATE SET paused = false`,
+      [HASH, now],
+    );
+    await db.query(
+      `INSERT INTO core.cms_entries (
+         entry_id, slug, content_type, placement, created_by, created_at
+       ) VALUES ('cms:seckill-rules','seckill-rules','SECKILL_RULES','SECKILL_RULES',$1,$2)`,
+      [admin.address.toLowerCase(), now],
+    );
+    await db.query(
+      `INSERT INTO core.cms_versions (
+         version_id, entry_id, version, locale, content_format, source_content,
+         sanitized_content, content_hash, audience, policy_version,
+         idempotency_key, request_hash, created_by, created_at
+       ) VALUES ('cms:seckill-rules:v1','cms:seckill-rules',1,'zh-CN','STRUCTURED_RICH_TEXT',
+         $1,$1,$2,'{"type":"ALL"}',1,'seckill-rules-v1',$3,$4,$5)`,
+      [
+        JSON.stringify({ type: 'doc', children: [] }),
+        HASH,
+        HASH_2,
+        admin.address.toLowerCase(),
+        now,
+      ],
+    );
+    await db.query(
+      `INSERT INTO core.cms_publication_events (
+         event_id, entry_id, active_version_id, event_type, evidence_hash,
+         actor_wallet, created_at
+       ) VALUES ('cms:seckill-rules:published','cms:seckill-rules','cms:seckill-rules:v1',
+         'PUBLISHED',$1,$2,$3)`,
+      [HASH_2, admin.address.toLowerCase(), now],
+    );
+
+    const service = new SeckillOperationsService({
+      transactions: transactionAdapter(db),
+      governanceSafeAddress: governanceSafe,
+      operationsSafeAddress: operationsSafe,
+      custodySafeAddress: custodySafe,
+      paymentRouterAddress: router,
+      secondarySignerAddress: secondary.address,
+      clock: () => clock,
+    });
+    const operatorActor = { walletAddress: operator.address, roles: ['OPERATOR'] as const };
+    const adminActor = { walletAddress: admin.address, roles: ['ADMIN'] as const };
+    const sessionAction = await service.createSession(operatorActor, {
+      policyVersion: '1',
+      rulesContentHash: HASH,
+      productId: 'product-1',
+      skuId: 'sku-1',
+      inventory: 4,
+      seckillListPriceUsdt: '80',
+      startsAt: new Date(now.getTime() + 30 * 60_000).toISOString(),
+      idempotencyKey: 'seckill-session-001',
+      correlationId: 'seckill-session-create',
+    });
+    assert.equal(sessionAction.state, 'DRAFT');
+    assert.equal(sessionAction.sessionPlan?.inventory, '4');
+    assert.equal(sessionAction.sessionPlan?.timers.mainDurationSeconds, 3_600);
+    assert.deepEqual(
+      (await db.query<{ stock_available: number; stock_seckill_locked: number }>(
+        'SELECT stock_available, stock_seckill_locked FROM core.skus WHERE sku_id = $1',
+        ['sku-1'],
+      )).rows[0],
+      { stock_available: 6, stock_seckill_locked: 4 },
+    );
+    await assert.rejects(
+      service.createSession({ walletAddress: secondary.address, roles: ['AUDITOR'] }, {
+        policyVersion: '1', rulesContentHash: HASH, productId: 'product-1', skuId: 'sku-1',
+        inventory: 1, seckillListPriceUsdt: '80', startsAt: new Date(now.getTime() + 60 * 60_000).toISOString(),
+        idempotencyKey: 'seckill-audit-denied', correlationId: 'denied',
+      }),
+      (error: unknown) => error instanceof CoreError && error.code === 'Forbidden',
+    );
+
+    const approve = async (actionId: string, nonce: string) => {
+      const deadline = String(Math.floor(clock.getTime() / 1_000) + 600);
+      const challenge = await service.approvalChallenge(adminActor, actionId, { nonce, deadline });
+      const signature = await secondary.signTypedData(
+        challenge.typedData.domain,
+        challenge.typedData.types,
+        challenge.typedData.message,
+      );
+      await service.submitApproval(adminActor, actionId, {
+        nonce,
+        deadline,
+        signature,
+        correlationId: `seckill-approval-${nonce}`,
+      });
+      await service.propose(adminActor, actionId, `seckill-proposal-${nonce}`);
+    };
+
+    const nonceBySafe = new Map<string, bigint>();
+    const reorged = new Set<string>();
+    const worker = new SeckillGovernanceWorker({
+      transactions: transactionAdapter(db),
+      proposer: {
+        propose: async (input: SeckillSafeProposal) => {
+          const current = nonceBySafe.get(input.safeAddress) ?? BigInt(input.minimumSafeNonce);
+          nonceBySafe.set(input.safeAddress, current + 1n);
+          const safeNonce = current.toString();
+          return {
+            safeNonce,
+            safeTxHash: seckillSafeTxHash(input, safeNonce),
+            proposalHash: keccak256(toUtf8Bytes(`proposal:${input.actionId}:${safeNonce}`)),
+          };
+        },
+      },
+      chain: {
+        observe: async (input: SeckillFinalityCandidate): Promise<SeckillObservation> => {
+          const executionTxHash = keccak256(toUtf8Bytes(`execution:${input.actionId}`));
+          const blockHash = keccak256(toUtf8Bytes(`block:${input.actionId}`));
+          if (reorged.has(input.actionId) && input.priorState === 'FINAL') {
+            const canonicalBlockHash = keccak256(toUtf8Bytes(`canonical:${input.actionId}`));
+            const evidence = {
+              safeTxHash: input.safeTxHash,
+              executionTxHash,
+              blockNumber: 100,
+              blockHash,
+              canonicalBlockHash,
+              confirmations: 0 as const,
+              canonical: false as const,
+              actionKind: input.actionKind,
+              evidenceHash: input.evidenceHash,
+            };
+            return {
+              state: 'REORGED',
+              ...evidence,
+              observationEvidenceHash: keccak256(toUtf8Bytes(JSON.stringify(evidence))),
+            };
+          }
+          const evidence = {
+            safeTxHash: input.safeTxHash,
+            executionTxHash,
+            blockNumber: 100,
+            blockHash,
+            confirmations: 15,
+            canonical: true as const,
+            actionKind: input.actionKind,
+            evidenceHash: input.evidenceHash,
+          };
+          return {
+            state: 'FINAL',
+            ...evidence,
+            observationEvidenceHash: keccak256(toUtf8Bytes(JSON.stringify(evidence))),
+          };
+        },
+      },
+      clock: () => clock,
+    });
+
+    await approve(sessionAction.actionId, '1');
+    assert.deepEqual(await worker.pollOnce(), { proposals: 1, finality: 1 });
+    assert.deepEqual(worker.status(), { healthy: true, errorCode: undefined });
+    const session = await db.query<{
+      phase: string; inventory: number; governance_action_id: string;
+      rules_content_hash: string; publication_tx_hash: string;
+    }>(
+      `SELECT phase, inventory, governance_action_id, rules_content_hash, publication_tx_hash
+       FROM core.seckill_sessions WHERE session_id = $1`,
+      [sessionAction.sessionId],
+    );
+    assert.equal(session.rows[0]?.phase, 'PREHEAT');
+    assert.equal(session.rows[0]?.inventory, 4);
+    assert.equal(session.rows[0]?.governance_action_id, sessionAction.actionId);
+    assert.equal(session.rows[0]?.rules_content_hash, HASH);
+
+    const injection = await service.createPrizeInjection(adminActor, sessionAction.sessionId, {
+      amountUsdt: '50',
+      idempotencyKey: 'seckill-prize-001',
+      correlationId: 'seckill-prize-create',
+    });
+    await approve(injection.actionId, '2');
+    await worker.pollOnce();
+    assert.equal(
+      (await db.query<{ prize_pool_usdt: string }>(
+        'SELECT prize_pool_usdt::text FROM core.seckill_sessions WHERE session_id = $1',
+        [sessionAction.sessionId],
+      )).rows[0]?.prize_pool_usdt,
+      '50',
+    );
+    const prizeJournal = await db.query<{ debits: string; credits: string }>(
+      `SELECT sum(CASE WHEN line.side = 'DEBIT' THEN line.amount ELSE 0 END)::text AS debits,
+         sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE 0 END)::text AS credits
+       FROM core.ledger_lines line
+       JOIN core.ledger_journals journal ON journal.journal_id = line.journal_id
+       WHERE journal.event_type = 'SECKILL_PRIZE_INJECTED'`,
+    );
+    assert.deepEqual(prizeJournal.rows[0], { debits: '50', credits: '50' });
+
+    reorged.add(injection.actionId);
+    await worker.pollOnce();
+    assert.deepEqual(worker.status(), { healthy: true, errorCode: undefined });
+    assert.equal(
+      (await db.query<{ prize_pool_usdt: string }>(
+        'SELECT prize_pool_usdt::text FROM core.seckill_sessions WHERE session_id = $1',
+        [sessionAction.sessionId],
+      )).rows[0]?.prize_pool_usdt,
+      '0',
+    );
+    assert.equal(
+      (await db.query<{ count: string }>(
+        "SELECT count(*)::text AS count FROM core.ledger_journals WHERE event_type = 'SECKILL_PRIZE_INJECTION_REVERSED'",
+      )).rows[0]?.count,
+      '1',
+    );
+
+    const forceClose = await service.createForceClose(adminActor, sessionAction.sessionId, {
+      reasonCode: 'OPERATIONS_STOP',
+      idempotencyKey: 'seckill-force-close-001',
+      correlationId: 'seckill-force-close-create',
+    });
+    await approve(forceClose.actionId, '3');
+    await worker.pollOnce();
+    assert.deepEqual(worker.status(), { healthy: true, errorCode: undefined });
+    assert.equal(
+      (await db.query<{ phase: string }>('SELECT phase FROM core.seckill_sessions WHERE session_id = $1', [sessionAction.sessionId])).rows[0]?.phase,
+      'FORCE_CLOSED',
+    );
+    assert.deepEqual(
+      (await db.query<{ stock_available: number; stock_seckill_locked: number }>(
+        'SELECT stock_available, stock_seckill_locked FROM core.skus WHERE sku_id = $1',
+        ['sku-1'],
+      )).rows[0],
+      { stock_available: 10, stock_seckill_locked: 0 },
+    );
+    assert.equal(
+      (await db.query<{ paused: boolean }>("SELECT paused FROM core.circuit_breakers WHERE scope = 'SECKILL_PURCHASE'")).rows[0]?.paused,
+      true,
+    );
+
+    const resume = await service.createResume(adminActor, {
+      sessionId: sessionAction.sessionId,
+      idempotencyKey: 'seckill-resume-001',
+      correlationId: 'seckill-resume-create',
+    });
+    await approve(resume.actionId, '4');
+    await worker.pollOnce();
+    assert.equal(
+      (await db.query<{ paused: boolean }>("SELECT paused FROM core.circuit_breakers WHERE scope = 'SECKILL_PURCHASE'")).rows[0]?.paused,
+      false,
+    );
+    assert.equal(
+      (await db.query<{ phase: string }>('SELECT phase FROM core.seckill_sessions WHERE session_id = $1', [sessionAction.sessionId])).rows[0]?.phase,
+      'FORCE_CLOSED',
+    );
   } finally {
     await db.close();
   }

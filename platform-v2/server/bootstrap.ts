@@ -3,7 +3,7 @@ import contractManifest from '../../packages/core-artifacts/contracts/contract-m
 import { createApiServer } from './api/app.ts';
 import type { OrderProjection } from './api/allowed-actions.ts';
 import { loadConfig } from './api/config.ts';
-import { CORE_ARTIFACT_VERSION, type BreakerScope, type UserRole } from './api/enums.ts';
+import { CORE_ARTIFACT_VERSION, USDT_ADDRESS, type BreakerScope, type UserRole } from './api/enums.ts';
 import { CoreError } from './api/errors.ts';
 import { AmapAdministrativeRegionResolver, AmapPostalAddressParser } from './api/providers.ts';
 import {
@@ -37,6 +37,11 @@ import {
   HttpCoverageBreakerSafeProposer,
   ResilientCoverageBreakerChainSource,
 } from './chain/coverage-breaker-governance.ts';
+import {
+  HttpSeckillSafeProposer,
+  ResilientSeckillChainSource,
+  SeckillGovernanceWorker,
+} from './chain/seckill-governance.ts';
 import { ChainIndexer } from './chain/indexer.ts';
 import {
   PollingPaymentIndexer,
@@ -92,6 +97,7 @@ import { SystemConfigService } from './data/system-config-service.ts';
 import { BusinessAnalyticsService } from './data/business-analytics-service.ts';
 import { AccountService } from './data/account-service.ts';
 import { RiskService } from './data/risk-service.ts';
+import { SeckillOperationsService } from './data/seckill-operations-service.ts';
 
 const ARTIFACT_ROOT = fileURLToPath(new URL('../../packages/core-artifacts/', import.meta.url));
 const ABI_BUNDLE_PATH = fileURLToPath(
@@ -144,6 +150,15 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   const catalogManagementService = new CatalogManagementService({ transactions, signer });
   const indexerStore = new PostgresIndexerStore(transactions);
   const seckillService = new SeckillService({ transactions });
+  const seckillOperationsService = new SeckillOperationsService({
+    transactions,
+    governanceSafeAddress: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    operationsSafeAddress: required(config.operationsTreasurySafeAddress, 'OPERATIONS_TREASURY_SAFE_ADDRESS'),
+    custodySafeAddress: required(config.usdtCustodySafeAddress, 'USDT_CUSTODY_SAFE_ADDRESS'),
+    paymentRouterAddress: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),
+    usdtAddress: USDT_ADDRESS,
+    secondarySignerAddress: required(config.secondarySignerAddress, 'SECONDARY_SIGNER_ADDRESS'),
+  });
   const fulfillmentService = new FulfillmentService({ transactions });
   const uploadLimits = mediaUploadLimits(env);
   const evidenceService = new EvidenceService({
@@ -334,6 +349,20 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
       ...(config.fallbackRpcUrl ? { fallbackRpcUrl: config.fallbackRpcUrl } : {}),
     }),
   });
+  const seckillGovernanceWorker = new SeckillGovernanceWorker({
+    transactions,
+    proposer: new HttpSeckillSafeProposer({
+      ...(env.POLICY_SAFE_PROPOSER_URL ? { url: env.POLICY_SAFE_PROPOSER_URL } : {}),
+      ...(env.POLICY_SAFE_PROPOSER_TOKEN ? { token: env.POLICY_SAFE_PROPOSER_TOKEN } : {}),
+      mutualTls: config.safeMutualTls,
+    }),
+    chain: new ResilientSeckillChainSource({
+      ...(env.POLICY_EXECUTION_LOOKUP_URL ? { lookupUrl: env.POLICY_EXECUTION_LOOKUP_URL } : {}),
+      ...(env.POLICY_EXECUTION_LOOKUP_TOKEN ? { lookupToken: env.POLICY_EXECUTION_LOOKUP_TOKEN } : {}),
+      ...(config.rpcUrl ? { primaryRpcUrl: config.rpcUrl } : {}),
+      ...(config.fallbackRpcUrl ? { fallbackRpcUrl: config.fallbackRpcUrl } : {}),
+    }),
+  });
   const settlementBatchScheduler = new SettlementBatchScheduler({
     service: settlementService,
     platformWallet: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
@@ -435,6 +464,8 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   coverageWorker.start();
   await coverageBreakerGovernanceWorker.pollOnce().catch(() => undefined);
   coverageBreakerGovernanceWorker.start();
+  await seckillGovernanceWorker.pollOnce().catch(() => undefined);
+  seckillGovernanceWorker.start();
   await guaranteeDepositWorker.pollOnce().catch(() => undefined);
   guaranteeDepositWorker.start();
   await settlementBatchScheduler.pollOnce().catch(() => undefined);
@@ -493,6 +524,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     paymentService,
     catalogManagementService,
     seckillService,
+    seckillOperationsService,
     fulfillmentService,
     fulfillmentTargetService,
     evidenceService,
@@ -553,6 +585,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
       await settlementBatchScheduler.stop();
       await coverageWorker.stop();
       await coverageBreakerGovernanceWorker.stop();
+      await seckillGovernanceWorker.stop();
       await guaranteeDepositWorker.stop();
       await bnmWorker.stop();
       await redis.quit();

@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Abu 24K V2 Core API",
-    "version": "2.0.0-settlement-admin.8"
+    "version": "2.0.0-settlement-admin.9"
   },
-  "x-artifactVersion": "2.0.0-settlement-admin.8",
+  "x-artifactVersion": "2.0.0-settlement-admin.9",
   "servers": [],
   "paths": {
     "/v2/buyer/profile": {
@@ -1209,6 +1209,626 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AdminBusinessDashboard"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/seckill/actions": {
+      "get": {
+        "operationId": "listSeckillGovernanceActions",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SeckillGovernanceActionProjection"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/seckill/actions/{actionId}": {
+      "get": {
+        "operationId": "getSeckillGovernanceAction",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeckillGovernanceActionProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "actionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/seckill/actions/{actionId}/approval-challenge": {
+      "post": {
+        "operationId": "createSeckillGovernanceChallenge",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeckillGovernanceChallengeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeckillGovernanceChallenge"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "actionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/seckill/actions/{actionId}/secondary-signature": {
+      "post": {
+        "operationId": "submitSeckillGovernanceApproval",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeckillGovernanceApprovalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeckillGovernanceActionProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "actionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/seckill/actions/{actionId}/safe-proposal": {
+      "post": {
+        "operationId": "proposeSeckillGovernanceAction",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyObject"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeckillGovernanceActionProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "actionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/seckill/actions/{actionId}/cancel": {
+      "post": {
+        "operationId": "cancelSeckillGovernanceAction",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyObject"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeckillGovernanceActionProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "actionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/seckill/sessions": {
+      "post": {
+        "operationId": "createSeckillSessionDraft",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeckillSessionCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeckillGovernanceActionProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/seckill/sessions/{sessionId}/force-close": {
+      "post": {
+        "operationId": "createSeckillForceClose",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeckillForceCloseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeckillGovernanceActionProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/seckill/sessions/{sessionId}/prize-injections": {
+      "post": {
+        "operationId": "createSeckillPrizeInjection",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeckillPrizeInjectionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeckillGovernanceActionProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/seckill/breaker/resume": {
+      "post": {
+        "operationId": "createSeckillBreakerResume",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeckillBreakerResumeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeckillGovernanceActionProjection"
                 }
               }
             }
@@ -7801,7 +8421,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "status": {
             "const": "CORE_API_READY"
@@ -10877,7 +11497,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -10976,7 +11596,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -11916,7 +12536,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "productId": {
             "type": "string",
@@ -12089,7 +12709,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "storeId": {
             "type": "string",
@@ -12215,7 +12835,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "productId": {
             "type": "string",
@@ -12317,7 +12937,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "previewId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -12476,7 +13096,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "adjustmentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -12600,7 +13220,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "uploadIntentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -12697,7 +13317,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -12782,7 +13402,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -12942,7 +13562,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "evidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
@@ -13201,7 +13821,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -13476,7 +14096,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifact_version": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "wallet_address": {
             "$ref": "#/components/schemas/Address"
@@ -13802,7 +14422,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -14801,6 +15421,563 @@
           }
         }
       },
+      "SeckillSessionCreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "policyVersion",
+          "rulesContentHash",
+          "productId",
+          "skuId",
+          "inventory",
+          "seckillListPriceUsdt",
+          "startsAt",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "policyVersion": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "rulesContentHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "productId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "skuId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "inventory": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "seckillListPriceUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          }
+        }
+      },
+      "SeckillForceCloseRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reasonCode",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "reasonCode": {
+            "type": "string",
+            "minLength": 1
+          },
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          }
+        }
+      },
+      "SeckillPrizeInjectionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "amountUsdt",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "amountUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          }
+        }
+      },
+      "SeckillBreakerResumeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sessionId",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "sessionId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          }
+        }
+      },
+      "SeckillGovernanceChallengeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "nonce",
+          "deadline"
+        ],
+        "properties": {
+          "nonce": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "deadline": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          }
+        }
+      },
+      "SeckillGovernanceApprovalRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "nonce",
+          "deadline",
+          "signature"
+        ],
+        "properties": {
+          "nonce": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "deadline": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^0x(?:[0-9a-fA-F]{2})+$"
+          }
+        }
+      },
+      "SeckillGovernanceChallenge": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "actionId",
+          "sessionId",
+          "actionKind",
+          "signer",
+          "safeAddress",
+          "typedData",
+          "digest"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.9"
+          },
+          "actionId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "sessionId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "actionKind": {
+            "enum": [
+              "OPEN_SESSION",
+              "FORCE_CLOSE",
+              "RESUME_PURCHASES",
+              "PRIZE_INJECTION"
+            ]
+          },
+          "signer": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "safeAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "typedData": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "domain",
+              "types",
+              "primaryType",
+              "message"
+            ],
+            "properties": {
+              "domain": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "types": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "primaryType": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "digest": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "SeckillSessionPlanProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "merchantId",
+          "productId",
+          "skuId",
+          "productPolicyHash",
+          "rulesContentHash",
+          "startsAt",
+          "mainDeadline",
+          "relayDeadline",
+          "inventory",
+          "seckillListPriceUsdt",
+          "timers",
+          "snapshot",
+          "inventoryLockState",
+          "releasedAt"
+        ],
+        "properties": {
+          "merchantId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "productId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "skuId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "productPolicyHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "rulesContentHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "mainDeadline": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "relayDeadline": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "inventory": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "seckillListPriceUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "timers": {
+            "$ref": "#/components/schemas/SeckillSessionTimers"
+          },
+          "snapshot": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "inventoryLockState": {
+            "enum": [
+              "LOCKED",
+              "RELEASED"
+            ]
+          },
+          "releasedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "SeckillPrizeInjectionProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "injectionId",
+          "amountUsdt",
+          "operationsSafeAddress",
+          "custodySafeAddress",
+          "tokenAddress",
+          "finalJournalId",
+          "reversalJournalId"
+        ],
+        "properties": {
+          "injectionId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "amountUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "operationsSafeAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "custodySafeAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "tokenAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "finalJournalId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reversalJournalId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "SeckillGovernanceActionProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "actionId",
+          "sessionId",
+          "policyVersion",
+          "actionKind",
+          "state",
+          "evidenceHash",
+          "safeAddress",
+          "targetAddress",
+          "calldataHash",
+          "safeNonce",
+          "safeTxHash",
+          "proposalHash",
+          "executionTxHash",
+          "blockNumber",
+          "blockHash",
+          "confirmations",
+          "canonical",
+          "actorWallet",
+          "secondarySigner",
+          "approvalNonce",
+          "approvalDeadline",
+          "createdAt",
+          "updatedAt",
+          "sessionPlan",
+          "prizeInjection",
+          "allowedActions"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.9"
+          },
+          "actionId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "sessionId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "policyVersion": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "actionKind": {
+            "enum": [
+              "OPEN_SESSION",
+              "FORCE_CLOSE",
+              "RESUME_PURCHASES",
+              "PRIZE_INJECTION"
+            ]
+          },
+          "state": {
+            "enum": [
+              "DRAFT",
+              "SECONDARY_SIGNED",
+              "PENDING_PROPOSAL",
+              "SAFE_PROPOSED",
+              "MINED",
+              "FINAL",
+              "REORGED",
+              "FAILED",
+              "CANCELLED"
+            ]
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "safeAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "targetAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "calldataHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "safeNonce": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "safeTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "proposalHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "executionTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "blockNumber": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "blockHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confirmations": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "canonical": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actorWallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "secondarySigner": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approvalNonce": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approvalDeadline": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sessionPlan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeckillSessionPlanProjection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prizeInjection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeckillPrizeInjectionProjection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "allowedActions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      },
       "PolicyDraftCreateRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -15478,7 +16655,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "snapshotId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15561,7 +16738,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -16892,7 +18069,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -17139,7 +18316,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -17436,6 +18613,34 @@
           }
         }
       },
+      "SeckillSessionTimers": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "mainDurationSeconds",
+          "relayInitialSeconds",
+          "relayIncrementSeconds",
+          "relayCapSeconds"
+        ],
+        "properties": {
+          "mainDurationSeconds": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "relayInitialSeconds": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "relayIncrementSeconds": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "relayCapSeconds": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
       "SeckillSessionProjection": {
         "type": "object",
         "additionalProperties": false,
@@ -17459,11 +18664,14 @@
           "lastBuyerWallet",
           "winnerWallet",
           "snapshot",
+          "governanceActionId",
+          "rulesContentHash",
+          "publicationTxHash",
           "allowedActions"
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "sessionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -17555,32 +18763,7 @@
             "format": "date-time"
           },
           "timers": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "mainDurationSeconds",
-              "relayInitialSeconds",
-              "relayIncrementSeconds",
-              "relayCapSeconds"
-            ],
-            "properties": {
-              "mainDurationSeconds": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "relayInitialSeconds": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "relayIncrementSeconds": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "relayCapSeconds": {
-                "type": "integer",
-                "minimum": 1
-              }
-            }
+            "$ref": "#/components/schemas/SeckillSessionTimers"
           },
           "inventory": {
             "type": "object",
@@ -17632,6 +18815,36 @@
           "snapshot": {
             "type": "object",
             "additionalProperties": true
+          },
+          "governanceActionId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rulesContentHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "publicationTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "allowedActions": {
             "type": "array",
@@ -17687,7 +18900,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "protocolVersion": {
             "const": 1
@@ -17761,7 +18974,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -18099,7 +19312,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "addresses": {
             "type": "array",
@@ -18280,7 +19493,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -18447,7 +19660,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "orderId": {
             "type": "string",
@@ -18482,7 +19695,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "merchantId": {
             "type": "string",
@@ -19176,7 +20389,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "observation": {
             "$ref": "#/components/schemas/RiskObservation"
@@ -19202,7 +20415,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.8"
+            "const": "2.0.0-settlement-admin.9"
           },
           "generatedAt": {
             "type": "string",

@@ -24,6 +24,9 @@ interface SessionRow {
   prize_pool_usdt: string;
   snapshot: unknown;
   allowed_actions: unknown;
+  governance_action_id: string | null;
+  rules_content_hash: string | null;
+  publication_tx_hash: string | null;
   relay_initial: string | number;
   relay_increment: string | number;
   relay_cap: string | number;
@@ -166,7 +169,8 @@ function sessionSelect() {
     session.relay_deadline, session.inventory, session.sold, session.reserved,
     session.seckill_list_price_usdt::text, session.phase,
     session.last_buyer_wallet, session.prize_pool_usdt::text,
-    session.snapshot, session.allowed_actions,
+    session.snapshot, session.allowed_actions, session.governance_action_id,
+    session.rules_content_hash, session.publication_tx_hash,
     policy.payload ->> 'relayInitial' AS relay_initial,
     policy.payload ->> 'relayIncrement' AS relay_increment,
     policy.payload ->> 'relayCap' AS relay_cap,
@@ -221,6 +225,9 @@ function sessionProjection(row: SessionRow, now: Date) {
     lastBuyerWallet: row.last_buyer_wallet,
     winnerWallet: phase === 'SETTLED' ? row.last_buyer_wallet : null,
     snapshot: object(row.snapshot),
+    governanceActionId: row.governance_action_id,
+    rulesContentHash: row.rules_content_hash,
+    publicationTxHash: row.publication_tx_hash,
     allowedActions: stringArray(row.allowed_actions),
   };
 }

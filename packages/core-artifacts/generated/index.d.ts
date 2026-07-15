@@ -1,4 +1,4 @@
-export declare const artifactVersion: "2.0.0-settlement-admin.8";
+export declare const artifactVersion: "2.0.0-settlement-admin.9";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
@@ -185,12 +185,105 @@ export interface SeckillSessionProjection {
   lastBuyerWallet: Address | null;
   winnerWallet: Address | null;
   snapshot: JsonObject;
+  governanceActionId: Bytes32 | null;
+  rulesContentHash: Bytes32 | null;
+  publicationTxHash: Bytes32 | null;
   allowedActions: readonly string[];
 }
 
 export interface SeckillSessionHistoryPage {
   items: readonly SeckillSessionProjection[];
   nextCursor: string | null;
+}
+
+export type SeckillGovernanceActionKind = 'OPEN_SESSION' | 'FORCE_CLOSE' | 'RESUME_PURCHASES' | 'PRIZE_INJECTION';
+export type SeckillGovernanceActionState =
+  | 'DRAFT' | 'SECONDARY_SIGNED' | 'PENDING_PROPOSAL' | 'SAFE_PROPOSED'
+  | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'CANCELLED';
+
+export interface SeckillSessionCreateRequest {
+  policyVersion: AtomicAmount;
+  rulesContentHash: Bytes32;
+  productId: string;
+  skuId: string;
+  inventory: number;
+  seckillListPriceUsdt: AtomicAmount;
+  startsAt: string;
+  idempotencyKey: string;
+}
+
+export interface SeckillForceCloseRequest { reasonCode: string; idempotencyKey: string }
+export interface SeckillPrizeInjectionRequest { amountUsdt: AtomicAmount; idempotencyKey: string }
+export interface SeckillBreakerResumeRequest { sessionId: Bytes32; idempotencyKey: string }
+export interface SeckillGovernanceChallengeRequest { nonce: AtomicAmount; deadline: AtomicAmount }
+export interface SeckillGovernanceApprovalRequest extends SeckillGovernanceChallengeRequest { signature: string }
+
+export interface SeckillGovernanceChallenge {
+  artifactVersion: typeof artifactVersion;
+  actionId: Bytes32;
+  sessionId: Bytes32;
+  actionKind: SeckillGovernanceActionKind;
+  signer: Address;
+  safeAddress: Address;
+  typedData: Eip712TypedData;
+  digest: Bytes32;
+}
+
+export interface SeckillSessionPlanProjection {
+  merchantId: string;
+  productId: string;
+  skuId: string;
+  productPolicyHash: Bytes32;
+  rulesContentHash: Bytes32;
+  startsAt: string;
+  mainDeadline: string;
+  relayDeadline: string;
+  inventory: AtomicAmount;
+  seckillListPriceUsdt: AtomicAmount;
+  timers: SeckillSessionTimers;
+  snapshot: JsonObject;
+  inventoryLockState: 'LOCKED' | 'RELEASED';
+  releasedAt: string | null;
+}
+
+export interface SeckillPrizeInjectionProjection {
+  injectionId: Bytes32;
+  amountUsdt: AtomicAmount;
+  operationsSafeAddress: Address;
+  custodySafeAddress: Address;
+  tokenAddress: Address;
+  finalJournalId: string | null;
+  reversalJournalId: string | null;
+}
+
+export interface SeckillGovernanceActionProjection {
+  artifactVersion: typeof artifactVersion;
+  actionId: Bytes32;
+  sessionId: Bytes32;
+  policyVersion: AtomicAmount;
+  actionKind: SeckillGovernanceActionKind;
+  state: SeckillGovernanceActionState;
+  evidenceHash: Bytes32;
+  safeAddress: Address;
+  targetAddress: Address;
+  calldataHash: Bytes32;
+  safeNonce: AtomicAmount | null;
+  safeTxHash: Bytes32 | null;
+  proposalHash: Bytes32 | null;
+  executionTxHash: Bytes32 | null;
+  blockNumber: AtomicAmount | null;
+  blockHash: Bytes32 | null;
+  confirmations: number;
+  canonical: boolean | null;
+  actorWallet: Address;
+  secondarySigner: Address | null;
+  approvalNonce: AtomicAmount | null;
+  approvalDeadline: string | null;
+  createdAt: string;
+  updatedAt: string;
+  sessionPlan: SeckillSessionPlanProjection | null;
+  prizeInjection: SeckillPrizeInjectionProjection | null;
+  allowedActions: readonly string[];
 }
 
 export interface RealtimeEventEnvelope {

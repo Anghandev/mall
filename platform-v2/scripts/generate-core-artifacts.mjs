@@ -106,6 +106,7 @@ const schemaSources = [
       '015_coverage_breaker_governance.sql',
       '016_coverage_breaker_safe_nonce.sql',
       '017_risk_management.sql',
+      '018_seckill_operations.sql',
     ],
   },
   {
@@ -418,6 +419,10 @@ const coordinatedManifest = {
     'BnmPointsBalance',
     'SeckillSessionProjection',
     'SeckillSessionHistoryPage',
+    'SeckillGovernanceActionProjection',
+    'SeckillGovernanceChallenge',
+    'SeckillSessionPlanProjection',
+    'SeckillPrizeInjectionProjection',
     'RealtimeEventPage',
     'GuaranteeDepositProjection',
     'TakeoverFundingChallenge',
@@ -1464,6 +1469,12 @@ function seckillRuntimeOpenApiSchemas() {
   const object = (properties, required = Object.keys(properties)) => ({
     type: 'object', additionalProperties: false, required, properties,
   });
+  const timers = object({
+    mainDurationSeconds: { type: 'integer', minimum: 1 },
+    relayInitialSeconds: { type: 'integer', minimum: 1 },
+    relayIncrementSeconds: { type: 'integer', minimum: 1 },
+    relayCapSeconds: { type: 'integer', minimum: 1 },
+  });
   const session = object({
     artifactVersion: { const: artifactVersion },
     sessionId: ref('Bytes32'),
@@ -1485,12 +1496,7 @@ function seckillRuntimeOpenApiSchemas() {
     relayDeadline: timestamp,
     settlementEarliestAt: timestamp,
     settlementDeadline: timestamp,
-    timers: object({
-      mainDurationSeconds: { type: 'integer', minimum: 1 },
-      relayInitialSeconds: { type: 'integer', minimum: 1 },
-      relayIncrementSeconds: { type: 'integer', minimum: 1 },
-      relayCapSeconds: { type: 'integer', minimum: 1 },
-    }),
+    timers: ref('SeckillSessionTimers'),
     inventory: object({
       total: atomic,
       sold: atomic,
@@ -1501,9 +1507,13 @@ function seckillRuntimeOpenApiSchemas() {
     lastBuyerWallet: nullable(ref('Address')),
     winnerWallet: nullable(ref('Address')),
     snapshot: jsonObject,
+    governanceActionId: nullable(ref('Bytes32')),
+    rulesContentHash: nullable(ref('Bytes32')),
+    publicationTxHash: nullable(ref('Bytes32')),
     allowedActions: { type: 'array', items: string },
   });
   return {
+    SeckillSessionTimers: timers,
     SeckillSessionProjection: session,
     SeckillSessionHistoryPage: object({
       items: { type: 'array', items: ref('SeckillSessionProjection') },
@@ -1568,6 +1578,38 @@ function settlementAdminOpenApiPaths(errorResponse) {
     },
     '/v2/admin/dashboard': {
       get: operation('getAdminBusinessDashboard', { $ref: '#/components/schemas/AdminBusinessDashboard' }),
+    },
+    '/v2/admin/seckill/actions': {
+      get: operation('listSeckillGovernanceActions', {
+        type: 'array', items: { $ref: '#/components/schemas/SeckillGovernanceActionProjection' },
+      }),
+    },
+    '/v2/admin/seckill/actions/{actionId}': {
+      get: resourceOperation('getSeckillGovernanceAction', 'actionId', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }),
+    },
+    '/v2/admin/seckill/actions/{actionId}/approval-challenge': {
+      post: resourceOperation('createSeckillGovernanceChallenge', 'actionId', { $ref: '#/components/schemas/SeckillGovernanceChallenge' }, 200, 'SeckillGovernanceChallengeRequest'),
+    },
+    '/v2/admin/seckill/actions/{actionId}/secondary-signature': {
+      post: resourceOperation('submitSeckillGovernanceApproval', 'actionId', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 200, 'SeckillGovernanceApprovalRequest'),
+    },
+    '/v2/admin/seckill/actions/{actionId}/safe-proposal': {
+      post: resourceOperation('proposeSeckillGovernanceAction', 'actionId', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 202, 'EmptyObject'),
+    },
+    '/v2/admin/seckill/actions/{actionId}/cancel': {
+      post: resourceOperation('cancelSeckillGovernanceAction', 'actionId', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 200, 'EmptyObject'),
+    },
+    '/v2/admin/seckill/sessions': {
+      post: operation('createSeckillSessionDraft', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 201, 'SeckillSessionCreateRequest'),
+    },
+    '/v2/admin/seckill/sessions/{sessionId}/force-close': {
+      post: resourceOperation('createSeckillForceClose', 'sessionId', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 201, 'SeckillForceCloseRequest'),
+    },
+    '/v2/admin/seckill/sessions/{sessionId}/prize-injections': {
+      post: resourceOperation('createSeckillPrizeInjection', 'sessionId', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 201, 'SeckillPrizeInjectionRequest'),
+    },
+    '/v2/admin/seckill/breaker/resume': {
+      post: operation('createSeckillBreakerResume', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 201, 'SeckillBreakerResumeRequest'),
     },
     '/v2/internal/risk/observations': {
       post: {
@@ -2071,6 +2113,92 @@ function settlementAdminOpenApiSchemas() {
       ...fundingProjection.properties,
       items: { type: 'array', items: ref('TakeoverFundingItem') },
       debtRecoveries: { type: 'array', items: ref('MerchantDebtRecovery') },
+    }),
+    SeckillSessionCreateRequest: object({
+      policyVersion: atomic,
+      rulesContentHash: hash,
+      productId: string,
+      skuId: string,
+      inventory: { type: 'integer', minimum: 1 },
+      seckillListPriceUsdt: atomic,
+      startsAt: timestamp,
+      idempotencyKey,
+    }),
+    SeckillForceCloseRequest: object({ reasonCode: string, idempotencyKey }),
+    SeckillPrizeInjectionRequest: object({ amountUsdt: atomic, idempotencyKey }),
+    SeckillBreakerResumeRequest: object({ sessionId: hash, idempotencyKey }),
+    SeckillGovernanceChallengeRequest: object({ nonce: atomic, deadline: atomic }),
+    SeckillGovernanceApprovalRequest: object({
+      nonce: atomic,
+      deadline: atomic,
+      signature: { type: 'string', pattern: '^0x(?:[0-9a-fA-F]{2})+$' },
+    }),
+    SeckillGovernanceChallenge: object({
+      artifactVersion: { const: artifactVersion },
+      actionId: hash,
+      sessionId: hash,
+      actionKind: { enum: ['OPEN_SESSION', 'FORCE_CLOSE', 'RESUME_PURCHASES', 'PRIZE_INJECTION'] },
+      signer: address,
+      safeAddress: address,
+      typedData: eip712TypedData,
+      digest: hash,
+    }),
+    SeckillSessionPlanProjection: object({
+      merchantId: string,
+      productId: string,
+      skuId: string,
+      productPolicyHash: hash,
+      rulesContentHash: hash,
+      startsAt: timestamp,
+      mainDeadline: timestamp,
+      relayDeadline: timestamp,
+      inventory: atomic,
+      seckillListPriceUsdt: atomic,
+      timers: ref('SeckillSessionTimers'),
+      snapshot: jsonObject,
+      inventoryLockState: { enum: ['LOCKED', 'RELEASED'] },
+      releasedAt: nullableTimestamp,
+    }),
+    SeckillPrizeInjectionProjection: object({
+      injectionId: hash,
+      amountUsdt: atomic,
+      operationsSafeAddress: address,
+      custodySafeAddress: address,
+      tokenAddress: address,
+      finalJournalId: nullableString,
+      reversalJournalId: nullableString,
+    }),
+    SeckillGovernanceActionProjection: object({
+      artifactVersion: { const: artifactVersion },
+      actionId: hash,
+      sessionId: hash,
+      policyVersion: atomic,
+      actionKind: { enum: ['OPEN_SESSION', 'FORCE_CLOSE', 'RESUME_PURCHASES', 'PRIZE_INJECTION'] },
+      state: { enum: [
+        'DRAFT', 'SECONDARY_SIGNED', 'PENDING_PROPOSAL', 'SAFE_PROPOSED',
+        'MINED', 'FINAL', 'REORGED', 'FAILED', 'CANCELLED',
+      ] },
+      evidenceHash: hash,
+      safeAddress: address,
+      targetAddress: address,
+      calldataHash: hash,
+      safeNonce: nullableAtomic,
+      safeTxHash: nullableHash,
+      proposalHash: nullableHash,
+      executionTxHash: nullableHash,
+      blockNumber: nullableAtomic,
+      blockHash: nullableHash,
+      confirmations: { type: 'integer', minimum: 0 },
+      canonical: nullable({ type: 'boolean' }),
+      actorWallet: address,
+      secondarySigner: nullableAddress,
+      approvalNonce: nullableAtomic,
+      approvalDeadline: nullableTimestamp,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      sessionPlan: nullable(ref('SeckillSessionPlanProjection')),
+      prizeInjection: nullable(ref('SeckillPrizeInjectionProjection')),
+      allowedActions: { type: 'array', items: string },
     }),
     PolicyDraftCreateRequest: object({ payload: jsonObject, idempotencyKey }),
     PolicyDraftUpdateRequest: object({ payload: jsonObject }),
@@ -4142,12 +4270,105 @@ export interface SeckillSessionProjection {
   lastBuyerWallet: Address | null;
   winnerWallet: Address | null;
   snapshot: JsonObject;
+  governanceActionId: Bytes32 | null;
+  rulesContentHash: Bytes32 | null;
+  publicationTxHash: Bytes32 | null;
   allowedActions: readonly string[];
 }
 
 export interface SeckillSessionHistoryPage {
   items: readonly SeckillSessionProjection[];
   nextCursor: string | null;
+}
+
+export type SeckillGovernanceActionKind = 'OPEN_SESSION' | 'FORCE_CLOSE' | 'RESUME_PURCHASES' | 'PRIZE_INJECTION';
+export type SeckillGovernanceActionState =
+  | 'DRAFT' | 'SECONDARY_SIGNED' | 'PENDING_PROPOSAL' | 'SAFE_PROPOSED'
+  | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'CANCELLED';
+
+export interface SeckillSessionCreateRequest {
+  policyVersion: AtomicAmount;
+  rulesContentHash: Bytes32;
+  productId: string;
+  skuId: string;
+  inventory: number;
+  seckillListPriceUsdt: AtomicAmount;
+  startsAt: string;
+  idempotencyKey: string;
+}
+
+export interface SeckillForceCloseRequest { reasonCode: string; idempotencyKey: string }
+export interface SeckillPrizeInjectionRequest { amountUsdt: AtomicAmount; idempotencyKey: string }
+export interface SeckillBreakerResumeRequest { sessionId: Bytes32; idempotencyKey: string }
+export interface SeckillGovernanceChallengeRequest { nonce: AtomicAmount; deadline: AtomicAmount }
+export interface SeckillGovernanceApprovalRequest extends SeckillGovernanceChallengeRequest { signature: string }
+
+export interface SeckillGovernanceChallenge {
+  artifactVersion: typeof artifactVersion;
+  actionId: Bytes32;
+  sessionId: Bytes32;
+  actionKind: SeckillGovernanceActionKind;
+  signer: Address;
+  safeAddress: Address;
+  typedData: Eip712TypedData;
+  digest: Bytes32;
+}
+
+export interface SeckillSessionPlanProjection {
+  merchantId: string;
+  productId: string;
+  skuId: string;
+  productPolicyHash: Bytes32;
+  rulesContentHash: Bytes32;
+  startsAt: string;
+  mainDeadline: string;
+  relayDeadline: string;
+  inventory: AtomicAmount;
+  seckillListPriceUsdt: AtomicAmount;
+  timers: SeckillSessionTimers;
+  snapshot: JsonObject;
+  inventoryLockState: 'LOCKED' | 'RELEASED';
+  releasedAt: string | null;
+}
+
+export interface SeckillPrizeInjectionProjection {
+  injectionId: Bytes32;
+  amountUsdt: AtomicAmount;
+  operationsSafeAddress: Address;
+  custodySafeAddress: Address;
+  tokenAddress: Address;
+  finalJournalId: string | null;
+  reversalJournalId: string | null;
+}
+
+export interface SeckillGovernanceActionProjection {
+  artifactVersion: typeof artifactVersion;
+  actionId: Bytes32;
+  sessionId: Bytes32;
+  policyVersion: AtomicAmount;
+  actionKind: SeckillGovernanceActionKind;
+  state: SeckillGovernanceActionState;
+  evidenceHash: Bytes32;
+  safeAddress: Address;
+  targetAddress: Address;
+  calldataHash: Bytes32;
+  safeNonce: AtomicAmount | null;
+  safeTxHash: Bytes32 | null;
+  proposalHash: Bytes32 | null;
+  executionTxHash: Bytes32 | null;
+  blockNumber: AtomicAmount | null;
+  blockHash: Bytes32 | null;
+  confirmations: number;
+  canonical: boolean | null;
+  actorWallet: Address;
+  secondarySigner: Address | null;
+  approvalNonce: AtomicAmount | null;
+  approvalDeadline: string | null;
+  createdAt: string;
+  updatedAt: string;
+  sessionPlan: SeckillSessionPlanProjection | null;
+  prizeInjection: SeckillPrizeInjectionProjection | null;
+  allowedActions: readonly string[];
 }
 
 export interface RealtimeEventEnvelope {

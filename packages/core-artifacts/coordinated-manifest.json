@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.8",
+  "artifactVersion": "2.0.0-settlement-admin.9",
   "publicationStatus": "COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
@@ -14,57 +14,57 @@
   "components": {
     "packageMetadata": {
       "path": "package.json",
-      "sha256": "dfbce1bbc8ec47860957bb5d0861f938ea8a036b9f41235290a87a77d5847b59"
+      "sha256": "e126eeed15c22cc92e41777ebeb1266a5cd59cd52c9ff1e3aafef0d9cc630082"
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "9ce7c0d39829aea0b760b01d745012950130922590304ac366ea881e08cdfb6a"
+      "sha256": "5ada19aa489f9e22567e62d9c08dbee1c200e16b4ea601a930455e1c3fd7a2d6"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "9ad83a4fa561a7f021b7b8fb2a6394c97e18f0bf42d1fa6b9956ddf04e8545aa"
+      "sha256": "98923a419fea657f5260e105d0180d066643b46058f8d4ed007b69657072b782"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "5c2a73577b9b1dc131f7a67370436fa7b134f1b0e6dfab31e5b7be35d74e4b8c"
+      "sha256": "588ddeef8a33d40650bd011e9023f42adf6cd27825c95b0d3d2e668b044f2d1c"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "16806f5564c7e559c37a411a0cd3f6172c85728a5e4e7d9a46ed6cc60af95c18"
+      "sha256": "e33de55ed30917df5b994bbdbe25071cc48fda1b8623e7bb1ce4d20c6c771021"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "4cfb3fbb43a07f02e670aa51fcb1918c5e3a170568776cfbb6c5b52d741e09d2"
+      "sha256": "66ce931388645ee5d1d35733bc2439ca6d861b519bfa88f9878a8a15f5e559eb"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
-      "sha256": "04124409b9fac10874297afba4abd1bf673ef4603f768ea8b3409a6afd188be9"
+      "sha256": "ed19ebd4ad1edd6f02e0589e3b2a24c7587bae6ded374b47a2489a5dbf28bd63"
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "5a7dbca7b4f67bdfd02131d5eb27de42d00170753b034543f6f93344980ee5a2"
+      "sha256": "ba233760c6a0e539b7b37f0f75a5b331e064dadee2ce10ce97592b314f11201c"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "083e96143b7ba2f8eb3b4595326111a2ca83b85633e6ca06e990e075687cc0d0"
+      "sha256": "8d078ae9895c3820bad65dafc920c186c5c656a32578226b0e4964a17bf898e4"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "7345f63c98e74a19f92555d86c2f341fcce433161fc5a84f27b738ce66229e9b"
+      "sha256": "9c29f697be81f4fa77cb01d238f100e7a7ef6b6f344f89f5da6fffa2d8e8b3f9"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
-      "sha256": "100861a843c326fad3c98bbfb430eed89a5e035b9271d9fb49a0c3d1f540142f"
+      "sha256": "fa0a17fc2699a5b721fb6349d8a9d61fc137fefec970a5d834097248cf2b0e39"
     }
   },
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "3f3f7db925c8dc82c581694e6a0a11a284e5531cf70e56ee06fba024f05cfe62"
+      "sha256": "0265438cbbac0f3aa9f68edbab5f8df88ccbe9cc2a5e7eaebd2dcdadbac35d79"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "87970f06a4e807860063f4f1e35a06f67a5a916ed44550600627f916b85b18e1"
+      "sha256": "f7f13a78d7ca6911ec99d9bac7fbb5910eb33484cae0b3ec85a52bdd032a4e76"
     }
   ],
   "httpSurface": [
@@ -82,6 +82,8 @@
     "GET /v2/admin/policy-drafts",
     "GET /v2/admin/policy-drafts/{draftId}",
     "GET /v2/admin/risk/overview",
+    "GET /v2/admin/seckill/actions",
+    "GET /v2/admin/seckill/actions/{actionId}",
     "GET /v2/admin/system-config/versions",
     "GET /v2/admin/takeover-funding/{caseId}",
     "GET /v2/bootstrap",
@@ -136,6 +138,14 @@
     "POST /v2/admin/risk/appeals/{appealId}/decision",
     "POST /v2/admin/risk/restrictions",
     "POST /v2/admin/risk/restrictions/{restrictionId}/override",
+    "POST /v2/admin/seckill/actions/{actionId}/approval-challenge",
+    "POST /v2/admin/seckill/actions/{actionId}/cancel",
+    "POST /v2/admin/seckill/actions/{actionId}/safe-proposal",
+    "POST /v2/admin/seckill/actions/{actionId}/secondary-signature",
+    "POST /v2/admin/seckill/breaker/resume",
+    "POST /v2/admin/seckill/sessions",
+    "POST /v2/admin/seckill/sessions/{sessionId}/force-close",
+    "POST /v2/admin/seckill/sessions/{sessionId}/prize-injections",
     "POST /v2/admin/settlement-intents",
     "POST /v2/admin/system-config/versions",
     "POST /v2/admin/system-config/versions/{configVersionId}/publish",
@@ -312,6 +322,10 @@
     "BnmPointsBalance",
     "SeckillSessionProjection",
     "SeckillSessionHistoryPage",
+    "SeckillGovernanceActionProjection",
+    "SeckillGovernanceChallenge",
+    "SeckillSessionPlanProjection",
+    "SeckillPrizeInjectionProjection",
     "RealtimeEventPage",
     "GuaranteeDepositProjection",
     "TakeoverFundingChallenge",

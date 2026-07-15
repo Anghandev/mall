@@ -109,6 +109,49 @@ export interface SeckillApiService {
   events(sessionId: string, input?: { cursor?: string; limit?: number }): Promise<RealtimeEventPage>;
 }
 
+export interface SeckillOperationsApiService {
+  list(actor: FulfillmentActor): Promise<unknown>;
+  get(actor: FulfillmentActor, actionId: string): Promise<unknown>;
+  createSession(actor: FulfillmentActor, input: {
+    policyVersion: string;
+    rulesContentHash: string;
+    productId: string;
+    skuId: string;
+    inventory: number;
+    seckillListPriceUsdt: string;
+    startsAt: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<unknown>;
+  createForceClose(actor: FulfillmentActor, sessionId: string, input: {
+    reasonCode: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<unknown>;
+  createResume(actor: FulfillmentActor, input: {
+    sessionId: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<unknown>;
+  createPrizeInjection(actor: FulfillmentActor, sessionId: string, input: {
+    amountUsdt: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<unknown>;
+  approvalChallenge(actor: FulfillmentActor, actionId: string, input: {
+    nonce: string;
+    deadline: string;
+  }): Promise<unknown>;
+  submitApproval(actor: FulfillmentActor, actionId: string, input: {
+    nonce: string;
+    deadline: string;
+    signature: string;
+    correlationId: string;
+  }): Promise<unknown>;
+  propose(actor: FulfillmentActor, actionId: string, correlationId: string): Promise<unknown>;
+  cancel(actor: FulfillmentActor, actionId: string, input: { correlationId: string }): Promise<unknown>;
+}
+
 export interface CatalogManagementApiService {
   listCategories(includeInactive?: boolean, actor?: FulfillmentActor): Promise<unknown>;
   listTags(includeInactive?: boolean, actor?: FulfillmentActor): Promise<unknown>;
@@ -477,6 +520,7 @@ export interface ApiDependencies {
   paymentService: PaymentApiService;
   catalogManagementService: CatalogManagementApiService;
   seckillService: SeckillApiService;
+  seckillOperationsService: SeckillOperationsApiService;
   fulfillmentService: FulfillmentApiService;
   fulfillmentTargetService: FulfillmentTargetApiService;
   evidenceService: EvidenceApiService;
@@ -1676,6 +1720,124 @@ async function routeAdminServices(
   url: URL,
   correlationId: string,
 ) {
+  if (request.method === 'GET' && url.pathname === '/v2/admin/seckill/actions') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
+    sendJson(response, 200, await dependencies.seckillOperationsService.list(fulfillmentActor(claims)), correlationId);
+    return true;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/seckill/sessions') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, [
+      'policyVersion', 'rulesContentHash', 'productId', 'skuId', 'inventory',
+      'seckillListPriceUsdt', 'startsAt', 'idempotencyKey',
+    ]);
+    sendJson(response, 201, await dependencies.seckillOperationsService.createSession(fulfillmentActor(claims), {
+      policyVersion: requiredString(body, 'policyVersion'),
+      rulesContentHash: requiredString(body, 'rulesContentHash'),
+      productId: requiredString(body, 'productId'),
+      skuId: requiredString(body, 'skuId'),
+      inventory: requiredPositiveInteger(body, 'inventory'),
+      seckillListPriceUsdt: requiredString(body, 'seckillListPriceUsdt'),
+      startsAt: requiredString(body, 'startsAt'),
+      idempotencyKey: requiredString(body, 'idempotencyKey'),
+      correlationId,
+    }), correlationId);
+    return true;
+  }
+  const seckillSessionAction = url.pathname.match(
+    /^\/v2\/admin\/seckill\/sessions\/(0x[0-9a-fA-F]{64})\/(force-close|prize-injections)$/,
+  );
+  if (request.method === 'POST' && seckillSessionAction) {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN']);
+    const body = await readJson(request);
+    const sessionId = seckillSessionAction[1]!.toLowerCase();
+    if (seckillSessionAction[2] === 'force-close') {
+      assertOnlyKeys(body, ['reasonCode', 'idempotencyKey']);
+      sendJson(response, 201, await dependencies.seckillOperationsService.createForceClose(
+        fulfillmentActor(claims),
+        sessionId,
+        {
+          reasonCode: requiredString(body, 'reasonCode'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+          correlationId,
+        },
+      ), correlationId);
+      return true;
+    }
+    assertOnlyKeys(body, ['amountUsdt', 'idempotencyKey']);
+    sendJson(response, 201, await dependencies.seckillOperationsService.createPrizeInjection(
+      fulfillmentActor(claims),
+      sessionId,
+      {
+        amountUsdt: requiredString(body, 'amountUsdt'),
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+        correlationId,
+      },
+    ), correlationId);
+    return true;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/seckill/breaker/resume') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['sessionId', 'idempotencyKey']);
+    sendJson(response, 201, await dependencies.seckillOperationsService.createResume(fulfillmentActor(claims), {
+      sessionId: requiredString(body, 'sessionId'),
+      idempotencyKey: requiredString(body, 'idempotencyKey'),
+      correlationId,
+    }), correlationId);
+    return true;
+  }
+  const seckillGovernanceAction = url.pathname.match(
+    /^\/v2\/admin\/seckill\/actions\/(0x[0-9a-fA-F]{64})(?:\/(approval-challenge|secondary-signature|safe-proposal|cancel))?$/,
+  );
+  if (seckillGovernanceAction) {
+    const actionName = seckillGovernanceAction[2];
+    const claims = authorizeRoles(
+      request,
+      dependencies.config,
+      dependencies.clock(),
+      request.method === 'GET' && !actionName ? ['ADMIN', 'OPERATOR', 'AUDITOR'] : ['ADMIN'],
+    );
+    const actor = fulfillmentActor(claims);
+    const actionId = seckillGovernanceAction[1]!.toLowerCase();
+    if (request.method === 'GET' && !actionName) {
+      sendJson(response, 200, await dependencies.seckillOperationsService.get(actor, actionId), correlationId);
+      return true;
+    }
+    if (request.method === 'POST' && actionName === 'approval-challenge') {
+      const body = await readJson(request);
+      assertOnlyKeys(body, ['nonce', 'deadline']);
+      sendJson(response, 200, await dependencies.seckillOperationsService.approvalChallenge(actor, actionId, {
+        nonce: requiredString(body, 'nonce'),
+        deadline: requiredString(body, 'deadline'),
+      }), correlationId);
+      return true;
+    }
+    if (request.method === 'POST' && actionName === 'secondary-signature') {
+      const body = await readJson(request);
+      assertOnlyKeys(body, ['nonce', 'deadline', 'signature']);
+      sendJson(response, 200, await dependencies.seckillOperationsService.submitApproval(actor, actionId, {
+        nonce: requiredString(body, 'nonce'),
+        deadline: requiredString(body, 'deadline'),
+        signature: requiredString(body, 'signature'),
+        correlationId,
+      }), correlationId);
+      return true;
+    }
+    if (request.method === 'POST' && actionName === 'safe-proposal') {
+      const body = await readJson(request);
+      assertOnlyKeys(body, []);
+      sendJson(response, 202, await dependencies.seckillOperationsService.propose(actor, actionId, correlationId), correlationId);
+      return true;
+    }
+    if (request.method === 'POST' && actionName === 'cancel') {
+      const body = await readJson(request);
+      assertOnlyKeys(body, []);
+      sendJson(response, 200, await dependencies.seckillOperationsService.cancel(actor, actionId, { correlationId }), correlationId);
+      return true;
+    }
+  }
   if (request.method === 'GET' && url.pathname === '/v2/admin/catalog/categories') {
     const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
     sendJson(response, 200, {

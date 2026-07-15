@@ -965,7 +965,19 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
         : {
             items: [{ sessionId, cursor: '1', eventType: 'SeckillRelayExtended' }],
             nextCursor: '1',
-          },
+      },
+    },
+    seckillOperationsService: {
+      list: async () => [],
+      get: async (_actor, actionId) => ({ actionId, state: 'DRAFT' }),
+      createSession: async (actor, input) => ({ actionId: HASH, actor: actor.walletAddress, ...input }),
+      createForceClose: async (actor, sessionId, input) => ({ actionId: HASH, actor: actor.walletAddress, sessionId, ...input }),
+      createResume: async (actor, input) => ({ actionId: HASH, actor: actor.walletAddress, ...input }),
+      createPrizeInjection: async (actor, sessionId, input) => ({ actionId: HASH, actor: actor.walletAddress, sessionId, ...input }),
+      approvalChallenge: async (_actor, actionId, input) => ({ actionId, ...input, typedData: {} }),
+      submitApproval: async (_actor, actionId, input) => ({ actionId, state: 'SECONDARY_SIGNED', ...input }),
+      propose: async (_actor, actionId) => ({ actionId, state: 'PENDING_PROPOSAL' }),
+      cancel: async (_actor, actionId) => ({ actionId, state: 'CANCELLED' }),
     },
     fulfillmentService: {
       getOrder: async (_actor, orderId) => ({ orderId, state: 'DELIVERED' }),
@@ -1322,6 +1334,58 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     });
     assert.equal(adminDashboard.status, 200);
     assert.equal(((await adminDashboard.json()) as { timezone: string }).timezone, 'Asia/Shanghai');
+    assert.equal((await fetch(`${base}/v2/admin/seckill/actions`, {
+      headers: { authorization: `Bearer ${buyerOnlyToken}` },
+    })).status, 403);
+    assert.equal((await fetch(`${base}/v2/admin/seckill/actions`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    const seckillDraft = await fetch(`${base}/v2/admin/seckill/sessions`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        policyVersion: '1',
+        rulesContentHash: HASH,
+        productId: 'product-1',
+        skuId: 'sku-1',
+        inventory: 4,
+        seckillListPriceUsdt: '80',
+        startsAt: '2026-07-15T01:00:00.000Z',
+        idempotencyKey: 'seckill-http-session-1',
+      }),
+    });
+    assert.equal(seckillDraft.status, 201);
+    assert.equal(((await seckillDraft.json()) as { actionId: string }).actionId, HASH);
+    assert.equal((await fetch(`${base}/v2/admin/seckill/actions/${HASH}/approval-challenge`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ nonce: '1', deadline: '1783990200' }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/seckill/actions/${HASH}/secondary-signature`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ nonce: '1', deadline: '1783990200', signature: '0x1234' }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/seckill/actions/${HASH}/safe-proposal`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: '{}',
+    })).status, 202);
+    assert.equal((await fetch(`${base}/v2/admin/seckill/sessions/${SESSION_ID}/force-close`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ reasonCode: 'OPERATIONS_STOP', idempotencyKey: 'seckill-http-close-1' }),
+    })).status, 201);
+    assert.equal((await fetch(`${base}/v2/admin/seckill/sessions/${SESSION_ID}/prize-injections`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ amountUsdt: '50', idempotencyKey: 'seckill-http-prize-1' }),
+    })).status, 201);
+    assert.equal((await fetch(`${base}/v2/admin/seckill/breaker/resume`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ sessionId: SESSION_ID, idempotencyKey: 'seckill-http-resume-1' }),
+    })).status, 201);
     const riskObservationBody = {
       observationId: HASH,
       signalType: 'HIGH_GAS',

@@ -62,6 +62,13 @@ import {
   ResilientCoverageBreakerChainSource,
   type CoverageBreakerFinalityCandidate,
 } from './coverage-breaker-governance.ts';
+import {
+  HttpSeckillSafeProposer,
+  ResilientSeckillChainSource,
+  seckillSafeTxHash,
+  type SeckillFinalityCandidate,
+  type SeckillSafeProposal,
+} from './seckill-governance.ts';
 
 const CONTRACT = '0x3333333333333333333333333333333333333333';
 const BUYER = '0x1111111111111111111111111111111111111111';
@@ -812,6 +819,71 @@ test('coverage breaker network adapters time out black-hole proposal, lookup and
       requestTimeoutMs: 5,
     }).observe(candidate),
     /timed out/,
+  );
+});
+
+test('seckill Safe proposer and dual-RPC finality bind session open, breaker and prize transfer evidence', async () => {
+  const open = seckillCandidate('OPEN_SESSION');
+  let proposedBody: Record<string, unknown> | undefined;
+  const proposer = new HttpSeckillSafeProposer({
+    url: 'https://safe-proposer.example.invalid/seckill',
+    token: 'safe-token',
+    mutualTls: true,
+    fetchImpl: async (_input, init) => {
+      proposedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      const safeNonce = '9';
+      return jsonResponse({
+        safeNonce,
+        safeTxHash: seckillSafeTxHash(open, safeNonce),
+        proposalHash: HASH_3,
+        dataHash: open.calldataHash,
+        resourceId: open.actionId,
+        sessionId: open.sessionId,
+        actionKind: open.actionKind,
+        policyVersion: open.policyVersion,
+        evidenceHash: open.evidenceHash,
+        minimumSafeNonce: open.minimumSafeNonce,
+      });
+    },
+  });
+  assert.deepEqual(await proposer.propose(open), {
+    safeNonce: '9',
+    safeTxHash: seckillSafeTxHash(open, '9'),
+    proposalHash: HASH_3,
+  });
+  assert.equal(proposedBody?.to, open.targetAddress);
+  assert.equal(proposedBody?.sessionId, open.sessionId);
+  assert.equal(proposedBody?.actionKind, 'OPEN_SESSION');
+
+  for (const kind of ['OPEN_SESSION', 'FORCE_CLOSE', 'PRIZE_INJECTION'] as const) {
+    const candidate = seckillCandidate(kind);
+    const harness = seckillRpcHarness(candidate);
+    const source = new ResilientSeckillChainSource({
+      lookupUrl: 'https://safe-lookup.example.invalid/seckill',
+      lookupToken: 'lookup-token',
+      primaryRpcUrl: 'https://seckill-primary-rpc.example.invalid',
+      fallbackRpcUrl: 'https://seckill-fallback-rpc.example.invalid',
+      fetchImpl: harness.fetch,
+    });
+    const finalized = await source.observe(candidate);
+    assert.equal(finalized.state, 'FINAL', kind);
+    if (finalized.state !== 'FINAL') throw new Error(`ExpectedFinalSeckill${kind}`);
+    assert.equal(finalized.confirmations, 15);
+    assert.equal(finalized.actionKind, kind);
+  }
+
+  const wrongPrize = seckillCandidate('PRIZE_INJECTION');
+  const wrongPrizeHarness = seckillRpcHarness(wrongPrize);
+  wrongPrizeHarness.state.prizeAmount = '51';
+  await assert.rejects(
+    new ResilientSeckillChainSource({
+      lookupUrl: 'https://safe-lookup.example.invalid/seckill',
+      lookupToken: 'lookup-token',
+      primaryRpcUrl: 'https://seckill-primary-rpc.example.invalid',
+      fallbackRpcUrl: 'https://seckill-fallback-rpc.example.invalid',
+      fetchImpl: wrongPrizeHarness.fetch,
+    }).observe(wrongPrize),
+    /exactly one matching USDT Transfer/,
   );
 });
 
@@ -1737,6 +1809,150 @@ function coverageBreakerRpcHarness() {
     return jsonResponse({ jsonrpc: '2.0', id: 1, result });
   };
   return { state, fetch: fetchImpl, executionTxHash, minedBlockHash };
+}
+
+function seckillCandidate(kind: 'OPEN_SESSION' | 'FORCE_CLOSE' | 'PRIZE_INJECTION'): SeckillFinalityCandidate {
+  const router = new Interface([
+    'function openSeckillSession(bytes32 sessionId,uint64 policyVersion,uint64 startsAt)',
+    'function setSeckillPurchasesPaused(bool paused,bytes32 evidenceHash)',
+  ]);
+  const token = new Interface(['function transfer(address recipient,uint256 amount) returns (bool)']);
+  let proposal: SeckillSafeProposal;
+  if (kind === 'OPEN_SESSION') {
+    const calldata = router.encodeFunctionData('openSeckillSession', [ORDER_ID, 1, 1_800_000_000]).toLowerCase();
+    proposal = {
+      actionId: HASH_2,
+      sessionId: ORDER_ID,
+      actionKind: kind,
+      policyVersion: 1,
+      evidenceHash: HASH_1,
+      safeAddress: BUYER,
+      targetAddress: CONTRACT,
+      calldata,
+      calldataHash: keccak256(calldata).toLowerCase(),
+      minimumSafeNonce: '7',
+      expected: {
+        kind,
+        startsAt: 1_800_000_000,
+        mainDeadline: 1_800_003_600,
+        relayDeadline: 1_800_000_060,
+      },
+    };
+  } else if (kind === 'FORCE_CLOSE') {
+    const calldata = router.encodeFunctionData('setSeckillPurchasesPaused', [true, HASH_1]).toLowerCase();
+    proposal = {
+      actionId: HASH_2,
+      sessionId: ORDER_ID,
+      actionKind: kind,
+      policyVersion: 1,
+      evidenceHash: HASH_1,
+      safeAddress: BUYER,
+      targetAddress: CONTRACT,
+      calldata,
+      calldataHash: keccak256(calldata).toLowerCase(),
+      minimumSafeNonce: '7',
+      expected: { kind, targetPaused: true },
+    };
+  } else {
+    const calldata = token.encodeFunctionData('transfer', [MERCHANT, 50]).toLowerCase();
+    proposal = {
+      actionId: HASH_2,
+      sessionId: ORDER_ID,
+      actionKind: kind,
+      policyVersion: 1,
+      evidenceHash: HASH_1,
+      safeAddress: BUYER,
+      targetAddress: USDT_ADDRESS,
+      calldata,
+      calldataHash: keccak256(calldata).toLowerCase(),
+      minimumSafeNonce: '7',
+      expected: {
+        kind,
+        amountUsdt: '50',
+        operationsSafeAddress: BUYER,
+        custodySafeAddress: MERCHANT,
+        tokenAddress: USDT_ADDRESS,
+      },
+    };
+  }
+  return {
+    ...proposal,
+    safeTxHash: seckillSafeTxHash(proposal, '7'),
+    priorState: 'SAFE_PROPOSED',
+  };
+}
+
+function seckillRpcHarness(candidate: SeckillFinalityCandidate) {
+  const executionTxHash = HASH_3;
+  const minedBlockHash = `0x${'6'.repeat(64)}`;
+  const router = new Interface([
+    'event SeckillSessionOpened(bytes32 indexed sessionId,uint64 indexed policyVersion,uint64 startsAt,uint64 mainDeadline,uint64 relayDeadline)',
+    'event SeckillPurchasePauseChanged(bool paused,bytes32 indexed evidenceHash)',
+    'function seckillPurchasesPaused() view returns (bool)',
+  ]);
+  const token = new Interface(['event Transfer(address indexed from,address indexed to,uint256 value)']);
+  const state = {
+    head: 114,
+    transactionTo: candidate.safeAddress,
+    canonicalBlockHash: minedBlockHash,
+    routerPaused: true,
+    prizeAmount: '50',
+  };
+  const eventLog = () => {
+    if (candidate.expected.kind === 'OPEN_SESSION') {
+      const event = router.getEvent('SeckillSessionOpened')!;
+      const encoded = router.encodeEventLog(event, [
+        candidate.sessionId,
+        candidate.policyVersion,
+        candidate.expected.startsAt,
+        candidate.expected.mainDeadline,
+        candidate.expected.relayDeadline,
+      ]);
+      return { address: candidate.targetAddress, topics: encoded.topics, data: encoded.data };
+    }
+    if (candidate.expected.kind === 'FORCE_CLOSE' || candidate.expected.kind === 'RESUME_PURCHASES') {
+      const event = router.getEvent('SeckillPurchasePauseChanged')!;
+      const encoded = router.encodeEventLog(event, [candidate.expected.targetPaused, candidate.evidenceHash]);
+      return { address: candidate.targetAddress, topics: encoded.topics, data: encoded.data };
+    }
+    if (candidate.expected.kind !== 'PRIZE_INJECTION') throw new Error('MissingPrizeExpectation');
+    const event = token.getEvent('Transfer')!;
+    const encoded = token.encodeEventLog(event, [
+      candidate.expected.operationsSafeAddress,
+      candidate.expected.custodySafeAddress,
+      state.prizeAmount,
+    ]);
+    return { address: candidate.expected.tokenAddress, topics: encoded.topics, data: encoded.data };
+  };
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = String(input);
+    if (url.startsWith('https://safe-lookup.example.invalid')) {
+      return jsonResponse({
+        safeTxHash: candidate.safeTxHash,
+        resourceId: candidate.actionId,
+        executionTxHash,
+      });
+    }
+    const request = JSON.parse(String(init?.body)) as { method: string };
+    let result: unknown;
+    if (request.method === 'eth_chainId') result = '0x38';
+    else if (request.method === 'eth_blockNumber') result = `0x${state.head.toString(16)}`;
+    else if (request.method === 'eth_getBlockByNumber') result = { hash: state.canonicalBlockHash };
+    else if (request.method === 'eth_getTransactionByHash') result = { hash: executionTxHash, to: state.transactionTo };
+    else if (request.method === 'eth_call') {
+      result = router.encodeFunctionResult('seckillPurchasesPaused', [state.routerPaused]);
+    } else if (request.method === 'eth_getTransactionReceipt') {
+      result = {
+        transactionHash: executionTxHash,
+        status: '0x1',
+        blockHash: minedBlockHash,
+        blockNumber: '0x64',
+        logs: [eventLog()],
+      };
+    } else throw new Error(`UnexpectedSeckillRpcMethod:${request.method}`);
+    return jsonResponse({ jsonrpc: '2.0', id: 1, result });
+  };
+  return { state, fetch: fetchImpl };
 }
 
 function jsonResponse(body: unknown) {

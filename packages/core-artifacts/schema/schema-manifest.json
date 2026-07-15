@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.8",
+  "artifactVersion": "2.0.0-settlement-admin.9",
   "formatVersion": 1,
   "databaseEngine": "postgresql",
   "schemas": {
@@ -90,6 +90,11 @@
           "name": "017_risk_management.sql",
           "path": "schema/business/017_risk_management.sql",
           "sha256": "3de844230c52604ae287818a1301df7586678e2b3816cc07eb01e45a33fb6684"
+        },
+        {
+          "name": "018_seckill_operations.sql",
+          "path": "schema/business/018_seckill_operations.sql",
+          "sha256": "af99e694faa269c1b5a40f153f563a168a21463a7675db59e6d256b84bdc2026"
         }
       ]
     },
