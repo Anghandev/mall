@@ -1,7 +1,7 @@
 # Abu 24K V2 Data Model
 
 Status: coordinated local settlement/admin checkpoint
-`2.0.0-settlement-admin.7`. This document describes implemented catalog, media, payment,
+`2.0.0-settlement-admin.8`. This document describes implemented catalog, media, payment,
 fulfillment, settlement and administrative storage and does not authorize
 deployment.
 
@@ -218,6 +218,14 @@ payment-reversal fulfillment action.
 - CMS versions/publication events, notification endpoints/campaigns/deliveries,
   system-config versions, the audit outbox, monitoring snapshots and alert
   events are versioned or append-only as appropriate.
+- `core.risk_observations` stores trusted high-Gas, wallet-context and
+  cancellation evidence idempotently. `core.risk_subject_wallets` links only
+  hashed IP/device subjects to wallets. `core.risk_restrictions` records
+  wallet/IP/device limits, exact start/expiry and override evidence;
+  `core.risk_restriction_events` retains created, expired and overridden
+  transitions. `core.risk_appeals` retains statement, decision and actor
+  evidence. Active wallet restrictions are consulted only by ordinary and
+  seckill quote creation.
 
 ## Immutability And Recovery
 

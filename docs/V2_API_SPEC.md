@@ -1,6 +1,6 @@
 # Abu 24K V2 Core API Contract
 
-Status: coordinated local settlement/admin checkpoint `2.0.0-settlement-admin.7`. OpenAPI,
+Status: coordinated local settlement/admin checkpoint `2.0.0-settlement-admin.8`. OpenAPI,
 generated types, ABI, manifests, enums, the fail-closed WebSocket protocol and
 consumer tests share this version. This checkpoint does not authorize a
 deployment, production signing or a transaction.
@@ -29,6 +29,9 @@ return `ExternalBlocked` or `ConfigurationRequired`.
 - Kuaidi100 and Cainiao callbacks use `x-provider-signature`, calculated over
   the exact raw request body with the configured HMAC secret. They do not use a
   product JWT.
+- Trusted chain, edge-auth and order services submit risk observations with the
+  separate opaque `RISK_SIGNAL_TOKEN`. That token cannot access Admin routes,
+  and an Admin JWT cannot submit an internal observation.
 - Every response includes `x-correlation-id`. Errors use the generated Core
   error-code catalog and fail closed.
 
@@ -167,6 +170,24 @@ hashes. Until an append-only historical tenant mapping is approved, the API
 reports `PARTIAL_PRE_MERCHANT_SCOPE` instead of claiming complete legacy audit
 history.
 
+Risk management:
+
+- `POST /v2/internal/risk/observations`
+- `GET /v2/admin/risk/overview`
+- `POST /v2/admin/risk/restrictions`
+- `POST /v2/admin/risk/restrictions/{restrictionId}/override`
+- `POST /v2/admin/risk/appeals`
+- `POST /v2/admin/risk/appeals/{appealId}/decision`
+
+High-Gas evidence above the published Gas threshold restricts new quotes for
+exactly 24 hours. The sixth distinct wallet observed on one IP or device inside
+one minute creates a subject blacklist and wallet restrictions. A third
+cancellation inside five minutes restricts new quotes for two hours. Duplicate
+observation IDs are idempotent. Admin may create or override restrictions and
+decide appeals; Operator may submit appeals; Auditor is read-only. These limits
+apply to ordinary and seckill quote creation only and never block fulfillment,
+takeover, arbitration, reconciliation, finality synchronization or audit reads.
+
 Catalog management:
 
 - `GET|PUT /v2/merchant/stores/{storeId}/product-slot`
@@ -259,8 +280,10 @@ finality inside that window. Amounts come from immutable `exactAmounts`; current
 order queues remain separate from the finality-window cohort. Shipment rates
 return numerator, denominator and nullable basis points, so an empty cohort is
 not reported as zero percent. Metrics whose identity or threshold is not frozen
-(buyer UID, low stock, abnormal orders and blacklist blocks) are explicit
-`DecisionBlocked` entries rather than synthetic zeroes.
+(buyer UID and low stock) are explicit `DecisionBlocked` entries rather than
+synthetic zeroes. Risk observations, blacklist blocks, active restrictions and
+pending appeals are derived from append-only risk records and are not inferred
+from operations monitoring alerts.
 Safe coverage is included only when the latest snapshot has a fresh canonical
 observation; missing, stale or reorged evidence is an explicit
 `SAFE_COVERAGE / ExternalBlocked` metric and never reuses an older covered row.
@@ -280,7 +303,7 @@ capabilities plus signed settlement intents and requests, merchant finance and
 guarantee deposits, takeover funding, Safe MultiSend batching and finality,
 policy governance, CMS, notifications, versioned system configuration,
 append-only audit queries and operations monitoring. The coordinated OpenAPI
-publishes 113 HTTP operations and the generated types, state/error enums,
+publishes 119 HTTP operations and the generated types, state/error enums,
 Schema and ABI share the same artifact version.
 
 Seckill session reads, numeric-cursor HTTP replay and `/v2/ws` publish only

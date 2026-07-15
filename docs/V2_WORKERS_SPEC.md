@@ -1,6 +1,6 @@
 # Abu 24K V2 Payment And Fulfillment Workers
 
-Status: local settlement/admin checkpoint `2.0.0-settlement-admin.7`. Production RPCs, deployed
+Status: local settlement/admin checkpoint `2.0.0-settlement-admin.8`. Production RPCs, deployed
 addresses, signer service and credentials remain `ExternalBlocked`.
 
 ## Indexer
@@ -58,6 +58,13 @@ Missing fulfillment providers, audit storage or settlement Executor do not
 disable payment quoting. Payment readiness never stops submission tracking,
 payment reads, Indexer polling, finality or reorg recovery. The Indexer continues
 running while `writesEnabled` is false.
+
+Trusted risk observations use a separate internal token and immutable evidence
+hash. The local rule engine applies the published Gas threshold and the frozen
+wallet-switch/cancellation windows before either quote path. Production
+mempool/RPC high-Gas collection, device fingerprint collection and their
+provider credentials remain external inputs; Core does not fabricate those
+observations when a source is absent.
 
 ## Signer
 
