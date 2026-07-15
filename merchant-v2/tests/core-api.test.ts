@@ -43,7 +43,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('settlement-admin.7 Core HTTP consumer', () => {
+describe('settlement-admin.8 Core HTTP consumer', () => {
   it('uses the published SIWE nonce and verify request bodies without a password fallback', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
@@ -206,7 +206,7 @@ describe('settlement-admin.7 Core HTTP consumer', () => {
       'https://core.example.test/v2/catalog/products',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.7' }),
+        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.8' }),
       }),
     );
   });
