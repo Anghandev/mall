@@ -266,8 +266,8 @@ async function enterSettings(client: CoreApi) {
 }
 
 describe('00 wallet gateway', () => {
-  it('consumes settlement-admin.7 and requires a server-authoritative order-action grant', () => {
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.7');
+  it('consumes settlement-admin.8 and requires a server-authoritative order-action grant', () => {
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.8');
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
     expect(coreBoundary.artifactVersion).toBe(artifactVersion);
     expect(coreBoundary.artifactsAvailable).toBe(true);
