@@ -19,15 +19,39 @@ export const product: CatalogProduct = {
   productId: 'product-24k-shoe',
   chainProductId: hash('a'),
   title: '阿步 24K 黑金运动鞋',
+  subtitle: '城市通勤与门店自提可选',
   metadata: {},
   mainImageAssetIds: [productImageAssetId],
   videoAssetId: productVideoAssetId,
+  richDetail: { summary: '黑金鞋面，轻量缓震结构。' },
+  defaultFreightUsdt: '10000000000000000000',
+  fulfillmentModes: ['DELIVERY', 'PICKUP'],
+  categoryId: 'sports-shoes',
+  tagIds: ['black-gold'],
   skus: [{
     skuId: 'sku-42-black-gold',
     chainSkuId: hash('b'),
     attributes: { size: '42码', color: '黑金' },
     listPriceUsdt: '120000000000000000000',
     stockAvailable: '8',
+    seckill: null,
+  }, {
+    skuId: 'sku-41-seckill',
+    chainSkuId: hash('c'),
+    attributes: { size: '41码', color: '秒杀黑金' },
+    listPriceUsdt: '120000000000000000000',
+    stockAvailable: '67',
+    seckill: {
+      sessionId: hash('9'),
+      policyVersion: '12',
+      phase: 'LIVE',
+      startsAt: '2033-05-18T04:59:00.000Z',
+      mainDeadline: '2033-05-18T05:59:00.000Z',
+      relayDeadline: '2033-05-18T05:01:00.000Z',
+      seckillListPriceUsdt: '80000000000000000000',
+      inventory: { total: '100', sold: '31', reserved: '2', available: '67' },
+      ordinaryCheckoutAllowed: false,
+    },
   }],
 };
 
@@ -128,13 +152,16 @@ export function paymentQuote(): PaymentQuoteResponse {
 export function seckillQuote(): SeckillQuoteResponse {
   const ordinary = paymentQuote();
   const sessionId = hash('9');
+  const seckillSku = product.skus[1]!;
   const seckill = {
     ...ordinary.intent,
+    skuId: seckillSku.chainSkuId,
     seckill: true,
     sessionId,
   };
   const fallback = {
     ...ordinary.intent,
+    skuId: seckillSku.chainSkuId,
     reservationId: hash('a'),
     reservationHash: hash('b'),
   };

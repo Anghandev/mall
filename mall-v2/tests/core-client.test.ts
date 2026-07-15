@@ -282,7 +282,11 @@ describe('coordinated Core HTTP client', () => {
       if (url.endsWith('/v2/stores?regionCode=210202')) return json({ stores: [store] });
       if (url.endsWith('/v2/fulfillment-targets/delivery')) return json(deliveryTarget, 201);
       if (url.endsWith('/v2/fulfillment-targets/pickup')) return json(pickupTarget, 201);
-      if (url.endsWith('/v2/orders')) return json({ orders: [deliveryOrder] });
+      if (url.endsWith('/v2/orders?limit=50')) return json({
+        orders: [deliveryOrder],
+        nextCursor: { createdAt: deliveryOrder.createdAt, orderId: deliveryOrder.orderId },
+      });
+      if (url.includes('/v2/orders?cursorCreatedAt=')) return json({ orders: [], nextCursor: null });
       if (url.endsWith(`/v2/orders/${deliveryOrder.orderId}/fulfillment-target`)) return json({ target: deliveryOrderTarget });
       if (url.endsWith(`/v2/orders/${deliveryOrder.orderId}`)) return json({ order: deliveryOrder });
       if (url.endsWith('/v2/actions/order')) return json({ allowedActions: deliveryActions });
@@ -301,7 +305,12 @@ describe('coordinated Core HTTP client', () => {
     expect(await client.listStores('210202')).toEqual([store]);
     expect(await client.createDeliveryTarget('session', targetDraft)).toEqual(deliveryTarget);
     expect(await client.createPickupTarget('session', { idempotencyKey: 'mall-pickup-1234', storeId: store.storeId })).toEqual(pickupTarget);
-    expect(await client.listOrders('session')).toEqual([deliveryOrder]);
+    const firstOrderPage = await client.listOrders('session');
+    expect(firstOrderPage).toEqual({
+      orders: [deliveryOrder],
+      nextCursor: { createdAt: deliveryOrder.createdAt, orderId: deliveryOrder.orderId },
+    });
+    expect(await client.listOrders('session', firstOrderPage.nextCursor!)).toEqual({ orders: [], nextCursor: null });
     expect(await client.getOrder('session', deliveryOrder.orderId)).toEqual(deliveryOrder);
     expect(await client.getOrderTarget('session', deliveryOrder.orderId)).toEqual(deliveryOrderTarget);
     expect(await client.getOrderAllowedActions('session', deliveryOrder.orderId)).toEqual(deliveryActions);
@@ -310,6 +319,7 @@ describe('coordinated Core HTTP client', () => {
     expect(protectedCalls.every((call) => (call.init?.headers as Record<string, string>)?.authorization === 'Bearer session')).toBe(true);
     expect(JSON.parse(String(calls.find((call) => call.url.endsWith('/v2/fulfillment-targets/delivery'))?.init?.body))).toEqual(targetDraft);
     expect(JSON.parse(String(calls.find((call) => call.url.endsWith('/v2/actions/order'))?.init?.body))).toEqual({ orderId: deliveryOrder.orderId });
+    expect(calls.some((call) => call.url.includes(`cursorOrderId=${encodeURIComponent(deliveryOrder.orderId)}`))).toBe(true);
   });
 
   it('uses generated responses and passes exact quote/routerCall fields through unchanged', async () => {
@@ -354,6 +364,25 @@ describe('coordinated Core HTTP client', () => {
       fulfillmentTargetHash: HASH,
       regionCodeHash: HASH_2,
     });
+  });
+
+  it('validates the published catalog fields and fails an ordinary-enabled seckill overlay closed', async () => {
+    const malformed = structuredClone(product);
+    malformed.skus[1]!.seckill!.ordinaryCheckoutAllowed = true as false;
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json({ products: [malformed] })),
+    }).listCatalog()).rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    const catalog = await createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json({ products: [product] })),
+    }).listCatalog();
+    expect(catalog[0]).toMatchObject({
+      subtitle: product.subtitle,
+      categoryId: 'sports-shoes',
+      tagIds: ['black-gold'],
+      fulfillmentModes: ['DELIVERY', 'PICKUP'],
+    });
+    expect(catalog[0]?.skus[1]?.seckill?.ordinaryCheckoutAllowed).toBe(false);
   });
 
   it('uses the published seckill endpoint and keeps both signed legs opaque', async () => {

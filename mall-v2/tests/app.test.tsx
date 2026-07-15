@@ -56,7 +56,7 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/mall');
 
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.4');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.5');
     expect(productBaseline.knownOrderActions).toBe(allowedActionNames);
     expect(productBaseline.executableOrderActions).toBe(executableOrderActionNames);
     expect(executableOrderActionNames).toContain('CONFIRM_RECEIPT');
@@ -64,7 +64,7 @@ describe('Mall V2 payment consumer', () => {
     expect(isCoreOrderActionExecutable('CONFIRM_RECEIPT')).toBe(true);
     expect(isCoreOrderActionExecutable('PAY_ORDER')).toBe(false);
     expect(mallRuntimeBoundary).toMatchObject({
-      artifactStatus: '2.0.0-settlement-admin.4',
+      artifactStatus: '2.0.0-settlement-admin.5',
       executableOrderActions: executableOrderActionNames,
       deploymentAuthorized: false,
       settlementAdminCapabilities: {
@@ -89,16 +89,45 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText('鞋履')).toBeTruthy();
     expect(screen.getByText('运动鞋')).toBeTruthy();
     expect(screen.getByText('黑金', { selector: '.taxonomy-strip span' })).toBeTruthy();
+    expect(screen.getByText(product.subtitle)).toBeTruthy();
+    expect(screen.getByText(/USDT 原子单位/)).toBeTruthy();
+    expect(screen.getByText(/秒杀进行中/)).toBeTruthy();
     const productImage = await screen.findByRole('img', { name: product.title });
     expect(productImage.getAttribute('src')).toBe(publicMediaAccess(product.mainImageAssetIds[0]!).readUrl);
     expect(createPublicMediaReadAccess).toHaveBeenCalledWith(product.mainImageAssetIds[0]!.toLowerCase());
     expect(document.body.textContent).not.toMatch(/CDN|OSS|分类稍后批次发布/);
 
     await user.click(screen.getByRole('button', { name: /选择商品/ }));
+    expect(screen.getByText('黑金鞋面，轻量缓震结构。')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /41码 \/ 秒杀黑金/ }).hasAttribute('disabled')).toBe(true);
     const productVideo = await screen.findByLabelText(`${product.title} 商品视频`);
     expect(productVideo.tagName).toBe('VIDEO');
     expect(productVideo.getAttribute('src')).toBe(publicMediaAccess(product.videoAssetId!).readUrl);
     expect(createPublicMediaReadAccess).toHaveBeenCalledWith(product.videoAssetId!.toLowerCase());
+  });
+
+  it('filters products only by the published category and tag associations', async () => {
+    const user = userEvent.setup();
+    const uncategorized = {
+      ...product,
+      productId: 'product-uncategorized',
+      chainProductId: `0x${'d'.repeat(64)}`,
+      title: '未分类商品',
+      subtitle: '',
+      mainImageAssetIds: [],
+      videoAssetId: null,
+      categoryId: null,
+      tagIds: [],
+      skus: [{ ...product.skus[0]!, skuId: 'sku-uncategorized', chainSkuId: `0x${'7'.repeat(64)}` }],
+    };
+    renderAt('/mall', readyServices({ listCatalog: vi.fn().mockResolvedValue([product, uncategorized]) }));
+
+    expect(await screen.findByRole('heading', { name: '未分类商品' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '运动鞋' }));
+    expect(screen.getByRole('heading', { name: product.title })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: '未分类商品' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: '黑金' }));
+    expect(screen.getByRole('heading', { name: product.title })).toBeTruthy();
   });
 
   it('fails media closed when the signed read target is bound to another product', async () => {
@@ -359,7 +388,7 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/seckill', readyServices({ getCurrentSeckillSession: vi.fn().mockResolvedValue(current) }));
 
     expect(await screen.findByText(new RegExp(expected))).toBeTruthy();
-    expect(screen.getByText(current.product.seckillListPriceUsdt, { exact: false })).toBeTruthy();
+    expect(screen.getAllByText(current.product.seckillListPriceUsdt, { exact: false }).length).toBeGreaterThan(0);
     expect(screen.getByText(current.prizePoolUsdt, { exact: false })).toBeTruthy();
     if (phase === 'LIVE') {
       expect(screen.getByText('00:59:00')).toBeTruthy();
@@ -414,7 +443,7 @@ describe('Mall V2 payment consumer', () => {
     await screen.findByRole('heading', { name: '库存已预留' });
     expect(createSeckillQuote).toHaveBeenCalledWith('buyer-session', seckillSessionId, expect.objectContaining({
       productId: product.productId,
-      skuId: product.skus[0]!.skuId,
+      skuId: product.skus[1]!.skuId,
     }));
   });
 
@@ -486,7 +515,7 @@ describe('Mall V2 payment consumer', () => {
     const createOrderActionEvidence = vi.fn<CoreClient['createOrderActionEvidence']>().mockResolvedValue(evidence);
     const requestExchange = vi.fn<CoreClient['requestExchange']>().mockResolvedValue(buyerActionResult('REQUEST_EXCHANGE'));
     const services = readyServices({
-      listOrders: vi.fn().mockResolvedValue([deliveryOrder]),
+      listOrders: vi.fn().mockResolvedValue({ orders: [deliveryOrder], nextCursor: null }),
       getOrderAllowedActions: vi.fn().mockResolvedValue(deliveryActions),
       getOrderTarget: vi.fn().mockResolvedValue(deliveryOrderTarget),
       createMediaUploadIntent,
@@ -538,6 +567,34 @@ describe('Mall V2 payment consumer', () => {
     expect(document.body.textContent).not.toContain(orderEvidenceHash);
   });
 
+  it('appends stable order pages and consumes complete row allowedActions without a second action lookup', async () => {
+    const user = userEvent.setup();
+    const cursor = { createdAt: deliveryOrder.createdAt, orderId: deliveryOrder.orderId };
+    const secondOrder = {
+      ...deliveryOrder,
+      orderId: `0x${'e'.repeat(64)}`,
+      createdAt: '2033-05-17T03:00:00.000Z',
+      orderKind: 'SECKILL' as const,
+      allowedActions: [],
+    };
+    const listOrders = vi.fn<CoreClient['listOrders']>().mockImplementation((_token, nextCursor) => Promise.resolve(
+      nextCursor ? { orders: [secondOrder], nextCursor: null } : { orders: [deliveryOrder], nextCursor: cursor },
+    ));
+    const services = readyServices({
+      listOrders,
+      getOrderTarget: vi.fn().mockResolvedValue(deliveryOrderTarget),
+    });
+    renderAt('/assets/orders', services);
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    expect(await screen.findByText(deliveryOrder.paymentTxHash!)).toBeTruthy();
+    expect(screen.getByText('数量').nextElementSibling?.textContent).toBe(deliveryOrder.quantity);
+    await user.click(screen.getByRole('button', { name: '加载更多订单' }));
+    await screen.findByText('秒杀 · 快递订单');
+    expect(listOrders).toHaveBeenLastCalledWith('buyer-session', cursor);
+    expect(services.core.getOrderAllowedActions).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['REQUEST_DELAY', '申请延期'],
     ['OPEN_ARBITRATION', '发起仲裁'],
@@ -550,8 +607,10 @@ describe('Mall V2 payment consumer', () => {
     const confirmReceipt = vi.fn<CoreClient['confirmReceipt']>().mockResolvedValue(buyerActionResult('CONFIRM_RECEIPT'));
     const createOrderActionEvidence = vi.fn<CoreClient['createOrderActionEvidence']>().mockResolvedValue(evidence);
     const services = readyServices({
-      listOrders: vi.fn().mockResolvedValue([deliveryOrder]),
-      getOrderAllowedActions: vi.fn().mockResolvedValue([{ action, enabled: true }]),
+      listOrders: vi.fn().mockResolvedValue({
+        orders: [{ ...deliveryOrder, allowedActions: [{ action, enabled: true }] }],
+        nextCursor: null,
+      }),
       getOrderTarget: vi.fn().mockResolvedValue(deliveryOrderTarget),
       createOrderActionEvidence,
       requestDelay,
@@ -585,8 +644,10 @@ describe('Mall V2 payment consumer', () => {
       .mockRejectedValueOnce(new CoreClientError('NetworkUnavailable', '命令提交中断'))
       .mockResolvedValue(buyerActionResult('REQUEST_EXCHANGE'));
     const services = readyServices({
-      listOrders: vi.fn().mockResolvedValue([deliveryOrder]),
-      getOrderAllowedActions: vi.fn().mockResolvedValue([{ action: 'REQUEST_EXCHANGE', enabled: true }]),
+      listOrders: vi.fn().mockResolvedValue({
+        orders: [{ ...deliveryOrder, allowedActions: [{ action: 'REQUEST_EXCHANGE', enabled: true }] }],
+        nextCursor: null,
+      }),
       getOrderTarget: vi.fn().mockResolvedValue(deliveryOrderTarget),
       createOrderActionEvidence,
       requestExchange,
@@ -608,11 +669,16 @@ describe('Mall V2 payment consumer', () => {
   it('keeps takeover and pickup verification fail closed when buyer evidence authority is absent', async () => {
     const user = userEvent.setup();
     const services = readyServices({
-      listOrders: vi.fn().mockResolvedValue([deliveryOrder]),
-      getOrderAllowedActions: vi.fn().mockResolvedValue([
-        { action: 'OPEN_TAKEOVER', enabled: true },
-        { action: 'VERIFY_PICKUP', enabled: true },
-      ]),
+      listOrders: vi.fn().mockResolvedValue({
+        orders: [{
+          ...deliveryOrder,
+          allowedActions: [
+            { action: 'OPEN_TAKEOVER', enabled: true },
+            { action: 'VERIFY_PICKUP', enabled: true },
+          ],
+        }],
+        nextCursor: null,
+      }),
       getOrderTarget: vi.fn().mockResolvedValue(deliveryOrderTarget),
     });
     renderAt('/assets/orders', services);
@@ -764,7 +830,7 @@ function servicesWith(overrides: Partial<CoreClient>): MallServices {
     listStores: vi.fn().mockResolvedValue([]),
     createDeliveryTarget: vi.fn().mockResolvedValue(deliveryTarget),
     createPickupTarget: vi.fn().mockResolvedValue(pickupTarget),
-    listOrders: vi.fn().mockResolvedValue([]),
+    listOrders: vi.fn().mockResolvedValue({ orders: [], nextCursor: null }),
     getOrder: vi.fn().mockRejectedValue(new Error('not configured')),
     getOrderTarget: vi.fn().mockRejectedValue(new Error('not configured')),
     getOrderAllowedActions: vi.fn().mockResolvedValue([]),

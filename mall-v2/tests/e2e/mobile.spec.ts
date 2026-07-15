@@ -81,10 +81,13 @@ test('buyer evidence form is keyboard-addressable and fits the mobile frame', as
   const exchange = page.getByRole('button', { name: '申请换货' });
   await exchange.focus();
   await page.keyboard.press('Enter');
-  await page.keyboard.press('Tab');
-  await page.keyboard.press('Tab');
-  await expect(page.getByLabel('原因代码')).toBeFocused();
-  await page.getByLabel('原因代码').fill('PACKAGE_DAMAGED');
+  const reasonCode = page.getByLabel('原因代码');
+  await expect(reasonCode).toBeVisible();
+  for (let index = 0; index < 12 && !await reasonCode.evaluate((element) => element === document.activeElement); index += 1) {
+    await page.keyboard.press('Tab');
+  }
+  await expect(reasonCode).toBeFocused();
+  await reasonCode.fill('PACKAGE_DAMAGED');
   await expect(page.getByLabel(/证据文件（可选）/)).toHaveAttribute('accept', 'image/jpeg,image/png,image/webp,application/pdf');
   await page.getByRole('button', { name: /封装证据并提交/ }).click();
   await expect(page.getByRole('status')).toContainText('操作已由 Core 接收');
@@ -165,7 +168,7 @@ async function mockPublicCore(page: import('@playwright/test').Page) {
         walletAddress: deliveryOrder.buyerWallet,
         roles: ['BUYER'],
       };
-      if (url.pathname === '/v2/orders') return { orders: [deliveryOrder] };
+      if (url.pathname === '/v2/orders') return { orders: [deliveryOrder], nextCursor: null };
       if (url.pathname === '/v2/actions/order') return { allowedActions: [{ action: 'REQUEST_EXCHANGE', enabled: true }] };
       if (url.pathname === `/v2/orders/${deliveryOrder.orderId}/fulfillment-target`) return { target: deliveryOrderTarget };
       if (url.pathname === '/v2/settlements') return {

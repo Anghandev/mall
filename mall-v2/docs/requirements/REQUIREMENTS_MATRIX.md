@@ -17,8 +17,8 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
 | MAL-SEK-002 | 18-21 | Large/bold SlideUpFade wall, exact +30s event copy, WebSocket event insertion | D-V2-013 | Ordered/deduped event stream, reconnect/cursor recovery, reduced-motion fallback | Verified | - |
 | MAL-SEK-003 | 22-24 | Main and relay timers; 60-minute main; source 60-minute relay; +30s after final TxHash | D-V2-013 | Main 60 min; relay initial/cap 60 sec; +30 sec per final purchase; never past main deadline | Verified | - |
 | MAL-SEK-004 | 25-34 | Rules button/modal/acknowledgement; chain timestamp; fallback retail classification; dual approval wording; 70% USDT + 30% NPL and 1:1 backend-BNM wording | D-V2-002, D-V2-008, D-V2-011, D-V2-012, D-V2-017 | Modal shows both five-minute signed quotes, Router classification rule and exact payment intents; BNM is backend points shown as Locked until fulfillment and never as a token payout | Overridden | GAP-MAL-003, GAP-MAL-004 |
-| MAL-CAT-001 | 35-39 | Horizontal multilevel categories, product waterfall, BNM badge, seckill overlay and route | - | Category filtering works; active seckill blocks ordinary checkout | Frozen | GAP-MAL-002, GAP-MAL-004 |
-| MAL-CAT-002 | 40-42 | Product detail, sticky Buy action, seckill-disabled state, SlideUp configuration sheet | - | Action remains reachable and follows authoritative product state | Frozen | GAP-MAL-002 |
+| MAL-CAT-001 | 35-39 | Horizontal multilevel categories, product waterfall, BNM badge, seckill overlay and route | - | Category filtering works; active seckill blocks ordinary checkout | Verified | - |
+| MAL-CAT-002 | 40-42 | Product detail, sticky Buy action, seckill-disabled state, SlideUp configuration sheet | - | Action remains reachable and follows authoritative product state | Frozen | - |
 | MAL-CHK-001 | 43-49 | Confirmation prerequisite; SKU matrix/manual selection; +/- quantity; delivery/pickup; default full address fields; empty-address guidance; nearest store/address/hours/detail | D-V2-002, D-V2-012, D-V2-021 | No confirmation without valid SKU, quantity, mode and authoritative address/store; exact 70/30 legs, Oracle snapshot, five-minute expiry and totals come only from the signed Core quote | Frozen | GAP-MAL-003, GAP-MAL-006, GAP-MAL-010 |
 | MAL-STORE-001 | 50-53 | Country/city/district selectors; GPS 1.2km display; Call and Navigation buttons; JSBridge AMap/Baidu launch | - | Browser/local tests cover permission, loading, denial, unavailable, deep-link generation and fallback states; real-device proof is tracked only by MAL-GOAL-004 | Frozen | GAP-MAL-010 |
 | MAL-ASSET-001 | 54-64 | Assets shell; avatar, nickname, account ID, address entry; four order groups/counts; View All | - | Profile and canonical counts render from Core projection | Frozen | GAP-MAL-007 |
@@ -29,8 +29,8 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
 | MAL-ASSET-006 | 84-86 | Direct-referral 1% NPL totals, source next-block wording and withdrawal control | D-V2-007, D-V2-009, D-V2-010, D-V2-023 | No self/cycle; 1% remains Locked until fulfillment finality, then uses the gasless signed request and Safe-batch lifecycle | Verified | - |
 | MAL-ASSET-007 | 88-90 | Operations 4% NPL totals, source daily multisig wording and operation-only withdrawal control | D-V2-007, D-V2-009, D-V2-014, D-V2-023 | 4% uses the immutable payment snapshot; eligible operations wallets sign requests and track Requested/Batched/Settled with final Safe TxHash | Verified | - |
 | MAL-ADDR-001 | 93-101 | Paste textarea; name/phone/province-city-district/detail parsing; 11-digit phone; review modal exact fields/copy; missing-field red error; edit/delete/default | - | PII-safe parser and CRUD; incomplete parse cannot silently save | Frozen | GAP-MAL-007, GAP-MAL-011 |
-| MAL-ORDER-001 | 102-107 | Pending Payment/Shipment/Receipt/After-sale groups; seckill badge; inline carrier/latest logistics; Support/Exchange and Confirm Receipt buttons | - | Actions render only from allowedActions; loading/empty/error states covered | Frozen | GAP-MAL-006, GAP-MAL-007 |
-| MAL-AFTER-001 | 108-111 | No no-reason action; Exchange or Delay only; arbitration state and linked reward lock | D-V2-004, D-V2-006, D-V2-007 | No business-refund entry point; arbitration is Disputed and retains payment, BNM and every transferable reward as Locked, with no settlement request action | Frozen | GAP-MAL-006, GAP-MAL-008 |
+| MAL-ORDER-001 | 102-107 | Pending Payment/Shipment/Receipt/After-sale groups; seckill badge; inline carrier/latest logistics; Support/Exchange and Confirm Receipt buttons | - | Actions render only from allowedActions; loading/empty/error states covered | Verified | - |
+| MAL-AFTER-001 | 108-111 | No no-reason action; Exchange or Delay only; arbitration state and linked reward lock | D-V2-004, D-V2-006, D-V2-007 | No business-refund entry point; arbitration is Disputed and retains payment, BNM and every transferable reward as Locked, with no settlement request action | Verified | - |
 | MAL-TRACK-001 | 112-118 | Seckill product/session/input/result; source USDT prize withdrawal; Locked BNM amount | D-V2-007, D-V2-008, D-V2-013, D-V2-023 | Prize becomes Available only after final session settlement, then follows signed request and Safe-batch states; BNM remains backend points with only Locked/Available | Overridden | GAP-MAL-007, GAP-MAL-015 |
 | MAL-TRACK-002 | 119-122 | Ordinary shopping rows; `+ BNM` pending release; released state | D-V2-006, D-V2-008 | BNM changes only from Locked to Available after authoritative fulfillment finality; no token payout or transferable-asset state is implied | Overridden | GAP-MAL-007 |
 | MAL-RWD-001 | 123-127 | Reward-center layout and lifecycle metrics | D-V2-007, D-V2-008, D-V2-023 | Each transferable rail exposes exact Locked/Available/Requested/Batched/Settled amounts and final Safe TxHash; BNM exposes only Locked/Available backend-point totals | Verified | - |
@@ -55,25 +55,23 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
 | MAL-GOAL-005 | Final Goal | Payment batch real Core path: product/SKU -> atomic reservation -> five-minute signed 70/30 quote -> allowance -> PaymentRouter -> indexed event -> order projection | D-V2-001, D-V2-002, D-V2-003, D-V2-011, D-V2-012, D-V2-017, D-V2-021, D-V2-028 | Mall consumer and integration tests use the published payment-batch Core artifact and real local API/indexer; inventory and both assets are atomic; no static fixture, local formula, handwritten calldata or disabled action counts | Frozen | GAP-MAL-001, GAP-MAL-003, GAP-MAL-004, GAP-MAL-015 |
 | MAL-GOAL-006 | Final Goal | Transferable-asset ledger lifecycle and BNM backend-points lifecycle | D-V2-007, D-V2-008, D-V2-017, D-V2-023 | USDT/NPL/prize rows prove Locked/Available/Requested/Batched/Settled, immutable batch identity and final 15-confirmation Safe TxHash; BNM proves only Locked/Available with no ERC-20, mint, Safe transfer or on-chain withdrawal | Verified | - |
 
-## Settlement/Admin .4 Verification Evidence
+## Settlement/Admin .5 Verification Evidence
 
-- `MAL-CAT-001`, `MAL-CAT-002` partial evidence: the Mall consumes the public
-  product/SKU list, enabled three-level categories, enabled tags,
-  `mainImageAssetIds`, `videoAssetId` and short-lived media-read targets from the
-  same `.4` artifact. Consumer/UI tests reject inactive taxonomy, mismatched
-  asset identity, non-public access, wrong resource/purpose and incompatible
-  content types. These rows remain `Frozen`, not `Verified`, because the public
-  `CatalogProduct` type still lacks category/tag association and authoritative
-  seckill-overlay/rich-detail fields required by their full acceptance targets.
+- `MAL-CAT-001`: the Mall consumes `.5` `categoryId`, `tagIds`, `subtitle`,
+  `richDetail`, `defaultFreightUsdt`, `fulfillmentModes` and each SKU's
+  authoritative seckill overlay. Category descendants and tags filter the real
+  product list; a SKU with a PREHEAT/LIVE/SETTLING overlay cannot enter ordinary
+  checkout. `MAL-CAT-002` remains `Frozen` because its complete sticky-detail and
+  configuration-sheet interaction is not yet delivered.
 
-- `MAL-ORDER-001`, `MAL-AFTER-001` and `MAL-FLOW-003` partial evidence: enabled
-  exchange, delay, receipt-confirmation and arbitration actions now perform the
-  `.4` sequence `local SHA-256 -> write-once upload -> Core verification ->
-  order evidence envelope -> matching buyer command -> order reload`. No hash
-  input or business-refund action exists. These rows remain `Frozen` because
-  `OPEN_TAKEOVER` has no matching published evidence action, buyer pickup
-  evidence is not authorized, and the wider order/profile/takeover acceptance
-  targets still have independent gaps.
+- `MAL-ORDER-001` and `MAL-AFTER-001`: stable `.5` order pages use the
+  `(createdAt, orderId)` cursor and complete rows expose quantity, order kind,
+  payment TxHash and authoritative `allowedActions`. Enabled exchange, delay,
+  receipt-confirmation and arbitration actions perform `local SHA-256 ->
+  write-once upload -> Core verification -> order evidence envelope -> matching
+  buyer command -> order reload`. No hash input or business-refund action exists.
+  `MAL-FLOW-003` remains `Frozen`; `OPEN_TAKEOVER` still lacks a matching evidence
+  action and buyer pickup evidence is not authorized.
 
 - `MAL-SEK-002`, `MAL-SEK-003`: strict OpenAPI-derived HTTP operations,
   final-only event validation, HTTP replay, `eventId` deduplication, last-cursor
