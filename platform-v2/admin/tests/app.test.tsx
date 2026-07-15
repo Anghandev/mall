@@ -68,6 +68,10 @@ describe('platform admin fail-closed experience', () => {
     expect(await screen.findByText('Asia/Shanghai', { selector: 'strong' })).toBeTruthy();
     expect(screen.getByText('300000000')).toBeTruthy();
     expect(screen.getByText('0 / 0; bps=null')).toBeTruthy();
+    const abnormalRiskMetric = screen.getByText('今日异常观察').closest('div')!;
+    const pendingAppealMetric = screen.getByText('待处理风险申诉').closest('div')!;
+    expect(within(abnormalRiskMetric).getByText('11')).toBeTruthy();
+    expect(within(pendingAppealMetric).getByText('14')).toBeTruthy();
     expect(screen.getAllByText('Buyer UID identity is not frozen')).toHaveLength(2);
     expect(screen.getByText('0x4444444444444444444444444444444444444444')).toBeTruthy();
     expect(screen.getAllByText('paused = true')).toHaveLength(2);
@@ -179,8 +183,8 @@ describe('platform admin fail-closed experience', () => {
     expect(await screen.findByText('当前角色仅可读取断路器治理证据。')).toBeTruthy();
     expect(screen.queryByLabelText('Approval nonce')).toBeNull();
     expect(screen.getByText('PAUSE')).toBeTruthy();
-    expect(screen.getByRole('columnheader', { name: 'Safe nonce' })).toBeTruthy();
-    expect(screen.getByText('12')).toBeTruthy();
+    const safeNonceTable = screen.getByRole('columnheader', { name: 'Safe nonce' }).closest('table')!;
+    expect(within(safeNonceTable).getByText('12')).toBeTruthy();
   });
 
   it('renders a superseded resume as invalidated by the newer PAUSE, never as restored', async () => {
@@ -822,6 +826,7 @@ function adminDashboardResponse() {
     seckill: { createdToday: '1', active: '1', settling: '0' },
     fulfillmentQueues: { exchange: '1', delay: '2', arbitration: '3', forcedReceipt: '4', takeover: '5' },
     settlements: { requestedCount: '6', requestedUsdt: '600000000', settledCount: '4', settledUsdt: '400000000', failedTransactions: '2' },
+    risk: { abnormalObservationsToday: '11', blacklistBlocksToday: '12', activeRestrictions: '13', pendingAppeals: '14' },
     coverage: [{ snapshotId: 'coverage-1', blockNumber: '123', recordedAt: '2026-07-15T04:00:00.000Z', asset: 'USDT', safeAddress: '0x4444444444444444444444444444444444444444', verifiedAssets: '100', unsettledLiabilities: '101', covered: false }],
     breakers: [
       { scope: 'NEW_PAYMENT', paused: true },
@@ -831,8 +836,6 @@ function adminDashboardResponse() {
     unavailable: [
       { metric: 'NEW_UID_USERS', reasonCode: 'DecisionBlocked', detail: 'Buyer UID identity is not frozen' },
       { metric: 'LOW_STOCK_PRODUCTS', reasonCode: 'DecisionBlocked', detail: 'Low-stock threshold is not frozen' },
-      { metric: 'ABNORMAL_ORDERS', reasonCode: 'DecisionBlocked', detail: 'Abnormal-order rules are not frozen' },
-      { metric: 'BLACKLIST_BLOCKS', reasonCode: 'DecisionBlocked', detail: 'Transaction risk rules are not frozen' },
     ],
   };
 }

@@ -13,6 +13,7 @@ import { MonitoringPage } from './pages/MonitoringPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { PaymentTracePage } from './pages/PaymentTracePage';
 import { PolicyPage } from './pages/PolicyPage';
+import { RiskPage } from './pages/RiskPage';
 import { SeckillPage } from './pages/SeckillPage';
 import { SystemConfigPage } from './pages/SystemConfigPage';
 import { TakeoverPage } from './pages/TakeoverPage';
@@ -26,6 +27,7 @@ export function App() {
           <Route path="/catalog" element={<CatalogPage />} />
           <Route path="/merchants" element={<MerchantFinancePage />} />
           <Route path="/policy" element={<PolicyPage />} />
+          <Route path="/risk" element={<RiskPage />} />
           <Route path="/seckill" element={<SeckillPage />} />
           <Route path="/takeover" element={<TakeoverPage />} />
           <Route path="/cms" element={<CmsPage />} />
@@ -35,7 +37,7 @@ export function App() {
           <Route path="/operations" element={<MonitoringPage />} />
           <Route path="/clearing" element={<PaymentTracePage />} />
           <Route path="/core-status" element={<CoreStatusPage />} />
-          {adminModules.filter((module) => !['dashboard', 'merchants', 'catalog', 'policy', 'seckill', 'takeover', 'cms', 'notifications', 'system', 'audit', 'operations', 'clearing', 'core'].includes(module.id)).map((module) => (
+          {adminModules.filter((module) => !['dashboard', 'merchants', 'catalog', 'policy', 'risk', 'seckill', 'takeover', 'cms', 'notifications', 'system', 'audit', 'operations', 'clearing', 'core'].includes(module.id)).map((module) => (
             <Route key={module.path} path={module.path} element={<ModuleWorkspace module={module} />} />
           ))}
           <Route path="*" element={<Navigate to="/" replace />} />

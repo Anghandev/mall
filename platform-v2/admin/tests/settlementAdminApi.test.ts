@@ -33,6 +33,7 @@ describe('settlement/admin coordinated Core client', () => {
       timezone: 'Asia/Shanghai',
       orders: { finalizedToday: '3', shipmentRate: { numerator: '0', denominator: '0', bps: null } },
       settlements: { failedTransactions: '2' },
+      risk: { abnormalObservationsToday: '11', blacklistBlocksToday: '12', activeRestrictions: '13', pendingAppeals: '14' },
     });
     expect(dashboard.coverage[0]).toMatchObject({ covered: false });
     expect(dashboard.breakers[0]).toEqual({ scope: 'NEW_PAYMENT', paused: true });
@@ -420,6 +421,7 @@ function adminBusinessDashboard() {
     seckill: { createdToday: '1', active: '1', settling: '0' },
     fulfillmentQueues: { exchange: '1', delay: '2', arbitration: '3', forcedReceipt: '4', takeover: '5' },
     settlements: { requestedCount: '6', requestedUsdt: '600000000', settledCount: '4', settledUsdt: '400000000', failedTransactions: '2' },
+    risk: { abnormalObservationsToday: '11', blacklistBlocksToday: '12', activeRestrictions: '13', pendingAppeals: '14' },
     coverage: [{ snapshotId: 'coverage-1', blockNumber: '123', recordedAt: '2026-07-15T04:00:00.000Z', asset: 'USDT', safeAddress: address('4'), verifiedAssets: '100', unsettledLiabilities: '101', covered: false }],
     breakers: [
       { scope: 'NEW_PAYMENT', paused: true },
@@ -429,8 +431,6 @@ function adminBusinessDashboard() {
     unavailable: [
       { metric: 'NEW_UID_USERS', reasonCode: 'DecisionBlocked', detail: 'Buyer UID identity is not frozen' },
       { metric: 'LOW_STOCK_PRODUCTS', reasonCode: 'DecisionBlocked', detail: 'Low-stock threshold is not frozen' },
-      { metric: 'ABNORMAL_ORDERS', reasonCode: 'DecisionBlocked', detail: 'Abnormal-order rules are not frozen' },
-      { metric: 'BLACKLIST_BLOCKS', reasonCode: 'DecisionBlocked', detail: 'Transaction risk rules are not frozen' },
     ],
   };
 }

@@ -511,6 +511,7 @@ function isAdminBusinessDashboard(value: unknown): value is AdminBusinessDashboa
       || !hasAmounts(value.seckill, ['createdToday', 'active', 'settling'])
       || !hasAmounts(value.fulfillmentQueues, ['exchange', 'delay', 'arbitration', 'forcedReceipt', 'takeover'])
       || !hasAmounts(value.settlements, ['requestedCount', 'requestedUsdt', 'settledCount', 'settledUsdt', 'failedTransactions'])
+      || !hasAmounts(value.risk, ['abnormalObservationsToday', 'blacklistBlocksToday', 'activeRestrictions', 'pendingAppeals'])
       || !Array.isArray(value.coverage)
       || !value.coverage.every(isDashboardCoverage)
       || !Array.isArray(value.breakers)
