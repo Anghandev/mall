@@ -445,15 +445,20 @@ export class EvidenceService {
     return {
       artifactVersion: CORE_ARTIFACT_VERSION,
       uploadIntentId: row.upload_intent_id,
+      ownerWallet: row.owner_wallet,
+      purpose: row.purpose,
+      resourceType: row.resource_type,
+      resourceId: row.resource_id,
+      contentType: row.content_type,
+      sizeBytes: String(row.size_bytes),
+      contentSha256: row.content_sha256,
+      state: 'UPLOADED' as const,
+      expiresAt: row.expires_at.toISOString(),
       method: target.method,
       uploadUrl: target.uploadUrl,
       headers: target.headers,
       writeOnce: target.writeOnce,
-      expiresAt: row.expires_at.toISOString(),
-      contentSha256: row.content_sha256,
-      maxSizeBytes: Number(row.size_bytes),
       providerReferenceHash: target.providerReferenceHash,
-      state: 'UPLOADED' as const,
     };
   }
 

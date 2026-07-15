@@ -1,7 +1,7 @@
 # Abu 24K V2 Payment Contract Freeze
 
 Status: coordinated local settlement/admin checkpoint
-`2.0.0-settlement-admin.3`. The generated
+`2.0.0-settlement-admin.4`. The generated
 manifest contains no deployment addresses and has `deploymentAuthorized:
 false`. This document does not authorize deployment or a transaction.
 

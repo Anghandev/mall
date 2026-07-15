@@ -6131,6 +6131,12 @@ test('evidence and media stay scoped, idempotent, hashed and immutable', async (
       idempotencyKey: 'evidence-upload-1',
     });
     assert.equal(upload.state, 'UPLOADED');
+    assert.equal(upload.ownerWallet, BUYER);
+    assert.equal(upload.purpose, 'FULFILLMENT_EVIDENCE');
+    assert.equal(upload.resourceType, 'ORDER');
+    assert.equal(upload.resourceId, intent.orderId);
+    assert.equal(upload.contentType, 'image/webp');
+    assert.equal(upload.sizeBytes, '512');
     assert.equal(upload.writeOnce, true);
     assert.equal(upload.headers['if-none-match'], '*');
     assert.equal(upload.providerReferenceHash, providerReferenceHash);

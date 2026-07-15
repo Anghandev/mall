@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Abu 24K V2 Core API",
-    "version": "2.0.0-settlement-admin.3"
+    "version": "2.0.0-settlement-admin.4"
   },
-  "x-artifactVersion": "2.0.0-settlement-admin.3",
+  "x-artifactVersion": "2.0.0-settlement-admin.4",
   "servers": [],
   "paths": {
     "/v2/settlement-intents": {
@@ -5908,7 +5908,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.3"
+            "const": "2.0.0-settlement-admin.4"
           },
           "status": {
             "const": "CORE_API_READY"
@@ -8526,7 +8526,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.3"
+            "const": "2.0.0-settlement-admin.4"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -8625,7 +8625,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.3"
+            "const": "2.0.0-settlement-admin.4"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -9558,7 +9558,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.3"
+            "const": "2.0.0-settlement-admin.4"
           },
           "productId": {
             "type": "string",
@@ -9731,7 +9731,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.3"
+            "const": "2.0.0-settlement-admin.4"
           },
           "storeId": {
             "type": "string",
@@ -9857,7 +9857,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.3"
+            "const": "2.0.0-settlement-admin.4"
           },
           "productId": {
             "type": "string",
@@ -9959,7 +9959,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.3"
+            "const": "2.0.0-settlement-admin.4"
           },
           "previewId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -10118,7 +10118,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.3"
+            "const": "2.0.0-settlement-admin.4"
           },
           "adjustmentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -10238,7 +10238,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.3"
+            "const": "2.0.0-settlement-admin.4"
           },
           "uploadIntentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -10331,7 +10331,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.3"
+            "const": "2.0.0-settlement-admin.4"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -10412,7 +10412,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.3"
+            "const": "2.0.0-settlement-admin.4"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -10568,7 +10568,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.3"
+            "const": "2.0.0-settlement-admin.4"
           },
           "evidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
@@ -10827,7 +10827,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.3"
+            "const": "2.0.0-settlement-admin.4"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -11102,7 +11102,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifact_version": {
-            "const": "2.0.0-settlement-admin.3"
+            "const": "2.0.0-settlement-admin.4"
           },
           "wallet_address": {
             "$ref": "#/components/schemas/Address"
@@ -11428,7 +11428,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.3"
+            "const": "2.0.0-settlement-admin.4"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -14191,7 +14191,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.3"
+            "const": "2.0.0-settlement-admin.4"
           },
           "sessionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -14415,7 +14415,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.3"
+            "const": "2.0.0-settlement-admin.4"
           },
           "protocolVersion": {
             "const": 1

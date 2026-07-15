@@ -1008,6 +1008,13 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
         return {
           artifactVersion: CORE_ARTIFACT_VERSION,
           uploadIntentId: HASH,
+          ownerWallet: actor.walletAddress,
+          purpose: input.purpose,
+          resourceType: input.resourceType,
+          resourceId: input.resourceId,
+          contentType: input.contentType,
+          sizeBytes: String(input.sizeBytes),
+          contentSha256: input.contentSha256,
           method: 'PUT',
           uploadUrl: 'https://uploads.example.invalid/signed-object',
           headers: { 'if-none-match': '*' },
