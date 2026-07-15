@@ -23,7 +23,7 @@ interface ActionRow {
   governance_safe_address: string;
   router_address: string;
   calldata_hash: string;
-  state: 'PENDING_PROPOSAL' | 'SAFE_PROPOSED' | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED';
+  state: 'PENDING_PROPOSAL' | 'SAFE_PROPOSED' | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'SUPERSEDED';
   safe_tx_hash: string | null;
   proposal_hash: string | null;
   execution_tx_hash: string | null;

@@ -2087,7 +2087,7 @@ function settlementAdminOpenApiSchemas() {
       governanceSafeAddress: address,
       routerAddress: address,
       calldataHash: hash,
-      state: { enum: ['PENDING_PROPOSAL', 'SAFE_PROPOSED', 'MINED', 'FINAL', 'REORGED', 'FAILED'] },
+      state: { enum: ['PENDING_PROPOSAL', 'SAFE_PROPOSED', 'MINED', 'FINAL', 'REORGED', 'FAILED', 'SUPERSEDED'] },
       safeTxHash: nullableHash,
       proposalHash: nullableHash,
       executionTxHash: nullableHash,
@@ -4390,7 +4390,7 @@ export interface CoverageBreakerActionProjection {
   governanceSafeAddress: Address;
   routerAddress: Address;
   calldataHash: Bytes32;
-  state: 'PENDING_PROPOSAL' | 'SAFE_PROPOSED' | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED';
+  state: 'PENDING_PROPOSAL' | 'SAFE_PROPOSED' | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'SUPERSEDED';
   safeTxHash: Bytes32 | null;
   proposalHash: Bytes32 | null;
   executionTxHash: Bytes32 | null;

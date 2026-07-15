@@ -10,7 +10,7 @@ CREATE TABLE core.coverage_breaker_actions (
     calldata text NOT NULL CHECK (calldata ~ '^0x[0-9a-f]+$'),
     calldata_hash text NOT NULL CHECK (calldata_hash ~ '^0x[0-9a-f]{64}$'),
     state text NOT NULL CHECK (state IN (
-        'PENDING_PROPOSAL', 'SAFE_PROPOSED', 'MINED', 'FINAL', 'REORGED', 'FAILED'
+        'PENDING_PROPOSAL', 'SAFE_PROPOSED', 'MINED', 'FINAL', 'REORGED', 'FAILED', 'SUPERSEDED'
     )),
     safe_tx_hash text CHECK (safe_tx_hash IS NULL OR safe_tx_hash ~ '^0x[0-9a-f]{64}$'),
     proposal_hash text CHECK (proposal_hash IS NULL OR proposal_hash ~ '^0x[0-9a-f]{64}$'),
@@ -31,7 +31,7 @@ CREATE TABLE core.coverage_breaker_actions (
     updated_at timestamptz NOT NULL,
     CHECK (action = CASE WHEN target_paused THEN 'PAUSE' ELSE 'RESUME' END),
     CHECK (
-        (state = 'PENDING_PROPOSAL' AND safe_tx_hash IS NULL AND proposal_hash IS NULL)
+        (state IN ('PENDING_PROPOSAL', 'SUPERSEDED') AND safe_tx_hash IS NULL AND proposal_hash IS NULL)
         OR (state <> 'PENDING_PROPOSAL' AND safe_tx_hash IS NOT NULL AND proposal_hash IS NOT NULL)
     ),
     CHECK (
@@ -55,10 +55,10 @@ CREATE TABLE core.coverage_breaker_action_transitions (
     transition_id text PRIMARY KEY CHECK (transition_id ~ '^0x[0-9a-f]{64}$'),
     action_id text NOT NULL REFERENCES core.coverage_breaker_actions(action_id),
     from_state text CHECK (from_state IS NULL OR from_state IN (
-        'PENDING_PROPOSAL', 'SAFE_PROPOSED', 'MINED', 'FINAL', 'REORGED', 'FAILED'
+        'PENDING_PROPOSAL', 'SAFE_PROPOSED', 'MINED', 'FINAL', 'REORGED', 'FAILED', 'SUPERSEDED'
     )),
     to_state text NOT NULL CHECK (to_state IN (
-        'PENDING_PROPOSAL', 'SAFE_PROPOSED', 'MINED', 'FINAL', 'REORGED', 'FAILED'
+        'PENDING_PROPOSAL', 'SAFE_PROPOSED', 'MINED', 'FINAL', 'REORGED', 'FAILED', 'SUPERSEDED'
     )),
     evidence jsonb NOT NULL CHECK (jsonb_typeof(evidence) = 'object'),
     recorded_at timestamptz NOT NULL

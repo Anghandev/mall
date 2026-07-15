@@ -15245,7 +15245,8 @@
               "MINED",
               "FINAL",
               "REORGED",
-              "FAILED"
+              "FAILED",
+              "SUPERSEDED"
             ]
           },
           "safeTxHash": {

@@ -10,7 +10,8 @@ const ROUTER = new Interface([
 ]);
 const PAYMENT_PAUSE_TOPIC = ROUTER.getEvent('PaymentPauseChanged')!.topicHash.toLowerCase();
 
-type ActionState = 'PENDING_PROPOSAL' | 'SAFE_PROPOSED' | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED';
+type ActionState =
+  | 'PENDING_PROPOSAL' | 'SAFE_PROPOSED' | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'SUPERSEDED';
 
 interface CoverageBreakerActionRow {
   action_id: string;
@@ -332,6 +333,10 @@ export class CoverageBreakerGovernanceWorker {
     const proposals = await this.#pendingProposals(10);
     for (const action of proposals) {
       try {
+        if (!action.target_paused && await this.#hasSupersedingPause(action)) {
+          await this.#supersedeResume(action.action_id);
+          continue;
+        }
         const proposal = proposalFromRow(action);
         const result = await this.#proposer.propose(proposal);
         await this.#recordProposal(action.action_id, result);
@@ -395,6 +400,49 @@ export class CoverageBreakerGovernanceWorker {
         [limit],
       )
     ).rows);
+  }
+
+  #hasSupersedingPause(action: CoverageBreakerActionRow) {
+    return this.#transactions.transaction(async (executor) => (
+      await executor.query<{ superseded: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1 FROM core.coverage_breaker_actions pause_action
+           JOIN core.coverage_snapshots pause_snapshot
+             ON pause_snapshot.snapshot_id = pause_action.snapshot_id
+           JOIN core.coverage_snapshots resume_snapshot
+             ON resume_snapshot.snapshot_id = $1
+           WHERE pause_action.target_paused
+             AND pause_action.state IN ('PENDING_PROPOSAL','SAFE_PROPOSED','MINED','FINAL')
+             AND (
+               pause_snapshot.block_number > resume_snapshot.block_number
+               OR pause_action.created_at > $2
+             )
+         ) AS superseded`,
+        [action.snapshot_id, action.created_at],
+      )
+    ).rows[0]?.superseded === true);
+  }
+
+  #supersedeResume(actionId: string) {
+    return this.#transactions.transaction(async (executor) => {
+      const action = await lockedAction(executor, actionId);
+      if (action.state !== 'PENDING_PROPOSAL' || action.target_paused) return;
+      const now = new Date();
+      await executor.query(
+        `UPDATE core.coverage_breaker_actions SET state = 'SUPERSEDED', updated_at = $2
+         WHERE action_id = $1`,
+        [actionId, now],
+      );
+      await appendTransition(executor, action, 'SUPERSEDED', { reasonCode: 'NEWER_PAUSE_ACTION' }, now);
+      await enqueueActionAudit(
+        executor,
+        action,
+        'CoverageBreakerResumeSuperseded',
+        'SYSTEM',
+        { reasonCode: 'NEWER_PAUSE_ACTION' },
+        now,
+      );
+    });
   }
 
   #recordProposal(actionId: string, proposal: { safeTxHash: string; proposalHash: string }) {

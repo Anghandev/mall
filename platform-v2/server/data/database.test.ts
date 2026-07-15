@@ -6015,9 +6015,52 @@ test('coverage recovery requires independent EIP-712 approval and Safe finality,
       "SELECT count(*)::text AS count FROM core.breaker_causes WHERE cause_type = 'COVERAGE' AND active",
     )).rows[0]?.count, '2');
 
+    observation = {
+      ...observation,
+      blockNumber: 3_004,
+      blockHash: `0x${'a'.repeat(64)}`,
+      evidenceHash: `0x${'b'.repeat(64)}`,
+      observedAt: new Date('2026-07-15T10:03:10.000Z'),
+      assets: observation.assets.map((item) => ({ ...item, balance: '69' })),
+    };
+    await coverage.pollOnce();
     await governance.pollOnce();
     assert.equal((await db.query<{ state: string }>(
-      "SELECT state FROM core.coverage_breaker_actions WHERE action = 'RESUME' ORDER BY created_at LIMIT 1",
+      'SELECT state FROM core.coverage_breaker_actions WHERE action_id = $1',
+      [requested.actionId],
+    )).rows[0]?.state, 'SUPERSEDED');
+    assert.equal((await db.query<{ state: string }>(
+      "SELECT state FROM core.coverage_breaker_actions WHERE action = 'PAUSE' ORDER BY created_at DESC LIMIT 1",
+    )).rows[0]?.state, 'FINAL');
+
+    observation = {
+      ...observation,
+      blockNumber: 3_005,
+      blockHash: `0x${'c'.repeat(64)}`,
+      evidenceHash: `0x${'d'.repeat(64)}`,
+      observedAt: new Date('2026-07-15T10:04:00.000Z'),
+      assets: observation.assets.map((item) => ({ ...item, balance: '70' })),
+    };
+    await coverage.pollOnce();
+    clock = new Date('2026-07-15T10:05:00.000Z');
+    const finalDeadline = String(Math.floor(clock.getTime() / 1_000) + 600);
+    const finalChallenge = await service.resumeChallenge(actor, { nonce: '10', deadline: finalDeadline });
+    const finalSignature = await secondary.signTypedData(
+      finalChallenge.typedData.domain,
+      finalChallenge.typedData.types,
+      finalChallenge.typedData.message,
+    );
+    const finalResume = await service.submitResume(actor, {
+      snapshotId: finalChallenge.snapshotId,
+      nonce: '10',
+      deadline: finalDeadline,
+      signature: finalSignature,
+      correlationId: 'coverage-resume-after-superseded',
+    });
+    await governance.pollOnce();
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.coverage_breaker_actions WHERE action_id = $1',
+      [finalResume.actionId],
     )).rows[0]?.state, 'FINAL');
     assert.equal((await db.query<{ count: string }>(
       "SELECT count(*)::text AS count FROM core.breaker_causes WHERE cause_type = 'COVERAGE' AND active",
@@ -6027,7 +6070,7 @@ test('coverage recovery requires independent EIP-712 approval and Safe finality,
     )).rows.map((row) => row.paused), [false, false]);
 
     resumePhase = 'REORGED';
-    clock = new Date('2026-07-15T10:04:00.000Z');
+    clock = new Date('2026-07-15T10:06:00.000Z');
     await governance.pollOnce();
     const reorgBreakers = (await db.query<{ paused: boolean }>(
       'SELECT paused FROM core.circuit_breakers ORDER BY scope',
@@ -6052,7 +6095,7 @@ test('coverage recovery requires independent EIP-712 approval and Safe finality,
     )).rows[0]?.count, '1');
 
     resumePhase = 'FINAL';
-    clock = new Date('2026-07-15T10:05:00.000Z');
+    clock = new Date('2026-07-15T10:07:00.000Z');
     await governance.pollOnce();
     assert.deepEqual((await db.query<{ paused: boolean }>(
       'SELECT paused FROM core.circuit_breakers ORDER BY scope',
