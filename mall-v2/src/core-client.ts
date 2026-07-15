@@ -2,6 +2,10 @@ import type {
   AllowedAction,
   AllowedActionName,
   ArbitrationOpenedResult,
+  BuyerOverview,
+  BuyerProfile,
+  BuyerSavedAddress,
+  BuyerTakeoverTimeline,
   CatalogCategory,
   CatalogProduct,
   CatalogTag,
@@ -108,6 +112,52 @@ export interface FulfillmentMediaUploadRequest {
   idempotencyKey: string;
 }
 
+export interface BuyerAvatarUploadRequest {
+  purpose: 'BUYER_AVATAR';
+  resourceType: 'BUYER';
+  resourceId: string;
+  contentType: Extract<MediaContentType, 'image/jpeg' | 'image/png' | 'image/webp'>;
+  sizeBytes: number;
+  contentSha256: string;
+  idempotencyKey: string;
+}
+
+export type MallMediaUploadRequest = FulfillmentMediaUploadRequest | BuyerAvatarUploadRequest;
+
+export interface BuyerProfileUpdateRequest {
+  nickname: string | null;
+  avatarAssetId: string | null;
+  expectedVersion: number;
+  idempotencyKey: string;
+}
+
+export interface ParsedBuyerAddress {
+  recipientName: string | null;
+  phone: string | null;
+  province: string | null;
+  city: string | null;
+  district: string | null;
+  detailAddress: string | null;
+  regionCode: string | null;
+  longitude: number | null;
+  latitude: number | null;
+  sourceReferenceHash: string | null;
+  canSave: boolean;
+  missingFields: readonly string[];
+}
+
+export interface BuyerAddressWriteRequest {
+  label: string;
+  recipientName: string;
+  phone: string;
+  detailAddress: string;
+  longitude: number;
+  latitude: number;
+  isDefault: boolean;
+  expectedVersion?: number;
+  idempotencyKey: string;
+}
+
 export interface OrderActionEvidenceRequest {
   action: BuyerEvidenceAction;
   reasonCode: string;
@@ -121,10 +171,22 @@ export interface CoreClient {
   listCatalogCategories(): Promise<readonly CatalogCategory[]>;
   listCatalogTags(): Promise<readonly CatalogTag[]>;
   createPublicMediaReadAccess(assetId: string): Promise<MediaReadAccessProjection>;
-  createMediaUploadIntent(token: string, request: FulfillmentMediaUploadRequest): Promise<MediaUploadIntentProjection>;
+  createAuthenticatedMediaReadAccess(token: string, assetId: string): Promise<MediaReadAccessProjection>;
+  createMediaUploadIntent(token: string, request: MallMediaUploadRequest): Promise<MediaUploadIntentProjection>;
   uploadMediaFile(intent: MediaUploadIntentProjection, file: Blob): Promise<void>;
   completeMediaUpload(token: string, uploadIntentId: string): Promise<MediaAssetProjection>;
   authenticate(walletAddress: string, signMessage: (message: string) => Promise<string>): Promise<WalletSession>;
+  getBuyerProfile(token: string): Promise<BuyerProfile>;
+  updateBuyerProfile(token: string, request: BuyerProfileUpdateRequest): Promise<BuyerProfile>;
+  parseBuyerAddress(token: string, rawText: string): Promise<ParsedBuyerAddress>;
+  listBuyerAddresses(token: string): Promise<readonly BuyerSavedAddress[]>;
+  createBuyerAddress(token: string, request: BuyerAddressWriteRequest): Promise<BuyerSavedAddress>;
+  updateBuyerAddress(token: string, addressId: string, request: BuyerAddressWriteRequest): Promise<BuyerSavedAddress>;
+  deleteBuyerAddress(token: string, addressId: string, expectedVersion: number, idempotencyKey: string): Promise<void>;
+  setDefaultBuyerAddress(token: string, addressId: string, expectedVersion: number, idempotencyKey: string): Promise<BuyerSavedAddress>;
+  createBuyerAddressTarget(token: string, addressId: string, idempotencyKey: string): Promise<DeliveryTarget>;
+  getBuyerOverview(token: string): Promise<BuyerOverview>;
+  getBuyerTakeoverTimeline(token: string, orderId: string): Promise<BuyerTakeoverTimeline>;
   createOrdinaryQuote(token: string, selection: QuoteSelection): Promise<PaymentQuoteResponse>;
   createSeckillQuote(token: string, sessionId: string, selection: QuoteSelection): Promise<SeckillQuoteResponse>;
   submitPayment(token: string, request: PaymentSubmissionRequest): Promise<PaymentSubmissionResponse>;
@@ -154,7 +216,7 @@ export interface CoreClient {
 }
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-type HttpMethod = 'get' | 'post';
+type HttpMethod = 'get' | 'post' | 'put' | 'delete';
 
 const paymentOperations = Object.freeze({
   bootstrap: operationPath('getBootstrap', 'get'),
@@ -173,6 +235,20 @@ const catalogMediaOperations = Object.freeze({
   mediaReadAccess: operationPath('createMediaReadAccess', 'get'),
   mediaUploadIntent: operationPath('createMediaUploadIntent', 'post'),
   mediaUploadComplete: operationPath('completeMediaUpload', 'post'),
+});
+
+const buyerAccountOperations = Object.freeze({
+  profile: operationPath('getBuyerProfile', 'get'),
+  profileUpdate: operationPath('updateBuyerProfile', 'put'),
+  addressParse: operationPath('parseBuyerAddress', 'post'),
+  addresses: operationPath('listBuyerAddresses', 'get'),
+  addressCreate: operationPath('createBuyerAddress', 'post'),
+  addressUpdate: operationPath('updateBuyerAddress', 'put'),
+  addressDelete: operationPath('deleteBuyerAddress', 'delete'),
+  addressDefault: operationPath('setDefaultBuyerAddress', 'post'),
+  addressTarget: operationPath('createSavedAddressFulfillmentTarget', 'post'),
+  overview: operationPath('getBuyerOverview', 'get'),
+  takeoverTimeline: operationPath('getBuyerTakeoverTimeline', 'get'),
 });
 
 const fulfillmentOperations = Object.freeze({
@@ -209,6 +285,7 @@ const realtimeOperations = Object.freeze({
 const operations = Object.freeze({
   ...paymentOperations,
   ...catalogMediaOperations,
+  ...buyerAccountOperations,
   ...fulfillmentOperations,
   ...settlementAdminOperations,
   ...realtimeOperations,
@@ -250,8 +327,18 @@ export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } 
       return parsePublicMediaReadAccess(value, normalizedAssetId);
     },
 
+    async createAuthenticatedMediaReadAccess(token, assetId) {
+      const normalizedAssetId = bytes32Value(assetId).toLowerCase();
+      const value = await requestJson<unknown>(
+        fetcher,
+        `${baseUrl}${mediaAssetPath(operations.mediaReadAccess, normalizedAssetId)}`,
+        { headers: authorizedHeaders(token) },
+      );
+      return parseAuthenticatedMediaReadAccess(value, normalizedAssetId);
+    },
+
     async createMediaUploadIntent(token, request) {
-      validateFulfillmentMediaUploadRequest(request);
+      validateMediaUploadRequest(request);
       const value = await postAuthorized<unknown>(
         fetcher,
         `${baseUrl}${operations.mediaUploadIntent}`,
@@ -303,6 +390,119 @@ export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } 
         body: JSON.stringify({ message: challenge.message, signature }),
       });
       return parseWalletSession(verified);
+    },
+
+    async getBuyerProfile(token) {
+      const value = await requestJson<unknown>(fetcher, `${baseUrl}${operations.profile}`, {
+        headers: authorizedHeaders(token),
+      });
+      return parseBuyerProfile(value);
+    },
+
+    async updateBuyerProfile(token, request) {
+      validateBuyerProfileUpdate(request);
+      const value = await putAuthorized<unknown>(fetcher, `${baseUrl}${operations.profileUpdate}`, token, request);
+      return parseBuyerProfile(value);
+    },
+
+    async parseBuyerAddress(token, rawText) {
+      const normalized = rawText.trim();
+      if (normalized.length < 5 || normalized.length > 1_000) {
+        throw new CoreClientError('InvalidRequest', '地址文本需为 5-1000 个字符');
+      }
+      const value = await postAuthorized<unknown>(
+        fetcher,
+        `${baseUrl}${operations.addressParse}`,
+        token,
+        { rawText: normalized },
+      );
+      return parseBuyerAddressProjection(value);
+    },
+
+    async listBuyerAddresses(token) {
+      const value = objectValue(await requestJson<unknown>(fetcher, `${baseUrl}${operations.addresses}`, {
+        headers: authorizedHeaders(token),
+      }));
+      assertArtifactVersion(stringValue(value.artifactVersion));
+      return arrayValue(value.addresses).map(parseBuyerSavedAddress);
+    },
+
+    async createBuyerAddress(token, request) {
+      validateBuyerAddressWrite(request, false);
+      return parseBuyerSavedAddress(await postAuthorized<unknown>(
+        fetcher,
+        `${baseUrl}${operations.addressCreate}`,
+        token,
+        request,
+      ));
+    },
+
+    async updateBuyerAddress(token, addressId, request) {
+      validateBuyerAddressWrite(request, true);
+      return parseBuyerSavedAddress(await putAuthorized<unknown>(
+        fetcher,
+        `${baseUrl}${accountResourcePath(operations.addressUpdate, addressId)}`,
+        token,
+        request,
+      ));
+    },
+
+    async deleteBuyerAddress(token, addressId, expectedVersion, idempotencyKey) {
+      validateVersionedAccountCommand(expectedVersion, idempotencyKey);
+      const value = objectValue(await requestJson<unknown>(
+        fetcher,
+        `${baseUrl}${accountResourcePath(operations.addressDelete, addressId)}`,
+        {
+          method: 'DELETE',
+          headers: authorizedHeaders(token),
+          body: JSON.stringify({ expectedVersion, idempotencyKey }),
+        },
+      ));
+      if (value.addressId !== addressId || value.status !== 'DELETED') {
+        throw new CoreClientError('InvalidResponse', '地址删除响应与请求不一致');
+      }
+    },
+
+    async setDefaultBuyerAddress(token, addressId, expectedVersion, idempotencyKey) {
+      validateVersionedAccountCommand(expectedVersion, idempotencyKey);
+      const value = await postAuthorized<unknown>(
+        fetcher,
+        `${baseUrl}${accountResourcePath(operations.addressDefault, addressId)}`,
+        token,
+        { expectedVersion, idempotencyKey },
+      );
+      const address = parseBuyerSavedAddress(value);
+      if (address.addressId !== addressId || !address.isDefault) {
+        throw new CoreClientError('InvalidResponse', '默认地址响应与请求不一致');
+      }
+      return address;
+    },
+
+    async createBuyerAddressTarget(token, addressId, idempotencyKey) {
+      idempotencyValue(idempotencyKey);
+      const value = await postAuthorized<DeliveryTarget>(
+        fetcher,
+        `${baseUrl}${accountResourcePath(operations.addressTarget, addressId)}`,
+        token,
+        { idempotencyKey },
+      );
+      return parseSavedAddressTarget(value);
+    },
+
+    async getBuyerOverview(token) {
+      const value = await requestJson<unknown>(fetcher, `${baseUrl}${operations.overview}`, {
+        headers: authorizedHeaders(token),
+      });
+      return parseBuyerOverview(value);
+    },
+
+    async getBuyerTakeoverTimeline(token, orderId) {
+      const value = await requestJson<unknown>(
+        fetcher,
+        `${baseUrl}${orderPath(operations.takeoverTimeline, orderId)}`,
+        { headers: authorizedHeaders(token) },
+      );
+      return parseBuyerTakeoverTimeline(value, orderId);
     },
 
     async createOrdinaryQuote(token, selection) {
@@ -610,6 +810,144 @@ function parseWalletSession(value: unknown): WalletSession {
     walletAddress: stringValue(response.walletAddress),
     roles,
   };
+}
+
+function parseBuyerProfile(value: unknown): BuyerProfile {
+  const profile = objectValue(value);
+  assertArtifactVersion(stringValue(profile.artifactVersion));
+  addressValue(profile.wallet);
+  if (profile.accountId !== null || profile.accountIdStatus !== 'DecisionBlocked') {
+    throw new CoreClientError('InvalidResponse', '买家账号未按冻结状态返回');
+  }
+  if (profile.nickname !== null) boundedNonEmptyStringValue(profile.nickname, 40);
+  optionalBytes32Value(profile.avatarAssetId);
+  nonNegativeIntegerValue(profile.version);
+  optionalIsoValue(profile.updatedAt);
+  return value as BuyerProfile;
+}
+
+function parseBuyerAddressProjection(value: unknown): ParsedBuyerAddress {
+  const address = objectValue(value);
+  for (const field of ['recipientName', 'province', 'city', 'district', 'detailAddress'] as const) {
+    if (address[field] !== null) stringValue(address[field]);
+  }
+  if (address.phone !== null && !/^1[3-9][0-9]{9}$/.test(stringValue(address.phone))) {
+    throw new CoreClientError('InvalidResponse', '地址解析手机号无效');
+  }
+  if (address.regionCode !== null && !/^[0-9]{6}$/.test(stringValue(address.regionCode))) {
+    throw new CoreClientError('InvalidResponse', '地址解析行政区无效');
+  }
+  if (address.longitude !== null) boundedNumberValue(address.longitude, -180, 180);
+  if (address.latitude !== null) boundedNumberValue(address.latitude, -90, 90);
+  optionalBytes32Value(address.sourceReferenceHash);
+  const canSave = booleanValue(address.canSave);
+  const missingFields = stringArray(address.missingFields);
+  if (canSave !== (missingFields.length === 0)) {
+    throw new CoreClientError('InvalidResponse', '地址解析完整性状态矛盾');
+  }
+  return value as ParsedBuyerAddress;
+}
+
+function parseBuyerSavedAddress(value: unknown): BuyerSavedAddress {
+  const address = objectValue(value);
+  stringValue(address.addressId);
+  boundedNonEmptyStringValue(address.label, 32);
+  boundedNonEmptyStringValue(address.recipientName, 64);
+  if (!/^1[3-9][0-9]{9}$/.test(stringValue(address.phone))) {
+    throw new CoreClientError('InvalidResponse', '收货地址手机号无效');
+  }
+  boundedNonEmptyStringValue(address.detailAddress, 300);
+  boundedNumberValue(address.longitude, -180, 180);
+  boundedNumberValue(address.latitude, -90, 90);
+  for (const field of ['province', 'city', 'district', 'formattedAddress'] as const) stringValue(address[field]);
+  if (!/^[0-9]{6}$/.test(stringValue(address.regionCode))) {
+    throw new CoreClientError('InvalidResponse', '收货地址行政区无效');
+  }
+  booleanValue(address.isDefault);
+  positiveIntegerValue(address.version);
+  isoValue(address.updatedAt);
+  return value as BuyerSavedAddress;
+}
+
+function parseBuyerOverview(value: unknown): BuyerOverview {
+  const overview = objectValue(value);
+  assertArtifactVersion(stringValue(overview.artifactVersion));
+  addressValue(overview.wallet);
+  const counts = objectValue(overview.orderCounts);
+  const pending = objectValue(counts.pendingPayment);
+  if (
+    pending.status !== 'DecisionBlocked'
+    || pending.count !== null
+    || pending.blocker !== 'BUYER_PENDING_PAYMENT_PROJECTION'
+  ) throw new CoreClientError('InvalidResponse', '待付款统计未按决策阻塞状态返回');
+  for (const field of ['pendingShipment', 'pendingReceipt', 'afterSale', 'total'] as const) {
+    const metric = objectValue(counts[field]);
+    if (metric.status !== 'AVAILABLE') throw new CoreClientError('InvalidResponse', '买家订单统计状态无效');
+    atomicValue(metric.count);
+  }
+  return value as BuyerOverview;
+}
+
+function parseBuyerTakeoverTimeline(value: unknown, expectedOrderId: string): BuyerTakeoverTimeline {
+  const timeline = objectValue(value);
+  assertArtifactVersion(stringValue(timeline.artifactVersion));
+  if (timeline.orderId !== expectedOrderId) {
+    throw new CoreClientError('InvalidResponse', '接管时间线与请求订单不一致');
+  }
+  enumValue(timeline.historyStatus, ['COMPLETE', 'PARTIAL_LEGACY'] as const);
+  arrayValue(timeline.transitions).forEach((value) => {
+    const transition = objectValue(value);
+    stringValue(transition.transitionId);
+    if (transition.fromState !== null) enumValue(transition.fromState, TAKEOVER_STATES);
+    enumValue(transition.toState, TAKEOVER_STATES);
+    stringValue(transition.evidenceType);
+    isoValue(transition.occurredAt);
+    if ('evidenceHash' in transition || 'publicEvidenceHash' in transition) {
+      throw new CoreClientError('InvalidResponse', '买家时间线不应包含内部证据哈希');
+    }
+  });
+  return value as BuyerTakeoverTimeline;
+}
+
+function parseSavedAddressTarget(value: unknown): DeliveryTarget {
+  const target = objectValue(value);
+  stringValue(target.targetId);
+  bytes32Value(target.targetHash);
+  if (target.fulfillmentMode !== 'DELIVERY') {
+    throw new CoreClientError('InvalidResponse', '保存地址未生成快递履约目标');
+  }
+  if (!/^[0-9]{6}$/.test(stringValue(target.regionCode))) {
+    throw new CoreClientError('InvalidResponse', '履约目标行政区无效');
+  }
+  bytes32Value(target.regionCodeHash);
+  isoValue(target.expiresAt);
+  return value as unknown as DeliveryTarget;
+}
+
+function validateBuyerProfileUpdate(request: BuyerProfileUpdateRequest) {
+  if (request.nickname !== null) boundedNonEmptyStringValue(request.nickname.trim(), 40);
+  optionalBytes32Value(request.avatarAssetId);
+  nonNegativeIntegerValue(request.expectedVersion);
+  idempotencyValue(request.idempotencyKey);
+}
+
+function validateBuyerAddressWrite(request: BuyerAddressWriteRequest, updating: boolean) {
+  boundedNonEmptyStringValue(request.label.trim(), 32);
+  boundedNonEmptyStringValue(request.recipientName.trim(), 64);
+  if (!/^1[3-9][0-9]{9}$/.test(request.phone)) throw new CoreClientError('InvalidRequest', '请输入有效的 11 位手机号');
+  const detail = request.detailAddress.trim();
+  if (detail.length < 5 || detail.length > 300) throw new CoreClientError('InvalidRequest', '详细地址需为 5-300 个字符');
+  boundedNumberValue(request.longitude, -180, 180);
+  boundedNumberValue(request.latitude, -90, 90);
+  if (typeof request.isDefault !== 'boolean') throw new CoreClientError('InvalidRequest', '默认地址状态无效');
+  if (updating) validateVersionedAccountCommand(request.expectedVersion, request.idempotencyKey);
+  else if (request.expectedVersion !== undefined) throw new CoreClientError('InvalidRequest', '新建地址不应携带历史版本');
+  idempotencyValue(request.idempotencyKey);
+}
+
+function validateVersionedAccountCommand(expectedVersion: unknown, idempotencyKey: string) {
+  positiveIntegerValue(expectedVersion);
+  idempotencyValue(idempotencyKey);
 }
 
 function parseSettlementList(value: unknown): SettlementListProjection {
@@ -920,6 +1258,22 @@ function parseCatalogTags(value: unknown): readonly CatalogTag[] {
 }
 
 function parsePublicMediaReadAccess(value: unknown, requestedAssetId: string): MediaReadAccessProjection {
+  const media = parseMediaReadAccess(value, requestedAssetId);
+  if (media.accessScope !== 'PUBLIC') {
+    throw new CoreClientError('Forbidden', '商品媒体未发布公共只读授权');
+  }
+  return media;
+}
+
+function parseAuthenticatedMediaReadAccess(value: unknown, requestedAssetId: string): MediaReadAccessProjection {
+  const media = parseMediaReadAccess(value, requestedAssetId);
+  if (media.accessScope !== 'AUTHENTICATED') {
+    throw new CoreClientError('Forbidden', '账户媒体未绑定当前会话');
+  }
+  return media;
+}
+
+function parseMediaReadAccess(value: unknown, requestedAssetId: string): MediaReadAccessProjection {
   const media = objectValue(value);
   assertArtifactVersion(stringValue(media.artifactVersion));
   if (bytes32Value(media.assetId).toLowerCase() !== requestedAssetId) {
@@ -932,9 +1286,8 @@ function parsePublicMediaReadAccess(value: unknown, requestedAssetId: string): M
   atomicValue(media.sizeBytes);
   bytes32Value(media.contentSha256);
   bytes32Value(media.objectVersionHash);
-  if (media.accessScope !== 'PUBLIC' || media.method !== 'GET') {
-    throw new CoreClientError('Forbidden', '商品媒体未发布公共只读授权');
-  }
+  enumValue(media.accessScope, ['PUBLIC', 'AUTHENTICATED'] as const);
+  if (media.method !== 'GET') throw new CoreClientError('InvalidResponse', '媒体读取方式无效');
   secureTargetUrl(media.readUrl, '媒体读取地址无效');
   if (Date.parse(isoValue(media.expiresAt)) <= Date.now()) {
     throw new CoreClientError('InvalidResponse', '媒体读取授权已过期');
@@ -943,16 +1296,17 @@ function parsePublicMediaReadAccess(value: unknown, requestedAssetId: string): M
   return value as MediaReadAccessProjection;
 }
 
-function validateFulfillmentMediaUploadRequest(request: FulfillmentMediaUploadRequest) {
-  if (request.purpose !== 'FULFILLMENT_EVIDENCE' || request.resourceType !== 'ORDER') {
-    throw new CoreClientError('InvalidRequest', '证据媒体用途或资源类型无效');
-  }
+function validateMediaUploadRequest(request: MallMediaUploadRequest) {
+  const isEvidence = request.purpose === 'FULFILLMENT_EVIDENCE' && request.resourceType === 'ORDER';
+  const isAvatar = request.purpose === 'BUYER_AVATAR' && request.resourceType === 'BUYER';
+  if (!isEvidence && !isAvatar) throw new CoreClientError('InvalidRequest', '媒体用途或资源类型无效');
   stringValue(request.resourceId);
-  if (!FULFILLMENT_EVIDENCE_CONTENT_TYPES.includes(request.contentType)) {
-    throw new CoreClientError('InvalidRequest', '证据文件类型无效');
+  const contentTypes = isEvidence ? FULFILLMENT_EVIDENCE_CONTENT_TYPES : BUYER_AVATAR_CONTENT_TYPES;
+  if (!(contentTypes as readonly string[]).includes(request.contentType)) {
+    throw new CoreClientError('InvalidRequest', '媒体文件类型无效');
   }
   if (!Number.isSafeInteger(request.sizeBytes) || request.sizeBytes < 1 || request.sizeBytes > 10_485_760) {
-    throw new CoreClientError('InvalidRequest', '证据文件大小无效');
+    throw new CoreClientError('InvalidRequest', '媒体文件大小无效');
   }
   bytes32Value(request.contentSha256);
   idempotencyValue(request.idempotencyKey);
@@ -960,7 +1314,7 @@ function validateFulfillmentMediaUploadRequest(request: FulfillmentMediaUploadRe
 
 function parseMediaUploadIntent(
   value: unknown,
-  request: FulfillmentMediaUploadRequest,
+  request: MallMediaUploadRequest,
 ): MediaUploadIntentProjection {
   const intent = objectValue(value);
   assertArtifactVersion(stringValue(intent.artifactVersion));
@@ -976,17 +1330,17 @@ function parseMediaUploadIntent(
     || intent.state !== 'UPLOADED'
     || intent.method !== 'PUT'
     || intent.writeOnce !== true
-  ) throw new CoreClientError('InvalidResponse', '证据上传授权与文件不一致');
+  ) throw new CoreClientError('InvalidResponse', '媒体上传授权与文件不一致');
   if (Date.parse(isoValue(intent.expiresAt)) <= Date.now()) {
-    throw new CoreClientError('InvalidResponse', '证据上传授权已过期');
+    throw new CoreClientError('InvalidResponse', '媒体上传授权已过期');
   }
-  secureTargetUrl(intent.uploadUrl, '证据上传地址无效');
+  secureTargetUrl(intent.uploadUrl, '媒体上传地址无效');
   const headers = objectValue(intent.headers);
   if (!Object.values(headers).every((header) => typeof header === 'string')) {
-    throw new CoreClientError('InvalidResponse', '证据上传请求头无效');
+    throw new CoreClientError('InvalidResponse', '媒体上传请求头无效');
   }
   if (headerValue(headers, 'if-none-match') !== '*') {
-    throw new CoreClientError('InvalidResponse', '证据上传缺少只写一次约束');
+    throw new CoreClientError('InvalidResponse', '媒体上传缺少只写一次约束');
   }
   bytes32Value(intent.providerReferenceHash);
   return value as MediaUploadIntentProjection;
@@ -994,15 +1348,13 @@ function parseMediaUploadIntent(
 
 function assertUploadFileMatchesIntent(intent: MediaUploadIntentProjection, file: Blob) {
   if (
-    intent.purpose !== 'FULFILLMENT_EVIDENCE'
-    || intent.resourceType !== 'ORDER'
-    || intent.state !== 'UPLOADED'
+    intent.state !== 'UPLOADED'
     || intent.method !== 'PUT'
     || intent.writeOnce !== true
     || String(file.size) !== intent.sizeBytes
     || file.type !== intent.contentType
     || Date.parse(intent.expiresAt) <= Date.now()
-  ) throw new CoreClientError('InvalidRequest', '证据文件与上传授权不一致');
+  ) throw new CoreClientError('InvalidRequest', '媒体文件与上传授权不一致');
 }
 
 function parseMediaAsset(value: unknown, expectedUploadIntentId: string): MediaAssetProjection {
@@ -1013,12 +1365,15 @@ function parseMediaAsset(value: unknown, expectedUploadIntentId: string): MediaA
     throw new CoreClientError('InvalidResponse', '已验证媒体与上传授权不一致');
   }
   addressValue(asset.ownerWallet);
-  if (asset.purpose !== 'FULFILLMENT_EVIDENCE' || asset.resourceType !== 'ORDER') {
+  const evidenceAsset = asset.purpose === 'FULFILLMENT_EVIDENCE' && asset.resourceType === 'ORDER';
+  const avatarAsset = asset.purpose === 'BUYER_AVATAR' && asset.resourceType === 'BUYER';
+  if (!evidenceAsset && !avatarAsset) {
     throw new CoreClientError('InvalidResponse', '已验证媒体用途无效');
   }
   stringValue(asset.resourceId);
   const contentType = enumValue(asset.contentType, mediaContentTypes);
-  if (!FULFILLMENT_EVIDENCE_CONTENT_TYPES.some((allowed) => allowed === contentType)) {
+  const allowedContentTypes = evidenceAsset ? FULFILLMENT_EVIDENCE_CONTENT_TYPES : BUYER_AVATAR_CONTENT_TYPES;
+  if (!(allowedContentTypes as readonly string[]).includes(contentType)) {
     throw new CoreClientError('InvalidResponse', '已验证媒体类型无效');
   }
   atomicValue(asset.sizeBytes);
@@ -1140,6 +1495,21 @@ const FULFILLMENT_EVIDENCE_CONTENT_TYPES = [
   'application/pdf',
 ] as const satisfies readonly FulfillmentEvidenceContentType[];
 
+const BUYER_AVATAR_CONTENT_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+] as const;
+
+const TAKEOVER_STATES = [
+  'OPEN',
+  'FUNDED',
+  'FULFILLING',
+  'FULFILLMENT_PENDING',
+  'CLOSED',
+  'DECISION_BLOCKED',
+] as const;
+
 function reasonCodeValue(value: unknown) {
   const code = stringValue(value);
   if (!/^[A-Z][A-Z0-9_]{1,63}$/.test(code)) {
@@ -1199,6 +1569,19 @@ function stringValue(value: unknown) {
 function boundedStringValue(value: unknown, maxLength: number) {
   if (typeof value !== 'string' || value.length > maxLength) {
     throw new CoreClientError('InvalidResponse', 'Core 响应文本字段无效');
+  }
+  return value;
+}
+
+function boundedNonEmptyStringValue(value: unknown, maxLength: number) {
+  const text = stringValue(value);
+  if (text.length > maxLength) throw new CoreClientError('InvalidResponse', 'Core 响应文本字段过长');
+  return text;
+}
+
+function boundedNumberValue(value: unknown, minimum: number, maximum: number) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < minimum || value > maximum) {
+    throw new CoreClientError('InvalidResponse', 'Core 响应数值字段无效');
   }
   return value;
 }
@@ -1289,8 +1672,22 @@ function postAuthorized<T>(fetcher: FetchLike, url: string, token: string, body:
   });
 }
 
+function putAuthorized<T>(fetcher: FetchLike, url: string, token: string, body: unknown) {
+  return requestJson<T>(fetcher, url, {
+    method: 'PUT',
+    headers: authorizedHeaders(token),
+    body: JSON.stringify(body),
+  });
+}
+
 function orderPath(path: string, orderId: string) {
   return path.replace('{orderId}', encodeURIComponent(orderId));
+}
+
+function accountResourcePath(path: string, resourceId: string) {
+  const normalized = resourceId.trim();
+  if (!normalized || normalized.length > 256) throw new CoreClientError('InvalidRequest', '账户资源标识无效');
+  return path.replace('{addressId}', encodeURIComponent(normalized));
 }
 
 function sessionPath(path: string, sessionId: string) {
@@ -1400,6 +1797,7 @@ function operationPath(operationId: string, method: HttpMethod) {
 
 export const coordinatedPaymentOperations = paymentOperations;
 export const coordinatedCatalogMediaOperations = catalogMediaOperations;
+export const coordinatedBuyerAccountOperations = buyerAccountOperations;
 export const coordinatedFulfillmentOperations = fulfillmentOperations;
 export const coordinatedSettlementAdminOperations = settlementAdminOperations;
 export const coordinatedRealtimeOperations = realtimeOperations;

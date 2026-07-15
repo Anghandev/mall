@@ -16,6 +16,18 @@ import type { MallServices, PendingSubmission } from '../src/mall-runtime';
 import type { WalletGateway } from '../src/wallet';
 import { catalogCategories, catalogTags, publicMediaAccess } from './catalog-fixtures';
 import {
+  authenticatedAvatarAccess,
+  avatarAssetId,
+  avatarContentHash,
+  avatarUploadIntent,
+  buyerOverview,
+  buyerProfile,
+  buyerSavedAddress,
+  buyerTakeoverTimeline,
+  parsedBuyerAddress,
+  verifiedAvatarAsset,
+} from './account-fixtures';
+import {
   buyerActionResult,
   evidenceAssetId,
   evidenceFileHash,
@@ -56,7 +68,7 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/mall');
 
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.6');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.7');
     expect(productBaseline.knownOrderActions).toBe(allowedActionNames);
     expect(productBaseline.executableOrderActions).toBe(executableOrderActionNames);
     expect(executableOrderActionNames).toContain('CONFIRM_RECEIPT');
@@ -64,7 +76,7 @@ describe('Mall V2 payment consumer', () => {
     expect(isCoreOrderActionExecutable('CONFIRM_RECEIPT')).toBe(true);
     expect(isCoreOrderActionExecutable('PAY_ORDER')).toBe(false);
     expect(mallRuntimeBoundary).toMatchObject({
-      artifactStatus: '2.0.0-settlement-admin.6',
+      artifactStatus: '2.0.0-settlement-admin.7',
       executableOrderActions: executableOrderActionNames,
       deploymentAuthorized: false,
       settlementAdminCapabilities: {
@@ -171,6 +183,163 @@ describe('Mall V2 payment consumer', () => {
     }
     await user.click(within(navigation).getByRole('link', { name: '商城' }));
     expect(screen.getByRole('heading', { name: '常规商城' })).toBeTruthy();
+  });
+
+  it('renders the real buyer profile, DecisionBlocked UID and canonical overview counts', async () => {
+    const user = userEvent.setup();
+    renderAt('/assets', readyServices({
+      getBuyerProfile: vi.fn().mockResolvedValue(buyerProfile),
+      getBuyerOverview: vi.fn().mockResolvedValue(buyerOverview),
+    }));
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    expect(await screen.findByRole('heading', { name: buyerProfile.nickname! })).toBeTruthy();
+    expect(screen.getByText('买家 UID：DecisionBlocked')).toBeTruthy();
+    expect(screen.getByText('DecisionBlocked', { selector: '.order-status-item strong' })).toBeTruthy();
+    expect(screen.getByText('2', { selector: '.order-status-item strong' })).toBeTruthy();
+    expect(screen.getByText('3', { selector: '.order-status-item strong' })).toBeTruthy();
+    expect(screen.getByText('1', { selector: '.order-status-item strong' })).toBeTruthy();
+    expect(document.body.textContent).not.toContain(deliveryOrder.buyerWallet);
+  });
+
+  it('updates nickname only after a provider-sealed BUYER_AVATAR upload', async () => {
+    const user = userEvent.setup();
+    const file = new File([new Uint8Array([1, 2, 3, 4])], 'avatar.png', { type: 'image/png' });
+    const intent = avatarUploadIntent();
+    const asset = verifiedAvatarAsset();
+    const updated = { ...buyerProfile, nickname: '新昵称', avatarAssetId, version: 3 };
+    const createMediaUploadIntent = vi.fn<CoreClient['createMediaUploadIntent']>().mockResolvedValue(intent);
+    const uploadMediaFile = vi.fn<CoreClient['uploadMediaFile']>().mockResolvedValue(undefined);
+    const completeMediaUpload = vi.fn<CoreClient['completeMediaUpload']>().mockResolvedValue(asset);
+    const updateBuyerProfile = vi.fn<CoreClient['updateBuyerProfile']>().mockResolvedValue(updated);
+    const services = readyServices({
+      getBuyerProfile: vi.fn().mockResolvedValue(buyerProfile),
+      getBuyerOverview: vi.fn().mockResolvedValue(buyerOverview),
+      createMediaUploadIntent,
+      uploadMediaFile,
+      completeMediaUpload,
+      updateBuyerProfile,
+      createAuthenticatedMediaReadAccess: vi.fn().mockResolvedValue(authenticatedAvatarAccess()),
+    });
+    services.hashEvidenceFile = vi.fn().mockResolvedValue(avatarContentHash);
+    renderAt('/assets', services);
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await user.click(await screen.findByRole('button', { name: '编辑买家资料' }));
+    await user.clear(screen.getByLabelText('昵称'));
+    await user.type(screen.getByLabelText('昵称'), '新昵称');
+    await user.upload(screen.getByLabelText(/^头像文件/), file);
+    await user.click(screen.getByRole('button', { name: /保存资料/ }));
+
+    expect(await screen.findByRole('heading', { name: '新昵称' })).toBeTruthy();
+    expect(createMediaUploadIntent).toHaveBeenCalledWith('buyer-session', expect.objectContaining({
+      purpose: 'BUYER_AVATAR',
+      resourceType: 'BUYER',
+      resourceId: BUYER,
+      contentType: 'image/png',
+      sizeBytes: 4,
+      contentSha256: avatarContentHash,
+    }));
+    expect(uploadMediaFile).toHaveBeenCalledWith(intent, file);
+    expect(completeMediaUpload).toHaveBeenCalledWith('buyer-session', intent.uploadIntentId);
+    expect(updateBuyerProfile).toHaveBeenCalledWith('buyer-session', {
+      nickname: '新昵称',
+      avatarAssetId,
+      expectedVersion: buyerProfile.version,
+      idempotencyKey: 'mall-test-idempotency',
+    });
+    expect((await screen.findByRole('img', { name: '买家头像' })).getAttribute('src')).toBe(authenticatedAvatarAccess().readUrl);
+  });
+
+  it('forces parse review before address CRUD and creates checkout target from the saved address', async () => {
+    const user = userEvent.setup();
+    let addresses = [{ ...buyerSavedAddress, isDefault: false }];
+    const parseBuyerAddress = vi.fn<CoreClient['parseBuyerAddress']>().mockResolvedValue(parsedBuyerAddress);
+    const createBuyerAddress = vi.fn<CoreClient['createBuyerAddress']>().mockImplementation(async (_token, request) => {
+      const created = { ...buyerSavedAddress, label: request.label, isDefault: request.isDefault };
+      addresses = [created];
+      return created;
+    });
+    const updateBuyerAddress = vi.fn<CoreClient['updateBuyerAddress']>().mockImplementation(async (_token, _id, request) => {
+      addresses = [{ ...addresses[0]!, ...request, version: 4 }];
+      return addresses[0]!;
+    });
+    const setDefaultBuyerAddress = vi.fn<CoreClient['setDefaultBuyerAddress']>().mockImplementation(async () => {
+      addresses = [{ ...addresses[0]!, isDefault: true, version: 5 }];
+      return addresses[0]!;
+    });
+    const deleteBuyerAddress = vi.fn<CoreClient['deleteBuyerAddress']>().mockImplementation(async () => { addresses = []; });
+    const createBuyerAddressTarget = vi.fn<CoreClient['createBuyerAddressTarget']>().mockResolvedValue(deliveryTarget);
+    const services = readyServices({
+      getBuyerProfile: vi.fn().mockResolvedValue(buyerProfile),
+      getBuyerOverview: vi.fn().mockResolvedValue(buyerOverview),
+      listBuyerAddresses: vi.fn().mockImplementation(async () => addresses),
+      parseBuyerAddress,
+      createBuyerAddress,
+      updateBuyerAddress,
+      setDefaultBuyerAddress,
+      deleteBuyerAddress,
+      createBuyerAddressTarget,
+    });
+    renderAt('/assets/addresses', services);
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await user.type(screen.getByLabelText('地址文本'), '张三 13800138000 辽宁省大连市中山区示例路 24 号');
+    expect(screen.queryByRole('button', { name: /确认并保存/ })).toBeNull();
+    await user.click(screen.getByRole('button', { name: '解析并复核' }));
+    expect(await screen.findByRole('heading', { name: '复核识别结果' })).toBeTruthy();
+    expect(screen.getAllByText(parsedBuyerAddress.regionCode!).length).toBeGreaterThan(0);
+    expect(document.body.textContent).not.toContain(parsedBuyerAddress.sourceReferenceHash!);
+    await user.click(screen.getByRole('button', { name: /确认并保存/ }));
+    await waitFor(() => expect(createBuyerAddress).toHaveBeenCalledTimes(1));
+    expect(createBuyerAddress).toHaveBeenCalledWith('buyer-session', expect.objectContaining({
+      recipientName: parsedBuyerAddress.recipientName,
+      phone: parsedBuyerAddress.phone,
+      detailAddress: parsedBuyerAddress.detailAddress,
+      longitude: parsedBuyerAddress.longitude,
+      latitude: parsedBuyerAddress.latitude,
+    }));
+
+    await user.click(screen.getByRole('button', { name: '用于下单' }));
+    expect(createBuyerAddressTarget).toHaveBeenCalledWith('buyer-session', buyerSavedAddress.addressId, 'mall-test-idempotency');
+    await user.click(screen.getByRole('button', { name: '编辑' }));
+    await user.clear(screen.getByLabelText('标签'));
+    await user.type(screen.getByLabelText('标签'), '公司');
+    await user.click(screen.getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(updateBuyerAddress).toHaveBeenCalledTimes(1));
+    await user.click(await screen.findByRole('button', { name: '将公司设为默认地址' }));
+    await waitFor(() => expect(setDefaultBuyerAddress).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole('button', { name: '删除公司地址' }));
+    await user.click(screen.getByRole('button', { name: '确认删除' }));
+    await waitFor(() => expect(deleteBuyerAddress).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole('heading', { name: '暂无已保存地址' })).toBeTruthy();
+  });
+
+  it('keeps address parsing and version conflicts visibly fail closed', async () => {
+    const user = userEvent.setup();
+    const parseBuyerAddress = vi.fn<CoreClient['parseBuyerAddress']>()
+      .mockRejectedValue(new CoreClientError('ConfigurationRequired', 'AMAP is not configured'));
+    const updateBuyerAddress = vi.fn<CoreClient['updateBuyerAddress']>()
+      .mockRejectedValue(new CoreClientError('UnknownState', 'Buyer address version changed'));
+    renderAt('/assets/addresses', readyServices({
+      getBuyerProfile: vi.fn().mockResolvedValue(buyerProfile),
+      getBuyerOverview: vi.fn().mockResolvedValue(buyerOverview),
+      listBuyerAddresses: vi.fn().mockResolvedValue([buyerSavedAddress]),
+      parseBuyerAddress,
+      updateBuyerAddress,
+    }));
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await user.type(screen.getByLabelText('地址文本'), '张三 13800138000 辽宁省大连市中山区');
+    await user.click(screen.getByRole('button', { name: '解析并复核' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('AMAP is not configured'));
+    expect(screen.queryByRole('heading', { name: '复核识别结果' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: '关闭' }));
+
+    await user.click(screen.getByRole('button', { name: '编辑' }));
+    await user.click(screen.getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Buyer address version changed'));
+    expect(screen.getByRole('heading', { name: '地址同步失败' })).toBeTruthy();
   });
 
   it('loads Core products, authenticates the buyer and requests an exact signed reservation', async () => {
@@ -518,6 +687,7 @@ describe('Mall V2 payment consumer', () => {
       listOrders: vi.fn().mockResolvedValue({ orders: [deliveryOrder], nextCursor: null }),
       getOrderAllowedActions: vi.fn().mockResolvedValue(deliveryActions),
       getOrderTarget: vi.fn().mockResolvedValue(deliveryOrderTarget),
+      getBuyerTakeoverTimeline: vi.fn().mockResolvedValue(buyerTakeoverTimeline),
       createMediaUploadIntent,
       uploadMediaFile,
       completeMediaUpload,
@@ -532,6 +702,9 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText('KUAIDI100 · 运输中 · 05/18 13:00')).toBeTruthy();
     expect(screen.getByText(deliveryOrder.exactAmounts.bnmAmount)).toBeTruthy();
     expect(screen.getByText(/13800138000/)).toBeTruthy();
+    expect(screen.getByText('PARTIAL_LEGACY')).toBeTruthy();
+    expect(screen.getByText(/OPEN →/)).toBeTruthy();
+    expect(screen.getByText(/PLATFORM_FUNDING_CONFIRMED/)).toBeTruthy();
     const exchange = screen.getByRole('button', { name: '申请换货' });
     expect(exchange.hasAttribute('disabled')).toBe(false);
     await user.click(exchange);
@@ -815,10 +988,37 @@ function servicesWith(overrides: Partial<CoreClient>): MallServices {
     listCatalogCategories: vi.fn().mockResolvedValue([]),
     listCatalogTags: vi.fn().mockResolvedValue([]),
     createPublicMediaReadAccess: vi.fn().mockRejectedValue(new Error('not configured')),
+    createAuthenticatedMediaReadAccess: vi.fn().mockRejectedValue(new Error('not configured')),
     createMediaUploadIntent: vi.fn().mockRejectedValue(new Error('not configured')),
     uploadMediaFile: vi.fn().mockRejectedValue(new Error('not configured')),
     completeMediaUpload: vi.fn().mockRejectedValue(new Error('not configured')),
     authenticate: vi.fn().mockResolvedValue({ token: 'buyer-session', walletAddress: BUYER, roles: ['BUYER'] }),
+    getBuyerProfile: vi.fn().mockResolvedValue({
+      artifactVersion, wallet: BUYER, accountId: null, accountIdStatus: 'DecisionBlocked',
+      nickname: null, avatarAssetId: null, version: 0, updatedAt: null,
+    }),
+    updateBuyerProfile: vi.fn().mockRejectedValue(new Error('not configured')),
+    parseBuyerAddress: vi.fn().mockRejectedValue(new Error('not configured')),
+    listBuyerAddresses: vi.fn().mockResolvedValue([]),
+    createBuyerAddress: vi.fn().mockRejectedValue(new Error('not configured')),
+    updateBuyerAddress: vi.fn().mockRejectedValue(new Error('not configured')),
+    deleteBuyerAddress: vi.fn().mockRejectedValue(new Error('not configured')),
+    setDefaultBuyerAddress: vi.fn().mockRejectedValue(new Error('not configured')),
+    createBuyerAddressTarget: vi.fn().mockRejectedValue(new Error('not configured')),
+    getBuyerOverview: vi.fn().mockResolvedValue({
+      artifactVersion,
+      wallet: BUYER,
+      orderCounts: {
+        pendingPayment: { status: 'DecisionBlocked', count: null, blocker: 'BUYER_PENDING_PAYMENT_PROJECTION' },
+        pendingShipment: { status: 'AVAILABLE', count: '0' },
+        pendingReceipt: { status: 'AVAILABLE', count: '0' },
+        afterSale: { status: 'AVAILABLE', count: '0' },
+        total: { status: 'AVAILABLE', count: '0' },
+      },
+    }),
+    getBuyerTakeoverTimeline: vi.fn().mockImplementation((_token: string, orderId: string) => Promise.resolve({
+      artifactVersion, orderId, historyStatus: 'COMPLETE', transitions: [],
+    })),
     createOrdinaryQuote: vi.fn().mockRejectedValue(new Error('not configured')),
     createSeckillQuote: vi.fn().mockRejectedValue(new Error('not configured')),
     submitPayment: vi.fn().mockRejectedValue(new Error('not configured')),

@@ -2,6 +2,13 @@ import { expect, test } from '@playwright/test';
 import { artifactVersion } from '@abu24k/core-artifacts';
 
 import { catalogCategories, catalogTags, publicMediaAccess } from '../catalog-fixtures';
+import {
+  buyerOverview,
+  buyerProfile,
+  buyerSavedAddress,
+  buyerTakeoverTimeline,
+  parsedBuyerAddress,
+} from '../account-fixtures';
 import { buyerActionResult, orderActionEvidence } from '../evidence-fixtures';
 import { deliveryOrder, deliveryOrderTarget } from '../fulfillment-fixtures';
 import { product, productVideoAssetId } from '../payment-fixtures';
@@ -97,6 +104,28 @@ test('buyer evidence form is keyboard-addressable and fits the mobile frame', as
   await page.screenshot({ path: 'test-results/screenshots/mobile-393-order-evidence.png', fullPage: true });
 });
 
+test('buyer account and address review fit the mobile frame and remain keyboard operable', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile-393', 'Focused account acceptance');
+  await mockWallet(page);
+  await mockPublicCore(page);
+  await page.goto('/assets');
+  await page.getByRole('button', { name: '连接钱包' }).click();
+  await expect(page.getByRole('heading', { name: buyerProfile.nickname! })).toBeVisible();
+  await expect(page.getByText('买家 UID：DecisionBlocked')).toBeVisible();
+  await page.getByRole('link', { name: '打开我的收货地址' }).click();
+  const rawText = page.getByLabel('地址文本');
+  await rawText.fill('张三 13800138000 辽宁省大连市中山区示例路 24 号');
+  await page.getByRole('button', { name: '解析并复核' }).focus();
+  await page.keyboard.press('Enter');
+  const reviewHeading = page.getByRole('heading', { name: '复核识别结果' });
+  await expect(reviewHeading).toBeVisible();
+  await expect(reviewHeading).toBeFocused();
+  await expect(page.getByRole('button', { name: /确认并保存/ })).toBeEnabled();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+  await expectHealthyDocument(page);
+  await page.screenshot({ path: 'test-results/screenshots/mobile-393-buyer-account.png', fullPage: true });
+});
+
 async function expectHealthyDocument(page: import('@playwright/test').Page) {
   const health = await page.evaluate(() => {
     const ids = Array.from(document.querySelectorAll('[id]'), (element) => element.id);
@@ -169,6 +198,12 @@ async function mockPublicCore(page: import('@playwright/test').Page) {
         roles: ['BUYER'],
       };
       if (url.pathname === '/v2/orders') return { orders: [deliveryOrder], nextCursor: null };
+      if (url.pathname === '/v2/buyer/profile') return buyerProfile;
+      if (url.pathname === '/v2/buyer/overview') return buyerOverview;
+      if (url.pathname === '/v2/buyer/addresses/parse') return parsedBuyerAddress;
+      if (url.pathname === '/v2/buyer/addresses' && route.request().method() === 'POST') return buyerSavedAddress;
+      if (url.pathname === '/v2/buyer/addresses') return { artifactVersion, addresses: [buyerSavedAddress] };
+      if (url.pathname === `/v2/orders/${deliveryOrder.orderId}/takeover-timeline`) return buyerTakeoverTimeline;
       if (url.pathname === '/v2/actions/order') return { allowedActions: [{ action: 'REQUEST_EXCHANGE', enabled: true }] };
       if (url.pathname === `/v2/orders/${deliveryOrder.orderId}/fulfillment-target`) return { target: deliveryOrderTarget };
       if (url.pathname === '/v2/settlements') return {

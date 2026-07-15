@@ -9,6 +9,10 @@ import {
 } from 'react';
 import type {
   AllowedAction,
+  BuyerOverview,
+  BuyerProfile,
+  BuyerSavedAddress,
+  BuyerTakeoverTimeline,
   CatalogCategory,
   CatalogProduct,
   CatalogSku,
@@ -38,10 +42,12 @@ import {
   CoreClientError,
   createCoreClient,
   type BuyerEvidenceAction,
+  type BuyerAddressWriteRequest,
   type CheckoutTarget,
   type CorePaymentAvailability,
   type CoreClient,
   type FulfillmentEvidenceContentType,
+  type ParsedBuyerAddress,
   type WalletSession,
 } from './core-client';
 import { productBaseline } from './bootstrap';
@@ -65,6 +71,8 @@ export interface DeliveryTargetDraft {
   phone: string;
   address: string;
 }
+
+export type BuyerAddressDraft = Omit<BuyerAddressWriteRequest, 'expectedVersion' | 'idempotencyKey'>;
 
 export interface MallServices {
   core: CoreClient;
@@ -126,7 +134,19 @@ export interface MallRuntimeValue {
   orderActions: Readonly<Record<string, readonly AllowedAction[]>>;
   orderTargets: Readonly<Record<string, FulfillmentTarget>>;
   orderCapabilityErrors: Readonly<Record<string, string>>;
+  takeoverTimelines: Readonly<Record<string, BuyerTakeoverTimeline>>;
+  takeoverTimelineErrors: Readonly<Record<string, string>>;
   fulfillmentEvidenceStatus: 'AVAILABLE';
+  buyerProfile: BuyerProfile | null;
+  buyerProfileState: 'idle' | LoadState;
+  buyerAvatarAccess: MediaReadAccessProjection | null;
+  buyerAvatarState: 'idle' | LoadState;
+  buyerOverview: BuyerOverview | null;
+  buyerOverviewState: 'idle' | LoadState;
+  buyerAddresses: readonly BuyerSavedAddress[];
+  buyerAddressesState: 'idle' | LoadState;
+  parsedBuyerAddress: ParsedBuyerAddress | null;
+  addressParseState: 'idle' | 'loading' | 'ready' | 'error';
   settlements: SettlementListProjection | null;
   settlementsState: 'idle' | LoadState;
   notifications: readonly NotificationInboxItem[];
@@ -164,6 +184,15 @@ export interface MallRuntimeValue {
     action: BuyerEvidenceAction,
     input: { reasonCode: string; file: File | null },
   ): Promise<boolean>;
+  reloadBuyerAccount(): Promise<void>;
+  saveBuyerProfile(nickname: string, avatarFile: File | null): Promise<boolean>;
+  parseBuyerAddress(rawText: string): Promise<boolean>;
+  clearParsedBuyerAddress(): void;
+  createBuyerAddress(label: string, isDefault: boolean): Promise<boolean>;
+  updateBuyerAddress(addressId: string, draft: BuyerAddressDraft): Promise<boolean>;
+  deleteBuyerAddress(addressId: string): Promise<boolean>;
+  setDefaultBuyerAddress(addressId: string): Promise<boolean>;
+  selectSavedAddress(addressId: string): Promise<boolean>;
   reloadSettlements(): Promise<void>;
   requestSettlement(rail: 'REWARD_NPL' | 'PRIZE_USDT', amount: string): Promise<void>;
   reloadNotifications(): Promise<void>;
@@ -215,6 +244,18 @@ export function MallRuntimeProvider({
   const [orderActions, setOrderActions] = useState<Readonly<Record<string, readonly AllowedAction[]>>>({});
   const [orderTargets, setOrderTargets] = useState<Readonly<Record<string, FulfillmentTarget>>>({});
   const [orderCapabilityErrors, setOrderCapabilityErrors] = useState<Readonly<Record<string, string>>>({});
+  const [takeoverTimelines, setTakeoverTimelines] = useState<Readonly<Record<string, BuyerTakeoverTimeline>>>({});
+  const [takeoverTimelineErrors, setTakeoverTimelineErrors] = useState<Readonly<Record<string, string>>>({});
+  const [buyerProfile, setBuyerProfile] = useState<BuyerProfile | null>(null);
+  const [buyerProfileState, setBuyerProfileState] = useState<'idle' | LoadState>('idle');
+  const [buyerAvatarAccess, setBuyerAvatarAccess] = useState<MediaReadAccessProjection | null>(null);
+  const [buyerAvatarState, setBuyerAvatarState] = useState<'idle' | LoadState>('idle');
+  const [buyerOverview, setBuyerOverview] = useState<BuyerOverview | null>(null);
+  const [buyerOverviewState, setBuyerOverviewState] = useState<'idle' | LoadState>('idle');
+  const [buyerAddresses, setBuyerAddresses] = useState<readonly BuyerSavedAddress[]>([]);
+  const [buyerAddressesState, setBuyerAddressesState] = useState<'idle' | LoadState>('idle');
+  const [parsedBuyerAddress, setParsedBuyerAddress] = useState<ParsedBuyerAddress | null>(null);
+  const [addressParseState, setAddressParseState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [settlements, setSettlements] = useState<SettlementListProjection | null>(null);
   const [settlementsState, setSettlementsState] = useState<'idle' | LoadState>('idle');
   const [notifications, setNotifications] = useState<readonly NotificationInboxItem[]>([]);
@@ -385,7 +426,19 @@ export function MallRuntimeProvider({
     orderActions,
     orderTargets,
     orderCapabilityErrors,
+    takeoverTimelines,
+    takeoverTimelineErrors,
     fulfillmentEvidenceStatus: 'AVAILABLE',
+    buyerProfile,
+    buyerProfileState,
+    buyerAvatarAccess,
+    buyerAvatarState,
+    buyerOverview,
+    buyerOverviewState,
+    buyerAddresses,
+    buyerAddressesState,
+    parsedBuyerAddress,
+    addressParseState,
     settlements,
     settlementsState,
     notifications,
@@ -631,6 +684,188 @@ export function MallRuntimeProvider({
       }
     },
 
+    async reloadBuyerAccount() {
+      await run(async () => loadBuyerAccountBundle(requireSession()), () => {
+        setBuyerProfileState('error');
+        setBuyerOverviewState('error');
+        setBuyerAddressesState('error');
+      });
+    },
+
+    async saveBuyerProfile(nickname, avatarFile) {
+      setBusy(true);
+      setError(null);
+      try {
+        const activeSession = requireSession();
+        const current = buyerProfile;
+        if (!current) throw new CoreClientError('UnknownState', '买家资料尚未同步');
+        const normalizedNickname = nickname.trim() || null;
+        if (normalizedNickname && normalizedNickname.length > 40) {
+          throw new CoreClientError('InvalidRequest', '昵称最多 40 个字符');
+        }
+        let avatarAssetId = current.avatarAssetId;
+        if (avatarFile) {
+          if (!['image/jpeg', 'image/png', 'image/webp'].includes(avatarFile.type) || avatarFile.size < 1 || avatarFile.size > 10_485_760) {
+            throw new CoreClientError('InvalidRequest', '头像仅支持 JPG、PNG 或 WebP，且不超过 10 MB');
+          }
+          const contentSha256 = await services.hashEvidenceFile(avatarFile);
+          if (!/^0x[0-9a-fA-F]{64}$/.test(contentSha256)) {
+            throw new CoreClientError('InvalidResponse', '本地头像文件哈希无效');
+          }
+          const intent = await services.core.createMediaUploadIntent(activeSession.token, {
+            purpose: 'BUYER_AVATAR',
+            resourceType: 'BUYER',
+            resourceId: activeSession.walletAddress.toLowerCase(),
+            contentType: avatarFile.type as 'image/jpeg' | 'image/png' | 'image/webp',
+            sizeBytes: avatarFile.size,
+            contentSha256,
+            idempotencyKey: services.createIdempotencyKey(),
+          });
+          assertBuyerAvatarUpload(intent, activeSession, avatarFile, contentSha256);
+          await services.core.uploadMediaFile(intent, avatarFile);
+          const asset = await services.core.completeMediaUpload(activeSession.token, intent.uploadIntentId);
+          assertBuyerAvatarAsset(asset, activeSession, avatarFile, contentSha256);
+          avatarAssetId = asset.assetId;
+        }
+        const next = await services.core.updateBuyerProfile(activeSession.token, {
+          nickname: normalizedNickname,
+          avatarAssetId,
+          expectedVersion: current.version,
+          idempotencyKey: services.createIdempotencyKey(),
+        });
+        assertBuyerProjectionWallet(next.wallet, activeSession);
+        setBuyerProfile(next);
+        setBuyerProfileState('ready');
+        await loadBuyerAvatar(activeSession, next).catch(() => undefined);
+        return true;
+      } catch (reason) {
+        setBuyerProfileState('error');
+        setError(errorMessage(reason));
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+
+    async parseBuyerAddress(rawText) {
+      setBusy(true);
+      setError(null);
+      setAddressParseState('loading');
+      setParsedBuyerAddress(null);
+      try {
+        const parsed = await services.core.parseBuyerAddress(requireSession().token, rawText);
+        setParsedBuyerAddress(parsed);
+        setAddressParseState('ready');
+        return true;
+      } catch (reason) {
+        setAddressParseState('error');
+        setError(errorMessage(reason));
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+
+    clearParsedBuyerAddress() {
+      setParsedBuyerAddress(null);
+      setAddressParseState('idle');
+    },
+
+    async createBuyerAddress(label, isDefault) {
+      setBusy(true);
+      setError(null);
+      try {
+        const activeSession = requireSession();
+        const parsed = parsedBuyerAddress;
+        if (!parsed?.canSave || parsed.missingFields.length > 0) {
+          throw new CoreClientError('InvalidRequest', '必须先完成地址解析并复核所有字段');
+        }
+        const required = completeParsedAddress(parsed);
+        const created = await services.core.createBuyerAddress(activeSession.token, {
+          label: label.trim(),
+          recipientName: required.recipientName,
+          phone: required.phone,
+          detailAddress: required.detailAddress,
+          longitude: required.longitude,
+          latitude: required.latitude,
+          isDefault,
+          idempotencyKey: services.createIdempotencyKey(),
+        });
+        setBuyerAddresses((current) => [created, ...current.filter((item) => item.addressId !== created.addressId)]);
+        setBuyerAddressesState('ready');
+        setParsedBuyerAddress(null);
+        setAddressParseState('idle');
+        await loadBuyerAddresses(activeSession);
+        return true;
+      } catch (reason) {
+        setBuyerAddressesState('error');
+        setError(errorMessage(reason));
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+
+    async updateBuyerAddress(addressId, draft) {
+      return writeSavedAddress(async (activeSession, current) => {
+        await services.core.updateBuyerAddress(activeSession.token, addressId, {
+          ...draft,
+          expectedVersion: current.version,
+          idempotencyKey: services.createIdempotencyKey(),
+        });
+      }, addressId);
+    },
+
+    async deleteBuyerAddress(addressId) {
+      return writeSavedAddress(async (activeSession, current) => {
+        await services.core.deleteBuyerAddress(
+          activeSession.token,
+          addressId,
+          current.version,
+          services.createIdempotencyKey(),
+        );
+      }, addressId);
+    },
+
+    async setDefaultBuyerAddress(addressId) {
+      return writeSavedAddress(async (activeSession, current) => {
+        await services.core.setDefaultBuyerAddress(
+          activeSession.token,
+          addressId,
+          current.version,
+          services.createIdempotencyKey(),
+        );
+      }, addressId);
+    },
+
+    async selectSavedAddress(addressId) {
+      setBusy(true);
+      setError(null);
+      try {
+        const activeSession = requireSession();
+        const address = requireBuyerAddress(addressId);
+        const target = await services.core.createBuyerAddressTarget(
+          activeSession.token,
+          address.addressId,
+          services.createIdempotencyKey(),
+        );
+        setCheckoutTarget({
+          fulfillmentMode: 'DELIVERY',
+          fulfillmentTargetHash: target.targetHash,
+          regionCodeHash: target.regionCodeHash,
+          label: `${address.recipientName} · ${address.formattedAddress}`,
+        });
+        setFulfillmentModeState('DELIVERY');
+        clearQuoteState();
+        return true;
+      } catch (reason) {
+        setError(errorMessage(reason));
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+
     async reloadSettlements() {
       await run(async () => loadSettlementBundle(requireSession()), () => setSettlementsState('error'));
     },
@@ -831,10 +1066,22 @@ export function MallRuntimeProvider({
     selectedSeckillSessionId,
     orderActions,
     orderCapabilityErrors,
+    takeoverTimelines,
+    takeoverTimelineErrors,
     orders,
     ordersNextCursor,
     ordersState,
     orderTargets,
+    buyerProfile,
+    buyerProfileState,
+    buyerAvatarAccess,
+    buyerAvatarState,
+    buyerOverview,
+    buyerOverviewState,
+    buyerAddresses,
+    buyerAddressesState,
+    parsedBuyerAddress,
+    addressParseState,
     settlements,
     settlementsState,
     notifications,
@@ -958,13 +1205,18 @@ export function MallRuntimeProvider({
     const actions: Record<string, readonly AllowedAction[]> = cursor ? { ...orderActions } : {};
     const targets: Record<string, FulfillmentTarget> = cursor ? { ...orderTargets } : {};
     const capabilityErrors: Record<string, string> = cursor ? { ...orderCapabilityErrors } : {};
+    const timelines: Record<string, BuyerTakeoverTimeline> = cursor ? { ...takeoverTimelines } : {};
+    const timelineErrors: Record<string, string> = cursor ? { ...takeoverTimelineErrors } : {};
     await Promise.all(page.orders.map(async (order) => {
       actions[order.orderId] = order.allowedActions;
-      const targetResult = await Promise.allSettled([
+      const [targetResult, timelineResult] = await Promise.allSettled([
         services.core.getOrderTarget(activeSession.token, order.orderId),
+        services.core.getBuyerTakeoverTimeline(activeSession.token, order.orderId),
       ]);
-      if (targetResult[0]?.status === 'fulfilled') targets[order.orderId] = targetResult[0].value;
+      if (targetResult.status === 'fulfilled') targets[order.orderId] = targetResult.value;
       else capabilityErrors[order.orderId] = '履约目标暂不可用';
+      if (timelineResult.status === 'fulfilled') timelines[order.orderId] = timelineResult.value;
+      else timelineErrors[order.orderId] = errorMessage(timelineResult.reason);
     }));
     const nextOrders = cursor ? mergeOrders(orders, page.orders) : page.orders;
     setOrders(nextOrders);
@@ -972,21 +1224,104 @@ export function MallRuntimeProvider({
     setOrderActions(actions);
     setOrderTargets(targets);
     setOrderCapabilityErrors(capabilityErrors);
+    setTakeoverTimelines(timelines);
+    setTakeoverTimelineErrors(timelineErrors);
     setOrdersState(nextOrders.length > 0 ? 'ready' : 'empty');
   }
 
   async function loadAuthenticatedBundles(activeSession: WalletSession) {
     const results = await Promise.allSettled([
+      loadBuyerAccountBundle(activeSession),
       loadOrderBundle(activeSession),
       loadSettlementBundle(activeSession),
       loadNotificationBundle(activeSession),
     ]);
-    if (results[0]?.status === 'rejected') setOrdersState('error');
-    if (results[1]?.status === 'rejected') setSettlementsState('error');
-    if (results[2]?.status === 'rejected') setNotificationsState('error');
+    if (results[0]?.status === 'rejected') {
+      setBuyerProfileState('error');
+      setBuyerOverviewState('error');
+      setBuyerAddressesState('error');
+    }
+    if (results[1]?.status === 'rejected') setOrdersState('error');
+    if (results[2]?.status === 'rejected') setSettlementsState('error');
+    if (results[3]?.status === 'rejected') setNotificationsState('error');
     if (results.some((result) => result.status === 'rejected')) {
       setError('部分账户数据同步失败，可在对应页面重试');
     }
+  }
+
+  async function loadBuyerAccountBundle(activeSession: WalletSession) {
+    setBuyerProfileState('loading');
+    setBuyerOverviewState('loading');
+    setBuyerAddressesState('loading');
+    const [profile, overview, addresses] = await Promise.all([
+      services.core.getBuyerProfile(activeSession.token),
+      services.core.getBuyerOverview(activeSession.token),
+      services.core.listBuyerAddresses(activeSession.token),
+    ]);
+    assertBuyerProjectionWallet(profile.wallet, activeSession);
+    assertBuyerProjectionWallet(overview.wallet, activeSession);
+    setBuyerProfile(profile);
+    setBuyerProfileState('ready');
+    setBuyerOverview(overview);
+    setBuyerOverviewState('ready');
+    setBuyerAddresses(addresses);
+    setBuyerAddressesState(addresses.length > 0 ? 'ready' : 'empty');
+    await loadBuyerAvatar(activeSession, profile).catch(() => undefined);
+  }
+
+  async function loadBuyerAvatar(activeSession: WalletSession, profile: BuyerProfile) {
+    setBuyerAvatarAccess(null);
+    if (!profile.avatarAssetId) {
+      setBuyerAvatarState('empty');
+      return;
+    }
+    setBuyerAvatarState('loading');
+    try {
+      const access = await services.core.createAuthenticatedMediaReadAccess(
+        activeSession.token,
+        profile.avatarAssetId,
+      );
+      assertBuyerAvatarRead(access, activeSession, profile.avatarAssetId);
+      setBuyerAvatarAccess(access);
+      setBuyerAvatarState('ready');
+    } catch (reason) {
+      setBuyerAvatarState('error');
+      throw reason;
+    }
+  }
+
+  async function loadBuyerAddresses(activeSession: WalletSession) {
+    setBuyerAddressesState('loading');
+    const addresses = await services.core.listBuyerAddresses(activeSession.token);
+    setBuyerAddresses(addresses);
+    setBuyerAddressesState(addresses.length > 0 ? 'ready' : 'empty');
+  }
+
+  async function writeSavedAddress(
+    command: (activeSession: WalletSession, current: BuyerSavedAddress) => Promise<void>,
+    addressId: string,
+  ) {
+    setBusy(true);
+    setError(null);
+    try {
+      const activeSession = requireSession();
+      const current = requireBuyerAddress(addressId);
+      await command(activeSession, current);
+      await loadBuyerAddresses(activeSession);
+      return true;
+    } catch (reason) {
+      setBuyerAddressesState('error');
+      setError(errorMessage(reason));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function requireBuyerAddress(addressId: string) {
+    const address = buyerAddresses.find((item) => item.addressId === addressId);
+    if (!address) throw new CoreClientError('UnknownState', '收货地址已更新或删除，请重新同步');
+    return address;
   }
 
   async function loadSettlementBundle(activeSession: WalletSession) {
@@ -1102,7 +1437,79 @@ function assertMediaAssetForBuyer(
     || asset.contentType !== file.type
     || asset.sizeBytes !== String(file.size)
     || asset.contentSha256.toLowerCase() !== contentSha256
-  ) throw new CoreClientError('InvalidResponse', '已验证证据媒体与当前订单或文件不一致');
+) throw new CoreClientError('InvalidResponse', '已验证证据媒体与当前订单或文件不一致');
+}
+
+function assertBuyerAvatarUpload(
+  intent: MediaUploadIntentProjection,
+  session: WalletSession,
+  file: File,
+  contentSha256: string,
+) {
+  if (
+    intent.ownerWallet.toLowerCase() !== session.walletAddress.toLowerCase()
+    || intent.purpose !== 'BUYER_AVATAR'
+    || intent.resourceType !== 'BUYER'
+    || intent.resourceId.toLowerCase() !== session.walletAddress.toLowerCase()
+    || intent.contentType !== file.type
+    || intent.sizeBytes !== String(file.size)
+    || intent.contentSha256.toLowerCase() !== contentSha256.toLowerCase()
+  ) throw new CoreClientError('InvalidResponse', '头像上传授权与当前买家或文件不一致');
+}
+
+function assertBuyerAvatarAsset(
+  asset: MediaAssetProjection,
+  session: WalletSession,
+  file: File,
+  contentSha256: string,
+) {
+  if (
+    asset.ownerWallet.toLowerCase() !== session.walletAddress.toLowerCase()
+    || asset.purpose !== 'BUYER_AVATAR'
+    || asset.resourceType !== 'BUYER'
+    || asset.resourceId.toLowerCase() !== session.walletAddress.toLowerCase()
+    || asset.contentType !== file.type
+    || asset.sizeBytes !== String(file.size)
+    || asset.contentSha256.toLowerCase() !== contentSha256.toLowerCase()
+  ) throw new CoreClientError('InvalidResponse', '已验证头像与当前买家或文件不一致');
+}
+
+function assertBuyerAvatarRead(
+  access: MediaReadAccessProjection,
+  session: WalletSession,
+  assetId: string,
+) {
+  if (
+    access.assetId.toLowerCase() !== assetId.toLowerCase()
+    || access.purpose !== 'BUYER_AVATAR'
+    || access.resourceType !== 'BUYER'
+    || access.resourceId.toLowerCase() !== session.walletAddress.toLowerCase()
+    || access.accessScope !== 'AUTHENTICATED'
+    || !access.contentType.startsWith('image/')
+  ) throw new CoreClientError('InvalidResponse', '头像读取授权与当前买家不一致');
+}
+
+function assertBuyerProjectionWallet(wallet: string, session: WalletSession) {
+  if (wallet.toLowerCase() !== session.walletAddress.toLowerCase()) {
+    throw new CoreClientError('WalletMismatch', '买家账户投影与当前钱包不一致');
+  }
+}
+
+function completeParsedAddress(parsed: ParsedBuyerAddress) {
+  if (
+    !parsed.recipientName
+    || !parsed.phone
+    || !parsed.detailAddress
+    || parsed.longitude === null
+    || parsed.latitude === null
+  ) throw new CoreClientError('InvalidRequest', '地址解析仍缺少必填字段');
+  return {
+    recipientName: parsed.recipientName,
+    phone: parsed.phone,
+    detailAddress: parsed.detailAddress,
+    longitude: parsed.longitude,
+    latitude: parsed.latitude,
+  };
 }
 
 function assertBuyerSettlement(rail: SettlementRail, amount: string): asserts rail is 'REWARD_NPL' | 'PRIZE_USDT' {

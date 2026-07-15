@@ -5,7 +5,7 @@ Requirement Matrix and consumes only coordinated Core artifacts.
 
 ## Current Runtime Boundary
 
-- Production consumes coordinated Core artifacts `2.0.0-settlement-admin.6` and derives
+- Production consumes coordinated Core artifacts `2.0.0-settlement-admin.7` and derives
   its HTTP paths from the published OpenAPI document.
 - The public catalog consumes active products/SKUs, enabled three-level
   categories, enabled tags, field-level product associations, rich detail,
@@ -40,7 +40,7 @@ Requirement Matrix and consumes only coordinated Core artifacts.
   subtype. BNM account totals render only Locked/Available and never enter a
   settlement action.
 - Enabled `REQUEST_EXCHANGE`, `REQUEST_DELAY`, `CONFIRM_RECEIPT` and
-  `OPEN_ARBITRATION` actions use the `.6` write-once upload, verification,
+  `OPEN_ARBITRATION` actions use the `.7` write-once upload, verification,
   order-evidence envelope and command endpoints. The browser hashes optional
   JPG/PNG/WebP/PDF evidence locally and never asks the buyer to paste a hash.
   `OPEN_TAKEOVER` remains fail closed because it is absent from the published

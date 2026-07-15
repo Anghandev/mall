@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BadgeCheck,
   Banknote,
@@ -27,10 +27,13 @@ import {
   RefreshCw,
   ScanLine,
   Send,
+  Save,
   ShieldAlert,
   ShoppingBag,
+  Star,
   Store,
   Tag,
+  Trash2,
   Truck,
   UserRound,
   WalletCards,
@@ -41,6 +44,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import type {
   AllowedAction,
   AllowedActionName,
+  BuyerSavedAddress,
   CatalogCategory,
   FulfillmentOrder,
   FulfillmentTarget,
@@ -495,11 +499,12 @@ function StoreRow({ store, location }: { store: MerchantStore; location: Browser
 
 export function AssetsScreen() {
   const runtime = useMallRuntime();
+  const [editingProfile, setEditingProfile] = useState(false);
   const orderItems = [
-    { label: '待付款', icon: Clock3, count: runtime.orders.filter((order) => ['QUOTED', 'SUBMITTED'].includes(order.state)).length },
-    { label: '待发货', icon: PackageOpen, count: runtime.orders.filter((order) => order.state === 'PAID').length },
-    { label: '待收货', icon: Truck, count: runtime.orders.filter((order) => ['SHIPPED', 'DELIVERED', 'FULFILLMENT_PENDING'].includes(order.state)).length },
-    { label: '售后 / 仲裁', icon: ShieldAlert, count: runtime.orders.filter((order) => ['ARBITRATION', 'TAKEOVER'].includes(order.state)).length },
+    { label: '待付款', icon: Clock3, count: runtime.buyerOverview?.orderCounts.pendingPayment.status ?? null },
+    { label: '待发货', icon: PackageOpen, count: runtime.buyerOverview?.orderCounts.pendingShipment.count ?? null },
+    { label: '待收货', icon: Truck, count: runtime.buyerOverview?.orderCounts.pendingReceipt.count ?? null },
+    { label: '售后 / 仲裁', icon: ShieldAlert, count: runtime.buyerOverview?.orderCounts.afterSale.count ?? null },
   ];
 
   return (
@@ -507,12 +512,26 @@ export function AssetsScreen() {
       <ScreenHeader eyebrow="PERSONAL LEDGER" title="我的资产" description="消费、交付与收益状态统一对账" />
 
       <section className="profile-strip" aria-labelledby="profile-title">
-        <div className="avatar-placeholder"><UserRound aria-hidden="true" size={24} /></div>
+        <div className="avatar-placeholder">
+          {runtime.buyerAvatarAccess ? (
+            <img src={runtime.buyerAvatarAccess.readUrl} alt="买家头像" referrerPolicy="no-referrer" />
+          ) : <UserRound aria-hidden="true" size={24} />}
+        </div>
         <div className="profile-strip__copy">
-          <h2 id="profile-title">{runtime.session ? shortHash(runtime.session.walletAddress) : '未连接钱包'}</h2>
-          <p>{runtime.session ? 'BUYER 会话已验证' : '账号 ID 与链上身份待安全校验'}</p>
+          <h2 id="profile-title">{runtime.buyerProfile?.nickname ?? (runtime.session ? '未设置昵称' : '未连接钱包')}</h2>
+          <p>买家 UID：{runtime.buyerProfile?.accountIdStatus ?? (runtime.session ? '正在同步' : 'DecisionBlocked')}</p>
         </div>
         <div className="profile-strip__actions">
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="编辑买家资料"
+            aria-expanded={editingProfile}
+            disabled={!runtime.session || runtime.buyerProfileState !== 'ready'}
+            onClick={() => setEditingProfile((current) => !current)}
+          >
+            <UserRound aria-hidden="true" size={20} />
+          </button>
           <Link className="icon-button" to="/assets/notifications" aria-label="打开通知中心">
             <Bell aria-hidden="true" size={20} />
           </Link>
@@ -521,6 +540,22 @@ export function AssetsScreen() {
           </Link>
         </div>
       </section>
+
+      {runtime.buyerProfileState === 'loading' ? <div className="account-skeleton" aria-label="正在加载买家资料" /> : null}
+      {runtime.session && runtime.buyerProfileState === 'error' ? (
+        <div className="catalog-retry">
+          <StatusNotice title="资料同步失败" tone="warning">不使用钱包地址伪造 UID 或昵称。</StatusNotice>
+          <button className="button button--secondary" type="button" onClick={() => void runtime.reloadBuyerAccount()} disabled={runtime.busy}>
+            <RefreshCw aria-hidden="true" size={18} /> 重新同步
+          </button>
+        </div>
+      ) : null}
+      {editingProfile && runtime.buyerProfile ? (
+        <BuyerProfileForm onClose={() => setEditingProfile(false)} />
+      ) : null}
+      {runtime.buyerProfile?.avatarAssetId && runtime.buyerAvatarState === 'error' ? (
+        <p className="field-error" role="status">头像媒体服务未配置或不可用，资料其他字段仍来自 Core。</p>
+      ) : null}
 
       <section className="section-block" aria-labelledby="order-center-title">
         <div className="section-heading">
@@ -535,7 +570,7 @@ export function AssetsScreen() {
             return (
               <Link key={item.label} to="/assets/orders" className="order-status-item">
                 <span className="order-status-item__icon"><Icon aria-hidden="true" size={20} /></span>
-                <strong>{runtime.session && runtime.ordersState !== 'error' ? item.count : '--'}</strong>
+                <strong>{runtime.session && runtime.buyerOverviewState === 'ready' ? item.count : '--'}</strong>
                 <span>{item.label}</span>
               </Link>
             );
@@ -574,10 +609,48 @@ export function AssetsScreen() {
   );
 }
 
+function BuyerProfileForm({ onClose }: { onClose(): void }) {
+  const runtime = useMallRuntime();
+  const [nickname, setNickname] = useState(runtime.buyerProfile?.nickname ?? '');
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  return (
+    <form
+      className="profile-form"
+      aria-label="编辑买家资料"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void runtime.saveBuyerProfile(nickname, avatarFile).then((saved) => { if (saved) onClose(); });
+      }}
+    >
+      <label className="field">
+        昵称
+        <input value={nickname} onChange={(event) => setNickname(event.target.value)} maxLength={40} autoComplete="nickname" />
+      </label>
+      <label className="field">
+        头像文件
+        <input
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          onChange={(event) => setAvatarFile(event.target.files?.[0] ?? null)}
+          aria-describedby="avatar-upload-help"
+        />
+        <span id="avatar-upload-help" className="field-help">JPG、PNG 或 WebP，最大 10 MB；必须经过 provider-sealed 验证后才会绑定。</span>
+      </label>
+      <div className="profile-form__actions">
+        <button className="button button--secondary" type="button" onClick={onClose} disabled={runtime.busy}>取消</button>
+        <button className="button button--primary" type="submit" disabled={runtime.busy || nickname.trim().length > 40}>
+          <Save aria-hidden="true" size={18} /> {runtime.busy ? '正在保存' : '保存资料'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export function AddressScreen() {
-  const [phone, setPhone] = useState('');
-  const [phoneTouched, setPhoneTouched] = useState(false);
-  const phoneInvalid = phoneTouched && phone.length > 0 && !/^\d{11}$/.test(phone);
+  const runtime = useMallRuntime();
+  const [rawText, setRawText] = useState('');
+  const [label, setLabel] = useState('家');
+  const [isDefault, setIsDefault] = useState(false);
 
   return (
     <div className="screen screen--detail">
@@ -600,66 +673,202 @@ export function AddressScreen() {
           地址文本
           <textarea
             rows={4}
-            disabled
-            placeholder="安全解析服务发布后可用"
+            value={rawText}
+            onChange={(event) => setRawText(event.target.value)}
+            disabled={!runtime.session || runtime.busy}
+            placeholder="例：张三 13800138000 辽宁省大连市中山区示例路 24 号"
             aria-describedby="parser-reason"
+            maxLength={1000}
           />
         </label>
-        <p id="parser-reason" className="field-help">当前不在浏览器本地解析或留存收货信息。</p>
+        <p id="parser-reason" className="field-help">原始粘贴文本只发往 Core 解析，不写入本地缓存或生产 fixture。</p>
+        <button
+          className="button button--secondary"
+          type="button"
+          disabled={!runtime.session || runtime.busy || rawText.trim().length < 5}
+          onClick={() => void runtime.parseBuyerAddress(rawText).then((parsed) => { if (parsed) setRawText(''); })}
+        >
+          <ScanLine aria-hidden="true" size={18} /> {runtime.addressParseState === 'loading' ? '正在解析' : '解析并复核'}
+        </button>
       </section>
 
-      <form className="address-form" onSubmit={(event) => event.preventDefault()} noValidate>
-        <fieldset>
-          <legend>收货人信息</legend>
-          <label className="field">
-            姓名
-            <input name="name" autoComplete="name" maxLength={50} />
-          </label>
-          <label className="field">
-            手机号
-            <input
-              name="phone"
-              value={phone}
-              onChange={(event) => setPhone(event.target.value.replace(/\D/g, '').slice(0, 11))}
-              onBlur={() => setPhoneTouched(true)}
-              inputMode="numeric"
-              autoComplete="tel"
-              aria-invalid={phoneInvalid}
-              aria-describedby={phoneInvalid ? 'phone-error' : 'phone-help'}
-            />
-            <span id="phone-help" className="field-help">请输入 11 位手机号</span>
-            {phoneInvalid ? <span id="phone-error" className="field-error" role="alert">手机号须为 11 位数字</span> : null}
-          </label>
-        </fieldset>
+      {runtime.parsedBuyerAddress ? (
+        <AddressReview
+          label={label}
+          isDefault={isDefault}
+          onLabelChange={setLabel}
+          onDefaultChange={setIsDefault}
+          onCancel={runtime.clearParsedBuyerAddress}
+        />
+      ) : null}
 
-        <fieldset disabled>
-          <legend>省市区</legend>
-          <div className="region-grid">
-            <label className="field">省份<select defaultValue=""><option value="">待同步</option></select></label>
-            <label className="field">城市<select defaultValue=""><option value="">待同步</option></select></label>
-            <label className="field">区县<select defaultValue=""><option value="">待同步</option></select></label>
-          </div>
-        </fieldset>
-
-        <label className="field">
-          详细地址
-          <textarea name="street-address" autoComplete="street-address" rows={3} maxLength={200} />
-        </label>
-
-        <label className="check-field">
-          <input type="checkbox" />
-          <span>设为默认地址</span>
-        </label>
-
-        <DisabledAction reason="地址服务与行政区划数据未发布，当前内容不会保存">
-          保存地址
-        </DisabledAction>
-      </form>
-
-      <EmptyState title="暂无已同步地址">
-        地址列表、修改、删除和默认状态将在身份与数据服务可用后显示。
-      </EmptyState>
+      {!runtime.session ? <StatusNotice title="需要钱包登录">登录后只读写当前 BUYER 会话所有的加密地址。</StatusNotice> : null}
+      {runtime.buyerAddressesState === 'loading' ? <div className="address-list-skeleton" aria-label="正在加载收货地址" /> : null}
+      {runtime.session && runtime.buyerAddressesState === 'error' ? (
+        <div className="catalog-retry">
+          <StatusNotice title="地址同步失败" tone="warning">列表不使用本地缓存，409 版本冲突后必须重新同步。</StatusNotice>
+          <button className="button button--secondary" type="button" onClick={() => void runtime.reloadBuyerAccount()} disabled={runtime.busy}>
+            <RefreshCw aria-hidden="true" size={18} /> 重新同步
+          </button>
+        </div>
+      ) : null}
+      {runtime.session && runtime.buyerAddressesState === 'empty' ? (
+        <EmptyState title="暂无已保存地址">先粘贴地址并完成 Core 解析复核，再保存。</EmptyState>
+      ) : null}
+      {runtime.buyerAddresses.length > 0 ? (
+        <section className="saved-addresses" aria-labelledby="saved-address-title">
+          <div className="section-heading"><h2 id="saved-address-title">已保存地址</h2><span>{runtime.buyerAddresses.length} 条</span></div>
+          {runtime.buyerAddresses.map((address) => <SavedAddressRow key={address.addressId} address={address} />)}
+        </section>
+      ) : null}
     </div>
+  );
+}
+
+function AddressReview({
+  label,
+  isDefault,
+  onLabelChange,
+  onDefaultChange,
+  onCancel,
+}: {
+  label: string;
+  isDefault: boolean;
+  onLabelChange(value: string): void;
+  onDefaultChange(value: boolean): void;
+  onCancel(): void;
+}) {
+  const runtime = useMallRuntime();
+  const parsed = runtime.parsedBuyerAddress!;
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => headingRef.current?.focus(), []);
+  const fields = [
+    ['收货人', parsed.recipientName],
+    ['手机号', parsed.phone],
+    ['省份', parsed.province],
+    ['城市', parsed.city],
+    ['区县', parsed.district],
+    ['详细地址', parsed.detailAddress],
+    ['行政区代码', parsed.regionCode],
+    ['经度', parsed.longitude === null ? null : String(parsed.longitude)],
+    ['纬度', parsed.latitude === null ? null : String(parsed.latitude)],
+  ] as const;
+  return (
+    <form
+      className="address-review"
+      aria-labelledby="address-review-title"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void runtime.createBuyerAddress(label, isDefault);
+      }}
+    >
+      <div className="section-heading">
+        <div><p className="eyebrow">REVIEW REQUIRED</p><h2 id="address-review-title" ref={headingRef} tabIndex={-1}>复核识别结果</h2></div>
+        <BadgeCheck aria-hidden="true" size={20} />
+      </div>
+      <p className="field-help">请逐项确认姓名、手机号、省市区和详细地址。未点击“确认并保存”不会写入地址簿。</p>
+      <dl className="address-review__fields">
+        {fields.map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{value ?? '缺失'}</dd></div>)}
+      </dl>
+      {parsed.missingFields.length > 0 ? (
+        <div className="address-review__missing" role="alert">
+          <strong>缺少必填字段</strong>
+          <ul>{parsed.missingFields.map((field) => <li key={field}>{field}</li>)}</ul>
+        </div>
+      ) : null}
+      <label className="field">
+        地址标签
+        <input value={label} onChange={(event) => onLabelChange(event.target.value)} maxLength={32} required />
+      </label>
+      <label className="check-field">
+        <input type="checkbox" checked={isDefault} onChange={(event) => onDefaultChange(event.target.checked)} />
+        <span>设为默认地址</span>
+      </label>
+      <div className="profile-form__actions">
+        <button className="button button--secondary" type="button" onClick={onCancel} disabled={runtime.busy}>取消</button>
+        <button className="button button--primary" type="submit" disabled={runtime.busy || !parsed.canSave || !label.trim()}>
+          <Save aria-hidden="true" size={18} /> {runtime.busy ? '正在保存' : '确认并保存'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function SavedAddressRow({ address }: { address: BuyerSavedAddress }) {
+  const runtime = useMallRuntime();
+  const [editing, setEditing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [draft, setDraft] = useState({
+    label: address.label,
+    recipientName: address.recipientName,
+    phone: address.phone,
+    detailAddress: address.detailAddress,
+    isDefault: address.isDefault,
+  });
+  const phoneInvalid = !/^1[3-9][0-9]{9}$/.test(draft.phone);
+  const canSave = Boolean(
+    draft.label.trim()
+    && draft.recipientName.trim()
+    && !phoneInvalid
+    && draft.detailAddress.trim().length >= 5,
+  );
+
+  if (editing) {
+    return (
+      <form
+        className="saved-address saved-address--editing"
+        aria-label={`编辑${address.label}地址`}
+        onSubmit={(event) => {
+          event.preventDefault();
+          void runtime.updateBuyerAddress(address.addressId, {
+            ...draft,
+            longitude: address.longitude,
+            latitude: address.latitude,
+          }).then((saved) => { if (saved) setEditing(false); });
+        }}
+      >
+        <label className="field">标签<input value={draft.label} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} maxLength={32} /></label>
+        <label className="field">收货人<input value={draft.recipientName} onChange={(event) => setDraft((current) => ({ ...current, recipientName: event.target.value }))} maxLength={64} autoComplete="name" /></label>
+        <label className="field">
+          手机号
+          <input value={draft.phone} onChange={(event) => setDraft((current) => ({ ...current, phone: event.target.value.replace(/\D/g, '').slice(0, 11) }))} inputMode="numeric" autoComplete="tel" aria-invalid={phoneInvalid} />
+          {phoneInvalid ? <span className="field-error" role="alert">请输入有效的 11 位手机号</span> : null}
+        </label>
+        <label className="field">详细地址<textarea value={draft.detailAddress} onChange={(event) => setDraft((current) => ({ ...current, detailAddress: event.target.value }))} rows={3} maxLength={300} autoComplete="street-address" /></label>
+        <label className="check-field"><input type="checkbox" checked={draft.isDefault} onChange={(event) => setDraft((current) => ({ ...current, isDefault: event.target.checked }))} /><span>设为默认地址</span></label>
+        <div className="profile-form__actions">
+          <button className="button button--secondary" type="button" onClick={() => setEditing(false)} disabled={runtime.busy}>取消</button>
+          <button className="button button--primary" type="submit" disabled={runtime.busy || !canSave}><Save aria-hidden="true" size={18} /> 保存修改</button>
+        </div>
+      </form>
+    );
+  }
+
+  return (
+    <article className="saved-address">
+      <header>
+        <div><h3>{address.label}</h3><span>{address.isDefault ? '默认地址' : `v${address.version}`}</span></div>
+        {address.isDefault ? <Star aria-label="当前默认地址" size={17} /> : null}
+      </header>
+      <p><strong>{address.recipientName}</strong> · {address.phone}</p>
+      <p>{address.formattedAddress}</p>
+      <small>{address.province} / {address.city} / {address.district} · {address.regionCode}</small>
+      <div className="saved-address__actions">
+        <button className="button button--primary" type="button" onClick={() => void runtime.selectSavedAddress(address.addressId)} disabled={runtime.busy}>用于下单</button>
+        <button className="button button--secondary" type="button" onClick={() => setEditing(true)} disabled={runtime.busy}>编辑</button>
+        {!address.isDefault ? (
+          <button className="icon-button" type="button" aria-label={`将${address.label}设为默认地址`} onClick={() => void runtime.setDefaultBuyerAddress(address.addressId)} disabled={runtime.busy}><Star aria-hidden="true" size={18} /></button>
+        ) : null}
+        <button className="icon-button" type="button" aria-label={`删除${address.label}地址`} onClick={() => setConfirmDelete(true)} disabled={runtime.busy}><Trash2 aria-hidden="true" size={18} /></button>
+      </div>
+      {confirmDelete ? (
+        <div className="saved-address__delete" role="alert">
+          <span>确定删除这条地址？</span>
+          <button type="button" onClick={() => setConfirmDelete(false)} disabled={runtime.busy}>取消</button>
+          <button type="button" onClick={() => void runtime.deleteBuyerAddress(address.addressId)} disabled={runtime.busy}>确认删除</button>
+        </div>
+      ) : null}
+    </article>
   );
 }
 
@@ -713,6 +922,8 @@ export function OrdersScreen() {
               actions={runtime.orderActions[order.orderId] ?? []}
               {...(runtime.orderTargets[order.orderId] ? { target: runtime.orderTargets[order.orderId] } : {})}
               {...(runtime.orderCapabilityErrors[order.orderId] ? { capabilityError: runtime.orderCapabilityErrors[order.orderId] } : {})}
+              {...(runtime.takeoverTimelines[order.orderId] ? { takeoverTimeline: runtime.takeoverTimelines[order.orderId] } : {})}
+              {...(runtime.takeoverTimelineErrors[order.orderId] ? { takeoverTimelineError: runtime.takeoverTimelineErrors[order.orderId] } : {})}
             />
           ))}
         </div>
@@ -747,11 +958,15 @@ function OrderRow({
   target,
   actions,
   capabilityError,
+  takeoverTimeline,
+  takeoverTimelineError,
 }: {
   order: FulfillmentOrder;
   target?: FulfillmentTarget;
   actions: readonly AllowedAction[];
   capabilityError?: string;
+  takeoverTimeline?: MallRuntimeValue['takeoverTimelines'][string];
+  takeoverTimelineError?: string;
 }) {
   const runtime = useMallRuntime();
   const logistics = order.logistics.at(-1);
@@ -823,6 +1038,29 @@ function OrderRow({
           </div>
         </section>
       ) : null}
+
+      <section className="order-row__section takeover-timeline" aria-label="平台接管时间线">
+        <div className="section-heading section-heading--compact"><h3>平台接管</h3><History aria-hidden="true" size={17} /></div>
+        {takeoverTimelineError ? <p className="field-error" role="status">{takeoverTimelineError}</p> : null}
+        {takeoverTimeline ? (
+          <>
+            <p className="takeover-timeline__status">
+              历史完整性：<strong>{takeoverTimeline.historyStatus}</strong>
+              {takeoverTimeline.historyStatus === 'PARTIAL_LEGACY' ? '（早期记录不完整）' : ''}
+            </p>
+            {takeoverTimeline.transitions.length > 0 ? (
+              <ol>
+                {takeoverTimeline.transitions.map((transition) => (
+                  <li key={transition.transitionId}>
+                    <span>{transition.fromState ?? '初始'} → <strong>{transition.toState}</strong></span>
+                    <small>{transition.evidenceType} · {formatIso(transition.occurredAt)}</small>
+                  </li>
+                ))}
+              </ol>
+            ) : <p>当前订单没有公开接管转换记录。</p>}
+          </>
+        ) : !takeoverTimelineError ? <p>正在同步公开接管记录。</p> : null}
+      </section>
 
       <section className="order-row__actions" aria-label="订单允许操作">
         <div className="section-heading section-heading--compact"><h3>可执行操作</h3><ShieldAlert aria-hidden="true" size={17} /></div>
