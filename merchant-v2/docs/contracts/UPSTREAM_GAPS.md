@@ -1,7 +1,7 @@
 # Merchant Workbench Core Gaps
 
-The merchant product consumes Core's coordinated
-`2.0.0-settlement-admin.9` artifact workspace package. Bootstrap, SIWE,
+The merchant product consumes Core's coordinated `2.0.0-logistics.1` artifact
+workspace package. Bootstrap, SIWE,
 merchant-bound Catalog/SKU/inventory management, immutable media, wallet-scoped fulfillment, merchant finance,
 guarantee-deposit evidence, signed settlement requests and Safe-finality
 history are connected through their published HTTP surfaces. The browser
@@ -25,16 +25,21 @@ state mismatches.
 | GAP-MER-014 | Tenant-scoped merchant profile, immutable settlement identity and owned Logo media validation | Settings consumes GET/PUT profile with expectedVersion/idempotency; only shopName/logoAssetId are editable and settlement wallet never enters the PUT body |
 | GAP-MER-015 | Merchant-scoped reverse-time audit read model and bounded CSV export | Filters/cursor, partial-history label, signature/Safe-or-chain hashes and exact Core CSV download are live without a browser-side audit replica |
 
+## Resolved In Logistics Batch
+
+| Gap ID | Published Core capability | Merchant evidence |
+|---|---|---|
+| GAP-MER-009 | Wallet-bound Feie/Yilianyun Device ID binding plus durable one-copy waybill and two-copy pickup print jobs | The connected merchant signs the exact Core challenge; the workbench renders tenant-scoped jobs and retries with stable command keys |
+| GAP-MER-010 | Kuaidi100/Cainiao waybill batches, provider tracking evidence and shipment recording | Selected eligible delivery orders submit only published provider/carrier/store/order fields; each authoritative result and failure state is rendered without browser-generated tracking data |
+
 ## Remaining Gaps
 
 | Gap ID | Required Core capability | Fail-closed behavior |
 |---|---|---|
 | GAP-MER-001 | Coordinated merchant runtime endpoints beyond published payment, fulfillment and settlement/admin surfaces | Published reads and writes are live; unpublished writes remain unavailable |
-| GAP-MER-002 | Secondary-signature intents plus production merchant allowlist and domain configuration | SIWE client is live; unauthorized/rejected/wrong-chain states fail closed and sensitive actions remain unavailable |
+| GAP-MER-002 | Secondary-signature intents beyond the published printer binding plus production merchant allowlist and domain configuration | Printer binding signs the exact Core challenge; unpublished region-change intent, unauthorized/rejected/wrong-chain states remain fail closed |
 | GAP-MER-005 | PII-authorized, audit-logged server-side Excel export and list-row consignee/contact projection | Cursor/filter/manual-batch reads and writes are live; Excel export stays unavailable and delivery PII is fetched only through the authorized immutable target endpoint |
 | GAP-MER-007 | Camera challenge/scan transport beyond the published six-digit order/store verification command | Manual order/store-bound verification is live; camera launch stays unavailable |
 | GAP-MER-008 | AMap reverse geocode plus signed immutable six-digit region | Region read-only; store save disabled |
-| GAP-MER-009 | Feie device binding/status/two-copy print job/retry contract | Printer controls return ConfigurationRequired |
-| GAP-MER-010 | Canonical raw tracking-number hashing plus Kuaidi100 waybill and callback integration | Exact precomputed shipment/evidence hashes can submit; raw number generation and provider controls return ConfigurationRequired |
 | GAP-MER-013 | Authoritative seckill revenue detail | Published NPL subtype balances and finance-center BNM totals are live; only the unpublished seckill revenue projection remains unavailable |
 | GAP-MER-018 | Provider accounts/devices, authorized merchant wallet, RPC/domain/Safe inputs | ExternalBlocked; no simulated success |

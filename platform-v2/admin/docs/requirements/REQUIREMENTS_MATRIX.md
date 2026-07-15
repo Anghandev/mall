@@ -219,7 +219,7 @@ wallet, Safe, RPC, domain and device evidence remains `ExternalBlocked` under
 
 ## Settlement/Admin `.9` Business Dashboard, Risk And Seckill Evidence
 
-The current product pin is
+That batch's product pin was
 `@abu24k/core-artifacts@2.0.0-settlement-admin.9`. The authenticated Admin
 Dashboard consumes generated `AdminBusinessDashboard` without a local
 financial calculation or production fixture:

@@ -11,7 +11,7 @@ pnpm --filter @abu24k/merchant check
 ```
 
 The app consumes the coordinated `@abu24k/core-artifacts` workspace package at
-`2.0.0-settlement-admin.9`. In addition to Bootstrap, merchant SIWE and the
+`2.0.0-logistics.1`. In addition to Bootstrap, merchant SIWE and the
 payment/fulfillment surfaces, the workbench consumes merchant finance,
 guarantee-deposit evidence, settlement intents, signed settlement requests and
 Safe-finality history. The help center reads wallet-targeted published CMS
@@ -37,9 +37,11 @@ availability does not gate the merchant projection.
 
 The fulfillment center consumes Core's stable `(createdAt, orderId)` cursor,
 server-side date/SKU/state/mode/order-kind filters, complete quantity/payment
-TxHash/order-kind/`allowedActions` rows, and the atomic manual-shipment batch.
-Batch retries preserve the batch and item idempotency keys. The browser submits
-only Core-issued canonical tracking/evidence hashes and does not derive them.
+TxHash/order-kind/`allowedActions` rows, the atomic manual-shipment batch,
+provider-issued electronic waybills and durable print jobs. Batch and print
+retries preserve their idempotency keys. The browser submits only published
+provider/carrier/store/order fields or Core-issued canonical tracking/evidence
+hashes; it does not derive tracking numbers, print content or financial state.
 
 The settings center consumes the tenant-scoped merchant profile with optimistic
 versioning and stable retry keys. Shop name and a provider-sealed,
@@ -54,9 +56,9 @@ shows signature and Safe/chain transaction hashes while labeling
 count as global chain proof. Bounded CSV export downloads only Core-returned
 content for ranges of at most 31 days and at most 1,000 rows.
 
-PII-safe Excel export, electronic-waybill providers, governed settlement-wallet
-migration and physical printer evidence remain fail closed until their
-coordinated capabilities are published or configured. The browser never calls the buyer-only payment
+PII-safe Excel export and governed settlement-wallet migration remain fail
+closed. Real provider accounts, authorized production wallets and physical
+printer acceptance remain externally blocked. The browser never calls the buyer-only payment
 projection with a merchant session.
 
 Core is expected on the same origin. A separately hosted local Core can be
