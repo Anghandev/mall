@@ -1385,7 +1385,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     assert.equal((await fetch(`${base}/v2/merchant/audit/entries?limit=20`, {
       headers: bearerHeaders,
     })).status, 200);
-    assert.equal((await fetch(`${base}/v2/merchant/audit/exports`, {
+    const auditExport = await fetch(`${base}/v2/merchant/audit/exports`, {
       method: 'POST',
       headers: bearerHeaders,
       body: JSON.stringify({
@@ -1393,7 +1393,9 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
         to: '2026-07-15T00:00:00.000Z',
         idempotencyKey: 'merchant-audit-export-http-1',
       }),
-    })).status, 200);
+    });
+    assert.equal(auditExport.status, 200);
+    assert.equal(((await auditExport.json()) as { merchantId: string }).merchantId, 'merchant-1');
 
     const productSlotBody = {
       idempotencyKey: 'http-product-slot-save-1',

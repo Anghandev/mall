@@ -21,7 +21,9 @@ const SAFE_EVENTS = new Interface([
 const TRANSFER_EVENT = new Interface([
   'event Transfer(address indexed from,address indexed to,uint256 amount)',
 ]);
+const TRANSFER_TOPIC = TRANSFER_EVENT.getEvent('Transfer')!.topicHash.toLowerCase();
 const SAFE_READ = new Interface(['function nonce() view returns (uint256)']);
+const ERC20_READ = new Interface(['function balanceOf(address account) view returns (uint256)']);
 
 export class HttpSafeApprovalVerifier implements SafeApprovalVerifier {
   readonly #url: string;
@@ -259,7 +261,12 @@ async function observe(provider: JsonRpcProvider, txHash: string): Promise<Obser
       // Not an ERC-20 Transfer event.
     }
   }
-  const transactionDeltas = transactionDeltasFromTransfers(transfers);
+  const transactionDeltas = await readTransactionBalanceDeltas(
+    provider,
+    receipt.blockNumber,
+    txHash.toLowerCase(),
+    transfers,
+  );
   const nonceResult = await provider.send('eth_call', [{
     to: safeAddress,
     data: SAFE_READ.encodeFunctionData('nonce'),
@@ -285,25 +292,78 @@ async function observe(provider: JsonRpcProvider, txHash: string): Promise<Obser
   };
 }
 
-function transactionDeltasFromTransfers(
-  transfers: readonly { tokenAddress: string; from: string; to: string; amount: string }[],
+async function readTransactionBalanceDeltas(
+  provider: JsonRpcProvider,
+  blockNumber: number,
+  executionTxHash: string,
+  transfers: readonly { tokenAddress: string; from: string; to: string }[],
 ) {
-  const deltas = new Map<string, { tokenAddress: string; account: string; delta: bigint }>();
+  if (blockNumber <= 0) throw new CoreError('InvalidFinality', 'Settlement block has no prior state', 409);
+  const pairs = new Map<string, { tokenAddress: string; account: string }>();
+  for (const transfer of transfers) {
+    for (const account of [transfer.from, transfer.to]) {
+      pairs.set(`${transfer.tokenAddress}:${account}`, { tokenAddress: transfer.tokenAddress, account });
+    }
+  }
+  const sortedPairs = [...pairs.values()].sort((left, right) =>
+    left.tokenAddress.localeCompare(right.tokenAddress) || left.account.localeCompare(right.account));
+  try {
+    const blockDeltas = await Promise.all(sortedPairs.map(async ({ tokenAddress, account }) => {
+      const data = ERC20_READ.encodeFunctionData('balanceOf', [account]);
+      const [beforeResult, afterResult] = await Promise.all([
+        provider.send('eth_call', [{ to: tokenAddress, data }, `0x${(blockNumber - 1).toString(16)}`]),
+        provider.send('eth_call', [{ to: tokenAddress, data }, `0x${blockNumber.toString(16)}`]),
+      ]);
+      const before = BigInt(ERC20_READ.decodeFunctionResult('balanceOf', beforeResult)[0]);
+      const after = BigInt(ERC20_READ.decodeFunctionResult('balanceOf', afterResult)[0]);
+      return { tokenAddress, account, delta: after - before };
+    }));
+    const tokenAddresses = [...new Set(sortedPairs.map((item) => item.tokenAddress))];
+    const blockLogs = await provider.getLogs({
+      fromBlock: blockNumber,
+      toBlock: blockNumber,
+      address: tokenAddresses,
+      topics: [TRANSFER_TOPIC],
+    });
+    const unrelatedTransfers = blockLogs
+      .filter((log) => log.transactionHash.toLowerCase() !== executionTxHash)
+      .map((log) => {
+        const event = TRANSFER_EVENT.parseLog({ topics: [...log.topics], data: log.data });
+        if (!event || event.name !== 'Transfer') throw new Error('invalid transfer event');
+        return {
+          tokenAddress: getAddress(log.address).toLowerCase(),
+          from: getAddress(String(event.args.from)).toLowerCase(),
+          to: getAddress(String(event.args.to)).toLowerCase(),
+          amount: String(event.args.amount),
+        };
+      });
+    return reconcileTransactionBalanceDeltas(blockDeltas, unrelatedTransfers);
+  } catch (error) {
+    throw new CoreError('ExternalBlocked', 'Archive RPC transaction balance evidence is unavailable', 503, {
+      cause: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+export function reconcileTransactionBalanceDeltas(
+  blockDeltas: readonly { tokenAddress: string; account: string; delta: bigint }[],
+  unrelatedTransfers: readonly { tokenAddress: string; from: string; to: string; amount: string }[],
+) {
+  const unrelated = new Map<string, bigint>();
   const add = (tokenAddress: string, account: string, delta: bigint) => {
     const key = `${tokenAddress}:${account}`;
-    const current = deltas.get(key);
-    deltas.set(key, { tokenAddress, account, delta: (current?.delta ?? 0n) + delta });
+    unrelated.set(key, (unrelated.get(key) ?? 0n) + delta);
   };
-  for (const transfer of transfers) {
+  for (const transfer of unrelatedTransfers) {
     const amount = BigInt(transfer.amount);
     add(transfer.tokenAddress, transfer.from, -amount);
     add(transfer.tokenAddress, transfer.to, amount);
   }
-  return [...deltas.values()]
-    .filter((item) => item.delta !== 0n)
-    .sort((left, right) =>
-      left.tokenAddress.localeCompare(right.tokenAddress) || left.account.localeCompare(right.account))
-    .map((item) => ({ tokenAddress: item.tokenAddress, account: item.account, delta: item.delta.toString() }));
+  return blockDeltas.map((item) => ({
+    tokenAddress: item.tokenAddress,
+    account: item.account,
+    delta: (item.delta - (unrelated.get(`${item.tokenAddress}:${item.account}`) ?? 0n)).toString(),
+  }));
 }
 
 function comparable(value: ObservedReceipt): Omit<ObservedReceipt, 'confirmations'> {

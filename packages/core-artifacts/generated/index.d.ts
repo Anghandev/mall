@@ -1784,6 +1784,7 @@ export interface MerchantAuditList {
 }
 
 export interface MerchantAuditExport {
+  merchantId: string;
   contentType: 'text/csv; charset=utf-8';
   filename: string;
   entryCount: number;

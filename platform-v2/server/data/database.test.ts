@@ -418,6 +418,7 @@ test('merchant profile keeps settlement wallet immutable and merchant audit neve
       from: new Date(now.getTime() - 60_000),
       to: new Date(now.getTime() + 60_000),
     });
+    assert.equal(exported.merchantId, 'merchant-1');
     assert.equal(exported.entryCount, 1);
     assert.equal(exported.csv.includes('MerchantProfileUpdated'), true);
     assert.equal(exported.csv.includes('merchant-2'), false);
