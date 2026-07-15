@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.7",
+  "artifactVersion": "2.0.0-settlement-admin.8",
   "orderProjectionStates": [
     "QUOTED",
     "SUBMITTED",
@@ -320,6 +320,7 @@
     "QuoteExpired",
     "ReorgPending",
     "ReservationConflict",
+    "RiskRestricted",
     "Unauthorized",
     "UnknownState"
   ],
@@ -481,5 +482,34 @@
   "providerReadinessStates": [
     "READY",
     "CONFIGURATION_REQUIRED"
+  ],
+  "riskAppealStates": [
+    "PENDING",
+    "APPROVED",
+    "REJECTED"
+  ],
+  "riskRestrictionKinds": [
+    "NEW_PAYMENT",
+    "BLACKLIST"
+  ],
+  "riskRestrictionStates": [
+    "ACTIVE",
+    "EXPIRED",
+    "OVERRIDDEN"
+  ],
+  "riskSignalTypes": [
+    "HIGH_GAS",
+    "WALLET_CONTEXT",
+    "ORDER_CANCELLATION"
+  ],
+  "riskSourceTypes": [
+    "CHAIN_MONITOR",
+    "EDGE_AUTH",
+    "ORDER_SERVICE"
+  ],
+  "riskSubjectTypes": [
+    "WALLET",
+    "IP",
+    "DEVICE"
   ]
 }

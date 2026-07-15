@@ -1,4 +1,4 @@
-export const CORE_ARTIFACT_VERSION = '2.0.0-settlement-admin.7';
+export const CORE_ARTIFACT_VERSION = '2.0.0-settlement-admin.8';
 export const BSC_CHAIN_ID = 56;
 export const USDT_ADDRESS = '0x55d398326f99059ff775485246999027b3197955';
 export const NPL_ADDRESS = '0x4e8277ab31e4956b2cd48449793a57656dfc03d2';
@@ -398,3 +398,21 @@ export type InfrastructureProvider = (typeof infrastructureProviders)[number];
 
 export const providerReadinessStates = ['READY', 'CONFIGURATION_REQUIRED'] as const;
 export type ProviderReadinessState = (typeof providerReadinessStates)[number];
+
+export const riskSignalTypes = ['HIGH_GAS', 'WALLET_CONTEXT', 'ORDER_CANCELLATION'] as const;
+export type RiskSignalType = (typeof riskSignalTypes)[number];
+
+export const riskSourceTypes = ['CHAIN_MONITOR', 'EDGE_AUTH', 'ORDER_SERVICE'] as const;
+export type RiskSourceType = (typeof riskSourceTypes)[number];
+
+export const riskSubjectTypes = ['WALLET', 'IP', 'DEVICE'] as const;
+export type RiskSubjectType = (typeof riskSubjectTypes)[number];
+
+export const riskRestrictionKinds = ['NEW_PAYMENT', 'BLACKLIST'] as const;
+export type RiskRestrictionKind = (typeof riskRestrictionKinds)[number];
+
+export const riskRestrictionStates = ['ACTIVE', 'EXPIRED', 'OVERRIDDEN'] as const;
+export type RiskRestrictionState = (typeof riskRestrictionStates)[number];
+
+export const riskAppealStates = ['PENDING', 'APPROVED', 'REJECTED'] as const;
+export type RiskAppealState = (typeof riskAppealStates)[number];

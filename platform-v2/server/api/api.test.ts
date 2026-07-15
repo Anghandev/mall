@@ -1208,6 +1208,15 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       updateMerchantProfile: async (actor, input) => ({ merchantId: actor.merchantId, ...input }),
       recordMerchantAuditExport: async () => ({ recorded: true }),
     },
+    riskService: {
+      ingestObservation: async (input) => ({ observation: input, restrictions: [] }),
+      listOverview: async () => ({ observations: [], restrictions: [], appeals: [] }),
+      createManualRestriction: async (_actor, input) => ({ restrictionId: HASH, ...input }),
+      overrideRestriction: async (_actor, restrictionId, input) => ({ restrictionId, state: 'OVERRIDDEN', ...input }),
+      submitAppeal: async (_actor, input) => ({ appealId: HASH_2, state: 'PENDING', ...input }),
+      decideAppeal: async (_actor, appealId, input) => ({ appealId, state: input.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED' }),
+    },
+    riskSignalToken: 'risk-signal-token',
     logisticsWebhookSecrets: {
       KUAIDI100: 'kuaidi-webhook-secret',
       CAINIAO: 'cainiao-webhook-secret',
@@ -1313,6 +1322,64 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     });
     assert.equal(adminDashboard.status, 200);
     assert.equal(((await adminDashboard.json()) as { timezone: string }).timezone, 'Asia/Shanghai');
+    const riskObservationBody = {
+      observationId: HASH,
+      signalType: 'HIGH_GAS',
+      sourceType: 'CHAIN_MONITOR',
+      walletAddress: wallet.address,
+      txHash: HASH_2,
+      gasPriceWei: '101',
+      evidenceHash: HASH,
+      observedAt: now.toISOString(),
+    };
+    assert.equal((await fetch(`${base}/v2/internal/risk/observations`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(riskObservationBody),
+    })).status, 401);
+    assert.equal((await fetch(`${base}/v2/internal/risk/observations`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer risk-signal-token' },
+      body: JSON.stringify(riskObservationBody),
+    })).status, 202);
+    assert.equal((await fetch(`${base}/v2/admin/risk/overview`, {
+      headers: { authorization: `Bearer ${buyerOnlyToken}` },
+    })).status, 403);
+    assert.equal((await fetch(`${base}/v2/admin/risk/overview`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/risk/restrictions`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        subjectType: 'WALLET',
+        subjectValue: wallet.address,
+        restrictionKind: 'BLACKLIST',
+        reasonCode: 'MANUAL_REVIEW',
+        evidenceHash: HASH,
+        idempotencyKey: 'risk-http-manual-1',
+      }),
+    })).status, 201);
+    assert.equal((await fetch(`${base}/v2/admin/risk/restrictions/${HASH}/override`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ reasonCode: 'REVIEW_CLEARED', evidenceHash: HASH_2 }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/risk/appeals`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        restrictionId: HASH,
+        statementHash: HASH,
+        evidenceHash: HASH_2,
+        idempotencyKey: 'risk-http-appeal-1',
+      }),
+    })).status, 201);
+    assert.equal((await fetch(`${base}/v2/admin/risk/appeals/${HASH_2}/decision`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ decision: 'APPROVE', reasonCode: 'APPEAL_ACCEPTED', evidenceHash: HASH }),
+    })).status, 200);
 
     const buyerHeaders = {
       'content-type': 'application/json',

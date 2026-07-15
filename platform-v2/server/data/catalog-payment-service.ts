@@ -22,6 +22,7 @@ import {
 } from '../api/payment-signing.ts';
 import type { SignerRequest } from '../chain/signer.ts';
 import { reserveInventory } from './inventory.ts';
+import { assertWalletPaymentAllowed } from './risk-service.ts';
 import { assertQuoteFulfillmentTarget } from './fulfillment-target-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 import {
@@ -610,6 +611,7 @@ async function loadPreparation(executor: SqlExecutor, buyer: string, input: Crea
     "SELECT paused FROM core.circuit_breakers WHERE scope = 'NEW_PAYMENT'",
   );
   if (breaker.rows[0]?.paused) throw new CoreError('BreakerActive', 'New payments are paused', 409);
+  await assertWalletPaymentAllowed(executor, buyer, now);
   await assertQuoteFulfillmentTarget(executor, {
     buyerWallet: buyer,
     fulfillmentMode: input.fulfillmentMode,
@@ -672,6 +674,7 @@ async function loadSeckillPreparation(executor: SqlExecutor, buyer: string, inpu
      WHERE paused AND scope IN ('NEW_PAYMENT', 'SECKILL_PURCHASE')`,
   );
   if (breakers.rows.length > 0) throw new CoreError('BreakerActive', 'Seckill payments are paused', 409);
+  await assertWalletPaymentAllowed(executor, buyer, now);
   await assertQuoteFulfillmentTarget(executor, {
     buyerWallet: buyer,
     fulfillmentMode: input.fulfillmentMode,

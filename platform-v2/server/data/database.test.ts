@@ -63,6 +63,7 @@ import { SystemConfigService } from './system-config-service.ts';
 import { MonitoringService } from './monitoring-service.ts';
 import { BusinessAnalyticsService } from './business-analytics-service.ts';
 import { AccountService } from './account-service.ts';
+import { assertWalletPaymentAllowed, RiskService } from './risk-service.ts';
 import {
   MULTISEND_CALL_ONLY_ADDRESS,
   MULTISEND_CALL_ONLY_CODE_HASH,
@@ -104,6 +105,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '014_accounts_and_profiles.sql',
       '015_coverage_breaker_governance.sql',
       '016_coverage_breaker_safe_nonce.sql',
+      '017_risk_management.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -162,6 +164,274 @@ test('business and audit migrations apply from empty databases', async () => {
   } finally {
     await business.close();
     await audit.close();
+  }
+});
+
+test('risk observations create exact restrictions, block new payment and preserve appeal evidence', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    let now = new Date('2026-07-16T00:00:00.000Z');
+    const admin = Wallet.createRandom();
+    const operator = Wallet.createRandom();
+    const auditor = Wallet.createRandom();
+    const highGasWallet = Wallet.createRandom();
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (wallet_address, role, status, evidence_hash)
+       VALUES ($1,'ADMIN','ACTIVE',$4), ($2,'OPERATOR','ACTIVE',$4), ($3,'AUDITOR','ACTIVE',$4)`,
+      [admin.address.toLowerCase(), operator.address.toLowerCase(), auditor.address.toLowerCase(), HASH],
+    );
+    await db.query(
+      `INSERT INTO core.system_config_versions (
+         config_version_id, config_key, version, payload, payload_hash, effective_from,
+         idempotency_key, request_hash, created_by, created_at
+       ) VALUES ('risk-gas-v1','GAS',1,$1,$2,$3,'risk-gas-config',$4,$5,$3)`,
+      [
+        JSON.stringify({ seckillMaxGasPriceWei: '100', highGasRestrictionSeconds: 86_400 }),
+        `0x${'3'.repeat(64)}`,
+        new Date('2026-07-14T23:00:00.000Z'),
+        `0x${'4'.repeat(64)}`,
+        admin.address.toLowerCase(),
+      ],
+    );
+    await db.query(
+      `INSERT INTO core.system_config_publication_events (
+         event_id, config_key, active_config_version_id, action_digest, secondary_signer,
+         safe_address, safe_tx_hash, actor_wallet, created_at
+       ) VALUES ('risk-gas-published','GAS','risk-gas-v1',$1,$2,$3,$4,$5,$6)`,
+      [
+        `0x${'5'.repeat(64)}`,
+        operator.address.toLowerCase(),
+        '0x8888888888888888888888888888888888888888',
+        `0x${'6'.repeat(64)}`,
+        admin.address.toLowerCase(),
+        new Date('2026-07-14T23:01:00.000Z'),
+      ],
+    );
+    const risk = new RiskService({ transactions: transactionAdapter(db), clock: () => now });
+    const observedAt = now.toISOString();
+    const highGasInput = {
+      observationId: `0x${'7'.repeat(64)}`,
+      signalType: 'HIGH_GAS' as const,
+      sourceType: 'CHAIN_MONITOR' as const,
+      walletAddress: highGasWallet.address,
+      txHash: `0x${'8'.repeat(64)}`,
+      gasPriceWei: '101',
+      evidenceHash: `0x${'9'.repeat(64)}`,
+      observedAt,
+    };
+    const highGas = await risk.ingestObservation(highGasInput, 'risk-high-gas');
+    assert.equal(highGas.restrictions.length, 1);
+    assert.equal(highGas.restrictions[0]?.reasonCode, 'HIGH_GAS_24H');
+    assert.equal(highGas.restrictions[0]?.expiresAt, '2026-07-17T00:00:00.000Z');
+    const repeatedHighGas = await risk.ingestObservation(highGasInput, 'risk-high-gas-repeat');
+    assert.equal(repeatedHighGas.restrictions.length, 1);
+    assert.deepEqual((await db.query<{ observations: string; restrictions: string }>(
+      `SELECT
+         (SELECT count(*)::text FROM core.risk_observations WHERE observation_id = $1) AS observations,
+         (SELECT count(*)::text FROM core.risk_restrictions WHERE source_observation_id = $1) AS restrictions`,
+      [highGasInput.observationId],
+    )).rows[0], { observations: '1', restrictions: '1' });
+    await assert.rejects(
+      assertWalletPaymentAllowed(adapter(db), highGasWallet.address, now),
+      (error: unknown) => error instanceof CoreError && error.code === 'RiskRestricted',
+    );
+    const blockedQuoteService = new CatalogPaymentService({
+      transactions: transactionAdapter(db),
+      signer: { sign: async () => { throw new Error('risk restriction must run before signing'); } },
+      oracle: { quote: async () => { throw new Error('risk restriction must run before oracle access'); } },
+      beneficiaries: { resolve: async () => { throw new Error('risk restriction must run before beneficiary lookup'); } },
+      policies: { assertPublished: async () => { throw new Error('risk restriction must run before policy lookup'); } },
+      paymentRouterAddress: '0x9999999999999999999999999999999999999999',
+      clock: () => now,
+    });
+    const blockedQuoteInput = {
+      idempotencyKey: 'risk-blocked-ordinary',
+      productId: 'risk-product',
+      skuId: 'risk-sku',
+      quantity: 1,
+      fulfillmentMode: 'DELIVERY' as const,
+      fulfillmentTargetHash: HASH,
+      regionCodeHash: HASH,
+    };
+    for (const operation of [
+      blockedQuoteService.createOrdinaryQuote(highGasWallet.address, blockedQuoteInput),
+      blockedQuoteService.createSeckillQuote(highGasWallet.address, {
+        ...blockedQuoteInput,
+        idempotencyKey: 'risk-blocked-seckill',
+        sessionId: HASH,
+      }),
+    ]) {
+      await assert.rejects(
+        operation,
+        (error: unknown) => error instanceof CoreError && error.code === 'RiskRestricted',
+      );
+    }
+
+    const sharedIpHash = `0x${'a'.repeat(64)}`;
+    const clusterWallets = Array.from({ length: 6 }, () => Wallet.createRandom());
+    for (const [index, wallet] of clusterWallets.entries()) {
+      const result = await risk.ingestObservation({
+        observationId: `0x${(index + 1).toString(16).repeat(64)}`,
+        signalType: 'WALLET_CONTEXT',
+        sourceType: 'EDGE_AUTH',
+        walletAddress: wallet.address,
+        ipHash: sharedIpHash,
+        evidenceHash: `0x${(index + 2).toString(16).repeat(64)}`,
+        observedAt: new Date(now.getTime() + index * 5_000).toISOString(),
+      }, `risk-wallet-context-${index}`);
+      if (index < 5) assert.equal(result.restrictions.length, 0);
+      if (index === 5) assert.equal(result.restrictions.length, 7);
+    }
+    const clusterRestrictions = await db.query<{ subject_type: string; count: string }>(
+      `SELECT subject_type, count(*)::text AS count FROM core.risk_restrictions
+       WHERE trigger_type IN ('WALLET_SWITCH','SUBJECT_BLACKLIST') GROUP BY subject_type ORDER BY subject_type`,
+    );
+    assert.deepEqual(clusterRestrictions.rows, [
+      { subject_type: 'IP', count: '1' },
+      { subject_type: 'WALLET', count: '6' },
+    ]);
+
+    const manualIpHash = `0x${'b'.repeat(64)}`;
+    const manualIpWallet = Wallet.createRandom();
+    await risk.ingestObservation({
+      observationId: `0x${'8'.repeat(64)}`,
+      signalType: 'WALLET_CONTEXT',
+      sourceType: 'EDGE_AUTH',
+      walletAddress: manualIpWallet.address,
+      ipHash: manualIpHash,
+      evidenceHash: `0x${'c'.repeat(64)}`,
+      observedAt: new Date(now.getTime() + 30_000).toISOString(),
+    }, 'risk-manual-ip-context');
+    const manualIpExpiresAt = new Date(now.getTime() + 60 * 60_000).toISOString();
+    await risk.createManualRestriction(
+      { walletAddress: admin.address, roles: ['ADMIN'] },
+      {
+        subjectType: 'IP',
+        subjectValue: manualIpHash,
+        restrictionKind: 'NEW_PAYMENT',
+        reasonCode: 'MANUAL_PAYMENT_REVIEW',
+        evidenceHash: HASH,
+        expiresAt: manualIpExpiresAt,
+        idempotencyKey: 'risk-manual-ip-1',
+        correlationId: 'risk-manual-ip-1',
+      },
+    );
+    assert.deepEqual((await db.query<{
+      restriction_kind: string;
+      reason_code: string;
+      source_observation_id: string | null;
+      expires_at: Date;
+    }>(
+      `SELECT restriction_kind, reason_code, source_observation_id, expires_at
+       FROM core.risk_restrictions
+       WHERE subject_type = 'WALLET' AND subject_value = $1 AND trigger_type = 'SUBJECT_BLACKLIST'`,
+      [manualIpWallet.address.toLowerCase()],
+    )).rows[0], {
+      restriction_kind: 'NEW_PAYMENT',
+      reason_code: 'MANUAL_PAYMENT_REVIEW',
+      source_observation_id: null,
+      expires_at: new Date(manualIpExpiresAt),
+    });
+
+    const cancellationWallet = Wallet.createRandom();
+    for (let index = 0; index < 3; index += 1) {
+      const result = await risk.ingestObservation({
+        observationId: `0x${(index + 11).toString(16).repeat(64)}`,
+        signalType: 'ORDER_CANCELLATION',
+        sourceType: 'ORDER_SERVICE',
+        walletAddress: cancellationWallet.address,
+        resourceId: `unpaid-order-${index}`,
+        evidenceHash: `0x${String(index + 4).repeat(64)}`,
+        observedAt: new Date(now.getTime() + index * 30_000).toISOString(),
+      }, `risk-cancellation-${index}`);
+      assert.equal(result.restrictions.length, index === 2 ? 1 : 0);
+    }
+    const cancellationRestriction = (await db.query<{
+      restriction_id: string;
+      expires_at: Date;
+    }>(
+      "SELECT restriction_id, expires_at FROM core.risk_restrictions WHERE trigger_type = 'ORDER_CANCELLATION'",
+    )).rows[0]!;
+    assert.equal(cancellationRestriction.expires_at.toISOString(), '2026-07-16T02:01:00.000Z');
+
+    const manual = await risk.createManualRestriction(
+      { walletAddress: admin.address, roles: ['ADMIN'] },
+      {
+        subjectType: 'WALLET',
+        subjectValue: cancellationWallet.address,
+        restrictionKind: 'BLACKLIST',
+        reasonCode: 'MANUAL_INVESTIGATION',
+        evidenceHash: `0x${'d'.repeat(64)}`,
+        idempotencyKey: 'risk-manual-1',
+        correlationId: 'risk-manual-1',
+      },
+    );
+    assert.throws(
+      () => risk.createManualRestriction(
+        { walletAddress: operator.address, roles: ['OPERATOR'] },
+        {
+          subjectType: 'WALLET', subjectValue: cancellationWallet.address,
+          restrictionKind: 'BLACKLIST', reasonCode: 'FORBIDDEN_TEST',
+          evidenceHash: HASH, idempotencyKey: 'risk-forbidden', correlationId: 'risk-forbidden',
+        },
+      ),
+      /Session cannot manage risk/,
+    );
+    assert.equal((await risk.listOverview(
+      { walletAddress: auditor.address, roles: ['AUDITOR'] },
+    )).artifactVersion, CORE_ARTIFACT_VERSION);
+    assert.throws(
+      () => risk.overrideRestriction(
+        { walletAddress: operator.address, roles: ['OPERATOR'] },
+        cancellationRestriction.restriction_id,
+        { reasonCode: 'FORBIDDEN_TEST', evidenceHash: HASH, correlationId: 'risk-forbidden-override' },
+      ),
+      /Session cannot manage risk/,
+    );
+    const appeal = await risk.submitAppeal(
+      { walletAddress: operator.address, roles: ['OPERATOR'] },
+      {
+        restrictionId: manual.restrictionId,
+        statementHash: `0x${'e'.repeat(64)}`,
+        evidenceHash: `0x${'f'.repeat(64)}`,
+        idempotencyKey: 'risk-appeal-1',
+        correlationId: 'risk-appeal-1',
+      },
+    );
+    assert.throws(
+      () => risk.decideAppeal(
+        { walletAddress: operator.address, roles: ['OPERATOR'] },
+        appeal.appealId,
+        { decision: 'APPROVE', reasonCode: 'FORBIDDEN_TEST', evidenceHash: HASH, correlationId: 'risk-forbidden-decision' },
+      ),
+      /Session cannot manage risk/,
+    );
+    const decided = await risk.decideAppeal(
+      { walletAddress: admin.address, roles: ['ADMIN'] },
+      appeal.appealId,
+      {
+        decision: 'APPROVE',
+        reasonCode: 'APPEAL_ACCEPTED',
+        evidenceHash: `0x${'c'.repeat(64)}`,
+        correlationId: 'risk-appeal-decision',
+      },
+    );
+    assert.equal(decided.state, 'APPROVED');
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.risk_restrictions WHERE restriction_id = $1',
+      [manual.restrictionId],
+    )).rows[0]?.state, 'OVERRIDDEN');
+
+    now = new Date('2026-07-17T00:00:00.001Z');
+    await assert.doesNotReject(assertWalletPaymentAllowed(adapter(db), highGasWallet.address, now));
+    assert.equal((await db.query<{ state: string }>(
+      "SELECT state FROM core.risk_restrictions WHERE trigger_type = 'HIGH_GAS'",
+    )).rows[0]?.state, 'EXPIRED');
+    assert.ok((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.audit_outbox_events WHERE resource_type LIKE 'RISK_%'",
+    )).rows[0]?.count !== '0');
+  } finally {
+    await db.close();
   }
 });
 
@@ -1062,7 +1332,15 @@ test('business analytics uses canonical Asia Shanghai finality windows and fail-
     assert.equal(platform.orders.pendingShipment, '1');
     assert.equal(platform.merchants.total, '1');
     assert.equal(platform.products.total, '1');
+    assert.deepEqual(platform.risk, {
+      abnormalObservationsToday: '0',
+      blacklistBlocksToday: '0',
+      activeRestrictions: '0',
+      pendingAppeals: '0',
+    });
     assert.equal(platform.unavailable.find((metric) => metric.metric === 'NEW_UID_USERS')?.reasonCode, 'DecisionBlocked');
+    assert.equal(platform.unavailable.some((metric) => metric.metric === 'ABNORMAL_ORDERS'), false);
+    assert.equal(platform.unavailable.some((metric) => metric.metric === 'BLACKLIST_BLOCKS'), false);
     assert.deepEqual(platform.breakers, [
       { scope: 'NEW_PAYMENT', paused: false },
       { scope: 'SECKILL_PURCHASE', paused: false },

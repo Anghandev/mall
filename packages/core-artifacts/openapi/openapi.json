@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Abu 24K V2 Core API",
-    "version": "2.0.0-settlement-admin.7"
+    "version": "2.0.0-settlement-admin.8"
   },
-  "x-artifactVersion": "2.0.0-settlement-admin.7",
+  "x-artifactVersion": "2.0.0-settlement-admin.8",
   "servers": [],
   "paths": {
     "/v2/buyer/profile": {
@@ -1231,6 +1231,354 @@
             }
           }
         }
+      }
+    },
+    "/v2/internal/risk/observations": {
+      "post": {
+        "operationId": "ingestRiskObservation",
+        "security": [
+          {
+            "riskSignalAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RiskObservationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskObservationResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/risk/overview": {
+      "get": {
+        "operationId": "getRiskOverview",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskOverview"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/risk/restrictions": {
+      "post": {
+        "operationId": "createRiskRestriction",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RiskRestrictionCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskRestriction"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/risk/restrictions/{restrictionId}/override": {
+      "post": {
+        "operationId": "overrideRiskRestriction",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RiskOverrideRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskRestriction"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "restrictionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/risk/appeals": {
+      "post": {
+        "operationId": "submitRiskAppeal",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RiskAppealCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskAppeal"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/risk/appeals/{appealId}/decision": {
+      "post": {
+        "operationId": "decideRiskAppeal",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RiskAppealDecisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskAppeal"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "appealId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
       }
     },
     "/v2/finance/merchant": {
@@ -7239,6 +7587,11 @@
         "scheme": "bearer",
         "bearerFormat": "JWT"
       },
+      "riskSignalAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "opaque-risk-signal-token"
+      },
       "providerSignature": {
         "type": "apiKey",
         "in": "header",
@@ -7283,6 +7636,7 @@
           "QuoteExpired",
           "ReorgPending",
           "ReservationConflict",
+          "RiskRestricted",
           "Unauthorized",
           "UnknownState"
         ]
@@ -7447,7 +7801,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "status": {
             "const": "CORE_API_READY"
@@ -10523,7 +10877,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -10622,7 +10976,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -11562,7 +11916,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "productId": {
             "type": "string",
@@ -11735,7 +12089,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "storeId": {
             "type": "string",
@@ -11861,7 +12215,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "productId": {
             "type": "string",
@@ -11963,7 +12317,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "previewId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -12122,7 +12476,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "adjustmentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -12246,7 +12600,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "uploadIntentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -12343,7 +12697,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -12428,7 +12782,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -12588,7 +12942,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "evidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
@@ -12847,7 +13201,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -13122,7 +13476,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifact_version": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "wallet_address": {
             "$ref": "#/components/schemas/Address"
@@ -13448,7 +13802,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -15124,7 +15478,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "snapshotId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15207,7 +15561,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -16538,7 +16892,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -16780,11 +17134,12 @@
           "settlements",
           "coverage",
           "breakers",
+          "risk",
           "unavailable"
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -17027,6 +17382,30 @@
               }
             }
           },
+          "risk": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "abnormalObservationsToday",
+              "blacklistBlocksToday",
+              "activeRestrictions",
+              "pendingAppeals"
+            ],
+            "properties": {
+              "abnormalObservationsToday": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "blacklistBlocksToday": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "activeRestrictions": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "pendingAppeals": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              }
+            }
+          },
           "unavailable": {
             "type": "array",
             "items": {
@@ -17084,7 +17463,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "sessionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -17308,7 +17687,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "protocolVersion": {
             "const": 1
@@ -17382,7 +17761,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -17720,7 +18099,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "addresses": {
             "type": "array",
@@ -17901,7 +18280,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -18068,7 +18447,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "orderId": {
             "type": "string",
@@ -18103,7 +18482,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.7"
+            "const": "2.0.0-settlement-admin.8"
           },
           "merchantId": {
             "type": "string",
@@ -18380,6 +18759,609 @@
           },
           "csv": {
             "type": "string"
+          }
+        }
+      },
+      "RiskObservationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "observationId",
+          "signalType",
+          "sourceType",
+          "walletAddress",
+          "evidenceHash",
+          "observedAt"
+        ],
+        "properties": {
+          "observationId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "signalType": {
+            "enum": [
+              "HIGH_GAS",
+              "WALLET_CONTEXT",
+              "ORDER_CANCELLATION"
+            ]
+          },
+          "sourceType": {
+            "enum": [
+              "CHAIN_MONITOR",
+              "EDGE_AUTH",
+              "ORDER_SERVICE"
+            ]
+          },
+          "walletAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "ipHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "deviceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "resourceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "txHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "gasPriceWei": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RiskObservation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "observationId",
+          "signalType",
+          "sourceType",
+          "walletAddress",
+          "ipHash",
+          "deviceHash",
+          "resourceId",
+          "txHash",
+          "gasPriceWei",
+          "evidenceHash",
+          "observedAt",
+          "recordedAt"
+        ],
+        "properties": {
+          "observationId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "signalType": {
+            "enum": [
+              "HIGH_GAS",
+              "WALLET_CONTEXT",
+              "ORDER_CANCELLATION"
+            ]
+          },
+          "sourceType": {
+            "enum": [
+              "CHAIN_MONITOR",
+              "EDGE_AUTH",
+              "ORDER_SERVICE"
+            ]
+          },
+          "walletAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "ipHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deviceHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resourceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "txHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gasPriceWei": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RiskRestriction": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "restrictionId",
+          "subjectType",
+          "subjectValue",
+          "restrictionKind",
+          "triggerType",
+          "reasonCode",
+          "evidenceHash",
+          "sourceObservationId",
+          "state",
+          "startsAt",
+          "expiresAt",
+          "createdBy",
+          "overrideBy",
+          "overrideReasonCode",
+          "overrideEvidenceHash",
+          "overrideAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "restrictionId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "subjectType": {
+            "enum": [
+              "WALLET",
+              "IP",
+              "DEVICE"
+            ]
+          },
+          "subjectValue": {
+            "type": "string",
+            "minLength": 42,
+            "maxLength": 66
+          },
+          "restrictionKind": {
+            "enum": [
+              "NEW_PAYMENT",
+              "BLACKLIST"
+            ]
+          },
+          "triggerType": {
+            "enum": [
+              "HIGH_GAS",
+              "WALLET_SWITCH",
+              "ORDER_CANCELLATION",
+              "SUBJECT_BLACKLIST",
+              "MANUAL"
+            ]
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "sourceObservationId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "enum": [
+              "ACTIVE",
+              "EXPIRED",
+              "OVERRIDDEN"
+            ]
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "overrideBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "overrideReasonCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "overrideEvidenceHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "overrideAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RiskAppeal": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "appealId",
+          "restrictionId",
+          "submittedBy",
+          "statementHash",
+          "evidenceHash",
+          "state",
+          "decidedBy",
+          "decisionReasonCode",
+          "decisionEvidenceHash",
+          "decidedAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "appealId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "restrictionId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "submittedBy": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "statementHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "state": {
+            "enum": [
+              "PENDING",
+              "APPROVED",
+              "REJECTED"
+            ]
+          },
+          "decidedBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decisionReasonCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decisionEvidenceHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decidedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RiskObservationResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "observation",
+          "restrictions"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.8"
+          },
+          "observation": {
+            "$ref": "#/components/schemas/RiskObservation"
+          },
+          "restrictions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RiskRestriction"
+            }
+          }
+        }
+      },
+      "RiskOverview": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "generatedAt",
+          "observations",
+          "restrictions",
+          "appeals",
+          "decisionBlocked"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.8"
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "observations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RiskObservation"
+            }
+          },
+          "restrictions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RiskRestriction"
+            }
+          },
+          "appeals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RiskAppeal"
+            }
+          },
+          "decisionBlocked": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "capability",
+                "reasonCode"
+              ],
+              "properties": {
+                "capability": {
+                  "type": "string"
+                },
+                "reasonCode": {
+                  "enum": [
+                    "DecisionBlocked",
+                    "ExternalBlocked"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "RiskRestrictionCreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "subjectType",
+          "subjectValue",
+          "restrictionKind",
+          "reasonCode",
+          "evidenceHash",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "subjectType": {
+            "enum": [
+              "WALLET",
+              "IP",
+              "DEVICE"
+            ]
+          },
+          "subjectValue": {
+            "type": "string",
+            "minLength": 42,
+            "maxLength": 66
+          },
+          "restrictionKind": {
+            "enum": [
+              "NEW_PAYMENT",
+              "BLACKLIST"
+            ]
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "RiskOverrideRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reasonCode",
+          "evidenceHash"
+        ],
+        "properties": {
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "RiskAppealCreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "restrictionId",
+          "statementHash",
+          "evidenceHash",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "restrictionId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "statementHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "RiskAppealDecisionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "decision",
+          "reasonCode",
+          "evidenceHash"
+        ],
+        "properties": {
+          "decision": {
+            "enum": [
+              "APPROVE",
+              "REJECT"
+            ]
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
           }
         }
       },

@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.7",
+  "artifactVersion": "2.0.0-settlement-admin.8",
   "formatVersion": 1,
   "databaseEngine": "postgresql",
   "schemas": {
@@ -85,6 +85,11 @@
           "name": "016_coverage_breaker_safe_nonce.sql",
           "path": "schema/business/016_coverage_breaker_safe_nonce.sql",
           "sha256": "6465d155453aea046d3ae4ddc8f1e2ab1feb8a8b3016fb6b160752cbbe0440e6"
+        },
+        {
+          "name": "017_risk_management.sql",
+          "path": "schema/business/017_risk_management.sql",
+          "sha256": "3de844230c52604ae287818a1301df7586678e2b3816cc07eb01e45a33fb6684"
         }
       ]
     },

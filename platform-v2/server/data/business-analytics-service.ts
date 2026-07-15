@@ -125,7 +125,7 @@ export class BusinessAnalyticsService {
     const window = businessDay(now);
     return this.#transactions.transaction(async (executor) => {
       await requirePlatformScope(executor, actor);
-      const [payments, states, merchants, products, sessions, requests, takeovers, settlements, coverage, breakers] = await Promise.all([
+      const [payments, states, merchants, products, sessions, requests, takeovers, settlements, coverage, breakers, risk] = await Promise.all([
         paymentAggregate(executor, window),
         orderStateCounts(executor),
         merchantCounts(executor, window),
@@ -136,6 +136,7 @@ export class BusinessAnalyticsService {
         adminSettlementToday(executor, window),
         latestCoverage(executor, now),
         breakerProjection(executor),
+        riskProjection(executor, window, now),
       ]);
       const stateCounts = countMap(states.rows);
       const requestCounts = countMap(requests.rows, 'request_type');
@@ -166,11 +167,10 @@ export class BusinessAnalyticsService {
         settlements,
         coverage: coverage.items,
         breakers,
+        risk,
         unavailable: [
           { metric: 'NEW_UID_USERS', reasonCode: 'DecisionBlocked', detail: 'Buyer UID identity is not frozen' },
           { metric: 'LOW_STOCK_PRODUCTS', reasonCode: 'DecisionBlocked', detail: 'Low-stock threshold is not frozen' },
-          { metric: 'ABNORMAL_ORDERS', reasonCode: 'DecisionBlocked', detail: 'Abnormal-order rules are not frozen' },
-          { metric: 'BLACKLIST_BLOCKS', reasonCode: 'DecisionBlocked', detail: 'Transaction risk rules are not frozen' },
           ...(coverage.unavailable ? [coverage.unavailable] : []),
         ],
       };
@@ -534,6 +534,32 @@ async function breakerProjection(executor: SqlExecutor) {
   );
   const values = new Map(result.rows.map((row) => [row.scope, row.paused]));
   return breakerScopes.map((scope) => ({ scope, paused: values.get(scope) ?? false }));
+}
+
+async function riskProjection(executor: SqlExecutor, window: ReturnType<typeof businessDay>, now: Date) {
+  const result = await executor.query<{
+    abnormal_observations_today: string;
+    blacklist_blocks_today: string;
+    active_restrictions: string;
+    pending_appeals: string;
+  }>(
+    `SELECT
+       (SELECT count(*)::text FROM core.risk_observations
+        WHERE observed_at >= $1 AND observed_at < $2) AS abnormal_observations_today,
+       (SELECT count(*)::text FROM core.risk_restrictions
+        WHERE restriction_kind = 'BLACKLIST' AND created_at >= $1 AND created_at < $2) AS blacklist_blocks_today,
+       (SELECT count(*)::text FROM core.risk_restrictions
+        WHERE state = 'ACTIVE' AND starts_at <= $3 AND (expires_at IS NULL OR expires_at > $3)) AS active_restrictions,
+       (SELECT count(*)::text FROM core.risk_appeals WHERE state = 'PENDING') AS pending_appeals`,
+    [window.start, window.end, now],
+  );
+  const row = result.rows[0];
+  return {
+    abnormalObservationsToday: row?.abnormal_observations_today ?? '0',
+    blacklistBlocksToday: row?.blacklist_blocks_today ?? '0',
+    activeRestrictions: row?.active_restrictions ?? '0',
+    pendingAppeals: row?.pending_appeals ?? '0',
+  };
 }
 
 function countMap(rows: Array<{ state?: string; request_type?: string; count: string }>, key: 'state' | 'request_type' = 'state') {

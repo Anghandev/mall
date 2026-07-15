@@ -23,8 +23,8 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('settlement/admin .7 checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-settlement-admin.7');
+test('settlement/admin .8 checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-settlement-admin.8');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
@@ -54,7 +54,7 @@ test('settlement/admin .7 checkpoint has one identity, resolvable exports and ex
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 16);
+  assert.equal(schemaManifest.schemas.core.migrations.length, 17);
   assert.equal(schemaManifest.schemas.audit.migrations.length, 4);
   for (const migration of [
     ...schemaManifest.schemas.core.migrations,
@@ -87,6 +87,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'GET /v2/admin/orders',
     'GET /v2/admin/policy-drafts',
     'GET /v2/admin/policy-drafts/{draftId}',
+    'GET /v2/admin/risk/overview',
     'GET /v2/admin/system-config/versions',
     'GET /v2/admin/takeover-funding/{caseId}',
     'GET /v2/bootstrap',
@@ -137,6 +138,10 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'POST /v2/admin/policy-drafts/{draftId}/approval-challenge',
     'POST /v2/admin/policy-drafts/{draftId}/safe-proposal',
     'POST /v2/admin/policy-drafts/{draftId}/secondary-signature',
+    'POST /v2/admin/risk/appeals',
+    'POST /v2/admin/risk/appeals/{appealId}/decision',
+    'POST /v2/admin/risk/restrictions',
+    'POST /v2/admin/risk/restrictions/{restrictionId}/override',
     'POST /v2/admin/settlement-intents',
     'POST /v2/admin/system-config/versions',
     'POST /v2/admin/system-config/versions/{configVersionId}/publish',
@@ -151,6 +156,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'POST /v2/finance/merchant/guarantee-deposits',
     'POST /v2/fulfillment-targets/delivery',
     'POST /v2/fulfillment-targets/pickup',
+    'POST /v2/internal/risk/observations',
     'POST /v2/media/upload-intents',
     'POST /v2/media/upload-intents/{uploadIntentId}/complete',
     'POST /v2/merchant/audit/exports',
@@ -210,6 +216,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
       'POST /v2/auth/verify',
       'POST /v2/providers/cainiao/webhooks/logistics',
       'POST /v2/providers/kuaidi100/webhooks/logistics',
+      'POST /v2/internal/risk/observations',
     ].includes(operation));
   for (const operation of bearerOperations) {
     const [method, path] = operation.split(' ');
@@ -223,6 +230,10 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     '/v2/providers/cainiao/webhooks/logistics',
     '/v2/providers/kuaidi100/webhooks/logistics',
   ]) assert.deepEqual(openapi.paths[path].post.security, [{ providerSignature: [] }], path);
+  assert.deepEqual(
+    openapi.paths['/v2/internal/risk/observations'].post.security,
+    [{ riskSignalAuth: [] }],
+  );
   for (const ref of collectRefs(openapi)) {
     assert.ok(resolveRef(openapi, ref), ref);
   }

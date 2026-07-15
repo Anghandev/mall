@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.7",
+  "artifactVersion": "2.0.0-settlement-admin.8",
   "publicationStatus": "COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
@@ -14,57 +14,57 @@
   "components": {
     "packageMetadata": {
       "path": "package.json",
-      "sha256": "ceb162ff8399de6a792e826bfc6fcc0de6c760ea006e26438c3881129bf2c021"
+      "sha256": "dfbce1bbc8ec47860957bb5d0861f938ea8a036b9f41235290a87a77d5847b59"
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "71b2b3e3422119c746f26f3dbf26dd1e920189c209ef8e715c9fc2b0ac543ddf"
+      "sha256": "9ce7c0d39829aea0b760b01d745012950130922590304ac366ea881e08cdfb6a"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "2edf823e5a4adb8dadb6972839c96575973a175658d1ff2149e56a1bccb8824c"
+      "sha256": "9ad83a4fa561a7f021b7b8fb2a6394c97e18f0bf42d1fa6b9956ddf04e8545aa"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "871a00d5557d1117c9f387d6c64cd72aaf011c9b4f55793fe1be7d7ec5fd33eb"
+      "sha256": "5c2a73577b9b1dc131f7a67370436fa7b134f1b0e6dfab31e5b7be35d74e4b8c"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "531c2c2ac88cde8118d86bcb8f1adcb567063aebc87dea0755202e10bec79a3d"
+      "sha256": "16806f5564c7e559c37a411a0cd3f6172c85728a5e4e7d9a46ed6cc60af95c18"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "fc59ad2c8511c9c5ba8f49b868bf44f14fcd5e3edff38770c18b3444fbbbbddb"
+      "sha256": "4cfb3fbb43a07f02e670aa51fcb1918c5e3a170568776cfbb6c5b52d741e09d2"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
-      "sha256": "0d9641abb108459e9e2b3e4b69dcb020618d12abe1635beea8d192f36c9c43eb"
+      "sha256": "04124409b9fac10874297afba4abd1bf673ef4603f768ea8b3409a6afd188be9"
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "391166dd039fd4aa8aefeafb54745bca1a42d2b4070ba0f9fead27d529ec2726"
+      "sha256": "5a7dbca7b4f67bdfd02131d5eb27de42d00170753b034543f6f93344980ee5a2"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "25aa58aeac37b4c417fc8195fe6d1d66c31536295f42d78107cbb67ef078414d"
+      "sha256": "083e96143b7ba2f8eb3b4595326111a2ca83b85633e6ca06e990e075687cc0d0"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "caf9980006fbac3b8b37ccdda5e640e1311fc6c314ffe4b71c5e6e9fc1685f41"
+      "sha256": "7345f63c98e74a19f92555d86c2f341fcce433161fc5a84f27b738ce66229e9b"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
-      "sha256": "b71c71ef2a5d895bcaf17bb38562db95dabcf355f36a075fdf578a56b3bfa491"
+      "sha256": "100861a843c326fad3c98bbfb430eed89a5e035b9271d9fb49a0c3d1f540142f"
     }
   },
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "c95bc4fd6f71b2b59621d74a16248ef07cd84ac8ac378d5abdc7f83308778a7a"
+      "sha256": "3f3f7db925c8dc82c581694e6a0a11a284e5531cf70e56ee06fba024f05cfe62"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "784c40fc34e7b6925f41c2201a6c02dc200cb7cbae6df39e04cc309881d16b47"
+      "sha256": "5b57c144526db66ca4169f5b7e26454cbd736a5c01599a05bc3c2dbc65d2c4d1"
     }
   ],
   "httpSurface": [
@@ -81,6 +81,7 @@
     "GET /v2/admin/orders",
     "GET /v2/admin/policy-drafts",
     "GET /v2/admin/policy-drafts/{draftId}",
+    "GET /v2/admin/risk/overview",
     "GET /v2/admin/system-config/versions",
     "GET /v2/admin/takeover-funding/{caseId}",
     "GET /v2/bootstrap",
@@ -131,6 +132,10 @@
     "POST /v2/admin/policy-drafts/{draftId}/approval-challenge",
     "POST /v2/admin/policy-drafts/{draftId}/safe-proposal",
     "POST /v2/admin/policy-drafts/{draftId}/secondary-signature",
+    "POST /v2/admin/risk/appeals",
+    "POST /v2/admin/risk/appeals/{appealId}/decision",
+    "POST /v2/admin/risk/restrictions",
+    "POST /v2/admin/risk/restrictions/{restrictionId}/override",
     "POST /v2/admin/settlement-intents",
     "POST /v2/admin/system-config/versions",
     "POST /v2/admin/system-config/versions/{configVersionId}/publish",
@@ -145,6 +150,7 @@
     "POST /v2/finance/merchant/guarantee-deposits",
     "POST /v2/fulfillment-targets/delivery",
     "POST /v2/fulfillment-targets/pickup",
+    "POST /v2/internal/risk/observations",
     "POST /v2/media/upload-intents",
     "POST /v2/media/upload-intents/{uploadIntentId}/complete",
     "POST /v2/merchant/audit/exports",
@@ -215,6 +221,8 @@
     "merchantProfileHttp": "AVAILABLE",
     "merchantScopedAuditHttp": "AVAILABLE",
     "monitoringHttp": "AVAILABLE",
+    "riskManagementHttp": "AVAILABLE",
+    "riskPaymentEnforcement": "AVAILABLE",
     "coverageMonitoring": "AVAILABLE",
     "storesHttp": "AVAILABLE",
     "fulfillmentTargetHttp": "AVAILABLE",
@@ -328,6 +336,9 @@
     "MerchantAuditList",
     "MerchantAuditExport",
     "CoverageBreakerResumeChallenge",
-    "CoverageBreakerActionProjection"
+    "CoverageBreakerActionProjection",
+    "RiskOverview",
+    "RiskRestriction",
+    "RiskAppeal"
   ]
 }

@@ -91,6 +91,7 @@ import { PolicyService } from './data/policy-service.ts';
 import { SystemConfigService } from './data/system-config-service.ts';
 import { BusinessAnalyticsService } from './data/business-analytics-service.ts';
 import { AccountService } from './data/account-service.ts';
+import { RiskService } from './data/risk-service.ts';
 
 const ARTIFACT_ROOT = fileURLToPath(new URL('../../packages/core-artifacts/', import.meta.url));
 const ABI_BUNDLE_PATH = fileURLToPath(
@@ -397,6 +398,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
       : {}),
     createDeliveryTarget: (actor, input) => fulfillmentTargetService.createDeliveryTarget(actor, input),
   });
+  const riskService = new RiskService({ transactions });
   const bnmWorker = new BnmAvailabilityWorker({
     transactions,
     adapter: new HttpBnmAvailabilityAdapter({
@@ -504,6 +506,8 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     monitoringService,
     businessAnalyticsService,
     accountService,
+    riskService,
+    ...(env.RISK_SIGNAL_TOKEN ? { riskSignalToken: env.RISK_SIGNAL_TOKEN } : {}),
     recordRuntimeMetric: (kind, durationMs, error, at) => runtimeMetrics.record(kind, durationMs, error, at),
     takeoverFundingService: {
       fundingApprovalChallenge: (actor, input) => takeoverFundingService.fundingApprovalChallenge(actor, {

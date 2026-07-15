@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import {
   createSiweChallenge,
@@ -65,6 +65,7 @@ import type {
   BuyerProfileUpdate,
   MerchantProfileUpdate,
 } from '../data/account-service.ts';
+import type { RiskObservationInput, RiskSubjectType } from '../data/risk-service.ts';
 import type {
   Carrier,
   EvidenceAction,
@@ -429,6 +430,39 @@ export interface AccountApiService {
   }): Promise<unknown>;
 }
 
+export interface RiskApiService {
+  ingestObservation(input: RiskObservationInput, correlationId: string): Promise<unknown>;
+  listOverview(actor: FulfillmentActor): Promise<unknown>;
+  createManualRestriction(actor: FulfillmentActor, input: {
+    subjectType: RiskSubjectType;
+    subjectValue: string;
+    restrictionKind: 'NEW_PAYMENT' | 'BLACKLIST';
+    reasonCode: string;
+    evidenceHash: string;
+    expiresAt?: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<unknown>;
+  overrideRestriction(actor: FulfillmentActor, restrictionId: string, input: {
+    reasonCode: string;
+    evidenceHash: string;
+    correlationId: string;
+  }): Promise<unknown>;
+  submitAppeal(actor: FulfillmentActor, input: {
+    restrictionId: string;
+    statementHash: string;
+    evidenceHash: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<unknown>;
+  decideAppeal(actor: FulfillmentActor, appealId: string, input: {
+    decision: 'APPROVE' | 'REJECT';
+    reasonCode: string;
+    evidenceHash: string;
+    correlationId: string;
+  }): Promise<unknown>;
+}
+
 export interface ApiDependencies {
   config: CoreConfig;
   runtimeReadiness?: RuntimeReadinessSnapshot | (() => RuntimeReadinessSnapshot | undefined);
@@ -458,6 +492,8 @@ export interface ApiDependencies {
   monitoringService: MonitoringApiService;
   businessAnalyticsService: BusinessAnalyticsApiService;
   accountService: AccountApiService;
+  riskService: RiskApiService;
+  riskSignalToken?: string;
   recordRuntimeMetric?(kind: 'HTTP' | 'PAYMENT' | 'FULFILLMENT', durationMs: number, error: boolean, at: Date): void;
   logisticsWebhookSecrets?: Readonly<Partial<Record<'KUAIDI100' | 'CAINIAO', string>>>;
   clock(): Date;
@@ -503,6 +539,28 @@ async function route(
       },
       correlationId,
     );
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/internal/risk/observations') {
+    requireInternalRiskToken(request, dependencies.riskSignalToken);
+    const body = await readJson(request);
+    assertOnlyKeys(body, [
+      'observationId', 'signalType', 'sourceType', 'walletAddress', 'ipHash', 'deviceHash',
+      'resourceId', 'txHash', 'gasPriceWei', 'evidenceHash', 'observedAt',
+    ]);
+    sendJson(response, 202, await dependencies.riskService.ingestObservation({
+      observationId: requiredString(body, 'observationId'),
+      signalType: riskSignalType(body.signalType),
+      sourceType: riskSourceType(body.sourceType),
+      walletAddress: requiredString(body, 'walletAddress'),
+      ...(body.ipHash === undefined ? {} : { ipHash: requiredString(body, 'ipHash') }),
+      ...(body.deviceHash === undefined ? {} : { deviceHash: requiredString(body, 'deviceHash') }),
+      ...(body.resourceId === undefined ? {} : { resourceId: requiredString(body, 'resourceId') }),
+      ...(body.txHash === undefined ? {} : { txHash: requiredString(body, 'txHash') }),
+      ...(body.gasPriceWei === undefined ? {} : { gasPriceWei: requiredString(body, 'gasPriceWei') }),
+      evidenceHash: requiredString(body, 'evidenceHash'),
+      observedAt: requiredString(body, 'observedAt'),
+    }, correlationId), correlationId);
     return;
   }
   if (request.method === 'GET' && url.pathname === '/v2/seckill/sessions/current') {
@@ -1823,6 +1881,72 @@ async function routeAdminServices(
     sendJson(response, 200, await dependencies.coverageBreakerService.listActions(fulfillmentActor(claims)), correlationId);
     return true;
   }
+  if (request.method === 'GET' && url.pathname === '/v2/admin/risk/overview') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
+    sendJson(response, 200, await dependencies.riskService.listOverview(fulfillmentActor(claims)), correlationId);
+    return true;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/risk/restrictions') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, [
+      'subjectType', 'subjectValue', 'restrictionKind', 'reasonCode',
+      'evidenceHash', 'expiresAt', 'idempotencyKey',
+    ]);
+    sendJson(response, 201, await dependencies.riskService.createManualRestriction(fulfillmentActor(claims), {
+      subjectType: riskSubjectType(body.subjectType),
+      subjectValue: requiredString(body, 'subjectValue'),
+      restrictionKind: riskRestrictionKind(body.restrictionKind),
+      reasonCode: requiredString(body, 'reasonCode'),
+      evidenceHash: requiredString(body, 'evidenceHash'),
+      ...(body.expiresAt === undefined ? {} : { expiresAt: requiredString(body, 'expiresAt') }),
+      idempotencyKey: requiredString(body, 'idempotencyKey'),
+      correlationId,
+    }), correlationId);
+    return true;
+  }
+  const restrictionOverride = url.pathname.match(/^\/v2\/admin\/risk\/restrictions\/(0x[0-9a-fA-F]{64})\/override$/);
+  if (request.method === 'POST' && restrictionOverride) {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['reasonCode', 'evidenceHash']);
+    sendJson(response, 200, await dependencies.riskService.overrideRestriction(
+      fulfillmentActor(claims),
+      restrictionOverride[1]!.toLowerCase(),
+      { reasonCode: requiredString(body, 'reasonCode'), evidenceHash: requiredString(body, 'evidenceHash'), correlationId },
+    ), correlationId);
+    return true;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/risk/appeals') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['restrictionId', 'statementHash', 'evidenceHash', 'idempotencyKey']);
+    sendJson(response, 201, await dependencies.riskService.submitAppeal(fulfillmentActor(claims), {
+      restrictionId: requiredString(body, 'restrictionId'),
+      statementHash: requiredString(body, 'statementHash'),
+      evidenceHash: requiredString(body, 'evidenceHash'),
+      idempotencyKey: requiredString(body, 'idempotencyKey'),
+      correlationId,
+    }), correlationId);
+    return true;
+  }
+  const appealDecision = url.pathname.match(/^\/v2\/admin\/risk\/appeals\/(0x[0-9a-fA-F]{64})\/decision$/);
+  if (request.method === 'POST' && appealDecision) {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['decision', 'reasonCode', 'evidenceHash']);
+    sendJson(response, 200, await dependencies.riskService.decideAppeal(
+      fulfillmentActor(claims),
+      appealDecision[1]!.toLowerCase(),
+      {
+        decision: riskAppealDecision(body.decision),
+        reasonCode: requiredString(body, 'reasonCode'),
+        evidenceHash: requiredString(body, 'evidenceHash'),
+        correlationId,
+      },
+    ), correlationId);
+    return true;
+  }
   if (request.method === 'POST' && url.pathname === '/v2/admin/coverage-breaker/resume-challenge') {
     const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN']);
     const body = await readJson(request);
@@ -2170,6 +2294,40 @@ function requiredString(body: Record<string, unknown>, name: string) {
   const value = body[name];
   if (typeof value !== 'string' || value.length === 0) throw new CoreError('InvalidRequest', `${name} is required`);
   return value;
+}
+
+function requireInternalRiskToken(request: IncomingMessage, expected: string | undefined) {
+  if (!expected) throw new CoreError('ConfigurationRequired', 'Risk observation transport is not configured', 503);
+  const authorization = request.headers.authorization;
+  const supplied = authorization?.startsWith('Bearer ') ? authorization.slice(7) : '';
+  const left = createHash('sha256').update(supplied).digest();
+  const right = createHash('sha256').update(expected).digest();
+  if (!supplied || !timingSafeEqual(left, right)) throw new CoreError('Unauthorized', 'Risk observation token is invalid', 401);
+}
+
+function riskSignalType(value: unknown): RiskObservationInput['signalType'] {
+  if (!['HIGH_GAS', 'WALLET_CONTEXT', 'ORDER_CANCELLATION'].includes(String(value))) throw new CoreError('InvalidRequest', 'Unsupported risk signal');
+  return value as RiskObservationInput['signalType'];
+}
+
+function riskSourceType(value: unknown): RiskObservationInput['sourceType'] {
+  if (!['CHAIN_MONITOR', 'EDGE_AUTH', 'ORDER_SERVICE'].includes(String(value))) throw new CoreError('InvalidRequest', 'Unsupported risk source');
+  return value as RiskObservationInput['sourceType'];
+}
+
+function riskSubjectType(value: unknown): RiskSubjectType {
+  if (!['WALLET', 'IP', 'DEVICE'].includes(String(value))) throw new CoreError('InvalidRequest', 'Unsupported risk subject');
+  return value as RiskSubjectType;
+}
+
+function riskRestrictionKind(value: unknown): 'NEW_PAYMENT' | 'BLACKLIST' {
+  if (!['NEW_PAYMENT', 'BLACKLIST'].includes(String(value))) throw new CoreError('InvalidRequest', 'Unsupported risk restriction');
+  return value as 'NEW_PAYMENT' | 'BLACKLIST';
+}
+
+function riskAppealDecision(value: unknown): 'APPROVE' | 'REJECT' {
+  if (!['APPROVE', 'REJECT'].includes(String(value))) throw new CoreError('InvalidRequest', 'Unsupported risk appeal decision');
+  return value as 'APPROVE' | 'REJECT';
 }
 
 function nullableString(body: Record<string, unknown>, name: string) {

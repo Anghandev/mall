@@ -21,6 +21,7 @@ export const coreErrorCodes = [
   'QuoteExpired',
   'ReorgPending',
   'ReservationConflict',
+  'RiskRestricted',
   'Unauthorized',
   'UnknownState',
 ] as const;

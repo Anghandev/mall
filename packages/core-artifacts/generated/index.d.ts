@@ -1,4 +1,4 @@
-export declare const artifactVersion: "2.0.0-settlement-admin.7";
+export declare const artifactVersion: "2.0.0-settlement-admin.8";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
@@ -16,7 +16,7 @@ export type CatalogReviewDecision = "APPROVE" | "REJECT" | "PUBLISH" | "HIDE" | 
 export type CatalogTaxonomyStatus = "ENABLED" | "DISABLED" | "DELETED";
 export type AllowedActionName = "PAY_ORDER" | "REQUEST_EXCHANGE" | "REQUEST_DELAY" | "DECIDE_FULFILLMENT_REQUEST" | "CONFIRM_RECEIPT" | "REQUEST_FORCED_RECEIPT" | "VERIFY_PICKUP" | "OPEN_ARBITRATION" | "OPEN_TAKEOVER" | "RECORD_SHIPMENT" | "RECORD_DELIVERY" | "REGISTER_PICKUP_CREDENTIAL" | "DECIDE_ARBITRATION" | "DECIDE_FORCED_RECEIPT" | "REQUEST_MERCHANT_SETTLEMENT" | "REQUEST_REWARD_SETTLEMENT" | "REQUEST_PRIZE_SETTLEMENT" | "RECONCILE" | "RECOVER_SURPLUS";
 export type AllowedActionReasonCode = "ArtifactVersionMismatch" | "BreakerActive" | "ConfigurationRequired" | "DecisionBlocked" | "ExternalBlocked" | "FinalityPending" | "Forbidden" | "MerchantFrozen" | "PickupTakeoverDecisionBlocked" | "UnknownState";
-export type CoreErrorCode = "ArtifactVersionMismatch" | "BreakerActive" | "ConfigurationRequired" | "DecisionBlocked" | "EmptySessionPrizeDecisionBlocked" | "ExternalBlocked" | "FinalityPending" | "Forbidden" | "IdempotencyConflict" | "InvalidFinality" | "InvalidRequest" | "InvalidSignature" | "InventoryUnavailable" | "NonceExpired" | "NonceReplay" | "SeckillOnlyProduct" | "PickupTakeoverDecisionBlocked" | "ProviderSignatureInvalid" | "ProductWriteLocked" | "QuoteExpired" | "ReorgPending" | "ReservationConflict" | "Unauthorized" | "UnknownState";
+export type CoreErrorCode = "ArtifactVersionMismatch" | "BreakerActive" | "ConfigurationRequired" | "DecisionBlocked" | "EmptySessionPrizeDecisionBlocked" | "ExternalBlocked" | "FinalityPending" | "Forbidden" | "IdempotencyConflict" | "InvalidFinality" | "InvalidRequest" | "InvalidSignature" | "InventoryUnavailable" | "NonceExpired" | "NonceReplay" | "SeckillOnlyProduct" | "PickupTakeoverDecisionBlocked" | "ProviderSignatureInvalid" | "ProductWriteLocked" | "QuoteExpired" | "ReorgPending" | "ReservationConflict" | "RiskRestricted" | "Unauthorized" | "UnknownState";
 export type FulfillmentMode = "DELIVERY" | "PICKUP";
 export type OrderKind = 'ORDINARY' | 'SECKILL' | 'FALLBACK_RETAIL';
 export type FulfillmentMethod = "CUSTOMER_RECEIPT" | "PICKUP_VERIFICATION" | "FORCED_RECEIPT" | "ARBITRATION";
@@ -66,6 +66,12 @@ export type OperationsAlertSeverity = "WARNING" | "CRITICAL";
 export type AdapterProvider = "AMAP" | "KUAIDI100" | "CAINIAO" | "FEIE" | "YILIANYUN" | "BNM" | "ALIYUN_SMS" | "TENCENT_SMS" | "ALIYUN_OSS" | "SMTP" | "FIREBASE" | "JPUSH";
 export type InfrastructureProvider = "RPC_PRIMARY" | "RPC_FALLBACK" | "EXPLORER";
 export type ProviderReadinessState = "READY" | "CONFIGURATION_REQUIRED";
+export type RiskSignalType = "HIGH_GAS" | "WALLET_CONTEXT" | "ORDER_CANCELLATION";
+export type RiskSourceType = "CHAIN_MONITOR" | "EDGE_AUTH" | "ORDER_SERVICE";
+export type RiskSubjectType = "WALLET" | "IP" | "DEVICE";
+export type RiskRestrictionKind = "NEW_PAYMENT" | "BLACKLIST";
+export type RiskRestrictionState = "ACTIVE" | "EXPIRED" | "OVERRIDDEN";
+export type RiskAppealState = "PENDING" | "APPROVED" | "REJECTED";
 export declare const orderProjectionStates: readonly OrderProjectionState[];
 export declare const contractOrderStates: readonly ContractOrderState[];
 export declare const orderFinalityStatuses: readonly OrderFinalityStatus[];
@@ -127,6 +133,12 @@ export declare const operationsAlertSeverities: readonly OperationsAlertSeverity
 export declare const adapterProviders: readonly AdapterProvider[];
 export declare const infrastructureProviders: readonly InfrastructureProvider[];
 export declare const providerReadinessStates: readonly ProviderReadinessState[];
+export declare const riskSignalTypes: readonly RiskSignalType[];
+export declare const riskSourceTypes: readonly RiskSourceType[];
+export declare const riskSubjectTypes: readonly RiskSubjectType[];
+export declare const riskRestrictionKinds: readonly RiskRestrictionKind[];
+export declare const riskRestrictionStates: readonly RiskRestrictionState[];
+export declare const riskAppealStates: readonly RiskAppealState[];
 
 export type JsonObject = Readonly<Record<string, unknown>>;
 
@@ -848,7 +860,119 @@ export interface AdminBusinessDashboard {
     safeAddress: Address; verifiedAssets: AtomicAmount; unsettledLiabilities: AtomicAmount; covered: boolean;
   }[];
   breakers: readonly { scope: BreakerScope; paused: boolean }[];
+  risk: {
+    abnormalObservationsToday: AtomicAmount;
+    blacklistBlocksToday: AtomicAmount;
+    activeRestrictions: AtomicAmount;
+    pendingAppeals: AtomicAmount;
+  };
   unavailable: readonly { metric: string; reasonCode: 'DecisionBlocked' | 'ExternalBlocked'; detail: string }[];
+}
+
+export interface RiskObservationRequest {
+  observationId: Bytes32;
+  signalType: RiskSignalType;
+  sourceType: RiskSourceType;
+  walletAddress: Address;
+  ipHash?: Bytes32;
+  deviceHash?: Bytes32;
+  resourceId?: string;
+  txHash?: Bytes32;
+  gasPriceWei?: AtomicAmount;
+  evidenceHash: Bytes32;
+  observedAt: string;
+}
+
+export interface RiskObservation {
+  observationId: Bytes32;
+  signalType: RiskSignalType;
+  sourceType: RiskSourceType;
+  walletAddress: Address;
+  ipHash: Bytes32 | null;
+  deviceHash: Bytes32 | null;
+  resourceId: string | null;
+  txHash: Bytes32 | null;
+  gasPriceWei: AtomicAmount | null;
+  evidenceHash: Bytes32;
+  observedAt: string;
+  recordedAt: string;
+}
+
+export interface RiskRestriction {
+  restrictionId: Bytes32;
+  subjectType: RiskSubjectType;
+  subjectValue: string;
+  restrictionKind: RiskRestrictionKind;
+  triggerType: 'HIGH_GAS' | 'WALLET_SWITCH' | 'ORDER_CANCELLATION' | 'SUBJECT_BLACKLIST' | 'MANUAL';
+  reasonCode: string;
+  evidenceHash: Bytes32;
+  sourceObservationId: Bytes32 | null;
+  state: RiskRestrictionState;
+  startsAt: string;
+  expiresAt: string | null;
+  createdBy: Address | null;
+  overrideBy: Address | null;
+  overrideReasonCode: string | null;
+  overrideEvidenceHash: Bytes32 | null;
+  overrideAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RiskAppeal {
+  appealId: Bytes32;
+  restrictionId: Bytes32;
+  submittedBy: Address;
+  statementHash: Bytes32;
+  evidenceHash: Bytes32;
+  state: RiskAppealState;
+  decidedBy: Address | null;
+  decisionReasonCode: string | null;
+  decisionEvidenceHash: Bytes32 | null;
+  decidedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RiskObservationResult {
+  artifactVersion: typeof artifactVersion;
+  observation: RiskObservation;
+  restrictions: readonly RiskRestriction[];
+}
+
+export interface RiskOverview {
+  artifactVersion: typeof artifactVersion;
+  generatedAt: string;
+  observations: readonly RiskObservation[];
+  restrictions: readonly RiskRestriction[];
+  appeals: readonly RiskAppeal[];
+  decisionBlocked: readonly {
+    capability: string;
+    reasonCode: 'DecisionBlocked' | 'ExternalBlocked';
+  }[];
+}
+
+export interface RiskRestrictionCreateRequest {
+  subjectType: RiskSubjectType;
+  subjectValue: string;
+  restrictionKind: RiskRestrictionKind;
+  reasonCode: string;
+  evidenceHash: Bytes32;
+  expiresAt?: string;
+  idempotencyKey: string;
+}
+
+export interface RiskOverrideRequest { reasonCode: string; evidenceHash: Bytes32 }
+export interface RiskAppealCreateRequest {
+  restrictionId: Bytes32;
+  statementHash: Bytes32;
+  evidenceHash: Bytes32;
+  idempotencyKey: string;
+}
+export interface RiskAppealDecisionRequest {
+  decision: 'APPROVE' | 'REJECT';
+  reasonCode: string;
+  evidenceHash: Bytes32;
 }
 
 export interface ProductPolicy {

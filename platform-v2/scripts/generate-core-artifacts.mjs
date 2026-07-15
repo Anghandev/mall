@@ -57,6 +57,12 @@ import {
   policyDraftStates,
   policyPublicationStates,
   providerReadinessStates,
+  riskAppealStates,
+  riskRestrictionKinds,
+  riskRestrictionStates,
+  riskSignalTypes,
+  riskSourceTypes,
+  riskSubjectTypes,
   reservationStates,
   rewardSubtypes,
   seckillStates,
@@ -99,6 +105,7 @@ const schemaSources = [
       '014_accounts_and_profiles.sql',
       '015_coverage_breaker_governance.sql',
       '016_coverage_breaker_safe_nonce.sql',
+      '017_risk_management.sql',
     ],
   },
   {
@@ -195,6 +202,12 @@ const enums = {
   adapterProviders,
   infrastructureProviders,
   providerReadinessStates,
+  riskAppealStates,
+  riskRestrictionKinds,
+  riskRestrictionStates,
+  riskSignalTypes,
+  riskSourceTypes,
+  riskSubjectTypes,
 };
 
 const openapi = buildOpenApi();
@@ -328,6 +341,8 @@ const coordinatedManifest = {
     merchantProfileHttp: 'AVAILABLE',
     merchantScopedAuditHttp: 'AVAILABLE',
     monitoringHttp: 'AVAILABLE',
+    riskManagementHttp: 'AVAILABLE',
+    riskPaymentEnforcement: 'AVAILABLE',
     coverageMonitoring: 'AVAILABLE',
     storesHttp: 'AVAILABLE',
     fulfillmentTargetHttp: 'AVAILABLE',
@@ -428,6 +443,9 @@ const coordinatedManifest = {
     'MerchantAuditExport',
     'CoverageBreakerResumeChallenge',
     'CoverageBreakerActionProjection',
+    'RiskOverview',
+    'RiskRestriction',
+    'RiskAppeal',
   ],
 };
 files.set('coordinated-manifest.json', json(coordinatedManifest));
@@ -823,6 +841,7 @@ function buildOpenApi() {
     components: {
       securitySchemes: {
         bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+        riskSignalAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'opaque-risk-signal-token' },
         providerSignature: { type: 'apiKey', in: 'header', name: 'x-provider-signature' },
       },
       schemas: {
@@ -913,6 +932,7 @@ function buildOpenApi() {
         ...settlementAdminOpenApiSchemas(),
         ...seckillRuntimeOpenApiSchemas(),
         ...accountOpenApiSchemas(),
+        ...riskOpenApiSchemas(),
         ErrorResponse: {
           type: 'object', additionalProperties: false, required: ['error'],
           properties: {
@@ -1548,6 +1568,27 @@ function settlementAdminOpenApiPaths(errorResponse) {
     },
     '/v2/admin/dashboard': {
       get: operation('getAdminBusinessDashboard', { $ref: '#/components/schemas/AdminBusinessDashboard' }),
+    },
+    '/v2/internal/risk/observations': {
+      post: {
+        ...operation('ingestRiskObservation', { $ref: '#/components/schemas/RiskObservationResult' }, 202, 'RiskObservationRequest'),
+        security: [{ riskSignalAuth: [] }],
+      },
+    },
+    '/v2/admin/risk/overview': {
+      get: operation('getRiskOverview', { $ref: '#/components/schemas/RiskOverview' }),
+    },
+    '/v2/admin/risk/restrictions': {
+      post: operation('createRiskRestriction', { $ref: '#/components/schemas/RiskRestriction' }, 201, 'RiskRestrictionCreateRequest'),
+    },
+    '/v2/admin/risk/restrictions/{restrictionId}/override': {
+      post: resourceOperation('overrideRiskRestriction', 'restrictionId', { $ref: '#/components/schemas/RiskRestriction' }, 200, 'RiskOverrideRequest'),
+    },
+    '/v2/admin/risk/appeals': {
+      post: operation('submitRiskAppeal', { $ref: '#/components/schemas/RiskAppeal' }, 201, 'RiskAppealCreateRequest'),
+    },
+    '/v2/admin/risk/appeals/{appealId}/decision': {
+      post: resourceOperation('decideRiskAppeal', 'appealId', { $ref: '#/components/schemas/RiskAppeal' }, 200, 'RiskAppealDecisionRequest'),
     },
     '/v2/finance/merchant': {
       get: {
@@ -2286,7 +2327,129 @@ function settlementAdminOpenApiSchemas() {
         safeAddress: address, verifiedAssets: atomic, unsettledLiabilities: atomic, covered: { type: 'boolean' },
       }) },
       breakers: { type: 'array', items: object({ scope: { enum: [...breakerScopes] }, paused: { type: 'boolean' } }) },
+      risk: object({
+        abnormalObservationsToday: atomic,
+        blacklistBlocksToday: atomic,
+        activeRestrictions: atomic,
+        pendingAppeals: atomic,
+      }),
       unavailable: { type: 'array', items: object({ metric: string, reasonCode: { enum: ['DecisionBlocked', 'ExternalBlocked'] }, detail: string }) },
+    }),
+  };
+}
+
+function riskOpenApiSchemas() {
+  const object = (properties, required = Object.keys(properties)) => ({
+    type: 'object', additionalProperties: false, required, properties,
+  });
+  const nullableString = { anyOf: [{ type: 'string' }, { type: 'null' }] };
+  const nullableHash = { anyOf: [{ $ref: '#/components/schemas/Bytes32' }, { type: 'null' }] };
+  const nullableAddress = { anyOf: [{ $ref: '#/components/schemas/Address' }, { type: 'null' }] };
+  const nullableTimestamp = { anyOf: [{ type: 'string', format: 'date-time' }, { type: 'null' }] };
+  const observation = object({
+    observationId: { $ref: '#/components/schemas/Bytes32' },
+    signalType: { enum: [...riskSignalTypes] },
+    sourceType: { enum: [...riskSourceTypes] },
+    walletAddress: { $ref: '#/components/schemas/Address' },
+    ipHash: nullableHash,
+    deviceHash: nullableHash,
+    resourceId: nullableString,
+    txHash: nullableHash,
+    gasPriceWei: { anyOf: [{ $ref: '#/components/schemas/AtomicAmount' }, { type: 'null' }] },
+    evidenceHash: { $ref: '#/components/schemas/Bytes32' },
+    observedAt: { type: 'string', format: 'date-time' },
+    recordedAt: { type: 'string', format: 'date-time' },
+  });
+  const restriction = object({
+    restrictionId: { $ref: '#/components/schemas/Bytes32' },
+    subjectType: { enum: [...riskSubjectTypes] },
+    subjectValue: { type: 'string', minLength: 42, maxLength: 66 },
+    restrictionKind: { enum: [...riskRestrictionKinds] },
+    triggerType: { enum: ['HIGH_GAS', 'WALLET_SWITCH', 'ORDER_CANCELLATION', 'SUBJECT_BLACKLIST', 'MANUAL'] },
+    reasonCode: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{1,63}$' },
+    evidenceHash: { $ref: '#/components/schemas/Bytes32' },
+    sourceObservationId: nullableHash,
+    state: { enum: [...riskRestrictionStates] },
+    startsAt: { type: 'string', format: 'date-time' },
+    expiresAt: nullableTimestamp,
+    createdBy: nullableAddress,
+    overrideBy: nullableAddress,
+    overrideReasonCode: nullableString,
+    overrideEvidenceHash: nullableHash,
+    overrideAt: nullableTimestamp,
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+  });
+  const appeal = object({
+    appealId: { $ref: '#/components/schemas/Bytes32' },
+    restrictionId: { $ref: '#/components/schemas/Bytes32' },
+    submittedBy: { $ref: '#/components/schemas/Address' },
+    statementHash: { $ref: '#/components/schemas/Bytes32' },
+    evidenceHash: { $ref: '#/components/schemas/Bytes32' },
+    state: { enum: [...riskAppealStates] },
+    decidedBy: nullableAddress,
+    decisionReasonCode: nullableString,
+    decisionEvidenceHash: nullableHash,
+    decidedAt: nullableTimestamp,
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+  });
+  return {
+    RiskObservationRequest: object({
+      observationId: { $ref: '#/components/schemas/Bytes32' },
+      signalType: { enum: [...riskSignalTypes] },
+      sourceType: { enum: [...riskSourceTypes] },
+      walletAddress: { $ref: '#/components/schemas/Address' },
+      ipHash: { $ref: '#/components/schemas/Bytes32' },
+      deviceHash: { $ref: '#/components/schemas/Bytes32' },
+      resourceId: { type: 'string', minLength: 1, maxLength: 128 },
+      txHash: { $ref: '#/components/schemas/Bytes32' },
+      gasPriceWei: { $ref: '#/components/schemas/AtomicAmount' },
+      evidenceHash: { $ref: '#/components/schemas/Bytes32' },
+      observedAt: { type: 'string', format: 'date-time' },
+    }, ['observationId', 'signalType', 'sourceType', 'walletAddress', 'evidenceHash', 'observedAt']),
+    RiskObservation: observation,
+    RiskRestriction: restriction,
+    RiskAppeal: appeal,
+    RiskObservationResult: object({
+      artifactVersion: { const: artifactVersion },
+      observation: { $ref: '#/components/schemas/RiskObservation' },
+      restrictions: { type: 'array', items: { $ref: '#/components/schemas/RiskRestriction' } },
+    }),
+    RiskOverview: object({
+      artifactVersion: { const: artifactVersion },
+      generatedAt: { type: 'string', format: 'date-time' },
+      observations: { type: 'array', items: { $ref: '#/components/schemas/RiskObservation' } },
+      restrictions: { type: 'array', items: { $ref: '#/components/schemas/RiskRestriction' } },
+      appeals: { type: 'array', items: { $ref: '#/components/schemas/RiskAppeal' } },
+      decisionBlocked: { type: 'array', items: object({
+        capability: { type: 'string' },
+        reasonCode: { enum: ['DecisionBlocked', 'ExternalBlocked'] },
+      }) },
+    }),
+    RiskRestrictionCreateRequest: object({
+      subjectType: { enum: [...riskSubjectTypes] },
+      subjectValue: { type: 'string', minLength: 42, maxLength: 66 },
+      restrictionKind: { enum: [...riskRestrictionKinds] },
+      reasonCode: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{1,63}$' },
+      evidenceHash: { $ref: '#/components/schemas/Bytes32' },
+      expiresAt: { type: 'string', format: 'date-time' },
+      idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
+    }, ['subjectType', 'subjectValue', 'restrictionKind', 'reasonCode', 'evidenceHash', 'idempotencyKey']),
+    RiskOverrideRequest: object({
+      reasonCode: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{1,63}$' },
+      evidenceHash: { $ref: '#/components/schemas/Bytes32' },
+    }),
+    RiskAppealCreateRequest: object({
+      restrictionId: { $ref: '#/components/schemas/Bytes32' },
+      statementHash: { $ref: '#/components/schemas/Bytes32' },
+      evidenceHash: { $ref: '#/components/schemas/Bytes32' },
+      idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
+    }),
+    RiskAppealDecisionRequest: object({
+      decision: { enum: ['APPROVE', 'REJECT'] },
+      reasonCode: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{1,63}$' },
+      evidenceHash: { $ref: '#/components/schemas/Bytes32' },
     }),
   };
 }
@@ -3860,6 +4023,12 @@ export type OperationsAlertSeverity = ${union(operationsAlertSeverities)};
 export type AdapterProvider = ${union(adapterProviders)};
 export type InfrastructureProvider = ${union(infrastructureProviders)};
 export type ProviderReadinessState = ${union(providerReadinessStates)};
+export type RiskSignalType = ${union(riskSignalTypes)};
+export type RiskSourceType = ${union(riskSourceTypes)};
+export type RiskSubjectType = ${union(riskSubjectTypes)};
+export type RiskRestrictionKind = ${union(riskRestrictionKinds)};
+export type RiskRestrictionState = ${union(riskRestrictionStates)};
+export type RiskAppealState = ${union(riskAppealStates)};
 export declare const orderProjectionStates: readonly OrderProjectionState[];
 export declare const contractOrderStates: readonly ContractOrderState[];
 export declare const orderFinalityStatuses: readonly OrderFinalityStatus[];
@@ -3921,6 +4090,12 @@ export declare const operationsAlertSeverities: readonly OperationsAlertSeverity
 export declare const adapterProviders: readonly AdapterProvider[];
 export declare const infrastructureProviders: readonly InfrastructureProvider[];
 export declare const providerReadinessStates: readonly ProviderReadinessState[];
+export declare const riskSignalTypes: readonly RiskSignalType[];
+export declare const riskSourceTypes: readonly RiskSourceType[];
+export declare const riskSubjectTypes: readonly RiskSubjectType[];
+export declare const riskRestrictionKinds: readonly RiskRestrictionKind[];
+export declare const riskRestrictionStates: readonly RiskRestrictionState[];
+export declare const riskAppealStates: readonly RiskAppealState[];
 
 export type JsonObject = Readonly<Record<string, unknown>>;
 
@@ -4642,7 +4817,119 @@ export interface AdminBusinessDashboard {
     safeAddress: Address; verifiedAssets: AtomicAmount; unsettledLiabilities: AtomicAmount; covered: boolean;
   }[];
   breakers: readonly { scope: BreakerScope; paused: boolean }[];
+  risk: {
+    abnormalObservationsToday: AtomicAmount;
+    blacklistBlocksToday: AtomicAmount;
+    activeRestrictions: AtomicAmount;
+    pendingAppeals: AtomicAmount;
+  };
   unavailable: readonly { metric: string; reasonCode: 'DecisionBlocked' | 'ExternalBlocked'; detail: string }[];
+}
+
+export interface RiskObservationRequest {
+  observationId: Bytes32;
+  signalType: RiskSignalType;
+  sourceType: RiskSourceType;
+  walletAddress: Address;
+  ipHash?: Bytes32;
+  deviceHash?: Bytes32;
+  resourceId?: string;
+  txHash?: Bytes32;
+  gasPriceWei?: AtomicAmount;
+  evidenceHash: Bytes32;
+  observedAt: string;
+}
+
+export interface RiskObservation {
+  observationId: Bytes32;
+  signalType: RiskSignalType;
+  sourceType: RiskSourceType;
+  walletAddress: Address;
+  ipHash: Bytes32 | null;
+  deviceHash: Bytes32 | null;
+  resourceId: string | null;
+  txHash: Bytes32 | null;
+  gasPriceWei: AtomicAmount | null;
+  evidenceHash: Bytes32;
+  observedAt: string;
+  recordedAt: string;
+}
+
+export interface RiskRestriction {
+  restrictionId: Bytes32;
+  subjectType: RiskSubjectType;
+  subjectValue: string;
+  restrictionKind: RiskRestrictionKind;
+  triggerType: 'HIGH_GAS' | 'WALLET_SWITCH' | 'ORDER_CANCELLATION' | 'SUBJECT_BLACKLIST' | 'MANUAL';
+  reasonCode: string;
+  evidenceHash: Bytes32;
+  sourceObservationId: Bytes32 | null;
+  state: RiskRestrictionState;
+  startsAt: string;
+  expiresAt: string | null;
+  createdBy: Address | null;
+  overrideBy: Address | null;
+  overrideReasonCode: string | null;
+  overrideEvidenceHash: Bytes32 | null;
+  overrideAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RiskAppeal {
+  appealId: Bytes32;
+  restrictionId: Bytes32;
+  submittedBy: Address;
+  statementHash: Bytes32;
+  evidenceHash: Bytes32;
+  state: RiskAppealState;
+  decidedBy: Address | null;
+  decisionReasonCode: string | null;
+  decisionEvidenceHash: Bytes32 | null;
+  decidedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RiskObservationResult {
+  artifactVersion: typeof artifactVersion;
+  observation: RiskObservation;
+  restrictions: readonly RiskRestriction[];
+}
+
+export interface RiskOverview {
+  artifactVersion: typeof artifactVersion;
+  generatedAt: string;
+  observations: readonly RiskObservation[];
+  restrictions: readonly RiskRestriction[];
+  appeals: readonly RiskAppeal[];
+  decisionBlocked: readonly {
+    capability: string;
+    reasonCode: 'DecisionBlocked' | 'ExternalBlocked';
+  }[];
+}
+
+export interface RiskRestrictionCreateRequest {
+  subjectType: RiskSubjectType;
+  subjectValue: string;
+  restrictionKind: RiskRestrictionKind;
+  reasonCode: string;
+  evidenceHash: Bytes32;
+  expiresAt?: string;
+  idempotencyKey: string;
+}
+
+export interface RiskOverrideRequest { reasonCode: string; evidenceHash: Bytes32 }
+export interface RiskAppealCreateRequest {
+  restrictionId: Bytes32;
+  statementHash: Bytes32;
+  evidenceHash: Bytes32;
+  idempotencyKey: string;
+}
+export interface RiskAppealDecisionRequest {
+  decision: 'APPROVE' | 'REJECT';
+  reasonCode: string;
+  evidenceHash: Bytes32;
 }
 
 export interface ProductPolicy {
