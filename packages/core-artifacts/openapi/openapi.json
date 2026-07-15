@@ -17906,12 +17906,17 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "merchantId",
           "contentType",
           "filename",
           "entryCount",
           "csv"
         ],
         "properties": {
+          "merchantId": {
+            "type": "string",
+            "minLength": 1
+          },
           "contentType": {
             "const": "text/csv; charset=utf-8"
           },
