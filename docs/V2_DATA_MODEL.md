@@ -1,7 +1,7 @@
 # Abu 24K V2 Data Model
 
 Status: coordinated local settlement/admin checkpoint
-`2.0.0-settlement-admin.4`. This document describes implemented catalog, media, payment,
+`2.0.0-settlement-admin.5`. This document describes implemented catalog, media, payment,
 fulfillment, settlement and administrative storage and does not authorize
 deployment.
 
@@ -42,7 +42,9 @@ order snapshots are never recalculated from current configuration.
   restore inventory atomically.
 - `core.seckill_sessions` owns independent seckill inventory. A dual quote also
   reserves ordinary SKU inventory for fallback. Neither branch borrows the
-  other's inventory.
+  other's inventory. Session activation and ordinary quote issuance take the
+  same SKU row lock; activation rejects any unexpired submittable ordinary
+  quote for that SKU.
 - `core.payment_quotes` records one immutable ordinary or seckill quote identity.
   `core.payment_quote_legs` records the exact ordinary, seckill and fallback
   intent snapshots and distinct reservations.
@@ -118,6 +120,12 @@ overwrite a later reorg `LOCKED` state.
   never stored in a database column.
 - `core.fulfillment_commands` makes every actor/idempotency-key command
   replay-safe and rejects changed input.
+- `core.fulfillment_shipment_batches` binds the actor, batch idempotency key,
+  exact request hash, item count and immutable result. All item orders are
+  locked in canonical ID order and commit or roll back together. A transaction
+  advisory lock serializes the actor/batch-idempotency identity before replay
+  lookup, and sorted actor/item-idempotency locks serialize command reuse across
+  different batches and the single-shipment path.
 - `core.fulfillment_evidence`, `core.shipments` and `core.logistics_events` are
   immutable. Provider event identity is unique and callback order is preserved.
 - `core.media_upload_intents` requires a signed write-once `PUT` and per-wallet
@@ -136,6 +144,9 @@ overwrite a later reorg `LOCKED` state.
   failed attempts.
 - `core.fulfillment_requests` owns exchange, delay, arbitration and forced
   receipt state. Only one open request of each kind exists per order.
+- Order cursor indexes bind merchant, buyer and global scopes to the stable
+  `(created_at DESC, order_id DESC)` traversal. Exact product and transaction
+  indexes support scoped admin lookup without exposing raw tracking or PII.
 - `core.takeover_cases` starts seven days after payment finality when delivery
   has no valid shipment evidence. Opening a case freezes the merchant and its
   active/review products while customer funds and rewards remain Locked.

@@ -11,6 +11,7 @@ import { Interface, Wallet, id, keccak256, toUtf8Bytes, type InterfaceAbi, type 
 import { sensitiveActionDomain, sensitiveActionTypes, type SensitiveActionIntent } from '../api/auth.ts';
 import type { CanonicalPaymentIntent } from '../api/checkout.ts';
 import { CORE_ARTIFACT_VERSION, USDT_ADDRESS } from '../api/enums.ts';
+import { CoreError } from '../api/errors.ts';
 import { MiddlewareMonitoringSource, RpcExplorerHeightSource } from '../api/monitoring-sources.ts';
 import { paymentAllocationSetHash } from '../api/payment-policy.ts';
 import { paymentIntentHash } from '../api/payment-signing.ts';
@@ -90,6 +91,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '009_product_surfaces.sql',
       '010_evidence_media.sql',
       '011_catalog_management.sql',
+      '012_order_operations.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -574,7 +576,12 @@ test('catalog payment service builds an authoritative idempotent quote and recor
     await seedCatalog(db, 2);
     const quoteNow = new Date();
     let signCalls = 0;
-    const ids = [`0x${'9'.repeat(64)}`, `0x${'d'.repeat(64)}`];
+    const ids = [
+      `0x${'9'.repeat(64)}`,
+      `0x${'d'.repeat(64)}`,
+      `0x${'7'.repeat(64)}`,
+      `0x${'8'.repeat(64)}`,
+    ];
     const service = new CatalogPaymentService({
       transactions: transactionAdapter(db),
       signer: {
@@ -614,9 +621,65 @@ test('catalog payment service builds an authoritative idempotent quote and recor
     };
     const catalog = await service.listCatalog();
     assert.equal(catalog[0]?.skus[0]?.listPriceUsdt, '100');
+    assert.equal(catalog[0]?.subtitle, 'Authoritative catalog product');
+    assert.deepEqual(catalog[0]?.richDetail, { blocks: [] });
+    assert.equal(catalog[0]?.defaultFreightUsdt, '5');
+    assert.deepEqual(catalog[0]?.fulfillmentModes, ['DELIVERY', 'PICKUP']);
+    assert.equal(catalog[0]?.categoryId, null);
+    assert.deepEqual(catalog[0]?.tagIds, []);
     assert.deepEqual(catalog[0]?.mainImageAssetIds, []);
     assert.equal(catalog[0]?.videoAssetId, null);
+    assert.equal(catalog[0]?.skus[0]?.seckill, null);
     assert.equal('merchantCostUsdt' in (catalog[0]?.skus[0] ?? {}), false);
+
+    const sessionId = `0x${'a'.repeat(64)}`;
+    await insertLiveSeckillSession(db, sessionId, quoteNow, 90);
+    const liveCatalog = await service.getProduct('product-1');
+    assert.deepEqual(liveCatalog.skus[0]?.seckill, {
+      sessionId,
+      policyVersion: '1',
+      phase: 'LIVE',
+      startsAt: new Date(quoteNow.getTime() - 60_000).toISOString(),
+      mainDeadline: new Date(quoteNow.getTime() + 59 * 60_000).toISOString(),
+      relayDeadline: new Date(quoteNow.getTime() + 60_000).toISOString(),
+      seckillListPriceUsdt: '90',
+      inventory: { total: '1', sold: '0', reserved: '0', available: '1' },
+      ordinaryCheckoutAllowed: false,
+    });
+    await assert.rejects(
+      service.createOrdinaryQuote(BUYER, { ...request, idempotencyKey: 'checkout-attempt-seckill' }),
+      (error: unknown) => error instanceof CoreError
+        && error.code === 'SeckillOnlyProduct'
+        && typeof error.details.blockingResource === 'object',
+    );
+    await db.query(
+      `UPDATE core.seckill_sessions SET phase = 'PREHEAT', starts_at = $2,
+         main_deadline = $3, relay_deadline = $4 WHERE session_id = $1`,
+      [sessionId, new Date(quoteNow.getTime() + 10 * 60_000),
+        new Date(quoteNow.getTime() + 70 * 60_000), new Date(quoteNow.getTime() + 11 * 60_000)],
+    );
+    await assert.rejects(
+      service.createOrdinaryQuote(BUYER, { ...request, idempotencyKey: 'checkout-attempt-preheat' }),
+      (error: unknown) => error instanceof CoreError && error.code === 'SeckillOnlyProduct',
+    );
+    const overlappingSessionId = `0x${'e'.repeat(64)}`;
+    await insertLiveSeckillSession(db, overlappingSessionId, quoteNow, 89);
+    await assert.rejects(service.getProduct('product-1'), /Multiple active seckill sessions/);
+    await assert.rejects(
+      service.createOrdinaryQuote(BUYER, { ...request, idempotencyKey: 'checkout-attempt-overlap' }),
+      (error: unknown) => error instanceof CoreError && error.code === 'UnknownState',
+    );
+    await db.query("UPDATE core.seckill_sessions SET phase = 'FORCE_CLOSED' WHERE session_id = $1", [overlappingSessionId]);
+    await db.query(
+      `UPDATE core.seckill_sessions SET phase = 'SETTLING', starts_at = $2,
+         main_deadline = $3, relay_deadline = $3 WHERE session_id = $1`,
+      [sessionId, new Date(quoteNow.getTime() - 70 * 60_000), new Date(quoteNow.getTime() - 10 * 60_000)],
+    );
+    await assert.rejects(
+      service.createOrdinaryQuote(BUYER, { ...request, idempotencyKey: 'checkout-attempt-settling' }),
+      (error: unknown) => error instanceof CoreError && error.code === 'SeckillOnlyProduct',
+    );
+    await db.query("UPDATE core.seckill_sessions SET phase = 'FORCE_CLOSED' WHERE session_id = $1", [sessionId]);
 
     const quote = await service.createOrdinaryQuote(BUYER, request);
     assert.equal(quote.intent.usdtPaymentAmount, '70');
@@ -636,6 +699,10 @@ test('catalog payment service builds an authoritative idempotent quote and recor
       "SELECT stock_available, stock_reserved FROM core.skus WHERE sku_id = 'sku-1'",
     );
     assert.deepEqual(stock.rows[0], { stock_available: 1, stock_reserved: 1 });
+    await assert.rejects(
+      insertLiveSeckillSession(db, `0x${'f'.repeat(64)}`, quoteNow, 88),
+      /ActiveOrdinaryQuote/,
+    );
     await db.query(
       `INSERT INTO core.circuit_breakers (scope, paused, evidence_hash, policy_version, changed_by)
        VALUES ('NEW_PAYMENT', true, $1, 1, 'test')`,
@@ -731,6 +798,29 @@ test('catalog management enforces product scope, signed preview, review locks an
       sortOrder: 1,
       idempotencyKey: 'catalog-category-create-1',
     });
+    const childCategory = await service.upsertCategory(platform, {
+      parentCategoryId: String(category.categoryId),
+      name: 'Gold Bars',
+      sortOrder: 2,
+      idempotencyKey: 'catalog-category-child-create-1',
+    });
+    const preservedChild = await service.upsertCategory(platform, {
+      categoryId: String(childCategory.categoryId),
+      name: 'Gold Bars Updated',
+      sortOrder: 2,
+      idempotencyKey: 'catalog-category-child-preserve-1',
+    });
+    assert.equal(preservedChild.parentCategoryId, category.categoryId);
+    assert.equal(preservedChild.level, 2);
+    const rootedChild = await service.upsertCategory(platform, {
+      categoryId: String(childCategory.categoryId),
+      parentCategoryId: null,
+      name: 'Gold Bars Updated',
+      sortOrder: 2,
+      idempotencyKey: 'catalog-category-child-root-1',
+    });
+    assert.equal(rootedChild.parentCategoryId, null);
+    assert.equal(rootedChild.level, 1);
     const tag = await service.upsertTag(platform, {
       name: 'Featured',
       example: 'Featured products',
@@ -956,6 +1046,23 @@ test('catalog management enforces product scope, signed preview, review locks an
       reasonCode: 'CATALOG_PUBLISHED',
       idempotencyKey: 'catalog-review-publish-3',
     })).lifecycleState, 'ACTIVE');
+    const publicCatalog = new CatalogPaymentService({
+      transactions: transactionAdapter(db),
+      signer: { sign: async () => { throw new Error('unused'); } },
+      oracle: { quote: async () => { throw new Error('unused'); } },
+      beneficiaries: { resolve: async () => { throw new Error('unused'); } },
+      policies: { assertPublished: async () => { throw new Error('unused'); } },
+      paymentRouterAddress: '0x9999999999999999999999999999999999999999',
+      clock: () => now,
+    });
+    const publicProduct = await publicCatalog.getProduct(productId);
+    assert.equal(publicProduct.subtitle, 'Verified catalog draft');
+    assert.deepEqual(publicProduct.richDetail, { blocks: [{ type: 'paragraph', text: 'Detail' }] });
+    assert.equal(publicProduct.defaultFreightUsdt, '2');
+    assert.deepEqual(publicProduct.fulfillmentModes, ['DELIVERY', 'PICKUP']);
+    assert.equal(publicProduct.categoryId, category.categoryId);
+    assert.deepEqual(publicProduct.tagIds, [tag.tagId]);
+    assert.equal(publicProduct.skus[0]?.seckill, null);
     const mediaRead = new EvidenceService({
       transactions: transactionAdapter(db),
       storage: {
@@ -986,6 +1093,7 @@ test('catalog management enforces product scope, signed preview, review locks an
       [`0x${'c'.repeat(64)}`, skuId, new Date(now.getTime() - 60_000),
         new Date(now.getTime() + 59 * 60_000), new Date(now.getTime() + 60_000), productId],
     );
+    assert.equal((await publicCatalog.getProduct(productId)).skus[0]?.seckill instanceof Object, true);
     await assert.rejects(
       service.upsertCategory(platform, {
         categoryId: String(category.categoryId),
@@ -1682,6 +1790,281 @@ test('fulfillment targets encrypt delivery PII and bind quotes to an AMap six-di
       () => new FulfillmentTargetService({ transactions: transactionAdapter(db), regions, encryptionKey: 'short' }),
       /must contain 32 bytes/,
     );
+  } finally {
+    await db.close();
+  }
+});
+
+test('order pages use stable scoped cursors and shipment batches are canonical, idempotent and atomic', async () => {
+  const db = await createBusinessDatabase();
+  const now = new Date('2026-07-15T10:00:00.000Z');
+  const merchantAgent = '0x7777777777777777777777777777777777777777';
+  try {
+    await seedCatalog(db, 10);
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES ($1,'MERCHANT','merchant-1','ACTIVE',$2)`,
+      [merchantAgent, HASH],
+    );
+    const createPaidOrder = async (character: string, finalized = true) => {
+      const orderId = `0x${character.repeat(64)}`;
+      const reservationId = `reservation-page-${character}`;
+      await reserveInventory(adapter(db), {
+        reservationId,
+        reservationHash: `0x${character.repeat(64)}`,
+        policyVersion: 1,
+        skuId: 'sku-1',
+        buyerWallet: BUYER,
+        quantity: 1,
+        classification: 'ORDINARY',
+        expiresAt: new Date(Date.now() + 10 * 60_000),
+      });
+      await insertOrder(db, orderId, reservationId);
+      await db.query(
+        `UPDATE core.orders SET state = 'PAID', finality_status = $2,
+           payment_tx_hash = $3, paid_at = $4, created_at = $4
+         WHERE order_id = $1`,
+        [orderId, finalized ? 'FINAL' : 'PENDING', `0x${character.repeat(64)}`, now],
+      );
+      if (finalized) {
+        await db.query(
+          `INSERT INTO core.transaction_finality (
+             transaction_id, resource_type, resource_id, chain_id, contract_address,
+             expected_event_hash, tx_hash, block_number, block_hash, confirmations,
+             required_confirmations, receipt_status, state, evidence, submitted_at,
+             finalized_at
+           ) VALUES ($1,'ORDER_PAYMENT',$2,56,$3,$4,$5,1,$4,15,15,1,'FINAL','{}',$6,$6)`,
+          [`payment-page:${character}`, orderId, '0x9999999999999999999999999999999999999999',
+            HASH, `0x${character.repeat(64)}`, now],
+        );
+      }
+      return orderId;
+    };
+    const orderA = await createPaidOrder('a');
+    const orderB = await createPaidOrder('b');
+    const fulfillmentQueries: string[] = [];
+    const service = new FulfillmentService({
+      transactions: transactionAdapter(db, (sql) => fulfillmentQueries.push(sql)),
+      clock: () => now,
+    });
+    const merchant = { walletAddress: merchantAgent, roles: ['MERCHANT'] as const, merchantId: 'merchant-1' };
+
+    const first = await service.listOrderPage(merchant, {
+      limit: 1,
+      state: 'PAID',
+      fulfillmentMode: 'DELIVERY',
+      orderKind: 'ORDINARY',
+      skuId: 'sku-1',
+      from: now,
+      to: now,
+    });
+    assert.equal(first.orders[0]?.orderId, orderB);
+    assert.equal(first.orders[0]?.quantity, '1');
+    assert.equal(first.orders[0]?.paymentTxHash, orderB);
+    assert.equal(first.orders[0]?.orderKind, 'ORDINARY');
+    assert.equal(first.orders[0]?.createdAt, now.toISOString());
+    assert.equal(first.orders[0]?.allowedActions.some((action) => (
+      action.action === 'RECORD_SHIPMENT' && action.enabled
+    )), true);
+    assert.deepEqual(first.nextCursor, { createdAt: now.toISOString(), orderId: orderB });
+    const second = await service.listOrderPage(merchant, {
+      limit: 1,
+      cursorCreatedAt: new Date(first.nextCursor!.createdAt),
+      cursorOrderId: first.nextCursor!.orderId,
+    });
+    assert.equal(second.orders[0]?.orderId, orderA);
+    assert.equal(second.nextCursor, null);
+    assert.throws(
+      () => service.listOrderPage(merchant, { cursorOrderId: orderA }),
+      /requires createdAt and orderId together/,
+    );
+    assert.deepEqual((await service.listOrderPage({
+      walletAddress: '0x8888888888888888888888888888888888888888',
+      roles: ['MERCHANT'],
+      merchantId: 'merchant-other',
+    })).orders, []);
+    await db.query(
+      `INSERT INTO core.circuit_breakers (scope, paused, evidence_hash, policy_version, changed_by)
+       VALUES ('NEW_PAYMENT', true, $1, 1, 'order-page-test')`,
+      [HASH],
+    );
+    const platform = {
+      walletAddress: '0x3333333333333333333333333333333333333333',
+      roles: ['ADMIN'] as const,
+    };
+    const adminSearch = await service.searchAdminOrders(platform, {
+      orderId: orderB,
+      productId: 'product-1',
+      txHash: orderB,
+      wallet: BUYER,
+      pendingProductReview: false,
+      breakerScope: 'NEW_PAYMENT',
+    });
+    assert.deepEqual(adminSearch.orders.map((order) => order.orderId), [orderB]);
+    assert.deepEqual(adminSearch.breaker, { scope: 'NEW_PAYMENT', active: true });
+    assert.deepEqual(adminSearch.pausedScopes, ['NEW_PAYMENT']);
+    const preview = await service.previewOrderBatchActions(platform, [orderA, orderB]);
+    assert.deepEqual(preview.rows.map((row) => row.orderId), [orderA, orderB]);
+    assert.equal(preview.enabledActionIntersection.includes('RECORD_SHIPMENT'), true);
+    assert.throws(
+      () => service.previewOrderBatchActions(platform, [orderA, orderA]),
+      /duplicate orders/,
+    );
+
+    const evidence = new EvidenceService({
+      transactions: transactionAdapter(db),
+      trackingHashKey: 'ab'.repeat(32),
+      clock: () => now,
+      storage: {
+        createUpload: async () => { throw new Error('unused'); },
+        finalizeUpload: async () => { throw new Error('unused'); },
+        createRead: async () => { throw new Error('unused'); },
+      },
+    });
+    const evidenceA = await evidence.createTrackingEvidence(merchant, {
+      orderId: orderA,
+      carrierCode: 'SF',
+      trackingNumber: 'SF100001',
+      idempotencyKey: 'page-tracking-a',
+    });
+    const evidenceB = await evidence.createTrackingEvidence(merchant, {
+      orderId: orderB,
+      carrierCode: 'JD',
+      trackingNumber: 'JD100002',
+      idempotencyKey: 'page-tracking-b',
+    });
+    const batchInput = {
+      idempotencyKey: 'shipment-batch-page-1',
+      items: [
+        {
+          orderId: orderA,
+          idempotencyKey: 'shipment-item-page-a',
+          evidenceHash: String(evidenceA.evidenceHash),
+          carrierCode: 'SF' as const,
+          trackingNumberHash: String(evidenceA.trackingNumberHash),
+        },
+        {
+          orderId: orderB,
+          idempotencyKey: 'shipment-item-page-b',
+          evidenceHash: String(evidenceB.evidenceHash),
+          carrierCode: 'JD' as const,
+          trackingNumberHash: String(evidenceB.trackingNumberHash),
+        },
+      ],
+    };
+    fulfillmentQueries.length = 0;
+    const batch = await service.recordShipmentBatch(merchant, batchInput) as {
+      batchId: string;
+      shipments: unknown[];
+      createdAt: string;
+    };
+    assert.ok(
+      fulfillmentQueries.findIndex((sql) => sql.includes('pg_advisory_xact_lock'))
+        < fulfillmentQueries.findIndex((sql) => sql.includes('FROM core.fulfillment_shipment_batches')),
+    );
+    assert.ok(
+      fulfillmentQueries.findLastIndex((sql) => sql.includes('pg_advisory_xact_lock'))
+        < fulfillmentQueries.findIndex((sql) => sql.includes('FROM core.fulfillment_commands')),
+    );
+    assert.equal(batch.shipments.length, 2);
+    assert.deepEqual(await service.recordShipmentBatch(merchant, batchInput), batch);
+    await assert.rejects(
+      service.recordShipmentBatch(merchant, { ...batchInput, items: [...batchInput.items].reverse() }),
+      /Shipment batch idempotency key was reused with different input/,
+    );
+    assert.equal((await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM core.orders
+       WHERE order_id IN ($1,$2) AND state = 'SHIPPED'`,
+      [orderA, orderB],
+    )).rows[0]?.count, '2');
+
+    const orderE = await createPaidOrder('e');
+    const evidenceE = await evidence.createTrackingEvidence(merchant, {
+      orderId: orderE,
+      carrierCode: 'SF',
+      trackingNumber: 'SF100005',
+      idempotencyKey: 'page-tracking-e',
+    });
+    const sharedItem = {
+      orderId: orderE,
+      idempotencyKey: 'shipment-item-concurrent-e',
+      evidenceHash: String(evidenceE.evidenceHash),
+      carrierCode: 'SF' as const,
+      trackingNumberHash: String(evidenceE.trackingNumberHash),
+    };
+    const concurrentService = new FulfillmentService({
+      transactions: concurrentTransactionAdapter(db),
+      clock: () => now,
+    });
+    const [concurrentA, concurrentB] = await Promise.all([
+      concurrentService.recordShipmentBatch(merchant, {
+        idempotencyKey: 'shipment-batch-concurrent-a',
+        items: [sharedItem],
+      }),
+      concurrentService.recordShipmentBatch(merchant, {
+        idempotencyKey: 'shipment-batch-concurrent-b',
+        items: [sharedItem],
+      }),
+    ]);
+    assert.notEqual(concurrentA.batchId, concurrentB.batchId);
+    assert.deepEqual(concurrentA.shipments, concurrentB.shipments);
+    await assert.rejects(
+      concurrentService.recordShipmentBatch(merchant, {
+        idempotencyKey: 'shipment-batch-concurrent-conflict',
+        items: [{ ...sharedItem, trackingNumberHash: HASH_2 }],
+      }),
+      /Shipment item idempotency key was reused with different input/,
+    );
+    assert.deepEqual((await db.query<{ commands: string; shipments: string; outbox: string }>(
+      `SELECT
+         (SELECT count(*)::text FROM core.fulfillment_commands WHERE order_id = $1) AS commands,
+         (SELECT count(*)::text FROM core.shipments WHERE order_id = $1) AS shipments,
+         (SELECT count(*)::text FROM core.outbox_events WHERE aggregate_id = $1) AS outbox`,
+      [orderE],
+    )).rows[0], { commands: '1', shipments: '1', outbox: '1' });
+
+    const orderC = await createPaidOrder('c');
+    const orderD = await createPaidOrder('d', false);
+    const evidenceC = await evidence.createTrackingEvidence(merchant, {
+      orderId: orderC,
+      carrierCode: 'SF',
+      trackingNumber: 'SF100003',
+      idempotencyKey: 'page-tracking-c',
+    });
+    const evidenceD = await evidence.createTrackingEvidence(merchant, {
+      orderId: orderD,
+      carrierCode: 'JD',
+      trackingNumber: 'JD100004',
+      idempotencyKey: 'page-tracking-d',
+    });
+    await assert.rejects(service.recordShipmentBatch(merchant, {
+      idempotencyKey: 'shipment-batch-rollback-1',
+      items: [
+        {
+          orderId: orderC,
+          idempotencyKey: 'shipment-item-page-c',
+          evidenceHash: String(evidenceC.evidenceHash),
+          carrierCode: 'SF',
+          trackingNumberHash: String(evidenceC.trackingNumberHash),
+        },
+        {
+          orderId: orderD,
+          idempotencyKey: 'shipment-item-page-d',
+          evidenceHash: String(evidenceD.evidenceHash),
+          carrierCode: 'JD',
+          trackingNumberHash: String(evidenceD.trackingNumberHash),
+        },
+      ],
+    }), /Payment must reach 15 canonical confirmations/);
+    assert.equal((await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM core.shipments WHERE order_id IN ($1,$2)`,
+      [orderC, orderD],
+    )).rows[0]?.count, '0');
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.orders WHERE order_id = $1',
+      [orderC],
+    )).rows[0]?.state, 'PAID');
   } finally {
     await db.close();
   }
@@ -6987,6 +7370,18 @@ function transactionAdapter(db: PGlite, beforeQuery?: (sql: string) => void): Sq
   };
 }
 
+function concurrentTransactionAdapter(db: PGlite): SqlTransactionRunner {
+  return {
+    transaction: (operation) => db.transaction(async (transaction) => operation({
+      exec: (sql) => transaction.exec(sql),
+      query: async <Row extends object>(sql: string, params: unknown[] = []) => {
+        const result = await transaction.query<Row>(sql, params);
+        return { rows: result.rows };
+      },
+    })),
+  };
+}
+
 async function seedCatalog(db: PGlite, stock: number, settlementWallet = MERCHANT) {
   await db.query(
     `INSERT INTO core.policy_snapshots (
@@ -7045,8 +7440,11 @@ async function seedCatalog(db: PGlite, stock: number, settlementWallet = MERCHAN
   await db.query(
     `INSERT INTO core.products (
        product_id, chain_product_id, merchant_id, version, title, lifecycle_state,
-       product_policy_hash, merchant_concession_bps, metadata
-     ) VALUES ('product-1', $1, 'merchant-1', 1, 'Product', 'ACTIVE', $2, 2500, '{}')`,
+       product_policy_hash, merchant_concession_bps, metadata, subtitle,
+       rich_detail, default_freight_usdt, fulfillment_modes
+     ) VALUES ('product-1', $1, 'merchant-1', 1, 'Product', 'ACTIVE', $2, 2500,
+       '{}', 'Authoritative catalog product', '{"blocks":[]}', 5,
+       '["DELIVERY","PICKUP"]')`,
     [`0x${'b'.repeat(64)}`, HASH],
   );
   await db.query(

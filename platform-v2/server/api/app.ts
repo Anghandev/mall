@@ -17,14 +17,17 @@ import { publicReadiness } from './config.ts';
 import {
   CORE_ARTIFACT_VERSION,
   auditStreamNames,
+  breakerScopes,
   cmsContentFormats,
   cmsContentTypes,
   executableOrderActionNames,
   notificationCampaignTopics,
   notificationChannels,
   notificationProviders,
+  orderProjectionStates,
   settlementRails,
   systemConfigKeys,
+  type BreakerScope,
   type SettlementRail,
   type UserRole,
 } from './enums.ts';
@@ -38,9 +41,12 @@ import type {
   FulfillmentCommandInput,
   FulfillmentRequestDecisionInput,
   LogisticsUpdateInput,
+  OrderKind,
+  OrderPageQuery,
   PickupCredentialInput,
   PickupVerificationInput,
   RequestInput,
+  ShipmentBatchInput,
   ShipmentInput,
 } from '../data/fulfillment-service.ts';
 import type {
@@ -102,7 +108,7 @@ export interface CatalogManagementApiService {
   listTags(includeInactive?: boolean, actor?: FulfillmentActor): Promise<unknown>;
   upsertCategory(actor: FulfillmentActor, input: {
     categoryId?: string;
-    parentCategoryId?: string;
+    parentCategoryId?: string | null;
     name: string;
     iconAssetId?: string;
     sortOrder: number;
@@ -153,7 +159,11 @@ export interface CatalogManagementApiService {
 export interface FulfillmentApiService {
   getOrder(actor: FulfillmentActor, orderId: string): Promise<unknown>;
   listOrders(actor: FulfillmentActor): Promise<unknown>;
+  listOrderPage(actor: FulfillmentActor, input?: OrderPageQuery): Promise<unknown>;
+  searchAdminOrders(actor: FulfillmentActor, input?: OrderPageQuery): Promise<unknown>;
+  previewOrderBatchActions(actor: FulfillmentActor, orderIds: string[]): Promise<unknown>;
   recordShipment(actor: FulfillmentActor, orderId: string, input: ShipmentInput): Promise<unknown>;
+  recordShipmentBatch(actor: FulfillmentActor, input: ShipmentBatchInput): Promise<unknown>;
   recordDelivery(actor: FulfillmentActor, orderId: string, input: FulfillmentCommandInput): Promise<unknown>;
   recordLogisticsUpdate(actor: FulfillmentActor, orderId: string, input: LogisticsUpdateInput): Promise<unknown>;
   registerPickupCredential(actor: FulfillmentActor, orderId: string, input: PickupCredentialInput): Promise<unknown>;
@@ -889,7 +899,67 @@ async function route(
     sendJson(
       response,
       200,
-      { orders: await dependencies.fulfillmentService.listOrders(fulfillmentActor(claims)) },
+      await dependencies.fulfillmentService.listOrderPage(
+        fulfillmentActor(claims),
+        fulfillmentOrderPageQuery(url),
+      ),
+      correlationId,
+    );
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/admin/orders') {
+    const claims = authorizeRoles(
+      request,
+      dependencies.config,
+      dependencies.clock(),
+      ['ADMIN', 'OPERATOR', 'AUDITOR'],
+    );
+    sendJson(
+      response,
+      200,
+      await dependencies.fulfillmentService.searchAdminOrders(
+        fulfillmentActor(claims),
+        adminOrderSearchQuery(url),
+      ),
+      correlationId,
+    );
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/orders/batch-actions/preview') {
+    const claims = authorizeRoles(
+      request,
+      dependencies.config,
+      dependencies.clock(),
+      ['ADMIN', 'OPERATOR', 'AUDITOR'],
+    );
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['orderIds']);
+    sendJson(
+      response,
+      200,
+      await dependencies.fulfillmentService.previewOrderBatchActions(
+        fulfillmentActor(claims),
+        requiredStringArray(body, 'orderIds'),
+      ),
+      correlationId,
+    );
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/shipments/batches') {
+    const claims = authorizeRoles(
+      request,
+      dependencies.config,
+      dependencies.clock(),
+      ['MERCHANT', 'ADMIN', 'OPERATOR'],
+    );
+    const body = await readJson(request);
+    sendJson(
+      response,
+      201,
+      await dependencies.fulfillmentService.recordShipmentBatch(
+        fulfillmentActor(claims),
+        shipmentBatchInput(body),
+      ),
       correlationId,
     );
     return;
@@ -1862,13 +1932,115 @@ function productSlotInput(body: Record<string, unknown>, allowMerchantId = false
   };
 }
 
+function fulfillmentOrderPageQuery(url: URL): OrderPageQuery {
+  const state = url.searchParams.get('state');
+  const orderKind = url.searchParams.get('orderKind');
+  return {
+    ...(url.searchParams.get('cursorCreatedAt')
+      ? { cursorCreatedAt: dateParameter(url.searchParams.get('cursorCreatedAt')!, 'cursorCreatedAt') }
+      : {}),
+    ...(url.searchParams.get('cursorOrderId')
+      ? { cursorOrderId: url.searchParams.get('cursorOrderId')! }
+      : {}),
+    ...(url.searchParams.get('limit')
+      ? { limit: optionalPositiveIntegerParameter(url.searchParams.get('limit'), 'limit')! }
+      : {}),
+    ...(url.searchParams.get('from')
+      ? { from: dateParameter(url.searchParams.get('from')!, 'from') }
+      : {}),
+    ...(url.searchParams.get('to')
+      ? { to: dateParameter(url.searchParams.get('to')!, 'to') }
+      : {}),
+    ...(url.searchParams.get('skuId') ? { skuId: url.searchParams.get('skuId')! } : {}),
+    ...(state ? { state: orderStateParameter(state) } : {}),
+    ...(url.searchParams.get('fulfillmentMode')
+      ? { fulfillmentMode: fulfillmentMode(url.searchParams.get('fulfillmentMode')) }
+      : {}),
+    ...(orderKind ? { orderKind: orderKindParameter(orderKind) } : {}),
+  };
+}
+
+function shipmentBatchInput(body: Record<string, unknown>): ShipmentBatchInput {
+  assertOnlyKeys(body, ['idempotencyKey', 'items']);
+  if (!Array.isArray(body.items)) throw new CoreError('InvalidRequest', 'items must be an array');
+  return {
+    idempotencyKey: requiredString(body, 'idempotencyKey'),
+    items: body.items.map((value) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new CoreError('InvalidRequest', 'Shipment batch item must be an object');
+      }
+      const item = value as Record<string, unknown>;
+      assertOnlyKeys(item, [
+        'orderId', 'idempotencyKey', 'evidenceHash', 'carrierCode',
+        'trackingNumberHash', 'providerReferenceHash',
+      ]);
+      return {
+        orderId: requiredString(item, 'orderId'),
+        idempotencyKey: requiredString(item, 'idempotencyKey'),
+        evidenceHash: requiredString(item, 'evidenceHash'),
+        carrierCode: evidenceCarrier(item.carrierCode),
+        trackingNumberHash: requiredString(item, 'trackingNumberHash'),
+        ...(item.providerReferenceHash === undefined
+          ? {}
+          : { providerReferenceHash: requiredString(item, 'providerReferenceHash') }),
+      };
+    }),
+  };
+}
+
+function adminOrderSearchQuery(url: URL): OrderPageQuery {
+  const base = fulfillmentOrderPageQuery(url);
+  return {
+    ...base,
+    ...(url.searchParams.get('orderId') ? { orderId: url.searchParams.get('orderId')! } : {}),
+    ...(url.searchParams.get('productId') ? { productId: url.searchParams.get('productId')! } : {}),
+    ...(url.searchParams.get('txHash') ? { txHash: url.searchParams.get('txHash')! } : {}),
+    ...(url.searchParams.get('wallet') ? { wallet: url.searchParams.get('wallet')! } : {}),
+    ...(url.searchParams.get('pendingReview')
+      ? { pendingProductReview: booleanParameter(url.searchParams.get('pendingReview')!, 'pendingReview') }
+      : {}),
+    ...(url.searchParams.get('breakerScope')
+      ? { breakerScope: breakerScopeParameter(url.searchParams.get('breakerScope')!) }
+      : {}),
+  };
+}
+
+function breakerScopeParameter(value: string): BreakerScope {
+  if (!(breakerScopes as readonly string[]).includes(value)) {
+    throw new CoreError('InvalidRequest', 'Unsupported breaker scope');
+  }
+  return value as BreakerScope;
+}
+
+function booleanParameter(value: string, name: string) {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw new CoreError('InvalidRequest', `${name} must be true or false`);
+}
+
+function orderStateParameter(value: string): (typeof orderProjectionStates)[number] {
+  if (!(orderProjectionStates as readonly string[]).includes(value)) {
+    throw new CoreError('InvalidRequest', 'Unsupported order state');
+  }
+  return value as (typeof orderProjectionStates)[number];
+}
+
+function orderKindParameter(value: string): OrderKind {
+  if (!['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'].includes(value)) {
+    throw new CoreError('InvalidRequest', 'Unsupported order kind');
+  }
+  return value as OrderKind;
+}
+
 function categoryInput(body: Record<string, unknown>) {
   assertOnlyKeys(body, [
     'parentCategoryId', 'name', 'iconAssetId', 'sortOrder',
     'serviceFeeBps', 'status', 'idempotencyKey',
   ]);
   return {
-    ...(body.parentCategoryId === undefined ? {} : { parentCategoryId: requiredString(body, 'parentCategoryId') }),
+    ...(body.parentCategoryId === undefined
+      ? {}
+      : { parentCategoryId: body.parentCategoryId === null ? null : requiredString(body, 'parentCategoryId') }),
     name: requiredString(body, 'name'),
     ...(body.iconAssetId === undefined ? {} : { iconAssetId: requiredString(body, 'iconAssetId') }),
     sortOrder: requiredNonNegativeInteger(body, 'sortOrder'),

@@ -179,7 +179,7 @@ export class CatalogManagementService {
 
   upsertCategory(actor: FulfillmentActor, input: {
     categoryId?: string;
-    parentCategoryId?: string;
+    parentCategoryId?: string | null;
     name: string;
     iconAssetId?: string;
     sortOrder: number;
@@ -209,7 +209,9 @@ export class CatalogManagementService {
       const now = this.#clock();
       const categoryId = value.categoryId ?? resourceId('category', this.#bytes32());
       const current = await loadCategoryRow(executor, categoryId, true);
-      const parentCategoryId = value.parentCategoryId ?? current?.parent_category_id ?? undefined;
+      const parentCategoryId = value.parentCategoryId === undefined
+        ? current?.parent_category_id ?? undefined
+        : value.parentCategoryId ?? undefined;
       if (parentCategoryId === categoryId) throw new CoreError('InvalidRequest', 'Category cannot be its own parent', 409);
       const parent = parentCategoryId
         ? await loadCategoryRow(executor, parentCategoryId, true)
@@ -1487,7 +1489,7 @@ function validateProductSlotInput(input: ProductSlotInput) {
 
 function validateCategoryInput(input: {
   categoryId?: string;
-  parentCategoryId?: string;
+  parentCategoryId?: string | null;
   name: string;
   iconAssetId?: string;
   sortOrder: number;
@@ -1500,7 +1502,11 @@ function validateCategoryInput(input: {
   if (!['ENABLED', 'DISABLED', 'DELETED'].includes(status)) throw new CoreError('InvalidRequest', 'Category status is invalid');
   return {
     ...(input.categoryId ? { categoryId: validateResourceId(input.categoryId, 'categoryId') } : {}),
-    ...(input.parentCategoryId ? { parentCategoryId: validateResourceId(input.parentCategoryId, 'parentCategoryId') } : {}),
+    ...(input.parentCategoryId === undefined
+      ? {}
+      : { parentCategoryId: input.parentCategoryId === null
+        ? null
+        : validateResourceId(input.parentCategoryId, 'parentCategoryId') }),
     name: boundedText(input.name, 1, 80, 'name'),
     ...(input.iconAssetId ? { iconAssetId: normalizedBytes32(input.iconAssetId, 'iconAssetId') } : {}),
     sortOrder: input.sortOrder,

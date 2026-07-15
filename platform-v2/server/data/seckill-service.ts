@@ -1,6 +1,7 @@
 import { CORE_ARTIFACT_VERSION } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
+import { effectiveSeckillPhase, type StoredSeckillPhase } from './seckill-phase.ts';
 
 interface SessionRow {
   session_id: string;
@@ -18,7 +19,7 @@ interface SessionRow {
   sold: string | number;
   reserved: string | number;
   seckill_list_price_usdt: string;
-  phase: 'PREHEAT' | 'LIVE' | 'SETTLING' | 'SETTLED' | 'FORCE_CLOSED';
+  phase: StoredSeckillPhase;
   last_buyer_wallet: string | null;
   prize_pool_usdt: string;
   snapshot: unknown;
@@ -177,7 +178,7 @@ function sessionSelect() {
 }
 
 function sessionProjection(row: SessionRow, now: Date) {
-  const phase = effectivePhase(row, now);
+  const phase = effectiveSeckillPhase(row, now);
   const end = new Date(Math.min(row.main_deadline.getTime(), row.relay_deadline.getTime()));
   const available = Number(row.inventory) - Number(row.sold) - Number(row.reserved);
   if (!Number.isSafeInteger(available) || available < 0) {
@@ -222,13 +223,6 @@ function sessionProjection(row: SessionRow, now: Date) {
     snapshot: object(row.snapshot),
     allowedActions: stringArray(row.allowed_actions),
   };
-}
-
-function effectivePhase(row: SessionRow, now: Date) {
-  if (row.phase === 'FORCE_CLOSED' || row.phase === 'SETTLED') return row.phase;
-  if (now < row.starts_at) return 'PREHEAT' as const;
-  if (now < row.main_deadline && now < row.relay_deadline) return 'LIVE' as const;
-  return 'SETTLING' as const;
 }
 
 async function requireSession(executor: SqlExecutor, sessionId: string) {

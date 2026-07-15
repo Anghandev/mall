@@ -24,6 +24,11 @@ import type { SignerRequest } from '../chain/signer.ts';
 import { reserveInventory } from './inventory.ts';
 import { assertQuoteFulfillmentTarget } from './fulfillment-target-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
+import {
+  blocksOrdinaryQuote,
+  effectiveSeckillPhase,
+  type StoredSeckillPhase,
+} from './seckill-phase.ts';
 
 export interface QuoteSigner {
   sign(request: SignerRequest): Promise<{ signature: string; signer: string }>;
@@ -76,11 +81,17 @@ interface CatalogRow {
   chain_product_id: string;
   merchant_id: string;
   title: string;
+  subtitle: string;
   product_policy_hash: string;
   merchant_concession_bps: number;
   metadata: unknown;
   main_image_asset_ids: unknown;
   video_asset_id: string | null;
+  rich_detail: unknown;
+  default_freight_usdt: string;
+  fulfillment_modes: unknown;
+  category_id: string | null;
+  tag_ids: unknown;
   product_state: string;
   sku_id: string;
   chain_sku_id: string;
@@ -109,11 +120,26 @@ interface SessionRow {
   policy_version: string;
   product_policy_hash: string;
   seckill_list_price_usdt: string;
-  phase: string;
+  phase: StoredSeckillPhase;
   starts_at: Date;
   main_deadline: Date;
   relay_deadline: Date;
   available: string | number;
+}
+
+interface CatalogSeckillRow {
+  session_id: string;
+  policy_version: string | number;
+  product_id: string;
+  sku_id: string;
+  seckill_list_price_usdt: string;
+  phase: StoredSeckillPhase;
+  starts_at: Date | string;
+  main_deadline: Date | string;
+  relay_deadline: Date | string;
+  inventory: string | number;
+  sold: string | number;
+  reserved: string | number;
 }
 
 interface StoredQuoteRow {
@@ -190,7 +216,9 @@ export class CatalogPaymentService {
         WHERE product.lifecycle_state = 'ACTIVE' AND sku.lifecycle_state = 'ACTIVE'
           AND merchant.status = 'APPROVED' AND merchant.guarantee_status = 'READY'
         ORDER BY product.created_at DESC, product.product_id, sku.sku_id`);
-      return catalogProjection(result.rows);
+      const now = this.#clock();
+      const sessions = await loadCatalogSeckillRows(executor);
+      return catalogProjection(result.rows, sessions, now);
     });
   }
 
@@ -201,7 +229,9 @@ export class CatalogPaymentService {
           AND sku.lifecycle_state = 'ACTIVE' AND merchant.status = 'APPROVED'
           AND merchant.guarantee_status = 'READY'
         ORDER BY sku.sku_id`, [productId]);
-      const products = catalogProjection(result.rows);
+      const now = this.#clock();
+      const sessions = await loadCatalogSeckillRows(executor, productId);
+      const products = catalogProjection(result.rows, sessions, now);
       if (!products[0]) throw new CoreError('InvalidRequest', 'Product not found', 404);
       return products[0];
     });
@@ -587,6 +617,7 @@ async function loadPreparation(executor: SqlExecutor, buyer: string, input: Crea
     regionCodeHash: input.regionCodeHash,
     now,
   });
+  await executor.query('SELECT sku_id FROM core.skus WHERE sku_id = $1 FOR UPDATE', [input.skuId]);
   const catalogResult = await executor.query<CatalogRow>(`${catalogSelect()}
     WHERE product.product_id = $1 AND sku.sku_id = $2`, [input.productId, input.skuId]);
   const catalog = catalogResult.rows[0];
@@ -595,6 +626,34 @@ async function loadPreparation(executor: SqlExecutor, buyer: string, input: Crea
       || catalog.merchant_status !== 'APPROVED' || catalog.guarantee_status !== 'READY'
       || Number(catalog.stock_available) < input.quantity
   ) throw new CoreError('InventoryUnavailable', 'Product, merchant or inventory is unavailable', 409);
+  const activeSessions = await executor.query<CatalogSeckillRow>(
+    `SELECT session_id, policy_version, product_id, sku_id,
+       seckill_list_price_usdt::text, phase, starts_at, main_deadline,
+       relay_deadline, inventory, sold, reserved
+     FROM core.seckill_sessions
+     WHERE product_id = $1 AND sku_id = $2
+       AND phase NOT IN ('SETTLED','FORCE_CLOSED')
+     ORDER BY starts_at, session_id`,
+    [input.productId, input.skuId],
+  );
+  const blocking = activeSessions.rows.filter((session) => blocksOrdinaryQuote(session, now));
+  if (blocking.length > 0) {
+    if (blocking.length > 1) {
+      throw new CoreError('UnknownState', 'Multiple active seckill sessions block ordinary checkout', 409, {
+        productId: input.productId,
+        skuId: input.skuId,
+        sessionIds: blocking.map((session) => session.session_id),
+      });
+    }
+    const session = blocking[0]!;
+    throw new CoreError('SeckillOnlyProduct', 'Ordinary checkout is unavailable during the seckill session', 409, {
+      blockingResource: {
+        type: 'SECKILL_SESSION',
+        id: session.session_id,
+        state: effectiveSeckillPhase(session, now),
+      },
+    });
+  }
   const policyResult = await executor.query<PolicyRow>(
     `SELECT artifact_version, policy_version, policy_hash, oracle_version,
        rules_content_hash, beneficiary_set_hash, payload FROM core.canonical_policy_publications
@@ -638,8 +697,7 @@ async function loadSeckillPreparation(executor: SqlExecutor, buyer: string, inpu
   );
   const session = sessionResult.rows[0];
   if (
-    !session || session.phase !== 'LIVE' || new Date(session.starts_at) > now
-      || new Date(session.main_deadline) <= now || new Date(session.relay_deadline) <= now
+    !session || effectiveSeckillPhase(session, now) !== 'LIVE'
       || Number(session.available) < input.quantity
       || session.product_policy_hash.toLowerCase() !== catalog.product_policy_hash.toLowerCase()
   ) throw new CoreError('InventoryUnavailable', 'Seckill session is not live or has no inventory', 409);
@@ -1002,14 +1060,21 @@ function maxAmount(left: string, right: string) {
   return BigInt(left) >= BigInt(right) ? left : right;
 }
 
-function catalogProjection(rows: CatalogRow[]) {
+function catalogProjection(rows: CatalogRow[], sessionRows: CatalogSeckillRow[], now: Date) {
+  const sessions = catalogSeckillOverlays(sessionRows, now);
   const products = new Map<string, {
     productId: string;
     chainProductId: string;
     title: string;
+    subtitle: string;
     metadata: unknown;
     mainImageAssetIds: string[];
     videoAssetId: string | null;
+    richDetail: Readonly<Record<string, unknown>>;
+    defaultFreightUsdt: string;
+    fulfillmentModes: string[];
+    categoryId: string | null;
+    tagIds: string[];
     skus: Array<Record<string, unknown>>;
   }>();
   for (const row of rows) {
@@ -1019,9 +1084,15 @@ function catalogProjection(rows: CatalogRow[]) {
         productId: row.product_id,
         chainProductId: row.chain_product_id,
         title: row.title,
-        metadata: row.metadata,
+        subtitle: row.subtitle,
+        metadata: object(row.metadata),
         mainImageAssetIds: mediaAssetIds(row.main_image_asset_ids),
         videoAssetId: row.video_asset_id,
+        richDetail: object(row.rich_detail),
+        defaultFreightUsdt: row.default_freight_usdt,
+        fulfillmentModes: stringArray(row.fulfillment_modes),
+        categoryId: row.category_id,
+        tagIds: stringArray(row.tag_ids),
         skus: [],
       };
       products.set(row.product_id, product);
@@ -1032,6 +1103,7 @@ function catalogProjection(rows: CatalogRow[]) {
       attributes: row.attributes,
       listPriceUsdt: row.list_price_usdt,
       stockAvailable: String(row.stock_available),
+      seckill: sessions.get(row.sku_id) ?? null,
     });
   }
   return [...products.values()];
@@ -1042,10 +1114,91 @@ function mediaAssetIds(value: unknown) {
   return value.filter((item): item is string => typeof item === 'string');
 }
 
+function catalogSeckillOverlays(rows: CatalogSeckillRow[], now: Date) {
+  const result = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    if (!blocksOrdinaryQuote(row, now)) continue;
+    if (result.has(row.sku_id)) {
+      throw new CoreError('UnknownState', 'Multiple active seckill sessions exist for one SKU', 409, {
+        skuId: row.sku_id,
+      });
+    }
+    const available = Number(row.inventory) - Number(row.sold) - Number(row.reserved);
+    if (!Number.isSafeInteger(available) || available < 0) {
+      throw new CoreError('UnknownState', 'Seckill inventory projection is invalid', 409);
+    }
+    result.set(row.sku_id, {
+      sessionId: row.session_id,
+      policyVersion: String(row.policy_version),
+      phase: effectiveSeckillPhase(row, now),
+      startsAt: isoTimestamp(row.starts_at),
+      mainDeadline: isoTimestamp(row.main_deadline),
+      relayDeadline: isoTimestamp(row.relay_deadline),
+      seckillListPriceUsdt: row.seckill_list_price_usdt,
+      inventory: {
+        total: String(row.inventory),
+        sold: String(row.sold),
+        reserved: String(row.reserved),
+        available: String(available),
+      },
+      ordinaryCheckoutAllowed: false,
+    });
+  }
+  return result;
+}
+
+async function loadCatalogSeckillRows(executor: SqlExecutor, productId?: string) {
+  const result = await executor.query<CatalogSeckillRow>(
+    `SELECT session.session_id, session.policy_version, session.product_id,
+       session.sku_id, session.seckill_list_price_usdt::text, session.phase,
+       session.starts_at, session.main_deadline, session.relay_deadline,
+       session.inventory, session.sold, session.reserved
+     FROM core.seckill_sessions session
+     JOIN core.products product ON product.product_id = session.product_id
+     JOIN core.skus sku ON sku.sku_id = session.sku_id AND sku.product_id = product.product_id
+     JOIN core.merchants merchant ON merchant.merchant_id = product.merchant_id
+     WHERE session.phase NOT IN ('SETTLED','FORCE_CLOSED')
+       AND product.lifecycle_state = 'ACTIVE' AND sku.lifecycle_state = 'ACTIVE'
+       AND merchant.status = 'APPROVED' AND merchant.guarantee_status = 'READY'
+       AND ($1::text IS NULL OR product.product_id = $1)
+     ORDER BY session.starts_at, session.session_id`,
+    [productId ?? null],
+  );
+  return result.rows;
+}
+
+function isoTimestamp(value: Date | string) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) throw new CoreError('UnknownState', 'Catalog timestamp projection is invalid', 409);
+  return date.toISOString();
+}
+
+function object(value: unknown) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : {};
+}
+
+function stringArray(value: unknown) {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+    throw new CoreError('UnknownState', 'Catalog list projection is invalid', 409);
+  }
+  return value as string[];
+}
+
 function catalogSelect() {
   return `SELECT product.product_id, product.chain_product_id, product.merchant_id,
-    product.title, product.product_policy_hash, product.merchant_concession_bps,
+    product.title, product.subtitle, product.product_policy_hash, product.merchant_concession_bps,
     product.metadata, product.main_image_asset_ids, product.video_asset_id,
+    product.rich_detail, product.default_freight_usdt::text, product.fulfillment_modes,
+    (SELECT assignment.category_id FROM core.product_category_assignments assignment
+      WHERE assignment.product_id = product.product_id
+        AND assignment.product_version = product.version
+      ORDER BY assignment.category_id LIMIT 1) AS category_id,
+    COALESCE((SELECT jsonb_agg(assignment.tag_id ORDER BY assignment.tag_id)
+      FROM core.product_tag_assignments assignment
+      WHERE assignment.product_id = product.product_id
+        AND assignment.product_version = product.version), '[]'::jsonb) AS tag_ids,
     product.lifecycle_state AS product_state, sku.sku_id,
     sku.chain_sku_id, sku.attributes, sku.list_price_usdt::text,
     sku.merchant_cost_usdt::text, sku.stock_available, sku.lifecycle_state AS sku_state,

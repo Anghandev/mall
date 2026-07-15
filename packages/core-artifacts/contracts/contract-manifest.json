@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.4",
+  "artifactVersion": "2.0.0-settlement-admin.5",
   "publicationStatus": "coordinated-settlement-admin-checkpoint",
   "chain": {
     "name": "BSC Mainnet",

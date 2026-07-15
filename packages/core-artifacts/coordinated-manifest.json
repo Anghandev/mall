@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.4",
+  "artifactVersion": "2.0.0-settlement-admin.5",
   "publicationStatus": "COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
@@ -14,57 +14,57 @@
   "components": {
     "packageMetadata": {
       "path": "package.json",
-      "sha256": "f3ba5abd6066211837cdaf4b5070e526e1297dfd6e1554d6170e8b2d42f09fd7"
+      "sha256": "27267e656f519969955e5424aa06c3d9a3529eea223420a5368e1b8a497e65a1"
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "1bea2c4153cb5fe5f734c67da441421efb654b364f1a2236259bbd33b5c28e6c"
+      "sha256": "b7a6e8da9c375dae4d60e6244e82aeeed1d4ddb77c03f29b952c52b4fcf25a41"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "fe89f33952e8951bd37f5e999479f1a09d78f691a4f9ff66d8f2dbb0a414e8d9"
+      "sha256": "ca7c118a95ae60095ce1569042568291b079c276f48050e3872401b7a6e8b156"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "c06043df0571aae579e01779429e95ce11f4cafea15b5e6ed4dc68200f9074f3"
+      "sha256": "26d2eb937a060ef92553ebec9c2c73585d83764210358491387f5806b22f39c6"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "9ded77e37e653406079cc79a59f5da1067d32e52b4b889a4ead38565d4aa8c40"
+      "sha256": "ef2391aaeb642fa6ea929ded18522b37f31b806d4e95fbac09a67f4b77a1b8fe"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "1531aa918393a7724fe4a87100c221df6659e5abd2e30220194d5faae5637d21"
+      "sha256": "2ac8d9c6adf1bc229394b80f4da68b03811aca4c693b572dde8c122b27fd05e2"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
-      "sha256": "f26850b99853b2966fb91b874623a7238ab1d6cdec2a3d229ffee0ec78e391a0"
+      "sha256": "b33407529b198e5c834c020b0331c0376b97f250d7f72d6d521b5d81e19c16ac"
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "e3e9abe5c1330e8e61c26e34461deabe74bfc88b71b03191f75d01d58347cb09"
+      "sha256": "7ad23bc2522d0ca80a2d483b1a80ff361fce03b3b5a5d09968aa1f88b0d3c56e"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "25f7aa2678fb8f19d25b42f8fe2838e1deb5a469c26fdc0ba42b993b83519605"
+      "sha256": "c86410ead586c9f7a2c1b88bd3f10ffcf21836e1cf8b37602fc24235818e7f1c"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "c0b3e82bd7ff00a2a6ab811e8f8b48c7a914767531af12ddc7072d1963363597"
+      "sha256": "2a7595e6536e6edfc1dd3514197d5431a278b5eeb517edb52b3f1597609ae105"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
-      "sha256": "0a79ba4585c019383118bfc7bf233653d36a41c33b313626488e8e20db9aa248"
+      "sha256": "578e91102fe6eace1845d34c296c160e0bb6c8a0361c6f7e3e102db113af4cfa"
     }
   },
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "a05c385bccbc3538cf82a53d9792d46b79a3bd9beacafbd9d7f87754ee09b38d"
+      "sha256": "4d2f1bf04f5b276809a737b49f53fc8b55f91279a8417c3788bff8ca4d3d74ba"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "af448026865f726c1b15fa0cb09bb97fab95fd1d4afb452dd332236390fe4227"
+      "sha256": "1fe568eb77463400068cec48c20500e24eb5a6fc1ff0af082c5d979933f5e59b"
     }
   ],
   "httpSurface": [
@@ -75,6 +75,7 @@
     "GET /v2/admin/catalog/tags",
     "GET /v2/admin/cms/versions/{versionId}",
     "GET /v2/admin/monitoring",
+    "GET /v2/admin/orders",
     "GET /v2/admin/policy-drafts",
     "GET /v2/admin/policy-drafts/{draftId}",
     "GET /v2/admin/system-config/versions",
@@ -113,6 +114,7 @@
     "POST /v2/admin/monitoring/alerts/{alertKey}/acknowledge",
     "POST /v2/admin/notification-campaigns",
     "POST /v2/admin/notification-campaigns/{campaignId}/publish",
+    "POST /v2/admin/orders/batch-actions/preview",
     "POST /v2/admin/policy-drafts",
     "POST /v2/admin/policy-drafts/{draftId}/approval-challenge",
     "POST /v2/admin/policy-drafts/{draftId}/safe-proposal",
@@ -155,6 +157,7 @@
     "POST /v2/seckill/quotes",
     "POST /v2/settlement-intents",
     "POST /v2/settlement-requests",
+    "POST /v2/shipments/batches",
     "POST /v2/stores",
     "PUT /v2/admin/catalog/categories/{categoryId}",
     "PUT /v2/admin/catalog/stores/{storeId}/product-slot",
@@ -263,6 +266,11 @@
     "MerchantStore",
     "FulfillmentTarget",
     "FulfillmentOrder",
+    "FulfillmentOrderPage",
+    "ShipmentBatchRequest",
+    "ShipmentBatchResult",
+    "AdminOrderSearchPage",
+    "OrderBatchActionPreview",
     "FulfillmentCommandInput",
     "FulfillmentCommandResult",
     "SettlementIntentProjection",

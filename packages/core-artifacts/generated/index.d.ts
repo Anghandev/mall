@@ -1,8 +1,9 @@
-export declare const artifactVersion: "2.0.0-settlement-admin.4";
+export declare const artifactVersion: "2.0.0-settlement-admin.5";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
 export type Address = string;
+export type Timestamp = string;
 export type OrderProjectionState = "QUOTED" | "SUBMITTED" | "PAID" | "SHIPPED" | "DELIVERED" | "ARBITRATION" | "TAKEOVER" | "FULFILLMENT_PENDING" | "FULFILLED" | "REORG_PENDING";
 export type ContractOrderState = "NONE" | "PAID" | "SHIPPED" | "DELIVERED" | "ARBITRATION" | "TAKEOVER" | "FULFILLMENT_PENDING" | "FULFILLED";
 export type OrderFinalityStatus = "NOT_SUBMITTED" | "PENDING" | "CONFIRMED" | "REPLACED" | "REORGED" | "FINAL";
@@ -15,8 +16,9 @@ export type CatalogReviewDecision = "APPROVE" | "REJECT" | "PUBLISH" | "HIDE" | 
 export type CatalogTaxonomyStatus = "ENABLED" | "DISABLED" | "DELETED";
 export type AllowedActionName = "PAY_ORDER" | "REQUEST_EXCHANGE" | "REQUEST_DELAY" | "DECIDE_FULFILLMENT_REQUEST" | "CONFIRM_RECEIPT" | "REQUEST_FORCED_RECEIPT" | "VERIFY_PICKUP" | "OPEN_ARBITRATION" | "OPEN_TAKEOVER" | "RECORD_SHIPMENT" | "RECORD_DELIVERY" | "REGISTER_PICKUP_CREDENTIAL" | "DECIDE_ARBITRATION" | "DECIDE_FORCED_RECEIPT" | "REQUEST_MERCHANT_SETTLEMENT" | "REQUEST_REWARD_SETTLEMENT" | "REQUEST_PRIZE_SETTLEMENT" | "RECONCILE" | "RECOVER_SURPLUS";
 export type AllowedActionReasonCode = "ArtifactVersionMismatch" | "BreakerActive" | "ConfigurationRequired" | "DecisionBlocked" | "ExternalBlocked" | "FinalityPending" | "Forbidden" | "MerchantFrozen" | "PickupTakeoverDecisionBlocked" | "UnknownState";
-export type CoreErrorCode = "ArtifactVersionMismatch" | "BreakerActive" | "ConfigurationRequired" | "DecisionBlocked" | "EmptySessionPrizeDecisionBlocked" | "ExternalBlocked" | "FinalityPending" | "Forbidden" | "IdempotencyConflict" | "InvalidFinality" | "InvalidRequest" | "InvalidSignature" | "InventoryUnavailable" | "NonceExpired" | "NonceReplay" | "PickupTakeoverDecisionBlocked" | "ProviderSignatureInvalid" | "ProductWriteLocked" | "QuoteExpired" | "ReorgPending" | "ReservationConflict" | "Unauthorized" | "UnknownState";
+export type CoreErrorCode = "ArtifactVersionMismatch" | "BreakerActive" | "ConfigurationRequired" | "DecisionBlocked" | "EmptySessionPrizeDecisionBlocked" | "ExternalBlocked" | "FinalityPending" | "Forbidden" | "IdempotencyConflict" | "InvalidFinality" | "InvalidRequest" | "InvalidSignature" | "InventoryUnavailable" | "NonceExpired" | "NonceReplay" | "SeckillOnlyProduct" | "PickupTakeoverDecisionBlocked" | "ProviderSignatureInvalid" | "ProductWriteLocked" | "QuoteExpired" | "ReorgPending" | "ReservationConflict" | "Unauthorized" | "UnknownState";
 export type FulfillmentMode = "DELIVERY" | "PICKUP";
+export type OrderKind = 'ORDINARY' | 'SECKILL' | 'FALLBACK_RETAIL';
 export type FulfillmentMethod = "CUSTOMER_RECEIPT" | "PICKUP_VERIFICATION" | "FORCED_RECEIPT" | "ARBITRATION";
 export type StoreStatus = "ACTIVE" | "SUSPENDED" | "CLOSED";
 export type FulfillmentRequestType = "EXCHANGE" | "DELAY" | "ARBITRATION" | "FORCED_RECEIPT";
@@ -792,21 +794,47 @@ export interface WeightedDestination {
   weightBps: number;
 }
 
+export interface CatalogSeckillInventory {
+  total: AtomicAmount;
+  sold: AtomicAmount;
+  reserved: AtomicAmount;
+  available: AtomicAmount;
+}
+
+export interface CatalogSeckillOverlay {
+  sessionId: Bytes32;
+  policyVersion: AtomicAmount;
+  phase: 'PREHEAT' | 'LIVE' | 'SETTLING';
+  startsAt: Timestamp;
+  mainDeadline: Timestamp;
+  relayDeadline: Timestamp;
+  seckillListPriceUsdt: AtomicAmount;
+  inventory: CatalogSeckillInventory;
+  ordinaryCheckoutAllowed: false;
+}
+
 export interface CatalogSku {
   skuId: string;
   chainSkuId: Bytes32;
   attributes: Readonly<Record<string, unknown>>;
   listPriceUsdt: AtomicAmount;
   stockAvailable: AtomicAmount;
+  seckill: CatalogSeckillOverlay | null;
 }
 
 export interface CatalogProduct {
   productId: string;
   chainProductId: Bytes32;
   title: string;
+  subtitle: string;
   metadata: Readonly<Record<string, unknown>>;
   mainImageAssetIds: readonly Bytes32[];
   videoAssetId: Bytes32 | null;
+  richDetail: JsonObject;
+  defaultFreightUsdt: AtomicAmount;
+  fulfillmentModes: readonly FulfillmentMode[];
+  categoryId: string | null;
+  tagIds: readonly string[];
   skus: readonly CatalogSku[];
 }
 
@@ -1167,6 +1195,10 @@ export interface FulfillmentOrder {
   merchantWallet: Address;
   productId: string;
   skuId: string;
+  quantity: AtomicAmount;
+  createdAt: Timestamp;
+  orderKind: OrderKind;
+  paymentTxHash: Bytes32 | null;
   fulfillmentMode: FulfillmentMode;
   state: OrderProjectionState;
   finalityStatus: OrderFinalityStatus;
@@ -1182,6 +1214,33 @@ export interface FulfillmentOrder {
   shipments: readonly ShipmentProjection[];
   logistics: readonly LogisticsProjection[];
   balances: readonly FulfillmentBalance[];
+  allowedActions: readonly AllowedAction[];
+}
+
+export interface FulfillmentOrderCursor {
+  createdAt: Timestamp;
+  orderId: string;
+}
+
+export interface FulfillmentOrderPage {
+  orders: readonly FulfillmentOrder[];
+  nextCursor: FulfillmentOrderCursor | null;
+}
+
+export interface AdminOrderSearchPage extends FulfillmentOrderPage {
+  pausedScopes: readonly BreakerScope[];
+  breaker: Readonly<{ scope: BreakerScope; active: boolean }> | null;
+  pendingProductReview: boolean | null;
+}
+
+export interface OrderBatchActionPreviewRow {
+  orderId: Bytes32;
+  allowedActions: readonly AllowedAction[];
+}
+
+export interface OrderBatchActionPreview {
+  rows: readonly OrderBatchActionPreviewRow[];
+  enabledActionIntersection: readonly AllowedActionName[];
 }
 
 export interface FulfillmentCommandInput {
@@ -1197,6 +1256,16 @@ export interface ShipmentRequest extends FulfillmentCommandInput {
   carrierCode: string;
   trackingNumberHash: Bytes32;
   providerReferenceHash?: Bytes32;
+}
+
+export interface ShipmentBatchItemRequest extends ShipmentRequest {
+  orderId: Bytes32;
+  carrierCode: 'SF' | 'JD' | 'YTO' | 'ZTO' | 'STO' | 'EMS';
+}
+
+export interface ShipmentBatchRequest {
+  idempotencyKey: string;
+  items: readonly ShipmentBatchItemRequest[];
 }
 
 export interface PickupCredentialRequest extends FulfillmentCommandInput {
@@ -1240,6 +1309,12 @@ export interface ShipmentResult {
   carrierCode: string;
   trackingNumberHash: Bytes32;
   recordedAt: string;
+}
+
+export interface ShipmentBatchResult {
+  batchId: Bytes32;
+  shipments: readonly ShipmentResult[];
+  createdAt: Timestamp;
 }
 
 export interface DeliveryResult {

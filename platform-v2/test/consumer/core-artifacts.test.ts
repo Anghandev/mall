@@ -23,8 +23,8 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('settlement/admin catalog checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-settlement-admin.4');
+test('settlement/admin .5 checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-settlement-admin.5');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
@@ -54,7 +54,7 @@ test('settlement/admin catalog checkpoint has one identity, resolvable exports a
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 11);
+  assert.equal(schemaManifest.schemas.core.migrations.length, 12);
   assert.equal(schemaManifest.schemas.audit.migrations.length, 3);
   for (const migration of [
     ...schemaManifest.schemas.core.migrations,
@@ -81,6 +81,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'GET /v2/admin/catalog/tags',
     'GET /v2/admin/cms/versions/{versionId}',
     'GET /v2/admin/monitoring',
+    'GET /v2/admin/orders',
     'GET /v2/admin/policy-drafts',
     'GET /v2/admin/policy-drafts/{draftId}',
     'GET /v2/admin/system-config/versions',
@@ -119,6 +120,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'POST /v2/admin/monitoring/alerts/{alertKey}/acknowledge',
     'POST /v2/admin/notification-campaigns',
     'POST /v2/admin/notification-campaigns/{campaignId}/publish',
+    'POST /v2/admin/orders/batch-actions/preview',
     'POST /v2/admin/policy-drafts',
     'POST /v2/admin/policy-drafts/{draftId}/approval-challenge',
     'POST /v2/admin/policy-drafts/{draftId}/safe-proposal',
@@ -161,6 +163,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'POST /v2/seckill/quotes',
     'POST /v2/settlement-intents',
     'POST /v2/settlement-requests',
+    'POST /v2/shipments/batches',
     'POST /v2/stores',
     'PUT /v2/admin/catalog/categories/{categoryId}',
     'PUT /v2/admin/catalog/stores/{storeId}/product-slot',
@@ -221,6 +224,13 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
   ]);
   assert.equal(openapi.components.schemas.ManagedCatalogProduct.properties.title.maxLength, 60);
   assert.equal(openapi.components.schemas.ProductSlotInput.properties.mainImageAssetIds.maxItems, 5);
+  assert.ok(openapi.components.schemas.CatalogProduct.required.includes('richDetail'));
+  assert.ok(openapi.components.schemas.CatalogProduct.required.includes('categoryId'));
+  assert.ok(openapi.components.schemas.CatalogSku.required.includes('seckill'));
+  assert.equal(openapi.components.schemas.CatalogCategoryInput.properties.parentCategoryId.anyOf[1].type, 'null');
+  assert.ok(openapi.components.schemas.FulfillmentOrder.required.includes('allowedActions'));
+  assert.ok(openapi.components.schemas.FulfillmentOrder.required.includes('orderKind'));
+  assert.equal(openapi.components.schemas.ShipmentBatchRequest.properties.items.maxItems, 100);
   for (const contract of manifest.requiredConsumerContracts as string[]) {
     assert.ok(openapi.components.schemas[contract], `OpenAPI ${contract}`);
     assert.match(declarations, new RegExp(`export (?:interface|type) ${contract}\\b`), contract);

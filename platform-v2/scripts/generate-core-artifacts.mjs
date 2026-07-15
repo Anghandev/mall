@@ -94,6 +94,7 @@ const schemaSources = [
       '009_product_surfaces.sql',
       '010_evidence_media.sql',
       '011_catalog_management.sql',
+      '012_order_operations.sql',
     ],
   },
   {
@@ -375,6 +376,11 @@ const coordinatedManifest = {
     'MerchantStore',
     'FulfillmentTarget',
     'FulfillmentOrder',
+    'FulfillmentOrderPage',
+    'ShipmentBatchRequest',
+    'ShipmentBatchResult',
+    'AdminOrderSearchPage',
+    'OrderBatchActionPreview',
     'FulfillmentCommandInput',
     'FulfillmentCommandResult',
     'SettlementIntentProjection',
@@ -445,6 +451,17 @@ function buildOpenApi() {
     required: true,
     schema: { $ref: '#/components/schemas/Bytes32' },
   };
+  const orderPageParameters = [
+    { name: 'cursorCreatedAt', in: 'query', schema: { type: 'string', format: 'date-time' } },
+    { name: 'cursorOrderId', in: 'query', schema: { type: 'string', minLength: 1, maxLength: 256 } },
+    { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 } },
+    { name: 'from', in: 'query', schema: { type: 'string', format: 'date-time' } },
+    { name: 'to', in: 'query', schema: { type: 'string', format: 'date-time' } },
+    { name: 'skuId', in: 'query', schema: { type: 'string', minLength: 1, maxLength: 256 } },
+    { name: 'state', in: 'query', schema: { enum: [...orderProjectionStates] } },
+    { name: 'fulfillmentMode', in: 'query', schema: { enum: [...fulfillmentModes] } },
+    { name: 'orderKind', in: 'query', schema: { enum: ['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] } },
+  ];
   const fulfillmentPost = (operationId, requestSchema, responseSchema, status = 200) => ({
     post: {
       operationId,
@@ -578,14 +595,57 @@ function buildOpenApi() {
         get: {
           operationId: 'listFulfillmentOrders',
           security: [{ bearerAuth: [] }],
+          parameters: orderPageParameters,
           responses: {
-            200: response('Wallet-scoped fulfillment orders', {
-              type: 'object',
-              additionalProperties: false,
-              required: ['orders'],
-              properties: {
-                orders: { type: 'array', items: { $ref: '#/components/schemas/FulfillmentOrder' } },
-              },
+            200: response('Stable wallet-scoped fulfillment order page', {
+              $ref: '#/components/schemas/FulfillmentOrderPage',
+            }),
+            default: errorResponse,
+          },
+        },
+      },
+      '/v2/shipments/batches': {
+        post: {
+          operationId: 'recordShipmentBatch',
+          security: [{ bearerAuth: [] }],
+          requestBody: body({ $ref: '#/components/schemas/ShipmentBatchRequest' }),
+          responses: {
+            201: response('Atomic canonical manual-shipment batch', {
+              $ref: '#/components/schemas/ShipmentBatchResult',
+            }),
+            default: errorResponse,
+          },
+        },
+      },
+      '/v2/admin/orders': {
+        get: {
+          operationId: 'searchAdminOrders',
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            ...orderPageParameters,
+            { name: 'orderId', in: 'query', schema: { type: 'string', minLength: 1, maxLength: 256 } },
+            { name: 'productId', in: 'query', schema: { type: 'string', minLength: 1, maxLength: 256 } },
+            { name: 'txHash', in: 'query', schema: { $ref: '#/components/schemas/Bytes32' } },
+            { name: 'wallet', in: 'query', schema: { $ref: '#/components/schemas/Address' } },
+            { name: 'pendingReview', in: 'query', schema: { type: 'boolean' } },
+            { name: 'breakerScope', in: 'query', schema: { $ref: '#/components/schemas/BreakerScope' } },
+          ],
+          responses: {
+            200: response('Exact scoped admin order search', {
+              $ref: '#/components/schemas/AdminOrderSearchPage',
+            }),
+            default: errorResponse,
+          },
+        },
+      },
+      '/v2/admin/orders/batch-actions/preview': {
+        post: {
+          operationId: 'previewAdminOrderBatchActions',
+          security: [{ bearerAuth: [] }],
+          requestBody: body({ $ref: '#/components/schemas/OrderBatchActionPreviewRequest' }),
+          responses: {
+            200: response('Read-only row actions and enabled intersection', {
+              $ref: '#/components/schemas/OrderBatchActionPreview',
             }),
             default: errorResponse,
           },
@@ -747,6 +807,7 @@ function buildOpenApi() {
         AllowedActionName: { type: 'string', enum: [...allowedActionNames] },
         AllowedActionReasonCode: { type: 'string', enum: [...allowedActionReasonCodes] },
         UserRole: { type: 'string', enum: [...userRoles] },
+        BreakerScope: { type: 'string', enum: [...breakerScopes] },
         AllowedAction: {
           type: 'object',
           additionalProperties: false,
@@ -1813,7 +1874,7 @@ function catalogManagementOpenApiSchemas() {
       type: 'object', additionalProperties: false,
       required: ['name', 'sortOrder', 'idempotencyKey'],
       properties: {
-        parentCategoryId: resourceId,
+        parentCategoryId: { anyOf: [resourceId, { type: 'null' }] },
         name: { type: 'string', minLength: 1, maxLength: 80 },
         iconAssetId: { $ref: '#/components/schemas/Bytes32' },
         sortOrder: { type: 'integer', minimum: 0 },
@@ -2442,9 +2503,10 @@ function fulfillmentOpenApiSchemas() {
       additionalProperties: false,
       required: [
         'orderId', 'artifactVersion', 'buyerWallet', 'merchantId', 'merchantWallet', 'productId',
-        'skuId', 'fulfillmentMode', 'state', 'finalityStatus', 'exactAmounts', 'paidAt',
+        'skuId', 'quantity', 'createdAt', 'orderKind', 'paymentTxHash', 'fulfillmentMode',
+        'state', 'finalityStatus', 'exactAmounts', 'paidAt',
         'paymentFinalizedAt', 'shippedAt', 'deliveredAt', 'fulfilledAt', 'takeoverOpenedAt',
-        'arbitrationOpenedAt', 'requests', 'shipments', 'logistics', 'balances',
+        'arbitrationOpenedAt', 'requests', 'shipments', 'logistics', 'balances', 'allowedActions',
       ],
       properties: {
         orderId: { $ref: '#/components/schemas/Bytes32' },
@@ -2454,6 +2516,10 @@ function fulfillmentOpenApiSchemas() {
         merchantWallet: { $ref: '#/components/schemas/Address' },
         productId: { type: 'string', minLength: 1 },
         skuId: { type: 'string', minLength: 1 },
+        quantity: { $ref: '#/components/schemas/AtomicAmount' },
+        createdAt: timestamp,
+        orderKind: { enum: ['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] },
+        paymentTxHash: { anyOf: [{ $ref: '#/components/schemas/Bytes32' }, { type: 'null' }] },
         fulfillmentMode: { enum: [...fulfillmentModes] },
         state: { enum: [...orderProjectionStates] },
         finalityStatus: { enum: [...orderFinalityStatuses] },
@@ -2469,6 +2535,70 @@ function fulfillmentOpenApiSchemas() {
         shipments: { type: 'array', items: { $ref: '#/components/schemas/ShipmentProjection' } },
         logistics: { type: 'array', items: { $ref: '#/components/schemas/LogisticsProjection' } },
         balances: { type: 'array', items: { $ref: '#/components/schemas/FulfillmentBalance' } },
+        allowedActions: { type: 'array', items: { $ref: '#/components/schemas/AllowedAction' } },
+      },
+    },
+    FulfillmentOrderCursor: {
+      type: 'object', additionalProperties: false, required: ['createdAt', 'orderId'],
+      properties: {
+        createdAt: timestamp,
+        orderId: { type: 'string', minLength: 1, maxLength: 256 },
+      },
+    },
+    FulfillmentOrderPage: {
+      type: 'object', additionalProperties: false, required: ['orders', 'nextCursor'],
+      properties: {
+        orders: { type: 'array', items: { $ref: '#/components/schemas/FulfillmentOrder' } },
+        nextCursor: {
+          anyOf: [{ $ref: '#/components/schemas/FulfillmentOrderCursor' }, { type: 'null' }],
+        },
+      },
+    },
+    AdminOrderSearchPage: {
+      type: 'object', additionalProperties: false,
+      required: ['orders', 'nextCursor', 'pausedScopes', 'breaker', 'pendingProductReview'],
+      properties: {
+        orders: { type: 'array', items: { $ref: '#/components/schemas/FulfillmentOrder' } },
+        nextCursor: {
+          anyOf: [{ $ref: '#/components/schemas/FulfillmentOrderCursor' }, { type: 'null' }],
+        },
+        pausedScopes: { type: 'array', uniqueItems: true, items: { $ref: '#/components/schemas/BreakerScope' } },
+        breaker: {
+          anyOf: [{
+            type: 'object', additionalProperties: false, required: ['scope', 'active'],
+            properties: {
+              scope: { $ref: '#/components/schemas/BreakerScope' },
+              active: { type: 'boolean' },
+            },
+          }, { type: 'null' }],
+        },
+        pendingProductReview: { anyOf: [{ type: 'boolean' }, { type: 'null' }] },
+      },
+    },
+    OrderBatchActionPreviewRequest: {
+      type: 'object', additionalProperties: false, required: ['orderIds'],
+      properties: {
+        orderIds: {
+          type: 'array', minItems: 1, maxItems: 100, uniqueItems: true,
+          items: { $ref: '#/components/schemas/Bytes32' },
+        },
+      },
+    },
+    OrderBatchActionPreviewRow: {
+      type: 'object', additionalProperties: false, required: ['orderId', 'allowedActions'],
+      properties: {
+        orderId: { $ref: '#/components/schemas/Bytes32' },
+        allowedActions: { type: 'array', items: { $ref: '#/components/schemas/AllowedAction' } },
+      },
+    },
+    OrderBatchActionPreview: {
+      type: 'object', additionalProperties: false,
+      required: ['rows', 'enabledActionIntersection'],
+      properties: {
+        rows: { type: 'array', items: { $ref: '#/components/schemas/OrderBatchActionPreviewRow' } },
+        enabledActionIntersection: {
+          type: 'array', uniqueItems: true, items: { enum: [...allowedActionNames] },
+        },
       },
     },
     FulfillmentCommandInput: {
@@ -2489,6 +2619,27 @@ function fulfillmentOpenApiSchemas() {
         carrierCode: { type: 'string', pattern: '^[A-Z0-9_-]{2,32}$' },
         trackingNumberHash: { $ref: '#/components/schemas/Bytes32' },
         providerReferenceHash: { $ref: '#/components/schemas/Bytes32' },
+      },
+    },
+    ShipmentBatchItemRequest: {
+      type: 'object', additionalProperties: false,
+      required: ['orderId', ...commandRequired, 'carrierCode', 'trackingNumberHash'],
+      properties: {
+        orderId: { $ref: '#/components/schemas/Bytes32' },
+        ...commandProperties,
+        carrierCode: { enum: ['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS'] },
+        trackingNumberHash: { $ref: '#/components/schemas/Bytes32' },
+        providerReferenceHash: { $ref: '#/components/schemas/Bytes32' },
+      },
+    },
+    ShipmentBatchRequest: {
+      type: 'object', additionalProperties: false, required: ['idempotencyKey', 'items'],
+      properties: {
+        idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
+        items: {
+          type: 'array', minItems: 1, maxItems: 100, uniqueItems: true,
+          items: { $ref: '#/components/schemas/ShipmentBatchItemRequest' },
+        },
       },
     },
     PickupCredentialRequest: {
@@ -2558,6 +2709,18 @@ function fulfillmentOpenApiSchemas() {
         trackingNumberHash: { $ref: '#/components/schemas/Bytes32' }, recordedAt: timestamp,
       },
     ),
+    ShipmentBatchResult: {
+      type: 'object', additionalProperties: false,
+      required: ['batchId', 'shipments', 'createdAt'],
+      properties: {
+        batchId: { $ref: '#/components/schemas/Bytes32' },
+        shipments: {
+          type: 'array', minItems: 1, maxItems: 100,
+          items: { $ref: '#/components/schemas/ShipmentResult' },
+        },
+        createdAt: timestamp,
+      },
+    },
     DeliveryResult: objectSchema(['orderId', 'state', 'deliveredAt'], {
       orderId: { $ref: '#/components/schemas/Bytes32' }, state: { const: 'DELIVERED' }, deliveredAt: timestamp,
     }),
@@ -2746,30 +2909,71 @@ function paymentOpenApiSchemas() {
         seckillPrizePoolAccount: { $ref: '#/components/schemas/Address' },
       },
     },
+    CatalogSeckillInventory: {
+      type: 'object', additionalProperties: false,
+      required: ['total', 'sold', 'reserved', 'available'],
+      properties: {
+        total: { $ref: '#/components/schemas/AtomicAmount' },
+        sold: { $ref: '#/components/schemas/AtomicAmount' },
+        reserved: { $ref: '#/components/schemas/AtomicAmount' },
+        available: { $ref: '#/components/schemas/AtomicAmount' },
+      },
+    },
+    CatalogSeckillOverlay: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'sessionId', 'policyVersion', 'phase', 'startsAt', 'mainDeadline',
+        'relayDeadline', 'seckillListPriceUsdt', 'inventory', 'ordinaryCheckoutAllowed',
+      ],
+      properties: {
+        sessionId: { $ref: '#/components/schemas/Bytes32' },
+        policyVersion: { $ref: '#/components/schemas/AtomicAmount' },
+        phase: { enum: ['PREHEAT', 'LIVE', 'SETTLING'] },
+        startsAt: { type: 'string', format: 'date-time' },
+        mainDeadline: { type: 'string', format: 'date-time' },
+        relayDeadline: { type: 'string', format: 'date-time' },
+        seckillListPriceUsdt: { $ref: '#/components/schemas/AtomicAmount' },
+        inventory: { $ref: '#/components/schemas/CatalogSeckillInventory' },
+        ordinaryCheckoutAllowed: { type: 'boolean', enum: [false] },
+      },
+    },
     CatalogSku: {
       type: 'object', additionalProperties: false,
-      required: ['skuId', 'chainSkuId', 'attributes', 'listPriceUsdt', 'stockAvailable'],
+      required: ['skuId', 'chainSkuId', 'attributes', 'listPriceUsdt', 'stockAvailable', 'seckill'],
       properties: {
         skuId: { type: 'string', minLength: 1 },
         chainSkuId: { $ref: '#/components/schemas/Bytes32' },
         attributes: { type: 'object' },
         listPriceUsdt: { $ref: '#/components/schemas/AtomicAmount' },
         stockAvailable: { $ref: '#/components/schemas/AtomicAmount' },
+        seckill: {
+          anyOf: [{ $ref: '#/components/schemas/CatalogSeckillOverlay' }, { type: 'null' }],
+        },
       },
     },
     CatalogProduct: {
       type: 'object', additionalProperties: false,
       required: [
-        'productId', 'chainProductId', 'title', 'metadata',
-        'mainImageAssetIds', 'videoAssetId', 'skus',
+        'productId', 'chainProductId', 'title', 'subtitle', 'metadata',
+        'mainImageAssetIds', 'videoAssetId', 'richDetail', 'defaultFreightUsdt',
+        'fulfillmentModes', 'categoryId', 'tagIds', 'skus',
       ],
       properties: {
         productId: { type: 'string', minLength: 1 },
         chainProductId: { $ref: '#/components/schemas/Bytes32' },
         title: { type: 'string', minLength: 1 },
+        subtitle: { type: 'string', maxLength: 120 },
         metadata: { type: 'object' },
         mainImageAssetIds: { type: 'array', maxItems: 5, items: { $ref: '#/components/schemas/Bytes32' } },
         videoAssetId: { anyOf: [{ $ref: '#/components/schemas/Bytes32' }, { type: 'null' }] },
+        richDetail: { type: 'object' },
+        defaultFreightUsdt: { $ref: '#/components/schemas/AtomicAmount' },
+        fulfillmentModes: {
+          type: 'array', minItems: 1, maxItems: 2, uniqueItems: true,
+          items: { enum: [...fulfillmentModes] },
+        },
+        categoryId: { anyOf: [{ type: 'string', minLength: 1 }, { type: 'null' }] },
+        tagIds: { type: 'array', maxItems: 20, uniqueItems: true, items: { type: 'string', minLength: 1 } },
         skus: { type: 'array', minItems: 1, items: { $ref: '#/components/schemas/CatalogSku' } },
       },
     },
@@ -3139,6 +3343,7 @@ export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: ${JSON.
 export type AtomicAmount = string;
 export type Bytes32 = string;
 export type Address = string;
+export type Timestamp = string;
 export type OrderProjectionState = ${union(orderProjectionStates)};
 export type ContractOrderState = ${union(contractOrderStates)};
 export type OrderFinalityStatus = ${union(orderFinalityStatuses)};
@@ -3153,6 +3358,7 @@ export type AllowedActionName = ${union(allowedActionNames)};
 export type AllowedActionReasonCode = ${union(allowedActionReasonCodes)};
 export type CoreErrorCode = ${union(coreErrorCodes)};
 export type FulfillmentMode = ${union(fulfillmentModes)};
+export type OrderKind = 'ORDINARY' | 'SECKILL' | 'FALLBACK_RETAIL';
 export type FulfillmentMethod = ${union(fulfillmentMethods)};
 export type StoreStatus = ${union(storeStatuses)};
 export type FulfillmentRequestType = ${union(fulfillmentRequestTypes)};
@@ -3928,21 +4134,47 @@ export interface WeightedDestination {
   weightBps: number;
 }
 
+export interface CatalogSeckillInventory {
+  total: AtomicAmount;
+  sold: AtomicAmount;
+  reserved: AtomicAmount;
+  available: AtomicAmount;
+}
+
+export interface CatalogSeckillOverlay {
+  sessionId: Bytes32;
+  policyVersion: AtomicAmount;
+  phase: 'PREHEAT' | 'LIVE' | 'SETTLING';
+  startsAt: Timestamp;
+  mainDeadline: Timestamp;
+  relayDeadline: Timestamp;
+  seckillListPriceUsdt: AtomicAmount;
+  inventory: CatalogSeckillInventory;
+  ordinaryCheckoutAllowed: false;
+}
+
 export interface CatalogSku {
   skuId: string;
   chainSkuId: Bytes32;
   attributes: Readonly<Record<string, unknown>>;
   listPriceUsdt: AtomicAmount;
   stockAvailable: AtomicAmount;
+  seckill: CatalogSeckillOverlay | null;
 }
 
 export interface CatalogProduct {
   productId: string;
   chainProductId: Bytes32;
   title: string;
+  subtitle: string;
   metadata: Readonly<Record<string, unknown>>;
   mainImageAssetIds: readonly Bytes32[];
   videoAssetId: Bytes32 | null;
+  richDetail: JsonObject;
+  defaultFreightUsdt: AtomicAmount;
+  fulfillmentModes: readonly FulfillmentMode[];
+  categoryId: string | null;
+  tagIds: readonly string[];
   skus: readonly CatalogSku[];
 }
 
@@ -4303,6 +4535,10 @@ export interface FulfillmentOrder {
   merchantWallet: Address;
   productId: string;
   skuId: string;
+  quantity: AtomicAmount;
+  createdAt: Timestamp;
+  orderKind: OrderKind;
+  paymentTxHash: Bytes32 | null;
   fulfillmentMode: FulfillmentMode;
   state: OrderProjectionState;
   finalityStatus: OrderFinalityStatus;
@@ -4318,6 +4554,33 @@ export interface FulfillmentOrder {
   shipments: readonly ShipmentProjection[];
   logistics: readonly LogisticsProjection[];
   balances: readonly FulfillmentBalance[];
+  allowedActions: readonly AllowedAction[];
+}
+
+export interface FulfillmentOrderCursor {
+  createdAt: Timestamp;
+  orderId: string;
+}
+
+export interface FulfillmentOrderPage {
+  orders: readonly FulfillmentOrder[];
+  nextCursor: FulfillmentOrderCursor | null;
+}
+
+export interface AdminOrderSearchPage extends FulfillmentOrderPage {
+  pausedScopes: readonly BreakerScope[];
+  breaker: Readonly<{ scope: BreakerScope; active: boolean }> | null;
+  pendingProductReview: boolean | null;
+}
+
+export interface OrderBatchActionPreviewRow {
+  orderId: Bytes32;
+  allowedActions: readonly AllowedAction[];
+}
+
+export interface OrderBatchActionPreview {
+  rows: readonly OrderBatchActionPreviewRow[];
+  enabledActionIntersection: readonly AllowedActionName[];
 }
 
 export interface FulfillmentCommandInput {
@@ -4333,6 +4596,16 @@ export interface ShipmentRequest extends FulfillmentCommandInput {
   carrierCode: string;
   trackingNumberHash: Bytes32;
   providerReferenceHash?: Bytes32;
+}
+
+export interface ShipmentBatchItemRequest extends ShipmentRequest {
+  orderId: Bytes32;
+  carrierCode: 'SF' | 'JD' | 'YTO' | 'ZTO' | 'STO' | 'EMS';
+}
+
+export interface ShipmentBatchRequest {
+  idempotencyKey: string;
+  items: readonly ShipmentBatchItemRequest[];
 }
 
 export interface PickupCredentialRequest extends FulfillmentCommandInput {
@@ -4376,6 +4649,12 @@ export interface ShipmentResult {
   carrierCode: string;
   trackingNumberHash: Bytes32;
   recordedAt: string;
+}
+
+export interface ShipmentBatchResult {
+  batchId: Bytes32;
+  shipments: readonly ShipmentResult[];
+  createdAt: Timestamp;
 }
 
 export interface DeliveryResult {

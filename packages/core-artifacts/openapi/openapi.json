@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Abu 24K V2 Core API",
-    "version": "2.0.0-settlement-admin.4"
+    "version": "2.0.0-settlement-admin.5"
   },
-  "x-artifactVersion": "2.0.0-settlement-admin.4",
+  "x-artifactVersion": "2.0.0-settlement-admin.5",
   "servers": [],
   "paths": {
     "/v2/settlement-intents": {
@@ -4216,9 +4216,102 @@
             "bearerAuth": []
           }
         ],
+        "parameters": [
+          {
+            "name": "cursorCreatedAt",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "cursorOrderId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "skuId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "QUOTED",
+                "SUBMITTED",
+                "PAID",
+                "SHIPPED",
+                "DELIVERED",
+                "ARBITRATION",
+                "TAKEOVER",
+                "FULFILLMENT_PENDING",
+                "FULFILLED",
+                "REORG_PENDING"
+              ]
+            }
+          },
+          {
+            "name": "fulfillmentMode",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "DELIVERY",
+                "PICKUP"
+              ]
+            }
+          },
+          {
+            "name": "orderKind",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "ORDINARY",
+                "SECKILL",
+                "FALLBACK_RETAIL"
+              ]
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Wallet-scoped fulfillment orders",
+            "description": "Stable wallet-scoped fulfillment order page",
             "headers": {
               "x-correlation-id": {
                 "schema": {
@@ -4229,19 +4322,304 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "orders"
-                  ],
-                  "properties": {
-                    "orders": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/FulfillmentOrder"
-                      }
-                    }
-                  }
+                  "$ref": "#/components/schemas/FulfillmentOrderPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/shipments/batches": {
+      "post": {
+        "operationId": "recordShipmentBatch",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShipmentBatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Atomic canonical manual-shipment batch",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShipmentBatchResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/orders": {
+      "get": {
+        "operationId": "searchAdminOrders",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cursorCreatedAt",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "cursorOrderId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "skuId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "QUOTED",
+                "SUBMITTED",
+                "PAID",
+                "SHIPPED",
+                "DELIVERED",
+                "ARBITRATION",
+                "TAKEOVER",
+                "FULFILLMENT_PENDING",
+                "FULFILLED",
+                "REORG_PENDING"
+              ]
+            }
+          },
+          {
+            "name": "fulfillmentMode",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "DELIVERY",
+                "PICKUP"
+              ]
+            }
+          },
+          {
+            "name": "orderKind",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "ORDINARY",
+                "SECKILL",
+                "FALLBACK_RETAIL"
+              ]
+            }
+          },
+          {
+            "name": "orderId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "productId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "txHash",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          },
+          {
+            "name": "wallet",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Address"
+            }
+          },
+          {
+            "name": "pendingReview",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "breakerScope",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/BreakerScope"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exact scoped admin order search",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOrderSearchPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/orders/batch-actions/preview": {
+      "post": {
+        "operationId": "previewAdminOrderBatchActions",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderBatchActionPreviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Read-only row actions and enabled intersection",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderBatchActionPreview"
                 }
               }
             }
@@ -5746,6 +6124,7 @@
           "InventoryUnavailable",
           "NonceExpired",
           "NonceReplay",
+          "SeckillOnlyProduct",
           "PickupTakeoverDecisionBlocked",
           "ProviderSignatureInvalid",
           "ProductWriteLocked",
@@ -5804,6 +6183,14 @@
           "OPERATOR",
           "ARBITRATOR",
           "AUDITOR"
+        ]
+      },
+      "BreakerScope": {
+        "type": "string",
+        "enum": [
+          "NEW_PAYMENT",
+          "SECKILL_PURCHASE",
+          "NEW_SETTLEMENT_BATCH"
         ]
       },
       "AllowedAction": {
@@ -5908,7 +6295,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.4"
+            "const": "2.0.0-settlement-admin.5"
           },
           "status": {
             "const": "CORE_API_READY"
@@ -6604,6 +6991,10 @@
           "merchantWallet",
           "productId",
           "skuId",
+          "quantity",
+          "createdAt",
+          "orderKind",
+          "paymentTxHash",
           "fulfillmentMode",
           "state",
           "finalityStatus",
@@ -6618,7 +7009,8 @@
           "requests",
           "shipments",
           "logistics",
-          "balances"
+          "balances",
+          "allowedActions"
         ],
         "properties": {
           "orderId": {
@@ -6645,6 +7037,30 @@
           "skuId": {
             "type": "string",
             "minLength": 1
+          },
+          "quantity": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "orderKind": {
+            "enum": [
+              "ORDINARY",
+              "SECKILL",
+              "FALLBACK_RETAIL"
+            ]
+          },
+          "paymentTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "fulfillmentMode": {
             "enum": [
@@ -6779,6 +7195,206 @@
             "items": {
               "$ref": "#/components/schemas/FulfillmentBalance"
             }
+          },
+          "allowedActions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AllowedAction"
+            }
+          }
+        }
+      },
+      "FulfillmentOrderCursor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "createdAt",
+          "orderId"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "orderId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      },
+      "FulfillmentOrderPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orders",
+          "nextCursor"
+        ],
+        "properties": {
+          "orders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FulfillmentOrder"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FulfillmentOrderCursor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "AdminOrderSearchPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orders",
+          "nextCursor",
+          "pausedScopes",
+          "breaker",
+          "pendingProductReview"
+        ],
+        "properties": {
+          "orders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FulfillmentOrder"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FulfillmentOrderCursor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pausedScopes": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/BreakerScope"
+            }
+          },
+          "breaker": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "scope",
+                  "active"
+                ],
+                "properties": {
+                  "scope": {
+                    "$ref": "#/components/schemas/BreakerScope"
+                  },
+                  "active": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pendingProductReview": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "OrderBatchActionPreviewRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderIds"
+        ],
+        "properties": {
+          "orderIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        }
+      },
+      "OrderBatchActionPreviewRow": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "allowedActions"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "allowedActions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AllowedAction"
+            }
+          }
+        }
+      },
+      "OrderBatchActionPreview": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rows",
+          "enabledActionIntersection"
+        ],
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderBatchActionPreviewRow"
+            }
+          },
+          "enabledActionIntersection": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "PAY_ORDER",
+                "REQUEST_EXCHANGE",
+                "REQUEST_DELAY",
+                "DECIDE_FULFILLMENT_REQUEST",
+                "CONFIRM_RECEIPT",
+                "REQUEST_FORCED_RECEIPT",
+                "VERIFY_PICKUP",
+                "OPEN_ARBITRATION",
+                "OPEN_TAKEOVER",
+                "RECORD_SHIPMENT",
+                "RECORD_DELIVERY",
+                "REGISTER_PICKUP_CREDENTIAL",
+                "DECIDE_ARBITRATION",
+                "DECIDE_FORCED_RECEIPT",
+                "REQUEST_MERCHANT_SETTLEMENT",
+                "REQUEST_REWARD_SETTLEMENT",
+                "REQUEST_PRIZE_SETTLEMENT",
+                "RECONCILE",
+                "RECOVER_SURPLUS"
+              ]
+            }
           }
         }
       },
@@ -6844,6 +7460,68 @@
           },
           "providerReferenceHash": {
             "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "ShipmentBatchItemRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "idempotencyKey",
+          "evidenceHash",
+          "carrierCode",
+          "trackingNumberHash"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "carrierCode": {
+            "enum": [
+              "SF",
+              "JD",
+              "YTO",
+              "ZTO",
+              "STO",
+              "EMS"
+            ]
+          },
+          "trackingNumberHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "providerReferenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "ShipmentBatchRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "items"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          },
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/ShipmentBatchItemRequest"
+            }
           }
         }
       },
@@ -7046,6 +7724,32 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "recordedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ShipmentBatchResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "batchId",
+          "shipments",
+          "createdAt"
+        ],
+        "properties": {
+          "batchId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "shipments": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/ShipmentResult"
+            }
+          },
+          "createdAt": {
             "type": "string",
             "format": "date-time"
           }
@@ -7609,6 +8313,84 @@
           }
         }
       },
+      "CatalogSeckillInventory": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "total",
+          "sold",
+          "reserved",
+          "available"
+        ],
+        "properties": {
+          "total": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "sold": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "reserved": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "available": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          }
+        }
+      },
+      "CatalogSeckillOverlay": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sessionId",
+          "policyVersion",
+          "phase",
+          "startsAt",
+          "mainDeadline",
+          "relayDeadline",
+          "seckillListPriceUsdt",
+          "inventory",
+          "ordinaryCheckoutAllowed"
+        ],
+        "properties": {
+          "sessionId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "policyVersion": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "phase": {
+            "enum": [
+              "PREHEAT",
+              "LIVE",
+              "SETTLING"
+            ]
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "mainDeadline": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "relayDeadline": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "seckillListPriceUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "inventory": {
+            "$ref": "#/components/schemas/CatalogSeckillInventory"
+          },
+          "ordinaryCheckoutAllowed": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          }
+        }
+      },
       "CatalogSku": {
         "type": "object",
         "additionalProperties": false,
@@ -7617,7 +8399,8 @@
           "chainSkuId",
           "attributes",
           "listPriceUsdt",
-          "stockAvailable"
+          "stockAvailable",
+          "seckill"
         ],
         "properties": {
           "skuId": {
@@ -7635,6 +8418,16 @@
           },
           "stockAvailable": {
             "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "seckill": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogSeckillOverlay"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -7645,9 +8438,15 @@
           "productId",
           "chainProductId",
           "title",
+          "subtitle",
           "metadata",
           "mainImageAssetIds",
           "videoAssetId",
+          "richDetail",
+          "defaultFreightUsdt",
+          "fulfillmentModes",
+          "categoryId",
+          "tagIds",
           "skus"
         ],
         "properties": {
@@ -7661,6 +8460,10 @@
           "title": {
             "type": "string",
             "minLength": 1
+          },
+          "subtitle": {
+            "type": "string",
+            "maxLength": 120
           },
           "metadata": {
             "type": "object"
@@ -7681,6 +8484,44 @@
                 "type": "null"
               }
             ]
+          },
+          "richDetail": {
+            "type": "object"
+          },
+          "defaultFreightUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "fulfillmentModes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "DELIVERY",
+                "PICKUP"
+              ]
+            }
+          },
+          "categoryId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tagIds": {
+            "type": "array",
+            "maxItems": 20,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
           },
           "skus": {
             "type": "array",
@@ -8526,7 +9367,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.4"
+            "const": "2.0.0-settlement-admin.5"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -8625,7 +9466,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.4"
+            "const": "2.0.0-settlement-admin.5"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -9019,9 +9860,16 @@
         ],
         "properties": {
           "parentCategoryId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "name": {
             "type": "string",
@@ -9558,7 +10406,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.4"
+            "const": "2.0.0-settlement-admin.5"
           },
           "productId": {
             "type": "string",
@@ -9731,7 +10579,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.4"
+            "const": "2.0.0-settlement-admin.5"
           },
           "storeId": {
             "type": "string",
@@ -9857,7 +10705,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.4"
+            "const": "2.0.0-settlement-admin.5"
           },
           "productId": {
             "type": "string",
@@ -9959,7 +10807,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.4"
+            "const": "2.0.0-settlement-admin.5"
           },
           "previewId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -10118,7 +10966,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.4"
+            "const": "2.0.0-settlement-admin.5"
           },
           "adjustmentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -10238,7 +11086,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.4"
+            "const": "2.0.0-settlement-admin.5"
           },
           "uploadIntentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -10331,7 +11179,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.4"
+            "const": "2.0.0-settlement-admin.5"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -10412,7 +11260,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.4"
+            "const": "2.0.0-settlement-admin.5"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -10568,7 +11416,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.4"
+            "const": "2.0.0-settlement-admin.5"
           },
           "evidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
@@ -10827,7 +11675,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.4"
+            "const": "2.0.0-settlement-admin.5"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -11102,7 +11950,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifact_version": {
-            "const": "2.0.0-settlement-admin.4"
+            "const": "2.0.0-settlement-admin.5"
           },
           "wallet_address": {
             "$ref": "#/components/schemas/Address"
@@ -11428,7 +12276,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.4"
+            "const": "2.0.0-settlement-admin.5"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -14191,7 +15039,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.4"
+            "const": "2.0.0-settlement-admin.5"
           },
           "sessionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -14415,7 +15263,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.4"
+            "const": "2.0.0-settlement-admin.5"
           },
           "protocolVersion": {
             "const": 1

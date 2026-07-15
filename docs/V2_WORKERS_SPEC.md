@@ -1,6 +1,6 @@
 # Abu 24K V2 Payment And Fulfillment Workers
 
-Status: local settlement/admin checkpoint `2.0.0-settlement-admin.4`. Production RPCs, deployed
+Status: local settlement/admin checkpoint `2.0.0-settlement-admin.5`. Production RPCs, deployed
 addresses, signer service and credentials remain `ExternalBlocked`.
 
 ## Indexer

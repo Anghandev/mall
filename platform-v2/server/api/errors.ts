@@ -14,6 +14,7 @@ export const coreErrorCodes = [
   'InventoryUnavailable',
   'NonceExpired',
   'NonceReplay',
+  'SeckillOnlyProduct',
   'PickupTakeoverDecisionBlocked',
   'ProviderSignatureInvalid',
   'ProductWriteLocked',

@@ -1,8 +1,20 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { orderAllowedActions, type OrderProjection } from '../api/allowed-actions.ts';
 import { CoreError } from '../api/errors.ts';
-import type { UserRole } from '../api/enums.ts';
+import {
+  breakerScopes,
+  executableOrderActionNames,
+  fulfillmentModes,
+  orderProjectionStates,
+  type AllowedActionName,
+  type BreakerScope,
+  type OrderFinalityStatus,
+  type OrderState,
+  type UserRole,
+} from '../api/enums.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 import { captureMerchantFutureProceeds } from './takeover-funding-service.ts';
+import { assertTrackingEvidenceRecord, type Carrier } from './evidence-service.ts';
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_PICKUP_ATTEMPTS = 5;
@@ -22,6 +34,36 @@ export interface ShipmentInput extends FulfillmentCommandInput {
   carrierCode: string;
   trackingNumberHash: string;
   providerReferenceHash?: string;
+}
+
+export interface ShipmentBatchItem extends ShipmentInput {
+  orderId: string;
+  carrierCode: Carrier;
+}
+
+export interface ShipmentBatchInput {
+  idempotencyKey: string;
+  items: ShipmentBatchItem[];
+}
+
+export type OrderKind = 'ORDINARY' | 'SECKILL' | 'FALLBACK_RETAIL';
+
+export interface OrderPageQuery {
+  cursorCreatedAt?: Date;
+  cursorOrderId?: string;
+  limit?: number;
+  from?: Date;
+  to?: Date;
+  skuId?: string;
+  state?: OrderState;
+  fulfillmentMode?: 'DELIVERY' | 'PICKUP';
+  orderKind?: OrderKind;
+  orderId?: string;
+  productId?: string;
+  txHash?: string;
+  wallet?: string;
+  pendingProductReview?: boolean;
+  breakerScope?: BreakerScope;
 }
 
 export interface LogisticsUpdateInput extends FulfillmentCommandInput {
@@ -69,10 +111,11 @@ interface OrderRow {
   merchant_wallet: string;
   product_id: string;
   sku_id: string;
+  quantity: string | number;
   fulfillment_mode: 'DELIVERY' | 'PICKUP';
   fulfillment_target_hash: string;
-  state: string;
-  finality_status: string;
+  state: OrderState;
+  finality_status: OrderFinalityStatus;
   paid_at: Date | null;
   shipped_at: Date | null;
   delivered_at: Date | null;
@@ -80,7 +123,23 @@ interface OrderRow {
   takeover_opened_at: Date | null;
   arbitration_opened_at: Date | null;
   exact_amounts: Record<string, unknown>;
+  seckill_snapshot: Record<string, unknown> | null;
+  payment_tx_hash: string | null;
+  created_at: Date;
+  quote_kind: 'ORDINARY' | 'SECKILL' | null;
   payment_finalized_at: Date | null;
+}
+
+interface OrderPageRow extends OrderRow {
+  requests: unknown;
+  shipments: unknown;
+  logistics: unknown;
+  balances: unknown;
+  shipment_evidence: boolean;
+  takeover_opened: boolean;
+  open_request_types: Array<'EXCHANGE' | 'DELAY' | 'ARBITRATION' | 'FORCED_RECEIPT'>;
+  active_pickup_credential: boolean;
+  approved_exchange: boolean;
 }
 
 interface ExistingCommandRow {
@@ -118,17 +177,28 @@ type CommandType =
 export class FulfillmentService {
   readonly #transactions: SqlTransactionRunner;
   readonly #clock: () => Date;
+  readonly #executableActions: ReadonlySet<AllowedActionName>;
 
-  constructor(input: { transactions: SqlTransactionRunner; clock?: () => Date }) {
+  constructor(input: {
+    transactions: SqlTransactionRunner;
+    clock?: () => Date;
+    executableActions?: Iterable<AllowedActionName>;
+  }) {
     this.#transactions = input.transactions;
     this.#clock = input.clock ?? (() => new Date());
+    this.#executableActions = new Set(input.executableActions ?? executableOrderActionNames);
   }
 
   getOrder(actor: FulfillmentActor, orderId: string) {
     return this.#transactions.transaction(async (executor) => {
       const order = await loadOrder(executor, orderId);
       assertCanRead(actor, order);
-      return orderProjection(executor, order);
+      const pausedScopes = await loadPausedScopes(executor);
+      return orderProjection(
+        executor,
+        order,
+        await allowedActionsForOrder(executor, order, actor, this.#clock(), pausedScopes, this.#executableActions),
+      );
     });
   }
 
@@ -149,95 +219,201 @@ export class FulfillmentService {
     });
   }
 
-  recordShipment(actor: FulfillmentActor, orderId: string, input: ShipmentInput) {
-    validateCommand(input);
-    if (!/^[A-Z0-9_-]{2,32}$/.test(input.carrierCode) || !isHash(input.trackingNumberHash)) {
-      throw new CoreError('InvalidRequest', 'Invalid shipment identity');
-    }
-    if (input.providerReferenceHash && !isHash(input.providerReferenceHash)) {
-      throw new CoreError('InvalidRequest', 'Invalid provider reference hash');
-    }
-    return this.#command(actor, orderId, 'RECORD_SHIPMENT', input, async (executor, order, command) => {
-      assertMerchantOrOperator(actor, order);
-      assertFinalPayment(order);
-      const exchange = order.state === 'PAID'
-        ? undefined
-        : (await executor.query<{ request_id: string }>(
-          `SELECT request_id FROM core.fulfillment_requests
-           WHERE order_id = $1 AND request_type = 'EXCHANGE' AND state = 'APPROVED'
-           ORDER BY resolved_at DESC LIMIT 1 FOR UPDATE`,
-          [orderId],
-        )).rows[0];
-      const takeover = order.state === 'TAKEOVER' && hasRole(actor, 'OPERATOR', 'ADMIN');
-      if (
-        order.fulfillment_mode !== 'DELIVERY'
-        || (
-          order.state !== 'PAID'
-          && !(['SHIPPED', 'DELIVERED'].includes(order.state) && exchange)
-          && !takeover
-        )
-      ) {
-        throw new CoreError('UnknownState', 'Shipment requires a paid delivery order', 409);
-      }
-      const evidenceId = `evidence:${randomUUID()}`;
-      const shipmentId = `shipment:${randomUUID()}`;
-      const result = {
-        orderId,
-        state: 'SHIPPED',
-        shipmentId,
-        carrierCode: input.carrierCode,
-        trackingNumberHash: input.trackingNumberHash.toLowerCase(),
-        recordedAt: command.now.toISOString(),
-      };
-      await insertCommand(executor, command, result);
-      await insertEvidence(executor, {
-        evidenceId,
-        orderId,
-        type: 'SHIPMENT',
-        hash: input.evidenceHash,
-        source: 'MERCHANT_OR_OPERATOR',
-        ...(input.providerReferenceHash ? { providerReferenceHash: input.providerReferenceHash } : {}),
-        payload: { carrierCode: input.carrierCode, trackingNumberHash: input.trackingNumberHash.toLowerCase() },
-        actor: command.actor,
-        at: command.now,
+  listOrderPage(actor: FulfillmentActor, input: OrderPageQuery = {}) {
+    const query = orderPageQuery(input);
+    return this.#transactions.transaction(async (executor) => {
+      const now = this.#clock();
+      const { sql, params } = orderPageSql(actor, query, now);
+      const result = await executor.query<OrderPageRow>(sql, params);
+      const pageRows = result.rows.slice(0, query.limit);
+      const pausedScopes = await loadPausedScopes(executor);
+      const orders = pageRows.map((row) => {
+        const order = normalizeOrderDates(row);
+        return orderPageProjection(
+          order,
+          allowedActionsFromState(order, order, actor, now, pausedScopes, this.#executableActions),
+        );
       });
-      await executor.query(
-        `INSERT INTO core.shipments (
-           shipment_id, order_id, command_id, carrier_code, tracking_number_hash,
-           provider_reference_hash, evidence_id
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [
-          shipmentId,
+      const last = pageRows.at(-1);
+      return {
+        orders,
+        nextCursor: result.rows.length > query.limit && last
+          ? { createdAt: new Date(last.created_at).toISOString(), orderId: last.order_id }
+          : null,
+      };
+    });
+  }
+
+  searchAdminOrders(actor: FulfillmentActor, input: OrderPageQuery = {}) {
+    assertRole(actor, 'ADMIN', 'OPERATOR', 'AUDITOR');
+    const query = orderPageQuery(input);
+    return this.#transactions.transaction(async (executor) => {
+      const now = this.#clock();
+      const { sql, params } = orderPageSql(actor, query, now);
+      const result = await executor.query<OrderPageRow>(sql, params);
+      const pageRows = result.rows.slice(0, query.limit);
+      const pausedScopes = await loadPausedScopes(executor);
+      const orders = pageRows.map((row) => {
+        const order = normalizeOrderDates(row);
+        return orderPageProjection(
+          order,
+          allowedActionsFromState(order, order, actor, now, pausedScopes, this.#executableActions),
+        );
+      });
+      const last = pageRows.at(-1);
+      return {
+        orders,
+        nextCursor: result.rows.length > query.limit && last
+          ? { createdAt: new Date(last.created_at).toISOString(), orderId: last.order_id }
+          : null,
+        pausedScopes: [...pausedScopes].sort(),
+        breaker: query.breakerScope
+          ? { scope: query.breakerScope, active: pausedScopes.has(query.breakerScope) }
+          : null,
+        pendingProductReview: query.pendingProductReview ?? null,
+      };
+    });
+  }
+
+  previewOrderBatchActions(actor: FulfillmentActor, orderIds: string[]) {
+    assertRole(actor, 'ADMIN', 'OPERATOR', 'AUDITOR');
+    if (!Array.isArray(orderIds) || orderIds.length < 1 || orderIds.length > 100) {
+      throw new CoreError('InvalidRequest', 'Order action preview requires 1-100 orders');
+    }
+    if (orderIds.some((orderId) => orderId.length < 1 || orderId.length > 256)) {
+      throw new CoreError('InvalidRequest', 'Order action preview contains an invalid order ID');
+    }
+    if (new Set(orderIds).size !== orderIds.length) {
+      throw new CoreError('InvalidRequest', 'Order action preview contains duplicate orders');
+    }
+    return this.#transactions.transaction(async (executor) => {
+      const now = this.#clock();
+      const pausedScopes = await loadPausedScopes(executor);
+      const rows: Array<{
+        orderId: string;
+        allowedActions: ReturnType<typeof orderAllowedActions>;
+      }> = [];
+      for (const orderId of [...orderIds].sort()) {
+        const order = await loadOrder(executor, orderId);
+        assertCanRead(actor, order);
+        rows.push({
           orderId,
-          command.id,
-          input.carrierCode,
-          input.trackingNumberHash.toLowerCase(),
-          input.providerReferenceHash?.toLowerCase() ?? null,
-          evidenceId,
-        ],
-      );
-      await transitionOrder(executor, order, command, evidenceId, 'SHIPPED');
+          allowedActions: await allowedActionsForOrder(
+            executor,
+            order,
+            actor,
+            now,
+            pausedScopes,
+            this.#executableActions,
+          ),
+        });
+      }
+      let intersection: Set<AllowedActionName> | undefined;
+      for (const row of rows) {
+        const enabled = new Set(row.allowedActions.filter((action) => action.enabled).map((action) => action.action));
+        intersection = intersection === undefined
+          ? enabled
+          : new Set([...intersection].filter((action) => enabled.has(action)));
+      }
+      return {
+        rows: orderIds.map((orderId) => rows.find((row) => row.orderId === orderId)!),
+        enabledActionIntersection: [...(intersection ?? new Set())].sort(),
+      };
+    });
+  }
+
+  recordShipment(actor: FulfillmentActor, orderId: string, input: ShipmentInput) {
+    validateShipment(input);
+    return this.#command(actor, orderId, 'RECORD_SHIPMENT', input, (
+      executor,
+      order,
+      command,
+    ) => recordShipmentCommand(executor, actor, order, input, command));
+  }
+
+  recordShipmentBatch(actor: FulfillmentActor, input: ShipmentBatchInput) {
+    validateIdempotencyKey(input.idempotencyKey);
+    if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 100) {
+      throw new CoreError('InvalidRequest', 'Shipment batch must contain 1-100 items');
+    }
+    for (const item of input.items) {
+      if (item.orderId.length < 1 || item.orderId.length > 256) {
+        throw new CoreError('InvalidRequest', 'Shipment batch order ID is invalid');
+      }
+      validateShipment(item);
+    }
+    if (new Set(input.items.map((item) => item.orderId)).size !== input.items.length) {
+      throw new CoreError('InvalidRequest', 'Shipment batch contains duplicate orders');
+    }
+    if (new Set(input.items.map((item) => item.idempotencyKey)).size !== input.items.length) {
+      throw new CoreError('InvalidRequest', 'Shipment batch contains duplicate item idempotency keys');
+    }
+    const wallet = normalizedWallet(actor.walletAddress);
+    const requestHash = hashJson({ type: 'RECORD_SHIPMENT_BATCH', input });
+    return this.#transactions.transaction(async (executor) => {
       await executor.query(
-        `UPDATE core.orders SET state = 'SHIPPED', shipped_at = $2,
-           delivered_at = CASE WHEN $3 THEN NULL ELSE delivered_at END,
-           updated_at = clock_timestamp() WHERE order_id = $1`,
-        [orderId, command.now, Boolean(exchange)],
+        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        [`fulfillment-shipment-batch:${wallet}:${input.idempotencyKey}`],
       );
-      if (exchange) {
-        await executor.query(
-          `UPDATE core.fulfillment_requests SET state = 'RESOLVED', resolution_evidence_id = $2,
-             resolved_by = $3, resolved_at = $4 WHERE request_id = $1 AND state = 'APPROVED'`,
-          [exchange.request_id, evidenceId, command.actor, command.now],
-        );
+      const prior = await executor.query<{ request_hash: string; result: Record<string, unknown> }>(
+        `SELECT request_hash, result FROM core.fulfillment_shipment_batches
+         WHERE actor_wallet = $1 AND idempotency_key = $2`,
+        [wallet, input.idempotencyKey],
+      );
+      if (prior.rows[0]) {
+        if (prior.rows[0].request_hash !== requestHash) {
+          throw new CoreError('IdempotencyConflict', 'Shipment batch idempotency key was reused with different input', 409);
+        }
+        return prior.rows[0].result;
       }
-      if (takeover) {
-        await executor.query(
-          `UPDATE core.takeover_cases SET state = 'FULFILLING', updated_at = clock_timestamp()
-           WHERE order_id = $1 AND state = 'OPEN'`,
-          [orderId],
-        );
+      for (const idempotencyKey of input.items.map((item) => item.idempotencyKey).sort()) {
+        await lockFulfillmentIdempotency(executor, wallet, idempotencyKey);
       }
-      await outbox(executor, orderId, command.id, 'ShipmentRecorded', result);
+      const results = new Map<string, Record<string, unknown>>();
+      for (const item of [...input.items].sort((left, right) => left.orderId.localeCompare(right.orderId))) {
+        const contentHash = hashJson({ orderId: item.orderId, type: 'RECORD_SHIPMENT', payload: shipmentPayload(item) });
+        const existing = await executor.query<ExistingCommandRow>(
+          `SELECT command_id, order_id, command_type, content_hash, result
+           FROM core.fulfillment_commands WHERE actor_wallet = $1 AND idempotency_key = $2`,
+          [wallet, item.idempotencyKey],
+        );
+        if (existing.rows[0]) {
+          if (
+            existing.rows[0].order_id !== item.orderId
+            || existing.rows[0].command_type !== 'RECORD_SHIPMENT'
+            || existing.rows[0].content_hash !== contentHash
+          ) throw new CoreError('IdempotencyConflict', 'Shipment item idempotency key was reused with different input', 409);
+          results.set(item.orderId, existing.rows[0].result);
+          continue;
+        }
+        const order = await loadOrder(executor, item.orderId, true);
+        await assertTrackingEvidenceRecord(executor, actor, {
+          orderId: item.orderId,
+          carrierCode: item.carrierCode,
+          trackingNumberHash: item.trackingNumberHash,
+          evidenceHash: item.evidenceHash,
+        });
+        results.set(item.orderId, await recordShipmentCommand(executor, actor, order, item, {
+          id: `command:${randomUUID()}`,
+          actor: wallet,
+          type: 'RECORD_SHIPMENT',
+          idempotencyKey: item.idempotencyKey,
+          contentHash,
+          now: this.#clock(),
+        }));
+      }
+      const batchId = `0x${randomBytes(32).toString('hex')}`;
+      const result = {
+        batchId,
+        shipments: input.items.map((item) => results.get(item.orderId)!),
+        createdAt: this.#clock().toISOString(),
+      };
+      await executor.query(
+        `INSERT INTO core.fulfillment_shipment_batches (
+           batch_id, actor_wallet, idempotency_key, request_hash, item_count, result, created_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [batchId, wallet, input.idempotencyKey, requestHash, input.items.length, JSON.stringify(result), result.createdAt],
+      );
       return result;
     });
   }
@@ -828,6 +1004,7 @@ export class FulfillmentService {
     }
     const contentHash = hashJson({ orderId, type, payload });
     return this.#transactions.transaction(async (executor) => {
+      await lockFulfillmentIdempotency(executor, wallet, idempotencyKey);
       const prior = await executor.query<ExistingCommandRow>(
         `SELECT command_id, order_id, command_type, content_hash, result
          FROM core.fulfillment_commands WHERE actor_wallet = $1 AND idempotency_key = $2`,
@@ -851,6 +1028,109 @@ export class FulfillmentService {
       });
     });
   }
+}
+
+async function lockFulfillmentIdempotency(executor: SqlExecutor, wallet: string, idempotencyKey: string) {
+  await executor.query(
+    'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+    [`fulfillment-command:${wallet}:${idempotencyKey}`],
+  );
+}
+
+async function recordShipmentCommand(
+  executor: SqlExecutor,
+  actor: FulfillmentActor,
+  order: OrderRow,
+  input: ShipmentInput,
+  command: {
+    id: string;
+    actor: string;
+    type: CommandType;
+    idempotencyKey: string;
+    contentHash: string;
+    now: Date;
+  },
+) {
+  const orderId = order.order_id;
+  assertMerchantOrOperator(actor, order);
+  assertFinalPayment(order);
+  const exchange = order.state === 'PAID'
+    ? undefined
+    : (await executor.query<{ request_id: string }>(
+      `SELECT request_id FROM core.fulfillment_requests
+       WHERE order_id = $1 AND request_type = 'EXCHANGE' AND state = 'APPROVED'
+       ORDER BY resolved_at DESC LIMIT 1 FOR UPDATE`,
+      [orderId],
+    )).rows[0];
+  const takeover = order.state === 'TAKEOVER' && hasRole(actor, 'OPERATOR', 'ADMIN');
+  if (
+    order.fulfillment_mode !== 'DELIVERY'
+    || (
+      order.state !== 'PAID'
+      && !(['SHIPPED', 'DELIVERED'].includes(order.state) && exchange)
+      && !takeover
+    )
+  ) throw new CoreError('UnknownState', 'Shipment requires a paid delivery order', 409);
+  const evidenceId = `evidence:${randomUUID()}`;
+  const shipmentId = `shipment:${randomUUID()}`;
+  const result = {
+    orderId,
+    state: 'SHIPPED',
+    shipmentId,
+    carrierCode: input.carrierCode,
+    trackingNumberHash: input.trackingNumberHash.toLowerCase(),
+    recordedAt: command.now.toISOString(),
+  };
+  await insertCommand(executor, command, result);
+  await insertEvidence(executor, {
+    evidenceId,
+    orderId,
+    type: 'SHIPMENT',
+    hash: input.evidenceHash,
+    source: 'MERCHANT_OR_OPERATOR',
+    ...(input.providerReferenceHash ? { providerReferenceHash: input.providerReferenceHash } : {}),
+    payload: { carrierCode: input.carrierCode, trackingNumberHash: input.trackingNumberHash.toLowerCase() },
+    actor: command.actor,
+    at: command.now,
+  });
+  await executor.query(
+    `INSERT INTO core.shipments (
+       shipment_id, order_id, command_id, carrier_code, tracking_number_hash,
+       provider_reference_hash, evidence_id
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [
+      shipmentId,
+      orderId,
+      command.id,
+      input.carrierCode,
+      input.trackingNumberHash.toLowerCase(),
+      input.providerReferenceHash?.toLowerCase() ?? null,
+      evidenceId,
+    ],
+  );
+  await transitionOrder(executor, order, command, evidenceId, 'SHIPPED');
+  await executor.query(
+    `UPDATE core.orders SET state = 'SHIPPED', shipped_at = $2,
+       delivered_at = CASE WHEN $3 THEN NULL ELSE delivered_at END,
+       updated_at = clock_timestamp() WHERE order_id = $1`,
+    [orderId, command.now, Boolean(exchange)],
+  );
+  if (exchange) {
+    await executor.query(
+      `UPDATE core.fulfillment_requests SET state = 'RESOLVED', resolution_evidence_id = $2,
+         resolved_by = $3, resolved_at = $4 WHERE request_id = $1 AND state = 'APPROVED'`,
+      [exchange.request_id, evidenceId, command.actor, command.now],
+    );
+  }
+  if (takeover) {
+    await executor.query(
+      `UPDATE core.takeover_cases SET state = 'FULFILLING', updated_at = clock_timestamp()
+       WHERE order_id = $1 AND state = 'OPEN'`,
+      [orderId],
+    );
+  }
+  await outbox(executor, orderId, command.id, 'ShipmentRecorded', result);
+  return result;
 }
 
 async function completeOrder(
@@ -993,11 +1273,14 @@ async function loadOrder(executor: SqlExecutor, orderId: string, forUpdate = fal
   const result = await executor.query<OrderRow>(
     `SELECT orders.order_id, orders.artifact_version, orders.policy_version,
        orders.buyer_wallet, orders.merchant_id, orders.merchant_wallet,
-       orders.product_id, orders.sku_id, orders.fulfillment_mode, orders.fulfillment_target_hash, orders.state,
+       orders.product_id, orders.sku_id, orders.quantity, orders.fulfillment_mode, orders.fulfillment_target_hash, orders.state,
        orders.finality_status, orders.paid_at, orders.shipped_at, orders.delivered_at,
        orders.fulfilled_at, orders.takeover_opened_at, orders.arbitration_opened_at,
-       orders.exact_amounts, finality.finalized_at AS payment_finalized_at
+       orders.exact_amounts, orders.seckill_snapshot, orders.payment_tx_hash,
+       orders.created_at, quote.quote_kind,
+       finality.finalized_at AS payment_finalized_at
      FROM core.orders orders
+     LEFT JOIN core.payment_quotes quote ON quote.order_id = orders.order_id
      LEFT JOIN core.transaction_finality finality
        ON finality.resource_type = 'ORDER_PAYMENT' AND finality.resource_id = orders.order_id
        AND finality.state = 'FINAL'
@@ -1007,18 +1290,15 @@ async function loadOrder(executor: SqlExecutor, orderId: string, forUpdate = fal
   const order = result.rows[0];
   if (!order) throw new CoreError('InvalidRequest', 'Order not found', 404);
   return {
-    ...order,
-    paid_at: asDate(order.paid_at),
-    shipped_at: asDate(order.shipped_at),
-    delivered_at: asDate(order.delivered_at),
-    fulfilled_at: asDate(order.fulfilled_at),
-    takeover_opened_at: asDate(order.takeover_opened_at),
-    arbitration_opened_at: asDate(order.arbitration_opened_at),
-    payment_finalized_at: asDate(order.payment_finalized_at),
+    ...normalizeOrderDates(order),
   };
 }
 
-async function orderProjection(executor: SqlExecutor, order: OrderRow) {
+async function orderProjection(
+  executor: SqlExecutor,
+  order: OrderRow,
+  allowedActions: ReturnType<typeof orderAllowedActions> = [],
+) {
   const [requests, shipments, logistics, balances] = await Promise.all([
     executor.query<{
       request_id: string;
@@ -1067,24 +1347,7 @@ async function orderProjection(executor: SqlExecutor, order: OrderRow) {
     ),
   ]);
   return {
-    orderId: order.order_id,
-    artifactVersion: order.artifact_version,
-    buyerWallet: order.buyer_wallet,
-    merchantId: order.merchant_id,
-    merchantWallet: order.merchant_wallet,
-    productId: order.product_id,
-    skuId: order.sku_id,
-    fulfillmentMode: order.fulfillment_mode,
-    state: order.state,
-    finalityStatus: order.finality_status,
-    exactAmounts: order.exact_amounts,
-    paidAt: iso(order.paid_at),
-    paymentFinalizedAt: iso(order.payment_finalized_at),
-    shippedAt: iso(order.shipped_at),
-    deliveredAt: iso(order.delivered_at),
-    fulfilledAt: iso(order.fulfilled_at),
-    takeoverOpenedAt: iso(order.takeover_opened_at),
-    arbitrationOpenedAt: iso(order.arbitration_opened_at),
+    ...orderSummary(order, allowedActions),
     requests: requests.rows.map((row) => ({
       requestId: row.request_id,
       requestType: row.request_type,
@@ -1108,6 +1371,401 @@ async function orderProjection(executor: SqlExecutor, order: OrderRow) {
     })),
     balances: balances.rows.map((row) => ({ asset: row.asset, state: row.balance_state, amount: row.amount })),
   };
+}
+
+function orderPageProjection(order: OrderPageRow, allowedActions: ReturnType<typeof orderAllowedActions>) {
+  const requests = recordArray(order.requests, 'order requests');
+  const shipments = recordArray(order.shipments, 'order shipments');
+  const logistics = recordArray(order.logistics, 'order logistics');
+  const balances = recordArray(order.balances, 'order balances');
+  return {
+    ...orderSummary(order, allowedActions),
+    requests: requests.map((row) => ({
+      requestId: requiredText(row.requestId, 'requestId'),
+      requestType: requiredText(row.requestType, 'requestType'),
+      state: requiredText(row.state, 'request state'),
+      requestedAt: requiredTimestamp(row.requestedAt, 'requestedAt'),
+      resolvedAt: nullableTimestamp(row.resolvedAt, 'resolvedAt'),
+    })),
+    shipments: shipments.map((row) => ({
+      shipmentId: requiredText(row.shipmentId, 'shipmentId'),
+      carrierCode: requiredText(row.carrierCode, 'carrierCode'),
+      trackingNumberHash: requiredText(row.trackingNumberHash, 'trackingNumberHash'),
+      providerReferenceHash: nullableText(row.providerReferenceHash, 'providerReferenceHash'),
+      createdAt: requiredTimestamp(row.createdAt, 'shipment createdAt'),
+    })),
+    logistics: logistics.map((row) => ({
+      logisticsEventId: requiredText(row.logisticsEventId, 'logisticsEventId'),
+      provider: requiredText(row.provider, 'logistics provider'),
+      status: requiredText(row.status, 'logistics status'),
+      locationHash: nullableText(row.locationHash, 'locationHash'),
+      occurredAt: requiredTimestamp(row.occurredAt, 'logistics occurredAt'),
+    })),
+    balances: balances.map((row) => ({
+      asset: requiredText(row.asset, 'balance asset'),
+      state: requiredText(row.state, 'balance state'),
+      amount: requiredText(row.amount, 'balance amount'),
+    })),
+  };
+}
+
+function orderSummary(order: OrderRow, allowedActions: ReturnType<typeof orderAllowedActions>) {
+  return {
+    orderId: order.order_id,
+    artifactVersion: order.artifact_version,
+    buyerWallet: order.buyer_wallet,
+    merchantId: order.merchant_id,
+    merchantWallet: order.merchant_wallet,
+    productId: order.product_id,
+    skuId: order.sku_id,
+    quantity: String(order.quantity),
+    createdAt: order.created_at.toISOString(),
+    orderKind: orderKind(order),
+    paymentTxHash: order.payment_tx_hash,
+    fulfillmentMode: order.fulfillment_mode,
+    state: order.state,
+    finalityStatus: order.finality_status,
+    exactAmounts: order.exact_amounts,
+    paidAt: iso(order.paid_at),
+    paymentFinalizedAt: iso(order.payment_finalized_at),
+    shippedAt: iso(order.shipped_at),
+    deliveredAt: iso(order.delivered_at),
+    fulfilledAt: iso(order.fulfilled_at),
+    takeoverOpenedAt: iso(order.takeover_opened_at),
+    arbitrationOpenedAt: iso(order.arbitration_opened_at),
+    allowedActions,
+  };
+}
+
+async function allowedActionsForOrder(
+  executor: SqlExecutor,
+  order: OrderRow,
+  actor: FulfillmentActor,
+  now: Date,
+  pausedScopes: ReadonlySet<BreakerScope>,
+  executableActions: ReadonlySet<AllowedActionName>,
+) {
+  const result = await executor.query<{
+    shipment_evidence: boolean;
+    takeover_opened: boolean;
+    open_request_types: Array<'EXCHANGE' | 'DELAY' | 'ARBITRATION' | 'FORCED_RECEIPT'>;
+    active_pickup_credential: boolean;
+    approved_exchange: boolean;
+  }>(
+    `SELECT
+       EXISTS (
+         SELECT 1 FROM core.fulfillment_evidence evidence
+         WHERE evidence.order_id = $1 AND evidence.evidence_type = 'SHIPMENT'
+       ) AS shipment_evidence,
+       EXISTS (SELECT 1 FROM core.takeover_cases takeover WHERE takeover.order_id = $1) AS takeover_opened,
+       ARRAY(
+         SELECT request.request_type FROM core.fulfillment_requests request
+         WHERE request.order_id = $1 AND request.state = 'OPEN'
+         ORDER BY request.request_type
+       ) AS open_request_types,
+       EXISTS (
+         SELECT 1 FROM core.pickup_credentials credential
+         WHERE credential.order_id = $1 AND credential.consumed_at IS NULL
+           AND credential.invalidated_at IS NULL AND credential.expires_at > $2
+       ) AS active_pickup_credential,
+       EXISTS (
+         SELECT 1 FROM core.fulfillment_requests request
+         WHERE request.order_id = $1 AND request.request_type = 'EXCHANGE'
+           AND request.state = 'APPROVED'
+       ) AS approved_exchange`,
+    [order.order_id, now],
+  );
+  const row = result.rows[0];
+  if (!row) throw new CoreError('UnknownState', 'Order action projection is unavailable', 409);
+  return allowedActionsFromState(order, row, actor, now, pausedScopes, executableActions);
+}
+
+function allowedActionsFromState(
+  order: OrderRow,
+  row: {
+    shipment_evidence: boolean;
+    takeover_opened: boolean;
+    open_request_types: Array<'EXCHANGE' | 'DELAY' | 'ARBITRATION' | 'FORCED_RECEIPT'>;
+    active_pickup_credential: boolean;
+    approved_exchange: boolean;
+  },
+  actor: FulfillmentActor,
+  now: Date,
+  pausedScopes: ReadonlySet<BreakerScope>,
+  executableActions: ReadonlySet<AllowedActionName>,
+) {
+  const projection: OrderProjection = {
+    state: order.state,
+    fulfillmentMode: order.fulfillment_mode,
+    buyerWallet: order.buyer_wallet,
+    merchantId: order.merchant_id,
+    merchantWallet: order.merchant_wallet,
+    ...(order.payment_finalized_at ? { paidAt: order.payment_finalized_at } : {}),
+    ...(order.delivered_at ? { deliveredAt: order.delivered_at } : {}),
+    paymentFinalityStatus: order.finality_status,
+    shipmentEvidence: row.shipment_evidence,
+    takeoverOpened: row.takeover_opened,
+    openRequestTypes: row.open_request_types,
+    activePickupCredential: row.active_pickup_credential,
+    approvedExchange: row.approved_exchange,
+  };
+  return orderAllowedActions(projection, {
+    actorWallet: normalizedWallet(actor.walletAddress),
+    ...(actor.merchantId ? { actorMerchantId: actor.merchantId } : {}),
+    roles: actor.roles,
+    now,
+    pausedScopes,
+    executableActions,
+  });
+}
+
+async function loadPausedScopes(executor: SqlExecutor) {
+  const result = await executor.query<{ scope: BreakerScope }>(
+    'SELECT scope FROM core.circuit_breakers WHERE paused ORDER BY scope',
+  );
+  const known = new Set<string>(breakerScopes);
+  if (result.rows.some((row) => !known.has(row.scope))) {
+    throw new CoreError('UnknownState', 'Circuit-breaker scope projection is invalid', 409);
+  }
+  return new Set(result.rows.map((row) => row.scope));
+}
+
+function orderPageQuery(input: OrderPageQuery) {
+  const limit = input.limit ?? 50;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+    throw new CoreError('InvalidRequest', 'Order page limit must be between 1 and 100');
+  }
+  const hasCursorTime = input.cursorCreatedAt !== undefined;
+  const hasCursorId = input.cursorOrderId !== undefined;
+  if (hasCursorTime !== hasCursorId) {
+    throw new CoreError('InvalidRequest', 'Order cursor requires createdAt and orderId together');
+  }
+  for (const [name, value] of [
+    ['cursorCreatedAt', input.cursorCreatedAt],
+    ['from', input.from],
+    ['to', input.to],
+  ] as const) {
+    if (value && !Number.isFinite(value.getTime())) throw new CoreError('InvalidRequest', `${name} is invalid`);
+  }
+  if (input.from && input.to && input.from > input.to) {
+    throw new CoreError('InvalidRequest', 'Order date range is invalid');
+  }
+  if (input.cursorOrderId !== undefined && (input.cursorOrderId.length < 1 || input.cursorOrderId.length > 256)) {
+    throw new CoreError('InvalidRequest', 'Order cursor ID is invalid');
+  }
+  if (input.skuId !== undefined && (input.skuId.length < 1 || input.skuId.length > 256)) {
+    throw new CoreError('InvalidRequest', 'Order SKU filter is invalid');
+  }
+  if (input.state !== undefined && !orderProjectionStates.includes(input.state)) {
+    throw new CoreError('InvalidRequest', 'Order state filter is invalid');
+  }
+  if (input.fulfillmentMode !== undefined && !fulfillmentModes.includes(input.fulfillmentMode)) {
+    throw new CoreError('InvalidRequest', 'Order fulfillment filter is invalid');
+  }
+  if (input.orderKind !== undefined && !['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'].includes(input.orderKind)) {
+    throw new CoreError('InvalidRequest', 'Order kind filter is invalid');
+  }
+  for (const [name, value] of [['orderId', input.orderId], ['productId', input.productId]] as const) {
+    if (value !== undefined && (value.length < 1 || value.length > 256)) {
+      throw new CoreError('InvalidRequest', `${name} filter is invalid`);
+    }
+  }
+  if (input.txHash !== undefined && !isHash(input.txHash)) {
+    throw new CoreError('InvalidRequest', 'Order transaction hash filter is invalid');
+  }
+  const wallet = input.wallet === undefined ? undefined : normalizedWallet(input.wallet);
+  if (input.breakerScope !== undefined && !breakerScopes.includes(input.breakerScope)) {
+    throw new CoreError('InvalidRequest', 'Order breaker filter is invalid');
+  }
+  return { ...input, ...(wallet ? { wallet } : {}), limit };
+}
+
+function orderPageSql(actor: FulfillmentActor, query: ReturnType<typeof orderPageQuery>, now: Date) {
+  const params: unknown[] = [];
+  const conditions: string[] = [];
+  const add = (value: unknown) => {
+    params.push(value);
+    return `$${params.length}`;
+  };
+  if (!hasRole(actor, 'ADMIN', 'OPERATOR', 'ARBITRATOR', 'AUDITOR')) {
+    const scope: string[] = [];
+    const wallet = normalizedWallet(actor.walletAddress);
+    if (actor.roles.includes('BUYER')) scope.push(`orders.buyer_wallet = ${add(wallet)}`);
+    if (actor.roles.includes('MERCHANT')) {
+      const merchantScope = [`orders.merchant_wallet = ${add(wallet)}`];
+      if (actor.merchantId) merchantScope.push(`orders.merchant_id = ${add(actor.merchantId)}`);
+      scope.push(`(${merchantScope.join(' OR ')})`);
+    }
+    conditions.push(scope.length > 0 ? `(${scope.join(' OR ')})` : 'FALSE');
+  }
+  if (query.from) conditions.push(`orders.created_at >= ${add(query.from)}`);
+  if (query.to) conditions.push(`orders.created_at <= ${add(query.to)}`);
+  if (query.skuId) conditions.push(`orders.sku_id = ${add(query.skuId)}`);
+  if (query.state) conditions.push(`orders.state = ${add(query.state)}`);
+  if (query.fulfillmentMode) conditions.push(`orders.fulfillment_mode = ${add(query.fulfillmentMode)}`);
+  if (query.orderKind) {
+    conditions.push(`CASE
+      WHEN orders.seckill_snapshot IS NOT NULL THEN 'SECKILL'
+      WHEN quote.quote_kind = 'SECKILL' THEN 'FALLBACK_RETAIL'
+      ELSE 'ORDINARY'
+    END = ${add(query.orderKind)}`);
+  }
+  if (query.orderId) conditions.push(`orders.order_id = ${add(query.orderId)}`);
+  if (query.productId) conditions.push(`orders.product_id = ${add(query.productId)}`);
+  if (query.txHash) {
+    conditions.push(`(orders.payment_tx_hash = ${add(query.txHash.toLowerCase())}
+      OR quote.submitted_tx_hash = ${add(query.txHash.toLowerCase())})`);
+  }
+  if (query.wallet) {
+    conditions.push(`(orders.buyer_wallet = ${add(query.wallet)} OR orders.merchant_wallet = ${add(query.wallet)})`);
+  }
+  if (query.pendingProductReview !== undefined) {
+    conditions.push(`(product.lifecycle_state = 'REVIEW') = ${add(query.pendingProductReview)}`);
+  }
+  if (query.cursorCreatedAt && query.cursorOrderId) {
+    conditions.push(`(orders.created_at, orders.order_id) < (${add(query.cursorCreatedAt)}, ${add(query.cursorOrderId)})`);
+  }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const activeAt = add(now);
+  const limit = add(query.limit + 1);
+  return {
+    sql: `SELECT orders.order_id, orders.artifact_version, orders.policy_version,
+        orders.buyer_wallet, orders.merchant_id, orders.merchant_wallet,
+        orders.product_id, orders.sku_id, orders.quantity, orders.fulfillment_mode,
+        orders.fulfillment_target_hash, orders.state, orders.finality_status,
+        orders.paid_at, orders.shipped_at, orders.delivered_at, orders.fulfilled_at,
+        orders.takeover_opened_at, orders.arbitration_opened_at, orders.exact_amounts,
+        orders.seckill_snapshot, orders.payment_tx_hash, orders.created_at,
+        quote.quote_kind, finality.finalized_at AS payment_finalized_at,
+        COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+            'requestId', request.request_id,
+            'requestType', request.request_type,
+            'state', request.state,
+            'requestedAt', request.requested_at,
+            'resolvedAt', request.resolved_at
+          ) ORDER BY request.requested_at, request.request_id)
+          FROM core.fulfillment_requests request WHERE request.order_id = orders.order_id
+        ), '[]'::jsonb) AS requests,
+        COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+            'shipmentId', shipment.shipment_id,
+            'carrierCode', shipment.carrier_code,
+            'trackingNumberHash', shipment.tracking_number_hash,
+            'providerReferenceHash', shipment.provider_reference_hash,
+            'createdAt', shipment.created_at
+          ) ORDER BY shipment.created_at, shipment.shipment_id)
+          FROM core.shipments shipment WHERE shipment.order_id = orders.order_id
+        ), '[]'::jsonb) AS shipments,
+        COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+            'logisticsEventId', event.logistics_event_id,
+            'provider', event.provider,
+            'status', event.status,
+            'locationHash', event.location_hash,
+            'occurredAt', event.occurred_at
+          ) ORDER BY event.occurred_at, event.logistics_event_id)
+          FROM core.logistics_events event WHERE event.order_id = orders.order_id
+        ), '[]'::jsonb) AS logistics,
+        COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+            'asset', balance.asset, 'state', balance.balance_state, 'amount', balance.amount
+          ) ORDER BY balance.asset, balance.balance_state)
+          FROM (
+            SELECT account.asset, line.balance_state,
+              sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS amount
+            FROM core.ledger_journals journal
+            JOIN core.ledger_lines line ON line.journal_id = journal.journal_id
+            JOIN core.ledger_accounts account ON account.account_id = line.account_id
+            WHERE journal.order_id = orders.order_id AND line.balance_state <> 'POSTED'
+            GROUP BY account.asset, line.balance_state
+            HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) <> 0
+          ) balance
+        ), '[]'::jsonb) AS balances,
+        EXISTS (
+          SELECT 1 FROM core.fulfillment_evidence evidence
+          WHERE evidence.order_id = orders.order_id AND evidence.evidence_type = 'SHIPMENT'
+        ) AS shipment_evidence,
+        EXISTS (
+          SELECT 1 FROM core.takeover_cases takeover WHERE takeover.order_id = orders.order_id
+        ) AS takeover_opened,
+        ARRAY(
+          SELECT request.request_type FROM core.fulfillment_requests request
+          WHERE request.order_id = orders.order_id AND request.state = 'OPEN'
+          ORDER BY request.request_type
+        ) AS open_request_types,
+        EXISTS (
+          SELECT 1 FROM core.pickup_credentials credential
+          WHERE credential.order_id = orders.order_id AND credential.consumed_at IS NULL
+            AND credential.invalidated_at IS NULL AND credential.expires_at > ${activeAt}
+        ) AS active_pickup_credential,
+        EXISTS (
+          SELECT 1 FROM core.fulfillment_requests request
+          WHERE request.order_id = orders.order_id AND request.request_type = 'EXCHANGE'
+            AND request.state = 'APPROVED'
+        ) AS approved_exchange
+      FROM core.orders orders
+      LEFT JOIN core.payment_quotes quote ON quote.order_id = orders.order_id
+      JOIN core.products product ON product.product_id = orders.product_id
+      LEFT JOIN core.transaction_finality finality
+        ON finality.resource_type = 'ORDER_PAYMENT' AND finality.resource_id = orders.order_id
+        AND finality.state = 'FINAL'
+      ${where}
+      ORDER BY orders.created_at DESC, orders.order_id DESC
+      LIMIT ${limit}`,
+    params,
+  };
+}
+
+function orderKind(order: Pick<OrderRow, 'seckill_snapshot' | 'quote_kind'>): OrderKind {
+  if (order.seckill_snapshot !== null) {
+    if (order.seckill_snapshot.classification !== 'SECKILL') {
+      throw new CoreError('UnknownState', 'Seckill order classification snapshot is invalid', 409);
+    }
+    return 'SECKILL';
+  }
+  return order.quote_kind === 'SECKILL' ? 'FALLBACK_RETAIL' : 'ORDINARY';
+}
+
+function normalizeOrderDates<Row extends OrderRow>(order: Row): Row {
+  return {
+    ...order,
+    paid_at: asDate(order.paid_at),
+    shipped_at: asDate(order.shipped_at),
+    delivered_at: asDate(order.delivered_at),
+    fulfilled_at: asDate(order.fulfilled_at),
+    takeover_opened_at: asDate(order.takeover_opened_at),
+    arbitration_opened_at: asDate(order.arbitration_opened_at),
+    created_at: new Date(order.created_at),
+    payment_finalized_at: asDate(order.payment_finalized_at),
+  };
+}
+
+function recordArray(value: unknown, label: string) {
+  if (!Array.isArray(value) || value.some((item) => !item || typeof item !== 'object' || Array.isArray(item))) {
+    throw new CoreError('UnknownState', `${label} projection is invalid`, 409);
+  }
+  return value as Record<string, unknown>[];
+}
+
+function requiredText(value: unknown, label: string) {
+  if (typeof value !== 'string' || value.length === 0) throw new CoreError('UnknownState', `${label} projection is invalid`, 409);
+  return value;
+}
+
+function nullableText(value: unknown, label: string) {
+  return value === null ? null : requiredText(value, label);
+}
+
+function requiredTimestamp(value: unknown, label: string) {
+  if (typeof value !== 'string') throw new CoreError('UnknownState', `${label} projection is invalid`, 409);
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) throw new CoreError('UnknownState', `${label} projection is invalid`, 409);
+  return date.toISOString();
+}
+
+function nullableTimestamp(value: unknown, label: string) {
+  return value === null ? null : requiredTimestamp(value, label);
 }
 
 async function insertCommand(
@@ -1351,6 +2009,32 @@ function validateCommand(input: FulfillmentCommandInput) {
   if (input.idempotencyKey.length < 8 || input.idempotencyKey.length > 128 || !isHash(input.evidenceHash)) {
     throw new CoreError('InvalidRequest', 'Invalid fulfillment command');
   }
+}
+
+function validateShipment(input: ShipmentInput) {
+  validateCommand(input);
+  if (!/^[A-Z0-9_-]{2,32}$/.test(input.carrierCode) || !isHash(input.trackingNumberHash)) {
+    throw new CoreError('InvalidRequest', 'Invalid shipment identity');
+  }
+  if (input.providerReferenceHash && !isHash(input.providerReferenceHash)) {
+    throw new CoreError('InvalidRequest', 'Invalid provider reference hash');
+  }
+}
+
+function validateIdempotencyKey(value: string) {
+  if (typeof value !== 'string' || value.length < 8 || value.length > 128) {
+    throw new CoreError('InvalidRequest', 'idempotencyKey must contain 8-128 characters');
+  }
+}
+
+function shipmentPayload(input: ShipmentInput): ShipmentInput {
+  return {
+    idempotencyKey: input.idempotencyKey,
+    evidenceHash: input.evidenceHash,
+    carrierCode: input.carrierCode,
+    trackingNumberHash: input.trackingNumberHash,
+    ...(input.providerReferenceHash ? { providerReferenceHash: input.providerReferenceHash } : {}),
+  };
 }
 
 function validateCode(value: string, name: string) {

@@ -1,6 +1,6 @@
 # Abu 24K V2 Core API Contract
 
-Status: coordinated local settlement/admin checkpoint `2.0.0-settlement-admin.4`. OpenAPI,
+Status: coordinated local settlement/admin checkpoint `2.0.0-settlement-admin.5`. OpenAPI,
 generated types, ABI, manifests, enums, the fail-closed WebSocket protocol and
 consumer tests share this version. This checkpoint does not authorize a
 deployment, production signing or a transaction.
@@ -71,6 +71,15 @@ independent reservations. The approval requirement covers the larger amount of
 the two possible branches. `PaymentRouterV2` uses block timestamp to select the
 branch atomically; products never select it.
 
+Public catalog products expose typed subtitle, category/tag assignments,
+structured rich detail, default freight display value, fulfillment modes and a
+nullable SKU-level seckill overlay. `PREHEAT`, `LIVE` and `SETTLING` overlays
+set `ordinaryCheckoutAllowed: false`. Core independently rejects an ordinary
+quote for the same product/SKU in those effective phases; the overlay is not a
+security boundary. Ordinary quote issuance and seckill activation serialize on
+the same SKU lock. A session cannot enter a blocking phase while an unexpired
+ordinary quote remains submittable.
+
 ## HTTP Surface
 
 Public reads:
@@ -119,6 +128,7 @@ Authenticated Core reads and writes:
 - `POST /v2/orders/{orderId}/receipt-confirmation`
 - `POST /v2/orders/{orderId}/evidence`
 - `POST /v2/orders/{orderId}/tracking-evidence`
+- `POST /v2/shipments/batches`
 
 Catalog management:
 
@@ -137,6 +147,8 @@ Catalog management:
 - `POST /v2/admin/catalog/products/{productId}/review-submissions`
 - `POST /v2/admin/catalog/products/{productId}/delist`
 - `POST /v2/admin/catalog/skus/{skuId}/inventory-adjustments`
+- `GET /v2/admin/orders`
+- `POST /v2/admin/orders/batch-actions/preview`
 
 Merchant routes always execute with a merchant-only actor even when the JWT also
 contains a platform role. Admin routes likewise use one platform role and never
@@ -175,6 +187,15 @@ Quotes accept only an unexpired target belonging to the authenticated buyer.
 Order reads are wallet/role scoped; decrypted target payloads are returned only
 to the buyer, bound merchant or authorized platform role.
 
+`GET /v2/orders` is a stable `(createdAt, orderId)` cursor page. Merchant
+filters cover date range, SKU, order state, fulfillment mode and authoritative
+ordinary/seckill/fallback order kind. Every row includes Core-computed
+`allowedActions`; clients do not infer actions from state or local time.
+Admin order search adds exact order ID, product ID, transaction hash and wallet
+filters, plus explicit product-review and breaker projections. The batch-action
+endpoint is read-only and returns each row's actions and their enabled
+intersection; it never performs a cross-resource mutation.
+
 Every fulfillment write requires an idempotency key and evidence hash. The
 server owns roles, state transitions and `allowedActions`. Shipment, delivery,
 pickup, exchange/delay, arbitration, forced-receipt review and takeover remain
@@ -182,6 +203,17 @@ available while payment or settlement breakers are active. A payment must first
 reach 15-confirmation finality. Seven-day delivery takeover starts from that
 finality timestamp, not the payment block timestamp. Pickup-timeout takeover is
 still `DecisionBlocked`.
+
+Manual shipment batches contain 1-100 unique orders. Core sorts and locks the
+orders, revalidates each canonical tracking-evidence envelope, authorizes every
+row and writes every shipment in one database transaction. One invalid item
+rolls back the whole batch. The actor wallet and batch idempotency key acquire a
+transaction advisory lock before replay lookup, so concurrent identical
+requests return the same immutable result. New batches also lock every sorted
+actor/item-idempotency identity before command lookup, so different batch keys
+cannot duplicate or ambiguously conflict on one shipment command.
+Electronic-waybill creation, label printing and raw tracking-number export are
+not part of this endpoint.
 
 Pickup verification includes the order snapshot's exact `storeId`. Core stores
 only salted code hashes, persists each idempotent failed attempt and invalidates
@@ -195,7 +227,7 @@ capabilities plus signed settlement intents and requests, merchant finance and
 guarantee deposits, takeover funding, Safe MultiSend batching and finality,
 policy governance, CMS, notifications, versioned system configuration,
 append-only audit queries and operations monitoring. The coordinated OpenAPI
-publishes 92 HTTP operations and the generated types, state/error enums,
+publishes 95 HTTP operations and the generated types, state/error enums,
 Schema and ABI share the same artifact version.
 
 Seckill session reads, numeric-cursor HTTP replay and `/v2/ws` publish only

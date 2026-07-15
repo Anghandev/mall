@@ -941,7 +941,21 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     fulfillmentService: {
       getOrder: async (_actor, orderId) => ({ orderId, state: 'DELIVERED' }),
       listOrders: async () => [{ orderId: 'order-1', state: 'DELIVERED' }],
+      listOrderPage: async (_actor, input) => ({
+        orders: [{ orderId: 'order-1', state: 'DELIVERED', query: input }],
+        nextCursor: null,
+      }),
+      searchAdminOrders: async (_actor, input) => ({
+        orders: [{ orderId: 'order-1', state: 'DELIVERED', query: input }],
+        nextCursor: null,
+        pausedScopes: [],
+      }),
+      previewOrderBatchActions: async (_actor, orderIds) => ({
+        rows: orderIds.map((orderId) => ({ orderId, allowedActions: [] })),
+        enabledActionIntersection: [],
+      }),
       recordShipment: async (_actor, orderId) => ({ orderId, state: 'SHIPPED' }),
+      recordShipmentBatch: async (_actor, input) => ({ batchId: HASH, shipments: input.items }),
       recordDelivery: async (_actor, orderId) => ({ orderId, state: 'DELIVERED' }),
       recordLogisticsUpdate: async (actor, orderId, input) => {
         fulfillmentCalls.push({ operation: 'LOGISTICS_UPDATE', wallet: actor.walletAddress, orderId, input });
@@ -1238,6 +1252,28 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       headers: bearerHeaders,
       body: JSON.stringify({ name: 'Gold', sortOrder: 1, idempotencyKey: 'http-category-create-1' }),
     })).status, 201);
+    const rootCategory = await fetch(`${base}/v2/admin/catalog/categories/category-1`, {
+      method: 'PUT',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        parentCategoryId: null,
+        name: 'Gold',
+        sortOrder: 1,
+        idempotencyKey: 'http-category-move-root-1',
+      }),
+    });
+    assert.equal(rootCategory.status, 200);
+    assert.equal(((await rootCategory.json()) as { parentCategoryId: string | null }).parentCategoryId, null);
+    assert.equal((await fetch(`${base}/v2/admin/catalog/categories/category-1`, {
+      method: 'PUT',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        parentCategoryId: 7,
+        name: 'Gold',
+        sortOrder: 1,
+        idempotencyKey: 'http-category-invalid-parent-1',
+      }),
+    })).status, 400);
     assert.equal((await fetch(`${base}/v2/admin/catalog/products/product-managed-1/review-decisions`, {
       method: 'POST',
       headers: bearerHeaders,
@@ -1248,6 +1284,64 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       headers: bearerHeaders,
       body: JSON.stringify({ delta: '2', reasonCode: 'RESTOCK', idempotencyKey: 'http-stock-1' }),
     })).status, 201);
+    const orderPage = await fetch(
+      `${base}/v2/orders?limit=25&state=PAID&fulfillmentMode=DELIVERY&orderKind=ORDINARY&skuId=sku-1`,
+      { headers: bearerHeaders },
+    );
+    assert.equal(orderPage.status, 200);
+    assert.deepEqual(
+      ((await orderPage.json()) as { orders: Array<{ query: Record<string, unknown> }> }).orders[0]?.query,
+      { limit: 25, state: 'PAID', fulfillmentMode: 'DELIVERY', orderKind: 'ORDINARY', skuId: 'sku-1' },
+    );
+    assert.equal((await fetch(`${base}/v2/orders?state=NOT_A_STATE`, {
+      headers: bearerHeaders,
+    })).status, 400);
+    const adminOrders = await fetch(
+      `${base}/v2/admin/orders?orderId=order-1&productId=product-1&txHash=${HASH}&wallet=${SAFE}`
+        + '&pendingReview=true&breakerScope=NEW_PAYMENT',
+      { headers: bearerHeaders },
+    );
+    assert.equal(adminOrders.status, 200);
+    assert.deepEqual(
+      ((await adminOrders.json()) as { orders: Array<{ query: Record<string, unknown> }> }).orders[0]?.query,
+      {
+        orderId: 'order-1',
+        productId: 'product-1',
+        txHash: HASH,
+        wallet: SAFE,
+        pendingProductReview: true,
+        breakerScope: 'NEW_PAYMENT',
+      },
+    );
+    assert.equal((await fetch(`${base}/v2/admin/orders`, {
+      headers: { authorization: `Bearer ${buyerOnlyToken}` },
+    })).status, 403);
+    const actionPreview = await fetch(`${base}/v2/admin/orders/batch-actions/preview`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ orderIds: ['order-1'] }),
+    });
+    assert.equal(actionPreview.status, 200);
+    assert.deepEqual(
+      ((await actionPreview.json()) as { rows: Array<{ orderId: string }> }).rows.map((row) => row.orderId),
+      ['order-1'],
+    );
+    const shipmentBatch = await fetch(`${base}/v2/shipments/batches`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        idempotencyKey: 'http-shipment-batch-1',
+        items: [{
+          orderId: 'order-1',
+          idempotencyKey: 'http-shipment-item-1',
+          evidenceHash: HASH,
+          carrierCode: 'SF',
+          trackingNumberHash: HASH_2,
+        }],
+      }),
+    });
+    assert.equal(shipmentBatch.status, 201);
+    assert.equal(((await shipmentBatch.json()) as { shipments: unknown[] }).shipments.length, 1);
     const postOrderAction = (action: string, body: Record<string, unknown>) => fetch(
       `${base}/v2/orders/order-1/${action}`,
       {

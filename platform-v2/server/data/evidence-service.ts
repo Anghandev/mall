@@ -310,23 +310,11 @@ export class EvidenceService {
     trackingNumberHash: string;
     evidenceHash: string;
   }) {
-    const wallet = actorWallet(actor);
     validateProviderHash(input.evidenceHash, 'evidence hash');
     validateProviderHash(input.trackingNumberHash, 'tracking number hash');
-    return this.#transactions.transaction(async (executor) => {
-      const actorRole = await authorizeShipmentOrder(executor, actor, input.orderId);
-      const row = await loadEvidence(executor, input.evidenceHash);
-      const payload = object(row.payload);
-      if (
-        row.owner_wallet !== wallet
-        || row.actor_role !== actorRole
-        || row.purpose !== 'SHIPMENT_TRACKING'
-        || row.resource_id !== input.orderId
-        || row.tracking_number_hash !== input.trackingNumberHash.toLowerCase()
-        || payload.carrierCode !== input.carrierCode
-      ) throw new CoreError('Forbidden', 'Shipment evidence does not match the command', 403);
-      return evidenceProjection(row);
-    });
+    return this.#transactions.transaction((executor) => (
+      assertTrackingEvidenceRecord(executor, actor, input)
+    ));
   }
 
   async createUploadIntent(actor: FulfillmentActor, input: {
@@ -970,8 +958,7 @@ async function authorizeActionOrder(
   const wallet = actorWallet(actor);
   const buyer = hasRole(actor, 'BUYER') && row.buyer_wallet === wallet;
   const merchant = hasRole(actor, 'MERCHANT')
-    && actor.merchantId === row.merchant_id
-    && row.merchant_wallet === wallet;
+    && actor.merchantId === row.merchant_id;
   if (action === 'REQUEST_FORCED_RECEIPT') {
     if (merchant) return 'MERCHANT';
   } else if (action === 'VERIFY_PICKUP') {
@@ -994,11 +981,9 @@ async function authorizeShipmentOrder(
   orderId: string,
 ): Promise<EvidenceRow['actor_role']> {
   const row = await loadOrderScope(executor, orderId);
-  const wallet = actorWallet(actor);
   if (
     hasRole(actor, 'MERCHANT')
     && actor.merchantId === row.merchant_id
-    && row.merchant_wallet === wallet
   ) return 'MERCHANT';
   const platform = platformActorRole(actor);
   if (platform) return platform;
@@ -1028,6 +1013,33 @@ async function loadEvidence(executor: SqlExecutor, evidenceHash: string) {
   );
   if (!result.rows[0]) throw new CoreError('Forbidden', 'Canonical evidence is unavailable', 403);
   return result.rows[0];
+}
+
+export async function assertTrackingEvidenceRecord(
+  executor: SqlExecutor,
+  actor: FulfillmentActor,
+  input: {
+    orderId: string;
+    carrierCode: Carrier;
+    trackingNumberHash: string;
+    evidenceHash: string;
+  },
+) {
+  const wallet = actorWallet(actor);
+  validateProviderHash(input.evidenceHash, 'evidence hash');
+  validateProviderHash(input.trackingNumberHash, 'tracking number hash');
+  const actorRole = await authorizeShipmentOrder(executor, actor, input.orderId);
+  const row = await loadEvidence(executor, input.evidenceHash);
+  const payload = object(row.payload);
+  if (
+    row.owner_wallet !== wallet
+    || row.actor_role !== actorRole
+    || row.purpose !== 'SHIPMENT_TRACKING'
+    || row.resource_id !== input.orderId
+    || row.tracking_number_hash !== input.trackingNumberHash.toLowerCase()
+    || payload.carrierCode !== input.carrierCode
+  ) throw new CoreError('Forbidden', 'Shipment evidence does not match the command', 403);
+  return evidenceProjection(row);
 }
 
 function validatedUploadTarget(value: unknown) {
