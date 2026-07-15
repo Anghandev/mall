@@ -32,6 +32,7 @@ import {
   type AllowedAction,
   type AllowedActionName,
   type AllowedActionReasonCode,
+  type AuditStreamName,
   type CatalogCategory,
   type CatalogProduct,
   type CatalogProductAction,
@@ -68,7 +69,10 @@ import {
   type MerchantConcessionPreview,
   type MerchantFinanceProjection,
   type MerchantBusinessDashboard,
+  type MerchantAuditExport,
+  type MerchantAuditList,
   type MerchantStore,
+  type MerchantProfile,
   type PickupVerificationRequest,
   type OrderKind,
   type OrderProjectionState,
@@ -186,6 +190,34 @@ export interface MediaUploadIntentRequest {
   idempotencyKey: string;
 }
 
+export interface UpdateMerchantProfileRequest {
+  shopName: string;
+  logoAssetId: string | null;
+  expectedVersion: number;
+  idempotencyKey: string;
+}
+
+export interface MerchantAuditListOptions {
+  streamName?: AuditStreamName;
+  eventType?: string;
+  resourceType?: string;
+  resourceId?: string;
+  correlationId?: string;
+  cursor?: MerchantAuditList['nextCursor'];
+  from?: string;
+  to?: string;
+  limit?: number;
+}
+
+export interface MerchantAuditExportRequest {
+  from: string;
+  to: string;
+  streamName?: AuditStreamName;
+  eventType?: string;
+  resourceType?: string;
+  idempotencyKey: string;
+}
+
 export interface CoreApi {
   bootstrap(): Promise<CoreBootstrap>;
   createSiweChallenge(walletAddress: string): Promise<SiweChallenge>;
@@ -229,6 +261,10 @@ export interface CoreApi {
     token: string,
     expected?: { resourceType: MediaResourceType; resourceId: string; purpose: MediaPurpose },
   ): Promise<MediaReadAccessProjection>;
+  getMerchantProfile(token: string): Promise<MerchantProfile>;
+  updateMerchantProfile(input: UpdateMerchantProfileRequest, token: string): Promise<MerchantProfile>;
+  listMerchantAuditEntries(token: string, options?: MerchantAuditListOptions): Promise<MerchantAuditList>;
+  exportMerchantAuditEntries(input: MerchantAuditExportRequest, token: string): Promise<MerchantAuditExport>;
   listFulfillmentOrders(token: string, options?: FulfillmentOrderListOptions): Promise<FulfillmentOrderPage>;
   getMerchantBusinessDashboard(token: string): Promise<MerchantBusinessDashboard>;
   getOrderFulfillmentTarget(orderId: string, token: string): Promise<FulfillmentTarget>;
@@ -263,18 +299,21 @@ export class CoreApiError extends Error {
   readonly code: CoreErrorCode | 'InvalidResponse' | 'NetworkUnavailable';
   readonly correlationId: string | undefined;
   readonly blockingResource: CatalogWriteLock | undefined;
+  readonly status: number | undefined;
 
   constructor(
     code: CoreErrorCode | 'InvalidResponse' | 'NetworkUnavailable',
     message: string,
     correlationId?: string,
     blockingResource?: CatalogWriteLock,
+    status?: number,
   ) {
     super(message);
     this.name = 'CoreApiError';
     this.code = code;
     this.correlationId = correlationId;
     this.blockingResource = blockingResource;
+    this.status = status;
   }
 }
 
@@ -426,6 +465,34 @@ export function createCoreApi(baseUrl = import.meta.env.VITE_CORE_API_BASE_URL ?
         { token },
       );
       return parseMediaReadAccess(body, assetId, expected);
+    },
+
+    async getMerchantProfile(token) {
+      return parseMerchantProfile(await request(normalizedBaseUrl, '/v2/merchant/profile', { token }));
+    },
+
+    async updateMerchantProfile(input, token) {
+      return parseMerchantProfile(await request(normalizedBaseUrl, '/v2/merchant/profile', {
+        method: 'PUT',
+        body: JSON.stringify(input),
+        token,
+      }));
+    },
+
+    async listMerchantAuditEntries(token, options = {}) {
+      return parseMerchantAuditList(await request(
+        normalizedBaseUrl,
+        merchantAuditEntriesPath(options),
+        { token },
+      ));
+    },
+
+    async exportMerchantAuditEntries(input, token) {
+      return parseMerchantAuditExport(await request(normalizedBaseUrl, '/v2/merchant/audit/exports', {
+        method: 'POST',
+        body: JSON.stringify(input),
+        token,
+      }));
     },
 
     async listFulfillmentOrders(token, options = {}) {
@@ -583,6 +650,24 @@ function fulfillmentOrdersPath(options: FulfillmentOrderListOptions) {
   return `/v2/orders${serialized ? `?${serialized}` : ''}`;
 }
 
+function merchantAuditEntriesPath(options: MerchantAuditListOptions) {
+  const query = new URLSearchParams();
+  if (options.streamName) query.set('streamName', options.streamName);
+  if (options.eventType) query.set('eventType', options.eventType);
+  if (options.resourceType) query.set('resourceType', options.resourceType);
+  if (options.resourceId) query.set('resourceId', options.resourceId);
+  if (options.correlationId) query.set('correlationId', options.correlationId);
+  if (options.cursor) {
+    query.set('cursorCreatedAt', options.cursor.createdAt);
+    query.set('cursorEntryId', options.cursor.entryId);
+  }
+  if (options.from) query.set('from', options.from);
+  if (options.to) query.set('to', options.to);
+  if (options.limit !== undefined) query.set('limit', String(options.limit));
+  const serialized = query.toString();
+  return `/v2/merchant/audit/entries${serialized ? `?${serialized}` : ''}`;
+}
+
 async function request(baseUrl: string, path: string, options: { method?: string; body?: string; token?: string } = {}) {
   let response: Response;
   const controller = new AbortController();
@@ -630,7 +715,7 @@ async function request(baseUrl: string, path: string, options: { method?: string
   const blockingResource = details?.blockingResource === undefined
     ? undefined
     : parseCatalogWriteLock(details.blockingResource);
-  throw new CoreApiError(code, message, correlationId, blockingResource);
+  throw new CoreApiError(code, message, correlationId, blockingResource, response.status);
 }
 
 function parseReadiness(input: unknown): CoreReadiness {
@@ -1130,6 +1215,111 @@ function parseMediaReadAccess(
     readUrl: absoluteUrl(value.readUrl, 'media read.readUrl'),
     expiresAt: dateTime(value.expiresAt, 'media read.expiresAt'),
     providerReferenceHash: bytes32(value.providerReferenceHash, 'media read.providerReferenceHash'),
+  };
+}
+
+function parseMerchantProfile(input: unknown): MerchantProfile {
+  const value = record(input, 'merchant profile');
+  exactObjectKeys(value, [
+    'artifactVersion',
+    'merchantId',
+    'shopName',
+    'logoAssetId',
+    'settlementWallet',
+    'settlementWalletMutable',
+    'version',
+    'updatedAt',
+  ], 'merchant profile');
+  exact(value.artifactVersion, artifactVersion, 'merchant profile artifactVersion');
+  exact(value.settlementWalletMutable, false, 'merchant profile settlementWalletMutable');
+  return {
+    artifactVersion,
+    merchantId: string(value.merchantId, 'merchant profile merchantId'),
+    shopName: value.shopName === null ? null : string(value.shopName, 'merchant profile shopName'),
+    logoAssetId: nullableBytes32(value.logoAssetId, 'merchant profile logoAssetId'),
+    settlementWallet: address(value.settlementWallet, 'merchant profile settlementWallet'),
+    settlementWalletMutable: false,
+    version: positiveInteger(value.version, 'merchant profile version'),
+    updatedAt: dateTime(value.updatedAt, 'merchant profile updatedAt'),
+  };
+}
+
+function parseMerchantAuditList(input: unknown): MerchantAuditList {
+  const value = record(input, 'merchant audit list');
+  exactObjectKeys(value, ['entries', 'proofScope', 'historyStatus', 'chainProof', 'nextCursor'], 'merchant audit list');
+  exact(value.proofScope, 'MERCHANT_SCOPED_ENTRY_HASHES', 'merchant audit proofScope');
+  exact(value.historyStatus, 'PARTIAL_PRE_MERCHANT_SCOPE', 'merchant audit historyStatus');
+  const entries = array(value.entries, 'merchant audit entries').map(parseMerchantAuditEntry);
+  for (let index = 1; index < entries.length; index += 1) {
+    const current = entries[index];
+    const previous = entries[index - 1];
+    if (current && previous && (
+      Date.parse(current.operationTime) > Date.parse(previous.operationTime)
+      || (current.operationTime === previous.operationTime && current.entryId >= previous.entryId)
+    )) invalid('merchant audit entries are not in reverse-time order');
+  }
+  const proof = record(value.chainProof, 'merchant audit chainProof');
+  exactObjectKeys(proof, ['merchantId', 'entries'], 'merchant audit chainProof');
+  return {
+    entries,
+    proofScope: 'MERCHANT_SCOPED_ENTRY_HASHES',
+    historyStatus: 'PARTIAL_PRE_MERCHANT_SCOPE',
+    chainProof: {
+      merchantId: string(proof.merchantId, 'merchant audit chainProof merchantId'),
+      entries: nonNegativeInteger(proof.entries, 'merchant audit chainProof entries'),
+    },
+    nextCursor: value.nextCursor === null ? null : parseMerchantAuditCursor(value.nextCursor),
+  };
+}
+
+function parseMerchantAuditEntry(input: unknown): MerchantAuditList['entries'][number] {
+  const value = record(input, 'merchant audit entry');
+  exactObjectKeys(value, [
+    'entryId',
+    'operationTime',
+    'operationType',
+    'module',
+    'detail',
+    'signatureHash',
+    'safeOrChainTxHash',
+    'entryHash',
+  ], 'merchant audit entry');
+  const entryHash = string(value.entryHash, 'merchant audit entryHash');
+  if (!/^[0-9a-f]{64}$/.test(entryHash)) invalid('merchant audit entryHash must be a lowercase hash');
+  return {
+    entryId: string(value.entryId, 'merchant audit entryId'),
+    operationTime: dateTime(value.operationTime, 'merchant audit operationTime'),
+    operationType: string(value.operationType, 'merchant audit operationType'),
+    module: string(value.module, 'merchant audit module'),
+    detail: string(value.detail, 'merchant audit detail'),
+    signatureHash: nullableBytes32(value.signatureHash, 'merchant audit signatureHash'),
+    safeOrChainTxHash: nullableBytes32(value.safeOrChainTxHash, 'merchant audit safeOrChainTxHash'),
+    entryHash,
+  };
+}
+
+function parseMerchantAuditCursor(input: unknown): NonNullable<MerchantAuditList['nextCursor']> {
+  const value = record(input, 'merchant audit cursor');
+  exactObjectKeys(value, ['createdAt', 'entryId'], 'merchant audit cursor');
+  return {
+    createdAt: dateTime(value.createdAt, 'merchant audit cursor createdAt'),
+    entryId: string(value.entryId, 'merchant audit cursor entryId'),
+  };
+}
+
+function parseMerchantAuditExport(input: unknown): MerchantAuditExport {
+  const value = record(input, 'merchant audit export');
+  exactObjectKeys(value, ['contentType', 'filename', 'entryCount', 'csv'], 'merchant audit export');
+  exact(value.contentType, 'text/csv; charset=utf-8', 'merchant audit export contentType');
+  const filename = string(value.filename, 'merchant audit export filename');
+  if (/[/\\\r\n]/.test(filename)) invalid('merchant audit export filename is unsafe');
+  const entryCount = nonNegativeInteger(value.entryCount, 'merchant audit export entryCount');
+  if (entryCount > 1_000) invalid('merchant audit export entryCount exceeds 1000');
+  return {
+    contentType: 'text/csv; charset=utf-8',
+    filename,
+    entryCount,
+    csv: string(value.csv, 'merchant audit export csv'),
   };
 }
 
