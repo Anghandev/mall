@@ -95,7 +95,9 @@ completion evidence. External inputs cannot be replaced by fixture success.
 
 ## Fulfillment Checkpoint Consumer Evidence
 
-The Admin consumer is pinned to `@abu24k/core-artifacts@2.0.0-fulfillment.1`.
+This earlier evidence was recorded against
+`@abu24k/core-artifacts@2.0.0-fulfillment.1`; the current pin is the coordinated
+settlement/admin checkpoint below.
 
 - `ADM-SYS-005`: consumes the coordinated manifest plus live bootstrap chain,
   fixed-asset and payment-readiness values; missing deployment/Safe evidence is
@@ -114,5 +116,35 @@ The Admin consumer is pinned to `@abu24k/core-artifacts@2.0.0-fulfillment.1`.
   never authorizes a button. Merchant guarantee funding, receivable deductions,
   future-proceeds debt and replacement-merchant case projections remain
   `GAP-ADM-010` / `GAP-ADM-017`, so the full rows are not complete.
+
+All test records stay under `tests/**`; no production fixture is shipped.
+
+## Settlement/Admin Checkpoint Evidence
+
+The product consumes coordinated artifact `2.0.0-settlement-admin.1` without a
+parallel API or local financial calculation:
+
+- `ADM-MER-004`, `ADM-TAKE-003` and `ADM-TAKE-004`: merchant guarantee,
+  ordered takeover funding, platform advance and debt projections are rendered
+  from Core; the governed funding action signs Core-issued EIP-712 typed data.
+- `ADM-POL-001` through `ADM-POL-006`, `ADM-CLEAR-002` and `ADM-CLEAR-003`:
+  policy draft validation, secondary signature and Safe proposal states are
+  consumed. Requirements that depend on unresolved commercial values remain
+  `DecisionBlocked`, not complete by placeholder.
+- `ADM-CMS-001` through `ADM-CMS-003`: version create/read, evidence-bound
+  publish and rollback are connected to Core.
+- `ADM-SYS-001` through `ADM-SYS-006`: typed version list/create/publish is
+  connected; production addresses, RPC and provider accounts remain
+  `ExternalBlocked` under `ADM-GOAL-003`.
+- `ADM-AUD-001` through `ADM-AUD-003`: filters, cursor result and per-stream
+  hash-chain proof are consumed from the read-only audit API; no delete path is
+  rendered.
+- `ADM-OPS-001` through `ADM-OPS-004`, `ADM-DASH-003`, `ADM-DASH-004` and
+  `ADM-CLEAR-007`: typed unavailable states, alerts, acknowledgement and
+  per-asset Safe coverage are consumed without turning missing probes into
+  zero or healthy states.
+- `ADM-MER-006`, `ADM-CLEAR-004` and `ADM-CLEAR-006`: the wallet-scoped
+  settlement projection renders balance states, immutable request states and
+  the final Safe TxHash. Admin-wide settlement search remains a Core gap.
 
 All test records stay under `tests/**`; no production fixture is shipped.

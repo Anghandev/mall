@@ -48,7 +48,7 @@ export function DashboardPage() {
         <span>{readiness?.writesEnabled ? <CheckCircle2 aria-hidden="true" /> : <Ban aria-hidden="true" />}</span>
         <div>
           <strong>{bootstrap.loading ? '正在读取支付 readiness' : bootstrap.error ? `${bootstrap.error.code}: ${bootstrap.error.message}` : readiness?.writesEnabled ? '支付运行时允许新报价' : '新支付保持 fail-closed'}</strong>
-          <p>业务聚合、风险队列和基础设施探针尚未发布；支付门禁状态来自 Core bootstrap，不以静态值代替。</p>
+          <p>业务聚合与风险队列尚无专用投影；基础设施与逐资产覆盖率已在运维监控消费，支付门禁仍以 Core bootstrap 为准。</p>
         </div>
         <Link to="/core-status">查看证据 <ArrowRight aria-hidden="true" /></Link>
       </section>

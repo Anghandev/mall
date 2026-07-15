@@ -4,10 +4,16 @@ import { ModuleWorkspace } from './components/ModuleWorkspace';
 import { CoreSessionProvider } from './coreSession';
 import { adminModules } from './domain/adminModules';
 import { CatalogPage } from './pages/CatalogPage';
+import { AuditPage } from './pages/AuditPage';
+import { CmsPage } from './pages/CmsPage';
 import { CoreStatusPage } from './pages/CoreStatusPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { MerchantFinancePage } from './pages/MerchantFinancePage';
+import { MonitoringPage } from './pages/MonitoringPage';
+import { NotificationsPage } from './pages/NotificationsPage';
 import { PaymentTracePage } from './pages/PaymentTracePage';
 import { PolicyPage } from './pages/PolicyPage';
+import { SystemConfigPage } from './pages/SystemConfigPage';
 import { TakeoverPage } from './pages/TakeoverPage';
 
 export function App() {
@@ -17,11 +23,17 @@ export function App() {
         <Routes>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/catalog" element={<CatalogPage />} />
+          <Route path="/merchants" element={<MerchantFinancePage />} />
           <Route path="/policy" element={<PolicyPage />} />
           <Route path="/takeover" element={<TakeoverPage />} />
+          <Route path="/cms" element={<CmsPage />} />
+          <Route path="/notifications" element={<NotificationsPage />} />
+          <Route path="/system" element={<SystemConfigPage />} />
+          <Route path="/audit" element={<AuditPage />} />
+          <Route path="/operations" element={<MonitoringPage />} />
           <Route path="/clearing" element={<PaymentTracePage />} />
           <Route path="/core-status" element={<CoreStatusPage />} />
-          {adminModules.filter((module) => !['dashboard', 'catalog', 'policy', 'takeover', 'clearing', 'core'].includes(module.id)).map((module) => (
+          {adminModules.filter((module) => !['dashboard', 'merchants', 'catalog', 'policy', 'takeover', 'cms', 'notifications', 'system', 'audit', 'operations', 'clearing', 'core'].includes(module.id)).map((module) => (
             <Route key={module.path} path={module.path} element={<ModuleWorkspace module={module} />} />
           ))}
           <Route path="*" element={<Navigate to="/" replace />} />

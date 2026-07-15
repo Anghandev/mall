@@ -1,0 +1,456 @@
+import {
+  artifactVersion,
+  auditEvidenceProfiles,
+  auditStreamNames,
+  balanceStates,
+  cmsContentFormats,
+  cmsContentTypes,
+  guaranteeStatuses,
+  merchantGuaranteeDepositStates,
+  operationsAlertEventTypes,
+  operationsAlertSeverities,
+  operationsMetricComponents,
+  operationsMetricStatuses,
+  operationsMetricUnits,
+  notificationCampaignStates,
+  notificationCampaignTopics,
+  notificationDeliveryStates,
+  policyDraftStates,
+  settlementRails,
+  settlementRequestStates,
+  systemConfigKeys,
+  takeoverStates,
+  type AuditStreamName,
+  type AuditListResponse,
+  type CmsVersionCreateRequest,
+  type CmsVersionProjection,
+  type MerchantFinanceProjection,
+  type MonitoringAcknowledgeResult,
+  type MonitoringDashboard,
+  type NotificationCampaignCreateResult,
+  type NotificationCampaignPublishResult,
+  type NotificationCampaignRequest,
+  type NotificationInboxItem,
+  type PolicyApprovalChallenge,
+  type PolicyDraftCreateRequest,
+  type PolicyDraftDetail,
+  type PolicyDraftProjection,
+  type PolicyDraftUpdateRequest,
+  type PolicySecondarySignatureRequest,
+  type SettlementListProjection,
+  type SensitiveApproval,
+  type SystemConfigCreateRequest,
+  type SystemConfigProjection,
+  type TakeoverFundingChallenge,
+  type TakeoverFundingChallengeRequest,
+  type TakeoverFundingDetail,
+  type TakeoverFundingRequest,
+  type TakeoverFundingResult,
+} from '@abu24k/core-artifacts';
+import { CoreApiError, requestCoreJson } from './coreApi';
+
+const bytes32Pattern = /^0x[0-9a-fA-F]{64}$/;
+const addressPattern = /^0x[0-9a-fA-F]{40}$/;
+const amountPattern = /^(0|[1-9][0-9]*)$/;
+
+export type AuditFilters = Readonly<{
+  streamName?: AuditStreamName;
+  eventType?: string;
+  resourceType?: string;
+  resourceId?: string;
+  correlationId?: string;
+  actorWallet?: string;
+  from?: string;
+  to?: string;
+  cursorCreatedAt?: string;
+  cursorEntryId?: string;
+  limit?: number;
+}>;
+
+const auditFilterNames = [
+  'streamName',
+  'eventType',
+  'resourceType',
+  'resourceId',
+  'correlationId',
+  'actorWallet',
+  'from',
+  'to',
+  'cursorCreatedAt',
+  'cursorEntryId',
+  'limit',
+] as const satisfies readonly (keyof AuditFilters)[];
+
+export async function fetchSettlementLedger(token: string, signal?: AbortSignal): Promise<SettlementListProjection> {
+  const body = await authenticatedGet('/v2/settlements', token, signal);
+  if (!isSettlementList(body)) throw invalid('Settlement projection does not match the coordinated generated type');
+  return body;
+}
+
+export async function fetchMerchantFinance(merchantId: string, token: string, signal?: AbortSignal): Promise<MerchantFinanceProjection> {
+  if (!merchantId.trim()) throw invalid('Merchant ID is required');
+  const body = await authenticatedGet(`/v2/finance/merchant?merchantId=${encodeURIComponent(merchantId.trim())}`, token, signal);
+  if (!isMerchantFinance(body)) throw invalid('Merchant finance projection does not match the coordinated generated type');
+  return body;
+}
+
+export async function fetchTakeoverFunding(caseId: string, token: string, signal?: AbortSignal): Promise<TakeoverFundingDetail> {
+  if (!caseId.trim()) throw invalid('Takeover case ID is required');
+  const body = await authenticatedGet(resourcePath('/v2/admin/takeover-funding/', caseId), token, signal);
+  if (!isTakeoverFundingDetail(body)) throw invalid('Takeover funding projection does not match the coordinated generated type');
+  return body;
+}
+
+export async function createTakeoverFundingChallenge(input: TakeoverFundingChallengeRequest, token: string): Promise<TakeoverFundingChallenge> {
+  requireAmount(input.requiredUsdt, 'requiredUsdt');
+  requireAmount(input.nonce, 'nonce');
+  requireAmount(input.deadline, 'deadline');
+  const body = await authenticatedWrite('/v2/admin/takeover-funding/approval-challenge', 'POST', input, token);
+  if (!isTakeoverFundingChallenge(body)) throw invalid('Takeover funding challenge does not match the coordinated generated type');
+  return body;
+}
+
+export async function fundTakeover(input: TakeoverFundingRequest, token: string): Promise<TakeoverFundingResult> {
+  requireAmount(input.requiredUsdt, 'requiredUsdt');
+  const body = await authenticatedWrite('/v2/admin/takeover-funding', 'POST', input, token);
+  if (!isTakeoverFundingResult(body)) throw invalid('Takeover funding result does not match the coordinated generated type');
+  return body;
+}
+
+export async function fetchPolicyDrafts(token: string, signal?: AbortSignal): Promise<readonly PolicyDraftProjection[]> {
+  const body = await authenticatedGet('/v2/admin/policy-drafts', token, signal);
+  if (!Array.isArray(body) || !body.every(isPolicyDraft)) throw invalid('Policy draft list does not match the coordinated generated type');
+  return Object.freeze([...body]);
+}
+
+export async function fetchPolicyDraft(draftId: string, token: string, signal?: AbortSignal): Promise<PolicyDraftDetail> {
+  const body = await authenticatedGet(resourcePath('/v2/admin/policy-drafts/', draftId), token, signal);
+  if (!isPolicyDraftDetail(body)) throw invalid('Policy draft detail does not match the coordinated generated type');
+  return body;
+}
+
+export async function createPolicyDraft(input: PolicyDraftCreateRequest, token: string): Promise<PolicyDraftProjection> {
+  const body = await authenticatedWrite('/v2/admin/policy-drafts', 'POST', input, token);
+  if (!isPolicyDraft(body)) throw invalid('Created policy draft does not match the coordinated generated type');
+  return body;
+}
+
+export async function updatePolicyDraft(draftId: string, input: PolicyDraftUpdateRequest, token: string): Promise<PolicyDraftProjection> {
+  const body = await authenticatedWrite(resourcePath('/v2/admin/policy-drafts/', draftId), 'PUT', input, token);
+  if (!isPolicyDraft(body)) throw invalid('Updated policy draft does not match the coordinated generated type');
+  return body;
+}
+
+export async function createPolicyApprovalChallenge(draftId: string, nonce: string, deadline: string, token: string): Promise<PolicyApprovalChallenge> {
+  requireAmount(nonce, 'nonce');
+  requireAmount(deadline, 'deadline');
+  const body = await authenticatedWrite(`${resourcePath('/v2/admin/policy-drafts/', draftId)}/approval-challenge`, 'POST', { nonce, deadline }, token);
+  if (!isPolicyApprovalChallenge(body)) throw invalid('Policy approval challenge does not match the coordinated generated type');
+  return body;
+}
+
+export async function submitPolicySecondarySignature(draftId: string, input: PolicySecondarySignatureRequest, token: string): Promise<PolicyDraftProjection> {
+  const body = await authenticatedWrite(`${resourcePath('/v2/admin/policy-drafts/', draftId)}/secondary-signature`, 'POST', input, token);
+  if (!isPolicyDraft(body)) throw invalid('Policy signature result does not match the coordinated generated type');
+  return body;
+}
+
+export async function proposePolicyToSafe(draftId: string, token: string): Promise<PolicyDraftProjection> {
+  const body = await authenticatedWrite(`${resourcePath('/v2/admin/policy-drafts/', draftId)}/safe-proposal`, 'POST', {}, token);
+  if (!isPolicyDraft(body)) throw invalid('Policy Safe proposal does not match the coordinated generated type');
+  return body;
+}
+
+export async function fetchCmsVersion(versionId: string, token: string, signal?: AbortSignal): Promise<CmsVersionProjection> {
+  const body = await authenticatedGet(resourcePath('/v2/admin/cms/versions/', versionId), token, signal);
+  if (!isCmsVersion(body)) throw invalid('CMS version does not match the coordinated generated type');
+  return body;
+}
+
+export async function createCmsVersion(input: CmsVersionCreateRequest, token: string): Promise<CmsVersionProjection> {
+  const body = await authenticatedWrite('/v2/admin/cms/versions', 'POST', input, token);
+  if (!isCmsVersion(body)) throw invalid('Created CMS version does not match the coordinated generated type');
+  return body;
+}
+
+export async function publishCmsVersion(versionId: string, evidenceHash: string, token: string): Promise<CmsVersionProjection> {
+  if (!bytes32Pattern.test(evidenceHash)) throw invalid('CMS evidence hash must be bytes32');
+  const body = await authenticatedWrite(`${resourcePath('/v2/admin/cms/versions/', versionId)}/publish`, 'POST', { evidenceHash }, token);
+  if (!isCmsVersion(body)) throw invalid('Published CMS version does not match the coordinated generated type');
+  return body;
+}
+
+export async function rollbackCmsVersion(versionId: string, evidenceHash: string, token: string): Promise<CmsVersionProjection> {
+  if (!bytes32Pattern.test(evidenceHash)) throw invalid('CMS evidence hash must be bytes32');
+  const body = await authenticatedWrite(`${resourcePath('/v2/admin/cms/versions/', versionId)}/rollback`, 'POST', { evidenceHash }, token);
+  if (!isCmsVersion(body)) throw invalid('CMS rollback result does not match the coordinated generated type');
+  return body;
+}
+
+export async function fetchSystemConfigVersions(token: string, signal?: AbortSignal): Promise<readonly SystemConfigProjection[]> {
+  const body = await authenticatedGet('/v2/admin/system-config/versions', token, signal);
+  if (!Array.isArray(body) || !body.every(isSystemConfig)) throw invalid('System config list does not match the coordinated generated type');
+  return Object.freeze([...body]);
+}
+
+export async function createSystemConfigVersion(input: SystemConfigCreateRequest, token: string): Promise<SystemConfigProjection> {
+  const body = await authenticatedWrite('/v2/admin/system-config/versions', 'POST', input, token);
+  if (!isSystemConfig(body)) throw invalid('Created system config does not match the coordinated generated type');
+  return body;
+}
+
+export async function publishSystemConfigVersion(configVersionId: string, approval: SensitiveApproval, token: string): Promise<SystemConfigProjection> {
+  if (!isSensitiveApproval(approval)) throw invalid('System config approval does not match SensitiveApproval');
+  const body = await authenticatedWrite(`${resourcePath('/v2/admin/system-config/versions/', configVersionId)}/publish`, 'POST', { approval }, token);
+  if (!isSystemConfig(body)) throw invalid('Published system config does not match the coordinated generated type');
+  return body;
+}
+
+export async function fetchAuditEntries(filters: AuditFilters, token: string, signal?: AbortSignal): Promise<AuditListResponse> {
+  const params = new URLSearchParams();
+  for (const name of auditFilterNames) {
+    const value = filters[name];
+    if (value !== undefined && value !== '') params.set(name, String(value));
+  }
+  const body = await authenticatedGet(`/v2/admin/audit/entries${params.size ? `?${params}` : ''}`, token, signal);
+  if (!isAuditList(body)) throw invalid('Audit list does not match the coordinated generated type');
+  return body;
+}
+
+export async function fetchMonitoringDashboard(token: string, signal?: AbortSignal): Promise<MonitoringDashboard> {
+  const body = await authenticatedGet('/v2/admin/monitoring', token, signal);
+  if (!isMonitoringDashboard(body)) throw invalid('Monitoring dashboard does not match the coordinated generated type');
+  return body;
+}
+
+export async function fetchNotifications(token: string, limit = 50, signal?: AbortSignal): Promise<readonly NotificationInboxItem[]> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) throw invalid('Notification limit must be between 1 and 200');
+  const body = await authenticatedGet(`/v2/notifications?limit=${limit}`, token, signal);
+  if (!Array.isArray(body) || !body.every(isNotificationInboxItem)) throw invalid('Notification inbox does not match the coordinated generated type');
+  return Object.freeze([...body]);
+}
+
+export async function createNotificationCampaign(input: NotificationCampaignRequest, token: string): Promise<NotificationCampaignCreateResult> {
+  if (!notificationCampaignTopics.includes(input.topic)) throw invalid('Notification campaign topic is invalid');
+  const body = await authenticatedWrite('/v2/admin/notification-campaigns', 'POST', input, token);
+  if (!isRecord(body) || typeof body.campaignId !== 'string' || !notificationCampaignStates.includes(body.state as never) || !bytes32Pattern.test(String(body.contentHash))) {
+    throw invalid('Notification campaign result does not match the coordinated generated type');
+  }
+  return body as unknown as NotificationCampaignCreateResult;
+}
+
+export async function publishNotificationCampaign(campaignId: string, evidenceHash: string, token: string): Promise<NotificationCampaignPublishResult> {
+  if (!bytes32Pattern.test(evidenceHash)) throw invalid('Notification evidence hash must be bytes32');
+  const body = await authenticatedWrite(`${resourcePath('/v2/admin/notification-campaigns/', campaignId)}/publish`, 'POST', { evidenceHash }, token);
+  if (!isRecord(body) || body.campaignId !== campaignId || body.state !== 'PUBLISHED') throw invalid('Notification publication does not match the coordinated generated type');
+  return body as unknown as NotificationCampaignPublishResult;
+}
+
+export async function acknowledgeMonitoringAlert(alertKey: string, token: string): Promise<MonitoringAcknowledgeResult> {
+  const body = await authenticatedWrite(`${resourcePath('/v2/admin/monitoring/alerts/', alertKey)}/acknowledge`, 'POST', {}, token);
+  if (!isRecord(body) || body.alertKey !== alertKey || body.state !== 'ACKNOWLEDGED') throw invalid('Alert acknowledgement does not match the coordinated generated type');
+  return body as unknown as MonitoringAcknowledgeResult;
+}
+
+async function authenticatedGet(path: string, token: string, signal?: AbortSignal) {
+  return requestCoreJson(path, { headers: { authorization: `Bearer ${token}` }, ...(signal ? { signal } : {}) });
+}
+
+async function authenticatedWrite(path: string, method: 'POST' | 'PUT', body: object, token: string) {
+  return requestCoreJson(path, {
+    body: JSON.stringify(body),
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    method,
+  });
+}
+
+function resourcePath(prefix: string, resourceId: string) {
+  const value = resourceId.trim();
+  if (!value) throw invalid('Resource ID is required');
+  return `${prefix}${encodeURIComponent(value)}`;
+}
+
+function isSettlementList(value: unknown): value is SettlementListProjection {
+  if (!isRecord(value) || value.artifactVersion !== artifactVersion || !addressPattern.test(String(value.wallet))) return false;
+  return Array.isArray(value.balances)
+    && value.balances.every((item) => isRecord(item) && ['USDT', 'NPL'].includes(String(item.asset)) && balanceStates.includes(item.state as never) && amountPattern.test(String(item.amount)) && typeof item.purpose === 'string')
+    && Array.isArray(value.requests)
+    && value.requests.every((item) => isRecord(item)
+      && settlementRails.includes(item.rail as never)
+      && settlementRequestStates.includes(item.state as never)
+      && amountPattern.test(String(item.amount))
+      && addressPattern.test(String(item.recipient_address))
+      && (item.final_safe_tx_hash === null || bytes32Pattern.test(String(item.final_safe_tx_hash))));
+}
+
+function isMerchantFinance(value: unknown): value is MerchantFinanceProjection {
+  if (!isRecord(value) || !isRecord(value.merchant)) return false;
+  const merchant = value.merchant;
+  return typeof merchant.merchant_id === 'string'
+    && guaranteeStatuses.includes(merchant.guarantee_status as never)
+    && addressPattern.test(String(merchant.settlement_wallet))
+    && (value.guarantee === null || (isRecord(value.guarantee) && amountPattern.test(String(value.guarantee.balance_usdt)) && amountPattern.test(String(value.guarantee.minimum_usdt))))
+    && Array.isArray(value.guaranteeDeposits)
+    && value.guaranteeDeposits.every((deposit) => isRecord(deposit) && merchantGuaranteeDepositStates.includes(deposit.state as never) && bytes32Pattern.test(String(deposit.transaction_hash)))
+    && (value.debt === null || (isRecord(value.debt) && amountPattern.test(String(value.debt.outstanding_usdt))))
+    && Array.isArray(value.takeovers)
+    && value.takeovers.every((item) => isRecord(item) && takeoverStates.includes(item.state as never));
+}
+
+function isTakeoverFundingDetail(value: unknown): value is TakeoverFundingDetail {
+  return isRecord(value)
+    && typeof value.case_id === 'string'
+    && takeoverStates.includes(value.state as never)
+    && nullableAmounts(value, ['required_usdt', 'guarantee_used_usdt', 'merchant_available_used_usdt', 'future_proceeds_used_usdt', 'platform_advance_usdt', 'merchant_debt_usdt'])
+    && Array.isArray(value.items)
+    && value.items.every((item) => isRecord(item) && amountPattern.test(String(item.amount_usdt)) && bytes32Pattern.test(String(item.evidence_hash)))
+    && Array.isArray(value.debtRecoveries);
+}
+
+function isTakeoverFundingChallenge(value: unknown): value is TakeoverFundingChallenge {
+  return isRecord(value) && isRecord(value.plan) && isTypedData(value.typedData)
+    && typeof value.plan.caseId === 'string' && amountPattern.test(String(value.plan.requiredUsdt));
+}
+
+function isTakeoverFundingResult(value: unknown): value is TakeoverFundingResult {
+  return isRecord(value) && typeof value.caseId === 'string' && value.state === 'FUNDED'
+    && ['requiredUsdt', 'guaranteeUsedUsdt', 'frozenReceivablesUsedUsdt', 'futureProceedsUsedUsdt', 'platformAdvanceUsdt', 'merchantDebtUsdt'].every((field) => amountPattern.test(String(value[field])));
+}
+
+function isPolicyDraft(value: unknown): value is PolicyDraftProjection {
+  return isRecord(value)
+    && typeof value.draftId === 'string'
+    && amountPattern.test(String(value.nextPolicyVersion))
+    && (value.artifactVersion === null || value.artifactVersion === artifactVersion)
+    && isRecord(value.payload)
+    && Array.isArray(value.validationErrors)
+    && value.validationErrors.every((item) => isRecord(item) && typeof item.code === 'string' && typeof item.field === 'string')
+    && policyDraftStates.includes(value.state as never)
+    && nullableHashes(value, ['policyHash', 'operationsHash', 'publicationDigest', 'secondarySignatureHash', 'safeCalldataHash', 'safeTxHash', 'safeProposalHash'])
+    && addressPattern.test(String(value.createdBy))
+    && isDateTime(value.createdAt)
+    && isDateTime(value.updatedAt);
+}
+
+function isPolicyDraftDetail(value: unknown): value is PolicyDraftDetail {
+  if (!isRecord(value) || !isPolicyDraft(value) || !Array.isArray(value.transitions)) return false;
+  return value.transitions.every((item) => isRecord(item) && policyDraftStates.includes(item.toState as never) && bytes32Pattern.test(String(item.evidenceHash)) && isDateTime(item.createdAt));
+}
+
+function isPolicyApprovalChallenge(value: unknown): value is PolicyApprovalChallenge {
+  return isRecord(value) && typeof value.draftId === 'string' && Number.isSafeInteger(value.policyVersion)
+    && addressPattern.test(String(value.signer)) && bytes32Pattern.test(String(value.digest)) && isTypedData(value.typedData);
+}
+
+function isCmsVersion(value: unknown): value is CmsVersionProjection {
+  return isRecord(value)
+    && nonEmpty(value, ['entryId', 'versionId', 'slug', 'placement', 'locale'])
+    && Number.isSafeInteger(value.version)
+    && cmsContentTypes.includes(value.contentType as never)
+    && cmsContentFormats.includes(value.contentFormat as never)
+    && isRecord(value.content)
+    && isRecord(value.audience)
+    && bytes32Pattern.test(String(value.contentHash))
+    && typeof value.published === 'boolean'
+    && addressPattern.test(String(value.createdBy))
+    && isDateTime(value.createdAt);
+}
+
+function isSystemConfig(value: unknown): value is SystemConfigProjection {
+  return isRecord(value)
+    && typeof value.configVersionId === 'string'
+    && systemConfigKeys.includes(value.configKey as never)
+    && Number.isSafeInteger(value.version)
+    && isRecord(value.payload)
+    && bytes32Pattern.test(String(value.payloadHash))
+    && isDateTime(value.effectiveFrom)
+    && typeof value.published === 'boolean'
+    && addressPattern.test(String(value.createdBy))
+    && isDateTime(value.createdAt);
+}
+
+function isAuditList(value: unknown): value is AuditListResponse {
+  return isRecord(value)
+    && Array.isArray(value.entries)
+    && value.entries.every((entry) => isRecord(entry)
+      && auditStreamNames.includes(entry.streamName as never)
+      && auditEvidenceProfiles.includes(entry.evidenceProfile as never)
+      && nonEmpty(entry, ['entryId', 'eventType', 'resourceType', 'resourceId', 'correlationId', 'entryHash'])
+      && isDateTime(entry.createdAt))
+    && isRecord(value.chainProof)
+    && (value.nextCursor === null || isRecord(value.nextCursor));
+}
+
+function isMonitoringDashboard(value: unknown): value is MonitoringDashboard {
+  return isRecord(value)
+    && Array.isArray(value.metrics)
+    && value.metrics.every((metric) => isRecord(metric)
+      && operationsMetricComponents.includes(metric.component as never)
+      && operationsMetricUnits.includes(metric.unit as never)
+      && operationsMetricStatuses.includes(metric.status as never)
+      && (metric.value === null || typeof metric.value === 'number')
+      && isDateTime(metric.observedAt))
+    && Array.isArray(value.alerts)
+    && value.alerts.every((alert) => isRecord(alert)
+      && operationsAlertEventTypes.includes(alert.state as never)
+      && operationsAlertSeverities.includes(alert.severity as never)
+      && typeof alert.alertKey === 'string')
+    && Array.isArray(value.coverage)
+    && value.coverage.every((item) => isRecord(item)
+      && ['USDT', 'NPL'].includes(String(item.asset))
+      && addressPattern.test(String(item.safe_address))
+      && amountPattern.test(String(item.assets))
+      && amountPattern.test(String(item.unsettled_liabilities))
+      && typeof item.covered === 'boolean');
+}
+
+function isNotificationInboxItem(value: unknown): value is NotificationInboxItem {
+  return isRecord(value)
+    && nonEmpty(value, ['messageId', 'sourceEventType', 'topic'])
+    && isRecord(value.templateData)
+    && notificationDeliveryStates.includes(value.deliveryState as never)
+    && isDateTime(value.createdAt);
+}
+
+function isTypedData(value: unknown) {
+  return isRecord(value) && isRecord(value.domain) && isRecord(value.types) && typeof value.primaryType === 'string' && isRecord(value.message);
+}
+
+function isSensitiveApproval(value: unknown): value is SensitiveApproval {
+  return isRecord(value)
+    && nonEmpty(value, ['action', 'resourceType', 'resourceId', 'policyVersion', 'oldValueHash', 'newValueHash', 'safeAddress', 'nonce', 'deadline', 'signature'])
+    && amountPattern.test(String(value.policyVersion))
+    && bytes32Pattern.test(String(value.oldValueHash))
+    && bytes32Pattern.test(String(value.newValueHash))
+    && addressPattern.test(String(value.safeAddress))
+    && amountPattern.test(String(value.nonce))
+    && amountPattern.test(String(value.deadline));
+}
+
+function nullableAmounts(value: Record<string, unknown>, fields: readonly string[]) {
+  return fields.every((field) => value[field] === null || amountPattern.test(String(value[field])));
+}
+
+function nullableHashes(value: Record<string, unknown>, fields: readonly string[]) {
+  return fields.every((field) => value[field] === null || bytes32Pattern.test(String(value[field])));
+}
+
+function nonEmpty(value: Record<string, unknown>, fields: readonly string[]) {
+  return fields.every((field) => typeof value[field] === 'string' && String(value[field]).length > 0);
+}
+
+function isDateTime(value: unknown) {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value));
+}
+
+function requireAmount(value: string, field: string) {
+  if (!amountPattern.test(value)) throw invalid(`${field} must be an unsigned canonical integer`);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function invalid(message: string) {
+  return new CoreApiError({ code: 'InvalidResponse', message, status: 502 });
+}

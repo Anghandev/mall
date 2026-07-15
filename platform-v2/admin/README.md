@@ -5,35 +5,25 @@ implements shared funds, contracts, API, Schema or signer behavior.
 
 ## Current Product Boundary
 
-- Routes cover Dashboard, merchants, catalog, policy governance, seckill,
-  risk, logistics, takeover fulfillment, CMS, notifications, system config,
-  append-only audit, clearing evidence, operations monitoring and Core status.
-- Production boots from `src/bootstrap.ts` with the coordinated
-  `@abu24k/core-artifacts@2.0.0-fulfillment.1` package.
-- `GET /v2/bootstrap` drives payment readiness and exact blocked reasons.
-  `GET /v2/catalog/products` drives the active product/SKU/price/stock table.
-  SIWE/JWT and `GET /v2/payments/{orderId}` drive the wallet-bound submission,
-  reservation, Router-call and finality trace.
-- `GET /v2/orders` drives the ADMIN/OPERATOR fulfillment-order view.
-  `POST /v2/actions/order` is the only authority for the current session's
-  order actions. Shipment, delivery, exchange/delay decision, arbitration,
-  takeover and forced-receipt commands remain disabled unless the current
-  role, order state and matching Core action all permit them. Every command
-  carries a stable idempotency key and evidence hash. The static executable
-  action catalog is capability metadata only.
-- The browser uses `VITE_CORE_API_ORIGIN` when set and otherwise calls the Core
-  API on the current origin. JWTs stay in memory and are not persisted.
-- The payment projection remains buyer-wallet scoped. Fulfillment orders and
-  platform fulfillment commands are ADMIN/OPERATOR scoped; arbitration
-  decisions additionally require ADMIN. Guarantee funding, merchant debt,
-  monitoring, policy publication, Safe settlement and other Admin writes remain
-  unpublished and fail closed. No amount, allocation, permission, endpoint,
-  calldata or finality is inferred.
-- Ordinary soft-delete controls are visible only as disabled capabilities
-  waiting for Core `allowedActions`. Funds, chain, audit and historical evidence
-  surfaces render no delete control.
-- Test data, when later required by consumer tests, belongs only under
-  `tests/**`; the production bundle scanner rejects known sample-data markers.
+- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.1`.
+- SIWE/JWT stays in memory. Every protected read and write is role-bound by
+  Core and preserves typed `DecisionBlocked`, `ExternalBlocked`,
+  `ConfigurationRequired` and correlation evidence.
+- The Admin UI consumes payment/fulfillment, wallet-scoped signed settlement,
+  merchant guarantee/debt, governed takeover funding, policy draft governance,
+  CMS version publication, typed system configuration, append-only audit and
+  operations/coverage monitoring.
+- Policy and takeover funding use Core-issued typed data. The wallet signs the
+  exact typed payload; the frontend does not construct calldata, calculate
+  funds or set final states.
+- CMS and configuration editors accept structured JSON objects because their
+  coordinated request types are open objects. Core remains the schema,
+  sanitization, decision and publication authority.
+- Global batch actions, Admin catalog writes, seckill administration, risk
+  rules, logistics configuration and production provider accounts remain
+  fail-closed as recorded in `docs/contracts/UPSTREAM_GAPS.md`.
+- Funds, chain, policy, audit and historical evidence surfaces never expose a
+  delete control. No production fixture is shipped.
 
 ## Local Verification
 

@@ -11,7 +11,6 @@ import {
   Clock3,
   FileLock2,
   KeyRound,
-  RefreshCw,
   ShieldCheck,
   Truck,
 } from 'lucide-react';
@@ -19,6 +18,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { BatchActionBar } from '../components/BatchActionBar';
 import { FulfillmentCommandPanel } from '../components/FulfillmentCommandPanel';
 import { GlobalSearch } from '../components/GlobalSearch';
+import { TakeoverFundingPanel } from '../components/TakeoverFundingPanel';
 import {
   CoreApiError,
   fetchFulfillmentOrders,
@@ -210,10 +210,11 @@ export function TakeoverPage() {
         <aside className="panel takeover-guard">
           <p className="section-kicker">不可暂停能力</p><h2>履约与恢复通道</h2>
           <ul className="check-list"><li><ShieldCheck aria-hidden="true" /> 接管履约</li><li><ShieldCheck aria-hidden="true" /> 技术恢复与 reconciliation</li><li><ShieldCheck aria-hidden="true" /> finality synchronization</li><li><ShieldCheck aria-hidden="true" /> append-only audit reads</li></ul>
-          <div className="debt-note"><AlertTriangle aria-hidden="true" /><p><strong>垫资记为商家债务</strong><br />保证金、冻结应收、未来货款和商家债务属于 settlement/admin checkpoint，本页不推算。</p></div>
-          <button className="button button-quiet button-full" type="button" disabled title="未发布案件资金投影"><RefreshCw aria-hidden="true" /> 筹资与债务证据未发布</button>
+          <div className="debt-note"><AlertTriangle aria-hidden="true" /><p><strong>垫资记为商家债务</strong><br />下方直接消费 Core 的筹资、垫资与债务投影；本页不推算金额。</p></div>
         </aside>
       </section>
+
+      <TakeoverFundingPanel />
 
       <BatchActionBar ordinarySoftDelete={false} immutable />
     </>
