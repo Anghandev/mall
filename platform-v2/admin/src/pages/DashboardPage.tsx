@@ -269,11 +269,12 @@ function CoverageBreakerActionTable({ actions }: { actions: readonly CoverageBre
   return (
     <div className="table-scroll">
       <table className="data-table coverage-action-table">
-        <thead><tr><th>动作</th><th>状态</th><th>Safe Tx</th><th>执行 Tx</th><th>确认数</th><th>更新时间</th></tr></thead>
+        <thead><tr><th>动作</th><th>状态</th><th>Safe nonce</th><th>Safe Tx</th><th>执行 Tx</th><th>确认数</th><th>更新时间</th></tr></thead>
         <tbody>{actions.map((action) => (
           <tr key={action.actionId}>
             <td><strong>{action.action}</strong><small>{action.targetPaused ? '目标：暂停' : '目标：恢复'}</small></td>
             <td><span className={action.state === 'FINAL' ? 'status-chip status-ready' : 'status-chip status-blocked'}>{coverageActionState(action)}</span></td>
+            <td><code>{action.safeNonce ?? '待分配'}</code></td>
             <td><code>{action.safeTxHash ?? '未发布'}</code></td>
             <td><code>{action.executionTxHash ?? '未执行'}</code></td>
             <td>{action.confirmations}</td>

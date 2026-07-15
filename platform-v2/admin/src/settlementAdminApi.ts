@@ -561,7 +561,7 @@ const coverageChallengeKeys = [
 const coverageActionKeys = [
   'artifactVersion', 'actionId', 'snapshotId', 'policyVersion', 'action',
   'targetPaused', 'evidenceHash', 'governanceSafeAddress', 'routerAddress',
-  'calldataHash', 'state', 'safeTxHash', 'proposalHash', 'executionTxHash',
+  'calldataHash', 'state', 'safeNonce', 'safeTxHash', 'proposalHash', 'executionTxHash',
   'confirmations', 'actorWallet', 'secondarySigner', 'secondarySignatureHash',
   'approvalNonce', 'approvalDeadline', 'createdAt', 'updatedAt',
 ] as const satisfies readonly (keyof CoverageBreakerActionProjection)[];
@@ -641,6 +641,7 @@ function isCoverageBreakerAction(value: unknown): value is CoverageBreakerAction
     && addressPattern.test(String(value.routerAddress))
     && bytes32Pattern.test(String(value.calldataHash))
     && ['PENDING_PROPOSAL', 'SAFE_PROPOSED', 'MINED', 'FINAL', 'REORGED', 'FAILED', 'SUPERSEDED'].includes(String(value.state))
+    && (value.safeNonce === null || amountPattern.test(String(value.safeNonce)))
     && nullableHash(value.safeTxHash)
     && nullableHash(value.proposalHash)
     && nullableHash(value.executionTxHash)

@@ -90,7 +90,7 @@ describe('platform admin fail-closed experience', () => {
       governanceSafeAddress: challenge.safeAddress, routerAddress: challenge.routerAddress,
       actorWallet: wallet, secondarySigner, secondarySignatureHash: hash('8'), approvalNonce: nonce,
       approvalDeadline: new Date(Number(deadline) * 1_000).toISOString(), safeTxHash: null,
-      proposalHash: null, executionTxHash: null, confirmations: 0,
+      proposalHash: null, executionTxHash: null, confirmations: 0, safeNonce: null,
     });
     const providerRequest = vi.fn(async ({ method }: { method: string }) => {
       if (method === 'eth_requestAccounts') return [wallet];
@@ -179,6 +179,8 @@ describe('platform admin fail-closed experience', () => {
     expect(await screen.findByText('当前角色仅可读取断路器治理证据。')).toBeTruthy();
     expect(screen.queryByLabelText('Approval nonce')).toBeNull();
     expect(screen.getByText('PAUSE')).toBeTruthy();
+    expect(screen.getByRole('columnheader', { name: 'Safe nonce' })).toBeTruthy();
+    expect(screen.getByText('12')).toBeTruthy();
   });
 
   it('renders a superseded resume as invalidated by the newer PAUSE, never as restored', async () => {
@@ -903,6 +905,7 @@ function coverageBreakerAction(overrides: Record<string, unknown> = {}) {
     routerAddress: '0x3333333333333333333333333333333333333333',
     calldataHash: hash('7'),
     state: 'FINAL',
+    safeNonce: '12',
     safeTxHash: hash('8'),
     proposalHash: hash('9'),
     executionTxHash: hash('a'),
