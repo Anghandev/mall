@@ -5,7 +5,7 @@ implements shared funds, contracts, API, Schema or signer behavior.
 
 ## Current Product Boundary
 
-- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.2`.
+- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.4`.
 - SIWE/JWT stays in memory. Every protected read and write is role-bound by
   Core and preserves typed `DecisionBlocked`, `ExternalBlocked`,
   `ConfigurationRequired` and correlation evidence.
@@ -24,9 +24,11 @@ implements shared funds, contracts, API, Schema or signer behavior.
 - CMS and configuration editors accept structured JSON objects because their
   coordinated request types are open objects. Core remains the schema,
   sanitization, decision and publication authority.
-- Global batch actions, Admin catalog writes, seckill administration, risk
-  rules, logistics configuration and production provider accounts remain
-  fail-closed as recorded in `docs/contracts/UPSTREAM_GAPS.md`.
+- Global batch actions, seckill administration, risk rules, logistics
+  configuration and production provider accounts remain fail-closed as
+  recorded in `docs/contracts/UPSTREAM_GAPS.md`. Catalog writes consume `.4`
+  runtime RBAC, `allowedActions`, `writeLock` and `blockingResource`; AUDITOR
+  is read-only.
 - Funds, chain, policy, audit and historical evidence surfaces never expose a
   delete control. No production fixture is shipped.
 

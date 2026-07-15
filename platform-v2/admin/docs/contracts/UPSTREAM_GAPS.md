@@ -3,7 +3,7 @@
 The platform-admin product is a consumer. It cannot add shared endpoints,
 schemas, financial logic, calldata, signers or database behavior.
 
-The coordinated consumer is `@abu24k/core-artifacts@2.0.0-settlement-admin.2`.
+The coordinated consumer is `@abu24k/core-artifacts@2.0.0-settlement-admin.4`.
 Published paths still fail closed when Core returns `DecisionBlocked`,
 `ExternalBlocked` or `ConfigurationRequired`.
 
@@ -15,8 +15,8 @@ Published paths still fail closed when Core returns `DecisionBlocked`,
 | GAP-ADM-004 | Policy and takeover-funding EIP-712 challenge/signature/Safe proposal evidence is published | Seckill force-close, breaker and prize-injection governance remain absent |
 | GAP-ADM-005 | Monitoring metrics and per-asset coverage are published | Business GMV/order/review aggregates and risk queues remain unavailable |
 | GAP-ADM-006 | Merchant guarantee, deposit finality, debt and takeover-finance projection is published | Qualification, level, PII, sales and wallet-change governance remain unavailable |
-| GAP-ADM-007 | Active public product/SKU/price/stock read is published | Admin category/tag/product/inventory writes remain disabled |
-| GAP-ADM-008 | Policy draft, validation, secondary signature and Safe proposal workflow is published | Missing commercial decisions remain `DecisionBlocked`; product/session preview is not inferred |
+| GAP-ADM-007 | `.4` admin category/tag versions, all managed products, store product slot, signed concession preview, review submission/decisions, delist, inventory adjustment and controlled media reads are published and consumed | `CatalogCategoryInput.parentCategoryId` cannot express `null`, so an existing child cannot move back to the root; UI disables that transition. Global cross-resource batch selection remains `GAP-ADM-003` |
+| GAP-ADM-008 | Policy governance plus the product-scoped signed concession preview are published and consumed | Missing service/prize/store/concession-destination commercial decisions remain `DecisionBlocked`; the product never infers them |
 | GAP-ADM-009 | Payment quotes plus current/history/session/event HTTP reads and finalized relay WebSocket are published | Admin session scheduling, inventory lock, force-close, prize injection and rule binding remain disabled |
 | GAP-ADM-010 | Fulfillment commands plus takeover funding, ordered deductions, platform advance and debt projections are published | Replacement-merchant administration and case-wide list projection remain unavailable |
 | GAP-ADM-011 | Monitoring accepts real risk/operations alerts | Risk rule, blacklist, trade-lock and breaker-action contracts remain disabled |

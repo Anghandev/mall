@@ -68,9 +68,9 @@ export const adminModules: readonly AdminModule[] = [
     description: '三级类目、标签、商品、SKU 与版本化库存管理。历史商品只允许授权下架隐藏。',
     icon: Boxes,
     requirements: ['ADM-CAT-001', 'ADM-CAT-002', 'ADM-CAT-003', 'ADM-CAT-004', 'ADM-CAT-005', 'ADM-CAT-006'],
-    gap: 'GAP-ADM-007 / GAP-ADM-008',
+    gap: 'GAP-ADM-008 · unresolved commercial decisions only',
     fields: ['三级类目树', '标签库与批量打标', '媒体与富文本', '结算商家白名单', '多 SKU 库存', 'USDT 结算成本'],
-    evidence: ['活动锁与资产锁', '版本历史', '订单 / 场次快照'],
+    evidence: ['allowedActions / blockingResource', '版本历史', '订单 / 场次快照'],
     ordinarySoftDelete: true,
   },
   {

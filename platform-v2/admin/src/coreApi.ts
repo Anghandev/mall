@@ -61,6 +61,7 @@ export type WalletProvider = {
 export class CoreApiError extends Error {
   readonly code: CoreErrorCode | 'InvalidResponse';
   readonly correlationId?: string;
+  readonly details?: Readonly<Record<string, unknown>>;
   readonly status: number;
 
   constructor(input: {
@@ -68,12 +69,14 @@ export class CoreApiError extends Error {
     message: string;
     status: number;
     correlationId?: string;
+    details?: Readonly<Record<string, unknown>>;
   }) {
     super(input.message);
     this.name = 'CoreApiError';
     this.code = input.code;
     this.status = input.status;
     if (input.correlationId) this.correlationId = input.correlationId;
+    if (input.details) this.details = input.details;
   }
 }
 
@@ -310,6 +313,7 @@ async function requestJson(path: string, init: RequestInit) {
     message: error?.message ?? `Core request failed (${response.status})`,
     status: response.status,
     ...(error?.correlationId ? { correlationId: error.correlationId } : {}),
+    ...(error?.details ? { details: error.details } : {}),
   });
 }
 
@@ -629,7 +633,7 @@ function isDateTime(value: unknown) {
 
 function readCoreError(value: unknown) {
   if (!isRecord(value) || !isRecord(value.error)) return undefined;
-  const { code, message, correlationId } = value.error;
+  const { code, message, correlationId, details } = value.error;
   if (
     typeof code !== 'string'
       || !coreErrorCodes.includes(code as CoreErrorCode)
@@ -639,6 +643,7 @@ function readCoreError(value: unknown) {
     code: code as CoreErrorCode,
     message,
     correlationId: typeof correlationId === 'string' ? correlationId : undefined,
+    details: isRecord(details) ? Object.freeze({ ...details }) : undefined,
   };
 }
 
