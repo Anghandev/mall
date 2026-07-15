@@ -18,6 +18,10 @@ import {
   breakerActions,
   breakerCauseTypes,
   breakerScopes,
+  catalogProductActions,
+  catalogProductLifecycleStates,
+  catalogReviewDecisions,
+  catalogTaxonomyStatuses,
   cmsContentFormats,
   cmsContentTypes,
   cmsPublicationEventTypes,
@@ -32,6 +36,9 @@ import {
   infrastructureProviders,
   logisticsProviders,
   logisticsStatuses,
+  mediaContentTypes,
+  mediaPurposes,
+  mediaResourceTypes,
   merchantGuaranteeDepositStates,
   guaranteeStatuses,
   notificationCampaignStates,
@@ -85,6 +92,8 @@ const schemaSources = [
       '007_settlement_admin.sql',
       '008_admin_services.sql',
       '009_product_surfaces.sql',
+      '010_evidence_media.sql',
+      '011_catalog_management.sql',
     ],
   },
   {
@@ -121,6 +130,10 @@ const enums = {
   finalityStates,
   userRoles,
   breakerScopes,
+  catalogProductActions,
+  catalogProductLifecycleStates,
+  catalogReviewDecisions,
+  catalogTaxonomyStatuses,
   allowedActionNames,
   executableOrderActionNames,
   allowedActionReasonCodes,
@@ -131,6 +144,9 @@ const enums = {
   fulfillmentRequestStates,
   logisticsProviders,
   logisticsStatuses,
+  mediaContentTypes,
+  mediaPurposes,
+  mediaResourceTypes,
   fulfillmentAssets,
   arbitrationOutcomes,
   settlementRails,
@@ -277,6 +293,9 @@ const coordinatedManifest = {
     siweAuthentication: 'AVAILABLE',
     orderAllowedActions: 'AVAILABLE',
     catalogHttp: 'AVAILABLE',
+    catalogManagementHttp: 'AVAILABLE',
+    signedConcessionPreview: 'AVAILABLE',
+    immutableMediaEvidence: 'AVAILABLE',
     paymentQuoteHttp: 'AVAILABLE',
     inventoryReservation: 'AVAILABLE',
     paymentSubmissionHttp: 'AVAILABLE',
@@ -310,6 +329,7 @@ const coordinatedManifest = {
   decisionBlocked: [
     'PLATFORM_SERVICE_FEE_BPS',
     'SECKILL_PRIZE_POOL_BPS',
+    'MERCHANT_STORE_REWARD_BPS',
     'SECKILL_PRIZE_POOL_ACCOUNT',
     'MERCHANT_CONCESSION_DESTINATION_WEIGHTS',
     'FIXED_REMAINDER_ACCOUNTS',
@@ -335,6 +355,14 @@ const coordinatedManifest = {
     'ProductPolicy',
     'CatalogProduct',
     'CatalogSku',
+    'CatalogCategory',
+    'CatalogTag',
+    'ManagedCatalogProduct',
+    'ManagedCatalogSku',
+    'MerchantConcessionPreview',
+    'MediaUploadIntentProjection',
+    'MediaAssetProjection',
+    'MediaReadAccessProjection',
     'PaymentQuoteResponse',
     'SeckillQuoteResponse',
     'PaymentProjection',
@@ -452,6 +480,7 @@ function buildOpenApi() {
     paths: {
       ...settlementAdminOpenApiPaths(errorResponse),
       ...seckillRuntimeOpenApiPaths(errorResponse),
+      ...catalogManagementOpenApiPaths(errorResponse),
       '/v2/bootstrap': {
         get: {
           operationId: 'getBootstrap',
@@ -792,6 +821,7 @@ function buildOpenApi() {
         },
         ...fulfillmentOpenApiSchemas(),
         ...paymentOpenApiSchemas(),
+        ...catalogManagementOpenApiSchemas(),
         ...settlementAdminOpenApiSchemas(),
         ...seckillRuntimeOpenApiSchemas(),
         ErrorResponse: {
@@ -808,6 +838,162 @@ function buildOpenApi() {
         },
       },
     },
+  };
+}
+
+function catalogManagementOpenApiPaths(errorResponse) {
+  const security = [{ bearerAuth: [] }];
+  const parameter = (name) => ({ name, in: 'path', required: true, schema: { type: 'string', minLength: 1 } });
+  const securedGet = (operationId, parameters, schema, description) => ({
+    get: {
+      operationId,
+      security,
+      parameters,
+      responses: { 200: response(description, schema), default: errorResponse },
+    },
+  });
+  const securedWrite = (method, operationId, parameters, requestSchema, responseSchema, status = 200) => ({
+    [method]: {
+      operationId,
+      security,
+      parameters,
+      requestBody: body({ $ref: `#/components/schemas/${requestSchema}` }),
+      responses: {
+        [status]: response('Authoritative catalog result', { $ref: `#/components/schemas/${responseSchema}` }),
+        default: errorResponse,
+      },
+    },
+  });
+  const categories = {
+    type: 'object', additionalProperties: false, required: ['categories'],
+    properties: { categories: { type: 'array', items: { $ref: '#/components/schemas/CatalogCategory' } } },
+  };
+  const tags = {
+    type: 'object', additionalProperties: false, required: ['tags'],
+    properties: { tags: { type: 'array', items: { $ref: '#/components/schemas/CatalogTag' } } },
+  };
+  return {
+    '/v2/catalog/categories': {
+      get: {
+        operationId: 'listCatalogCategories',
+        responses: { 200: response('Enabled three-level categories', categories), default: errorResponse },
+      },
+    },
+    '/v2/catalog/tags': {
+      get: {
+        operationId: 'listCatalogTags',
+        responses: { 200: response('Enabled catalog tags', tags), default: errorResponse },
+      },
+    },
+    '/v2/media/upload-intents': securedWrite(
+      'post', 'createMediaUploadIntent', [], 'MediaUploadIntentRequest', 'MediaUploadIntentProjection', 201,
+    ),
+    '/v2/media/upload-intents/{uploadIntentId}/complete': securedWrite(
+      'post', 'completeMediaUpload', [parameter('uploadIntentId')], 'EmptyRequest', 'MediaAssetProjection', 200,
+    ),
+    '/v2/media/assets/{assetId}/access': {
+      get: {
+        operationId: 'createMediaReadAccess',
+        parameters: [parameter('assetId')],
+        security: [{ bearerAuth: [] }, {}],
+        responses: {
+          200: response('Short-lived authorized media read target', {
+            $ref: '#/components/schemas/MediaReadAccessProjection',
+          }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/orders/{orderId}/evidence': securedWrite(
+      'post', 'createOrderActionEvidence', [parameter('orderId')],
+      'OrderActionEvidenceRequest', 'EvidenceEnvelopeProjection', 201,
+    ),
+    '/v2/orders/{orderId}/tracking-evidence': securedWrite(
+      'post', 'createOrderTrackingEvidence', [parameter('orderId')],
+      'TrackingEvidenceRequest', 'EvidenceEnvelopeProjection', 201,
+    ),
+    '/v2/merchant/stores/{storeId}/product-slot': {
+      ...securedGet(
+        'getMerchantProductSlot',
+        [parameter('storeId')],
+        { $ref: '#/components/schemas/ProductSlotProjection' },
+        'Merchant-bound unique product slot',
+      ),
+      ...securedWrite(
+        'put', 'saveMerchantProductSlot', [parameter('storeId')],
+        'ProductSlotInput', 'ManagedCatalogProduct', 200,
+      ),
+    },
+    '/v2/merchant/products/{productId}/concession-previews': securedWrite(
+      'post', 'createMerchantConcessionPreview', [parameter('productId')],
+      'ConcessionPreviewRequest', 'MerchantConcessionPreview', 201,
+    ),
+    '/v2/merchant/products/{productId}/review-submissions': securedWrite(
+      'post', 'submitMerchantProductReview', [parameter('productId')],
+      'ProductReviewSubmissionRequest', 'ManagedCatalogProduct', 201,
+    ),
+    '/v2/merchant/products/{productId}/delist': securedWrite(
+      'post', 'delistMerchantProduct', [parameter('productId')],
+      'CatalogReasonRequest', 'ManagedCatalogProduct', 200,
+    ),
+    '/v2/admin/catalog/categories': {
+      ...securedGet('listAdminCatalogCategories', [], categories, 'All versioned categories'),
+      ...securedWrite('post', 'createCatalogCategory', [], 'CatalogCategoryInput', 'CatalogCategory', 201),
+    },
+    '/v2/admin/catalog/categories/{categoryId}': securedWrite(
+      'put', 'updateCatalogCategory', [parameter('categoryId')],
+      'CatalogCategoryInput', 'CatalogCategory', 200,
+    ),
+    '/v2/admin/catalog/tags': {
+      ...securedGet('listAdminCatalogTags', [], tags, 'All versioned tags'),
+      ...securedWrite('post', 'createCatalogTag', [], 'CatalogTagInput', 'CatalogTag', 201),
+    },
+    '/v2/admin/catalog/tags/{tagId}': securedWrite(
+      'put', 'updateCatalogTag', [parameter('tagId')], 'CatalogTagInput', 'CatalogTag', 200,
+    ),
+    '/v2/admin/catalog/products': securedGet(
+      'listAdminCatalogProducts',
+      [],
+      {
+        type: 'object', additionalProperties: false, required: ['products'],
+        properties: { products: { type: 'array', items: { $ref: '#/components/schemas/ManagedCatalogProduct' } } },
+      },
+      'All managed catalog products',
+    ),
+    '/v2/admin/catalog/stores/{storeId}/product-slot': {
+      ...securedGet(
+        'getAdminProductSlot',
+        [parameter('storeId'), {
+          name: 'merchantId', in: 'query', required: false, schema: { type: 'string', minLength: 1 },
+        }],
+        { $ref: '#/components/schemas/ProductSlotProjection' },
+        'Admin product slot projection',
+      ),
+      ...securedWrite(
+        'put', 'saveAdminProductSlot', [parameter('storeId')],
+        'AdminProductSlotInput', 'ManagedCatalogProduct', 200,
+      ),
+    },
+    '/v2/admin/catalog/products/{productId}/concession-previews': securedWrite(
+      'post', 'createAdminConcessionPreview', [parameter('productId')],
+      'ConcessionPreviewRequest', 'MerchantConcessionPreview', 201,
+    ),
+    '/v2/admin/catalog/products/{productId}/review-decisions': securedWrite(
+      'post', 'decideCatalogProductReview', [parameter('productId')],
+      'ProductReviewDecisionRequest', 'ManagedCatalogProduct', 200,
+    ),
+    '/v2/admin/catalog/products/{productId}/review-submissions': securedWrite(
+      'post', 'submitAdminProductReview', [parameter('productId')],
+      'ProductReviewSubmissionRequest', 'ManagedCatalogProduct', 201,
+    ),
+    '/v2/admin/catalog/products/{productId}/delist': securedWrite(
+      'post', 'delistAdminProduct', [parameter('productId')],
+      'CatalogReasonRequest', 'ManagedCatalogProduct', 200,
+    ),
+    '/v2/admin/catalog/skus/{skuId}/inventory-adjustments': securedWrite(
+      'post', 'adjustCatalogInventory', [parameter('skuId')],
+      'InventoryAdjustmentRequest', 'InventoryAdjustmentProjection', 201,
+    ),
   };
 }
 
@@ -1590,6 +1776,478 @@ function settlementAdminOpenApiSchemas() {
   };
 }
 
+function catalogManagementOpenApiSchemas() {
+  const idempotencyKey = { type: 'string', minLength: 8, maxLength: 128 };
+  const resourceId = { type: 'string', minLength: 1, maxLength: 256 };
+  const nullableString = { anyOf: [{ type: 'string' }, { type: 'null' }] };
+  const nullableWriteLock = {
+    anyOf: [{ $ref: '#/components/schemas/CatalogWriteLock' }, { type: 'null' }],
+  };
+  const taxonomyStatus = { enum: [...catalogTaxonomyStatuses] };
+  const productInputProperties = {
+    idempotencyKey,
+    title: { type: 'string', minLength: 1, maxLength: 60 },
+    subtitle: { type: 'string', minLength: 1, maxLength: 120 },
+    mainImageAssetIds: {
+      type: 'array', maxItems: 5, uniqueItems: true,
+      items: { $ref: '#/components/schemas/Bytes32' },
+    },
+    videoAssetId: { $ref: '#/components/schemas/Bytes32' },
+    richDetail: { type: 'object' },
+    defaultFreightUsdt: { $ref: '#/components/schemas/AtomicAmount' },
+    merchantConcessionBps: { type: 'integer', minimum: 0, maximum: 10000 },
+    fulfillmentModes: {
+      type: 'array', minItems: 1, maxItems: 2, uniqueItems: true,
+      items: { enum: [...fulfillmentModes] },
+    },
+    categoryId: resourceId,
+    tagIds: { type: 'array', maxItems: 20, uniqueItems: true, items: resourceId },
+    skus: {
+      type: 'array', minItems: 1, maxItems: 50,
+      items: { $ref: '#/components/schemas/ProductSkuInput' },
+    },
+  };
+  return {
+    EmptyRequest: { type: 'object', additionalProperties: false, properties: {} },
+    CatalogCategoryInput: {
+      type: 'object', additionalProperties: false,
+      required: ['name', 'sortOrder', 'idempotencyKey'],
+      properties: {
+        parentCategoryId: resourceId,
+        name: { type: 'string', minLength: 1, maxLength: 80 },
+        iconAssetId: { $ref: '#/components/schemas/Bytes32' },
+        sortOrder: { type: 'integer', minimum: 0 },
+        serviceFeeBps: { type: 'integer', minimum: 0, maximum: 10000 },
+        status: taxonomyStatus,
+        idempotencyKey,
+      },
+    },
+    CatalogCategory: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'categoryId', 'version', 'parentCategoryId', 'level', 'name',
+        'iconAssetId', 'sortOrder', 'status', 'serviceFee',
+      ],
+      properties: {
+        categoryId: resourceId,
+        version: { $ref: '#/components/schemas/AtomicAmount' },
+        parentCategoryId: nullableString,
+        level: { type: 'integer', minimum: 1, maximum: 3 },
+        name: { type: 'string', minLength: 1, maxLength: 80 },
+        iconAssetId: { anyOf: [{ $ref: '#/components/schemas/Bytes32' }, { type: 'null' }] },
+        sortOrder: { type: 'integer', minimum: 0 },
+        status: taxonomyStatus,
+        serviceFee: {
+          type: 'object', additionalProperties: false, required: ['state', 'valueBps'],
+          properties: {
+            state: { enum: ['Frozen', 'DecisionBlocked'] },
+            valueBps: { anyOf: [{ type: 'integer', minimum: 0, maximum: 10000 }, { type: 'null' }] },
+          },
+        },
+      },
+    },
+    CatalogTagInput: {
+      type: 'object', additionalProperties: false,
+      required: ['name', 'sortOrder', 'idempotencyKey'],
+      properties: {
+        name: { type: 'string', minLength: 1, maxLength: 60 },
+        example: { type: 'string', minLength: 1, maxLength: 240 },
+        sortOrder: { type: 'integer', minimum: 0 },
+        status: taxonomyStatus,
+        idempotencyKey,
+      },
+    },
+    CatalogTag: {
+      type: 'object', additionalProperties: false,
+      required: ['tagId', 'version', 'name', 'example', 'sortOrder', 'status'],
+      properties: {
+        tagId: resourceId,
+        version: { $ref: '#/components/schemas/AtomicAmount' },
+        name: { type: 'string', minLength: 1, maxLength: 60 },
+        example: { type: 'string', maxLength: 240 },
+        sortOrder: { type: 'integer', minimum: 0 },
+        status: taxonomyStatus,
+      },
+    },
+    ProductSkuInput: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'attributes', 'listPriceUsdt', 'merchantBaseReceivableUsdt',
+        'stockTotal', 'proposedSeckillInventory',
+      ],
+      properties: {
+        skuId: resourceId,
+        attributes: { type: 'object' },
+        listPriceUsdt: { $ref: '#/components/schemas/AtomicAmount' },
+        merchantBaseReceivableUsdt: { $ref: '#/components/schemas/AtomicAmount' },
+        stockTotal: { type: 'integer', minimum: 1 },
+        proposedSeckillInventory: { type: 'integer', minimum: 1 },
+      },
+    },
+    ProductSlotInput: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'idempotencyKey', 'title', 'richDetail', 'defaultFreightUsdt',
+        'merchantConcessionBps', 'fulfillmentModes', 'skus',
+      ],
+      properties: productInputProperties,
+    },
+    AdminProductSlotInput: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'merchantId', 'idempotencyKey', 'title', 'richDetail', 'defaultFreightUsdt',
+        'merchantConcessionBps', 'fulfillmentModes', 'skus',
+      ],
+      properties: { merchantId: resourceId, ...productInputProperties },
+    },
+    CatalogWriteLock: {
+      type: 'object', additionalProperties: false, required: ['type', 'id', 'state'],
+      properties: { type: { type: 'string' }, id: resourceId, state: { type: 'string' } },
+    },
+    ManagedCatalogSku: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'skuId', 'chainSkuId', 'version', 'attributes', 'listPriceUsdt',
+        'merchantBaseReceivableUsdt', 'stockTotal', 'stockAvailable',
+        'stockReserved', 'proposedSeckillInventory', 'lifecycleState',
+      ],
+      properties: {
+        skuId: resourceId,
+        chainSkuId: { $ref: '#/components/schemas/Bytes32' },
+        version: { $ref: '#/components/schemas/AtomicAmount' },
+        attributes: { type: 'object' },
+        listPriceUsdt: { $ref: '#/components/schemas/AtomicAmount' },
+        merchantBaseReceivableUsdt: { $ref: '#/components/schemas/AtomicAmount' },
+        stockTotal: { $ref: '#/components/schemas/AtomicAmount' },
+        stockAvailable: { $ref: '#/components/schemas/AtomicAmount' },
+        stockReserved: { $ref: '#/components/schemas/AtomicAmount' },
+        proposedSeckillInventory: { $ref: '#/components/schemas/AtomicAmount' },
+        lifecycleState: { enum: [...catalogProductLifecycleStates] },
+      },
+    },
+    ManagedCatalogProduct: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'artifactVersion', 'productId', 'chainProductId', 'merchantId', 'storeId',
+        'supersedesProductId', 'version', 'title', 'subtitle', 'lifecycleState',
+        'productPolicyHash', 'merchantConcessionBps', 'mainImageAssetIds',
+        'videoAssetId', 'richDetail', 'defaultFreightUsdt', 'fulfillmentModes',
+        'categoryId', 'tagIds', 'skus', 'allowedActions', 'writeLock',
+        'createdAt', 'updatedAt',
+      ],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        productId: resourceId,
+        chainProductId: { $ref: '#/components/schemas/Bytes32' },
+        merchantId: resourceId,
+        storeId: nullableString,
+        supersedesProductId: nullableString,
+        version: { $ref: '#/components/schemas/AtomicAmount' },
+        title: { type: 'string', minLength: 1, maxLength: 60 },
+        subtitle: { type: 'string', maxLength: 120 },
+        lifecycleState: { enum: [...catalogProductLifecycleStates] },
+        productPolicyHash: { $ref: '#/components/schemas/Bytes32' },
+        merchantConcessionBps: { type: 'integer', minimum: 0, maximum: 10000 },
+        mainImageAssetIds: { type: 'array', maxItems: 5, items: { $ref: '#/components/schemas/Bytes32' } },
+        videoAssetId: { anyOf: [{ $ref: '#/components/schemas/Bytes32' }, { type: 'null' }] },
+        richDetail: { type: 'object' },
+        defaultFreightUsdt: { $ref: '#/components/schemas/AtomicAmount' },
+        fulfillmentModes: { type: 'array', items: { enum: [...fulfillmentModes] } },
+        categoryId: nullableString,
+        tagIds: { type: 'array', items: resourceId },
+        skus: { type: 'array', minItems: 1, items: { $ref: '#/components/schemas/ManagedCatalogSku' } },
+        allowedActions: { type: 'array', items: { enum: [...catalogProductActions] } },
+        writeLock: nullableWriteLock,
+        createdAt: { type: 'string', format: 'date-time' },
+        updatedAt: { type: 'string', format: 'date-time' },
+      },
+    },
+    ProductSlotProjection: {
+      type: 'object', additionalProperties: false,
+      required: ['artifactVersion', 'storeId', 'merchantId', 'product', 'allowedActions', 'writeLock'],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        storeId: resourceId,
+        merchantId: resourceId,
+        product: { anyOf: [{ $ref: '#/components/schemas/ManagedCatalogProduct' }, { type: 'null' }] },
+        allowedActions: { type: 'array', items: { enum: [...catalogProductActions] } },
+        writeLock: nullableWriteLock,
+      },
+    },
+    ConcessionPreviewRequest: {
+      type: 'object', additionalProperties: false,
+      required: ['merchantConcessionBps', 'idempotencyKey'],
+      properties: {
+        merchantConcessionBps: { type: 'integer', minimum: 0, maximum: 10000 },
+        idempotencyKey,
+      },
+    },
+    MerchantConcessionAllocation: {
+      type: 'object', additionalProperties: false, required: ['account', 'amount'],
+      properties: {
+        account: { $ref: '#/components/schemas/Address' },
+        amount: { $ref: '#/components/schemas/AtomicAmount' },
+      },
+    },
+    MerchantConcessionPreviewItem: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'skuId', 'merchantBaseReceivableUsdt', 'merchantConcessionBps',
+        'merchantConcessionAmount', 'merchantNetReceivableUsdt', 'allocations',
+      ],
+      properties: {
+        skuId: resourceId,
+        merchantBaseReceivableUsdt: { $ref: '#/components/schemas/AtomicAmount' },
+        merchantConcessionBps: { type: 'integer', minimum: 0, maximum: 10000 },
+        merchantConcessionAmount: { $ref: '#/components/schemas/AtomicAmount' },
+        merchantNetReceivableUsdt: { $ref: '#/components/schemas/AtomicAmount' },
+        allocations: { type: 'array', items: { $ref: '#/components/schemas/MerchantConcessionAllocation' } },
+      },
+    },
+    MerchantConcessionPreviewPayload: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'artifactVersion', 'productId', 'productVersion', 'merchantId', 'policyVersion',
+        'merchantConcessionBps', 'destinationSetHash', 'catalogFingerprint', 'items', 'expiresAt',
+      ],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        productId: resourceId,
+        productVersion: { type: 'integer', minimum: 1 },
+        merchantId: resourceId,
+        policyVersion: { type: 'integer', minimum: 1 },
+        merchantConcessionBps: { type: 'integer', minimum: 0, maximum: 10000 },
+        destinationSetHash: { $ref: '#/components/schemas/Bytes32' },
+        catalogFingerprint: { $ref: '#/components/schemas/Bytes32' },
+        items: { type: 'array', minItems: 1, items: { $ref: '#/components/schemas/MerchantConcessionPreviewItem' } },
+        expiresAt: { type: 'string', format: 'date-time' },
+      },
+    },
+    CatalogSignedAuthorization: {
+      type: 'object', additionalProperties: false,
+      required: ['domain', 'types', 'primaryType', 'message', 'digest', 'signature', 'signer'],
+      properties: {
+        domain: { type: 'object' },
+        types: { type: 'object' },
+        primaryType: { const: 'MerchantConcessionPreview' },
+        message: { type: 'object' },
+        digest: { $ref: '#/components/schemas/Bytes32' },
+        signature: { type: 'string', pattern: '^0x[0-9a-fA-F]+$' },
+        signer: { $ref: '#/components/schemas/Address' },
+      },
+    },
+    MerchantConcessionPreview: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'artifactVersion', 'previewId', 'productId', 'productVersion', 'merchantId',
+        'policyVersion', 'merchantConcessionBps', 'catalogFingerprint',
+        'destinationSetHash', 'previewHash', 'payload', 'authorization',
+        'expiresAt', 'createdAt',
+      ],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        previewId: { $ref: '#/components/schemas/Bytes32' },
+        productId: resourceId,
+        productVersion: { $ref: '#/components/schemas/AtomicAmount' },
+        merchantId: resourceId,
+        policyVersion: { $ref: '#/components/schemas/AtomicAmount' },
+        merchantConcessionBps: { type: 'integer', minimum: 0, maximum: 10000 },
+        catalogFingerprint: { $ref: '#/components/schemas/Bytes32' },
+        destinationSetHash: { $ref: '#/components/schemas/Bytes32' },
+        previewHash: { $ref: '#/components/schemas/Bytes32' },
+        payload: { $ref: '#/components/schemas/MerchantConcessionPreviewPayload' },
+        authorization: { $ref: '#/components/schemas/CatalogSignedAuthorization' },
+        expiresAt: { type: 'string', format: 'date-time' },
+        createdAt: { type: 'string', format: 'date-time' },
+      },
+    },
+    ProductReviewSubmissionRequest: {
+      type: 'object', additionalProperties: false, required: ['previewId', 'idempotencyKey'],
+      properties: { previewId: { $ref: '#/components/schemas/Bytes32' }, idempotencyKey },
+    },
+    ProductReviewDecisionRequest: {
+      type: 'object', additionalProperties: false,
+      required: ['decision', 'reasonCode', 'idempotencyKey'],
+      properties: {
+        decision: { enum: [...catalogReviewDecisions] },
+        reasonCode: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{1,63}$' },
+        idempotencyKey,
+      },
+    },
+    CatalogReasonRequest: {
+      type: 'object', additionalProperties: false, required: ['reasonCode', 'idempotencyKey'],
+      properties: {
+        reasonCode: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{1,63}$' },
+        idempotencyKey,
+      },
+    },
+    InventoryAdjustmentRequest: {
+      type: 'object', additionalProperties: false,
+      required: ['delta', 'reasonCode', 'idempotencyKey'],
+      properties: {
+        delta: { type: 'string', pattern: '^-?[1-9][0-9]*$' },
+        reasonCode: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{1,63}$' },
+        idempotencyKey,
+      },
+    },
+    InventoryAdjustmentProjection: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'artifactVersion', 'adjustmentId', 'skuId', 'beforeTotal', 'beforeAvailable',
+        'delta', 'afterTotal', 'afterAvailable', 'reasonCode', 'actorWallet', 'createdAt',
+      ],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        adjustmentId: { $ref: '#/components/schemas/Bytes32' },
+        skuId: resourceId,
+        beforeTotal: { $ref: '#/components/schemas/AtomicAmount' },
+        beforeAvailable: { $ref: '#/components/schemas/AtomicAmount' },
+        delta: { type: 'string', pattern: '^-?[1-9][0-9]*$' },
+        afterTotal: { $ref: '#/components/schemas/AtomicAmount' },
+        afterAvailable: { $ref: '#/components/schemas/AtomicAmount' },
+        reasonCode: { type: 'string' },
+        actorWallet: { $ref: '#/components/schemas/Address' },
+        createdAt: { type: 'string', format: 'date-time' },
+      },
+    },
+    MediaUploadIntentRequest: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'purpose', 'resourceType', 'resourceId', 'contentType',
+        'sizeBytes', 'contentSha256', 'idempotencyKey',
+      ],
+      properties: {
+        purpose: { enum: [...mediaPurposes] },
+        resourceType: { enum: [...mediaResourceTypes] },
+        resourceId,
+        contentType: { enum: [...mediaContentTypes] },
+        sizeBytes: { type: 'integer', minimum: 1, maximum: 10485760 },
+        contentSha256: { $ref: '#/components/schemas/Bytes32' },
+        idempotencyKey,
+      },
+    },
+    MediaUploadIntentProjection: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'artifactVersion', 'uploadIntentId', 'ownerWallet', 'purpose', 'resourceType',
+        'resourceId', 'contentType', 'sizeBytes', 'contentSha256', 'state', 'expiresAt',
+        'method', 'uploadUrl', 'headers', 'providerReferenceHash', 'writeOnce',
+      ],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        uploadIntentId: { $ref: '#/components/schemas/Bytes32' },
+        ownerWallet: { $ref: '#/components/schemas/Address' },
+        purpose: { enum: [...mediaPurposes] },
+        resourceType: { enum: [...mediaResourceTypes] },
+        resourceId,
+        contentType: { enum: [...mediaContentTypes] },
+        sizeBytes: { $ref: '#/components/schemas/AtomicAmount' },
+        contentSha256: { $ref: '#/components/schemas/Bytes32' },
+        state: { const: 'UPLOADED' },
+        expiresAt: { type: 'string', format: 'date-time' },
+        method: { const: 'PUT' },
+        uploadUrl: { type: 'string', format: 'uri' },
+        headers: { type: 'object', additionalProperties: { type: 'string' } },
+        providerReferenceHash: { $ref: '#/components/schemas/Bytes32' },
+        writeOnce: { const: true },
+      },
+    },
+    MediaAssetProjection: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'artifactVersion', 'assetId', 'uploadIntentId', 'ownerWallet', 'purpose',
+        'resourceType', 'resourceId', 'contentType', 'sizeBytes', 'contentSha256',
+        'providerEvidenceHash', 'objectVersionHash', 'createdAt',
+      ],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        assetId: { $ref: '#/components/schemas/Bytes32' },
+        uploadIntentId: { $ref: '#/components/schemas/Bytes32' },
+        ownerWallet: { $ref: '#/components/schemas/Address' },
+        purpose: { enum: [...mediaPurposes] },
+        resourceType: { enum: [...mediaResourceTypes] },
+        resourceId,
+        contentType: { enum: [...mediaContentTypes] },
+        sizeBytes: { $ref: '#/components/schemas/AtomicAmount' },
+        contentSha256: { $ref: '#/components/schemas/Bytes32' },
+        providerEvidenceHash: { $ref: '#/components/schemas/Bytes32' },
+        objectVersionHash: { $ref: '#/components/schemas/Bytes32' },
+        createdAt: { type: 'string', format: 'date-time' },
+      },
+    },
+    MediaReadAccessProjection: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'artifactVersion', 'assetId', 'purpose', 'resourceType', 'resourceId',
+        'contentType', 'sizeBytes', 'contentSha256', 'objectVersionHash',
+        'accessScope', 'method', 'readUrl', 'expiresAt', 'providerReferenceHash',
+      ],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        assetId: { $ref: '#/components/schemas/Bytes32' },
+        purpose: { enum: [...mediaPurposes] },
+        resourceType: { enum: [...mediaResourceTypes] },
+        resourceId,
+        contentType: { enum: [...mediaContentTypes] },
+        sizeBytes: { $ref: '#/components/schemas/AtomicAmount' },
+        contentSha256: { $ref: '#/components/schemas/Bytes32' },
+        objectVersionHash: { $ref: '#/components/schemas/Bytes32' },
+        accessScope: { enum: ['PUBLIC', 'AUTHENTICATED'] },
+        method: { const: 'GET' },
+        readUrl: { type: 'string', format: 'uri' },
+        expiresAt: { type: 'string', format: 'date-time' },
+        providerReferenceHash: { $ref: '#/components/schemas/Bytes32' },
+      },
+    },
+    OrderActionEvidenceRequest: {
+      type: 'object', additionalProperties: false,
+      required: ['action', 'reasonCode', 'idempotencyKey'],
+      properties: {
+        action: { enum: [
+          'REQUEST_EXCHANGE', 'REQUEST_DELAY', 'CONFIRM_RECEIPT',
+          'OPEN_ARBITRATION', 'VERIFY_PICKUP', 'REQUEST_FORCED_RECEIPT',
+        ] },
+        reasonCode: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{1,63}$' },
+        mediaAssetIds: { type: 'array', maxItems: 8, uniqueItems: true, items: { $ref: '#/components/schemas/Bytes32' } },
+        idempotencyKey,
+      },
+    },
+    TrackingEvidenceRequest: {
+      type: 'object', additionalProperties: false,
+      required: ['carrierCode', 'trackingNumber', 'idempotencyKey'],
+      properties: {
+        carrierCode: { enum: ['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS'] },
+        trackingNumber: { type: 'string', minLength: 6, maxLength: 64 },
+        idempotencyKey,
+      },
+    },
+    EvidenceEnvelopeProjection: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'artifactVersion', 'evidenceHash', 'ownerWallet', 'actorRole', 'purpose',
+        'resourceType', 'resourceId', 'action', 'reasonCode', 'trackingNumberHash',
+        'mediaAssetIds', 'payload', 'createdAt',
+      ],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        evidenceHash: { $ref: '#/components/schemas/Bytes32' },
+        ownerWallet: { $ref: '#/components/schemas/Address' },
+        actorRole: { enum: ['BUYER', 'MERCHANT', 'ADMIN', 'OPERATOR'] },
+        purpose: { enum: ['FULFILLMENT_ACTION', 'SHIPMENT_TRACKING'] },
+        resourceType: { const: 'ORDER' },
+        resourceId,
+        action: { type: 'string' },
+        reasonCode: nullableString,
+        trackingNumberHash: { anyOf: [{ $ref: '#/components/schemas/Bytes32' }, { type: 'null' }] },
+        mediaAssetIds: { type: 'array', items: { $ref: '#/components/schemas/Bytes32' } },
+        payload: { type: 'object' },
+        carrierCode: { enum: ['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS'] },
+        createdAt: { type: 'string', format: 'date-time' },
+      },
+    },
+  };
+}
+
 function fulfillmentOpenApiSchemas() {
   const idempotencyKey = { $ref: '#/components/schemas/IdempotencyKey' };
   const evidenceHash = { $ref: '#/components/schemas/Bytes32' };
@@ -2101,12 +2759,17 @@ function paymentOpenApiSchemas() {
     },
     CatalogProduct: {
       type: 'object', additionalProperties: false,
-      required: ['productId', 'chainProductId', 'title', 'metadata', 'skus'],
+      required: [
+        'productId', 'chainProductId', 'title', 'metadata',
+        'mainImageAssetIds', 'videoAssetId', 'skus',
+      ],
       properties: {
         productId: { type: 'string', minLength: 1 },
         chainProductId: { $ref: '#/components/schemas/Bytes32' },
         title: { type: 'string', minLength: 1 },
         metadata: { type: 'object' },
+        mainImageAssetIds: { type: 'array', maxItems: 5, items: { $ref: '#/components/schemas/Bytes32' } },
+        videoAssetId: { anyOf: [{ $ref: '#/components/schemas/Bytes32' }, { type: 'null' }] },
         skus: { type: 'array', minItems: 1, items: { $ref: '#/components/schemas/CatalogSku' } },
       },
     },
@@ -2482,6 +3145,10 @@ export type OrderFinalityStatus = ${union(orderFinalityStatuses)};
 export type TransactionFinalityState = ${union(finalityStates)};
 export type UserRole = ${union(userRoles)};
 export type BreakerScope = ${union(breakerScopes)};
+export type CatalogProductAction = ${union(catalogProductActions)};
+export type CatalogProductLifecycleState = ${union(catalogProductLifecycleStates)};
+export type CatalogReviewDecision = ${union(catalogReviewDecisions)};
+export type CatalogTaxonomyStatus = ${union(catalogTaxonomyStatuses)};
 export type AllowedActionName = ${union(allowedActionNames)};
 export type AllowedActionReasonCode = ${union(allowedActionReasonCodes)};
 export type CoreErrorCode = ${union(coreErrorCodes)};
@@ -2492,6 +3159,9 @@ export type FulfillmentRequestType = ${union(fulfillmentRequestTypes)};
 export type FulfillmentRequestState = ${union(fulfillmentRequestStates)};
 export type LogisticsProvider = ${union(logisticsProviders)};
 export type LogisticsStatus = ${union(logisticsStatuses)};
+export type MediaContentType = ${union(mediaContentTypes)};
+export type MediaPurpose = ${union(mediaPurposes)};
+export type MediaResourceType = ${union(mediaResourceTypes)};
 export type FulfillmentAsset = ${union(fulfillmentAssets)};
 export type ArbitrationOutcome = ${union(arbitrationOutcomes)};
 export type SettlementRail = ${union(settlementRails)};
@@ -2536,6 +3206,10 @@ export declare const orderFinalityStatuses: readonly OrderFinalityStatus[];
 export declare const finalityStates: readonly TransactionFinalityState[];
 export declare const userRoles: readonly UserRole[];
 export declare const breakerScopes: readonly BreakerScope[];
+export declare const catalogProductActions: readonly CatalogProductAction[];
+export declare const catalogProductLifecycleStates: readonly CatalogProductLifecycleState[];
+export declare const catalogReviewDecisions: readonly CatalogReviewDecision[];
+export declare const catalogTaxonomyStatuses: readonly CatalogTaxonomyStatus[];
 export declare const allowedActionNames: readonly AllowedActionName[];
 export declare const executableOrderActionNames: readonly AllowedActionName[];
 export declare const allowedActionReasonCodes: readonly AllowedActionReasonCode[];
@@ -2547,6 +3221,9 @@ export declare const fulfillmentRequestTypes: readonly FulfillmentRequestType[];
 export declare const fulfillmentRequestStates: readonly FulfillmentRequestState[];
 export declare const logisticsProviders: readonly LogisticsProvider[];
 export declare const logisticsStatuses: readonly LogisticsStatus[];
+export declare const mediaContentTypes: readonly MediaContentType[];
+export declare const mediaPurposes: readonly MediaPurpose[];
+export declare const mediaResourceTypes: readonly MediaResourceType[];
 export declare const fulfillmentAssets: readonly FulfillmentAsset[];
 export declare const arbitrationOutcomes: readonly ArbitrationOutcome[];
 export declare const settlementRails: readonly SettlementRail[];
@@ -3264,7 +3941,248 @@ export interface CatalogProduct {
   chainProductId: Bytes32;
   title: string;
   metadata: Readonly<Record<string, unknown>>;
+  mainImageAssetIds: readonly Bytes32[];
+  videoAssetId: Bytes32 | null;
   skus: readonly CatalogSku[];
+}
+
+export interface CatalogCategory {
+  categoryId: string;
+  version: AtomicAmount;
+  parentCategoryId: string | null;
+  level: 1 | 2 | 3;
+  name: string;
+  iconAssetId: Bytes32 | null;
+  sortOrder: number;
+  status: CatalogTaxonomyStatus;
+  serviceFee: Readonly<{ state: 'Frozen' | 'DecisionBlocked'; valueBps: number | null }>;
+}
+
+export interface CatalogTag {
+  tagId: string;
+  version: AtomicAmount;
+  name: string;
+  example: string;
+  sortOrder: number;
+  status: CatalogTaxonomyStatus;
+}
+
+export interface ProductSkuInput {
+  skuId?: string;
+  attributes: JsonObject;
+  listPriceUsdt: AtomicAmount;
+  merchantBaseReceivableUsdt: AtomicAmount;
+  stockTotal: number;
+  proposedSeckillInventory: number;
+}
+
+export interface ProductSlotInput {
+  idempotencyKey: string;
+  title: string;
+  subtitle?: string;
+  mainImageAssetIds?: readonly Bytes32[];
+  videoAssetId?: Bytes32;
+  richDetail: JsonObject;
+  defaultFreightUsdt: AtomicAmount;
+  merchantConcessionBps: number;
+  fulfillmentModes: readonly FulfillmentMode[];
+  categoryId?: string;
+  tagIds?: readonly string[];
+  skus: readonly ProductSkuInput[];
+}
+
+export interface AdminProductSlotInput extends ProductSlotInput {
+  merchantId: string;
+}
+
+export interface CatalogWriteLock {
+  type: string;
+  id: string;
+  state: string;
+}
+
+export interface ManagedCatalogSku {
+  skuId: string;
+  chainSkuId: Bytes32;
+  version: AtomicAmount;
+  attributes: JsonObject;
+  listPriceUsdt: AtomicAmount;
+  merchantBaseReceivableUsdt: AtomicAmount;
+  stockTotal: AtomicAmount;
+  stockAvailable: AtomicAmount;
+  stockReserved: AtomicAmount;
+  proposedSeckillInventory: AtomicAmount;
+  lifecycleState: CatalogProductLifecycleState;
+}
+
+export interface ManagedCatalogProduct {
+  artifactVersion: typeof artifactVersion;
+  productId: string;
+  chainProductId: Bytes32;
+  merchantId: string;
+  storeId: string | null;
+  supersedesProductId: string | null;
+  version: AtomicAmount;
+  title: string;
+  subtitle: string;
+  lifecycleState: CatalogProductLifecycleState;
+  productPolicyHash: Bytes32;
+  merchantConcessionBps: number;
+  mainImageAssetIds: readonly Bytes32[];
+  videoAssetId: Bytes32 | null;
+  richDetail: JsonObject;
+  defaultFreightUsdt: AtomicAmount;
+  fulfillmentModes: readonly FulfillmentMode[];
+  categoryId: string | null;
+  tagIds: readonly string[];
+  skus: readonly ManagedCatalogSku[];
+  allowedActions: readonly CatalogProductAction[];
+  writeLock: CatalogWriteLock | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProductSlotProjection {
+  artifactVersion: typeof artifactVersion;
+  storeId: string;
+  merchantId: string;
+  product: ManagedCatalogProduct | null;
+  allowedActions: readonly CatalogProductAction[];
+  writeLock: CatalogWriteLock | null;
+}
+
+export interface MerchantConcessionAllocation {
+  account: Address;
+  amount: AtomicAmount;
+}
+
+export interface MerchantConcessionPreviewItem {
+  skuId: string;
+  merchantBaseReceivableUsdt: AtomicAmount;
+  merchantConcessionBps: number;
+  merchantConcessionAmount: AtomicAmount;
+  merchantNetReceivableUsdt: AtomicAmount;
+  allocations: readonly MerchantConcessionAllocation[];
+}
+
+export interface MerchantConcessionPreviewPayload {
+  artifactVersion: typeof artifactVersion;
+  productId: string;
+  productVersion: number;
+  merchantId: string;
+  policyVersion: number;
+  merchantConcessionBps: number;
+  destinationSetHash: Bytes32;
+  catalogFingerprint: Bytes32;
+  items: readonly MerchantConcessionPreviewItem[];
+  expiresAt: string;
+}
+
+export interface CatalogSignedAuthorization extends Eip712TypedData {
+  primaryType: 'MerchantConcessionPreview';
+  digest: Bytes32;
+  signature: string;
+  signer: Address;
+}
+
+export interface MerchantConcessionPreview {
+  artifactVersion: typeof artifactVersion;
+  previewId: Bytes32;
+  productId: string;
+  productVersion: AtomicAmount;
+  merchantId: string;
+  policyVersion: AtomicAmount;
+  merchantConcessionBps: number;
+  catalogFingerprint: Bytes32;
+  destinationSetHash: Bytes32;
+  previewHash: Bytes32;
+  payload: MerchantConcessionPreviewPayload;
+  authorization: CatalogSignedAuthorization;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface MediaUploadIntentProjection {
+  artifactVersion: typeof artifactVersion;
+  uploadIntentId: Bytes32;
+  ownerWallet: Address;
+  purpose: MediaPurpose;
+  resourceType: MediaResourceType;
+  resourceId: string;
+  contentType: MediaContentType;
+  sizeBytes: AtomicAmount;
+  contentSha256: Bytes32;
+  state: 'UPLOADED';
+  expiresAt: string;
+  method: 'PUT';
+  uploadUrl: string;
+  headers: Readonly<Record<string, string>>;
+  providerReferenceHash: Bytes32;
+  writeOnce: true;
+}
+
+export interface MediaAssetProjection {
+  artifactVersion: typeof artifactVersion;
+  assetId: Bytes32;
+  uploadIntentId: Bytes32;
+  ownerWallet: Address;
+  purpose: MediaPurpose;
+  resourceType: MediaResourceType;
+  resourceId: string;
+  contentType: MediaContentType;
+  sizeBytes: AtomicAmount;
+  contentSha256: Bytes32;
+  providerEvidenceHash: Bytes32;
+  objectVersionHash: Bytes32;
+  createdAt: string;
+}
+
+export interface MediaReadAccessProjection {
+  artifactVersion: typeof artifactVersion;
+  assetId: Bytes32;
+  purpose: MediaPurpose;
+  resourceType: MediaResourceType;
+  resourceId: string;
+  contentType: MediaContentType;
+  sizeBytes: AtomicAmount;
+  contentSha256: Bytes32;
+  objectVersionHash: Bytes32;
+  accessScope: 'PUBLIC' | 'AUTHENTICATED';
+  method: 'GET';
+  readUrl: string;
+  expiresAt: string;
+  providerReferenceHash: Bytes32;
+}
+
+export interface EvidenceEnvelopeProjection {
+  artifactVersion: typeof artifactVersion;
+  evidenceHash: Bytes32;
+  ownerWallet: Address;
+  actorRole: 'BUYER' | 'MERCHANT' | 'ADMIN' | 'OPERATOR';
+  purpose: 'FULFILLMENT_ACTION' | 'SHIPMENT_TRACKING';
+  resourceType: 'ORDER';
+  resourceId: string;
+  action: string;
+  reasonCode: string | null;
+  trackingNumberHash: Bytes32 | null;
+  mediaAssetIds: readonly Bytes32[];
+  payload: JsonObject;
+  carrierCode?: 'SF' | 'JD' | 'YTO' | 'ZTO' | 'STO' | 'EMS';
+  createdAt: string;
+}
+
+export interface InventoryAdjustmentProjection {
+  artifactVersion: typeof artifactVersion;
+  adjustmentId: Bytes32;
+  skuId: string;
+  beforeTotal: AtomicAmount;
+  beforeAvailable: AtomicAmount;
+  delta: string;
+  afterTotal: AtomicAmount;
+  afterAvailable: AtomicAmount;
+  reasonCode: string;
+  actorWallet: Address;
+  createdAt: string;
 }
 
 export interface MerchantStore {

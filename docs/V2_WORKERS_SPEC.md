@@ -1,6 +1,6 @@
 # Abu 24K V2 Payment And Fulfillment Workers
 
-Status: local settlement/admin checkpoint `2.0.0-settlement-admin.2`. Production RPCs, deployed
+Status: local settlement/admin checkpoint `2.0.0-settlement-admin.3`. Production RPCs, deployed
 addresses, signer service and credentials remain `ExternalBlocked`.
 
 ## Indexer
@@ -61,7 +61,7 @@ running while `writesEnabled` is false.
 
 ## Signer
 
-Core stores no quote private key. `RemoteSignerClient` sends only purpose,
+Core stores no quote or catalog-preview private key. `RemoteSignerClient` sends only purpose,
 bytes32 digest, resource, policy version, deadline and idempotency key to an
 isolated signer. It recovers the returned signature and rejects any signer other
 than the configured public address.
@@ -69,6 +69,10 @@ than the configured public address.
 The same authenticated endpoint must answer the Core health request with
 `status: READY` and its public signer address. Health identity is checked before
 new quotes are enabled; each quote signature is still recovered independently.
+
+`PRODUCT_CONCESSION_PREVIEW` signs the EIP-712 digest for the latest product/SKU
+fingerprint, canonical policy, exact destination allocation and five-minute
+expiry. Catalog review never accepts an unsigned or stale financial preview.
 
 Signer URL/token and public signer address are independent configuration. A
 public address without a reachable isolated signer is not ready.

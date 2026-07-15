@@ -16,6 +16,7 @@ export const coreErrorCodes = [
   'NonceReplay',
   'PickupTakeoverDecisionBlocked',
   'ProviderSignatureInvalid',
+  'ProductWriteLocked',
   'QuoteExpired',
   'ReorgPending',
   'ReservationConflict',

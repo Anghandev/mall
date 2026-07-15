@@ -1,13 +1,14 @@
 # Abu 24K V2 Core API Contract
 
-Status: coordinated local settlement/admin checkpoint `2.0.0-settlement-admin.2`. OpenAPI,
+Status: coordinated local settlement/admin checkpoint `2.0.0-settlement-admin.3`. OpenAPI,
 generated types, ABI, manifests, enums, the fail-closed WebSocket protocol and
 consumer tests share this version. This checkpoint does not authorize a
 deployment, production signing or a transaction.
 
 ## Authority
 
-Core is authoritative for catalog price, payment legs, allocations, policy and
+Core is authoritative for catalog identity/state, price, inventory, signed
+merchant-concession previews, payment legs, allocations, policy and
 beneficiary snapshots, reservations, seckill boundary classification, chain
 finality, fulfillment targets, order transitions and ledger release. Products
 submit user choices, wallet signatures, transaction hashes and immutable
@@ -77,7 +78,11 @@ Public reads:
 - `GET /v2/bootstrap`
 - `GET /v2/catalog/products`
 - `GET /v2/catalog/products/{productId}`
+- `GET /v2/catalog/categories`
+- `GET /v2/catalog/tags`
 - `GET /v2/stores` with an optional six-digit `regionCode`
+- `GET /v2/media/assets/{assetId}/access` for referenced public catalog media;
+  an optional Bearer session extends access to authorized private resources
 
 Authentication:
 
@@ -94,6 +99,8 @@ Authenticated Core reads and writes:
 - `POST /v2/stores`
 - `POST /v2/fulfillment-targets/delivery`
 - `POST /v2/fulfillment-targets/pickup`
+- `POST /v2/media/upload-intents`
+- `POST /v2/media/upload-intents/{uploadIntentId}/complete`
 - `GET /v2/orders`
 - `GET /v2/orders/{orderId}`
 - `GET /v2/orders/{orderId}/fulfillment-target`
@@ -110,6 +117,40 @@ Authenticated Core reads and writes:
 - `POST /v2/orders/{orderId}/forced-receipt-requests`
 - `POST /v2/orders/{orderId}/forced-receipt-decisions`
 - `POST /v2/orders/{orderId}/receipt-confirmation`
+- `POST /v2/orders/{orderId}/evidence`
+- `POST /v2/orders/{orderId}/tracking-evidence`
+
+Catalog management:
+
+- `GET|PUT /v2/merchant/stores/{storeId}/product-slot`
+- `POST /v2/merchant/products/{productId}/concession-previews`
+- `POST /v2/merchant/products/{productId}/review-submissions`
+- `POST /v2/merchant/products/{productId}/delist`
+- `GET|POST /v2/admin/catalog/categories`
+- `PUT /v2/admin/catalog/categories/{categoryId}`
+- `GET|POST /v2/admin/catalog/tags`
+- `PUT /v2/admin/catalog/tags/{tagId}`
+- `GET /v2/admin/catalog/products`
+- `GET|PUT /v2/admin/catalog/stores/{storeId}/product-slot`
+- `POST /v2/admin/catalog/products/{productId}/concession-previews`
+- `POST /v2/admin/catalog/products/{productId}/review-decisions`
+- `POST /v2/admin/catalog/products/{productId}/review-submissions`
+- `POST /v2/admin/catalog/products/{productId}/delist`
+- `POST /v2/admin/catalog/skus/{skuId}/inventory-adjustments`
+
+Merchant routes always execute with a merchant-only actor even when the JWT also
+contains a platform role. Admin routes likewise use one platform role and never
+splice merchant ownership into platform authority. A store has at most one
+non-delisted product slot. Review, scheduled, live-session, active-reservation
+and positive Locked/Disputed-liability blockers return `ProductWriteLocked`
+with the exact blocking resource. Historical products are logically delisted
+and replaced rather than physically deleted or financially rewritten.
+
+Product review requires 1-5 verified write-once main images and a non-expired
+Core-signed concession preview bound to the latest canonical policy and exact
+product/SKU fingerprint. The preview returns each SKU's integer base,
+concession, net receivable and every configured destination. An unresolved
+destination set returns `DecisionBlocked`; no UI supplies weights.
 
 Provider callbacks:
 
@@ -149,12 +190,12 @@ order even when it belongs to the same merchant.
 
 ## Publication Boundary
 
-The settlement/admin checkpoint includes all payment and fulfillment
+The settlement/admin checkpoint includes catalog/media management and all payment and fulfillment
 capabilities plus signed settlement intents and requests, merchant finance and
 guarantee deposits, takeover funding, Safe MultiSend batching and finality,
 policy governance, CMS, notifications, versioned system configuration,
 append-only audit queries and operations monitoring. The coordinated OpenAPI
-publishes 63 HTTP operations and the generated types, state/error enums,
+publishes 92 HTTP operations and the generated types, state/error enums,
 Schema and ABI share the same artifact version.
 
 Seckill session reads, numeric-cursor HTTP replay and `/v2/ws` publish only

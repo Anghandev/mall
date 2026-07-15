@@ -28,7 +28,9 @@ import { appendAuditEntry, verifyAuditChain, type AuditRow } from './audit-chain
 import { AuditQueryService, enqueueAudit } from './audit-service.ts';
 import { PostgresNonceStore, RedisNonceRateLimiter } from './auth-store.ts';
 import { CatalogPaymentService } from './catalog-payment-service.ts';
+import { CatalogManagementService } from './catalog-management-service.ts';
 import { CmsService, sanitizeStructuredContent } from './cms-service.ts';
+import { EvidenceService, HttpMediaStorageAdapter, type MediaStorageAdapter } from './evidence-service.ts';
 import { FulfillmentService } from './fulfillment-service.ts';
 import { FulfillmentTargetService, assertQuoteFulfillmentTarget } from './fulfillment-target-service.ts';
 import {
@@ -86,6 +88,8 @@ test('business and audit migrations apply from empty databases', async () => {
       '007_settlement_admin.sql',
       '008_admin_services.sql',
       '009_product_surfaces.sql',
+      '010_evidence_media.sql',
+      '011_catalog_management.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -105,6 +109,15 @@ test('business and audit migrations apply from empty databases', async () => {
     assert.ok(businessTables.rows.some((row) => row.table_name === 'notification_deliveries'));
     assert.ok(businessTables.rows.some((row) => row.table_name === 'audit_outbox_events'));
     assert.ok(businessTables.rows.some((row) => row.table_name === 'operations_metric_snapshots'));
+    assert.ok(businessTables.rows.some((row) => row.table_name === 'media_upload_intents'));
+    assert.ok(businessTables.rows.some((row) => row.table_name === 'media_upload_wallet_locks'));
+    assert.ok(businessTables.rows.some((row) => row.table_name === 'media_assets'));
+    assert.ok(businessTables.rows.some((row) => row.table_name === 'evidence_envelopes'));
+    assert.ok(businessTables.rows.some((row) => row.table_name === 'catalog_category_versions'));
+    assert.ok(businessTables.rows.some((row) => row.table_name === 'catalog_tag_versions'));
+    assert.ok(businessTables.rows.some((row) => row.table_name === 'product_review_events'));
+    assert.ok(businessTables.rows.some((row) => row.table_name === 'catalog_inventory_adjustments'));
+    assert.ok(businessTables.rows.some((row) => row.table_name === 'merchant_concession_previews'));
     assert.equal(businessTables.rows.some((row) => row.table_name === 'claim_projections'), false);
     const finalityColumns = await business.query<{ column_name: string }>(
       "SELECT column_name FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'transaction_finality'",
@@ -601,6 +614,8 @@ test('catalog payment service builds an authoritative idempotent quote and recor
     };
     const catalog = await service.listCatalog();
     assert.equal(catalog[0]?.skus[0]?.listPriceUsdt, '100');
+    assert.deepEqual(catalog[0]?.mainImageAssetIds, []);
+    assert.equal(catalog[0]?.videoAssetId, null);
     assert.equal('merchantCostUsdt' in (catalog[0]?.skus[0] ?? {}), false);
 
     const quote = await service.createOrdinaryQuote(BUYER, request);
@@ -653,6 +668,465 @@ test('catalog payment service builds an authoritative idempotent quote and recor
       txHash: reorgReplacement,
       replacementForTxHash: replacementTx,
     })).state, 'SUBMITTED');
+  } finally {
+    await db.close();
+  }
+});
+
+test('catalog management enforces product scope, signed preview, review locks and taxonomy blockers', async () => {
+  const db = await createBusinessDatabase();
+  const now = new Date('2026-07-15T08:00:00.000Z');
+  let sequence = 16;
+  const bytes32 = () => `0x${(sequence++).toString(16).padStart(64, '0')}`;
+  try {
+    await seedCatalog(db, 3);
+    const admin = '0x3333333333333333333333333333333333333333';
+    const auditor = '0x4444444444444444444444444444444444444444';
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES
+         ($1, 'MERCHANT', 'merchant-1', 'ACTIVE', $4),
+         ($2, 'ADMIN', NULL, 'ACTIVE', $4),
+         ($3, 'AUDITOR', NULL, 'ACTIVE', $4)`,
+      [MERCHANT, admin, auditor, HASH],
+    );
+    await db.query(
+      `INSERT INTO core.merchant_stores (
+         store_id, merchant_id, idempotency_key, request_hash, name, region_code,
+         longitude, latitude, address, phone, status, version
+       ) VALUES
+       (
+         'store-catalog-1', 'merchant-1', 'catalog-store-seed-1', $1,
+         'Catalog Store', '110101', 116.397000, 39.908000,
+         '1 Catalog Street', '01012345678', 'ACTIVE', 1
+       ),
+       (
+         'store-catalog-empty', 'merchant-1', 'catalog-store-seed-2', $1,
+         'Empty Catalog Store', '110101', 116.398000, 39.909000,
+         '2 Catalog Street', '01012345679', 'ACTIVE', 1
+       )`,
+      [HASH],
+    );
+    const catalogQueries: string[] = [];
+    const service = new CatalogManagementService({
+      transactions: transactionAdapter(db, (sql) => catalogQueries.push(sql)),
+      signer: {
+        sign: async (request) => {
+          assert.equal(request.purpose, 'PRODUCT_CONCESSION_PREVIEW');
+          return {
+            signature: `0x${'1'.repeat(130)}`,
+            signer: '0x8888888888888888888888888888888888888888',
+          };
+        },
+      },
+      clock: () => now,
+      bytes32,
+    });
+    const merchant = { walletAddress: MERCHANT, roles: ['MERCHANT'] as const, merchantId: 'merchant-1' };
+    const platform = { walletAddress: admin, roles: ['ADMIN'] as const };
+    const auditActor = { walletAddress: auditor, roles: ['AUDITOR'] as const };
+    const category = await service.upsertCategory(platform, {
+      name: 'Gold',
+      sortOrder: 1,
+      idempotencyKey: 'catalog-category-create-1',
+    });
+    const tag = await service.upsertTag(platform, {
+      name: 'Featured',
+      example: 'Featured products',
+      sortOrder: 1,
+      idempotencyKey: 'catalog-tag-create-1',
+    });
+    assert.throws(
+      () => service.upsertCategory(platform, {
+        name: 'Blocked Fee',
+        sortOrder: 2,
+        serviceFeeBps: 100,
+        idempotencyKey: 'catalog-category-fee-1',
+      }),
+      /Category service fee is not frozen/,
+    );
+
+    const draft = await service.saveProductSlot(merchant, 'store-catalog-1', {
+      idempotencyKey: 'catalog-product-save-1',
+      title: '24K Product',
+      subtitle: 'Verified catalog draft',
+      richDetail: { blocks: [{ type: 'paragraph', text: 'Detail' }] },
+      defaultFreightUsdt: '2',
+      merchantConcessionBps: 2500,
+      fulfillmentModes: ['DELIVERY', 'PICKUP'],
+      categoryId: String(category.categoryId),
+      tagIds: [String(tag.tagId)],
+      skus: [{
+        attributes: { size: 'standard' },
+        listPriceUsdt: '100',
+        merchantBaseReceivableUsdt: '60',
+        stockTotal: 10,
+        proposedSeckillInventory: 3,
+      }],
+    });
+    const productId = String(draft.productId);
+    const skuId = String((draft.skus as Array<{ skuId: string }>)[0]!.skuId);
+    assert.equal(draft.lifecycleState, 'DRAFT');
+    assert.deepEqual(draft.allowedActions, ['SAVE_DRAFT', 'CREATE_CONCESSION_PREVIEW', 'SUBMIT_REVIEW', 'DELIST']);
+    assert.equal(catalogQueries.some((sql) => (
+      sql.includes('FROM core.merchant_stores WHERE store_id = $1 FOR UPDATE')
+    )), true);
+    const adminDraft = await service.getProductSlot(platform, 'store-catalog-1', 'merchant-1');
+    assert.deepEqual(adminDraft.allowedActions, [
+      'SAVE_DRAFT', 'CREATE_CONCESSION_PREVIEW', 'SUBMIT_REVIEW',
+      'ADJUST_INVENTORY', 'HIDE', 'DELIST',
+    ]);
+    assert.deepEqual((await service.getProductSlot(
+      auditActor,
+      'store-catalog-1',
+      'merchant-1',
+    )).allowedActions, []);
+    assert.deepEqual((await service.getProductSlot(
+      auditActor,
+      'store-catalog-empty',
+      'merchant-1',
+    )).allowedActions, []);
+    assert.equal((await service.listAdminProducts(auditActor)).every((product) => (
+      (product.allowedActions as string[]).length === 0
+    )), true);
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.products WHERE store_id = 'store-catalog-1' AND lifecycle_state <> 'DELISTED'",
+    )).rows[0]?.count, '1');
+    await assert.rejects(
+      service.getProductSlot(
+        { walletAddress: MERCHANT, roles: ['MERCHANT'], merchantId: 'merchant-other' },
+        'store-catalog-1',
+      ),
+      /Merchant binding is not active|outside the merchant scope/,
+    );
+
+    const uploadIntentId = `0x${'a'.repeat(64)}`;
+    const imageAssetId = `0x${'b'.repeat(64)}`;
+    await db.query(
+      `INSERT INTO core.media_upload_intents (
+         upload_intent_id, owner_wallet, purpose, resource_type, resource_id,
+         object_key, content_type, size_bytes, content_sha256, idempotency_key,
+         request_hash, state, expires_at, provider_reference_hash,
+         provider_evidence_hash, verified_at, created_at, updated_at
+       ) VALUES ($1,$2,'PRODUCT_IMAGE','PRODUCT',$3,$4,'image/webp',512,$5,$6,$5,
+         'VERIFIED',$7,$8,$9,$10,$10,$10)`,
+      [uploadIntentId, MERCHANT, productId, `catalog/${productId}/main.webp`, HASH,
+        'catalog-product-image-1', new Date(now.getTime() + 3600_000), HASH_2,
+        `0x${'3'.repeat(64)}`, now],
+    );
+    await db.query(
+      `INSERT INTO core.media_assets (
+         asset_id, upload_intent_id, owner_wallet, purpose, resource_type,
+         resource_id, object_key, content_type, size_bytes, content_sha256,
+         provider_evidence_hash, object_version_hash, created_at
+       ) VALUES ($1,$2,$3,'PRODUCT_IMAGE','PRODUCT',$4,$5,'image/webp',512,$6,$7,$8,$9)`,
+      [imageAssetId, uploadIntentId, MERCHANT, productId, `catalog/${productId}/main.webp`,
+        HASH, `0x${'3'.repeat(64)}`, `0x${'4'.repeat(64)}`, now],
+    );
+    const saved = await service.saveProductSlot(merchant, 'store-catalog-1', {
+      idempotencyKey: 'catalog-product-save-2',
+      title: '24K Product',
+      subtitle: 'Verified catalog draft',
+      mainImageAssetIds: [imageAssetId],
+      richDetail: { blocks: [{ type: 'paragraph', text: 'Detail' }] },
+      defaultFreightUsdt: '2',
+      merchantConcessionBps: 2500,
+      fulfillmentModes: ['DELIVERY', 'PICKUP'],
+      categoryId: String(category.categoryId),
+      tagIds: [String(tag.tagId)],
+      skus: [{
+        skuId,
+        attributes: { size: 'standard' },
+        listPriceUsdt: '100',
+        merchantBaseReceivableUsdt: '60',
+        stockTotal: 10,
+        proposedSeckillInventory: 3,
+      }],
+    });
+    assert.deepEqual(saved.mainImageAssetIds, [imageAssetId]);
+    const preview = await service.createConcessionPreview(merchant, productId, {
+      merchantConcessionBps: 2500,
+      idempotencyKey: 'catalog-concession-preview-1',
+    });
+    const previewPayload = preview.payload as {
+      items: Array<{
+        merchantConcessionAmount: string;
+        merchantNetReceivableUsdt: string;
+        allocations: Array<{ amount: string }>;
+      }>;
+    };
+    assert.equal(previewPayload.items[0]?.merchantConcessionAmount, '15');
+    assert.equal(previewPayload.items[0]?.merchantNetReceivableUsdt, '45');
+    assert.deepEqual(previewPayload.items[0]?.allocations.map((item) => item.amount), ['6', '9']);
+    assert.equal((preview.authorization as { signature: string }).signature, `0x${'1'.repeat(130)}`);
+
+    const submitted = await service.submitReview(merchant, productId, {
+      previewId: String(preview.previewId),
+      idempotencyKey: 'catalog-review-submit-1',
+    });
+    assert.equal(submitted.lifecycleState, 'REVIEW');
+    assert.equal((await service.submitReview(merchant, productId, {
+      previewId: String(preview.previewId),
+      idempotencyKey: 'catalog-review-submit-1',
+    })).lifecycleState, 'REVIEW');
+    await assert.rejects(
+      service.saveProductSlot(merchant, 'store-catalog-1', {
+        idempotencyKey: 'catalog-product-save-locked-1',
+        title: 'Locked Edit',
+        mainImageAssetIds: [imageAssetId],
+        richDetail: {},
+        defaultFreightUsdt: '2',
+        merchantConcessionBps: 2500,
+        fulfillmentModes: ['DELIVERY'],
+        skus: [{
+          skuId,
+          attributes: {},
+          listPriceUsdt: '100',
+          merchantBaseReceivableUsdt: '60',
+          stockTotal: 10,
+          proposedSeckillInventory: 3,
+        }],
+      }),
+      /Product is locked against catalog writes/,
+    );
+    await publishTestPolicy(db, 2);
+    await assert.rejects(
+      service.decideReview(platform, productId, {
+        decision: 'APPROVE',
+        reasonCode: 'CATALOG_APPROVED',
+        idempotencyKey: 'catalog-review-approve-stale-1',
+      }),
+      /Submitted concession preview no longer matches/,
+    );
+    assert.equal((await service.decideReview(platform, productId, {
+      decision: 'REJECT',
+      reasonCode: 'POLICY_CHANGED',
+      idempotencyKey: 'catalog-review-reject-stale-1',
+    })).lifecycleState, 'DRAFT');
+    const preview2 = await service.createConcessionPreview(merchant, productId, {
+      merchantConcessionBps: 2500,
+      idempotencyKey: 'catalog-concession-preview-2',
+    });
+    await service.submitReview(merchant, productId, {
+      previewId: String(preview2.previewId),
+      idempotencyKey: 'catalog-review-submit-2',
+    });
+    assert.equal((await service.decideReview(platform, productId, {
+      decision: 'APPROVE',
+      reasonCode: 'CATALOG_APPROVED',
+      idempotencyKey: 'catalog-review-approve-2',
+    })).lifecycleState, 'SCHEDULED');
+    await publishTestPolicy(db, 3);
+    await assert.rejects(
+      service.decideReview(platform, productId, {
+        decision: 'PUBLISH',
+        reasonCode: 'CATALOG_PUBLISHED',
+        idempotencyKey: 'catalog-review-publish-stale-2',
+      }),
+      /Submitted concession preview no longer matches/,
+    );
+    assert.deepEqual((await service.getProductSlot(platform, 'store-catalog-1', 'merchant-1')).allowedActions, [
+      'PUBLISH', 'REJECT', 'HIDE', 'DELIST',
+    ]);
+    assert.equal((await service.decideReview(platform, productId, {
+      decision: 'REJECT',
+      reasonCode: 'POLICY_CHANGED',
+      idempotencyKey: 'catalog-review-reject-stale-2',
+    })).lifecycleState, 'DRAFT');
+    assert.deepEqual((await db.query<{ submission_hash: string | null; submission_preview_id: string | null }>(
+      'SELECT submission_hash, submission_preview_id FROM core.products WHERE product_id = $1',
+      [productId],
+    )).rows[0], { submission_hash: null, submission_preview_id: null });
+    const preview3 = await service.createConcessionPreview(merchant, productId, {
+      merchantConcessionBps: 2500,
+      idempotencyKey: 'catalog-concession-preview-3',
+    });
+    await service.submitReview(merchant, productId, {
+      previewId: String(preview3.previewId),
+      idempotencyKey: 'catalog-review-submit-3',
+    });
+    await service.decideReview(platform, productId, {
+      decision: 'APPROVE',
+      reasonCode: 'CATALOG_APPROVED',
+      idempotencyKey: 'catalog-review-approve-3',
+    });
+    assert.equal((await service.decideReview(platform, productId, {
+      decision: 'PUBLISH',
+      reasonCode: 'CATALOG_PUBLISHED',
+      idempotencyKey: 'catalog-review-publish-3',
+    })).lifecycleState, 'ACTIVE');
+    const mediaRead = new EvidenceService({
+      transactions: transactionAdapter(db),
+      storage: {
+        createUpload: async () => { throw new Error('unused'); },
+        finalizeUpload: async () => { throw new Error('unused'); },
+        createRead: async (input) => ({
+          method: 'GET',
+        readUrl: 'https://media.example.invalid/catalog-image',
+        expiresAt: input.expiresAt.toISOString(),
+        providerReferenceHash: HASH,
+        assetId: input.assetId,
+        contentSha256: input.contentSha256,
+        objectVersionHash: input.objectVersionHash,
+        }),
+      },
+      clock: () => now,
+    });
+    assert.equal((await mediaRead.createReadAccess(undefined, imageAssetId)).accessScope, 'PUBLIC');
+
+    await db.query(
+      `INSERT INTO core.seckill_sessions (
+         session_id, policy_version, merchant_id, product_id, sku_id,
+         product_policy_hash, starts_at, main_deadline, relay_deadline,
+         inventory, seckill_list_price_usdt, phase, snapshot
+       ) SELECT $1, 1, merchant_id, product_id, $2, product_policy_hash,
+         $3, $4, $5, 3, 90, 'LIVE', '{}'
+       FROM core.products WHERE product_id = $6`,
+      [`0x${'c'.repeat(64)}`, skuId, new Date(now.getTime() - 60_000),
+        new Date(now.getTime() + 59 * 60_000), new Date(now.getTime() + 60_000), productId],
+    );
+    await assert.rejects(
+      service.upsertCategory(platform, {
+        categoryId: String(category.categoryId),
+        name: 'Gold',
+        sortOrder: 1,
+        status: 'DISABLED',
+        idempotencyKey: 'catalog-category-disable-1',
+      }),
+      /contains a seckill product/,
+    );
+    await assert.rejects(
+      service.adjustInventory(platform, skuId, {
+        delta: '2',
+        reasonCode: 'RESTOCK',
+        idempotencyKey: 'catalog-inventory-live-1',
+      }),
+      /Product is locked against catalog writes/,
+    );
+    await db.query("UPDATE core.seckill_sessions SET phase = 'SETTLED' WHERE product_id = $1", [productId]);
+    const adjustment = await service.adjustInventory(platform, skuId, {
+      delta: '2',
+      reasonCode: 'RESTOCK',
+      idempotencyKey: 'catalog-inventory-adjust-1',
+    });
+    assert.deepEqual(
+      { before: adjustment.beforeTotal, delta: adjustment.delta, after: adjustment.afterTotal },
+      { before: '10', delta: '2', after: '12' },
+    );
+    await assert.rejects(
+      db.query('DELETE FROM core.catalog_inventory_adjustments WHERE adjustment_id = $1', [adjustment.adjustmentId]),
+      /ImmutableRecord/,
+    );
+
+    const replacement = await service.saveProductSlot(merchant, 'store-catalog-1', {
+      idempotencyKey: 'catalog-product-history-replacement-1',
+      title: '24K Replacement',
+      richDetail: { blocks: [] },
+      defaultFreightUsdt: '2',
+      merchantConcessionBps: 2500,
+      fulfillmentModes: ['DELIVERY'],
+      categoryId: String(category.categoryId),
+      tagIds: [String(tag.tagId)],
+      skus: [{
+        attributes: { size: 'replacement' },
+        listPriceUsdt: '100',
+        merchantBaseReceivableUsdt: '60',
+        stockTotal: 5,
+        proposedSeckillInventory: 2,
+      }],
+    });
+    assert.notEqual(replacement.productId, productId);
+    assert.equal(replacement.supersedesProductId, productId);
+    assert.equal((await db.query<{ lifecycle_state: string }>(
+      'SELECT lifecycle_state FROM core.products WHERE product_id = $1',
+      [productId],
+    )).rows[0]?.lifecycle_state, 'DELISTED');
+    await assert.rejects(
+      mediaRead.createReadAccess(undefined, imageAssetId),
+      /Media asset is not public/,
+    );
+    assert.equal((await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM core.products
+       WHERE store_id = 'store-catalog-1' AND lifecycle_state NOT IN ('HIDDEN','DELISTED')`,
+    )).rows[0]?.count, '1');
+    await assert.rejects(
+      service.adjustInventory(platform, skuId, {
+        delta: '1',
+        reasonCode: 'INVALID_DELISTED_ADJUSTMENT',
+        idempotencyKey: 'catalog-inventory-delisted-1',
+      }),
+      /Product is locked against catalog writes/,
+    );
+    const replacementSkuId = String((replacement.skus as Array<{ skuId: string }>)[0]!.skuId);
+    await db.query(
+      `INSERT INTO core.seckill_sessions (
+         session_id, policy_version, merchant_id, product_id, sku_id,
+         product_policy_hash, starts_at, main_deadline, relay_deadline,
+         inventory, seckill_list_price_usdt, phase, snapshot
+       ) SELECT $1, 3, merchant_id, product_id, $2, product_policy_hash,
+         $3, $4, $5, 1, 90, 'SETTLED', '{}'
+       FROM core.products WHERE product_id = $6`,
+      [`0x${'7'.repeat(64)}`, replacementSkuId, new Date(now.getTime() - 3_600_000),
+        new Date(now.getTime() - 60_000), new Date(now.getTime() - 60_000), replacement.productId],
+    );
+    await service.delistProduct(platform, String(replacement.productId), {
+      reasonCode: 'EXPLICIT_HISTORY_DELIST',
+      idempotencyKey: 'catalog-explicit-delist-1',
+    });
+    const postDelistReplacement = await service.saveProductSlot(merchant, 'store-catalog-1', {
+      idempotencyKey: 'catalog-post-delist-replacement-1',
+      title: '24K Post Delist Replacement',
+      richDetail: { blocks: [] },
+      defaultFreightUsdt: '2',
+      merchantConcessionBps: 2500,
+      fulfillmentModes: ['DELIVERY'],
+      categoryId: String(category.categoryId),
+      tagIds: [String(tag.tagId)],
+      skus: [{
+        attributes: { size: 'post-delist' },
+        listPriceUsdt: '100',
+        merchantBaseReceivableUsdt: '60',
+        stockTotal: 5,
+        proposedSeckillInventory: 2,
+      }],
+    });
+    assert.equal(postDelistReplacement.supersedesProductId, replacement.productId);
+
+    const lockedCategory = await service.upsertCategory(platform, {
+      name: 'Locked Liability Category',
+      sortOrder: 2,
+      idempotencyKey: 'catalog-category-locked-create-1',
+    });
+    await db.query(
+      `INSERT INTO core.product_category_assignments (
+         product_id, product_version, category_id, assigned_by, assigned_at
+       ) VALUES ('product-1', 1, $1, $2, $3)`,
+      [lockedCategory.categoryId, admin, now],
+    );
+    const lockedIntent = paymentIntent();
+    await reserveInventory(adapter(db), {
+      reservationId: lockedIntent.reservationId,
+      reservationHash: lockedIntent.reservationHash,
+      policyVersion: lockedIntent.policyVersion,
+      skuId: 'sku-1',
+      buyerWallet: lockedIntent.buyer,
+      quantity: lockedIntent.quantity,
+      classification: 'ORDINARY',
+      expiresAt: new Date(lockedIntent.reservationDeadline * 1000),
+    });
+    await insertPaymentQuote(db, lockedIntent, 'catalog-locked-liability-quote-1');
+    await new PostgresPaymentStore(transactionAdapter(db)).record(paymentInput(lockedIntent));
+    await assert.rejects(
+      service.upsertCategory(platform, {
+        categoryId: String(lockedCategory.categoryId),
+        name: 'Locked Liability Category',
+        sortOrder: 2,
+        status: 'DISABLED',
+        idempotencyKey: 'catalog-category-locked-disable-1',
+      }),
+      /contains Locked funds/,
+    );
   } finally {
     await db.close();
   }
@@ -2740,13 +3214,13 @@ test('notifications consume finalized domain events independently and isolate Co
     await db.query(
       `INSERT INTO core.outbox_events (
          event_id, aggregate_type, aggregate_id, event_type, payload,
-         idempotency_key, state, created_at
+         idempotency_key, state, available_at, created_at
        ) VALUES
          ('notify-payment-final', 'ORDER', 'order-notification', 'PaymentFinalized',
-          '{"orderId":"order-notification","confirmations":15}', 'notify-payment-final', 'PENDING', $1),
+          '{"orderId":"order-notification","confirmations":15}', 'notify-payment-final', 'PENDING', $1, $1),
          ('notify-bnm-final', 'ORDER', 'order-notification', 'BnmStateFinalized',
           '{"orderId":"order-notification","state":"AVAILABLE","amount":"100","stateVersion":"2"}',
-          'notify-bnm-final', 'PENDING', $1)`,
+          'notify-bnm-final', 'PENDING', $1, $1)`,
       [now],
     );
     assert.equal(await service.projectNext(), 2);
@@ -2815,11 +3289,11 @@ test('notifications consume finalized domain events independently and isolate Co
     await db.query(
       `INSERT INTO core.outbox_events (
          event_id, aggregate_type, aggregate_id, event_type, payload,
-         idempotency_key, state, created_at
+         idempotency_key, state, available_at, created_at
        ) VALUES ('notify-payment-reorg', 'ORDER', 'order-notification', 'PaymentReorged',
          '{"orderId":"order-notification","state":"REORGED"}',
-         'notify-payment-reorg', 'PENDING', $1)`,
-      [new Date(now.getTime() + 1_000)],
+         'notify-payment-reorg', 'PENDING', $2, $1)`,
+      [new Date(now.getTime() + 1_000), now],
     );
     assert.equal(await service.projectNext(), 1);
     assert.equal((await db.query<{ count: string }>(
@@ -5563,6 +6037,473 @@ test('governed takeover and Operations reimbursement bind secondary approval, fr
   }
 });
 
+test('evidence and media stay scoped, idempotent, hashed and immutable', async () => {
+  const db = await createBusinessDatabase();
+  const now = new Date('2026-07-15T04:00:00.000Z');
+  const contentSha256 = `0x${'7'.repeat(64)}`;
+  const providerReferenceHash = `0x${'8'.repeat(64)}`;
+  const providerEvidenceHash = `0x${'9'.repeat(64)}`;
+  const objectVersionHash = `0x${'c'.repeat(64)}`;
+  const uploadLimits = { maxIntentsPerWalletHour: 20, maxBytesPerWalletHour: 100_000_000n };
+  let createCalls = 0;
+  let verifyCalls = 0;
+  let readCalls = 0;
+  let objectWritten = false;
+  let objectSealed = false;
+  const putObject = async () => {
+    if (objectWritten || objectSealed) throw new Error('WriteOnceObjectAlreadyExists');
+    objectWritten = true;
+  };
+  const storage: MediaStorageAdapter = {
+    createUpload: async (input) => {
+      createCalls += 1;
+      assert.equal(input.contentSha256, contentSha256);
+      return {
+        method: 'PUT',
+        uploadUrl: 'https://uploads.example.invalid/signed-object',
+        headers: { 'if-none-match': '*', 'x-upload-token': 'opaque-test-token' },
+        providerReferenceHash,
+        writeOnce: true,
+      };
+    },
+    finalizeUpload: async (input) => {
+      verifyCalls += 1;
+      assert.equal(input.contentSha256, contentSha256);
+      assert.equal(objectWritten, true);
+      objectSealed = true;
+      return { providerEvidenceHash, objectVersionHash, sealed: true };
+    },
+    createRead: async (input) => {
+      readCalls += 1;
+      return {
+        method: 'GET',
+        readUrl: 'https://media.example.invalid/signed-object',
+        expiresAt: input.expiresAt.toISOString(),
+        providerReferenceHash,
+        assetId: input.assetId,
+        contentSha256: input.contentSha256,
+        objectVersionHash: input.objectVersionHash,
+      };
+    },
+  };
+  try {
+    const intent = await recordFinalPayment(db);
+    const buyer = { walletAddress: BUYER, roles: ['BUYER'] as const };
+    const merchant = { walletAddress: MERCHANT, roles: ['MERCHANT'] as const, merchantId: 'merchant-1' };
+    const evidence = new EvidenceService({
+      transactions: transactionAdapter(db),
+      storage,
+      trackingHashKey: 'ab'.repeat(32),
+      uploadLimits,
+      clock: () => now,
+    });
+
+    const invalidMediaCombinations = [
+      ['PRODUCT_IMAGE', 'PRODUCT', 'video/mp4'],
+      ['PRODUCT_VIDEO', 'PRODUCT', 'image/jpeg'],
+      ['CATEGORY_ICON', 'CATEGORY', 'application/pdf'],
+      ['STORE_IMAGE', 'STORE', 'video/mp4'],
+      ['FULFILLMENT_EVIDENCE', 'ORDER', 'video/mp4'],
+    ] as const;
+    for (const [purpose, resourceType, contentType] of invalidMediaCombinations) {
+      await assert.rejects(
+        evidence.createUploadIntent(buyer, {
+          purpose,
+          resourceType,
+          resourceId: intent.orderId,
+          contentType,
+          sizeBytes: 64,
+          contentSha256,
+          idempotencyKey: `invalid-media-${purpose.toLowerCase()}`,
+        }),
+        /Media content type does not match its purpose/,
+      );
+    }
+    assert.equal(createCalls, 0);
+
+    const upload = await evidence.createUploadIntent(buyer, {
+      purpose: 'FULFILLMENT_EVIDENCE',
+      resourceType: 'ORDER',
+      resourceId: intent.orderId,
+      contentType: 'image/webp',
+      sizeBytes: 512,
+      contentSha256,
+      idempotencyKey: 'evidence-upload-1',
+    });
+    assert.equal(upload.state, 'UPLOADED');
+    assert.equal(upload.writeOnce, true);
+    assert.equal(upload.headers['if-none-match'], '*');
+    assert.equal(upload.providerReferenceHash, providerReferenceHash);
+    assert.equal(createCalls, 1);
+    const storedIntent = await db.query<{
+      state: string;
+      provider_reference_hash: string;
+      object_key: string;
+    }>(
+      `SELECT state, provider_reference_hash, object_key
+       FROM core.media_upload_intents WHERE upload_intent_id = $1`,
+      [upload.uploadIntentId],
+    );
+    assert.equal(storedIntent.rows[0]?.state, 'UPLOADED');
+    assert.equal(storedIntent.rows[0]?.provider_reference_hash, providerReferenceHash);
+    assert.equal(storedIntent.rows[0]?.object_key.includes(intent.orderId), false);
+
+    await putObject();
+    const asset = await evidence.completeUpload(buyer, upload.uploadIntentId);
+    assert.equal(asset.contentSha256, contentSha256);
+    assert.equal(asset.providerEvidenceHash, providerEvidenceHash);
+    assert.equal(asset.objectVersionHash, objectVersionHash);
+    const authenticatedRead = await evidence.createReadAccess(buyer, String(asset.assetId));
+    assert.equal(authenticatedRead.accessScope, 'AUTHENTICATED');
+    assert.equal(authenticatedRead.readUrl, 'https://media.example.invalid/signed-object');
+    assert.equal(readCalls, 1);
+    await assert.rejects(
+      evidence.createReadAccess(
+        { walletAddress: '0x9999999999999999999999999999999999999998', roles: ['BUYER'] },
+        String(asset.assetId),
+      ),
+      /outside the actor scope/,
+    );
+    assert.equal(readCalls, 1);
+    const mismatchedRead = new EvidenceService({
+      transactions: transactionAdapter(db),
+      storage: {
+        ...storage,
+        createRead: async (input) => ({
+          method: 'GET',
+          readUrl: 'https://media.example.invalid/wrong-object',
+          expiresAt: input.expiresAt.toISOString(),
+          providerReferenceHash,
+          assetId: HASH,
+          contentSha256: input.contentSha256,
+          objectVersionHash: input.objectVersionHash,
+        }),
+      },
+      clock: () => now,
+    });
+    await assert.rejects(
+      mismatchedRead.createReadAccess(buyer, String(asset.assetId)),
+      /Media provider returned an invalid read target/,
+    );
+    await assert.rejects(putObject(), /WriteOnceObjectAlreadyExists/);
+    assert.equal(verifyCalls, 1);
+    await assert.rejects(
+      db.query(
+        `INSERT INTO core.media_upload_intents (
+           upload_intent_id, owner_wallet, purpose, resource_type, resource_id,
+           object_key, content_type, size_bytes, content_sha256, idempotency_key,
+           request_hash, state, expires_at, created_at, updated_at
+         ) VALUES ($1,$2,'PRODUCT_IMAGE','PRODUCT','invalid-product-media',
+           'abu24k-v2/product-image/invalid-video','video/mp4',64,$3,
+           'invalid-media-sql-1',$4,'PENDING',$5,$6,$6)`,
+        [`0x${'d'.repeat(64)}`, BUYER, `0x${'e'.repeat(64)}`, `0x${'f'.repeat(64)}`,
+          new Date(now.getTime() + 60_000), now],
+      ),
+      /violates check constraint/,
+    );
+    const constraintIntentId = `0x${'6'.repeat(64)}`;
+    const constraintOwner = '0x9999999999999999999999999999999999999996';
+    await db.query(
+      `INSERT INTO core.media_upload_intents (
+         upload_intent_id, owner_wallet, purpose, resource_type, resource_id,
+         object_key, content_type, size_bytes, content_sha256, idempotency_key,
+         request_hash, state, expires_at, created_at, updated_at
+       ) VALUES ($1,$2,'PRODUCT_VIDEO','PRODUCT','constraint-product-media',
+         'abu24k-v2/product-video/constraint-video','video/mp4',64,$3,
+         'valid-video-sql-1',$4,'PENDING',$5,$6,$6)`,
+      [constraintIntentId, constraintOwner, `0x${'5'.repeat(64)}`, `0x${'4'.repeat(64)}`,
+        new Date(now.getTime() + 60_000), now],
+    );
+    await assert.rejects(
+      db.query(
+        `INSERT INTO core.media_assets (
+           asset_id, upload_intent_id, owner_wallet, purpose, resource_type,
+           resource_id, object_key, content_type, size_bytes, content_sha256,
+           provider_evidence_hash, object_version_hash, created_at
+         ) VALUES ($1,$2,$3,'PRODUCT_VIDEO','PRODUCT','constraint-product-media',
+           'abu24k-v2/product-video/constraint-video','image/jpeg',64,$4,$5,$6,$7)`,
+        [`0x${'3'.repeat(64)}`, constraintIntentId, constraintOwner, `0x${'5'.repeat(64)}`,
+          `0x${'2'.repeat(64)}`, `0x${'1'.repeat(64)}`, now],
+      ),
+      /violates check constraint/,
+    );
+    assert.deepEqual(await evidence.completeUpload(buyer, upload.uploadIntentId), asset);
+    assert.equal(verifyCalls, 1);
+    await assert.rejects(
+      evidence.completeUpload(
+        { walletAddress: '0x9999999999999999999999999999999999999998', roles: ['BUYER'] },
+        upload.uploadIntentId,
+      ),
+      /belongs to another wallet/,
+    );
+    await assert.rejects(
+      evidence.createUploadIntent(buyer, {
+        purpose: 'FULFILLMENT_EVIDENCE',
+        resourceType: 'ORDER',
+        resourceId: intent.orderId,
+        contentType: 'image/webp',
+        sizeBytes: 513,
+        contentSha256,
+        idempotencyKey: 'evidence-upload-1',
+      }),
+      /Upload intent changed/,
+    );
+
+    const action = await evidence.createActionEvidence(buyer, {
+      orderId: intent.orderId,
+      action: 'REQUEST_EXCHANGE',
+      reasonCode: 'DAMAGED_PACKAGE',
+      mediaAssetIds: [String(asset.assetId)],
+      idempotencyKey: 'action-evidence-1',
+    });
+    assert.deepEqual(await evidence.createActionEvidence(buyer, {
+      orderId: intent.orderId,
+      action: 'REQUEST_EXCHANGE',
+      reasonCode: 'DAMAGED_PACKAGE',
+      mediaAssetIds: [String(asset.assetId)],
+      idempotencyKey: 'action-evidence-1',
+    }), action);
+    await evidence.assertActionEvidence(buyer, {
+      orderId: intent.orderId,
+      action: 'REQUEST_EXCHANGE',
+      evidenceHash: action.evidenceHash,
+      reasonCode: 'DAMAGED_PACKAGE',
+    });
+    await assert.rejects(
+      evidence.assertActionEvidence(buyer, {
+        orderId: intent.orderId,
+        action: 'REQUEST_DELAY',
+        evidenceHash: action.evidenceHash,
+      }),
+      /does not match the command/,
+    );
+    await assert.rejects(
+      evidence.assertActionEvidence(buyer, {
+        orderId: intent.orderId,
+        action: 'REQUEST_EXCHANGE',
+        evidenceHash: action.evidenceHash,
+        reasonCode: 'WRONG_ITEM',
+      }),
+      /does not match the command/,
+    );
+    await assert.rejects(
+      evidence.createActionEvidence(buyer, {
+        orderId: intent.orderId,
+        action: 'REQUEST_EXCHANGE',
+        reasonCode: 'WRONG_ITEM',
+        mediaAssetIds: [String(asset.assetId)],
+        idempotencyKey: 'action-evidence-1',
+      }),
+      /Evidence input changed/,
+    );
+    await assert.rejects(
+      evidence.createActionEvidence(merchant, {
+        orderId: intent.orderId,
+        action: 'VERIFY_PICKUP',
+        reasonCode: 'PICKUP_PROOF',
+        mediaAssetIds: [String(asset.assetId)],
+        idempotencyKey: 'merchant-foreign-media-1',
+      }),
+      /Media evidence is unverified or outside the resource/,
+    );
+
+    const tracking = await evidence.createTrackingEvidence(merchant, {
+      orderId: intent.orderId,
+      carrierCode: 'SF',
+      trackingNumber: ' sf-123 456 ',
+      idempotencyKey: 'tracking-evidence-1',
+    });
+    assert.equal(tracking.carrierCode, 'SF');
+    assert.deepEqual(await evidence.createTrackingEvidence(merchant, {
+      orderId: intent.orderId,
+      carrierCode: 'SF',
+      trackingNumber: 'SF123456',
+      idempotencyKey: 'tracking-evidence-1',
+    }), tracking);
+    await evidence.assertTrackingEvidence(merchant, {
+      orderId: intent.orderId,
+      carrierCode: 'SF',
+      trackingNumberHash: String(tracking.trackingNumberHash),
+      evidenceHash: tracking.evidenceHash,
+    });
+    await assert.rejects(
+      evidence.assertTrackingEvidence(merchant, {
+        orderId: intent.orderId,
+        carrierCode: 'SF',
+        trackingNumberHash: HASH,
+        evidenceHash: tracking.evidenceHash,
+      }),
+      /does not match the command/,
+    );
+    await assert.rejects(
+      evidence.createTrackingEvidence(merchant, {
+        orderId: intent.orderId,
+        carrierCode: 'SF',
+        trackingNumber: 'SF999999',
+        idempotencyKey: 'tracking-evidence-1',
+      }),
+      /Evidence input changed/,
+    );
+    const trackingStorage = await db.query<{ payload: string }>(
+      `SELECT payload::text AS payload FROM core.evidence_envelopes
+       WHERE evidence_hash = $1`,
+      [tracking.evidenceHash],
+    );
+    assert.equal(JSON.stringify(trackingStorage.rows).includes('SF123456'), false);
+    assert.equal(JSON.stringify(trackingStorage.rows).includes('sf-123 456'), false);
+    assert.throws(
+      () => evidence.createTrackingEvidence(merchant, {
+        orderId: intent.orderId,
+        carrierCode: 'SF',
+        trackingNumber: 'SF123456',
+        idempotencyKey: 'tracking-SF123456',
+      }),
+      /must not contain a tracking number/,
+    );
+    assert.throws(
+      () => new EvidenceService({ transactions: transactionAdapter(db), storage }).createTrackingEvidence(merchant, {
+        orderId: intent.orderId,
+        carrierCode: 'SF',
+        trackingNumber: 'SF123456',
+        idempotencyKey: 'tracking-no-key-1',
+      }),
+      /Tracking hash key is unavailable/,
+    );
+
+    await assert.rejects(
+      evidence.createActionEvidence(
+        { walletAddress: '0x9999999999999999999999999999999999999998', roles: ['BUYER'] },
+        {
+          orderId: intent.orderId,
+          action: 'REQUEST_DELAY',
+          reasonCode: 'BUYER_REQUEST',
+          idempotencyKey: 'foreign-order-evidence-1',
+        },
+      ),
+      /outside the actor order scope/,
+    );
+    await assert.rejects(
+      evidence.createActionEvidence(
+        {
+          walletAddress: '0x9999999999999999999999999999999999999998',
+          roles: ['BUYER', 'ADMIN'],
+        },
+        {
+          orderId: intent.orderId,
+          action: 'REQUEST_EXCHANGE',
+          reasonCode: 'BUYER_REQUEST',
+          idempotencyKey: 'multi-role-buyer-evidence-1',
+        },
+      ),
+      /outside the actor order scope/,
+    );
+    const platformTracking = await evidence.createTrackingEvidence(
+      {
+        walletAddress: '0x9999999999999999999999999999999999999997',
+        roles: ['MERCHANT', 'ADMIN'],
+        merchantId: 'merchant-other',
+      },
+      {
+        orderId: intent.orderId,
+        carrierCode: 'JD',
+        trackingNumber: 'JD123456',
+        idempotencyKey: 'platform-tracking-evidence-1',
+      },
+    );
+    assert.equal(platformTracking.actorRole, 'ADMIN');
+    await assert.rejects(
+      evidence.createTrackingEvidence(
+        { walletAddress: '0x9999999999999999999999999999999999999997', roles: ['ADMIN'] },
+        {
+          orderId: 'missing-order',
+          carrierCode: 'SF',
+          trackingNumber: 'SF123456',
+          idempotencyKey: 'missing-order-evidence-1',
+        },
+      ),
+      /Order was not found/,
+    );
+    await assert.rejects(
+      db.query('UPDATE core.media_assets SET size_bytes = 513 WHERE asset_id = $1', [asset.assetId]),
+      /ImmutableRecord/,
+    );
+    await assert.rejects(
+      db.query('DELETE FROM core.evidence_envelopes WHERE evidence_hash = $1', [action.evidenceHash]),
+      /ImmutableRecord/,
+    );
+
+    const limited = new EvidenceService({
+      transactions: transactionAdapter(db),
+      storage,
+      uploadLimits: { maxIntentsPerWalletHour: 1, maxBytesPerWalletHour: 1_000_000n },
+      clock: () => now,
+    });
+    await assert.rejects(
+      limited.createUploadIntent(buyer, {
+        purpose: 'FULFILLMENT_EVIDENCE',
+        resourceType: 'ORDER',
+        resourceId: intent.orderId,
+        contentType: 'image/png',
+        sizeBytes: 128,
+        contentSha256: `0x${'d'.repeat(64)}`,
+        idempotencyKey: 'upload-quota-exceeded-1',
+      }),
+      /Media upload quota exceeded/,
+    );
+    assert.equal((await db.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM core.media_upload_intents WHERE owner_wallet = $1',
+      [BUYER],
+    )).rows[0]?.count, '1');
+    assert.equal((await db.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM core.media_upload_wallet_locks WHERE owner_wallet = $1',
+      [BUYER],
+    )).rows[0]?.count, '1');
+
+    const unavailable = new EvidenceService({
+      transactions: transactionAdapter(db),
+      storage: new HttpMediaStorageAdapter({}),
+      uploadLimits,
+      clock: () => now,
+    });
+    await assert.rejects(
+      unavailable.createUploadIntent(buyer, {
+        purpose: 'FULFILLMENT_EVIDENCE',
+        resourceType: 'ORDER',
+        resourceId: intent.orderId,
+        contentType: 'image/png',
+        sizeBytes: 128,
+        contentSha256: `0x${'a'.repeat(64)}`,
+        idempotencyKey: 'provider-unavailable-1',
+      }),
+      /Media storage signer is not configured/,
+    );
+    const pending = await db.query<{ state: string; provider_reference_hash: string | null }>(
+      `SELECT state, provider_reference_hash FROM core.media_upload_intents
+       WHERE idempotency_key = 'provider-unavailable-1'`,
+    );
+    assert.deepEqual(pending.rows[0], { state: 'PENDING', provider_reference_hash: null });
+
+    await assert.rejects(
+      evidence.createUploadIntent(
+        { walletAddress: '0x9999999999999999999999999999999999999997', roles: ['ADMIN'] },
+        {
+          purpose: 'PRODUCT_IMAGE',
+          resourceType: 'PRODUCT',
+          resourceId: 'missing-product',
+          contentType: 'image/jpeg',
+          sizeBytes: 64,
+          contentSha256: `0x${'b'.repeat(64)}`,
+          idempotencyKey: 'missing-product-upload-1',
+        },
+      ),
+      /Product was not found/,
+    );
+    assert.equal(createCalls, 1);
+  } finally {
+    await db.close();
+  }
+});
+
 async function prepareRequestedSettlement(db: PGlite) {
   const merchantWallet = Wallet.createRandom();
   const intent = paymentIntent();
@@ -6108,6 +7049,28 @@ async function seedCatalog(db: PGlite, stock: number, settlementWallet = MERCHAN
        merchant_cost_usdt, stock_total, stock_available, lifecycle_state
      ) VALUES ('sku-1', $1, 'product-1', 1, '{}', 100, 60, $2, $2, 'ACTIVE')`,
     [`0x${'c'.repeat(64)}`, stock],
+  );
+}
+
+async function publishTestPolicy(db: PGlite, policyVersion: number) {
+  const hash = (offset: number) => (
+    `0x${(BigInt(policyVersion) * 10n + BigInt(offset)).toString(16).padStart(64, '0')}`
+  );
+  await db.query(
+    `INSERT INTO core.policy_snapshots (
+       policy_version, artifact_version, policy_hash, oracle_version,
+       rules_content_hash, beneficiary_set_hash, payload, publication_status
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,'PUBLISHED')`,
+    [policyVersion, CORE_ARTIFACT_VERSION, hash(1), hash(2), hash(3), hash(4),
+      JSON.stringify(paymentPolicyPayload())],
+  );
+  await db.query(
+    `INSERT INTO core.policy_publication_transitions (
+       transition_id, policy_version, event_type, safe_tx_hash, execution_tx_hash,
+       block_number, block_hash, confirmations, canonical, evidence_hash, evidence, observed_at
+     ) VALUES ($1,$2,'FINAL',$3,$4,$2,$5,15,true,$6,$7,clock_timestamp())`,
+    [`test:policy-final:${policyVersion}`, policyVersion, hash(5), hash(6), hash(7), hash(8),
+      JSON.stringify({ source: 'catalog-policy-drift-test', policyVersion })],
   );
 }
 

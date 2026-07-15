@@ -1,4 +1,4 @@
-export const CORE_ARTIFACT_VERSION = '2.0.0-settlement-admin.2';
+export const CORE_ARTIFACT_VERSION = '2.0.0-settlement-admin.3';
 export const BSC_CHAIN_ID = 56;
 export const USDT_ADDRESS = '0x55d398326f99059ff775485246999027b3197955';
 export const NPL_ADDRESS = '0x4e8277ab31e4956b2cd48449793a57656dfc03d2';
@@ -127,6 +127,58 @@ export type FulfillmentMethod = (typeof fulfillmentMethods)[number];
 
 export const storeStatuses = ['ACTIVE', 'SUSPENDED', 'CLOSED'] as const;
 export type StoreStatus = (typeof storeStatuses)[number];
+
+export const catalogProductLifecycleStates = [
+  'DRAFT',
+  'REVIEW',
+  'SCHEDULED',
+  'ACTIVE',
+  'SOLD_OUT',
+  'HIDDEN',
+  'DELISTED',
+  'LOCKED',
+] as const;
+export type CatalogProductLifecycleState = (typeof catalogProductLifecycleStates)[number];
+
+export const catalogTaxonomyStatuses = ['ENABLED', 'DISABLED', 'DELETED'] as const;
+export type CatalogTaxonomyStatus = (typeof catalogTaxonomyStatuses)[number];
+
+export const catalogReviewDecisions = ['APPROVE', 'REJECT', 'PUBLISH', 'HIDE', 'DELIST'] as const;
+export type CatalogReviewDecision = (typeof catalogReviewDecisions)[number];
+
+export const catalogProductActions = [
+  'SAVE_DRAFT',
+  'CREATE_CONCESSION_PREVIEW',
+  'SUBMIT_REVIEW',
+  'APPROVE',
+  'REJECT',
+  'PUBLISH',
+  'ADJUST_INVENTORY',
+  'HIDE',
+  'DELIST',
+] as const;
+export type CatalogProductAction = (typeof catalogProductActions)[number];
+
+export const mediaPurposes = [
+  'PRODUCT_IMAGE',
+  'PRODUCT_VIDEO',
+  'CATEGORY_ICON',
+  'STORE_IMAGE',
+  'FULFILLMENT_EVIDENCE',
+] as const;
+export type MediaPurpose = (typeof mediaPurposes)[number];
+
+export const mediaResourceTypes = ['PRODUCT', 'CATEGORY', 'STORE', 'ORDER'] as const;
+export type MediaResourceType = (typeof mediaResourceTypes)[number];
+
+export const mediaContentTypes = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'video/mp4',
+  'application/pdf',
+] as const;
+export type MediaContentType = (typeof mediaContentTypes)[number];
 
 export const fulfillmentRequestTypes = ['EXCHANGE', 'DELAY', 'ARBITRATION', 'FORCED_RECEIPT'] as const;
 export type FulfillmentRequestType = (typeof fulfillmentRequestTypes)[number];

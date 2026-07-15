@@ -79,6 +79,8 @@ interface CatalogRow {
   product_policy_hash: string;
   merchant_concession_bps: number;
   metadata: unknown;
+  main_image_asset_ids: unknown;
+  video_asset_id: string | null;
   product_state: string;
   sku_id: string;
   chain_sku_id: string;
@@ -1006,6 +1008,8 @@ function catalogProjection(rows: CatalogRow[]) {
     chainProductId: string;
     title: string;
     metadata: unknown;
+    mainImageAssetIds: string[];
+    videoAssetId: string | null;
     skus: Array<Record<string, unknown>>;
   }>();
   for (const row of rows) {
@@ -1016,6 +1020,8 @@ function catalogProjection(rows: CatalogRow[]) {
         chainProductId: row.chain_product_id,
         title: row.title,
         metadata: row.metadata,
+        mainImageAssetIds: mediaAssetIds(row.main_image_asset_ids),
+        videoAssetId: row.video_asset_id,
         skus: [],
       };
       products.set(row.product_id, product);
@@ -1031,10 +1037,16 @@ function catalogProjection(rows: CatalogRow[]) {
   return [...products.values()];
 }
 
+function mediaAssetIds(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string');
+}
+
 function catalogSelect() {
   return `SELECT product.product_id, product.chain_product_id, product.merchant_id,
     product.title, product.product_policy_hash, product.merchant_concession_bps,
-    product.metadata, product.lifecycle_state AS product_state, sku.sku_id,
+    product.metadata, product.main_image_asset_ids, product.video_asset_id,
+    product.lifecycle_state AS product_state, sku.sku_id,
     sku.chain_sku_id, sku.attributes, sku.list_price_usdt::text,
     sku.merchant_cost_usdt::text, sku.stock_available, sku.lifecycle_state AS sku_state,
     merchant.settlement_wallet, merchant.status AS merchant_status,

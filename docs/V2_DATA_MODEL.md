@@ -1,7 +1,7 @@
 # Abu 24K V2 Data Model
 
 Status: coordinated local settlement/admin checkpoint
-`2.0.0-settlement-admin.2`. This document describes implemented payment,
+`2.0.0-settlement-admin.3`. This document describes implemented catalog, media, payment,
 fulfillment, settlement and administrative storage and does not authorize
 deployment.
 
@@ -20,6 +20,23 @@ order snapshots are never recalculated from current configuration.
 
 - `core.products` and `core.skus` own the off-chain IDs, immutable chain IDs,
   USDT list price, merchant cost, concession rate and inventory.
+- New products bind one active `core.merchant_stores` slot. The partial unique
+  index permits at most one non-hidden/non-delisted product per store. Product
+  states are Draft, Review, Scheduled, Active, SoldOut, Hidden, Delisted and
+  Locked; active seckill sessions, reservations and positive Locked/Disputed
+  liabilities block merchant writes.
+- `core.catalog_categories`/`core.catalog_tags` identify records while their
+  version tables are append-only. Product category/tag assignments bind the
+  product version. A category or tag containing any seckill product or positive
+  Locked/Disputed order liability cannot be disabled or deleted.
+- `core.product_review_events`, `core.catalog_inventory_adjustments` and
+  `core.catalog_commands` retain every state decision, stock delta and
+  idempotency identity. Historical products and SKUs are delisted and linked by
+  `supersedes_product_id`; they are never physically deleted.
+- `core.merchant_concession_previews` stores an immutable five-minute signed
+  preview bound to policy version, product/SKU fingerprint, integer amounts,
+  configured destination set, digest and signer. Review submission rejects an
+  expired preview or any product/policy drift.
 - `core.inventory_reservations` binds buyer, SKU, quantity, policy, hash,
   classification and expiry. PostgreSQL functions reserve, consume, release and
   restore inventory atomically.
@@ -103,6 +120,15 @@ overwrite a later reorg `LOCKED` state.
   replay-safe and rejects changed input.
 - `core.fulfillment_evidence`, `core.shipments` and `core.logistics_events` are
   immutable. Provider event identity is unique and callback order is preserved.
+- `core.media_upload_intents` requires a signed write-once `PUT` and per-wallet
+  rolling quota. Only a provider-sealed object version becomes an immutable
+  `core.media_assets` row. Product images/video, category icons, store images
+  and order evidence have purpose/resource and MIME bindings. Public catalog
+  media is readable only while referenced by an active product or enabled
+  category; other assets require an authorized short-lived signed GET. Object
+  keys are never exposed to product clients. `core.evidence_envelopes`
+  binds the exact order action or normalized tracking hash; raw tracking
+  numbers are never persisted.
 - `core.pickup_credentials` stores salted hashes, binds the credential to the
   pickup store snapshotted by the order and allows one successful use before
   expiry. `core.pickup_verification_attempts` stores no plaintext code, keeps

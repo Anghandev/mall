@@ -359,6 +359,32 @@ function allocateWeighted(amount: bigint, destinations: readonly WeightedDestina
   });
 }
 
+export function buildMerchantConcessionPreview(
+  merchantBaseReceivableUsdt: bigint,
+  merchantConcessionBps: number,
+  destinations: readonly WeightedDestination[],
+) {
+  if (merchantBaseReceivableUsdt < 0n) {
+    throw new CoreError('InvalidRequest', 'Merchant base receivable cannot be negative');
+  }
+  if (
+    !Number.isInteger(merchantConcessionBps)
+    || merchantConcessionBps < 0
+    || merchantConcessionBps > 10_000
+  ) throw new CoreError('InvalidRequest', 'Merchant concession must be between 0% and 100%');
+  const concessionAmount = mulBps(merchantBaseReceivableUsdt, merchantConcessionBps);
+  return Object.freeze({
+    merchantBaseReceivableUsdt: merchantBaseReceivableUsdt.toString(),
+    merchantConcessionBps,
+    merchantConcessionAmount: concessionAmount.toString(),
+    merchantNetReceivableUsdt: (merchantBaseReceivableUsdt - concessionAmount).toString(),
+    allocations: Object.freeze(allocateWeighted(concessionAmount, destinations).map((allocation) => Object.freeze({
+      account: allocation.account,
+      amount: allocation.amount.toString(),
+    }))),
+  });
+}
+
 function validateDestinations(destinations: readonly WeightedDestination[]) {
   if (destinations.length === 0) throw new CoreError('DecisionBlocked', 'Concession destinations are not configured', 409);
   let total = 0;

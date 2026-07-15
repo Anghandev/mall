@@ -23,8 +23,8 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('settlement/admin correction checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-settlement-admin.2');
+test('settlement/admin catalog checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-settlement-admin.3');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
@@ -54,7 +54,7 @@ test('settlement/admin correction checkpoint has one identity, resolvable export
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 9);
+  assert.equal(schemaManifest.schemas.core.migrations.length, 11);
   assert.equal(schemaManifest.schemas.audit.migrations.length, 3);
   for (const migration of [
     ...schemaManifest.schemas.core.migrations,
@@ -75,6 +75,10 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     .sort();
   assert.deepEqual(operations, [
     'GET /v2/admin/audit/entries',
+    'GET /v2/admin/catalog/categories',
+    'GET /v2/admin/catalog/products',
+    'GET /v2/admin/catalog/stores/{storeId}/product-slot',
+    'GET /v2/admin/catalog/tags',
     'GET /v2/admin/cms/versions/{versionId}',
     'GET /v2/admin/monitoring',
     'GET /v2/admin/policy-drafts',
@@ -82,10 +86,14 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'GET /v2/admin/system-config/versions',
     'GET /v2/admin/takeover-funding/{caseId}',
     'GET /v2/bootstrap',
+    'GET /v2/catalog/categories',
     'GET /v2/catalog/products',
     'GET /v2/catalog/products/{productId}',
+    'GET /v2/catalog/tags',
     'GET /v2/cms/public',
     'GET /v2/finance/merchant',
+    'GET /v2/media/assets/{assetId}/access',
+    'GET /v2/merchant/stores/{storeId}/product-slot',
     'GET /v2/notifications',
     'GET /v2/orders',
     'GET /v2/orders/{orderId}',
@@ -98,6 +106,13 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'GET /v2/settlements',
     'GET /v2/stores',
     'POST /v2/actions/order',
+    'POST /v2/admin/catalog/categories',
+    'POST /v2/admin/catalog/products/{productId}/concession-previews',
+    'POST /v2/admin/catalog/products/{productId}/delist',
+    'POST /v2/admin/catalog/products/{productId}/review-decisions',
+    'POST /v2/admin/catalog/products/{productId}/review-submissions',
+    'POST /v2/admin/catalog/skus/{skuId}/inventory-adjustments',
+    'POST /v2/admin/catalog/tags',
     'POST /v2/admin/cms/versions',
     'POST /v2/admin/cms/versions/{versionId}/publish',
     'POST /v2/admin/cms/versions/{versionId}/rollback',
@@ -118,11 +133,17 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'POST /v2/finance/merchant/guarantee-deposits',
     'POST /v2/fulfillment-targets/delivery',
     'POST /v2/fulfillment-targets/pickup',
+    'POST /v2/media/upload-intents',
+    'POST /v2/media/upload-intents/{uploadIntentId}/complete',
+    'POST /v2/merchant/products/{productId}/concession-previews',
+    'POST /v2/merchant/products/{productId}/delist',
+    'POST /v2/merchant/products/{productId}/review-submissions',
     'POST /v2/notification-endpoints',
     'POST /v2/orders/{orderId}/arbitration-decisions',
     'POST /v2/orders/{orderId}/arbitrations',
     'POST /v2/orders/{orderId}/delay-requests',
     'POST /v2/orders/{orderId}/delivery',
+    'POST /v2/orders/{orderId}/evidence',
     'POST /v2/orders/{orderId}/exchange-requests',
     'POST /v2/orders/{orderId}/forced-receipt-decisions',
     'POST /v2/orders/{orderId}/forced-receipt-requests',
@@ -132,6 +153,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'POST /v2/orders/{orderId}/request-decisions',
     'POST /v2/orders/{orderId}/shipments',
     'POST /v2/orders/{orderId}/takeover',
+    'POST /v2/orders/{orderId}/tracking-evidence',
     'POST /v2/payments/quotes',
     'POST /v2/payments/submissions',
     'POST /v2/providers/cainiao/webhooks/logistics',
@@ -140,15 +162,22 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'POST /v2/settlement-intents',
     'POST /v2/settlement-requests',
     'POST /v2/stores',
+    'PUT /v2/admin/catalog/categories/{categoryId}',
+    'PUT /v2/admin/catalog/stores/{storeId}/product-slot',
+    'PUT /v2/admin/catalog/tags/{tagId}',
     'PUT /v2/admin/policy-drafts/{draftId}',
+    'PUT /v2/merchant/stores/{storeId}/product-slot',
   ]);
   assert.deepEqual([...manifest.httpSurface].sort(), operations);
   const bearerOperations = operations.filter((operation: string) =>
     ![
       'GET /v2/bootstrap',
+      'GET /v2/catalog/categories',
       'GET /v2/catalog/products',
       'GET /v2/catalog/products/{productId}',
+      'GET /v2/catalog/tags',
       'GET /v2/cms/public',
+      'GET /v2/media/assets/{assetId}/access',
       'GET /v2/seckill/sessions/current',
       'GET /v2/seckill/sessions/history',
       'GET /v2/seckill/sessions/{sessionId}',
@@ -163,6 +192,10 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     const [method, path] = operation.split(' ');
     assert.deepEqual(openapi.paths[path!][method!.toLowerCase()].security, [{ bearerAuth: [] }], operation);
   }
+  assert.deepEqual(
+    openapi.paths['/v2/media/assets/{assetId}/access'].get.security,
+    [{ bearerAuth: [] }, {}],
+  );
   for (const path of [
     '/v2/providers/cainiao/webhooks/logistics',
     '/v2/providers/kuaidi100/webhooks/logistics',
@@ -179,6 +212,15 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
   ]);
   assert.ok(openapi.components.schemas.ProductPolicy.required.includes('seckillPrizeBps'));
   assert.ok(openapi.components.schemas.ProductPolicy.required.includes('seckillPrizePoolAccount'));
+  assert.deepEqual(openapi.components.schemas.MediaUploadIntentRequest.properties.purpose.enum, [
+    'PRODUCT_IMAGE',
+    'PRODUCT_VIDEO',
+    'CATEGORY_ICON',
+    'STORE_IMAGE',
+    'FULFILLMENT_EVIDENCE',
+  ]);
+  assert.equal(openapi.components.schemas.ManagedCatalogProduct.properties.title.maxLength, 60);
+  assert.equal(openapi.components.schemas.ProductSlotInput.properties.mainImageAssetIds.maxItems, 5);
   for (const contract of manifest.requiredConsumerContracts as string[]) {
     assert.ok(openapi.components.schemas[contract], `OpenAPI ${contract}`);
     assert.match(declarations, new RegExp(`export (?:interface|type) ${contract}\\b`), contract);
@@ -557,7 +599,7 @@ test('publication contains no Claim, BNM token payout, old escrow or old allocat
   assert.equal([...settlementRails].includes('BNM' as never), false);
 });
 
-test('settlement/admin and seckill realtime capabilities are published while deployment stays fail closed', () => {
+test('catalog, settlement/admin and seckill realtime capabilities are published while deployment stays fail closed', () => {
   assert.equal(websocket.endpoint, '/v2/ws');
   assert.equal(websocket.channels.length, 1);
   assert.equal(websocket.channels[0].pattern, 'seckill:{sessionId}');
@@ -568,6 +610,9 @@ test('settlement/admin and seckill realtime capabilities are published while dep
     'siweAuthentication',
     'orderAllowedActions',
     'catalogHttp',
+    'catalogManagementHttp',
+    'signedConcessionPreview',
+    'immutableMediaEvidence',
     'paymentQuoteHttp',
     'inventoryReservation',
     'paymentSubmissionHttp',

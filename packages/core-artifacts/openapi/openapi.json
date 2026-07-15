@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Abu 24K V2 Core API",
-    "version": "2.0.0-settlement-admin.2"
+    "version": "2.0.0-settlement-admin.3"
   },
-  "x-artifactVersion": "2.0.0-settlement-admin.2",
+  "x-artifactVersion": "2.0.0-settlement-admin.3",
   "servers": [],
   "paths": {
     "/v2/settlement-intents": {
@@ -2147,6 +2147,1638 @@
         }
       }
     },
+    "/v2/catalog/categories": {
+      "get": {
+        "operationId": "listCatalogCategories",
+        "responses": {
+          "200": {
+            "description": "Enabled three-level categories",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "categories"
+                  ],
+                  "properties": {
+                    "categories": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CatalogCategory"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/catalog/tags": {
+      "get": {
+        "operationId": "listCatalogTags",
+        "responses": {
+          "200": {
+            "description": "Enabled catalog tags",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "tags"
+                  ],
+                  "properties": {
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CatalogTag"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/media/upload-intents": {
+      "post": {
+        "operationId": "createMediaUploadIntent",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MediaUploadIntentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative catalog result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaUploadIntentProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/media/upload-intents/{uploadIntentId}/complete": {
+      "post": {
+        "operationId": "completeMediaUpload",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "uploadIntentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative catalog result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaAssetProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/media/assets/{assetId}/access": {
+      "get": {
+        "operationId": "createMediaReadAccess",
+        "parameters": [
+          {
+            "name": "assetId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Short-lived authorized media read target",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaReadAccessProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/orders/{orderId}/evidence": {
+      "post": {
+        "operationId": "createOrderActionEvidence",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderActionEvidenceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative catalog result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceEnvelopeProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/orders/{orderId}/tracking-evidence": {
+      "post": {
+        "operationId": "createOrderTrackingEvidence",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrackingEvidenceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative catalog result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceEnvelopeProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/merchant/stores/{storeId}/product-slot": {
+      "get": {
+        "operationId": "getMerchantProductSlot",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "storeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Merchant-bound unique product slot",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductSlotProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "saveMerchantProductSlot",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "storeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductSlotInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative catalog result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedCatalogProduct"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/merchant/products/{productId}/concession-previews": {
+      "post": {
+        "operationId": "createMerchantConcessionPreview",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConcessionPreviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative catalog result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantConcessionPreview"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/merchant/products/{productId}/review-submissions": {
+      "post": {
+        "operationId": "submitMerchantProductReview",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductReviewSubmissionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative catalog result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedCatalogProduct"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/merchant/products/{productId}/delist": {
+      "post": {
+        "operationId": "delistMerchantProduct",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogReasonRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative catalog result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedCatalogProduct"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/catalog/categories": {
+      "get": {
+        "operationId": "listAdminCatalogCategories",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "All versioned categories",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "categories"
+                  ],
+                  "properties": {
+                    "categories": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CatalogCategory"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createCatalogCategory",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogCategoryInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative catalog result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogCategory"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/catalog/categories/{categoryId}": {
+      "put": {
+        "operationId": "updateCatalogCategory",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "categoryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogCategoryInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative catalog result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogCategory"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/catalog/tags": {
+      "get": {
+        "operationId": "listAdminCatalogTags",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "All versioned tags",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "tags"
+                  ],
+                  "properties": {
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CatalogTag"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createCatalogTag",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogTagInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative catalog result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogTag"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/catalog/tags/{tagId}": {
+      "put": {
+        "operationId": "updateCatalogTag",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tagId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogTagInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative catalog result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogTag"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/catalog/products": {
+      "get": {
+        "operationId": "listAdminCatalogProducts",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "All managed catalog products",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "products"
+                  ],
+                  "properties": {
+                    "products": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ManagedCatalogProduct"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/catalog/stores/{storeId}/product-slot": {
+      "get": {
+        "operationId": "getAdminProductSlot",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "storeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "merchantId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Admin product slot projection",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductSlotProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "saveAdminProductSlot",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "storeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminProductSlotInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative catalog result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedCatalogProduct"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/catalog/products/{productId}/concession-previews": {
+      "post": {
+        "operationId": "createAdminConcessionPreview",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConcessionPreviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative catalog result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantConcessionPreview"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/catalog/products/{productId}/review-decisions": {
+      "post": {
+        "operationId": "decideCatalogProductReview",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductReviewDecisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative catalog result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedCatalogProduct"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/catalog/products/{productId}/review-submissions": {
+      "post": {
+        "operationId": "submitAdminProductReview",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductReviewSubmissionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative catalog result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedCatalogProduct"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/catalog/products/{productId}/delist": {
+      "post": {
+        "operationId": "delistAdminProduct",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogReasonRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative catalog result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedCatalogProduct"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/catalog/skus/{skuId}/inventory-adjustments": {
+      "post": {
+        "operationId": "adjustCatalogInventory",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "skuId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventoryAdjustmentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative catalog result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryAdjustmentProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v2/bootstrap": {
       "get": {
         "operationId": "getBootstrap",
@@ -4116,6 +5748,7 @@
           "NonceReplay",
           "PickupTakeoverDecisionBlocked",
           "ProviderSignatureInvalid",
+          "ProductWriteLocked",
           "QuoteExpired",
           "ReorgPending",
           "ReservationConflict",
@@ -4275,7 +5908,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.2"
+            "const": "2.0.0-settlement-admin.3"
           },
           "status": {
             "const": "CORE_API_READY"
@@ -6013,6 +7646,8 @@
           "chainProductId",
           "title",
           "metadata",
+          "mainImageAssetIds",
+          "videoAssetId",
           "skus"
         ],
         "properties": {
@@ -6029,6 +7664,23 @@
           },
           "metadata": {
             "type": "object"
+          },
+          "mainImageAssetIds": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          },
+          "videoAssetId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "skus": {
             "type": "array",
@@ -6874,7 +8526,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.2"
+            "const": "2.0.0-settlement-admin.3"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -6973,7 +8625,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.2"
+            "const": "2.0.0-settlement-admin.3"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -7352,6 +9004,1648 @@
           }
         }
       },
+      "EmptyRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "CatalogCategoryInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "sortOrder",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "parentCategoryId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "iconAssetId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "sortOrder": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "serviceFeeBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "status": {
+            "enum": [
+              "ENABLED",
+              "DISABLED",
+              "DELETED"
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "CatalogCategory": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "categoryId",
+          "version",
+          "parentCategoryId",
+          "level",
+          "name",
+          "iconAssetId",
+          "sortOrder",
+          "status",
+          "serviceFee"
+        ],
+        "properties": {
+          "categoryId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "version": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "parentCategoryId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "level": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "iconAssetId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sortOrder": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "status": {
+            "enum": [
+              "ENABLED",
+              "DISABLED",
+              "DELETED"
+            ]
+          },
+          "serviceFee": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "state",
+              "valueBps"
+            ],
+            "properties": {
+              "state": {
+                "enum": [
+                  "Frozen",
+                  "DecisionBlocked"
+                ]
+              },
+              "valueBps": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 10000
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "CatalogTagInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "sortOrder",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "example": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "sortOrder": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "status": {
+            "enum": [
+              "ENABLED",
+              "DISABLED",
+              "DELETED"
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "CatalogTag": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tagId",
+          "version",
+          "name",
+          "example",
+          "sortOrder",
+          "status"
+        ],
+        "properties": {
+          "tagId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "version": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "example": {
+            "type": "string",
+            "maxLength": 240
+          },
+          "sortOrder": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "status": {
+            "enum": [
+              "ENABLED",
+              "DISABLED",
+              "DELETED"
+            ]
+          }
+        }
+      },
+      "ProductSkuInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "attributes",
+          "listPriceUsdt",
+          "merchantBaseReceivableUsdt",
+          "stockTotal",
+          "proposedSeckillInventory"
+        ],
+        "properties": {
+          "skuId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "attributes": {
+            "type": "object"
+          },
+          "listPriceUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "merchantBaseReceivableUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "stockTotal": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "proposedSeckillInventory": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "ProductSlotInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "title",
+          "richDetail",
+          "defaultFreightUsdt",
+          "merchantConcessionBps",
+          "fulfillmentModes",
+          "skus"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "subtitle": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "mainImageAssetIds": {
+            "type": "array",
+            "maxItems": 5,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          },
+          "videoAssetId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "richDetail": {
+            "type": "object"
+          },
+          "defaultFreightUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "merchantConcessionBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "fulfillmentModes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "DELIVERY",
+                "PICKUP"
+              ]
+            }
+          },
+          "categoryId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "tagIds": {
+            "type": "array",
+            "maxItems": 20,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "skus": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/ProductSkuInput"
+            }
+          }
+        }
+      },
+      "AdminProductSlotInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "merchantId",
+          "idempotencyKey",
+          "title",
+          "richDetail",
+          "defaultFreightUsdt",
+          "merchantConcessionBps",
+          "fulfillmentModes",
+          "skus"
+        ],
+        "properties": {
+          "merchantId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "subtitle": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "mainImageAssetIds": {
+            "type": "array",
+            "maxItems": 5,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          },
+          "videoAssetId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "richDetail": {
+            "type": "object"
+          },
+          "defaultFreightUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "merchantConcessionBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "fulfillmentModes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "DELIVERY",
+                "PICKUP"
+              ]
+            }
+          },
+          "categoryId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "tagIds": {
+            "type": "array",
+            "maxItems": 20,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "skus": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/ProductSkuInput"
+            }
+          }
+        }
+      },
+      "CatalogWriteLock": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "id",
+          "state"
+        ],
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "state": {
+            "type": "string"
+          }
+        }
+      },
+      "ManagedCatalogSku": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "skuId",
+          "chainSkuId",
+          "version",
+          "attributes",
+          "listPriceUsdt",
+          "merchantBaseReceivableUsdt",
+          "stockTotal",
+          "stockAvailable",
+          "stockReserved",
+          "proposedSeckillInventory",
+          "lifecycleState"
+        ],
+        "properties": {
+          "skuId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "chainSkuId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "version": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "attributes": {
+            "type": "object"
+          },
+          "listPriceUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "merchantBaseReceivableUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "stockTotal": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "stockAvailable": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "stockReserved": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "proposedSeckillInventory": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "lifecycleState": {
+            "enum": [
+              "DRAFT",
+              "REVIEW",
+              "SCHEDULED",
+              "ACTIVE",
+              "SOLD_OUT",
+              "HIDDEN",
+              "DELISTED",
+              "LOCKED"
+            ]
+          }
+        }
+      },
+      "ManagedCatalogProduct": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "productId",
+          "chainProductId",
+          "merchantId",
+          "storeId",
+          "supersedesProductId",
+          "version",
+          "title",
+          "subtitle",
+          "lifecycleState",
+          "productPolicyHash",
+          "merchantConcessionBps",
+          "mainImageAssetIds",
+          "videoAssetId",
+          "richDetail",
+          "defaultFreightUsdt",
+          "fulfillmentModes",
+          "categoryId",
+          "tagIds",
+          "skus",
+          "allowedActions",
+          "writeLock",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.3"
+          },
+          "productId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "chainProductId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "merchantId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "storeId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "supersedesProductId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "subtitle": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "lifecycleState": {
+            "enum": [
+              "DRAFT",
+              "REVIEW",
+              "SCHEDULED",
+              "ACTIVE",
+              "SOLD_OUT",
+              "HIDDEN",
+              "DELISTED",
+              "LOCKED"
+            ]
+          },
+          "productPolicyHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "merchantConcessionBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "mainImageAssetIds": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          },
+          "videoAssetId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "richDetail": {
+            "type": "object"
+          },
+          "defaultFreightUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "fulfillmentModes": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "DELIVERY",
+                "PICKUP"
+              ]
+            }
+          },
+          "categoryId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tagIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "skus": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/ManagedCatalogSku"
+            }
+          },
+          "allowedActions": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "SAVE_DRAFT",
+                "CREATE_CONCESSION_PREVIEW",
+                "SUBMIT_REVIEW",
+                "APPROVE",
+                "REJECT",
+                "PUBLISH",
+                "ADJUST_INVENTORY",
+                "HIDE",
+                "DELIST"
+              ]
+            }
+          },
+          "writeLock": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogWriteLock"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ProductSlotProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "storeId",
+          "merchantId",
+          "product",
+          "allowedActions",
+          "writeLock"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.3"
+          },
+          "storeId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "merchantId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "product": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ManagedCatalogProduct"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "allowedActions": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "SAVE_DRAFT",
+                "CREATE_CONCESSION_PREVIEW",
+                "SUBMIT_REVIEW",
+                "APPROVE",
+                "REJECT",
+                "PUBLISH",
+                "ADJUST_INVENTORY",
+                "HIDE",
+                "DELIST"
+              ]
+            }
+          },
+          "writeLock": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogWriteLock"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ConcessionPreviewRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "merchantConcessionBps",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "merchantConcessionBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "MerchantConcessionPreviewItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "skuId",
+          "merchantBaseReceivableUsdt",
+          "merchantConcessionBps",
+          "merchantConcessionAmount",
+          "merchantNetReceivableUsdt",
+          "allocations"
+        ],
+        "properties": {
+          "skuId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "merchantBaseReceivableUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "merchantConcessionBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "merchantConcessionAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "merchantNetReceivableUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "allocations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantConcessionAllocation"
+            }
+          }
+        }
+      },
+      "MerchantConcessionPreviewPayload": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "productId",
+          "productVersion",
+          "merchantId",
+          "policyVersion",
+          "merchantConcessionBps",
+          "destinationSetHash",
+          "catalogFingerprint",
+          "items",
+          "expiresAt"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.3"
+          },
+          "productId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "productVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "merchantId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "policyVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "merchantConcessionBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "destinationSetHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "catalogFingerprint": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/MerchantConcessionPreviewItem"
+            }
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CatalogSignedAuthorization": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "domain",
+          "types",
+          "primaryType",
+          "message",
+          "digest",
+          "signature",
+          "signer"
+        ],
+        "properties": {
+          "domain": {
+            "type": "object"
+          },
+          "types": {
+            "type": "object"
+          },
+          "primaryType": {
+            "const": "MerchantConcessionPreview"
+          },
+          "message": {
+            "type": "object"
+          },
+          "digest": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]+$"
+          },
+          "signer": {
+            "$ref": "#/components/schemas/Address"
+          }
+        }
+      },
+      "MerchantConcessionPreview": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "previewId",
+          "productId",
+          "productVersion",
+          "merchantId",
+          "policyVersion",
+          "merchantConcessionBps",
+          "catalogFingerprint",
+          "destinationSetHash",
+          "previewHash",
+          "payload",
+          "authorization",
+          "expiresAt",
+          "createdAt"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.3"
+          },
+          "previewId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "productId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "productVersion": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "merchantId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "policyVersion": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "merchantConcessionBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "catalogFingerprint": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "destinationSetHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "previewHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/MerchantConcessionPreviewPayload"
+          },
+          "authorization": {
+            "$ref": "#/components/schemas/CatalogSignedAuthorization"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ProductReviewSubmissionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "previewId",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "previewId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "ProductReviewDecisionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "decision",
+          "reasonCode",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "decision": {
+            "enum": [
+              "APPROVE",
+              "REJECT",
+              "PUBLISH",
+              "HIDE",
+              "DELIST"
+            ]
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "CatalogReasonRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reasonCode",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "InventoryAdjustmentRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "delta",
+          "reasonCode",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "delta": {
+            "type": "string",
+            "pattern": "^-?[1-9][0-9]*$"
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "InventoryAdjustmentProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "adjustmentId",
+          "skuId",
+          "beforeTotal",
+          "beforeAvailable",
+          "delta",
+          "afterTotal",
+          "afterAvailable",
+          "reasonCode",
+          "actorWallet",
+          "createdAt"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.3"
+          },
+          "adjustmentId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "skuId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "beforeTotal": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "beforeAvailable": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "delta": {
+            "type": "string",
+            "pattern": "^-?[1-9][0-9]*$"
+          },
+          "afterTotal": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "afterAvailable": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "reasonCode": {
+            "type": "string"
+          },
+          "actorWallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MediaUploadIntentRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "purpose",
+          "resourceType",
+          "resourceId",
+          "contentType",
+          "sizeBytes",
+          "contentSha256",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "purpose": {
+            "enum": [
+              "PRODUCT_IMAGE",
+              "PRODUCT_VIDEO",
+              "CATEGORY_ICON",
+              "STORE_IMAGE",
+              "FULFILLMENT_EVIDENCE"
+            ]
+          },
+          "resourceType": {
+            "enum": [
+              "PRODUCT",
+              "CATEGORY",
+              "STORE",
+              "ORDER"
+            ]
+          },
+          "resourceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "contentType": {
+            "enum": [
+              "image/jpeg",
+              "image/png",
+              "image/webp",
+              "video/mp4",
+              "application/pdf"
+            ]
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10485760
+          },
+          "contentSha256": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "MediaUploadIntentProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "uploadIntentId",
+          "ownerWallet",
+          "purpose",
+          "resourceType",
+          "resourceId",
+          "contentType",
+          "sizeBytes",
+          "contentSha256",
+          "state",
+          "expiresAt",
+          "method",
+          "uploadUrl",
+          "headers",
+          "providerReferenceHash",
+          "writeOnce"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.3"
+          },
+          "uploadIntentId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "ownerWallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "purpose": {
+            "enum": [
+              "PRODUCT_IMAGE",
+              "PRODUCT_VIDEO",
+              "CATEGORY_ICON",
+              "STORE_IMAGE",
+              "FULFILLMENT_EVIDENCE"
+            ]
+          },
+          "resourceType": {
+            "enum": [
+              "PRODUCT",
+              "CATEGORY",
+              "STORE",
+              "ORDER"
+            ]
+          },
+          "resourceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "contentType": {
+            "enum": [
+              "image/jpeg",
+              "image/png",
+              "image/webp",
+              "video/mp4",
+              "application/pdf"
+            ]
+          },
+          "sizeBytes": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "contentSha256": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "state": {
+            "const": "UPLOADED"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "method": {
+            "const": "PUT"
+          },
+          "uploadUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "providerReferenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "writeOnce": {
+            "const": true
+          }
+        }
+      },
+      "MediaAssetProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "assetId",
+          "uploadIntentId",
+          "ownerWallet",
+          "purpose",
+          "resourceType",
+          "resourceId",
+          "contentType",
+          "sizeBytes",
+          "contentSha256",
+          "providerEvidenceHash",
+          "objectVersionHash",
+          "createdAt"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.3"
+          },
+          "assetId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "uploadIntentId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "ownerWallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "purpose": {
+            "enum": [
+              "PRODUCT_IMAGE",
+              "PRODUCT_VIDEO",
+              "CATEGORY_ICON",
+              "STORE_IMAGE",
+              "FULFILLMENT_EVIDENCE"
+            ]
+          },
+          "resourceType": {
+            "enum": [
+              "PRODUCT",
+              "CATEGORY",
+              "STORE",
+              "ORDER"
+            ]
+          },
+          "resourceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "contentType": {
+            "enum": [
+              "image/jpeg",
+              "image/png",
+              "image/webp",
+              "video/mp4",
+              "application/pdf"
+            ]
+          },
+          "sizeBytes": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "contentSha256": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "providerEvidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "objectVersionHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MediaReadAccessProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "assetId",
+          "purpose",
+          "resourceType",
+          "resourceId",
+          "contentType",
+          "sizeBytes",
+          "contentSha256",
+          "objectVersionHash",
+          "accessScope",
+          "method",
+          "readUrl",
+          "expiresAt",
+          "providerReferenceHash"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.3"
+          },
+          "assetId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "purpose": {
+            "enum": [
+              "PRODUCT_IMAGE",
+              "PRODUCT_VIDEO",
+              "CATEGORY_ICON",
+              "STORE_IMAGE",
+              "FULFILLMENT_EVIDENCE"
+            ]
+          },
+          "resourceType": {
+            "enum": [
+              "PRODUCT",
+              "CATEGORY",
+              "STORE",
+              "ORDER"
+            ]
+          },
+          "resourceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "contentType": {
+            "enum": [
+              "image/jpeg",
+              "image/png",
+              "image/webp",
+              "video/mp4",
+              "application/pdf"
+            ]
+          },
+          "sizeBytes": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "contentSha256": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "objectVersionHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "accessScope": {
+            "enum": [
+              "PUBLIC",
+              "AUTHENTICATED"
+            ]
+          },
+          "method": {
+            "const": "GET"
+          },
+          "readUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "providerReferenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "OrderActionEvidenceRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "reasonCode",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "action": {
+            "enum": [
+              "REQUEST_EXCHANGE",
+              "REQUEST_DELAY",
+              "CONFIRM_RECEIPT",
+              "OPEN_ARBITRATION",
+              "VERIFY_PICKUP",
+              "REQUEST_FORCED_RECEIPT"
+            ]
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "mediaAssetIds": {
+            "type": "array",
+            "maxItems": 8,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "TrackingEvidenceRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "carrierCode",
+          "trackingNumber",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "carrierCode": {
+            "enum": [
+              "SF",
+              "JD",
+              "YTO",
+              "ZTO",
+              "STO",
+              "EMS"
+            ]
+          },
+          "trackingNumber": {
+            "type": "string",
+            "minLength": 6,
+            "maxLength": 64
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "EvidenceEnvelopeProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "evidenceHash",
+          "ownerWallet",
+          "actorRole",
+          "purpose",
+          "resourceType",
+          "resourceId",
+          "action",
+          "reasonCode",
+          "trackingNumberHash",
+          "mediaAssetIds",
+          "payload",
+          "createdAt"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.3"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "ownerWallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "actorRole": {
+            "enum": [
+              "BUYER",
+              "MERCHANT",
+              "ADMIN",
+              "OPERATOR"
+            ]
+          },
+          "purpose": {
+            "enum": [
+              "FULFILLMENT_ACTION",
+              "SHIPMENT_TRACKING"
+            ]
+          },
+          "resourceType": {
+            "const": "ORDER"
+          },
+          "resourceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "action": {
+            "type": "string"
+          },
+          "reasonCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trackingNumberHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mediaAssetIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          },
+          "payload": {
+            "type": "object"
+          },
+          "carrierCode": {
+            "enum": [
+              "SF",
+              "JD",
+              "YTO",
+              "ZTO",
+              "STO",
+              "EMS"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "EmptyObject": {
         "type": "object",
         "additionalProperties": false,
@@ -7533,7 +10827,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.2"
+            "const": "2.0.0-settlement-admin.3"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -7808,7 +11102,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifact_version": {
-            "const": "2.0.0-settlement-admin.2"
+            "const": "2.0.0-settlement-admin.3"
           },
           "wallet_address": {
             "$ref": "#/components/schemas/Address"
@@ -8134,7 +11428,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.2"
+            "const": "2.0.0-settlement-admin.3"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -10897,7 +14191,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.2"
+            "const": "2.0.0-settlement-admin.3"
           },
           "sessionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -11121,7 +14415,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.2"
+            "const": "2.0.0-settlement-admin.3"
           },
           "protocolVersion": {
             "const": 1

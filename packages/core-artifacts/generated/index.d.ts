@@ -1,4 +1,4 @@
-export declare const artifactVersion: "2.0.0-settlement-admin.2";
+export declare const artifactVersion: "2.0.0-settlement-admin.3";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
@@ -9,9 +9,13 @@ export type OrderFinalityStatus = "NOT_SUBMITTED" | "PENDING" | "CONFIRMED" | "R
 export type TransactionFinalityState = "SUBMITTED" | "MINED" | "REPLACED" | "REORGED" | "FINAL" | "FAILED";
 export type UserRole = "BUYER" | "MERCHANT" | "ADMIN" | "OPERATOR" | "ARBITRATOR" | "AUDITOR";
 export type BreakerScope = "NEW_PAYMENT" | "SECKILL_PURCHASE" | "NEW_SETTLEMENT_BATCH";
+export type CatalogProductAction = "SAVE_DRAFT" | "CREATE_CONCESSION_PREVIEW" | "SUBMIT_REVIEW" | "APPROVE" | "REJECT" | "PUBLISH" | "ADJUST_INVENTORY" | "HIDE" | "DELIST";
+export type CatalogProductLifecycleState = "DRAFT" | "REVIEW" | "SCHEDULED" | "ACTIVE" | "SOLD_OUT" | "HIDDEN" | "DELISTED" | "LOCKED";
+export type CatalogReviewDecision = "APPROVE" | "REJECT" | "PUBLISH" | "HIDE" | "DELIST";
+export type CatalogTaxonomyStatus = "ENABLED" | "DISABLED" | "DELETED";
 export type AllowedActionName = "PAY_ORDER" | "REQUEST_EXCHANGE" | "REQUEST_DELAY" | "DECIDE_FULFILLMENT_REQUEST" | "CONFIRM_RECEIPT" | "REQUEST_FORCED_RECEIPT" | "VERIFY_PICKUP" | "OPEN_ARBITRATION" | "OPEN_TAKEOVER" | "RECORD_SHIPMENT" | "RECORD_DELIVERY" | "REGISTER_PICKUP_CREDENTIAL" | "DECIDE_ARBITRATION" | "DECIDE_FORCED_RECEIPT" | "REQUEST_MERCHANT_SETTLEMENT" | "REQUEST_REWARD_SETTLEMENT" | "REQUEST_PRIZE_SETTLEMENT" | "RECONCILE" | "RECOVER_SURPLUS";
 export type AllowedActionReasonCode = "ArtifactVersionMismatch" | "BreakerActive" | "ConfigurationRequired" | "DecisionBlocked" | "ExternalBlocked" | "FinalityPending" | "Forbidden" | "MerchantFrozen" | "PickupTakeoverDecisionBlocked" | "UnknownState";
-export type CoreErrorCode = "ArtifactVersionMismatch" | "BreakerActive" | "ConfigurationRequired" | "DecisionBlocked" | "EmptySessionPrizeDecisionBlocked" | "ExternalBlocked" | "FinalityPending" | "Forbidden" | "IdempotencyConflict" | "InvalidFinality" | "InvalidRequest" | "InvalidSignature" | "InventoryUnavailable" | "NonceExpired" | "NonceReplay" | "PickupTakeoverDecisionBlocked" | "ProviderSignatureInvalid" | "QuoteExpired" | "ReorgPending" | "ReservationConflict" | "Unauthorized" | "UnknownState";
+export type CoreErrorCode = "ArtifactVersionMismatch" | "BreakerActive" | "ConfigurationRequired" | "DecisionBlocked" | "EmptySessionPrizeDecisionBlocked" | "ExternalBlocked" | "FinalityPending" | "Forbidden" | "IdempotencyConflict" | "InvalidFinality" | "InvalidRequest" | "InvalidSignature" | "InventoryUnavailable" | "NonceExpired" | "NonceReplay" | "PickupTakeoverDecisionBlocked" | "ProviderSignatureInvalid" | "ProductWriteLocked" | "QuoteExpired" | "ReorgPending" | "ReservationConflict" | "Unauthorized" | "UnknownState";
 export type FulfillmentMode = "DELIVERY" | "PICKUP";
 export type FulfillmentMethod = "CUSTOMER_RECEIPT" | "PICKUP_VERIFICATION" | "FORCED_RECEIPT" | "ARBITRATION";
 export type StoreStatus = "ACTIVE" | "SUSPENDED" | "CLOSED";
@@ -19,6 +23,9 @@ export type FulfillmentRequestType = "EXCHANGE" | "DELAY" | "ARBITRATION" | "FOR
 export type FulfillmentRequestState = "OPEN" | "APPROVED" | "REJECTED" | "RESOLVED";
 export type LogisticsProvider = "KUAIDI100" | "CAINIAO";
 export type LogisticsStatus = "PICKED_UP" | "IN_TRANSIT" | "OUT_FOR_DELIVERY" | "DELIVERED" | "EXCEPTION";
+export type MediaContentType = "image/jpeg" | "image/png" | "image/webp" | "video/mp4" | "application/pdf";
+export type MediaPurpose = "PRODUCT_IMAGE" | "PRODUCT_VIDEO" | "CATEGORY_ICON" | "STORE_IMAGE" | "FULFILLMENT_EVIDENCE";
+export type MediaResourceType = "PRODUCT" | "CATEGORY" | "STORE" | "ORDER";
 export type FulfillmentAsset = "USDT" | "NPL" | "BNM_POINTS";
 export type ArbitrationOutcome = "FULFILL" | "RESUME_FULFILLMENT";
 export type SettlementRail = "MERCHANT_USDT" | "REWARD_NPL" | "PRIZE_USDT" | "TAKEOVER_USDT" | "OPERATIONS_REIMBURSEMENT_USDT";
@@ -63,6 +70,10 @@ export declare const orderFinalityStatuses: readonly OrderFinalityStatus[];
 export declare const finalityStates: readonly TransactionFinalityState[];
 export declare const userRoles: readonly UserRole[];
 export declare const breakerScopes: readonly BreakerScope[];
+export declare const catalogProductActions: readonly CatalogProductAction[];
+export declare const catalogProductLifecycleStates: readonly CatalogProductLifecycleState[];
+export declare const catalogReviewDecisions: readonly CatalogReviewDecision[];
+export declare const catalogTaxonomyStatuses: readonly CatalogTaxonomyStatus[];
 export declare const allowedActionNames: readonly AllowedActionName[];
 export declare const executableOrderActionNames: readonly AllowedActionName[];
 export declare const allowedActionReasonCodes: readonly AllowedActionReasonCode[];
@@ -74,6 +85,9 @@ export declare const fulfillmentRequestTypes: readonly FulfillmentRequestType[];
 export declare const fulfillmentRequestStates: readonly FulfillmentRequestState[];
 export declare const logisticsProviders: readonly LogisticsProvider[];
 export declare const logisticsStatuses: readonly LogisticsStatus[];
+export declare const mediaContentTypes: readonly MediaContentType[];
+export declare const mediaPurposes: readonly MediaPurpose[];
+export declare const mediaResourceTypes: readonly MediaResourceType[];
 export declare const fulfillmentAssets: readonly FulfillmentAsset[];
 export declare const arbitrationOutcomes: readonly ArbitrationOutcome[];
 export declare const settlementRails: readonly SettlementRail[];
@@ -791,7 +805,248 @@ export interface CatalogProduct {
   chainProductId: Bytes32;
   title: string;
   metadata: Readonly<Record<string, unknown>>;
+  mainImageAssetIds: readonly Bytes32[];
+  videoAssetId: Bytes32 | null;
   skus: readonly CatalogSku[];
+}
+
+export interface CatalogCategory {
+  categoryId: string;
+  version: AtomicAmount;
+  parentCategoryId: string | null;
+  level: 1 | 2 | 3;
+  name: string;
+  iconAssetId: Bytes32 | null;
+  sortOrder: number;
+  status: CatalogTaxonomyStatus;
+  serviceFee: Readonly<{ state: 'Frozen' | 'DecisionBlocked'; valueBps: number | null }>;
+}
+
+export interface CatalogTag {
+  tagId: string;
+  version: AtomicAmount;
+  name: string;
+  example: string;
+  sortOrder: number;
+  status: CatalogTaxonomyStatus;
+}
+
+export interface ProductSkuInput {
+  skuId?: string;
+  attributes: JsonObject;
+  listPriceUsdt: AtomicAmount;
+  merchantBaseReceivableUsdt: AtomicAmount;
+  stockTotal: number;
+  proposedSeckillInventory: number;
+}
+
+export interface ProductSlotInput {
+  idempotencyKey: string;
+  title: string;
+  subtitle?: string;
+  mainImageAssetIds?: readonly Bytes32[];
+  videoAssetId?: Bytes32;
+  richDetail: JsonObject;
+  defaultFreightUsdt: AtomicAmount;
+  merchantConcessionBps: number;
+  fulfillmentModes: readonly FulfillmentMode[];
+  categoryId?: string;
+  tagIds?: readonly string[];
+  skus: readonly ProductSkuInput[];
+}
+
+export interface AdminProductSlotInput extends ProductSlotInput {
+  merchantId: string;
+}
+
+export interface CatalogWriteLock {
+  type: string;
+  id: string;
+  state: string;
+}
+
+export interface ManagedCatalogSku {
+  skuId: string;
+  chainSkuId: Bytes32;
+  version: AtomicAmount;
+  attributes: JsonObject;
+  listPriceUsdt: AtomicAmount;
+  merchantBaseReceivableUsdt: AtomicAmount;
+  stockTotal: AtomicAmount;
+  stockAvailable: AtomicAmount;
+  stockReserved: AtomicAmount;
+  proposedSeckillInventory: AtomicAmount;
+  lifecycleState: CatalogProductLifecycleState;
+}
+
+export interface ManagedCatalogProduct {
+  artifactVersion: typeof artifactVersion;
+  productId: string;
+  chainProductId: Bytes32;
+  merchantId: string;
+  storeId: string | null;
+  supersedesProductId: string | null;
+  version: AtomicAmount;
+  title: string;
+  subtitle: string;
+  lifecycleState: CatalogProductLifecycleState;
+  productPolicyHash: Bytes32;
+  merchantConcessionBps: number;
+  mainImageAssetIds: readonly Bytes32[];
+  videoAssetId: Bytes32 | null;
+  richDetail: JsonObject;
+  defaultFreightUsdt: AtomicAmount;
+  fulfillmentModes: readonly FulfillmentMode[];
+  categoryId: string | null;
+  tagIds: readonly string[];
+  skus: readonly ManagedCatalogSku[];
+  allowedActions: readonly CatalogProductAction[];
+  writeLock: CatalogWriteLock | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProductSlotProjection {
+  artifactVersion: typeof artifactVersion;
+  storeId: string;
+  merchantId: string;
+  product: ManagedCatalogProduct | null;
+  allowedActions: readonly CatalogProductAction[];
+  writeLock: CatalogWriteLock | null;
+}
+
+export interface MerchantConcessionAllocation {
+  account: Address;
+  amount: AtomicAmount;
+}
+
+export interface MerchantConcessionPreviewItem {
+  skuId: string;
+  merchantBaseReceivableUsdt: AtomicAmount;
+  merchantConcessionBps: number;
+  merchantConcessionAmount: AtomicAmount;
+  merchantNetReceivableUsdt: AtomicAmount;
+  allocations: readonly MerchantConcessionAllocation[];
+}
+
+export interface MerchantConcessionPreviewPayload {
+  artifactVersion: typeof artifactVersion;
+  productId: string;
+  productVersion: number;
+  merchantId: string;
+  policyVersion: number;
+  merchantConcessionBps: number;
+  destinationSetHash: Bytes32;
+  catalogFingerprint: Bytes32;
+  items: readonly MerchantConcessionPreviewItem[];
+  expiresAt: string;
+}
+
+export interface CatalogSignedAuthorization extends Eip712TypedData {
+  primaryType: 'MerchantConcessionPreview';
+  digest: Bytes32;
+  signature: string;
+  signer: Address;
+}
+
+export interface MerchantConcessionPreview {
+  artifactVersion: typeof artifactVersion;
+  previewId: Bytes32;
+  productId: string;
+  productVersion: AtomicAmount;
+  merchantId: string;
+  policyVersion: AtomicAmount;
+  merchantConcessionBps: number;
+  catalogFingerprint: Bytes32;
+  destinationSetHash: Bytes32;
+  previewHash: Bytes32;
+  payload: MerchantConcessionPreviewPayload;
+  authorization: CatalogSignedAuthorization;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface MediaUploadIntentProjection {
+  artifactVersion: typeof artifactVersion;
+  uploadIntentId: Bytes32;
+  ownerWallet: Address;
+  purpose: MediaPurpose;
+  resourceType: MediaResourceType;
+  resourceId: string;
+  contentType: MediaContentType;
+  sizeBytes: AtomicAmount;
+  contentSha256: Bytes32;
+  state: 'UPLOADED';
+  expiresAt: string;
+  method: 'PUT';
+  uploadUrl: string;
+  headers: Readonly<Record<string, string>>;
+  providerReferenceHash: Bytes32;
+  writeOnce: true;
+}
+
+export interface MediaAssetProjection {
+  artifactVersion: typeof artifactVersion;
+  assetId: Bytes32;
+  uploadIntentId: Bytes32;
+  ownerWallet: Address;
+  purpose: MediaPurpose;
+  resourceType: MediaResourceType;
+  resourceId: string;
+  contentType: MediaContentType;
+  sizeBytes: AtomicAmount;
+  contentSha256: Bytes32;
+  providerEvidenceHash: Bytes32;
+  objectVersionHash: Bytes32;
+  createdAt: string;
+}
+
+export interface MediaReadAccessProjection {
+  artifactVersion: typeof artifactVersion;
+  assetId: Bytes32;
+  purpose: MediaPurpose;
+  resourceType: MediaResourceType;
+  resourceId: string;
+  contentType: MediaContentType;
+  sizeBytes: AtomicAmount;
+  contentSha256: Bytes32;
+  objectVersionHash: Bytes32;
+  accessScope: 'PUBLIC' | 'AUTHENTICATED';
+  method: 'GET';
+  readUrl: string;
+  expiresAt: string;
+  providerReferenceHash: Bytes32;
+}
+
+export interface EvidenceEnvelopeProjection {
+  artifactVersion: typeof artifactVersion;
+  evidenceHash: Bytes32;
+  ownerWallet: Address;
+  actorRole: 'BUYER' | 'MERCHANT' | 'ADMIN' | 'OPERATOR';
+  purpose: 'FULFILLMENT_ACTION' | 'SHIPMENT_TRACKING';
+  resourceType: 'ORDER';
+  resourceId: string;
+  action: string;
+  reasonCode: string | null;
+  trackingNumberHash: Bytes32 | null;
+  mediaAssetIds: readonly Bytes32[];
+  payload: JsonObject;
+  carrierCode?: 'SF' | 'JD' | 'YTO' | 'ZTO' | 'STO' | 'EMS';
+  createdAt: string;
+}
+
+export interface InventoryAdjustmentProjection {
+  artifactVersion: typeof artifactVersion;
+  adjustmentId: Bytes32;
+  skuId: string;
+  beforeTotal: AtomicAmount;
+  beforeAvailable: AtomicAmount;
+  delta: string;
+  afterTotal: AtomicAmount;
+  afterAvailable: AtomicAmount;
+  reasonCode: string;
+  actorWallet: Address;
+  createdAt: string;
 }
 
 export interface MerchantStore {

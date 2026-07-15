@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.2",
+  "artifactVersion": "2.0.0-settlement-admin.3",
   "orderProjectionStates": [
     "QUOTED",
     "SUBMITTED",
@@ -50,6 +50,39 @@
     "NEW_PAYMENT",
     "SECKILL_PURCHASE",
     "NEW_SETTLEMENT_BATCH"
+  ],
+  "catalogProductActions": [
+    "SAVE_DRAFT",
+    "CREATE_CONCESSION_PREVIEW",
+    "SUBMIT_REVIEW",
+    "APPROVE",
+    "REJECT",
+    "PUBLISH",
+    "ADJUST_INVENTORY",
+    "HIDE",
+    "DELIST"
+  ],
+  "catalogProductLifecycleStates": [
+    "DRAFT",
+    "REVIEW",
+    "SCHEDULED",
+    "ACTIVE",
+    "SOLD_OUT",
+    "HIDDEN",
+    "DELISTED",
+    "LOCKED"
+  ],
+  "catalogReviewDecisions": [
+    "APPROVE",
+    "REJECT",
+    "PUBLISH",
+    "HIDE",
+    "DELIST"
+  ],
+  "catalogTaxonomyStatuses": [
+    "ENABLED",
+    "DISABLED",
+    "DELETED"
   ],
   "allowedActionNames": [
     "PAY_ORDER",
@@ -136,6 +169,26 @@
     "OUT_FOR_DELIVERY",
     "DELIVERED",
     "EXCEPTION"
+  ],
+  "mediaContentTypes": [
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "video/mp4",
+    "application/pdf"
+  ],
+  "mediaPurposes": [
+    "PRODUCT_IMAGE",
+    "PRODUCT_VIDEO",
+    "CATEGORY_ICON",
+    "STORE_IMAGE",
+    "FULFILLMENT_EVIDENCE"
+  ],
+  "mediaResourceTypes": [
+    "PRODUCT",
+    "CATEGORY",
+    "STORE",
+    "ORDER"
   ],
   "fulfillmentAssets": [
     "USDT",
@@ -258,6 +311,7 @@
     "NonceReplay",
     "PickupTakeoverDecisionBlocked",
     "ProviderSignatureInvalid",
+    "ProductWriteLocked",
     "QuoteExpired",
     "ReorgPending",
     "ReservationConflict",

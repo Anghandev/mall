@@ -13,6 +13,7 @@ import { CoreError } from './errors.ts';
 const decisionVariables = [
   'PLATFORM_SERVICE_FEE_BPS',
   'SECKILL_PRIZE_POOL_BPS',
+  'MERCHANT_STORE_REWARD_BPS',
   'MERCHANT_CONCESSION_DESTINATIONS_JSON',
   'CIRCULATION_REWARD_POOL_ADDRESS',
   'GENESIS_CREDENTIAL_ADDRESS',
@@ -38,6 +39,7 @@ const externalVariables = [
   'AUTH_DOMAIN',
   'AUTH_URI',
   'DELIVERY_DATA_ENCRYPTION_KEY',
+  'TRACKING_HASH_KEY',
   'AMAP_WEB_SERVICE_KEY',
   'BSC_RPC_URL',
   'BSC_FALLBACK_RPC_URL',
@@ -88,6 +90,10 @@ const externalVariables = [
   'BNM_API_TOKEN',
   'BNM_PROJECT_ID',
   'BNM_MONOTONIC_CONFORMANCE_EVIDENCE_HASH',
+  'MEDIA_STORAGE_SIGNER_URL',
+  'MEDIA_STORAGE_SIGNER_TOKEN',
+  'MEDIA_UPLOAD_MAX_INTENTS_PER_WALLET_HOUR',
+  'MEDIA_UPLOAD_MAX_BYTES_PER_WALLET_HOUR',
   'POLICY_SAFE_PROPOSER_URL',
   'POLICY_SAFE_PROPOSER_TOKEN',
   'POLICY_EXECUTION_LOOKUP_URL',
@@ -150,7 +156,7 @@ const providerVariables: Readonly<Record<ProviderName, readonly string[]>> = {
   ],
   ALIYUN_SMS: ['SECRET_RESOLVER_URL', 'SECRET_RESOLVER_TOKEN', 'ALIYUN_SMS_GATEWAY_URL', 'ALIYUN_SMS_CREDENTIAL_REF'],
   TENCENT_SMS: ['SECRET_RESOLVER_URL', 'SECRET_RESOLVER_TOKEN', 'TENCENT_SMS_GATEWAY_URL', 'TENCENT_SMS_CREDENTIAL_REF'],
-  ALIYUN_OSS: ['ALIYUN_OSS_ACCESS_KEY_ID', 'ALIYUN_OSS_ACCESS_KEY_SECRET'],
+  ALIYUN_OSS: ['MEDIA_STORAGE_SIGNER_URL', 'MEDIA_STORAGE_SIGNER_TOKEN'],
   SMTP: ['SECRET_RESOLVER_URL', 'SECRET_RESOLVER_TOKEN', 'SMTP_GATEWAY_URL', 'SMTP_CREDENTIAL_REF'],
   FIREBASE: ['SECRET_RESOLVER_URL', 'SECRET_RESOLVER_TOKEN', 'FIREBASE_GATEWAY_URL', 'FIREBASE_CREDENTIAL_REF'],
   JPUSH: ['SECRET_RESOLVER_URL', 'SECRET_RESOLVER_TOKEN', 'JPUSH_GATEWAY_URL', 'JPUSH_CREDENTIAL_REF'],
@@ -280,6 +286,14 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
   );
   if (env.JWT_SECRET && Buffer.byteLength(env.JWT_SECRET) < 32) {
     throw new CoreError('InvalidRequest', 'JWT_SECRET must be at least 32 bytes', 500);
+  }
+  if (env.TRACKING_HASH_KEY && !/^[0-9a-fA-F]{64}$/.test(env.TRACKING_HASH_KEY)) {
+    throw new CoreError('InvalidRequest', 'TRACKING_HASH_KEY must be 32-byte hex', 500);
+  }
+  for (const name of ['MEDIA_UPLOAD_MAX_INTENTS_PER_WALLET_HOUR', 'MEDIA_UPLOAD_MAX_BYTES_PER_WALLET_HOUR']) {
+    if (env[name] && !/^[1-9]\d*$/.test(env[name]!)) {
+      throw new CoreError('InvalidRequest', `${name} must be a positive integer`, 500);
+    }
   }
   validateAuthOrigin(env);
   const providerReadiness = Object.fromEntries(
@@ -473,6 +487,7 @@ function validateProductionEndpoints(env: Readonly<Record<string, string | undef
     'SETTLEMENT_EXECUTOR_URL',
     'SAFE_APPROVAL_VERIFIER_URL',
     'BNM_AVAILABILITY_URL',
+    'MEDIA_STORAGE_SIGNER_URL',
     'POLICY_SAFE_PROPOSER_URL',
     'POLICY_EXECUTION_LOOKUP_URL',
     'SYSTEM_CONFIG_SAFE_APPROVER_URL',
@@ -603,7 +618,7 @@ function safeExpectation(
 }
 
 function validateDecisionValues(env: Readonly<Record<string, string | undefined>>) {
-  for (const name of ['PLATFORM_SERVICE_FEE_BPS', 'SECKILL_PRIZE_POOL_BPS']) {
+  for (const name of ['PLATFORM_SERVICE_FEE_BPS', 'SECKILL_PRIZE_POOL_BPS', 'MERCHANT_STORE_REWARD_BPS']) {
     const value = Number(env[name]);
     if (!Number.isInteger(value) || value < 0 || value > 10_000) {
       throw new CoreError('InvalidRequest', `${name} must be integer BPS`, 500);

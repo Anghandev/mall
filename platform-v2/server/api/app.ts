@@ -30,6 +30,7 @@ import {
 } from './enums.ts';
 import { CoreError, errorBody } from './errors.ts';
 import type { CreateOrdinaryQuoteInput, CreateSeckillQuoteInput } from '../data/catalog-payment-service.ts';
+import type { ProductSlotInput } from '../data/catalog-management-service.ts';
 import type {
   ArbitrationDecisionInput,
   DecisionInput,
@@ -53,8 +54,29 @@ import type {
 } from '../data/settlement-service.ts';
 import type { ConfigApprovalInput } from '../data/system-config-service.ts';
 import type { AuditQuery } from '../data/audit-service.ts';
+import type {
+  Carrier,
+  EvidenceAction,
+  MediaPurpose,
+  MediaResourceType,
+} from '../data/evidence-service.ts';
 import { verifyWebhookHmac } from './providers.ts';
 import { attachRealtimeServer, type RealtimeEventPage } from './realtime.ts';
+
+const PRODUCT_SLOT_KEYS = [
+  'idempotencyKey',
+  'title',
+  'subtitle',
+  'mainImageAssetIds',
+  'videoAssetId',
+  'richDetail',
+  'defaultFreightUsdt',
+  'merchantConcessionBps',
+  'fulfillmentModes',
+  'categoryId',
+  'tagIds',
+  'skus',
+] as const;
 
 export interface PaymentApiService {
   listCatalog(): Promise<unknown>;
@@ -73,6 +95,59 @@ export interface SeckillApiService {
   get(sessionId: string): Promise<unknown>;
   history(input?: { cursor?: string; limit?: number }): Promise<unknown>;
   events(sessionId: string, input?: { cursor?: string; limit?: number }): Promise<RealtimeEventPage>;
+}
+
+export interface CatalogManagementApiService {
+  listCategories(includeInactive?: boolean, actor?: FulfillmentActor): Promise<unknown>;
+  listTags(includeInactive?: boolean, actor?: FulfillmentActor): Promise<unknown>;
+  upsertCategory(actor: FulfillmentActor, input: {
+    categoryId?: string;
+    parentCategoryId?: string;
+    name: string;
+    iconAssetId?: string;
+    sortOrder: number;
+    serviceFeeBps?: number;
+    status?: 'ENABLED' | 'DISABLED' | 'DELETED';
+    idempotencyKey: string;
+  }): Promise<unknown>;
+  upsertTag(actor: FulfillmentActor, input: {
+    tagId?: string;
+    name: string;
+    example?: string;
+    sortOrder: number;
+    status?: 'ENABLED' | 'DISABLED' | 'DELETED';
+    idempotencyKey: string;
+  }): Promise<unknown>;
+  getProductSlot(actor: FulfillmentActor, storeId: string, targetMerchantId?: string): Promise<unknown>;
+  saveProductSlot(
+    actor: FulfillmentActor,
+    storeId: string,
+    input: ProductSlotInput,
+    targetMerchantId?: string,
+  ): Promise<unknown>;
+  createConcessionPreview(actor: FulfillmentActor, productId: string, input: {
+    merchantConcessionBps: number;
+    idempotencyKey: string;
+  }): Promise<unknown>;
+  submitReview(actor: FulfillmentActor, productId: string, input: {
+    previewId: string;
+    idempotencyKey: string;
+  }): Promise<unknown>;
+  decideReview(actor: FulfillmentActor, productId: string, input: {
+    decision: 'APPROVE' | 'REJECT' | 'PUBLISH' | 'HIDE' | 'DELIST';
+    reasonCode: string;
+    idempotencyKey: string;
+  }): Promise<unknown>;
+  delistProduct(actor: FulfillmentActor, productId: string, input: {
+    reasonCode: string;
+    idempotencyKey: string;
+  }): Promise<unknown>;
+  adjustInventory(actor: FulfillmentActor, skuId: string, input: {
+    delta: string;
+    reasonCode: string;
+    idempotencyKey: string;
+  }): Promise<unknown>;
+  listAdminProducts(actor: FulfillmentActor): Promise<unknown>;
 }
 
 export interface FulfillmentApiService {
@@ -108,6 +183,45 @@ export interface FulfillmentTargetApiService {
   createStore(actor: FulfillmentActor, input: StoreInput): Promise<unknown>;
   listStores(regionCode?: string): Promise<unknown>;
   getOrderTarget(actor: FulfillmentActor, orderId: string): Promise<unknown>;
+}
+
+export interface EvidenceApiService {
+  createActionEvidence(actor: FulfillmentActor, input: {
+    orderId: string;
+    action: EvidenceAction;
+    reasonCode: string;
+    mediaAssetIds?: string[];
+    idempotencyKey: string;
+  }): Promise<unknown>;
+  createTrackingEvidence(actor: FulfillmentActor, input: {
+    orderId: string;
+    carrierCode: Carrier;
+    trackingNumber: string;
+    idempotencyKey: string;
+  }): Promise<unknown>;
+  assertActionEvidence(actor: FulfillmentActor, input: {
+    orderId: string;
+    action: EvidenceAction;
+    evidenceHash: string;
+    reasonCode?: string;
+  }): Promise<unknown>;
+  assertTrackingEvidence(actor: FulfillmentActor, input: {
+    orderId: string;
+    carrierCode: Carrier;
+    trackingNumberHash: string;
+    evidenceHash: string;
+  }): Promise<unknown>;
+  createUploadIntent(actor: FulfillmentActor, input: {
+    purpose: MediaPurpose;
+    resourceType: MediaResourceType;
+    resourceId: string;
+    contentType: 'image/jpeg' | 'image/png' | 'image/webp' | 'video/mp4' | 'application/pdf';
+    sizeBytes: number;
+    contentSha256: string;
+    idempotencyKey: string;
+  }): Promise<unknown>;
+  completeUpload(actor: FulfillmentActor, uploadIntentId: string): Promise<unknown>;
+  createReadAccess(actor: FulfillmentActor | undefined, assetId: string): Promise<unknown>;
 }
 
 export interface SettlementApiService {
@@ -262,9 +376,11 @@ export interface ApiDependencies {
   getOrderProjection(orderId: string): Promise<OrderProjection | undefined>;
   getPausedScopes(): Promise<ActionContext['pausedScopes']>;
   paymentService: PaymentApiService;
+  catalogManagementService: CatalogManagementApiService;
   seckillService: SeckillApiService;
   fulfillmentService: FulfillmentApiService;
   fulfillmentTargetService: FulfillmentTargetApiService;
+  evidenceService: EvidenceApiService;
   settlementService: SettlementApiService;
   takeoverFundingService: TakeoverFundingApiService;
   guaranteeDepositService: GuaranteeDepositApiService;
@@ -711,6 +827,63 @@ async function route(
     );
     return;
   }
+  if (request.method === 'POST' && url.pathname === '/v2/media/upload-intents') {
+    const claims = authorize(request, dependencies.config, dependencies.clock());
+    const body = await readJson(request);
+    assertOnlyKeys(body, [
+      'purpose',
+      'resourceType',
+      'resourceId',
+      'contentType',
+      'sizeBytes',
+      'contentSha256',
+      'idempotencyKey',
+    ]);
+    sendJson(
+      response,
+      201,
+      await dependencies.evidenceService.createUploadIntent(fulfillmentActor(claims), {
+        purpose: mediaPurpose(body.purpose),
+        resourceType: mediaResourceType(body.resourceType),
+        resourceId: requiredString(body, 'resourceId'),
+        contentType: mediaContentType(body.contentType),
+        sizeBytes: requiredPositiveInteger(body, 'sizeBytes'),
+        contentSha256: requiredString(body, 'contentSha256'),
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+      }),
+      correlationId,
+    );
+    return;
+  }
+  const completeUpload = url.pathname.match(/^\/v2\/media\/upload-intents\/(0x[0-9a-fA-F]{64})\/complete$/);
+  if (request.method === 'POST' && completeUpload) {
+    const claims = authorize(request, dependencies.config, dependencies.clock());
+    const body = await readJson(request);
+    assertOnlyKeys(body, []);
+    sendJson(
+      response,
+      200,
+      await dependencies.evidenceService.completeUpload(fulfillmentActor(claims), completeUpload[1]!),
+      correlationId,
+    );
+    return;
+  }
+  const readMedia = url.pathname.match(/^\/v2\/media\/assets\/(0x[0-9a-fA-F]{64})\/access$/);
+  if (request.method === 'GET' && readMedia) {
+    const claims = request.headers.authorization
+      ? authorize(request, dependencies.config, dependencies.clock())
+      : undefined;
+    sendJson(
+      response,
+      200,
+      await dependencies.evidenceService.createReadAccess(
+        claims ? fulfillmentActor(claims) : undefined,
+        readMedia[1]!,
+      ),
+      correlationId,
+    );
+    return;
+  }
   if (request.method === 'GET' && url.pathname === '/v2/orders') {
     const claims = authorize(request, dependencies.config, dependencies.clock());
     sendJson(
@@ -756,7 +929,30 @@ async function route(
     let status = 200;
     let result: unknown;
     switch (orderPath.action) {
-      case 'shipments':
+      case 'evidence':
+        assertOnlyKeys(body, ['action', 'reasonCode', 'mediaAssetIds', 'idempotencyKey']);
+        status = 201;
+        result = await dependencies.evidenceService.createActionEvidence(actor, {
+          orderId: orderPath.orderId,
+          action: evidenceAction(body.action),
+          reasonCode: requiredString(body, 'reasonCode'),
+          ...(body.mediaAssetIds === undefined
+            ? {}
+            : { mediaAssetIds: requiredStringArray(body, 'mediaAssetIds') }),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+        });
+        break;
+      case 'tracking-evidence':
+        assertOnlyKeys(body, ['carrierCode', 'trackingNumber', 'idempotencyKey']);
+        status = 201;
+        result = await dependencies.evidenceService.createTrackingEvidence(actor, {
+          orderId: orderPath.orderId,
+          carrierCode: evidenceCarrier(body.carrierCode),
+          trackingNumber: requiredString(body, 'trackingNumber'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+        });
+        break;
+      case 'shipments': {
         assertOnlyKeys(body, [
           'idempotencyKey',
           'evidenceHash',
@@ -765,16 +961,26 @@ async function route(
           'providerReferenceHash',
         ]);
         status = 201;
+        const carrierCode = evidenceCarrier(body.carrierCode);
+        const trackingNumberHash = requiredString(body, 'trackingNumberHash');
+        const evidenceHash = requiredString(body, 'evidenceHash');
+        await dependencies.evidenceService.assertTrackingEvidence(actor, {
+          orderId: orderPath.orderId,
+          carrierCode,
+          trackingNumberHash,
+          evidenceHash,
+        });
         result = await dependencies.fulfillmentService.recordShipment(actor, orderPath.orderId, {
           idempotencyKey: requiredString(body, 'idempotencyKey'),
-          evidenceHash: requiredString(body, 'evidenceHash'),
-          carrierCode: requiredString(body, 'carrierCode'),
-          trackingNumberHash: requiredString(body, 'trackingNumberHash'),
+          evidenceHash,
+          carrierCode,
+          trackingNumberHash,
           ...(body.providerReferenceHash === undefined
             ? {}
             : { providerReferenceHash: requiredString(body, 'providerReferenceHash') }),
         });
         break;
+      }
       case 'delivery':
         result = await dependencies.fulfillmentService.recordDelivery(actor, orderPath.orderId, base());
         break;
@@ -788,31 +994,54 @@ async function route(
           expiresAt: requiredDate(body, 'expiresAt'),
         });
         break;
-      case 'pickup-verification':
+      case 'pickup-verification': {
         assertOnlyKeys(body, ['idempotencyKey', 'evidenceHash', 'code', 'storeId']);
+        const evidenceHash = requiredString(body, 'evidenceHash');
+        await dependencies.evidenceService.assertActionEvidence(actor, {
+          orderId: orderPath.orderId,
+          action: 'VERIFY_PICKUP',
+          evidenceHash,
+        });
         result = await dependencies.fulfillmentService.verifyPickup(actor, orderPath.orderId, {
           idempotencyKey: requiredString(body, 'idempotencyKey'),
-          evidenceHash: requiredString(body, 'evidenceHash'),
+          evidenceHash,
           code: requiredString(body, 'code'),
           storeId: requiredString(body, 'storeId'),
         });
         break;
-      case 'exchange-requests':
+      }
+      case 'exchange-requests': {
         status = 201;
+        const input = requestInput(body);
+        await dependencies.evidenceService.assertActionEvidence(actor, {
+          orderId: orderPath.orderId,
+          action: 'REQUEST_EXCHANGE',
+          evidenceHash: input.evidenceHash,
+          reasonCode: input.reasonCode,
+        });
         result = await dependencies.fulfillmentService.requestExchange(
           actor,
           orderPath.orderId,
-          requestInput(body),
+          input,
         );
         break;
-      case 'delay-requests':
+      }
+      case 'delay-requests': {
         status = 201;
+        const input = requestInput(body);
+        await dependencies.evidenceService.assertActionEvidence(actor, {
+          orderId: orderPath.orderId,
+          action: 'REQUEST_DELAY',
+          evidenceHash: input.evidenceHash,
+          reasonCode: input.reasonCode,
+        });
         result = await dependencies.fulfillmentService.requestDelay(
           actor,
           orderPath.orderId,
-          requestInput(body),
+          input,
         );
         break;
+      }
       case 'request-decisions':
         assertOnlyKeys(body, ['idempotencyKey', 'evidenceHash', 'requestId', 'approved', 'noteCode']);
         result = await dependencies.fulfillmentService.decideFulfillmentRequest(actor, orderPath.orderId, {
@@ -823,14 +1052,22 @@ async function route(
           noteCode: requiredString(body, 'noteCode'),
         });
         break;
-      case 'arbitrations':
+      case 'arbitrations': {
         status = 201;
+        const input = requestInput(body);
+        await dependencies.evidenceService.assertActionEvidence(actor, {
+          orderId: orderPath.orderId,
+          action: 'OPEN_ARBITRATION',
+          evidenceHash: input.evidenceHash,
+          reasonCode: input.reasonCode,
+        });
         result = await dependencies.fulfillmentService.openArbitration(
           actor,
           orderPath.orderId,
-          requestInput(body),
+          input,
         );
         break;
+      }
       case 'arbitration-decisions':
         assertOnlyKeys(body, ['idempotencyKey', 'evidenceHash', 'outcome', 'noteCode']);
         result = await dependencies.fulfillmentService.decideArbitration(actor, orderPath.orderId, {
@@ -848,14 +1085,22 @@ async function route(
           requestInput(body),
         );
         break;
-      case 'forced-receipt-requests':
+      case 'forced-receipt-requests': {
         status = 201;
+        const input = requestInput(body);
+        await dependencies.evidenceService.assertActionEvidence(actor, {
+          orderId: orderPath.orderId,
+          action: 'REQUEST_FORCED_RECEIPT',
+          evidenceHash: input.evidenceHash,
+          reasonCode: input.reasonCode,
+        });
         result = await dependencies.fulfillmentService.requestForcedReceipt(
           actor,
           orderPath.orderId,
-          requestInput(body),
+          input,
         );
         break;
+      }
       case 'forced-receipt-decisions':
         assertOnlyKeys(body, ['idempotencyKey', 'evidenceHash', 'approved', 'noteCode']);
         result = await dependencies.fulfillmentService.decideForcedReceipt(actor, orderPath.orderId, {
@@ -865,14 +1110,89 @@ async function route(
           noteCode: requiredString(body, 'noteCode'),
         });
         break;
-      case 'receipt-confirmation':
-        result = await dependencies.fulfillmentService.confirmReceipt(actor, orderPath.orderId, base());
+      case 'receipt-confirmation': {
+        const input = base();
+        await dependencies.evidenceService.assertActionEvidence(actor, {
+          orderId: orderPath.orderId,
+          action: 'CONFIRM_RECEIPT',
+          evidenceHash: input.evidenceHash,
+        });
+        result = await dependencies.fulfillmentService.confirmReceipt(actor, orderPath.orderId, input);
         break;
+      }
       default:
         throw new CoreError('InvalidRequest', 'Order action route not found', 404);
     }
     sendJson(response, status, result, correlationId);
     return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/catalog/categories') {
+    sendJson(response, 200, { categories: await dependencies.catalogManagementService.listCategories(false) }, correlationId);
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/catalog/tags') {
+    sendJson(response, 200, { tags: await dependencies.catalogManagementService.listTags(false) }, correlationId);
+    return;
+  }
+  const merchantSlot = /^\/v2\/merchant\/stores\/([^/]+)\/product-slot$/.exec(url.pathname);
+  if (merchantSlot && (request.method === 'GET' || request.method === 'PUT')) {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
+    const storeId = decodedPathPart(merchantSlot[1]!);
+    const actor = merchantCatalogActor(claims);
+    if (request.method === 'GET') {
+      sendJson(response, 200, await dependencies.catalogManagementService.getProductSlot(actor, storeId), correlationId);
+      return;
+    }
+    const body = await readJson(request);
+    sendJson(
+      response,
+      200,
+      await dependencies.catalogManagementService.saveProductSlot(actor, storeId, productSlotInput(body)),
+      correlationId,
+    );
+    return;
+  }
+  const merchantProduct = matchResourceAction(url.pathname, '/v2/merchant/products/');
+  if (request.method === 'POST' && merchantProduct?.action) {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
+    const actor = merchantCatalogActor(claims);
+    const body = await readJson(request);
+    if (merchantProduct.action === 'concession-previews') {
+      assertOnlyKeys(body, ['merchantConcessionBps', 'idempotencyKey']);
+      sendJson(response, 201, await dependencies.catalogManagementService.createConcessionPreview(
+        actor,
+        merchantProduct.resourceId,
+        {
+          merchantConcessionBps: requiredBps(body, 'merchantConcessionBps'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+        },
+      ), correlationId);
+      return;
+    }
+    if (merchantProduct.action === 'review-submissions') {
+      assertOnlyKeys(body, ['previewId', 'idempotencyKey']);
+      sendJson(response, 201, await dependencies.catalogManagementService.submitReview(
+        actor,
+        merchantProduct.resourceId,
+        {
+          previewId: requiredString(body, 'previewId'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+        },
+      ), correlationId);
+      return;
+    }
+    if (merchantProduct.action === 'delist') {
+      assertOnlyKeys(body, ['reasonCode', 'idempotencyKey']);
+      sendJson(response, 200, await dependencies.catalogManagementService.delistProduct(
+        actor,
+        merchantProduct.resourceId,
+        {
+          reasonCode: requiredString(body, 'reasonCode'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+        },
+      ), correlationId);
+      return;
+    }
   }
   if (request.method === 'GET' && url.pathname === '/v2/catalog/products') {
     sendJson(response, 200, { products: await dependencies.paymentService.listCatalog() }, correlationId);
@@ -984,6 +1304,161 @@ async function routeAdminServices(
   url: URL,
   correlationId: string,
 ) {
+  if (request.method === 'GET' && url.pathname === '/v2/admin/catalog/categories') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
+    sendJson(response, 200, {
+      categories: await dependencies.catalogManagementService.listCategories(true, platformCatalogActor(claims)),
+    }, correlationId);
+    return true;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/catalog/categories') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    sendJson(response, 201, await dependencies.catalogManagementService.upsertCategory(
+      platformCatalogActor(claims),
+      categoryInput(body),
+    ), correlationId);
+    return true;
+  }
+  const categoryId = pathParameter(url.pathname, '/v2/admin/catalog/categories/');
+  if (request.method === 'PUT' && categoryId) {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    sendJson(response, 200, await dependencies.catalogManagementService.upsertCategory(
+      platformCatalogActor(claims),
+      { ...categoryInput(body), categoryId },
+    ), correlationId);
+    return true;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/admin/catalog/tags') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
+    sendJson(response, 200, {
+      tags: await dependencies.catalogManagementService.listTags(true, platformCatalogActor(claims)),
+    }, correlationId);
+    return true;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/catalog/tags') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    sendJson(response, 201, await dependencies.catalogManagementService.upsertTag(
+      platformCatalogActor(claims),
+      tagInput(body),
+    ), correlationId);
+    return true;
+  }
+  const tagId = pathParameter(url.pathname, '/v2/admin/catalog/tags/');
+  if (request.method === 'PUT' && tagId) {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    sendJson(response, 200, await dependencies.catalogManagementService.upsertTag(
+      platformCatalogActor(claims),
+      { ...tagInput(body), tagId },
+    ), correlationId);
+    return true;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/admin/catalog/products') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
+    sendJson(response, 200, {
+      products: await dependencies.catalogManagementService.listAdminProducts(platformCatalogActor(claims)),
+    }, correlationId);
+    return true;
+  }
+  const adminSlot = /^\/v2\/admin\/catalog\/stores\/([^/]+)\/product-slot$/.exec(url.pathname);
+  if (adminSlot && (request.method === 'GET' || request.method === 'PUT')) {
+    const claims = authorizeRoles(
+      request,
+      dependencies.config,
+      dependencies.clock(),
+      request.method === 'GET' ? ['ADMIN', 'OPERATOR', 'AUDITOR'] : ['ADMIN', 'OPERATOR'],
+    );
+    const storeId = decodedPathPart(adminSlot[1]!);
+    const actor = platformCatalogActor(claims);
+    const merchantId = url.searchParams.get('merchantId') ?? undefined;
+    if (request.method === 'GET') {
+      sendJson(response, 200, await dependencies.catalogManagementService.getProductSlot(actor, storeId, merchantId), correlationId);
+      return true;
+    }
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['merchantId', ...PRODUCT_SLOT_KEYS]);
+    sendJson(response, 200, await dependencies.catalogManagementService.saveProductSlot(
+      actor,
+      storeId,
+      productSlotInput(body, true),
+      requiredString(body, 'merchantId'),
+    ), correlationId);
+    return true;
+  }
+  const adminProduct = matchResourceAction(url.pathname, '/v2/admin/catalog/products/');
+  if (request.method === 'POST' && adminProduct?.action) {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const actor = platformCatalogActor(claims);
+    const body = await readJson(request);
+    if (adminProduct.action === 'concession-previews') {
+      assertOnlyKeys(body, ['merchantConcessionBps', 'idempotencyKey']);
+      sendJson(response, 201, await dependencies.catalogManagementService.createConcessionPreview(
+        actor,
+        adminProduct.resourceId,
+        {
+          merchantConcessionBps: requiredBps(body, 'merchantConcessionBps'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+        },
+      ), correlationId);
+      return true;
+    }
+    if (adminProduct.action === 'review-decisions') {
+      assertOnlyKeys(body, ['decision', 'reasonCode', 'idempotencyKey']);
+      sendJson(response, 200, await dependencies.catalogManagementService.decideReview(
+        actor,
+        adminProduct.resourceId,
+        {
+          decision: catalogReviewDecision(body.decision),
+          reasonCode: requiredString(body, 'reasonCode'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+        },
+      ), correlationId);
+      return true;
+    }
+    if (adminProduct.action === 'review-submissions') {
+      assertOnlyKeys(body, ['previewId', 'idempotencyKey']);
+      sendJson(response, 201, await dependencies.catalogManagementService.submitReview(
+        actor,
+        adminProduct.resourceId,
+        {
+          previewId: requiredString(body, 'previewId'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+        },
+      ), correlationId);
+      return true;
+    }
+    if (adminProduct.action === 'delist') {
+      assertOnlyKeys(body, ['reasonCode', 'idempotencyKey']);
+      sendJson(response, 200, await dependencies.catalogManagementService.delistProduct(
+        actor,
+        adminProduct.resourceId,
+        {
+          reasonCode: requiredString(body, 'reasonCode'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+        },
+      ), correlationId);
+      return true;
+    }
+  }
+  const adminSku = matchResourceAction(url.pathname, '/v2/admin/catalog/skus/');
+  if (request.method === 'POST' && adminSku?.action === 'inventory-adjustments') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['delta', 'reasonCode', 'idempotencyKey']);
+    sendJson(response, 201, await dependencies.catalogManagementService.adjustInventory(
+      platformCatalogActor(claims),
+      adminSku.resourceId,
+      {
+        delta: requiredString(body, 'delta'),
+        reasonCode: requiredString(body, 'reasonCode'),
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+      },
+    ), correlationId);
+    return true;
+  }
   if (request.method === 'GET' && url.pathname === '/v2/cms/public') {
     const walletAddress = url.searchParams.get('walletAddress') ?? undefined;
     sendJson(response, 200, await dependencies.cmsService.listPublished({
@@ -1350,6 +1825,70 @@ function requiredObject(body: Record<string, unknown>, name: string) {
   return value as Record<string, unknown>;
 }
 
+function productSlotInput(body: Record<string, unknown>, allowMerchantId = false): ProductSlotInput {
+  assertOnlyKeys(body, allowMerchantId ? ['merchantId', ...PRODUCT_SLOT_KEYS] : PRODUCT_SLOT_KEYS);
+  if (!Array.isArray(body.skus)) throw new CoreError('InvalidRequest', 'skus must be an array');
+  const skus = body.skus.map((value, index) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new CoreError('InvalidRequest', `skus[${index}] must be an object`);
+    }
+    const sku = value as Record<string, unknown>;
+    assertOnlyKeys(sku, [
+      'skuId', 'attributes', 'listPriceUsdt', 'merchantBaseReceivableUsdt',
+      'stockTotal', 'proposedSeckillInventory',
+    ]);
+    return {
+      ...(sku.skuId === undefined ? {} : { skuId: requiredString(sku, 'skuId') }),
+      attributes: requiredObject(sku, 'attributes'),
+      listPriceUsdt: requiredString(sku, 'listPriceUsdt'),
+      merchantBaseReceivableUsdt: requiredString(sku, 'merchantBaseReceivableUsdt'),
+      stockTotal: requiredPositiveInteger(sku, 'stockTotal'),
+      proposedSeckillInventory: requiredPositiveInteger(sku, 'proposedSeckillInventory'),
+    };
+  });
+  return {
+    idempotencyKey: requiredString(body, 'idempotencyKey'),
+    title: requiredString(body, 'title'),
+    ...(body.subtitle === undefined ? {} : { subtitle: requiredString(body, 'subtitle') }),
+    ...(body.mainImageAssetIds === undefined ? {} : { mainImageAssetIds: requiredStringArray(body, 'mainImageAssetIds') }),
+    ...(body.videoAssetId === undefined ? {} : { videoAssetId: requiredString(body, 'videoAssetId') }),
+    richDetail: requiredObject(body, 'richDetail'),
+    defaultFreightUsdt: requiredString(body, 'defaultFreightUsdt'),
+    merchantConcessionBps: requiredBps(body, 'merchantConcessionBps'),
+    fulfillmentModes: fulfillmentModes(body.fulfillmentModes),
+    ...(body.categoryId === undefined ? {} : { categoryId: requiredString(body, 'categoryId') }),
+    ...(body.tagIds === undefined ? {} : { tagIds: requiredStringArray(body, 'tagIds') }),
+    skus,
+  };
+}
+
+function categoryInput(body: Record<string, unknown>) {
+  assertOnlyKeys(body, [
+    'parentCategoryId', 'name', 'iconAssetId', 'sortOrder',
+    'serviceFeeBps', 'status', 'idempotencyKey',
+  ]);
+  return {
+    ...(body.parentCategoryId === undefined ? {} : { parentCategoryId: requiredString(body, 'parentCategoryId') }),
+    name: requiredString(body, 'name'),
+    ...(body.iconAssetId === undefined ? {} : { iconAssetId: requiredString(body, 'iconAssetId') }),
+    sortOrder: requiredNonNegativeInteger(body, 'sortOrder'),
+    ...(body.serviceFeeBps === undefined ? {} : { serviceFeeBps: requiredBps(body, 'serviceFeeBps') }),
+    ...(body.status === undefined ? {} : { status: taxonomyStatus(body.status) }),
+    idempotencyKey: requiredString(body, 'idempotencyKey'),
+  };
+}
+
+function tagInput(body: Record<string, unknown>) {
+  assertOnlyKeys(body, ['name', 'example', 'sortOrder', 'status', 'idempotencyKey']);
+  return {
+    name: requiredString(body, 'name'),
+    ...(body.example === undefined ? {} : { example: requiredString(body, 'example') }),
+    sortOrder: requiredNonNegativeInteger(body, 'sortOrder'),
+    ...(body.status === undefined ? {} : { status: taxonomyStatus(body.status) }),
+    idempotencyKey: requiredString(body, 'idempotencyKey'),
+  };
+}
+
 function requiredStringArray(body: Record<string, unknown>, name: string) {
   const value = body[name];
   if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
@@ -1362,6 +1901,22 @@ function requiredPositiveInteger(body: Record<string, unknown>, name: string) {
   const value = body[name];
   if (!Number.isSafeInteger(value) || Number(value) <= 0) {
     throw new CoreError('InvalidRequest', `${name} must be a positive integer`);
+  }
+  return Number(value);
+}
+
+function requiredNonNegativeInteger(body: Record<string, unknown>, name: string) {
+  const value = body[name];
+  if (!Number.isSafeInteger(value) || Number(value) < 0) {
+    throw new CoreError('InvalidRequest', `${name} must be a non-negative integer`);
+  }
+  return Number(value);
+}
+
+function requiredBps(body: Record<string, unknown>, name: string) {
+  const value = body[name];
+  if (!Number.isInteger(value) || Number(value) < 0 || Number(value) > 10_000) {
+    throw new CoreError('InvalidRequest', `${name} must be between 0 and 10000`);
   }
   return Number(value);
 }
@@ -1398,6 +1953,52 @@ function requestInput(body: Record<string, unknown>) {
   };
 }
 
+function evidenceAction(value: unknown): EvidenceAction {
+  if (![
+    'REQUEST_EXCHANGE',
+    'REQUEST_DELAY',
+    'CONFIRM_RECEIPT',
+    'OPEN_ARBITRATION',
+    'VERIFY_PICKUP',
+    'REQUEST_FORCED_RECEIPT',
+  ].includes(String(value))) throw new CoreError('InvalidRequest', 'Unsupported evidence action');
+  return value as EvidenceAction;
+}
+
+function evidenceCarrier(value: unknown): Carrier {
+  if (!['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS'].includes(String(value))) {
+    throw new CoreError('InvalidRequest', 'Unsupported carrier code');
+  }
+  return value as Carrier;
+}
+
+function mediaPurpose(value: unknown): MediaPurpose {
+  if (![
+    'PRODUCT_IMAGE',
+    'PRODUCT_VIDEO',
+    'CATEGORY_ICON',
+    'STORE_IMAGE',
+    'FULFILLMENT_EVIDENCE',
+  ].includes(String(value))) {
+    throw new CoreError('InvalidRequest', 'Unsupported media purpose');
+  }
+  return value as MediaPurpose;
+}
+
+function mediaResourceType(value: unknown): MediaResourceType {
+  if (!['PRODUCT', 'CATEGORY', 'STORE', 'ORDER'].includes(String(value))) {
+    throw new CoreError('InvalidRequest', 'Unsupported media resource type');
+  }
+  return value as MediaResourceType;
+}
+
+function mediaContentType(value: unknown): 'image/jpeg' | 'image/png' | 'image/webp' | 'video/mp4' | 'application/pdf' {
+  if (!['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'application/pdf'].includes(String(value))) {
+    throw new CoreError('InvalidRequest', 'Unsupported media content type');
+  }
+  return value as 'image/jpeg' | 'image/png' | 'image/webp' | 'video/mp4' | 'application/pdf';
+}
+
 function arbitrationOutcome(value: unknown): 'FULFILL' | 'RESUME_FULFILLMENT' {
   if (value !== 'FULFILL' && value !== 'RESUME_FULFILLMENT') {
     throw new CoreError('InvalidRequest', 'outcome must be FULFILL or RESUME_FULFILLMENT');
@@ -1419,6 +2020,27 @@ function fulfillmentMode(value: unknown): 'DELIVERY' | 'PICKUP' {
   return value;
 }
 
+function fulfillmentModes(value: unknown): Array<'DELIVERY' | 'PICKUP'> {
+  if (!Array.isArray(value) || value.length === 0 || value.some((item) => item !== 'DELIVERY' && item !== 'PICKUP')) {
+    throw new CoreError('InvalidRequest', 'fulfillmentModes must contain DELIVERY or PICKUP');
+  }
+  return value as Array<'DELIVERY' | 'PICKUP'>;
+}
+
+function taxonomyStatus(value: unknown): 'ENABLED' | 'DISABLED' | 'DELETED' {
+  if (!['ENABLED', 'DISABLED', 'DELETED'].includes(String(value))) {
+    throw new CoreError('InvalidRequest', 'Unsupported taxonomy status');
+  }
+  return value as 'ENABLED' | 'DISABLED' | 'DELETED';
+}
+
+function catalogReviewDecision(value: unknown): 'APPROVE' | 'REJECT' | 'PUBLISH' | 'HIDE' | 'DELIST' {
+  if (!['APPROVE', 'REJECT', 'PUBLISH', 'HIDE', 'DELIST'].includes(String(value))) {
+    throw new CoreError('InvalidRequest', 'Unsupported catalog review decision');
+  }
+  return value as 'APPROVE' | 'REJECT' | 'PUBLISH' | 'HIDE' | 'DELIST';
+}
+
 function settlementRail(value: unknown): SettlementRail {
   if (!settlementRails.includes(value as SettlementRail)) {
     throw new CoreError('InvalidRequest', 'Unsupported settlement rail');
@@ -1437,6 +2059,14 @@ function pathParameter(pathname: string, prefix: string) {
   if (!pathname.startsWith(prefix)) return undefined;
   const value = pathname.slice(prefix.length);
   if (!value || value.includes('/')) return undefined;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new CoreError('InvalidRequest', 'Invalid URL path');
+  }
+}
+
+function decodedPathPart(value: string) {
   try {
     return decodeURIComponent(value);
   } catch {
@@ -1540,7 +2170,7 @@ function auditStream(value: string | null): NonNullable<AuditQuery['streamName']
 
 function runtimeMetricKind(path: string): 'PAYMENT' | 'FULFILLMENT' | undefined {
   if (/^\/v2\/(?:payments|seckill)/.test(path)) return 'PAYMENT';
-  if (/^\/v2\/(?:orders|fulfillment-targets|stores)/.test(path)) return 'FULFILLMENT';
+  if (/^\/v2\/(?:orders|fulfillment-targets|stores|media)/.test(path)) return 'FULFILLMENT';
   return undefined;
 }
 
@@ -1569,6 +2199,23 @@ function fulfillmentActor(claims: { sub: string; roles: readonly UserRole[]; mer
     roles: claims.roles,
     ...(claims.merchantId ? { merchantId: claims.merchantId } : {}),
   };
+}
+
+function merchantCatalogActor(claims: { sub: string; roles: readonly UserRole[]; merchantId?: string }): FulfillmentActor {
+  if (!claims.roles.includes('MERCHANT') || !claims.merchantId) {
+    throw new CoreError('Forbidden', 'Merchant catalog scope is unavailable', 403);
+  }
+  return { walletAddress: claims.sub, roles: ['MERCHANT'], merchantId: claims.merchantId };
+}
+
+function platformCatalogActor(claims: { sub: string; roles: readonly UserRole[] }): FulfillmentActor {
+  const role = claims.roles.includes('ADMIN')
+    ? 'ADMIN'
+    : claims.roles.includes('OPERATOR')
+      ? 'OPERATOR'
+      : claims.roles.includes('AUDITOR') ? 'AUDITOR' : undefined;
+  if (!role) throw new CoreError('Forbidden', 'Platform catalog scope is unavailable', 403);
+  return { walletAddress: claims.sub, roles: [role] };
 }
 
 function sendJson(response: ServerResponse, status: number, body: unknown, correlationId: string) {

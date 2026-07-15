@@ -62,6 +62,8 @@ import { HttpSystemConfigSafeApprover } from './chain/system-config-governance.t
 import { HttpTakeoverFundingSafeApprover } from './chain/takeover-funding-governance.ts';
 import { PostgresNonceStore, RedisNonceRateLimiter } from './data/auth-store.ts';
 import { CatalogPaymentService } from './data/catalog-payment-service.ts';
+import { CatalogManagementService } from './data/catalog-management-service.ts';
+import { EvidenceService, HttpMediaStorageAdapter } from './data/evidence-service.ts';
 import { FulfillmentService } from './data/fulfillment-service.ts';
 import { FulfillmentTargetService } from './data/fulfillment-target-service.ts';
 import { GuaranteeDepositService } from './data/guarantee-deposit-service.ts';
@@ -130,9 +132,20 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     }),
     paymentRouterAddress: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),
   });
+  const catalogManagementService = new CatalogManagementService({ transactions, signer });
   const indexerStore = new PostgresIndexerStore(transactions);
   const seckillService = new SeckillService({ transactions });
   const fulfillmentService = new FulfillmentService({ transactions });
+  const uploadLimits = mediaUploadLimits(env);
+  const evidenceService = new EvidenceService({
+    transactions,
+    ...(env.TRACKING_HASH_KEY ? { trackingHashKey: env.TRACKING_HASH_KEY } : {}),
+    ...(uploadLimits ? { uploadLimits } : {}),
+    storage: new HttpMediaStorageAdapter({
+      ...(env.MEDIA_STORAGE_SIGNER_URL ? { url: env.MEDIA_STORAGE_SIGNER_URL } : {}),
+      ...(env.MEDIA_STORAGE_SIGNER_TOKEN ? { token: env.MEDIA_STORAGE_SIGNER_TOKEN } : {}),
+    }),
+  });
   const settlementService = new SettlementService({
     transactions,
     contractWalletVerifier: walletSignatureVerifier,
@@ -430,9 +443,11 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     getOrderProjection: (orderId) => getOrderProjection(database, orderId),
     getPausedScopes: () => getPausedScopes(database),
     paymentService,
+    catalogManagementService,
     seckillService,
     fulfillmentService,
     fulfillmentTargetService,
+    evidenceService,
     settlementService,
     policyService,
     cmsService,
@@ -591,6 +606,21 @@ function sqlExecutor(pool: ReturnType<typeof createPostgresPool>): SqlExecutor {
       return { rows: result.rows as Row[] };
     },
   };
+}
+
+function mediaUploadLimits(env: Readonly<Record<string, string | undefined>>) {
+  const intents = env.MEDIA_UPLOAD_MAX_INTENTS_PER_WALLET_HOUR;
+  const bytes = env.MEDIA_UPLOAD_MAX_BYTES_PER_WALLET_HOUR;
+  if (!intents || !bytes) return undefined;
+  if (!/^\d+$/.test(intents) || !/^\d+$/.test(bytes)) {
+    throw new CoreError('InvalidRequest', 'Media upload quotas must be positive integers', 500);
+  }
+  const maxIntentsPerWalletHour = Number(intents);
+  const maxBytesPerWalletHour = BigInt(bytes);
+  if (!Number.isSafeInteger(maxIntentsPerWalletHour) || maxIntentsPerWalletHour < 1 || maxBytesPerWalletHour < 1n) {
+    throw new CoreError('InvalidRequest', 'Media upload quotas must be positive integers', 500);
+  }
+  return { maxIntentsPerWalletHour, maxBytesPerWalletHour };
 }
 
 function required<Value>(value: Value | undefined, name: string): Value {

@@ -2,7 +2,7 @@ import { recoverAddress } from 'ethers';
 import { CoreError } from '../api/errors.ts';
 
 export interface SignerRequest {
-  purpose: 'ORDER_QUOTE' | 'FINALITY' | 'SENSITIVE_ACTION';
+  purpose: 'ORDER_QUOTE' | 'PRODUCT_CONCESSION_PREVIEW' | 'FINALITY' | 'SENSITIVE_ACTION';
   digest: string;
   resourceId: string;
   policyVersion: number;

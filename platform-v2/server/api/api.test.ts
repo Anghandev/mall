@@ -17,6 +17,7 @@ import {
   type StoredNonce,
 } from './auth.ts';
 import { createApiServer } from './app.ts';
+import { concessionPreviewAuthorization } from './catalog-signing.ts';
 import {
   buildDualPaymentQuote,
   buildPaymentIntent,
@@ -320,6 +321,31 @@ test('settlement EIP-712 intent and Safe MultiSend bind wallet, items, nonce and
     () => assertSafeSettlementBatch({ ...batch, totalAmount: '46' }),
     /totalAmount/,
   );
+});
+
+test('catalog concession authorization binds preview identity, product, policy and expiry', () => {
+  const authorization = concessionPreviewAuthorization({
+    previewHash: HASH,
+    previewId: HASH_2,
+    productId: 'product-1',
+    policyVersion: 3,
+    expiresAt: 1_800_000_000,
+  });
+  assert.equal(authorization.message.previewId, HASH_2);
+  assert.notEqual(authorization.digest, concessionPreviewAuthorization({
+    previewHash: HASH,
+    previewId: ORDER_ID,
+    productId: 'product-1',
+    policyVersion: 3,
+    expiresAt: 1_800_000_000,
+  }).digest);
+  assert.notEqual(authorization.digest, concessionPreviewAuthorization({
+    previewHash: HASH,
+    previewId: HASH_2,
+    productId: 'product-2',
+    policyVersion: 3,
+    expiresAt: 1_800_000_000,
+  }).digest);
 });
 
 test('Core quote math conserves both assets and dual quote keeps independent reservations', () => {
@@ -830,6 +856,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
   };
   const runtimeReadiness = paymentRuntimeReadiness(now, false);
   const fulfillmentCalls: Array<{ operation: string; wallet: string; orderId: string; input?: unknown }> = [];
+  const evidenceCalls: Array<{ operation: string; wallet: string; input: unknown }> = [];
   let notificationEndpointCorrelationId: string | undefined;
   let monitoringCorrelationId: string | undefined;
   const server = createApiServer({
@@ -874,6 +901,31 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       }),
       submitPayment: async (buyerWallet, input) => ({ ...input, buyerWallet, state: 'SUBMITTED' }),
       getPayment: async (buyerWallet, orderId) => ({ orderId, buyerWallet, state: 'SUBMITTED' }),
+    },
+    catalogManagementService: {
+      listCategories: async (includeInactive) => [{ categoryId: 'category-1', includeInactive }],
+      listTags: async (includeInactive) => [{ tagId: 'tag-1', includeInactive }],
+      upsertCategory: async (actor, input) => ({ actor: actor.walletAddress, categoryId: 'category-1', ...input }),
+      upsertTag: async (actor, input) => ({ actor: actor.walletAddress, tagId: 'tag-1', ...input }),
+      getProductSlot: async (actor, storeId, merchantId) => ({ actor: actor.walletAddress, storeId, merchantId, product: null }),
+      saveProductSlot: async (actor, storeId, input, merchantId) => ({
+        actor: actor.walletAddress,
+        storeId,
+        merchantId,
+        productId: 'product-managed-1',
+        ...input,
+      }),
+      createConcessionPreview: async (actor, productId, input) => ({
+        actor: actor.walletAddress,
+        productId,
+        previewId: HASH,
+        ...input,
+      }),
+      submitReview: async (actor, productId, input) => ({ actor: actor.walletAddress, productId, state: 'REVIEW', ...input }),
+      decideReview: async (actor, productId, input) => ({ actor: actor.walletAddress, productId, ...input }),
+      delistProduct: async (actor, productId, input) => ({ actor: actor.walletAddress, productId, state: 'DELISTED', ...input }),
+      adjustInventory: async (actor, skuId, input) => ({ actor: actor.walletAddress, skuId, ...input }),
+      listAdminProducts: async (actor) => [{ actor: actor.walletAddress, productId: 'product-managed-1' }],
     },
     seckillService: {
       current: async () => ({ sessionId: SESSION_ID, phase: 'LIVE' }),
@@ -933,6 +985,51 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       createStore: async (actor) => ({ storeId: 'store-1', merchantId: actor.merchantId }),
       listStores: async () => [{ storeId: 'store-1', regionCode: '110101' }],
       getOrderTarget: async (actor, orderId) => ({ orderId, buyerWallet: actor.walletAddress }),
+    },
+    evidenceService: {
+      createActionEvidence: async (actor, input) => {
+        evidenceCalls.push({ operation: 'ACTION', wallet: actor.walletAddress, input });
+        return { artifactVersion: CORE_ARTIFACT_VERSION, evidenceHash: HASH, ...input };
+      },
+      createTrackingEvidence: async (actor, input) => {
+        evidenceCalls.push({ operation: 'TRACKING', wallet: actor.walletAddress, input });
+        return { artifactVersion: CORE_ARTIFACT_VERSION, evidenceHash: HASH_2, ...input };
+      },
+      assertActionEvidence: async (actor, input) => {
+        evidenceCalls.push({ operation: 'ASSERT_ACTION', wallet: actor.walletAddress, input });
+        return input;
+      },
+      assertTrackingEvidence: async (actor, input) => {
+        evidenceCalls.push({ operation: 'ASSERT_TRACKING', wallet: actor.walletAddress, input });
+        return input;
+      },
+      createUploadIntent: async (actor, input) => {
+        evidenceCalls.push({ operation: 'UPLOAD_INTENT', wallet: actor.walletAddress, input });
+        return {
+          artifactVersion: CORE_ARTIFACT_VERSION,
+          uploadIntentId: HASH,
+          method: 'PUT',
+          uploadUrl: 'https://uploads.example.invalid/signed-object',
+          headers: { 'if-none-match': '*' },
+          writeOnce: true,
+          state: 'UPLOADED',
+        };
+      },
+      completeUpload: async (actor, uploadIntentId) => {
+        evidenceCalls.push({ operation: 'UPLOAD_COMPLETE', wallet: actor.walletAddress, input: { uploadIntentId } });
+        return { artifactVersion: CORE_ARTIFACT_VERSION, uploadIntentId, assetId: HASH_2 };
+      },
+      createReadAccess: async (actor, assetId) => {
+        evidenceCalls.push({ operation: 'MEDIA_READ', wallet: actor?.walletAddress ?? 'PUBLIC', input: { assetId } });
+        return {
+          artifactVersion: CORE_ARTIFACT_VERSION,
+          assetId,
+          method: 'GET',
+          readUrl: 'https://media.example.invalid/signed-object',
+          expiresAt: new Date(now.getTime() + 300_000).toISOString(),
+          accessScope: actor ? 'AUTHENTICATED' : 'PUBLIC',
+        };
+      },
     },
     settlementService: {
       createIntent: async (actor, input) => ({
@@ -1018,6 +1115,8 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     assert.ok(bootstrap.headers.get('x-correlation-id'));
     const catalog = await fetch(`${base}/v2/catalog/products`);
     assert.equal(catalog.status, 200);
+    assert.equal((await fetch(`${base}/v2/catalog/categories`)).status, 200);
+    assert.equal((await fetch(`${base}/v2/catalog/tags`)).status, 200);
     const seckillCurrent = await fetch(`${base}/v2/seckill/sessions/current`);
     assert.equal(seckillCurrent.status, 200);
     assert.equal(((await seckillCurrent.json()) as { sessionId: string }).sessionId, SESSION_ID);
@@ -1083,6 +1182,65 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     assert.equal((await fetch(`${base}/v2/admin/policy-drafts`, {
       headers: { authorization: `Bearer ${buyerOnlyToken}` },
     })).status, 403);
+    assert.equal((await fetch(`${base}/v2/merchant/stores/store-1/product-slot`, {
+      headers: { authorization: `Bearer ${buyerOnlyToken}` },
+    })).status, 403);
+    assert.equal((await fetch(`${base}/v2/admin/catalog/categories`, {
+      headers: { authorization: `Bearer ${buyerOnlyToken}` },
+    })).status, 403);
+
+    const productSlotBody = {
+      idempotencyKey: 'http-product-slot-save-1',
+      title: '24K Product',
+      subtitle: 'Catalog draft',
+      mainImageAssetIds: [],
+      richDetail: { blocks: [] },
+      defaultFreightUsdt: '0',
+      merchantConcessionBps: 2500,
+      fulfillmentModes: ['DELIVERY', 'PICKUP'],
+      categoryId: 'category-1',
+      tagIds: ['tag-1'],
+      skus: [{
+        attributes: { size: 'standard' },
+        listPriceUsdt: '100',
+        merchantBaseReceivableUsdt: '60',
+        stockTotal: 10,
+        proposedSeckillInventory: 3,
+      }],
+    };
+    assert.equal((await fetch(`${base}/v2/merchant/stores/store-1/product-slot`, {
+      headers: bearerHeaders,
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/merchant/stores/store-1/product-slot`, {
+      method: 'PUT',
+      headers: bearerHeaders,
+      body: JSON.stringify(productSlotBody),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/merchant/products/product-managed-1/concession-previews`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ merchantConcessionBps: 2500, idempotencyKey: 'http-preview-1' }),
+    })).status, 201);
+    assert.equal((await fetch(`${base}/v2/merchant/products/product-managed-1/concession-previews`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ merchantConcessionBps: 10001, idempotencyKey: 'http-preview-invalid-1' }),
+    })).status, 400);
+    assert.equal((await fetch(`${base}/v2/admin/catalog/categories`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ name: 'Gold', sortOrder: 1, idempotencyKey: 'http-category-create-1' }),
+    })).status, 201);
+    assert.equal((await fetch(`${base}/v2/admin/catalog/products/product-managed-1/review-decisions`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ decision: 'APPROVE', reasonCode: 'APPROVED', idempotencyKey: 'http-review-1' }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/catalog/skus/sku-1/inventory-adjustments`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ delta: '2', reasonCode: 'RESTOCK', idempotencyKey: 'http-stock-1' }),
+    })).status, 201);
     const postOrderAction = (action: string, body: Record<string, unknown>) => fetch(
       `${base}/v2/orders/order-1/${action}`,
       {
@@ -1091,6 +1249,51 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
         body: JSON.stringify(body),
       },
     );
+
+    assert.equal((await fetch(`${base}/v2/media/upload-intents`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    })).status, 401);
+    assert.equal((await fetch(`${base}/v2/media/upload-intents`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        purpose: 'FULFILLMENT_EVIDENCE',
+        resourceType: 'ORDER',
+        resourceId: 'order-1',
+        contentType: 'image/webp',
+        sizeBytes: 512,
+        contentSha256: HASH,
+        idempotencyKey: 'http-media-upload-1',
+      }),
+    })).status, 201);
+    assert.equal((await fetch(`${base}/v2/media/upload-intents/${HASH}/complete`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: '{}',
+    })).status, 200);
+    const publicMedia = await fetch(`${base}/v2/media/assets/${HASH_2}/access`);
+    assert.equal(publicMedia.status, 200);
+    assert.equal(((await publicMedia.json()) as { accessScope: string }).accessScope, 'PUBLIC');
+    assert.equal((await postOrderAction('evidence', {
+      action: 'REQUEST_EXCHANGE',
+      reasonCode: 'DAMAGED_PACKAGE',
+      mediaAssetIds: [HASH_2],
+      idempotencyKey: 'http-action-evidence-1',
+    })).status, 201);
+    assert.equal((await postOrderAction('tracking-evidence', {
+      carrierCode: 'SF',
+      trackingNumber: 'SF123456',
+      idempotencyKey: 'http-tracking-evidence-1',
+    })).status, 201);
+    assert.deepEqual(evidenceCalls.map((call) => call.operation), [
+      'UPLOAD_INTENT',
+      'UPLOAD_COMPLETE',
+      'MEDIA_READ',
+      'ACTION',
+      'TRACKING',
+    ]);
 
     const unauthorized = await fetch(`${base}/v2/actions/order`, { method: 'POST', body: '{}' });
     assert.equal(unauthorized.status, 401);
@@ -1483,6 +1686,18 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     });
     assert.equal(receipt.status, 200);
     assert.deepEqual(
+      evidenceCalls.filter((call) => call.operation.startsWith('ASSERT_')).map((call) => call.operation),
+      [
+        'ASSERT_ACTION',
+        'ASSERT_TRACKING',
+        'ASSERT_ACTION',
+        'ASSERT_ACTION',
+        'ASSERT_ACTION',
+        'ASSERT_ACTION',
+        'ASSERT_ACTION',
+      ],
+    );
+    assert.deepEqual(
       fulfillmentCalls.map(({ operation, wallet, orderId }) => ({ operation, wallet, orderId })),
       [
         { operation: 'LOGISTICS_UPDATE', wallet: SAFE, orderId: 'order-1' },
@@ -1777,6 +1992,7 @@ function completeEnvironment(): Record<string, string> {
     OPERATIONS_TRANSFER_CONFORMANCE_EVIDENCE_HASH: HASH_2,
     PLATFORM_SERVICE_FEE_BPS: '500',
     SECKILL_PRIZE_POOL_BPS: '1000',
+    MERCHANT_STORE_REWARD_BPS: '0',
     MERCHANT_CONCESSION_DESTINATIONS_JSON:
       '[{"account":"0x1111111111111111111111111111111111111111","weightBps":4000},{"account":"0x2222222222222222222222222222222222222222","weightBps":6000}]',
     CIRCULATION_REWARD_POOL_ADDRESS: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
