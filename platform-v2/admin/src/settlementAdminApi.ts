@@ -3,6 +3,7 @@ import {
   auditEvidenceProfiles,
   auditStreamNames,
   balanceStates,
+  breakerScopes,
   cmsContentFormats,
   cmsContentTypes,
   guaranteeStatuses,
@@ -21,6 +22,7 @@ import {
   settlementRequestStates,
   systemConfigKeys,
   takeoverStates,
+  type AdminBusinessDashboard,
   type AuditStreamName,
   type AuditListResponse,
   type CmsVersionCreateRequest,
@@ -67,6 +69,17 @@ export type AuditFilters = Readonly<{
   cursorEntryId?: string;
   limit?: number;
 }>;
+
+export async function fetchAdminBusinessDashboard(
+  token: string,
+  signal?: AbortSignal,
+): Promise<AdminBusinessDashboard> {
+  const body = await authenticatedGet('/v2/admin/dashboard', token, signal);
+  if (!isAdminBusinessDashboard(body)) {
+    throw invalid('Admin business dashboard does not match the coordinated generated type');
+  }
+  return body;
+}
 
 const auditFilterNames = [
   'streamName',
@@ -417,6 +430,70 @@ function isMonitoringDashboard(value: unknown): value is MonitoringDashboard {
       && typeof item.covered === 'boolean');
 }
 
+function isAdminBusinessDashboard(value: unknown): value is AdminBusinessDashboard {
+  if (
+    !isRecord(value)
+      || value.artifactVersion !== artifactVersion
+      || value.timezone !== 'Asia/Shanghai'
+      || !isBusinessDayWindow(value.window)
+      || !hasAmounts(value.orders, [
+        'finalizedToday', 'listPriceUsdt', 'buyerUsdtPaid', 'pendingShipment',
+        'shipped', 'delivered', 'fulfilled',
+      ])
+      || !isRecord(value.orders)
+      || !isBusinessRatio(value.orders.shipmentRate)
+      || !hasAmounts(value.merchants, ['total', 'newToday', 'pending', 'approved', 'suspended'])
+      || !hasAmounts(value.products, ['total', 'pendingReview', 'soldOut'])
+      || !hasAmounts(value.seckill, ['createdToday', 'active', 'settling'])
+      || !hasAmounts(value.fulfillmentQueues, ['exchange', 'delay', 'arbitration', 'forcedReceipt', 'takeover'])
+      || !hasAmounts(value.settlements, ['requestedCount', 'requestedUsdt', 'settledCount', 'settledUsdt', 'failedTransactions'])
+      || !Array.isArray(value.coverage)
+      || !value.coverage.every(isDashboardCoverage)
+      || !Array.isArray(value.breakers)
+      || value.breakers.length !== breakerScopes.length
+      || new Set(value.breakers.map((item) => isRecord(item) ? item.scope : null)).size !== breakerScopes.length
+      || !value.breakers.every((item) => isRecord(item)
+        && breakerScopes.includes(item.scope as never)
+        && typeof item.paused === 'boolean')
+      || !Array.isArray(value.unavailable)
+      || !value.unavailable.every((item) => isRecord(item)
+        && nonEmpty(item, ['metric', 'detail'])
+        && ['DecisionBlocked', 'ExternalBlocked'].includes(String(item.reasonCode)))
+  ) return false;
+  return true;
+}
+
+function isBusinessDayWindow(value: unknown) {
+  return isRecord(value)
+    && isDateTime(value.start)
+    && isDateTime(value.end)
+    && isDateTime(value.generatedAt)
+    && new Date(value.start).getTime() < new Date(value.end).getTime();
+}
+
+function isBusinessRatio(value: unknown) {
+  return isRecord(value)
+    && amountPattern.test(String(value.numerator))
+    && amountPattern.test(String(value.denominator))
+    && (value.bps === null || amountPattern.test(String(value.bps)));
+}
+
+function isDashboardCoverage(value: unknown) {
+  return isRecord(value)
+    && nonEmpty(value, ['snapshotId'])
+    && amountPattern.test(String(value.blockNumber))
+    && isDateTime(value.recordedAt)
+    && ['USDT', 'NPL'].includes(String(value.asset))
+    && addressPattern.test(String(value.safeAddress))
+    && amountPattern.test(String(value.verifiedAssets))
+    && amountPattern.test(String(value.unsettledLiabilities))
+    && typeof value.covered === 'boolean';
+}
+
+function hasAmounts(value: unknown, fields: readonly string[]) {
+  return isRecord(value) && fields.every((field) => amountPattern.test(String(value[field])));
+}
+
 function isNotificationInboxItem(value: unknown): value is NotificationInboxItem {
   return isRecord(value)
     && nonEmpty(value, ['messageId', 'sourceEventType', 'topic'])
@@ -452,7 +529,7 @@ function nonEmpty(value: Record<string, unknown>, fields: readonly string[]) {
   return fields.every((field) => typeof value[field] === 'string' && String(value[field]).length > 0);
 }
 
-function isDateTime(value: unknown) {
+function isDateTime(value: unknown): value is string {
   return typeof value === 'string' && Number.isFinite(Date.parse(value));
 }
 

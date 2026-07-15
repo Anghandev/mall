@@ -6,6 +6,7 @@ import {
   createNotificationCampaign,
   createPolicyDraft,
   createSystemConfigVersion,
+  fetchAdminBusinessDashboard,
   fetchAuditEntries,
   fetchMerchantFinance,
   fetchMonitoringDashboard,
@@ -19,6 +20,34 @@ import {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('settlement/admin coordinated Core client', () => {
+  it('consumes the authenticated Admin business dashboard without filling nullable ratios', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(adminBusinessDashboard()));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const dashboard = await fetchAdminBusinessDashboard('jwt');
+    expect(dashboard).toMatchObject({
+      artifactVersion,
+      timezone: 'Asia/Shanghai',
+      orders: { finalizedToday: '3', shipmentRate: { numerator: '0', denominator: '0', bps: null } },
+      settlements: { failedTransactions: '2' },
+    });
+    expect(dashboard.coverage[0]).toMatchObject({ covered: false });
+    expect(dashboard.breakers[0]).toEqual({ scope: 'NEW_PAYMENT', paused: true });
+    expect(dashboard.unavailable[0]).toMatchObject({ metric: 'NEW_UID_USERS', reasonCode: 'DecisionBlocked' });
+    expect(fetchMock).toHaveBeenCalledWith('/v2/admin/dashboard', {
+      headers: { authorization: 'Bearer jwt' },
+    });
+  });
+
+  it('rejects an Admin dashboard that omits an independent breaker scope', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      ...adminBusinessDashboard(),
+      breakers: [{ scope: 'NEW_PAYMENT', paused: false }],
+    })));
+
+    await expect(fetchAdminBusinessDashboard('jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
+  });
+
   it('rejects a settlement projection from a stale artifact', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       artifactVersion: '2.0.0-stale', wallet: address('1'), balances: [], points: [], requests: [],
@@ -164,6 +193,39 @@ describe('settlement/admin coordinated Core client', () => {
 function jsonResponse(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }); }
 function hash(digit: string) { return `0x${digit.repeat(64)}`; }
 function address(digit: string) { return `0x${digit.repeat(40)}`; }
+function adminBusinessDashboard() {
+  return {
+    artifactVersion,
+    timezone: 'Asia/Shanghai',
+    window: {
+      start: '2026-07-14T16:00:00.000Z',
+      end: '2026-07-15T16:00:00.000Z',
+      generatedAt: '2026-07-15T04:00:00.000Z',
+    },
+    orders: {
+      finalizedToday: '3', listPriceUsdt: '300000000', buyerUsdtPaid: '210000000',
+      pendingShipment: '4', shipped: '5', delivered: '6', fulfilled: '7',
+      shipmentRate: { numerator: '0', denominator: '0', bps: null },
+    },
+    merchants: { total: '8', newToday: '1', pending: '2', approved: '5', suspended: '1' },
+    products: { total: '9', pendingReview: '3', soldOut: '2' },
+    seckill: { createdToday: '1', active: '1', settling: '0' },
+    fulfillmentQueues: { exchange: '1', delay: '2', arbitration: '3', forcedReceipt: '4', takeover: '5' },
+    settlements: { requestedCount: '6', requestedUsdt: '600000000', settledCount: '4', settledUsdt: '400000000', failedTransactions: '2' },
+    coverage: [{ snapshotId: 'coverage-1', blockNumber: '123', recordedAt: '2026-07-15T04:00:00.000Z', asset: 'USDT', safeAddress: address('4'), verifiedAssets: '100', unsettledLiabilities: '101', covered: false }],
+    breakers: [
+      { scope: 'NEW_PAYMENT', paused: true },
+      { scope: 'SECKILL_PURCHASE', paused: false },
+      { scope: 'NEW_SETTLEMENT_BATCH', paused: true },
+    ],
+    unavailable: [
+      { metric: 'NEW_UID_USERS', reasonCode: 'DecisionBlocked', detail: 'Buyer UID identity is not frozen' },
+      { metric: 'LOW_STOCK_PRODUCTS', reasonCode: 'DecisionBlocked', detail: 'Low-stock threshold is not frozen' },
+      { metric: 'ABNORMAL_ORDERS', reasonCode: 'DecisionBlocked', detail: 'Abnormal-order rules are not frozen' },
+      { metric: 'BLACKLIST_BLOCKS', reasonCode: 'DecisionBlocked', detail: 'Transaction risk rules are not frozen' },
+    ],
+  };
+}
 function policyDraft() { return { draftId: 'draft-1', nextPolicyVersion: '2', basePolicyVersion: '1', artifactVersion, payload: {}, validationErrors: [], state: 'DRAFT', policyHash: null, operationsHash: null, publicationDigest: null, publicationNonce: null, publicationDeadline: null, secondarySigner: null, secondarySignatureHash: null, safeAddress: null, safeCalldataHash: null, safeTxHash: null, safeProposalHash: null, createdBy: address('1'), createdAt: '2026-07-15T00:00:00.000Z', updatedAt: '2026-07-15T00:00:00.000Z' }; }
 function cmsVersion() { return { entryId: 'entry-1', versionId: 'version-1', version: 1, slug: 'rules', contentType: 'SECKILL_RULES', placement: 'seckill', locale: 'zh-CN', contentFormat: 'STRUCTURED_RICH_TEXT', content: {}, contentHash: hash('4'), audience: {}, startsAt: null, endsAt: null, frequencyCap: null, policyVersion: '2', published: false, publicationType: null, createdBy: address('1'), createdAt: '2026-07-15T00:00:00.000Z' }; }
 function systemConfig() { return { configVersionId: 'config-1', configKey: 'RPC', version: 1, payload: {}, payloadHash: hash('5'), effectiveFrom: '2026-07-16T00:00:00.000Z', published: false, createdBy: address('1'), createdAt: '2026-07-15T00:00:00.000Z' }; }

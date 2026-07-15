@@ -210,3 +210,33 @@ wallet, Safe, RPC, domain and device evidence remains `ExternalBlocked` under
 - `ADM-GOAL-001` and `ADM-GOAL-002`: `.5` response shape, exact query
   serialization, role denial, nullable category parent and read-only batch
   preview have consumer tests. Production source and bundle contain no fixture.
+
+## Settlement/Admin `.6` Business Dashboard Evidence
+
+The current product pin is
+`@abu24k/core-artifacts@2.0.0-settlement-admin.6`. The authenticated Admin
+Dashboard consumes generated `AdminBusinessDashboard` without a local
+financial calculation or production fixture:
+
+- `ADM-DASH-001`: renders the exact `Asia/Shanghai` `[start,end)` window,
+  15-confirmation finalized-order cohort, immutable list-price GMV,
+  buyer-paid USDT, and nullable shipment-rate numerator/denominator/bps. New
+  UID identity remains `DecisionBlocked`, so the full row is not reported
+  complete.
+- `ADM-DASH-002`: renders pending merchant/product review and the current
+  exchange, delay, arbitration, forced-receipt and takeover queues. Low-stock
+  threshold remains `DecisionBlocked`, so the full row is not reported
+  complete.
+- `ADM-DASH-003` and `ADM-CLEAR-007`: renders signed-settlement request and
+  Safe-final totals, `failedTransactions`, per-asset verified Safe assets,
+  unsettled liabilities, coverage evidence and all three independent breaker
+  scopes. Abnormal-order and blacklist rules remain `DecisionBlocked`, so
+  monitoring alerts are not substituted and the full dashboard requirement is
+  not reported complete.
+- `ADM-DASH-004`: remains backed by the separate typed monitoring consumer;
+  the business Dashboard does not duplicate or reinterpret infrastructure
+  probes as transaction-risk events.
+
+All unavailable entries preserve Core `DecisionBlocked` / `ExternalBlocked`
+reason codes and details. An empty coverage projection is never shown as zero
+or healthy. All fixtures remain under `tests/**`.
