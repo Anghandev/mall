@@ -1063,6 +1063,9 @@ function seckillSession() {
     lastBuyerWallet: '0x1111111111111111111111111111111111111111',
     winnerWallet: null,
     snapshot: {},
+    governanceActionId: hash('1'),
+    rulesContentHash: hash('2'),
+    publicationTxHash: hash('3'),
     allowedActions: [],
   };
 }

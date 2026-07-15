@@ -2,6 +2,7 @@ import type { RealtimeEventEnvelope, SeckillSessionHistoryPage, SeckillSessionPr
 import { AlertTriangle, Ban, CheckCircle2, History, Radio, RefreshCw, ShieldCheck, TimerReset } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { CoreApiError } from '../coreApi';
+import { SeckillGovernanceWorkspace } from '../components/SeckillGovernanceWorkspace';
 import {
   fetchCurrentSeckillSession,
   fetchSeckillSessionEvents,
@@ -87,6 +88,8 @@ export function SeckillPage() {
         {current ? <SessionDetail session={current} /> : null}
       </section>
 
+      <SeckillGovernanceWorkspace current={current} onRefresh={() => setReload((value) => value + 1)} />
+
       <section className="workspace-grid">
         <article className="panel admin-resource-panel">
           <div className="panel-heading"><div><p className="section-kicker">HTTP replay → /v2/ws</p><h2>最终接力事件</h2></div><span className={streamState === 'LIVE' ? 'status-chip status-ready' : 'status-chip status-blocked'}><Radio aria-hidden="true" />{streamState}</span></div>
@@ -94,9 +97,9 @@ export function SeckillPage() {
           {events.length ? <div className="table-scroll"><table className="data-table seckill-event-table"><thead><tr><th>Cursor / Event</th><th>Finality</th><th>Session</th><th>发生时间</th></tr></thead><tbody>{[...events].reverse().map((event) => <tr key={event.eventId}><td><strong>{event.cursor}</strong><small>{event.eventId}</small></td><td><span className="status-chip status-ready"><CheckCircle2 aria-hidden="true" />{event.finality}</span></td><td><code>{event.resourceId}</code></td><td>{event.occurredAt}</td></tr>)}</tbody></table></div> : <p className="muted-copy">尚无 15-confirmation 接力事件；空列表不表示链路健康。</p>}
         </article>
         <aside className="panel evidence-panel">
-          <p className="section-kicker">Admin write boundary</p><h2>控盘写入仍阻断</h2>
-          <ul className="check-list"><li><ShieldCheck aria-hidden="true" /> 场次和计时参数来自 policy snapshot</li><li><ShieldCheck aria-hidden="true" /> 接力只接受链上最终购买事件</li><li><ShieldCheck aria-hidden="true" /> allowedActions 仅作 Core 证据</li></ul>
-          <p className="muted-copy">新建/发布、库存锁定、强截止、独立 breaker 和奖池注入尚无 Admin 写接口，不渲染伪操作。</p>
+          <p className="section-kicker">Immutable timing boundary</p><h2>计时与终局证据</h2>
+          <ul className="check-list"><li><ShieldCheck aria-hidden="true" /> 3600s / 60s / +30s / cap 60s 只读</li><li><ShieldCheck aria-hidden="true" /> 接力只接受链上最终购买事件</li><li><ShieldCheck aria-hidden="true" /> `FINAL` 仅由 Core 15-confirmation 投影提供</li></ul>
+          <p className="muted-copy">REORGED / FAILED 不改写本地终态；历史场次和进行中快照不随新 policyVersion 重算。</p>
         </aside>
       </section>
 
@@ -105,7 +108,6 @@ export function SeckillPage() {
         {history.items.length ? <div className="table-scroll"><table className="data-table seckill-history-table"><thead><tr><th>场次 / 商品</th><th>阶段</th><th>库存</th><th>奖池 · USDT atomic</th><th>时间边界</th></tr></thead><tbody>{history.items.map((session) => <tr key={session.sessionId}><td><strong>{session.product.title}</strong><code>{session.sessionId}</code></td><td>{session.phase}<small>stored {session.storedPhase}</small></td><td>{session.inventory.sold} / {session.inventory.total}<small>available {session.inventory.available}</small></td><td>{session.prizePoolUsdt}</td><td>{session.startsAt}<small>{session.mainDeadline}</small></td></tr>)}</tbody></table></div> : <p className="muted-copy">Core 返回真实空历史列表。</p>}
       </section>
 
-      <section className="blocked-callout" aria-labelledby="seckill-write-gap"><AlertTriangle aria-hidden="true" /><div><strong id="seckill-write-gap">GAP-ADM-004 / 009 / 017</strong><p>只读会话、历史、HTTP replay 与 WebSocket 已发布；治理写入仍需精确 RBAC、二次签名、Safe、账本和 indexed event 接口。</p></div><span>写入 fail-closed</span></section>
     </>
   );
 }

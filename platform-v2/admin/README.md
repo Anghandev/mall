@@ -5,7 +5,7 @@ implements shared funds, contracts, API, Schema or signer behavior.
 
 ## Current Product Boundary
 
-- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.8`.
+- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.9`.
 - SIWE/JWT stays in memory. Every protected read and write is role-bound by
   Core and preserves typed `DecisionBlocked`, `ExternalBlocked`,
   `ConfigurationRequired` and correlation evidence.
@@ -26,9 +26,11 @@ implements shared funds, contracts, API, Schema or signer behavior.
   and read-only batch enabled-intersection preview. OR, fuzzy wallet, UID/phone,
   Yellow queue, exports, printing and arbitrary batch writes remain fail-closed.
 - Seckill control consumes current/history session snapshots, numeric-cursor
-  HTTP replay and the artifact-bound `/v2/ws` finalized relay stream. Scheduling,
-  force-close, breaker and prize-injection writes remain fail-closed because no
-  coordinated Admin write operation is published.
+  HTTP replay, the artifact-bound `/v2/ws` finalized relay stream, action
+  list/detail, session inventory locking, force-close, prize injection and
+  breaker recovery. Every governed action uses Core-issued EIP-712 typed data,
+  an independent secondary wallet and a Safe proposal; `FINAL` is rendered
+  only from 15-confirmation Core evidence.
 - Policy and takeover funding use Core-issued typed data. The wallet signs the
   exact typed payload; the frontend does not construct calldata, calculate
   funds or set final states.
@@ -41,8 +43,8 @@ implements shared funds, contracts, API, Schema or signer behavior.
   low-stock thresholds, low-history wallet clustering and frequent
   address/store-change thresholds remain explicit fail-closed capabilities;
   monitoring alerts are never relabeled as transaction-risk events. Global
-  batch actions, seckill administration, logistics configuration and production
-  provider accounts remain fail-closed as
+  batch actions, logistics configuration and production provider accounts
+  remain fail-closed as
   recorded in `docs/contracts/UPSTREAM_GAPS.md`. Catalog writes consume `.5`
   runtime RBAC, `allowedActions`, `writeLock` and `blockingResource`; AUDITOR
   is read-only. Existing child categories move to root only through an explicit

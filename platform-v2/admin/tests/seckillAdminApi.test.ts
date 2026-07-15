@@ -1,11 +1,21 @@
-import { artifactVersion } from '@abu24k/core-artifacts';
+import { artifactVersion, type SeckillGovernanceActionProjection, type SeckillSessionPlanProjection } from '@abu24k/core-artifacts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  cancelSeckillGovernanceAction,
+  createSeckillBreakerResume,
+  createSeckillForceClose,
+  createSeckillGovernanceChallenge,
+  createSeckillPrizeInjection,
+  createSeckillSessionDraft,
   fetchCurrentSeckillSession,
+  fetchSeckillGovernanceAction,
+  fetchSeckillGovernanceActions,
   fetchSeckillSessionEvents,
   fetchSeckillSessionHistory,
   parseRealtimeEvent,
+  proposeSeckillGovernanceAction,
   seckillWebSocketUrl,
+  submitSeckillGovernanceApproval,
   subscribeSeckillEvents,
 } from '../src/seckillAdminApi';
 
@@ -64,12 +74,138 @@ describe('seckill admin coordinated Core client', () => {
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: 'InvalidResponse' }));
     expect(socket.closedWith).toEqual([4403, 'Protocol violation']);
   });
+
+  it('strictly reads governance action list and detail with bearer authorization', async () => {
+    const action = governanceAction();
+    const fetchMock = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => String(input).endsWith('/actions')
+      ? jsonResponse([action]) : jsonResponse(action));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(fetchSeckillGovernanceActions('jwt')).resolves.toMatchObject([{ actionKind: 'OPEN_SESSION', state: 'DRAFT' }]);
+    await expect(fetchSeckillGovernanceAction(action.actionId, 'jwt')).resolves.toMatchObject({ actionId: action.actionId });
+    for (const [, init] of fetchMock.mock.calls) expect(init?.headers).toEqual({ authorization: 'Bearer jwt' });
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ ...action, unexpected: true })));
+    await expect(fetchSeckillGovernanceAction(action.actionId, 'jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
+  });
+
+  it('creates every published seckill draft operation with exact bodies', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/sessions')) return jsonResponse(governanceAction(), 201);
+      if (url.endsWith('/force-close')) return jsonResponse(governanceAction({ actionKind: 'FORCE_CLOSE', sessionPlan: null }), 201);
+      if (url.endsWith('/prize-injections')) return jsonResponse(governanceAction({ actionKind: 'PRIZE_INJECTION', sessionPlan: null, prizeInjection: prizeInjection() }), 201);
+      return jsonResponse(governanceAction({ actionKind: 'RESUME_PURCHASES', sessionPlan: null }), 201);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const sessionId = hash('b');
+
+    await createSeckillSessionDraft({ policyVersion: '2', rulesContentHash: hash('2'), productId: 'product-1', skuId: 'sku-1', inventory: 4, seckillListPriceUsdt: '80', startsAt: '2026-07-18T01:00:00.000Z', idempotencyKey: 'seckill-session-1' }, 'jwt');
+    await createSeckillForceClose(sessionId, { reasonCode: 'OPERATIONS_STOP', idempotencyKey: 'seckill-close-1' }, 'jwt');
+    await createSeckillPrizeInjection(sessionId, { amountUsdt: '50', idempotencyKey: 'seckill-prize-1' }, 'jwt');
+    await createSeckillBreakerResume({ sessionId, idempotencyKey: 'seckill-resume-1' }, 'jwt');
+
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      '/v2/admin/seckill/sessions',
+      `/v2/admin/seckill/sessions/${sessionId}/force-close`,
+      `/v2/admin/seckill/sessions/${sessionId}/prize-injections`,
+      '/v2/admin/seckill/breaker/resume',
+    ]);
+    expect(fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
+      { policyVersion: '2', rulesContentHash: hash('2'), productId: 'product-1', skuId: 'sku-1', inventory: 4, seckillListPriceUsdt: '80', startsAt: '2026-07-18T01:00:00.000Z', idempotencyKey: 'seckill-session-1' },
+      { reasonCode: 'OPERATIONS_STOP', idempotencyKey: 'seckill-close-1' },
+      { amountUsdt: '50', idempotencyKey: 'seckill-prize-1' },
+      { sessionId, idempotencyKey: 'seckill-resume-1' },
+    ]);
+  });
+
+  it('binds secondary-wallet EIP-712 approval, Safe proposal and cancellation to one action', async () => {
+    const action = governanceAction();
+    const input = { nonce: '7', deadline: '1800000000' };
+    const challenge = governanceChallenge(action, input.nonce, input.deadline);
+    const signed = governanceAction({ state: 'SECONDARY_SIGNED', secondarySigner: challenge.signer, approvalNonce: input.nonce, approvalDeadline: new Date(Number(input.deadline) * 1_000).toISOString(), allowedActions: ['PROPOSE_SAFE', 'CANCEL'] });
+    const proposed = governanceAction({ ...signed, state: 'PENDING_PROPOSAL', allowedActions: [] });
+    const cancelled = governanceAction({ state: 'CANCELLED', allowedActions: [], sessionPlan: { ...sessionPlan(), inventoryLockState: 'RELEASED', releasedAt: '2026-07-16T01:00:00.000Z' } });
+    const fetchMock = vi.fn(async (inputUrl: string | URL | Request) => {
+      const url = String(inputUrl);
+      if (url.endsWith('/approval-challenge')) return jsonResponse(challenge);
+      if (url.endsWith('/secondary-signature')) return jsonResponse(signed);
+      if (url.endsWith('/safe-proposal')) return jsonResponse(proposed, 202);
+      return jsonResponse(cancelled);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const received = await createSeckillGovernanceChallenge(action, input, 'jwt');
+    await expect(submitSeckillGovernanceApproval(action, received, { ...input, signature: '0x1234' }, address('1'), 'jwt')).resolves.toMatchObject({ state: 'SECONDARY_SIGNED' });
+    await expect(proposeSeckillGovernanceAction(signed, 'jwt')).resolves.toMatchObject({ state: 'PENDING_PROPOSAL' });
+    await expect(cancelSeckillGovernanceAction(action, 'jwt')).resolves.toMatchObject({ state: 'CANCELLED' });
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      `/v2/admin/seckill/actions/${action.actionId}/approval-challenge`,
+      `/v2/admin/seckill/actions/${action.actionId}/secondary-signature`,
+      `/v2/admin/seckill/actions/${action.actionId}/safe-proposal`,
+      `/v2/admin/seckill/actions/${action.actionId}/cancel`,
+    ]);
+  });
+
+  it('rejects an altered challenge and invalid draft values before a protected write', async () => {
+    const action = governanceAction();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ...governanceChallenge(action, '7', '1800000000'), sessionId: hash('f') }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(createSeckillGovernanceChallenge(action, { nonce: '7', deadline: '1800000000' }, 'jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
+    await expect(createSeckillPrizeInjection(hash('b'), { amountUsdt: '0', idempotencyKey: 'seckill-prize-1' }, 'jwt')).rejects.toMatchObject({ status: 400 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 function jsonResponse(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }); }
 function hash(digit: string) { return `0x${digit.repeat(64)}`; }
-function seckillSession() { return { artifactVersion, sessionId: hash('a'), policyVersion: '2', merchantId: 'merchant-1', product: { productId: 'product-1', skuId: 'sku-1', title: '24K session', metadata: {}, attributes: {}, seckillListPriceUsdt: '88' }, phase: 'LIVE', storedPhase: 'LIVE', serverTime: '2026-07-15T05:00:00.000Z', startsAt: '2026-07-15T05:00:00.000Z', mainDeadline: '2026-07-15T06:00:00.000Z', relayDeadline: '2026-07-15T05:01:00.000Z', settlementEarliestAt: '2026-07-15T05:06:00.000Z', settlementDeadline: '2026-07-15T05:11:00.000Z', timers: { mainDurationSeconds: 3600, relayInitialSeconds: 60, relayIncrementSeconds: 30, relayCapSeconds: 60 }, inventory: { total: '100', sold: '5', reserved: '2', available: '93' }, prizePoolUsdt: '9', lastBuyerWallet: null, winnerWallet: null, snapshot: {}, allowedActions: [] }; }
+function seckillSession() { return { artifactVersion, sessionId: hash('a'), policyVersion: '2', merchantId: 'merchant-1', product: { productId: 'product-1', skuId: 'sku-1', title: '24K session', metadata: {}, attributes: {}, seckillListPriceUsdt: '88' }, phase: 'LIVE', storedPhase: 'LIVE', serverTime: '2026-07-15T05:00:00.000Z', startsAt: '2026-07-15T05:00:00.000Z', mainDeadline: '2026-07-15T06:00:00.000Z', relayDeadline: '2026-07-15T05:01:00.000Z', settlementEarliestAt: '2026-07-15T05:06:00.000Z', settlementDeadline: '2026-07-15T05:11:00.000Z', timers: { mainDurationSeconds: 3600, relayInitialSeconds: 60, relayIncrementSeconds: 30, relayCapSeconds: 60 }, inventory: { total: '100', sold: '5', reserved: '2', available: '93' }, prizePoolUsdt: '9', lastBuyerWallet: null, winnerWallet: null, snapshot: {}, governanceActionId: hash('1'), rulesContentHash: hash('2'), publicationTxHash: hash('3'), allowedActions: [] }; }
 function realtimeEvent(sessionId: string) { return { artifactVersion, protocolVersion: 1, eventId: 'event-1', channel: `seckill:${sessionId}`, cursor: '8', eventType: 'SeckillRelayExtended', resourceType: 'SECKILL_SESSION', resourceId: sessionId, occurredAt: '2026-07-15T05:00:30.000Z', finality: 'FINAL', payload: {} }; }
+
+function governanceAction(overrides: Partial<SeckillGovernanceActionProjection> = {}): SeckillGovernanceActionProjection {
+  return {
+    artifactVersion, actionId: hash('a'), sessionId: hash('b'), policyVersion: '2', actionKind: 'OPEN_SESSION', state: 'DRAFT',
+    evidenceHash: hash('c'), safeAddress: address('4'), targetAddress: address('5'), calldataHash: hash('d'), safeNonce: null,
+    safeTxHash: null, proposalHash: null, executionTxHash: null, blockNumber: null, blockHash: null, confirmations: 0,
+    canonical: null, actorWallet: address('1'), secondarySigner: null, approvalNonce: null, approvalDeadline: null,
+    createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T00:00:00.000Z', sessionPlan: sessionPlan(),
+    prizeInjection: null, allowedActions: ['APPROVE_SECONDARY', 'CANCEL'], ...overrides,
+  };
+}
+
+function sessionPlan(): SeckillSessionPlanProjection {
+  return {
+    merchantId: 'merchant-1', productId: 'product-1', skuId: 'sku-1', productPolicyHash: hash('1'), rulesContentHash: hash('2'),
+    startsAt: '2026-07-18T01:00:00.000Z', mainDeadline: '2026-07-18T02:00:00.000Z', relayDeadline: '2026-07-18T01:01:00.000Z',
+    inventory: '4', seckillListPriceUsdt: '80', timers: { mainDurationSeconds: 3600, relayInitialSeconds: 60, relayIncrementSeconds: 30, relayCapSeconds: 60 },
+    snapshot: {}, inventoryLockState: 'LOCKED', releasedAt: null,
+  };
+}
+
+function prizeInjection() {
+  return { injectionId: hash('a'), amountUsdt: '50', operationsSafeAddress: address('6'), custodySafeAddress: address('7'), tokenAddress: address('8'), finalJournalId: null, reversalJournalId: null };
+}
+
+function governanceChallenge(action: ReturnType<typeof governanceAction>, nonce: string, deadline: string) {
+  return {
+    artifactVersion, actionId: action.actionId, sessionId: action.sessionId, actionKind: action.actionKind,
+    signer: address('2'), safeAddress: action.safeAddress,
+    typedData: {
+      domain: { name: 'Abu24KV2Core', version: '2', chainId: 56, verifyingContract: action.targetAddress },
+      types: { SensitiveAction: [
+        { name: 'action', type: 'string' }, { name: 'resourceType', type: 'string' }, { name: 'resourceId', type: 'string' },
+        { name: 'policyVersion', type: 'uint64' }, { name: 'oldValueHash', type: 'bytes32' }, { name: 'newValueHash', type: 'bytes32' },
+        { name: 'safeAddress', type: 'address' }, { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint64' },
+      ] },
+      primaryType: 'SensitiveAction',
+      message: { action: `SECKILL_${action.actionKind}`, resourceType: 'SECKILL_SESSION', resourceId: action.sessionId, policyVersion: action.policyVersion, oldValueHash: hash('e'), newValueHash: hash('f'), safeAddress: action.safeAddress, nonce, deadline },
+    },
+    digest: hash('9'),
+  };
+}
+
+function address(digit: string) { return `0x${digit.repeat(40)}`; }
 
 class TestSocket {
   onopen: ((event: Event) => void) | null = null;
