@@ -337,11 +337,15 @@ export async function createWalletSession(provider: WalletProvider): Promise<Cor
     throw invalidResponse('Wallet did not return a signature');
   }
 
-  return parseSession(await requestJson('/v2/auth/verify', {
+  const session = parseSession(await requestJson('/v2/auth/verify', {
     body: JSON.stringify({ message: challenge.message, signature }),
     headers: { 'content-type': 'application/json' },
     method: 'POST',
   }));
+  if (session.walletAddress.toLowerCase() !== walletAddress.toLowerCase()) {
+    throw invalidResponse('Core session wallet does not match the signing wallet');
+  }
+  return session;
 }
 
 async function requestJson(path: string, init: RequestInit) {

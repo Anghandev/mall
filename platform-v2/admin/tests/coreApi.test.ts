@@ -4,6 +4,7 @@ import {
   decideArbitration,
   decideForcedReceipt,
   decideFulfillmentRequest,
+  createWalletSession,
   fetchCatalogProducts,
   fetchCoreBootstrap,
   openArbitration,
@@ -66,6 +67,70 @@ describe('coordinated fulfillment Core client', () => {
     await expect(fetchCoreBootstrap()).resolves.toMatchObject({
       artifactVersion,
       readiness: { chainId: 56, writesEnabled: true },
+    });
+  });
+
+  it('binds the Core session response to the wallet that signed the SIWE challenge', async () => {
+    const signingWallet = '0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa';
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) {
+        return jsonResponse({
+          message: 'SIWE message',
+          nonce: 'nonce-1',
+          issuedAt: '2026-07-16T00:00:00.000Z',
+          expiresAt: '2026-07-16T00:05:00.000Z',
+        }, 201);
+      }
+      return jsonResponse({
+        token: 'jwt',
+        walletAddress: signingWallet.toLowerCase(),
+        roles: ['ADMIN'],
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = {
+      request: vi.fn(async ({ method }: { method: string }) => (
+        method === 'eth_requestAccounts' ? [signingWallet] : '0xsignature'
+      )),
+    };
+
+    await expect(createWalletSession(provider)).resolves.toMatchObject({
+      walletAddress: signingWallet.toLowerCase(),
+    });
+
+    expect(provider.request).toHaveBeenNthCalledWith(2, {
+      method: 'personal_sign',
+      params: ['SIWE message', signingWallet],
+    });
+  });
+
+  it('fails closed when Core verifies a SIWE session for a different wallet', async () => {
+    const signingWallet = '0x1111111111111111111111111111111111111111';
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      if (String(input).endsWith('/v2/auth/nonce')) {
+        return jsonResponse({
+          message: 'SIWE message',
+          nonce: 'nonce-1',
+          issuedAt: '2026-07-16T00:00:00.000Z',
+          expiresAt: '2026-07-16T00:05:00.000Z',
+        }, 201);
+      }
+      return jsonResponse({
+        token: 'jwt',
+        walletAddress: '0x2222222222222222222222222222222222222222',
+        roles: ['ADMIN'],
+      });
+    }));
+    const provider = {
+      request: vi.fn(async ({ method }: { method: string }) => (
+        method === 'eth_requestAccounts' ? [signingWallet] : '0xsignature'
+      )),
+    };
+
+    await expect(createWalletSession(provider)).rejects.toMatchObject({
+      code: 'InvalidResponse',
+      status: 502,
     });
   });
 
