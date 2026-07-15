@@ -16,6 +16,7 @@ import { LoginPage } from '../src/pages/LoginPage';
 import { ProductPage } from '../src/pages/ProductPage';
 import { SettingsPage } from '../src/pages/SettingsPage';
 import { StoresPage } from '../src/pages/StoresPage';
+import { merchantBusinessDashboard } from './business-dashboard-fixtures';
 import {
   deliveryOrder,
   deliveryOrderId,
@@ -133,6 +134,7 @@ function createMockCoreApi(overrides: Partial<CoreApi> = {}): CoreApi {
       resourceId: expected?.resourceId ?? mediaReadAccess.resourceId,
     }),
     listFulfillmentOrders: async () => ({ orders: [], nextCursor: null }),
+    getMerchantBusinessDashboard: async () => merchantBusinessDashboard,
     getOrderFulfillmentTarget: async () => deliveryTarget,
     getOrderAllowedActions: async () => [{
       action: 'RECORD_SHIPMENT',
@@ -239,8 +241,8 @@ async function enterProduct(client: CoreApi) {
 }
 
 describe('00 wallet gateway', () => {
-  it('consumes settlement-admin.5 and requires a server-authoritative order-action grant', () => {
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.5');
+  it('consumes settlement-admin.6 and requires a server-authoritative order-action grant', () => {
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.6');
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
     expect(coreBoundary.artifactVersion).toBe(artifactVersion);
     expect(coreBoundary.artifactsAvailable).toBe(true);
@@ -336,6 +338,66 @@ describe('00 wallet gateway', () => {
 
     expect(await screen.findByRole('heading', { name: '连接授权商家钱包' })).toBeTruthy();
     expect(screen.queryByRole('heading', { name: '运营大盘' })).toBeNull();
+  });
+});
+
+describe('01 authoritative dashboard', () => {
+  it('renders Core day-window amounts, current fulfillment queues and generated product states', async () => {
+    const getMerchantBusinessDashboard = vi.fn(async () => merchantBusinessDashboard);
+    const user = userEvent.setup();
+    installWallet();
+    render(<MemoryRouter><App client={createMockCoreApi({ getMerchantBusinessDashboard })} /></MemoryRouter>);
+    const connect = screen.getByRole('button', { name: '连接钱包' });
+    await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
+    await user.click(connect);
+
+    expect(await screen.findByText('8000000000000000000000')).toBeTruthy();
+    expect(screen.getByText('5600000000000000000000')).toBeTruthy();
+    expect(screen.getByText('4800000000000000000000')).toBeTruthy();
+    expect(screen.getByText('3600000000000000000000')).toBeTruthy();
+    expect(screen.getByText('销售进行中')).toBeTruthy();
+    expect(screen.getAllByText(/秒杀进行中/).length).toBeGreaterThan(0);
+    expect(screen.getByText('Asia/Shanghai')).toBeTruthy();
+    expect(screen.getByText('5000 bps')).toBeTruthy();
+    expect(getMerchantBusinessDashboard).toHaveBeenCalledWith('test-session');
+    expect(screen.getByRole('link', { name: /快递待发货订单3/ }).getAttribute('href')).toBe('/fulfillment');
+  });
+
+  it('keeps merchant analytics available when platform SAFE_COVERAGE is externally blocked', async () => {
+    const getMerchantBusinessDashboard = vi.fn(async () => merchantBusinessDashboard);
+    const user = userEvent.setup();
+    installWallet();
+    render(<MemoryRouter><App client={createMockCoreApi({
+      bootstrap: async () => ({
+        ...bootstrap,
+        readiness: { ...bootstrap.readiness, externalBlocked: ['SAFE_COVERAGE'] },
+      }),
+      getMerchantBusinessDashboard,
+    })} /></MemoryRouter>);
+    const connect = screen.getByRole('button', { name: '连接钱包' });
+    await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
+    await user.click(connect);
+
+    expect(await screen.findByText('8000000000000000000000')).toBeTruthy();
+    expect(getMerchantBusinessDashboard).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('SAFE_COVERAGE')).toBeNull();
+  });
+
+  it('shows unavailable instead of zero when the dashboard request fails', async () => {
+    const user = userEvent.setup();
+    installWallet();
+    render(<MemoryRouter><App client={createMockCoreApi({
+      getMerchantBusinessDashboard: async () => {
+        throw new CoreApiError('NetworkUnavailable', 'dashboard offline');
+      },
+    })} /></MemoryRouter>);
+    const connect = screen.getByRole('button', { name: '连接钱包' });
+    await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
+    await user.click(connect);
+
+    expect(await screen.findByText('运营聚合加载失败')).toBeTruthy();
+    expect(screen.getAllByText(/dashboard offline/).length).toBeGreaterThan(0);
+    expect(screen.getByLabelText('快递待发货订单不可用').textContent).toBe('--');
   });
 });
 
@@ -741,6 +803,8 @@ describe('05 asset rails', () => {
     expect(await screen.findByRole('heading', { name: 'USDT 商家货款' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'NPL 收益子类' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'BNM 积分总额' })).toBeTruthy();
+    expect(await screen.findByText('8000000000000000000000')).toBeTruthy();
+    expect(screen.getByText(/2026-07-14T16:00:00.000Z 至 2026-07-15T16:00:00.000Z/)).toBeTruthy();
     expect(screen.getByLabelText('USDT 商家货款五状态余额')).toBeTruthy();
     const nplRewards = screen.getByLabelText('NPL 奖励收益子类');
     for (const subtype of rewardSubtypes) expect(within(nplRewards).getByText(subtype)).toBeTruthy();

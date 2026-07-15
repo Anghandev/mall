@@ -1,7 +1,7 @@
 # Merchant Workbench Core Gaps
 
 The merchant product consumes Core's coordinated
-`2.0.0-settlement-admin.5` artifact workspace package. Bootstrap, SIWE,
+`2.0.0-settlement-admin.6` artifact workspace package. Bootstrap, SIWE,
 merchant-bound Catalog/SKU/inventory management, immutable media, wallet-scoped fulfillment, merchant finance,
 guarantee-deposit evidence, signed settlement requests and Safe-finality
 history are connected through their published HTTP surfaces. The browser
@@ -21,6 +21,7 @@ state mismatches.
 | GAP-MER-004 | Merchant-bound unique product slot, save/replacement/review lifecycle, exact write locks and signed concession preview | Product form reads and writes only `/v2/merchant/**`; generated `allowedActions`, `writeLock`, `blockingResource` and signed EIP-712 preview fields fail closed on mismatch |
 | GAP-MER-017 | Write-once signed media upload plus owned-asset metadata and controlled reads | Product image/video uses intent -> provider PUT -> completion -> authorized read; purpose/content/resource/owner fields must match before the asset enters the form |
 | GAP-MER-005 (order-page/manual-batch slice) | Stable merchant order cursor, date/SKU/state/mode/kind filters, complete authoritative rows and atomic manual-shipment batch | The workbench serializes only published filters, preserves the full cursor, renders quantity/TxHash/kind/actions and submits 1-100 canonical shipment evidence rows with stable retry keys |
+| GAP-MER-003 | Merchant business dashboard with authoritative timezone/day, exact payment snapshots, current fulfillment queues and generated product/seckill state | Dashboard and finance Today metric consume `/v2/merchant/dashboard`; zero remains a real Core value while request failure stays visibly unavailable |
 
 ## Remaining Gaps
 
@@ -28,7 +29,6 @@ state mismatches.
 |---|---|---|
 | GAP-MER-001 | Coordinated merchant runtime endpoints beyond published payment, fulfillment and settlement/admin surfaces | Published reads and writes are live; unpublished writes remain unavailable |
 | GAP-MER-002 | Secondary-signature intents plus production merchant allowlist and domain configuration | SIWE client is live; unauthorized/rejected/wrong-chain states fail closed and sensitive actions remain unavailable |
-| GAP-MER-003 | Merchant dashboard aggregate with authoritative timezone/day and product state | Values show unavailable, never fake zero |
 | GAP-MER-005 | PII-authorized, audit-logged server-side Excel export and list-row consignee/contact projection | Cursor/filter/manual-batch reads and writes are live; Excel export stays unavailable and delivery PII is fetched only through the authorized immutable target endpoint |
 | GAP-MER-007 | Camera challenge/scan transport beyond the published six-digit order/store verification command | Manual order/store-bound verification is live; camera launch stays unavailable |
 | GAP-MER-008 | AMap reverse geocode plus signed immutable six-digit region | Region read-only; store save disabled |

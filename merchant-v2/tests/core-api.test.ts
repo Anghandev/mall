@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCoreApi, putMediaFile } from '../src/core-api';
+import { merchantBusinessDashboard } from './business-dashboard-fixtures';
 import {
   catalogCategories,
   catalogTags,
@@ -41,7 +42,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('settlement-admin.5 Core HTTP consumer', () => {
+describe('settlement-admin.6 Core HTTP consumer', () => {
   it('uses the published SIWE nonce and verify request bodies without a password fallback', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
@@ -104,7 +105,7 @@ describe('settlement-admin.5 Core HTTP consumer', () => {
       'https://core.example.test/v2/catalog/products',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.5' }),
+        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.6' }),
       }),
     );
   });
@@ -505,6 +506,49 @@ describe('settlement-admin.5 Core HTTP consumer', () => {
       'https://core.example.test/v2/finance/merchant/guarantee-deposits',
       expect.objectContaining({ body: JSON.stringify(depositInput) }),
     );
+  });
+
+  it('consumes the merchant business dashboard without deriving amounts or queue counts', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(merchantBusinessDashboard));
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const dashboard = await createCoreApi('https://core.example.test').getMerchantBusinessDashboard('merchant-session');
+
+    expect(dashboard).toEqual(merchantBusinessDashboard);
+    expect(dashboard.sales.merchantNetReceivableUsdt).toBe('3600000000000000000000');
+    expect(dashboard.orders.pendingShipment).toBe('3');
+    expect(dashboard.shipmentRate.bps).toBe('5000');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://core.example.test/v2/merchant/dashboard',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({ authorization: 'Bearer merchant-session' }),
+      }),
+    );
+  });
+
+  it('fails closed on malformed dashboard amounts, timezones and unknown states', async () => {
+    const invalidAmount = structuredClone(merchantBusinessDashboard) as unknown as {
+      sales: Record<string, unknown>;
+    };
+    invalidAmount.sales.listPriceUsdt = '8.5';
+    globalThis.fetch = vi.fn(async () => jsonResponse(invalidAmount)) as typeof fetch;
+    await expect(createCoreApi().getMerchantBusinessDashboard('merchant-session'))
+      .rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    globalThis.fetch = vi.fn(async () => jsonResponse({
+      ...merchantBusinessDashboard,
+      timezone: 'UTC',
+    })) as typeof fetch;
+    await expect(createCoreApi().getMerchantBusinessDashboard('merchant-session'))
+      .rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    globalThis.fetch = vi.fn(async () => jsonResponse({
+      ...merchantBusinessDashboard,
+      product: { ...merchantBusinessDashboard.product, state: 'LIVE' },
+    })) as typeof fetch;
+    await expect(createCoreApi().getMerchantBusinessDashboard('merchant-session'))
+      .rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
   it('rejects unknown reward subtypes and transferable BNM projections', async () => {
