@@ -214,7 +214,7 @@ wallet, Safe, RPC, domain and device evidence remains `ExternalBlocked` under
 ## Settlement/Admin `.6` Business Dashboard Evidence
 
 The current product pin is
-`@abu24k/core-artifacts@2.0.0-settlement-admin.6`. The authenticated Admin
+`@abu24k/core-artifacts@2.0.0-settlement-admin.7`. The authenticated Admin
 Dashboard consumes generated `AdminBusinessDashboard` without a local
 financial calculation or production fixture:
 
