@@ -675,3 +675,69 @@ input::placeholder { color: #8b8b82; }
   .risk-field-wide { grid-column: 1; }
   .risk-command-form > .button { width: 100%; }
 }
+
+.seckill-governance-stack { display: grid; gap: 16px; margin: 20px 0; }
+.seckill-governance-header { display: grid; gap: 14px; }
+.seckill-role-boundary { min-height: 58px; display: flex; align-items: center; gap: 11px; padding: 11px 14px; color: #315847; background: var(--success-soft); border: 1px solid #a7cfbb; border-radius: 4px; }
+.seckill-role-boundary > svg { flex: 0 0 auto; width: 20px; }
+.seckill-role-boundary p { margin: 2px 0 0; color: var(--ink-soft); font-size: 11px; }
+.seckill-governance-layout { display: grid; grid-template-columns: minmax(250px, .72fr) minmax(430px, 1.35fr) minmax(270px, .68fr); gap: 16px; align-items: start; }
+.seckill-action-list, .seckill-action-detail, .seckill-governance-command { min-height: 360px; display: grid; align-content: start; gap: 14px; }
+.seckill-action-items { display: grid; max-height: 600px; overflow-y: auto; border: 1px solid var(--line); }
+.seckill-action-row { min-width: 0; min-height: 76px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 10px 11px; color: var(--ink); background: var(--surface); border: 0; border-bottom: 1px solid var(--line); text-align: left; }
+.seckill-action-row:last-child { border-bottom: 0; }
+.seckill-action-row:hover, .seckill-action-row.is-selected { background: var(--gold-soft); }
+.seckill-action-row > span:first-child { min-width: 0; display: grid; gap: 3px; }
+.seckill-action-row strong, .seckill-action-row small { overflow-wrap: anywhere; }
+.seckill-action-row strong { font-size: 12px; }
+.seckill-action-row small { color: var(--ink-muted); font-family: var(--font-mono); font-size: 8px; }
+.seckill-action-row .status-chip { min-height: 27px; font-size: 9px; }
+.seckill-action-status { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 10px; background: var(--surface-muted); border-left: 3px solid var(--line-strong); }
+.seckill-action-status > span:last-child { color: var(--ink-muted); font-size: 10px; }
+.seckill-governance-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.seckill-governance-facts code { overflow-wrap: anywhere; font-size: 8px; }
+.seckill-plan-evidence { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid var(--line); }
+.seckill-plan-evidence h3 { margin: 0; font-size: 13px; }
+.seckill-plan-evidence dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin: 0; overflow: hidden; background: var(--line); border: 1px solid var(--line); }
+.seckill-plan-evidence dl > div { min-width: 0; padding: 9px 10px; background: var(--surface-muted); }
+.seckill-plan-evidence dt { color: var(--ink-muted); font-size: 9px; }
+.seckill-plan-evidence dd { margin: 4px 0 0; overflow-wrap: anywhere; font-size: 10px; font-weight: 700; }
+.seckill-plan-evidence dd small { display: block; margin-top: 2px; color: var(--ink-muted); font-size: 8px; }
+.seckill-governance-command label, .seckill-session-form label, .seckill-control-target label, .seckill-control-form label { display: grid; gap: 6px; color: var(--ink-soft); font-size: 11px; font-weight: 700; }
+.seckill-governance-command .button-explanation { margin-top: 0; }
+.seckill-session-form { display: grid; gap: 16px; }
+.seckill-session-form > .button { justify-self: start; }
+.seckill-fixed-timers { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) 44px; gap: 1px; overflow: hidden; background: var(--line); border: 1px solid var(--line); border-radius: 4px; }
+.seckill-fixed-timers > div { min-width: 0; min-height: 62px; display: grid; align-content: center; gap: 3px; padding: 8px 11px; background: var(--surface-muted); }
+.seckill-fixed-timers span { color: var(--ink-muted); font-size: 9px; }
+.seckill-fixed-timers strong { font-size: 15px; }
+.seckill-fixed-timers > svg { align-self: center; justify-self: center; width: 18px; color: var(--gold-dark); }
+.seckill-form-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.seckill-control-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.seckill-control-target, .seckill-control-form { display: grid; align-content: start; gap: 12px; }
+.seckill-control-target input { font-family: var(--font-mono); font-size: 10px; }
+.seckill-control-form > .button { align-self: end; }
+
+@media (max-width: 1320px) {
+  .seckill-governance-layout { grid-template-columns: minmax(240px, .65fr) minmax(420px, 1.35fr); }
+  .seckill-governance-command { grid-column: 1 / -1; min-height: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; }
+  .seckill-governance-command > h2, .seckill-governance-command > .section-kicker, .seckill-governance-command > .button-explanation { grid-column: 1 / -1; }
+  .seckill-control-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 920px) {
+  .seckill-governance-layout, .seckill-control-grid { grid-template-columns: 1fr; }
+  .seckill-governance-command { grid-column: 1; grid-template-columns: 1fr; }
+  .seckill-governance-command > h2, .seckill-governance-command > .section-kicker, .seckill-governance-command > .button-explanation { grid-column: 1; }
+  .seckill-action-list, .seckill-action-detail, .seckill-governance-command { min-height: 0; }
+  .seckill-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  .seckill-form-grid, .seckill-governance-facts, .seckill-plan-evidence dl { grid-template-columns: 1fr; }
+  .seckill-fixed-timers { grid-template-columns: repeat(2, minmax(0, 1fr)) 40px; }
+  .seckill-fixed-timers > svg { grid-column: 3; grid-row: 1 / 3; }
+  .seckill-session-form > .button { width: 100%; }
+  .seckill-action-row { grid-template-columns: 1fr; }
+  .seckill-action-row .status-chip { justify-self: start; }
+}

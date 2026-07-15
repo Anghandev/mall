@@ -151,9 +151,15 @@ parallel API or local financial calculation:
   settlement search remains a Core gap.
 - `ADM-SEK-001` through `ADM-SEK-004`: the current/history/session projections,
   canonical timers, inventory, prize liability, numeric-cursor HTTP replay and
-  artifact-bound finalized relay WebSocket are rendered. Scheduling, inventory
-  lock, force-close, breaker and prize-injection writes remain
-  `GAP-ADM-004 / 009 / 017`, so these rows are not reported complete.
+  artifact-bound finalized relay WebSocket are rendered. `.9` additionally
+  consumes action list/detail, role-scoped session draft and inventory lock,
+  force-close, prize injection and seckill-purchase breaker recovery. Each
+  action follows Core `allowedActions` through independent secondary-wallet
+  EIP-712 signing, Safe proposal and 15-confirmation finality; `REORGED` and
+  `FAILED` never render as effective.
+- `ADM-SEK-005`: the session draft binds the published CMS rules content hash
+  and policy version. The UI never edits the fixed 3600s / 60s / +30s / cap
+  60s timers and does not construct calldata or calculate prize allocations.
 - `ADM-MER-005`: wallet-scoped BNM points are now visible, but merchant-wide
   historical Burn and Available-BNM aggregates remain `GAP-ADM-006` and this
   row is not reported complete.
@@ -211,10 +217,10 @@ wallet, Safe, RPC, domain and device evidence remains `ExternalBlocked` under
   serialization, role denial, nullable category parent and read-only batch
   preview have consumer tests. Production source and bundle contain no fixture.
 
-## Settlement/Admin `.8` Business Dashboard And Risk Evidence
+## Settlement/Admin `.9` Business Dashboard, Risk And Seckill Evidence
 
 The current product pin is
-`@abu24k/core-artifacts@2.0.0-settlement-admin.8`. The authenticated Admin
+`@abu24k/core-artifacts@2.0.0-settlement-admin.9`. The authenticated Admin
 Dashboard consumes generated `AdminBusinessDashboard` without a local
 financial calculation or production fixture:
 
@@ -245,6 +251,12 @@ financial calculation or production fixture:
 - `ADM-RISK-003`: low-history wallet clustering remains `DecisionBlocked`.
   Frequent address/store-change thresholds and the production device
   fingerprint source remain explicit Core blockers; the UI does not infer them.
+- `ADM-SEK-001` through `ADM-SEK-005`: ADMIN/OPERATOR/AUDITOR consume generated
+  action list/detail projections with strict action/session/artifact binding.
+  ADMIN/OPERATOR may create an opening draft; OPERATOR may cancel only an
+  unproposed opening. ADMIN owns force-close, prize injection, breaker recovery,
+  challenge/signature and Safe proposal. ConfigurationRequired, pending Safe
+  finality, `REORGED`, `FAILED` and `CANCELLED` remain explicit UI states.
 
 All unavailable entries preserve Core `DecisionBlocked` / `ExternalBlocked`
 reason codes and details. An empty coverage projection is never shown as zero
