@@ -46,11 +46,12 @@ describe('platform admin fail-closed experience', () => {
   it('keeps the Dashboard fail-closed until SIWE and then renders the authoritative Core projection', async () => {
     const wallet = '0x1111111111111111111111111111111111111111';
     window.ethereum = walletProvider(wallet);
-    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
       if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['ADMIN'] });
       if (url.endsWith('/v2/admin/dashboard')) return jsonResponse(adminDashboardResponse());
+      if (url.endsWith('/v2/admin/coverage-breaker/actions')) return jsonResponse([]);
       return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected Dashboard request', correlationId: 'dashboard-ui-test' } }, 400);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -70,10 +71,114 @@ describe('platform admin fail-closed experience', () => {
     expect(screen.getAllByText('Buyer UID identity is not frozen')).toHaveLength(2);
     expect(screen.getByText('0x4444444444444444444444444444444444444444')).toBeTruthy();
     expect(screen.getAllByText('paused = true')).toHaveLength(2);
+    expect(screen.getByLabelText('Approval nonce').hasAttribute('disabled')).toBe(true);
     const failedTransactions = screen.getByText('链上失败交易').closest('div');
     expect(failedTransactions).not.toBeNull();
     expect(within(failedTransactions!).getByText('2')).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledWith('/v2/admin/dashboard', expect.objectContaining({ headers: { authorization: 'Bearer jwt' } }));
+  });
+
+  it('uses the independent challenge signer and keeps coverage recovery pending until Safe FINAL', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    const secondarySigner = '0x2222222222222222222222222222222222222222';
+    const nonce = '7';
+    const deadline = '1800000000';
+    const challenge = coverageResumeChallenge(secondarySigner, nonce, deadline);
+    const pendingAction = coverageBreakerAction({
+      action: 'RESUME', targetPaused: false, state: 'PENDING_PROPOSAL', snapshotId: challenge.snapshotId,
+      evidenceHash: challenge.evidenceHash, policyVersion: challenge.policyVersion,
+      governanceSafeAddress: challenge.safeAddress, routerAddress: challenge.routerAddress,
+      actorWallet: wallet, secondarySigner, secondarySignatureHash: hash('8'), approvalNonce: nonce,
+      approvalDeadline: new Date(Number(deadline) * 1_000).toISOString(), safeTxHash: null,
+      proposalHash: null, executionTxHash: null, confirmations: 0,
+    });
+    const providerRequest = vi.fn(async ({ method }: { method: string }) => {
+      if (method === 'eth_requestAccounts') return [wallet];
+      if (method === 'personal_sign') return '0xsigned';
+      if (method === 'eth_signTypedData_v4') return '0x1234';
+      throw new Error(`Unexpected wallet method ${method}`);
+    });
+    window.ethereum = { request: providerRequest };
+    let submitted = false;
+    const fetchMock = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['ADMIN'] });
+      if (url.endsWith('/v2/admin/dashboard')) return jsonResponse(healthyCoverageDashboard());
+      if (url.endsWith('/v2/admin/coverage-breaker/actions')) return jsonResponse(submitted ? [pendingAction, coverageBreakerAction()] : [coverageBreakerAction()]);
+      if (url.endsWith('/v2/admin/coverage-breaker/resume-challenge')) return jsonResponse(challenge);
+      if (url.endsWith('/v2/admin/coverage-breaker/resume-actions')) { submitted = true; return jsonResponse(pendingAction, 201); }
+      return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected coverage request', correlationId: 'coverage-ui-test' } }, 400);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderAt('/');
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    await user.type(await screen.findByLabelText('Approval nonce'), nonce);
+    await user.type(screen.getByLabelText('Deadline · Unix seconds'), deadline);
+    await user.click(screen.getByRole('button', { name: '请求二次签名并提交' }));
+
+    await waitFor(() => expect(providerRequest).toHaveBeenCalledWith({
+      method: 'eth_signTypedData_v4',
+      params: [secondarySigner, JSON.stringify(challenge.typedData)],
+    }));
+    const submitCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/v2/admin/coverage-breaker/resume-actions'));
+    expect(JSON.parse(String(submitCall?.[1]?.body))).toEqual({ snapshotId: challenge.snapshotId, nonce, deadline, signature: '0x1234' });
+    expect(await screen.findByText(/Safe FINAL 前不视为已恢复/)).toBeTruthy();
+    expect(screen.getAllByText(/PENDING_PROPOSAL · 等待 Safe 提案/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/^恢复已生效/)).toBeNull();
+  });
+
+  it('fails closed before wallet signing when Core returns the ADMIN session wallet as secondary signer', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    const providerRequest = vi.fn(async ({ method }: { method: string }) => method === 'eth_requestAccounts' ? [wallet] : '0xsigned');
+    window.ethereum = { request: providerRequest };
+    const fetchMock = coverageDashboardFetch(wallet, 'ADMIN', coverageResumeChallenge(wallet, '7', '1800000000'));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderAt('/');
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    await user.type(await screen.findByLabelText('Approval nonce'), '7');
+    await user.type(screen.getByLabelText('Deadline · Unix seconds'), '1800000000');
+    await user.click(screen.getByRole('button', { name: '请求二次签名并提交' }));
+
+    expect(await screen.findByText('Core 未提供独立的二次签名钱包')).toBeTruthy();
+    expect(providerRequest.mock.calls.some(([input]) => input.method === 'eth_signTypedData_v4')).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/resume-actions'))).toBe(false);
+  });
+
+  it('does not submit recovery when the independent wallet rejects typed-data signing', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    const providerRequest = vi.fn(async ({ method }: { method: string }) => {
+      if (method === 'eth_requestAccounts') return [wallet];
+      if (method === 'personal_sign') return '0xsigned';
+      throw new Error('Wallet rejected');
+    });
+    window.ethereum = { request: providerRequest };
+    const fetchMock = coverageDashboardFetch(wallet, 'ADMIN', coverageResumeChallenge('0x2222222222222222222222222222222222222222', '7', '1800000000'));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderAt('/');
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    await user.type(await screen.findByLabelText('Approval nonce'), '7');
+    await user.type(screen.getByLabelText('Deadline · Unix seconds'), '1800000000');
+    await user.click(screen.getByRole('button', { name: '请求二次签名并提交' }));
+
+    expect(await screen.findByText('二次钱包拒绝签名或签名请求失败')).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/resume-actions'))).toBe(false);
+  });
+
+  it('keeps coverage recovery inputs unavailable to read-only platform roles', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    window.ethereum = walletProvider(wallet);
+    vi.stubGlobal('fetch', coverageDashboardFetch(wallet, 'OPERATOR'));
+    const user = userEvent.setup();
+    renderAt('/');
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+
+    expect(await screen.findByText('当前角色仅可读取断路器治理证据。')).toBeTruthy();
+    expect(screen.queryByLabelText('Approval nonce')).toBeNull();
+    expect(screen.getByText('PAUSE')).toBeTruthy();
   });
 
   it('keeps every Catalog read and write behind a Core SIWE session', () => {
@@ -705,6 +810,89 @@ function adminDashboardResponse() {
       { metric: 'ABNORMAL_ORDERS', reasonCode: 'DecisionBlocked', detail: 'Abnormal-order rules are not frozen' },
       { metric: 'BLACKLIST_BLOCKS', reasonCode: 'DecisionBlocked', detail: 'Transaction risk rules are not frozen' },
     ],
+  };
+}
+
+function healthyCoverageDashboard() {
+  const dashboard = adminDashboardResponse();
+  return {
+    ...dashboard,
+    coverage: dashboard.coverage.map((item) => ({ ...item, verifiedAssets: '101', covered: true })),
+  };
+}
+
+function coverageDashboardFetch(wallet: string, role: UserRole, challenge?: ReturnType<typeof coverageResumeChallenge>) {
+  return vi.fn(async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
+    if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: [role] });
+    if (url.endsWith('/v2/admin/dashboard')) return jsonResponse(healthyCoverageDashboard());
+    if (url.endsWith('/v2/admin/coverage-breaker/actions')) return jsonResponse([coverageBreakerAction()]);
+    if (url.endsWith('/v2/admin/coverage-breaker/resume-challenge') && challenge) return jsonResponse(challenge);
+    return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected coverage request', correlationId: 'coverage-ui-test' } }, 400);
+  });
+}
+
+function coverageResumeChallenge(signer: string, nonce: string, deadline: string) {
+  const snapshotId = hash('1');
+  const safeAddress = '0x4444444444444444444444444444444444444444';
+  const routerAddress = '0x3333333333333333333333333333333333333333';
+  return {
+    artifactVersion,
+    snapshotId,
+    evidenceHash: hash('2'),
+    policyVersion: '2',
+    signer,
+    safeAddress,
+    routerAddress,
+    typedData: {
+      domain: { name: 'Abu24KV2Core', version: '2', chainId: 56, verifyingContract: routerAddress },
+      types: { SensitiveAction: [
+        { name: 'action', type: 'string' },
+        { name: 'resourceType', type: 'string' },
+        { name: 'resourceId', type: 'string' },
+        { name: 'policyVersion', type: 'uint64' },
+        { name: 'oldValueHash', type: 'bytes32' },
+        { name: 'newValueHash', type: 'bytes32' },
+        { name: 'safeAddress', type: 'address' },
+        { name: 'nonce', type: 'uint256' },
+        { name: 'deadline', type: 'uint64' },
+      ] },
+      primaryType: 'SensitiveAction',
+      message: {
+        action: 'RESUME_NEW_PAYMENTS', resourceType: 'COVERAGE_BREAKER', resourceId: snapshotId,
+        policyVersion: '2', oldValueHash: hash('3'), newValueHash: hash('4'), safeAddress, nonce, deadline,
+      },
+    },
+    digest: hash('5'),
+  };
+}
+
+function coverageBreakerAction(overrides: Record<string, unknown> = {}) {
+  return {
+    artifactVersion,
+    actionId: hash('6'),
+    snapshotId: hash('1'),
+    policyVersion: '2',
+    action: 'PAUSE',
+    targetPaused: true,
+    evidenceHash: hash('2'),
+    governanceSafeAddress: '0x4444444444444444444444444444444444444444',
+    routerAddress: '0x3333333333333333333333333333333333333333',
+    calldataHash: hash('7'),
+    state: 'FINAL',
+    safeTxHash: hash('8'),
+    proposalHash: hash('9'),
+    executionTxHash: hash('a'),
+    confirmations: 15,
+    actorWallet: null,
+    secondarySigner: null,
+    secondarySignatureHash: null,
+    approvalNonce: null,
+    approvalDeadline: null,
+    createdAt: '2026-07-16T00:00:00.000Z',
+    updatedAt: '2026-07-16T00:05:00.000Z',
+    ...overrides,
   };
 }
 

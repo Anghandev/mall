@@ -27,6 +27,10 @@ import {
   type AuditListResponse,
   type CmsVersionCreateRequest,
   type CmsVersionProjection,
+  type CoverageBreakerActionProjection,
+  type CoverageBreakerResumeChallenge,
+  type CoverageBreakerResumeChallengeRequest,
+  type CoverageBreakerResumeRequest,
   type MerchantFinanceProjection,
   type MonitoringAcknowledgeResult,
   type MonitoringDashboard,
@@ -55,6 +59,7 @@ import { CoreApiError, requestCoreJson } from './coreApi';
 const bytes32Pattern = /^0x[0-9a-fA-F]{64}$/;
 const addressPattern = /^0x[0-9a-fA-F]{40}$/;
 const amountPattern = /^(0|[1-9][0-9]*)$/;
+const signaturePattern = /^0x(?:[0-9a-fA-F]{2})+$/;
 
 export type AuditFilters = Readonly<{
   streamName?: AuditStreamName;
@@ -78,6 +83,65 @@ export async function fetchAdminBusinessDashboard(
   if (!isAdminBusinessDashboard(body)) {
     throw invalid('Admin business dashboard does not match the coordinated generated type');
   }
+  return body;
+}
+
+export async function fetchCoverageBreakerActions(
+  token: string,
+  signal?: AbortSignal,
+): Promise<readonly CoverageBreakerActionProjection[]> {
+  const body = await authenticatedGet('/v2/admin/coverage-breaker/actions', token, signal);
+  if (!Array.isArray(body) || !body.every(isCoverageBreakerAction)) {
+    throw invalid('Coverage breaker actions do not match the coordinated generated type');
+  }
+  return Object.freeze([...body]);
+}
+
+export async function createCoverageBreakerResumeChallenge(
+  input: CoverageBreakerResumeChallengeRequest,
+  token: string,
+): Promise<CoverageBreakerResumeChallenge> {
+  requireAmount(input.nonce, 'nonce');
+  requireAmount(input.deadline, 'deadline');
+  const body = await authenticatedWrite('/v2/admin/coverage-breaker/resume-challenge', 'POST', input, token);
+  if (!isCoverageBreakerResumeChallenge(body, input)) {
+    throw invalid('Coverage breaker resume challenge does not match the coordinated generated type');
+  }
+  return body;
+}
+
+export async function authorizeCoverageBreakerResume(
+  input: CoverageBreakerResumeRequest,
+  challenge: CoverageBreakerResumeChallenge,
+  actorWallet: string,
+  token: string,
+): Promise<CoverageBreakerActionProjection> {
+  requireAmount(input.nonce, 'nonce');
+  requireAmount(input.deadline, 'deadline');
+  if (!bytes32Pattern.test(input.snapshotId) || !signaturePattern.test(input.signature)) {
+    throw invalid('Coverage breaker resume authorization is invalid');
+  }
+  if (
+    !isCoverageBreakerResumeChallenge(challenge, { nonce: input.nonce, deadline: input.deadline })
+      || input.snapshotId.toLowerCase() !== challenge.snapshotId.toLowerCase()
+      || !addressPattern.test(actorWallet)
+  ) throw invalid('Coverage breaker resume authorization does not match its challenge');
+
+  const body = await authenticatedWrite('/v2/admin/coverage-breaker/resume-actions', 'POST', input, token);
+  if (
+    !isCoverageBreakerAction(body)
+      || body.action !== 'RESUME'
+      || body.targetPaused
+      || body.snapshotId.toLowerCase() !== challenge.snapshotId.toLowerCase()
+      || body.evidenceHash.toLowerCase() !== challenge.evidenceHash.toLowerCase()
+      || body.policyVersion !== challenge.policyVersion
+      || body.governanceSafeAddress.toLowerCase() !== challenge.safeAddress.toLowerCase()
+      || body.routerAddress.toLowerCase() !== challenge.routerAddress.toLowerCase()
+      || body.actorWallet?.toLowerCase() !== actorWallet.toLowerCase()
+      || body.secondarySigner?.toLowerCase() !== challenge.signer.toLowerCase()
+      || body.approvalNonce !== input.nonce
+      || !deadlineMatches(body.approvalDeadline, input.deadline)
+  ) throw invalid('Coverage breaker resume result is not bound to its challenge and session');
   return body;
 }
 
@@ -488,6 +552,130 @@ function isDashboardCoverage(value: unknown) {
     && amountPattern.test(String(value.verifiedAssets))
     && amountPattern.test(String(value.unsettledLiabilities))
     && typeof value.covered === 'boolean';
+}
+
+const coverageChallengeKeys = [
+  'artifactVersion', 'snapshotId', 'evidenceHash', 'policyVersion', 'signer',
+  'safeAddress', 'routerAddress', 'typedData', 'digest',
+] as const satisfies readonly (keyof CoverageBreakerResumeChallenge)[];
+const coverageActionKeys = [
+  'artifactVersion', 'actionId', 'snapshotId', 'policyVersion', 'action',
+  'targetPaused', 'evidenceHash', 'governanceSafeAddress', 'routerAddress',
+  'calldataHash', 'state', 'safeTxHash', 'proposalHash', 'executionTxHash',
+  'confirmations', 'actorWallet', 'secondarySigner', 'secondarySignatureHash',
+  'approvalNonce', 'approvalDeadline', 'createdAt', 'updatedAt',
+] as const satisfies readonly (keyof CoverageBreakerActionProjection)[];
+const sensitiveActionFields = [
+  ['action', 'string'],
+  ['resourceType', 'string'],
+  ['resourceId', 'string'],
+  ['policyVersion', 'uint64'],
+  ['oldValueHash', 'bytes32'],
+  ['newValueHash', 'bytes32'],
+  ['safeAddress', 'address'],
+  ['nonce', 'uint256'],
+  ['deadline', 'uint64'],
+] as const;
+
+function isCoverageBreakerResumeChallenge(
+  value: unknown,
+  request: CoverageBreakerResumeChallengeRequest,
+): value is CoverageBreakerResumeChallenge {
+  if (
+    !isRecord(value)
+      || !hasExactKeys(value, coverageChallengeKeys)
+      || value.artifactVersion !== artifactVersion
+      || !bytes32Pattern.test(String(value.snapshotId))
+      || !bytes32Pattern.test(String(value.evidenceHash))
+      || !amountPattern.test(String(value.policyVersion))
+      || !addressPattern.test(String(value.signer))
+      || !addressPattern.test(String(value.safeAddress))
+      || !addressPattern.test(String(value.routerAddress))
+      || !bytes32Pattern.test(String(value.digest))
+      || !isRecord(value.typedData)
+      || !hasExactKeys(value.typedData, ['domain', 'types', 'primaryType', 'message'])
+      || value.typedData.primaryType !== 'SensitiveAction'
+      || !isRecord(value.typedData.domain)
+      || !hasExactKeys(value.typedData.domain, ['name', 'version', 'chainId', 'verifyingContract'])
+      || value.typedData.domain.name !== 'Abu24KV2Core'
+      || value.typedData.domain.version !== '2'
+      || value.typedData.domain.chainId !== 56
+      || !addressPattern.test(String(value.typedData.domain.verifyingContract))
+      || String(value.typedData.domain.verifyingContract).toLowerCase() !== String(value.routerAddress).toLowerCase()
+      || !isRecord(value.typedData.types)
+      || !hasExactKeys(value.typedData.types, ['SensitiveAction'])
+      || !Array.isArray(value.typedData.types.SensitiveAction)
+      || value.typedData.types.SensitiveAction.length !== sensitiveActionFields.length
+      || !value.typedData.types.SensitiveAction.every((field, index) => isRecord(field)
+        && hasExactKeys(field, ['name', 'type'])
+        && field.name === sensitiveActionFields[index]?.[0]
+        && field.type === sensitiveActionFields[index]?.[1])
+      || !isRecord(value.typedData.message)
+      || !hasExactKeys(value.typedData.message, sensitiveActionFields.map(([name]) => name))
+  ) return false;
+
+  const message = value.typedData.message;
+  return message.action === 'RESUME_NEW_PAYMENTS'
+    && message.resourceType === 'COVERAGE_BREAKER'
+    && String(message.resourceId).toLowerCase() === String(value.snapshotId).toLowerCase()
+    && String(message.policyVersion) === String(value.policyVersion)
+    && bytes32Pattern.test(String(message.oldValueHash))
+    && bytes32Pattern.test(String(message.newValueHash))
+    && addressPattern.test(String(message.safeAddress))
+    && String(message.safeAddress).toLowerCase() === String(value.safeAddress).toLowerCase()
+    && String(message.nonce) === request.nonce
+    && String(message.deadline) === request.deadline;
+}
+
+function isCoverageBreakerAction(value: unknown): value is CoverageBreakerActionProjection {
+  if (!isRecord(value) || !hasExactKeys(value, coverageActionKeys)) return false;
+  return value.artifactVersion === artifactVersion
+    && bytes32Pattern.test(String(value.actionId))
+    && bytes32Pattern.test(String(value.snapshotId))
+    && amountPattern.test(String(value.policyVersion))
+    && ['PAUSE', 'RESUME'].includes(String(value.action))
+    && typeof value.targetPaused === 'boolean'
+    && value.targetPaused === (value.action === 'PAUSE')
+    && bytes32Pattern.test(String(value.evidenceHash))
+    && addressPattern.test(String(value.governanceSafeAddress))
+    && addressPattern.test(String(value.routerAddress))
+    && bytes32Pattern.test(String(value.calldataHash))
+    && ['PENDING_PROPOSAL', 'SAFE_PROPOSED', 'MINED', 'FINAL', 'REORGED', 'FAILED'].includes(String(value.state))
+    && nullableHash(value.safeTxHash)
+    && nullableHash(value.proposalHash)
+    && nullableHash(value.executionTxHash)
+    && Number.isSafeInteger(value.confirmations)
+    && Number(value.confirmations) >= 0
+    && nullableAddress(value.actorWallet)
+    && nullableAddress(value.secondarySigner)
+    && nullableHash(value.secondarySignatureHash)
+    && (value.approvalNonce === null || amountPattern.test(String(value.approvalNonce)))
+    && (value.approvalDeadline === null || isCanonicalDateTime(value.approvalDeadline))
+    && isCanonicalDateTime(value.createdAt)
+    && isCanonicalDateTime(value.updatedAt);
+}
+
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]) {
+  const actual = Object.keys(value);
+  return actual.length === keys.length && actual.every((key) => keys.includes(key));
+}
+
+function nullableHash(value: unknown) {
+  return value === null || bytes32Pattern.test(String(value));
+}
+
+function nullableAddress(value: unknown) {
+  return value === null || addressPattern.test(String(value));
+}
+
+function deadlineMatches(value: string | null, deadline: string) {
+  return value !== null && Math.floor(new Date(value).getTime() / 1_000) === Number(deadline);
+}
+
+function isCanonicalDateTime(value: unknown) {
+  return typeof value === 'string'
+    && Number.isFinite(Date.parse(value))
+    && new Date(value).toISOString() === value;
 }
 
 function hasAmounts(value: unknown, fields: readonly string[]) {

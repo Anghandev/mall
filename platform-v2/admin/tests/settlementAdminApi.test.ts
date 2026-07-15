@@ -2,12 +2,15 @@ import { artifactVersion } from '@abu24k/core-artifacts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   acknowledgeMonitoringAlert,
+  authorizeCoverageBreakerResume,
   createCmsVersion,
+  createCoverageBreakerResumeChallenge,
   createNotificationCampaign,
   createPolicyDraft,
   createSystemConfigVersion,
   fetchAdminBusinessDashboard,
   fetchAuditEntries,
+  fetchCoverageBreakerActions,
   fetchMerchantFinance,
   fetchMonitoringDashboard,
   fetchNotifications,
@@ -46,6 +49,128 @@ describe('settlement/admin coordinated Core client', () => {
     })));
 
     await expect(fetchAdminBusinessDashboard('jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
+  });
+
+  it('strictly binds coverage recovery challenge and action responses to the signed request', async () => {
+    const nonce = '7';
+    const deadline = '1800000000';
+    const challenge = coverageResumeChallenge(nonce, deadline);
+    const resumeAction = coverageAction({
+      action: 'RESUME',
+      targetPaused: false,
+      snapshotId: challenge.snapshotId,
+      evidenceHash: challenge.evidenceHash,
+      policyVersion: challenge.policyVersion,
+      governanceSafeAddress: challenge.safeAddress,
+      routerAddress: challenge.routerAddress,
+      actorWallet: address('1'),
+      secondarySigner: challenge.signer,
+      secondarySignatureHash: hash('8'),
+      approvalNonce: nonce,
+      approvalDeadline: new Date(Number(deadline) * 1_000).toISOString(),
+      state: 'PENDING_PROPOSAL',
+    });
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/actions')) return jsonResponse([coverageAction()]);
+      if (url.endsWith('/resume-challenge')) return jsonResponse(challenge);
+      if (url.endsWith('/resume-actions')) return jsonResponse(resumeAction, 201);
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(fetchCoverageBreakerActions('jwt')).resolves.toMatchObject([{ action: 'PAUSE', state: 'FINAL' }]);
+    const received = await createCoverageBreakerResumeChallenge({ nonce, deadline }, 'jwt');
+    await expect(authorizeCoverageBreakerResume({
+      snapshotId: received.snapshotId,
+      nonce,
+      deadline,
+      signature: '0x1234',
+    }, received, address('1'), 'jwt')).resolves.toMatchObject({ action: 'RESUME', state: 'PENDING_PROPOSAL' });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/v2/admin/coverage-breaker/resume-challenge', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ nonce, deadline }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/v2/admin/coverage-breaker/resume-actions', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ snapshotId: challenge.snapshotId, nonce, deadline, signature: '0x1234' }),
+    }));
+  });
+
+  it('rejects coverage responses with extra fields or mismatched signed intent fields', async () => {
+    const nonce = '7';
+    const deadline = '1800000000';
+    const challenge = coverageResumeChallenge(nonce, deadline);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(jsonResponse([{
+      ...coverageAction(),
+      uiAuthorized: true,
+    }])).mockResolvedValueOnce(jsonResponse({
+      ...challenge,
+      typedData: {
+        ...challenge.typedData,
+        message: { ...challenge.typedData.message, nonce: '8' },
+      },
+    })));
+
+    await expect(fetchCoverageBreakerActions('jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
+    await expect(createCoverageBreakerResumeChallenge({ nonce, deadline }, 'jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
+  });
+
+  it('rejects a resume action that is not bound to the challenge signer and session actor', async () => {
+    const nonce = '7';
+    const deadline = '1800000000';
+    const challenge = coverageResumeChallenge(nonce, deadline);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(coverageAction({
+      action: 'RESUME',
+      targetPaused: false,
+      snapshotId: challenge.snapshotId,
+      evidenceHash: challenge.evidenceHash,
+      policyVersion: challenge.policyVersion,
+      governanceSafeAddress: challenge.safeAddress,
+      routerAddress: challenge.routerAddress,
+      actorWallet: address('9'),
+      secondarySigner: challenge.signer,
+      secondarySignatureHash: hash('8'),
+      approvalNonce: nonce,
+      approvalDeadline: new Date(Number(deadline) * 1_000).toISOString(),
+    }), 201)));
+
+    await expect(authorizeCoverageBreakerResume({
+      snapshotId: challenge.snapshotId,
+      nonce,
+      deadline,
+      signature: '0x1234',
+    }, challenge, address('1'), 'jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
+  });
+
+  it('keeps Core breaker and secondary-signature failures closed', async () => {
+    const nonce = '7';
+    const deadline = '1800000000';
+    const challenge = coverageResumeChallenge(nonce, deadline);
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ error: { code: 'BreakerActive', message: 'Coverage remains below 100%', correlationId: 'coverage-blocked' } }, 409))
+      .mockResolvedValueOnce(jsonResponse({ error: { code: 'InvalidSignature', message: 'Secondary signer mismatch', correlationId: 'coverage-signature' } }, 401)));
+
+    await expect(createCoverageBreakerResumeChallenge({ nonce, deadline }, 'jwt')).rejects.toMatchObject({
+      code: 'BreakerActive', status: 409,
+    });
+    await expect(authorizeCoverageBreakerResume({
+      snapshotId: challenge.snapshotId,
+      nonce,
+      deadline,
+      signature: '0xwrong',
+    }, challenge, address('1'), 'jwt')).rejects.toMatchObject({
+      code: 'InvalidResponse', status: 502,
+    });
+    await expect(authorizeCoverageBreakerResume({
+      snapshotId: challenge.snapshotId,
+      nonce,
+      deadline,
+      signature: '0x1234',
+    }, challenge, address('1'), 'jwt')).rejects.toMatchObject({
+      code: 'InvalidSignature', status: 401,
+    });
   });
 
   it('rejects a settlement projection from a stale artifact', async () => {
@@ -193,6 +318,67 @@ describe('settlement/admin coordinated Core client', () => {
 function jsonResponse(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }); }
 function hash(digit: string) { return `0x${digit.repeat(64)}`; }
 function address(digit: string) { return `0x${digit.repeat(40)}`; }
+function coverageResumeChallenge(nonce: string, deadline: string) {
+  const snapshotId = hash('1');
+  const safeAddress = address('4');
+  const routerAddress = address('3');
+  return {
+    artifactVersion,
+    snapshotId,
+    evidenceHash: hash('2'),
+    policyVersion: '2',
+    signer: address('2'),
+    safeAddress,
+    routerAddress,
+    typedData: {
+      domain: { name: 'Abu24KV2Core', version: '2', chainId: 56, verifyingContract: routerAddress },
+      types: { SensitiveAction: [
+        { name: 'action', type: 'string' },
+        { name: 'resourceType', type: 'string' },
+        { name: 'resourceId', type: 'string' },
+        { name: 'policyVersion', type: 'uint64' },
+        { name: 'oldValueHash', type: 'bytes32' },
+        { name: 'newValueHash', type: 'bytes32' },
+        { name: 'safeAddress', type: 'address' },
+        { name: 'nonce', type: 'uint256' },
+        { name: 'deadline', type: 'uint64' },
+      ] },
+      primaryType: 'SensitiveAction',
+      message: {
+        action: 'RESUME_NEW_PAYMENTS', resourceType: 'COVERAGE_BREAKER', resourceId: snapshotId,
+        policyVersion: '2', oldValueHash: hash('3'), newValueHash: hash('4'), safeAddress, nonce, deadline,
+      },
+    },
+    digest: hash('5'),
+  };
+}
+function coverageAction(overrides: Record<string, unknown> = {}) {
+  return {
+    artifactVersion,
+    actionId: hash('6'),
+    snapshotId: hash('1'),
+    policyVersion: '2',
+    action: 'PAUSE',
+    targetPaused: true,
+    evidenceHash: hash('2'),
+    governanceSafeAddress: address('4'),
+    routerAddress: address('3'),
+    calldataHash: hash('7'),
+    state: 'FINAL',
+    safeTxHash: hash('8'),
+    proposalHash: hash('9'),
+    executionTxHash: hash('a'),
+    confirmations: 15,
+    actorWallet: null,
+    secondarySigner: null,
+    secondarySignatureHash: null,
+    approvalNonce: null,
+    approvalDeadline: null,
+    createdAt: '2026-07-16T00:00:00.000Z',
+    updatedAt: '2026-07-16T00:05:00.000Z',
+    ...overrides,
+  };
+}
 function adminBusinessDashboard() {
   return {
     artifactVersion,

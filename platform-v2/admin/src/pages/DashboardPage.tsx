@@ -1,4 +1,4 @@
-import type { AdminBusinessDashboard } from '@abu24k/core-artifacts';
+import type { AdminBusinessDashboard, CoverageBreakerActionProjection } from '@abu24k/core-artifacts';
 import {
   AlertTriangle,
   Ban,
@@ -15,10 +15,15 @@ import {
   Zap,
   type LucideIcon,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { CoreApiError } from '../coreApi';
 import { useCoreSession } from '../coreSession';
-import { fetchAdminBusinessDashboard } from '../settlementAdminApi';
+import {
+  authorizeCoverageBreakerResume,
+  createCoverageBreakerResumeChallenge,
+  fetchAdminBusinessDashboard,
+  fetchCoverageBreakerActions,
+} from '../settlementAdminApi';
 
 type Metric = Readonly<{ label: string; value: string; detail: string; blocked?: boolean }>;
 type MetricGroup = Readonly<{ title: string; icon: LucideIcon; metrics: readonly Metric[] }>;
@@ -29,7 +34,16 @@ export function DashboardPage() {
   const [error, setError] = useState<CoreApiError | null>(null);
   const [loading, setLoading] = useState(false);
   const [reload, setReload] = useState(0);
+  const [coverageActions, setCoverageActions] = useState<readonly CoverageBreakerActionProjection[] | null>(null);
+  const [coverageActionsError, setCoverageActionsError] = useState<CoreApiError | null>(null);
+  const [coverageActionsLoading, setCoverageActionsLoading] = useState(false);
+  const [resumeNonce, setResumeNonce] = useState('');
+  const [resumeDeadline, setResumeDeadline] = useState('');
+  const [resumeError, setResumeError] = useState<CoreApiError | null>(null);
+  const [resumePending, setResumePending] = useState(false);
+  const [resumeNotice, setResumeNotice] = useState('');
   const canRead = session?.roles.some((role) => ['ADMIN', 'OPERATOR', 'AUDITOR'].includes(role)) ?? false;
+  const isAdmin = session?.roles.includes('ADMIN') ?? false;
 
   useEffect(() => {
     setDashboard(null);
@@ -47,6 +61,72 @@ export function DashboardPage() {
       });
     return () => controller.abort();
   }, [canRead, reload, session]);
+
+  useEffect(() => {
+    setCoverageActions(null);
+    setCoverageActionsError(null);
+    if (!session || !canRead) return;
+    const controller = new AbortController();
+    setCoverageActionsLoading(true);
+    void fetchCoverageBreakerActions(session.token, controller.signal)
+      .then(setCoverageActions)
+      .catch((cause) => {
+        if (!controller.signal.aborted) setCoverageActionsError(asCoreError(cause));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setCoverageActionsLoading(false);
+      });
+    return () => controller.abort();
+  }, [canRead, reload, session]);
+
+  const newPaymentPaused = dashboard?.breakers.find((item) => item.scope === 'NEW_PAYMENT')?.paused === true;
+  const coverageHealthy = Boolean(dashboard?.coverage.length) && dashboard!.coverage.every((item) => item.covered);
+  const canRequestResume = isAdmin && newPaymentPaused && coverageHealthy;
+
+  const submitCoverageResume = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!session || !canRequestResume) return;
+    if (!window.ethereum) {
+      setResumeError(new CoreApiError({ code: 'ExternalBlocked', message: '未检测到可用的二次签名钱包', status: 503 }));
+      return;
+    }
+    setResumePending(true);
+    setResumeError(null);
+    setResumeNotice('');
+    try {
+      const challenge = await createCoverageBreakerResumeChallenge({ nonce: resumeNonce, deadline: resumeDeadline }, session.token);
+      if (challenge.signer.toLowerCase() === session.walletAddress.toLowerCase()) {
+        throw new CoreApiError({ code: 'InvalidResponse', message: 'Core 未提供独立的二次签名钱包', status: 502 });
+      }
+      let signature: unknown;
+      try {
+        signature = await window.ethereum.request({
+          method: 'eth_signTypedData_v4',
+          params: [challenge.signer, JSON.stringify(challenge.typedData)],
+        });
+      } catch {
+        throw new CoreApiError({ code: 'InvalidResponse', message: '二次钱包拒绝签名或签名请求失败', status: 400 });
+      }
+      if (typeof signature !== 'string' || !/^0x(?:[0-9a-fA-F]{2})+$/.test(signature)) {
+        throw new CoreApiError({ code: 'InvalidResponse', message: '二次钱包返回了无效签名', status: 400 });
+      }
+      const action = await authorizeCoverageBreakerResume({
+        snapshotId: challenge.snapshotId,
+        nonce: resumeNonce,
+        deadline: resumeDeadline,
+        signature,
+      }, challenge, session.walletAddress, session.token);
+      setCoverageActions((current) => [action, ...(current ?? []).filter((item) => item.actionId !== action.actionId)]);
+      setResumeNotice(action.state === 'FINAL'
+        ? 'Safe 恢复动作已达 FINAL，正在刷新 Dashboard 断路器状态。'
+        : `恢复治理动作已提交，当前 ${action.state}；Safe FINAL 前不视为已恢复。`);
+      setReload((value) => value + 1);
+    } catch (cause) {
+      setResumeError(asCoverageResumeError(cause));
+    } finally {
+      setResumePending(false);
+    }
+  };
 
   const hasBlockedEvidence = dashboard
     ? dashboard.unavailable.length > 0
@@ -142,7 +222,26 @@ export function DashboardPage() {
                   </div>
                 ))}
               </div>
+              {isAdmin ? (
+                <form className="coverage-recovery-form" onSubmit={(event) => void submitCoverageResume(event)}>
+                  <div><strong>NEW_PAYMENT 覆盖恢复</strong><p>{coverageRecoveryReason(newPaymentPaused, coverageHealthy)}</p></div>
+                  <label>Approval nonce<input inputMode="numeric" pattern="0|[1-9][0-9]*" value={resumeNonce} onChange={(event) => setResumeNonce(event.target.value)} disabled={!canRequestResume || resumePending} required /></label>
+                  <label>Deadline · Unix seconds<input inputMode="numeric" pattern="0|[1-9][0-9]*" value={resumeDeadline} onChange={(event) => setResumeDeadline(event.target.value)} disabled={!canRequestResume || resumePending} required /></label>
+                  <button className="button button-primary" type="submit" disabled={!canRequestResume || resumePending || !/^(0|[1-9][0-9]*)$/.test(resumeNonce) || !/^(0|[1-9][0-9]*)$/.test(resumeDeadline)}>
+                    <KeyRound aria-hidden="true" />{resumePending ? '等待二次签名' : '请求二次签名并提交'}
+                  </button>
+                </form>
+              ) : <p className="coverage-readonly-note">当前角色仅可读取断路器治理证据。</p>}
+              {resumeError ? <ErrorView error={resumeError} /> : null}
+              {resumeNotice ? <p className="healthy-copy" role="status">{resumeNotice}</p> : null}
             </article>
+          </section>
+
+          <section className="panel dashboard-blockers coverage-action-panel">
+            <div className="panel-heading"><div><p className="section-kicker">SAFE GOVERNANCE FINALITY</p><h2>覆盖断路器动作</h2></div><button className="icon-button light-icon-button" type="button" aria-label="刷新断路器动作" onClick={() => setReload((value) => value + 1)} disabled={coverageActionsLoading}><RefreshCw aria-hidden="true" /></button></div>
+            {coverageActionsLoading ? <div className="resource-state" role="status"><RefreshCw className="spin" aria-hidden="true" /><div><strong>正在读取 Safe 治理动作</strong><p>恢复状态以 Core 终局证据为准。</p></div></div> : null}
+            {coverageActionsError ? <ErrorView error={coverageActionsError} /> : null}
+            {coverageActions ? <CoverageBreakerActionTable actions={coverageActions} /> : null}
           </section>
 
           <section className="panel dashboard-blockers">
@@ -163,6 +262,41 @@ export function DashboardPage() {
       ) : null}
     </>
   );
+}
+
+function CoverageBreakerActionTable({ actions }: { actions: readonly CoverageBreakerActionProjection[] }) {
+  if (!actions.length) return <UnavailableEmpty label="尚无断路器治理动作" />;
+  return (
+    <div className="table-scroll">
+      <table className="data-table coverage-action-table">
+        <thead><tr><th>动作</th><th>状态</th><th>Safe Tx</th><th>执行 Tx</th><th>确认数</th><th>更新时间</th></tr></thead>
+        <tbody>{actions.map((action) => (
+          <tr key={action.actionId}>
+            <td><strong>{action.action}</strong><small>{action.targetPaused ? '目标：暂停' : '目标：恢复'}</small></td>
+            <td><span className={action.state === 'FINAL' ? 'status-chip status-ready' : 'status-chip status-blocked'}>{coverageActionState(action)}</span></td>
+            <td><code>{action.safeTxHash ?? '未发布'}</code></td>
+            <td><code>{action.executionTxHash ?? '未执行'}</code></td>
+            <td>{action.confirmations}</td>
+            <td>{action.updatedAt}</td>
+          </tr>
+        ))}</tbody>
+      </table>
+    </div>
+  );
+}
+
+function coverageActionState(action: CoverageBreakerActionProjection) {
+  if (action.state === 'FINAL') return action.action === 'RESUME' ? '恢复已生效 · FINAL' : '暂停已生效 · FINAL';
+  if (action.state === 'MINED') return `MINED · 等待 15 确认 (${action.confirmations})`;
+  if (action.state === 'SAFE_PROPOSED') return 'SAFE_PROPOSED · 等待 Safe 执行';
+  if (action.state === 'PENDING_PROPOSAL') return 'PENDING_PROPOSAL · 等待 Safe 提案';
+  return `${action.state} · 未生效`;
+}
+
+function coverageRecoveryReason(newPaymentPaused: boolean, coverageHealthy: boolean) {
+  if (!newPaymentPaused) return 'NEW_PAYMENT 未暂停，不创建恢复动作。';
+  if (!coverageHealthy) return '覆盖证据为空或未全部达到 100%，恢复保持关闭。';
+  return '需要独立二次钱包签名和 Safe FINAL；提交不等于已恢复。';
 }
 
 function dashboardMetricGroups(dashboard: AdminBusinessDashboard): readonly MetricGroup[] {
@@ -251,4 +385,10 @@ function asCoreError(cause: unknown) {
   return cause instanceof CoreApiError
     ? cause
     : new CoreApiError({ code: 'ExternalBlocked', message: 'Dashboard Core 能力不可用', status: 503 });
+}
+
+function asCoverageResumeError(cause: unknown) {
+  return cause instanceof CoreApiError
+    ? cause
+    : new CoreApiError({ code: 'InvalidResponse', message: '覆盖断路器恢复未获得有效签名或 Core 授权', status: 400 });
 }

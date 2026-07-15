@@ -208,6 +208,17 @@ input::placeholder { color: #8b8b82; }
 .breaker-row > span { display: grid; gap: 2px; min-width: 0; }
 .breaker-row strong { overflow-wrap: anywhere; color: var(--ink); font-size: 12px; }
 .breaker-row small { font-size: 10px; }
+.coverage-recovery-form { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(130px, .65fr) minmax(170px, .8fr); gap: 10px; padding-top: 16px; border-top: 1px solid var(--line); }
+.coverage-recovery-form > div { grid-column: 1 / -1; }
+.coverage-recovery-form p, .coverage-readonly-note { margin: 3px 0 0; color: var(--ink-muted); font-size: 11px; }
+.coverage-recovery-form label { display: grid; gap: 6px; color: var(--ink-soft); font-size: 11px; font-weight: 700; }
+.coverage-recovery-form .button { align-self: end; }
+.coverage-readonly-note { padding-top: 12px; border-top: 1px solid var(--line); }
+.coverage-action-panel { display: grid; gap: 14px; }
+.coverage-action-table { min-width: 940px; }
+.coverage-action-table td { max-width: 240px; }
+.coverage-action-table td code { display: block; overflow-wrap: anywhere; white-space: normal; }
+.coverage-action-table td small { display: block; margin-top: 3px; color: var(--ink-muted); font-size: 10px; }
 .dashboard-blockers { margin-top: 16px; }
 .dashboard-blocker-list { display: grid; gap: 8px; margin-top: 14px; }
 .dashboard-blocker-list article { min-width: 0; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 12px; background: var(--danger-soft); border: 1px solid #e5b6b1; border-radius: 4px; }
@@ -336,6 +347,8 @@ input::placeholder { color: #8b8b82; }
   .takeover-order-detail { grid-template-columns: minmax(0, 1fr); }
   .dashboard-window { grid-template-columns: repeat(2, minmax(0, 1fr)) 44px; }
   .dashboard-evidence-grid { grid-template-columns: minmax(0, 1fr); }
+  .coverage-recovery-form { grid-template-columns: 1fr 1fr; }
+  .coverage-recovery-form .button { grid-column: 1 / -1; }
   .stage-arrow { display: none; }
 }
 
@@ -393,6 +406,8 @@ input::placeholder { color: #8b8b82; }
   .fulfillment-evidence-streams { grid-template-columns: 1fr; }
   .dashboard-alert { grid-template-columns: 36px 1fr; }
   .dashboard-alert a { grid-column: 2; }
+  .coverage-recovery-form { grid-template-columns: 1fr; }
+  .coverage-recovery-form .button { grid-column: 1; }
   .blocked-callout { align-items: flex-start; }
   .blocked-callout > span { display: none; }
 }
