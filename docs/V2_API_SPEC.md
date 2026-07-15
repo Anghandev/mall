@@ -303,7 +303,7 @@ capabilities plus signed settlement intents and requests, merchant finance and
 guarantee deposits, takeover funding, Safe MultiSend batching and finality,
 policy governance, CMS, notifications, versioned system configuration,
 append-only audit queries and operations monitoring. The coordinated OpenAPI
-publishes 119 HTTP operations and the generated types, state/error enums,
+publishes 122 HTTP operations and the generated types, state/error enums,
 Schema and ABI share the same artifact version.
 
 Seckill session reads, numeric-cursor HTTP replay and `/v2/ws` publish only
