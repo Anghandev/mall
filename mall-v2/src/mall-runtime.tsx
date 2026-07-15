@@ -33,7 +33,6 @@ import type {
   PaymentSubmissionRequest,
   RealtimeEventEnvelope,
   SeckillQuoteResponse,
-  SeckillSessionProjection,
   SettlementListProjection,
   SettlementRail,
 } from '@abu24k/core-artifacts';
@@ -48,6 +47,7 @@ import {
   type CoreClient,
   type FulfillmentEvidenceContentType,
   type ParsedBuyerAddress,
+  type PublishedSeckillSessionProjection,
   type WalletSession,
 } from './core-client';
 import { productBaseline } from './bootstrap';
@@ -121,9 +121,9 @@ export interface MallRuntimeValue {
   location: BrowserPosition | null;
   locationState: 'idle' | 'loading' | 'ready' | 'error';
   checkoutTarget: CheckoutTarget | null;
-  seckillSession: SeckillSessionProjection | null;
+  seckillSession: PublishedSeckillSessionProjection | null;
   seckillSessionState: LoadState;
-  seckillHistory: readonly SeckillSessionProjection[];
+  seckillHistory: readonly PublishedSeckillSessionProjection[];
   seckillEvents: readonly RealtimeEventEnvelope[];
   seckillRealtimeState: SeckillRealtimeState | 'IDLE';
   seckillRealtimeError: string | null;
@@ -231,9 +231,9 @@ export function MallRuntimeProvider({
   const [location, setLocation] = useState<BrowserPosition | null>(null);
   const [locationState, setLocationState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [checkoutTarget, setCheckoutTarget] = useState<CheckoutTarget | null>(null);
-  const [seckillSession, setSeckillSession] = useState<SeckillSessionProjection | null>(null);
+  const [seckillSession, setSeckillSession] = useState<PublishedSeckillSessionProjection | null>(null);
   const [seckillSessionState, setSeckillSessionState] = useState<LoadState>('loading');
-  const [seckillHistory, setSeckillHistory] = useState<readonly SeckillSessionProjection[]>([]);
+  const [seckillHistory, setSeckillHistory] = useState<readonly PublishedSeckillSessionProjection[]>([]);
   const [seckillEvents, setSeckillEvents] = useState<readonly RealtimeEventEnvelope[]>([]);
   const [seckillRealtimeState, setSeckillRealtimeState] = useState<SeckillRealtimeState | 'IDLE'>('IDLE');
   const [seckillRealtimeError, setSeckillRealtimeError] = useState<string | null>(null);

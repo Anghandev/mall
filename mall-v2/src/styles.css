@@ -850,6 +850,38 @@ a {
   line-height: 1.55;
 }
 
+.seckill-publication {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.seckill-publication > div {
+  display: grid;
+  gap: 4px;
+}
+
+.seckill-publication dt,
+.seckill-publication dd {
+  margin: 0;
+}
+
+.seckill-publication dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.seckill-publication code {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .winner-callout {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);

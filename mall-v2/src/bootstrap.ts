@@ -13,28 +13,33 @@ const paymentRouterDeployment = (contractManifest.contracts as readonly Readonly
   address: string | null;
 }>[]).find((contract) => contract.name === 'PaymentRouterV2');
 
+const manifestsAligned = String(coordinatedManifest.artifactVersion) === artifactVersion
+  && String(contractManifest.artifactVersion) === artifactVersion;
+
 export const productBaseline = Object.freeze({
   coreArtifacts: artifactVersion,
+  manifestsAligned,
   surface: 'mall',
   chainId: chainIdentity.chainId,
   knownOrderActions: allowedActionNames,
   executableOrderActions: executableOrderActionNames,
-  deploymentAuthorized:
-    coordinatedManifest.deploymentAuthorized === true && contractManifest.deploymentAuthorized === true,
-  paymentRouterAddress: paymentRouterDeployment?.address ?? null,
+  deploymentAuthorized: manifestsAligned
+    && coordinatedManifest.deploymentAuthorized === true
+    && contractManifest.deploymentAuthorized === true,
+  paymentRouterAddress: manifestsAligned ? paymentRouterDeployment?.address ?? null : null,
   paymentCapabilities: Object.freeze({
-    catalog: coordinatedManifest.capabilityStatus.catalogHttp === 'AVAILABLE',
-    ordinaryQuote: coordinatedManifest.capabilityStatus.paymentQuoteHttp === 'AVAILABLE',
-    seckillQuote: coordinatedManifest.capabilityStatus.seckillQuoteHttp === 'AVAILABLE',
-    submission: coordinatedManifest.capabilityStatus.paymentSubmissionHttp === 'AVAILABLE',
-    projection: coordinatedManifest.capabilityStatus.paymentProjectionHttp === 'AVAILABLE',
+    catalog: manifestsAligned && coordinatedManifest.capabilityStatus.catalogHttp === 'AVAILABLE',
+    ordinaryQuote: manifestsAligned && coordinatedManifest.capabilityStatus.paymentQuoteHttp === 'AVAILABLE',
+    seckillQuote: manifestsAligned && coordinatedManifest.capabilityStatus.seckillQuoteHttp === 'AVAILABLE',
+    submission: manifestsAligned && coordinatedManifest.capabilityStatus.paymentSubmissionHttp === 'AVAILABLE',
+    projection: manifestsAligned && coordinatedManifest.capabilityStatus.paymentProjectionHttp === 'AVAILABLE',
   }),
   settlementAdminCapabilities: Object.freeze({
-    settlements: coordinatedManifest.capabilityStatus.settlementHttp === 'AVAILABLE',
-    cms: coordinatedManifest.capabilityStatus.cmsHttp === 'AVAILABLE',
-    notifications: coordinatedManifest.capabilityStatus.notificationHttp === 'AVAILABLE',
-    seckillSessions: coordinatedManifest.capabilityStatus.seckillSessionHttp === 'AVAILABLE',
-    websocket: coordinatedManifest.capabilityStatus.websocket === 'AVAILABLE',
+    settlements: manifestsAligned && coordinatedManifest.capabilityStatus.settlementHttp === 'AVAILABLE',
+    cms: manifestsAligned && coordinatedManifest.capabilityStatus.cmsHttp === 'AVAILABLE',
+    notifications: manifestsAligned && coordinatedManifest.capabilityStatus.notificationHttp === 'AVAILABLE',
+    seckillSessions: manifestsAligned && coordinatedManifest.capabilityStatus.seckillSessionHttp === 'AVAILABLE',
+    websocket: manifestsAligned && coordinatedManifest.capabilityStatus.websocket === 'AVAILABLE',
   }),
   payOrderExecutable: executableOrderActionNames.includes('PAY_ORDER'),
 } as const);

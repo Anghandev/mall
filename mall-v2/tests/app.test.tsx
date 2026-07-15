@@ -45,7 +45,14 @@ import {
   store,
 } from './fulfillment-fixtures';
 import { paymentQuote, product, seckillQuote } from './payment-fixtures';
-import { relayEvent, seckillSession, seckillSessionId } from './seckill-fixtures';
+import {
+  relayEvent,
+  seckillGovernanceActionId,
+  seckillPublicationTxHash,
+  seckillRulesContentHash,
+  seckillSession,
+  seckillSessionId,
+} from './seckill-fixtures';
 import {
   finalSafeTxHash,
   notificationItem,
@@ -68,7 +75,8 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/mall');
 
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.8');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.9');
+    expect(productBaseline.manifestsAligned).toBe(true);
     expect(productBaseline.knownOrderActions).toBe(allowedActionNames);
     expect(productBaseline.executableOrderActions).toBe(executableOrderActionNames);
     expect(executableOrderActionNames).toContain('CONFIRM_RECEIPT');
@@ -76,7 +84,7 @@ describe('Mall V2 payment consumer', () => {
     expect(isCoreOrderActionExecutable('CONFIRM_RECEIPT')).toBe(true);
     expect(isCoreOrderActionExecutable('PAY_ORDER')).toBe(false);
     expect(mallRuntimeBoundary).toMatchObject({
-      artifactStatus: '2.0.0-settlement-admin.8',
+      artifactStatus: '2.0.0-settlement-admin.9',
       executableOrderActions: executableOrderActionNames,
       deploymentAuthorized: false,
       settlementAdminCapabilities: {
@@ -562,7 +570,40 @@ describe('Mall V2 payment consumer', () => {
     if (phase === 'LIVE') {
       expect(screen.getByText('00:59:00')).toBeTruthy();
       expect(screen.getByText('00:01:00')).toBeTruthy();
+      expect(screen.getByText(seckillGovernanceActionId)).toBeTruthy();
+      expect(screen.getByText(seckillRulesContentHash)).toBeTruthy();
+      expect(screen.getByText(seckillPublicationTxHash)).toBeTruthy();
     }
+  });
+
+  it('shows only the published rules content bound to the current final session', async () => {
+    const current = seckillSession();
+    const content = (text: string) => ({
+      type: 'doc',
+      children: [{ type: 'paragraph', children: [{ type: 'text', text }] }],
+    });
+    const matchingRules = {
+      ...publicCmsItem,
+      versionId: 'seckill-rules-current',
+      slug: 'seckill-rules-current',
+      contentType: 'SECKILL_RULES' as const,
+      contentHash: current.rulesContentHash,
+      content: content('当前场次规则'),
+    };
+    const staleRules = {
+      ...matchingRules,
+      versionId: 'seckill-rules-stale',
+      slug: 'seckill-rules-stale',
+      contentHash: `0x${'d'.repeat(64)}`,
+      content: content('旧场次规则'),
+    };
+    renderAt('/seckill', readyServices({
+      getCurrentSeckillSession: vi.fn().mockResolvedValue(current),
+      listPublicCms: vi.fn().mockResolvedValue([staleRules, matchingRules]),
+    }));
+
+    expect(await screen.findByRole('heading', { name: '当前场次规则' })).toBeTruthy();
+    expect(screen.queryByText('旧场次规则')).toBeNull();
   });
 
   it('renders history and final-only relay wall from the coordinated realtime consumer', async () => {

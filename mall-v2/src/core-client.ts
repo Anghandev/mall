@@ -76,6 +76,19 @@ export interface CorePaymentAvailability {
   blockCode: 'DecisionBlocked' | 'ExternalBlocked' | 'ConfigurationRequired' | null;
 }
 
+export type PublishedSeckillSessionProjection = Omit<
+  SeckillSessionProjection,
+  'governanceActionId' | 'rulesContentHash' | 'publicationTxHash'
+> & Readonly<{
+  governanceActionId: NonNullable<SeckillSessionProjection['governanceActionId']>;
+  rulesContentHash: NonNullable<SeckillSessionProjection['rulesContentHash']>;
+  publicationTxHash: NonNullable<SeckillSessionProjection['publicationTxHash']>;
+}>;
+
+export type PublishedSeckillSessionHistoryPage = Omit<SeckillSessionHistoryPage, 'items'> & Readonly<{
+  items: readonly PublishedSeckillSessionProjection[];
+}>;
+
 export interface WalletSession {
   token: string;
   walletAddress: string;
@@ -191,9 +204,9 @@ export interface CoreClient {
   createSeckillQuote(token: string, sessionId: string, selection: QuoteSelection): Promise<SeckillQuoteResponse>;
   submitPayment(token: string, request: PaymentSubmissionRequest): Promise<PaymentSubmissionResponse>;
   getPayment(token: string, orderId: string): Promise<PaymentProjection>;
-  getCurrentSeckillSession(): Promise<SeckillSessionProjection>;
-  listSeckillSessionHistory(cursor?: string, limit?: number): Promise<SeckillSessionHistoryPage>;
-  getSeckillSession(sessionId: string): Promise<SeckillSessionProjection>;
+  getCurrentSeckillSession(): Promise<PublishedSeckillSessionProjection>;
+  listSeckillSessionHistory(cursor?: string, limit?: number): Promise<PublishedSeckillSessionHistoryPage>;
+  getSeckillSession(sessionId: string): Promise<PublishedSeckillSessionProjection>;
   listSeckillSessionEvents(sessionId: string, cursor?: string, limit?: number): Promise<RealtimeEventPage>;
   listStores(regionCode?: string): Promise<readonly MerchantStore[]>;
   createDeliveryTarget(token: string, request: CreateDeliveryTargetRequest): Promise<DeliveryTarget>;
@@ -977,14 +990,14 @@ function parseSettlementList(value: unknown): SettlementListProjection {
   return value as SettlementListProjection;
 }
 
-function parseSeckillHistory(value: unknown): SeckillSessionHistoryPage {
+function parseSeckillHistory(value: unknown): PublishedSeckillSessionHistoryPage {
   const response = objectValue(value);
   const items = arrayValue(response.items).map(parseSeckillSession);
   if (response.nextCursor !== null) atomicValue(response.nextCursor);
   return { items, nextCursor: response.nextCursor as string | null };
 }
 
-function parseSeckillSession(value: unknown): SeckillSessionProjection {
+function parseSeckillSession(value: unknown): PublishedSeckillSessionProjection {
   const response = objectValue(value);
   assertArtifactVersion(stringValue(response.artifactVersion));
   bytes32Value(response.sessionId);
@@ -1016,9 +1029,15 @@ function parseSeckillSession(value: unknown): SeckillSessionProjection {
   atomicValue(response.prizePoolUsdt);
   if (response.lastBuyerWallet !== null) addressValue(response.lastBuyerWallet);
   if (response.winnerWallet !== null) addressValue(response.winnerWallet);
-  objectValue(response.snapshot);
+  const snapshot = objectValue(response.snapshot);
+  bytes32Value(response.governanceActionId);
+  const rulesContentHash = bytes32Value(response.rulesContentHash);
+  bytes32Value(response.publicationTxHash);
+  if (bytes32Value(snapshot.rulesContentHash).toLowerCase() !== rulesContentHash.toLowerCase()) {
+    throw new CoreClientError('InvalidResponse', '秒杀场次缺少可验证的最终发布证据');
+  }
   stringArray(response.allowedActions);
-  return value as SeckillSessionProjection;
+  return value as PublishedSeckillSessionProjection;
 }
 
 function parseRealtimeEventPage(value: unknown, sessionId: string): RealtimeEventPage {
