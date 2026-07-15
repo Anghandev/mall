@@ -3,7 +3,7 @@
 The platform-admin product is a consumer. It cannot add shared endpoints,
 schemas, financial logic, calldata, signers or database behavior.
 
-The coordinated consumer is `@abu24k/core-artifacts@2.0.0-settlement-admin.4`.
+The coordinated consumer is `@abu24k/core-artifacts@2.0.0-settlement-admin.5`.
 Published paths still fail closed when Core returns `DecisionBlocked`,
 `ExternalBlocked` or `ConfigurationRequired`.
 
@@ -11,11 +11,11 @@ Published paths still fail closed when Core returns `DecisionBlocked`,
 |---|---|---|
 | GAP-ADM-001 | Payment, fulfillment and settlement/admin artifacts, including finalized seckill WebSocket, are coordinated at one version | Production deployment remains unauthorized |
 | GAP-ADM-002 | SIWE/JWT plus route-specific ADMIN/OPERATOR/ARBITRATOR/AUDITOR enforcement is published | A role absent from the session never enables a product control |
-| GAP-ADM-003 | Order-level `allowedActions` is published | Global resource list/batch `allowedActions`, export and print contracts are absent |
+| GAP-ADM-003 | Exact Admin order ID/product ID/TxHash/wallet search, pending-product-review and breaker projections, full order-row `allowedActions`, and read-only batch enabled-intersection preview are published and consumed | OR search, fuzzy wallet, UID/phone PII search, Yellow queue, cross-resource selection, export/print and arbitrary batch-write contracts are absent |
 | GAP-ADM-004 | Policy and takeover-funding EIP-712 challenge/signature/Safe proposal evidence is published | Seckill force-close, breaker and prize-injection governance remain absent |
 | GAP-ADM-005 | Monitoring metrics and per-asset coverage are published | Business GMV/order/review aggregates and risk queues remain unavailable |
 | GAP-ADM-006 | Merchant guarantee, deposit finality, debt and takeover-finance projection is published | Qualification, level, PII, sales and wallet-change governance remain unavailable |
-| GAP-ADM-007 | `.4` admin category/tag versions, all managed products, store product slot, signed concession preview, review submission/decisions, delist, inventory adjustment and controlled media reads are published and consumed | `CatalogCategoryInput.parentCategoryId` cannot express `null`, so an existing child cannot move back to the root; UI disables that transition. Global cross-resource batch selection remains `GAP-ADM-003` |
+| GAP-ADM-007 | `.5` admin category/tag versions, nullable category parent, all managed products, store product slot, signed concession preview, review submission/decisions, delist, inventory adjustment and controlled media reads are published and consumed | Global cross-resource batch selection remains `GAP-ADM-003`; unresolved category service fees remain `DecisionBlocked` |
 | GAP-ADM-008 | Policy governance plus the product-scoped signed concession preview are published and consumed | Missing service/prize/store/concession-destination commercial decisions remain `DecisionBlocked`; the product never infers them |
 | GAP-ADM-009 | Payment quotes plus current/history/session/event HTTP reads and finalized relay WebSocket are published | Admin session scheduling, inventory lock, force-close, prize injection and rule binding remain disabled |
 | GAP-ADM-010 | Fulfillment commands plus takeover funding, ordered deductions, platform advance and debt projections are published | Replacement-merchant administration and case-wide list projection remain unavailable |

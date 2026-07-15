@@ -59,6 +59,25 @@ describe('catalog/admin coordinated Core client', () => {
     expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: 'POST' });
   });
 
+  it('sends explicit null when an existing category moves back to the root', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(category({ version: '2', parentCategoryId: null })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await saveCatalogCategory('category-child', {
+      name: '纪念章',
+      parentCategoryId: null,
+      sortOrder: 3,
+      idempotencyKey: 'category-move-root-1',
+    }, 'jwt');
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      name: '纪念章',
+      parentCategoryId: null,
+      sortOrder: 3,
+      idempotencyKey: 'category-move-root-1',
+    });
+  });
+
   it('requires the authoritative store slot before saving the exact proxy product body', async () => {
     const input = productInput();
     const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {

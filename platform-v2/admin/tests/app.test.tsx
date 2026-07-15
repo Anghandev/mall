@@ -134,21 +134,20 @@ describe('platform admin fail-closed experience', () => {
 
     await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
 
-    expect(await screen.findByText(/缺少 ADMIN 或 OPERATOR/)).toBeTruthy();
-    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/v2/orders'))).toBe(false);
+    expect(await screen.findByText(/缺少 ADMIN、OPERATOR 或 AUDITOR/)).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/v2/admin/orders'))).toBe(false);
     expect(screen.queryByRole('button', { name: '打开接管案件' })).toBeNull();
   });
 
   it('requires current Core allowedActions before an admin can open takeover', async () => {
     const wallet = '0x1111111111111111111111111111111111111111';
-    const order = fulfillmentOrder();
+    const order = fulfillmentOrder({ allowedActions: [{ action: 'OPEN_TAKEOVER', enabled: true }] });
     window.ethereum = walletProvider(wallet);
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
       if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['ADMIN'] });
-      if (url.endsWith('/v2/orders') && !init?.method) return jsonResponse({ orders: [order] });
-      if (url.endsWith('/v2/actions/order')) return jsonResponse({ allowedActions: [{ action: 'OPEN_TAKEOVER', enabled: true }] });
+      if (url.endsWith('/v2/admin/orders') && !init?.method) return jsonResponse(adminOrderPage([order]));
       if (url.endsWith(`/v2/orders/${order.orderId}/takeover`)) {
         return jsonResponse({ orderId: order.orderId, caseId: 'takeover-case-1', state: 'TAKEOVER', customerFundsRemainLocked: true }, 201);
       }
@@ -179,14 +178,13 @@ describe('platform admin fail-closed experience', () => {
 
   it('keeps takeover disabled when Core returns a denied order action', async () => {
     const wallet = '0x1111111111111111111111111111111111111111';
-    const order = fulfillmentOrder();
+    const order = fulfillmentOrder({ allowedActions: [{ action: 'OPEN_TAKEOVER', enabled: false, reasonCode: 'FinalityPending', deadline: '2026-07-21T00:00:00.000Z' }] });
     window.ethereum = walletProvider(wallet);
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
       if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['OPERATOR'] });
-      if (url.endsWith('/v2/orders') && !init?.method) return jsonResponse({ orders: [order] });
-      if (url.endsWith('/v2/actions/order')) return jsonResponse({ allowedActions: [{ action: 'OPEN_TAKEOVER', enabled: false, reasonCode: 'FinalityPending', deadline: '2026-07-21T00:00:00.000Z' }] });
+      if (url.endsWith('/v2/admin/orders') && !init?.method) return jsonResponse(adminOrderPage([order]));
       return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected request', correlationId: 'denied-test' } }, 400);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -203,14 +201,13 @@ describe('platform admin fail-closed experience', () => {
 
   it('records replacement shipment only after takeover order state and Core action agree', async () => {
     const wallet = '0x1111111111111111111111111111111111111111';
-    const order = fulfillmentOrder({ state: 'TAKEOVER', takeoverOpenedAt: '2026-07-09T00:00:00.000Z' });
+    const order = fulfillmentOrder({ state: 'TAKEOVER', takeoverOpenedAt: '2026-07-09T00:00:00.000Z', allowedActions: [{ action: 'RECORD_SHIPMENT', enabled: true }] });
     window.ethereum = walletProvider(wallet);
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
       if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['OPERATOR'] });
-      if (url.endsWith('/v2/orders') && !init?.method) return jsonResponse({ orders: [order] });
-      if (url.endsWith('/v2/actions/order')) return jsonResponse({ allowedActions: [{ action: 'RECORD_SHIPMENT', enabled: true }] });
+      if (url.endsWith('/v2/admin/orders') && !init?.method) return jsonResponse(adminOrderPage([order]));
       if (url.endsWith(`/v2/orders/${order.orderId}/shipments`)) {
         return jsonResponse({
           orderId: order.orderId,
@@ -245,14 +242,13 @@ describe('platform admin fail-closed experience', () => {
 
   it('denies arbitration decisions to an operator even if a bad Core response enables the action', async () => {
     const wallet = '0x1111111111111111111111111111111111111111';
-    const order = fulfillmentOrder({ state: 'ARBITRATION', arbitrationOpenedAt: '2026-07-14T09:00:00.000Z' });
+    const order = fulfillmentOrder({ state: 'ARBITRATION', arbitrationOpenedAt: '2026-07-14T09:00:00.000Z', allowedActions: [{ action: 'DECIDE_ARBITRATION', enabled: true }] });
     window.ethereum = walletProvider(wallet);
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
       if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['OPERATOR'] });
-      if (url.endsWith('/v2/orders') && !init?.method) return jsonResponse({ orders: [order] });
-      if (url.endsWith('/v2/actions/order')) return jsonResponse({ allowedActions: [{ action: 'DECIDE_ARBITRATION', enabled: true }] });
+      if (url.endsWith('/v2/admin/orders') && !init?.method) return jsonResponse(adminOrderPage([order]));
       return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected request', correlationId: 'role-fence' } }, 400);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -263,6 +259,61 @@ describe('platform admin fail-closed experience', () => {
     expect(await screen.findByText(/DECIDE_ARBITRATION 不允许当前平台角色/)).toBeTruthy();
     expect(screen.getByRole('button', { name: '执行裁决仲裁' }).hasAttribute('disabled')).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/arbitration-decisions'))).toBe(false);
+  });
+
+  it('runs exact admin search and read-only batch preview from the coordinated .5 projections', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    const order = fulfillmentOrder({ allowedActions: [{ action: 'RECORD_SHIPMENT', enabled: true }] });
+    window.ethereum = walletProvider(wallet);
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['ADMIN'] });
+      if (url.endsWith('/v2/admin/orders/batch-actions/preview') && init?.method === 'POST') return jsonResponse({
+        rows: [{ orderId: order.orderId, allowedActions: order.allowedActions }],
+        enabledActionIntersection: ['RECORD_SHIPMENT'],
+      });
+      if (url.includes('/v2/admin/orders?')) return jsonResponse(adminOrderPage([order], {
+        pausedScopes: ['NEW_PAYMENT'],
+        breaker: { scope: 'NEW_PAYMENT', active: true },
+        pendingProductReview: true,
+      }));
+      if (url.endsWith('/v2/admin/orders')) return jsonResponse(adminOrderPage([order]));
+      return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected request', correlationId: 'admin-search-test' } }, 400);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderAt('/takeover');
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    expect(await screen.findByText(order.productId)).toBeTruthy();
+    await user.click(screen.getByText('高级组合检索'));
+    await user.type(screen.getByLabelText('订单号'), order.orderId);
+    await user.type(screen.getByLabelText('商品 ID'), order.productId);
+    await user.type(screen.getByLabelText('TxHash'), order.paymentTxHash);
+    await user.type(screen.getByLabelText('钱包地址'), wallet);
+    await user.selectOptions(screen.getByLabelText('业务投影'), 'breaker');
+    await user.selectOptions(screen.getByLabelText('Breaker scope'), 'NEW_PAYMENT');
+    await user.click(screen.getByRole('button', { name: '查询' }));
+
+    expect(await screen.findByText('ACTIVE')).toBeTruthy();
+    expect(screen.getByText('PENDING')).toBeTruthy();
+    const searchCall = fetchMock.mock.calls.find(([input]) => String(input).includes('/v2/admin/orders?'));
+    const searchUrl = new URL(String(searchCall?.[0]), 'https://admin.local');
+    expect(Object.fromEntries(searchUrl.searchParams)).toMatchObject({
+      orderId: order.orderId,
+      productId: order.productId,
+      txHash: order.paymentTxHash,
+      wallet,
+      breakerScope: 'NEW_PAYMENT',
+    });
+
+    await user.click(screen.getByRole('checkbox', { name: `选择订单 ${order.orderId}` }));
+    await user.click(screen.getByRole('button', { name: '预览共同操作' }));
+    expect(await screen.findByText('RECORD_SHIPMENT')).toBeTruthy();
+    expect(screen.getByText(/仅发布只读预览/)).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/v2/admin/orders/batch-actions/preview'))).toBe(true);
+    expect(screen.getByRole('button', { name: '导出 CSV' }).hasAttribute('disabled')).toBe(true);
   });
 
   it('shows every governance gate and requires an authenticated draft before signing', () => {
@@ -433,6 +484,37 @@ describe('platform admin fail-closed experience', () => {
     expect(screen.getByText(/Correlation ID: taxonomy-lock-1/)).toBeTruthy();
     const write = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/v2/admin/catalog/categories/category-1'));
     expect(JSON.parse(String(write?.[1]?.body))).toMatchObject({ status: 'DISABLED', idempotencyKey: 'disable-category-1' });
+  });
+
+  it('moves an existing child category to the root with an explicit null parent', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    window.ethereum = walletProvider(wallet);
+    const root = { categoryId: 'category-root', version: '1', parentCategoryId: null, level: 1, name: '黄金', iconAssetId: null, sortOrder: 1, status: 'ENABLED', serviceFee: { state: 'DecisionBlocked', valueBps: null } };
+    const child = { ...root, categoryId: 'category-child', parentCategoryId: root.categoryId, level: 2, name: '纪念章', sortOrder: 2 };
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['ADMIN'] });
+      if (url.endsWith('/v2/admin/catalog/categories') && !init?.method) return jsonResponse({ categories: [root, child] });
+      if (url.endsWith('/v2/admin/catalog/tags') && !init?.method) return jsonResponse({ tags: [] });
+      if (url.endsWith('/v2/admin/catalog/products') && !init?.method) return jsonResponse({ products: [] });
+      if (url.endsWith('/v2/admin/catalog/categories/category-child') && init?.method === 'PUT') return jsonResponse({ ...child, version: '2', parentCategoryId: null, level: 1 });
+      return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected request', correlationId: 'taxonomy-root-test' } }, 400);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderAt('/catalog');
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    await user.click(await screen.findByRole('tab', { name: '类目与标签' }));
+    await user.click(screen.getByRole('button', { name: /纪念章/ }));
+    await user.selectOptions(screen.getByLabelText('父类目'), '');
+    await user.type(screen.getAllByLabelText('Idempotency key')[0]!, 'category-move-root-1');
+    await user.click(screen.getByRole('button', { name: '保存类目版本' }));
+
+    expect(await screen.findByText(/Core 已保存类目 category-child v2/)).toBeTruthy();
+    const write = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/v2/admin/catalog/categories/category-child'));
+    expect(JSON.parse(String(write?.[1]?.body))).toMatchObject({ parentCategoryId: null, idempotencyKey: 'category-move-root-1' });
   });
 
   it('uses SIWE and renders the wallet-bound payment submission projection', async () => {
@@ -615,6 +697,10 @@ function fulfillmentOrder(overrides: Record<string, unknown> = {}) {
     merchantWallet: '0x2222222222222222222222222222222222222222',
     productId: 'product-24k',
     skuId: 'sku-10g',
+    quantity: '1',
+    createdAt: '2026-07-01T00:00:00.000Z',
+    orderKind: 'ORDINARY',
+    paymentTxHash: hash('4'),
     fulfillmentMode: 'DELIVERY',
     state: 'PAID',
     finalityStatus: 'FINAL',
@@ -641,6 +727,18 @@ function fulfillmentOrder(overrides: Record<string, unknown> = {}) {
     shipments: [],
     logistics: [],
     balances: [{ asset: 'USDT', state: 'LOCKED', amount: '65000000' }],
+    allowedActions: [],
+    ...overrides,
+  };
+}
+
+function adminOrderPage(orders: readonly unknown[], overrides: Record<string, unknown> = {}) {
+  return {
+    orders,
+    nextCursor: null,
+    pausedScopes: [],
+    breaker: null,
+    pendingProductReview: null,
     ...overrides,
   };
 }

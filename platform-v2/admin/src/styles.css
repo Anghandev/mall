@@ -149,6 +149,11 @@ input::placeholder { color: #8b8b82; }
 
 .batch-bar { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 12px 20px; margin-top: 16px; padding: 14px 16px; background: #e9e9e4; border: 1px solid var(--line-strong); border-radius: 6px; }
 .batch-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+.batch-preview { grid-column: 1 / -1; display: grid; gap: 7px; padding: 12px 0 2px; border-top: 1px solid var(--line); }
+.batch-preview > span, .batch-preview > small { color: var(--ink-muted); font-size: 10px; }
+.batch-preview > div { display: flex; flex-wrap: wrap; gap: 5px; }
+.batch-preview code { padding: 3px 6px; color: #315847; background: var(--success-soft); border: 1px solid #a7cfbb; border-radius: 3px; font-size: 10px; }
+.batch-preview-error { grid-column: 1 / -1; margin: 0; color: var(--danger); font-size: 11px; }
 .batch-reason { grid-column: 1 / -1; margin: 0; padding-top: 8px; color: var(--ink-soft); border-top: 1px solid var(--line); font-size: 11px; }
 .tabular, dd, code { font-variant-numeric: tabular-nums; }
 
@@ -206,6 +211,10 @@ input::placeholder { color: #8b8b82; }
 .snapshot-rule { color: #315847; background: var(--success-soft); border-color: #a7cfbb; }
 
 .takeover-stage-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 20px 0 16px; background: var(--line-strong); border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden; }
+.admin-order-projection { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 16px 0; overflow: hidden; background: var(--line); border: 1px solid var(--line); border-radius: 5px; }
+.admin-order-projection > div { min-width: 0; min-height: 72px; display: flex; flex-direction: column; justify-content: center; padding: 10px 14px; background: var(--surface); }
+.admin-order-projection span, .admin-order-projection small { color: var(--ink-muted); font-size: 10px; }
+.admin-order-projection strong { margin: 4px 0; overflow-wrap: anywhere; font-size: 14px; }
 .takeover-stage-grid article { position: relative; min-height: 168px; padding: 18px; background: var(--surface); }
 .takeover-stage-grid article > svg:not(.stage-arrow) { width: 22px; margin-top: 20px; color: var(--gold-dark); }
 .takeover-stage-grid h2 { margin: 8px 0 4px; font-size: 15px; }
@@ -221,6 +230,7 @@ input::placeholder { color: #8b8b82; }
 .takeover-orders { border-bottom: 1px solid var(--line); }
 .takeover-orders .data-table { min-width: 900px; }
 .takeover-orders tr.is-selected td { background: var(--gold-soft); }
+.takeover-orders input[type='checkbox'] { width: 20px; min-height: 20px; accent-color: var(--ink); }
 .takeover-order-detail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, .75fr); gap: 16px; padding: 18px; }
 .takeover-order-detail h3 { margin: 0; font-size: 16px; }
 .takeover-command { display: grid; gap: 7px; padding: 14px; background: var(--surface-muted); border: 1px solid var(--line); border-radius: 4px; }
@@ -394,7 +404,7 @@ input::placeholder { color: #8b8b82; }
 .seckill-history-table { min-width: 760px; }
 
 @media (max-width: 760px) {
-  .inline-query-form, .coverage-grid { grid-template-columns: 1fr; }
+  .inline-query-form, .coverage-grid, .admin-order-projection { grid-template-columns: 1fr; }
   .alert-list article { grid-template-columns: 22px minmax(0, 1fr); }
   .alert-list article > button, .alert-list article > span { grid-column: 2; justify-self: start; }
 }

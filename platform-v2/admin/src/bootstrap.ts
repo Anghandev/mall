@@ -23,6 +23,8 @@ export const productBaseline = Object.freeze({
     catalogSignedConcessionPreview: true,
     paymentProjection: 'BUYER_WALLET_SCOPED',
     fulfillmentOrderProjection: 'ADMIN_RBAC_SCOPED',
+    adminOrderSearch: true,
+    adminOrderBatchActionPreview: true,
     orderAllowedActions: true,
     fulfillmentCommands: true,
     projections: true,

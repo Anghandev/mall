@@ -4,6 +4,7 @@ import {
   arbitrationOutcomes,
   artifactVersion,
   balanceStates,
+  breakerScopes,
   chainIdentity,
   coreErrorCodes,
   fulfillmentAssets,
@@ -16,14 +17,20 @@ import {
   orderProjectionStates,
   userRoles,
   type AllowedAction,
+  type AdminOrderSearchPage,
   type ArbitrationDecision,
   type ArbitrationDecisionResult,
   type ArbitrationOpenedResult,
   type CatalogProduct,
   type CoreErrorCode,
+  type BreakerScope,
   type DeliveryResult,
   type ForcedReceiptDecisionResult,
   type FulfillmentOrder,
+  type FulfillmentMode,
+  type OrderBatchActionPreview,
+  type OrderKind,
+  type OrderProjectionState,
   type FulfillmentCommandInput,
   type FulfillmentDecision,
   type FulfillmentRequestDecision,
@@ -43,6 +50,23 @@ const coreOrigin = (import.meta.env.VITE_CORE_API_ORIGIN ?? '').trim().replace(/
 
 export type CoreBootstrap = ReturnType<typeof parseBootstrap>;
 export type CoreSession = ReturnType<typeof parseSession>;
+export type AdminOrderSearchFilters = Readonly<{
+  cursorCreatedAt?: string;
+  cursorOrderId?: string;
+  limit?: number;
+  from?: string;
+  to?: string;
+  skuId?: string;
+  state?: OrderProjectionState;
+  fulfillmentMode?: FulfillmentMode;
+  orderKind?: OrderKind;
+  orderId?: string;
+  productId?: string;
+  txHash?: string;
+  wallet?: string;
+  pendingReview?: boolean;
+  breakerScope?: BreakerScope;
+}>;
 export type PlatformFulfillmentCommandResult =
   | ShipmentResult
   | DeliveryResult
@@ -121,6 +145,46 @@ export async function fetchFulfillmentOrders(
     throw invalidResponse('Fulfillment order list does not match the coordinated generated type');
   }
   return Object.freeze([...body.orders]);
+}
+
+export async function searchAdminOrders(
+  token: string,
+  filters: AdminOrderSearchFilters = {},
+  signal?: AbortSignal,
+): Promise<AdminOrderSearchPage> {
+  const query = adminOrderSearchQuery(filters);
+  const body = await requestJson(`/v2/admin/orders${query ? `?${query}` : ''}`, {
+    headers: { authorization: `Bearer ${token}` },
+    ...(signal ? { signal } : {}),
+  });
+  if (!isAdminOrderSearchPage(body)) {
+    throw invalidResponse('Admin order search does not match the coordinated generated type');
+  }
+  return body;
+}
+
+export async function previewAdminOrderBatchActions(
+  orderIds: readonly string[],
+  token: string,
+): Promise<OrderBatchActionPreview> {
+  if (orderIds.length < 1 || orderIds.length > 100 || new Set(orderIds).size !== orderIds.length) {
+    throw invalidResponse('Order batch preview requires 1-100 unique orders', 400);
+  }
+  if (!orderIds.every((orderId) => bytes32Pattern.test(orderId))) {
+    throw invalidResponse('Order batch preview requires bytes32 order IDs', 400);
+  }
+  const body = await requestJson('/v2/admin/orders/batch-actions/preview', {
+    body: JSON.stringify({ orderIds }),
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
+    method: 'POST',
+  });
+  if (!isOrderBatchActionPreview(body, orderIds)) {
+    throw invalidResponse('Order batch action preview does not match the coordinated generated type');
+  }
+  return body;
 }
 
 export async function fetchOrderAllowedActions(
@@ -449,6 +513,10 @@ function isFulfillmentOrder(value: unknown): value is FulfillmentOrder {
       || !addressPattern.test(String(value.buyerWallet))
       || !addressPattern.test(String(value.merchantWallet))
       || !nonEmptyStrings(value, ['merchantId', 'productId', 'skuId'])
+      || !atomicAmountPattern.test(String(value.quantity))
+      || !isDateTime(value.createdAt)
+      || !['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'].includes(String(value.orderKind))
+      || (value.paymentTxHash !== null && !bytes32Pattern.test(String(value.paymentTxHash)))
       || !fulfillmentModes.includes(value.fulfillmentMode as never)
       || !orderProjectionStates.includes(value.state as never)
       || !orderFinalityStatuses.includes(value.finalityStatus as never)
@@ -463,7 +531,9 @@ function isFulfillmentOrder(value: unknown): value is FulfillmentOrder {
       ])
       || !isFulfillmentExactAmounts(value.exactAmounts)
   ) return false;
-  return Array.isArray(value.requests)
+  return Array.isArray(value.allowedActions)
+    && value.allowedActions.every(isAllowedAction)
+    && Array.isArray(value.requests)
     && value.requests.every((item) => isRecord(item)
       && nonEmptyStrings(item, ['requestId'])
       && fulfillmentRequestTypes.includes(item.requestType as never)
@@ -488,6 +558,102 @@ function isFulfillmentOrder(value: unknown): value is FulfillmentOrder {
       && fulfillmentAssets.includes(item.asset as never)
       && balanceStates.includes(item.state as never)
       && atomicAmountPattern.test(String(item.amount)));
+}
+
+function adminOrderSearchQuery(filters: AdminOrderSearchFilters) {
+  const query = new URLSearchParams();
+  const hasCursorTime = filters.cursorCreatedAt !== undefined;
+  const hasCursorId = filters.cursorOrderId !== undefined;
+  if (hasCursorTime !== hasCursorId) throw invalidResponse('Order cursor requires createdAt and orderId together', 400);
+  if (filters.limit !== undefined) {
+    if (!Number.isSafeInteger(filters.limit) || filters.limit < 1 || filters.limit > 100) {
+      throw invalidResponse('Order search limit must be between 1 and 100', 400);
+    }
+    query.set('limit', String(filters.limit));
+  }
+  for (const [name, value] of [
+    ['cursorCreatedAt', filters.cursorCreatedAt],
+    ['from', filters.from],
+    ['to', filters.to],
+  ] as const) {
+    if (value !== undefined) {
+      if (!isDateTime(value)) throw invalidResponse(`${name} must be an ISO timestamp`, 400);
+      query.set(name, value);
+    }
+  }
+  if (filters.from && filters.to && new Date(filters.from) > new Date(filters.to)) {
+    throw invalidResponse('Order search start must not be after end', 400);
+  }
+  for (const [name, value] of [
+    ['cursorOrderId', filters.cursorOrderId],
+    ['skuId', filters.skuId],
+    ['orderId', filters.orderId],
+    ['productId', filters.productId],
+  ] as const) {
+    if (value !== undefined) {
+      if (value.length < 1 || value.length > 256) throw invalidResponse(`${name} is invalid`, 400);
+      query.set(name, value);
+    }
+  }
+  if (filters.state !== undefined) {
+    if (!orderProjectionStates.includes(filters.state)) throw invalidResponse('Order state filter is invalid', 400);
+    query.set('state', filters.state);
+  }
+  if (filters.fulfillmentMode !== undefined) {
+    if (!fulfillmentModes.includes(filters.fulfillmentMode)) throw invalidResponse('Fulfillment mode filter is invalid', 400);
+    query.set('fulfillmentMode', filters.fulfillmentMode);
+  }
+  if (filters.orderKind !== undefined) {
+    if (!['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'].includes(filters.orderKind)) throw invalidResponse('Order kind filter is invalid', 400);
+    query.set('orderKind', filters.orderKind);
+  }
+  if (filters.txHash !== undefined) {
+    if (!bytes32Pattern.test(filters.txHash)) throw invalidResponse('TxHash filter must be bytes32', 400);
+    query.set('txHash', filters.txHash);
+  }
+  if (filters.wallet !== undefined) {
+    if (!addressPattern.test(filters.wallet)) throw invalidResponse('Wallet filter must be an exact address', 400);
+    query.set('wallet', filters.wallet);
+  }
+  if (filters.pendingReview !== undefined) query.set('pendingReview', String(filters.pendingReview));
+  if (filters.breakerScope !== undefined) {
+    if (!breakerScopes.includes(filters.breakerScope)) throw invalidResponse('Breaker scope filter is invalid', 400);
+    query.set('breakerScope', filters.breakerScope);
+  }
+  return query.toString();
+}
+
+function isAdminOrderSearchPage(value: unknown): value is AdminOrderSearchPage {
+  if (!isRecord(value)
+    || !Array.isArray(value.orders)
+    || !value.orders.every(isFulfillmentOrder)
+    || !isOrderCursor(value.nextCursor)
+    || !Array.isArray(value.pausedScopes)
+    || !value.pausedScopes.every((scope) => breakerScopes.includes(scope as BreakerScope))
+    || (value.pendingProductReview !== null && typeof value.pendingProductReview !== 'boolean')) return false;
+  return value.breaker === null
+    || (isRecord(value.breaker)
+      && breakerScopes.includes(value.breaker.scope as BreakerScope)
+      && typeof value.breaker.active === 'boolean');
+}
+
+function isOrderCursor(value: unknown) {
+  return value === null
+    || (isRecord(value) && isDateTime(value.createdAt) && typeof value.orderId === 'string' && value.orderId.length > 0);
+}
+
+function isOrderBatchActionPreview(value: unknown, requestedOrderIds: readonly string[]): value is OrderBatchActionPreview {
+  if (!isRecord(value)
+    || !Array.isArray(value.rows)
+    || value.rows.length !== requestedOrderIds.length
+    || !Array.isArray(value.enabledActionIntersection)
+    || !value.enabledActionIntersection.every((action) => allowedActionNames.includes(action as never))) return false;
+  const requested = new Set(requestedOrderIds);
+  return value.rows.every((row) => isRecord(row)
+    && requested.delete(String(row.orderId))
+    && Array.isArray(row.allowedActions)
+    && row.allowedActions.every(isAllowedAction))
+    && requested.size === 0;
 }
 
 function isFulfillmentExactAmounts(value: unknown) {

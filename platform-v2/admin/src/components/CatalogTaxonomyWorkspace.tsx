@@ -84,7 +84,11 @@ export function CatalogTaxonomyWorkspace(props: Props) {
       name: categoryForm.name.trim(),
       sortOrder: Number(categoryForm.sortOrder),
       status: categoryForm.status,
-      ...(categoryForm.parentCategoryId ? { parentCategoryId: categoryForm.parentCategoryId } : {}),
+      ...(selectedCategory
+        ? { parentCategoryId: categoryForm.parentCategoryId || null }
+        : categoryForm.parentCategoryId
+          ? { parentCategoryId: categoryForm.parentCategoryId }
+          : {}),
       ...(categoryForm.iconAssetId ? { iconAssetId: categoryForm.iconAssetId } : {}),
     };
     await run(async () => {
@@ -158,14 +162,14 @@ export function CatalogTaxonomyWorkspace(props: Props) {
             <h3>{selectedCategory ? `编辑 ${selectedCategory.name}` : '新建类目版本'}</h3>
             <div className="form-grid">
               <label>类目名称<input value={categoryForm.name} onChange={(event) => setCategoryForm({ ...categoryForm, name: event.target.value })} maxLength={80} required /></label>
-              <label>父类目<select value={categoryForm.parentCategoryId} onChange={(event) => setCategoryForm({ ...categoryForm, parentCategoryId: event.target.value })}><option value="" disabled={Boolean(selectedCategory?.parentCategoryId)}>{selectedCategory?.parentCategoryId ? 'Core 当前不支持移回顶级' : '顶级类目'}</option>{props.categories.filter((category) => category.level < 3 && category.categoryId !== selectedCategoryId && category.status === 'ENABLED').map((category) => <option key={category.categoryId} value={category.categoryId}>L{category.level} · {category.name}</option>)}</select></label>
+              <label>父类目<select value={categoryForm.parentCategoryId} onChange={(event) => setCategoryForm({ ...categoryForm, parentCategoryId: event.target.value })}><option value="">顶级类目</option>{props.categories.filter((category) => category.level < 3 && category.categoryId !== selectedCategoryId && category.status === 'ENABLED').map((category) => <option key={category.categoryId} value={category.categoryId}>L{category.level} · {category.name}</option>)}</select></label>
               <label>Icon asset ID<input value={categoryForm.iconAssetId} onChange={(event) => setCategoryForm({ ...categoryForm, iconAssetId: event.target.value })} placeholder="0x… bytes32" /></label>
               <label>排序<input inputMode="numeric" min="0" type="number" value={categoryForm.sortOrder} onChange={(event) => setCategoryForm({ ...categoryForm, sortOrder: event.target.value })} required /></label>
               <label>状态<select value={categoryForm.status} onChange={(event) => setCategoryForm({ ...categoryForm, status: event.target.value as CatalogTaxonomyStatus })}>{catalogTaxonomyStatuses.map((status) => <option key={status} value={status}>{statusLabel(status)}</option>)}</select></label>
               <label>Idempotency key<input value={categoryForm.idempotencyKey} onChange={(event) => setCategoryForm({ ...categoryForm, idempotencyKey: event.target.value })} minLength={8} maxLength={128} required /></label>
             </div>
             <div className="catalog-decision-field"><span>服务费率</span><strong>{selectedCategory?.serviceFee.state ?? 'DecisionBlocked'}</strong><small>{selectedCategory?.serviceFee.valueBps === null || selectedCategory?.serviceFee.valueBps === undefined ? '未决策，界面不提交默认值' : `${selectedCategory.serviceFee.valueBps} bps`}</small></div>
-            <p className="catalog-form-hint"><Ban aria-hidden="true" />`.4` 请求类型无法为已有类目清空 parentCategoryId；子类目移回顶级保持 fail-closed。</p>
+            <p className="catalog-form-hint"><FolderTree aria-hidden="true" />已有类目选择“顶级类目”时，提交 Core `.5` 的显式 `parentCategoryId: null`；未选择的创建请求不携带该字段。</p>
             <button className="button button-primary" type="submit" disabled={saving || categoryForm.idempotencyKey.length < 8}><Save aria-hidden="true" />保存类目版本</button>
           </form>
         ) : <ReadOnlyNotice />}
