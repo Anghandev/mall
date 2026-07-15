@@ -55,16 +55,16 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
 | MAL-GOAL-005 | Final Goal | Payment batch real Core path: product/SKU -> atomic reservation -> five-minute signed 70/30 quote -> allowance -> PaymentRouter -> indexed event -> order projection | D-V2-001, D-V2-002, D-V2-003, D-V2-011, D-V2-012, D-V2-017, D-V2-021, D-V2-028 | Mall consumer and integration tests use the published payment-batch Core artifact and real local API/indexer; inventory and both assets are atomic; no static fixture, local formula, handwritten calldata or disabled action counts | Frozen | GAP-MAL-001, GAP-MAL-003, GAP-MAL-004, GAP-MAL-015 |
 | MAL-GOAL-006 | Final Goal | Transferable-asset ledger lifecycle and BNM backend-points lifecycle | D-V2-007, D-V2-008, D-V2-017, D-V2-023 | USDT/NPL/prize rows prove Locked/Available/Requested/Batched/Settled, immutable batch identity and final 15-confirmation Safe TxHash; BNM proves only Locked/Available with no ERC-20, mint, Safe transfer or on-chain withdrawal | Verified | - |
 
-## Settlement/Admin .5 Verification Evidence
+## Settlement/Admin .6 Verification Evidence
 
-- `MAL-CAT-001`: the Mall consumes `.5` `categoryId`, `tagIds`, `subtitle`,
+- `MAL-CAT-001`: the Mall consumes `.6` `categoryId`, `tagIds`, `subtitle`,
   `richDetail`, `defaultFreightUsdt`, `fulfillmentModes` and each SKU's
   authoritative seckill overlay. Category descendants and tags filter the real
   product list; a SKU with a PREHEAT/LIVE/SETTLING overlay cannot enter ordinary
   checkout. `MAL-CAT-002` remains `Frozen` because its complete sticky-detail and
   configuration-sheet interaction is not yet delivered.
 
-- `MAL-ORDER-001` and `MAL-AFTER-001`: stable `.5` order pages use the
+- `MAL-ORDER-001` and `MAL-AFTER-001`: stable `.6` order pages use the
   `(createdAt, orderId)` cursor and complete rows expose quantity, order kind,
   payment TxHash and authoritative `allowedActions`. Enabled exchange, delay,
   receipt-confirmation and arbitration actions perform `local SHA-256 ->
