@@ -50,6 +50,7 @@ export const merchantAudit: MerchantAuditList = {
 };
 
 export const merchantAuditExport: MerchantAuditExport = {
+  merchantId: 'merchant-1',
   contentType: 'text/csv; charset=utf-8',
   filename: 'merchant-audit-2026-07-01-2026-07-15.csv',
   entryCount: 2,

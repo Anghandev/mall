@@ -159,10 +159,15 @@ export interface SiweChallenge {
   expiresAt: string;
 }
 
-export interface MerchantSession {
+export interface SiweSession {
   token: string;
   walletAddress: string;
   roles: readonly UserRole[];
+  merchantId?: string;
+}
+
+export interface MerchantSession extends SiweSession {
+  merchantId: string;
 }
 
 export interface ConcessionPreviewRequest {
@@ -221,7 +226,7 @@ export interface MerchantAuditExportRequest {
 export interface CoreApi {
   bootstrap(): Promise<CoreBootstrap>;
   createSiweChallenge(walletAddress: string): Promise<SiweChallenge>;
-  verifySiwe(message: string, signature: string): Promise<MerchantSession>;
+  verifySiwe(message: string, signature: string): Promise<SiweSession>;
   listCatalog(): Promise<readonly CatalogProduct[]>;
   listCatalogCategories(): Promise<readonly CatalogCategory[]>;
   listCatalogTags(): Promise<readonly CatalogTag[]>;
@@ -292,7 +297,7 @@ export interface CoreApi {
     input: GuaranteeDepositRequest,
     token: string,
   ): Promise<GuaranteeDepositProjection>;
-  listPublicCms(walletAddress?: string): Promise<readonly CmsPublicItem[]>;
+  listPublicCms(token?: string): Promise<readonly CmsPublicItem[]>;
 }
 
 export class CoreApiError extends Error {
@@ -362,6 +367,9 @@ export function createCoreApi(baseUrl = import.meta.env.VITE_CORE_API_BASE_URL ?
         token: string(value.token, 'token'),
         walletAddress: address(value.walletAddress, 'walletAddress'),
         roles,
+        ...(value.merchantId === undefined
+          ? {}
+          : { merchantId: string(value.merchantId, 'merchantId') }),
       };
     },
 
@@ -597,10 +605,9 @@ export function createCoreApi(baseUrl = import.meta.env.VITE_CORE_API_BASE_URL ?
       }));
     },
 
-    async listPublicCms(walletAddress) {
-      const query = walletAddress ? `?walletAddress=${encodeURIComponent(walletAddress)}` : '';
+    async listPublicCms(token) {
       return array(
-        await request(normalizedBaseUrl, `/v2/cms/public${query}`),
+        await request(normalizedBaseUrl, '/v2/cms/public', { ...(token ? { token } : {}) }),
         'public CMS response',
       ).map(parseCmsPublicItem);
     },
@@ -1309,13 +1316,14 @@ function parseMerchantAuditCursor(input: unknown): NonNullable<MerchantAuditList
 
 function parseMerchantAuditExport(input: unknown): MerchantAuditExport {
   const value = record(input, 'merchant audit export');
-  exactObjectKeys(value, ['contentType', 'filename', 'entryCount', 'csv'], 'merchant audit export');
+  exactObjectKeys(value, ['merchantId', 'contentType', 'filename', 'entryCount', 'csv'], 'merchant audit export');
   exact(value.contentType, 'text/csv; charset=utf-8', 'merchant audit export contentType');
   const filename = string(value.filename, 'merchant audit export filename');
   if (/[/\\\r\n]/.test(filename)) invalid('merchant audit export filename is unsafe');
   const entryCount = nonNegativeInteger(value.entryCount, 'merchant audit export entryCount');
   if (entryCount > 1_000) invalid('merchant audit export entryCount exceeds 1000');
   return {
+    merchantId: string(value.merchantId, 'merchant audit export merchantId'),
     contentType: 'text/csv; charset=utf-8',
     filename,
     entryCount,
