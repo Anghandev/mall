@@ -571,6 +571,22 @@ describe('coordinated Core HTTP client', () => {
     });
   });
 
+  it('surfaces RiskRestricted from ordinary and seckill quotes without inventing a successful fallback', async () => {
+    const client = createCoreClient({
+      fetch: vi.fn().mockImplementation(() => Promise.resolve(json({
+        error: { code: 'RiskRestricted', message: 'New payments are temporarily restricted', correlationId: 'corr-risk-1' },
+      }, 403))),
+    });
+    const expectedFailure = {
+      code: 'RiskRestricted',
+      message: 'New payments are temporarily restricted',
+      correlationId: 'corr-risk-1',
+    };
+
+    await expect(client.createOrdinaryQuote('session', selection())).rejects.toMatchObject(expectedFailure);
+    await expect(client.createSeckillQuote('session', seckillSessionId, selection())).rejects.toMatchObject(expectedFailure);
+  });
+
   it('rejects a response whose canonical display or validity differs from routerCall', async () => {
     const mismatched = structuredClone(paymentQuote());
     (mismatched.intent as { nplPaymentAmount: string }).nplPaymentAmount = '1';

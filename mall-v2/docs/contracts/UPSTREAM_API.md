@@ -2,7 +2,7 @@
 
 Status: the previous handwritten `mall-api-v1` proposal is retired. Mall now
 consumes coordinated Core settlement/admin artifacts
-`2.0.0-settlement-admin.7`.
+`2.0.0-settlement-admin.8`.
 
 The published boundary currently covers:
 
