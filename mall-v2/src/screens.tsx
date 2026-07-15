@@ -9,6 +9,7 @@ import {
   Clock3,
   Copy,
   FileClock,
+  FileUp,
   Headphones,
   History,
   ImageOff,
@@ -25,6 +26,7 @@ import {
   Radio,
   RefreshCw,
   ScanLine,
+  Send,
   ShieldAlert,
   ShoppingBag,
   Store,
@@ -33,10 +35,12 @@ import {
   UserRound,
   WalletCards,
   Zap,
+  X,
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import type {
   AllowedAction,
+  AllowedActionName,
   CatalogCategory,
   FulfillmentOrder,
   FulfillmentTarget,
@@ -60,6 +64,7 @@ import {
   ScreenHeader,
   StatusNotice,
 } from './components';
+import type { BuyerEvidenceAction } from './core-client';
 import { useMallRuntime, type BrowserPosition, type MallRuntimeValue } from './mall-runtime';
 
 export function SeckillScreen() {
@@ -705,8 +710,10 @@ function OrderRow({
   actions: readonly AllowedAction[];
   capabilityError?: string;
 }) {
+  const runtime = useMallRuntime();
   const logistics = order.logistics.at(-1);
   const buyerActions = actions.filter((action) => BUYER_FULFILLMENT_ACTIONS.includes(action.action));
+  const [activeAction, setActiveAction] = useState<BuyerEvidenceAction | null>(null);
   return (
     <article className="order-row">
       <header className="order-row__header">
@@ -777,13 +784,25 @@ function OrderRow({
         {buyerActions.length > 0 ? (
           <div className="order-action-grid">
             {buyerActions.map((action) => {
+              const supported = isBuyerEvidenceAction(action.action);
               const reason = action.enabled
-                ? 'Core 已允许该操作，但 canonical evidence 生成/上传契约尚未发布'
+                ? supported ? 'Core 已允许，可提交订单证据' : unsupportedBuyerActionReason(action.action)
                 : action.reasonCode ?? 'Core 当前未允许该操作';
               const reasonId = `action-${order.orderId.slice(2, 10)}-${action.action}`;
               return (
                 <div key={action.action}>
-                  <button type="button" className="button button--secondary" disabled aria-describedby={reasonId}>
+                  <button
+                    type="button"
+                    className="button button--secondary"
+                    disabled={!action.enabled || !supported || runtime.busy}
+                    aria-describedby={reasonId}
+                    aria-expanded={supported && activeAction === action.action}
+                    onClick={() => {
+                      if (!isBuyerEvidenceAction(action.action)) return;
+                      const nextAction = action.action;
+                      setActiveAction((current) => current === nextAction ? null : nextAction);
+                    }}
+                  >
                     {actionLabel(action.action)}
                   </button>
                   <p id={reasonId}>{reason}{action.deadline ? ` · ${formatIso(action.deadline)}` : ''}</p>
@@ -792,8 +811,98 @@ function OrderRow({
             })}
           </div>
         ) : <p>当前会话未返回买家履约动作。</p>}
+        {activeAction ? (
+          <OrderEvidenceForm
+            action={activeAction}
+            busy={runtime.busy}
+            orderId={order.orderId}
+            onClose={() => setActiveAction(null)}
+            onSubmit={(input) => runtime.submitBuyerAction(order.orderId, activeAction, input)}
+          />
+        ) : null}
       </section>
     </article>
+  );
+}
+
+function OrderEvidenceForm({
+  action,
+  busy,
+  orderId,
+  onClose,
+  onSubmit,
+}: {
+  action: BuyerEvidenceAction;
+  busy: boolean;
+  orderId: string;
+  onClose(): void;
+  onSubmit(input: { reasonCode: string; file: File | null }): Promise<boolean>;
+}) {
+  const fieldId = `evidence-${orderId.slice(2, 10)}-${action}`;
+  const [reasonCode, setReasonCode] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+
+  return (
+    <form
+      className="order-evidence-form"
+      aria-label={`${actionLabel(action)}证据`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        setSubmitted(false);
+        void onSubmit({ reasonCode, file }).then(setSubmitted);
+      }}
+    >
+      <div className="order-evidence-form__header">
+        <div>
+          <p className="eyebrow">CORE EVIDENCE</p>
+          <h4>{actionLabel(action)}</h4>
+        </div>
+        <button className="icon-button" type="button" aria-label="关闭证据表单" onClick={onClose} disabled={busy}>
+          <X aria-hidden="true" size={18} />
+        </button>
+      </div>
+      <label className="field" htmlFor={`${fieldId}-reason`}>
+        原因代码
+        <input
+          id={`${fieldId}-reason`}
+          value={reasonCode}
+          required
+          minLength={2}
+          maxLength={64}
+          pattern="[A-Z][A-Z0-9_]{1,63}"
+          autoCapitalize="characters"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="大写字母、数字或下划线"
+          onChange={(event) => {
+            setReasonCode(event.currentTarget.value.toUpperCase());
+            setSubmitted(false);
+          }}
+        />
+      </label>
+      <label className="field" htmlFor={`${fieldId}-file`}>
+        证据文件（可选）
+        <span className="field-help"><FileUp aria-hidden="true" size={15} /> JPG、PNG、WebP 或 PDF，最大 10 MB</span>
+        <input
+          id={`${fieldId}-file`}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,application/pdf"
+          onChange={(event) => {
+            setFile(event.currentTarget.files?.[0] ?? null);
+            setSubmitted(false);
+          }}
+        />
+      </label>
+      {file ? <p className="selected-evidence-file">{file.name} · {file.size} bytes</p> : null}
+      <div className="order-evidence-form__actions">
+        <button className="button button--primary" type="submit" disabled={busy || reasonCode.length < 2}>
+          <Send aria-hidden="true" size={17} /> {busy ? '提交中' : '封装证据并提交'}
+        </button>
+        <button className="button button--secondary" type="button" onClick={onClose} disabled={busy}>取消</button>
+      </div>
+      {submitted ? <p className="evidence-success" role="status">操作已由 Core 接收，订单状态已重新同步。</p> : null}
+    </form>
   );
 }
 
@@ -1742,6 +1851,23 @@ const BUYER_FULFILLMENT_ACTIONS: readonly string[] = [
   'OPEN_ARBITRATION',
   'OPEN_TAKEOVER',
 ];
+
+const BUYER_EVIDENCE_ACTIONS = [
+  'REQUEST_EXCHANGE',
+  'REQUEST_DELAY',
+  'CONFIRM_RECEIPT',
+  'OPEN_ARBITRATION',
+] as const satisfies readonly BuyerEvidenceAction[];
+
+function isBuyerEvidenceAction(action: AllowedActionName): action is BuyerEvidenceAction {
+  return BUYER_EVIDENCE_ACTIONS.some((supported) => supported === action);
+}
+
+function unsupportedBuyerActionReason(action: AllowedActionName) {
+  if (action === 'OPEN_TAKEOVER') return 'Core 尚未发布 OPEN_TAKEOVER 的订单证据动作';
+  if (action === 'VERIFY_PICKUP') return '自提核销证据仅授权门店或平台角色';
+  return '当前 Mall 买家证据流程不支持该操作';
+}
 
 function distanceKm(location: BrowserPosition, store: MerchantStore) {
   const radians = (value: number) => value * Math.PI / 180;

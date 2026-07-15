@@ -12,6 +12,9 @@ The published boundary currently covers:
 - enabled three-level category and tag projections;
 - short-lived public media-read targets bound to asset, resource, purpose,
   content type, object version and expiry;
+- buyer write-once evidence upload/verification, order-action evidence
+  envelopes and the published exchange, delay, receipt-confirmation and
+  arbitration commands;
 - ordinary and dual seckill signed quotes with atomic reservations;
 - approval requirements and ABI-shaped PaymentRouter calls;
 - transaction submission plus replacement/reorg/finality projection.
@@ -35,8 +38,9 @@ the generated response types. It does not maintain a parallel API schema.
 The following Mall capabilities remain incomplete:
 
 - saved-address/profile persistence and PII-safe address parsing;
-- Mall consumption of the published upload/evidence commands required before it
-  may execute exchange, delay, receipt, pickup, arbitration or takeover;
+- an `OPEN_TAKEOVER` evidence action matching the published takeover command;
+- buyer authority for `VERIFY_PICKUP` evidence, if buyer-side pickup execution
+  is ever intended; current Core authority is merchant/platform only;
 - typed public `CatalogProduct` category/tag associations, rich-detail fields
   and the authoritative ordinary-checkout seckill overlay;
 - fulfillment and settlement WebSocket cursor replay beyond the published

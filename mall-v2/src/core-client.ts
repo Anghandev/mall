@@ -1,5 +1,7 @@
 import type {
   AllowedAction,
+  AllowedActionName,
+  ArbitrationOpenedResult,
   CatalogCategory,
   CatalogProduct,
   CatalogTag,
@@ -7,10 +9,19 @@ import type {
   CreatePickupTargetRequest,
   CmsPublicItem,
   DeliveryTarget,
+  EvidenceEnvelopeProjection,
+  FulfillmentCommandInput,
+  FulfillmentCommandResult,
+  FulfillmentCompletedResult,
   FulfillmentOrder,
+  FulfillmentReasonRequest,
+  FulfillmentRequestResult,
   FulfillmentTarget,
   MerchantStore,
+  MediaAssetProjection,
+  MediaContentType,
   MediaReadAccessProjection,
+  MediaUploadIntentProjection,
   NotificationEndpointProjection,
   NotificationEndpointRequest,
   NotificationInboxItem,
@@ -32,6 +43,8 @@ import type {
   UserRole,
 } from '@abu24k/core-artifacts';
 import {
+  allowedActionNames,
+  allowedActionReasonCodes,
   artifactVersion,
   balanceStates,
   catalogTaxonomyStatuses,
@@ -76,12 +89,38 @@ export interface QuoteSelection extends CheckoutTarget {
   quantity: number;
 }
 
+export type BuyerEvidenceAction = Extract<AllowedActionName,
+  'REQUEST_EXCHANGE' | 'REQUEST_DELAY' | 'CONFIRM_RECEIPT' | 'OPEN_ARBITRATION'>;
+
+export type FulfillmentEvidenceContentType = Extract<MediaContentType,
+  'image/jpeg' | 'image/png' | 'image/webp' | 'application/pdf'>;
+
+export interface FulfillmentMediaUploadRequest {
+  purpose: 'FULFILLMENT_EVIDENCE';
+  resourceType: 'ORDER';
+  resourceId: string;
+  contentType: FulfillmentEvidenceContentType;
+  sizeBytes: number;
+  contentSha256: string;
+  idempotencyKey: string;
+}
+
+export interface OrderActionEvidenceRequest {
+  action: BuyerEvidenceAction;
+  reasonCode: string;
+  mediaAssetIds?: readonly string[];
+  idempotencyKey: string;
+}
+
 export interface CoreClient {
   getBootstrap(): Promise<CorePaymentAvailability>;
   listCatalog(): Promise<readonly CatalogProduct[]>;
   listCatalogCategories(): Promise<readonly CatalogCategory[]>;
   listCatalogTags(): Promise<readonly CatalogTag[]>;
   createPublicMediaReadAccess(assetId: string): Promise<MediaReadAccessProjection>;
+  createMediaUploadIntent(token: string, request: FulfillmentMediaUploadRequest): Promise<MediaUploadIntentProjection>;
+  uploadMediaFile(intent: MediaUploadIntentProjection, file: Blob): Promise<void>;
+  completeMediaUpload(token: string, uploadIntentId: string): Promise<MediaAssetProjection>;
   authenticate(walletAddress: string, signMessage: (message: string) => Promise<string>): Promise<WalletSession>;
   createOrdinaryQuote(token: string, selection: QuoteSelection): Promise<PaymentQuoteResponse>;
   createSeckillQuote(token: string, sessionId: string, selection: QuoteSelection): Promise<SeckillQuoteResponse>;
@@ -98,6 +137,11 @@ export interface CoreClient {
   getOrder(token: string, orderId: string): Promise<FulfillmentOrder>;
   getOrderTarget(token: string, orderId: string): Promise<FulfillmentTarget>;
   getOrderAllowedActions(token: string, orderId: string): Promise<readonly AllowedAction[]>;
+  createOrderActionEvidence(token: string, orderId: string, request: OrderActionEvidenceRequest): Promise<EvidenceEnvelopeProjection>;
+  requestExchange(token: string, orderId: string, request: FulfillmentReasonRequest): Promise<FulfillmentRequestResult>;
+  requestDelay(token: string, orderId: string, request: FulfillmentReasonRequest): Promise<FulfillmentRequestResult>;
+  confirmReceipt(token: string, orderId: string, request: FulfillmentCommandInput): Promise<FulfillmentCompletedResult>;
+  openArbitration(token: string, orderId: string, request: FulfillmentReasonRequest): Promise<ArbitrationOpenedResult>;
   listSettlements(token: string): Promise<SettlementListProjection>;
   createSettlementIntent(token: string, request: SettlementIntentRequest): Promise<SettlementIntentProjection>;
   submitSettlementRequest(token: string, request: SettlementRequestSubmission): Promise<SettlementRequestProjection>;
@@ -124,6 +168,8 @@ const catalogMediaOperations = Object.freeze({
   categories: operationPath('listCatalogCategories', 'get'),
   tags: operationPath('listCatalogTags', 'get'),
   mediaReadAccess: operationPath('createMediaReadAccess', 'get'),
+  mediaUploadIntent: operationPath('createMediaUploadIntent', 'post'),
+  mediaUploadComplete: operationPath('completeMediaUpload', 'post'),
 });
 
 const fulfillmentOperations = Object.freeze({
@@ -134,6 +180,11 @@ const fulfillmentOperations = Object.freeze({
   orders: operationPath('listFulfillmentOrders', 'get'),
   order: operationPath('getFulfillmentOrder', 'get'),
   orderTarget: operationPath('getOrderFulfillmentTarget', 'get'),
+  orderEvidence: operationPath('createOrderActionEvidence', 'post'),
+  requestExchange: operationPath('requestExchange', 'post'),
+  requestDelay: operationPath('requestDelay', 'post'),
+  confirmReceipt: operationPath('confirmReceipt', 'post'),
+  openArbitration: operationPath('openArbitration', 'post'),
 });
 
 const settlementAdminOperations = Object.freeze({
@@ -194,6 +245,43 @@ export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } 
         `${baseUrl}${mediaAssetPath(operations.mediaReadAccess, normalizedAssetId)}`,
       );
       return parsePublicMediaReadAccess(value, normalizedAssetId);
+    },
+
+    async createMediaUploadIntent(token, request) {
+      validateFulfillmentMediaUploadRequest(request);
+      const value = await postAuthorized<unknown>(
+        fetcher,
+        `${baseUrl}${operations.mediaUploadIntent}`,
+        token,
+        request,
+      );
+      return parseMediaUploadIntent(value, request);
+    },
+
+    async uploadMediaFile(intent, file) {
+      assertUploadFileMatchesIntent(intent, file);
+      let response: Response;
+      try {
+        response = await fetcher(intent.uploadUrl, {
+          method: 'PUT',
+          headers: { ...intent.headers },
+          body: file,
+        });
+      } catch {
+        throw new CoreClientError('ExternalBlocked', '证据文件上传服务不可用');
+      }
+      if (!response.ok) throw new CoreClientError('ExternalBlocked', '证据文件上传失败');
+    },
+
+    async completeMediaUpload(token, uploadIntentId) {
+      const normalizedIntentId = bytes32Value(uploadIntentId).toLowerCase();
+      const value = await postAuthorized<unknown>(
+        fetcher,
+        `${baseUrl}${uploadIntentPath(operations.mediaUploadComplete, normalizedIntentId)}`,
+        token,
+        {},
+      );
+      return parseMediaAsset(value, normalizedIntentId);
     },
 
     async authenticate(walletAddress, signMessage) {
@@ -334,16 +422,40 @@ export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } 
     },
 
     async getOrderAllowedActions(token, orderId) {
-      const value = await postAuthorized<{ allowedActions: readonly AllowedAction[] }>(
+      const value = await postAuthorized<unknown>(
         fetcher,
         `${baseUrl}${operations.allowedActions}`,
         token,
         { orderId },
       );
-      if (!Array.isArray(value.allowedActions)) {
-        throw new CoreClientError('InvalidResponse', '订单允许操作响应无效');
-      }
-      return value.allowedActions;
+      return parseAllowedActions(objectValue(value).allowedActions);
+    },
+
+    async createOrderActionEvidence(token, orderId, request) {
+      validateOrderActionEvidenceRequest(request);
+      const value = await postAuthorized<unknown>(
+        fetcher,
+        `${baseUrl}${orderPath(operations.orderEvidence, orderId)}`,
+        token,
+        request,
+      );
+      return parseOrderActionEvidence(value, orderId, request);
+    },
+
+    requestExchange(token, orderId, request) {
+      return submitOrderCommand<FulfillmentRequestResult>(fetcher, baseUrl, operations.requestExchange, token, orderId, request, 'REQUEST_EXCHANGE');
+    },
+
+    requestDelay(token, orderId, request) {
+      return submitOrderCommand<FulfillmentRequestResult>(fetcher, baseUrl, operations.requestDelay, token, orderId, request, 'REQUEST_DELAY');
+    },
+
+    confirmReceipt(token, orderId, request) {
+      return submitOrderCommand<FulfillmentCompletedResult>(fetcher, baseUrl, operations.confirmReceipt, token, orderId, request, 'CONFIRM_RECEIPT');
+    },
+
+    openArbitration(token, orderId, request) {
+      return submitOrderCommand<ArbitrationOpenedResult>(fetcher, baseUrl, operations.openArbitration, token, orderId, request, 'OPEN_ARBITRATION');
     },
 
     async listSettlements(token) {
@@ -686,6 +798,21 @@ function parseNotifications(value: unknown): readonly NotificationInboxItem[] {
   });
 }
 
+function parseAllowedActions(value: unknown): readonly AllowedAction[] {
+  const actions = arrayValue(value).map((item) => {
+    const action = objectValue(item);
+    enumValue(action.action, allowedActionNames);
+    booleanValue(action.enabled);
+    if (action.reasonCode !== undefined) enumValue(action.reasonCode, allowedActionReasonCodes);
+    if (action.deadline !== undefined) isoValue(action.deadline);
+    return item as AllowedAction;
+  });
+  if (new Set(actions.map((action) => action.action)).size !== actions.length) {
+    throw new CoreClientError('InvalidResponse', '订单允许操作包含重复动作');
+  }
+  return actions;
+}
+
 function parseCatalogProducts(value: unknown): readonly CatalogProduct[] {
   return arrayValue(value).map((item) => {
     const product = objectValue(item);
@@ -768,20 +895,241 @@ function parsePublicMediaReadAccess(value: unknown, requestedAssetId: string): M
   if (media.accessScope !== 'PUBLIC' || media.method !== 'GET') {
     throw new CoreClientError('Forbidden', '商品媒体未发布公共只读授权');
   }
-  const readUrl = stringValue(media.readUrl);
-  try {
-    const parsed = new URL(readUrl);
-    if (parsed.protocol !== 'https:' && !['127.0.0.1', 'localhost'].includes(parsed.hostname)) {
-      throw new Error('insecure media URL');
-    }
-  } catch {
-    throw new CoreClientError('InvalidResponse', '媒体读取地址无效');
-  }
+  secureTargetUrl(media.readUrl, '媒体读取地址无效');
   if (Date.parse(isoValue(media.expiresAt)) <= Date.now()) {
     throw new CoreClientError('InvalidResponse', '媒体读取授权已过期');
   }
   bytes32Value(media.providerReferenceHash);
   return value as MediaReadAccessProjection;
+}
+
+function validateFulfillmentMediaUploadRequest(request: FulfillmentMediaUploadRequest) {
+  if (request.purpose !== 'FULFILLMENT_EVIDENCE' || request.resourceType !== 'ORDER') {
+    throw new CoreClientError('InvalidRequest', '证据媒体用途或资源类型无效');
+  }
+  stringValue(request.resourceId);
+  if (!FULFILLMENT_EVIDENCE_CONTENT_TYPES.includes(request.contentType)) {
+    throw new CoreClientError('InvalidRequest', '证据文件类型无效');
+  }
+  if (!Number.isSafeInteger(request.sizeBytes) || request.sizeBytes < 1 || request.sizeBytes > 10_485_760) {
+    throw new CoreClientError('InvalidRequest', '证据文件大小无效');
+  }
+  bytes32Value(request.contentSha256);
+  idempotencyValue(request.idempotencyKey);
+}
+
+function parseMediaUploadIntent(
+  value: unknown,
+  request: FulfillmentMediaUploadRequest,
+): MediaUploadIntentProjection {
+  const intent = objectValue(value);
+  assertArtifactVersion(stringValue(intent.artifactVersion));
+  bytes32Value(intent.uploadIntentId);
+  addressValue(intent.ownerWallet);
+  if (
+    intent.purpose !== request.purpose
+    || intent.resourceType !== request.resourceType
+    || intent.resourceId !== request.resourceId
+    || intent.contentType !== request.contentType
+    || atomicValue(intent.sizeBytes) !== String(request.sizeBytes)
+    || bytes32Value(intent.contentSha256).toLowerCase() !== request.contentSha256.toLowerCase()
+    || intent.state !== 'UPLOADED'
+    || intent.method !== 'PUT'
+    || intent.writeOnce !== true
+  ) throw new CoreClientError('InvalidResponse', '证据上传授权与文件不一致');
+  if (Date.parse(isoValue(intent.expiresAt)) <= Date.now()) {
+    throw new CoreClientError('InvalidResponse', '证据上传授权已过期');
+  }
+  secureTargetUrl(intent.uploadUrl, '证据上传地址无效');
+  const headers = objectValue(intent.headers);
+  if (!Object.values(headers).every((header) => typeof header === 'string')) {
+    throw new CoreClientError('InvalidResponse', '证据上传请求头无效');
+  }
+  if (headerValue(headers, 'if-none-match') !== '*') {
+    throw new CoreClientError('InvalidResponse', '证据上传缺少只写一次约束');
+  }
+  bytes32Value(intent.providerReferenceHash);
+  return value as MediaUploadIntentProjection;
+}
+
+function assertUploadFileMatchesIntent(intent: MediaUploadIntentProjection, file: Blob) {
+  if (
+    intent.purpose !== 'FULFILLMENT_EVIDENCE'
+    || intent.resourceType !== 'ORDER'
+    || intent.state !== 'UPLOADED'
+    || intent.method !== 'PUT'
+    || intent.writeOnce !== true
+    || String(file.size) !== intent.sizeBytes
+    || file.type !== intent.contentType
+    || Date.parse(intent.expiresAt) <= Date.now()
+  ) throw new CoreClientError('InvalidRequest', '证据文件与上传授权不一致');
+}
+
+function parseMediaAsset(value: unknown, expectedUploadIntentId: string): MediaAssetProjection {
+  const asset = objectValue(value);
+  assertArtifactVersion(stringValue(asset.artifactVersion));
+  bytes32Value(asset.assetId);
+  if (bytes32Value(asset.uploadIntentId).toLowerCase() !== expectedUploadIntentId) {
+    throw new CoreClientError('InvalidResponse', '已验证媒体与上传授权不一致');
+  }
+  addressValue(asset.ownerWallet);
+  if (asset.purpose !== 'FULFILLMENT_EVIDENCE' || asset.resourceType !== 'ORDER') {
+    throw new CoreClientError('InvalidResponse', '已验证媒体用途无效');
+  }
+  stringValue(asset.resourceId);
+  const contentType = enumValue(asset.contentType, mediaContentTypes);
+  if (!FULFILLMENT_EVIDENCE_CONTENT_TYPES.some((allowed) => allowed === contentType)) {
+    throw new CoreClientError('InvalidResponse', '已验证媒体类型无效');
+  }
+  atomicValue(asset.sizeBytes);
+  bytes32Value(asset.contentSha256);
+  bytes32Value(asset.providerEvidenceHash);
+  bytes32Value(asset.objectVersionHash);
+  isoValue(asset.createdAt);
+  return value as MediaAssetProjection;
+}
+
+function validateOrderActionEvidenceRequest(request: OrderActionEvidenceRequest) {
+  if (!BUYER_EVIDENCE_ACTIONS.includes(request.action)) {
+    throw new CoreClientError('InvalidRequest', '买家证据动作无效');
+  }
+  reasonCodeValue(request.reasonCode);
+  const mediaAssetIds = request.mediaAssetIds ?? [];
+  if (mediaAssetIds.length > 8 || new Set(mediaAssetIds.map((assetId) => assetId.toLowerCase())).size !== mediaAssetIds.length) {
+    throw new CoreClientError('InvalidRequest', '订单证据媒体列表无效');
+  }
+  mediaAssetIds.forEach(bytes32Value);
+  idempotencyValue(request.idempotencyKey);
+}
+
+function parseOrderActionEvidence(
+  value: unknown,
+  orderId: string,
+  request: OrderActionEvidenceRequest,
+): EvidenceEnvelopeProjection {
+  const evidence = objectValue(value);
+  assertArtifactVersion(stringValue(evidence.artifactVersion));
+  bytes32Value(evidence.evidenceHash);
+  addressValue(evidence.ownerWallet);
+  if (
+    evidence.actorRole !== 'BUYER'
+    || evidence.purpose !== 'FULFILLMENT_ACTION'
+    || evidence.resourceType !== 'ORDER'
+    || evidence.resourceId !== orderId
+    || evidence.action !== request.action
+    || evidence.reasonCode !== request.reasonCode
+    || evidence.trackingNumberHash !== null
+  ) throw new CoreClientError('InvalidResponse', '订单证据封装与买家动作不一致');
+  const mediaAssetIds = arrayValue(evidence.mediaAssetIds).map(bytes32Value);
+  const requestedIds = request.mediaAssetIds ?? [];
+  if (
+    mediaAssetIds.length !== requestedIds.length
+    || mediaAssetIds.some((assetId, index) => assetId.toLowerCase() !== requestedIds[index]?.toLowerCase())
+  ) throw new CoreClientError('InvalidResponse', '订单证据媒体绑定不一致');
+  objectValue(evidence.payload);
+  isoValue(evidence.createdAt);
+  return value as EvidenceEnvelopeProjection;
+}
+
+async function submitOrderCommand<T extends FulfillmentCommandResult>(
+  fetcher: FetchLike,
+  baseUrl: string,
+  path: string,
+  token: string,
+  orderId: string,
+  request: FulfillmentCommandInput | FulfillmentReasonRequest,
+  action: BuyerEvidenceAction,
+) {
+  const normalizedOrderId = bytes32Value(orderId).toLowerCase();
+  idempotencyValue(request.idempotencyKey);
+  bytes32Value(request.evidenceHash);
+  if (action === 'CONFIRM_RECEIPT') {
+    if ('reasonCode' in request) throw new CoreClientError('InvalidRequest', '确认收货命令不接受原因代码');
+  } else {
+    if (!('reasonCode' in request)) throw new CoreClientError('InvalidRequest', '买家履约命令缺少原因代码');
+    reasonCodeValue(request.reasonCode);
+  }
+  const value = await postAuthorized<unknown>(
+    fetcher,
+    `${baseUrl}${orderPath(path, normalizedOrderId)}`,
+    token,
+    request,
+  );
+  return parseBuyerCommandResult(value, normalizedOrderId, action) as T;
+}
+
+function parseBuyerCommandResult(
+  value: unknown,
+  orderId: string,
+  action: BuyerEvidenceAction,
+): FulfillmentCommandResult {
+  const result = objectValue(value);
+  if (bytes32Value(result.orderId).toLowerCase() !== orderId) {
+    throw new CoreClientError('InvalidResponse', '买家履约结果与订单不一致');
+  }
+  if (action === 'REQUEST_EXCHANGE' || action === 'REQUEST_DELAY') {
+    stringValue(result.requestId);
+    if (result.requestType !== (action === 'REQUEST_EXCHANGE' ? 'EXCHANGE' : 'DELAY') || result.state !== 'OPEN') {
+      throw new CoreClientError('InvalidResponse', '买家履约申请结果无效');
+    }
+    isoValue(result.requestedAt);
+  } else if (action === 'OPEN_ARBITRATION') {
+    stringValue(result.requestId);
+    if (result.state !== 'ARBITRATION') throw new CoreClientError('InvalidResponse', '仲裁开启结果无效');
+    isoValue(result.openedAt);
+  } else {
+    if (result.state !== 'FULFILLED' || result.method !== 'CUSTOMER_RECEIPT') {
+      throw new CoreClientError('InvalidResponse', '确认收货结果无效');
+    }
+    isoValue(result.fulfilledAt);
+  }
+  return value as FulfillmentCommandResult;
+}
+
+const BUYER_EVIDENCE_ACTIONS = [
+  'REQUEST_EXCHANGE',
+  'REQUEST_DELAY',
+  'CONFIRM_RECEIPT',
+  'OPEN_ARBITRATION',
+] as const satisfies readonly BuyerEvidenceAction[];
+
+const FULFILLMENT_EVIDENCE_CONTENT_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'application/pdf',
+] as const satisfies readonly FulfillmentEvidenceContentType[];
+
+function reasonCodeValue(value: unknown) {
+  const code = stringValue(value);
+  if (!/^[A-Z][A-Z0-9_]{1,63}$/.test(code)) {
+    throw new CoreClientError('InvalidRequest', '证据原因代码格式无效');
+  }
+  return code;
+}
+
+function idempotencyValue(value: unknown) {
+  const key = stringValue(value);
+  if (key.length < 8 || key.length > 128) throw new CoreClientError('InvalidRequest', '幂等键格式无效');
+  return key;
+}
+
+function secureTargetUrl(value: unknown, message: string) {
+  const target = stringValue(value);
+  try {
+    const parsed = new URL(target);
+    if (parsed.protocol !== 'https:' && !['127.0.0.1', 'localhost'].includes(parsed.hostname)) {
+      throw new Error('insecure target');
+    }
+  } catch {
+    throw new CoreClientError('InvalidResponse', message);
+  }
+  return target;
+}
+
+function headerValue(headers: Record<string, unknown>, name: string) {
+  const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === name);
+  return entry?.[1];
 }
 
 function parseNotificationEndpoint(value: unknown): NotificationEndpointProjection {
@@ -901,6 +1249,10 @@ function sessionPath(path: string, sessionId: string) {
 
 function mediaAssetPath(path: string, assetId: string) {
   return path.replace('{assetId}', encodeURIComponent(assetId));
+}
+
+function uploadIntentPath(path: string, uploadIntentId: string) {
+  return path.replace('{uploadIntentId}', encodeURIComponent(uploadIntentId));
 }
 
 function queryString(values: Readonly<Record<string, string | undefined>>) {

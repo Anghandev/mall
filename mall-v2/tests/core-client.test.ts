@@ -20,6 +20,16 @@ import {
   store,
 } from './fulfillment-fixtures';
 import { catalogCategories, catalogTags, publicMediaAccess } from './catalog-fixtures';
+import {
+  buyerActionResult,
+  evidenceAssetId,
+  evidenceFileHash,
+  mediaUploadIntent,
+  orderActionEvidence,
+  orderEvidenceHash,
+  uploadIntentId,
+  verifiedEvidenceAsset,
+} from './evidence-fixtures';
 import { paymentQuote, product, seckillQuote } from './payment-fixtures';
 import { relayEvent, seckillSession, seckillSessionId } from './seckill-fixtures';
 import {
@@ -55,6 +65,11 @@ describe('coordinated Core HTTP client', () => {
       orders: '/v2/orders',
       order: '/v2/orders/{orderId}',
       orderTarget: '/v2/orders/{orderId}/fulfillment-target',
+      orderEvidence: '/v2/orders/{orderId}/evidence',
+      requestExchange: '/v2/orders/{orderId}/exchange-requests',
+      requestDelay: '/v2/orders/{orderId}/delay-requests',
+      confirmReceipt: '/v2/orders/{orderId}/receipt-confirmation',
+      openArbitration: '/v2/orders/{orderId}/arbitrations',
     });
   });
 
@@ -63,7 +78,103 @@ describe('coordinated Core HTTP client', () => {
       categories: '/v2/catalog/categories',
       tags: '/v2/catalog/tags',
       mediaReadAccess: '/v2/media/assets/{assetId}/access',
+      mediaUploadIntent: '/v2/media/upload-intents',
+      mediaUploadComplete: '/v2/media/upload-intents/{uploadIntentId}/complete',
     });
+  });
+
+  it('uploads, verifies and binds buyer evidence before submitting generated command routes', async () => {
+    const file = new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'image/png' });
+    const intent = mediaUploadIntent();
+    const asset = verifiedEvidenceAsset();
+    const evidence = orderActionEvidence('REQUEST_EXCHANGE', 'PACKAGE_DAMAGED', [evidenceAssetId]);
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, ...(init ? { init } : {}) });
+      if (url.endsWith('/v2/media/upload-intents')) return json(intent, 201);
+      if (url === intent.uploadUrl) return new Response(null, { status: 204 });
+      if (url.endsWith(`/v2/media/upload-intents/${uploadIntentId}/complete`)) return json(asset);
+      if (url.endsWith(`/v2/orders/${deliveryOrder.orderId}/evidence`)) return json(evidence, 201);
+      if (url.endsWith(`/v2/orders/${deliveryOrder.orderId}/exchange-requests`)) return json(buyerActionResult('REQUEST_EXCHANGE'), 201);
+      if (url.endsWith(`/v2/orders/${deliveryOrder.orderId}/delay-requests`)) return json(buyerActionResult('REQUEST_DELAY'), 201);
+      if (url.endsWith(`/v2/orders/${deliveryOrder.orderId}/receipt-confirmation`)) return json(buyerActionResult('CONFIRM_RECEIPT'));
+      if (url.endsWith(`/v2/orders/${deliveryOrder.orderId}/arbitrations`)) return json(buyerActionResult('OPEN_ARBITRATION'), 201);
+      throw new Error(`unexpected URL ${url}`);
+    });
+    const client = createCoreClient({ baseUrl: 'https://core.mall.test', fetch: fetcher });
+    const uploadRequest = {
+      purpose: 'FULFILLMENT_EVIDENCE' as const,
+      resourceType: 'ORDER' as const,
+      resourceId: deliveryOrder.orderId,
+      contentType: 'image/png' as const,
+      sizeBytes: 4,
+      contentSha256: evidenceFileHash,
+      idempotencyKey: 'mall-upload-1',
+    };
+
+    expect(await client.createMediaUploadIntent('session', uploadRequest)).toEqual(intent);
+    await client.uploadMediaFile(intent, file);
+    expect(await client.completeMediaUpload('session', uploadIntentId)).toEqual(asset);
+    expect(await client.createOrderActionEvidence('session', deliveryOrder.orderId, {
+      action: 'REQUEST_EXCHANGE',
+      reasonCode: 'PACKAGE_DAMAGED',
+      mediaAssetIds: [evidenceAssetId],
+      idempotencyKey: 'mall-evidence-1',
+    })).toEqual(evidence);
+    const reasonCommand = { idempotencyKey: 'mall-command-1', evidenceHash: orderEvidenceHash, reasonCode: 'PACKAGE_DAMAGED' };
+    expect((await client.requestExchange('session', deliveryOrder.orderId, reasonCommand)).state).toBe('OPEN');
+    expect((await client.requestDelay('session', deliveryOrder.orderId, reasonCommand)).state).toBe('OPEN');
+    expect((await client.confirmReceipt('session', deliveryOrder.orderId, {
+      idempotencyKey: 'mall-command-2', evidenceHash: orderEvidenceHash,
+    })).state).toBe('FULFILLED');
+    expect((await client.openArbitration('session', deliveryOrder.orderId, reasonCommand)).state).toBe('ARBITRATION');
+
+    const providerCall = calls.find((call) => call.url === intent.uploadUrl)!;
+    expect(providerCall.init).toMatchObject({ method: 'PUT', headers: intent.headers, body: file });
+    expect((providerCall.init?.headers as Record<string, string>).authorization).toBeUndefined();
+    const coreCalls = calls.filter((call) => call.url.startsWith('https://core.mall.test'));
+    expect(coreCalls.every((call) => (call.init?.headers as Record<string, string>).authorization === 'Bearer session')).toBe(true);
+    expect(JSON.parse(String(calls.find((call) => call.url.endsWith('/complete'))?.init?.body))).toEqual({});
+  });
+
+  it('rejects mismatched upload, evidence and command responses and fails provider upload closed', async () => {
+    const request = {
+      purpose: 'FULFILLMENT_EVIDENCE' as const,
+      resourceType: 'ORDER' as const,
+      resourceId: deliveryOrder.orderId,
+      contentType: 'image/png' as const,
+      sizeBytes: 4,
+      contentSha256: evidenceFileHash,
+      idempotencyKey: 'mall-upload-2',
+    };
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json({ ...mediaUploadIntent(), sizeBytes: '5' }, 201)),
+    }).createMediaUploadIntent('session', request)).rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(new Response(null, { status: 403 })),
+    }).uploadMediaFile(mediaUploadIntent(), new Blob([new Uint8Array(4)], { type: 'image/png' })))
+      .rejects.toMatchObject({ code: 'ExternalBlocked' });
+
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json({
+        ...orderActionEvidence('REQUEST_EXCHANGE', 'PACKAGE_DAMAGED'),
+        action: 'REQUEST_DELAY',
+      }, 201)),
+    }).createOrderActionEvidence('session', deliveryOrder.orderId, {
+      action: 'REQUEST_EXCHANGE', reasonCode: 'PACKAGE_DAMAGED', idempotencyKey: 'mall-evidence-2',
+    })).rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json({ ...buyerActionResult('REQUEST_EXCHANGE'), requestType: 'DELAY' }, 201)),
+    }).requestExchange('session', deliveryOrder.orderId, {
+      idempotencyKey: 'mall-command-3', evidenceHash: orderEvidenceHash, reasonCode: 'PACKAGE_DAMAGED',
+    })).rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json({ allowedActions: [{ action: 'REQUEST_EXCHANGE', enabled: 'yes' }] })),
+    }).getOrderAllowedActions('session', deliveryOrder.orderId)).rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
   it('consumes typed public taxonomy and short-lived media access without provider URL construction', async () => {

@@ -16,6 +16,15 @@ import type { MallServices, PendingSubmission } from '../src/mall-runtime';
 import type { WalletGateway } from '../src/wallet';
 import { catalogCategories, catalogTags, publicMediaAccess } from './catalog-fixtures';
 import {
+  buyerActionResult,
+  evidenceAssetId,
+  evidenceFileHash,
+  mediaUploadIntent,
+  orderActionEvidence,
+  orderEvidenceHash,
+  verifiedEvidenceAsset,
+} from './evidence-fixtures';
+import {
   deliveryActions,
   deliveryOrder,
   deliveryOrderTarget,
@@ -465,13 +474,28 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByRole('button', { name: '创建签名报价' }).hasAttribute('disabled')).toBe(true);
   });
 
-  it('renders wallet-scoped orders, logistics, BNM and server allowedActions fail closed', async () => {
+  it('uploads and submits evidence for an enabled buyer exchange action', async () => {
     const user = userEvent.setup();
+    const file = new File([new Uint8Array([1, 2, 3, 4])], 'damage.png', { type: 'image/png' });
+    const intent = mediaUploadIntent();
+    const asset = verifiedEvidenceAsset();
+    const evidence = orderActionEvidence('REQUEST_EXCHANGE', 'PACKAGE_DAMAGED', [evidenceAssetId]);
+    const createMediaUploadIntent = vi.fn<CoreClient['createMediaUploadIntent']>().mockResolvedValue(intent);
+    const uploadMediaFile = vi.fn<CoreClient['uploadMediaFile']>().mockResolvedValue(undefined);
+    const completeMediaUpload = vi.fn<CoreClient['completeMediaUpload']>().mockResolvedValue(asset);
+    const createOrderActionEvidence = vi.fn<CoreClient['createOrderActionEvidence']>().mockResolvedValue(evidence);
+    const requestExchange = vi.fn<CoreClient['requestExchange']>().mockResolvedValue(buyerActionResult('REQUEST_EXCHANGE'));
     const services = readyServices({
       listOrders: vi.fn().mockResolvedValue([deliveryOrder]),
       getOrderAllowedActions: vi.fn().mockResolvedValue(deliveryActions),
       getOrderTarget: vi.fn().mockResolvedValue(deliveryOrderTarget),
+      createMediaUploadIntent,
+      uploadMediaFile,
+      completeMediaUpload,
+      createOrderActionEvidence,
+      requestExchange,
     });
+    services.hashEvidenceFile = vi.fn().mockResolvedValue(evidenceFileHash);
     renderAt('/assets/orders', services);
 
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
@@ -480,10 +504,125 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText(deliveryOrder.exactAmounts.bnmAmount)).toBeTruthy();
     expect(screen.getByText(/13800138000/)).toBeTruthy();
     const exchange = screen.getByRole('button', { name: '申请换货' });
-    expect(exchange.hasAttribute('disabled')).toBe(true);
-    expect(screen.getAllByText(/canonical evidence 生成\/上传契约尚未发布/).length).toBeGreaterThan(0);
+    expect(exchange.hasAttribute('disabled')).toBe(false);
+    await user.click(exchange);
+    await user.type(screen.getByLabelText('原因代码'), 'package_damaged');
+    await user.upload(screen.getByLabelText(/证据文件（可选）/), file);
+    await user.click(screen.getByRole('button', { name: /封装证据并提交/ }));
+
+    expect(await screen.findByText('操作已由 Core 接收，订单状态已重新同步。')).toBeTruthy();
+    expect(createMediaUploadIntent).toHaveBeenCalledWith('buyer-session', {
+      purpose: 'FULFILLMENT_EVIDENCE',
+      resourceType: 'ORDER',
+      resourceId: deliveryOrder.orderId,
+      contentType: 'image/png',
+      sizeBytes: 4,
+      contentSha256: evidenceFileHash,
+      idempotencyKey: 'mall-test-idempotency',
+    });
+    expect(uploadMediaFile).toHaveBeenCalledWith(intent, file);
+    expect(completeMediaUpload).toHaveBeenCalledWith('buyer-session', intent.uploadIntentId);
+    expect(createOrderActionEvidence).toHaveBeenCalledWith('buyer-session', deliveryOrder.orderId, {
+      action: 'REQUEST_EXCHANGE',
+      reasonCode: 'PACKAGE_DAMAGED',
+      mediaAssetIds: [evidenceAssetId],
+      idempotencyKey: 'mall-test-idempotency',
+    });
+    expect(requestExchange).toHaveBeenCalledWith('buyer-session', deliveryOrder.orderId, {
+      idempotencyKey: 'mall-test-idempotency',
+      evidenceHash: orderEvidenceHash,
+      reasonCode: 'PACKAGE_DAMAGED',
+    });
     expect(screen.getAllByText('UnknownState')).toHaveLength(2);
     expect(document.body.textContent).not.toMatch(/申请退款|强制退款|无理由退款/i);
+    expect(document.body.textContent).not.toContain(orderEvidenceHash);
+  });
+
+  it.each([
+    ['REQUEST_DELAY', '申请延期'],
+    ['OPEN_ARBITRATION', '发起仲裁'],
+    ['CONFIRM_RECEIPT', '确认收货'],
+  ] as const)('submits %s without requiring a pasted hash or media file', async (action, label) => {
+    const user = userEvent.setup();
+    const evidence = orderActionEvidence(action, 'BUYER_CONFIRMED');
+    const requestDelay = vi.fn<CoreClient['requestDelay']>().mockResolvedValue(buyerActionResult('REQUEST_DELAY'));
+    const openArbitration = vi.fn<CoreClient['openArbitration']>().mockResolvedValue(buyerActionResult('OPEN_ARBITRATION'));
+    const confirmReceipt = vi.fn<CoreClient['confirmReceipt']>().mockResolvedValue(buyerActionResult('CONFIRM_RECEIPT'));
+    const createOrderActionEvidence = vi.fn<CoreClient['createOrderActionEvidence']>().mockResolvedValue(evidence);
+    const services = readyServices({
+      listOrders: vi.fn().mockResolvedValue([deliveryOrder]),
+      getOrderAllowedActions: vi.fn().mockResolvedValue([{ action, enabled: true }]),
+      getOrderTarget: vi.fn().mockResolvedValue(deliveryOrderTarget),
+      createOrderActionEvidence,
+      requestDelay,
+      openArbitration,
+      confirmReceipt,
+    });
+    renderAt('/assets/orders', services);
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await user.click(await screen.findByRole('button', { name: label }));
+    await user.type(screen.getByLabelText('原因代码'), 'buyer_confirmed');
+    await user.click(screen.getByRole('button', { name: /封装证据并提交/ }));
+    expect(await screen.findByText('操作已由 Core 接收，订单状态已重新同步。')).toBeTruthy();
+    expect(createOrderActionEvidence).toHaveBeenCalledWith('buyer-session', deliveryOrder.orderId, {
+      action,
+      reasonCode: 'BUYER_CONFIRMED',
+      idempotencyKey: 'mall-test-idempotency',
+    });
+    expect(services.core.createMediaUploadIntent).not.toHaveBeenCalled();
+    const command = { idempotencyKey: 'mall-test-idempotency', evidenceHash: orderEvidenceHash };
+    if (action === 'REQUEST_DELAY') expect(requestDelay).toHaveBeenCalledWith('buyer-session', deliveryOrder.orderId, { ...command, reasonCode: 'BUYER_CONFIRMED' });
+    if (action === 'OPEN_ARBITRATION') expect(openArbitration).toHaveBeenCalledWith('buyer-session', deliveryOrder.orderId, { ...command, reasonCode: 'BUYER_CONFIRMED' });
+    if (action === 'CONFIRM_RECEIPT') expect(confirmReceipt).toHaveBeenCalledWith('buyer-session', deliveryOrder.orderId, command);
+  });
+
+  it('reuses the same evidence and command idempotency keys when command submission is retried', async () => {
+    const user = userEvent.setup();
+    const evidence = orderActionEvidence('REQUEST_EXCHANGE', 'PACKAGE_DAMAGED');
+    const createOrderActionEvidence = vi.fn<CoreClient['createOrderActionEvidence']>().mockResolvedValue(evidence);
+    const requestExchange = vi.fn<CoreClient['requestExchange']>()
+      .mockRejectedValueOnce(new CoreClientError('NetworkUnavailable', '命令提交中断'))
+      .mockResolvedValue(buyerActionResult('REQUEST_EXCHANGE'));
+    const services = readyServices({
+      listOrders: vi.fn().mockResolvedValue([deliveryOrder]),
+      getOrderAllowedActions: vi.fn().mockResolvedValue([{ action: 'REQUEST_EXCHANGE', enabled: true }]),
+      getOrderTarget: vi.fn().mockResolvedValue(deliveryOrderTarget),
+      createOrderActionEvidence,
+      requestExchange,
+    });
+    renderAt('/assets/orders', services);
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await user.click(await screen.findByRole('button', { name: '申请换货' }));
+    await user.type(screen.getByLabelText('原因代码'), 'package_damaged');
+    await user.click(screen.getByRole('button', { name: /封装证据并提交/ }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('命令提交中断'));
+    await user.click(screen.getByRole('button', { name: /封装证据并提交/ }));
+    expect(await screen.findByText('操作已由 Core 接收，订单状态已重新同步。')).toBeTruthy();
+    expect(createOrderActionEvidence).toHaveBeenCalledTimes(1);
+    expect(requestExchange).toHaveBeenCalledTimes(2);
+    expect(requestExchange.mock.calls[0]).toEqual(requestExchange.mock.calls[1]);
+  });
+
+  it('keeps takeover and pickup verification fail closed when buyer evidence authority is absent', async () => {
+    const user = userEvent.setup();
+    const services = readyServices({
+      listOrders: vi.fn().mockResolvedValue([deliveryOrder]),
+      getOrderAllowedActions: vi.fn().mockResolvedValue([
+        { action: 'OPEN_TAKEOVER', enabled: true },
+        { action: 'VERIFY_PICKUP', enabled: true },
+      ]),
+      getOrderTarget: vi.fn().mockResolvedValue(deliveryOrderTarget),
+    });
+    renderAt('/assets/orders', services);
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    expect((await screen.findByRole('button', { name: '平台接管' })).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '自提核销' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText(/尚未发布 OPEN_TAKEOVER/)).toBeTruthy();
+    expect(screen.getByText(/仅授权门店或平台角色/)).toBeTruthy();
+    expect(screen.queryByLabelText(/证据$/)).toBeNull();
   });
 
   it('renders public CMS content without inventing a local content response', async () => {
@@ -610,6 +749,9 @@ function servicesWith(overrides: Partial<CoreClient>): MallServices {
     listCatalogCategories: vi.fn().mockResolvedValue([]),
     listCatalogTags: vi.fn().mockResolvedValue([]),
     createPublicMediaReadAccess: vi.fn().mockRejectedValue(new Error('not configured')),
+    createMediaUploadIntent: vi.fn().mockRejectedValue(new Error('not configured')),
+    uploadMediaFile: vi.fn().mockRejectedValue(new Error('not configured')),
+    completeMediaUpload: vi.fn().mockRejectedValue(new Error('not configured')),
     authenticate: vi.fn().mockResolvedValue({ token: 'buyer-session', walletAddress: BUYER, roles: ['BUYER'] }),
     createOrdinaryQuote: vi.fn().mockRejectedValue(new Error('not configured')),
     createSeckillQuote: vi.fn().mockRejectedValue(new Error('not configured')),
@@ -626,6 +768,11 @@ function servicesWith(overrides: Partial<CoreClient>): MallServices {
     getOrder: vi.fn().mockRejectedValue(new Error('not configured')),
     getOrderTarget: vi.fn().mockRejectedValue(new Error('not configured')),
     getOrderAllowedActions: vi.fn().mockResolvedValue([]),
+    createOrderActionEvidence: vi.fn().mockRejectedValue(new Error('not configured')),
+    requestExchange: vi.fn().mockRejectedValue(new Error('not configured')),
+    requestDelay: vi.fn().mockRejectedValue(new Error('not configured')),
+    confirmReceipt: vi.fn().mockRejectedValue(new Error('not configured')),
+    openArbitration: vi.fn().mockRejectedValue(new Error('not configured')),
     listSettlements: vi.fn().mockResolvedValue({ artifactVersion, wallet: BUYER, balances: [], points: [], requests: [] }),
     createSettlementIntent: vi.fn().mockRejectedValue(new Error('not configured')),
     submitSettlementRequest: vi.fn().mockRejectedValue(new Error('not configured')),
@@ -650,6 +797,7 @@ function servicesWith(overrides: Partial<CoreClient>): MallServices {
     wallet,
     getCurrentPosition: vi.fn().mockResolvedValue({ latitude: store.latitude, longitude: store.longitude }),
     createIdempotencyKey: () => 'mall-test-idempotency',
+    hashEvidenceFile: vi.fn().mockResolvedValue(HASH_3),
     submissionStore: {
       load: (walletAddress) => pendingSubmission?.walletAddress === walletAddress.toLowerCase() ? pendingSubmission : null,
       save: (submission) => { pendingSubmission = submission; },
