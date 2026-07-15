@@ -4,11 +4,16 @@ pragma solidity 0.8.26;
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
+import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 import {IPolicyRegistryV2} from "./interfaces/IV2Core.sol";
 import {V2Types} from "./types/V2Types.sol";
 
-contract BeneficiaryRegistryV2 is AccessControl {
+contract BeneficiaryRegistryV2 is AccessControl, EIP712 {
     bytes32 public constant REGISTRY_EDITOR_ROLE = keccak256("REGISTRY_EDITOR_ROLE");
+    bytes32 public constant REGION_PUBLICATION_TYPEHASH = keccak256(
+        "RegionBeneficiaryPublication(uint64 policyVersion,bytes32 regionCodeHash,bytes32 beneficiariesHash,uint256 nonce,uint64 deadline)"
+    );
     uint256 public constant MAX_REFERRAL_DEPTH = 64;
 
     struct RegionBeneficiaries {
@@ -20,7 +25,10 @@ contract BeneficiaryRegistryV2 is AccessControl {
 
     IPolicyRegistryV2 public immutable policyRegistry;
     mapping(address member => address referrer) public referrerOf;
-    mapping(bytes32 regionCodeHash => RegionBeneficiaries beneficiaries) public regionBeneficiaries;
+    mapping(uint64 policyVersion => mapping(bytes32 regionCodeHash => RegionBeneficiaries beneficiaries)) public
+        regionBeneficiaries;
+    mapping(uint64 policyVersion => mapping(bytes32 regionCodeHash => bool published)) public regionPublished;
+    mapping(uint256 nonce => bool used) public usedRegionPublicationNonce;
 
     error InvalidAddress();
     error InvalidReferral();
@@ -29,13 +37,24 @@ contract BeneficiaryRegistryV2 is AccessControl {
     error BeneficiaryMismatch();
     error InvalidRegion();
     error InvalidGenesisCredential();
+    error InvalidSecondarySignature();
+    error PublicationExpired();
+    error PublicationReplay();
+    error SafeExecutionRequired();
+    error PolicyVersionRequired();
+    error RegionAlreadyPublished();
 
     event ReferralUpdated(address indexed member, address indexed oldReferrer, address indexed newReferrer);
     event RegionBeneficiariesUpdated(
-        bytes32 indexed regionCodeHash, address district, address city, address province, address region
+        uint64 indexed policyVersion,
+        bytes32 indexed regionCodeHash,
+        address district,
+        address city,
+        address province,
+        address region
     );
 
-    constructor(IPolicyRegistryV2 policyRegistry_) {
+    constructor(IPolicyRegistryV2 policyRegistry_) EIP712("Abu24KBeneficiaryRegistry", "2") {
         if (address(policyRegistry_) == address(0)) revert InvalidAddress();
         policyRegistry = policyRegistry_;
         address safe_ = policyRegistry_.safe();
@@ -56,14 +75,56 @@ contract BeneficiaryRegistryV2 is AccessControl {
         emit ReferralUpdated(member, oldReferrer, referrer);
     }
 
-    function setRegionBeneficiaries(bytes32 regionCodeHash, RegionBeneficiaries calldata beneficiaries)
-        external
-        onlyRole(REGISTRY_EDITOR_ROLE)
-    {
+    function publishRegionBeneficiaries(
+        uint64 policyVersion,
+        bytes32 regionCodeHash,
+        RegionBeneficiaries calldata beneficiaries,
+        uint256 nonce,
+        uint64 deadline,
+        bytes calldata secondarySignature
+    ) external onlyRole(REGISTRY_EDITOR_ROLE) {
+        if (msg.sender != policyRegistry.safe()) revert SafeExecutionRequired();
         if (regionCodeHash == bytes32(0)) revert InvalidRegion();
-        regionBeneficiaries[regionCodeHash] = beneficiaries;
+        if (policyVersion == 0 || policyVersion != policyRegistry.latestVersion() + 1) revert PolicyVersionRequired();
+        if (block.timestamp > deadline) revert PublicationExpired();
+        if (usedRegionPublicationNonce[nonce]) revert PublicationReplay();
+        if (regionPublished[policyVersion][regionCodeHash]) revert RegionAlreadyPublished();
+        bytes32 digest = hashRegionPublication(policyVersion, regionCodeHash, beneficiaries, nonce, deadline);
+        if (!SignatureChecker.isValidSignatureNowCalldata(policyRegistry.secondarySigner(), digest, secondarySignature))
+        {
+            revert InvalidSecondarySignature();
+        }
+        usedRegionPublicationNonce[nonce] = true;
+        regionPublished[policyVersion][regionCodeHash] = true;
+        regionBeneficiaries[policyVersion][regionCodeHash] = beneficiaries;
         emit RegionBeneficiariesUpdated(
-            regionCodeHash, beneficiaries.district, beneficiaries.city, beneficiaries.province, beneficiaries.region
+            policyVersion,
+            regionCodeHash,
+            beneficiaries.district,
+            beneficiaries.city,
+            beneficiaries.province,
+            beneficiaries.region
+        );
+    }
+
+    function hashRegionPublication(
+        uint64 policyVersion,
+        bytes32 regionCodeHash,
+        RegionBeneficiaries calldata beneficiaries,
+        uint256 nonce,
+        uint64 deadline
+    ) public view returns (bytes32) {
+        return _hashTypedDataV4(
+            keccak256(
+                abi.encode(
+                    REGION_PUBLICATION_TYPEHASH,
+                    policyVersion,
+                    regionCodeHash,
+                    keccak256(abi.encode(beneficiaries)),
+                    nonce,
+                    deadline
+                )
+            )
         );
     }
 
@@ -79,7 +140,7 @@ contract BeneficiaryRegistryV2 is AccessControl {
         }
         if (snapshot.directReferral != referrerOf[buyer]) revert BeneficiaryMismatch();
 
-        RegionBeneficiaries memory expected = regionBeneficiaries[regionCodeHash];
+        RegionBeneficiaries memory expected = regionBeneficiaries[policyVersion][regionCodeHash];
         if (
             snapshot.district != expected.district || snapshot.city != expected.city
                 || snapshot.province != expected.province || snapshot.region != expected.region

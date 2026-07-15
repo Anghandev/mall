@@ -2,6 +2,7 @@
 pragma solidity 0.8.26;
 
 import {CoreFixture} from "./helpers/CoreFixture.sol";
+import {BeneficiaryRegistryV2} from "../contracts/BeneficiaryRegistryV2.sol";
 import {PolicyRegistryV2} from "../contracts/PolicyRegistryV2.sol";
 import {V2Types} from "../contracts/types/V2Types.sol";
 
@@ -92,6 +93,46 @@ contract PolicyRegistryV2Test is CoreFixture {
         vm.prank(safe);
         vm.expectRevert(PolicyRegistryV2.InvalidPolicy.selector);
         policyRegistry.publishPolicy(policy, accounts, weights, 6, deadline, _sign(SECONDARY_KEY, digest));
+    }
+
+    function testRegionRoutingRequiresVersionedSafeAndSecondaryApproval() public {
+        (V2Types.Policy memory policy, address[] memory accounts, uint16[] memory weights) = _secondPolicy();
+        uint64 deadline = uint64(block.timestamp + 1 hours);
+        BeneficiaryRegistryV2.RegionBeneficiaries memory next = BeneficiaryRegistryV2.RegionBeneficiaries(
+            address(0x8001), address(0x8002), address(0x8003), address(0x8004)
+        );
+        bytes32 digest = beneficiaryRegistry.hashRegionPublication(2, regionCodeHash, next, 2, deadline);
+
+        vm.expectRevert();
+        beneficiaryRegistry.publishRegionBeneficiaries(
+            2, regionCodeHash, next, 2, deadline, _sign(SECONDARY_KEY, digest)
+        );
+        vm.prank(safe);
+        vm.expectRevert(BeneficiaryRegistryV2.InvalidSecondarySignature.selector);
+        beneficiaryRegistry.publishRegionBeneficiaries(2, regionCodeHash, next, 2, deadline, _sign(QUOTE_KEY, digest));
+        vm.prank(safe);
+        beneficiaryRegistry.publishRegionBeneficiaries(
+            2, regionCodeHash, next, 2, deadline, _sign(SECONDARY_KEY, digest)
+        );
+
+        bytes32 policyDigest = policyRegistry.hashPublication(policy, accounts, weights, 20, deadline);
+        vm.prank(safe);
+        policyRegistry.publishPolicy(policy, accounts, weights, 20, deadline, _sign(SECONDARY_KEY, policyDigest));
+
+        V2Types.BeneficiarySnapshot memory oldSnapshot =
+            V2Types.BeneficiarySnapshot(buyer, directReferral, district, city, province, region);
+        beneficiaryRegistry.validateSnapshot(1, buyer, merchant, regionCodeHash, oldSnapshot);
+        V2Types.BeneficiarySnapshot memory nextSnapshot =
+            V2Types.BeneficiarySnapshot(buyer, directReferral, next.district, next.city, next.province, next.region);
+        beneficiaryRegistry.validateSnapshot(2, buyer, merchant, regionCodeHash, nextSnapshot);
+        vm.expectRevert(BeneficiaryRegistryV2.BeneficiaryMismatch.selector);
+        beneficiaryRegistry.validateSnapshot(2, buyer, merchant, regionCodeHash, oldSnapshot);
+
+        vm.prank(safe);
+        vm.expectRevert(BeneficiaryRegistryV2.PolicyVersionRequired.selector);
+        beneficiaryRegistry.publishRegionBeneficiaries(
+            2, regionCodeHash, next, 3, deadline, _sign(SECONDARY_KEY, digest)
+        );
     }
 
     function _secondPolicy()

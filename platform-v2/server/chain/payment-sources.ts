@@ -17,7 +17,7 @@ const SOURCE_ABI = [
 ];
 const BENEFICIARY_ABI = [
   'function referrerOf(address member) view returns (address)',
-  'function regionBeneficiaries(bytes32 regionCodeHash) view returns (address district,address city,address province,address region)',
+  'function regionBeneficiaries(uint64 policyVersion,bytes32 regionCodeHash) view returns (address district,address city,address province,address region)',
   'function isGenesisEligible(uint64 policyVersion,address account) view returns (bool)',
 ];
 export const PAYMENT_POLICY_TUPLE_ABI = 'tuple(uint64 version,uint16 usdtPaymentBps,uint16 nplPaymentBps,uint16 nplBurnListPriceBps,uint16 nplRewardListPriceBps,uint16 genesisBps,uint16 directReferralBps,uint16 districtBps,uint16 cityBps,uint16 provinceBps,uint16 regionBps,uint16 operationsBps,uint16 platformFeeBps,uint16 seckillPrizeBps,uint32 seckillMainDuration,uint32 relayInitial,uint32 relayIncrement,uint32 relayCap,bytes32 oracleVersion,uint64 oracleMaxAge,uint128 oracleMinLiquidity,uint128 merchantGuaranteeMinimum,address usdtCustodySafe,address nplRewardSafe,address operationsTreasurySafe,address circulationPool,address genesisCredential,uint256 genesisTokenId,uint8 genesisCredentialStandard,bytes32 beneficiarySetHash,bytes32 concessionDestinationSetHash,bytes32 decisionEvidenceHash,bytes32 rulesContentHash)';
@@ -146,7 +146,12 @@ export class RpcBeneficiarySnapshotSource implements BeneficiarySnapshotSource {
     }
     const [referrerValue, regionValue, genesisValue] = await Promise.all([
       this.#reader.call(this.#registryAddress, BENEFICIARY_ABI, 'referrerOf', [buyer]),
-      this.#reader.call(this.#registryAddress, BENEFICIARY_ABI, 'regionBeneficiaries', [input.regionCodeHash]),
+      this.#reader.call(
+        this.#registryAddress,
+        BENEFICIARY_ABI,
+        'regionBeneficiaries',
+        [input.policyVersion, input.regionCodeHash],
+      ),
       this.#reader.call(this.#registryAddress, BENEFICIARY_ABI, 'isGenesisEligible', [input.policyVersion, buyer]),
     ]);
     const referrer = address(String(referrerValue), 'direct referrer');

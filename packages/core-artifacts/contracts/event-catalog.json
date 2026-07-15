@@ -3,6 +3,12 @@
   "events": [
     {
       "contract": "BeneficiaryRegistryV2",
+      "name": "EIP712DomainChanged",
+      "signature": "EIP712DomainChanged()",
+      "inputs": []
+    },
+    {
+      "contract": "BeneficiaryRegistryV2",
       "name": "ReferralUpdated",
       "signature": "ReferralUpdated(address,address,address)",
       "inputs": [
@@ -29,8 +35,14 @@
     {
       "contract": "BeneficiaryRegistryV2",
       "name": "RegionBeneficiariesUpdated",
-      "signature": "RegionBeneficiariesUpdated(bytes32,address,address,address,address)",
+      "signature": "RegionBeneficiariesUpdated(uint64,bytes32,address,address,address,address)",
       "inputs": [
+        {
+          "name": "policyVersion",
+          "type": "uint64",
+          "indexed": true,
+          "internalType": "uint64"
+        },
         {
           "name": "regionCodeHash",
           "type": "bytes32",

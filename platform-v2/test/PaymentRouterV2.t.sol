@@ -336,6 +336,11 @@ contract PaymentRouterV2Test is CoreFixture {
     }
 
     function testFutureSessionUsesVersionedRelayIncrementAndCap() public {
+        V2Types.PaymentIntent memory versionOneQuote =
+            _makePayment(keccak256("version-one-after-region-change"), buyer, 18, false, keccak256("reservation-18"));
+        bytes32 versionOneDigest = router.hashPayment(versionOneQuote);
+        bytes memory versionOneQuoteSignature = _sign(QUOTE_KEY, versionOneDigest);
+        bytes memory versionOneBuyerSignature = _sign(BUYER_KEY, versionOneDigest);
         V2Types.Policy memory policy = policyRegistry.getPolicy(1);
         policy.version = 2;
         policy.relayInitial = 20 seconds;
@@ -349,9 +354,17 @@ contract PaymentRouterV2Test is CoreFixture {
         weights[0] = 6_000;
         weights[1] = 4_000;
         uint64 deadline = uint64(block.timestamp + 1 hours);
+        BeneficiaryRegistryV2.RegionBeneficiaries memory nextRegion =
+            BeneficiaryRegistryV2.RegionBeneficiaries(district, city, province, region);
+        bytes32 regionDigest = beneficiaryRegistry.hashRegionPublication(2, regionCodeHash, nextRegion, 8, deadline);
+        vm.prank(safe);
+        beneficiaryRegistry.publishRegionBeneficiaries(
+            2, regionCodeHash, nextRegion, 8, deadline, _sign(SECONDARY_KEY, regionDigest)
+        );
         bytes32 publicationDigest = policyRegistry.hashPublication(policy, accounts, weights, 8, deadline);
         vm.prank(safe);
         policyRegistry.publishPolicy(policy, accounts, weights, 8, deadline, _sign(SECONDARY_KEY, publicationDigest));
+        router.pay(versionOneQuote, versionOneQuoteSignature, versionOneBuyerSignature);
 
         bytes32 sessionId = keccak256("session-v2");
         vm.prank(safe);

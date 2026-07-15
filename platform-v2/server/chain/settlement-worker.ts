@@ -129,7 +129,7 @@ export interface SafeSettlementReceipt {
   executionFailureSafeTxHash?: string;
   safeNonceAfter: string;
   transfers: readonly { tokenAddress: string; from: string; to: string; amount: string }[];
-  balanceDeltas: readonly { tokenAddress: string; account: string; delta: string }[];
+  transactionDeltas: readonly { tokenAddress: string; account: string; delta: string }[];
   evidenceHash: string;
 }
 
@@ -1264,11 +1264,11 @@ function validateTransfers(batch: SafeSettlementBatch, receipt: SafeSettlementRe
     add(item.tokenAddress, item.recipientAddress, BigInt(item.amount));
   }
   const actualDeltas = new Map<string, bigint>();
-  for (const delta of receipt.balanceDeltas) {
-    const token = normalizedAddress(delta.tokenAddress, 'balance-delta token');
-    const account = normalizedAddress(delta.account, 'balance-delta account');
+  for (const delta of receipt.transactionDeltas) {
+    const token = normalizedAddress(delta.tokenAddress, 'transaction-delta token');
+    const account = normalizedAddress(delta.account, 'transaction-delta account');
     if (!/^-?(0|[1-9][0-9]*)$/.test(delta.delta)) {
-      throw new CoreError('InvalidFinality', 'Safe balance delta is invalid', 409);
+      throw new CoreError('InvalidFinality', 'Safe transaction delta is invalid', 409);
     }
     const key = `${token}:${account}`;
     actualDeltas.set(key, (actualDeltas.get(key) ?? 0n) + BigInt(delta.delta));
@@ -1276,7 +1276,7 @@ function validateTransfers(batch: SafeSettlementBatch, receipt: SafeSettlementRe
   if (
     expectedDeltas.size !== actualDeltas.size
     || [...expectedDeltas].some(([key, value]) => actualDeltas.get(key) !== value)
-  ) throw new CoreError('InvalidFinality', 'Safe balance deltas do not conserve the settlement batch', 409);
+  ) throw new CoreError('InvalidFinality', 'Safe transaction deltas do not conserve the settlement batch', 409);
 }
 
 async function loadBatch(executor: SqlExecutor, batchId: string) {

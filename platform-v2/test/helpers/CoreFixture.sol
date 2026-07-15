@@ -66,8 +66,23 @@ abstract contract CoreFixture is TestBase {
         twapSource.setResult(1_000 ether, V2Types.ORACLE_MIN_USDT_LIQUIDITY, uint64(block.timestamp));
 
         policyRegistry = new PolicyRegistryV2(safe, secondarySigner);
-        _publishLaunchPolicy();
         beneficiaryRegistry = new BeneficiaryRegistryV2(IPolicyRegistryV2(address(policyRegistry)));
+        BeneficiaryRegistryV2.RegionBeneficiaries memory regionBeneficiarySet =
+            BeneficiaryRegistryV2.RegionBeneficiaries(district, city, province, region);
+        uint64 regionPublicationDeadline = uint64(block.timestamp + 1 hours);
+        bytes32 regionPublicationDigest = beneficiaryRegistry.hashRegionPublication(
+            1, regionCodeHash, regionBeneficiarySet, 1, regionPublicationDeadline
+        );
+        vm.prank(safe);
+        beneficiaryRegistry.publishRegionBeneficiaries(
+            1,
+            regionCodeHash,
+            regionBeneficiarySet,
+            1,
+            regionPublicationDeadline,
+            _sign(SECONDARY_KEY, regionPublicationDigest)
+        );
+        _publishLaunchPolicy();
         oracle = new TwapOracleAdapterV2(twapSource, ORACLE_VERSION);
         router = new PaymentRouterV2(
             usdt,
@@ -80,12 +95,8 @@ abstract contract CoreFixture is TestBase {
             operationsTreasurySafe,
             quoteSigner
         );
-        vm.startPrank(safe);
+        vm.prank(safe);
         beneficiaryRegistry.setReferrer(buyer, directReferral);
-        beneficiaryRegistry.setRegionBeneficiaries(
-            regionCodeHash, BeneficiaryRegistryV2.RegionBeneficiaries(district, city, province, region)
-        );
-        vm.stopPrank();
         usdt.mint(buyer, 1_000_000 ether);
         npl.mint(buyer, 10_000_000 ether);
         vm.startPrank(buyer);

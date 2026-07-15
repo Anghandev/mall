@@ -58,6 +58,31 @@
   },
   {
     "type": "error",
+    "name": "InvalidSecondarySignature",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidShortString",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PolicyVersionRequired",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PublicationExpired",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PublicationReplay",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "ReferralCycle",
     "inputs": []
   },
@@ -65,6 +90,33 @@
     "type": "error",
     "name": "ReferralDepthExceeded",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RegionAlreadyPublished",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SafeExecutionRequired",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "StringTooLong",
+    "inputs": [
+      {
+        "name": "str",
+        "type": "string",
+        "internalType": "string"
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "EIP712DomainChanged",
+    "inputs": [],
+    "anonymous": false
   },
   {
     "type": "event",
@@ -95,6 +147,12 @@
     "type": "event",
     "name": "RegionBeneficiariesUpdated",
     "inputs": [
+      {
+        "name": "policyVersion",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
       {
         "name": "regionCodeHash",
         "type": "bytes32",
@@ -218,6 +276,49 @@
   },
   {
     "type": "function",
+    "name": "eip712Domain",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "fields",
+        "type": "bytes1",
+        "internalType": "bytes1"
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "version",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "chainId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "verifyingContract",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "extensions",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "getRoleAdmin",
     "inputs": [
       {
@@ -252,6 +353,67 @@
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "hashRegionPublication",
+    "inputs": [
+      {
+        "name": "policyVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "regionCodeHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "beneficiaries",
+        "type": "tuple",
+        "internalType": "struct BeneficiaryRegistryV2.RegionBeneficiaries",
+        "components": [
+          {
+            "name": "district",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "city",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "province",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "region",
+            "type": "address",
+            "internalType": "address"
+          }
+        ]
+      },
+      {
+        "name": "nonce",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "deadline",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -329,6 +491,66 @@
   },
   {
     "type": "function",
+    "name": "publishRegionBeneficiaries",
+    "inputs": [
+      {
+        "name": "policyVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "regionCodeHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "beneficiaries",
+        "type": "tuple",
+        "internalType": "struct BeneficiaryRegistryV2.RegionBeneficiaries",
+        "components": [
+          {
+            "name": "district",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "city",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "province",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "region",
+            "type": "address",
+            "internalType": "address"
+          }
+        ]
+      },
+      {
+        "name": "nonce",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "deadline",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "secondarySignature",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "referrerOf",
     "inputs": [
       {
@@ -348,8 +570,26 @@
   },
   {
     "type": "function",
+    "name": "REGION_PUBLICATION_TYPEHASH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "regionBeneficiaries",
     "inputs": [
+      {
+        "name": "policyVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
       {
         "name": "regionCodeHash",
         "type": "bytes32",
@@ -376,6 +616,30 @@
         "name": "region",
         "type": "address",
         "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "regionPublished",
+    "inputs": [
+      {
+        "name": "policyVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "regionCodeHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "published",
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
@@ -449,46 +713,6 @@
   },
   {
     "type": "function",
-    "name": "setRegionBeneficiaries",
-    "inputs": [
-      {
-        "name": "regionCodeHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "beneficiaries",
-        "type": "tuple",
-        "internalType": "struct BeneficiaryRegistryV2.RegionBeneficiaries",
-        "components": [
-          {
-            "name": "district",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "city",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "province",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "region",
-            "type": "address",
-            "internalType": "address"
-          }
-        ]
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "supportsInterface",
     "inputs": [
       {
@@ -500,6 +724,25 @@
     "outputs": [
       {
         "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "usedRegionPublicationNonce",
+    "inputs": [
+      {
+        "name": "nonce",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "used",
         "type": "bool",
         "internalType": "bool"
       }

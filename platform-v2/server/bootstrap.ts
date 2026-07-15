@@ -32,6 +32,11 @@ import {
 } from './chain/guarantee-deposit-worker.ts';
 import { CoverageWorker } from './chain/coverage-worker.ts';
 import { ResilientBscCoverageSource } from './chain/coverage-source.ts';
+import {
+  CoverageBreakerGovernanceWorker,
+  HttpCoverageBreakerSafeProposer,
+  ResilientCoverageBreakerChainSource,
+} from './chain/coverage-breaker-governance.ts';
 import { ChainIndexer } from './chain/indexer.ts';
 import {
   PollingPaymentIndexer,
@@ -304,6 +309,22 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
       assets: coverageAssets,
     }),
     expectedAssets: coverageAssets,
+    paymentRouterAddress: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),
+    governanceSafeAddress: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+  });
+  const coverageBreakerGovernanceWorker = new CoverageBreakerGovernanceWorker({
+    transactions,
+    proposer: new HttpCoverageBreakerSafeProposer({
+      ...(env.POLICY_SAFE_PROPOSER_URL ? { url: env.POLICY_SAFE_PROPOSER_URL } : {}),
+      ...(env.POLICY_SAFE_PROPOSER_TOKEN ? { token: env.POLICY_SAFE_PROPOSER_TOKEN } : {}),
+      mutualTls: config.safeMutualTls,
+    }),
+    chain: new ResilientCoverageBreakerChainSource({
+      ...(env.POLICY_EXECUTION_LOOKUP_URL ? { lookupUrl: env.POLICY_EXECUTION_LOOKUP_URL } : {}),
+      ...(env.POLICY_EXECUTION_LOOKUP_TOKEN ? { lookupToken: env.POLICY_EXECUTION_LOOKUP_TOKEN } : {}),
+      ...(config.rpcUrl ? { primaryRpcUrl: config.rpcUrl } : {}),
+      ...(config.fallbackRpcUrl ? { fallbackRpcUrl: config.fallbackRpcUrl } : {}),
+    }),
   });
   const settlementBatchScheduler = new SettlementBatchScheduler({
     service: settlementService,
@@ -403,6 +424,8 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   fulfillmentScheduler.start();
   await coverageWorker.pollOnce().catch(() => undefined);
   coverageWorker.start();
+  await coverageBreakerGovernanceWorker.pollOnce().catch(() => undefined);
+  coverageBreakerGovernanceWorker.start();
   await guaranteeDepositWorker.pollOnce().catch(() => undefined);
   guaranteeDepositWorker.start();
   await settlementBatchScheduler.pollOnce().catch(() => undefined);
@@ -517,6 +540,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
       await settlementWorker.stop();
       await settlementBatchScheduler.stop();
       await coverageWorker.stop();
+      await coverageBreakerGovernanceWorker.stop();
       await guaranteeDepositWorker.stop();
       await bnmWorker.stop();
       await redis.quit();

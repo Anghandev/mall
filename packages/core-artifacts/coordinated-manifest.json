@@ -18,7 +18,7 @@
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "1b39f4d36565c2b6c74cd3dc111eefd4e4883c4a0cd9c9ce100cf22821be9de4"
+      "sha256": "0b240b93b2f5d646f0dcb2dcd7c3bb7c6223650e22344ee145568c31705ea62e"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
@@ -30,7 +30,7 @@
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "4d31e29c1f887526e39810a8e0a0ed0b932ea743a3b5c703b80ae21b9321fabe"
+      "sha256": "1a195fefec9836bca4d894b84570c4b6a23c98d167c8096d11d264fcc0c76327"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
@@ -42,15 +42,15 @@
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "ed1b6b82e5c5b7587f93883e40e4a884b447f92e5050b21644e7ae668fe04f9a"
+      "sha256": "391166dd039fd4aa8aefeafb54745bca1a42d2b4070ba0f9fead27d529ec2726"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "89cd05ea3675ff0182445c6c9e4e59509f25a84de85daecf0e36bb1b0466ccbd"
+      "sha256": "25aa58aeac37b4c417fc8195fe6d1d66c31536295f42d78107cbb67ef078414d"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "650fc2f864d6703db09b0116e70c6a08e798b7ad10ff9772b23dee98f1e562e1"
+      "sha256": "caf9980006fbac3b8b37ccdda5e640e1311fc6c314ffe4b71c5e6e9fc1685f41"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
@@ -60,11 +60,11 @@
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "9f17e7c283a2e173d468f0d03169286fae52624d27c4bcee2c6cdf0c2aae2b2d"
+      "sha256": "5a264e4e98f564eda534220b4a9120acbb1459610b27dc5f4ff514189a825589"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "7ea39c929a8d3d64428dd8199300242fd35308478a5365c9112295d59de45bc2"
+      "sha256": "e9395119cd200ca9d2b4531777214f0b439f8fbf6d813355cc8c9019fe3adcd1"
     }
   ],
   "httpSurface": [

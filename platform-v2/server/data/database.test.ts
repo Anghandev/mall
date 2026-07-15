@@ -20,6 +20,10 @@ import { BnmAvailabilityWorker } from '../chain/bnm-availability-worker.ts';
 import { FulfillmentSchedulerWorker } from '../chain/fulfillment-scheduler-worker.ts';
 import { GuaranteeDepositWorker } from '../chain/guarantee-deposit-worker.ts';
 import { CoverageWorker, type CoverageObservation } from '../chain/coverage-worker.ts';
+import {
+  CoverageBreakerGovernanceWorker,
+  type CoverageBreakerObservation,
+} from '../chain/coverage-breaker-governance.ts';
 import { AuditOutboxWorker } from '../chain/audit-outbox-worker.ts';
 import { NotificationWorker } from '../chain/notification-worker.ts';
 import { OperationsMonitoringWorker, RuntimeMetricsRegistry } from '../chain/monitoring-worker.ts';
@@ -96,6 +100,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '012_order_operations.sql',
       '013_business_analytics.sql',
       '014_accounts_and_profiles.sql',
+      '015_coverage_breaker_governance.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -3866,8 +3871,11 @@ test('CMS sanitizes structured content, targets audiences, binds seckill rules a
       correlationId: 'cms-test-v1',
     })).versionId, first.versionId);
     await service.publish(actor, first.versionId, { evidenceHash: HASH, correlationId: 'cms-publish-v1' });
-    assert.equal((await service.listPublished({ regionCode: '110101', now })).length, 1);
-    assert.equal((await service.listPublished({ regionCode: '310101', now })).length, 0);
+    const buyerAudience = { walletAddress: BUYER, roles: ['BUYER'] as const };
+    const firstPublished = await service.listPublished({ actor: buyerAudience, now });
+    assert.equal(firstPublished.length, 1);
+    assert.deepEqual(firstPublished[0]?.audience, { type: 'REGION' });
+    assert.equal((await service.listPublished({ now })).length, 0);
 
     const second = await service.createVersion(actor, {
       entryId: first.entryId,
@@ -3885,12 +3893,12 @@ test('CMS sanitizes structured content, targets audiences, binds seckill rules a
       correlationId: 'cms-test-v2',
     });
     await service.publish(actor, second.versionId, { evidenceHash: HASH_2, correlationId: 'cms-publish-v2' });
-    assert.equal((await service.listPublished({ regionCode: '110101', now }))[0]?.version, 2);
+    assert.equal((await service.listPublished({ actor: buyerAudience, now }))[0]?.version, 2);
     await service.rollback(actor, first.versionId, {
       evidenceHash: `0x${'4'.repeat(64)}`,
       correlationId: 'cms-rollback-v1',
     });
-    assert.equal((await service.listPublished({ regionCode: '110101', now }))[0]?.version, 1);
+    assert.equal((await service.listPublished({ actor: buyerAudience, now }))[0]?.version, 1);
     assert.equal((await db.query<{ count: string }>(
       'SELECT count(*)::text AS count FROM core.cms_versions WHERE entry_id = $1',
       [first.entryId],
@@ -5283,7 +5291,7 @@ test('signed settlement request moves Available to Requested and an immutable co
         to: merchantWallet.address,
         amount: '45',
       }],
-      balanceDeltas: [
+      transactionDeltas: [
         {
           tokenAddress: '0x55d398326f99059ff775485246999027b3197955',
           account: runtime.safeAddress,
@@ -5657,6 +5665,8 @@ test('coverage worker derives per-Safe liabilities, pauses on deficit and never 
         asset: item.asset,
         tokenAddress: item.tokenAddress,
       })),
+      paymentRouterAddress: '0x9999999999999999999999999999999999999999',
+      governanceSafeAddress: '0x8888888888888888888888888888888888888888',
     });
     const deficient = await worker.pollOnce();
     assert.deepEqual(Object.fromEntries(deficient.assets.map((item) => [item.asset, {
@@ -5670,6 +5680,29 @@ test('coverage worker derives per-Safe liabilities, pauses on deficit and never 
       'SELECT scope FROM core.circuit_breakers WHERE paused ORDER BY scope',
     );
     assert.deepEqual(paused.rows.map((row) => row.scope), ['NEW_PAYMENT', 'NEW_SETTLEMENT_BATCH']);
+    const actions = await db.query<{
+      action: string;
+      target_paused: boolean;
+      evidence_hash: string;
+      router_address: string;
+      state: string;
+      calldata: string;
+    }>('SELECT action, target_paused, evidence_hash, router_address, state, calldata FROM core.coverage_breaker_actions');
+    assert.equal(actions.rows.length, 1);
+    assert.deepEqual({ ...actions.rows[0], calldata: undefined }, {
+      action: 'PAUSE',
+      target_paused: true,
+      evidence_hash: observation.evidenceHash,
+      router_address: '0x9999999999999999999999999999999999999999',
+      state: 'PENDING_PROPOSAL',
+      calldata: undefined,
+    });
+    assert.equal(
+      actions.rows[0]?.calldata,
+      new Interface(['function setNewPaymentsPaused(bool paused,bytes32 evidenceHash)'])
+        .encodeFunctionData('setNewPaymentsPaused', [true, observation.evidenceHash])
+        .toLowerCase(),
+    );
 
     observation = {
       ...observation,
@@ -5703,6 +5736,109 @@ test('coverage worker derives per-Safe liabilities, pauses on deficit and never 
       [recovered.snapshotId],
     );
     assert.deepEqual(canonicality.rows.map((row) => row.canonical), [true, false]);
+  } finally {
+    await db.close();
+  }
+});
+
+test('coverage breaker Safe action retries, reaches finality and replaces reorged execution without reopening payments', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    await recordFinalPayment(db);
+    const observation: CoverageObservation = {
+      chainId: 56,
+      blockNumber: 2_000,
+      blockHash: `0x${'7'.repeat(64)}`,
+      canonical: true,
+      evidenceHash: `0x${'8'.repeat(64)}`,
+      observedAt: new Date('2026-07-15T09:00:00.000Z'),
+      assets: [{
+        safeAddress: '0x3333333333333333333333333333333333333333',
+        asset: 'USDT',
+        tokenAddress: '0x55d398326f99059ff775485246999027b3197955',
+        balance: '69',
+      }],
+    };
+    const coverage = new CoverageWorker({
+      transactions: transactionAdapter(db),
+      source: { observe: async () => observation },
+      expectedAssets: observation.assets,
+      paymentRouterAddress: '0x9999999999999999999999999999999999999999',
+      governanceSafeAddress: '0x8888888888888888888888888888888888888888',
+    });
+    await coverage.pollOnce();
+
+    let rejectProposal = true;
+    let phase: 'MINED' | 'FINAL' | 'REORGED' = 'MINED';
+    let proposals = 0;
+    const governance = new CoverageBreakerGovernanceWorker({
+      transactions: transactionAdapter(db),
+      proposer: {
+        propose: async () => {
+          proposals += 1;
+          if (rejectProposal) throw new CoreError('ExternalBlocked', 'Safe unavailable', 503);
+          return { safeTxHash: `0x${'3'.repeat(64)}`, proposalHash: `0x${'4'.repeat(64)}` };
+        },
+      },
+      chain: {
+        observe: async (candidate): Promise<CoverageBreakerObservation> => {
+          const base = {
+            safeTxHash: candidate.safeTxHash,
+            executionTxHash: `0x${'5'.repeat(64)}`,
+            blockNumber: 2_001,
+            blockHash: `0x${'6'.repeat(64)}`,
+            targetPaused: true,
+            evidenceHash: candidate.evidenceHash,
+          };
+          if (phase === 'REORGED') return {
+            state: 'REORGED',
+            ...base,
+            canonicalBlockHash: `0x${'9'.repeat(64)}`,
+            confirmations: 0,
+            canonical: false,
+            observationEvidenceHash: `0x${'a'.repeat(64)}`,
+          };
+          const confirmations = phase === 'FINAL' ? 15 : 14;
+          return {
+            state: phase,
+            ...base,
+            confirmations,
+            canonical: true,
+            observationEvidenceHash: phase === 'FINAL' ? `0x${'b'.repeat(64)}` : `0x${'c'.repeat(64)}`,
+          };
+        },
+      },
+    });
+
+    await governance.pollOnce();
+    assert.equal(proposals, 1);
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.coverage_breaker_actions',
+    )).rows[0]?.state, 'PENDING_PROPOSAL');
+
+    rejectProposal = false;
+    await governance.pollOnce();
+    assert.equal(proposals, 2);
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.coverage_breaker_actions',
+    )).rows[0]?.state, 'MINED');
+
+    phase = 'FINAL';
+    await governance.pollOnce();
+    assert.equal((await db.query<{ state: string; confirmations: number }>(
+      'SELECT state, confirmations FROM core.coverage_breaker_actions',
+    )).rows[0]?.state, 'FINAL');
+
+    phase = 'REORGED';
+    await governance.pollOnce();
+    const afterReorg = await db.query<{ state: string; replaces_action_id: string | null }>(
+      'SELECT state, replaces_action_id FROM core.coverage_breaker_actions ORDER BY created_at, action_id',
+    );
+    assert.deepEqual(afterReorg.rows.map((row) => row.state).sort(), ['PENDING_PROPOSAL', 'REORGED']);
+    assert.ok(afterReorg.rows.find((row) => row.state === 'PENDING_PROPOSAL')?.replaces_action_id);
+    assert.equal((await db.query<{ paused: boolean }>(
+      "SELECT paused FROM core.circuit_breakers WHERE scope = 'NEW_PAYMENT'",
+    )).rows[0]?.paused, true);
   } finally {
     await db.close();
   }
@@ -5938,7 +6074,7 @@ test('Safe replacement preserves outer sender, nonce and exact calldata before f
         to: prepared.merchantWallet.address,
         amount: '45',
       }],
-      balanceDeltas: [
+      transactionDeltas: [
         {
           tokenAddress: '0x55d398326f99059ff775485246999027b3197955',
           account: prepared.runtime.safeAddress,
@@ -6070,7 +6206,7 @@ test('Safe outer failure keeps Batched funds quarantined until the Safe nonce is
       executionFailureSafeTxHash: String(prepared.batch.safe_tx_hash),
       safeNonceAfter: '7',
       transfers: [],
-      balanceDeltas: [],
+      transactionDeltas: [],
       evidenceHash: `0x${'f'.repeat(64)}`,
     };
     assert.equal(await worker.pollFinalityOnce(), 1);

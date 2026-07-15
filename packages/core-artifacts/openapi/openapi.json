@@ -1518,31 +1518,10 @@
     "/v2/cms/public": {
       "get": {
         "operationId": "listPublicCms",
-        "parameters": [
+        "security": [
+          {},
           {
-            "name": "walletAddress",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "$ref": "#/components/schemas/Address"
-            }
-          },
-          {
-            "name": "merchantId",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
-            "name": "regionCode",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "$ref": "#/components/schemas/RegionCode"
-            }
+            "bearerAuth": []
           }
         ],
         "responses": {
@@ -7391,6 +7370,10 @@
             "items": {
               "$ref": "#/components/schemas/UserRole"
             }
+          },
+          "merchantId": {
+            "type": "string",
+            "minLength": 1
           }
         }
       },

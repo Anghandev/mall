@@ -332,7 +332,7 @@ export interface CmsApiService {
   publish(actor: FulfillmentActor, versionId: string, input: { evidenceHash: string; correlationId: string }): Promise<unknown>;
   rollback(actor: FulfillmentActor, versionId: string, input: { evidenceHash: string; correlationId: string }): Promise<unknown>;
   getVersion(actor: FulfillmentActor, versionId: string): Promise<unknown>;
-  listPublished(context?: { walletAddress?: string; merchantId?: string; regionCode?: string; now?: Date }): Promise<unknown>;
+  listPublished(context?: { actor?: FulfillmentActor; now?: Date }): Promise<unknown>;
 }
 
 export interface NotificationApiService {
@@ -564,7 +564,12 @@ async function route(
       dependencies.config.jwtSecret,
       dependencies.clock(),
     );
-    sendJson(response, 200, { token, walletAddress: verified.walletAddress, roles: binding.roles }, correlationId);
+    sendJson(response, 200, {
+      token,
+      walletAddress: verified.walletAddress,
+      roles: binding.roles,
+      ...(binding.merchantId ? { merchantId: binding.merchantId } : {}),
+    }, correlationId);
     return;
   }
   const logisticsProvider = logisticsWebhookProvider(url.pathname);
@@ -1759,11 +1764,14 @@ async function routeAdminServices(
     return true;
   }
   if (request.method === 'GET' && url.pathname === '/v2/cms/public') {
-    const walletAddress = url.searchParams.get('walletAddress') ?? undefined;
+    if ([...url.searchParams].length !== 0) {
+      throw new CoreError('InvalidRequest', 'CMS audience context cannot be supplied by the caller');
+    }
+    const claims = request.headers.authorization
+      ? authorize(request, dependencies.config, dependencies.clock())
+      : undefined;
     sendJson(response, 200, await dependencies.cmsService.listPublished({
-      ...(walletAddress ? { walletAddress } : {}),
-      ...(url.searchParams.get('merchantId') ? { merchantId: url.searchParams.get('merchantId')! } : {}),
-      ...(url.searchParams.get('regionCode') ? { regionCode: url.searchParams.get('regionCode')! } : {}),
+      ...(claims ? { actor: fulfillmentActor(claims) } : {}),
       now: dependencies.clock(),
     }), correlationId);
     return true;
@@ -2436,6 +2444,8 @@ function mediaPurpose(value: unknown): MediaPurpose {
     'CATEGORY_ICON',
     'STORE_IMAGE',
     'FULFILLMENT_EVIDENCE',
+    'BUYER_AVATAR',
+    'MERCHANT_LOGO',
   ].includes(String(value))) {
     throw new CoreError('InvalidRequest', 'Unsupported media purpose');
   }
@@ -2443,7 +2453,7 @@ function mediaPurpose(value: unknown): MediaPurpose {
 }
 
 function mediaResourceType(value: unknown): MediaResourceType {
-  if (!['PRODUCT', 'CATEGORY', 'STORE', 'ORDER'].includes(String(value))) {
+  if (!['PRODUCT', 'CATEGORY', 'STORE', 'ORDER', 'BUYER', 'MERCHANT'].includes(String(value))) {
     throw new CoreError('InvalidRequest', 'Unsupported media resource type');
   }
   return value as MediaResourceType;

@@ -55,6 +55,11 @@ import {
   HttpRpcPolicyChainSource,
   type PolicyFinalityCandidate,
 } from './policy-publication-worker.ts';
+import {
+  HttpCoverageBreakerSafeProposer,
+  ResilientCoverageBreakerChainSource,
+  type CoverageBreakerFinalityCandidate,
+} from './coverage-breaker-governance.ts';
 
 const CONTRACT = '0x3333333333333333333333333333333333333333';
 const BUYER = '0x1111111111111111111111111111111111111111';
@@ -636,6 +641,73 @@ test('policy RPC finality distinguishes pending execution from a proven deep reo
     priorState: 'REORGED',
     priorFinality: previous,
   }), { state: 'NOT_FOUND' });
+});
+
+test('coverage breaker proposer and dual-RPC finality bind Safe, Router event, state and 14/15 confirmations', async () => {
+  const candidate = coverageBreakerCandidate();
+  let proposedBody: Record<string, unknown> | undefined;
+  const proposer = new HttpCoverageBreakerSafeProposer({
+    url: 'https://safe-proposer.example.invalid/coverage-breaker',
+    token: 'safe-token',
+    mutualTls: true,
+    fetchImpl: async (_input, init) => {
+      proposedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return jsonResponse({
+        safeTxHash: candidate.safeTxHash,
+        proposalHash: HASH_3,
+        dataHash: candidate.calldataHash,
+        resourceId: candidate.actionId,
+        targetPaused: true,
+        evidenceHash: candidate.evidenceHash,
+        policyVersion: 1,
+      });
+    },
+  });
+  assert.deepEqual(await proposer.propose(candidate), {
+    safeTxHash: candidate.safeTxHash,
+    proposalHash: HASH_3,
+  });
+  assert.equal(proposedBody?.to, candidate.routerAddress);
+  assert.equal(proposedBody?.safeAddress, candidate.safeAddress);
+
+  const harness = coverageBreakerRpcHarness();
+  const source = coverageBreakerChainSource(harness.fetch);
+  harness.state.head = 113;
+  const mined = await source.observe(candidate);
+  assert.equal(mined.state, 'MINED');
+  if (mined.state !== 'MINED') throw new Error('ExpectedMinedCoverageBreaker');
+  assert.equal(mined.confirmations, 14);
+
+  harness.state.head = 114;
+  const finalized = await source.observe(candidate);
+  assert.equal(finalized.state, 'FINAL');
+  if (finalized.state !== 'FINAL') throw new Error('ExpectedFinalCoverageBreaker');
+  assert.equal(finalized.confirmations, 15);
+  assert.equal(finalized.targetPaused, true);
+
+  harness.state.receiptStatus = '0x0';
+  const failed = await source.observe(candidate);
+  assert.equal(failed.state, 'FAILED');
+});
+
+test('coverage breaker finality fails closed on wrong authority, event, Router state and provider disagreement', async () => {
+  const cases: Array<[string, (harness: ReturnType<typeof coverageBreakerRpcHarness>) => void]> = [
+    ['wrong chain', (harness) => { harness.state.primaryChainId = 1; }],
+    ['wrong Safe', (harness) => { harness.state.transactionTo = MERCHANT; }],
+    ['wrong event evidence', (harness) => { harness.state.eventEvidenceHash = HASH_2; }],
+    ['wrong Router state', (harness) => { harness.state.routerPaused = false; }],
+    ['receipt disagreement', (harness) => { harness.state.fallbackReceiptBlockHash = HASH_2; }],
+    ['canonical disagreement', (harness) => { harness.state.fallbackCanonicalBlockHash = HASH_2; }],
+  ];
+  for (const [name, mutate] of cases) {
+    const harness = coverageBreakerRpcHarness();
+    mutate(harness);
+    await assert.rejects(
+      coverageBreakerChainSource(harness.fetch).observe(coverageBreakerCandidate()),
+      () => true,
+      name,
+    );
+  }
 });
 
 test('payment RPC sources enforce the frozen Oracle and beneficiary snapshot rules', async () => {
@@ -1468,6 +1540,94 @@ function policyRpcHarness() {
     return jsonResponse({ jsonrpc: '2.0', id: 1, result });
   };
   return { state, fetch: fetchImpl, executionTxHash, minedBlockHash, replacementBlockHash };
+}
+
+function coverageBreakerCandidate(): CoverageBreakerFinalityCandidate {
+  const iface = new Interface(['function setNewPaymentsPaused(bool paused,bytes32 evidenceHash)']);
+  const calldata = iface.encodeFunctionData('setNewPaymentsPaused', [true, HASH_1]).toLowerCase();
+  return {
+    actionId: ORDER_ID,
+    safeAddress: BUYER,
+    routerAddress: CONTRACT,
+    calldata,
+    calldataHash: keccak256(calldata).toLowerCase(),
+    targetPaused: true,
+    evidenceHash: HASH_1,
+    policyVersion: 1,
+    safeTxHash: HASH_2,
+    priorState: 'SAFE_PROPOSED',
+  };
+}
+
+function coverageBreakerChainSource(fetchImpl: typeof fetch) {
+  return new ResilientCoverageBreakerChainSource({
+    lookupUrl: 'https://safe-lookup.example.invalid/coverage-breaker',
+    lookupToken: 'lookup-token',
+    primaryRpcUrl: 'https://coverage-primary-rpc.example.invalid',
+    fallbackRpcUrl: 'https://coverage-fallback-rpc.example.invalid',
+    fetchImpl,
+  });
+}
+
+function coverageBreakerRpcHarness() {
+  const executionTxHash = HASH_3;
+  const minedBlockHash = `0x${'6'.repeat(64)}`;
+  const iface = new Interface([
+    'event PaymentPauseChanged(bool paused,bytes32 indexed evidenceHash)',
+    'function newPaymentsPaused() view returns (bool)',
+  ]);
+  const event = iface.getEvent('PaymentPauseChanged');
+  if (!event) throw new Error('MissingPaymentPauseChangedEvent');
+  const state = {
+    primaryChainId: 56,
+    fallbackChainId: 56,
+    head: 114,
+    receiptStatus: '0x1',
+    transactionTo: BUYER,
+    eventEvidenceHash: HASH_1,
+    eventPaused: true,
+    routerPaused: true,
+    fallbackReceiptBlockHash: minedBlockHash,
+    primaryCanonicalBlockHash: minedBlockHash,
+    fallbackCanonicalBlockHash: minedBlockHash,
+  };
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = String(input);
+    if (url.startsWith('https://safe-lookup.example.invalid')) {
+      return jsonResponse({
+        safeTxHash: coverageBreakerCandidate().safeTxHash,
+        resourceId: coverageBreakerCandidate().actionId,
+        executionTxHash,
+      });
+    }
+    const primary = url.startsWith('https://coverage-primary-rpc.example.invalid');
+    const request = JSON.parse(String(init?.body)) as { method: string; params: unknown[] };
+    let result: unknown;
+    if (request.method === 'eth_chainId') {
+      result = `0x${(primary ? state.primaryChainId : state.fallbackChainId).toString(16)}`;
+    } else if (request.method === 'eth_blockNumber') {
+      result = `0x${state.head.toString(16)}`;
+    } else if (request.method === 'eth_getBlockByNumber') {
+      result = { hash: primary ? state.primaryCanonicalBlockHash : state.fallbackCanonicalBlockHash };
+    } else if (request.method === 'eth_getTransactionByHash') {
+      result = { hash: executionTxHash, to: state.transactionTo };
+    } else if (request.method === 'eth_call') {
+      result = iface.encodeFunctionResult('newPaymentsPaused', [state.routerPaused]);
+    } else if (request.method === 'eth_getTransactionReceipt') {
+      const encoded = iface.encodeEventLog(event, [state.eventPaused, state.eventEvidenceHash]);
+      result = {
+        transactionHash: executionTxHash,
+        status: state.receiptStatus,
+        blockHash: primary ? minedBlockHash : state.fallbackReceiptBlockHash,
+        blockNumber: '0x64',
+        logs: [{ address: CONTRACT, topics: encoded.topics, data: encoded.data }],
+      };
+    } else {
+      throw new Error(`UnexpectedCoverageBreakerRpcMethod:${request.method}`);
+    }
+    return jsonResponse({ jsonrpc: '2.0', id: 1, result });
+  };
+  return { state, fetch: fetchImpl, executionTxHash, minedBlockHash };
 }
 
 function jsonResponse(body: unknown) {

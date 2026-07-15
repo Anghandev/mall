@@ -22,7 +22,6 @@ const TRANSFER_EVENT = new Interface([
   'event Transfer(address indexed from,address indexed to,uint256 amount)',
 ]);
 const SAFE_READ = new Interface(['function nonce() view returns (uint256)']);
-const ERC20_READ = new Interface(['function balanceOf(address account) view returns (uint256)']);
 
 export class HttpSafeApprovalVerifier implements SafeApprovalVerifier {
   readonly #url: string;
@@ -260,7 +259,7 @@ async function observe(provider: JsonRpcProvider, txHash: string): Promise<Obser
       // Not an ERC-20 Transfer event.
     }
   }
-  const balanceDeltas = await readBalanceDeltas(provider, receipt.blockNumber, transfers);
+  const transactionDeltas = transactionDeltasFromTransfers(transfers);
   const nonceResult = await provider.send('eth_call', [{
     to: safeAddress,
     data: SAFE_READ.encodeFunctionData('nonce'),
@@ -282,41 +281,29 @@ async function observe(provider: JsonRpcProvider, txHash: string): Promise<Obser
     ...(executionFailureSafeTxHash ? { executionFailureSafeTxHash } : {}),
     safeNonceAfter,
     transfers,
-    balanceDeltas,
+    transactionDeltas,
   };
 }
 
-async function readBalanceDeltas(
-  provider: JsonRpcProvider,
-  blockNumber: number,
-  transfers: readonly { tokenAddress: string; from: string; to: string }[],
+function transactionDeltasFromTransfers(
+  transfers: readonly { tokenAddress: string; from: string; to: string; amount: string }[],
 ) {
-  if (blockNumber <= 0) throw new CoreError('InvalidFinality', 'Settlement block has no prior state', 409);
-  const pairs = new Map<string, { tokenAddress: string; account: string }>();
+  const deltas = new Map<string, { tokenAddress: string; account: string; delta: bigint }>();
+  const add = (tokenAddress: string, account: string, delta: bigint) => {
+    const key = `${tokenAddress}:${account}`;
+    const current = deltas.get(key);
+    deltas.set(key, { tokenAddress, account, delta: (current?.delta ?? 0n) + delta });
+  };
   for (const transfer of transfers) {
-    for (const account of [transfer.from, transfer.to]) {
-      pairs.set(`${transfer.tokenAddress}:${account}`, { tokenAddress: transfer.tokenAddress, account });
-    }
+    const amount = BigInt(transfer.amount);
+    add(transfer.tokenAddress, transfer.from, -amount);
+    add(transfer.tokenAddress, transfer.to, amount);
   }
-  try {
-    return await Promise.all([...pairs.values()]
-      .sort((left, right) =>
-        left.tokenAddress.localeCompare(right.tokenAddress) || left.account.localeCompare(right.account))
-      .map(async ({ tokenAddress, account }) => {
-        const data = ERC20_READ.encodeFunctionData('balanceOf', [account]);
-        const [beforeResult, afterResult] = await Promise.all([
-          provider.send('eth_call', [{ to: tokenAddress, data }, `0x${(blockNumber - 1).toString(16)}`]),
-          provider.send('eth_call', [{ to: tokenAddress, data }, `0x${blockNumber.toString(16)}`]),
-        ]);
-        const before = BigInt(ERC20_READ.decodeFunctionResult('balanceOf', beforeResult)[0]);
-        const after = BigInt(ERC20_READ.decodeFunctionResult('balanceOf', afterResult)[0]);
-        return { tokenAddress, account, delta: (after - before).toString() };
-      }));
-  } catch (error) {
-    throw new CoreError('ExternalBlocked', 'Archive RPC balance evidence is unavailable', 503, {
-      cause: error instanceof Error ? error.message : String(error),
-    });
-  }
+  return [...deltas.values()]
+    .filter((item) => item.delta !== 0n)
+    .sort((left, right) =>
+      left.tokenAddress.localeCompare(right.tokenAddress) || left.account.localeCompare(right.account))
+    .map((item) => ({ tokenAddress: item.tokenAddress, account: item.account, delta: item.delta.toString() }));
 }
 
 function comparable(value: ObservedReceipt): Omit<ObservedReceipt, 'confirmations'> {
@@ -324,7 +311,7 @@ function comparable(value: ObservedReceipt): Omit<ObservedReceipt, 'confirmation
   return {
     ...comparableValue,
     transfers: [...value.transfers],
-    balanceDeltas: [...value.balanceDeltas],
+    transactionDeltas: [...value.transactionDeltas],
   };
 }
 

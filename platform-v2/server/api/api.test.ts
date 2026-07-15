@@ -885,6 +885,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
   const runtimeReadiness = paymentRuntimeReadiness(now, false);
   const fulfillmentCalls: Array<{ operation: string; wallet: string; orderId: string; input?: unknown }> = [];
   const evidenceCalls: Array<{ operation: string; wallet: string; input: unknown }> = [];
+  const cmsPublishedContexts: unknown[] = [];
   let notificationEndpointCorrelationId: string | undefined;
   let monitoringCorrelationId: string | undefined;
   const server = createApiServer({
@@ -1125,7 +1126,10 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       publish: async (_actor, versionId) => ({ versionId, published: true }),
       rollback: async (_actor, versionId) => ({ versionId, publicationType: 'ROLLED_BACK' }),
       getVersion: async (_actor, versionId) => ({ versionId }),
-      listPublished: async () => [],
+      listPublished: async (context) => {
+        cmsPublishedContexts.push(context);
+        return [];
+      },
     },
     notificationService: {
       registerEndpoint: async (actor, input) => {
@@ -1257,7 +1261,8 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       body: JSON.stringify({ message: challenge.message, signature }),
     });
     assert.equal(login.status, 200);
-    const session = (await login.json()) as { token: string };
+    const session = (await login.json()) as { token: string; merchantId?: string };
+    assert.equal(session.merchantId, 'merchant-1');
     const bearerHeaders = {
       'content-type': 'application/json',
       authorization: `Bearer ${session.token}`,
@@ -1549,6 +1554,21 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
         idempotencyKey: 'http-media-upload-1',
       }),
     })).status, 201);
+    for (const upload of [
+      { purpose: 'BUYER_AVATAR', resourceType: 'BUYER', resourceId: wallet.address.toLowerCase(), idempotencyKey: 'buyer-avatar-http-1' },
+      { purpose: 'MERCHANT_LOGO', resourceType: 'MERCHANT', resourceId: 'merchant-1', idempotencyKey: 'merchant-logo-http-1' },
+    ]) {
+      assert.equal((await fetch(`${base}/v2/media/upload-intents`, {
+        method: 'POST',
+        headers: bearerHeaders,
+        body: JSON.stringify({
+          ...upload,
+          contentType: 'image/webp',
+          sizeBytes: 512,
+          contentSha256: HASH,
+        }),
+      })).status, 201);
+    }
     assert.equal((await fetch(`${base}/v2/media/upload-intents/${HASH}/complete`, {
       method: 'POST',
       headers: bearerHeaders,
@@ -1569,6 +1589,8 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       idempotencyKey: 'http-tracking-evidence-1',
     })).status, 201);
     assert.deepEqual(evidenceCalls.map((call) => call.operation), [
+      'UPLOAD_INTENT',
+      'UPLOAD_INTENT',
       'UPLOAD_INTENT',
       'UPLOAD_COMPLETE',
       'MEDIA_READ',
@@ -1688,6 +1710,16 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     })).status, 200);
 
     assert.equal((await fetch(`${base}/v2/cms/public`)).status, 200);
+    assert.equal((await fetch(`${base}/v2/cms/public?walletAddress=${wallet.address}`)).status, 400);
+    assert.equal((await fetch(`${base}/v2/cms/public`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    assert.equal((cmsPublishedContexts[0] as { actor?: unknown }).actor, undefined);
+    assert.deepEqual((cmsPublishedContexts[1] as { actor: { walletAddress: string; merchantId: string } }).actor, {
+      walletAddress: wallet.address.toLowerCase(),
+      roles: ['BUYER', 'MERCHANT', 'ADMIN', 'OPERATOR', 'ARBITRATOR', 'AUDITOR'],
+      merchantId: 'merchant-1',
+    });
     const notificationEndpointResponse = await fetch(`${base}/v2/notification-endpoints`, {
       method: 'POST',
       headers: { ...bearerHeaders, 'x-correlation-id': 'notification-endpoint-http' },

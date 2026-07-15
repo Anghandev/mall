@@ -190,14 +190,10 @@ export class CmsService {
     });
   }
 
-  listPublished(context: {
-    walletAddress?: string;
-    merchantId?: string;
-    regionCode?: string;
-    now?: Date;
-  } = {}) {
+  listPublished(context: { actor?: FulfillmentActor; now?: Date } = {}) {
     const now = context.now ?? this.#clock();
     return this.#transactions.transaction(async (executor) => {
+      const audienceContext = await publishedAudienceContext(executor, context.actor, now);
       const result = await executor.query<CmsVersionRow & {
         slug: string;
         content_type: ContentType;
@@ -217,7 +213,7 @@ export class CmsService {
         [now],
       );
       return result.rows
-        .filter((row) => audienceMatches(row.audience, context))
+        .filter((row) => audienceMatches(row.audience, audienceContext))
         .map((row) => Object.freeze({
           entryId: row.entry_id,
           versionId: row.active_version_id,
@@ -228,7 +224,7 @@ export class CmsService {
           locale: row.locale,
           content: row.sanitized_content,
           contentHash: row.content_hash,
-          audience: row.audience,
+          audience: Object.freeze({ type: row.audience.type }),
           startsAt: row.starts_at ? new Date(row.starts_at).toISOString() : null,
           endsAt: row.ends_at ? new Date(row.ends_at).toISOString() : null,
           frequencyCap: row.frequency_cap,
@@ -506,10 +502,50 @@ function requireSessionRole(actor: FulfillmentActor, ...allowed: string[]) {
   if (!actor.roles.some((role) => allowed.includes(role))) throw new CoreError('Forbidden', 'Wallet session cannot manage CMS', 403);
 }
 
-function audienceMatches(audience: CmsAudience, context: { walletAddress?: string; merchantId?: string; regionCode?: string }) {
+interface PublishedAudienceContext {
+  walletAddress?: string;
+  merchantIds: ReadonlySet<string>;
+  regionCodes: ReadonlySet<string>;
+}
+
+async function publishedAudienceContext(
+  executor: SqlExecutor,
+  actor: FulfillmentActor | undefined,
+  now: Date,
+): Promise<PublishedAudienceContext> {
+  if (!actor) return { merchantIds: new Set(), regionCodes: new Set() };
+  const walletAddress = normalizeAddress(actor.walletAddress);
+  const merchantIds = new Set<string>();
+  if (actor.roles.includes('MERCHANT') && actor.merchantId) {
+    const binding = await executor.query<{ merchant_id: string }>(
+      `SELECT merchant_id FROM core.wallet_role_bindings
+       WHERE lower(wallet_address) = $1 AND role = 'MERCHANT' AND status = 'ACTIVE'
+         AND merchant_id = $2`,
+      [walletAddress, actor.merchantId],
+    );
+    if (binding.rows[0]) merchantIds.add(binding.rows[0].merchant_id);
+  }
+  const regions = await executor.query<{ region_code: string }>(
+    `SELECT DISTINCT region_code FROM (
+       SELECT region_code FROM core.fulfillment_targets
+       WHERE buyer_wallet = $1 AND expires_at > $2
+       UNION
+       SELECT store.region_code FROM core.merchant_stores store
+       WHERE store.merchant_id = ANY($3::text[]) AND store.status = 'ACTIVE'
+     ) audience_regions ORDER BY region_code`,
+    [walletAddress, now, [...merchantIds]],
+  );
+  return {
+    walletAddress,
+    merchantIds,
+    regionCodes: new Set(regions.rows.map((row) => row.region_code)),
+  };
+}
+
+function audienceMatches(audience: CmsAudience, context: PublishedAudienceContext) {
   if (audience.type === 'ALL') return true;
-  if (audience.type === 'REGION') return context.regionCode !== undefined && audience.regionCodes.includes(context.regionCode);
-  if (audience.type === 'MERCHANT') return context.merchantId !== undefined && audience.merchantIds.includes(context.merchantId);
+  if (audience.type === 'REGION') return audience.regionCodes.some((regionCode) => context.regionCodes.has(regionCode));
+  if (audience.type === 'MERCHANT') return audience.merchantIds.some((merchantId) => context.merchantIds.has(merchantId));
   return context.walletAddress !== undefined && audience.wallets.includes(normalizeAddress(context.walletAddress));
 }
 

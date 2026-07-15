@@ -97,6 +97,7 @@ const schemaSources = [
       '012_order_operations.sql',
       '013_business_analytics.sql',
       '014_accounts_and_profiles.sql',
+      '015_coverage_breaker_governance.sql',
     ],
   },
   {
@@ -892,6 +893,7 @@ function buildOpenApi() {
           properties: {
             token: { type: 'string' }, walletAddress: { $ref: '#/components/schemas/Address' },
             roles: { type: 'array', items: { $ref: '#/components/schemas/UserRole' } },
+            merchantId: { type: 'string', minLength: 1 },
           },
         },
         OrderActionRequest: {
@@ -1564,11 +1566,7 @@ function settlementAdminOpenApiPaths(errorResponse) {
     '/v2/cms/public': {
       get: {
         operationId: 'listPublicCms',
-        parameters: [
-          { name: 'walletAddress', in: 'query', required: false, schema: { $ref: '#/components/schemas/Address' } },
-          { name: 'merchantId', in: 'query', required: false, schema: { type: 'string', minLength: 1 } },
-          { name: 'regionCode', in: 'query', required: false, schema: { $ref: '#/components/schemas/RegionCode' } },
-        ],
+        security: [{}, { bearerAuth: [] }],
         responses: {
           200: response('Published CMS items', { type: 'array', items: { $ref: '#/components/schemas/CmsPublicItem' } }),
           default: errorResponse,

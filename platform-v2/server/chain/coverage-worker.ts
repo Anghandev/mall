@@ -1,4 +1,4 @@
-import { getAddress, keccak256, toUtf8Bytes } from 'ethers';
+import { Interface, getAddress, keccak256, toUtf8Bytes } from 'ethers';
 import { CoreError } from '../api/errors.ts';
 import type { SqlExecutor, SqlTransactionRunner } from '../data/migrations.ts';
 
@@ -32,6 +32,8 @@ export class CoverageWorker {
   readonly #transactions: SqlTransactionRunner;
   readonly #source: CoverageSource;
   readonly #expected: ExpectedCoverageAssets;
+  readonly #paymentRouterAddress: string;
+  readonly #governanceSafeAddress: string;
   #timer: NodeJS.Timeout | undefined;
   #inFlight: Promise<void> | undefined;
   #running = false;
@@ -40,10 +42,14 @@ export class CoverageWorker {
     transactions: SqlTransactionRunner;
     source: CoverageSource;
     expectedAssets: readonly { safeAddress: string; asset: 'USDT' | 'NPL'; tokenAddress: string }[];
+    paymentRouterAddress: string;
+    governanceSafeAddress: string;
   }) {
     this.#transactions = input.transactions;
     this.#source = input.source;
     this.#expected = expectedAssets(input.expectedAssets);
+    this.#paymentRouterAddress = address(input.paymentRouterAddress, 'PaymentRouter');
+    this.#governanceSafeAddress = address(input.governanceSafeAddress, 'governance Safe');
   }
 
   start(intervalMs = 30_000) {
@@ -67,7 +73,7 @@ export class CoverageWorker {
 
   async pollOnce() {
     const observed = validateObservation(await this.#source.observe(), this.#expected);
-    return this.#transactions.transaction(async (executor) => {
+    const result = await this.#transactions.transaction(async (executor) => {
       const snapshotId = hashJson({
         chainId: observed.chainId,
         blockNumber: observed.blockNumber,
@@ -128,9 +134,19 @@ export class CoverageWorker {
       }
       return { snapshotId, canonical: observed.canonical, assets: results };
     });
+    if (result.assets.some((item) => !item.coverageMet)) {
+      await this.#transactions.transaction((executor) => ensurePaymentPauseAction(executor, {
+        snapshotId: result.snapshotId,
+        evidenceHash: observed.evidenceHash,
+        paymentRouterAddress: this.#paymentRouterAddress,
+        governanceSafeAddress: this.#governanceSafeAddress,
+        at: observed.observedAt,
+      }));
+    }
+    return result;
   }
 
-  recordCanonicality(input: {
+  async recordCanonicality(input: {
     snapshotId: string;
     canonical: boolean;
     observedBlockHash: string;
@@ -140,7 +156,7 @@ export class CoverageWorker {
     if (!isHash(input.snapshotId) || !isHash(input.observedBlockHash) || !isHash(input.evidenceHash)) {
       throw new CoreError('InvalidFinality', 'Coverage canonicality evidence is invalid');
     }
-    return this.#transactions.transaction(async (executor) => {
+    const result = await this.#transactions.transaction(async (executor) => {
       const snapshot = await executor.query<{ snapshot_id: string }>(
         'SELECT snapshot_id FROM core.coverage_snapshots WHERE snapshot_id = $1',
         [input.snapshotId],
@@ -169,7 +185,87 @@ export class CoverageWorker {
       }
       return { snapshotId: input.snapshotId, canonical: input.canonical };
     });
+    if (!input.canonical) {
+      await this.#transactions.transaction((executor) => ensurePaymentPauseAction(executor, {
+        snapshotId: input.snapshotId,
+        evidenceHash: input.evidenceHash,
+        paymentRouterAddress: this.#paymentRouterAddress,
+        governanceSafeAddress: this.#governanceSafeAddress,
+        at: input.observedAt,
+      }));
+    }
+    return result;
   }
+}
+
+const PAYMENT_ROUTER_BREAKER = new Interface([
+  'function setNewPaymentsPaused(bool paused,bytes32 evidenceHash)',
+]);
+
+async function ensurePaymentPauseAction(executor: SqlExecutor, input: {
+  snapshotId: string;
+  evidenceHash: string;
+  paymentRouterAddress: string;
+  governanceSafeAddress: string;
+  at: Date;
+}) {
+  const existing = await executor.query<{ action_id: string }>(
+    `SELECT action_id FROM core.coverage_breaker_actions
+     WHERE target_paused AND state IN ('PENDING_PROPOSAL','SAFE_PROPOSED','MINED','FINAL')
+     ORDER BY created_at DESC, action_id DESC LIMIT 1`,
+  );
+  if (existing.rows[0]) return existing.rows[0].action_id;
+  const replaced = await executor.query<{ action_id: string }>(
+    `SELECT action_id FROM core.coverage_breaker_actions
+     WHERE target_paused AND state IN ('REORGED','FAILED')
+     ORDER BY updated_at DESC, action_id DESC LIMIT 1`,
+  );
+  const calldata = PAYMENT_ROUTER_BREAKER.encodeFunctionData(
+    'setNewPaymentsPaused',
+    [true, input.evidenceHash],
+  ).toLowerCase();
+  const policy = await executor.query<{ policy_version: string | number }>(
+    `SELECT policy_version FROM core.policy_snapshots
+     WHERE publication_status = 'PUBLISHED' ORDER BY policy_version DESC LIMIT 1`,
+  );
+  if (!policy.rows[0]) throw new CoreError('ExternalBlocked', 'Published policy is unavailable for breaker governance', 503);
+  const actionId = hashJson({
+    domain: 'ABU24K_COVERAGE_BREAKER_ACTION_V1',
+    action: 'PAUSE',
+    snapshotId: input.snapshotId,
+    evidenceHash: input.evidenceHash,
+    routerAddress: input.paymentRouterAddress,
+    replacesActionId: replaced.rows[0]?.action_id ?? null,
+  });
+  await executor.query(
+    `INSERT INTO core.coverage_breaker_actions (
+       action_id, snapshot_id, policy_version, action, target_paused, evidence_hash,
+       governance_safe_address, router_address, calldata, calldata_hash,
+       state, replaces_action_id, created_at, updated_at
+     ) VALUES ($1,$2,$3,'PAUSE',true,$4,$5,$6,$7,$8,'PENDING_PROPOSAL',$9,$10,$10)
+     ON CONFLICT (action_id) DO NOTHING`,
+    [
+      actionId,
+      input.snapshotId,
+      policy.rows[0].policy_version,
+      input.evidenceHash,
+      input.governanceSafeAddress,
+      input.paymentRouterAddress,
+      calldata,
+      keccak256(calldata).toLowerCase(),
+      replaced.rows[0]?.action_id ?? null,
+      input.at,
+    ],
+  );
+  const transitionId = hashJson({ actionId, state: 'PENDING_PROPOSAL' });
+  await executor.query(
+    `INSERT INTO core.coverage_breaker_action_transitions (
+       transition_id, action_id, from_state, to_state, evidence, recorded_at
+     ) VALUES ($1,$2,NULL,'PENDING_PROPOSAL',$3,$4)
+     ON CONFLICT (transition_id) DO NOTHING`,
+    [transitionId, actionId, JSON.stringify({ snapshotId: input.snapshotId, evidenceHash: input.evidenceHash }), input.at],
+  );
+  return actionId;
 }
 
 function expectedAssets(input: readonly { safeAddress: string; asset: 'USDT' | 'NPL'; tokenAddress: string }[]) {
