@@ -74,15 +74,22 @@ const catalogProduct: CatalogProduct = {
   productId: 'product-payment-read',
   chainProductId,
   title: '支付批次商品',
+  subtitle: '公开商品副标题',
   metadata: {},
   mainImageAssetIds: [chainProductId],
   videoAssetId: null,
+  richDetail: { blocks: [] },
+  defaultFreightUsdt: '0',
+  fulfillmentModes: ['DELIVERY', 'PICKUP'],
+  categoryId: 'category-gold',
+  tagIds: ['tag-24k'],
   skus: [{
     skuId: 'sku-gold',
     chainSkuId,
     attributes: { color: '金色' },
     listPriceUsdt: '24000000000000000000',
     stockAvailable: '19',
+    seckill: null,
   }],
 };
 
@@ -125,7 +132,7 @@ function createMockCoreApi(overrides: Partial<CoreApi> = {}): CoreApi {
       resourceType: expected?.resourceType ?? mediaReadAccess.resourceType,
       resourceId: expected?.resourceId ?? mediaReadAccess.resourceId,
     }),
-    listFulfillmentOrders: async () => [],
+    listFulfillmentOrders: async () => ({ orders: [], nextCursor: null }),
     getOrderFulfillmentTarget: async () => deliveryTarget,
     getOrderAllowedActions: async () => [{
       action: 'RECORD_SHIPMENT',
@@ -139,6 +146,18 @@ function createMockCoreApi(overrides: Partial<CoreApi> = {}): CoreApi {
       carrierCode: input.carrierCode,
       trackingNumberHash: input.trackingNumberHash,
       recordedAt: '2026-07-14T12:00:00.000Z',
+    }),
+    recordShipmentBatch: async (input) => ({
+      batchId: `0x${'8'.repeat(64)}`,
+      shipments: input.items.map((item) => ({
+        orderId: item.orderId,
+        state: 'SHIPPED',
+        shipmentId: `shipment-${item.orderId.slice(2, 10)}`,
+        carrierCode: item.carrierCode,
+        trackingNumberHash: item.trackingNumberHash,
+        recordedAt: '2026-07-14T12:00:00.000Z',
+      })),
+      createdAt: '2026-07-14T12:00:00.000Z',
     }),
     requestForcedReceipt: async (orderId) => ({
       orderId,
@@ -220,8 +239,8 @@ async function enterProduct(client: CoreApi) {
 }
 
 describe('00 wallet gateway', () => {
-  it('consumes settlement-admin.4 and requires a server-authoritative order-action grant', () => {
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.4');
+  it('consumes settlement-admin.5 and requires a server-authoritative order-action grant', () => {
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.5');
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
     expect(coreBoundary.artifactVersion).toBe(artifactVersion);
     expect(coreBoundary.artifactsAvailable).toBe(true);
@@ -483,15 +502,13 @@ describe('03 fulfillment center', () => {
   });
 
   it('reads merchant-scoped orders, target PII and finality-gated actions from Core', async () => {
-    const getOrderAllowedActions = vi.fn(async () => [{
-      action: 'RECORD_SHIPMENT' as const,
-      enabled: false,
-      reasonCode: 'FinalityPending' as const,
-    }]);
+    const blockedDeliveryOrder = {
+      ...deliveryOrder,
+      allowedActions: [{ action: 'RECORD_SHIPMENT' as const, enabled: false, reasonCode: 'FinalityPending' as const }],
+    };
     const getOrderFulfillmentTarget = vi.fn(async () => deliveryTarget);
     const client = createMockCoreApi({
-      listFulfillmentOrders: async () => [deliveryOrder, pickupOrder],
-      getOrderAllowedActions,
+      listFulfillmentOrders: async () => ({ orders: [blockedDeliveryOrder, pickupOrder], nextCursor: null }),
       getOrderFulfillmentTarget,
     });
     const user = await enterFulfillment(client);
@@ -502,21 +519,94 @@ describe('03 fulfillment center', () => {
     expect(screen.getByText('北京市东城区仓储路 24 号')).toBeTruthy();
     expect(screen.getAllByText('BNM_POINTS').length).toBeGreaterThan(0);
     expect(screen.getByText('FinalityPending')).toBeTruthy();
-    expect(getOrderAllowedActions).toHaveBeenCalledWith(deliveryOrderId, 'test-session');
     expect(getOrderFulfillmentTarget).toHaveBeenCalledWith(deliveryOrderId, 'test-session');
-    expect(screen.getAllByText('未发布').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('SECKILL').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('2').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(deliveryOrder.paymentTxHash!).length).toBeGreaterThan(0);
+  });
+
+  it('serializes Core order filters and advances with the complete stable cursor', async () => {
+    const nextCursor = { createdAt: deliveryOrder.createdAt, orderId: deliveryOrder.orderId };
+    const listFulfillmentOrders = vi.fn(async () => ({ orders: [deliveryOrder], nextCursor }));
+    const user = await enterFulfillment(createMockCoreApi({ listFulfillmentOrders }));
+    await screen.findByRole('button', { name: `处理订单 ${deliveryOrderId}` });
+
+    expect(listFulfillmentOrders).toHaveBeenLastCalledWith('test-session', expect.objectContaining({
+      limit: 100,
+      fulfillmentMode: 'DELIVERY',
+    }));
+    await user.type(screen.getByLabelText('SKU 筛选'), 'sku-delivery');
+    await user.selectOptions(screen.getByLabelText('订单状态'), 'DELIVERED');
+    await user.selectOptions(screen.getByLabelText('订单类型'), 'SECKILL');
+    await user.click(screen.getByRole('button', { name: '应用筛选' }));
+    await waitFor(() => expect(listFulfillmentOrders).toHaveBeenLastCalledWith('test-session', expect.objectContaining({
+      skuId: 'sku-delivery',
+      state: 'DELIVERED',
+      orderKind: 'SECKILL',
+      fulfillmentMode: 'DELIVERY',
+    })));
+
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+    await waitFor(() => expect(listFulfillmentOrders).toHaveBeenLastCalledWith('test-session', expect.objectContaining({
+      cursor: nextCursor,
+    })));
+    expect(screen.getByText(/第 2 页/)).toBeTruthy();
+  });
+
+  it('submits authorized rows as one atomic shipment batch and keeps every idempotency key on retry', async () => {
+    const secondOrderId = `0x${'a'.repeat(64)}`;
+    const shippableOrders = [deliveryOrder, { ...deliveryOrder, orderId: secondOrderId, skuId: 'sku-second' }]
+      .map((order) => ({
+        ...order,
+        state: 'PAID' as const,
+        shippedAt: null,
+        deliveredAt: null,
+        shipments: [],
+        logistics: [],
+        allowedActions: [{ action: 'RECORD_SHIPMENT' as const, enabled: true }],
+      }));
+    const recordShipmentBatch = vi.fn()
+      .mockRejectedValueOnce(new CoreApiError('NetworkUnavailable', '批量网络中断'))
+      .mockResolvedValueOnce({
+        batchId: `0x${'8'.repeat(64)}`,
+        shipments: shippableOrders.map((order) => ({
+          orderId: order.orderId,
+          state: 'SHIPPED' as const,
+          shipmentId: `shipment-${order.skuId}`,
+          carrierCode: 'SF',
+          trackingNumberHash,
+          recordedAt: '2026-07-14T12:00:00.000Z',
+        })),
+        createdAt: '2026-07-14T12:00:00.000Z',
+      });
+    const client = createMockCoreApi({
+      listFulfillmentOrders: async () => ({ orders: shippableOrders, nextCursor: null }),
+      recordShipmentBatch,
+    });
+    const user = await enterFulfillment(client);
+
+    for (const order of shippableOrders) {
+      await user.click(await screen.findByLabelText(`选择批量发货 ${order.orderId}`));
+      await user.type(screen.getByLabelText(`批量物流单号哈希 ${order.orderId}`), trackingNumberHash);
+      await user.type(screen.getByLabelText(`批量发货证据哈希 ${order.orderId}`), evidenceHash);
+    }
+    await user.selectOptions(screen.getByLabelText(`批量承运商 ${secondOrderId}`), 'JD');
+    await user.click(screen.getByRole('button', { name: '原子提交批量发货' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('批量网络中断');
+    await user.click(screen.getByRole('button', { name: '原子提交批量发货' }));
+
+    expect(await screen.findByText(/批量发货已原子确认/)).toBeTruthy();
+    expect(recordShipmentBatch).toHaveBeenCalledTimes(2);
+    expect(recordShipmentBatch.mock.calls[0]?.[0]).toEqual(recordShipmentBatch.mock.calls[1]?.[0]);
+    expect(recordShipmentBatch.mock.calls[1]?.[0].items.map((item: { carrierCode: string }) => item.carrierCode))
+      .toEqual(['SF', 'JD']);
   });
 
   it('submits a platform-review request but never exposes direct merchant receipt completion', async () => {
     const requestForcedReceipt = vi.fn(createMockCoreApi().requestForcedReceipt);
     const client = createMockCoreApi({
-      listFulfillmentOrders: async () => [deliveryOrder],
+      listFulfillmentOrders: async () => ({ orders: [deliveryOrder], nextCursor: null }),
       getOrderFulfillmentTarget: async () => deliveryTarget,
-      getOrderAllowedActions: async () => [{
-        action: 'REQUEST_FORCED_RECEIPT',
-        enabled: true,
-        deadline: '2026-07-10T08:00:00.000Z',
-      }],
       requestForcedReceipt,
     });
     const user = await enterFulfillment(client);
@@ -541,6 +631,15 @@ describe('03 fulfillment center', () => {
   });
 
   it('reuses the shipment idempotency key after a typed Core failure and confirms only real success', async () => {
+    const shippableOrder = {
+      ...deliveryOrder,
+      state: 'PAID' as const,
+      shippedAt: null,
+      deliveredAt: null,
+      shipments: [],
+      logistics: [],
+      allowedActions: [{ action: 'RECORD_SHIPMENT' as const, enabled: true }],
+    };
     const recordShipment = vi.fn()
       .mockRejectedValueOnce(new CoreApiError('NetworkUnavailable', '网络中断'))
       .mockResolvedValueOnce({
@@ -552,9 +651,8 @@ describe('03 fulfillment center', () => {
         recordedAt: '2026-07-14T12:00:00.000Z',
       });
     const client = createMockCoreApi({
-      listFulfillmentOrders: async () => [deliveryOrder],
+      listFulfillmentOrders: async () => ({ orders: [shippableOrder], nextCursor: null }),
       getOrderFulfillmentTarget: async () => deliveryTarget,
-      getOrderAllowedActions: async () => [{ action: 'RECORD_SHIPMENT', enabled: true }],
       recordShipment,
     });
     const user = await enterFulfillment(client);
@@ -576,9 +674,8 @@ describe('03 fulfillment center', () => {
   it('binds pickup verification to the immutable store and reports the authoritative completion', async () => {
     const verifyPickup = vi.fn(createMockCoreApi().verifyPickup);
     const client = createMockCoreApi({
-      listFulfillmentOrders: async () => [pickupOrder],
+      listFulfillmentOrders: async () => ({ orders: [pickupOrder], nextCursor: null }),
       getOrderFulfillmentTarget: async () => pickupTarget,
-      getOrderAllowedActions: async () => [{ action: 'VERIFY_PICKUP', enabled: true }],
       verifyPickup,
     });
     const user = await enterFulfillment(client);
@@ -598,15 +695,14 @@ describe('03 fulfillment center', () => {
   });
 
   it('keeps pickup inputs disabled when Core reports FinalityPending', async () => {
+    const blockedPickupOrder = {
+      ...pickupOrder,
+      allowedActions: [{ action: 'VERIFY_PICKUP' as const, enabled: false, reasonCode: 'FinalityPending' as const }],
+    };
     const verifyPickup = vi.fn(createMockCoreApi().verifyPickup);
     const client = createMockCoreApi({
-      listFulfillmentOrders: async () => [pickupOrder],
+      listFulfillmentOrders: async () => ({ orders: [blockedPickupOrder], nextCursor: null }),
       getOrderFulfillmentTarget: async () => pickupTarget,
-      getOrderAllowedActions: async () => [{
-        action: 'VERIFY_PICKUP',
-        enabled: false,
-        reasonCode: 'FinalityPending',
-      }],
       verifyPickup,
     });
     const user = await enterFulfillment(client);

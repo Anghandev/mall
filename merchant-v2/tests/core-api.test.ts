@@ -41,7 +41,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('settlement-admin.4 Core HTTP consumer', () => {
+describe('settlement-admin.5 Core HTTP consumer', () => {
   it('uses the published SIWE nonce and verify request bodies without a password fallback', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
@@ -76,15 +76,22 @@ describe('settlement-admin.4 Core HTTP consumer', () => {
         productId: 'product-consumer',
         chainProductId: productHash,
         title: '核验商品',
+        subtitle: '公开商品副标题',
         metadata: {},
         mainImageAssetIds: [productHash],
         videoAssetId: null,
+        richDetail: { blocks: [] },
+        defaultFreightUsdt: '0',
+        fulfillmentModes: ['DELIVERY', 'PICKUP'],
+        categoryId: 'category-gold',
+        tagIds: ['tag-24k'],
         skus: [{
           skuId: 'sku-consumer',
           chainSkuId: skuHash,
           attributes: { size: 'standard' },
           listPriceUsdt: '1000000000000000000',
           stockAvailable: '7',
+          seckill: null,
         }],
       }],
     }));
@@ -97,7 +104,7 @@ describe('settlement-admin.4 Core HTTP consumer', () => {
       'https://core.example.test/v2/catalog/products',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.4' }),
+        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.5' }),
       }),
     );
   });
@@ -258,29 +265,94 @@ describe('settlement-admin.4 Core HTTP consumer', () => {
     }));
   });
 
-  it('reads wallet-scoped fulfillment orders and their immutable target snapshots', async () => {
+  it('reads the stable filtered order page, complete rows and immutable target snapshots', async () => {
+    const nextCursor = { createdAt: '2026-07-01T07:59:00.000Z', orderId: deliveryOrderId };
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ orders: [deliveryOrder, pickupOrder] }))
+      .mockResolvedValueOnce(jsonResponse({ orders: [deliveryOrder, pickupOrder], nextCursor }))
       .mockResolvedValueOnce(jsonResponse({ target: pickupTarget }));
     globalThis.fetch = fetchMock as typeof fetch;
     const api = createCoreApi('https://core.example.test');
 
-    const orders = await api.listFulfillmentOrders('merchant-session');
+    const page = await api.listFulfillmentOrders('merchant-session', {
+      cursor: { createdAt: '2026-07-02T00:00:00.000Z', orderId: pickupOrderId },
+      limit: 20,
+      from: '2026-07-01T00:00:00.000Z',
+      to: '2026-07-15T00:00:00.000Z',
+      skuId: 'sku-delivery',
+      state: 'DELIVERED',
+      fulfillmentMode: 'DELIVERY',
+      orderKind: 'SECKILL',
+    });
     const target = await api.getOrderFulfillmentTarget(pickupOrderId, 'merchant-session');
 
-    expect(orders.map((order) => [order.orderId, order.fulfillmentMode])).toEqual([
-      [deliveryOrderId, 'DELIVERY'],
-      [pickupOrderId, 'PICKUP'],
+    expect(page.orders.map((order) => [
+      order.orderId,
+      order.quantity,
+      order.orderKind,
+      order.paymentTxHash,
+      order.allowedActions[0]?.action,
+    ])).toEqual([
+      [deliveryOrderId, '2', 'SECKILL', deliveryOrder.paymentTxHash, 'REQUEST_FORCED_RECEIPT'],
+      [pickupOrderId, '2', 'SECKILL', pickupOrder.paymentTxHash, 'VERIFY_PICKUP'],
     ]);
+    expect(page.nextCursor).toEqual(nextCursor);
     expect(target).toEqual(pickupTarget);
-    expect(fetchMock).toHaveBeenNthCalledWith(1, 'https://core.example.test/v2/orders', expect.objectContaining({
+    expect(fetchMock).toHaveBeenNthCalledWith(1, expect.stringContaining('https://core.example.test/v2/orders?'), expect.objectContaining({
       headers: expect.objectContaining({ authorization: 'Bearer merchant-session' }),
     }));
+    const requestUrl = String(fetchMock.mock.calls[0]?.[0]);
+    expect(Object.fromEntries(new URL(requestUrl).searchParams)).toMatchObject({
+      cursorCreatedAt: '2026-07-02T00:00:00.000Z',
+      cursorOrderId: pickupOrderId,
+      limit: '20',
+      from: '2026-07-01T00:00:00.000Z',
+      to: '2026-07-15T00:00:00.000Z',
+      skuId: 'sku-delivery',
+      state: 'DELIVERED',
+      fulfillmentMode: 'DELIVERY',
+      orderKind: 'SECKILL',
+    });
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       `https://core.example.test/v2/orders/${pickupOrderId}/fulfillment-target`,
       expect.objectContaining({ headers: expect.objectContaining({ authorization: 'Bearer merchant-session' }) }),
     );
+  });
+
+  it('submits one atomic manual-shipment batch and validates every authoritative result', async () => {
+    const batchId = `0x${'8'.repeat(64)}`;
+    const input = {
+      idempotencyKey: 'shipment-batch-command-key',
+      items: [{
+        orderId: deliveryOrderId,
+        idempotencyKey: 'shipment-batch-item-key',
+        evidenceHash,
+        carrierCode: 'SF' as const,
+        trackingNumberHash,
+      }],
+    };
+    const fetchMock = vi.fn(async () => jsonResponse({
+      batchId,
+      shipments: [{
+        orderId: deliveryOrderId,
+        state: 'SHIPPED',
+        shipmentId: 'shipment-batch-result-1',
+        carrierCode: 'SF',
+        trackingNumberHash,
+        recordedAt: '2026-07-14T12:10:00.000Z',
+      }],
+      createdAt: '2026-07-14T12:10:00.000Z',
+    }, 201));
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const result = await createCoreApi().recordShipmentBatch(input, 'merchant-session');
+
+    expect(result).toMatchObject({ batchId, shipments: [{ orderId: deliveryOrderId, state: 'SHIPPED' }] });
+    expect(fetchMock).toHaveBeenCalledWith('/v2/shipments/batches', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: expect.objectContaining({ authorization: 'Bearer merchant-session' }),
+    }));
   });
 
   it('submits the three published merchant fulfillment commands with exact generated bodies', async () => {
@@ -350,6 +422,7 @@ describe('settlement-admin.4 Core HTTP consumer', () => {
   it('rejects an unknown order state instead of trusting an uncoordinated projection', async () => {
     globalThis.fetch = vi.fn(async () => jsonResponse({
       orders: [{ ...deliveryOrder, state: 'REFUNDED' }],
+      nextCursor: null,
     })) as typeof fetch;
 
     await expect(createCoreApi().listFulfillmentOrders('merchant-session')).rejects.toMatchObject({
@@ -360,11 +433,12 @@ describe('settlement-admin.4 Core HTTP consumer', () => {
   it('preserves each order artifact snapshot instead of rewriting it to the consumer version', async () => {
     globalThis.fetch = vi.fn(async () => jsonResponse({
       orders: [{ ...deliveryOrder, artifactVersion: 'order-snapshot-version' }],
+      nextCursor: null,
     })) as typeof fetch;
 
-    const orders = await createCoreApi().listFulfillmentOrders('merchant-session');
+    const page = await createCoreApi().listFulfillmentOrders('merchant-session');
 
-    expect(orders[0]?.artifactVersion).toBe('order-snapshot-version');
+    expect(page.orders[0]?.artifactVersion).toBe('order-snapshot-version');
   });
 
   it('rejects an artifact mismatch before the workspace trusts readiness', async () => {

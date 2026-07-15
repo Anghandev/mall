@@ -1353,7 +1353,7 @@ h2 {
 
 .filter-bar {
   display: grid;
-  grid-template-columns: minmax(200px, 1.5fr) repeat(4, minmax(120px, 0.8fr)) auto;
+  grid-template-columns: repeat(5, minmax(130px, 1fr)) auto;
   gap: 10px;
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
@@ -1368,6 +1368,16 @@ h2 {
   color: var(--muted);
   font-size: 0.75rem;
   font-weight: 650;
+}
+
+.filter-actions {
+  display: flex;
+  align-self: end;
+  gap: 8px;
+}
+
+.filter-error {
+  margin: 0 20px 14px;
 }
 
 .filter-bar input,
@@ -1407,6 +1417,36 @@ h2 {
   border-bottom: 1px solid var(--border);
   color: var(--muted);
   font-size: 0.75rem;
+}
+
+.batch-shipment-panel {
+  border-top: 1px solid var(--border);
+  background: var(--surface-muted);
+}
+
+.batch-shipment-panel > .section-heading {
+  padding: 16px 20px;
+}
+
+.batch-shipment-panel table {
+  min-width: 920px;
+}
+
+.batch-shipment-panel select,
+.batch-shipment-panel input {
+  width: 100%;
+  min-width: 150px;
+  min-height: 36px;
+  padding: 0 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--ink);
+  background: var(--surface);
+  font-size: 0.75rem;
+}
+
+.batch-shipment-panel select {
+  min-width: 84px;
 }
 
 .table-wrap {
@@ -3065,6 +3105,11 @@ td > small {
   .filter-bar {
     grid-template-columns: 1fr;
     padding: 14px;
+  }
+
+  .filter-actions,
+  .filter-actions .button {
+    width: 100%;
   }
 
   .search-field {

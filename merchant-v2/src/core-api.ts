@@ -35,6 +35,7 @@ import {
   type CatalogProduct,
   type CatalogProductAction,
   type CatalogProductLifecycleState,
+  type CatalogSeckillOverlay,
   type CatalogSku,
   type CatalogTag,
   type CatalogWriteLock,
@@ -44,7 +45,10 @@ import {
   type FulfillmentBalance,
   type FulfillmentCompletedResult,
   type FulfillmentExactAmounts,
+  type FulfillmentMode,
   type FulfillmentOrder,
+  type FulfillmentOrderCursor,
+  type FulfillmentOrderPage,
   type FulfillmentReasonRequest,
   type FulfillmentRequestProjection,
   type FulfillmentTarget,
@@ -64,7 +68,11 @@ import {
   type MerchantFinanceProjection,
   type MerchantStore,
   type PickupVerificationRequest,
+  type OrderKind,
+  type OrderProjectionState,
   type RewardSubtype,
+  type ShipmentBatchRequest,
+  type ShipmentBatchResult,
   type ShipmentProjection,
   type ShipmentRequest,
   type ShipmentResult,
@@ -108,6 +116,7 @@ const catalogTaxonomyStatusSet = new Set<string>(catalogTaxonomyStatuses);
 const mediaContentTypeSet = new Set<string>(mediaContentTypes);
 const mediaPurposeSet = new Set<string>(mediaPurposes);
 const mediaResourceTypeSet = new Set<string>(mediaResourceTypes);
+const orderKindSet = new Set<string>(['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] satisfies readonly OrderKind[]);
 
 export interface CoreReadiness {
   chainId: 56;
@@ -123,6 +132,17 @@ export interface CoreBootstrap {
   artifactVersion: typeof artifactVersion;
   status: 'CORE_API_READY';
   readiness: CoreReadiness;
+}
+
+export interface FulfillmentOrderListOptions {
+  cursor?: FulfillmentOrderCursor;
+  limit?: number;
+  from?: string;
+  to?: string;
+  skuId?: string;
+  state?: OrderProjectionState;
+  fulfillmentMode?: FulfillmentMode;
+  orderKind?: OrderKind;
 }
 
 export interface SiweChallenge {
@@ -206,10 +226,11 @@ export interface CoreApi {
     token: string,
     expected?: { resourceType: MediaResourceType; resourceId: string; purpose: MediaPurpose },
   ): Promise<MediaReadAccessProjection>;
-  listFulfillmentOrders(token: string): Promise<readonly FulfillmentOrder[]>;
+  listFulfillmentOrders(token: string, options?: FulfillmentOrderListOptions): Promise<FulfillmentOrderPage>;
   getOrderFulfillmentTarget(orderId: string, token: string): Promise<FulfillmentTarget>;
   getOrderAllowedActions(orderId: string, token: string): Promise<readonly AllowedAction[]>;
   recordShipment(orderId: string, input: ShipmentRequest, token: string): Promise<ShipmentResult>;
+  recordShipmentBatch(input: ShipmentBatchRequest, token: string): Promise<ShipmentBatchResult>;
   requestForcedReceipt(
     orderId: string,
     input: FulfillmentReasonRequest,
@@ -403,10 +424,13 @@ export function createCoreApi(baseUrl = import.meta.env.VITE_CORE_API_BASE_URL ?
       return parseMediaReadAccess(body, assetId, expected);
     },
 
-    async listFulfillmentOrders(token) {
-      const body = await request(normalizedBaseUrl, '/v2/orders', { token });
+    async listFulfillmentOrders(token, options = {}) {
+      const body = await request(normalizedBaseUrl, fulfillmentOrdersPath(options), { token });
       const value = record(body, 'fulfillment orders response');
-      return array(value.orders, 'orders').map(parseFulfillmentOrder);
+      return {
+        orders: array(value.orders, 'orders').map(parseFulfillmentOrder),
+        nextCursor: value.nextCursor === null ? null : parseFulfillmentOrderCursor(value.nextCursor),
+      };
     },
 
     async getOrderFulfillmentTarget(orderId, token) {
@@ -435,6 +459,15 @@ export function createCoreApi(baseUrl = import.meta.env.VITE_CORE_API_BASE_URL ?
         token,
       });
       return parseShipmentResult(body, orderId);
+    },
+
+    async recordShipmentBatch(input, token) {
+      const body = await request(normalizedBaseUrl, '/v2/shipments/batches', {
+        method: 'POST',
+        body: JSON.stringify(input),
+        token,
+      });
+      return parseShipmentBatchResult(body, input.items.map((item) => item.orderId));
     },
 
     async requestForcedReceipt(orderId, input, token) {
@@ -521,6 +554,23 @@ export async function putMediaFile(uploadIntent: MediaUploadIntentProjection, fi
   if (!response.ok) {
     throw new CoreApiError('ExternalBlocked', '媒体存储服务拒绝了文件上传。');
   }
+}
+
+function fulfillmentOrdersPath(options: FulfillmentOrderListOptions) {
+  const query = new URLSearchParams();
+  if (options.cursor) {
+    query.set('cursorCreatedAt', options.cursor.createdAt);
+    query.set('cursorOrderId', options.cursor.orderId);
+  }
+  if (options.limit !== undefined) query.set('limit', String(options.limit));
+  if (options.from) query.set('from', options.from);
+  if (options.to) query.set('to', options.to);
+  if (options.skuId) query.set('skuId', options.skuId);
+  if (options.state) query.set('state', options.state);
+  if (options.fulfillmentMode) query.set('fulfillmentMode', options.fulfillmentMode);
+  if (options.orderKind) query.set('orderKind', options.orderKind);
+  const serialized = query.toString();
+  return `/v2/orders${serialized ? `?${serialized}` : ''}`;
 }
 
 async function request(baseUrl: string, path: string, options: { method?: string; body?: string; token?: string } = {}) {
@@ -611,10 +661,17 @@ function parseCatalogProduct(input: unknown): CatalogProduct {
     productId: string(value.productId, 'productId'),
     chainProductId: bytes32(value.chainProductId, 'chainProductId'),
     title: string(value.title, 'title'),
+    subtitle: optionalString(value.subtitle, 'subtitle'),
     metadata,
     mainImageAssetIds: array(value.mainImageAssetIds, 'product.mainImageAssetIds')
       .map((assetId) => bytes32(assetId, 'product.mainImageAssetId')),
     videoAssetId: nullableBytes32(value.videoAssetId, 'product.videoAssetId'),
+    richDetail: record(value.richDetail, 'product.richDetail'),
+    defaultFreightUsdt: atomicAmount(value.defaultFreightUsdt, 'product.defaultFreightUsdt'),
+    fulfillmentModes: array(value.fulfillmentModes, 'product.fulfillmentModes')
+      .map((mode) => enumValue(mode, fulfillmentModeSet, 'product.fulfillmentMode')),
+    categoryId: nullableString(value.categoryId, 'product.categoryId'),
+    tagIds: stringArray(value.tagIds, 'product.tagIds'),
     skus: array(value.skus, 'skus').map(parseCatalogSku),
   };
 }
@@ -627,6 +684,29 @@ function parseCatalogSku(input: unknown): CatalogSku {
     attributes: record(value.attributes, 'sku.attributes'),
     listPriceUsdt: atomicAmount(value.listPriceUsdt, 'listPriceUsdt'),
     stockAvailable: atomicAmount(value.stockAvailable, 'stockAvailable'),
+    seckill: value.seckill === null ? null : parseCatalogSeckillOverlay(value.seckill),
+  };
+}
+
+function parseCatalogSeckillOverlay(input: unknown): CatalogSeckillOverlay {
+  const value = record(input, 'catalog SKU seckill overlay');
+  const inventory = record(value.inventory, 'catalog SKU seckill inventory');
+  exact(value.ordinaryCheckoutAllowed, false, 'catalog SKU ordinaryCheckoutAllowed');
+  return {
+    sessionId: bytes32(value.sessionId, 'catalog SKU seckill sessionId'),
+    policyVersion: atomicAmount(value.policyVersion, 'catalog SKU seckill policyVersion'),
+    phase: enumValue(value.phase, new Set(['PREHEAT', 'LIVE', 'SETTLING']), 'catalog SKU seckill phase'),
+    startsAt: dateTime(value.startsAt, 'catalog SKU seckill startsAt'),
+    mainDeadline: dateTime(value.mainDeadline, 'catalog SKU seckill mainDeadline'),
+    relayDeadline: dateTime(value.relayDeadline, 'catalog SKU seckill relayDeadline'),
+    seckillListPriceUsdt: atomicAmount(value.seckillListPriceUsdt, 'catalog SKU seckill price'),
+    inventory: {
+      total: atomicAmount(inventory.total, 'catalog SKU seckill inventory.total'),
+      sold: atomicAmount(inventory.sold, 'catalog SKU seckill inventory.sold'),
+      reserved: atomicAmount(inventory.reserved, 'catalog SKU seckill inventory.reserved'),
+      available: atomicAmount(inventory.available, 'catalog SKU seckill inventory.available'),
+    },
+    ordinaryCheckoutAllowed: false,
   };
 }
 
@@ -1068,6 +1148,10 @@ function parseFulfillmentOrder(input: unknown): FulfillmentOrder {
     merchantWallet: address(value.merchantWallet, 'order.merchantWallet'),
     productId: string(value.productId, 'order.productId'),
     skuId: string(value.skuId, 'order.skuId'),
+    quantity: atomicAmount(value.quantity, 'order.quantity'),
+    createdAt: dateTime(value.createdAt, 'order.createdAt'),
+    orderKind: enumValue(value.orderKind, orderKindSet, 'order.orderKind'),
+    paymentTxHash: nullableBytes32(value.paymentTxHash, 'order.paymentTxHash'),
     fulfillmentMode: enumValue(value.fulfillmentMode, fulfillmentModeSet, 'order.fulfillmentMode'),
     state: enumValue(value.state, orderStateSet, 'order.state'),
     finalityStatus: enumValue(value.finalityStatus, finalityStatusSet, 'order.finalityStatus'),
@@ -1083,6 +1167,15 @@ function parseFulfillmentOrder(input: unknown): FulfillmentOrder {
     shipments: array(value.shipments, 'order.shipments').map(parseShipmentProjection),
     logistics: array(value.logistics, 'order.logistics').map(parseLogisticsProjection),
     balances: array(value.balances, 'order.balances').map(parseFulfillmentBalance),
+    allowedActions: array(value.allowedActions, 'order.allowedActions').map(parseAllowedAction),
+  };
+}
+
+function parseFulfillmentOrderCursor(input: unknown): FulfillmentOrderCursor {
+  const value = record(input, 'fulfillment order cursor');
+  return {
+    createdAt: dateTime(value.createdAt, 'fulfillment order cursor.createdAt'),
+    orderId: string(value.orderId, 'fulfillment order cursor.orderId'),
   };
 }
 
@@ -1216,6 +1309,19 @@ function parseShipmentResult(input: unknown, expectedOrderId: string): ShipmentR
     carrierCode: string(value.carrierCode, 'shipment result carrierCode'),
     trackingNumberHash: bytes32(value.trackingNumberHash, 'shipment result trackingNumberHash'),
     recordedAt: dateTime(value.recordedAt, 'shipment result recordedAt'),
+  };
+}
+
+function parseShipmentBatchResult(input: unknown, expectedOrderIds: readonly string[]): ShipmentBatchResult {
+  const value = record(input, 'shipment batch result');
+  const shipments = array(value.shipments, 'shipment batch result.shipments');
+  if (shipments.length !== expectedOrderIds.length) {
+    invalid('shipment batch result count does not match the request');
+  }
+  return {
+    batchId: bytes32(value.batchId, 'shipment batch result.batchId'),
+    shipments: shipments.map((shipment, index) => parseShipmentResult(shipment, expectedOrderIds[index]!)),
+    createdAt: dateTime(value.createdAt, 'shipment batch result.createdAt'),
   };
 }
 
