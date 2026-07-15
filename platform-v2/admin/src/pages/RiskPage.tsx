@@ -274,7 +274,7 @@ function RestrictionTable({ restrictions, isAdmin, canAppeal, onAppeal, onOverri
   onAppeal(value: string): void;
   onOverride(value: string): void;
 }) {
-  if (!restrictions.length) return <EmptyState title="没有限制记录" detail="Core 返回真实空列表，未用 fixture 填充。" />;
+  if (!restrictions.length) return <EmptyState title="没有限制记录" detail="Core 返回真实空列表，未填充合成记录。" />;
   return <div className="table-scroll"><table className="data-table risk-table"><thead><tr><th>主体</th><th>限制</th><th>状态</th><th>证据</th><th>时间</th><th>授权操作</th></tr></thead><tbody>{restrictions.map((item) => (
     <tr key={item.restrictionId}>
       <td><strong>{item.subjectType}</strong><code>{item.subjectValue}</code></td>
