@@ -625,7 +625,7 @@ a {
   inset-block-end: 14px;
   display: grid;
   gap: 3px;
-  width: fit-content;
+  width: auto;
   padding: 8px 10px;
   border-radius: 6px;
   background: oklch(16% 0.01 85 / 0.86);
@@ -638,7 +638,9 @@ a {
 }
 
 .seckill-hero__overlay strong {
-  font-size: 27px;
+  overflow-wrap: anywhere;
+  font-size: 20px;
+  line-height: 1.25;
   font-variant-numeric: tabular-nums;
 }
 
@@ -684,6 +686,161 @@ a {
 
 .action-row > * {
   min-width: 0;
+}
+
+.realtime-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.realtime-state--live {
+  color: var(--green-dark);
+}
+
+.realtime-state--fail_closed,
+.realtime-state--artifact_mismatch {
+  color: var(--danger);
+}
+
+.seckill-dashboard {
+  display: grid;
+  gap: 13px;
+}
+
+.seckill-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--line);
+}
+
+.seckill-facts > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 11px;
+  background: var(--surface-soft);
+}
+
+.seckill-facts dt,
+.seckill-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.seckill-facts dt,
+.phase-copy,
+.last-buyer {
+  color: var(--muted);
+}
+
+.seckill-facts dd {
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+.phase-copy,
+.last-buyer {
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.winner-callout {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 3px 8px;
+  padding: 12px;
+  border: 1px solid oklch(82% 0.08 82);
+  border-radius: 7px;
+  background: var(--amber-soft);
+  color: oklch(38% 0.07 78);
+}
+
+.winner-callout svg {
+  grid-row: 1 / 3;
+}
+
+.winner-callout span {
+  font-size: 11px;
+}
+
+.winner-callout strong {
+  overflow-wrap: anywhere;
+  font-size: 15px;
+}
+
+.seckill-history-list,
+.relay-feed {
+  display: grid;
+  gap: 8px;
+}
+
+.seckill-history-list article,
+.relay-feed li {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-soft);
+}
+
+.seckill-history-list article > div,
+.relay-feed li > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 10px;
+}
+
+.seckill-history-list p,
+.relay-feed p,
+.relay-feed span,
+.relay-feed time {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.relay-feed {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.relay-feed li:first-child {
+  animation: relay-event-enter 240ms ease-out both;
+  border-color: oklch(80% 0.07 82);
+  background: var(--amber-soft);
+}
+
+.relay-feed p {
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 750;
+}
+
+.relay-feed strong,
+.relay-feed span {
+  overflow-wrap: anywhere;
+}
+
+@keyframes relay-event-enter {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .rules-disclosure {
@@ -1491,6 +1648,58 @@ input[aria-invalid="true"] {
   line-height: 1.45;
 }
 
+.bnm-provenance {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.bnm-provenance summary {
+  min-height: 44px;
+  padding: 12px 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.reward-breakdown {
+  display: grid;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.reward-breakdown h3 {
+  font-size: 14px;
+}
+
+.reward-breakdown article {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-soft);
+}
+
+.reward-breakdown article strong {
+  font-size: 12px;
+}
+
+.reward-breakdown article div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px 8px;
+}
+
+.reward-breakdown article span {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 .safe-hash {
   display: grid;
   gap: 3px;
@@ -1978,5 +2187,9 @@ input[aria-invalid="true"] {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+
+  .relay-feed li:first-child {
+    animation: none;
   }
 }

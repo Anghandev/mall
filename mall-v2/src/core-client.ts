@@ -16,7 +16,11 @@ import type {
   PaymentSubmissionRequest,
   PaymentSubmissionResponse,
   PickupTarget,
+  RealtimeEventEnvelope,
+  RealtimeEventPage,
   SeckillQuoteResponse,
+  SeckillSessionHistoryPage,
+  SeckillSessionProjection,
   SettlementIntentProjection,
   SettlementIntentRequest,
   SettlementListProjection,
@@ -30,6 +34,8 @@ import {
   cmsContentTypes,
   notificationDeliveryStates,
   notificationEndpointStates,
+  rewardSubtypes,
+  seckillStates,
   settlementRequestStates,
   userRoles,
 } from '@abu24k/core-artifacts';
@@ -71,6 +77,10 @@ export interface CoreClient {
   createSeckillQuote(token: string, sessionId: string, selection: QuoteSelection): Promise<SeckillQuoteResponse>;
   submitPayment(token: string, request: PaymentSubmissionRequest): Promise<PaymentSubmissionResponse>;
   getPayment(token: string, orderId: string): Promise<PaymentProjection>;
+  getCurrentSeckillSession(): Promise<SeckillSessionProjection>;
+  listSeckillSessionHistory(cursor?: string, limit?: number): Promise<SeckillSessionHistoryPage>;
+  getSeckillSession(sessionId: string): Promise<SeckillSessionProjection>;
+  listSeckillSessionEvents(sessionId: string, cursor?: string, limit?: number): Promise<RealtimeEventPage>;
   listStores(regionCode?: string): Promise<readonly MerchantStore[]>;
   createDeliveryTarget(token: string, request: CreateDeliveryTargetRequest): Promise<DeliveryTarget>;
   createPickupTarget(token: string, request: CreatePickupTargetRequest): Promise<PickupTarget>;
@@ -119,7 +129,19 @@ const settlementAdminOperations = Object.freeze({
   notificationEndpoint: operationPath('registerNotificationEndpoint', 'post'),
 });
 
-const operations = Object.freeze({ ...paymentOperations, ...fulfillmentOperations, ...settlementAdminOperations });
+const realtimeOperations = Object.freeze({
+  seckillCurrent: operationPath('getCurrentSeckillSession', 'get'),
+  seckillHistory: operationPath('listSeckillSessionHistory', 'get'),
+  seckillSession: operationPath('getSeckillSession', 'get'),
+  seckillEvents: operationPath('listSeckillSessionEvents', 'get'),
+});
+
+const operations = Object.freeze({
+  ...paymentOperations,
+  ...fulfillmentOperations,
+  ...settlementAdminOperations,
+  ...realtimeOperations,
+});
 
 export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } = {}): CoreClient {
   const baseUrl = input.baseUrl?.replace(/\/$/, '') ?? '';
@@ -199,6 +221,33 @@ export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } 
       assertArtifactVersion(projection.artifactVersion);
       await assertPaymentQuoteIntegrity(projection);
       return projection;
+    },
+
+    async getCurrentSeckillSession() {
+      return parseSeckillSession(await requestJson<unknown>(fetcher, `${baseUrl}${operations.seckillCurrent}`));
+    },
+
+    async listSeckillSessionHistory(cursor, limit = 20) {
+      const query = queryString({ cursor, limit: String(limit) });
+      return parseSeckillHistory(await requestJson<unknown>(
+        fetcher,
+        `${baseUrl}${operations.seckillHistory}${query}`,
+      ));
+    },
+
+    async getSeckillSession(sessionId) {
+      return parseSeckillSession(await requestJson<unknown>(
+        fetcher,
+        `${baseUrl}${sessionPath(operations.seckillSession, sessionId)}`,
+      ));
+    },
+
+    async listSeckillSessionEvents(sessionId, cursor = '0', limit = 100) {
+      const query = queryString({ cursor, limit: String(limit) });
+      return parseRealtimeEventPage(await requestJson<unknown>(
+        fetcher,
+        `${baseUrl}${sessionPath(operations.seckillEvents, sessionId)}${query}`,
+      ), sessionId);
     },
 
     async listStores(regionCode) {
@@ -417,12 +466,112 @@ function parseSettlementList(value: unknown): SettlementListProjection {
     const balance = objectValue(item);
     enumValue(balance.asset, ['USDT', 'NPL'] as const);
     stringValue(balance.purpose);
+    if (balance.rewardSubtype !== null) enumValue(balance.rewardSubtype, rewardSubtypes);
     enumValue(balance.state, balanceStates);
+    atomicValue(balance.amount);
+  }
+  const points = arrayValue(response.points);
+  for (const item of points) {
+    const balance = objectValue(item);
+    if (balance.pointsType !== 'BNM' || balance.purpose !== 'BNM_LIABILITY' || balance.transferable !== false) {
+      throw new CoreClientError('InvalidResponse', 'BNM 积分投影无效');
+    }
+    enumValue(balance.state, ['LOCKED', 'AVAILABLE'] as const);
     atomicValue(balance.amount);
   }
   const requests = arrayValue(response.requests);
   requests.forEach(parseSettlementRequest);
   return value as SettlementListProjection;
+}
+
+function parseSeckillHistory(value: unknown): SeckillSessionHistoryPage {
+  const response = objectValue(value);
+  const items = arrayValue(response.items).map(parseSeckillSession);
+  if (response.nextCursor !== null) atomicValue(response.nextCursor);
+  return { items, nextCursor: response.nextCursor as string | null };
+}
+
+function parseSeckillSession(value: unknown): SeckillSessionProjection {
+  const response = objectValue(value);
+  assertArtifactVersion(stringValue(response.artifactVersion));
+  bytes32Value(response.sessionId);
+  atomicValue(response.policyVersion);
+  stringValue(response.merchantId);
+  const product = objectValue(response.product);
+  stringValue(product.productId);
+  stringValue(product.skuId);
+  stringValue(product.title);
+  objectValue(product.metadata);
+  objectValue(product.attributes);
+  atomicValue(product.seckillListPriceUsdt);
+  enumValue(response.phase, seckillStates);
+  enumValue(response.storedPhase, seckillStates);
+  for (const field of ['serverTime', 'startsAt', 'mainDeadline', 'relayDeadline', 'settlementEarliestAt', 'settlementDeadline'] as const) {
+    isoValue(response[field]);
+  }
+  if (Date.parse(String(response.mainDeadline)) < Date.parse(String(response.startsAt))
+    || Date.parse(String(response.relayDeadline)) > Date.parse(String(response.mainDeadline))
+    || Date.parse(String(response.settlementDeadline)) < Date.parse(String(response.settlementEarliestAt))) {
+    throw new CoreClientError('InvalidResponse', '秒杀时间边界无效');
+  }
+  const timers = objectValue(response.timers);
+  for (const field of ['mainDurationSeconds', 'relayInitialSeconds', 'relayIncrementSeconds', 'relayCapSeconds'] as const) {
+    positiveIntegerValue(timers[field]);
+  }
+  const inventory = objectValue(response.inventory);
+  for (const field of ['total', 'sold', 'reserved', 'available'] as const) atomicValue(inventory[field]);
+  atomicValue(response.prizePoolUsdt);
+  if (response.lastBuyerWallet !== null) addressValue(response.lastBuyerWallet);
+  if (response.winnerWallet !== null) addressValue(response.winnerWallet);
+  objectValue(response.snapshot);
+  stringArray(response.allowedActions);
+  return value as SeckillSessionProjection;
+}
+
+function parseRealtimeEventPage(value: unknown, sessionId: string): RealtimeEventPage {
+  const response = objectValue(value);
+  const items = arrayValue(response.items).map((item) => parseRealtimeEvent(item, sessionId));
+  const nextCursor = atomicValue(response.nextCursor);
+  for (let index = 1; index < items.length; index += 1) {
+    if (BigInt(items[index]!.cursor) <= BigInt(items[index - 1]!.cursor)) {
+      throw new CoreClientError('InvalidResponse', '秒杀事件页顺序无效');
+    }
+  }
+  const last = items.at(-1);
+  if (last && nextCursor !== last.cursor) {
+    throw new CoreClientError('InvalidResponse', '秒杀事件页游标与末条事件不一致');
+  }
+  return { items, nextCursor };
+}
+
+export function parseRealtimeEvent(value: unknown, sessionId: string): RealtimeEventEnvelope {
+  const event = objectValue(value);
+  assertArtifactVersion(stringValue(event.artifactVersion));
+  if (event.protocolVersion !== 1
+    || event.eventType !== 'SeckillRelayExtended'
+    || event.resourceType !== 'SECKILL_SESSION'
+    || event.finality !== 'FINAL') {
+    throw new CoreClientError('InvalidResponse', '实时事件协议或最终性无效');
+  }
+  stringValue(event.eventId);
+  const normalizedSessionId = bytes32Value(sessionId).toLowerCase();
+  if (stringValue(event.channel).toLowerCase() !== `seckill:${normalizedSessionId}`
+    || bytes32Value(event.resourceId).toLowerCase() !== normalizedSessionId) {
+    throw new CoreClientError('InvalidResponse', '实时事件场次绑定无效');
+  }
+  atomicValue(event.cursor);
+  isoValue(event.occurredAt);
+  const payload = objectValue(event.payload);
+  bytes32Value(payload.orderId);
+  addressValue(payload.buyerWallet);
+  bytes32Value(payload.transactionHash);
+  atomicValue(payload.blockNumber);
+  bytes32Value(payload.blockHash);
+  stringValue(payload.paymentEventKey);
+  isoValue(payload.previousRelayDeadline);
+  isoValue(payload.relayDeadline);
+  nonNegativeIntegerValue(payload.extensionSeconds);
+  return value as RealtimeEventEnvelope;
 }
 
 function parseSettlementIntent(value: unknown): SettlementIntentProjection {
@@ -560,6 +709,26 @@ function atomicValue(value: unknown) {
   return amount;
 }
 
+function isoValue(value: unknown) {
+  const timestamp = stringValue(value);
+  if (!Number.isFinite(Date.parse(timestamp))) throw new CoreClientError('InvalidResponse', 'Core 响应时间无效');
+  return timestamp;
+}
+
+function positiveIntegerValue(value: unknown) {
+  if (!Number.isSafeInteger(value) || Number(value) < 1) {
+    throw new CoreClientError('InvalidResponse', 'Core 响应正整数无效');
+  }
+  return Number(value);
+}
+
+function nonNegativeIntegerValue(value: unknown) {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) {
+    throw new CoreClientError('InvalidResponse', 'Core 响应非负整数无效');
+  }
+  return Number(value);
+}
+
 function booleanValue(value: unknown) {
   if (typeof value !== 'boolean') throw new CoreClientError('InvalidResponse', 'Core 响应布尔字段无效');
   return value;
@@ -592,6 +761,18 @@ function orderPath(path: string, orderId: string) {
   return path.replace('{orderId}', encodeURIComponent(orderId));
 }
 
+function sessionPath(path: string, sessionId: string) {
+  bytes32Value(sessionId);
+  return path.replace('{sessionId}', encodeURIComponent(sessionId.toLowerCase()));
+}
+
+function queryString(values: Readonly<Record<string, string | undefined>>) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(values)) if (value !== undefined) query.set(key, value);
+  const serialized = query.toString();
+  return serialized ? `?${serialized}` : '';
+}
+
 function assertFulfillmentOrderVersion(order: FulfillmentOrder) {
   assertArtifactVersion(order.artifactVersion);
 }
@@ -607,3 +788,4 @@ function operationPath(operationId: string, method: HttpMethod) {
 export const coordinatedPaymentOperations = paymentOperations;
 export const coordinatedFulfillmentOperations = fulfillmentOperations;
 export const coordinatedSettlementAdminOperations = settlementAdminOperations;
+export const coordinatedRealtimeOperations = realtimeOperations;

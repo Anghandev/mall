@@ -33,6 +33,8 @@ export const productBaseline = Object.freeze({
     settlements: coordinatedManifest.capabilityStatus.settlementHttp === 'AVAILABLE',
     cms: coordinatedManifest.capabilityStatus.cmsHttp === 'AVAILABLE',
     notifications: coordinatedManifest.capabilityStatus.notificationHttp === 'AVAILABLE',
+    seckillSessions: coordinatedManifest.capabilityStatus.seckillSessionHttp === 'AVAILABLE',
+    websocket: coordinatedManifest.capabilityStatus.websocket === 'AVAILABLE',
   }),
   payOrderExecutable: executableOrderActionNames.includes('PAY_ORDER'),
 } as const);
