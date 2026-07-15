@@ -14,10 +14,13 @@ import type {
   CatalogSku,
   CatalogTag,
   CmsPublicItem,
+  EvidenceEnvelopeProjection,
   FulfillmentOrder,
   FulfillmentTarget,
   MerchantStore,
+  MediaAssetProjection,
   MediaReadAccessProjection,
+  MediaUploadIntentProjection,
   NotificationEndpointProjection,
   NotificationInboxItem,
   PaymentProjection,
@@ -33,9 +36,11 @@ import type {
 import {
   CoreClientError,
   createCoreClient,
+  type BuyerEvidenceAction,
   type CheckoutTarget,
   type CorePaymentAvailability,
   type CoreClient,
+  type FulfillmentEvidenceContentType,
   type WalletSession,
 } from './core-client';
 import { productBaseline } from './bootstrap';
@@ -65,6 +70,7 @@ export interface MallServices {
   wallet: WalletGateway;
   getCurrentPosition(): Promise<BrowserPosition>;
   createIdempotencyKey(): string;
+  hashEvidenceFile(file: Blob): Promise<string>;
   submissionStore: SubmissionStore;
   realtime: SeckillRealtimeClient;
   walletWritesAuthorized: boolean;
@@ -81,6 +87,17 @@ export interface PendingSubmission extends PaymentSubmissionRequest {
   chainId: number;
   walletAddress: string;
   phase: 'PENDING_CORE_SUBMISSION' | 'AWAITING_PROJECTION';
+}
+
+interface BuyerActionAttempt {
+  fingerprint: string;
+  uploadIdempotencyKey: string;
+  evidenceIdempotencyKey: string;
+  commandIdempotencyKey: string;
+  uploaded: boolean;
+  uploadIntent?: MediaUploadIntentProjection;
+  asset?: MediaAssetProjection;
+  evidence?: EvidenceEnvelopeProjection;
 }
 
 export interface MallRuntimeValue {
@@ -107,7 +124,7 @@ export interface MallRuntimeValue {
   orderActions: Readonly<Record<string, readonly AllowedAction[]>>;
   orderTargets: Readonly<Record<string, FulfillmentTarget>>;
   orderCapabilityErrors: Readonly<Record<string, string>>;
-  fulfillmentEvidenceStatus: 'NOT_PUBLISHED_FAIL_CLOSED';
+  fulfillmentEvidenceStatus: 'AVAILABLE';
   settlements: SettlementListProjection | null;
   settlementsState: 'idle' | LoadState;
   notifications: readonly NotificationInboxItem[];
@@ -139,6 +156,11 @@ export interface MallRuntimeValue {
   createDeliveryTarget(draft: DeliveryTargetDraft): Promise<void>;
   createPickupTarget(storeId: string): Promise<void>;
   reloadOrders(): Promise<void>;
+  submitBuyerAction(
+    orderId: string,
+    action: BuyerEvidenceAction,
+    input: { reasonCode: string; file: File | null },
+  ): Promise<boolean>;
   reloadSettlements(): Promise<void>;
   requestSettlement(rail: 'REWARD_NPL' | 'PRIZE_USDT', amount: string): Promise<void>;
   reloadNotifications(): Promise<void>;
@@ -209,6 +231,7 @@ export function MallRuntimeProvider({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const broadcastInFlight = useRef(false);
+  const buyerActionAttempts = useRef(new Map<string, BuyerActionAttempt>());
   const mediaAccessCache = useRef(new Map<string, MediaReadAccessProjection>());
   const mediaAccessInFlight = useRef(new Map<string, Promise<MediaReadAccessProjection>>());
 
@@ -357,7 +380,7 @@ export function MallRuntimeProvider({
     orderActions,
     orderTargets,
     orderCapabilityErrors,
-    fulfillmentEvidenceStatus: 'NOT_PUBLISHED_FAIL_CLOSED',
+    fulfillmentEvidenceStatus: 'AVAILABLE',
     settlements,
     settlementsState,
     notifications,
@@ -501,6 +524,98 @@ export function MallRuntimeProvider({
 
     async reloadOrders() {
       await run(async () => loadOrderBundle(requireSession()), () => setOrdersState('error'));
+    },
+
+    async submitBuyerAction(orderId, action, input) {
+      setBusy(true);
+      setError(null);
+      try {
+        const activeSession = requireSession();
+        const order = orders.find((item) => item.orderId === orderId);
+        if (!order || order.buyerWallet.toLowerCase() !== activeSession.walletAddress.toLowerCase()) {
+          throw new CoreClientError('Forbidden', '订单与当前买家钱包不一致');
+        }
+        const allowed = orderActions[orderId]?.find((item) => item.action === action);
+        if (!allowed?.enabled) throw new CoreClientError('Forbidden', 'Core 当前未允许该订单操作');
+        const reasonCode = validateEvidenceReasonCode(input.reasonCode);
+        const file = input.file;
+        const fileHash = file ? await evidenceFileHash(file) : null;
+        const attemptKey = `${orderId.toLowerCase()}:${action}`;
+        const fingerprint = file
+          ? `${action}:${reasonCode}:${file.type}:${file.size}:${fileHash}`
+          : `${action}:${reasonCode}:NO_MEDIA`;
+        let attempt = buyerActionAttempts.current.get(attemptKey);
+        if (!attempt || attempt.fingerprint !== fingerprint) {
+          attempt = {
+            fingerprint,
+            uploadIdempotencyKey: services.createIdempotencyKey(),
+            evidenceIdempotencyKey: services.createIdempotencyKey(),
+            commandIdempotencyKey: services.createIdempotencyKey(),
+            uploaded: false,
+          };
+          buyerActionAttempts.current.set(attemptKey, attempt);
+        }
+
+        const mediaAssetIds: string[] = [];
+        if (file && fileHash) {
+          const contentType = evidenceContentType(file.type);
+          attempt.uploadIntent ??= await services.core.createMediaUploadIntent(activeSession.token, {
+            purpose: 'FULFILLMENT_EVIDENCE',
+            resourceType: 'ORDER',
+            resourceId: order.orderId,
+            contentType,
+            sizeBytes: file.size,
+            contentSha256: fileHash,
+            idempotencyKey: attempt.uploadIdempotencyKey,
+          });
+          assertUploadIntentForBuyer(attempt.uploadIntent, activeSession, order, file, fileHash);
+          if (!attempt.uploaded) {
+            await services.core.uploadMediaFile(attempt.uploadIntent, file);
+            attempt.uploaded = true;
+          }
+          attempt.asset ??= await services.core.completeMediaUpload(
+            activeSession.token,
+            attempt.uploadIntent.uploadIntentId,
+          );
+          assertMediaAssetForBuyer(attempt.asset, activeSession, order, file, fileHash);
+          mediaAssetIds.push(attempt.asset.assetId);
+        }
+
+        attempt.evidence ??= await services.core.createOrderActionEvidence(activeSession.token, order.orderId, {
+          action,
+          reasonCode,
+          ...(mediaAssetIds.length > 0 ? { mediaAssetIds } : {}),
+          idempotencyKey: attempt.evidenceIdempotencyKey,
+        });
+        if (
+          attempt.evidence.ownerWallet.toLowerCase() !== activeSession.walletAddress.toLowerCase()
+          || attempt.evidence.resourceId !== order.orderId
+          || attempt.evidence.action !== action
+          || attempt.evidence.reasonCode !== reasonCode
+        ) throw new CoreClientError('InvalidResponse', 'Core 证据与当前买家操作不一致');
+
+        const command = {
+          idempotencyKey: attempt.commandIdempotencyKey,
+          evidenceHash: attempt.evidence.evidenceHash,
+        };
+        if (action === 'REQUEST_EXCHANGE') {
+          await services.core.requestExchange(activeSession.token, order.orderId, { ...command, reasonCode });
+        } else if (action === 'REQUEST_DELAY') {
+          await services.core.requestDelay(activeSession.token, order.orderId, { ...command, reasonCode });
+        } else if (action === 'OPEN_ARBITRATION') {
+          await services.core.openArbitration(activeSession.token, order.orderId, { ...command, reasonCode });
+        } else {
+          await services.core.confirmReceipt(activeSession.token, order.orderId, command);
+        }
+        await loadOrderBundle(activeSession);
+        buyerActionAttempts.current.delete(attemptKey);
+        return true;
+      } catch (reason) {
+        setError(errorMessage(reason));
+        return false;
+      } finally {
+        setBusy(false);
+      }
     },
 
     async reloadSettlements() {
@@ -748,6 +863,18 @@ export function MallRuntimeProvider({
     return request;
   }
 
+  async function evidenceFileHash(file: File) {
+    evidenceContentType(file.type);
+    if (!Number.isSafeInteger(file.size) || file.size < 1 || file.size > 10_485_760) {
+      throw new CoreClientError('InvalidRequest', '证据文件必须小于或等于 10 MB');
+    }
+    const hash = await services.hashEvidenceFile(file);
+    if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) {
+      throw new CoreClientError('InvalidResponse', '本地证据文件哈希无效');
+    }
+    return hash.toLowerCase();
+  }
+
   function requireSession() {
     if (!session) throw new CoreClientError('Unauthorized', '请先连接钱包并完成登录签名');
     return session;
@@ -902,6 +1029,53 @@ export function MallRuntimeProvider({
   }
 }
 
+function validateEvidenceReasonCode(value: string) {
+  const reasonCode = value.trim();
+  if (!/^[A-Z][A-Z0-9_]{1,63}$/.test(reasonCode)) {
+    throw new CoreClientError('InvalidRequest', '请输入 2-64 位大写字母、数字或下划线原因代码');
+  }
+  return reasonCode;
+}
+
+function evidenceContentType(value: string): FulfillmentEvidenceContentType {
+  if (!['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(value)) {
+    throw new CoreClientError('InvalidRequest', '仅支持 JPG、PNG、WebP 或 PDF 证据文件');
+  }
+  return value as FulfillmentEvidenceContentType;
+}
+
+function assertUploadIntentForBuyer(
+  intent: MediaUploadIntentProjection,
+  session: WalletSession,
+  order: FulfillmentOrder,
+  file: File,
+  contentSha256: string,
+) {
+  if (
+    intent.ownerWallet.toLowerCase() !== session.walletAddress.toLowerCase()
+    || intent.resourceId !== order.orderId
+    || intent.contentType !== file.type
+    || intent.sizeBytes !== String(file.size)
+    || intent.contentSha256.toLowerCase() !== contentSha256
+  ) throw new CoreClientError('InvalidResponse', '证据上传授权与当前订单或文件不一致');
+}
+
+function assertMediaAssetForBuyer(
+  asset: MediaAssetProjection,
+  session: WalletSession,
+  order: FulfillmentOrder,
+  file: File,
+  contentSha256: string,
+) {
+  if (
+    asset.ownerWallet.toLowerCase() !== session.walletAddress.toLowerCase()
+    || asset.resourceId !== order.orderId
+    || asset.contentType !== file.type
+    || asset.sizeBytes !== String(file.size)
+    || asset.contentSha256.toLowerCase() !== contentSha256
+  ) throw new CoreClientError('InvalidResponse', '已验证证据媒体与当前订单或文件不一致');
+}
+
 function assertBuyerSettlement(rail: SettlementRail, amount: string): asserts rail is 'REWARD_NPL' | 'PRIZE_USDT' {
   if (!['REWARD_NPL', 'PRIZE_USDT'].includes(rail) || !/^[1-9][0-9]*$/.test(amount)) {
     throw new CoreClientError('InvalidRequest', '结算轨道或金额无效');
@@ -937,6 +1111,13 @@ export const defaultMallServices: MallServices = Object.freeze({
   },
   createIdempotencyKey() {
     return `mall-${globalThis.crypto.randomUUID()}`;
+  },
+  async hashEvidenceFile(file: Blob) {
+    if (!globalThis.crypto?.subtle) {
+      throw new CoreClientError('ExternalBlocked', '当前浏览器不支持安全文件哈希');
+    }
+    const digest = await globalThis.crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+    return `0x${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
   },
   submissionStore: createBrowserSubmissionStore(),
   walletWritesAuthorized:

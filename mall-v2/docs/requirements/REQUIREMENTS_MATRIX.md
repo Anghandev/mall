@@ -66,6 +66,15 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
   `CatalogProduct` type still lacks category/tag association and authoritative
   seckill-overlay/rich-detail fields required by their full acceptance targets.
 
+- `MAL-ORDER-001`, `MAL-AFTER-001` and `MAL-FLOW-003` partial evidence: enabled
+  exchange, delay, receipt-confirmation and arbitration actions now perform the
+  `.4` sequence `local SHA-256 -> write-once upload -> Core verification ->
+  order evidence envelope -> matching buyer command -> order reload`. No hash
+  input or business-refund action exists. These rows remain `Frozen` because
+  `OPEN_TAKEOVER` has no matching published evidence action, buyer pickup
+  evidence is not authorized, and the wider order/profile/takeover acceptance
+  targets still have independent gaps.
+
 - `MAL-SEK-002`, `MAL-SEK-003`: strict OpenAPI-derived HTTP operations,
   final-only event validation, HTTP replay, `eventId` deduplication, last-cursor
   reconnect and `4409` artifact reload are covered by

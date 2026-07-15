@@ -2,6 +2,8 @@ import { expect, test } from '@playwright/test';
 import { artifactVersion } from '@abu24k/core-artifacts';
 
 import { catalogCategories, catalogTags, publicMediaAccess } from '../catalog-fixtures';
+import { buyerActionResult, orderActionEvidence } from '../evidence-fixtures';
+import { deliveryOrder, deliveryOrderTarget } from '../fulfillment-fixtures';
 import { product, productVideoAssetId } from '../payment-fixtures';
 import { relayEvent, seckillSession, seckillSessionId } from '../seckill-fixtures';
 
@@ -70,6 +72,28 @@ test('production surface exposes no business-refund action', async ({ page }) =>
   await expect(page.getByRole('link', { name: /退款/ })).toHaveCount(0);
 });
 
+test('buyer evidence form is keyboard-addressable and fits the mobile frame', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile-393', 'Focused mobile evidence acceptance');
+  await mockWallet(page);
+  await mockPublicCore(page);
+  await page.goto('/assets/orders');
+  await page.getByRole('button', { name: '连接钱包' }).click();
+  const exchange = page.getByRole('button', { name: '申请换货' });
+  await exchange.focus();
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Tab');
+  await expect(page.getByLabel('原因代码')).toBeFocused();
+  await page.getByLabel('原因代码').fill('PACKAGE_DAMAGED');
+  await expect(page.getByLabel(/证据文件（可选）/)).toHaveAttribute('accept', 'image/jpeg,image/png,image/webp,application/pdf');
+  await page.getByRole('button', { name: /封装证据并提交/ }).click();
+  await expect(page.getByRole('status')).toContainText('操作已由 Core 接收');
+  expect(await page.evaluate(() => document.activeElement?.classList.contains('skip-link'))).toBe(false);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+  await expectHealthyDocument(page);
+  await page.screenshot({ path: 'test-results/screenshots/mobile-393-order-evidence.png', fullPage: true });
+});
+
 async function expectHealthyDocument(page: import('@playwright/test').Page) {
   const health = await page.evaluate(() => {
     const ids = Array.from(document.querySelectorAll('[id]'), (element) => element.id);
@@ -135,9 +159,48 @@ async function mockPublicCore(page: import('@playwright/test').Page) {
       if (url.pathname === `/v2/seckill/sessions/${seckillSessionId}`) return session;
       if (url.pathname === '/v2/cms/public') return [];
       if (url.pathname === '/v2/stores') return { stores: [] };
+      if (url.pathname === '/v2/auth/nonce') return { message: 'Sign in to Abu 24K V2' };
+      if (url.pathname === '/v2/auth/verify') return {
+        token: 'e2e-buyer-session',
+        walletAddress: deliveryOrder.buyerWallet,
+        roles: ['BUYER'],
+      };
+      if (url.pathname === '/v2/orders') return { orders: [deliveryOrder] };
+      if (url.pathname === '/v2/actions/order') return { allowedActions: [{ action: 'REQUEST_EXCHANGE', enabled: true }] };
+      if (url.pathname === `/v2/orders/${deliveryOrder.orderId}/fulfillment-target`) return { target: deliveryOrderTarget };
+      if (url.pathname === '/v2/settlements') return {
+        artifactVersion,
+        wallet: deliveryOrder.buyerWallet,
+        balances: [],
+        points: [],
+        requests: [],
+      };
+      if (url.pathname === '/v2/notifications') return [];
+      if (url.pathname === `/v2/orders/${deliveryOrder.orderId}/evidence`) {
+        return orderActionEvidence('REQUEST_EXCHANGE', 'PACKAGE_DAMAGED');
+      }
+      if (url.pathname === `/v2/orders/${deliveryOrder.orderId}/exchange-requests`) {
+        return buyerActionResult('REQUEST_EXCHANGE');
+      }
       return { error: { code: 'UnknownState', message: 'E2E route not configured' } };
     })();
     const status = 'error' in json ? 404 : 200;
     await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(json) });
   });
+}
+
+async function mockWallet(page: import('@playwright/test').Page) {
+  await page.addInitScript(({ buyer }) => {
+    Object.defineProperty(window, 'ethereum', {
+      configurable: true,
+      value: {
+        request: async ({ method }: { method: string }) => {
+          if (method === 'eth_requestAccounts' || method === 'eth_accounts') return [buyer];
+          if (method === 'eth_chainId') return '0x38';
+          if (method === 'personal_sign') return `0x${'11'.repeat(65)}`;
+          throw new Error(`Unsupported wallet method ${method}`);
+        },
+      },
+    });
+  }, { buyer: deliveryOrder.buyerWallet });
 }

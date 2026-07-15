@@ -36,9 +36,13 @@ Requirement Matrix and consumes only coordinated Core artifacts.
   genesis, direct, district, city, province, region, operations or rounding
   subtype. BNM account totals render only Locked/Available and never enter a
   settlement action.
-- Buyer fulfillment commands remain fail closed even when `allowedActions`
-  enables them because the Mall has not yet consumed the `.4` upload/evidence
-  command flow required to create the authoritative `evidenceHash`.
+- Enabled `REQUEST_EXCHANGE`, `REQUEST_DELAY`, `CONFIRM_RECEIPT` and
+  `OPEN_ARBITRATION` actions now use the `.4` write-once upload, verification,
+  order-evidence envelope and command endpoints. The browser hashes optional
+  JPG/PNG/WebP/PDF evidence locally and never asks the buyer to paste a hash.
+  `OPEN_TAKEOVER` remains fail closed because it is absent from the published
+  evidence-action schema; `VERIFY_PICKUP` evidence is authorized only for
+  merchant/platform roles.
 - The coordinated manifest still has `deploymentAuthorized=false` and no
   executable `PAY_ORDER`. Wallet broadcast therefore remains fail closed until
   Core publishes deployment evidence. Native navigation, production-device GPS
