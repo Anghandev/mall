@@ -51,15 +51,17 @@ export function Metric({
   label,
   hint,
   linkLabel,
+  value,
 }: {
   label: string;
   hint: string;
   linkLabel?: string;
+  value?: string | undefined;
 }) {
   return (
     <article className="metric">
       <p>{label}</p>
-      <strong aria-label={`${label}不可用`}>--</strong>
+      <strong aria-label={value === undefined ? `${label}不可用` : `${label}${value}`}>{value ?? '--'}</strong>
       <span>{hint}</span>
       {linkLabel ? (
         <span className="metric-link">

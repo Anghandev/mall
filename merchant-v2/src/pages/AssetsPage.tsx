@@ -15,6 +15,7 @@ import {
 import type {
   BalanceState,
   BnmPointsBalance,
+  MerchantBusinessDashboard,
   MerchantFinanceProjection,
   RewardSubtype,
   SettlementBalance,
@@ -45,6 +46,7 @@ export function AssetsPage() {
   const { api, session, signSettlementTypedData } = useCoreRuntime();
   const [settlementsState, setSettlementsState] = useState<LoadState<SettlementListProjection>>({ phase: 'idle' });
   const [financeState, setFinanceState] = useState<LoadState<MerchantFinanceProjection>>({ phase: 'idle' });
+  const [dashboardState, setDashboardState] = useState<LoadState<MerchantBusinessDashboard>>({ phase: 'idle' });
   const [settlementAmount, setSettlementAmount] = useState('');
   const [settlementCommand, setSettlementCommand] = useState<CommandState>({ phase: 'idle' });
   const [depositPolicyVersion, setDepositPolicyVersion] = useState('');
@@ -60,16 +62,19 @@ export function AssetsPage() {
     if (!session) {
       setSettlementsState({ phase: 'idle' });
       setFinanceState({ phase: 'idle' });
+      setDashboardState({ phase: 'idle' });
       return;
     }
     if (!quiet) {
       setSettlementsState({ phase: 'loading' });
       setFinanceState({ phase: 'loading' });
+      setDashboardState({ phase: 'loading' });
     }
     const token = session.token;
-    const [settlementsResult, financeResult] = await Promise.allSettled([
+    const [settlementsResult, financeResult, dashboardResult] = await Promise.allSettled([
       api.listSettlements(token),
       api.getMerchantFinance(token),
+      api.getMerchantBusinessDashboard(token),
     ]);
     if (sessionTokenRef.current !== token) return;
 
@@ -92,6 +97,19 @@ export function AssetsPage() {
     } else {
       setFinanceState({ phase: 'error', message: readableError(financeResult.reason) });
     }
+
+    if (dashboardResult.status === 'fulfilled') {
+      if (
+        financeResult.status === 'fulfilled'
+        && dashboardResult.value.merchant.merchantId !== financeResult.value.merchant.merchant_id
+      ) {
+        setDashboardState({ phase: 'error', message: '今日销售投影与商家财务归属不一致。' });
+      } else {
+        setDashboardState({ phase: 'ready', value: dashboardResult.value });
+      }
+    } else {
+      setDashboardState({ phase: 'error', message: readableError(dashboardResult.reason) });
+    }
   }, [api, session]);
 
   useEffect(() => {
@@ -100,6 +118,7 @@ export function AssetsPage() {
 
   const settlements = settlementsState.phase === 'ready' ? settlementsState.value : undefined;
   const finance = financeState.phase === 'ready' ? financeState.value : undefined;
+  const dashboard = dashboardState.phase === 'ready' ? dashboardState.value : undefined;
   const merchantBalances = settlements?.balances.filter((balance) => (
     balance.asset === 'USDT' && balance.purpose === 'MERCHANT_RECEIVABLE'
   )) ?? [];
@@ -223,7 +242,17 @@ export function AssetsPage() {
           <span>MERCHANT_RECEIVABLE / Core 原子单位</span>
         </div>
         <div className="metric-grid finance-intro-grid">
-          <Metric hint="权威时区和自然日聚合尚未发布" label="今日销售货款" />
+          <Metric
+            hint={dashboard
+              ? `${dashboard.timezone} / ${dashboard.window.start} 至 ${dashboard.window.end}`
+              : dashboardState.phase === 'loading'
+                ? '正在读取 Core 权威自然日聚合'
+                : dashboardState.phase === 'error'
+                  ? dashboardState.message
+                  : '需要已验证的商家会话'}
+            label="今日销售总价（USDT atomic）"
+            value={dashboard?.sales.listPriceUsdt}
+          />
           <article className="metric finance-identity">
             <p>结算钱包</p>
             <strong>{finance ? finance.merchant.settlement_wallet : '--'}</strong>

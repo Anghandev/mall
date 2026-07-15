@@ -23,6 +23,7 @@ import {
   orderFinalityStatuses,
   orderProjectionStates,
   rewardSubtypes,
+  seckillStates,
   settlementRails,
   settlementRequestStates,
   storeStatuses,
@@ -66,6 +67,7 @@ import {
   type MediaUploadIntentProjection,
   type MerchantConcessionPreview,
   type MerchantFinanceProjection,
+  type MerchantBusinessDashboard,
   type MerchantStore,
   type PickupVerificationRequest,
   type OrderKind,
@@ -109,6 +111,7 @@ const takeoverStateSet = new Set<string>(takeoverStates);
 const cmsContentTypeSet = new Set<string>(cmsContentTypes);
 const settlementAssetSet = new Set<string>(['USDT', 'NPL']);
 const rewardSubtypeSet = new Set<string>(rewardSubtypes);
+const seckillStateSet = new Set<string>(seckillStates);
 const bnmPointStateSet = new Set<string>(['LOCKED', 'AVAILABLE']);
 const catalogProductActionSet = new Set<string>(catalogProductActions);
 const catalogProductLifecycleSet = new Set<string>(catalogProductLifecycleStates);
@@ -227,6 +230,7 @@ export interface CoreApi {
     expected?: { resourceType: MediaResourceType; resourceId: string; purpose: MediaPurpose },
   ): Promise<MediaReadAccessProjection>;
   listFulfillmentOrders(token: string, options?: FulfillmentOrderListOptions): Promise<FulfillmentOrderPage>;
+  getMerchantBusinessDashboard(token: string): Promise<MerchantBusinessDashboard>;
   getOrderFulfillmentTarget(orderId: string, token: string): Promise<FulfillmentTarget>;
   getOrderAllowedActions(orderId: string, token: string): Promise<readonly AllowedAction[]>;
   recordShipment(orderId: string, input: ShipmentRequest, token: string): Promise<ShipmentResult>;
@@ -431,6 +435,12 @@ export function createCoreApi(baseUrl = import.meta.env.VITE_CORE_API_BASE_URL ?
         orders: array(value.orders, 'orders').map(parseFulfillmentOrder),
         nextCursor: value.nextCursor === null ? null : parseFulfillmentOrderCursor(value.nextCursor),
       };
+    },
+
+    async getMerchantBusinessDashboard(token) {
+      return parseMerchantBusinessDashboard(
+        await request(normalizedBaseUrl, '/v2/merchant/dashboard', { token }),
+      );
     },
 
     async getOrderFulfillmentTarget(orderId, token) {
@@ -1558,6 +1568,127 @@ function parseSettlementRequest(input: unknown): SettlementRequestProjection {
         created_at: dateTime(transition.created_at, 'settlement transition.created_at'),
       };
     }),
+  };
+}
+
+function parseMerchantBusinessDashboard(input: unknown): MerchantBusinessDashboard {
+  const value = record(input, 'merchant business dashboard');
+  exactObjectKeys(value, [
+    'artifactVersion', 'timezone', 'window', 'merchant', 'product', 'orders',
+    'sales', 'shipmentRate', 'settlements',
+  ], 'merchant business dashboard');
+  exact(value.artifactVersion, artifactVersion, 'merchant dashboard artifactVersion');
+  exact(value.timezone, 'Asia/Shanghai', 'merchant dashboard timezone');
+
+  const window = record(value.window, 'merchant dashboard window');
+  exactObjectKeys(window, ['start', 'end', 'generatedAt'], 'merchant dashboard window');
+  const merchant = record(value.merchant, 'merchant dashboard merchant');
+  exactObjectKeys(merchant, ['merchantId', 'status', 'level', 'guaranteeStatus'], 'merchant dashboard merchant');
+  const orders = record(value.orders, 'merchant dashboard orders');
+  exactObjectKeys(orders, [
+    'finalizedToday', 'pendingShipment', 'shipped', 'delivered', 'fulfilled',
+    'arbitration', 'takeover', 'pickupVerifiedToday',
+  ], 'merchant dashboard orders');
+  const sales = record(value.sales, 'merchant dashboard sales');
+  exactObjectKeys(sales, [
+    'listPriceUsdt', 'buyerUsdtPaid', 'merchantBaseReceivableUsdt',
+    'merchantNetReceivableUsdt',
+  ], 'merchant dashboard sales');
+  const shipmentRate = record(value.shipmentRate, 'merchant dashboard shipmentRate');
+  exactObjectKeys(shipmentRate, ['numerator', 'denominator', 'bps'], 'merchant dashboard shipmentRate');
+  const settlements = record(value.settlements, 'merchant dashboard settlements');
+  exactObjectKeys(settlements, [
+    'requestedCount', 'requestedUsdt', 'settledCount', 'settledUsdt',
+  ], 'merchant dashboard settlements');
+
+  let product: MerchantBusinessDashboard['product'] = null;
+  if (value.product !== null) {
+    const productValue = record(value.product, 'merchant dashboard product');
+    exactObjectKeys(
+      productValue,
+      ['productId', 'title', 'state', 'stock', 'seckill', 'updatedAt'],
+      'merchant dashboard product',
+    );
+    const stock = record(productValue.stock, 'merchant dashboard product stock');
+    exactObjectKeys(stock, ['total', 'available', 'reserved'], 'merchant dashboard product stock');
+    let seckill: NonNullable<MerchantBusinessDashboard['product']>['seckill'] = null;
+    if (productValue.seckill !== null) {
+      const seckillValue = record(productValue.seckill, 'merchant dashboard product seckill');
+      exactObjectKeys(seckillValue, ['sessionId', 'phase'], 'merchant dashboard product seckill');
+      seckill = {
+        sessionId: bytes32(seckillValue.sessionId, 'merchant dashboard product seckill.sessionId'),
+        phase: enumValue(seckillValue.phase, seckillStateSet, 'merchant dashboard product seckill.phase'),
+      };
+    }
+    product = {
+      productId: string(productValue.productId, 'merchant dashboard product.productId'),
+      title: string(productValue.title, 'merchant dashboard product.title'),
+      state: enumValue(productValue.state, catalogProductLifecycleSet, 'merchant dashboard product.state'),
+      stock: {
+        total: atomicAmount(stock.total, 'merchant dashboard product stock.total'),
+        available: atomicAmount(stock.available, 'merchant dashboard product stock.available'),
+        reserved: atomicAmount(stock.reserved, 'merchant dashboard product stock.reserved'),
+      },
+      seckill,
+      updatedAt: dateTime(productValue.updatedAt, 'merchant dashboard product.updatedAt'),
+    };
+  }
+
+  return {
+    artifactVersion,
+    timezone: 'Asia/Shanghai',
+    window: {
+      start: dateTime(window.start, 'merchant dashboard window.start'),
+      end: dateTime(window.end, 'merchant dashboard window.end'),
+      generatedAt: dateTime(window.generatedAt, 'merchant dashboard window.generatedAt'),
+    },
+    merchant: {
+      merchantId: string(merchant.merchantId, 'merchant dashboard merchant.merchantId'),
+      status: string(merchant.status, 'merchant dashboard merchant.status'),
+      level: string(merchant.level, 'merchant dashboard merchant.level'),
+      guaranteeStatus: enumValue(
+        merchant.guaranteeStatus,
+        guaranteeStatusSet,
+        'merchant dashboard merchant.guaranteeStatus',
+      ),
+    },
+    product,
+    orders: {
+      finalizedToday: atomicAmount(orders.finalizedToday, 'merchant dashboard orders.finalizedToday'),
+      pendingShipment: atomicAmount(orders.pendingShipment, 'merchant dashboard orders.pendingShipment'),
+      shipped: atomicAmount(orders.shipped, 'merchant dashboard orders.shipped'),
+      delivered: atomicAmount(orders.delivered, 'merchant dashboard orders.delivered'),
+      fulfilled: atomicAmount(orders.fulfilled, 'merchant dashboard orders.fulfilled'),
+      arbitration: atomicAmount(orders.arbitration, 'merchant dashboard orders.arbitration'),
+      takeover: atomicAmount(orders.takeover, 'merchant dashboard orders.takeover'),
+      pickupVerifiedToday: atomicAmount(
+        orders.pickupVerifiedToday,
+        'merchant dashboard orders.pickupVerifiedToday',
+      ),
+    },
+    sales: {
+      listPriceUsdt: atomicAmount(sales.listPriceUsdt, 'merchant dashboard sales.listPriceUsdt'),
+      buyerUsdtPaid: atomicAmount(sales.buyerUsdtPaid, 'merchant dashboard sales.buyerUsdtPaid'),
+      merchantBaseReceivableUsdt: atomicAmount(
+        sales.merchantBaseReceivableUsdt,
+        'merchant dashboard sales.merchantBaseReceivableUsdt',
+      ),
+      merchantNetReceivableUsdt: atomicAmount(
+        sales.merchantNetReceivableUsdt,
+        'merchant dashboard sales.merchantNetReceivableUsdt',
+      ),
+    },
+    shipmentRate: {
+      numerator: atomicAmount(shipmentRate.numerator, 'merchant dashboard shipmentRate.numerator'),
+      denominator: atomicAmount(shipmentRate.denominator, 'merchant dashboard shipmentRate.denominator'),
+      bps: nullableAtomicAmount(shipmentRate.bps, 'merchant dashboard shipmentRate.bps'),
+    },
+    settlements: {
+      requestedCount: atomicAmount(settlements.requestedCount, 'merchant dashboard settlements.requestedCount'),
+      requestedUsdt: atomicAmount(settlements.requestedUsdt, 'merchant dashboard settlements.requestedUsdt'),
+      settledCount: atomicAmount(settlements.settledCount, 'merchant dashboard settlements.settledCount'),
+      settledUsdt: atomicAmount(settlements.settledUsdt, 'merchant dashboard settlements.settledUsdt'),
+    },
   };
 }
 
