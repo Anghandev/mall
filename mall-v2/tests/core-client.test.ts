@@ -341,7 +341,7 @@ describe('coordinated Core HTTP client', () => {
       if (url.endsWith('/v2/settlements')) return json(settlementProjection);
       if (url.endsWith('/v2/settlement-intents')) return json(settlementIntent, 201);
       if (url.endsWith('/v2/settlement-requests')) return json(requestedSettlement, 201);
-      if (url.endsWith(`/v2/cms/public?walletAddress=${settlementProjection.wallet}`)) return json([publicCmsItem]);
+      if (url.endsWith('/v2/cms/public')) return json([publicCmsItem]);
       if (url.endsWith('/v2/notifications?limit=25')) return json([]);
       if (url.endsWith('/v2/notification-endpoints')) return json({
         endpointId: 'notification-endpoint-1', channel: 'IN_APP', provider: 'CORE', topics: ['*'], state: 'ACTIVE',
@@ -354,13 +354,19 @@ describe('coordinated Core HTTP client', () => {
     expect(await client.listSettlements('session')).toEqual(settlementProjection);
     expect(await client.createSettlementIntent('session', { rail: 'REWARD_NPL', amount: '200', idempotencyKey: 'mall-settlement-1' })).toEqual(settlementIntent);
     expect(await client.submitSettlementRequest('session', { intentId: settlementIntent.intent.intentId, signature: '0xsigned' })).toEqual(requestedSettlement);
-    expect(await client.listPublicCms(settlementProjection.wallet)).toEqual([publicCmsItem]);
+    expect(await client.listPublicCms()).toEqual([publicCmsItem]);
+    expect(await client.listPublicCms('session')).toEqual([publicCmsItem]);
     expect(await client.listNotifications('session', 25)).toEqual([]);
     expect((await client.registerNotificationEndpoint('session', endpoint)).state).toBe('ACTIVE');
 
     for (const call of calls.filter((entry) => !entry.url.includes('/v2/cms/public'))) {
       expect((call.init?.headers as Record<string, string>)?.authorization).toBe('Bearer session');
     }
+    const cmsCalls = calls.filter((entry) => entry.url.endsWith('/v2/cms/public'));
+    expect(cmsCalls).toHaveLength(2);
+    expect(cmsCalls[0]?.init).toBeUndefined();
+    expect((cmsCalls[1]?.init?.headers as Record<string, string>)?.authorization).toBe('Bearer session');
+    expect(cmsCalls.every((call) => !call.url.includes('?'))).toBe(true);
     expect(JSON.parse(String(calls.find((call) => call.url.endsWith('/v2/settlement-intents'))?.init?.body))).toEqual({
       rail: 'REWARD_NPL', amount: '200', idempotencyKey: 'mall-settlement-1',
     });
@@ -375,6 +381,13 @@ describe('coordinated Core HTTP client', () => {
 
     await expect(createCoreClient({ fetch: vi.fn().mockResolvedValue(json([{ ...publicCmsItem, content: [] }])) }).listPublicCms())
       .rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json([{
+        ...publicCmsItem,
+        audience: { type: 'WALLET', wallets: [settlementProjection.wallet] },
+      }])),
+    }).listPublicCms('session')).rejects.toMatchObject({ code: 'InvalidResponse' });
 
     await expect(createCoreClient({ fetch: vi.fn().mockResolvedValue(json([{ deliveryState: 'UNKNOWN' }])) }).listNotifications('session'))
       .rejects.toMatchObject({ code: 'InvalidResponse' });

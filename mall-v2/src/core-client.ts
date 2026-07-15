@@ -210,7 +210,7 @@ export interface CoreClient {
   listSettlements(token: string): Promise<SettlementListProjection>;
   createSettlementIntent(token: string, request: SettlementIntentRequest): Promise<SettlementIntentProjection>;
   submitSettlementRequest(token: string, request: SettlementRequestSubmission): Promise<SettlementRequestProjection>;
-  listPublicCms(walletAddress?: string): Promise<readonly CmsPublicItem[]>;
+  listPublicCms(token?: string): Promise<readonly CmsPublicItem[]>;
   listNotifications(token: string, limit?: number): Promise<readonly NotificationInboxItem[]>;
   registerNotificationEndpoint(token: string, request: NotificationEndpointRequest): Promise<NotificationEndpointProjection>;
 }
@@ -693,11 +693,11 @@ export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } 
       return parseSettlementRequest(value);
     },
 
-    async listPublicCms(walletAddress) {
-      const query = walletAddress ? `?walletAddress=${encodeURIComponent(walletAddress)}` : '';
+    async listPublicCms(token) {
       const value = await requestJson<unknown>(
         fetcher,
-        `${baseUrl}${operations.publicCms}${query}`,
+        `${baseUrl}${operations.publicCms}`,
+        token ? { headers: authorizedHeaders(token) } : undefined,
       );
       return parseCmsItems(value);
     },
@@ -1126,7 +1126,11 @@ function parseCmsItems(value: unknown): readonly CmsPublicItem[] {
     stringValue(entry.locale);
     objectValue(entry.content);
     bytes32Value(entry.contentHash);
-    objectValue(entry.audience);
+    const audience = objectValue(entry.audience);
+    enumValue(audience.type, ['ALL', 'REGION', 'MERCHANT', 'WALLET'] as const);
+    if (Object.keys(audience).some((key) => key !== 'type')) {
+      throw new CoreClientError('InvalidResponse', 'CMS audience 响应未脱敏');
+    }
     return item as CmsPublicItem;
   });
 }

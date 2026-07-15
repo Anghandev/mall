@@ -864,10 +864,16 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.queryByLabelText(/证据$/)).toBeNull();
   });
 
-  it('renders public CMS content without inventing a local content response', async () => {
-    renderAt('/mall', readyServices({ listPublicCms: vi.fn().mockResolvedValue([publicCmsItem]) }));
+  it('loads anonymous CMS without identity input and reloads authenticated CMS with the session token', async () => {
+    const user = userEvent.setup();
+    const listPublicCms = vi.fn<CoreClient['listPublicCms']>().mockResolvedValue([publicCmsItem]);
+    renderAt('/mall', readyServices({ listPublicCms }));
     await screen.findByRole('heading', { name: '结算中心已开放' });
     expect(screen.getByText('RELEASE_ANNOUNCEMENT · V2')).toBeTruthy();
+    expect(listPublicCms).toHaveBeenCalledWith();
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await waitFor(() => expect(listPublicCms).toHaveBeenCalledWith('buyer-session'));
   });
 
   it('renders every transferable lifecycle state and submits a wallet-signed settlement request', async () => {

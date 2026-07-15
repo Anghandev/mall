@@ -473,7 +473,7 @@ export function MallRuntimeProvider({
         setSubmittedTxHash(recovered?.txHash ?? null);
         setSession(nextSession);
         await loadAuthenticatedBundles(nextSession);
-        await loadCms(nextSession.walletAddress).catch(() => setCmsState('error'));
+        await loadCms(nextSession.token).catch(() => setCmsState('error'));
       });
     },
 
@@ -907,7 +907,7 @@ export function MallRuntimeProvider({
     },
 
     async reloadCms() {
-      await run(async () => loadCms(session?.walletAddress), () => setCmsState('error'));
+      await run(async () => loadCms(session?.token), () => setCmsState('error'));
     },
 
     selectProduct(productId) {
@@ -1369,9 +1369,9 @@ export function MallRuntimeProvider({
     setNotificationsState(nextNotifications.length > 0 ? 'ready' : 'empty');
   }
 
-  async function loadCms(walletAddress?: string) {
+  async function loadCms(token?: string) {
     setCmsState('loading');
-    const items = await services.core.listPublicCms(walletAddress);
+    const items = await services.core.listPublicCms(token);
     setCmsItems(items);
     setCmsState(items.length > 0 ? 'ready' : 'empty');
   }
