@@ -211,10 +211,10 @@ wallet, Safe, RPC, domain and device evidence remains `ExternalBlocked` under
   serialization, role denial, nullable category parent and read-only batch
   preview have consumer tests. Production source and bundle contain no fixture.
 
-## Settlement/Admin `.6` Business Dashboard Evidence
+## Settlement/Admin `.8` Business Dashboard And Risk Evidence
 
 The current product pin is
-`@abu24k/core-artifacts@2.0.0-settlement-admin.7`. The authenticated Admin
+`@abu24k/core-artifacts@2.0.0-settlement-admin.8`. The authenticated Admin
 Dashboard consumes generated `AdminBusinessDashboard` without a local
 financial calculation or production fixture:
 
@@ -230,12 +230,21 @@ financial calculation or production fixture:
 - `ADM-DASH-003` and `ADM-CLEAR-007`: renders signed-settlement request and
   Safe-final totals, `failedTransactions`, per-asset verified Safe assets,
   unsettled liabilities, coverage evidence and all three independent breaker
-  scopes. Abnormal-order and blacklist rules remain `DecisionBlocked`, so
-  monitoring alerts are not substituted and the full dashboard requirement is
-  not reported complete.
+  scopes, plus authoritative abnormal-observation, blacklist-block,
+  active-restriction and pending-appeal counts. Monitoring alerts are not
+  substituted for risk observations.
 - `ADM-DASH-004`: remains backed by the separate typed monitoring consumer;
   the business Dashboard does not duplicate or reinterpret infrastructure
   probes as transaction-risk events.
+- `ADM-RISK-001`, `ADM-RISK-004`, `ADM-RISK-005` and `ADM-RISK-006`: consumes
+  generated observations, `ACTIVE` / `EXPIRED` / `OVERRIDDEN` restrictions,
+  appeals and all four published Admin risk writes. UI controls match Core
+  RBAC: AUDITOR read-only, OPERATOR appeal-only, ADMIN manual restriction,
+  override and appeal decision. Response parsing rejects stale versions,
+  unknown fields and invalid generated enum/state values.
+- `ADM-RISK-003`: low-history wallet clustering remains `DecisionBlocked`.
+  Frequent address/store-change thresholds and the production device
+  fingerprint source remain explicit Core blockers; the UI does not infer them.
 
 All unavailable entries preserve Core `DecisionBlocked` / `ExternalBlocked`
 reason codes and details. An empty coverage projection is never shown as zero

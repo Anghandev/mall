@@ -5,7 +5,7 @@ implements shared funds, contracts, API, Schema or signer behavior.
 
 ## Current Product Boundary
 
-- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.7`.
+- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.8`.
 - SIWE/JWT stays in memory. Every protected read and write is role-bound by
   Core and preserves typed `DecisionBlocked`, `ExternalBlocked`,
   `ConfigurationRequired` and correlation evidence.
@@ -18,7 +18,9 @@ implements shared funds, contracts, API, Schema or signer behavior.
   projection. It renders the Core `Asia/Shanghai` window, immutable order
   amounts, current fulfillment queues, merchant/product/seckill counts,
   signed-settlement totals, failed transactions, coverage and independent
-  breakers. Nullable ratios and unavailable metrics stay visibly fail-closed.
+  breakers, plus authoritative abnormal-observation, blacklist-block,
+  active-restriction and pending-appeal counts. Nullable ratios and unavailable
+  metrics stay visibly fail-closed.
 - Admin order operations consume exact Core-side order/product/TxHash/wallet
   search, pending-review and breaker projections, full row `allowedActions`,
   and read-only batch enabled-intersection preview. OR, fuzzy wallet, UID/phone,
@@ -33,11 +35,14 @@ implements shared funds, contracts, API, Schema or signer behavior.
 - CMS and configuration editors accept structured JSON objects because their
   coordinated request types are open objects. Core remains the schema,
   sanitization, decision and publication authority.
-- New UID, low-stock thresholds, abnormal-order and blacklist rules remain
-  explicit `DecisionBlocked`; monitoring alerts are never relabeled as
-  transaction-risk events. Global batch actions, seckill administration,
-  risk rules, logistics
-  configuration and production provider accounts remain fail-closed as
+- The risk workspace consumes Core observations, restrictions, appeals,
+  manual restriction, override and appeal-decision contracts. AUDITOR is
+  read-only, OPERATOR may only appeal and ADMIN owns the other writes. New UID,
+  low-stock thresholds, low-history wallet clustering and frequent
+  address/store-change thresholds remain explicit fail-closed capabilities;
+  monitoring alerts are never relabeled as transaction-risk events. Global
+  batch actions, seckill administration, logistics configuration and production
+  provider accounts remain fail-closed as
   recorded in `docs/contracts/UPSTREAM_GAPS.md`. Catalog writes consume `.5`
   runtime RBAC, `allowedActions`, `writeLock` and `blockingResource`; AUDITOR
   is read-only. Existing child categories move to root only through an explicit

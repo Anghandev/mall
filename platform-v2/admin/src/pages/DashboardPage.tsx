@@ -355,8 +355,10 @@ function dashboardMetricGroups(dashboard: AdminBusinessDashboard): readonly Metr
         metric('今日已结算', dashboard.settlements.settledCount, 'Safe finality'),
         metric('已结算 · USDT atomic', dashboard.settlements.settledUsdt, 'Safe finality'),
         metric('链上失败交易', dashboard.settlements.failedTransactions, '今日结算窗口'),
-        blocked('ABNORMAL_ORDERS'),
-        blocked('BLACKLIST_BLOCKS'),
+        metric('今日异常观察', dashboard.risk.abnormalObservationsToday, 'Core risk observations'),
+        metric('今日黑名单拦截', dashboard.risk.blacklistBlocksToday, 'Core BLACKLIST enforcement'),
+        metric('生效风险限制', dashboard.risk.activeRestrictions, 'ACTIVE restrictions'),
+        metric('待处理风险申诉', dashboard.risk.pendingAppeals, 'PENDING appeals'),
       ],
     },
   ];
@@ -370,8 +372,6 @@ function metricLabel(metricName: string) {
   return ({
     NEW_UID_USERS: '新增 UID',
     LOW_STOCK_PRODUCTS: '库存预警',
-    ABNORMAL_ORDERS: '异常订单',
-    BLACKLIST_BLOCKS: '黑名单拦截',
   } as const)[metricName as 'NEW_UID_USERS'] ?? metricName;
 }
 
