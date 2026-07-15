@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.6",
+  "artifactVersion": "2.0.0-settlement-admin.7",
   "formatVersion": 1,
   "databaseEngine": "postgresql",
   "schemas": {
@@ -70,6 +70,11 @@
           "name": "013_business_analytics.sql",
           "path": "schema/business/013_business_analytics.sql",
           "sha256": "247c8a38041a93c277d214771cec39021075518aaa395f62a4d9fa98e3cd2d82"
+        },
+        {
+          "name": "014_accounts_and_profiles.sql",
+          "path": "schema/business/014_accounts_and_profiles.sql",
+          "sha256": "9fd83e1bce904d5acc4e925959797467c42574399bdf06765159980806a39707"
         }
       ]
     },
@@ -90,6 +95,11 @@
           "name": "003_admin_query_and_ingest.sql",
           "path": "schema/audit/003_admin_query_and_ingest.sql",
           "sha256": "c8941192e1164e7ee806dd33080c5eda3662dad6f1c3d17be31642ca9544ec85"
+        },
+        {
+          "name": "004_merchant_scope.sql",
+          "path": "schema/audit/004_merchant_scope.sql",
+          "sha256": "2047a014a53a4574df6a21d965a102033634700986e2c1e52dbcbbed1edbdb41"
         }
       ]
     }

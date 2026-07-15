@@ -24,8 +24,10 @@ export type MediaPurpose =
   | 'PRODUCT_VIDEO'
   | 'CATEGORY_ICON'
   | 'STORE_IMAGE'
-  | 'FULFILLMENT_EVIDENCE';
-export type MediaResourceType = 'PRODUCT' | 'CATEGORY' | 'STORE' | 'ORDER';
+  | 'FULFILLMENT_EVIDENCE'
+  | 'BUYER_AVATAR'
+  | 'MERCHANT_LOGO';
+export type MediaResourceType = 'PRODUCT' | 'CATEGORY' | 'STORE' | 'ORDER' | 'BUYER' | 'MERCHANT';
 
 export interface MediaUploadLimits {
   maxIntentsPerWalletHour: number;
@@ -626,7 +628,10 @@ function validateUploadInput(input: {
   const expected = input.purpose === 'PRODUCT_IMAGE' || input.purpose === 'PRODUCT_VIDEO'
     ? 'PRODUCT'
     : input.purpose === 'CATEGORY_ICON' ? 'CATEGORY'
-    : input.purpose === 'STORE_IMAGE' ? 'STORE' : 'ORDER';
+    : input.purpose === 'STORE_IMAGE' ? 'STORE'
+    : input.purpose === 'BUYER_AVATAR' ? 'BUYER'
+    : input.purpose === 'MERCHANT_LOGO' ? 'MERCHANT'
+    : 'ORDER';
   if (input.resourceType !== expected) throw new CoreError('InvalidRequest', 'Media purpose does not match its resource');
   if (!CONTENT_TYPES.includes(input.contentType as (typeof CONTENT_TYPES)[number])) {
     throw new CoreError('InvalidRequest', 'Unsupported media content type');
@@ -689,6 +694,19 @@ async function authorizeResource(
     if (!row) throw new CoreError('UnknownState', 'Store was not found', 404);
     if (hasRole(actor, 'ADMIN', 'OPERATOR')) return;
     if (hasRole(actor, 'MERCHANT') && row.merchant_id === actor.merchantId) return;
+  } else if (resourceType === 'BUYER') {
+    if (hasRole(actor, 'BUYER') && resourceId.toLowerCase() === wallet) return;
+  } else if (resourceType === 'MERCHANT') {
+    if (hasRole(actor, 'MERCHANT') && actor.merchantId === resourceId) {
+      const binding = await executor.query<{ active: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1 FROM core.wallet_role_bindings
+           WHERE wallet_address = $1 AND role = 'MERCHANT' AND merchant_id = $2 AND status = 'ACTIVE'
+         ) AS active`,
+        [wallet, resourceId],
+      );
+      if (binding.rows[0]?.active) return;
+    }
   }
   throw new CoreError('Forbidden', 'Resource evidence is outside the wallet scope', 403);
 }
@@ -838,6 +856,15 @@ async function authorizeMediaRead(
       && await hasActiveMerchantBinding(executor, wallet, actor.merchantId)
     ) return 'AUTHENTICATED';
   }
+  if (asset.resource_type === 'BUYER' && asset.resource_id.toLowerCase() === wallet && hasRole(actor, 'BUYER')) {
+    return 'AUTHENTICATED';
+  }
+  if (
+    asset.resource_type === 'MERCHANT'
+    && hasRole(actor, 'MERCHANT')
+    && actor.merchantId === asset.resource_id
+    && await hasActiveMerchantBinding(executor, wallet, actor.merchantId)
+  ) return 'AUTHENTICATED';
   throw new CoreError('Forbidden', 'Media asset is outside the actor scope', 403);
 }
 

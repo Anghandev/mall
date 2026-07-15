@@ -56,6 +56,7 @@ import { NotificationService } from './notification-service.ts';
 import { SystemConfigService } from './system-config-service.ts';
 import { MonitoringService } from './monitoring-service.ts';
 import { BusinessAnalyticsService } from './business-analytics-service.ts';
+import { AccountService } from './account-service.ts';
 import {
   MULTISEND_CALL_ONLY_ADDRESS,
   MULTISEND_CALL_ONLY_CODE_HASH,
@@ -94,11 +95,13 @@ test('business and audit migrations apply from empty databases', async () => {
       '011_catalog_management.sql',
       '012_order_operations.sql',
       '013_business_analytics.sql',
+      '014_accounts_and_profiles.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
       '002_evidence_policy.sql',
       '003_admin_query_and_ingest.sql',
+      '004_merchant_scope.sql',
     ]);
     const businessTables = await business.query<{ table_name: string }>(
       "SELECT table_name FROM information_schema.tables WHERE table_schema = 'core' ORDER BY table_name",
@@ -122,6 +125,9 @@ test('business and audit migrations apply from empty databases', async () => {
     assert.ok(businessTables.rows.some((row) => row.table_name === 'product_review_events'));
     assert.ok(businessTables.rows.some((row) => row.table_name === 'catalog_inventory_adjustments'));
     assert.ok(businessTables.rows.some((row) => row.table_name === 'merchant_concession_previews'));
+    assert.ok(businessTables.rows.some((row) => row.table_name === 'buyer_profiles'));
+    assert.ok(businessTables.rows.some((row) => row.table_name === 'buyer_saved_addresses'));
+    assert.ok(businessTables.rows.some((row) => row.table_name === 'takeover_case_transitions'));
     assert.equal(businessTables.rows.some((row) => row.table_name === 'claim_projections'), false);
     const finalityColumns = await business.query<{ column_name: string }>(
       "SELECT column_name FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'transaction_finality'",
@@ -145,6 +151,271 @@ test('business and audit migrations apply from empty databases', async () => {
       ),
       /audit_entries_stream_evidence_check/,
     );
+  } finally {
+    await business.close();
+    await audit.close();
+  }
+});
+
+test('buyer account data is encrypted, tenant scoped and creates targets only from active saved addresses', async () => {
+  const db = await createBusinessDatabase();
+  const now = new Date('2026-07-15T06:00:00.000Z');
+  const createdTargets: Array<Record<string, unknown>> = [];
+  let reverseGeocodeCalls = 0;
+  try {
+    await seedCatalog(db, 2);
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES ($1,'BUYER',NULL,'ACTIVE',$2),($3,'BUYER',NULL,'ACTIVE',$2)`,
+      [BUYER, HASH, '0x3333333333333333333333333333333333333333'],
+    );
+    const region = {
+      regionCode: '210211',
+      province: 'Liaoning',
+      city: 'Dalian',
+      district: 'Ganjingzi',
+      formattedAddress: 'Liaoning Dalian Ganjingzi Software Park',
+      sourceReferenceHash: `0x${'3'.repeat(64)}`,
+    };
+    const service = new AccountService({
+      transactions: transactionAdapter(db),
+      regions: { reverseGeocode: async () => {
+        reverseGeocodeCalls += 1;
+        return region;
+      } },
+      parser: {
+        parse: async () => ({
+          recipientName: 'Zhang San',
+          phone: '13800138000',
+          province: region.province,
+          city: region.city,
+          district: region.district,
+          detailAddress: region.formattedAddress,
+          regionCode: region.regionCode,
+          longitude: 121.6,
+          latitude: 38.9,
+          sourceReferenceHash: region.sourceReferenceHash,
+        }),
+      },
+      encryptionKey: '11'.repeat(32),
+      retentionPolicyVersion: 'pii-v1',
+      createDeliveryTarget: async (_actor, input) => {
+        createdTargets.push(input);
+        return { targetId: 'target:saved-address', ...input };
+      },
+      clock: () => now,
+    });
+    const buyer = { walletAddress: BUYER, roles: ['BUYER'] as const };
+    const profile = await service.updateBuyerProfile(buyer, {
+      nickname: 'Private Nickname',
+      avatarAssetId: null,
+      expectedVersion: 0,
+      idempotencyKey: 'buyer-profile-update-1',
+    });
+    assert.equal(profile.nickname, 'Private Nickname');
+    const profileStorage = await db.query<{ encrypted: string }>(
+      "SELECT encode(encrypted_nickname, 'hex') AS encrypted FROM core.buyer_profiles WHERE buyer_wallet = $1",
+      [BUYER],
+    );
+    assert.equal(profileStorage.rows[0]?.encrypted.includes(Buffer.from('Private Nickname').toString('hex')), false);
+    assert.equal((await service.parseBuyerAddress(buyer, 'Zhang San 13800138000 Dalian Software Park')).canSave, true);
+
+    const home = await service.createBuyerAddress(buyer, {
+      label: 'Home',
+      recipientName: 'Zhang San',
+      phone: '13800138000',
+      detailAddress: 'Dalian Software Park Building 1',
+      longitude: 121.6,
+      latitude: 38.9,
+      isDefault: false,
+      idempotencyKey: 'buyer-address-home-1',
+    });
+    assert.equal(home.isDefault, true);
+    const repeatedHome = await service.createBuyerAddress(buyer, {
+      label: 'Home',
+      recipientName: 'Zhang San',
+      phone: '13800138000',
+      detailAddress: 'Dalian Software Park Building 1',
+      longitude: 121.6,
+      latitude: 38.9,
+      isDefault: false,
+      idempotencyKey: 'buyer-address-home-1',
+    });
+    assert.equal(repeatedHome.addressId, home.addressId);
+    assert.equal(reverseGeocodeCalls, 1);
+    const office = await service.createBuyerAddress(buyer, {
+      label: 'Office',
+      recipientName: 'Li Si',
+      phone: '13900139000',
+      detailAddress: 'Dalian Software Park Building 2',
+      longitude: 121.61,
+      latitude: 38.91,
+      isDefault: true,
+      idempotencyKey: 'buyer-address-office-1',
+    });
+    assert.equal(office.isDefault, true);
+    const listed = await service.listBuyerAddresses(buyer);
+    assert.equal(listed.addresses.length, 2);
+    assert.equal(listed.addresses.filter((address) => address.isDefault).length, 1);
+    assert.equal(listed.addresses[0]?.addressId, office.addressId);
+    await assert.rejects(
+      db.query(
+        "UPDATE core.buyer_saved_addresses SET is_default = true WHERE buyer_wallet = $1 AND status = 'ACTIVE'",
+        [BUYER],
+      ),
+      /buyer_saved_addresses_one_default_idx|duplicate key/,
+    );
+    const target = await service.createBuyerAddressTarget(buyer, office.addressId, 'saved-address-target-1');
+    assert.equal((target as { targetId: string }).targetId, 'target:saved-address');
+    assert.equal(createdTargets[0]?.phone, '13900139000');
+    await assert.rejects(
+      service.deleteBuyerAddress(
+        { walletAddress: '0x3333333333333333333333333333333333333333', roles: ['BUYER'] },
+        office.addressId,
+        { expectedVersion: office.version, idempotencyKey: 'wrong-buyer-address-delete' },
+      ),
+      /outside the wallet scope/,
+    );
+    await service.deleteBuyerAddress(buyer, office.addressId, {
+      expectedVersion: office.version,
+      idempotencyKey: 'buyer-address-delete-office',
+    });
+    await assert.rejects(
+      service.createBuyerAddressTarget(buyer, office.addressId, 'deleted-address-target-1'),
+      /deleted/,
+    );
+    const afterDelete = await service.listBuyerAddresses(buyer);
+    assert.equal(afterDelete.addresses.length, 1);
+    assert.equal(afterDelete.addresses[0]?.isDefault, true);
+    assert.equal(JSON.stringify((await db.query(
+      'SELECT encrypted_payload FROM core.buyer_saved_addresses WHERE buyer_wallet = $1',
+      [BUYER],
+    )).rows).includes('13900139000'), false);
+    const addressColumns = await db.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_schema = 'core' AND table_name = 'buyer_saved_addresses'`,
+    );
+    assert.equal(addressColumns.rows.some((row) => ['label', 'region_code', 'source_reference_hash'].includes(row.column_name)), false);
+    const auditPayloads = await db.query<{ payload: Record<string, unknown> }>(
+      'SELECT payload FROM core.audit_outbox_events WHERE actor_wallet = $1',
+      [BUYER],
+    );
+    const serializedAudit = JSON.stringify(auditPayloads.rows);
+    assert.equal(serializedAudit.includes('13800138000'), false);
+    assert.equal(serializedAudit.includes('Zhang San'), false);
+    await db.query(
+      `UPDATE core.buyer_saved_addresses
+       SET encryption_tag = decode($3, 'hex')
+       WHERE buyer_wallet = $1 AND address_id = $2`,
+      [BUYER, home.addressId, '00'.repeat(16)],
+    );
+    await assert.rejects(service.listBuyerAddresses(buyer), /decryption failed/);
+  } finally {
+    await db.close();
+  }
+});
+
+test('merchant profile keeps settlement wallet immutable and merchant audit never crosses tenant scope', async () => {
+  const business = await createBusinessDatabase();
+  const audit = await PGlite.create();
+  const now = new Date('2026-07-15T07:00:00.000Z');
+  try {
+    await seedCatalog(business, 2);
+    await business.query(
+      `INSERT INTO core.merchants (
+         merchant_id, settlement_wallet, status, level, guarantee_status
+       ) VALUES ('merchant-2','0x3333333333333333333333333333333333333333','APPROVED','V1','READY')`,
+    );
+    await business.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES ($1,'MERCHANT','merchant-1','ACTIVE',$2),
+                ('0x3333333333333333333333333333333333333333','MERCHANT','merchant-2','ACTIVE',$2)`,
+      [MERCHANT, HASH],
+    );
+    await applyMigrations(adapter(audit), 'audit', AUDIT_MIGRATIONS);
+    const service = new AccountService({
+      transactions: transactionAdapter(business),
+      regions: { reverseGeocode: async () => { throw new Error('unused'); } },
+      parser: { parse: async () => { throw new Error('unused'); } },
+      encryptionKey: '11'.repeat(32),
+      retentionPolicyVersion: 'pii-v1',
+      createDeliveryTarget: async () => { throw new Error('unused'); },
+      clock: () => now,
+    });
+    const merchantActor = { walletAddress: MERCHANT, roles: ['MERCHANT'] as const, merchantId: 'merchant-1' };
+    const profile = await service.updateMerchantProfile(merchantActor, {
+      shopName: 'Merchant One',
+      logoAssetId: null,
+      expectedVersion: 1,
+      idempotencyKey: 'merchant-profile-update-1',
+      correlationId: 'merchant-profile-correlation',
+    });
+    assert.equal(profile.shopName, 'Merchant One');
+    assert.equal(profile.settlementWallet, MERCHANT);
+    assert.equal(profile.settlementWalletMutable, false);
+    await business.query("UPDATE core.merchants SET status = 'SUSPENDED' WHERE merchant_id = 'merchant-1'");
+    await assert.rejects(
+      business.query(
+        "UPDATE core.merchants SET settlement_wallet = '0x4444444444444444444444444444444444444444' WHERE merchant_id = 'merchant-1'",
+      ),
+      /GovernedWalletMigrationRequired/,
+    );
+    await business.query("UPDATE core.merchants SET status = 'APPROVED' WHERE merchant_id = 'merchant-1'");
+    await assert.rejects(
+      service.getMerchantProfile({ ...merchantActor, merchantId: 'merchant-2' }),
+      /inactive or mismatched/,
+    );
+    const worker = new AuditOutboxWorker({
+      business: transactionAdapter(business),
+      audit: transactionAdapter(audit),
+      clock: () => now,
+    });
+    assert.equal(await worker.pollOnce(), true);
+    await appendAuditEntry(transactionAdapter(audit), {
+      sourceEventId: 'audit:merchant-two:test',
+      streamName: 'operational',
+      evidenceProfile: 'AUTHORIZATION',
+      eventType: 'MerchantTwoAction',
+      resourceType: 'MERCHANT_PROFILE',
+      resourceId: 'merchant-2',
+      merchantId: 'merchant-2',
+      actorWallet: '0x3333333333333333333333333333333333333333',
+      actorRole: 'MERCHANT',
+      correlationId: 'merchant-two-action',
+      requestHash: '4'.repeat(64),
+      payload: { evidence: 'bounded' },
+      authorizationEvidence: {
+        scheme: 'SESSION_RESOURCE_OWNERSHIP',
+        subject: '0x3333333333333333333333333333333333333333',
+        roles: ['MERCHANT'],
+        evidenceHash: `0x${'4'.repeat(64)}`,
+        checkedAt: now.toISOString(),
+      },
+      createdAt: now,
+    });
+    const query = new AuditQueryService(adapter(audit));
+    const merchantOne = await query.listMerchant(merchantActor, { limit: 20 });
+    assert.equal(merchantOne.entries.length, 1);
+    assert.equal(merchantOne.entries[0]?.operationType, 'MerchantProfileUpdated');
+    assert.equal(merchantOne.proofScope, 'MERCHANT_SCOPED_ENTRY_HASHES');
+    assert.equal(merchantOne.historyStatus, 'PARTIAL_PRE_MERCHANT_SCOPE');
+    assert.deepEqual(merchantOne.chainProof, { merchantId: 'merchant-1', entries: 1 });
+    assert.equal(JSON.stringify(merchantOne).includes('merchant-2'), false);
+    const merchantTwo = await query.listMerchant({
+      walletAddress: '0x3333333333333333333333333333333333333333',
+      roles: ['MERCHANT'],
+      merchantId: 'merchant-2',
+    }, { limit: 20 });
+    assert.equal(merchantTwo.entries.length, 1);
+    const exported = await query.exportMerchant(merchantActor, {
+      from: new Date(now.getTime() - 60_000),
+      to: new Date(now.getTime() + 60_000),
+    });
+    assert.equal(exported.entryCount, 1);
+    assert.equal(exported.csv.includes('MerchantProfileUpdated'), true);
+    assert.equal(exported.csv.includes('merchant-2'), false);
   } finally {
     await business.close();
     await audit.close();
@@ -4635,6 +4906,25 @@ test('audit outbox is transactional, retries exactly once and exposes read-only 
     )).rows[0]?.count, '0');
 
     await transactionAdapter(business).transaction((executor) => enqueueAudit(executor, input));
+    const storedOutbox = await business.query<{ payload: Record<string, unknown> }>(
+      "SELECT payload FROM core.audit_outbox_events WHERE source_event_id = 'audit:operation:one'",
+    );
+    const legacyContentHash = `0x${createHash('sha256').update(stableJson({
+      streamName: input.streamName,
+      evidenceProfile: input.evidenceProfile,
+      eventType: input.eventType,
+      resourceType: input.resourceType,
+      resourceId: input.resourceId,
+      actorWallet: input.actorWallet,
+      actorRole: input.actorRole,
+      correlationId: input.correlationId,
+      requestHash: input.requestHash,
+      payload: input.payload,
+      authorizationEvidence: {},
+      signatureEvidence: {},
+      transactionEvidence: input.transactionEvidence,
+    })).digest('hex')}`;
+    assert.equal(storedOutbox.rows[0]?.payload._contentHash, legacyContentHash);
     assert.equal(
       (await transactionAdapter(business).transaction((executor) => enqueueAudit(executor, input))).existing,
       true,
@@ -5084,7 +5374,8 @@ test('signed settlement request moves Available to Requested and an immutable co
       transaction_evidence: Record<string, unknown>;
     }>(
       `SELECT event_type, evidence_profile, payload, signature_evidence, transaction_evidence
-       FROM core.audit_outbox_events WHERE resource_type = 'SETTLEMENT_BATCH' AND resource_id = $1`,
+       FROM core.audit_outbox_events
+       WHERE resource_type = 'SETTLEMENT_BATCH' AND resource_id = $1 AND merchant_id IS NULL`,
       [batch.batch_id],
     );
     const auditByType = new Map(settlementAudits.rows.map((row) => [row.event_type, row]));
@@ -5107,6 +5398,31 @@ test('signed settlement request moves Available to Requested and an immutable co
     assert.equal(reorgAudit?.evidence_profile, 'CHAIN_OBSERVED');
     assert.equal(reorgAudit?.transaction_evidence.blockHash, `0x${'e'.repeat(64)}`);
     assert.equal(reorgAudit?.payload.canonicalBlockHash, `0x${'a'.repeat(64)}`);
+    const merchantSettlementAudits = await db.query<{
+      merchant_id: string;
+      event_type: string;
+      payload: Record<string, unknown>;
+    }>(
+      `SELECT merchant_id, event_type, payload FROM core.audit_outbox_events
+       WHERE resource_type = 'SETTLEMENT_BATCH' AND resource_id = $1 AND merchant_id IS NOT NULL`,
+      [batch.batch_id],
+    );
+    assert.ok(merchantSettlementAudits.rows.length >= 6);
+    assert.ok(merchantSettlementAudits.rows.every((row) => row.merchant_id === 'merchant-1'));
+    for (const eventType of [
+      'SettlementBatchCreated',
+      'SettlementBatchApproved',
+      'SettlementBatchSubmitted',
+      'SettlementBatchMined',
+      'SettlementBatchFinalized',
+      'SettlementBatchFinalityReorged',
+    ]) {
+      assert.ok(merchantSettlementAudits.rows.some((row) => row.event_type === eventType));
+    }
+    const tenantAuditPayload = JSON.stringify(merchantSettlementAudits.rows.map((row) => row.payload));
+    assert.equal(tenantAuditPayload.includes(String(request.request_id)), false);
+    assert.equal(tenantAuditPayload.includes(intent.orderId), false);
+    assert.equal(tenantAuditPayload.includes(merchantWallet.address.toLowerCase()), false);
     const reorgFinality = await db.query<{ block_hash: string; evidence: Record<string, unknown> }>(
       'SELECT block_hash, evidence FROM core.transaction_finality WHERE transaction_id LIKE $1',
       [`settlement:%${batch.batch_id}%`],
@@ -5114,6 +5430,194 @@ test('signed settlement request moves Available to Requested and an immutable co
     assert.equal(reorgFinality.rows[0]?.block_hash, `0x${'e'.repeat(64)}`);
     assert.equal(reorgFinality.rows[0]?.evidence.canonicalBlockHash, `0x${'a'.repeat(64)}`);
     await assertLedgerBalanced(db, 1);
+  } finally {
+    await db.close();
+  }
+});
+
+test('one Safe batch emits isolated tenant audit entries for every affected merchant', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const prepared = await prepareRequestedSettlement(db);
+    const merchantTwoWallet = Wallet.createRandom();
+    const merchantTwoBuyer = Wallet.createRandom();
+    const orderTwo = `0x${'2'.repeat(64)}`;
+    const reservationTwo = `0x${'3'.repeat(64)}`;
+    const safeAddress = prepared.runtime.safeAddress;
+    await db.query(
+      `INSERT INTO core.merchants (
+         merchant_id, settlement_wallet, status, level, guarantee_status
+       ) VALUES ('merchant-2',$1,'APPROVED','V1','READY')`,
+      [merchantTwoWallet.address.toLowerCase()],
+    );
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES ($1,'MERCHANT','merchant-2','ACTIVE',$2)`,
+      [merchantTwoWallet.address.toLowerCase(), HASH],
+    );
+    await db.query(
+      `INSERT INTO core.inventory_reservations (
+         reservation_id, reservation_hash, policy_version, sku_id, buyer_wallet,
+         quantity, classification, session_id, state, expires_at, consumed_order_id
+       ) SELECT $1,$2,policy_version,sku_id,$3,quantity,classification,session_id,
+                'CONSUMED',expires_at,$4
+         FROM core.inventory_reservations WHERE reservation_id = $5`,
+      [reservationTwo, `0x${'4'.repeat(64)}`, merchantTwoBuyer.address.toLowerCase(), orderTwo, prepared.intent.reservationId],
+    );
+    await db.query(
+      `INSERT INTO core.orders (
+         order_id, artifact_version, policy_version, oracle_version, buyer_wallet,
+         merchant_id, merchant_wallet, product_id, sku_id, quantity, fulfillment_mode,
+         fulfillment_target_hash, encrypted_delivery_target, region_code_hash,
+         product_policy_hash, reservation_id, quote_snapshot, allocation_snapshot,
+         seckill_snapshot, exact_amounts, buyer_nonce, quote_deadline, state,
+         finality_status, payment_tx_hash, payment_block_hash, paid_at, fulfilled_at,
+         allowed_actions, created_at, updated_at, shipped_at, delivered_at,
+         takeover_opened_at, arbitration_opened_at, bnm_state_version
+       ) SELECT $1,artifact_version,policy_version,oracle_version,$2,'merchant-2',$3,
+                product_id,sku_id,quantity,fulfillment_mode,fulfillment_target_hash,
+                encrypted_delivery_target,region_code_hash,product_policy_hash,$4,
+                quote_snapshot,allocation_snapshot,seckill_snapshot,exact_amounts,
+                buyer_nonce,quote_deadline,'FULFILLED','FINAL',payment_tx_hash,
+                payment_block_hash,paid_at,fulfilled_at,allowed_actions,created_at,
+                updated_at,shipped_at,delivered_at,takeover_opened_at,
+                arbitration_opened_at,bnm_state_version
+         FROM core.orders WHERE order_id = $5`,
+      [
+        orderTwo,
+        merchantTwoBuyer.address.toLowerCase(),
+        merchantTwoWallet.address.toLowerCase(),
+        reservationTwo,
+        prepared.intent.orderId,
+      ],
+    );
+    const merchantTwoAccount = `merchant:${merchantTwoWallet.address.toLowerCase()}:usdt`;
+    const clearingAccount = 'system:merchant-2-test-clearing:usdt';
+    const buyerPrizeAccount = `buyer:${merchantTwoBuyer.address.toLowerCase()}:prize:usdt`;
+    const buyerPrizeClearing = 'system:buyer-prize-test-clearing:usdt';
+    await db.query(
+      `INSERT INTO core.ledger_accounts (
+         account_id, owner_type, owner_id, asset, purpose, safe_address
+       ) VALUES
+         ($1,'MERCHANT',$2,'USDT','MERCHANT_RECEIVABLE',$3),
+         ($4,'SYSTEM','merchant-2-test-clearing','USDT','PAYMENT_CLEARING',$3),
+         ($5,'BUYER',$6,'USDT','SECKILL_PRIZE_LIABILITY',$3),
+         ($7,'SYSTEM','buyer-prize-test-clearing','USDT','PAYMENT_CLEARING',$3)`,
+      [
+        merchantTwoAccount,
+        merchantTwoWallet.address.toLowerCase(),
+        safeAddress,
+        clearingAccount,
+        buyerPrizeAccount,
+        merchantTwoBuyer.address.toLowerCase(),
+        buyerPrizeClearing,
+      ],
+    );
+    await db.query(
+      `INSERT INTO core.ledger_journals (
+         journal_id, event_key, event_type, order_id, policy_version, content_hash,
+         resource_type, resource_id, source_kind, source_reference_hash, payload
+       ) VALUES (
+         'journal:merchant-2-available','merchant-2-available','FULFILLMENT_AVAILABLE',
+         $1,1,$2,'ORDER',$1,'FULFILLMENT_EVIDENCE',$2,'{}'
+       )`,
+      [orderTwo, `0x${'5'.repeat(64)}`],
+    );
+    await db.query(
+      `INSERT INTO core.ledger_lines (
+         journal_id, account_id, side, amount, balance_state, backing_safe_address
+       ) VALUES
+         ('journal:merchant-2-available',$1,'CREDIT',45,'AVAILABLE',$3),
+         ('journal:merchant-2-available',$2,'DEBIT',45,'AVAILABLE',$3)`,
+      [merchantTwoAccount, clearingAccount, safeAddress],
+    );
+    await db.query(
+      `INSERT INTO core.ledger_journals (
+         journal_id, event_key, event_type, order_id, policy_version, content_hash,
+         resource_type, resource_id, source_kind, source_reference_hash, payload
+       ) VALUES (
+         'journal:buyer-prize-available','buyer-prize-available','FULFILLMENT_AVAILABLE',
+         $1,1,$2,'ORDER',$1,'FULFILLMENT_EVIDENCE',$2,'{}'
+       )`,
+      [orderTwo, `0x${'6'.repeat(64)}`],
+    );
+    await db.query(
+      `INSERT INTO core.ledger_lines (
+         journal_id, account_id, side, amount, balance_state, backing_safe_address
+       ) VALUES
+         ('journal:buyer-prize-available',$1,'CREDIT',10,'AVAILABLE',$3),
+         ('journal:buyer-prize-available',$2,'DEBIT',10,'AVAILABLE',$3)`,
+      [buyerPrizeAccount, buyerPrizeClearing, safeAddress],
+    );
+    const merchantTwo = {
+      walletAddress: merchantTwoWallet.address,
+      roles: ['MERCHANT'] as const,
+      merchantId: 'merchant-2',
+    };
+    await assert.rejects(
+      prepared.settlements.createIntent({ ...merchantTwo, merchantId: 'merchant-1' }, {
+        rail: 'MERCHANT_USDT',
+        amount: '45',
+        idempotencyKey: 'merchant-two-wrong-scope-intent',
+      }),
+      /scope does not match/,
+    );
+    const challenge = await prepared.settlements.createIntent(merchantTwo, {
+      rail: 'MERCHANT_USDT',
+      amount: '45',
+      idempotencyKey: 'merchant-two-settlement-intent',
+    });
+    const signature = await merchantTwoWallet.signTypedData(
+      challenge.typedData.domain,
+      challenge.typedData.types,
+      challenge.typedData.message,
+    );
+    await prepared.settlements.submitRequest(merchantTwo, {
+      intentId: challenge.intent.intentId,
+      signature,
+    });
+    const buyerPrizeChallenge = await prepared.settlements.createIntent({
+      walletAddress: merchantTwoBuyer.address,
+      roles: ['BUYER'] as const,
+    }, {
+      rail: 'PRIZE_USDT',
+      amount: '10',
+      idempotencyKey: 'buyer-prize-settlement-intent',
+    });
+    const buyerPrizeSignature = await merchantTwoBuyer.signTypedData(
+      buyerPrizeChallenge.typedData.domain,
+      buyerPrizeChallenge.typedData.types,
+      buyerPrizeChallenge.typedData.message,
+    );
+    await prepared.settlements.submitRequest({
+      walletAddress: merchantTwoBuyer.address,
+      roles: ['BUYER'] as const,
+    }, {
+      intentId: buyerPrizeChallenge.intent.intentId,
+      signature: buyerPrizeSignature,
+    });
+    const batch = await prepared.settlements.createBatch(prepared.operator, {
+      asset: 'USDT',
+      idempotencyKey: 'two-merchant-safe-batch',
+      runtime: prepared.runtime,
+    });
+    assert.equal(batch.total_amount, '100');
+    const tenantAudits = await db.query<{
+      merchant_id: string;
+      payload: Record<string, unknown>;
+    }>(
+      `SELECT merchant_id, payload FROM core.audit_outbox_events
+       WHERE event_type = 'SettlementBatchCreated' AND resource_id = $1
+         AND merchant_id IS NOT NULL ORDER BY merchant_id`,
+      [batch.batch_id],
+    );
+    assert.deepEqual(tenantAudits.rows.map((row) => row.merchant_id), ['merchant-1', 'merchant-2']);
+    assert.ok(tenantAudits.rows.every((row) => row.payload.itemCount === 1 && row.payload.totalAmount === '45'));
+    const serialized = JSON.stringify(tenantAudits.rows);
+    assert.equal(serialized.includes(prepared.intent.orderId), false);
+    assert.equal(serialized.includes(orderTwo), false);
+    assert.equal(serialized.includes(String(prepared.request.request_id)), false);
   } finally {
     await db.close();
   }
@@ -5257,6 +5761,9 @@ test('payment reorg quarantines a requested settlement before it can be batched'
   try {
     const prepared = await prepareRequestedSettlement(db);
     assert.equal((await reversePayment(db, prepared.intent)).status, 'REVERSED');
+    assert.equal((await db.query<{ merchant_id: string }>(
+      "SELECT merchant_id FROM core.audit_outbox_events WHERE event_type = 'PaymentFinalityReorged'",
+    )).rows[0]?.merchant_id, 'merchant-1');
     const request = await db.query<{ state: string; batch_id: string | null }>(
       'SELECT state, batch_id FROM core.settlement_requests WHERE request_id = $1',
       [prepared.request.request_id],
@@ -5764,12 +6271,14 @@ test('merchant guarantee finality is policy-bound, audited and frozen across dee
     const finalAudit = await db.query<{
       evidence_profile: string;
       correlation_id: string;
+      merchant_id: string;
       transaction_evidence: Record<string, unknown>;
     }>(
-      "SELECT evidence_profile, correlation_id, transaction_evidence FROM core.audit_outbox_events WHERE event_type = 'GuaranteeDepositFinalized'",
+      "SELECT evidence_profile, correlation_id, merchant_id, transaction_evidence FROM core.audit_outbox_events WHERE event_type = 'GuaranteeDepositFinalized'",
     );
     assert.equal(finalAudit.rows[0]?.evidence_profile, 'CHAIN_FINAL');
     assert.equal(finalAudit.rows[0]?.correlation_id, 'guarantee-finality-submit');
+    assert.equal(finalAudit.rows[0]?.merchant_id, 'merchant-1');
     assert.equal(finalAudit.rows[0]?.transaction_evidence.txHash, submission.transactionHash);
     assert.equal(finalAudit.rows[0]?.transaction_evidence.contractAddress, '0x55d398326f99059ff775485246999027b3197955');
     assert.equal(finalAudit.rows[0]?.transaction_evidence.eventSignatureHash, id('Transfer(address,address,uint256)'));
@@ -5826,6 +6335,9 @@ test('merchant guarantee finality is policy-bound, audited and frozen across dee
     assert.equal((await db.query<{ evidence_profile: string }>(
       "SELECT evidence_profile FROM core.audit_outbox_events WHERE event_type = 'GuaranteeDepositReorged'",
     )).rows[0]?.evidence_profile, 'CHAIN_OBSERVED');
+    assert.equal((await db.query<{ merchant_id: string }>(
+      "SELECT merchant_id FROM core.audit_outbox_events WHERE event_type = 'GuaranteeDepositReorged'",
+    )).rows[0]?.merchant_id, 'merchant-1');
 
     now = new Date(now.getTime() + 1_000);
     const replacementFinal = {
@@ -6075,13 +6587,14 @@ test('takeover funding consumes final guarantee first and records Operations adv
       safe_owner_approvals: unknown[];
       source_tx_hash: string | null;
       source_block_hash: string | null;
+      merchant_id: string;
       evidence_profile: string;
       signature_evidence: Record<string, unknown>;
       transaction_evidence: Record<string, unknown>;
     }>(
       `SELECT command.correlation_id, command.safe_owner_approvals,
          journal.source_tx_hash, journal.source_block_hash,
-         audit.evidence_profile, audit.signature_evidence, audit.transaction_evidence
+         audit.merchant_id, audit.evidence_profile, audit.signature_evidence, audit.transaction_evidence
        FROM core.takeover_funding_commands command
        JOIN core.ledger_journals journal
          ON journal.resource_type = 'TAKEOVER_CASE' AND journal.resource_id = command.case_id
@@ -6094,6 +6607,7 @@ test('takeover funding consumes final guarantee first and records Operations adv
     assert.equal(fundingEvidence.rows[0]?.safe_owner_approvals.length, 2);
     assert.equal(fundingEvidence.rows[0]?.source_tx_hash, null);
     assert.equal(fundingEvidence.rows[0]?.source_block_hash, null);
+    assert.equal(fundingEvidence.rows[0]?.merchant_id, 'merchant-1');
     assert.equal(fundingEvidence.rows[0]?.evidence_profile, 'SAFE_APPROVED');
     assert.equal(fundingEvidence.rows[0]?.signature_evidence.scheme, 'EIP712');
     assert.deepEqual(fundingEvidence.rows[0]?.transaction_evidence, {});
@@ -6136,13 +6650,15 @@ test('takeover funding consumes final guarantee first and records Operations adv
     const futureProceedsAudit = await db.query<{
       evidence_profile: string;
       correlation_id: string;
+      merchant_id: string;
       transaction_evidence: Record<string, unknown>;
     }>(
-      `SELECT evidence_profile, correlation_id, transaction_evidence
+      `SELECT evidence_profile, correlation_id, merchant_id, transaction_evidence
        FROM core.audit_outbox_events
        WHERE event_type = 'MerchantFutureProceedsCaptured' AND resource_id = 'merchant-1'`,
     );
     assert.equal(futureProceedsAudit.rows[0]?.evidence_profile, 'SYSTEM');
+    assert.equal(futureProceedsAudit.rows[0]?.merchant_id, 'merchant-1');
     assert.match(futureProceedsAudit.rows[0]?.correlation_id ?? '', /^fulfillment:command:/);
     assert.deepEqual(futureProceedsAudit.rows[0]?.transaction_evidence, {});
     const reimbursement = await db.query<{ owner_id: string; amount: string }>(

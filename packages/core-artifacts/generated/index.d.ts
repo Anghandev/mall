@@ -1,4 +1,4 @@
-export declare const artifactVersion: "2.0.0-settlement-admin.6";
+export declare const artifactVersion: "2.0.0-settlement-admin.7";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
@@ -26,8 +26,8 @@ export type FulfillmentRequestState = "OPEN" | "APPROVED" | "REJECTED" | "RESOLV
 export type LogisticsProvider = "KUAIDI100" | "CAINIAO";
 export type LogisticsStatus = "PICKED_UP" | "IN_TRANSIT" | "OUT_FOR_DELIVERY" | "DELIVERED" | "EXCEPTION";
 export type MediaContentType = "image/jpeg" | "image/png" | "image/webp" | "video/mp4" | "application/pdf";
-export type MediaPurpose = "PRODUCT_IMAGE" | "PRODUCT_VIDEO" | "CATEGORY_ICON" | "STORE_IMAGE" | "FULFILLMENT_EVIDENCE";
-export type MediaResourceType = "PRODUCT" | "CATEGORY" | "STORE" | "ORDER";
+export type MediaPurpose = "PRODUCT_IMAGE" | "PRODUCT_VIDEO" | "CATEGORY_ICON" | "STORE_IMAGE" | "FULFILLMENT_EVIDENCE" | "BUYER_AVATAR" | "MERCHANT_LOGO";
+export type MediaResourceType = "PRODUCT" | "CATEGORY" | "STORE" | "ORDER" | "BUYER" | "MERCHANT";
 export type FulfillmentAsset = "USDT" | "NPL" | "BNM_POINTS";
 export type ArbitrationOutcome = "FULFILL" | "RESUME_FULFILLMENT";
 export type SettlementRail = "MERCHANT_USDT" | "REWARD_NPL" | "PRIZE_USDT" | "TAKEOVER_USDT" | "OPERATIONS_REIMBURSEMENT_USDT";
@@ -1686,6 +1686,108 @@ export interface AllowedAction {
   enabled: boolean;
   reasonCode?: AllowedActionReasonCode;
   deadline?: string;
+}
+
+export interface BuyerProfile {
+  artifactVersion: typeof artifactVersion;
+  wallet: Address;
+  accountId: null;
+  accountIdStatus: 'DecisionBlocked';
+  nickname: string | null;
+  avatarAssetId: Bytes32 | null;
+  version: number;
+  updatedAt: Timestamp | null;
+}
+
+export interface BuyerSavedAddress {
+  addressId: string;
+  label: string;
+  recipientName: string;
+  phone: string;
+  detailAddress: string;
+  longitude: number;
+  latitude: number;
+  province: string;
+  city: string;
+  district: string;
+  formattedAddress: string;
+  regionCode: string;
+  isDefault: boolean;
+  version: number;
+  updatedAt: Timestamp;
+}
+
+export interface BuyerOverviewCount {
+  status: 'AVAILABLE';
+  count: AtomicAmount;
+}
+
+export interface BuyerOverview {
+  artifactVersion: typeof artifactVersion;
+  wallet: Address;
+  orderCounts: Readonly<{
+    pendingPayment: Readonly<{
+      status: 'DecisionBlocked';
+      count: null;
+      blocker: 'BUYER_PENDING_PAYMENT_PROJECTION';
+    }>;
+    pendingShipment: BuyerOverviewCount;
+    pendingReceipt: BuyerOverviewCount;
+    afterSale: BuyerOverviewCount;
+    total: BuyerOverviewCount;
+  }>;
+}
+
+export interface BuyerTakeoverTransition {
+  transitionId: string;
+  fromState: TakeoverState | null;
+  toState: TakeoverState;
+  evidenceType: string;
+  occurredAt: Timestamp;
+}
+
+export interface BuyerTakeoverTimeline {
+  artifactVersion: typeof artifactVersion;
+  orderId: string;
+  historyStatus: 'COMPLETE' | 'PARTIAL_LEGACY';
+  transitions: readonly BuyerTakeoverTransition[];
+}
+
+export interface MerchantProfile {
+  artifactVersion: typeof artifactVersion;
+  merchantId: string;
+  shopName: string | null;
+  logoAssetId: Bytes32 | null;
+  settlementWallet: Address;
+  settlementWalletMutable: false;
+  version: number;
+  updatedAt: Timestamp;
+}
+
+export interface MerchantAuditEntry {
+  entryId: string;
+  operationTime: Timestamp;
+  operationType: string;
+  module: string;
+  detail: string;
+  signatureHash: Bytes32 | null;
+  safeOrChainTxHash: Bytes32 | null;
+  entryHash: string;
+}
+
+export interface MerchantAuditList {
+  entries: readonly MerchantAuditEntry[];
+  proofScope: 'MERCHANT_SCOPED_ENTRY_HASHES';
+  historyStatus: 'PARTIAL_PRE_MERCHANT_SCOPE';
+  chainProof: Readonly<{ merchantId: string; entries: number }>;
+  nextCursor: Readonly<{ createdAt: Timestamp; entryId: string }> | null;
+}
+
+export interface MerchantAuditExport {
+  contentType: 'text/csv; charset=utf-8';
+  filename: string;
+  entryCount: number;
+  csv: string;
 }
 
 export interface PaymentFinality {

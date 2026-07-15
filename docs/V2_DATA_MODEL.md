@@ -1,7 +1,7 @@
 # Abu 24K V2 Data Model
 
 Status: coordinated local settlement/admin checkpoint
-`2.0.0-settlement-admin.6`. This document describes implemented catalog, media, payment,
+`2.0.0-settlement-admin.7`. This document describes implemented catalog, media, payment,
 fulfillment, settlement and administrative storage and does not authorize
 deployment.
 
@@ -167,6 +167,32 @@ overwrite a later reorg `LOCKED` state.
   future-proceeds and platform-advance/debt entries. Each governed command and
   resulting debt recovery remains linked to the takeover evidence.
 
+## Account And Tenant Audit Storage
+
+- `core.buyer_profiles` stores AES-256-GCM encrypted nicknames and optional
+  provider-sealed avatar identity. Buyer account ID remains explicitly
+  `DecisionBlocked` rather than being synthesized from a wallet.
+- `core.buyer_saved_addresses` stores encrypted address payloads, AMap region
+  evidence, logical deletion, optimistic versions and one active transactional
+  default per wallet. Raw parser text is never stored. A saved row is not a
+  fulfillment snapshot: checkout creates a new expiring `fulfillment_target`.
+- `core.account_write_commands` keeps profile/address write idempotency without
+  storing plaintext PII. The production retention-policy version is required
+  before new nickname or address PII can be persisted.
+- `core.buyer_account_locks` serializes account/address writes per buyer wallet,
+  including concurrent first-address and default-address selection.
+- Settlement intents and requests retain the authoritative merchant scope
+  resolved from the settlement wallet or immutable order. Multi-merchant Safe
+  batches append separate tenant audit entries with merchant-only counts and
+  amounts; they never expose another merchant's order, request or recipient.
+- `core.takeover_case_transitions` records future state changes append-only.
+  Existing pre-migration cases are labeled partial; buyer projection omits
+  guarantee sources, debt, Safe internals and internal evidence hashes.
+- `audit.entries.merchant_id` and the matching business outbox field carry an
+  explicit tenant scope through delivery. Merchant reads require equality with
+  the active merchant binding, hide legacy null-scope rows and expose bounded
+  summaries instead of the raw audit payload.
+
 Fulfillment completion stores the method and immutable evidence, closes an
 active takeover case, resolves eligible requests and writes BNM availability to
 the outbox in the same business transaction. There is no refund table or
@@ -209,4 +235,5 @@ not a substitute for production PostgreSQL backup and restore evidence.
 Production PostgreSQL, Redis, encrypted backup storage, Safe addresses, RPCs,
 signer services and providers remain `ExternalBlocked`. Missing commercial
 allocation inputs remain `DecisionBlocked`. There is no fixture-backed success
-path and no business-refund or Claim table/API in V2.
+path and no business-refund or Claim table/API in V2. Buyer account-ID policy
+and production PII retention/deletion policy also remain `DecisionBlocked`.

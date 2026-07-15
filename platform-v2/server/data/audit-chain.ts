@@ -21,6 +21,7 @@ export interface AuditInput {
   eventType: string;
   resourceType: string;
   resourceId: string;
+  merchantId?: string;
   actorWallet?: string;
   actorRole?: string;
   correlationId: string;
@@ -74,6 +75,7 @@ export interface AuditRow {
   event_type: string;
   resource_type: string;
   resource_id: string;
+  merchant_id: string | null;
   actor_wallet: string | null;
   actor_role: string | null;
   correlation_id: string;
@@ -96,6 +98,7 @@ async function appendAuditEntryInTransaction(executor: SqlExecutor, input: Audit
   const redactedPayload = redact(input.payload) as Record<string, unknown>;
   const createdAt = input.createdAt ?? new Date();
   const { authorizationEvidence, signatureEvidence, transactionEvidence } = normalizeAuditEvidence(input);
+  const merchantId = normalizedMerchantId(input.merchantId);
   if (input.sourceEventId) {
     const existing = await executor.query<AuditRow>(
       'SELECT * FROM audit.entries WHERE source_event_id = $1',
@@ -127,8 +130,9 @@ async function appendAuditEntryInTransaction(executor: SqlExecutor, input: Audit
     evidenceProfile: input.evidenceProfile,
     sequence,
     eventType: input.eventType,
-    resourceType: input.resourceType,
-    resourceId: input.resourceId,
+      resourceType: input.resourceType,
+      resourceId: input.resourceId,
+      ...(merchantId ? { merchantId } : {}),
     actorWallet: input.actorWallet ?? null,
     actorRole: input.actorRole ?? null,
     correlationId: input.correlationId,
@@ -142,11 +146,11 @@ async function appendAuditEntryInTransaction(executor: SqlExecutor, input: Audit
   });
   const inserted = await executor.query<AuditRow>(
     `INSERT INTO audit.entries (
-       entry_id, stream_name, evidence_profile, sequence, event_type, resource_type, resource_id,
+       entry_id, stream_name, evidence_profile, sequence, event_type, resource_type, resource_id, merchant_id,
        actor_wallet, actor_role, correlation_id, request_hash, payload,
        authorization_evidence, signature_evidence, transaction_evidence,
        previous_hash, entry_hash, created_at, source_event_id
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
      RETURNING *`,
     [
       entryId,
@@ -156,6 +160,7 @@ async function appendAuditEntryInTransaction(executor: SqlExecutor, input: Audit
       input.eventType,
       input.resourceType,
       input.resourceId,
+      merchantId,
       input.actorWallet ?? null,
       input.actorRole ?? null,
       input.correlationId,
@@ -210,6 +215,7 @@ export function verifyAuditChain(rows: AuditRow[]) {
       eventType: row.event_type,
       resourceType: row.resource_type,
       resourceId: row.resource_id,
+      ...(row.merchant_id ? { merchantId: row.merchant_id } : {}),
       actorWallet: row.actor_wallet,
       actorRole: row.actor_role,
       correlationId: row.correlation_id,
@@ -244,6 +250,7 @@ function assertSameSource(
     || row.event_type !== input.eventType
     || row.resource_type !== input.resourceType
     || row.resource_id !== input.resourceId
+    || row.merchant_id !== normalizedMerchantId(input.merchantId)
     || row.actor_wallet !== (input.actorWallet ?? null)
     || row.actor_role !== (input.actorRole ?? null)
     || row.correlation_id !== input.correlationId
@@ -273,6 +280,13 @@ function sanitizeAuthorizationEvidence(evidence: AuthorizationAuditEvidence | un
 
 export function hashAuditEntry(value: Record<string, unknown>) {
   return createHash('sha256').update(canonicalJson(value)).digest('hex');
+}
+
+function normalizedMerchantId(value: string | undefined) {
+  if (value === undefined) return null;
+  const normalized = value.trim();
+  if (!/^[A-Za-z0-9:_-]{1,128}$/.test(normalized)) throw new Error('InvalidAuditMerchantId');
+  return normalized;
 }
 
 export function redact(value: unknown): unknown {

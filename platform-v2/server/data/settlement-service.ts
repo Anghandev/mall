@@ -67,6 +67,7 @@ interface IntentRow {
   intent_id: string;
   artifact_version: string;
   wallet_address: string;
+  merchant_id: string | null;
   recipient_address: string;
   rail: SettlementRail;
   asset: 'USDT' | 'NPL';
@@ -134,6 +135,7 @@ interface RequestedItemRow {
   amount: string;
   requested_at: Date;
   policy_version: string | number;
+  merchant_id: string | null;
 }
 
 interface RequestProjectionRow extends Record<string, unknown> {
@@ -214,8 +216,9 @@ export class SettlementService {
       }
 
       const rail = railDefinition(input.rail);
-      const recipient = await authorizeSettlementOwner(executor, actor, wallet, input.rail);
-      const sources = await availableSources(executor, wallet, actor.merchantId, input.rail);
+      const ownership = await authorizeSettlementOwner(executor, actor, wallet, input.rail);
+      const recipient = ownership.recipient;
+      const sources = await availableSources(executor, wallet, ownership.merchantId, input.rail);
       const selected = selectSources(sources, BigInt(input.amount));
       if (selected.items.length > 256) {
         throw new CoreError('InvalidRequest', 'Settlement intent exceeds the 256-item Safe batch limit');
@@ -256,14 +259,15 @@ export class SettlementService {
       const digest = settlementIntentDigest(intent).toLowerCase();
       await executor.query(
         `INSERT INTO core.settlement_intents (
-           intent_id, artifact_version, wallet_address, recipient_address, rail,
+           intent_id, artifact_version, wallet_address, merchant_id, recipient_address, rail,
            asset, asset_address, safe_address, amount, items_hash, intent_digest,
            nonce, deadline, state, idempotency_key, request_hash, created_at
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'ISSUED',$14,$15,$16)`,
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'ISSUED',$15,$16,$17)`,
         [
           intentId,
           CORE_ARTIFACT_VERSION,
           wallet,
+          ownership.merchantId ?? null,
           recipient,
           input.rail,
           rail.asset,
@@ -299,6 +303,7 @@ export class SettlementService {
         eventType: 'SettlementIntentIssued',
         resourceType: 'SETTLEMENT_INTENT',
         resourceId: intentId,
+        ...(ownership.merchantId ? { merchantId: ownership.merchantId } : {}),
         actor,
         wallet,
         correlationId: auditCorrelationId(input.correlationId),
@@ -458,6 +463,7 @@ export class SettlementService {
           createdAt: now,
         })
         : undefined;
+      const merchantId = await merchantIdForOrder(executor, input.orderId);
       const deadline = new Date(now.getTime() + INTENT_TTL_SECONDS * 1000);
       const nonce = await allocateNonce(executor, wallet);
       const intentId = randomHash();
@@ -493,14 +499,15 @@ export class SettlementService {
       const digest = settlementIntentDigest(intent).toLowerCase();
       await executor.query(
         `INSERT INTO core.settlement_intents (
-           intent_id, artifact_version, wallet_address, recipient_address, rail,
+           intent_id, artifact_version, wallet_address, merchant_id, recipient_address, rail,
            asset, asset_address, safe_address, amount, items_hash, intent_digest,
            nonce, deadline, state, idempotency_key, request_hash, created_at
-         ) VALUES ($1,$2,$3,$4,$5,'USDT',$6,$7,$8,$9,$10,$11,$12,'ISSUED',$13,$14,$15)`,
+         ) VALUES ($1,$2,$3,$4,$5,$6,'USDT',$7,$8,$9,$10,$11,$12,$13,'ISSUED',$14,$15,$16)`,
         [
           intentId,
           CORE_ARTIFACT_VERSION,
           wallet,
+          merchantId,
           recipient,
           input.rail,
           USDT_ADDRESS,
@@ -559,6 +566,7 @@ export class SettlementService {
         eventType: 'GovernedSettlementIntentIssued',
         resourceType: expectedResourceType,
         resourceId: input.resourceId,
+        merchantId,
         actorWallet: wallet,
         actorRole: actor.roles[0]!,
         correlationId: auditCorrelationId(input.correlationId),
@@ -650,15 +658,16 @@ export class SettlementService {
       const signatureHash = keccak256(input.signature).toLowerCase();
       await executor.query(
         `INSERT INTO core.settlement_requests (
-           request_id, intent_id, artifact_version, wallet_address, recipient_address,
+           request_id, intent_id, artifact_version, wallet_address, merchant_id, recipient_address,
            rail, asset, asset_address, safe_address, amount, items_hash, intent_digest,
            signature, signature_hash, state, requested_at
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'REQUESTED',$15)`,
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'REQUESTED',$16)`,
         [
           requestId,
           intent.intent_id,
           intent.artifact_version,
           intent.wallet_address,
+          intent.merchant_id,
           intent.recipient_address,
           intent.rail,
           intent.asset,
@@ -730,6 +739,7 @@ export class SettlementService {
         eventType: 'SettlementRequested',
         resourceType: 'SETTLEMENT_REQUEST',
         resourceId: requestId,
+        ...(intent.merchant_id ? { merchantId: intent.merchant_id } : {}),
         actorWallet: wallet,
         actorRole: actor.roles[0]!,
         correlationId: auditCorrelationId(input.correlationId),
@@ -845,7 +855,7 @@ export class SettlementService {
       const requestedItems = await executor.query<RequestedItemRow>(
         `SELECT request.request_id, item.item_index AS request_item_index,
            item.order_id, item.account_id, request.recipient_address, item.amount,
-           request.requested_at, orders.policy_version
+           request.requested_at, orders.policy_version, request.merchant_id
          FROM core.settlement_requests request
          JOIN core.settlement_request_items item ON item.request_id = request.request_id
          JOIN core.orders orders ON orders.order_id = item.order_id
@@ -1041,6 +1051,35 @@ export class SettlementService {
         },
         now,
       });
+      const merchantBatchTotals = new Map<string, { itemCount: number; totalAmount: bigint }>();
+      for (const item of batchItems) {
+        if (!item.merchant_id) continue;
+        const current = merchantBatchTotals.get(item.merchant_id) ?? { itemCount: 0, totalAmount: 0n };
+        current.itemCount += 1;
+        current.totalAmount += BigInt(item.amount);
+        merchantBatchTotals.set(item.merchant_id, current);
+      }
+      for (const [merchantId, totals] of merchantBatchTotals) {
+        await enqueueSettlementAuthorizationAudit(executor, {
+          eventType: 'SettlementBatchCreated',
+          resourceType: 'SETTLEMENT_BATCH',
+          resourceId: batchId,
+          merchantId,
+          actor,
+          wallet: normalizedAddress(actor.walletAddress, 'batch creator'),
+          correlationId: auditCorrelationId(input.correlationId),
+          requestHash: batch.contentHash,
+          payload: {
+            asset: input.asset,
+            safeAddress: runtime.safeAddress,
+            safeTxHash: batch.safeTxHash,
+            contentHash: batch.contentHash,
+            itemCount: totals.itemCount,
+            totalAmount: totals.totalAmount.toString(),
+          },
+          now,
+        });
+      }
       return loadBatchProjection(executor, batchId);
     });
   }
@@ -1050,6 +1089,7 @@ async function enqueueSettlementAuthorizationAudit(executor: SqlExecutor, input:
   eventType: string;
   resourceType: string;
   resourceId: string;
+  merchantId?: string;
   actor: FulfillmentActor;
   wallet: string;
   correlationId: string;
@@ -1063,6 +1103,7 @@ async function enqueueSettlementAuthorizationAudit(executor: SqlExecutor, input:
     roles,
     resourceType: input.resourceType,
     resourceId: input.resourceId,
+    merchantId: input.merchantId ?? null,
     checkedAt: input.now.toISOString(),
   });
   await enqueueAudit(executor, {
@@ -1070,12 +1111,14 @@ async function enqueueSettlementAuthorizationAudit(executor: SqlExecutor, input:
       eventType: input.eventType,
       resourceId: input.resourceId,
       requestHash: input.requestHash,
+      merchantId: input.merchantId ?? null,
     }),
     streamName: 'financial',
     evidenceProfile: 'AUTHORIZATION',
     eventType: input.eventType,
     resourceType: input.resourceType,
     resourceId: input.resourceId,
+    ...(input.merchantId ? { merchantId: input.merchantId } : {}),
     actorWallet: input.wallet,
     actorRole: roles[0]!,
     correlationId: input.correlationId,
@@ -1127,9 +1170,9 @@ async function authorizeSettlementOwner(
 ) {
   if (isGovernedRail(rail)) {
     assertRole(actor, 'ADMIN', 'OPERATOR', 'ARBITRATOR');
-    return wallet;
+    return { recipient: wallet };
   }
-  if (rail !== 'MERCHANT_USDT') return wallet;
+  if (rail !== 'MERCHANT_USDT') return { recipient: wallet };
   if (!actor.roles.includes('MERCHANT')) throw new CoreError('Forbidden', 'Merchant role is required', 403);
   const merchant = await executor.query<{
     merchant_id: string;
@@ -1148,10 +1191,23 @@ async function authorizeSettlementOwner(
   if (!row || row.settlement_wallet.toLowerCase() !== wallet) {
     throw new CoreError('Forbidden', 'Merchant settlement wallet must sign the request', 403);
   }
+  if (actor.merchantId && row.merchant_id !== actor.merchantId) {
+    throw new CoreError('Forbidden', 'Merchant settlement scope does not match the active session', 403);
+  }
   if (row.status !== 'APPROVED' || row.guarantee_status !== 'READY') {
     throw new CoreError('Forbidden', 'Merchant settlement is frozen', 403);
   }
-  return row.settlement_wallet.toLowerCase();
+  return { recipient: row.settlement_wallet.toLowerCase(), merchantId: row.merchant_id };
+}
+
+async function merchantIdForOrder(executor: SqlExecutor, orderId: string) {
+  const result = await executor.query<{ merchant_id: string }>(
+    'SELECT merchant_id FROM core.orders WHERE order_id = $1',
+    [orderId],
+  );
+  const merchantId = result.rows[0]?.merchant_id;
+  if (!merchantId) throw new CoreError('UnknownState', 'Settlement order merchant is unavailable', 409);
+  return merchantId;
 }
 
 async function availableSources(

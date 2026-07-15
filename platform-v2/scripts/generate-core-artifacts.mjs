@@ -96,13 +96,19 @@ const schemaSources = [
       '011_catalog_management.sql',
       '012_order_operations.sql',
       '013_business_analytics.sql',
+      '014_accounts_and_profiles.sql',
     ],
   },
   {
     name: 'audit',
     directory: 'audit',
     migrationTable: 'audit.schema_migrations',
-    files: ['001_audit_schema.sql', '002_evidence_policy.sql', '003_admin_query_and_ingest.sql'],
+    files: [
+      '001_audit_schema.sql',
+      '002_evidence_policy.sql',
+      '003_admin_query_and_ingest.sql',
+      '004_merchant_scope.sql',
+    ],
   },
 ];
 const schemaArtifacts = new Map();
@@ -314,6 +320,11 @@ const coordinatedManifest = {
     notificationDelivery: 'AVAILABLE',
     systemConfigGovernanceHttp: 'AVAILABLE',
     auditHttp: 'AVAILABLE',
+    buyerAccountHttp: 'AVAILABLE',
+    buyerSavedAddressHttp: 'AVAILABLE',
+    buyerTakeoverTimelineHttp: 'AVAILABLE',
+    merchantProfileHttp: 'AVAILABLE',
+    merchantScopedAuditHttp: 'AVAILABLE',
     monitoringHttp: 'AVAILABLE',
     coverageMonitoring: 'AVAILABLE',
     storesHttp: 'AVAILABLE',
@@ -406,6 +417,13 @@ const coordinatedManifest = {
     'MonitoringDashboard',
     'MerchantBusinessDashboard',
     'AdminBusinessDashboard',
+    'BuyerProfile',
+    'BuyerSavedAddress',
+    'BuyerOverview',
+    'BuyerTakeoverTimeline',
+    'MerchantProfile',
+    'MerchantAuditList',
+    'MerchantAuditExport',
   ],
 };
 files.set('coordinated-manifest.json', json(coordinatedManifest));
@@ -498,6 +516,7 @@ function buildOpenApi() {
     'x-artifactVersion': artifactVersion,
     servers: [],
     paths: {
+      ...accountOpenApiPaths(errorResponse),
       ...settlementAdminOpenApiPaths(errorResponse),
       ...seckillRuntimeOpenApiPaths(errorResponse),
       ...catalogManagementOpenApiPaths(errorResponse),
@@ -888,6 +907,7 @@ function buildOpenApi() {
         ...catalogManagementOpenApiSchemas(),
         ...settlementAdminOpenApiSchemas(),
         ...seckillRuntimeOpenApiSchemas(),
+        ...accountOpenApiSchemas(),
         ErrorResponse: {
           type: 'object', additionalProperties: false, required: ['error'],
           properties: {
@@ -1093,6 +1113,318 @@ function seckillRuntimeOpenApiPaths(errorResponse) {
     '/v2/seckill/sessions/{sessionId}/events': {
       get: read('listSeckillSessionEvents', 'RealtimeEventPage', [sessionParameter, ...cursorParameters]),
     },
+  };
+}
+
+function accountOpenApiPaths(errorResponse) {
+  const security = [{ bearerAuth: [] }];
+  const pathParameter = (name) => ({
+    name,
+    in: 'path',
+    required: true,
+    schema: { type: 'string', minLength: 1, maxLength: 256 },
+  });
+  const operation = (operationId, responseSchema, description) => ({
+    operationId,
+    security,
+    responses: {
+      200: response(description, { $ref: `#/components/schemas/${responseSchema}` }),
+      default: errorResponse,
+    },
+  });
+  return {
+    '/v2/buyer/profile': {
+      get: operation('getBuyerProfile', 'BuyerProfile', 'Encrypted buyer profile projection'),
+      put: {
+        operationId: 'updateBuyerProfile',
+        security,
+        requestBody: body({ $ref: '#/components/schemas/UpdateBuyerProfileRequest' }),
+        responses: {
+          200: response('Updated encrypted buyer profile', { $ref: '#/components/schemas/BuyerProfile' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/buyer/addresses/parse': {
+      post: {
+        operationId: 'parseBuyerAddress',
+        security,
+        requestBody: body({ $ref: '#/components/schemas/ParseBuyerAddressRequest' }),
+        responses: {
+          200: response('Ephemeral PII-safe address parse', { $ref: '#/components/schemas/ParsedBuyerAddress' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/buyer/addresses': {
+      get: operation('listBuyerAddresses', 'BuyerAddressList', 'Wallet-scoped encrypted address list'),
+      post: {
+        operationId: 'createBuyerAddress',
+        security,
+        requestBody: body({ $ref: '#/components/schemas/CreateBuyerAddressRequest' }),
+        responses: {
+          201: response('Created encrypted buyer address', { $ref: '#/components/schemas/BuyerSavedAddress' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/buyer/addresses/{addressId}': {
+      put: {
+        operationId: 'updateBuyerAddress',
+        security,
+        parameters: [pathParameter('addressId')],
+        requestBody: body({ $ref: '#/components/schemas/UpdateBuyerAddressRequest' }),
+        responses: {
+          200: response('Updated encrypted buyer address', { $ref: '#/components/schemas/BuyerSavedAddress' }),
+          default: errorResponse,
+        },
+      },
+      delete: {
+        operationId: 'deleteBuyerAddress',
+        security,
+        parameters: [pathParameter('addressId')],
+        requestBody: body({ $ref: '#/components/schemas/VersionedAccountCommand' }),
+        responses: {
+          200: response('Logically deleted buyer address', { $ref: '#/components/schemas/DeletedBuyerAddress' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/buyer/addresses/{addressId}/default': {
+      post: {
+        operationId: 'setDefaultBuyerAddress',
+        security,
+        parameters: [pathParameter('addressId')],
+        requestBody: body({ $ref: '#/components/schemas/VersionedAccountCommand' }),
+        responses: {
+          200: response('Transactional default buyer address', { $ref: '#/components/schemas/BuyerSavedAddress' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/buyer/addresses/{addressId}/fulfillment-target': {
+      post: {
+        operationId: 'createSavedAddressFulfillmentTarget',
+        security,
+        parameters: [pathParameter('addressId')],
+        requestBody: body({ $ref: '#/components/schemas/IdempotentAccountCommand' }),
+        responses: {
+          201: response('Fresh quote-bound delivery target from saved address', { $ref: '#/components/schemas/DeliveryTarget' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/buyer/overview': {
+      get: operation('getBuyerOverview', 'BuyerOverview', 'Canonical buyer order counts'),
+    },
+    '/v2/orders/{orderId}/takeover-timeline': {
+      get: {
+        ...operation('getBuyerTakeoverTimeline', 'BuyerTakeoverTimeline', 'Redacted append-only takeover timeline'),
+        parameters: [pathParameter('orderId')],
+      },
+    },
+    '/v2/merchant/profile': {
+      get: operation('getMerchantProfile', 'MerchantProfile', 'Tenant-scoped merchant profile'),
+      put: {
+        operationId: 'updateMerchantProfile',
+        security,
+        requestBody: body({ $ref: '#/components/schemas/UpdateMerchantProfileRequest' }),
+        responses: {
+          200: response('Updated tenant-scoped merchant profile', { $ref: '#/components/schemas/MerchantProfile' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/merchant/audit/entries': {
+      get: {
+        ...operation('listMerchantAuditEntries', 'MerchantAuditList', 'Tenant-scoped bounded audit summaries'),
+        parameters: [
+          { name: 'streamName', in: 'query', schema: { enum: [...auditStreamNames] } },
+          ...['eventType', 'resourceType', 'resourceId', 'correlationId', 'cursorEntryId'].map((name) => ({
+            name,
+            in: 'query',
+            schema: { type: 'string', minLength: 1 },
+          })),
+          ...['from', 'to', 'cursorCreatedAt'].map((name) => ({
+            name,
+            in: 'query',
+            schema: { type: 'string', format: 'date-time' },
+          })),
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 200 } },
+        ],
+      },
+    },
+    '/v2/merchant/audit/exports': {
+      post: {
+        operationId: 'exportMerchantAuditEntries',
+        security,
+        requestBody: body({ $ref: '#/components/schemas/MerchantAuditExportRequest' }),
+        responses: {
+          200: response('Bounded tenant-scoped CSV export', { $ref: '#/components/schemas/MerchantAuditExport' }),
+          default: errorResponse,
+        },
+      },
+    },
+  };
+}
+
+function accountOpenApiSchemas() {
+  const ref = (name) => ({ $ref: `#/components/schemas/${name}` });
+  const nullable = (schema) => ({ anyOf: [schema, { type: 'null' }] });
+  const object = (properties, required = Object.keys(properties)) => ({
+    type: 'object', additionalProperties: false, required, properties,
+  });
+  const string = { type: 'string', minLength: 1 };
+  const timestamp = { type: 'string', format: 'date-time' };
+  const idempotencyKey = { type: 'string', minLength: 8, maxLength: 128 };
+  const version = { type: 'integer', minimum: 0 };
+  const addressFields = {
+    label: { type: 'string', minLength: 1, maxLength: 32 },
+    recipientName: { type: 'string', minLength: 1, maxLength: 64 },
+    phone: { type: 'string', pattern: '^1[3-9][0-9]{9}$' },
+    detailAddress: { type: 'string', minLength: 5, maxLength: 300 },
+    longitude: { type: 'number', minimum: -180, maximum: 180 },
+    latitude: { type: 'number', minimum: -90, maximum: 90 },
+    isDefault: { type: 'boolean' },
+  };
+  const availableCount = object({ status: { const: 'AVAILABLE' }, count: ref('AtomicAmount') });
+  return {
+    BuyerProfile: object({
+      artifactVersion: { const: artifactVersion },
+      wallet: ref('Address'),
+      accountId: { type: 'null' },
+      accountIdStatus: { const: 'DecisionBlocked' },
+      nickname: nullable(string),
+      avatarAssetId: nullable(ref('Bytes32')),
+      version,
+      updatedAt: nullable(timestamp),
+    }),
+    UpdateBuyerProfileRequest: object({
+      nickname: nullable({ type: 'string', minLength: 1, maxLength: 40 }),
+      avatarAssetId: nullable(ref('Bytes32')),
+      expectedVersion: version,
+      idempotencyKey,
+    }),
+    ParseBuyerAddressRequest: object({ rawText: { type: 'string', minLength: 5, maxLength: 1000 } }),
+    ParsedBuyerAddress: object({
+      recipientName: nullable(string),
+      phone: nullable({ type: 'string' }),
+      province: nullable(string),
+      city: nullable(string),
+      district: nullable(string),
+      detailAddress: nullable(string),
+      regionCode: nullable({ type: 'string', pattern: '^[0-9]{6}$' }),
+      longitude: nullable({ type: 'number' }),
+      latitude: nullable({ type: 'number' }),
+      sourceReferenceHash: nullable(ref('Bytes32')),
+      canSave: { type: 'boolean' },
+      missingFields: { type: 'array', items: string },
+    }),
+    BuyerSavedAddress: object({
+      addressId: string,
+      ...addressFields,
+      province: string,
+      city: string,
+      district: string,
+      formattedAddress: string,
+      regionCode: { type: 'string', pattern: '^[0-9]{6}$' },
+      version: { type: 'integer', minimum: 1 },
+      updatedAt: timestamp,
+    }),
+    BuyerAddressList: object({
+      artifactVersion: { const: artifactVersion },
+      addresses: { type: 'array', items: ref('BuyerSavedAddress') },
+    }),
+    CreateBuyerAddressRequest: object({ ...addressFields, idempotencyKey }),
+    UpdateBuyerAddressRequest: object({
+      ...addressFields,
+      expectedVersion: { type: 'integer', minimum: 1 },
+      idempotencyKey,
+    }),
+    VersionedAccountCommand: object({
+      expectedVersion: { type: 'integer', minimum: 1 },
+      idempotencyKey,
+    }),
+    IdempotentAccountCommand: object({ idempotencyKey }),
+    DeletedBuyerAddress: object({ addressId: string, status: { const: 'DELETED' } }),
+    BuyerOverview: object({
+      artifactVersion: { const: artifactVersion },
+      wallet: ref('Address'),
+      orderCounts: object({
+        pendingPayment: object({
+          status: { const: 'DecisionBlocked' },
+          count: { type: 'null' },
+          blocker: { const: 'BUYER_PENDING_PAYMENT_PROJECTION' },
+        }),
+        pendingShipment: availableCount,
+        pendingReceipt: availableCount,
+        afterSale: availableCount,
+        total: availableCount,
+      }),
+    }),
+    BuyerTakeoverTransition: object({
+      transitionId: string,
+      fromState: nullable({ enum: [...takeoverStates] }),
+      toState: { enum: [...takeoverStates] },
+      evidenceType: string,
+      occurredAt: timestamp,
+    }),
+    BuyerTakeoverTimeline: object({
+      artifactVersion: { const: artifactVersion },
+      orderId: string,
+      historyStatus: { enum: ['COMPLETE', 'PARTIAL_LEGACY'] },
+      transitions: { type: 'array', items: ref('BuyerTakeoverTransition') },
+    }),
+    MerchantProfile: object({
+      artifactVersion: { const: artifactVersion },
+      merchantId: string,
+      shopName: nullable(string),
+      logoAssetId: nullable(ref('Bytes32')),
+      settlementWallet: ref('Address'),
+      settlementWalletMutable: { const: false },
+      version: { type: 'integer', minimum: 1 },
+      updatedAt: timestamp,
+    }),
+    UpdateMerchantProfileRequest: object({
+      shopName: { type: 'string', minLength: 1, maxLength: 100 },
+      logoAssetId: nullable(ref('Bytes32')),
+      expectedVersion: { type: 'integer', minimum: 1 },
+      idempotencyKey,
+    }),
+    MerchantAuditEntry: object({
+      entryId: string,
+      operationTime: timestamp,
+      operationType: string,
+      module: string,
+      detail: string,
+      signatureHash: nullable(ref('Bytes32')),
+      safeOrChainTxHash: nullable(ref('Bytes32')),
+      entryHash: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+    }),
+    MerchantAuditList: object({
+      entries: { type: 'array', items: ref('MerchantAuditEntry') },
+      proofScope: { const: 'MERCHANT_SCOPED_ENTRY_HASHES' },
+      historyStatus: { const: 'PARTIAL_PRE_MERCHANT_SCOPE' },
+      chainProof: object({
+        merchantId: string,
+        entries: { type: 'integer', minimum: 0 },
+      }),
+      nextCursor: nullable(object({ createdAt: timestamp, entryId: string })),
+    }),
+    MerchantAuditExportRequest: object({
+      from: timestamp,
+      to: timestamp,
+      streamName: { enum: [...auditStreamNames] },
+      eventType: string,
+      resourceType: string,
+      idempotencyKey,
+    }, ['from', 'to', 'idempotencyKey']),
+    MerchantAuditExport: object({
+      contentType: { const: 'text/csv; charset=utf-8' },
+      filename: string,
+      entryCount: { type: 'integer', minimum: 0, maximum: 1000 },
+      csv: { type: 'string' },
+    }),
   };
 }
 
@@ -5082,6 +5414,108 @@ export interface AllowedAction {
   enabled: boolean;
   reasonCode?: AllowedActionReasonCode;
   deadline?: string;
+}
+
+export interface BuyerProfile {
+  artifactVersion: typeof artifactVersion;
+  wallet: Address;
+  accountId: null;
+  accountIdStatus: 'DecisionBlocked';
+  nickname: string | null;
+  avatarAssetId: Bytes32 | null;
+  version: number;
+  updatedAt: Timestamp | null;
+}
+
+export interface BuyerSavedAddress {
+  addressId: string;
+  label: string;
+  recipientName: string;
+  phone: string;
+  detailAddress: string;
+  longitude: number;
+  latitude: number;
+  province: string;
+  city: string;
+  district: string;
+  formattedAddress: string;
+  regionCode: string;
+  isDefault: boolean;
+  version: number;
+  updatedAt: Timestamp;
+}
+
+export interface BuyerOverviewCount {
+  status: 'AVAILABLE';
+  count: AtomicAmount;
+}
+
+export interface BuyerOverview {
+  artifactVersion: typeof artifactVersion;
+  wallet: Address;
+  orderCounts: Readonly<{
+    pendingPayment: Readonly<{
+      status: 'DecisionBlocked';
+      count: null;
+      blocker: 'BUYER_PENDING_PAYMENT_PROJECTION';
+    }>;
+    pendingShipment: BuyerOverviewCount;
+    pendingReceipt: BuyerOverviewCount;
+    afterSale: BuyerOverviewCount;
+    total: BuyerOverviewCount;
+  }>;
+}
+
+export interface BuyerTakeoverTransition {
+  transitionId: string;
+  fromState: TakeoverState | null;
+  toState: TakeoverState;
+  evidenceType: string;
+  occurredAt: Timestamp;
+}
+
+export interface BuyerTakeoverTimeline {
+  artifactVersion: typeof artifactVersion;
+  orderId: string;
+  historyStatus: 'COMPLETE' | 'PARTIAL_LEGACY';
+  transitions: readonly BuyerTakeoverTransition[];
+}
+
+export interface MerchantProfile {
+  artifactVersion: typeof artifactVersion;
+  merchantId: string;
+  shopName: string | null;
+  logoAssetId: Bytes32 | null;
+  settlementWallet: Address;
+  settlementWalletMutable: false;
+  version: number;
+  updatedAt: Timestamp;
+}
+
+export interface MerchantAuditEntry {
+  entryId: string;
+  operationTime: Timestamp;
+  operationType: string;
+  module: string;
+  detail: string;
+  signatureHash: Bytes32 | null;
+  safeOrChainTxHash: Bytes32 | null;
+  entryHash: string;
+}
+
+export interface MerchantAuditList {
+  entries: readonly MerchantAuditEntry[];
+  proofScope: 'MERCHANT_SCOPED_ENTRY_HASHES';
+  historyStatus: 'PARTIAL_PRE_MERCHANT_SCOPE';
+  chainProof: Readonly<{ merchantId: string; entries: number }>;
+  nextCursor: Readonly<{ createdAt: Timestamp; entryId: string }> | null;
+}
+
+export interface MerchantAuditExport {
+  contentType: 'text/csv; charset=utf-8';
+  filename: string;
+  entryCount: number;
+  csv: string;
 }
 
 export interface PaymentFinality {

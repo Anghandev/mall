@@ -31,6 +31,8 @@ const paymentUnresolvedPublishedDecisions = [
   'EMPTY_SESSION_INJECTED_PRIZE_ALLOCATION',
 ] as const;
 
+const accountDecisionVariables = ['PII_RETENTION_POLICY_VERSION'] as const;
+
 const externalVariables = [
   'DATABASE_URL',
   'AUDIT_DATABASE_URL',
@@ -173,6 +175,7 @@ export interface CoreConfig {
   jwtSecret: string | undefined;
   authDomain: string | undefined;
   authUri: string | undefined;
+  piiRetentionPolicyVersion: string | undefined;
   rpcUrl: string | undefined;
   fallbackRpcUrl: string | undefined;
   paymentRouterAddress: string | undefined;
@@ -247,7 +250,12 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
   validateFrozenOverrides(env);
 
   const missingDecisionVariables = decisionVariables.filter((name) => !env[name]);
-  const decisionBlocked = [...missingDecisionVariables, ...unresolvedPublishedDecisions];
+  const missingAccountDecisionVariables = accountDecisionVariables.filter((name) => !env[name]);
+  const decisionBlocked = [
+    ...missingDecisionVariables,
+    ...missingAccountDecisionVariables,
+    ...unresolvedPublishedDecisions,
+  ];
   const paymentDecisionBlocked = [...missingDecisionVariables, ...paymentUnresolvedPublishedDecisions];
   const deploymentReady = coordinatedDeploymentReady();
   const paymentRouterDeployment = manifestContractDeployment('PaymentRouterV2');
@@ -314,6 +322,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     jwtSecret: env.JWT_SECRET,
     authDomain: env.AUTH_DOMAIN,
     authUri: env.AUTH_URI,
+    piiRetentionPolicyVersion: env.PII_RETENTION_POLICY_VERSION,
     rpcUrl: env.BSC_RPC_URL,
     fallbackRpcUrl: env.BSC_FALLBACK_RPC_URL,
     paymentRouterAddress,

@@ -23,8 +23,8 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('settlement/admin .6 checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-settlement-admin.6');
+test('settlement/admin .7 checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-settlement-admin.7');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
@@ -54,8 +54,8 @@ test('settlement/admin .6 checkpoint has one identity, resolvable exports and ex
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 13);
-  assert.equal(schemaManifest.schemas.audit.migrations.length, 3);
+  assert.equal(schemaManifest.schemas.core.migrations.length, 14);
+  assert.equal(schemaManifest.schemas.audit.migrations.length, 4);
   for (const migration of [
     ...schemaManifest.schemas.core.migrations,
     ...schemaManifest.schemas.audit.migrations,
@@ -74,6 +74,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     )
     .sort();
   assert.deepEqual(operations, [
+    'DELETE /v2/buyer/addresses/{addressId}',
     'GET /v2/admin/audit/entries',
     'GET /v2/admin/catalog/categories',
     'GET /v2/admin/catalog/products',
@@ -88,6 +89,9 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'GET /v2/admin/system-config/versions',
     'GET /v2/admin/takeover-funding/{caseId}',
     'GET /v2/bootstrap',
+    'GET /v2/buyer/addresses',
+    'GET /v2/buyer/overview',
+    'GET /v2/buyer/profile',
     'GET /v2/catalog/categories',
     'GET /v2/catalog/products',
     'GET /v2/catalog/products/{productId}',
@@ -95,12 +99,15 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'GET /v2/cms/public',
     'GET /v2/finance/merchant',
     'GET /v2/media/assets/{assetId}/access',
+    'GET /v2/merchant/audit/entries',
     'GET /v2/merchant/dashboard',
+    'GET /v2/merchant/profile',
     'GET /v2/merchant/stores/{storeId}/product-slot',
     'GET /v2/notifications',
     'GET /v2/orders',
     'GET /v2/orders/{orderId}',
     'GET /v2/orders/{orderId}/fulfillment-target',
+    'GET /v2/orders/{orderId}/takeover-timeline',
     'GET /v2/payments/{orderId}',
     'GET /v2/seckill/sessions/current',
     'GET /v2/seckill/sessions/history',
@@ -134,11 +141,16 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'POST /v2/admin/takeover-funding/approval-challenge',
     'POST /v2/auth/nonce',
     'POST /v2/auth/verify',
+    'POST /v2/buyer/addresses',
+    'POST /v2/buyer/addresses/parse',
+    'POST /v2/buyer/addresses/{addressId}/default',
+    'POST /v2/buyer/addresses/{addressId}/fulfillment-target',
     'POST /v2/finance/merchant/guarantee-deposits',
     'POST /v2/fulfillment-targets/delivery',
     'POST /v2/fulfillment-targets/pickup',
     'POST /v2/media/upload-intents',
     'POST /v2/media/upload-intents/{uploadIntentId}/complete',
+    'POST /v2/merchant/audit/exports',
     'POST /v2/merchant/products/{productId}/concession-previews',
     'POST /v2/merchant/products/{productId}/delist',
     'POST /v2/merchant/products/{productId}/review-submissions',
@@ -171,6 +183,9 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'PUT /v2/admin/catalog/stores/{storeId}/product-slot',
     'PUT /v2/admin/catalog/tags/{tagId}',
     'PUT /v2/admin/policy-drafts/{draftId}',
+    'PUT /v2/buyer/addresses/{addressId}',
+    'PUT /v2/buyer/profile',
+    'PUT /v2/merchant/profile',
     'PUT /v2/merchant/stores/{storeId}/product-slot',
   ]);
   assert.deepEqual([...manifest.httpSurface].sort(), operations);
@@ -223,6 +238,8 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'CATEGORY_ICON',
     'STORE_IMAGE',
     'FULFILLMENT_EVIDENCE',
+    'BUYER_AVATAR',
+    'MERCHANT_LOGO',
   ]);
   assert.equal(openapi.components.schemas.ManagedCatalogProduct.properties.title.maxLength, 60);
   assert.equal(openapi.components.schemas.ProductSlotInput.properties.mainImageAssetIds.maxItems, 5);
@@ -650,6 +667,11 @@ test('catalog, settlement/admin and seckill realtime capabilities are published 
     'notificationDelivery',
     'systemConfigGovernanceHttp',
     'auditHttp',
+    'buyerAccountHttp',
+    'buyerSavedAddressHttp',
+    'buyerTakeoverTimelineHttp',
+    'merchantProfileHttp',
+    'merchantScopedAuditHttp',
     'monitoringHttp',
     'coverageMonitoring',
     'websocket',

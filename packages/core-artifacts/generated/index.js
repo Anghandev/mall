@@ -1,4 +1,4 @@
-export const artifactVersion = "2.0.0-settlement-admin.6";
+export const artifactVersion = "2.0.0-settlement-admin.7";
 export const chainIdentity = Object.freeze({"chainId":56,"usdtAddress":"0x55d398326f99059ff775485246999027b3197955","nplAddress":"0x4e8277ab31e4956b2cd48449793a57656dfc03d2"});
 export const orderProjectionStates = Object.freeze(["QUOTED","SUBMITTED","PAID","SHIPPED","DELIVERED","ARBITRATION","TAKEOVER","FULFILLMENT_PENDING","FULFILLED","REORG_PENDING"]);
 export const contractOrderStates = Object.freeze(["NONE","PAID","SHIPPED","DELIVERED","ARBITRATION","TAKEOVER","FULFILLMENT_PENDING","FULFILLED"]);
@@ -21,8 +21,8 @@ export const fulfillmentRequestStates = Object.freeze(["OPEN","APPROVED","REJECT
 export const logisticsProviders = Object.freeze(["KUAIDI100","CAINIAO"]);
 export const logisticsStatuses = Object.freeze(["PICKED_UP","IN_TRANSIT","OUT_FOR_DELIVERY","DELIVERED","EXCEPTION"]);
 export const mediaContentTypes = Object.freeze(["image/jpeg","image/png","image/webp","video/mp4","application/pdf"]);
-export const mediaPurposes = Object.freeze(["PRODUCT_IMAGE","PRODUCT_VIDEO","CATEGORY_ICON","STORE_IMAGE","FULFILLMENT_EVIDENCE"]);
-export const mediaResourceTypes = Object.freeze(["PRODUCT","CATEGORY","STORE","ORDER"]);
+export const mediaPurposes = Object.freeze(["PRODUCT_IMAGE","PRODUCT_VIDEO","CATEGORY_ICON","STORE_IMAGE","FULFILLMENT_EVIDENCE","BUYER_AVATAR","MERCHANT_LOGO"]);
+export const mediaResourceTypes = Object.freeze(["PRODUCT","CATEGORY","STORE","ORDER","BUYER","MERCHANT"]);
 export const fulfillmentAssets = Object.freeze(["USDT","NPL","BNM_POINTS"]);
 export const arbitrationOutcomes = Object.freeze(["FULFILL","RESUME_FULFILLMENT"]);
 export const settlementRails = Object.freeze(["MERCHANT_USDT","REWARD_NPL","PRIZE_USDT","TAKEOVER_USDT","OPERATIONS_REIMBURSEMENT_USDT"]);

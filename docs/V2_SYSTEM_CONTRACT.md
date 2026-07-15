@@ -219,7 +219,8 @@ Status: frozen authority for the function-first V2 rewrite from
 - Still `DecisionBlocked`: platform service-fee proportion, seckill prize-pool
   proportion, merchant-store reward proportion, merchant-concession
   destination weights, fixed circulation/remainder accounts and any policy
-  beneficiary not frozen above. No default may be inferred.
+  beneficiary not frozen above, buyer account-ID policy, and production buyer
+  PII retention/deletion policy. No default may be inferred.
 - `ExternalBlocked`: USDT Custody, NPL Reward and Operations Treasury Safe
   addresses and Owners, role wallets, production RPC/fallback RPC,
   domains/HTTPS/WSS, the existing BNM backend project's API/schema/credentials

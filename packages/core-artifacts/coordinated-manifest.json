@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.6",
+  "artifactVersion": "2.0.0-settlement-admin.7",
   "publicationStatus": "COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
@@ -14,60 +14,61 @@
   "components": {
     "packageMetadata": {
       "path": "package.json",
-      "sha256": "714a4acf241f56ecc3195fd851bdfa18e86687de6a3497375684e87112106922"
+      "sha256": "ceb162ff8399de6a792e826bfc6fcc0de6c760ea006e26438c3881129bf2c021"
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "60368f57c0e6cef5675e8e96a094605c79ec037624f7b0dd4980e2213d4665dc"
+      "sha256": "1b39f4d36565c2b6c74cd3dc111eefd4e4883c4a0cd9c9ce100cf22821be9de4"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "ec367274b5353f2885abe449cebf813913287176937d9770600678052b11ad5a"
+      "sha256": "2edf823e5a4adb8dadb6972839c96575973a175658d1ff2149e56a1bccb8824c"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "003fe2563b0477bdcbbad62d70a3700b2c485c17421da9bbce97d7bbef10e0fb"
+      "sha256": "febe2bc755e491ab767ecde8821ea061f4315a37fc65b29cd00d32a9942e17a8"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "f2a4910b1995bf59992343e209154b46105169a5417ddee2017d133361f104f2"
+      "sha256": "4d31e29c1f887526e39810a8e0a0ed0b932ea743a3b5c703b80ae21b9321fabe"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "d15e2d7d861d380cf1626f02183bbcc685e3ad00f3c5703c6ef011e5fbf25406"
+      "sha256": "fc59ad2c8511c9c5ba8f49b868bf44f14fcd5e3edff38770c18b3444fbbbbddb"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
-      "sha256": "c5451e8c17ed44e5a236173dba47314becbb064804727dbf817e2f7b564851cd"
+      "sha256": "0d9641abb108459e9e2b3e4b69dcb020618d12abe1635beea8d192f36c9c43eb"
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "f7ea3f51c41934c88df85b64e85bd0e1354fbf59877d2c81d6828f143cce4635"
+      "sha256": "ed1b6b82e5c5b7587f93883e40e4a884b447f92e5050b21644e7ae668fe04f9a"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "0d1d296bc1d2caa10bda407f0d20e21fc1a00a775af9953cd6eb4078ae32348c"
+      "sha256": "89cd05ea3675ff0182445c6c9e4e59509f25a84de85daecf0e36bb1b0466ccbd"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "69d854e27ce02f5df5b3610d62c277421e200673179feaa2bafb37369be03a25"
+      "sha256": "650fc2f864d6703db09b0116e70c6a08e798b7ad10ff9772b23dee98f1e562e1"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
-      "sha256": "122c3b47e4e755503c9001bdd57bbb104fe56a48ab0da4dd1420a7c05c19c225"
+      "sha256": "b71c71ef2a5d895bcaf17bb38562db95dabcf355f36a075fdf578a56b3bfa491"
     }
   },
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "a2b4b3917be7135b6ec306cbdf65fec0a3dac26952ab5943e13bcf8aa8fd2efd"
+      "sha256": "9f17e7c283a2e173d468f0d03169286fae52624d27c4bcee2c6cdf0c2aae2b2d"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "ccbe1d04e2fb8dc7ef39c45fa0f30870b8cf8aea73952edf04ed974e8faf8d70"
+      "sha256": "7ea39c929a8d3d64428dd8199300242fd35308478a5365c9112295d59de45bc2"
     }
   ],
   "httpSurface": [
+    "DELETE /v2/buyer/addresses/{addressId}",
     "GET /v2/admin/audit/entries",
     "GET /v2/admin/catalog/categories",
     "GET /v2/admin/catalog/products",
@@ -82,6 +83,9 @@
     "GET /v2/admin/system-config/versions",
     "GET /v2/admin/takeover-funding/{caseId}",
     "GET /v2/bootstrap",
+    "GET /v2/buyer/addresses",
+    "GET /v2/buyer/overview",
+    "GET /v2/buyer/profile",
     "GET /v2/catalog/categories",
     "GET /v2/catalog/products",
     "GET /v2/catalog/products/{productId}",
@@ -89,12 +93,15 @@
     "GET /v2/cms/public",
     "GET /v2/finance/merchant",
     "GET /v2/media/assets/{assetId}/access",
+    "GET /v2/merchant/audit/entries",
     "GET /v2/merchant/dashboard",
+    "GET /v2/merchant/profile",
     "GET /v2/merchant/stores/{storeId}/product-slot",
     "GET /v2/notifications",
     "GET /v2/orders",
     "GET /v2/orders/{orderId}",
     "GET /v2/orders/{orderId}/fulfillment-target",
+    "GET /v2/orders/{orderId}/takeover-timeline",
     "GET /v2/payments/{orderId}",
     "GET /v2/seckill/sessions/current",
     "GET /v2/seckill/sessions/history",
@@ -128,11 +135,16 @@
     "POST /v2/admin/takeover-funding/approval-challenge",
     "POST /v2/auth/nonce",
     "POST /v2/auth/verify",
+    "POST /v2/buyer/addresses",
+    "POST /v2/buyer/addresses/parse",
+    "POST /v2/buyer/addresses/{addressId}/default",
+    "POST /v2/buyer/addresses/{addressId}/fulfillment-target",
     "POST /v2/finance/merchant/guarantee-deposits",
     "POST /v2/fulfillment-targets/delivery",
     "POST /v2/fulfillment-targets/pickup",
     "POST /v2/media/upload-intents",
     "POST /v2/media/upload-intents/{uploadIntentId}/complete",
+    "POST /v2/merchant/audit/exports",
     "POST /v2/merchant/products/{productId}/concession-previews",
     "POST /v2/merchant/products/{productId}/delist",
     "POST /v2/merchant/products/{productId}/review-submissions",
@@ -165,6 +177,9 @@
     "PUT /v2/admin/catalog/stores/{storeId}/product-slot",
     "PUT /v2/admin/catalog/tags/{tagId}",
     "PUT /v2/admin/policy-drafts/{draftId}",
+    "PUT /v2/buyer/addresses/{addressId}",
+    "PUT /v2/buyer/profile",
+    "PUT /v2/merchant/profile",
     "PUT /v2/merchant/stores/{storeId}/product-slot"
   ],
   "capabilityStatus": {
@@ -191,6 +206,11 @@
     "notificationDelivery": "AVAILABLE",
     "systemConfigGovernanceHttp": "AVAILABLE",
     "auditHttp": "AVAILABLE",
+    "buyerAccountHttp": "AVAILABLE",
+    "buyerSavedAddressHttp": "AVAILABLE",
+    "buyerTakeoverTimelineHttp": "AVAILABLE",
+    "merchantProfileHttp": "AVAILABLE",
+    "merchantScopedAuditHttp": "AVAILABLE",
     "monitoringHttp": "AVAILABLE",
     "coverageMonitoring": "AVAILABLE",
     "storesHttp": "AVAILABLE",
@@ -296,6 +316,13 @@
     "AuditListResponse",
     "MonitoringDashboard",
     "MerchantBusinessDashboard",
-    "AdminBusinessDashboard"
+    "AdminBusinessDashboard",
+    "BuyerProfile",
+    "BuyerSavedAddress",
+    "BuyerOverview",
+    "BuyerTakeoverTimeline",
+    "MerchantProfile",
+    "MerchantAuditList",
+    "MerchantAuditExport"
   ]
 }

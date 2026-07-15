@@ -41,7 +41,12 @@ import {
   type PaymentPolicySnapshot,
 } from './payment-policy.ts';
 import { assertEmptySessionPrizeDecision, evaluateForcedReceipt, evaluateTakeover } from './fulfillment.ts';
-import { AmapAdministrativeRegionResolver, executeProvider, verifyWebhookHmac } from './providers.ts';
+import {
+  AmapAdministrativeRegionResolver,
+  AmapPostalAddressParser,
+  executeProvider,
+  verifyWebhookHmac,
+} from './providers.ts';
 import {
   settlementIntentDigest,
   settlementRequestDomain,
@@ -65,6 +70,7 @@ const EXECUTABLE_ACTIONS = new Set(allowedActionNames);
 test('typed config reports blocked inputs without exposing secret values', () => {
   const blocked = loadConfig({ CHAIN_ID: '56' });
   assert.ok(blocked.decisionBlocked.includes('PLATFORM_SERVICE_FEE_BPS'));
+  assert.ok(blocked.decisionBlocked.includes('PII_RETENTION_POLICY_VERSION'));
   assert.equal(blocked.requiredConfirmations, 15);
   assert.ok(blocked.decisionBlocked.includes('PICKUP_TIMEOUT_AND_TAKEOVER_EVIDENCE'));
   assert.ok(blocked.externalBlocked.includes('DATABASE_URL'));
@@ -842,6 +848,28 @@ test('provider calls and webhooks fail closed until configured and signed', asyn
   assert.equal(region.regionCode, '110101');
   assert.equal(region.city, 'Beijing');
   assert.ok(requestedUrl.startsWith('https://restapi.amap.com/v3/geocode/regeo?'));
+  await assert.rejects(
+    new AmapPostalAddressParser({}).parse({ rawText: '张三 13800138000 辽宁省大连市甘井子区软件园' }),
+    /not configured/,
+  );
+  const parser = new AmapPostalAddressParser({
+    key: 'amap-secret',
+    fetch: (async () => new Response(JSON.stringify({
+      status: '1',
+      geocodes: [{
+        formatted_address: '辽宁省大连市甘井子区软件园',
+        province: '辽宁省',
+        city: '大连市',
+        district: '甘井子区',
+        adcode: '210211',
+        location: '121.600000,38.900000',
+      }],
+    }), { status: 200 })) as typeof fetch,
+  });
+  const parsed = await parser.parse({ rawText: '张三 13800138000 辽宁省大连市甘井子区软件园' });
+  assert.equal(parsed.recipientName, '张三');
+  assert.equal(parsed.phone, '13800138000');
+  assert.equal(parsed.regionCode, '210211');
 });
 
 test('HTTP bootstrap and SIWE flow return correlated JSON and protect order actions', async () => {
@@ -1113,7 +1141,18 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       publish: async (_actor, configVersionId) => ({ configVersionId, published: true }),
       list: async () => [],
     },
-    auditService: { list: async (_actor, query) => ({ entries: [], query }) },
+    auditService: {
+      list: async (_actor, query) => ({ entries: [], query }),
+      listMerchant: async (actor, query) => ({ merchantId: actor.merchantId, entries: [], query }),
+      exportMerchant: async (actor, query) => ({
+        merchantId: actor.merchantId,
+        query,
+        contentType: 'text/csv; charset=utf-8',
+        filename: 'merchant-audit.csv',
+        entryCount: 0,
+        csv: 'operationTime\n',
+      }),
+    },
     monitoringService: {
       dashboard: async () => ({ metrics: [], alerts: [] }),
       acknowledge: async (_actor, alertKey, correlationId) => {
@@ -1132,6 +1171,22 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
         actor: actor.walletAddress,
         timezone: 'Asia/Shanghai',
       }),
+    },
+    accountService: {
+      getBuyerProfile: async (actor) => ({ wallet: actor.walletAddress, version: 0 }),
+      updateBuyerProfile: async (actor, input) => ({ wallet: actor.walletAddress, ...input, version: 1 }),
+      parseBuyerAddress: async (_actor, rawText) => ({ rawTextLength: rawText.length, canSave: true }),
+      listBuyerAddresses: async (actor) => ({ wallet: actor.walletAddress, addresses: [] }),
+      createBuyerAddress: async (actor, input) => ({ wallet: actor.walletAddress, addressId: 'address-1', ...input }),
+      updateBuyerAddress: async (actor, addressId, input) => ({ wallet: actor.walletAddress, addressId, ...input }),
+      deleteBuyerAddress: async (_actor, addressId) => ({ addressId, status: 'DELETED' }),
+      setDefaultBuyerAddress: async (_actor, addressId, input) => ({ addressId, ...input, isDefault: true }),
+      createBuyerAddressTarget: async (_actor, addressId, idempotencyKey) => ({ addressId, idempotencyKey, targetId: 'target-1' }),
+      getBuyerOverview: async (actor) => ({ wallet: actor.walletAddress, orderCounts: {} }),
+      getBuyerTakeoverTimeline: async (_actor, orderId) => ({ orderId, transitions: [] }),
+      getMerchantProfile: async (actor) => ({ merchantId: actor.merchantId, settlementWalletMutable: false }),
+      updateMerchantProfile: async (actor, input) => ({ merchantId: actor.merchantId, ...input }),
+      recordMerchantAuditExport: async () => ({ recorded: true }),
     },
     logisticsWebhookSecrets: {
       KUAIDI100: 'kuaidi-webhook-secret',
@@ -1237,6 +1292,103 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     });
     assert.equal(adminDashboard.status, 200);
     assert.equal(((await adminDashboard.json()) as { timezone: string }).timezone, 'Asia/Shanghai');
+
+    const buyerHeaders = {
+      'content-type': 'application/json',
+      authorization: `Bearer ${buyerOnlyToken}`,
+    };
+    assert.equal((await fetch(`${base}/v2/buyer/profile`, { headers: buyerHeaders })).status, 200);
+    assert.equal((await fetch(`${base}/v2/buyer/profile`, {
+      method: 'PUT',
+      headers: buyerHeaders,
+      body: JSON.stringify({
+        nickname: 'Buyer',
+        avatarAssetId: null,
+        expectedVersion: 0,
+        idempotencyKey: 'buyer-profile-http-1',
+      }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/buyer/addresses/parse`, {
+      method: 'POST',
+      headers: buyerHeaders,
+      body: JSON.stringify({ rawText: 'Zhang San 13800138000 Dalian Software Park' }),
+    })).status, 200);
+    const addressBody = {
+      label: 'Home',
+      recipientName: 'Zhang San',
+      phone: '13800138000',
+      detailAddress: 'Dalian Software Park Building 1',
+      longitude: 121.6,
+      latitude: 38.9,
+      isDefault: true,
+      idempotencyKey: 'buyer-address-http-1',
+    };
+    assert.equal((await fetch(`${base}/v2/buyer/addresses`, {
+      method: 'POST',
+      headers: buyerHeaders,
+      body: JSON.stringify(addressBody),
+    })).status, 201);
+    assert.equal((await fetch(`${base}/v2/buyer/addresses`, { headers: buyerHeaders })).status, 200);
+    assert.equal((await fetch(`${base}/v2/buyer/addresses/address-1`, {
+      method: 'PUT',
+      headers: buyerHeaders,
+      body: JSON.stringify({ ...addressBody, expectedVersion: 1, idempotencyKey: 'buyer-address-http-update-1' }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/buyer/addresses/address-1/default`, {
+      method: 'POST',
+      headers: buyerHeaders,
+      body: JSON.stringify({ expectedVersion: 1, idempotencyKey: 'buyer-address-http-default-1' }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/buyer/addresses/address-1/fulfillment-target`, {
+      method: 'POST',
+      headers: buyerHeaders,
+      body: JSON.stringify({ idempotencyKey: 'buyer-address-http-target-1' }),
+    })).status, 201);
+    assert.equal((await fetch(`${base}/v2/buyer/overview`, { headers: buyerHeaders })).status, 200);
+    assert.equal((await fetch(`${base}/v2/orders/order-1/takeover-timeline`, { headers: buyerHeaders })).status, 200);
+    assert.equal((await fetch(`${base}/v2/buyer/addresses/address-1`, {
+      method: 'DELETE',
+      headers: buyerHeaders,
+      body: JSON.stringify({ expectedVersion: 1, idempotencyKey: 'buyer-address-http-delete-1' }),
+    })).status, 200);
+
+    assert.equal((await fetch(`${base}/v2/merchant/profile`, { headers: bearerHeaders })).status, 200);
+    assert.equal((await fetch(`${base}/v2/merchant/profile`, {
+      method: 'PUT',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        shopName: 'Merchant',
+        logoAssetId: null,
+        settlementWallet: SAFE,
+        expectedVersion: 1,
+        idempotencyKey: 'merchant-profile-wallet-injection',
+      }),
+    })).status, 400);
+    assert.equal((await fetch(`${base}/v2/merchant/profile`, {
+      method: 'PUT',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        shopName: 'Merchant',
+        logoAssetId: null,
+        expectedVersion: 1,
+        idempotencyKey: 'merchant-profile-http-1',
+      }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/merchant/audit/entries`, {
+      headers: { authorization: `Bearer ${buyerOnlyToken}` },
+    })).status, 403);
+    assert.equal((await fetch(`${base}/v2/merchant/audit/entries?limit=20`, {
+      headers: bearerHeaders,
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/merchant/audit/exports`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        from: '2026-07-14T00:00:00.000Z',
+        to: '2026-07-15T00:00:00.000Z',
+        idempotencyKey: 'merchant-audit-export-http-1',
+      }),
+    })).status, 200);
 
     const productSlotBody = {
       idempotencyKey: 'http-product-slot-save-1',
@@ -2076,6 +2228,7 @@ function completeEnvironment(): Record<string, string> {
     AUTH_DOMAIN: 'mall.abu.test',
     AUTH_URI: 'https://mall.abu.test',
     DELIVERY_DATA_ENCRYPTION_KEY: 'ab'.repeat(32),
+    PII_RETENTION_POLICY_VERSION: 'pii-v1',
     BSC_RPC_URL: 'https://rpc.example.invalid',
     BSC_FALLBACK_RPC_URL: 'https://fallback-rpc.example.invalid',
     PLATFORM_SAFE_ADDRESS: SAFE,

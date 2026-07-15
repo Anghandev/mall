@@ -2,11 +2,931 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Abu 24K V2 Core API",
-    "version": "2.0.0-settlement-admin.6"
+    "version": "2.0.0-settlement-admin.7"
   },
-  "x-artifactVersion": "2.0.0-settlement-admin.6",
+  "x-artifactVersion": "2.0.0-settlement-admin.7",
   "servers": [],
   "paths": {
+    "/v2/buyer/profile": {
+      "get": {
+        "operationId": "getBuyerProfile",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Encrypted buyer profile projection",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerProfile"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateBuyerProfile",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBuyerProfileRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated encrypted buyer profile",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerProfile"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/buyer/addresses/parse": {
+      "post": {
+        "operationId": "parseBuyerAddress",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParseBuyerAddressRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ephemeral PII-safe address parse",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParsedBuyerAddress"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/buyer/addresses": {
+      "get": {
+        "operationId": "listBuyerAddresses",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Wallet-scoped encrypted address list",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerAddressList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createBuyerAddress",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBuyerAddressRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created encrypted buyer address",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerSavedAddress"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/buyer/addresses/{addressId}": {
+      "put": {
+        "operationId": "updateBuyerAddress",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "addressId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBuyerAddressRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated encrypted buyer address",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerSavedAddress"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteBuyerAddress",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "addressId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VersionedAccountCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Logically deleted buyer address",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedBuyerAddress"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/buyer/addresses/{addressId}/default": {
+      "post": {
+        "operationId": "setDefaultBuyerAddress",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "addressId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VersionedAccountCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transactional default buyer address",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerSavedAddress"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/buyer/addresses/{addressId}/fulfillment-target": {
+      "post": {
+        "operationId": "createSavedAddressFulfillmentTarget",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "addressId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdempotentAccountCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Fresh quote-bound delivery target from saved address",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryTarget"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/buyer/overview": {
+      "get": {
+        "operationId": "getBuyerOverview",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Canonical buyer order counts",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerOverview"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/orders/{orderId}/takeover-timeline": {
+      "get": {
+        "operationId": "getBuyerTakeoverTimeline",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Redacted append-only takeover timeline",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerTakeoverTimeline"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ]
+      }
+    },
+    "/v2/merchant/profile": {
+      "get": {
+        "operationId": "getMerchantProfile",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tenant-scoped merchant profile",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantProfile"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateMerchantProfile",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMerchantProfileRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated tenant-scoped merchant profile",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantProfile"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/merchant/audit/entries": {
+      "get": {
+        "operationId": "listMerchantAuditEntries",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tenant-scoped bounded audit summaries",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantAuditList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "streamName",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "financial",
+                "governance",
+                "authentication",
+                "operational",
+                "backup"
+              ]
+            }
+          },
+          {
+            "name": "eventType",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "resourceType",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "resourceId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "correlationId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "cursorEntryId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "cursorCreatedAt",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ]
+      }
+    },
+    "/v2/merchant/audit/exports": {
+      "post": {
+        "operationId": "exportMerchantAuditEntries",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MerchantAuditExportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bounded tenant-scoped CSV export",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantAuditExport"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v2/settlement-intents": {
       "post": {
         "operationId": "createSettlementIntent",
@@ -6387,7 +7307,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.6"
+            "const": "2.0.0-settlement-admin.7"
           },
           "status": {
             "const": "CORE_API_READY"
@@ -9459,7 +10379,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.6"
+            "const": "2.0.0-settlement-admin.7"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -9558,7 +10478,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.6"
+            "const": "2.0.0-settlement-admin.7"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -10498,7 +11418,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.6"
+            "const": "2.0.0-settlement-admin.7"
           },
           "productId": {
             "type": "string",
@@ -10671,7 +11591,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.6"
+            "const": "2.0.0-settlement-admin.7"
           },
           "storeId": {
             "type": "string",
@@ -10797,7 +11717,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.6"
+            "const": "2.0.0-settlement-admin.7"
           },
           "productId": {
             "type": "string",
@@ -10899,7 +11819,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.6"
+            "const": "2.0.0-settlement-admin.7"
           },
           "previewId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -11058,7 +11978,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.6"
+            "const": "2.0.0-settlement-admin.7"
           },
           "adjustmentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -11115,7 +12035,9 @@
               "PRODUCT_VIDEO",
               "CATEGORY_ICON",
               "STORE_IMAGE",
-              "FULFILLMENT_EVIDENCE"
+              "FULFILLMENT_EVIDENCE",
+              "BUYER_AVATAR",
+              "MERCHANT_LOGO"
             ]
           },
           "resourceType": {
@@ -11123,7 +12045,9 @@
               "PRODUCT",
               "CATEGORY",
               "STORE",
-              "ORDER"
+              "ORDER",
+              "BUYER",
+              "MERCHANT"
             ]
           },
           "resourceId": {
@@ -11178,7 +12102,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.6"
+            "const": "2.0.0-settlement-admin.7"
           },
           "uploadIntentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -11192,7 +12116,9 @@
               "PRODUCT_VIDEO",
               "CATEGORY_ICON",
               "STORE_IMAGE",
-              "FULFILLMENT_EVIDENCE"
+              "FULFILLMENT_EVIDENCE",
+              "BUYER_AVATAR",
+              "MERCHANT_LOGO"
             ]
           },
           "resourceType": {
@@ -11200,7 +12126,9 @@
               "PRODUCT",
               "CATEGORY",
               "STORE",
-              "ORDER"
+              "ORDER",
+              "BUYER",
+              "MERCHANT"
             ]
           },
           "resourceId": {
@@ -11271,7 +12199,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.6"
+            "const": "2.0.0-settlement-admin.7"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -11288,7 +12216,9 @@
               "PRODUCT_VIDEO",
               "CATEGORY_ICON",
               "STORE_IMAGE",
-              "FULFILLMENT_EVIDENCE"
+              "FULFILLMENT_EVIDENCE",
+              "BUYER_AVATAR",
+              "MERCHANT_LOGO"
             ]
           },
           "resourceType": {
@@ -11296,7 +12226,9 @@
               "PRODUCT",
               "CATEGORY",
               "STORE",
-              "ORDER"
+              "ORDER",
+              "BUYER",
+              "MERCHANT"
             ]
           },
           "resourceId": {
@@ -11352,7 +12284,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.6"
+            "const": "2.0.0-settlement-admin.7"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -11363,7 +12295,9 @@
               "PRODUCT_VIDEO",
               "CATEGORY_ICON",
               "STORE_IMAGE",
-              "FULFILLMENT_EVIDENCE"
+              "FULFILLMENT_EVIDENCE",
+              "BUYER_AVATAR",
+              "MERCHANT_LOGO"
             ]
           },
           "resourceType": {
@@ -11371,7 +12305,9 @@
               "PRODUCT",
               "CATEGORY",
               "STORE",
-              "ORDER"
+              "ORDER",
+              "BUYER",
+              "MERCHANT"
             ]
           },
           "resourceId": {
@@ -11508,7 +12444,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.6"
+            "const": "2.0.0-settlement-admin.7"
           },
           "evidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
@@ -11767,7 +12703,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.6"
+            "const": "2.0.0-settlement-admin.7"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -12042,7 +12978,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifact_version": {
-            "const": "2.0.0-settlement-admin.6"
+            "const": "2.0.0-settlement-admin.7"
           },
           "wallet_address": {
             "$ref": "#/components/schemas/Address"
@@ -12368,7 +13304,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.6"
+            "const": "2.0.0-settlement-admin.7"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -15170,7 +16106,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.6"
+            "const": "2.0.0-settlement-admin.7"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -15416,7 +16352,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.6"
+            "const": "2.0.0-settlement-admin.7"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -15716,7 +16652,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.6"
+            "const": "2.0.0-settlement-admin.7"
           },
           "sessionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15940,7 +16876,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.6"
+            "const": "2.0.0-settlement-admin.7"
           },
           "protocolVersion": {
             "const": 1
@@ -15996,6 +16932,1017 @@
           "nextCursor": {
             "type": "string",
             "pattern": "^(0|[1-9][0-9]*)$"
+          }
+        }
+      },
+      "BuyerProfile": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "wallet",
+          "accountId",
+          "accountIdStatus",
+          "nickname",
+          "avatarAssetId",
+          "version",
+          "updatedAt"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.7"
+          },
+          "wallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "accountId": {
+            "type": "null"
+          },
+          "accountIdStatus": {
+            "const": "DecisionBlocked"
+          },
+          "nickname": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "avatarAssetId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "UpdateBuyerProfileRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "nickname",
+          "avatarAssetId",
+          "expectedVersion",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "nickname": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "avatarAssetId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "ParseBuyerAddressRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rawText"
+        ],
+        "properties": {
+          "rawText": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 1000
+          }
+        }
+      },
+      "ParsedBuyerAddress": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "recipientName",
+          "phone",
+          "province",
+          "city",
+          "district",
+          "detailAddress",
+          "regionCode",
+          "longitude",
+          "latitude",
+          "sourceReferenceHash",
+          "canSave",
+          "missingFields"
+        ],
+        "properties": {
+          "recipientName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "province": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "district": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "detailAddress": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "regionCode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{6}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sourceReferenceHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "canSave": {
+            "type": "boolean"
+          },
+          "missingFields": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      },
+      "BuyerSavedAddress": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "addressId",
+          "label",
+          "recipientName",
+          "phone",
+          "detailAddress",
+          "longitude",
+          "latitude",
+          "isDefault",
+          "province",
+          "city",
+          "district",
+          "formattedAddress",
+          "regionCode",
+          "version",
+          "updatedAt"
+        ],
+        "properties": {
+          "addressId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          },
+          "recipientName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "phone": {
+            "type": "string",
+            "pattern": "^1[3-9][0-9]{9}$"
+          },
+          "detailAddress": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 300
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "latitude": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "province": {
+            "type": "string",
+            "minLength": 1
+          },
+          "city": {
+            "type": "string",
+            "minLength": 1
+          },
+          "district": {
+            "type": "string",
+            "minLength": 1
+          },
+          "formattedAddress": {
+            "type": "string",
+            "minLength": 1
+          },
+          "regionCode": {
+            "type": "string",
+            "pattern": "^[0-9]{6}$"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "BuyerAddressList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "addresses"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.7"
+          },
+          "addresses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BuyerSavedAddress"
+            }
+          }
+        }
+      },
+      "CreateBuyerAddressRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "label",
+          "recipientName",
+          "phone",
+          "detailAddress",
+          "longitude",
+          "latitude",
+          "isDefault",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          },
+          "recipientName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "phone": {
+            "type": "string",
+            "pattern": "^1[3-9][0-9]{9}$"
+          },
+          "detailAddress": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 300
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "latitude": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "UpdateBuyerAddressRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "label",
+          "recipientName",
+          "phone",
+          "detailAddress",
+          "longitude",
+          "latitude",
+          "isDefault",
+          "expectedVersion",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          },
+          "recipientName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "phone": {
+            "type": "string",
+            "pattern": "^1[3-9][0-9]{9}$"
+          },
+          "detailAddress": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 300
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "latitude": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "VersionedAccountCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "IdempotentAccountCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "DeletedBuyerAddress": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "addressId",
+          "status"
+        ],
+        "properties": {
+          "addressId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "const": "DELETED"
+          }
+        }
+      },
+      "BuyerOverview": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "wallet",
+          "orderCounts"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.7"
+          },
+          "wallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "orderCounts": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "pendingPayment",
+              "pendingShipment",
+              "pendingReceipt",
+              "afterSale",
+              "total"
+            ],
+            "properties": {
+              "pendingPayment": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "status",
+                  "count",
+                  "blocker"
+                ],
+                "properties": {
+                  "status": {
+                    "const": "DecisionBlocked"
+                  },
+                  "count": {
+                    "type": "null"
+                  },
+                  "blocker": {
+                    "const": "BUYER_PENDING_PAYMENT_PROJECTION"
+                  }
+                }
+              },
+              "pendingShipment": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "status",
+                  "count"
+                ],
+                "properties": {
+                  "status": {
+                    "const": "AVAILABLE"
+                  },
+                  "count": {
+                    "$ref": "#/components/schemas/AtomicAmount"
+                  }
+                }
+              },
+              "pendingReceipt": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "status",
+                  "count"
+                ],
+                "properties": {
+                  "status": {
+                    "const": "AVAILABLE"
+                  },
+                  "count": {
+                    "$ref": "#/components/schemas/AtomicAmount"
+                  }
+                }
+              },
+              "afterSale": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "status",
+                  "count"
+                ],
+                "properties": {
+                  "status": {
+                    "const": "AVAILABLE"
+                  },
+                  "count": {
+                    "$ref": "#/components/schemas/AtomicAmount"
+                  }
+                }
+              },
+              "total": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "status",
+                  "count"
+                ],
+                "properties": {
+                  "status": {
+                    "const": "AVAILABLE"
+                  },
+                  "count": {
+                    "$ref": "#/components/schemas/AtomicAmount"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "BuyerTakeoverTransition": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "transitionId",
+          "fromState",
+          "toState",
+          "evidenceType",
+          "occurredAt"
+        ],
+        "properties": {
+          "transitionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "fromState": {
+            "anyOf": [
+              {
+                "enum": [
+                  "OPEN",
+                  "FUNDED",
+                  "FULFILLING",
+                  "FULFILLMENT_PENDING",
+                  "CLOSED",
+                  "DECISION_BLOCKED"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "toState": {
+            "enum": [
+              "OPEN",
+              "FUNDED",
+              "FULFILLING",
+              "FULFILLMENT_PENDING",
+              "CLOSED",
+              "DECISION_BLOCKED"
+            ]
+          },
+          "evidenceType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "BuyerTakeoverTimeline": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "orderId",
+          "historyStatus",
+          "transitions"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.7"
+          },
+          "orderId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "historyStatus": {
+            "enum": [
+              "COMPLETE",
+              "PARTIAL_LEGACY"
+            ]
+          },
+          "transitions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BuyerTakeoverTransition"
+            }
+          }
+        }
+      },
+      "MerchantProfile": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "merchantId",
+          "shopName",
+          "logoAssetId",
+          "settlementWallet",
+          "settlementWalletMutable",
+          "version",
+          "updatedAt"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.7"
+          },
+          "merchantId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "shopName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "logoAssetId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settlementWallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "settlementWalletMutable": {
+            "const": false
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "UpdateMerchantProfileRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "shopName",
+          "logoAssetId",
+          "expectedVersion",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "shopName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "logoAssetId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "MerchantAuditEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entryId",
+          "operationTime",
+          "operationType",
+          "module",
+          "detail",
+          "signatureHash",
+          "safeOrChainTxHash",
+          "entryHash"
+        ],
+        "properties": {
+          "entryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "operationTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "operationType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "module": {
+            "type": "string",
+            "minLength": 1
+          },
+          "detail": {
+            "type": "string",
+            "minLength": 1
+          },
+          "signatureHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "safeOrChainTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "entryHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      },
+      "MerchantAuditList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entries",
+          "proofScope",
+          "historyStatus",
+          "chainProof",
+          "nextCursor"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantAuditEntry"
+            }
+          },
+          "proofScope": {
+            "const": "MERCHANT_SCOPED_ENTRY_HASHES"
+          },
+          "historyStatus": {
+            "const": "PARTIAL_PRE_MERCHANT_SCOPE"
+          },
+          "chainProof": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "merchantId",
+              "entries"
+            ],
+            "properties": {
+              "merchantId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "entries": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "createdAt",
+                  "entryId"
+                ],
+                "properties": {
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "entryId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "MerchantAuditExportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "from",
+          "to",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "streamName": {
+            "enum": [
+              "financial",
+              "governance",
+              "authentication",
+              "operational",
+              "backup"
+            ]
+          },
+          "eventType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resourceType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "MerchantAuditExport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contentType",
+          "filename",
+          "entryCount",
+          "csv"
+        ],
+        "properties": {
+          "contentType": {
+            "const": "text/csv; charset=utf-8"
+          },
+          "filename": {
+            "type": "string",
+            "minLength": 1
+          },
+          "entryCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          },
+          "csv": {
+            "type": "string"
           }
         }
       },

@@ -11,6 +11,7 @@ interface AuditOutboxRow {
   event_type: string;
   resource_type: string;
   resource_id: string;
+  merchant_id: string | null;
   actor_wallet: string | null;
   actor_role: string | null;
   correlation_id: string;
@@ -20,6 +21,7 @@ interface AuditOutboxRow {
   signature_evidence: Record<string, unknown>;
   transaction_evidence: Record<string, unknown>;
   attempt_count: number;
+  created_at: Date | string;
 }
 
 export class AuditOutboxWorker {
@@ -54,6 +56,7 @@ export class AuditOutboxWorker {
         eventType: event.event_type,
         resourceType: event.resource_type,
         resourceId: event.resource_id,
+        ...(event.merchant_id ? { merchantId: event.merchant_id } : {}),
         ...(event.actor_wallet ? { actorWallet: event.actor_wallet } : {}),
         ...(event.actor_role ? { actorRole: event.actor_role } : {}),
         correlationId: event.correlation_id,
@@ -68,6 +71,7 @@ export class AuditOutboxWorker {
         ...(Object.keys(event.transaction_evidence).length > 0
           ? { transactionEvidence: event.transaction_evidence as unknown as NonNullable<AuditInput['transactionEvidence']> }
           : {}),
+        createdAt: new Date(event.created_at),
       });
       await this.#business.transaction((executor) => delivered(executor, event.source_event_id, this.#workerId, this.#clock()));
       this.#lastErrorCode = undefined;

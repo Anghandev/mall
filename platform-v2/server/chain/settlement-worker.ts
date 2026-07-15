@@ -56,6 +56,7 @@ interface BatchItemRow {
   transfer_calldata: string;
   item_hash: string;
   policy_version: string | number;
+  merchant_id: string | null;
 }
 
 type LoadedBatch = { row: BatchRow; items: BatchItemRow[] };
@@ -1281,9 +1282,10 @@ function validateTransfers(batch: SafeSettlementBatch, receipt: SafeSettlementRe
 async function loadBatch(executor: SqlExecutor, batchId: string) {
   const row = await loadBatchRow(executor, batchId);
   const items = await executor.query<BatchItemRow>(
-    `SELECT item.*, orders.policy_version
+    `SELECT item.*, orders.policy_version, request.merchant_id
      FROM core.settlement_batch_items item
      JOIN core.orders orders ON orders.order_id = item.order_id
+     JOIN core.settlement_requests request ON request.request_id = item.request_id
      WHERE item.batch_id = $1 ORDER BY item.item_index`,
     [batchId],
   );
@@ -1396,6 +1398,15 @@ async function enqueueSettlementApprovalAudit(
   approvals: VerifiedSafeApprovals,
   at: Date,
 ) {
+  const signatureEvidence = {
+    scheme: 'SAFE_OWNER_SET' as const,
+    signatureHash: approvals.approvalEvidenceHash,
+    signer: batch.safe_address,
+    digest: batch.safe_tx_hash,
+    domain: `Safe:${batch.safe_version}:56:${batch.safe_address}`,
+    nonce: batch.safe_nonce,
+    deadline: '0',
+  };
   await enqueueAudit(executor, {
     sourceEventId: auditSourceId('audit:settlement-approval', {
       batchId: batch.batch_id,
@@ -1421,17 +1432,37 @@ async function enqueueSettlementApprovalAudit(
       proposalReferenceHash: approvals.proposalReferenceHash,
       approvalEvidenceHash: approvals.approvalEvidenceHash,
     },
-    signatureEvidence: {
-      scheme: 'SAFE_OWNER_SET',
-      signatureHash: approvals.approvalEvidenceHash,
-      signer: batch.safe_address,
-      digest: batch.safe_tx_hash,
-      domain: `Safe:${batch.safe_version}:56:${batch.safe_address}`,
-      nonce: batch.safe_nonce,
-      deadline: '0',
-    },
+    signatureEvidence,
     createdAt: at,
   });
+  for (const summary of await loadSettlementMerchantSummaries(executor, batch.batch_id)) {
+    await enqueueAudit(executor, {
+      sourceEventId: auditSourceId('audit:settlement-approval', {
+        batchId: batch.batch_id,
+        safeTxHash: batch.safe_tx_hash,
+        approvalEvidenceHash: approvals.approvalEvidenceHash,
+        merchantId: summary.merchantId,
+      }),
+      streamName: 'financial',
+      evidenceProfile: 'SAFE_APPROVED',
+      eventType: 'SettlementBatchApproved',
+      resourceType: 'SETTLEMENT_BATCH',
+      resourceId: batch.batch_id,
+      merchantId: summary.merchantId,
+      actorWallet: batch.safe_address,
+      actorRole: 'SAFE_OWNER_SET',
+      correlationId: `settlement:${batch.batch_id}`,
+      requestHash: batch.safe_tx_hash.slice(2),
+      payload: {
+        safeAddress: batch.safe_address,
+        safeTxHash: batch.safe_tx_hash,
+        itemCount: summary.itemCount,
+        totalAmount: summary.totalAmount,
+      },
+      signatureEvidence,
+      createdAt: at,
+    });
+  }
 }
 
 interface SettlementChainAuditInput {
@@ -1503,6 +1534,39 @@ async function enqueueSettlementChainAudit(
     transactionEvidence,
     createdAt: input.createdAt,
   });
+  for (const summary of settlementMerchantSummaries(loaded.items)) {
+    await enqueueAudit(executor, {
+      sourceEventId: auditSourceId('audit:settlement-chain', {
+        batchId: batch.batchId,
+        attemptId: input.attemptId,
+        eventType: input.eventType,
+        executionTxHash: input.executionTxHash,
+        requestHash: input.requestHash,
+        merchantId: summary.merchantId,
+      }),
+      streamName: 'financial',
+      evidenceProfile: input.evidenceProfile,
+      eventType: input.eventType,
+      resourceType: 'SETTLEMENT_BATCH',
+      resourceId: batch.batchId,
+      merchantId: summary.merchantId,
+      actorWallet: normalizedAddress(input.outerSender, 'settlement outer sender'),
+      actorRole: 'SETTLEMENT_EXECUTOR',
+      correlationId: `settlement:${batch.batchId}`,
+      requestHash: input.requestHash.slice(2),
+      payload: {
+        batchId: batch.batchId,
+        safeAddress: batch.safeAddress,
+        safeTxHash: batch.safeTxHash,
+        executionTxHash: input.executionTxHash,
+        itemCount: summary.itemCount,
+        totalAmount: summary.totalAmount,
+        ...(input.payload?.canonical === false ? { canonical: false } : {}),
+      },
+      transactionEvidence,
+      createdAt: input.createdAt,
+    });
+  }
 }
 
 async function enqueueSettlementSystemAudit(executor: SqlExecutor, input: {
@@ -1537,6 +1601,78 @@ async function enqueueSettlementSystemAudit(executor: SqlExecutor, input: {
     },
     createdAt: input.createdAt,
   });
+  for (const summary of await loadSettlementMerchantSummaries(executor, input.batchId)) {
+    await enqueueAudit(executor, {
+      sourceEventId: auditSourceId('audit:settlement-system', {
+        eventType: input.eventType,
+        batchId: input.batchId,
+        attemptId: input.attemptId,
+        evidenceHash,
+        merchantId: summary.merchantId,
+      }),
+      streamName: 'financial',
+      evidenceProfile: 'SYSTEM',
+      eventType: input.eventType,
+      resourceType: 'SETTLEMENT_BATCH',
+      resourceId: input.batchId,
+      merchantId: summary.merchantId,
+      actorRole: 'SETTLEMENT_WORKER',
+      correlationId: `settlement:${input.batchId}`,
+      requestHash: evidenceHash.slice(2),
+      payload: {
+        batchId: input.batchId,
+        attemptId: input.attemptId,
+        itemCount: summary.itemCount,
+        totalAmount: summary.totalAmount,
+      },
+      createdAt: input.createdAt,
+    });
+  }
+}
+
+interface SettlementMerchantSummary {
+  merchantId: string;
+  itemCount: number;
+  totalAmount: string;
+}
+
+function settlementMerchantSummaries(items: readonly BatchItemRow[]): SettlementMerchantSummary[] {
+  const summaries = new Map<string, { itemCount: number; totalAmount: bigint }>();
+  for (const item of items) {
+    if (!item.merchant_id) continue;
+    const summary = summaries.get(item.merchant_id) ?? { itemCount: 0, totalAmount: 0n };
+    summary.itemCount += 1;
+    summary.totalAmount += BigInt(item.amount);
+    summaries.set(item.merchant_id, summary);
+  }
+  return [...summaries]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([merchantId, summary]) => ({
+      merchantId,
+      itemCount: summary.itemCount,
+      totalAmount: summary.totalAmount.toString(),
+    }));
+}
+
+async function loadSettlementMerchantSummaries(executor: SqlExecutor, batchId: string) {
+  const result = await executor.query<{
+    merchant_id: string;
+    item_count: string | number;
+    total_amount: string;
+  }>(
+    `SELECT request.merchant_id, count(*) AS item_count, sum(item.amount)::text AS total_amount
+     FROM core.settlement_batch_items item
+     JOIN core.settlement_requests request ON request.request_id = item.request_id
+     WHERE item.batch_id = $1 AND request.merchant_id IS NOT NULL
+     GROUP BY request.merchant_id
+     ORDER BY request.merchant_id`,
+    [batchId],
+  );
+  return result.rows.map((row) => ({
+    merchantId: row.merchant_id,
+    itemCount: Number(row.item_count),
+    totalAmount: row.total_amount,
+  }));
 }
 
 function settlementPolicyVersions(items: BatchItemRow[]) {

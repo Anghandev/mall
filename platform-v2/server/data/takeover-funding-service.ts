@@ -252,6 +252,20 @@ export class TakeoverFundingService {
         ],
       );
       await executor.query(
+        `INSERT INTO core.takeover_case_transitions (
+           transition_id, case_id, order_id, from_state, to_state,
+           public_evidence_type, public_evidence_hash, occurred_at
+         ) VALUES ($1,$2,$3,$4,'FUNDED','FUNDING_APPROVED',$5,$6)`,
+        [
+          `takeover-transition:${randomUUID()}`,
+          plan.takeover.case_id,
+          plan.takeover.order_id,
+          plan.takeover.state,
+          fundingEvidenceHash,
+          now,
+        ],
+      );
+      await executor.query(
         `INSERT INTO core.takeover_funding_commands (
            command_id, case_id, actor_wallet, idempotency_key, request_hash,
            evidence_hash, policy_version, old_value_hash, new_value_hash,
@@ -302,6 +316,7 @@ export class TakeoverFundingService {
         eventType: 'TakeoverFundingApproved',
         resourceType: 'TAKEOVER_CASE',
         resourceId: plan.takeover.case_id,
+        merchantId: plan.takeover.merchant_id,
         actorWallet: wallet,
         actorRole: roles[0]!,
         correlationId: input.correlationId,
@@ -860,6 +875,7 @@ export async function captureMerchantFutureProceeds(
     eventType: 'MerchantFutureProceedsCaptured',
     resourceType: 'MERCHANT_DEBT',
     resourceId: input.merchantId,
+    merchantId: input.merchantId,
     correlationId: input.correlationId,
     requestHash: input.evidenceHash.slice(2),
     payload: {

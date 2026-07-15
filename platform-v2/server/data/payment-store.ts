@@ -567,9 +567,11 @@ export async function reversePaymentProjection(executor: SqlExecutor, eventKey: 
   );
   const bnm = await executor.query<{
     buyer_wallet: string;
+    merchant_id: string;
     amount: string;
   }>(
-    `SELECT orders.buyer_wallet, orders.exact_amounts ->> 'bnmAmount' AS amount
+    `SELECT orders.buyer_wallet, orders.merchant_id,
+            orders.exact_amounts ->> 'bnmAmount' AS amount
      FROM core.orders orders
      WHERE orders.order_id = $1`,
     [row.order_id],
@@ -626,6 +628,7 @@ export async function reversePaymentProjection(executor: SqlExecutor, eventKey: 
     eventType: 'PaymentFinalityReorged',
     resourceType: 'ORDER',
     resourceId: row.order_id,
+    ...(bnm.rows[0]?.merchant_id ? { merchantId: bnm.rows[0].merchant_id } : {}),
     actorRole: 'PAYMENT_INDEXER',
     correlationId: `payment-reorg:${row.order_id}`,
     requestHash: reorgAuditHash.slice(2),

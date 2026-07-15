@@ -859,6 +859,15 @@ export class FulfillmentService {
          ) VALUES ($1,$2,$3,$4,'OPEN',NULL,$5,$6)`,
         [caseId, orderId, order.merchant_id, order.policy_version, input.evidenceHash.toLowerCase(), command.now],
       );
+      await insertTakeoverTransition(executor, {
+        caseId,
+        orderId,
+        fromState: null,
+        toState: 'OPEN',
+        evidenceType: 'TAKEOVER_OPENED',
+        evidenceHash: input.evidenceHash,
+        occurredAt: command.now,
+      });
       await transitionOrder(executor, order, command, evidenceId, 'TAKEOVER');
       await executor.query(
         `UPDATE core.orders SET state = 'TAKEOVER', takeover_opened_at = $2,
@@ -1123,11 +1132,27 @@ async function recordShipmentCommand(
     );
   }
   if (takeover) {
-    await executor.query(
-      `UPDATE core.takeover_cases SET state = 'FULFILLING', updated_at = clock_timestamp()
-       WHERE order_id = $1 AND state = 'OPEN'`,
+    const takeoverCase = await executor.query<{ case_id: string; state: string }>(
+      `SELECT case_id, state FROM core.takeover_cases
+       WHERE order_id = $1 AND state IN ('OPEN', 'FUNDED') FOR UPDATE`,
       [orderId],
     );
+    const activeCase = takeoverCase.rows[0];
+    if (!activeCase) throw new CoreError('UnknownState', 'Active takeover case is unavailable', 409);
+    await executor.query(
+      `UPDATE core.takeover_cases SET state = 'FULFILLING', updated_at = clock_timestamp()
+       WHERE order_id = $1 AND state IN ('OPEN', 'FUNDED')`,
+      [orderId],
+    );
+    await insertTakeoverTransition(executor, {
+      caseId: activeCase.case_id,
+      orderId,
+      fromState: activeCase.state,
+      toState: 'FULFILLING',
+      evidenceType: 'REPLACEMENT_SHIPMENT_ACCEPTED',
+      evidenceHash: input.evidenceHash,
+      occurredAt: command.now,
+    });
   }
   await outbox(executor, orderId, command.id, 'ShipmentRecorded', result);
   return result;
@@ -1184,11 +1209,27 @@ async function completeOrder(
     [order.order_id, command.now],
   );
   if (!bnmState.rows[0]) throw new CoreError('UnknownState', 'Order BNM state version is unavailable', 409);
+  const closingTakeover = await executor.query<{ case_id: string; state: string }>(
+    `SELECT case_id, state FROM core.takeover_cases
+     WHERE order_id = $1 AND state IN ('FULFILLING', 'FULFILLMENT_PENDING') FOR UPDATE`,
+    [order.order_id],
+  );
   await executor.query(
     `UPDATE core.takeover_cases SET state = 'CLOSED', closed_at = $2,
        updated_at = clock_timestamp() WHERE order_id = $1 AND state IN ('FULFILLING', 'FULFILLMENT_PENDING')`,
     [order.order_id, command.now],
   );
+  if (closingTakeover.rows[0]) {
+    await insertTakeoverTransition(executor, {
+      caseId: closingTakeover.rows[0].case_id,
+      orderId: order.order_id,
+      fromState: closingTakeover.rows[0].state,
+      toState: 'CLOSED',
+      evidenceType: 'FULFILLMENT_FINALIZED',
+      evidenceHash,
+      occurredAt: command.now,
+    });
+  }
   await executor.query(
     `UPDATE core.fulfillment_requests SET state = 'RESOLVED', resolution_evidence_id = $2,
        resolved_by = $3, resolved_at = $4
@@ -1998,6 +2039,33 @@ function assertFinalPayment(order: OrderRow) {
   if (order.finality_status !== 'FINAL' || !order.payment_finalized_at) {
     throw new CoreError('FinalityPending', 'Payment must reach 15 canonical confirmations', 409);
   }
+}
+
+async function insertTakeoverTransition(executor: SqlExecutor, input: {
+  caseId: string;
+  orderId: string;
+  fromState: string | null;
+  toState: string;
+  evidenceType: string;
+  evidenceHash: string;
+  occurredAt: Date;
+}) {
+  await executor.query(
+    `INSERT INTO core.takeover_case_transitions (
+       transition_id, case_id, order_id, from_state, to_state,
+       public_evidence_type, public_evidence_hash, occurred_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [
+      `takeover-transition:${randomUUID()}`,
+      input.caseId,
+      input.orderId,
+      input.fromState,
+      input.toState,
+      input.evidenceType,
+      input.evidenceHash.toLowerCase(),
+      input.occurredAt,
+    ],
+  );
 }
 
 function validateRequest(input: RequestInput) {

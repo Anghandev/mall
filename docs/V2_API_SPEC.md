@@ -1,6 +1,6 @@
 # Abu 24K V2 Core API Contract
 
-Status: coordinated local settlement/admin checkpoint `2.0.0-settlement-admin.6`. OpenAPI,
+Status: coordinated local settlement/admin checkpoint `2.0.0-settlement-admin.7`. OpenAPI,
 generated types, ABI, manifests, enums, the fail-closed WebSocket protocol and
 consumer tests share this version. This checkpoint does not authorize a
 deployment, production signing or a transaction.
@@ -130,6 +130,43 @@ Authenticated Core reads and writes:
 - `POST /v2/orders/{orderId}/tracking-evidence`
 - `POST /v2/shipments/batches`
 
+Buyer account and saved-address routes:
+
+- `GET|PUT /v2/buyer/profile`
+- `POST /v2/buyer/addresses/parse`
+- `GET|POST /v2/buyer/addresses`
+- `PUT|DELETE /v2/buyer/addresses/{addressId}`
+- `POST /v2/buyer/addresses/{addressId}/default`
+- `POST /v2/buyer/addresses/{addressId}/fulfillment-target`
+- `GET /v2/buyer/overview`
+- `GET /v2/orders/{orderId}/takeover-timeline`
+
+The parser request is ephemeral: raw pasted text is not persisted or written to
+audit. Saving requires complete name, mainland mobile number, address and
+coordinates plus a current AMap six-digit region result. Nickname and address
+PII use AES-256-GCM; one active default address is enforced transactionally.
+A saved address creates a fresh 30-minute fulfillment target and never rewrites
+the target snapshot of an existing quote or order. Buyer UID/account-ID policy
+and production PII retention remain `DecisionBlocked`.
+
+Merchant profile and audit routes:
+
+- `GET|PUT /v2/merchant/profile`
+- `GET /v2/merchant/audit/entries`
+- `POST /v2/merchant/audit/exports`
+
+Merchant profile updates accept only shop name and an owned provider-sealed
+Logo asset. The settlement wallet is returned read-only and is never an
+ordinary profile-update field. Merchant audit requires a current active wallet
+binding and filters by explicit `merchant_id`; actor-wallet filtering cannot
+cross that boundary. Responses expose bounded summaries and proof references,
+not raw payloads. CSV export requires a time range of at most 31 days, returns
+at most 1,000 rows, neutralizes spreadsheet formulas and records the export.
+The list proof is tenant-scoped and never returns global stream counts or head
+hashes. Until an append-only historical tenant mapping is approved, the API
+reports `PARTIAL_PRE_MERCHANT_SCOPE` instead of claiming complete legacy audit
+history.
+
 Catalog management:
 
 - `GET|PUT /v2/merchant/stores/{storeId}/product-slot`
@@ -243,7 +280,7 @@ capabilities plus signed settlement intents and requests, merchant finance and
 guarantee deposits, takeover funding, Safe MultiSend batching and finality,
 policy governance, CMS, notifications, versioned system configuration,
 append-only audit queries and operations monitoring. The coordinated OpenAPI
-publishes 97 HTTP operations and the generated types, state/error enums,
+publishes 113 HTTP operations and the generated types, state/error enums,
 Schema and ABI share the same artifact version.
 
 Seckill session reads, numeric-cursor HTTP replay and `/v2/ws` publish only

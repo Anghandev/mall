@@ -1,4 +1,4 @@
-export const CORE_ARTIFACT_VERSION = '2.0.0-settlement-admin.6';
+export const CORE_ARTIFACT_VERSION = '2.0.0-settlement-admin.7';
 export const BSC_CHAIN_ID = 56;
 export const USDT_ADDRESS = '0x55d398326f99059ff775485246999027b3197955';
 export const NPL_ADDRESS = '0x4e8277ab31e4956b2cd48449793a57656dfc03d2';
@@ -165,10 +165,12 @@ export const mediaPurposes = [
   'CATEGORY_ICON',
   'STORE_IMAGE',
   'FULFILLMENT_EVIDENCE',
+  'BUYER_AVATAR',
+  'MERCHANT_LOGO',
 ] as const;
 export type MediaPurpose = (typeof mediaPurposes)[number];
 
-export const mediaResourceTypes = ['PRODUCT', 'CATEGORY', 'STORE', 'ORDER'] as const;
+export const mediaResourceTypes = ['PRODUCT', 'CATEGORY', 'STORE', 'ORDER', 'BUYER', 'MERCHANT'] as const;
 export type MediaResourceType = (typeof mediaResourceTypes)[number];
 
 export const mediaContentTypes = [

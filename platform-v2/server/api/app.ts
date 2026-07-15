@@ -61,6 +61,11 @@ import type {
 import type { ConfigApprovalInput } from '../data/system-config-service.ts';
 import type { AuditQuery } from '../data/audit-service.ts';
 import type {
+  BuyerAddressInput,
+  BuyerProfileUpdate,
+  MerchantProfileUpdate,
+} from '../data/account-service.ts';
+import type {
   Carrier,
   EvidenceAction,
   MediaPurpose,
@@ -367,6 +372,11 @@ export interface SystemConfigApiService {
 
 export interface AuditApiService {
   list(actor: FulfillmentActor, query: AuditQuery): Promise<unknown>;
+  listMerchant(actor: FulfillmentActor, query: Omit<AuditQuery, 'actorWallet' | 'merchantId'>): Promise<unknown>;
+  exportMerchant(
+    actor: FulfillmentActor,
+    query: Omit<AuditQuery, 'actorWallet' | 'merchantId' | 'limit'>,
+  ): Promise<{ contentType: string; filename: string; entryCount: number; csv: string }>;
 }
 
 export interface MonitoringApiService {
@@ -377,6 +387,37 @@ export interface MonitoringApiService {
 export interface BusinessAnalyticsApiService {
   merchantDashboard(actor: FulfillmentActor): Promise<unknown>;
   adminDashboard(actor: FulfillmentActor): Promise<unknown>;
+}
+
+export interface AccountApiService {
+  getBuyerProfile(actor: FulfillmentActor): Promise<unknown>;
+  updateBuyerProfile(actor: FulfillmentActor, input: BuyerProfileUpdate): Promise<unknown>;
+  parseBuyerAddress(actor: FulfillmentActor, rawText: string): Promise<unknown>;
+  listBuyerAddresses(actor: FulfillmentActor): Promise<unknown>;
+  createBuyerAddress(actor: FulfillmentActor, input: BuyerAddressInput): Promise<unknown>;
+  updateBuyerAddress(actor: FulfillmentActor, addressId: string, input: BuyerAddressInput): Promise<unknown>;
+  deleteBuyerAddress(
+    actor: FulfillmentActor,
+    addressId: string,
+    input: { expectedVersion: number; idempotencyKey: string },
+  ): Promise<unknown>;
+  setDefaultBuyerAddress(
+    actor: FulfillmentActor,
+    addressId: string,
+    input: { expectedVersion: number; idempotencyKey: string },
+  ): Promise<unknown>;
+  createBuyerAddressTarget(actor: FulfillmentActor, addressId: string, idempotencyKey: string): Promise<unknown>;
+  getBuyerOverview(actor: FulfillmentActor): Promise<unknown>;
+  getBuyerTakeoverTimeline(actor: FulfillmentActor, orderId: string): Promise<unknown>;
+  getMerchantProfile(actor: FulfillmentActor): Promise<unknown>;
+  updateMerchantProfile(actor: FulfillmentActor, input: MerchantProfileUpdate): Promise<unknown>;
+  recordMerchantAuditExport(actor: FulfillmentActor, input: {
+    from: Date;
+    to: Date;
+    entryCount: number;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<unknown>;
 }
 
 export interface ApiDependencies {
@@ -406,6 +447,7 @@ export interface ApiDependencies {
   auditService: AuditApiService;
   monitoringService: MonitoringApiService;
   businessAnalyticsService: BusinessAnalyticsApiService;
+  accountService: AccountApiService;
   recordRuntimeMetric?(kind: 'HTTP' | 'PAYMENT' | 'FULFILLMENT', durationMs: number, error: boolean, at: Date): void;
   logisticsWebhookSecrets?: Readonly<Partial<Record<'KUAIDI100' | 'CAINIAO', string>>>;
   clock(): Date;
@@ -579,6 +621,177 @@ async function route(
       await dependencies.businessAnalyticsService.merchantDashboard(fulfillmentActor(claims)),
       correlationId,
     );
+    return;
+  }
+  if (url.pathname === '/v2/buyer/profile') {
+    const claims = authorizeBuyer(request, dependencies.config, dependencies.clock());
+    if (request.method === 'GET') {
+      sendJson(response, 200, await dependencies.accountService.getBuyerProfile(fulfillmentActor(claims)), correlationId);
+      return;
+    }
+    if (request.method === 'PUT') {
+      const body = await readJson(request);
+      assertOnlyKeys(body, ['nickname', 'avatarAssetId', 'expectedVersion', 'idempotencyKey']);
+      sendJson(response, 200, await dependencies.accountService.updateBuyerProfile(fulfillmentActor(claims), {
+        nickname: nullableString(body, 'nickname'),
+        avatarAssetId: nullableString(body, 'avatarAssetId'),
+        expectedVersion: requiredNonNegativeInteger(body, 'expectedVersion'),
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+      }), correlationId);
+      return;
+    }
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/buyer/addresses/parse') {
+    const claims = authorizeBuyer(request, dependencies.config, dependencies.clock());
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['rawText']);
+    sendJson(
+      response,
+      200,
+      await dependencies.accountService.parseBuyerAddress(fulfillmentActor(claims), requiredString(body, 'rawText')),
+      correlationId,
+    );
+    return;
+  }
+  if (url.pathname === '/v2/buyer/addresses') {
+    const claims = authorizeBuyer(request, dependencies.config, dependencies.clock());
+    if (request.method === 'GET') {
+      sendJson(response, 200, await dependencies.accountService.listBuyerAddresses(fulfillmentActor(claims)), correlationId);
+      return;
+    }
+    if (request.method === 'POST') {
+      const body = await readJson(request);
+      sendJson(
+        response,
+        201,
+        await dependencies.accountService.createBuyerAddress(
+          fulfillmentActor(claims),
+          buyerAddressInput(body, false),
+        ),
+        correlationId,
+      );
+      return;
+    }
+  }
+  const buyerAddressPath = matchResourceAction(url.pathname, '/v2/buyer/addresses/');
+  if (buyerAddressPath && request.method === 'PUT' && buyerAddressPath.action === undefined) {
+    const claims = authorizeBuyer(request, dependencies.config, dependencies.clock());
+    const body = await readJson(request);
+    sendJson(response, 200, await dependencies.accountService.updateBuyerAddress(
+      fulfillmentActor(claims),
+      buyerAddressPath.resourceId,
+      buyerAddressInput(body, true),
+    ), correlationId);
+    return;
+  }
+  if (buyerAddressPath && request.method === 'DELETE' && buyerAddressPath.action === undefined) {
+    const claims = authorizeBuyer(request, dependencies.config, dependencies.clock());
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['expectedVersion', 'idempotencyKey']);
+    sendJson(response, 200, await dependencies.accountService.deleteBuyerAddress(
+      fulfillmentActor(claims),
+      buyerAddressPath.resourceId,
+      {
+        expectedVersion: requiredPositiveInteger(body, 'expectedVersion'),
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+      },
+    ), correlationId);
+    return;
+  }
+  if (buyerAddressPath && request.method === 'POST' && buyerAddressPath.action === 'default') {
+    const claims = authorizeBuyer(request, dependencies.config, dependencies.clock());
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['expectedVersion', 'idempotencyKey']);
+    sendJson(response, 200, await dependencies.accountService.setDefaultBuyerAddress(
+      fulfillmentActor(claims),
+      buyerAddressPath.resourceId,
+      {
+        expectedVersion: requiredPositiveInteger(body, 'expectedVersion'),
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+      },
+    ), correlationId);
+    return;
+  }
+  if (buyerAddressPath && request.method === 'POST' && buyerAddressPath.action === 'fulfillment-target') {
+    const claims = authorizeBuyer(request, dependencies.config, dependencies.clock());
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['idempotencyKey']);
+    sendJson(response, 201, await dependencies.accountService.createBuyerAddressTarget(
+      fulfillmentActor(claims),
+      buyerAddressPath.resourceId,
+      requiredString(body, 'idempotencyKey'),
+    ), correlationId);
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/buyer/overview') {
+    const claims = authorizeBuyer(request, dependencies.config, dependencies.clock());
+    sendJson(response, 200, await dependencies.accountService.getBuyerOverview(fulfillmentActor(claims)), correlationId);
+    return;
+  }
+  const takeoverTimeline = url.pathname.match(/^\/v2\/orders\/([^/]+)\/takeover-timeline$/);
+  if (request.method === 'GET' && takeoverTimeline) {
+    const claims = authorizeBuyer(request, dependencies.config, dependencies.clock());
+    sendJson(response, 200, await dependencies.accountService.getBuyerTakeoverTimeline(
+      fulfillmentActor(claims),
+      decodedPathPart(takeoverTimeline[1]!),
+    ), correlationId);
+    return;
+  }
+  if (url.pathname === '/v2/merchant/profile') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
+    const actor = fulfillmentActor(claims);
+    if (request.method === 'GET') {
+      sendJson(response, 200, await dependencies.accountService.getMerchantProfile(actor), correlationId);
+      return;
+    }
+    if (request.method === 'PUT') {
+      const body = await readJson(request);
+      assertOnlyKeys(body, ['shopName', 'logoAssetId', 'expectedVersion', 'idempotencyKey']);
+      sendJson(response, 200, await dependencies.accountService.updateMerchantProfile(actor, {
+        shopName: requiredString(body, 'shopName'),
+        logoAssetId: nullableString(body, 'logoAssetId'),
+        expectedVersion: requiredPositiveInteger(body, 'expectedVersion'),
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+        correlationId,
+      }), correlationId);
+      return;
+    }
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/merchant/audit/entries') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
+    const actor = fulfillmentActor(claims);
+    await dependencies.accountService.getMerchantProfile(actor);
+    sendJson(
+      response,
+      200,
+      await dependencies.auditService.listMerchant(actor, merchantAuditQuery(url)),
+      correlationId,
+    );
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/merchant/audit/exports') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
+    const actor = fulfillmentActor(claims);
+    await dependencies.accountService.getMerchantProfile(actor);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['from', 'to', 'streamName', 'eventType', 'resourceType', 'idempotencyKey']);
+    const from = requiredDate(body, 'from');
+    const to = requiredDate(body, 'to');
+    const exported = await dependencies.auditService.exportMerchant(actor, {
+      from,
+      to,
+      ...(body.streamName === undefined ? {} : { streamName: auditStream(requiredString(body, 'streamName')) }),
+      ...(body.eventType === undefined ? {} : { eventType: requiredString(body, 'eventType') }),
+      ...(body.resourceType === undefined ? {} : { resourceType: requiredString(body, 'resourceType') }),
+    });
+    await dependencies.accountService.recordMerchantAuditExport(actor, {
+      from,
+      to,
+      entryCount: exported.entryCount,
+      idempotencyKey: requiredString(body, 'idempotencyKey'),
+      correlationId,
+    });
+    sendJson(response, 200, exported, correlationId);
     return;
   }
   if (request.method === 'POST' && url.pathname === '/v2/settlement-intents') {
@@ -1913,6 +2126,15 @@ function requiredString(body: Record<string, unknown>, name: string) {
   return value;
 }
 
+function nullableString(body: Record<string, unknown>, name: string) {
+  const value = body[name];
+  if (value === null) return null;
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new CoreError('InvalidRequest', `${name} must be a non-empty string or null`);
+  }
+  return value;
+}
+
 function requiredObject(body: Record<string, unknown>, name: string) {
   const value = body[name];
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -2140,6 +2362,43 @@ function requiredDate(body: Record<string, unknown>, name: string) {
     throw new CoreError('InvalidRequest', `${name} must be a canonical ISO timestamp`);
   }
   return date;
+}
+
+function buyerAddressInput(body: Record<string, unknown>, requireVersion: boolean): BuyerAddressInput {
+  assertOnlyKeys(body, [
+    'label', 'recipientName', 'phone', 'detailAddress', 'longitude', 'latitude',
+    'isDefault', 'expectedVersion', 'idempotencyKey',
+  ]);
+  return {
+    label: requiredString(body, 'label'),
+    recipientName: requiredString(body, 'recipientName'),
+    phone: requiredString(body, 'phone'),
+    detailAddress: requiredString(body, 'detailAddress'),
+    longitude: requiredNumber(body, 'longitude'),
+    latitude: requiredNumber(body, 'latitude'),
+    isDefault: requiredBoolean(body, 'isDefault'),
+    ...(requireVersion ? { expectedVersion: requiredPositiveInteger(body, 'expectedVersion') } : {}),
+    idempotencyKey: requiredString(body, 'idempotencyKey'),
+  };
+}
+
+function merchantAuditQuery(url: URL): Omit<AuditQuery, 'actorWallet' | 'merchantId'> {
+  return {
+    ...(url.searchParams.get('streamName') ? { streamName: auditStream(url.searchParams.get('streamName')) } : {}),
+    ...(url.searchParams.get('eventType') ? { eventType: url.searchParams.get('eventType')! } : {}),
+    ...(url.searchParams.get('resourceType') ? { resourceType: url.searchParams.get('resourceType')! } : {}),
+    ...(url.searchParams.get('resourceId') ? { resourceId: url.searchParams.get('resourceId')! } : {}),
+    ...(url.searchParams.get('correlationId') ? { correlationId: url.searchParams.get('correlationId')! } : {}),
+    ...(url.searchParams.get('from') ? { from: dateParameter(url.searchParams.get('from')!, 'from') } : {}),
+    ...(url.searchParams.get('to') ? { to: dateParameter(url.searchParams.get('to')!, 'to') } : {}),
+    ...(url.searchParams.get('cursorCreatedAt')
+      ? { cursorCreatedAt: dateParameter(url.searchParams.get('cursorCreatedAt')!, 'cursorCreatedAt') }
+      : {}),
+    ...(url.searchParams.get('cursorEntryId') ? { cursorEntryId: url.searchParams.get('cursorEntryId')! } : {}),
+    ...(url.searchParams.get('limit')
+      ? { limit: optionalPositiveIntegerParameter(url.searchParams.get('limit'), 'limit')! }
+      : {}),
+  };
 }
 
 function requestInput(body: Record<string, unknown>) {

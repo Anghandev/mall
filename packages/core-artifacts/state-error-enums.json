@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.6",
+  "artifactVersion": "2.0.0-settlement-admin.7",
   "orderProjectionStates": [
     "QUOTED",
     "SUBMITTED",
@@ -182,13 +182,17 @@
     "PRODUCT_VIDEO",
     "CATEGORY_ICON",
     "STORE_IMAGE",
-    "FULFILLMENT_EVIDENCE"
+    "FULFILLMENT_EVIDENCE",
+    "BUYER_AVATAR",
+    "MERCHANT_LOGO"
   ],
   "mediaResourceTypes": [
     "PRODUCT",
     "CATEGORY",
     "STORE",
-    "ORDER"
+    "ORDER",
+    "BUYER",
+    "MERCHANT"
   ],
   "fulfillmentAssets": [
     "USDT",

@@ -19,6 +19,7 @@ export interface AuditOutboxInput {
   eventType: string;
   resourceType: string;
   resourceId: string;
+  merchantId?: string;
   actorWallet?: string;
   actorRole?: string;
   correlationId: string;
@@ -39,6 +40,7 @@ export async function enqueueAudit(executor: SqlExecutor, input: AuditOutboxInpu
     eventType: input.eventType,
     resourceType: input.resourceType,
     resourceId: input.resourceId,
+    ...(input.merchantId ? { merchantId: input.merchantId } : {}),
     actorWallet: input.actorWallet ?? null,
     actorRole: input.actorRole ?? null,
     correlationId: input.correlationId,
@@ -61,11 +63,11 @@ export async function enqueueAudit(executor: SqlExecutor, input: AuditOutboxInpu
   }
   await executor.query(
     `INSERT INTO core.audit_outbox_events (
-       source_event_id, stream_name, evidence_profile, event_type, resource_type, resource_id,
+       source_event_id, stream_name, evidence_profile, event_type, resource_type, resource_id, merchant_id,
        actor_wallet, actor_role, correlation_id, request_hash, payload,
        authorization_evidence, signature_evidence, transaction_evidence,
        state, available_at, created_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'PENDING',$15,$15)`,
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'PENDING',$16,$16)`,
     [
       input.sourceEventId,
       input.streamName,
@@ -73,6 +75,7 @@ export async function enqueueAudit(executor: SqlExecutor, input: AuditOutboxInpu
       input.eventType,
       input.resourceType,
       input.resourceId,
+      input.merchantId ?? null,
       input.actorWallet ?? null,
       input.actorRole ?? null,
       input.correlationId,
@@ -92,6 +95,7 @@ export interface AuditQuery {
   eventType?: string;
   resourceType?: string;
   resourceId?: string;
+  merchantId?: string;
   actorWallet?: string;
   correlationId?: string;
   from?: Date;
@@ -121,6 +125,7 @@ export class AuditQueryService {
     if (query.eventType) add('event_type = ?', query.eventType);
     if (query.resourceType) add('resource_type = ?', query.resourceType);
     if (query.resourceId) add('resource_id = ?', query.resourceId);
+    if (query.merchantId) add('merchant_id = ?', query.merchantId);
     if (query.actorWallet) add('actor_wallet = ?', normalizedAddress(query.actorWallet));
     if (query.correlationId) add('correlation_id = ?', query.correlationId);
     if (query.from) add('created_at >= ?', query.from);
@@ -168,6 +173,73 @@ export class AuditQueryService {
     }
     return proof;
   }
+
+  async listMerchant(actor: FulfillmentActor, query: Omit<AuditQuery, 'actorWallet' | 'merchantId'>) {
+    const merchantId = requireMerchantAuditScope(actor);
+    validateQuery(query);
+    const result = await this.merchantRows(merchantId, query, query.limit ?? 50);
+    const limit = query.limit ?? 50;
+    const hasMore = result.length > limit;
+    const rows = result.slice(0, limit);
+    const last = rows.at(-1);
+    return {
+      entries: rows.map(publicMerchantAuditRow),
+      proofScope: 'MERCHANT_SCOPED_ENTRY_HASHES' as const,
+      historyStatus: 'PARTIAL_PRE_MERCHANT_SCOPE' as const,
+      chainProof: {
+        merchantId,
+        entries: rows.length,
+      },
+      nextCursor: hasMore && last
+        ? { createdAt: new Date(last.created_at).toISOString(), entryId: last.entry_id }
+        : null,
+    };
+  }
+
+  async exportMerchant(actor: FulfillmentActor, query: Omit<AuditQuery, 'actorWallet' | 'merchantId' | 'limit'>) {
+    const merchantId = requireMerchantAuditScope(actor);
+    validateMerchantExportQuery(query);
+    const rows = await this.merchantRows(merchantId, query, 1_000);
+    const entries = rows.map(publicMerchantAuditRow);
+    return {
+      contentType: 'text/csv; charset=utf-8' as const,
+      filename: `merchant-audit-${query.from!.toISOString().slice(0, 10)}-${query.to!.toISOString().slice(0, 10)}.csv`,
+      entryCount: entries.length,
+      csv: merchantAuditCsv(entries),
+    };
+  }
+
+  private async merchantRows(
+    merchantId: string,
+    query: Omit<AuditQuery, 'actorWallet' | 'merchantId'>,
+    limit: number,
+  ) {
+    const clauses = ['merchant_id = $1'];
+    const params: unknown[] = [merchantId];
+    const add = (sql: string, value: unknown) => {
+      params.push(value);
+      clauses.push(sql.replace('?', `$${params.length}`));
+    };
+    if (query.streamName) add('stream_name = ?', query.streamName);
+    if (query.eventType) add('event_type = ?', query.eventType);
+    if (query.resourceType) add('resource_type = ?', query.resourceType);
+    if (query.resourceId) add('resource_id = ?', query.resourceId);
+    if (query.correlationId) add('correlation_id = ?', query.correlationId);
+    if (query.from) add('created_at >= ?', query.from);
+    if (query.to) add('created_at <= ?', query.to);
+    if (query.cursorCreatedAt && query.cursorEntryId) {
+      params.push(query.cursorCreatedAt, query.cursorEntryId);
+      clauses.push(`(created_at, entry_id) < ($${params.length - 1}, $${params.length})`);
+    }
+    params.push(limit + 1);
+    const result = await this.#audit.query<AuditRow>(
+      `SELECT * FROM audit.entries WHERE ${clauses.join(' AND ')}
+       ORDER BY created_at DESC, entry_id DESC LIMIT $${params.length}`,
+      params,
+    );
+    return result.rows;
+  }
+
 }
 
 export function auditSourceId(prefix: string, value: Record<string, unknown>) {
@@ -204,6 +276,7 @@ function publicAuditRow(row: AuditRow) {
     eventType: row.event_type,
     resourceType: row.resource_type,
     resourceId: row.resource_id,
+    merchantId: row.merchant_id,
     actorWallet: row.actor_wallet,
     actorRole: row.actor_role,
     correlationId: row.correlation_id,
@@ -218,10 +291,56 @@ function publicAuditRow(row: AuditRow) {
   });
 }
 
+function publicMerchantAuditRow(row: AuditRow) {
+  const signatureHash = typeof row.signature_evidence.signatureHash === 'string'
+    ? row.signature_evidence.signatureHash
+    : null;
+  const safeOrChainTxHash = typeof row.transaction_evidence.txHash === 'string'
+    ? row.transaction_evidence.txHash
+    : null;
+  return Object.freeze({
+    entryId: row.entry_id,
+    operationTime: new Date(row.created_at).toISOString(),
+    operationType: row.event_type,
+    module: row.resource_type,
+    detail: `${row.event_type} / ${row.resource_type} / ${row.resource_id}`,
+    signatureHash,
+    safeOrChainTxHash,
+    entryHash: row.entry_hash,
+  });
+}
+
 function requireAuditRead(actor: FulfillmentActor) {
   if (!actor.roles.some((role) => role === 'ADMIN' || role === 'AUDITOR')) {
     throw new CoreError('Forbidden', 'Audit records require ADMIN or AUDITOR role', 403);
   }
+}
+
+function requireMerchantAuditScope(actor: FulfillmentActor) {
+  if (!actor.roles.includes('MERCHANT') || !actor.merchantId || !/^[A-Za-z0-9:_-]{1,128}$/.test(actor.merchantId)) {
+    throw new CoreError('Forbidden', 'Merchant audit scope is unavailable', 403);
+  }
+  return actor.merchantId;
+}
+
+function validateMerchantExportQuery(query: Omit<AuditQuery, 'actorWallet' | 'merchantId' | 'limit'>) {
+  validateQuery(query);
+  if (!query.from || !query.to) throw new CoreError('InvalidRequest', 'Merchant audit export requires a bounded time range');
+  if (query.to.getTime() - query.from.getTime() > 31 * 24 * 60 * 60 * 1_000) {
+    throw new CoreError('InvalidRequest', 'Merchant audit export range cannot exceed 31 days');
+  }
+}
+
+function merchantAuditCsv(entries: ReturnType<typeof publicMerchantAuditRow>[]) {
+  const header = ['operationTime', 'operationType', 'module', 'detail', 'signatureHash', 'safeOrChainTxHash', 'entryHash'];
+  const rows = entries.map((entry) => header.map((name) => csvCell(entry[name as keyof typeof entry])).join(','));
+  return `\uFEFF${header.join(',')}\n${rows.join('\n')}${rows.length > 0 ? '\n' : ''}`;
+}
+
+function csvCell(value: unknown) {
+  let text = value === null || value === undefined ? '' : String(value);
+  if (/^[=+\-@]/.test(text)) text = `'${text}`;
+  return `"${text.replaceAll('"', '""')}"`;
 }
 
 function normalizedAddress(value: string) {

@@ -5,7 +5,7 @@ import type { OrderProjection } from './api/allowed-actions.ts';
 import { loadConfig } from './api/config.ts';
 import { CORE_ARTIFACT_VERSION, type BreakerScope, type UserRole } from './api/enums.ts';
 import { CoreError } from './api/errors.ts';
-import { AmapAdministrativeRegionResolver } from './api/providers.ts';
+import { AmapAdministrativeRegionResolver, AmapPostalAddressParser } from './api/providers.ts';
 import {
   HttpNotificationProviderAdapter,
   HttpSecretReferenceResolver,
@@ -84,6 +84,7 @@ import { NotificationService } from './data/notification-service.ts';
 import { PolicyService } from './data/policy-service.ts';
 import { SystemConfigService } from './data/system-config-service.ts';
 import { BusinessAnalyticsService } from './data/business-analytics-service.ts';
+import { AccountService } from './data/account-service.ts';
 
 const ARTIFACT_ROOT = fileURLToPath(new URL('../../packages/core-artifacts/', import.meta.url));
 const ABI_BUNDLE_PATH = fileURLToPath(
@@ -348,12 +349,25 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     platformWallet: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
     transactions,
   });
+  const regionResolver = new AmapAdministrativeRegionResolver({
+    ...(env.AMAP_WEB_SERVICE_KEY ? { key: env.AMAP_WEB_SERVICE_KEY } : {}),
+  });
   const fulfillmentTargetService = new FulfillmentTargetService({
     transactions,
-    regions: new AmapAdministrativeRegionResolver({
+    regions: regionResolver,
+    ...(env.DELIVERY_DATA_ENCRYPTION_KEY ? { encryptionKey: env.DELIVERY_DATA_ENCRYPTION_KEY } : {}),
+  });
+  const accountService = new AccountService({
+    transactions,
+    regions: regionResolver,
+    parser: new AmapPostalAddressParser({
       ...(env.AMAP_WEB_SERVICE_KEY ? { key: env.AMAP_WEB_SERVICE_KEY } : {}),
     }),
     ...(env.DELIVERY_DATA_ENCRYPTION_KEY ? { encryptionKey: env.DELIVERY_DATA_ENCRYPTION_KEY } : {}),
+    ...(config.piiRetentionPolicyVersion
+      ? { retentionPolicyVersion: config.piiRetentionPolicyVersion }
+      : {}),
+    createDeliveryTarget: (actor, input) => fulfillmentTargetService.createDeliveryTarget(actor, input),
   });
   const bnmWorker = new BnmAvailabilityWorker({
     transactions,
@@ -458,6 +472,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     auditService: new AuditQueryService(auditDatabase),
     monitoringService,
     businessAnalyticsService,
+    accountService,
     recordRuntimeMetric: (kind, durationMs, error, at) => runtimeMetrics.record(kind, durationMs, error, at),
     takeoverFundingService: {
       fundingApprovalChallenge: (actor, input) => takeoverFundingService.fundingApprovalChallenge(actor, {
