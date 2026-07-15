@@ -14,11 +14,13 @@ import {
 } from 'lucide-react';
 import type {
   BalanceState,
-  FulfillmentOrder,
+  BnmPointsBalance,
   MerchantFinanceProjection,
+  RewardSubtype,
   SettlementBalance,
   SettlementListProjection,
 } from '@abu24k/core-artifacts';
+import { rewardSubtypes } from '@abu24k/core-artifacts';
 import { CoreApiError } from '../core-api';
 import { readableError, useCoreRuntime } from '../core-runtime';
 import { EmptyState, LoadingRows, Metric, PageHeader } from '../components/ui';
@@ -35,6 +37,7 @@ type CommandState =
   | { phase: 'error'; message: string };
 
 const payableStates = ['LOCKED', 'AVAILABLE', 'REQUESTED', 'BATCHED', 'SETTLED'] as const;
+const bnmPointStates = ['LOCKED', 'AVAILABLE'] as const;
 const positiveAtomicPattern = /^[1-9][0-9]*$/;
 const bytes32Pattern = /^0x[0-9a-fA-F]{64}$/;
 
@@ -42,7 +45,6 @@ export function AssetsPage() {
   const { api, session, signSettlementTypedData } = useCoreRuntime();
   const [settlementsState, setSettlementsState] = useState<LoadState<SettlementListProjection>>({ phase: 'idle' });
   const [financeState, setFinanceState] = useState<LoadState<MerchantFinanceProjection>>({ phase: 'idle' });
-  const [ordersState, setOrdersState] = useState<LoadState<readonly FulfillmentOrder[]>>({ phase: 'idle' });
   const [settlementAmount, setSettlementAmount] = useState('');
   const [settlementCommand, setSettlementCommand] = useState<CommandState>({ phase: 'idle' });
   const [depositPolicyVersion, setDepositPolicyVersion] = useState('');
@@ -58,19 +60,16 @@ export function AssetsPage() {
     if (!session) {
       setSettlementsState({ phase: 'idle' });
       setFinanceState({ phase: 'idle' });
-      setOrdersState({ phase: 'idle' });
       return;
     }
     if (!quiet) {
       setSettlementsState({ phase: 'loading' });
       setFinanceState({ phase: 'loading' });
-      setOrdersState({ phase: 'loading' });
     }
     const token = session.token;
-    const [settlementsResult, financeResult, ordersResult] = await Promise.allSettled([
+    const [settlementsResult, financeResult] = await Promise.allSettled([
       api.listSettlements(token),
       api.getMerchantFinance(token),
-      api.listFulfillmentOrders(token),
     ]);
     if (sessionTokenRef.current !== token) return;
 
@@ -93,12 +92,6 @@ export function AssetsPage() {
     } else {
       setFinanceState({ phase: 'error', message: readableError(financeResult.reason) });
     }
-
-    if (ordersResult.status === 'fulfilled') {
-      setOrdersState({ phase: 'ready', value: ordersResult.value });
-    } else {
-      setOrdersState({ phase: 'error', message: readableError(ordersResult.reason) });
-    }
   }, [api, session]);
 
   useEffect(() => {
@@ -107,17 +100,14 @@ export function AssetsPage() {
 
   const settlements = settlementsState.phase === 'ready' ? settlementsState.value : undefined;
   const finance = financeState.phase === 'ready' ? financeState.value : undefined;
-  const orders = ordersState.phase === 'ready' ? ordersState.value : [];
   const merchantBalances = settlements?.balances.filter((balance) => (
     balance.asset === 'USDT' && balance.purpose === 'MERCHANT_RECEIVABLE'
   )) ?? [];
   const nplBalances = settlements?.balances.filter((balance) => (
     balance.asset === 'NPL' && balance.purpose === 'REWARD_LIABILITY'
   )) ?? [];
+  const bnmPoints = settlements?.points ?? [];
   const disputedMerchantBalances = merchantBalances.filter((balance) => balance.state === 'DISPUTED');
-  const bnmRows = orders.flatMap((order) => order.balances
-    .filter((balance) => balance.asset === 'BNM_POINTS')
-    .map((balance) => ({ orderId: order.orderId, ...balance })));
   const financeAllowsSettlement = finance?.merchant.status === 'APPROVED'
     && finance.merchant.guarantee_status === 'READY';
   const hasAvailableMerchantBalance = merchantBalances.some((balance) => balance.state === 'AVAILABLE');
@@ -417,24 +407,90 @@ export function AssetsPage() {
           <EmptyState blocked description="最终场次结算与收益比例仍为 DecisionBlocked。" title="收益投影不可用" />
         </section>
         <section className="section-block reward-section" aria-labelledby="npl-title">
-          <div className="section-heading"><div><p className="eyebrow">NPL</p><h2 id="npl-title">门店奖励池</h2></div><Coins aria-hidden="true" size={19} /></div>
+          <div className="section-heading"><div><p className="eyebrow">NPL / Reward Safe</p><h2 id="npl-title">NPL 收益子类</h2></div><Coins aria-hidden="true" size={19} /></div>
           <ProjectionState state={settlementsState} compact>
-            <AssetStateGrid balances={nplBalances} compact label="NPL 奖励" />
+            <RewardSubtypeGrid balances={nplBalances} />
           </ProjectionState>
         </section>
         <section className="section-block reward-section" aria-labelledby="bnm-title">
-          <div className="section-heading"><div><p className="eyebrow">BNM</p><h2 id="bnm-title">后台积分释放跟踪</h2></div><LockKeyhole aria-hidden="true" size={19} /></div>
-          <ProjectionState state={ordersState} compact>
-            {bnmRows.length ? (
-              <div className="compact-evidence-list">
-                {bnmRows.map((row) => <div key={`${row.orderId}:${row.state}`}><span>{row.state}</span><strong>{row.amount}</strong><small>{row.orderId}</small></div>)}
-              </div>
-            ) : <EmptyState description="Core 未返回订单级 BNM 积分余额。" title="暂无 BNM 记录" />}
+          <div className="section-heading"><div><p className="eyebrow">BNM / Backend points</p><h2 id="bnm-title">BNM 积分总额</h2></div><LockKeyhole aria-hidden="true" size={19} /></div>
+          <ProjectionState state={settlementsState} compact>
+            <BnmPointsGrid points={bnmPoints} />
           </ProjectionState>
         </section>
       </div>
     </div>
   );
+}
+
+function RewardSubtypeGrid({ balances }: { balances: readonly SettlementBalance[] }) {
+  const unclassified = balances.some((balance) => balance.rewardSubtype === null);
+  return (
+    <>
+      {unclassified ? (
+        <div className="inline-warning finance-warning" role="alert">
+          <AlertTriangle aria-hidden="true" size={17} />
+          <span>Core 返回了未分类的 NPL 奖励余额，已失败关闭该行展示。</span>
+        </div>
+      ) : null}
+      <div aria-label="NPL 奖励收益子类" className="reward-subtype-grid">
+        {rewardSubtypes.map((subtype) => {
+          const rows = balances.filter((balance) => balance.rewardSubtype === subtype);
+          return (
+            <article key={subtype}>
+              <header><h3>{rewardSubtypeLabel(subtype)}</h3><span>{subtype}</span></header>
+              {rows.length ? rows.map((row) => (
+                <div className="reward-subtype-balance" key={`${subtype}:${row.state}`}>
+                  <span><StatusText state={row.state} /></span>
+                  <strong>{row.amount}</strong>
+                  <small>NPL atomic</small>
+                </div>
+              )) : <p>Core 未返回余额</p>}
+            </article>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+function BnmPointsGrid({ points }: { points: readonly BnmPointsBalance[] }) {
+  return (
+    <div className="bnm-points-block">
+      <div aria-label="BNM Locked/Available 聚合" className="bnm-points-grid">
+        {bnmPointStates.map((state) => {
+          const rows = points.filter((pointsBalance) => pointsBalance.state === state);
+          return (
+            <article key={state}>
+              <h3>{state === 'LOCKED' ? 'Locked 锁定总额' : 'Available 可用总额'}</h3>
+              {rows.length ? rows.map((row) => (
+                <div className="state-balance" key={`${row.purpose}:${row.state}`}>
+                  <strong>{row.amount}</strong>
+                  <span>BNM points</span>
+                  <small>{row.purpose}</small>
+                </div>
+              )) : <p>Core 未返回总额</p>}
+            </article>
+          );
+        })}
+      </div>
+      <p className="bnm-transfer-boundary"><LockKeyhole aria-hidden="true" size={15} />BNM 是不可转移的后台积分，本页不提供结算、Safe 转账或链上 Claim 操作。</p>
+    </div>
+  );
+}
+
+function rewardSubtypeLabel(subtype: RewardSubtype) {
+  const labels: Record<RewardSubtype, string> = {
+    GENESIS: '创世奖励',
+    DIRECT_REFERRAL: '直推奖励',
+    DISTRICT: '区县奖励',
+    CITY: '城市奖励',
+    PROVINCE: '省级奖励',
+    REGION: '大区奖励',
+    OPERATIONS: '运维奖励',
+    ROUNDING_REMAINDER: '取整余额',
+  };
+  return labels[subtype];
 }
 
 function ProjectionState<T>({

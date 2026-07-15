@@ -3,7 +3,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
-import { artifactVersion, type CatalogProduct } from '@abu24k/core-artifacts';
+import { artifactVersion, rewardSubtypes, type CatalogProduct } from '@abu24k/core-artifacts';
 import { App } from '../src/App';
 import { productBaseline } from '../src/bootstrap';
 import { CoreApiError, type CoreApi, type CoreBootstrap } from '../src/core-api';
@@ -162,8 +162,8 @@ async function enterAssets(client: CoreApi) {
 }
 
 describe('00 wallet gateway', () => {
-  it('consumes settlement-admin.1 and requires a server-authoritative order-action grant', () => {
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.1');
+  it('consumes settlement-admin.2 and requires a server-authoritative order-action grant', () => {
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.2');
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
     expect(coreBoundary.artifactVersion).toBe(artifactVersion);
     expect(coreBoundary.artifactsAvailable).toBe(true);
@@ -450,12 +450,20 @@ describe('04 store controls', () => {
 
 describe('05 asset rails', () => {
   it('renders Core five-state balances, Safe finality, guarantee reorg and takeover debt without local netting', async () => {
-    await enterAssets(createMockCoreApi({ listFulfillmentOrders: async () => [deliveryOrder] }));
+    await enterAssets(createMockCoreApi());
 
     expect(await screen.findByRole('heading', { name: 'USDT 商家货款' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: '门店奖励池' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: '后台积分释放跟踪' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'NPL 收益子类' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'BNM 积分总额' })).toBeTruthy();
     expect(screen.getByLabelText('USDT 商家货款五状态余额')).toBeTruthy();
+    const nplRewards = screen.getByLabelText('NPL 奖励收益子类');
+    for (const subtype of rewardSubtypes) expect(within(nplRewards).getByText(subtype)).toBeTruthy();
+    expect(within(nplRewards).getByText('2108')).toBeTruthy();
+    const bnmPoints = screen.getByLabelText('BNM Locked/Available 聚合');
+    expect(within(bnmPoints).getByText('8800')).toBeTruthy();
+    expect(within(bnmPoints).getByText('3600')).toBeTruthy();
+    expect(screen.getByText(/BNM 是不可转移的后台积分/)).toBeTruthy();
+    expect(within(bnmPoints).queryByRole('button')).toBeNull();
     expect(screen.getByText('45000000000000000000')).toBeTruthy();
     expect(screen.getByText('safe-batch-7')).toBeTruthy();
     expect(screen.getByRole('link', { name: new RegExp(`0x${'9'.repeat(64)}`) }).getAttribute('href'))

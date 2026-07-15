@@ -1347,7 +1347,7 @@ td .empty-state {
 
 .reward-grid {
   display: grid;
-  grid-template-columns: 1.2fr 0.9fr 0.9fr;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.8fr) minmax(0, 0.9fr);
   gap: 20px;
 }
 
@@ -1370,6 +1370,102 @@ td .empty-state {
 
 .reward-balance strong {
   font-size: 1.5rem;
+}
+
+.reward-subtype-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+}
+
+.reward-subtype-grid article {
+  min-width: 0;
+  padding: 12px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.reward-subtype-grid header {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 9px;
+}
+
+.reward-subtype-grid h3,
+.bnm-points-grid h3 {
+  font-size: 0.75rem;
+}
+
+.reward-subtype-grid header span,
+.reward-subtype-grid article > p,
+.reward-subtype-balance small,
+.bnm-points-grid article > p {
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.reward-subtype-balance {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 5px 8px;
+}
+
+.reward-subtype-balance + .reward-subtype-balance {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.reward-subtype-balance strong {
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.reward-subtype-balance small {
+  grid-column: 1 / -1;
+  text-align: right;
+}
+
+.bnm-points-block {
+  display: grid;
+  gap: 12px;
+}
+
+.bnm-points-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.bnm-points-grid article {
+  min-width: 0;
+  padding: 14px;
+}
+
+.bnm-points-grid article + article {
+  border-left: 1px solid var(--border);
+}
+
+.bnm-transfer-boundary {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.bnm-transfer-boundary svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
 }
 
 .balance-list {
@@ -2421,6 +2517,10 @@ td > small {
     grid-column: auto;
   }
 
+  .reward-subtype-grid {
+    grid-template-columns: 1fr;
+  }
+
   .filter-bar {
     grid-template-columns: 1fr 1fr;
   }
@@ -2504,6 +2604,15 @@ td > small {
 }
 
 @media (max-width: 520px) {
+  .bnm-points-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .bnm-points-grid article + article {
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+
   .topbar,
   .system-notice.compact,
   .workspace main {
