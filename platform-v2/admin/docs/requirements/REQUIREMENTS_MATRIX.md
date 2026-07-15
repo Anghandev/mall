@@ -261,3 +261,22 @@ financial calculation or production fixture:
 All unavailable entries preserve Core `DecisionBlocked` / `ExternalBlocked`
 reason codes and details. An empty coverage projection is never shown as zero
 or healthy. All fixtures remain under `tests/**`.
+
+## Logistics `.1` Consumer Boundary
+
+The current product pin is
+`@abu24k/core-artifacts@2.0.0-logistics.1`. This checkpoint publishes printer
+binding, waybill batches and durable print jobs only under Merchant routes.
+It completes no Admin Requirement ID:
+
+- `ADM-LOG-001` through `ADM-LOG-005` and `ADM-GLOBAL-002` remain unchanged.
+  Admin carrier/warehouse/freight configuration, batch print actions and print
+  job operations are not published and remain fail-closed under `GAP-ADM-012`.
+- The product records `merchantLogisticsOperations: false`; its consumer test
+  proves the coordinated manifest contains the Merchant paths and no matching
+  Admin path.
+- The production-bundle guard requires the coordinated artifact version and
+  rejects Merchant printer, waybill or print-job paths in the Admin bundle.
+
+Real provider accounts, device acceptance and production deployment remain
+`ExternalBlocked` under `ADM-GOAL-003`. No production fixture is shipped.

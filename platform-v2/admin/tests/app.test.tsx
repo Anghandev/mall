@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { artifactVersion, executableOrderActionNames, type ManagedCatalogProduct, type UserRole } from '@abu24k/core-artifacts';
+import coordinatedManifest from '@abu24k/core-artifacts/manifest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
@@ -27,8 +28,32 @@ describe('platform admin fail-closed experience', () => {
     expect(packageJson.dependencies['@abu24k/core-artifacts']).toBe(`workspace:${artifactVersion}`);
     expect(productBaseline.artifactVersion).toBe(artifactVersion);
     expect(coreState.artifactVersion).toBe(artifactVersion);
-    expect(coreState.artifactStatus).toBe('coordinated-settlement-admin-checkpoint');
+    expect(coreState.artifactStatus).toBe('coordinated-logistics-checkpoint');
     expect(coreState.connectionLabel).toContain(artifactVersion);
+  });
+
+  it('consumes the logistics checkpoint without exposing Merchant operations to Admin', () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const merchantLogisticsPaths = coordinatedManifest.httpSurface.filter((operation) =>
+      /\/v2\/merchant\/(?:stores\/\{storeId\}\/printer-binding|waybills\/batches|print-jobs)/.test(operation),
+    );
+    const adminLogisticsPaths = coordinatedManifest.httpSurface.filter((operation) =>
+      /\/v2\/admin\/.*(?:printer|waybill|print-job|logistics)/i.test(operation),
+    );
+
+    expect(merchantLogisticsPaths).toHaveLength(6);
+    expect(adminLogisticsPaths).toEqual([]);
+    expect(productBaseline.adminCapabilities.merchantLogisticsOperations).toBe(false);
+
+    renderAt('/logistics');
+    expect(screen.getByRole('heading', { name: '物流配置' })).toBeTruthy();
+    expect(screen.getByText('GAP-ADM-012')).toBeTruthy();
+    expect(screen.getByText(/Admin 未发布的物流配置和打印操作继续 fail-closed/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: '加载资源' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '打印电子面单' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '打印自提单' }).hasAttribute('disabled')).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('treats the static action catalog as capability metadata, not runtime authorization', () => {

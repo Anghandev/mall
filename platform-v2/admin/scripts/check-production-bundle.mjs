@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { artifactVersion } from '@abu24k/core-artifacts';
 
 const root = fileURLToPath(new URL('../dist/', import.meta.url));
 const forbidden = [
@@ -12,6 +13,9 @@ const forbidden = [
   'USDT Claim',
   'NPL/BNM Claim',
   'Escrow',
+  '/v2/merchant/stores/',
+  '/v2/merchant/waybills/batches',
+  '/v2/merchant/print-jobs',
 ];
 
 function files(path) {
@@ -22,17 +26,21 @@ function files(path) {
 }
 
 const violations = [];
+let containsArtifactVersion = false;
 for (const file of files(root)) {
   if (!/\.(?:js|css|html)$/.test(file)) continue;
   const content = readFileSync(file, 'utf8');
+  if (content.includes(artifactVersion)) containsArtifactVersion = true;
   for (const marker of forbidden) {
     if (content.includes(marker)) violations.push(`${file}: ${marker}`);
   }
 }
+
+if (!containsArtifactVersion) violations.push(`production bundle does not contain coordinated artifact ${artifactVersion}`);
 
 if (violations.length > 0) {
   console.error(`Production bundle contains forbidden markers:\n${violations.join('\n')}`);
   process.exit(1);
 }
 
-console.log('Production bundle check passed: no production sample data or deprecated action markers.');
+console.log(`Production bundle check passed for ${artifactVersion}: no samples, deprecated actions or Merchant logistics paths.`);
