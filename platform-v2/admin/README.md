@@ -5,7 +5,7 @@ implements shared funds, contracts, API, Schema or signer behavior.
 
 ## Current Product Boundary
 
-- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.5`.
+- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.6`.
 - SIWE/JWT stays in memory. Every protected read and write is role-bound by
   Core and preserves typed `DecisionBlocked`, `ExternalBlocked`,
   `ConfigurationRequired` and correlation evidence.
@@ -14,6 +14,11 @@ implements shared funds, contracts, API, Schema or signer behavior.
   governed takeover funding, policy draft governance, CMS version publication,
   typed system configuration, append-only audit and operations/coverage
   monitoring.
+- The Dashboard consumes the authenticated `GET /v2/admin/dashboard` business
+  projection. It renders the Core `Asia/Shanghai` window, immutable order
+  amounts, current fulfillment queues, merchant/product/seckill counts,
+  signed-settlement totals, failed transactions, coverage and independent
+  breakers. Nullable ratios and unavailable metrics stay visibly fail-closed.
 - Admin order operations consume exact Core-side order/product/TxHash/wallet
   search, pending-review and breaker projections, full row `allowedActions`,
   and read-only batch enabled-intersection preview. OR, fuzzy wallet, UID/phone,
@@ -28,7 +33,10 @@ implements shared funds, contracts, API, Schema or signer behavior.
 - CMS and configuration editors accept structured JSON objects because their
   coordinated request types are open objects. Core remains the schema,
   sanitization, decision and publication authority.
-- Global batch actions, seckill administration, risk rules, logistics
+- New UID, low-stock thresholds, abnormal-order and blacklist rules remain
+  explicit `DecisionBlocked`; monitoring alerts are never relabeled as
+  transaction-risk events. Global batch actions, seckill administration,
+  risk rules, logistics
   configuration and production provider accounts remain fail-closed as
   recorded in `docs/contracts/UPSTREAM_GAPS.md`. Catalog writes consume `.5`
   runtime RBAC, `allowedActions`, `writeLock` and `blockingResource`; AUDITOR

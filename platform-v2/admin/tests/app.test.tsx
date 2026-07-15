@@ -43,11 +43,36 @@ describe('platform admin fail-closed experience', () => {
     expect(screen.getByRole('button', { name: '请求并提交二次签名' }).hasAttribute('disabled')).toBe(true);
   });
 
-  it('renders unavailable dashboard values instead of synthetic zeroes', () => {
+  it('keeps the Dashboard fail-closed until SIWE and then renders the authoritative Core projection', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    window.ethereum = walletProvider(wallet);
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['ADMIN'] });
+      if (url.endsWith('/v2/admin/dashboard')) return jsonResponse(adminDashboardResponse());
+      return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected Dashboard request', correlationId: 'dashboard-ui-test' } }, 400);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
     renderAt('/');
     expect(screen.getByRole('heading', { name: '今日运营态势' })).toBeTruthy();
-    expect(screen.getAllByText('不可用').length).toBeGreaterThan(4);
-    expect(screen.getAllByText(coreState.connectionLabel).length).toBeGreaterThan(0);
+    expect(screen.getByText(/未认证时不显示合成数据/)).toBeTruthy();
+    expect(screen.queryByText('300000000')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+
+    expect(await screen.findByText('Asia/Shanghai', { selector: 'strong' })).toBeTruthy();
+    expect(screen.getByText('300000000')).toBeTruthy();
+    expect(screen.getByText('0 / 0; bps=null')).toBeTruthy();
+    expect(screen.getAllByText('Buyer UID identity is not frozen')).toHaveLength(2);
+    expect(screen.getByText('0x4444444444444444444444444444444444444444')).toBeTruthy();
+    expect(screen.getAllByText('paused = true')).toHaveLength(2);
+    const failedTransactions = screen.getByText('链上失败交易').closest('div');
+    expect(failedTransactions).not.toBeNull();
+    expect(within(failedTransactions!).getByText('2')).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith('/v2/admin/dashboard', expect.objectContaining({ headers: { authorization: 'Bearer jwt' } }));
   });
 
   it('keeps every Catalog read and write behind a Core SIWE session', () => {
@@ -649,6 +674,36 @@ function bootstrapResponse() {
       providers: { RPC_PRIMARY: 'CONFIGURATION_REQUIRED' },
       writesEnabled: false,
     },
+  };
+}
+
+function adminDashboardResponse() {
+  return {
+    artifactVersion,
+    timezone: 'Asia/Shanghai',
+    window: { start: '2026-07-14T16:00:00.000Z', end: '2026-07-15T16:00:00.000Z', generatedAt: '2026-07-15T04:00:00.000Z' },
+    orders: {
+      finalizedToday: '3', listPriceUsdt: '300000000', buyerUsdtPaid: '210000000',
+      pendingShipment: '4', shipped: '5', delivered: '6', fulfilled: '7',
+      shipmentRate: { numerator: '0', denominator: '0', bps: null },
+    },
+    merchants: { total: '8', newToday: '1', pending: '2', approved: '5', suspended: '1' },
+    products: { total: '9', pendingReview: '3', soldOut: '2' },
+    seckill: { createdToday: '1', active: '1', settling: '0' },
+    fulfillmentQueues: { exchange: '1', delay: '2', arbitration: '3', forcedReceipt: '4', takeover: '5' },
+    settlements: { requestedCount: '6', requestedUsdt: '600000000', settledCount: '4', settledUsdt: '400000000', failedTransactions: '2' },
+    coverage: [{ snapshotId: 'coverage-1', blockNumber: '123', recordedAt: '2026-07-15T04:00:00.000Z', asset: 'USDT', safeAddress: '0x4444444444444444444444444444444444444444', verifiedAssets: '100', unsettledLiabilities: '101', covered: false }],
+    breakers: [
+      { scope: 'NEW_PAYMENT', paused: true },
+      { scope: 'SECKILL_PURCHASE', paused: false },
+      { scope: 'NEW_SETTLEMENT_BATCH', paused: true },
+    ],
+    unavailable: [
+      { metric: 'NEW_UID_USERS', reasonCode: 'DecisionBlocked', detail: 'Buyer UID identity is not frozen' },
+      { metric: 'LOW_STOCK_PRODUCTS', reasonCode: 'DecisionBlocked', detail: 'Low-stock threshold is not frozen' },
+      { metric: 'ABNORMAL_ORDERS', reasonCode: 'DecisionBlocked', detail: 'Abnormal-order rules are not frozen' },
+      { metric: 'BLACKLIST_BLOCKS', reasonCode: 'DecisionBlocked', detail: 'Transaction risk rules are not frozen' },
+    ],
   };
 }
 

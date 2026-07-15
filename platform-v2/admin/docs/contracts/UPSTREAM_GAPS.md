@@ -3,7 +3,7 @@
 The platform-admin product is a consumer. It cannot add shared endpoints,
 schemas, financial logic, calldata, signers or database behavior.
 
-The coordinated consumer is `@abu24k/core-artifacts@2.0.0-settlement-admin.5`.
+The coordinated consumer is `@abu24k/core-artifacts@2.0.0-settlement-admin.6`.
 Published paths still fail closed when Core returns `DecisionBlocked`,
 `ExternalBlocked` or `ConfigurationRequired`.
 
@@ -13,7 +13,7 @@ Published paths still fail closed when Core returns `DecisionBlocked`,
 | GAP-ADM-002 | SIWE/JWT plus route-specific ADMIN/OPERATOR/ARBITRATOR/AUDITOR enforcement is published | A role absent from the session never enables a product control |
 | GAP-ADM-003 | Exact Admin order ID/product ID/TxHash/wallet search, pending-product-review and breaker projections, full order-row `allowedActions`, and read-only batch enabled-intersection preview are published and consumed | OR search, fuzzy wallet, UID/phone PII search, Yellow queue, cross-resource selection, export/print and arbitrary batch-write contracts are absent |
 | GAP-ADM-004 | Policy and takeover-funding EIP-712 challenge/signature/Safe proposal evidence is published | Seckill force-close, breaker and prize-injection governance remain absent |
-| GAP-ADM-005 | Monitoring metrics and per-asset coverage are published | Business GMV/order/review aggregates and risk queues remain unavailable |
+| GAP-ADM-005 | `.6` authenticated Admin Dashboard publishes the `Asia/Shanghai` business window, immutable order/GMV amounts, shipment ratio, merchant/product/seckill counts, fulfillment queues, signed-settlement totals and failures, per-asset coverage, independent breakers and typed unavailable evidence; the product consumes it directly | New UID identity, low-stock threshold, abnormal-order rules and blacklist rules remain `DecisionBlocked`; monitoring alerts are not transaction-risk evidence |
 | GAP-ADM-006 | Merchant guarantee, deposit finality, debt and takeover-finance projection is published | Qualification, level, PII, sales and wallet-change governance remain unavailable |
 | GAP-ADM-007 | `.5` admin category/tag versions, nullable category parent, all managed products, store product slot, signed concession preview, review submission/decisions, delist, inventory adjustment and controlled media reads are published and consumed | Global cross-resource batch selection remains `GAP-ADM-003`; unresolved category service fees remain `DecisionBlocked` |
 | GAP-ADM-008 | Policy governance plus the product-scoped signed concession preview are published and consumed | Missing service/prize/store/concession-destination commercial decisions remain `DecisionBlocked`; the product never infers them |

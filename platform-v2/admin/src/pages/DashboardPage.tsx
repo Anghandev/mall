@@ -1,91 +1,254 @@
-import { AlertTriangle, ArrowRight, Ban, CheckCircle2, Database, RefreshCw, ServerCog, ShieldCheck, ShoppingBag, Store, WalletCards } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import { fetchCoreBootstrap } from '../coreApi';
-import { coreState } from '../coreState';
-import { adminModules } from '../domain/adminModules';
-import { useCoreResource } from '../useCoreResource';
+import type { AdminBusinessDashboard } from '@abu24k/core-artifacts';
+import {
+  AlertTriangle,
+  Ban,
+  CheckCircle2,
+  Clock3,
+  Database,
+  KeyRound,
+  PackageCheck,
+  RefreshCw,
+  ShieldAlert,
+  ShoppingBag,
+  Store,
+  WalletCards,
+  Zap,
+  type LucideIcon,
+} from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { CoreApiError } from '../coreApi';
+import { useCoreSession } from '../coreSession';
+import { fetchAdminBusinessDashboard } from '../settlementAdminApi';
 
-const metricGroups = [
-  {
-    title: '今日核心业务',
-    icon: ShoppingBag,
-    metrics: ['总订单数', 'GMV · USDT', '发货率', '秒杀场次', '新增 UID', '新增商家'],
-  },
-  {
-    title: '待办与履约',
-    icon: Store,
-    metrics: ['待审核商家', '待审核商品', 'exchange / delay / arbitration', 'Takeover cases', '库存预警'],
-  },
-  {
-    title: 'Web3 资管与风控',
-    icon: ShieldCheck,
-    metrics: ['签名结算申请', 'Safe settled · USDT', '链上失败', '异常订单', '黑名单拦截', '逐资产覆盖率'],
-  },
-  {
-    title: '基础设施',
-    icon: ServerCog,
-    metrics: ['RPC latency', 'Oracle deviation', 'CPU / memory', 'Redis hit', 'MQ backlog', 'block height'],
-  },
-] as const;
+type Metric = Readonly<{ label: string; value: string; detail: string; blocked?: boolean }>;
+type MetricGroup = Readonly<{ title: string; icon: LucideIcon; metrics: readonly Metric[] }>;
 
 export function DashboardPage() {
-  const bootstrap = useCoreResource(fetchCoreBootstrap);
-  const readiness = bootstrap.data?.readiness;
+  const { connect, session, status } = useCoreSession();
+  const [dashboard, setDashboard] = useState<AdminBusinessDashboard | null>(null);
+  const [error, setError] = useState<CoreApiError | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [reload, setReload] = useState(0);
+  const canRead = session?.roles.some((role) => ['ADMIN', 'OPERATOR', 'AUDITOR'].includes(role)) ?? false;
+
+  useEffect(() => {
+    setDashboard(null);
+    setError(null);
+    if (!session || !canRead) return;
+    const controller = new AbortController();
+    setLoading(true);
+    void fetchAdminBusinessDashboard(session.token, controller.signal)
+      .then(setDashboard)
+      .catch((cause) => {
+        if (!controller.signal.aborted) setError(asCoreError(cause));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [canRead, reload, session]);
+
+  const hasBlockedEvidence = dashboard
+    ? dashboard.unavailable.length > 0
+      || dashboard.breakers.some((item) => item.paused)
+      || dashboard.coverage.some((item) => !item.covered)
+    : true;
 
   return (
     <>
       <header className="page-header dashboard-header">
         <div className="page-icon"><Database aria-hidden="true" /></div>
         <div>
-          <p className="eyebrow">OPERATIONS CONTROL ROOM</p>
+          <p className="eyebrow">AUTHORITATIVE BUSINESS WINDOW</p>
           <h1>今日运营态势</h1>
-          <p>以 authoritative timezone 和 Core 聚合为准。当前未连接，指标显示不可用而非 0。</p>
+          <p>订单金额只显示 Core 的不可变支付快照；当前履约队列与今日终局窗口分开呈现。</p>
         </div>
-        <div className="requirement-list"><code>ADM-DASH-001—004</code><code>2026-07-14 · UTC+8</code></div>
+        <div className="requirement-list"><code>ADM-DASH-001—004</code><code>GET /v2/admin/dashboard</code></div>
       </header>
 
-      <section className={readiness?.writesEnabled ? 'dashboard-alert dashboard-alert-ready' : 'dashboard-alert'} role="status">
-        <span>{readiness?.writesEnabled ? <CheckCircle2 aria-hidden="true" /> : <Ban aria-hidden="true" />}</span>
-        <div>
-          <strong>{bootstrap.loading ? '正在读取支付 readiness' : bootstrap.error ? `${bootstrap.error.code}: ${bootstrap.error.message}` : readiness?.writesEnabled ? '支付运行时允许新报价' : '新支付保持 fail-closed'}</strong>
-          <p>业务聚合与风险队列尚无专用投影；基础设施与逐资产覆盖率已在运维监控消费，支付门禁仍以 Core bootstrap 为准。</p>
-        </div>
-        <Link to="/core-status">查看证据 <ArrowRight aria-hidden="true" /></Link>
-      </section>
+      {!session ? (
+        <section className="panel session-prompt dashboard-session-prompt">
+          <div><KeyRound aria-hidden="true" /><span><strong>连接平台钱包</strong><small>仅 ADMIN、OPERATOR 或 AUDITOR 可读取业务聚合；未认证时不显示合成数据。</small></span></div>
+          <button className="button button-primary" type="button" onClick={() => void connect()} disabled={status === 'CONNECTING'}>
+            <KeyRound aria-hidden="true" />{status === 'CONNECTING' ? '等待签名' : 'SIWE 连接'}
+          </button>
+        </section>
+      ) : !canRead ? (
+        <ErrorView error={new CoreApiError({ code: 'Forbidden', message: '当前会话没有平台 Dashboard 读取权限', status: 403 })} />
+      ) : null}
 
-      <section className="readiness-strip" aria-label="支付 checkpoint 状态">
-        <div><span>Artifact</span><strong>{coreState.artifactVersion}</strong></div>
-        <div><span>Chain</span><strong>{readiness?.chainId ?? '—'}</strong></div>
-        <div><span>Payment DecisionBlocked</span><strong>{readiness ? readiness.paymentDecisionBlocked.length : '—'}</strong></div>
-        <div><span>Payment ExternalBlocked</span><strong>{readiness ? readiness.paymentExternalBlocked.length : '—'}</strong></div>
-        <button className="icon-button light-icon-button" type="button" aria-label="重新读取支付 readiness" onClick={bootstrap.reload} disabled={bootstrap.loading}><RefreshCw aria-hidden="true" /></button>
-      </section>
+      {loading ? <div className="resource-state" role="status"><RefreshCw className="spin" aria-hidden="true" /><div><strong>正在读取 Core 业务投影</strong><p>金额、终局和队列均等待真实响应。</p></div></div> : null}
+      {error ? <ErrorView error={error} /> : null}
 
-      <section className="metric-board" aria-label="Dashboard 指标组">
-        {metricGroups.map(({ title, icon: Icon, metrics }) => (
-          <article className="metric-group" key={title}>
-            <div className="metric-group-heading"><Icon aria-hidden="true" /><h2>{title}</h2><span>UNAVAILABLE</span></div>
-            <dl>
-              {metrics.map((metric) => <div key={metric}><dt>{metric}</dt><dd aria-label={`${metric}不可用`}>—<small>不可用</small></dd></div>)}
-            </dl>
-          </article>
-        ))}
-      </section>
+      {dashboard ? (
+        <>
+          <section className={hasBlockedEvidence ? 'dashboard-alert' : 'dashboard-alert dashboard-alert-ready'} role="status">
+            <span>{hasBlockedEvidence ? <ShieldAlert aria-hidden="true" /> : <CheckCircle2 aria-hidden="true" />}</span>
+            <div>
+              <strong>{hasBlockedEvidence ? 'Core 投影已载入，存在显式阻断证据' : 'Core 投影已载入'}</strong>
+              <p>这里不使用运维告警充当交易风险，也不会把缺失投影当成 0 或健康状态。</p>
+            </div>
+          </section>
 
-      <section className="dashboard-lower">
-        <article className="panel incident-panel">
-          <div className="panel-heading"><div><p className="section-kicker">风险队列</p><h2>需要证据的事件</h2></div><AlertTriangle aria-hidden="true" /></div>
-          <div className="empty-inline"><ShieldCheck aria-hidden="true" /><div><strong>风险事件投影不可用</strong><p>不以空列表证明系统安全；等待 GAP-ADM-011。</p></div></div>
-        </article>
-        <article className="panel">
-          <div className="panel-heading"><div><p className="section-kicker">快速入口</p><h2>关键运营工作流</h2></div><WalletCards aria-hidden="true" /></div>
-          <nav className="quick-links" aria-label="关键运营工作流">
-            {adminModules.filter((module) => ['takeover', 'policy', 'risk', 'audit'].includes(module.id)).map((module) => (
-              <Link key={module.id} to={module.path}><module.icon aria-hidden="true" /><span><strong>{module.label}</strong><small>{module.eyebrow}</small></span><ArrowRight aria-hidden="true" /></Link>
+          <section className="readiness-strip dashboard-window" aria-label="Asia Shanghai 业务窗口">
+            <div><span>Artifact</span><strong>{dashboard.artifactVersion}</strong></div>
+            <div><span>Timezone</span><strong>{dashboard.timezone}</strong></div>
+            <div><span>Window start</span><strong>{dashboard.window.start}</strong></div>
+            <div><span>Window end</span><strong>{dashboard.window.end}</strong></div>
+            <div><span>Generated</span><strong>{dashboard.window.generatedAt}</strong></div>
+            <button className="icon-button light-icon-button" type="button" aria-label="重新读取业务 Dashboard" onClick={() => setReload((value) => value + 1)} disabled={loading}><RefreshCw aria-hidden="true" /></button>
+          </section>
+
+          <section className="metric-board" aria-label="Core Dashboard 指标组">
+            {dashboardMetricGroups(dashboard).map(({ title, icon: Icon, metrics }) => (
+              <article className="metric-group" key={title}>
+                <div className="metric-group-heading"><Icon aria-hidden="true" /><h2>{title}</h2><span className={metrics.some((metric) => metric.blocked) ? 'is-blocked' : undefined}>{metrics.some((metric) => metric.blocked) ? 'FAIL CLOSED' : 'CORE'}</span></div>
+                <dl>
+                  {metrics.map((metric) => (
+                    <div key={metric.label}>
+                      <dt>{metric.label}</dt>
+                      <dd className={metric.blocked ? 'metric-blocked' : undefined}>{metric.value}<small>{metric.detail}</small></dd>
+                    </div>
+                  ))}
+                </dl>
+              </article>
             ))}
-          </nav>
-        </article>
-      </section>
+          </section>
+
+          <section className="dashboard-evidence-grid">
+            <article className="panel dashboard-evidence-panel">
+              <div className="panel-heading"><div><p className="section-kicker">SAFE COVERAGE</p><h2>逐资产覆盖证据</h2></div><WalletCards aria-hidden="true" /></div>
+              {dashboard.coverage.length > 0 ? (
+                <div className="coverage-grid" aria-label="Safe assets / unsettled liabilities coverage">
+                  {dashboard.coverage.map((item) => (
+                    <article className={item.covered ? 'coverage-card is-covered' : 'coverage-card is-breached'} key={`${item.snapshotId}:${item.asset}:${item.safeAddress}`}>
+                      <span>{item.asset} · Safe assets / unsettled liabilities coverage</span>
+                      <strong>{item.covered ? 'COVERED' : 'BELOW 100%'}</strong>
+                      <dl><div><dt>Verified assets</dt><dd>{item.verifiedAssets}</dd></div><div><dt>Unsettled liabilities</dt><dd>{item.unsettledLiabilities}</dd></div></dl>
+                      <code>{item.safeAddress}</code><small>Block {item.blockNumber} · {item.recordedAt}</small>
+                    </article>
+                  ))}
+                </div>
+              ) : <UnavailableEmpty label="Coverage 投影不可用" />}
+            </article>
+
+            <article className="panel dashboard-evidence-panel">
+              <div className="panel-heading"><div><p className="section-kicker">CIRCUIT BREAKERS</p><h2>独立断路器</h2></div><Zap aria-hidden="true" /></div>
+              <div className="breaker-list">
+                {dashboard.breakers.map((item) => (
+                  <div key={item.scope} className={item.paused ? 'breaker-row is-paused' : 'breaker-row'}>
+                    {item.paused ? <Ban aria-hidden="true" /> : <CheckCircle2 aria-hidden="true" />}
+                    <span><strong>{item.scope}</strong><small>paused = {String(item.paused)}</small></span>
+                  </div>
+                ))}
+              </div>
+            </article>
+          </section>
+
+          <section className="panel dashboard-blockers">
+            <div className="panel-heading"><div><p className="section-kicker">FAIL-CLOSED EVIDENCE</p><h2>DecisionBlocked / ExternalBlocked</h2></div><AlertTriangle aria-hidden="true" /></div>
+            {dashboard.unavailable.length > 0 ? (
+              <div className="dashboard-blocker-list">
+                {dashboard.unavailable.map((item) => (
+                  <article key={`${item.metric}:${item.reasonCode}`}>
+                    <AlertTriangle aria-hidden="true" />
+                    <div><strong>{item.metric}</strong><p>{item.detail}</p></div>
+                    <span className="status-chip status-blocked">{item.reasonCode}</span>
+                  </article>
+                ))}
+              </div>
+            ) : <p className="healthy-copy"><CheckCircle2 aria-hidden="true" />Core 未返回 unavailable 项。</p>}
+          </section>
+        </>
+      ) : null}
     </>
   );
+}
+
+function dashboardMetricGroups(dashboard: AdminBusinessDashboard): readonly MetricGroup[] {
+  const blocked = (metric: string): Metric => {
+    const item = dashboard.unavailable.find((candidate) => candidate.metric === metric);
+    return item
+      ? { label: metricLabel(metric), value: item.reasonCode, detail: item.detail, blocked: true }
+      : { label: metricLabel(metric), value: '不可用', detail: 'Core 未发布该指标，不解读为 0', blocked: true };
+  };
+  const shipmentRate = dashboard.orders.shipmentRate;
+  return [
+    {
+      title: '今日终局与当前履约', icon: ShoppingBag, metrics: [
+        metric('今日终局订单', dashboard.orders.finalizedToday, '15-confirmation ORDER_PAYMENT'),
+        metric('GMV · USDT atomic', dashboard.orders.listPriceUsdt, 'immutable orders.exact_amounts'),
+        metric('买家已付 · USDT atomic', dashboard.orders.buyerUsdtPaid, 'immutable orders.exact_amounts'),
+        metric('今日发货率', shipmentRate.bps === null ? '不可计算' : `${shipmentRate.bps} bps`, `${shipmentRate.numerator} / ${shipmentRate.denominator}; bps=${shipmentRate.bps ?? 'null'}`, shipmentRate.bps === null),
+        metric('待发货', dashboard.orders.pendingShipment, '当前队列'),
+        metric('已发货', dashboard.orders.shipped, '当前状态'),
+        metric('已送达', dashboard.orders.delivered, '当前状态'),
+        metric('已履约', dashboard.orders.fulfilled, '当前状态'),
+        blocked('NEW_UID_USERS'),
+      ],
+    },
+    {
+      title: '商家与商品', icon: Store, metrics: [
+        metric('商家总数', dashboard.merchants.total, 'Core merchant projection'),
+        metric('今日新商家', dashboard.merchants.newToday, dashboard.timezone),
+        metric('待审核商家', dashboard.merchants.pending, '当前状态'),
+        metric('已通过商家', dashboard.merchants.approved, '当前状态'),
+        metric('暂停商家', dashboard.merchants.suspended, '当前状态'),
+        metric('商品总数', dashboard.products.total, 'Core catalog projection'),
+        metric('待审核商品', dashboard.products.pendingReview, '当前状态'),
+        metric('售罄商品', dashboard.products.soldOut, '当前状态'),
+        blocked('LOW_STOCK_PRODUCTS'),
+      ],
+    },
+    {
+      title: '秒杀与履约队列', icon: PackageCheck, metrics: [
+        metric('今日创建秒杀', dashboard.seckill.createdToday, dashboard.timezone),
+        metric('活动中秒杀', dashboard.seckill.active, '当前会场'),
+        metric('结算中秒杀', dashboard.seckill.settling, '当前会场'),
+        metric('Exchange', dashboard.fulfillmentQueues.exchange, '无业务退款'),
+        metric('Delay', dashboard.fulfillmentQueues.delay, '无业务退款'),
+        metric('Arbitration', dashboard.fulfillmentQueues.arbitration, '当前队列'),
+        metric('Forced receipt', dashboard.fulfillmentQueues.forcedReceipt, '当前队列'),
+        metric('Takeover', dashboard.fulfillmentQueues.takeover, '平台接管履约'),
+      ],
+    },
+    {
+      title: '签名结算与交易证据', icon: ShieldAlert, metrics: [
+        metric('今日结算申请', dashboard.settlements.requestedCount, '签名请求'),
+        metric('申请 · USDT atomic', dashboard.settlements.requestedUsdt, '今日窗口'),
+        metric('今日已结算', dashboard.settlements.settledCount, 'Safe finality'),
+        metric('已结算 · USDT atomic', dashboard.settlements.settledUsdt, 'Safe finality'),
+        metric('链上失败交易', dashboard.settlements.failedTransactions, '今日结算窗口'),
+        blocked('ABNORMAL_ORDERS'),
+        blocked('BLACKLIST_BLOCKS'),
+      ],
+    },
+  ];
+}
+
+function metric(label: string, value: string, detail: string, blocked = false): Metric {
+  return { label, value, detail, blocked };
+}
+
+function metricLabel(metricName: string) {
+  return ({
+    NEW_UID_USERS: '新增 UID',
+    LOW_STOCK_PRODUCTS: '库存预警',
+    ABNORMAL_ORDERS: '异常订单',
+    BLACKLIST_BLOCKS: '黑名单拦截',
+  } as const)[metricName as 'NEW_UID_USERS'] ?? metricName;
+}
+
+function ErrorView({ error }: { error: CoreApiError }) {
+  return <div className="resource-state resource-state-error" role="alert"><Ban aria-hidden="true" /><div><strong>{error.code}</strong><p>{error.message}</p></div></div>;
+}
+
+function UnavailableEmpty({ label }: { label: string }) {
+  return <div className="empty-inline"><Clock3 aria-hidden="true" /><div><strong>{label}</strong><p>空列表不解读为 0 或健康。</p></div></div>;
+}
+
+function asCoreError(cause: unknown) {
+  return cause instanceof CoreApiError
+    ? cause
+    : new CoreApiError({ code: 'ExternalBlocked', message: 'Dashboard Core 能力不可用', status: 503 });
 }
