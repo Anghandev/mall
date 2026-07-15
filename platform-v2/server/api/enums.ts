@@ -1,4 +1,4 @@
-export const CORE_ARTIFACT_VERSION = '2.0.0-settlement-admin.1';
+export const CORE_ARTIFACT_VERSION = '2.0.0-settlement-admin.2';
 export const BSC_CHAIN_ID = 56;
 export const USDT_ADDRESS = '0x55d398326f99059ff775485246999027b3197955';
 export const NPL_ADDRESS = '0x4e8277ab31e4956b2cd48449793a57656dfc03d2';
@@ -203,8 +203,20 @@ export const takeoverStates = [
 ] as const;
 export type TakeoverState = (typeof takeoverStates)[number];
 
-export const seckillStates = ['SCHEDULED', 'LIVE', 'ENDED', 'SETTLED', 'NO_WINNER'] as const;
+export const seckillStates = ['PREHEAT', 'LIVE', 'SETTLING', 'SETTLED', 'FORCE_CLOSED'] as const;
 export type SeckillState = (typeof seckillStates)[number];
+
+export const rewardSubtypes = [
+  'GENESIS',
+  'DIRECT_REFERRAL',
+  'DISTRICT',
+  'CITY',
+  'PROVINCE',
+  'REGION',
+  'OPERATIONS',
+  'ROUNDING_REMAINDER',
+] as const;
+export type RewardSubtype = (typeof rewardSubtypes)[number];
 
 export const policyPublicationStates = ['DRAFT', 'DECISION_BLOCKED', 'PUBLISHED', 'SUPERSEDED'] as const;
 export type PolicyPublicationState = (typeof policyPublicationStates)[number];

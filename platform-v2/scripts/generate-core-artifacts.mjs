@@ -51,6 +51,7 @@ import {
   policyPublicationStates,
   providerReadinessStates,
   reservationStates,
+  rewardSubtypes,
   seckillStates,
   settlementBatchStates,
   settlementIntentStates,
@@ -83,6 +84,7 @@ const schemaSources = [
       '006_fulfillment.sql',
       '007_settlement_admin.sql',
       '008_admin_services.sql',
+      '009_product_surfaces.sql',
     ],
   },
   {
@@ -140,6 +142,7 @@ const enums = {
   breakerActions,
   breakerCauseTypes,
   reservationStates,
+  rewardSubtypes,
   balanceStates,
   takeoverStates,
   seckillStates,
@@ -173,24 +176,31 @@ const websocket = {
   artifactVersion,
   protocolVersion: 1,
   transport: 'wss',
-  publicationStatus: 'FAIL_CLOSED',
-  endpoint: null,
-  channels: [],
-  reasonCode: 'ConfigurationRequired',
-  reason: 'No Core WebSocket endpoint is implemented in this checkpoint',
-  clientRule: 'Products must not connect or infer live state while endpoint is null',
+  publicationStatus: 'AVAILABLE',
+  endpoint: '/v2/ws',
+  channels: [{
+    pattern: 'seckill:{sessionId}',
+    authorization: 'PUBLIC',
+    events: ['SeckillRelayExtended'],
+    replayHttp: '/v2/seckill/sessions/{sessionId}/events',
+  }],
+  clientRule: 'Bind artifactVersion and channel; resume with the last accepted numeric cursor',
   envelope: {
-    required: ['artifactVersion', 'protocolVersion', 'eventId', 'channel', 'cursor', 'resourceType', 'resourceId', 'occurredAt', 'payload'],
+    required: [
+      'artifactVersion', 'protocolVersion', 'eventId', 'channel', 'cursor',
+      'eventType', 'resourceType', 'resourceId', 'occurredAt', 'finality', 'payload',
+    ],
     properties: {
       artifactVersion: { const: artifactVersion },
       protocolVersion: { const: 1 },
       eventId: { type: 'string', minLength: 1 },
       channel: { type: 'string', minLength: 1 },
       cursor: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
+      eventType: { const: 'SeckillRelayExtended' },
       resourceType: { type: 'string', minLength: 1 },
       resourceId: { type: 'string', minLength: 1 },
       occurredAt: { type: 'string', format: 'date-time' },
-      finality: { enum: [...finalityStates] },
+      finality: { const: 'FINAL' },
       payload: { type: 'object' },
     },
   },
@@ -293,7 +303,8 @@ const coordinatedManifest = {
     fulfillmentScheduler: 'AVAILABLE',
     bnmAvailabilityWorker: 'AVAILABLE',
     seckillQuoteHttp: 'AVAILABLE',
-    websocket: 'NOT_PUBLISHED_FAIL_CLOSED',
+    seckillSessionHttp: 'AVAILABLE',
+    websocket: 'AVAILABLE',
   },
   executableOrderActionNames,
   decisionBlocked: [
@@ -341,6 +352,10 @@ const coordinatedManifest = {
     'SettlementIntentProjection',
     'SettlementRequestProjection',
     'SettlementListProjection',
+    'BnmPointsBalance',
+    'SeckillSessionProjection',
+    'SeckillSessionHistoryPage',
+    'RealtimeEventPage',
     'GuaranteeDepositProjection',
     'TakeoverFundingChallenge',
     'TakeoverFundingResult',
@@ -436,6 +451,7 @@ function buildOpenApi() {
     servers: [],
     paths: {
       ...settlementAdminOpenApiPaths(errorResponse),
+      ...seckillRuntimeOpenApiPaths(errorResponse),
       '/v2/bootstrap': {
         get: {
           operationId: 'getBootstrap',
@@ -777,6 +793,7 @@ function buildOpenApi() {
         ...fulfillmentOpenApiSchemas(),
         ...paymentOpenApiSchemas(),
         ...settlementAdminOpenApiSchemas(),
+        ...seckillRuntimeOpenApiSchemas(),
         ErrorResponse: {
           type: 'object', additionalProperties: false, required: ['error'],
           properties: {
@@ -791,6 +808,116 @@ function buildOpenApi() {
         },
       },
     },
+  };
+}
+
+function seckillRuntimeOpenApiPaths(errorResponse) {
+  const sessionParameter = {
+    name: 'sessionId',
+    in: 'path',
+    required: true,
+    schema: { $ref: '#/components/schemas/Bytes32' },
+  };
+  const cursorParameters = [
+    { name: 'cursor', in: 'query', required: false, schema: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' } },
+    { name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 100 } },
+  ];
+  const read = (operationId, schema, parameters = []) => ({
+    operationId,
+    parameters,
+    responses: {
+      200: response('Authoritative seckill projection', { $ref: `#/components/schemas/${schema}` }),
+      default: errorResponse,
+    },
+  });
+  return {
+    '/v2/seckill/sessions/current': {
+      get: read('getCurrentSeckillSession', 'SeckillSessionProjection'),
+    },
+    '/v2/seckill/sessions/history': {
+      get: read('listSeckillSessionHistory', 'SeckillSessionHistoryPage', cursorParameters),
+    },
+    '/v2/seckill/sessions/{sessionId}': {
+      get: read('getSeckillSession', 'SeckillSessionProjection', [sessionParameter]),
+    },
+    '/v2/seckill/sessions/{sessionId}/events': {
+      get: read('listSeckillSessionEvents', 'RealtimeEventPage', [sessionParameter, ...cursorParameters]),
+    },
+  };
+}
+
+function seckillRuntimeOpenApiSchemas() {
+  const ref = (name) => ({ $ref: `#/components/schemas/${name}` });
+  const nullable = (schema) => ({ anyOf: [schema, { type: 'null' }] });
+  const timestamp = { type: 'string', format: 'date-time' };
+  const atomic = ref('AtomicAmount');
+  const string = { type: 'string', minLength: 1 };
+  const jsonObject = { type: 'object', additionalProperties: true };
+  const object = (properties, required = Object.keys(properties)) => ({
+    type: 'object', additionalProperties: false, required, properties,
+  });
+  const session = object({
+    artifactVersion: { const: artifactVersion },
+    sessionId: ref('Bytes32'),
+    policyVersion: atomic,
+    merchantId: string,
+    product: object({
+      productId: string,
+      skuId: string,
+      title: string,
+      metadata: jsonObject,
+      attributes: jsonObject,
+      seckillListPriceUsdt: atomic,
+    }),
+    phase: { enum: [...seckillStates] },
+    storedPhase: { enum: [...seckillStates] },
+    serverTime: timestamp,
+    startsAt: timestamp,
+    mainDeadline: timestamp,
+    relayDeadline: timestamp,
+    settlementEarliestAt: timestamp,
+    settlementDeadline: timestamp,
+    timers: object({
+      mainDurationSeconds: { type: 'integer', minimum: 1 },
+      relayInitialSeconds: { type: 'integer', minimum: 1 },
+      relayIncrementSeconds: { type: 'integer', minimum: 1 },
+      relayCapSeconds: { type: 'integer', minimum: 1 },
+    }),
+    inventory: object({
+      total: atomic,
+      sold: atomic,
+      reserved: atomic,
+      available: atomic,
+    }),
+    prizePoolUsdt: atomic,
+    lastBuyerWallet: nullable(ref('Address')),
+    winnerWallet: nullable(ref('Address')),
+    snapshot: jsonObject,
+    allowedActions: { type: 'array', items: string },
+  });
+  return {
+    SeckillSessionProjection: session,
+    SeckillSessionHistoryPage: object({
+      items: { type: 'array', items: ref('SeckillSessionProjection') },
+      nextCursor: nullable({ type: 'string', pattern: '^(0|[1-9][0-9]*)$' }),
+    }),
+    RealtimeEventEnvelope: object({
+      artifactVersion: { const: artifactVersion },
+      protocolVersion: { const: 1 },
+      eventId: string,
+      channel: string,
+      cursor: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
+      eventType: { const: 'SeckillRelayExtended' },
+      resourceType: { const: 'SECKILL_SESSION' },
+      resourceId: ref('Bytes32'),
+      occurredAt: timestamp,
+      finality: { const: 'FINAL' },
+      payload: jsonObject,
+    }),
+    RealtimeEventPage: object({
+      items: { type: 'array', items: ref('RealtimeEventEnvelope') },
+      nextCursor: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
+    }),
   };
 }
 
@@ -1161,11 +1288,26 @@ function settlementAdminOpenApiSchemas() {
     SettlementRequestItem: settlementRequestItem,
     SettlementRequestItemTransition: settlementTransition,
     SettlementRequestProjection: object(settlementRequestProperties),
-    SettlementBalance: object({ asset: { enum: ['USDT', 'NPL'] }, purpose: string, state: { enum: [...balanceStates] }, amount: atomic }),
+    RewardSubtype: { type: 'string', enum: [...rewardSubtypes] },
+    SettlementBalance: object({
+      asset: { enum: ['USDT', 'NPL'] },
+      purpose: string,
+      rewardSubtype: nullable(ref('RewardSubtype')),
+      state: { enum: [...balanceStates] },
+      amount: atomic,
+    }),
+    BnmPointsBalance: object({
+      pointsType: { const: 'BNM' },
+      purpose: { const: 'BNM_LIABILITY' },
+      state: { enum: ['LOCKED', 'AVAILABLE'] },
+      amount: atomic,
+      transferable: { const: false },
+    }),
     SettlementListProjection: object({
       artifactVersion: { const: artifactVersion },
       wallet: address,
       balances: { type: 'array', items: ref('SettlementBalance') },
+      points: { type: 'array', items: ref('BnmPointsBalance') },
       requests: { type: 'array', items: ref('SettlementRequestProjection') },
     }),
     GuaranteeDepositRequest: object({
@@ -2362,6 +2504,7 @@ export type BreakerAction = ${union(breakerActions)};
 export type BreakerCauseType = ${union(breakerCauseTypes)};
 export type ReservationState = ${union(reservationStates)};
 export type BalanceState = ${union(balanceStates)};
+export type RewardSubtype = ${union(rewardSubtypes)};
 export type UsdtLiabilityPurpose = 'POLICY_ALLOCATION' | 'SECKILL_PRIZE_LIABILITY';
 export type TakeoverState = ${union(takeoverStates)};
 export type SeckillState = ${union(seckillStates)};
@@ -2416,6 +2559,7 @@ export declare const breakerActions: readonly BreakerAction[];
 export declare const breakerCauseTypes: readonly BreakerCauseType[];
 export declare const reservationStates: readonly ReservationState[];
 export declare const balanceStates: readonly BalanceState[];
+export declare const rewardSubtypes: readonly RewardSubtype[];
 export declare const takeoverStates: readonly TakeoverState[];
 export declare const seckillStates: readonly SeckillState[];
 export declare const policyPublicationStates: readonly PolicyPublicationState[];
@@ -2442,6 +2586,76 @@ export declare const infrastructureProviders: readonly InfrastructureProvider[];
 export declare const providerReadinessStates: readonly ProviderReadinessState[];
 
 export type JsonObject = Readonly<Record<string, unknown>>;
+
+export interface SeckillSessionProduct {
+  productId: string;
+  skuId: string;
+  title: string;
+  metadata: JsonObject;
+  attributes: JsonObject;
+  seckillListPriceUsdt: AtomicAmount;
+}
+
+export interface SeckillSessionTimers {
+  mainDurationSeconds: number;
+  relayInitialSeconds: number;
+  relayIncrementSeconds: number;
+  relayCapSeconds: number;
+}
+
+export interface SeckillSessionInventory {
+  total: AtomicAmount;
+  sold: AtomicAmount;
+  reserved: AtomicAmount;
+  available: AtomicAmount;
+}
+
+export interface SeckillSessionProjection {
+  artifactVersion: typeof artifactVersion;
+  sessionId: Bytes32;
+  policyVersion: AtomicAmount;
+  merchantId: string;
+  product: SeckillSessionProduct;
+  phase: SeckillState;
+  storedPhase: SeckillState;
+  serverTime: string;
+  startsAt: string;
+  mainDeadline: string;
+  relayDeadline: string;
+  settlementEarliestAt: string;
+  settlementDeadline: string;
+  timers: SeckillSessionTimers;
+  inventory: SeckillSessionInventory;
+  prizePoolUsdt: AtomicAmount;
+  lastBuyerWallet: Address | null;
+  winnerWallet: Address | null;
+  snapshot: JsonObject;
+  allowedActions: readonly string[];
+}
+
+export interface SeckillSessionHistoryPage {
+  items: readonly SeckillSessionProjection[];
+  nextCursor: string | null;
+}
+
+export interface RealtimeEventEnvelope {
+  artifactVersion: typeof artifactVersion;
+  protocolVersion: 1;
+  eventId: string;
+  channel: string;
+  cursor: AtomicAmount;
+  eventType: 'SeckillRelayExtended';
+  resourceType: 'SECKILL_SESSION';
+  resourceId: Bytes32;
+  occurredAt: string;
+  finality: 'FINAL';
+  payload: JsonObject;
+}
+
+export interface RealtimeEventPage {
+  items: readonly RealtimeEventEnvelope[];
+  nextCursor: AtomicAmount;
+}
 
 export interface SensitiveApproval {
   action: string;
@@ -2566,14 +2780,24 @@ export interface SettlementRequestProjection {
 export interface SettlementBalance {
   asset: 'USDT' | 'NPL';
   purpose: string;
+  rewardSubtype: RewardSubtype | null;
   state: BalanceState;
   amount: AtomicAmount;
+}
+
+export interface BnmPointsBalance {
+  pointsType: 'BNM';
+  purpose: 'BNM_LIABILITY';
+  state: 'LOCKED' | 'AVAILABLE';
+  amount: AtomicAmount;
+  transferable: false;
 }
 
 export interface SettlementListProjection {
   artifactVersion: typeof artifactVersion;
   wallet: Address;
   balances: readonly SettlementBalance[];
+  points: readonly BnmPointsBalance[];
   requests: readonly SettlementRequestProjection[];
 }
 

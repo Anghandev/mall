@@ -23,8 +23,8 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('settlement/admin checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-settlement-admin.1');
+test('settlement/admin correction checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-settlement-admin.2');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
@@ -54,7 +54,7 @@ test('settlement/admin checkpoint has one identity, resolvable exports and exact
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 8);
+  assert.equal(schemaManifest.schemas.core.migrations.length, 9);
   assert.equal(schemaManifest.schemas.audit.migrations.length, 3);
   for (const migration of [
     ...schemaManifest.schemas.core.migrations,
@@ -91,6 +91,10 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'GET /v2/orders/{orderId}',
     'GET /v2/orders/{orderId}/fulfillment-target',
     'GET /v2/payments/{orderId}',
+    'GET /v2/seckill/sessions/current',
+    'GET /v2/seckill/sessions/history',
+    'GET /v2/seckill/sessions/{sessionId}',
+    'GET /v2/seckill/sessions/{sessionId}/events',
     'GET /v2/settlements',
     'GET /v2/stores',
     'POST /v2/actions/order',
@@ -145,6 +149,10 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
       'GET /v2/catalog/products',
       'GET /v2/catalog/products/{productId}',
       'GET /v2/cms/public',
+      'GET /v2/seckill/sessions/current',
+      'GET /v2/seckill/sessions/history',
+      'GET /v2/seckill/sessions/{sessionId}',
+      'GET /v2/seckill/sessions/{sessionId}/events',
       'GET /v2/stores',
       'POST /v2/auth/nonce',
       'POST /v2/auth/verify',
@@ -293,6 +301,11 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
     'SettlementIntentProjection',
     'SettlementRequestProjection',
     'SettlementListProjection',
+    'BnmPointsBalance',
+    'SeckillSessionProjection',
+    'SeckillSessionHistoryPage',
+    'RealtimeEventEnvelope',
+    'RealtimeEventPage',
     'GuaranteeDepositProjection',
     'TakeoverFundingChallenge',
     'TakeoverFundingResult',
@@ -309,6 +322,11 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
     'MonitoringDashboard',
   ]) assert.match(declarations, new RegExp(`export interface ${name}\\b`), name);
   assert.deepEqual(enums.merchantGuaranteeDepositStates, ['SUBMITTED', 'MINED', 'FINAL', 'REORGED', 'QUARANTINED']);
+  assert.deepEqual(enums.rewardSubtypes, [
+    'GENESIS', 'DIRECT_REFERRAL', 'DISTRICT', 'CITY',
+    'PROVINCE', 'REGION', 'OPERATIONS', 'ROUNDING_REMAINDER',
+  ]);
+  assert.deepEqual(enums.seckillStates, ['PREHEAT', 'LIVE', 'SETTLING', 'SETTLED', 'FORCE_CLOSED']);
   assert.deepEqual(enums.policyDraftStates, [
     'DRAFT', 'DECISION_BLOCKED', 'SECONDARY_SIGNED', 'SAFE_PROPOSED',
     'FINALITY_PENDING', 'REORGED', 'REJECTED', 'PUBLISHED',
@@ -328,6 +346,10 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
   assert.equal(openapi.paths['/v2/notifications'].get.responses['200'].content['application/json'].schema.type, 'array');
   assert.equal(openapi.paths['/v2/admin/policy-drafts'].get.responses['200'].content['application/json'].schema.type, 'array');
   assert.equal(openapi.paths['/v2/admin/system-config/versions'].get.responses['200'].content['application/json'].schema.type, 'array');
+  assert.ok(openapi.components.schemas.SettlementListProjection.required.includes('points'));
+  assert.ok(openapi.components.schemas.SettlementBalance.required.includes('rewardSubtype'));
+  assert.equal(openapi.components.schemas.BnmPointsBalance.properties.transferable.const, false);
+  assert.equal(openapi.components.schemas.RealtimeEventEnvelope.properties.finality.const, 'FINAL');
 });
 
 test('published wallet calls encode with the ABI and published EIP-712 messages reproduce authorization digests', () => {
@@ -535,10 +557,12 @@ test('publication contains no Claim, BNM token payout, old escrow or old allocat
   assert.equal([...settlementRails].includes('BNM' as never), false);
 });
 
-test('settlement/admin capabilities are published while websocket and deployment stay fail closed', () => {
-  assert.equal(websocket.endpoint, null);
-  assert.deepEqual(websocket.channels, []);
-  assert.equal(websocket.publicationStatus, 'FAIL_CLOSED');
+test('settlement/admin and seckill realtime capabilities are published while deployment stays fail closed', () => {
+  assert.equal(websocket.endpoint, '/v2/ws');
+  assert.equal(websocket.channels.length, 1);
+  assert.equal(websocket.channels[0].pattern, 'seckill:{sessionId}');
+  assert.deepEqual(websocket.channels[0].events, ['SeckillRelayExtended']);
+  assert.equal(websocket.publicationStatus, 'AVAILABLE');
   const available = new Set([
     'bootstrap',
     'siweAuthentication',
@@ -550,6 +574,7 @@ test('settlement/admin capabilities are published while websocket and deployment
     'paymentProjectionHttp',
     'paymentIndexer',
     'seckillQuoteHttp',
+    'seckillSessionHttp',
     'storesHttp',
     'fulfillmentTargetHttp',
     'fulfillmentHttp',
@@ -570,6 +595,7 @@ test('settlement/admin capabilities are published while websocket and deployment
     'auditHttp',
     'monitoringHttp',
     'coverageMonitoring',
+    'websocket',
   ]);
   for (const [capability, status] of Object.entries(manifest.capabilityStatus)) {
     assert.equal(status, available.has(capability) ? 'AVAILABLE' : 'NOT_PUBLISHED_FAIL_CLOSED', capability);

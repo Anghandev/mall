@@ -1,7 +1,7 @@
 # Abu 24K V2 Data Model
 
 Status: coordinated local settlement/admin checkpoint
-`2.0.0-settlement-admin.1`. This document describes implemented payment,
+`2.0.0-settlement-admin.2`. This document describes implemented payment,
 fulfillment, settlement and administrative storage and does not authorize
 deployment.
 

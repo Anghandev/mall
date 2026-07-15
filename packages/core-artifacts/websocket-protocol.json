@@ -1,13 +1,20 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.1",
+  "artifactVersion": "2.0.0-settlement-admin.2",
   "protocolVersion": 1,
   "transport": "wss",
-  "publicationStatus": "FAIL_CLOSED",
-  "endpoint": null,
-  "channels": [],
-  "reasonCode": "ConfigurationRequired",
-  "reason": "No Core WebSocket endpoint is implemented in this checkpoint",
-  "clientRule": "Products must not connect or infer live state while endpoint is null",
+  "publicationStatus": "AVAILABLE",
+  "endpoint": "/v2/ws",
+  "channels": [
+    {
+      "pattern": "seckill:{sessionId}",
+      "authorization": "PUBLIC",
+      "events": [
+        "SeckillRelayExtended"
+      ],
+      "replayHttp": "/v2/seckill/sessions/{sessionId}/events"
+    }
+  ],
+  "clientRule": "Bind artifactVersion and channel; resume with the last accepted numeric cursor",
   "envelope": {
     "required": [
       "artifactVersion",
@@ -15,14 +22,16 @@
       "eventId",
       "channel",
       "cursor",
+      "eventType",
       "resourceType",
       "resourceId",
       "occurredAt",
+      "finality",
       "payload"
     ],
     "properties": {
       "artifactVersion": {
-        "const": "2.0.0-settlement-admin.1"
+        "const": "2.0.0-settlement-admin.2"
       },
       "protocolVersion": {
         "const": 1
@@ -39,6 +48,9 @@
         "type": "string",
         "pattern": "^(0|[1-9][0-9]*)$"
       },
+      "eventType": {
+        "const": "SeckillRelayExtended"
+      },
       "resourceType": {
         "type": "string",
         "minLength": 1
@@ -52,14 +64,7 @@
         "format": "date-time"
       },
       "finality": {
-        "enum": [
-          "SUBMITTED",
-          "MINED",
-          "REPLACED",
-          "REORGED",
-          "FINAL",
-          "FAILED"
-        ]
+        "const": "FINAL"
       },
       "payload": {
         "type": "object"

@@ -1,6 +1,6 @@
 # Abu 24K V2 Core API Contract
 
-Status: coordinated local settlement/admin checkpoint `2.0.0-settlement-admin.1`. OpenAPI,
+Status: coordinated local settlement/admin checkpoint `2.0.0-settlement-admin.2`. OpenAPI,
 generated types, ABI, manifests, enums, the fail-closed WebSocket protocol and
 consumer tests share this version. This checkpoint does not authorize a
 deployment, production signing or a transaction.
@@ -157,8 +157,8 @@ append-only audit queries and operations monitoring. The coordinated OpenAPI
 publishes 63 HTTP operations and the generated types, state/error enums,
 Schema and ABI share the same artifact version.
 
-Live WebSocket delivery remains explicitly fail closed; consumers use the
-published HTTP projections until a coordinated WebSocket checkpoint exists.
-A disabled control, empty endpoint or fixture does not count as implementation.
-V2 exposes no business-refund or on-chain Claim API, and BNM is never a token
-payout.
+Seckill session reads, numeric-cursor HTTP replay and `/v2/ws` publish only
+15-confirmation Router relay events. Consumers bind the artifact version,
+deduplicate by event ID and resume from the last accepted cursor. A disabled
+control, empty endpoint or fixture does not count as implementation. V2 exposes
+no business-refund or on-chain Claim API, and BNM is never a token payout.

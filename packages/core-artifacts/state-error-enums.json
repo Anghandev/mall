@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.1",
+  "artifactVersion": "2.0.0-settlement-admin.2",
   "orderProjectionStates": [
     "QUOTED",
     "SUBMITTED",
@@ -207,6 +207,16 @@
     "EXPIRED",
     "RELEASED"
   ],
+  "rewardSubtypes": [
+    "GENESIS",
+    "DIRECT_REFERRAL",
+    "DISTRICT",
+    "CITY",
+    "PROVINCE",
+    "REGION",
+    "OPERATIONS",
+    "ROUNDING_REMAINDER"
+  ],
   "balanceStates": [
     "LOCKED",
     "AVAILABLE",
@@ -224,11 +234,11 @@
     "DECISION_BLOCKED"
   ],
   "seckillStates": [
-    "SCHEDULED",
+    "PREHEAT",
     "LIVE",
-    "ENDED",
+    "SETTLING",
     "SETTLED",
-    "NO_WINNER"
+    "FORCE_CLOSED"
   ],
   "coreErrorCodes": [
     "ArtifactVersionMismatch",

@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.1",
+  "artifactVersion": "2.0.0-settlement-admin.2",
   "formatVersion": 1,
   "databaseEngine": "postgresql",
   "schemas": {
@@ -45,6 +45,11 @@
           "name": "008_admin_services.sql",
           "path": "schema/business/008_admin_services.sql",
           "sha256": "7c04a80ca3a76b44ab4706fe9dfccb871977d8a39dd2fde2ac5e788eb60f316f"
+        },
+        {
+          "name": "009_product_surfaces.sql",
+          "path": "schema/business/009_product_surfaces.sql",
+          "sha256": "d2ccdad895c85a0bfe63fab8523c33fb93236f0489dd0d7e8fba4ecac089b365"
         }
       ]
     },

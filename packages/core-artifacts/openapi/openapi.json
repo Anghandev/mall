@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Abu 24K V2 Core API",
-    "version": "2.0.0-settlement-admin.1"
+    "version": "2.0.0-settlement-admin.2"
   },
-  "x-artifactVersion": "2.0.0-settlement-admin.1",
+  "x-artifactVersion": "2.0.0-settlement-admin.2",
   "servers": [],
   "paths": {
     "/v2/settlement-intents": {
@@ -1920,6 +1920,231 @@
             }
           }
         ]
+      }
+    },
+    "/v2/seckill/sessions/current": {
+      "get": {
+        "operationId": "getCurrentSeckillSession",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Authoritative seckill projection",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeckillSessionProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/seckill/sessions/history": {
+      "get": {
+        "operationId": "listSeckillSessionHistory",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative seckill projection",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeckillSessionHistoryPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/seckill/sessions/{sessionId}": {
+      "get": {
+        "operationId": "getSeckillSession",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative seckill projection",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeckillSessionProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/seckill/sessions/{sessionId}/events": {
+      "get": {
+        "operationId": "listSeckillSessionEvents",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative seckill projection",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RealtimeEventPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v2/bootstrap": {
@@ -4050,7 +4275,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.1"
+            "const": "2.0.0-settlement-admin.2"
           },
           "status": {
             "const": "CORE_API_READY"
@@ -6649,7 +6874,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.1"
+            "const": "2.0.0-settlement-admin.2"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -6748,7 +6973,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.1"
+            "const": "2.0.0-settlement-admin.2"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -7308,7 +7533,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.1"
+            "const": "2.0.0-settlement-admin.2"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -7583,7 +7808,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifact_version": {
-            "const": "2.0.0-settlement-admin.1"
+            "const": "2.0.0-settlement-admin.2"
           },
           "wallet_address": {
             "$ref": "#/components/schemas/Address"
@@ -7807,12 +8032,26 @@
           }
         }
       },
+      "RewardSubtype": {
+        "type": "string",
+        "enum": [
+          "GENESIS",
+          "DIRECT_REFERRAL",
+          "DISTRICT",
+          "CITY",
+          "PROVINCE",
+          "REGION",
+          "OPERATIONS",
+          "ROUNDING_REMAINDER"
+        ]
+      },
       "SettlementBalance": {
         "type": "object",
         "additionalProperties": false,
         "required": [
           "asset",
           "purpose",
+          "rewardSubtype",
           "state",
           "amount"
         ],
@@ -7826,6 +8065,16 @@
           "purpose": {
             "type": "string",
             "minLength": 1
+          },
+          "rewardSubtype": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RewardSubtype"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "state": {
             "enum": [
@@ -7842,6 +8091,37 @@
           }
         }
       },
+      "BnmPointsBalance": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pointsType",
+          "purpose",
+          "state",
+          "amount",
+          "transferable"
+        ],
+        "properties": {
+          "pointsType": {
+            "const": "BNM"
+          },
+          "purpose": {
+            "const": "BNM_LIABILITY"
+          },
+          "state": {
+            "enum": [
+              "LOCKED",
+              "AVAILABLE"
+            ]
+          },
+          "amount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "transferable": {
+            "const": false
+          }
+        }
+      },
       "SettlementListProjection": {
         "type": "object",
         "additionalProperties": false,
@@ -7849,11 +8129,12 @@
           "artifactVersion",
           "wallet",
           "balances",
+          "points",
           "requests"
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.1"
+            "const": "2.0.0-settlement-admin.2"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -7862,6 +8143,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SettlementBalance"
+            }
+          },
+          "points": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BnmPointsBalance"
             }
           },
           "requests": {
@@ -10580,6 +10867,316 @@
           },
           "state": {
             "const": "ACKNOWLEDGED"
+          }
+        }
+      },
+      "SeckillSessionProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "sessionId",
+          "policyVersion",
+          "merchantId",
+          "product",
+          "phase",
+          "storedPhase",
+          "serverTime",
+          "startsAt",
+          "mainDeadline",
+          "relayDeadline",
+          "settlementEarliestAt",
+          "settlementDeadline",
+          "timers",
+          "inventory",
+          "prizePoolUsdt",
+          "lastBuyerWallet",
+          "winnerWallet",
+          "snapshot",
+          "allowedActions"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.2"
+          },
+          "sessionId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "policyVersion": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "merchantId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "product": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "productId",
+              "skuId",
+              "title",
+              "metadata",
+              "attributes",
+              "seckillListPriceUsdt"
+            ],
+            "properties": {
+              "productId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "skuId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "attributes": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "seckillListPriceUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              }
+            }
+          },
+          "phase": {
+            "enum": [
+              "PREHEAT",
+              "LIVE",
+              "SETTLING",
+              "SETTLED",
+              "FORCE_CLOSED"
+            ]
+          },
+          "storedPhase": {
+            "enum": [
+              "PREHEAT",
+              "LIVE",
+              "SETTLING",
+              "SETTLED",
+              "FORCE_CLOSED"
+            ]
+          },
+          "serverTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "mainDeadline": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "relayDeadline": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "settlementEarliestAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "settlementDeadline": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "timers": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "mainDurationSeconds",
+              "relayInitialSeconds",
+              "relayIncrementSeconds",
+              "relayCapSeconds"
+            ],
+            "properties": {
+              "mainDurationSeconds": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "relayInitialSeconds": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "relayIncrementSeconds": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "relayCapSeconds": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "inventory": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "total",
+              "sold",
+              "reserved",
+              "available"
+            ],
+            "properties": {
+              "total": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "sold": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "reserved": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "available": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              }
+            }
+          },
+          "prizePoolUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "lastBuyerWallet": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "winnerWallet": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "snapshot": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "allowedActions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      },
+      "SeckillSessionHistoryPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SeckillSessionProjection"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "RealtimeEventEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "protocolVersion",
+          "eventId",
+          "channel",
+          "cursor",
+          "eventType",
+          "resourceType",
+          "resourceId",
+          "occurredAt",
+          "finality",
+          "payload"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.2"
+          },
+          "protocolVersion": {
+            "const": 1
+          },
+          "eventId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "channel": {
+            "type": "string",
+            "minLength": 1
+          },
+          "cursor": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$"
+          },
+          "eventType": {
+            "const": "SeckillRelayExtended"
+          },
+          "resourceType": {
+            "const": "SECKILL_SESSION"
+          },
+          "resourceId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finality": {
+            "const": "FINAL"
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "RealtimeEventPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RealtimeEventEnvelope"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$"
           }
         }
       },

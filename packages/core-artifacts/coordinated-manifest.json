@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.1",
+  "artifactVersion": "2.0.0-settlement-admin.2",
   "publicationStatus": "COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
@@ -14,57 +14,57 @@
   "components": {
     "packageMetadata": {
       "path": "package.json",
-      "sha256": "fd6fc22206f6abb8ab025dae8c4a3eae080d21bfad418af34343fe863b13d366"
+      "sha256": "9a8d339b47733248054b9fb26e0b04f659c90b6165724ee5900d3102ee30dd67"
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "554360f7aaa0193831f529a54d80b37cba6be9ab2a83997e2e28f0d84de04ea2"
+      "sha256": "bb8a1284fdca47790db16e02062aadd0e1c9be547e7c53fa31f6ccb2fe1eebd8"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "76bf4df65954aa7429b7adcdf69f80d3bf287c58277716f64aa97d3bb362c7a6"
+      "sha256": "9801b7678c68af51dbcb916cbc7dbdb0574ffb8e61d67fb15088d60dc4778649"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "d86ca6a437a72e915c5d3535c74106da8113b747bc6b07e76af2f6c605f53ecd"
+      "sha256": "d30ab17daa1fbb00676d0b1b8e0ac70768a9ed687d2c44c02697ebc8b916894c"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "54a3b122a35bb0d53fb11a5d920e02d770a1b76f28ce79823ff3084b681b6d7c"
+      "sha256": "cebc9249a26cf6a9936c3a4dada09b034690cd9748e91e43e8252934db3f69f1"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "190b98136b04ad2d77b2cb92f9f9f02ab1a061710ea451eb8619d358eec015fd"
+      "sha256": "0ecaeaf453b36e3ea0a488d6f1e570e473026fbd69380b3358e9cb92ecc51d78"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
-      "sha256": "dbd080d95614c1bd576871d06007d8748a87baf7621d840b37ee48fc5c040b11"
+      "sha256": "8974212294cd3f6bdcffd2c1ce0a13620d18126a7ada88d62233c39d64d7e0fb"
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "ba67b7e5bf77249b068b7b7d65e692d568fab0f4506db3d11a9a038b6f926b75"
+      "sha256": "a480543e9e58e071803b10705036b2a867b74521cece41c3ed1581e3f7ea701c"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "e53cccd5482a12d71f352548e3053279876203150215643a3646156b1aacbd86"
+      "sha256": "8b49372ea5662c4c6d19462cdc049b4974b4bc3d90ab04c9289d49563451674b"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "3bc01231fdd41a6ac3846f8ae9a487f74d32f8b3966a09db40964495a2b3bf2e"
+      "sha256": "bf2eba8a60118477cb1af59d7a2815de05fb02c6d0ced9fd290e71e79848b2cc"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
-      "sha256": "dd91b68441a582c62dc318c93414040204c4a702fa8cf4a1efb0419203971ead"
+      "sha256": "14e73f0fce43f81fe57b37a60db3976f69ead4fe9a587ec58393c3d827b627c2"
     }
   },
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "6f8960d6e5a8beaddf276b540850e288f7b690aced978d8e1131c545be62c57c"
+      "sha256": "051478820e3727b8a6d54c842b889211112820005c4f1f650e212586f4725853"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "d7b1fa619e4a8ed097fa498be29f4c1a281298275ba85aeea2fab8268dd0de3e"
+      "sha256": "ed261a0bda12233d9c2708025fdb7d52d7e0415ebbd5633d1843a54b02a8df3a"
     }
   ],
   "httpSurface": [
@@ -85,6 +85,10 @@
     "GET /v2/orders/{orderId}",
     "GET /v2/orders/{orderId}/fulfillment-target",
     "GET /v2/payments/{orderId}",
+    "GET /v2/seckill/sessions/current",
+    "GET /v2/seckill/sessions/history",
+    "GET /v2/seckill/sessions/{sessionId}",
+    "GET /v2/seckill/sessions/{sessionId}/events",
     "GET /v2/settlements",
     "GET /v2/stores",
     "POST /v2/actions/order",
@@ -163,7 +167,8 @@
     "fulfillmentScheduler": "AVAILABLE",
     "bnmAvailabilityWorker": "AVAILABLE",
     "seckillQuoteHttp": "AVAILABLE",
-    "websocket": "NOT_PUBLISHED_FAIL_CLOSED"
+    "seckillSessionHttp": "AVAILABLE",
+    "websocket": "AVAILABLE"
   },
   "executableOrderActionNames": [
     "REQUEST_EXCHANGE",
@@ -225,6 +230,10 @@
     "SettlementIntentProjection",
     "SettlementRequestProjection",
     "SettlementListProjection",
+    "BnmPointsBalance",
+    "SeckillSessionProjection",
+    "SeckillSessionHistoryPage",
+    "RealtimeEventPage",
     "GuaranteeDepositProjection",
     "TakeoverFundingChallenge",
     "TakeoverFundingResult",

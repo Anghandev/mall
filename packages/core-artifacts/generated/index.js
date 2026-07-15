@@ -1,4 +1,4 @@
-export const artifactVersion = "2.0.0-settlement-admin.1";
+export const artifactVersion = "2.0.0-settlement-admin.2";
 export const chainIdentity = Object.freeze({"chainId":56,"usdtAddress":"0x55d398326f99059ff775485246999027b3197955","nplAddress":"0x4e8277ab31e4956b2cd48449793a57656dfc03d2"});
 export const orderProjectionStates = Object.freeze(["QUOTED","SUBMITTED","PAID","SHIPPED","DELIVERED","ARBITRATION","TAKEOVER","FULFILLMENT_PENDING","FULFILLED","REORG_PENDING"]);
 export const contractOrderStates = Object.freeze(["NONE","PAID","SHIPPED","DELIVERED","ARBITRATION","TAKEOVER","FULFILLMENT_PENDING","FULFILLED"]);
@@ -27,9 +27,10 @@ export const guaranteeStatuses = Object.freeze(["DECISION_BLOCKED","BELOW_MINIMU
 export const breakerActions = Object.freeze(["PAUSE","RESUME"]);
 export const breakerCauseTypes = Object.freeze(["COVERAGE","GOVERNANCE","SECURITY","OPERATIONS"]);
 export const reservationStates = Object.freeze(["ACTIVE","CONSUMED","EXPIRED","RELEASED"]);
+export const rewardSubtypes = Object.freeze(["GENESIS","DIRECT_REFERRAL","DISTRICT","CITY","PROVINCE","REGION","OPERATIONS","ROUNDING_REMAINDER"]);
 export const balanceStates = Object.freeze(["LOCKED","AVAILABLE","REQUESTED","BATCHED","SETTLED","DISPUTED"]);
 export const takeoverStates = Object.freeze(["OPEN","FUNDED","FULFILLING","FULFILLMENT_PENDING","CLOSED","DECISION_BLOCKED"]);
-export const seckillStates = Object.freeze(["SCHEDULED","LIVE","ENDED","SETTLED","NO_WINNER"]);
+export const seckillStates = Object.freeze(["PREHEAT","LIVE","SETTLING","SETTLED","FORCE_CLOSED"]);
 export const coreErrorCodes = Object.freeze(["ArtifactVersionMismatch","BreakerActive","ConfigurationRequired","DecisionBlocked","EmptySessionPrizeDecisionBlocked","ExternalBlocked","FinalityPending","Forbidden","IdempotencyConflict","InvalidFinality","InvalidRequest","InvalidSignature","InventoryUnavailable","NonceExpired","NonceReplay","PickupTakeoverDecisionBlocked","ProviderSignatureInvalid","QuoteExpired","ReorgPending","ReservationConflict","Unauthorized","UnknownState"]);
 export const policyPublicationStates = Object.freeze(["DRAFT","DECISION_BLOCKED","PUBLISHED","SUPERSEDED"]);
 export const policyDraftStates = Object.freeze(["DRAFT","DECISION_BLOCKED","SECONDARY_SIGNED","SAFE_PROPOSED","FINALITY_PENDING","REORGED","REJECTED","PUBLISHED"]);

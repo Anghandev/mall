@@ -1,4 +1,4 @@
-export declare const artifactVersion: "2.0.0-settlement-admin.1";
+export declare const artifactVersion: "2.0.0-settlement-admin.2";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
@@ -31,9 +31,10 @@ export type BreakerAction = "PAUSE" | "RESUME";
 export type BreakerCauseType = "COVERAGE" | "GOVERNANCE" | "SECURITY" | "OPERATIONS";
 export type ReservationState = "ACTIVE" | "CONSUMED" | "EXPIRED" | "RELEASED";
 export type BalanceState = "LOCKED" | "AVAILABLE" | "REQUESTED" | "BATCHED" | "SETTLED" | "DISPUTED";
+export type RewardSubtype = "GENESIS" | "DIRECT_REFERRAL" | "DISTRICT" | "CITY" | "PROVINCE" | "REGION" | "OPERATIONS" | "ROUNDING_REMAINDER";
 export type UsdtLiabilityPurpose = 'POLICY_ALLOCATION' | 'SECKILL_PRIZE_LIABILITY';
 export type TakeoverState = "OPEN" | "FUNDED" | "FULFILLING" | "FULFILLMENT_PENDING" | "CLOSED" | "DECISION_BLOCKED";
-export type SeckillState = "SCHEDULED" | "LIVE" | "ENDED" | "SETTLED" | "NO_WINNER";
+export type SeckillState = "PREHEAT" | "LIVE" | "SETTLING" | "SETTLED" | "FORCE_CLOSED";
 export type PolicyPublicationState = "DRAFT" | "DECISION_BLOCKED" | "PUBLISHED" | "SUPERSEDED";
 export type PolicyDraftState = "DRAFT" | "DECISION_BLOCKED" | "SECONDARY_SIGNED" | "SAFE_PROPOSED" | "FINALITY_PENDING" | "REORGED" | "REJECTED" | "PUBLISHED";
 export type CmsContentType = "BANNER" | "RECOMMENDATION" | "SPLASH" | "CAMPAIGN_POPUP" | "SECKILL_RULES" | "FAQ" | "SERVICE_AGREEMENT" | "PRIVACY" | "ABOUT" | "RELEASE_ANNOUNCEMENT" | "UPDATE_NOTICE" | "CONTRACT_NOTICE";
@@ -85,6 +86,7 @@ export declare const breakerActions: readonly BreakerAction[];
 export declare const breakerCauseTypes: readonly BreakerCauseType[];
 export declare const reservationStates: readonly ReservationState[];
 export declare const balanceStates: readonly BalanceState[];
+export declare const rewardSubtypes: readonly RewardSubtype[];
 export declare const takeoverStates: readonly TakeoverState[];
 export declare const seckillStates: readonly SeckillState[];
 export declare const policyPublicationStates: readonly PolicyPublicationState[];
@@ -111,6 +113,76 @@ export declare const infrastructureProviders: readonly InfrastructureProvider[];
 export declare const providerReadinessStates: readonly ProviderReadinessState[];
 
 export type JsonObject = Readonly<Record<string, unknown>>;
+
+export interface SeckillSessionProduct {
+  productId: string;
+  skuId: string;
+  title: string;
+  metadata: JsonObject;
+  attributes: JsonObject;
+  seckillListPriceUsdt: AtomicAmount;
+}
+
+export interface SeckillSessionTimers {
+  mainDurationSeconds: number;
+  relayInitialSeconds: number;
+  relayIncrementSeconds: number;
+  relayCapSeconds: number;
+}
+
+export interface SeckillSessionInventory {
+  total: AtomicAmount;
+  sold: AtomicAmount;
+  reserved: AtomicAmount;
+  available: AtomicAmount;
+}
+
+export interface SeckillSessionProjection {
+  artifactVersion: typeof artifactVersion;
+  sessionId: Bytes32;
+  policyVersion: AtomicAmount;
+  merchantId: string;
+  product: SeckillSessionProduct;
+  phase: SeckillState;
+  storedPhase: SeckillState;
+  serverTime: string;
+  startsAt: string;
+  mainDeadline: string;
+  relayDeadline: string;
+  settlementEarliestAt: string;
+  settlementDeadline: string;
+  timers: SeckillSessionTimers;
+  inventory: SeckillSessionInventory;
+  prizePoolUsdt: AtomicAmount;
+  lastBuyerWallet: Address | null;
+  winnerWallet: Address | null;
+  snapshot: JsonObject;
+  allowedActions: readonly string[];
+}
+
+export interface SeckillSessionHistoryPage {
+  items: readonly SeckillSessionProjection[];
+  nextCursor: string | null;
+}
+
+export interface RealtimeEventEnvelope {
+  artifactVersion: typeof artifactVersion;
+  protocolVersion: 1;
+  eventId: string;
+  channel: string;
+  cursor: AtomicAmount;
+  eventType: 'SeckillRelayExtended';
+  resourceType: 'SECKILL_SESSION';
+  resourceId: Bytes32;
+  occurredAt: string;
+  finality: 'FINAL';
+  payload: JsonObject;
+}
+
+export interface RealtimeEventPage {
+  items: readonly RealtimeEventEnvelope[];
+  nextCursor: AtomicAmount;
+}
 
 export interface SensitiveApproval {
   action: string;
@@ -235,14 +307,24 @@ export interface SettlementRequestProjection {
 export interface SettlementBalance {
   asset: 'USDT' | 'NPL';
   purpose: string;
+  rewardSubtype: RewardSubtype | null;
   state: BalanceState;
   amount: AtomicAmount;
+}
+
+export interface BnmPointsBalance {
+  pointsType: 'BNM';
+  purpose: 'BNM_LIABILITY';
+  state: 'LOCKED' | 'AVAILABLE';
+  amount: AtomicAmount;
+  transferable: false;
 }
 
 export interface SettlementListProjection {
   artifactVersion: typeof artifactVersion;
   wallet: Address;
   balances: readonly SettlementBalance[];
+  points: readonly BnmPointsBalance[];
   requests: readonly SettlementRequestProjection[];
 }
 
