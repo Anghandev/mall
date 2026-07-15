@@ -110,6 +110,7 @@ export function SettingsPage() {
     setProfileFeedback(undefined);
     try {
       const value = await api.getMerchantProfile(session.token);
+      requireMerchantScope(value.merchantId, session.merchantId, '店铺资料');
       setProfile({ phase: 'ready', value });
       setShopName(value.shopName ?? '');
       setLogoAssetId(value.logoAssetId);
@@ -134,6 +135,7 @@ export function SettingsPage() {
     try {
       const options = auditListOptions(nextFilters, cursor);
       const value = await api.listMerchantAuditEntries(session.token, options);
+      requireMerchantScope(value.chainProof.merchantId, session.merchantId, '审计日志');
       setAudit((current) => ({
         phase: 'ready',
         value: cursor && current.phase === 'ready'
@@ -181,7 +183,8 @@ export function SettingsPage() {
         idempotencyKey: profileCommand.current.key,
       }, session.token);
       if (
-        value.merchantId !== profile.value.merchantId
+        value.merchantId !== session.merchantId
+        || value.merchantId !== profile.value.merchantId
         || value.settlementWallet.toLowerCase() !== profile.value.settlementWallet.toLowerCase()
         || value.shopName !== normalizedName
         || value.logoAssetId?.toLowerCase() !== logoAssetId?.toLowerCase()
@@ -258,6 +261,8 @@ export function SettingsPage() {
     if (
       profile.phase !== 'ready'
       || audit.phase !== 'ready'
+      || profile.value.merchantId !== session.merchantId
+      || audit.value.chainProof.merchantId !== session.merchantId
       || profile.value.merchantId !== audit.value.chainProof.merchantId
     ) {
       setAuditFeedback({ tone: 'error', message: '当前商家范围未通过校验，不能导出。' });
@@ -284,6 +289,7 @@ export function SettingsPage() {
         ...input,
         idempotencyKey: exportCommand.current.key,
       }, session.token);
+      requireMerchantScope(result.merchantId, session.merchantId, '审计导出');
       exportCommand.current = undefined;
       let feedback: Feedback;
       if (result.entryCount === 0) {
@@ -301,8 +307,15 @@ export function SettingsPage() {
     }
   }
 
-  const auditScopeMismatch = profile.phase === 'ready' && audit.phase === 'ready'
-    && profile.value.merchantId !== audit.value.chainProof.merchantId;
+  const sessionMerchantId = session?.merchantId;
+  const auditScopeMismatch = Boolean(sessionMerchantId)
+    && profile.phase === 'ready'
+    && audit.phase === 'ready'
+    && (
+      profile.value.merchantId !== sessionMerchantId
+      || audit.value.chainProof.merchantId !== sessionMerchantId
+      || profile.value.merchantId !== audit.value.chainProof.merchantId
+    );
 
   return (
     <div className="page-stack">
@@ -442,6 +455,12 @@ function auditListOptions(filters: AuditFilters, cursor?: NonNullable<MerchantAu
     ...(cursor ? { cursor } : {}),
     limit: 50,
   };
+}
+
+function requireMerchantScope(actualMerchantId: string, sessionMerchantId: string, label: string) {
+  if (actualMerchantId !== sessionMerchantId) {
+    throw new CoreApiError('InvalidResponse', `${label}与当前商家会话不一致。`);
+  }
 }
 
 function auditExportInput(filters: AuditFilters): Omit<MerchantAuditExportRequest, 'idempotencyKey'> {

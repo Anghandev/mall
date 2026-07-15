@@ -63,13 +63,16 @@ export function CoreRuntimeProvider({
       const challenge = await api.createSiweChallenge(walletAddress);
       const signature = await signSiweMessage(provider, walletAddress, challenge.message);
       const nextSession = await api.verifySiwe(challenge.message, signature);
+      if (nextSession.walletAddress.toLowerCase() !== walletAddress.toLowerCase()) {
+        throw new Error('Core 会话钱包与实际签名钱包不一致。');
+      }
       if (!nextSession.roles.includes('MERCHANT')) {
         throw new Error('该钱包没有商家工作台权限。');
       }
-      if (nextSession.walletAddress.toLowerCase() !== walletAddress.toLowerCase()) {
-        throw new Error('Core 会话钱包与已连接钱包不一致。');
+      if (!nextSession.merchantId) {
+        throw new Error('Core 会话缺少商家身份，已拒绝进入工作台。');
       }
-      setSession(nextSession);
+      setSession({ ...nextSession, merchantId: nextSession.merchantId });
       setActiveProvider(provider);
     } catch (error) {
       setSession(undefined);

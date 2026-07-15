@@ -11,7 +11,6 @@ import { coreBoundary, canExecuteOrderAction } from '../src/core-boundary';
 import { CoreRuntimeProvider } from '../src/core-runtime';
 import { AssetsPage } from '../src/pages/AssetsPage';
 import { FulfillmentPage } from '../src/pages/FulfillmentPage';
-import { HelpPage } from '../src/pages/HelpPage';
 import { LoginPage } from '../src/pages/LoginPage';
 import { ProductPage } from '../src/pages/ProductPage';
 import { StoresPage } from '../src/pages/StoresPage';
@@ -113,7 +112,7 @@ function createMockCoreApi(overrides: Partial<CoreApi> = {}): CoreApi {
       issuedAt: '2026-07-14T12:00:00.000Z',
       expiresAt: '2026-07-14T12:05:00.000Z',
     }),
-    verifySiwe: async () => ({ token: 'test-session', walletAddress, roles: ['MERCHANT'] }),
+    verifySiwe: async () => ({ token: 'test-session', walletAddress, roles: ['MERCHANT'], merchantId: 'merchant-1' }),
     listCatalog: async () => [catalogProduct],
     listCatalogCategories: async () => catalogCategories,
     listCatalogTags: async () => catalogTags,
@@ -356,6 +355,36 @@ describe('00 wallet gateway', () => {
 
     expect((await screen.findByRole('alert')).textContent).toContain('没有商家工作台权限');
     expect(screen.getByRole('heading', { name: '连接授权商家钱包' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: '运营大盘' })).toBeNull();
+  });
+
+  it('rejects a SIWE response with a different wallet or no merchant tenant identity', async () => {
+    const user = userEvent.setup();
+    installWallet();
+    const wrongWallet = createMockCoreApi({
+      verifySiwe: async () => ({
+        token: 'wrong-wallet-session',
+        walletAddress: '0x2222222222222222222222222222222222222222',
+        roles: ['MERCHANT'],
+        merchantId: 'merchant-1',
+      }),
+    });
+    render(<MemoryRouter><App client={wrongWallet} /></MemoryRouter>);
+    const connect = screen.getByRole('button', { name: '连接钱包' });
+    await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
+    await user.click(connect);
+    expect((await screen.findByRole('alert')).textContent).toContain('实际签名钱包不一致');
+
+    cleanup();
+    installWallet();
+    const missingTenant = createMockCoreApi({
+      verifySiwe: async () => ({ token: 'unscoped-session', walletAddress, roles: ['MERCHANT'] }),
+    });
+    render(<MemoryRouter><App client={missingTenant} /></MemoryRouter>);
+    const retry = screen.getByRole('button', { name: '连接钱包' });
+    await waitFor(() => expect((retry as HTMLButtonElement).disabled).toBe(false));
+    await user.click(retry);
+    expect((await screen.findByRole('alert')).textContent).toContain('缺少商家身份');
     expect(screen.queryByRole('heading', { name: '运营大盘' })).toBeNull();
   });
 
@@ -972,7 +1001,8 @@ describe('06 audit and 07 rules', () => {
       }),
     }));
 
-    expect(await screen.findByText('商家范围不匹配')).toBeTruthy();
+    expect(await screen.findByText('审计日志加载失败')).toBeTruthy();
+    expect(screen.getByText(/审计日志与当前商家会话不一致/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('起始时间'), { target: { value: '2026-07-01T00:00' } });
     fireEvent.change(screen.getByLabelText('结束时间'), { target: { value: '2026-07-02T00:00' } });
     expect((screen.getByRole('button', { name: '导出 CSV' }) as HTMLButtonElement).disabled).toBe(true);
@@ -982,6 +1012,16 @@ describe('06 audit and 07 rules', () => {
     await user.type(name, '范围校验店铺');
     await user.click(screen.getByRole('button', { name: '保存资料' }));
     expect((await screen.findByRole('alert')).textContent).toContain('保存结果与当前商家资料快照不一致');
+  });
+
+  it('rejects the initial profile when it does not belong to the SIWE merchant tenant', async () => {
+    await enterSettings(createMockCoreApi({
+      getMerchantProfile: async () => ({ ...merchantProfile, merchantId: 'merchant-other' }),
+    }));
+
+    expect(await screen.findByText('店铺资料不可用')).toBeTruthy();
+    expect(screen.getAllByText(/店铺资料与当前商家会话不一致/)).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: '保存资料' })).toBeNull();
   });
 
   it('uploads a provider-sealed merchant logo and binds its verified asset on profile save', async () => {
@@ -1065,6 +1105,20 @@ describe('06 audit and 07 rules', () => {
     expect(await screen.findByText(/已下载 2 条/)).toBeTruthy();
   });
 
+  it('refuses an audit export response from a different merchant tenant', async () => {
+    const createObjectUrl = vi.fn(() => 'blob:merchant-audit');
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
+    const user = await enterSettings(createMockCoreApi({
+      exportMerchantAuditEntries: async () => ({ ...merchantAuditExport, merchantId: 'merchant-other' }),
+    }));
+    fireEvent.change(screen.getByLabelText('起始时间'), { target: { value: '2026-07-01T00:00' } });
+    fireEvent.change(screen.getByLabelText('结束时间'), { target: { value: '2026-07-02T00:00' } });
+    await user.click(screen.getByRole('button', { name: '导出 CSV' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('审计导出与当前商家会话不一致');
+    expect(createObjectUrl).not.toHaveBeenCalled();
+  });
+
   it('handles empty exports and audit permission failures without simulating content', async () => {
     const user = await enterSettings(createMockCoreApi({
       exportMerchantAuditEntries: async () => ({ ...merchantAuditExport, entryCount: 0, csv: 'operationTime,operationType\n' }),
@@ -1085,9 +1139,18 @@ describe('06 audit and 07 rules', () => {
   });
 
   it('shows published versioned policy content and the frozen merchant boundaries', async () => {
-    renderPage(<HelpPage />);
+    const listPublicCms = vi.fn(async () => [cmsRules]);
+    const user = userEvent.setup();
+    installWallet();
+    render(<MemoryRouter><App client={createMockCoreApi({ listPublicCms })} /></MemoryRouter>);
+    const connect = screen.getByRole('button', { name: '连接钱包' });
+    await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
+    await user.click(connect);
+    const navigation = await screen.findByRole('navigation', { name: '商家工作台导航' });
+    await user.click(within(navigation).getByRole('link', { name: /帮助中心/ }));
 
     expect(await screen.findByRole('heading', { name: '秒杀履约与结算' })).toBeTruthy();
+    expect(listPublicCms).toHaveBeenCalledWith('test-session');
     expect(screen.getByText('Policy 8')).toBeTruthy();
     expect(screen.getByText(/Locked 进入 Available/)).toBeTruthy();
     expect(screen.getByRole('heading', { name: '7 天未发货进入平台接管' })).toBeTruthy();

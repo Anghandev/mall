@@ -56,6 +56,7 @@ describe('settlement-admin.7 Core HTTP consumer', () => {
         token: 'merchant-session',
         walletAddress: '0x1111111111111111111111111111111111111111',
         roles: ['MERCHANT'],
+        merchantId: 'merchant-1',
       }));
     globalThis.fetch = fetchMock as typeof fetch;
     const api = createCoreApi();
@@ -64,6 +65,7 @@ describe('settlement-admin.7 Core HTTP consumer', () => {
     const session = await api.verifySiwe(challenge.message, '0xsigned');
 
     expect(session.roles).toEqual(['MERCHANT']);
+    expect(session.merchantId).toBe('merchant-1');
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/v2/auth/nonce', expect.objectContaining({
       body: JSON.stringify({ walletAddress: '0x1111111111111111111111111111111111111111' }),
     }));
@@ -111,6 +113,7 @@ describe('settlement-admin.7 Core HTTP consumer', () => {
     }, 'merchant-session');
 
     expect(audit.historyStatus).toBe('PARTIAL_PRE_MERCHANT_SCOPE');
+    expect(exported.merchantId).toBe('merchant-1');
     expect(exported.csv).toBe(merchantAuditExport.csv);
     expect(fetchMock).toHaveBeenNthCalledWith(1, 'https://core.example.test/v2/merchant/profile', expect.objectContaining({
       headers: expect.objectContaining({ authorization: 'Bearer merchant-session' }),
@@ -158,6 +161,14 @@ describe('settlement-admin.7 Core HTTP consumer', () => {
       from: '2026-07-01T00:00:00.000Z',
       to: '2026-07-02T00:00:00.000Z',
       idempotencyKey: 'merchant-audit-export-2',
+    }, 'merchant-session')).rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    const { merchantId: _merchantId, ...unscopedExport } = merchantAuditExport;
+    globalThis.fetch = vi.fn(async () => jsonResponse(unscopedExport)) as typeof fetch;
+    await expect(createCoreApi().exportMerchantAuditEntries({
+      from: '2026-07-01T00:00:00.000Z',
+      to: '2026-07-02T00:00:00.000Z',
+      idempotencyKey: 'merchant-audit-export-3',
     }, 'merchant-session')).rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
@@ -687,18 +698,19 @@ describe('settlement-admin.7 Core HTTP consumer', () => {
     }, 'merchant-session')).rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
-  it('reads wallet-targeted published CMS rules from the coordinated public route', async () => {
+  it('reads authenticated published CMS rules without caller-supplied identity queries', async () => {
     const fetchMock = vi.fn(async () => jsonResponse([cmsRules]));
     globalThis.fetch = fetchMock as typeof fetch;
 
-    const items = await createCoreApi('https://core.example.test').listPublicCms(
-      '0x1111111111111111111111111111111111111111',
-    );
+    const items = await createCoreApi('https://core.example.test').listPublicCms('merchant-session');
 
     expect(items).toEqual([cmsRules]);
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://core.example.test/v2/cms/public?walletAddress=0x1111111111111111111111111111111111111111',
-      expect.objectContaining({ method: 'GET' }),
+      'https://core.example.test/v2/cms/public',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({ authorization: 'Bearer merchant-session' }),
+      }),
     );
   });
 

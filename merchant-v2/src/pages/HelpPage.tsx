@@ -16,7 +16,7 @@ export function HelpPage() {
   useEffect(() => {
     let current = true;
     setRulesState({ phase: 'loading' });
-    void api.listPublicCms(session?.walletAddress).then(
+    void api.listPublicCms(session?.token).then(
       (items) => {
         if (!current) return;
         setRulesState({
@@ -29,7 +29,7 @@ export function HelpPage() {
       },
     );
     return () => { current = false; };
-  }, [api, session?.walletAddress]);
+  }, [api, session?.token]);
 
   return (
     <div className="page-stack help-page">
