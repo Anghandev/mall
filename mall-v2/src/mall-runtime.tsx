@@ -16,6 +16,7 @@ import type {
   CmsPublicItem,
   EvidenceEnvelopeProjection,
   FulfillmentOrder,
+  FulfillmentOrderCursor,
   FulfillmentTarget,
   MerchantStore,
   MediaAssetProjection,
@@ -121,6 +122,7 @@ export interface MallRuntimeValue {
   selectedSeckillSessionId: string | null;
   orders: readonly FulfillmentOrder[];
   ordersState: 'idle' | LoadState;
+  ordersNextCursor: FulfillmentOrderCursor | null;
   orderActions: Readonly<Record<string, readonly AllowedAction[]>>;
   orderTargets: Readonly<Record<string, FulfillmentTarget>>;
   orderCapabilityErrors: Readonly<Record<string, string>>;
@@ -156,6 +158,7 @@ export interface MallRuntimeValue {
   createDeliveryTarget(draft: DeliveryTargetDraft): Promise<void>;
   createPickupTarget(storeId: string): Promise<void>;
   reloadOrders(): Promise<void>;
+  loadMoreOrders(): Promise<void>;
   submitBuyerAction(
     orderId: string,
     action: BuyerEvidenceAction,
@@ -208,6 +211,7 @@ export function MallRuntimeProvider({
   const [selectedSeckillSessionId, setSelectedSeckillSessionId] = useState<string | null>(null);
   const [orders, setOrders] = useState<readonly FulfillmentOrder[]>([]);
   const [ordersState, setOrdersState] = useState<'idle' | LoadState>('idle');
+  const [ordersNextCursor, setOrdersNextCursor] = useState<FulfillmentOrderCursor | null>(null);
   const [orderActions, setOrderActions] = useState<Readonly<Record<string, readonly AllowedAction[]>>>({});
   const [orderTargets, setOrderTargets] = useState<Readonly<Record<string, FulfillmentTarget>>>({});
   const [orderCapabilityErrors, setOrderCapabilityErrors] = useState<Readonly<Record<string, string>>>({});
@@ -377,6 +381,7 @@ export function MallRuntimeProvider({
     selectedSeckillSessionId,
     orders,
     ordersState,
+    ordersNextCursor,
     orderActions,
     orderTargets,
     orderCapabilityErrors,
@@ -455,7 +460,10 @@ export function MallRuntimeProvider({
       }
       const product = catalog.find((item) => item.productId === seckillSession.product.productId);
       const sku = product?.skus.find((item) => item.skuId === seckillSession.product.skuId);
-      if (!product || !sku) return setError('秒杀商品与当前可售目录不一致，已停止进入结算');
+      if (!product || !sku || sku.seckill?.sessionId.toLowerCase() !== seckillSession.sessionId.toLowerCase()
+        || sku.seckill.phase !== 'LIVE') {
+        return setError('秒杀商品与当前可售目录 overlay 不一致，已停止进入结算');
+      }
       setSelectedProductId(product.productId);
       setSelectedSkuId(sku.skuId);
       setSelectedSeckillSessionId(seckillSession.sessionId);
@@ -524,6 +532,11 @@ export function MallRuntimeProvider({
 
     async reloadOrders() {
       await run(async () => loadOrderBundle(requireSession()), () => setOrdersState('error'));
+    },
+
+    async loadMoreOrders() {
+      if (!ordersNextCursor) return;
+      await run(async () => loadOrderBundle(requireSession(), ordersNextCursor));
     },
 
     async submitBuyerAction(orderId, action, input) {
@@ -668,6 +681,10 @@ export function MallRuntimeProvider({
       setSelectedProductId(product?.productId ?? null);
       setSelectedSkuId(null);
       setSelectedSeckillSessionId(null);
+      if (product && !product.fulfillmentModes.includes(fulfillmentMode)) {
+        setFulfillmentModeState(product.fulfillmentModes[0]!);
+        setCheckoutTarget(null);
+      }
       setQuantityState(1);
       clearPaymentState();
     },
@@ -677,7 +694,11 @@ export function MallRuntimeProvider({
       if (selectedSeckillSessionId && skuId !== seckillSession?.product.skuId) {
         return setError('秒杀订单只能使用 Core 场次绑定的 SKU');
       }
-      setSelectedSkuId(selectedProduct?.skus.some((sku) => sku.skuId === skuId) ? skuId : null);
+      const sku = selectedProduct?.skus.find((item) => item.skuId === skuId);
+      if (sku?.seckill && !selectedSeckillSessionId) {
+        return setError(`该 SKU 处于${sku.seckill.phase}活动阶段，普通结算已停用`);
+      }
+      setSelectedSkuId(sku?.skuId ?? null);
       clearPaymentState();
     },
 
@@ -689,6 +710,9 @@ export function MallRuntimeProvider({
 
     setFulfillmentMode(mode) {
       if (pendingSubmission) return setError('当前链上交易尚未提交到 Core，请先恢复跟踪');
+      if (selectedProduct && !selectedProduct.fulfillmentModes.includes(mode)) {
+        return setError('该商品未发布当前履约方式');
+      }
       setFulfillmentModeState(mode);
       if (checkoutTarget?.fulfillmentMode !== mode) setCheckoutTarget(null);
       clearPaymentState();
@@ -808,6 +832,7 @@ export function MallRuntimeProvider({
     orderActions,
     orderCapabilityErrors,
     orders,
+    ordersNextCursor,
     ordersState,
     orderTargets,
     settlements,
@@ -888,6 +913,12 @@ export function MallRuntimeProvider({
   async function buildSelection() {
     if (!bootstrap?.writesEnabled) throw readinessError(bootstrap);
     if (!selectedProduct || !selectedSku) throw new CoreClientError('InvalidRequest', '请选择商品和 SKU');
+    if (!selectedProduct.fulfillmentModes.includes(fulfillmentMode)) {
+      throw new CoreClientError('InvalidRequest', '该商品未发布当前履约方式');
+    }
+    if (selectedSku.seckill && !selectedSeckillSessionId) {
+      throw new CoreClientError('SeckillOnlyProduct', '该 SKU 正在活动阶段，普通结算已停用');
+    }
     if (BigInt(selectedSku.stockAvailable) < BigInt(quantity)) {
       throw new CoreClientError('InventoryUnavailable', '抱歉，该规格商品刚刚已被抢光，请重新选择规格！');
     }
@@ -921,25 +952,23 @@ export function MallRuntimeProvider({
     setApprovals([]);
   }
 
-  async function loadOrderBundle(activeSession: WalletSession) {
-    setOrdersState('loading');
-    const nextOrders = await services.core.listOrders(activeSession.token);
-    const actions: Record<string, readonly AllowedAction[]> = {};
-    const targets: Record<string, FulfillmentTarget> = {};
-    const capabilityErrors: Record<string, string> = {};
-    await Promise.all(nextOrders.map(async (order) => {
-      const [actionResult, targetResult] = await Promise.allSettled([
-        services.core.getOrderAllowedActions(activeSession.token, order.orderId),
+  async function loadOrderBundle(activeSession: WalletSession, cursor?: FulfillmentOrderCursor) {
+    if (!cursor) setOrdersState('loading');
+    const page = await services.core.listOrders(activeSession.token, cursor);
+    const actions: Record<string, readonly AllowedAction[]> = cursor ? { ...orderActions } : {};
+    const targets: Record<string, FulfillmentTarget> = cursor ? { ...orderTargets } : {};
+    const capabilityErrors: Record<string, string> = cursor ? { ...orderCapabilityErrors } : {};
+    await Promise.all(page.orders.map(async (order) => {
+      actions[order.orderId] = order.allowedActions;
+      const targetResult = await Promise.allSettled([
         services.core.getOrderTarget(activeSession.token, order.orderId),
       ]);
-      if (actionResult.status === 'fulfilled') actions[order.orderId] = actionResult.value;
-      else capabilityErrors[order.orderId] = '订单允许操作暂不可用';
-      if (targetResult.status === 'fulfilled') targets[order.orderId] = targetResult.value;
-      else capabilityErrors[order.orderId] = capabilityErrors[order.orderId]
-        ? `${capabilityErrors[order.orderId]}；履约目标暂不可用`
-        : '履约目标暂不可用';
+      if (targetResult[0]?.status === 'fulfilled') targets[order.orderId] = targetResult[0].value;
+      else capabilityErrors[order.orderId] = '履约目标暂不可用';
     }));
+    const nextOrders = cursor ? mergeOrders(orders, page.orders) : page.orders;
     setOrders(nextOrders);
+    setOrdersNextCursor(page.nextCursor);
     setOrderActions(actions);
     setOrderTargets(targets);
     setOrderCapabilityErrors(capabilityErrors);
@@ -1135,6 +1164,15 @@ function readinessError(bootstrap: CorePaymentAvailability | null) {
     return new CoreClientError('ExternalBlocked', '支付基础设施尚未就绪');
   }
   return new CoreClientError('ConfigurationRequired', '新支付当前已安全停用');
+}
+
+function mergeOrders(
+  current: readonly FulfillmentOrder[],
+  incoming: readonly FulfillmentOrder[],
+) {
+  const byId = new Map(current.map((order) => [order.orderId, order]));
+  for (const order of incoming) byId.set(order.orderId, order);
+  return [...byId.values()];
 }
 
 function assertDeliveryTargetDraft(draft: DeliveryTargetDraft) {

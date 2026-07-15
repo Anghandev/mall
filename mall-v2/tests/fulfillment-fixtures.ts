@@ -75,6 +75,10 @@ export const deliveryOrder: FulfillmentOrder = {
   merchantWallet: address('2'),
   productId: 'product-24k-shoe',
   skuId: 'sku-42-black-gold',
+  quantity: '2',
+  createdAt: '2033-05-18T03:00:00.000Z',
+  orderKind: 'ORDINARY',
+  paymentTxHash: hash('c'),
   fulfillmentMode: 'DELIVERY',
   state: 'SHIPPED',
   finalityStatus: 'FINAL',
@@ -117,6 +121,12 @@ export const deliveryOrder: FulfillmentOrder = {
     { asset: 'NPL', state: 'LOCKED', amount: '24000000000000000000' },
     { asset: 'BNM_POINTS', state: 'LOCKED', amount: '120000000000000000000' },
   ],
+  allowedActions: [
+    { action: 'REQUEST_EXCHANGE', enabled: true },
+    { action: 'REQUEST_DELAY', enabled: false, reasonCode: 'UnknownState' },
+    { action: 'CONFIRM_RECEIPT', enabled: false, reasonCode: 'UnknownState' },
+    { action: 'OPEN_ARBITRATION', enabled: true },
+  ],
 };
 
 export const pickupOrder: FulfillmentOrder = {
@@ -128,16 +138,12 @@ export const pickupOrder: FulfillmentOrder = {
   deliveredAt: '2033-05-18T06:00:00.000Z',
   shipments: [],
   logistics: [],
+  allowedActions: [
+    { action: 'VERIFY_PICKUP', enabled: true },
+    { action: 'OPEN_TAKEOVER', enabled: false, reasonCode: 'PickupTakeoverDecisionBlocked' },
+  ],
 };
 
-export const deliveryActions: readonly AllowedAction[] = [
-  { action: 'REQUEST_EXCHANGE', enabled: true },
-  { action: 'REQUEST_DELAY', enabled: false, reasonCode: 'UnknownState' },
-  { action: 'CONFIRM_RECEIPT', enabled: false, reasonCode: 'UnknownState' },
-  { action: 'OPEN_ARBITRATION', enabled: true },
-];
+export const deliveryActions: readonly AllowedAction[] = deliveryOrder.allowedActions;
 
-export const pickupActions: readonly AllowedAction[] = [
-  { action: 'VERIFY_PICKUP', enabled: true },
-  { action: 'OPEN_TAKEOVER', enabled: false, reasonCode: 'PickupTakeoverDecisionBlocked' },
-];
+export const pickupActions: readonly AllowedAction[] = pickupOrder.allowedActions;

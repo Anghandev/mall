@@ -14,6 +14,8 @@ import type {
   FulfillmentCommandResult,
   FulfillmentCompletedResult,
   FulfillmentOrder,
+  FulfillmentOrderCursor,
+  FulfillmentOrderPage,
   FulfillmentReasonRequest,
   FulfillmentRequestResult,
   FulfillmentTarget,
@@ -49,6 +51,7 @@ import {
   balanceStates,
   catalogTaxonomyStatuses,
   cmsContentTypes,
+  fulfillmentModes,
   mediaContentTypes,
   mediaPurposes,
   mediaResourceTypes,
@@ -133,7 +136,7 @@ export interface CoreClient {
   listStores(regionCode?: string): Promise<readonly MerchantStore[]>;
   createDeliveryTarget(token: string, request: CreateDeliveryTargetRequest): Promise<DeliveryTarget>;
   createPickupTarget(token: string, request: CreatePickupTargetRequest): Promise<PickupTarget>;
-  listOrders(token: string): Promise<readonly FulfillmentOrder[]>;
+  listOrders(token: string, cursor?: FulfillmentOrderCursor, limit?: number): Promise<FulfillmentOrderPage>;
   getOrder(token: string, orderId: string): Promise<FulfillmentOrder>;
   getOrderTarget(token: string, orderId: string): Promise<FulfillmentTarget>;
   getOrderAllowedActions(token: string, orderId: string): Promise<readonly AllowedAction[]>;
@@ -391,15 +394,21 @@ export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } 
       return postAuthorized<PickupTarget>(fetcher, `${baseUrl}${operations.pickupTarget}`, token, request);
     },
 
-    async listOrders(token) {
-      const value = await requestJson<{ orders: readonly FulfillmentOrder[] }>(
+    async listOrders(token, cursor, limit = 50) {
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+        throw new CoreClientError('InvalidRequest', '订单分页数量无效');
+      }
+      const query = queryString({
+        cursorCreatedAt: cursor?.createdAt,
+        cursorOrderId: cursor?.orderId,
+        limit: String(limit),
+      });
+      const value = await requestJson<unknown>(
         fetcher,
-        `${baseUrl}${operations.orders}`,
+        `${baseUrl}${operations.orders}${query}`,
         { headers: authorizedHeaders(token) },
       );
-      if (!Array.isArray(value.orders)) throw new CoreClientError('InvalidResponse', '订单列表响应无效');
-      value.orders.forEach(assertFulfillmentOrderVersion);
-      return value.orders;
+      return parseFulfillmentOrderPage(value);
     },
 
     async getOrder(token, orderId) {
@@ -408,8 +417,7 @@ export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } 
         `${baseUrl}${orderPath(operations.order, orderId)}`,
         { headers: authorizedHeaders(token) },
       );
-      assertFulfillmentOrderVersion(value.order);
-      return value.order;
+      return parseFulfillmentOrder(value.order);
     },
 
     async getOrderTarget(token, orderId) {
@@ -819,11 +827,23 @@ function parseCatalogProducts(value: unknown): readonly CatalogProduct[] {
     stringValue(product.productId);
     bytes32Value(product.chainProductId);
     stringValue(product.title);
+    boundedStringValue(product.subtitle, 120);
     objectValue(product.metadata);
     const images = arrayValue(product.mainImageAssetIds);
     if (images.length > 5) throw new CoreClientError('InvalidResponse', '商品主图数量无效');
     images.forEach(bytes32Value);
     optionalBytes32Value(product.videoAssetId);
+    objectValue(product.richDetail);
+    atomicValue(product.defaultFreightUsdt);
+    const modes = arrayValue(product.fulfillmentModes).map((mode) => enumValue(mode, fulfillmentModes));
+    if (modes.length < 1 || modes.length > 2 || new Set(modes).size !== modes.length) {
+      throw new CoreClientError('InvalidResponse', '商品履约方式无效');
+    }
+    if (product.categoryId !== null) stringValue(product.categoryId);
+    const tagIds = arrayValue(product.tagIds).map(stringValue);
+    if (tagIds.length > 20 || new Set(tagIds).size !== tagIds.length) {
+      throw new CoreClientError('InvalidResponse', '商品标签关联无效');
+    }
     const skus = arrayValue(product.skus);
     if (skus.length === 0) throw new CoreClientError('InvalidResponse', '商品缺少可售 SKU');
     skus.forEach((skuValue) => {
@@ -833,9 +853,29 @@ function parseCatalogProducts(value: unknown): readonly CatalogProduct[] {
       objectValue(sku.attributes);
       atomicValue(sku.listPriceUsdt);
       atomicValue(sku.stockAvailable);
+      if (sku.seckill !== null) parseCatalogSeckillOverlay(sku.seckill);
     });
     return item as CatalogProduct;
   });
+}
+
+function parseCatalogSeckillOverlay(value: unknown) {
+  const overlay = objectValue(value);
+  bytes32Value(overlay.sessionId);
+  atomicValue(overlay.policyVersion);
+  enumValue(overlay.phase, ['PREHEAT', 'LIVE', 'SETTLING'] as const);
+  const startsAt = Date.parse(isoValue(overlay.startsAt));
+  const mainDeadline = Date.parse(isoValue(overlay.mainDeadline));
+  const relayDeadline = Date.parse(isoValue(overlay.relayDeadline));
+  if (startsAt >= mainDeadline || relayDeadline > mainDeadline) {
+    throw new CoreClientError('InvalidResponse', '秒杀时间边界无效');
+  }
+  atomicValue(overlay.seckillListPriceUsdt);
+  const inventory = objectValue(overlay.inventory);
+  for (const field of ['total', 'sold', 'reserved', 'available'] as const) atomicValue(inventory[field]);
+  if (overlay.ordinaryCheckoutAllowed !== false) {
+    throw new CoreClientError('InvalidResponse', '活动 SKU 必须禁止普通结算');
+  }
 }
 
 function parseCatalogCategories(value: unknown): readonly CatalogCategory[] {
@@ -1156,6 +1196,13 @@ function stringValue(value: unknown) {
   return value;
 }
 
+function boundedStringValue(value: unknown, maxLength: number) {
+  if (typeof value !== 'string' || value.length > maxLength) {
+    throw new CoreClientError('InvalidResponse', 'Core 响应文本字段无效');
+  }
+  return value;
+}
+
 function arrayValue(value: unknown): readonly unknown[] {
   if (!Array.isArray(value)) throw new CoreClientError('InvalidResponse', 'Core 响应列表字段无效');
   return value;
@@ -1194,6 +1241,10 @@ function isoValue(value: unknown) {
   const timestamp = stringValue(value);
   if (!Number.isFinite(Date.parse(timestamp))) throw new CoreClientError('InvalidResponse', 'Core 响应时间无效');
   return timestamp;
+}
+
+function optionalIsoValue(value: unknown) {
+  if (value !== null) isoValue(value);
 }
 
 function positiveIntegerValue(value: unknown) {
@@ -1262,8 +1313,81 @@ function queryString(values: Readonly<Record<string, string | undefined>>) {
   return serialized ? `?${serialized}` : '';
 }
 
-function assertFulfillmentOrderVersion(order: FulfillmentOrder) {
-  assertArtifactVersion(order.artifactVersion);
+function parseFulfillmentOrderPage(value: unknown): FulfillmentOrderPage {
+  const page = objectValue(value);
+  const orders = arrayValue(page.orders).map(parseFulfillmentOrder);
+  let nextCursor: FulfillmentOrderCursor | null = null;
+  if (page.nextCursor !== null) {
+    const cursor = objectValue(page.nextCursor);
+    nextCursor = {
+      createdAt: isoValue(cursor.createdAt),
+      orderId: stringValue(cursor.orderId),
+    };
+  }
+  return { orders, nextCursor };
+}
+
+function parseFulfillmentOrder(value: unknown): FulfillmentOrder {
+  const order = objectValue(value);
+  bytes32Value(order.orderId);
+  assertArtifactVersion(stringValue(order.artifactVersion));
+  addressValue(order.buyerWallet);
+  stringValue(order.merchantId);
+  addressValue(order.merchantWallet);
+  stringValue(order.productId);
+  stringValue(order.skuId);
+  atomicValue(order.quantity);
+  isoValue(order.createdAt);
+  enumValue(order.orderKind, ['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] as const);
+  optionalBytes32Value(order.paymentTxHash);
+  enumValue(order.fulfillmentMode, fulfillmentModes);
+  enumValue(order.state, [
+    'QUOTED', 'SUBMITTED', 'PAID', 'SHIPPED', 'DELIVERED', 'ARBITRATION',
+    'TAKEOVER', 'FULFILLMENT_PENDING', 'FULFILLED', 'REORG_PENDING',
+  ] as const);
+  enumValue(order.finalityStatus, ['NOT_SUBMITTED', 'PENDING', 'CONFIRMED', 'REPLACED', 'REORGED', 'FINAL'] as const);
+  const amounts = objectValue(order.exactAmounts);
+  for (const field of [
+    'listPriceUsdt', 'usdtPaymentAmount', 'nplQuoteAmount', 'nplPaymentAmount',
+    'nplBurnAmount', 'nplRewardAmount', 'merchantBaseReceivableUsdt',
+    'merchantConcessionAmount', 'merchantNetReceivableUsdt', 'bnmAmount',
+  ] as const) atomicValue(amounts[field]);
+  for (const field of [
+    'paidAt', 'paymentFinalizedAt', 'shippedAt', 'deliveredAt', 'fulfilledAt',
+    'takeoverOpenedAt', 'arbitrationOpenedAt',
+  ] as const) optionalIsoValue(order[field]);
+  arrayValue(order.requests).forEach((requestValue) => {
+    const request = objectValue(requestValue);
+    stringValue(request.requestId);
+    enumValue(request.requestType, ['EXCHANGE', 'DELAY', 'ARBITRATION', 'FORCED_RECEIPT'] as const);
+    enumValue(request.state, ['OPEN', 'APPROVED', 'REJECTED', 'RESOLVED'] as const);
+    isoValue(request.requestedAt);
+    optionalIsoValue(request.resolvedAt);
+  });
+  arrayValue(order.shipments).forEach((shipmentValue) => {
+    const shipment = objectValue(shipmentValue);
+    stringValue(shipment.shipmentId);
+    stringValue(shipment.carrierCode);
+    bytes32Value(shipment.trackingNumberHash);
+    optionalBytes32Value(shipment.providerReferenceHash);
+    isoValue(shipment.createdAt);
+  });
+  arrayValue(order.logistics).forEach((logisticsValue) => {
+    const logistics = objectValue(logisticsValue);
+    stringValue(logistics.logisticsEventId);
+    enumValue(logistics.provider, ['KUAIDI100', 'CAINIAO'] as const);
+    enumValue(logistics.status, ['PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED', 'EXCEPTION'] as const);
+    optionalBytes32Value(logistics.locationHash);
+    isoValue(logistics.occurredAt);
+  });
+  arrayValue(order.balances).forEach((balanceValue) => {
+    const balance = objectValue(balanceValue);
+    enumValue(balance.asset, ['USDT', 'NPL', 'BNM_POINTS'] as const);
+    enumValue(balance.state, balanceStates);
+    atomicValue(balance.amount);
+  });
+  parseAllowedActions(order.allowedActions);
+  return value as FulfillmentOrder;
 }
 
 function operationPath(operationId: string, method: HttpMethod) {

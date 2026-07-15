@@ -5,10 +5,12 @@ Requirement Matrix and consumes only coordinated Core artifacts.
 
 ## Current Runtime Boundary
 
-- Production consumes coordinated Core artifacts `2.0.0-settlement-admin.4` and derives
+- Production consumes coordinated Core artifacts `2.0.0-settlement-admin.5` and derives
   its HTTP paths from the published OpenAPI document.
 - The public catalog consumes active products/SKUs, enabled three-level
-  categories, enabled tags and product/category media asset IDs. Every image or
+  categories, enabled tags, field-level product associations, rich detail,
+  freight, fulfillment modes and SKU-level seckill overlays. Category/tag
+  filtering and ordinary-checkout blocking use only those Core fields. Every image or
   video URL comes from Core's short-lived media-read endpoint and is checked
   against the expected asset, resource, purpose and content type; the Mall does
   not construct an OSS/CDN path.
@@ -19,9 +21,10 @@ Requirement Matrix and consumes only coordinated Core artifacts.
   from Core responses. The Mall does not recalculate them or treat a submitted
   TxHash as final.
 - The Mall consumes published stores, browser-location-backed delivery/pickup
-  targets, wallet-scoped order/target projections, logistics, balances and
-  current-session `allowedActions`. No endpoint, amount or state is duplicated
-  locally.
+  targets and stable wallet order pages keyed by `(createdAt, orderId)`. Complete
+  order rows carry quantity, kind, payment TxHash, logistics, balances and
+  authoritative `allowedActions`; no second action lookup or local state
+  inference is used.
 - Transferable balances now render Core-projected Locked, Available, Requested,
   Batched and Settled states. Available NPL reward and USDT prize balances use
   a wallet-bound EIP-712 settlement intent; the Mall never creates settlement
@@ -37,7 +40,7 @@ Requirement Matrix and consumes only coordinated Core artifacts.
   subtype. BNM account totals render only Locked/Available and never enter a
   settlement action.
 - Enabled `REQUEST_EXCHANGE`, `REQUEST_DELAY`, `CONFIRM_RECEIPT` and
-  `OPEN_ARBITRATION` actions now use the `.4` write-once upload, verification,
+  `OPEN_ARBITRATION` actions use the `.5` write-once upload, verification,
   order-evidence envelope and command endpoints. The browser hashes optional
   JPG/PNG/WebP/PDF evidence locally and never asks the buyer to paste a hash.
   `OPEN_TAKEOVER` remains fail closed because it is absent from the published

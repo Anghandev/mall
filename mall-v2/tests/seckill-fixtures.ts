@@ -18,10 +18,10 @@ export function seckillSession(
     merchantId: 'merchant-1',
     product: {
       productId: product.productId,
-      skuId: product.skus[0]!.skuId,
+      skuId: product.skus[1]!.skuId,
       title: product.title,
       metadata: {},
-      attributes: product.skus[0]!.attributes,
+      attributes: product.skus[1]!.attributes,
       seckillListPriceUsdt: '80000000000000000000',
     },
     phase: 'LIVE',

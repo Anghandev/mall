@@ -2,13 +2,15 @@
 
 Status: the previous handwritten `mall-api-v1` proposal is retired. Mall now
 consumes coordinated Core settlement/admin artifacts
-`2.0.0-settlement-admin.4`.
+`2.0.0-settlement-admin.5`.
 
 The published boundary currently covers:
 
 - bootstrap/readiness, BSC chain identity and fixed asset identity;
 - buyer SIWE challenge and session;
-- products/SKUs, authoritative atomic-unit prices/stock and catalog media IDs;
+- products/SKUs, authoritative atomic-unit prices/stock, subtitle, rich detail,
+  freight, fulfillment modes, category/tag associations, catalog media IDs and
+  SKU-level seckill overlays;
 - enabled three-level category and tag projections;
 - short-lived public media-read targets bound to asset, resource, purpose,
   content type, object version and expiry;
@@ -19,7 +21,9 @@ The published boundary currently covers:
 - approval requirements and ABI-shaped PaymentRouter calls;
 - transaction submission plus replacement/reorg/finality projection.
 - store reads and authoritative delivery/pickup checkout targets;
-- order, fulfillment-target, shipment, logistics and balance projections;
+- stable `(createdAt, orderId)` wallet order pages with full quantity, order
+  kind, payment TxHash, fulfillment-target, shipment, logistics, balance and
+  row-level `allowedActions` projections;
 - fulfillment requests, receipt, pickup, arbitration and takeover actions with
   generated `allowedActions`.
 - wallet settlement balances and requests, signed EIP-712 settlement intents,
@@ -41,8 +45,6 @@ The following Mall capabilities remain incomplete:
 - an `OPEN_TAKEOVER` evidence action matching the published takeover command;
 - buyer authority for `VERIFY_PICKUP` evidence, if buyer-side pickup execution
   is ever intended; current Core authority is merchant/platform only;
-- typed public `CatalogProduct` category/tag associations, rich-detail fields
-  and the authoritative ordinary-checkout seckill overlay;
 - fulfillment and settlement WebSocket cursor replay beyond the published
   seckill channel.
 

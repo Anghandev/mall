@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   BadgeCheck,
   Banknote,
@@ -245,6 +245,15 @@ function RelayEvent({ event }: { event: RealtimeEventEnvelope }) {
 export function MallScreen() {
   const runtime = useMallRuntime();
   const navigate = useNavigate();
+  const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [tagId, setTagId] = useState<string | null>(null);
+  const visibleProducts = useMemo(() => {
+    const categoryIds = categoryId ? descendantCategoryIds(categoryId, runtime.categories) : null;
+    return runtime.catalog.filter((product) => (
+      (!categoryIds || (product.categoryId !== null && categoryIds.has(product.categoryId)))
+      && (!tagId || product.tagIds.includes(tagId))
+    ));
+  }, [categoryId, runtime.catalog, runtime.categories, tagId]);
 
   return (
     <div className="screen screen--mall">
@@ -287,7 +296,15 @@ export function MallScreen() {
             </button>
           </div>
         ) : null}
-        {runtime.taxonomyState === 'ready' ? <CatalogTaxonomy runtime={runtime} /> : null}
+        {runtime.taxonomyState === 'ready' ? (
+          <CatalogTaxonomy
+            runtime={runtime}
+            selectedCategoryId={categoryId}
+            selectedTagId={tagId}
+            onSelectCategory={setCategoryId}
+            onSelectTag={setTagId}
+          />
+        ) : null}
       </section>
 
       {runtime.catalogState === 'loading' ? (
@@ -308,8 +325,12 @@ export function MallScreen() {
       ) : null}
       {runtime.catalogState === 'ready' ? (
         <div className="product-grid" aria-label="可售商品">
-          {runtime.catalog.map((product) => (
-            <article className="product-card" key={product.productId}>
+          {visibleProducts.map((product) => {
+            const overlay = product.skus.find((sku) => sku.seckill)?.seckill ?? null;
+            const ordinarySkuCount = product.skus.filter((sku) => sku.seckill === null).length;
+            const activityOnly = Boolean(overlay && ordinarySkuCount === 0);
+            return (
+            <article className={overlay ? 'product-card product-card--seckill' : 'product-card'} key={product.productId}>
               <div className="product-card__visual">
                 {product.mainImageAssetIds[0] ? (
                   <PublicCatalogMedia
@@ -324,26 +345,43 @@ export function MallScreen() {
               </div>
               <div className="product-card__body">
                 <h2>{product.title}</h2>
-                <p>{product.skus.length} 个可售 SKU</p>
+                {product.subtitle ? <p>{product.subtitle}</p> : null}
+                <div className="product-card__badges" aria-label="商品属性">
+                  <span>BNM 履约后释放</span>
+                  {product.fulfillmentModes.map((mode) => <span key={mode}>{mode === 'DELIVERY' ? '快递' : '自提'}</span>)}
+                  {product.tagIds.map((id) => <span key={id}>{runtime.tags.find((tag) => tag.tagId === id)?.name ?? id}</span>)}
+                </div>
+                {overlay ? (
+                  <div className="product-card__seckill" role="status">
+                    <Zap aria-hidden="true" size={15} />
+                    <span>{seckillOverlayLabel(overlay.phase)} · {overlay.seckillListPriceUsdt} · 剩余 {overlay.inventory.available}</span>
+                  </div>
+                ) : null}
                 <dl>
-                  <div><dt>首个 SKU 标价</dt><dd>{product.skus[0] ? `${product.skus[0].listPriceUsdt} 原子单位` : '--'}</dd></div>
-                  <div><dt>可用库存</dt><dd>{product.skus[0]?.stockAvailable ?? '--'}</dd></div>
+                  <div><dt>普通可售规格</dt><dd>{ordinarySkuCount} / {product.skus.length}</dd></div>
+                  <div><dt>默认运费</dt><dd>{product.defaultFreightUsdt} USDT 原子单位</dd></div>
                 </dl>
                 <button
                   className="button button--primary"
                   type="button"
                   disabled={runtime.busy || Boolean(runtime.pendingSubmission)}
                   onClick={() => {
-                    runtime.selectProduct(product.productId);
-                    navigate('/checkout');
+                    if (activityOnly) navigate('/seckill');
+                    else {
+                      runtime.selectProduct(product.productId);
+                      navigate('/checkout');
+                    }
                   }}
                 >
-                  选择商品 <ChevronRight aria-hidden="true" size={17} />
+                  {activityOnly ? '前往秒杀' : '选择商品'} <ChevronRight aria-hidden="true" size={17} />
                 </button>
               </div>
             </article>
-          ))}
+          );})}
         </div>
+      ) : null}
+      {runtime.catalogState === 'ready' && visibleProducts.length === 0 ? (
+        <EmptyState title="当前筛选无商品">筛选结果仅使用 Core 发布的类目与标签关联。</EmptyState>
       ) : null}
     </div>
   );
@@ -679,6 +717,11 @@ export function OrdersScreen() {
           ))}
         </div>
       ) : null}
+      {runtime.ordersNextCursor ? (
+        <button className="button button--secondary order-load-more" type="button" disabled={runtime.busy} onClick={() => void runtime.loadMoreOrders()}>
+          <RefreshCw aria-hidden="true" size={17} /> {runtime.busy ? '正在读取下一页' : '加载更多订单'}
+        </button>
+      ) : null}
 
       <section className="support-policy" aria-labelledby="support-title">
         <div className="support-policy__icon"><Headphones aria-hidden="true" size={22} /></div>
@@ -718,7 +761,7 @@ function OrderRow({
     <article className="order-row">
       <header className="order-row__header">
         <div>
-          <p className="eyebrow">{order.fulfillmentMode === 'DELIVERY' ? '快递订单' : '到店自提'}</p>
+          <p className="eyebrow">{orderKindLabel(order.orderKind)} · {order.fulfillmentMode === 'DELIVERY' ? '快递订单' : '到店自提'}</p>
           <h2>{shortHash(order.orderId)}</h2>
         </div>
         <div className="order-row__state">
@@ -730,8 +773,11 @@ function OrderRow({
       <dl className="order-row__identity">
         <div><dt>商品</dt><dd>{order.productId}</dd></div>
         <div><dt>规格</dt><dd>{order.skuId}</dd></div>
+        <div><dt>数量</dt><dd>{order.quantity}</dd></div>
+        <div><dt>创建时间</dt><dd>{formatIso(order.createdAt)}</dd></div>
         <div><dt>USDT 支付</dt><dd>{order.exactAmounts.usdtPaymentAmount}</dd></div>
         <div><dt>NPL 支付</dt><dd>{order.exactAmounts.nplPaymentAmount}</dd></div>
+        <div className="order-row__tx"><dt>付款 TxHash</dt><dd>{order.paymentTxHash ? <code>{order.paymentTxHash}</code> : '尚未提交'}</dd></div>
         <div><dt>付款记录</dt><dd>{order.paidAt ? formatIso(order.paidAt) : '待付款'}</dd></div>
         <div><dt>付款最终确认</dt><dd>{order.paymentFinalizedAt ? formatIso(order.paymentFinalizedAt) : '确认中'}</dd></div>
       </dl>
@@ -1203,6 +1249,8 @@ export function CheckoutScreen() {
       && runtime.bootstrap?.writesEnabled
       && product
       && sku
+      && product.fulfillmentModes.includes(runtime.fulfillmentMode)
+      && (!sku.seckill || Boolean(runtime.selectedSeckillSessionId))
       && runtime.checkoutTarget?.fulfillmentMode === runtime.fulfillmentMode
       && (!runtime.selectedSeckillSessionId
         || (runtime.seckillSession?.sessionId === runtime.selectedSeckillSessionId
@@ -1265,6 +1313,24 @@ export function CheckoutScreen() {
         </StatusNotice>
       ) : null}
 
+      {product ? (
+        <section className="section-block product-core-detail" aria-labelledby="product-core-detail-title">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">CORE PRODUCT</p>
+              <h2 id="product-core-detail-title">{product.title}</h2>
+            </div>
+            <ShoppingBag aria-hidden="true" size={19} />
+          </div>
+          {product.subtitle ? <p className="product-core-detail__subtitle">{product.subtitle}</p> : null}
+          {richDetailText(product.richDetail) ? <p>{richDetailText(product.richDetail)}</p> : null}
+          <dl className="product-core-detail__facts">
+            <div><dt>默认运费</dt><dd>{product.defaultFreightUsdt} USDT 原子单位</dd></div>
+            <div><dt>履约方式</dt><dd>{product.fulfillmentModes.map(fulfillmentModeLabel).join(' / ')}</dd></div>
+          </dl>
+        </section>
+      ) : null}
+
       <section className="section-block" aria-labelledby="sku-title">
         <div className="section-heading"><h2 id="sku-title">商品规格</h2><Box aria-hidden="true" size={19} /></div>
         {product ? (
@@ -1279,10 +1345,11 @@ export function CheckoutScreen() {
                 disabled={runtime.busy
                   || Boolean(runtime.pendingSubmission)
                   || BigInt(item.stockAvailable) === 0n
+                  || Boolean(item.seckill && !runtime.selectedSeckillSessionId)
                   || Boolean(runtime.selectedSeckillSessionId && item.skuId !== runtime.seckillSession?.product.skuId)}
               >
                 <strong>{skuLabel(item.attributes, item.skuId)}</strong>
-                <span>标价 {item.listPriceUsdt} USDT 原子单位 · 库存 {item.stockAvailable}</span>
+                <span>{item.seckill ? `${seckillOverlayLabel(item.seckill.phase)} · 活动价 ${item.seckill.seckillListPriceUsdt}` : `标价 ${item.listPriceUsdt}`} USDT 原子单位 · 库存 {item.seckill?.inventory.available ?? item.stockAvailable}</span>
               </button>
             ))}
           </div>
@@ -1306,10 +1373,10 @@ export function CheckoutScreen() {
       <fieldset className="fulfillment-mode">
         <legend>履约方式</legend>
         <div className="segmented-control segmented-control--two">
-          <button type="button" disabled={runtime.busy || Boolean(runtime.pendingSubmission)} className={runtime.fulfillmentMode === 'DELIVERY' ? 'is-active' : ''} aria-pressed={runtime.fulfillmentMode === 'DELIVERY'} onClick={() => runtime.setFulfillmentMode('DELIVERY')}>
+          <button type="button" disabled={runtime.busy || Boolean(runtime.pendingSubmission) || !product?.fulfillmentModes.includes('DELIVERY')} className={runtime.fulfillmentMode === 'DELIVERY' ? 'is-active' : ''} aria-pressed={runtime.fulfillmentMode === 'DELIVERY'} onClick={() => runtime.setFulfillmentMode('DELIVERY')}>
             <Truck aria-hidden="true" size={17} /> 快递邮寄
           </button>
-          <button type="button" disabled={runtime.busy || Boolean(runtime.pendingSubmission)} className={runtime.fulfillmentMode === 'PICKUP' ? 'is-active' : ''} aria-pressed={runtime.fulfillmentMode === 'PICKUP'} onClick={() => runtime.setFulfillmentMode('PICKUP')}>
+          <button type="button" disabled={runtime.busy || Boolean(runtime.pendingSubmission) || !product?.fulfillmentModes.includes('PICKUP')} className={runtime.fulfillmentMode === 'PICKUP' ? 'is-active' : ''} aria-pressed={runtime.fulfillmentMode === 'PICKUP'} onClick={() => runtime.setFulfillmentMode('PICKUP')}>
             <Store aria-hidden="true" size={17} /> 到店自提
           </button>
         </div>
@@ -1585,6 +1652,8 @@ function skuLabel(attributes: Readonly<Record<string, unknown>>, fallback: strin
 function quoteDisabledReason(runtime: MallRuntimeValue) {
   if (!runtime.selectedProduct) return '请先从商城选择商品';
   if (!runtime.selectedSku) return '请手动选择一个可售 SKU';
+  if (!runtime.selectedProduct.fulfillmentModes.includes(runtime.fulfillmentMode)) return '该商品未发布当前履约方式';
+  if (runtime.selectedSku.seckill && !runtime.selectedSeckillSessionId) return '该 SKU 正在活动阶段，普通结算已停用';
   if (!runtime.session) return '请先连接钱包并完成 SIWE 登录';
   if (!runtime.bootstrap) return '正在同步 Core 安全状态';
   if (!runtime.bootstrap.writesEnabled) return '新支付当前被 Core 安全门禁阻断';
@@ -1701,7 +1770,19 @@ function shortHash(value: string) {
   return value.length > 18 ? `${value.slice(0, 10)}…${value.slice(-8)}` : value;
 }
 
-function CatalogTaxonomy({ runtime }: { runtime: MallRuntimeValue }) {
+function CatalogTaxonomy({
+  runtime,
+  selectedCategoryId,
+  selectedTagId,
+  onSelectCategory,
+  onSelectTag,
+}: {
+  runtime: MallRuntimeValue;
+  selectedCategoryId: string | null;
+  selectedTagId: string | null;
+  onSelectCategory(categoryId: string | null): void;
+  onSelectTag(tagId: string | null): void;
+}) {
   const categoriesByLevel = ([1, 2, 3] as const).map((level) => ({
     level,
     items: runtime.categories.filter((category) => category.level === level),
@@ -1709,12 +1790,24 @@ function CatalogTaxonomy({ runtime }: { runtime: MallRuntimeValue }) {
 
   return (
     <div className="catalog-taxonomy">
+      <button
+        className={!selectedCategoryId && !selectedTagId ? 'taxonomy-reset is-active' : 'taxonomy-reset'}
+        type="button"
+        aria-pressed={!selectedCategoryId && !selectedTagId}
+        onClick={() => { onSelectCategory(null); onSelectTag(null); }}
+      >全部商品</button>
       {categoriesByLevel.map((group) => (
         <div className="taxonomy-level" key={group.level}>
           <span className="taxonomy-level__label">{categoryLevelLabel(group.level)}</span>
           <ul className="taxonomy-strip" aria-label={`${categoryLevelLabel(group.level)}类目`}>
             {group.items.map((category) => (
               <li key={category.categoryId}>
+                <button
+                  type="button"
+                  aria-pressed={selectedCategoryId === category.categoryId}
+                  className={selectedCategoryId === category.categoryId ? 'is-active' : ''}
+                  onClick={() => onSelectCategory(selectedCategoryId === category.categoryId ? null : category.categoryId)}
+                >
                 {category.iconAssetId ? (
                   <PublicCatalogMedia
                     alt=""
@@ -1726,6 +1819,7 @@ function CatalogTaxonomy({ runtime }: { runtime: MallRuntimeValue }) {
                   />
                 ) : null}
                 <span>{category.name}</span>
+                </button>
               </li>
             ))}
           </ul>
@@ -1737,16 +1831,20 @@ function CatalogTaxonomy({ runtime }: { runtime: MallRuntimeValue }) {
           <ul className="taxonomy-strip taxonomy-strip--tags" aria-label="商品标签">
             {runtime.tags.map((tag) => (
               <li key={tag.tagId} title={tag.example || undefined}>
-                <Tag aria-hidden="true" size={13} />
-                <span>{tag.name}</span>
+                <button
+                  type="button"
+                  aria-pressed={selectedTagId === tag.tagId}
+                  className={selectedTagId === tag.tagId ? 'is-active' : ''}
+                  onClick={() => onSelectTag(selectedTagId === tag.tagId ? null : tag.tagId)}
+                >
+                  <Tag aria-hidden="true" size={13} />
+                  <span>{tag.name}</span>
+                </button>
               </li>
             ))}
           </ul>
         </div>
       ) : null}
-      <p className="taxonomy-boundary">
-        公开商品投影尚未发布类目与标签关联，目录不会从 metadata 推断筛选结果。
-      </p>
     </div>
   );
 }
@@ -1843,6 +1941,40 @@ function categoryLevelLabel(level: CatalogCategory['level']) {
   return ({ 1: '一级', 2: '二级', 3: '三级' } as const)[level];
 }
 
+function descendantCategoryIds(categoryId: string, categories: readonly CatalogCategory[]) {
+  const ids = new Set([categoryId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const category of categories) {
+      if (category.parentCategoryId && ids.has(category.parentCategoryId) && !ids.has(category.categoryId)) {
+        ids.add(category.categoryId);
+        changed = true;
+      }
+    }
+  }
+  return ids;
+}
+
+function seckillOverlayLabel(phase: 'PREHEAT' | 'LIVE' | 'SETTLING') {
+  return ({ PREHEAT: '秒杀预热', LIVE: '秒杀进行中', SETTLING: '秒杀结算中' } as const)[phase];
+}
+
+function fulfillmentModeLabel(mode: 'DELIVERY' | 'PICKUP') {
+  return mode === 'DELIVERY' ? '快递邮寄' : '到店自提';
+}
+
+function richDetailText(detail: Readonly<Record<string, unknown>>) {
+  return collectDetailText(detail).join(' · ');
+}
+
+function collectDetailText(value: unknown): string[] {
+  if (typeof value === 'string' && value.trim()) return [value.trim()];
+  if (Array.isArray(value)) return value.flatMap(collectDetailText);
+  if (value && typeof value === 'object') return Object.values(value).flatMap(collectDetailText);
+  return [];
+}
+
 const BUYER_FULFILLMENT_ACTIONS: readonly string[] = [
   'REQUEST_EXCHANGE',
   'REQUEST_DELAY',
@@ -1900,6 +2032,10 @@ function orderStateLabel(state: FulfillmentOrder['state']) {
     FULFILLED: '已完成',
     REORG_PENDING: '重组核验中',
   } as const)[state];
+}
+
+function orderKindLabel(kind: FulfillmentOrder['orderKind']) {
+  return ({ ORDINARY: '普通', SECKILL: '秒杀', FALLBACK_RETAIL: '边界转普通' } as const)[kind];
 }
 
 function finalityLabel(status: FulfillmentOrder['finalityStatus']) {
