@@ -69,6 +69,7 @@ describe('settlement/admin coordinated Core client', () => {
       approvalNonce: nonce,
       approvalDeadline: new Date(Number(deadline) * 1_000).toISOString(),
       state: 'PENDING_PROPOSAL',
+      safeNonce: null,
     });
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
@@ -79,7 +80,7 @@ describe('settlement/admin coordinated Core client', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(fetchCoverageBreakerActions('jwt')).resolves.toMatchObject([{ action: 'PAUSE', state: 'FINAL' }]);
+    await expect(fetchCoverageBreakerActions('jwt')).resolves.toMatchObject([{ action: 'PAUSE', state: 'FINAL', safeNonce: '12' }]);
     const received = await createCoverageBreakerResumeChallenge({ nonce, deadline }, 'jwt');
     await expect(authorizeCoverageBreakerResume({
       snapshotId: received.snapshotId,
@@ -129,6 +130,12 @@ describe('settlement/admin coordinated Core client', () => {
       state: 'SUPERSEDED',
       targetPaused: false,
     }]);
+  });
+
+  it('rejects a non-canonical Safe nonce', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([coverageAction({ safeNonce: '01' })])));
+
+    await expect(fetchCoverageBreakerActions('jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
   it('rejects a resume action that is not bound to the challenge signer and session actor', async () => {
@@ -379,6 +386,7 @@ function coverageAction(overrides: Record<string, unknown> = {}) {
     routerAddress: address('3'),
     calldataHash: hash('7'),
     state: 'FINAL',
+    safeNonce: '12',
     safeTxHash: hash('8'),
     proposalHash: hash('9'),
     executionTxHash: hash('a'),
