@@ -55,7 +55,16 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
 | MAL-GOAL-005 | Final Goal | Payment batch real Core path: product/SKU -> atomic reservation -> five-minute signed 70/30 quote -> allowance -> PaymentRouter -> indexed event -> order projection | D-V2-001, D-V2-002, D-V2-003, D-V2-011, D-V2-012, D-V2-017, D-V2-021, D-V2-028 | Mall consumer and integration tests use the published payment-batch Core artifact and real local API/indexer; inventory and both assets are atomic; no static fixture, local formula, handwritten calldata or disabled action counts | Frozen | GAP-MAL-001, GAP-MAL-003, GAP-MAL-004, GAP-MAL-015 |
 | MAL-GOAL-006 | Final Goal | Transferable-asset ledger lifecycle and BNM backend-points lifecycle | D-V2-007, D-V2-008, D-V2-017, D-V2-023 | USDT/NPL/prize rows prove Locked/Available/Requested/Batched/Settled, immutable batch identity and final 15-confirmation Safe TxHash; BNM proves only Locked/Available with no ERC-20, mint, Safe transfer or on-chain withdrawal | Verified | - |
 
-## Settlement/Admin .2 Verification Evidence
+## Settlement/Admin .4 Verification Evidence
+
+- `MAL-CAT-001`, `MAL-CAT-002` partial evidence: the Mall consumes the public
+  product/SKU list, enabled three-level categories, enabled tags,
+  `mainImageAssetIds`, `videoAssetId` and short-lived media-read targets from the
+  same `.4` artifact. Consumer/UI tests reject inactive taxonomy, mismatched
+  asset identity, non-public access, wrong resource/purpose and incompatible
+  content types. These rows remain `Frozen`, not `Verified`, because the public
+  `CatalogProduct` type still lacks category/tag association and authoritative
+  seckill-overlay/rich-detail fields required by their full acceptance targets.
 
 - `MAL-SEK-002`, `MAL-SEK-003`: strict OpenAPI-derived HTTP operations,
   final-only event validation, HTTP replay, `eventId` deduplication, last-cursor

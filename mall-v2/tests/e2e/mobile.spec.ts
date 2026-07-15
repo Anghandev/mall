@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { artifactVersion } from '@abu24k/core-artifacts';
 
-import { product } from '../payment-fixtures';
+import { catalogCategories, catalogTags, publicMediaAccess } from '../catalog-fixtures';
+import { product, productVideoAssetId } from '../payment-fixtures';
 import { relayEvent, seckillSession, seckillSessionId } from '../seckill-fixtures';
 
 const screenshotRoutes = [
@@ -114,6 +115,17 @@ async function mockPublicCore(page: import('@playwright/test').Page) {
         },
       };
       if (url.pathname === '/v2/catalog/products') return { products: [product] };
+      if (url.pathname === '/v2/catalog/categories') return { categories: catalogCategories };
+      if (url.pathname === '/v2/catalog/tags') return { tags: catalogTags };
+      const mediaAssetId = /^\/v2\/media\/assets\/(0x[0-9a-f]{64})\/access$/.exec(url.pathname)?.[1];
+      if (mediaAssetId) {
+        const access = publicMediaAccess(mediaAssetId);
+        return {
+          ...access,
+          ...(mediaAssetId === productVideoAssetId ? {} : { contentType: 'image/png' }),
+          readUrl: 'http://127.0.0.1:4311/brand/store-front.png',
+        };
+      }
       if (url.pathname === '/v2/seckill/sessions/current') return session;
       if (url.pathname === '/v2/seckill/sessions/history') return {
         items: [{ ...session, phase: 'SETTLED', storedPhase: 'SETTLED', winnerWallet: session.lastBuyerWallet }],

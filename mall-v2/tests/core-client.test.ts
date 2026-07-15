@@ -3,6 +3,7 @@ import { TypedDataEncoder } from 'ethers';
 import { vi } from 'vitest';
 
 import {
+  coordinatedCatalogMediaOperations,
   coordinatedFulfillmentOperations,
   coordinatedPaymentOperations,
   coordinatedSettlementAdminOperations,
@@ -18,6 +19,7 @@ import {
   pickupTarget,
   store,
 } from './fulfillment-fixtures';
+import { catalogCategories, catalogTags, publicMediaAccess } from './catalog-fixtures';
 import { paymentQuote, product, seckillQuote } from './payment-fixtures';
 import { relayEvent, seckillSession, seckillSessionId } from './seckill-fixtures';
 import {
@@ -54,6 +56,53 @@ describe('coordinated Core HTTP client', () => {
       order: '/v2/orders/{orderId}',
       orderTarget: '/v2/orders/{orderId}/fulfillment-target',
     });
+  });
+
+  it('derives catalog taxonomy and media paths from coordinated OpenAPI', () => {
+    expect(coordinatedCatalogMediaOperations).toEqual({
+      categories: '/v2/catalog/categories',
+      tags: '/v2/catalog/tags',
+      mediaReadAccess: '/v2/media/assets/{assetId}/access',
+    });
+  });
+
+  it('consumes typed public taxonomy and short-lived media access without provider URL construction', async () => {
+    const assetId = product.mainImageAssetIds[0]!;
+    const media = publicMediaAccess(assetId);
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, ...(init ? { init } : {}) });
+      if (url.endsWith('/v2/catalog/categories')) return json({ categories: catalogCategories });
+      if (url.endsWith('/v2/catalog/tags')) return json({ tags: catalogTags });
+      if (url.endsWith(`/v2/media/assets/${assetId}/access`)) return json(media);
+      throw new Error(`unexpected URL ${url}`);
+    });
+    const client = createCoreClient({ baseUrl: 'https://core.mall.test', fetch: fetcher });
+
+    expect(await client.listCatalogCategories()).toEqual(catalogCategories);
+    expect(await client.listCatalogTags()).toEqual(catalogTags);
+    expect(await client.createPublicMediaReadAccess(assetId)).toEqual(media);
+    expect(calls.every((call) => call.init?.headers === undefined)).toBe(true);
+  });
+
+  it('rejects malformed taxonomy and media identity instead of rendering a guessed asset', async () => {
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json({ categories: [{ ...catalogCategories[0], status: 'DISABLED' }] })),
+    }).listCatalogCategories()).rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    const assetId = product.mainImageAssetIds[0]!;
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json({ ...publicMediaAccess(assetId), assetId: HASH_2 })),
+    }).createPublicMediaReadAccess(assetId)).rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json({ ...publicMediaAccess(assetId), accessScope: 'AUTHENTICATED' })),
+    }).createPublicMediaReadAccess(assetId)).rejects.toMatchObject({ code: 'Forbidden' });
+
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json({ ...publicMediaAccess(assetId), readUrl: 'http://media.example/asset' })),
+    }).createPublicMediaReadAccess(assetId)).rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
   it('derives settlement, CMS and notification paths from coordinated OpenAPI', () => {

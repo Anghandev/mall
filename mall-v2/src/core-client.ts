@@ -1,6 +1,8 @@
 import type {
   AllowedAction,
+  CatalogCategory,
   CatalogProduct,
+  CatalogTag,
   CreateDeliveryTargetRequest,
   CreatePickupTargetRequest,
   CmsPublicItem,
@@ -8,6 +10,7 @@ import type {
   FulfillmentOrder,
   FulfillmentTarget,
   MerchantStore,
+  MediaReadAccessProjection,
   NotificationEndpointProjection,
   NotificationEndpointRequest,
   NotificationInboxItem,
@@ -31,7 +34,11 @@ import type {
 import {
   artifactVersion,
   balanceStates,
+  catalogTaxonomyStatuses,
   cmsContentTypes,
+  mediaContentTypes,
+  mediaPurposes,
+  mediaResourceTypes,
   notificationDeliveryStates,
   notificationEndpointStates,
   rewardSubtypes,
@@ -72,6 +79,9 @@ export interface QuoteSelection extends CheckoutTarget {
 export interface CoreClient {
   getBootstrap(): Promise<CorePaymentAvailability>;
   listCatalog(): Promise<readonly CatalogProduct[]>;
+  listCatalogCategories(): Promise<readonly CatalogCategory[]>;
+  listCatalogTags(): Promise<readonly CatalogTag[]>;
+  createPublicMediaReadAccess(assetId: string): Promise<MediaReadAccessProjection>;
   authenticate(walletAddress: string, signMessage: (message: string) => Promise<string>): Promise<WalletSession>;
   createOrdinaryQuote(token: string, selection: QuoteSelection): Promise<PaymentQuoteResponse>;
   createSeckillQuote(token: string, sessionId: string, selection: QuoteSelection): Promise<SeckillQuoteResponse>;
@@ -110,6 +120,12 @@ const paymentOperations = Object.freeze({
   payment: operationPath('getPaymentProjection', 'get'),
 });
 
+const catalogMediaOperations = Object.freeze({
+  categories: operationPath('listCatalogCategories', 'get'),
+  tags: operationPath('listCatalogTags', 'get'),
+  mediaReadAccess: operationPath('createMediaReadAccess', 'get'),
+});
+
 const fulfillmentOperations = Object.freeze({
   allowedActions: operationPath('getOrderAllowedActions', 'post'),
   stores: operationPath('listMerchantStores', 'get'),
@@ -138,6 +154,7 @@ const realtimeOperations = Object.freeze({
 
 const operations = Object.freeze({
   ...paymentOperations,
+  ...catalogMediaOperations,
   ...fulfillmentOperations,
   ...settlementAdminOperations,
   ...realtimeOperations,
@@ -153,12 +170,30 @@ export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } 
     },
 
     async listCatalog() {
-      const value = await requestJson<{ products: readonly CatalogProduct[] }>(
+      const value = await requestJson<unknown>(
         fetcher,
         `${baseUrl}${operations.catalog}`,
       );
-      if (!Array.isArray(value.products)) throw new CoreClientError('InvalidResponse', '商品目录响应无效');
-      return value.products;
+      return parseCatalogProducts(objectValue(value).products);
+    },
+
+    async listCatalogCategories() {
+      const value = await requestJson<unknown>(fetcher, `${baseUrl}${operations.categories}`);
+      return parseCatalogCategories(objectValue(value).categories);
+    },
+
+    async listCatalogTags() {
+      const value = await requestJson<unknown>(fetcher, `${baseUrl}${operations.tags}`);
+      return parseCatalogTags(objectValue(value).tags);
+    },
+
+    async createPublicMediaReadAccess(assetId) {
+      const normalizedAssetId = bytes32Value(assetId).toLowerCase();
+      const value = await requestJson<unknown>(
+        fetcher,
+        `${baseUrl}${mediaAssetPath(operations.mediaReadAccess, normalizedAssetId)}`,
+      );
+      return parsePublicMediaReadAccess(value, normalizedAssetId);
     },
 
     async authenticate(walletAddress, signMessage) {
@@ -651,6 +686,104 @@ function parseNotifications(value: unknown): readonly NotificationInboxItem[] {
   });
 }
 
+function parseCatalogProducts(value: unknown): readonly CatalogProduct[] {
+  return arrayValue(value).map((item) => {
+    const product = objectValue(item);
+    stringValue(product.productId);
+    bytes32Value(product.chainProductId);
+    stringValue(product.title);
+    objectValue(product.metadata);
+    const images = arrayValue(product.mainImageAssetIds);
+    if (images.length > 5) throw new CoreClientError('InvalidResponse', '商品主图数量无效');
+    images.forEach(bytes32Value);
+    optionalBytes32Value(product.videoAssetId);
+    const skus = arrayValue(product.skus);
+    if (skus.length === 0) throw new CoreClientError('InvalidResponse', '商品缺少可售 SKU');
+    skus.forEach((skuValue) => {
+      const sku = objectValue(skuValue);
+      stringValue(sku.skuId);
+      bytes32Value(sku.chainSkuId);
+      objectValue(sku.attributes);
+      atomicValue(sku.listPriceUsdt);
+      atomicValue(sku.stockAvailable);
+    });
+    return item as CatalogProduct;
+  });
+}
+
+function parseCatalogCategories(value: unknown): readonly CatalogCategory[] {
+  return arrayValue(value).map((item) => {
+    const category = objectValue(item);
+    stringValue(category.categoryId);
+    atomicValue(category.version);
+    if (category.parentCategoryId !== null) stringValue(category.parentCategoryId);
+    const level = positiveIntegerValue(category.level);
+    if (level > 3 || (level === 1) !== (category.parentCategoryId === null)) {
+      throw new CoreClientError('InvalidResponse', '商品类目层级无效');
+    }
+    stringValue(category.name);
+    optionalBytes32Value(category.iconAssetId);
+    nonNegativeIntegerValue(category.sortOrder);
+    if (enumValue(category.status, catalogTaxonomyStatuses) !== 'ENABLED') {
+      throw new CoreClientError('InvalidResponse', '公开类目包含未启用版本');
+    }
+    const serviceFee = objectValue(category.serviceFee);
+    enumValue(serviceFee.state, ['Frozen', 'DecisionBlocked'] as const);
+    if (serviceFee.valueBps !== null) {
+      const valueBps = nonNegativeIntegerValue(serviceFee.valueBps);
+      if (valueBps > 10_000) throw new CoreClientError('InvalidResponse', '类目服务费投影无效');
+    }
+    return item as CatalogCategory;
+  });
+}
+
+function parseCatalogTags(value: unknown): readonly CatalogTag[] {
+  return arrayValue(value).map((item) => {
+    const tag = objectValue(item);
+    stringValue(tag.tagId);
+    atomicValue(tag.version);
+    stringValue(tag.name);
+    if (typeof tag.example !== 'string') throw new CoreClientError('InvalidResponse', '商品标签示例无效');
+    nonNegativeIntegerValue(tag.sortOrder);
+    if (enumValue(tag.status, catalogTaxonomyStatuses) !== 'ENABLED') {
+      throw new CoreClientError('InvalidResponse', '公开标签包含未启用版本');
+    }
+    return item as CatalogTag;
+  });
+}
+
+function parsePublicMediaReadAccess(value: unknown, requestedAssetId: string): MediaReadAccessProjection {
+  const media = objectValue(value);
+  assertArtifactVersion(stringValue(media.artifactVersion));
+  if (bytes32Value(media.assetId).toLowerCase() !== requestedAssetId) {
+    throw new CoreClientError('InvalidResponse', '媒体读取授权与请求资产不一致');
+  }
+  enumValue(media.purpose, mediaPurposes);
+  enumValue(media.resourceType, mediaResourceTypes);
+  stringValue(media.resourceId);
+  enumValue(media.contentType, mediaContentTypes);
+  atomicValue(media.sizeBytes);
+  bytes32Value(media.contentSha256);
+  bytes32Value(media.objectVersionHash);
+  if (media.accessScope !== 'PUBLIC' || media.method !== 'GET') {
+    throw new CoreClientError('Forbidden', '商品媒体未发布公共只读授权');
+  }
+  const readUrl = stringValue(media.readUrl);
+  try {
+    const parsed = new URL(readUrl);
+    if (parsed.protocol !== 'https:' && !['127.0.0.1', 'localhost'].includes(parsed.hostname)) {
+      throw new Error('insecure media URL');
+    }
+  } catch {
+    throw new CoreClientError('InvalidResponse', '媒体读取地址无效');
+  }
+  if (Date.parse(isoValue(media.expiresAt)) <= Date.now()) {
+    throw new CoreClientError('InvalidResponse', '媒体读取授权已过期');
+  }
+  bytes32Value(media.providerReferenceHash);
+  return value as MediaReadAccessProjection;
+}
+
 function parseNotificationEndpoint(value: unknown): NotificationEndpointProjection {
   const entry = objectValue(value);
   stringValue(entry.endpointId);
@@ -766,6 +899,10 @@ function sessionPath(path: string, sessionId: string) {
   return path.replace('{sessionId}', encodeURIComponent(sessionId.toLowerCase()));
 }
 
+function mediaAssetPath(path: string, assetId: string) {
+  return path.replace('{assetId}', encodeURIComponent(assetId));
+}
+
 function queryString(values: Readonly<Record<string, string | undefined>>) {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(values)) if (value !== undefined) query.set(key, value);
@@ -786,6 +923,7 @@ function operationPath(operationId: string, method: HttpMethod) {
 }
 
 export const coordinatedPaymentOperations = paymentOperations;
+export const coordinatedCatalogMediaOperations = catalogMediaOperations;
 export const coordinatedFulfillmentOperations = fulfillmentOperations;
 export const coordinatedSettlementAdminOperations = settlementAdminOperations;
 export const coordinatedRealtimeOperations = realtimeOperations;

@@ -11,6 +11,7 @@ import {
   FileClock,
   Headphones,
   History,
+  ImageOff,
   LocateFixed,
   LockKeyhole,
   MapPinned,
@@ -27,6 +28,7 @@ import {
   ShieldAlert,
   ShoppingBag,
   Store,
+  Tag,
   Truck,
   UserRound,
   WalletCards,
@@ -35,9 +37,13 @@ import {
 import { Link, useNavigate } from 'react-router-dom';
 import type {
   AllowedAction,
+  CatalogCategory,
   FulfillmentOrder,
   FulfillmentTarget,
   MerchantStore,
+  MediaPurpose,
+  MediaReadAccessProjection,
+  MediaResourceType,
   PaymentRouterIntent,
   RealtimeEventEnvelope,
   RewardSubtype,
@@ -260,9 +266,23 @@ export function MallScreen() {
       <section aria-labelledby="category-title" className="section-block section-block--flat">
         <div className="section-heading">
           <h2 id="category-title">商品分类</h2>
-          <span className="muted-label">分类稍后批次发布</span>
+          <span className="muted-label">Core 目录</span>
         </div>
-        <p className="section-copy">当前先展示 Core 已发布的可售商品，不根据 metadata 猜测分类或秒杀遮罩。</p>
+        {runtime.taxonomyState === 'loading' ? (
+          <div className="category-skeleton" aria-label="正在加载商品分类"><span /><span /><span /><span /></div>
+        ) : null}
+        {runtime.taxonomyState === 'empty' ? (
+          <EmptyState title="暂无已发布分类">Core 当前没有启用中的公开类目或标签。</EmptyState>
+        ) : null}
+        {runtime.taxonomyState === 'error' ? (
+          <div className="catalog-retry">
+            <StatusNotice title="分类与标签同步失败" tone="warning">当前不使用本地分类或缓存标签替代。</StatusNotice>
+            <button className="button button--secondary" type="button" onClick={() => void runtime.reloadTaxonomy()} disabled={runtime.busy}>
+              <RefreshCw aria-hidden="true" size={18} /> 重新同步分类
+            </button>
+          </div>
+        ) : null}
+        {runtime.taxonomyState === 'ready' ? <CatalogTaxonomy runtime={runtime} /> : null}
       </section>
 
       {runtime.catalogState === 'loading' ? (
@@ -285,7 +305,18 @@ export function MallScreen() {
         <div className="product-grid" aria-label="可售商品">
           {runtime.catalog.map((product) => (
             <article className="product-card" key={product.productId}>
-              <div className="product-card__visual"><ShoppingBag aria-hidden="true" size={26} /></div>
+              <div className="product-card__visual">
+                {product.mainImageAssetIds[0] ? (
+                  <PublicCatalogMedia
+                    alt={product.title}
+                    assetId={product.mainImageAssetIds[0]}
+                    expectedPurpose="PRODUCT_IMAGE"
+                    expectedResourceId={product.productId}
+                    expectedResourceType="PRODUCT"
+                    kind="image"
+                  />
+                ) : <ShoppingBag aria-hidden="true" size={26} />}
+              </div>
               <div className="product-card__body">
                 <h2>{product.title}</h2>
                 <p>{product.skus.length} 个可售 SKU</p>
@@ -1091,6 +1122,32 @@ export function CheckoutScreen() {
       {product && !runtime.session ? (
         <StatusNotice title="需要钱包登录">连接钱包并签署 SIWE 登录挑战后，Core 才会为当前买家预留库存。</StatusNotice>
       ) : null}
+
+      {product && (product.mainImageAssetIds.length > 0 || product.videoAssetId) ? (
+        <section className="product-media-gallery" aria-label={`${product.title} 商品媒体`}>
+          {product.mainImageAssetIds.map((assetId, index) => (
+            <PublicCatalogMedia
+              alt={`${product.title} 商品图 ${index + 1}`}
+              assetId={assetId}
+              expectedPurpose="PRODUCT_IMAGE"
+              expectedResourceId={product.productId}
+              expectedResourceType="PRODUCT"
+              key={assetId}
+              kind="image"
+            />
+          ))}
+          {product.videoAssetId ? (
+            <PublicCatalogMedia
+              alt={`${product.title} 商品视频`}
+              assetId={product.videoAssetId}
+              expectedPurpose="PRODUCT_VIDEO"
+              expectedResourceId={product.productId}
+              expectedResourceType="PRODUCT"
+              kind="video"
+            />
+          ) : null}
+        </section>
+      ) : null}
       {product && runtime.bootstrap && !runtime.bootstrap.writesEnabled ? (
         <StatusNotice title="新支付当前已安全停用" tone="warning">
           {runtime.bootstrap.blockCode === 'DecisionBlocked'
@@ -1533,6 +1590,148 @@ function formatTimestamp(timestamp: number) {
 
 function shortHash(value: string) {
   return value.length > 18 ? `${value.slice(0, 10)}…${value.slice(-8)}` : value;
+}
+
+function CatalogTaxonomy({ runtime }: { runtime: MallRuntimeValue }) {
+  const categoriesByLevel = ([1, 2, 3] as const).map((level) => ({
+    level,
+    items: runtime.categories.filter((category) => category.level === level),
+  })).filter((group) => group.items.length > 0);
+
+  return (
+    <div className="catalog-taxonomy">
+      {categoriesByLevel.map((group) => (
+        <div className="taxonomy-level" key={group.level}>
+          <span className="taxonomy-level__label">{categoryLevelLabel(group.level)}</span>
+          <ul className="taxonomy-strip" aria-label={`${categoryLevelLabel(group.level)}类目`}>
+            {group.items.map((category) => (
+              <li key={category.categoryId}>
+                {category.iconAssetId ? (
+                  <PublicCatalogMedia
+                    alt=""
+                    assetId={category.iconAssetId}
+                    expectedPurpose="CATEGORY_ICON"
+                    expectedResourceId={category.categoryId}
+                    expectedResourceType="CATEGORY"
+                    kind="image"
+                  />
+                ) : null}
+                <span>{category.name}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+      {runtime.tags.length > 0 ? (
+        <div className="taxonomy-level">
+          <span className="taxonomy-level__label">标签</span>
+          <ul className="taxonomy-strip taxonomy-strip--tags" aria-label="商品标签">
+            {runtime.tags.map((tag) => (
+              <li key={tag.tagId} title={tag.example || undefined}>
+                <Tag aria-hidden="true" size={13} />
+                <span>{tag.name}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      <p className="taxonomy-boundary">
+        公开商品投影尚未发布类目与标签关联，目录不会从 metadata 推断筛选结果。
+      </p>
+    </div>
+  );
+}
+
+function PublicCatalogMedia({
+  alt,
+  assetId,
+  expectedPurpose,
+  expectedResourceId,
+  expectedResourceType,
+  kind,
+}: {
+  alt: string;
+  assetId: string;
+  expectedPurpose: MediaPurpose;
+  expectedResourceId: string;
+  expectedResourceType: MediaResourceType;
+  kind: 'image' | 'video';
+}) {
+  const runtime = useMallRuntime();
+  const [access, setAccess] = useState<MediaReadAccessProjection | null>(null);
+  const [error, setError] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    setError(false);
+    void runtime.resolvePublicMedia(assetId, refreshKey > 0)
+      .then((nextAccess) => {
+        assertMediaBinding(nextAccess, {
+          assetId,
+          expectedPurpose,
+          expectedResourceId,
+          expectedResourceType,
+          kind,
+        });
+        if (!active) return;
+        setAccess(nextAccess);
+        const refreshDelay = Math.max(1_000, Date.parse(nextAccess.expiresAt) - Date.now() - 30_000);
+        refreshTimer = setTimeout(() => setRefreshKey((current) => current + 1), refreshDelay);
+      })
+      .catch(() => {
+        if (!active) return;
+        setAccess(null);
+        setError(true);
+      });
+    return () => {
+      active = false;
+      if (refreshTimer) clearTimeout(refreshTimer);
+    };
+  }, [assetId, expectedPurpose, expectedResourceId, expectedResourceType, kind, refreshKey]);
+
+  if (error) {
+    return (
+      <div className="public-media public-media--error" role="status">
+        <ImageOff aria-hidden="true" size={19} />
+        <button type="button" onClick={() => setRefreshKey((current) => current + 1)}>
+          重新加载{kind === 'image' ? '图片' : '视频'}
+        </button>
+      </div>
+    );
+  }
+  if (!access) return <div className="public-media public-media--loading" aria-label={`${alt || '类目图标'}加载中`} />;
+  if (kind === 'video') {
+    return <video className="public-media" src={access.readUrl} controls playsInline preload="metadata" aria-label={alt} onError={() => setError(true)} />;
+  }
+  return <img className="public-media" src={access.readUrl} alt={alt} referrerPolicy="no-referrer" onError={() => setError(true)} />;
+}
+
+function assertMediaBinding(
+  access: MediaReadAccessProjection,
+  expected: {
+    assetId: string;
+    expectedPurpose: MediaPurpose;
+    expectedResourceId: string;
+    expectedResourceType: MediaResourceType;
+    kind: 'image' | 'video';
+  },
+) {
+  const validContentType = expected.kind === 'image'
+    ? access.contentType.startsWith('image/')
+    : access.contentType === 'video/mp4';
+  if (
+    access.assetId.toLowerCase() !== expected.assetId.toLowerCase()
+    || access.purpose !== expected.expectedPurpose
+    || access.resourceType !== expected.expectedResourceType
+    || access.resourceId !== expected.expectedResourceId
+    || !validContentType
+  ) throw new Error('媒体读取授权与公开目录资源不一致');
+}
+
+function categoryLevelLabel(level: CatalogCategory['level']) {
+  return ({ 1: '一级', 2: '二级', 3: '三级' } as const)[level];
 }
 
 const BUYER_FULFILLMENT_ACTIONS: readonly string[] = [

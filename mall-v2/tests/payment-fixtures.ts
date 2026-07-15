@@ -12,11 +12,16 @@ import { paymentAuthorizationTypes, seckillAuthorizationTypes } from '../src/pay
 const hash = (value: string) => `0x${value.repeat(64)}`;
 const address = (value: string) => `0x${value.repeat(40)}`;
 
+export const productImageAssetId = hash('e');
+export const productVideoAssetId = hash('f');
+
 export const product: CatalogProduct = {
   productId: 'product-24k-shoe',
   chainProductId: hash('a'),
   title: '阿步 24K 黑金运动鞋',
   metadata: {},
+  mainImageAssetIds: [productImageAssetId],
+  videoAssetId: productVideoAssetId,
   skus: [{
     skuId: 'sku-42-black-gold',
     chainSkuId: hash('b'),

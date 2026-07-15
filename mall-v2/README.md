@@ -5,8 +5,13 @@ Requirement Matrix and consumes only coordinated Core artifacts.
 
 ## Current Runtime Boundary
 
-- Production consumes coordinated Core artifacts `2.0.0-settlement-admin.2` and derives
+- Production consumes coordinated Core artifacts `2.0.0-settlement-admin.4` and derives
   its HTTP paths from the published OpenAPI document.
+- The public catalog consumes active products/SKUs, enabled three-level
+  categories, enabled tags and product/category media asset IDs. Every image or
+  video URL comes from Core's short-lived media-read endpoint and is checked
+  against the expected asset, resource, purpose and content type; the Mall does
+  not construct an OSS/CDN path.
 - The real payment consumer covers SIWE, product/SKU reads, ordinary and dual
   seckill quotes, atomic reservations, approval requirements, ABI-shaped
   `routerCall`, transaction submission and indexed payment projections.
@@ -32,8 +37,8 @@ Requirement Matrix and consumes only coordinated Core artifacts.
   subtype. BNM account totals render only Locked/Available and never enter a
   settlement action.
 - Buyer fulfillment commands remain fail closed even when `allowedActions`
-  enables them because Core has not published canonical buyer-evidence
-  creation/upload semantics for the required `evidenceHash`.
+  enables them because the Mall has not yet consumed the `.4` upload/evidence
+  command flow required to create the authoritative `evidenceHash`.
 - The coordinated manifest still has `deploymentAuthorized=false` and no
   executable `PAY_ORDER`. Wallet broadcast therefore remains fail closed until
   Core publishes deployment evidence. Native navigation, production-device GPS

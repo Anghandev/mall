@@ -9,12 +9,15 @@ import {
 } from 'react';
 import type {
   AllowedAction,
+  CatalogCategory,
   CatalogProduct,
   CatalogSku,
+  CatalogTag,
   CmsPublicItem,
   FulfillmentOrder,
   FulfillmentTarget,
   MerchantStore,
+  MediaReadAccessProjection,
   NotificationEndpointProjection,
   NotificationInboxItem,
   PaymentProjection,
@@ -84,6 +87,9 @@ export interface MallRuntimeValue {
   bootstrap: CorePaymentAvailability | null;
   catalog: readonly CatalogProduct[];
   catalogState: LoadState;
+  categories: readonly CatalogCategory[];
+  tags: readonly CatalogTag[];
+  taxonomyState: LoadState;
   stores: readonly MerchantStore[];
   storesState: LoadState;
   location: BrowserPosition | null;
@@ -124,6 +130,8 @@ export interface MallRuntimeValue {
   walletWritesAuthorized: boolean;
   connectWallet(): Promise<void>;
   reloadCatalog(): Promise<void>;
+  reloadTaxonomy(): Promise<void>;
+  resolvePublicMedia(assetId: string, forceRefresh?: boolean): Promise<MediaReadAccessProjection>;
   reloadSeckill(): Promise<void>;
   selectSeckillSession(): void;
   reloadStores(regionCode?: string): Promise<void>;
@@ -161,6 +169,9 @@ export function MallRuntimeProvider({
   const [bootstrap, setBootstrap] = useState<CorePaymentAvailability | null>(null);
   const [catalog, setCatalog] = useState<readonly CatalogProduct[]>([]);
   const [catalogState, setCatalogState] = useState<LoadState>('loading');
+  const [categories, setCategories] = useState<readonly CatalogCategory[]>([]);
+  const [tags, setTags] = useState<readonly CatalogTag[]>([]);
+  const [taxonomyState, setTaxonomyState] = useState<LoadState>('loading');
   const [stores, setStores] = useState<readonly MerchantStore[]>([]);
   const [storesState, setStoresState] = useState<LoadState>('loading');
   const [location, setLocation] = useState<BrowserPosition | null>(null);
@@ -198,6 +209,8 @@ export function MallRuntimeProvider({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const broadcastInFlight = useRef(false);
+  const mediaAccessCache = useRef(new Map<string, MediaReadAccessProjection>());
+  const mediaAccessInFlight = useRef(new Map<string, Promise<MediaReadAccessProjection>>());
 
   const selectedProduct = catalog.find((product) => product.productId === selectedProductId) ?? null;
   const selectedSku = selectedProduct?.skus.find((sku) => sku.skuId === selectedSkuId) ?? null;
@@ -219,6 +232,31 @@ export function MallRuntimeProvider({
     return () => {
       active = false;
     };
+  }, [services]);
+
+  useEffect(() => {
+    let active = true;
+    void loadTaxonomy()
+      .catch(() => {
+        if (active) setTaxonomyState('error');
+      });
+    return () => { active = false; };
+
+    async function loadTaxonomy() {
+      const [nextCategories, nextTags] = await Promise.all([
+        services.core.listCatalogCategories(),
+        services.core.listCatalogTags(),
+      ]);
+      if (!active) return;
+      setCategories(nextCategories);
+      setTags(nextTags);
+      setTaxonomyState(nextCategories.length > 0 || nextTags.length > 0 ? 'ready' : 'empty');
+    }
+  }, [services]);
+
+  useEffect(() => {
+    mediaAccessCache.current.clear();
+    mediaAccessInFlight.current.clear();
   }, [services]);
 
   useEffect(() => {
@@ -299,6 +337,9 @@ export function MallRuntimeProvider({
     bootstrap,
     catalog,
     catalogState,
+    categories,
+    tags,
+    taxonomyState,
     stores,
     storesState,
     location,
@@ -363,6 +404,21 @@ export function MallRuntimeProvider({
         setCatalogState(products.length > 0 ? 'ready' : 'empty');
       }, () => setCatalogState('error'));
     },
+
+    async reloadTaxonomy() {
+      setTaxonomyState('loading');
+      await run(async () => {
+        const [nextCategories, nextTags] = await Promise.all([
+          services.core.listCatalogCategories(),
+          services.core.listCatalogTags(),
+        ]);
+        setCategories(nextCategories);
+        setTags(nextTags);
+        setTaxonomyState(nextCategories.length > 0 || nextTags.length > 0 ? 'ready' : 'empty');
+      }, () => setTaxonomyState('error'));
+    },
+
+    resolvePublicMedia,
 
     async reloadSeckill() {
       await run(async () => loadSeckillSurface(() => true));
@@ -621,6 +677,7 @@ export function MallRuntimeProvider({
     busy,
     catalog,
     catalogState,
+    categories,
     checkoutTarget,
     error,
     fulfillmentMode,
@@ -656,6 +713,8 @@ export function MallRuntimeProvider({
     stores,
     storesState,
     submittedTxHash,
+    tags,
+    taxonomyState,
   ]);
 
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
@@ -671,6 +730,22 @@ export function MallRuntimeProvider({
     } finally {
       setBusy(false);
     }
+  }
+
+  function resolvePublicMedia(assetId: string, forceRefresh = false) {
+    const key = assetId.toLowerCase();
+    const cached = mediaAccessCache.current.get(key);
+    if (!forceRefresh && cached && Date.parse(cached.expiresAt) > Date.now() + 30_000) return Promise.resolve(cached);
+    const pending = mediaAccessInFlight.current.get(key);
+    if (pending) return pending;
+    const request = services.core.createPublicMediaReadAccess(key)
+      .then((access) => {
+        mediaAccessCache.current.set(key, access);
+        return access;
+      })
+      .finally(() => mediaAccessInFlight.current.delete(key));
+    mediaAccessInFlight.current.set(key, request);
+    return request;
   }
 
   function requireSession() {

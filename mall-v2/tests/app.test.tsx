@@ -14,6 +14,7 @@ import { isCoreOrderActionExecutable, productBaseline } from '../src/bootstrap';
 import { CoreClientError, type CoreClient, type CorePaymentAvailability } from '../src/core-client';
 import type { MallServices, PendingSubmission } from '../src/mall-runtime';
 import type { WalletGateway } from '../src/wallet';
+import { catalogCategories, catalogTags, publicMediaAccess } from './catalog-fixtures';
 import {
   deliveryActions,
   deliveryOrder,
@@ -46,7 +47,7 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/mall');
 
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.2');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.4');
     expect(productBaseline.knownOrderActions).toBe(allowedActionNames);
     expect(productBaseline.executableOrderActions).toBe(executableOrderActionNames);
     expect(executableOrderActionNames).toContain('CONFIRM_RECEIPT');
@@ -54,7 +55,7 @@ describe('Mall V2 payment consumer', () => {
     expect(isCoreOrderActionExecutable('CONFIRM_RECEIPT')).toBe(true);
     expect(isCoreOrderActionExecutable('PAY_ORDER')).toBe(false);
     expect(mallRuntimeBoundary).toMatchObject({
-      artifactStatus: '2.0.0-settlement-admin.2',
+      artifactStatus: '2.0.0-settlement-admin.4',
       executableOrderActions: executableOrderActionNames,
       deploymentAuthorized: false,
       settlementAdminCapabilities: {
@@ -67,6 +68,59 @@ describe('Mall V2 payment consumer', () => {
       sharedInterface: '@abu24k/core-artifacts',
     });
     await waitFor(() => expect(screen.getByText('暂无可售商品')).toBeTruthy());
+  });
+
+  it('renders public taxonomy and short-lived Core media without constructing provider URLs', async () => {
+    const user = userEvent.setup();
+    const createPublicMediaReadAccess = vi.fn((assetId: string) => Promise.resolve(publicMediaAccess(assetId)));
+    const services = readyServices({ createPublicMediaReadAccess });
+    renderAt('/mall', services);
+
+    expect(await screen.findByRole('heading', { name: product.title })).toBeTruthy();
+    expect(screen.getByText('鞋履')).toBeTruthy();
+    expect(screen.getByText('运动鞋')).toBeTruthy();
+    expect(screen.getByText('黑金', { selector: '.taxonomy-strip span' })).toBeTruthy();
+    const productImage = await screen.findByRole('img', { name: product.title });
+    expect(productImage.getAttribute('src')).toBe(publicMediaAccess(product.mainImageAssetIds[0]!).readUrl);
+    expect(createPublicMediaReadAccess).toHaveBeenCalledWith(product.mainImageAssetIds[0]!.toLowerCase());
+    expect(document.body.textContent).not.toMatch(/CDN|OSS|分类稍后批次发布/);
+
+    await user.click(screen.getByRole('button', { name: /选择商品/ }));
+    const productVideo = await screen.findByLabelText(`${product.title} 商品视频`);
+    expect(productVideo.tagName).toBe('VIDEO');
+    expect(productVideo.getAttribute('src')).toBe(publicMediaAccess(product.videoAssetId!).readUrl);
+    expect(createPublicMediaReadAccess).toHaveBeenCalledWith(product.videoAssetId!.toLowerCase());
+  });
+
+  it('fails media closed when the signed read target is bound to another product', async () => {
+    const mismatched = {
+      ...publicMediaAccess(product.mainImageAssetIds[0]!),
+      resourceId: 'another-product',
+    };
+    renderAt('/mall', readyServices({
+      createPublicMediaReadAccess: vi.fn((assetId: string) => Promise.resolve(
+        assetId === product.mainImageAssetIds[0] ? mismatched : publicMediaAccess(assetId),
+      )),
+    }));
+
+    expect(await screen.findByRole('button', { name: '重新加载图片' })).toBeTruthy();
+    expect(screen.queryByRole('img', { name: product.title })).toBeNull();
+  });
+
+  it('rejects a product video read target with an image purpose and content type', async () => {
+    const user = userEvent.setup();
+    renderAt('/mall', readyServices({
+      createPublicMediaReadAccess: vi.fn((assetId: string) => {
+        const access = publicMediaAccess(assetId);
+        return Promise.resolve(assetId === product.videoAssetId
+          ? { ...access, purpose: 'PRODUCT_IMAGE' as const, contentType: 'image/webp' as const }
+          : access);
+      }),
+    }));
+
+    await user.click(await screen.findByRole('button', { name: /选择商品/ }));
+    expect(await screen.findByRole('button', { name: '重新加载视频' })).toBeTruthy();
+    expect(screen.queryByLabelText(`${product.title} 商品视频`)).toBeNull();
   });
 
   it('keeps all four primary tabs reachable and preserves the existing shell', async () => {
@@ -540,6 +594,9 @@ function readyServices(overrides: Partial<CoreClient> = {}): MallServices {
   return servicesWith({
     getBootstrap: vi.fn().mockResolvedValue(bootstrap(true)),
     listCatalog: vi.fn().mockResolvedValue([product]),
+    listCatalogCategories: vi.fn().mockResolvedValue(catalogCategories),
+    listCatalogTags: vi.fn().mockResolvedValue(catalogTags),
+    createPublicMediaReadAccess: vi.fn((assetId: string) => Promise.resolve(publicMediaAccess(assetId))),
     listStores: vi.fn().mockResolvedValue([store]),
     ...overrides,
   });
@@ -550,6 +607,9 @@ function servicesWith(overrides: Partial<CoreClient>): MallServices {
   const core: CoreClient = {
     getBootstrap: vi.fn().mockResolvedValue(bootstrap(false)),
     listCatalog: vi.fn().mockResolvedValue([]),
+    listCatalogCategories: vi.fn().mockResolvedValue([]),
+    listCatalogTags: vi.fn().mockResolvedValue([]),
+    createPublicMediaReadAccess: vi.fn().mockRejectedValue(new Error('not configured')),
     authenticate: vi.fn().mockResolvedValue({ token: 'buyer-session', walletAddress: BUYER, roles: ['BUYER'] }),
     createOrdinaryQuote: vi.fn().mockRejectedValue(new Error('not configured')),
     createSeckillQuote: vi.fn().mockRejectedValue(new Error('not configured')),

@@ -2,13 +2,16 @@
 
 Status: the previous handwritten `mall-api-v1` proposal is retired. Mall now
 consumes coordinated Core settlement/admin artifacts
-`2.0.0-settlement-admin.2`.
+`2.0.0-settlement-admin.4`.
 
 The published boundary currently covers:
 
 - bootstrap/readiness, BSC chain identity and fixed asset identity;
 - buyer SIWE challenge and session;
-- products/SKUs and authoritative atomic-unit prices/stock;
+- products/SKUs, authoritative atomic-unit prices/stock and catalog media IDs;
+- enabled three-level category and tag projections;
+- short-lived public media-read targets bound to asset, resource, purpose,
+  content type, object version and expiry;
 - ordinary and dual seckill signed quotes with atomic reservations;
 - approval requirements and ABI-shaped PaymentRouter calls;
 - transaction submission plus replacement/reorg/finality projection.
@@ -29,11 +32,13 @@ The published boundary currently covers:
 Mall derives endpoint paths from the coordinated OpenAPI document and consumes
 the generated response types. It does not maintain a parallel API schema.
 
-The following Mall capabilities remain unpublished:
+The following Mall capabilities remain incomplete:
 
 - saved-address/profile persistence and PII-safe address parsing;
-- canonical buyer-evidence generation/upload required before Mall may execute
-  exchange, delay, receipt, pickup, arbitration or takeover commands;
+- Mall consumption of the published upload/evidence commands required before it
+  may execute exchange, delay, receipt, pickup, arbitration or takeover;
+- typed public `CatalogProduct` category/tag associations, rich-detail fields
+  and the authoritative ordinary-checkout seckill overlay;
 - fulfillment and settlement WebSocket cursor replay beyond the published
   seckill channel.
 
