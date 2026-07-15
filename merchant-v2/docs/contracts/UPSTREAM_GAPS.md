@@ -1,7 +1,7 @@
 # Merchant Workbench Core Gaps
 
 The merchant product consumes Core's coordinated
-`2.0.0-settlement-admin.8` artifact workspace package. Bootstrap, SIWE,
+`2.0.0-settlement-admin.9` artifact workspace package. Bootstrap, SIWE,
 merchant-bound Catalog/SKU/inventory management, immutable media, wallet-scoped fulfillment, merchant finance,
 guarantee-deposit evidence, signed settlement requests and Safe-finality
 history are connected through their published HTTP surfaces. The browser
