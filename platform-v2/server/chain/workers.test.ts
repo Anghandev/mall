@@ -69,6 +69,7 @@ import {
   type SeckillFinalityCandidate,
   type SeckillSafeProposal,
 } from './seckill-governance.ts';
+import { LogisticsPrintWorker } from './logistics-print-worker.ts';
 
 const CONTRACT = '0x3333333333333333333333333333333333333333';
 const BUYER = '0x1111111111111111111111111111111111111111';
@@ -82,6 +83,32 @@ const ALLOWED_CALLDATA = EXECUTOR_INTERFACE.encodeFunctionData('settle', [ORDER_
 const BUNDLE_PATH = fileURLToPath(
   new URL('../../../packages/core-artifacts/contracts/abi-bundle.json', import.meta.url),
 );
+
+test('logistics print worker serializes polling and waits for the active dispatch on stop', async () => {
+  let calls = 0;
+  let release: (() => void) | undefined;
+  const worker = new LogisticsPrintWorker({
+    intervalMs: 5,
+    dispatcher: {
+      dispatchNextPrintJob: () => {
+        calls += 1;
+        if (calls > 1) return Promise.resolve(undefined);
+        return new Promise<void>((resolve) => { release = resolve; });
+      },
+    },
+  });
+  const first = worker.pollOnce();
+  assert.equal(worker.pollOnce(), first);
+  assert.equal(calls, 1);
+  worker.start();
+  const stopping = worker.stop();
+  assert.ok(release);
+  release();
+  await stopping;
+  assert.equal(calls, 1);
+  await worker.pollOnce();
+  assert.equal(calls, 2);
+});
 
 test('Indexer decodes the frozen ABI, is idempotent and fails closed on reorg', async () => {
   const decoder = await AbiEventDecoder.load(BUNDLE_PATH, { PaymentRouterV2: CONTRACT });

@@ -25,6 +25,13 @@ export interface FulfillmentActor {
   merchantId?: string;
 }
 
+export interface PickupReceiptEnqueuer {
+  (
+    executor: SqlExecutor,
+    input: { orderId: string; merchantId: string; storeId: string; quantity: string; fulfilledAt: Date },
+  ): Promise<unknown>;
+}
+
 export interface FulfillmentCommandInput {
   idempotencyKey: string;
   evidenceHash: string;
@@ -178,15 +185,18 @@ export class FulfillmentService {
   readonly #transactions: SqlTransactionRunner;
   readonly #clock: () => Date;
   readonly #executableActions: ReadonlySet<AllowedActionName>;
+  readonly #enqueuePickupReceipt: PickupReceiptEnqueuer | undefined;
 
   constructor(input: {
     transactions: SqlTransactionRunner;
     clock?: () => Date;
     executableActions?: Iterable<AllowedActionName>;
+    enqueuePickupReceipt?: PickupReceiptEnqueuer;
   }) {
     this.#transactions = input.transactions;
     this.#clock = input.clock ?? (() => new Date());
     this.#executableActions = new Set(input.executableActions ?? executableOrderActionNames);
+    this.#enqueuePickupReceipt = input.enqueuePickupReceipt;
   }
 
   getOrder(actor: FulfillmentActor, orderId: string) {
@@ -658,6 +668,13 @@ export class FulfillmentService {
           evidenceHash: input.evidenceHash,
           successful: true,
           at: command.now,
+        });
+        await this.#enqueuePickupReceipt?.(executor, {
+          orderId,
+          merchantId: order.merchant_id,
+          storeId: input.storeId,
+          quantity: String(order.quantity),
+          fulfilledAt: command.now,
         });
         return result;
       },

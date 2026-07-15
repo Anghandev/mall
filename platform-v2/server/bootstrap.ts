@@ -7,6 +7,13 @@ import { CORE_ARTIFACT_VERSION, USDT_ADDRESS, type BreakerScope, type UserRole }
 import { CoreError } from './api/errors.ts';
 import { AmapAdministrativeRegionResolver, AmapPostalAddressParser } from './api/providers.ts';
 import {
+  CainiaoWaybillAdapter,
+  FeiePrintAdapter,
+  HttpCainiaoDigestSigner,
+  Kuaidi100WaybillAdapter,
+  YilianyunPrintAdapter,
+} from './api/logistics-providers.ts';
+import {
   HttpNotificationProviderAdapter,
   HttpSecretReferenceResolver,
   type ExternalNotificationProvider,
@@ -26,6 +33,7 @@ import {
 import { AbiEventDecoder } from './chain/abi-decoder.ts';
 import { BnmAvailabilityWorker, HttpBnmAvailabilityAdapter } from './chain/bnm-availability-worker.ts';
 import { FulfillmentSchedulerWorker } from './chain/fulfillment-scheduler-worker.ts';
+import { LogisticsPrintWorker } from './chain/logistics-print-worker.ts';
 import {
   GuaranteeDepositWorker,
   ResilientBscGuaranteeDepositSource,
@@ -98,6 +106,10 @@ import { BusinessAnalyticsService } from './data/business-analytics-service.ts';
 import { AccountService } from './data/account-service.ts';
 import { RiskService } from './data/risk-service.ts';
 import { SeckillOperationsService } from './data/seckill-operations-service.ts';
+import {
+  createPickupReceiptEnqueuer,
+  LogisticsPrintingService,
+} from './data/logistics-printing-service.ts';
 
 const ARTIFACT_ROOT = fileURLToPath(new URL('../../packages/core-artifacts/', import.meta.url));
 const ABI_BUNDLE_PATH = fileURLToPath(
@@ -159,7 +171,12 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     usdtAddress: USDT_ADDRESS,
     secondarySignerAddress: required(config.secondarySignerAddress, 'SECONDARY_SIGNER_ADDRESS'),
   });
-  const fulfillmentService = new FulfillmentService({ transactions });
+  const fulfillmentService = new FulfillmentService({
+    transactions,
+    ...(env.DELIVERY_DATA_ENCRYPTION_KEY
+      ? { enqueuePickupReceipt: createPickupReceiptEnqueuer({ encryptionKey: env.DELIVERY_DATA_ENCRYPTION_KEY }) }
+      : {}),
+  });
   const uploadLimits = mediaUploadLimits(env);
   const evidenceService = new EvidenceService({
     transactions,
@@ -170,6 +187,47 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
       ...(env.MEDIA_STORAGE_SIGNER_TOKEN ? { token: env.MEDIA_STORAGE_SIGNER_TOKEN } : {}),
     }),
   });
+  const logisticsPrintingService = new LogisticsPrintingService({
+    transactions,
+    ...(env.DELIVERY_DATA_ENCRYPTION_KEY ? { encryptionKey: env.DELIVERY_DATA_ENCRYPTION_KEY } : {}),
+    verifyingContract: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    contractWalletVerifier: walletSignatureVerifier,
+    evidence: evidenceService,
+    fulfillment: fulfillmentService,
+    waybillAdapters: {
+      KUAIDI100: new Kuaidi100WaybillAdapter({
+        ...(env.KUAIDI100_KEY ? { key: env.KUAIDI100_KEY } : {}),
+        ...(env.KUAIDI100_SECRET ? { secret: env.KUAIDI100_SECRET } : {}),
+        ...(env.KUAIDI100_CUSTOMER ? { customer: env.KUAIDI100_CUSTOMER } : {}),
+        ...(env.KUAIDI100_SIID ? { siid: env.KUAIDI100_SIID } : {}),
+      }),
+      CAINIAO: new CainiaoWaybillAdapter({
+        ...(env.CAINIAO_LOGISTIC_PROVIDER_ID
+          ? { logisticProviderId: env.CAINIAO_LOGISTIC_PROVIDER_ID }
+          : {}),
+        signer: new HttpCainiaoDigestSigner({
+          ...(env.CAINIAO_DATA_DIGEST_SIGNER_URL
+            ? { url: env.CAINIAO_DATA_DIGEST_SIGNER_URL }
+            : {}),
+          ...(env.CAINIAO_DATA_DIGEST_SIGNER_TOKEN
+            ? { token: env.CAINIAO_DATA_DIGEST_SIGNER_TOKEN }
+            : {}),
+        }),
+      }),
+    },
+    printAdapters: {
+      FEIE: new FeiePrintAdapter({
+        ...(env.FEIE_USER ? { user: env.FEIE_USER } : {}),
+        ...(env.FEIE_UKEY ? { ukey: env.FEIE_UKEY } : {}),
+      }),
+      YILIANYUN: new YilianyunPrintAdapter({
+        ...(env.YILIANYUN_CLIENT_ID ? { clientId: env.YILIANYUN_CLIENT_ID } : {}),
+        ...(env.YILIANYUN_CLIENT_SECRET ? { clientSecret: env.YILIANYUN_CLIENT_SECRET } : {}),
+        ...(env.YILIANYUN_ACCESS_TOKEN ? { accessToken: env.YILIANYUN_ACCESS_TOKEN } : {}),
+      }),
+    },
+  });
+  const logisticsPrintWorker = new LogisticsPrintWorker({ dispatcher: logisticsPrintingService });
   const settlementService = new SettlementService({
     transactions,
     contractWalletVerifier: walletSignatureVerifier,
@@ -476,6 +534,8 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   auditWorker.start();
   await notificationWorker.pollOnce().catch(() => undefined);
   notificationWorker.start();
+  await logisticsPrintWorker.pollOnce().catch(() => undefined);
+  logisticsPrintWorker.start();
   await monitoringWorker.pollOnce().catch(() => undefined);
   monitoringWorker.start();
   await policyFinalityWorker.pollOnce().catch(() => undefined);
@@ -527,6 +587,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     seckillOperationsService,
     fulfillmentService,
     fulfillmentTargetService,
+    logisticsPrintingService,
     evidenceService,
     settlementService,
     policyService,
@@ -578,6 +639,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
       await policyFinalityWorker.stop();
       await monitoringWorker.stop();
       await notificationWorker.stop();
+      await logisticsPrintWorker.stop();
       await auditWorker.stop();
       await paymentIndexer.stop();
       await fulfillmentScheduler.stop();

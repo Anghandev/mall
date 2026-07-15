@@ -73,6 +73,10 @@ import { BusinessAnalyticsService } from './business-analytics-service.ts';
 import { AccountService } from './account-service.ts';
 import { assertWalletPaymentAllowed, RiskService } from './risk-service.ts';
 import {
+  createPickupReceiptEnqueuer,
+  LogisticsPrintingService,
+} from './logistics-printing-service.ts';
+import {
   MULTISEND_CALL_ONLY_ADDRESS,
   MULTISEND_CALL_ONLY_CODE_HASH,
   SAFE_L2_SINGLETON_ADDRESS,
@@ -115,6 +119,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '016_coverage_breaker_safe_nonce.sql',
       '017_risk_management.sql',
       '018_seckill_operations.sql',
+      '019_logistics_printing.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -2836,6 +2841,224 @@ test('fulfillment targets encrypt delivery PII and bind quotes to an AMap six-di
   }
 });
 
+test('printer binding, provider waybill and durable print jobs form one merchant-scoped idempotent chain', async () => {
+  const db = await createBusinessDatabase();
+  const now = new Date('2026-07-16T02:00:00.000Z');
+  const merchantWallet = Wallet.createRandom();
+  const merchant = {
+    walletAddress: merchantWallet.address,
+    roles: ['MERCHANT'] as const,
+    merchantId: 'merchant-1',
+  };
+  const buyer = { walletAddress: BUYER, roles: ['BUYER'] as const };
+  const encryptionKey = 'ab'.repeat(32);
+  try {
+    await seedCatalog(db, 5);
+    const regions = {
+      reverseGeocode: async () => ({
+        regionCode: '210211',
+        province: 'Liaoning',
+        city: 'Dalian',
+        district: 'Ganjingzi',
+        formattedAddress: 'Dalian Test Road 1',
+        sourceReferenceHash: HASH_2,
+      }),
+    };
+    const targets = new FulfillmentTargetService({
+      transactions: transactionAdapter(db),
+      regions,
+      encryptionKey,
+      clock: () => now,
+    });
+    const store = await targets.createStore(merchant, {
+      idempotencyKey: 'logistics-store-create-1',
+      name: 'Dalian Logistics Store',
+      phone: '+8641112345678',
+      longitude: 121.53,
+      latitude: 38.88,
+    });
+    const unboundStore = await targets.createStore(merchant, {
+      idempotencyKey: 'logistics-store-create-2',
+      name: 'Unbound Pickup Store',
+      phone: '+8641187654321',
+      longitude: 121.54,
+      latitude: 38.89,
+    });
+    const delivery = await targets.createDeliveryTarget(buyer, {
+      idempotencyKey: 'logistics-delivery-target-1',
+      recipientName: 'Delivery Recipient',
+      phone: '+8613800000000',
+      address: 'Dalian Delivery Road 8',
+      longitude: 121.55,
+      latitude: 38.90,
+    });
+    const reservationId = 'logistics-reservation-1';
+    await reserveInventory(adapter(db), {
+      reservationId,
+      reservationHash: `0x${'a'.repeat(64)}`,
+      policyVersion: 1,
+      skuId: 'sku-1',
+      buyerWallet: BUYER,
+      quantity: 1,
+      classification: 'ORDINARY',
+      expiresAt: new Date(now.getTime() + 60_000),
+    });
+    const orderId = `0x${'b'.repeat(64)}`;
+    await insertOrder(db, orderId, reservationId, delivery.targetHash, delivery.regionCodeHash);
+    await db.query(
+      `UPDATE core.orders SET state = 'PAID', finality_status = 'FINAL',
+         payment_tx_hash = $2, paid_at = $3 WHERE order_id = $1`,
+      [orderId, `0x${'c'.repeat(64)}`, now],
+    );
+    await db.query(
+      `INSERT INTO core.transaction_finality (
+         transaction_id, resource_type, resource_id, chain_id, contract_address,
+         expected_event_hash, tx_hash, block_number, block_hash, confirmations,
+         required_confirmations, receipt_status, state, evidence, submitted_at, finalized_at
+       ) VALUES ($1,'ORDER_PAYMENT',$2,56,$3,$4,$5,1,$4,15,15,1,'FINAL','{}',$6,$6)`,
+      [
+        'payment-logistics-1',
+        orderId,
+        '0x9999999999999999999999999999999999999999',
+        HASH,
+        `0x${'c'.repeat(64)}`,
+        now,
+      ],
+    );
+    const fulfillment = new FulfillmentService({ transactions: transactionAdapter(db), clock: () => now });
+    const evidence = new EvidenceService({
+      transactions: transactionAdapter(db),
+      trackingHashKey: 'cd'.repeat(32),
+      clock: () => now,
+      storage: {
+        createUpload: async () => { throw new Error('unused'); },
+        finalizeUpload: async () => { throw new Error('unused'); },
+        createRead: async () => { throw new Error('unused'); },
+      },
+    });
+    let waybillCalls = 0;
+    const printed: Array<{ printJobId: string; deviceId: string; copyCount: number }> = [];
+    const service = new LogisticsPrintingService({
+      transactions: transactionAdapter(db),
+      encryptionKey,
+      verifyingContract: '0x9999999999999999999999999999999999999999',
+      evidence,
+      fulfillment,
+      waybillAdapters: {
+        KUAIDI100: {
+          createWaybill: async (input) => {
+            waybillCalls += 1;
+            assert.equal(input.recipient.name, 'Delivery Recipient');
+            assert.equal(input.sender.name, 'Dalian Logistics Store');
+            return { providerReference: 'kuaidi-task-1', trackingNumber: 'SF100000001' };
+          },
+        },
+      },
+      printAdapters: {
+        YILIANYUN: {
+          print: async (input) => {
+            printed.push(input);
+            return { providerReference: `print-${printed.length}` };
+          },
+        },
+      },
+      clock: () => now,
+    });
+    const pendingOrderId = `0x${'d'.repeat(64)}`;
+    await reserveInventory(adapter(db), {
+      reservationId: 'logistics-reservation-pending-1',
+      reservationHash: `0x${'d'.repeat(64)}`,
+      policyVersion: 1,
+      skuId: 'sku-1',
+      buyerWallet: BUYER,
+      quantity: 1,
+      classification: 'ORDINARY',
+      expiresAt: new Date(now.getTime() + 60_000),
+    });
+    await insertOrder(
+      db,
+      pendingOrderId,
+      'logistics-reservation-pending-1',
+      delivery.targetHash,
+      delivery.regionCodeHash,
+    );
+    await db.query(
+      `UPDATE core.orders SET state = 'PAID', finality_status = 'PENDING', paid_at = $2 WHERE order_id = $1`,
+      [pendingOrderId, now],
+    );
+    await assert.rejects(
+      service.createWaybillBatch(merchant, {
+        provider: 'KUAIDI100',
+        carrierCode: 'SF',
+        storeId: store.storeId,
+        orderIds: [pendingOrderId],
+        idempotencyKey: 'waybill-pending-finality-1',
+      }),
+      /15 canonical confirmations/,
+    );
+    assert.equal(waybillCalls, 0);
+    const challenge = await service.createPrinterBindingChallenge(merchant, store.storeId, {
+      provider: 'YILIANYUN',
+      deviceId: 'printer-device-001',
+      idempotencyKey: 'printer-binding-challenge-1',
+    });
+    const signature = await merchantWallet.signTypedData(
+      challenge.typedData.domain,
+      challenge.typedData.types,
+      challenge.typedData.message,
+    );
+    const binding = await service.applyPrinterBinding(merchant, store.storeId, {
+      challengeId: challenge.challengeId,
+      signature,
+      idempotencyKey: 'printer-binding-apply-1',
+    });
+    assert.equal(binding.provider, 'YILIANYUN');
+    assert.equal((await service.applyPrinterBinding(merchant, store.storeId, {
+      challengeId: challenge.challengeId,
+      signature,
+      idempotencyKey: 'printer-binding-apply-1',
+    })).bindingId, binding.bindingId);
+
+    const waybillInput = {
+      provider: 'KUAIDI100' as const,
+      carrierCode: 'SF' as const,
+      storeId: store.storeId,
+      orderIds: [orderId],
+      idempotencyKey: 'waybill-batch-create-1',
+    };
+    const batch = await service.createWaybillBatch(merchant, waybillInput);
+    assert.equal(batch.items[0]?.state, 'COMPLETED', JSON.stringify(batch.items[0]));
+    assert.equal(batch.items[0]?.trackingNumber, 'SF100000001');
+    assert.equal(waybillCalls, 1);
+    assert.equal((await service.createWaybillBatch(merchant, waybillInput)).batchId, batch.batchId);
+    assert.equal(waybillCalls, 1);
+    const shipped = await db.query<{ state: string }>('SELECT state FROM core.orders WHERE order_id = $1', [orderId]);
+    assert.equal(shipped.rows[0]?.state, 'SHIPPED');
+    assert.equal((await service.listPrintJobs(merchant))[0]?.state, 'QUEUED');
+    assert.equal((await service.dispatchNextPrintJob())?.state, 'ACCEPTED');
+    assert.deepEqual(printed.map((item) => [item.deviceId, item.copyCount]), [['printer-device-001', 1]]);
+
+    const enqueuePickup = createPickupReceiptEnqueuer({ encryptionKey, clock: () => now });
+    await transactionAdapter(db).transaction((executor) => enqueuePickup(executor, {
+      orderId,
+      merchantId: 'merchant-1',
+      storeId: unboundStore.storeId,
+      quantity: '1',
+      fulfilledAt: now,
+    }));
+    const jobs = await service.listPrintJobs(merchant);
+    assert.equal(jobs.find((job) => job.jobKind === 'PICKUP_RECEIPT')?.state, 'CONFIGURATION_REQUIRED');
+    assert.equal(jobs.find((job) => job.jobKind === 'PICKUP_RECEIPT')?.copyCount, 2);
+    const ciphertext = await db.query<{ content: string }>(
+      `SELECT encode(encrypted_content, 'hex') AS content FROM core.print_jobs
+       WHERE job_kind = 'PICKUP_RECEIPT'`,
+    );
+    assert.equal(ciphertext.rows[0]?.content.includes(Buffer.from(orderId).toString('hex')), false);
+  } finally {
+    await db.close();
+  }
+});
+
 test('order pages use stable scoped cursors and shipment batches are canonical, idempotent and atomic', async () => {
   const db = await createBusinessDatabase();
   const now = new Date('2026-07-15T10:00:00.000Z');
@@ -3512,7 +3735,14 @@ test('takeover freezes the merchant after seven days while funds stay Locked and
       );
     `);
     let now = new Date((intent.issuedAt + 60) * 1000);
-    const service = new FulfillmentService({ transactions: transactionAdapter(pickupDb), clock: () => now });
+    const pickupReceipts: Array<{ orderId: string; storeId: string; quantity: string }> = [];
+    const service = new FulfillmentService({
+      transactions: transactionAdapter(pickupDb),
+      clock: () => now,
+      enqueuePickupReceipt: async (_executor, receipt) => {
+        pickupReceipts.push(receipt);
+      },
+    });
     const buyer = { walletAddress: BUYER, roles: ['BUYER'] as const };
     const merchant = { walletAddress: MERCHANT, roles: ['MERCHANT'] as const, merchantId: 'merchant-1' };
     await service.registerPickupCredential(buyer, intent.orderId, {
@@ -3592,6 +3822,10 @@ test('takeover freezes the merchant after seven days while funds stay Locked and
       NPL: '100',
       USDT: '70',
     });
+    assert.deepEqual(
+      pickupReceipts.map(({ orderId, storeId, quantity }) => ({ orderId, storeId, quantity })),
+      [{ orderId: intent.orderId, storeId: 'store-pickup-1', quantity: '1' }],
+    );
     await assert.rejects(
       service.verifyPickup(merchant, intent.orderId, {
         idempotencyKey: 'pickup-replay-code-1',

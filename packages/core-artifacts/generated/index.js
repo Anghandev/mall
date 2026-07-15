@@ -1,4 +1,4 @@
-export const artifactVersion = "2.0.0-settlement-admin.9";
+export const artifactVersion = "2.0.0-logistics.1";
 export const chainIdentity = Object.freeze({"chainId":56,"usdtAddress":"0x55d398326f99059ff775485246999027b3197955","nplAddress":"0x4e8277ab31e4956b2cd48449793a57656dfc03d2"});
 export const orderProjectionStates = Object.freeze(["QUOTED","SUBMITTED","PAID","SHIPPED","DELIVERED","ARBITRATION","TAKEOVER","FULFILLMENT_PENDING","FULFILLED","REORG_PENDING"]);
 export const contractOrderStates = Object.freeze(["NONE","PAID","SHIPPED","DELIVERED","ARBITRATION","TAKEOVER","FULFILLMENT_PENDING","FULFILLED"]);
@@ -20,6 +20,10 @@ export const fulfillmentRequestTypes = Object.freeze(["EXCHANGE","DELAY","ARBITR
 export const fulfillmentRequestStates = Object.freeze(["OPEN","APPROVED","REJECTED","RESOLVED"]);
 export const logisticsProviders = Object.freeze(["KUAIDI100","CAINIAO"]);
 export const logisticsStatuses = Object.freeze(["PICKED_UP","IN_TRANSIT","OUT_FOR_DELIVERY","DELIVERED","EXCEPTION"]);
+export const printProviders = Object.freeze(["FEIE","YILIANYUN"]);
+export const printJobStates = Object.freeze(["CONFIGURATION_REQUIRED","QUEUED","PROCESSING","ACCEPTED","RETRYABLE","FAILED"]);
+export const waybillProviders = Object.freeze(["KUAIDI100","CAINIAO"]);
+export const waybillRequestStates = Object.freeze(["PENDING_PROVIDER","CONFIGURATION_REQUIRED","PROVIDER_ACCEPTED","SHIPMENT_RECORDED","COMPLETED","FAILED"]);
 export const mediaContentTypes = Object.freeze(["image/jpeg","image/png","image/webp","video/mp4","application/pdf"]);
 export const mediaPurposes = Object.freeze(["PRODUCT_IMAGE","PRODUCT_VIDEO","CATEGORY_ICON","STORE_IMAGE","FULFILLMENT_EVIDENCE","BUYER_AVATAR","MERCHANT_LOGO"]);
 export const mediaResourceTypes = Object.freeze(["PRODUCT","CATEGORY","STORE","ORDER","BUYER","MERCHANT"]);

@@ -23,13 +23,13 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('settlement/admin .9 checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-settlement-admin.9');
+test('logistics .1 checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-logistics.1');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
   assert.equal(openapi['x-artifactVersion'], artifactVersion);
-  assert.equal(manifest.publicationStatus, 'COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT');
+  assert.equal(manifest.publicationStatus, 'COORDINATED_LOGISTICS_CHECKPOINT');
   assert.equal(contractManifest.publicationStatus, 'coordinated-settlement-admin-checkpoint');
   assert.ok(manifest.decisionBlocked.includes('SECKILL_PRIZE_POOL_ACCOUNT'));
   assert.deepEqual(
@@ -54,7 +54,7 @@ test('settlement/admin .9 checkpoint has one identity, resolvable exports and ex
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 18);
+  assert.equal(schemaManifest.schemas.core.migrations.length, 19);
   assert.equal(schemaManifest.schemas.audit.migrations.length, 4);
   for (const migration of [
     ...schemaManifest.schemas.core.migrations,
@@ -105,7 +105,9 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'GET /v2/media/assets/{assetId}/access',
     'GET /v2/merchant/audit/entries',
     'GET /v2/merchant/dashboard',
+    'GET /v2/merchant/print-jobs',
     'GET /v2/merchant/profile',
+    'GET /v2/merchant/stores/{storeId}/printer-binding',
     'GET /v2/merchant/stores/{storeId}/product-slot',
     'GET /v2/notifications',
     'GET /v2/orders',
@@ -170,9 +172,12 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'POST /v2/media/upload-intents',
     'POST /v2/media/upload-intents/{uploadIntentId}/complete',
     'POST /v2/merchant/audit/exports',
+    'POST /v2/merchant/print-jobs/{printJobId}/retry',
     'POST /v2/merchant/products/{productId}/concession-previews',
     'POST /v2/merchant/products/{productId}/delist',
     'POST /v2/merchant/products/{productId}/review-submissions',
+    'POST /v2/merchant/stores/{storeId}/printer-binding/challenge',
+    'POST /v2/merchant/waybills/batches',
     'POST /v2/notification-endpoints',
     'POST /v2/orders/{orderId}/arbitration-decisions',
     'POST /v2/orders/{orderId}/arbitrations',
@@ -205,6 +210,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'PUT /v2/buyer/addresses/{addressId}',
     'PUT /v2/buyer/profile',
     'PUT /v2/merchant/profile',
+    'PUT /v2/merchant/stores/{storeId}/printer-binding',
     'PUT /v2/merchant/stores/{storeId}/product-slot',
   ]);
   assert.deepEqual([...manifest.httpSurface].sort(), operations);
@@ -376,6 +382,11 @@ test('generated fulfillment DTOs expose exact amounts, immutable evidence and co
     'usdtPaymentAmount',
   ]);
   assert.deepEqual(enums.logisticsProviders, ['KUAIDI100', 'CAINIAO']);
+  assert.deepEqual(enums.printProviders, ['FEIE', 'YILIANYUN']);
+  assert.deepEqual(enums.waybillProviders, ['KUAIDI100', 'CAINIAO']);
+  assert.deepEqual(enums.printJobStates, [
+    'CONFIGURATION_REQUIRED', 'QUEUED', 'PROCESSING', 'ACCEPTED', 'RETRYABLE', 'FAILED',
+  ]);
   assert.ok(enums.adapterProviders.includes('YILIANYUN'));
   assert.ok(enums.adapterProviders.includes('BNM'));
   assert.ok(openapi.components.schemas.PickupVerificationRequest.required.includes('storeId'));
@@ -685,6 +696,9 @@ test('catalog, settlement/admin and seckill realtime capabilities are published 
     'fulfillmentTargetHttp',
     'fulfillmentHttp',
     'logisticsWebhookHttp',
+    'printerBindingHttp',
+    'waybillBatchHttp',
+    'durablePrintJobs',
     'takeoverHttp',
     'fulfillmentScheduler',
     'bnmAvailabilityWorker',

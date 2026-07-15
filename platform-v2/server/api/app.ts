@@ -244,6 +244,29 @@ export interface FulfillmentTargetApiService {
   getOrderTarget(actor: FulfillmentActor, orderId: string): Promise<unknown>;
 }
 
+export interface LogisticsPrintingApiService {
+  createPrinterBindingChallenge(actor: FulfillmentActor, storeId: string, input: {
+    provider: 'FEIE' | 'YILIANYUN';
+    deviceId: string;
+    idempotencyKey: string;
+  }): Promise<unknown>;
+  applyPrinterBinding(actor: FulfillmentActor, storeId: string, input: {
+    challengeId: string;
+    signature: string;
+    idempotencyKey: string;
+  }): Promise<unknown>;
+  getPrinterBinding(actor: FulfillmentActor, storeId: string): Promise<unknown>;
+  createWaybillBatch(actor: FulfillmentActor, input: {
+    provider: 'KUAIDI100' | 'CAINIAO';
+    carrierCode: 'SF' | 'JD' | 'YTO' | 'ZTO' | 'STO' | 'EMS';
+    storeId: string;
+    orderIds: string[];
+    idempotencyKey: string;
+  }): Promise<unknown>;
+  listPrintJobs(actor: FulfillmentActor, limit?: number): Promise<unknown>;
+  retryPrintJob(actor: FulfillmentActor, printJobId: string, idempotencyKey: string): Promise<unknown>;
+}
+
 export interface EvidenceApiService {
   createActionEvidence(actor: FulfillmentActor, input: {
     orderId: string;
@@ -523,6 +546,7 @@ export interface ApiDependencies {
   seckillOperationsService: SeckillOperationsApiService;
   fulfillmentService: FulfillmentApiService;
   fulfillmentTargetService: FulfillmentTargetApiService;
+  logisticsPrintingService: LogisticsPrintingApiService;
   evidenceService: EvidenceApiService;
   settlementService: SettlementApiService;
   takeoverFundingService: TakeoverFundingApiService;
@@ -1120,6 +1144,108 @@ async function route(
       response,
       200,
       { stores: await dependencies.fulfillmentTargetService.listStores(regionCode) },
+      correlationId,
+    );
+    return;
+  }
+  const printerBindingPath = matchMerchantPrinterBindingPath(url.pathname);
+  if (printerBindingPath && request.method === 'GET' && !printerBindingPath.action) {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
+    sendJson(
+      response,
+      200,
+      await dependencies.logisticsPrintingService.getPrinterBinding(
+        fulfillmentActor(claims),
+        printerBindingPath.storeId,
+      ),
+      correlationId,
+    );
+    return;
+  }
+  if (printerBindingPath && request.method === 'POST' && printerBindingPath.action === 'challenge') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['provider', 'deviceId', 'idempotencyKey']);
+    sendJson(
+      response,
+      201,
+      await dependencies.logisticsPrintingService.createPrinterBindingChallenge(
+        fulfillmentActor(claims),
+        printerBindingPath.storeId,
+        {
+          provider: requiredEnum(body, 'provider', ['FEIE', 'YILIANYUN']),
+          deviceId: requiredString(body, 'deviceId'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+        },
+      ),
+      correlationId,
+    );
+    return;
+  }
+  if (printerBindingPath && request.method === 'PUT' && !printerBindingPath.action) {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['challengeId', 'signature', 'idempotencyKey']);
+    sendJson(
+      response,
+      200,
+      await dependencies.logisticsPrintingService.applyPrinterBinding(
+        fulfillmentActor(claims),
+        printerBindingPath.storeId,
+        {
+          challengeId: requiredString(body, 'challengeId'),
+          signature: requiredString(body, 'signature'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+        },
+      ),
+      correlationId,
+    );
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/merchant/waybills/batches') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['provider', 'carrierCode', 'storeId', 'orderIds', 'idempotencyKey']);
+    sendJson(
+      response,
+      201,
+      await dependencies.logisticsPrintingService.createWaybillBatch(fulfillmentActor(claims), {
+        provider: requiredEnum(body, 'provider', ['KUAIDI100', 'CAINIAO']),
+        carrierCode: requiredEnum(body, 'carrierCode', ['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS']),
+        storeId: requiredString(body, 'storeId'),
+        orderIds: requiredStringArray(body, 'orderIds'),
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+      }),
+      correlationId,
+    );
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/merchant/print-jobs') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
+    sendJson(
+      response,
+      200,
+      await dependencies.logisticsPrintingService.listPrintJobs(
+        fulfillmentActor(claims),
+        optionalPositiveIntegerParameter(url.searchParams.get('limit'), 'limit'),
+      ),
+      correlationId,
+    );
+    return;
+  }
+  const printJobRetryId = matchMerchantPrintJobRetryPath(url.pathname);
+  if (printJobRetryId && request.method === 'POST') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['idempotencyKey']);
+    sendJson(
+      response,
+      200,
+      await dependencies.logisticsPrintingService.retryPrintJob(
+        fulfillmentActor(claims),
+        printJobRetryId,
+        requiredString(body, 'idempotencyKey'),
+      ),
       correlationId,
     );
     return;
@@ -2458,6 +2584,16 @@ function requiredString(body: Record<string, unknown>, name: string) {
   return value;
 }
 
+function requiredEnum<const Values extends readonly string[]>(
+  body: Record<string, unknown>,
+  name: string,
+  values: Values,
+): Values[number] {
+  const value = requiredString(body, name);
+  if (!values.includes(value)) throw new CoreError('InvalidRequest', `${name} is unsupported`);
+  return value as Values[number];
+}
+
 function requireInternalRiskToken(request: IncomingMessage, expected: string | undefined) {
   if (!expected) throw new CoreError('ConfigurationRequired', 'Risk observation transport is not configured', 503);
   const authorization = request.headers.authorization;
@@ -3006,6 +3142,29 @@ function matchOrderPath(pathname: string) {
     return { orderId: decodeURIComponent(match[1]!), action: match[2] ? decodeURIComponent(match[2]) : undefined };
   } catch {
     throw new CoreError('InvalidRequest', 'Invalid order URL path');
+  }
+}
+
+function matchMerchantPrinterBindingPath(pathname: string) {
+  const match = /^\/v2\/merchant\/stores\/([^/]+)\/printer-binding(?:\/([^/]+))?$/.exec(pathname);
+  if (!match) return undefined;
+  try {
+    return {
+      storeId: decodeURIComponent(match[1]!),
+      action: match[2] ? decodeURIComponent(match[2]) : undefined,
+    };
+  } catch {
+    throw new CoreError('InvalidRequest', 'Invalid printer binding URL path');
+  }
+}
+
+function matchMerchantPrintJobRetryPath(pathname: string) {
+  const match = /^\/v2\/merchant\/print-jobs\/([^/]+)\/retry$/.exec(pathname);
+  if (!match) return undefined;
+  try {
+    return decodeURIComponent(match[1]!);
+  } catch {
+    throw new CoreError('InvalidRequest', 'Invalid print job URL path');
   }
 }
 

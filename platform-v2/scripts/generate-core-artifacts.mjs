@@ -36,6 +36,10 @@ import {
   infrastructureProviders,
   logisticsProviders,
   logisticsStatuses,
+  printProviders,
+  printJobStates,
+  waybillProviders,
+  waybillRequestStates,
   mediaContentTypes,
   mediaPurposes,
   mediaResourceTypes,
@@ -107,6 +111,7 @@ const schemaSources = [
       '016_coverage_breaker_safe_nonce.sql',
       '017_risk_management.sql',
       '018_seckill_operations.sql',
+      '019_logistics_printing.sql',
     ],
   },
   {
@@ -162,6 +167,10 @@ const enums = {
   fulfillmentRequestStates,
   logisticsProviders,
   logisticsStatuses,
+  printProviders,
+  printJobStates,
+  waybillProviders,
+  waybillRequestStates,
   mediaContentTypes,
   mediaPurposes,
   mediaResourceTypes,
@@ -295,7 +304,7 @@ const publishedContractManifest = JSON.parse(readRequired(join(contractsRoot, 'c
 
 const coordinatedManifest = {
   artifactVersion,
-  publicationStatus: 'COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT',
+  publicationStatus: 'COORDINATED_LOGISTICS_CHECKPOINT',
   deploymentAuthorized: publishedContractManifest.deploymentAuthorized === true,
   deploymentAuthorizationEvidenceHash:
     publishedContractManifest.deploymentAuthorizationEvidenceHash ?? null,
@@ -349,6 +358,9 @@ const coordinatedManifest = {
     fulfillmentTargetHttp: 'AVAILABLE',
     fulfillmentHttp: 'AVAILABLE',
     logisticsWebhookHttp: 'AVAILABLE',
+    printerBindingHttp: 'AVAILABLE',
+    waybillBatchHttp: 'AVAILABLE',
+    durablePrintJobs: 'AVAILABLE',
     takeoverHttp: 'AVAILABLE',
     fulfillmentScheduler: 'AVAILABLE',
     bnmAvailabilityWorker: 'AVAILABLE',
@@ -409,6 +421,11 @@ const coordinatedManifest = {
     'FulfillmentOrderPage',
     'ShipmentBatchRequest',
     'ShipmentBatchResult',
+    'PrinterBindingChallenge',
+    'PrinterBinding',
+    'WaybillBatchRequest',
+    'WaybillBatchResult',
+    'PrintJob',
     'AdminOrderSearchPage',
     'OrderBatchActionPreview',
     'FulfillmentCommandInput',
@@ -547,6 +564,7 @@ function buildOpenApi() {
       ...settlementAdminOpenApiPaths(errorResponse),
       ...seckillRuntimeOpenApiPaths(errorResponse),
       ...catalogManagementOpenApiPaths(errorResponse),
+      ...logisticsPrintingOpenApiPaths(errorResponse),
       '/v2/bootstrap': {
         get: {
           operationId: 'getBootstrap',
@@ -938,6 +956,7 @@ function buildOpenApi() {
         ...seckillRuntimeOpenApiSchemas(),
         ...accountOpenApiSchemas(),
         ...riskOpenApiSchemas(),
+        ...logisticsPrintingOpenApiSchemas(),
         ErrorResponse: {
           type: 'object', additionalProperties: false, required: ['error'],
           properties: {
@@ -951,6 +970,209 @@ function buildOpenApi() {
           },
         },
       },
+    },
+  };
+}
+
+function logisticsPrintingOpenApiPaths(errorResponse) {
+  const security = [{ bearerAuth: [] }];
+  const storeId = { name: 'storeId', in: 'path', required: true, schema: { type: 'string', minLength: 1, maxLength: 256 } };
+  const printJobId = { name: 'printJobId', in: 'path', required: true, schema: { $ref: '#/components/schemas/Bytes32' } };
+  return {
+    '/v2/merchant/stores/{storeId}/printer-binding': {
+      get: {
+        operationId: 'getMerchantPrinterBinding',
+        security,
+        parameters: [storeId],
+        responses: {
+          200: response('Current wallet-verified printer binding or null', {
+            anyOf: [{ $ref: '#/components/schemas/PrinterBinding' }, { type: 'null' }],
+          }),
+          default: errorResponse,
+        },
+      },
+      put: {
+        operationId: 'applyMerchantPrinterBinding',
+        security,
+        parameters: [storeId],
+        requestBody: body({ $ref: '#/components/schemas/ApplyPrinterBindingRequest' }),
+        responses: {
+          200: response('Wallet-verified versioned printer binding', { $ref: '#/components/schemas/PrinterBinding' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/merchant/stores/{storeId}/printer-binding/challenge': {
+      post: {
+        operationId: 'createMerchantPrinterBindingChallenge',
+        security,
+        parameters: [storeId],
+        requestBody: body({ $ref: '#/components/schemas/PrinterBindingChallengeRequest' }),
+        responses: {
+          201: response('Five-minute wallet signature challenge', { $ref: '#/components/schemas/PrinterBindingChallenge' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/merchant/waybills/batches': {
+      post: {
+        operationId: 'createMerchantWaybillBatch',
+        security,
+        requestBody: body({ $ref: '#/components/schemas/WaybillBatchRequest' }),
+        responses: {
+          201: response('Idempotent provider waybill and shipment results', { $ref: '#/components/schemas/WaybillBatchResult' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/merchant/print-jobs': {
+      get: {
+        operationId: 'listMerchantPrintJobs',
+        security,
+        parameters: [{ name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 } }],
+        responses: {
+          200: response('Merchant-scoped durable print jobs', {
+            type: 'array', items: { $ref: '#/components/schemas/PrintJob' },
+          }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/merchant/print-jobs/{printJobId}/retry': {
+      post: {
+        operationId: 'retryMerchantPrintJob',
+        security,
+        parameters: [printJobId],
+        requestBody: body({ $ref: '#/components/schemas/PrintJobRetryRequest' }),
+        responses: {
+          200: response('Idempotently requeued print job', { $ref: '#/components/schemas/PrintJob' }),
+          default: errorResponse,
+        },
+      },
+    },
+  };
+}
+
+function logisticsPrintingOpenApiSchemas() {
+  const nullableString = { anyOf: [{ type: 'string' }, { type: 'null' }] };
+  const timestamp = { type: 'string', format: 'date-time' };
+  return {
+    PrintProvider: { type: 'string', enum: [...printProviders] },
+    WaybillProvider: { type: 'string', enum: [...waybillProviders] },
+    PrintJobState: { type: 'string', enum: [...printJobStates] },
+    WaybillRequestState: { type: 'string', enum: [...waybillRequestStates] },
+    PrinterBindingChallengeRequest: {
+      type: 'object', additionalProperties: false, required: ['provider', 'deviceId', 'idempotencyKey'],
+      properties: {
+        provider: { $ref: '#/components/schemas/PrintProvider' },
+        deviceId: { type: 'string', minLength: 3, maxLength: 128 },
+        idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
+      },
+    },
+    PrinterBindingChallenge: {
+      type: 'object', additionalProperties: false,
+      required: ['artifactVersion', 'challengeId', 'storeId', 'merchantId', 'signer', 'expiresAt', 'typedData', 'digest'],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        challengeId: { $ref: '#/components/schemas/Bytes32' },
+        storeId: { type: 'string' },
+        merchantId: { type: 'string' },
+        signer: { $ref: '#/components/schemas/Address' },
+        expiresAt: timestamp,
+        typedData: { type: 'object' },
+        digest: { $ref: '#/components/schemas/Bytes32' },
+      },
+    },
+    ApplyPrinterBindingRequest: {
+      type: 'object', additionalProperties: false, required: ['challengeId', 'signature', 'idempotencyKey'],
+      properties: {
+        challengeId: { $ref: '#/components/schemas/Bytes32' },
+        signature: { type: 'string', pattern: '^0x(?:[0-9a-fA-F]{2})+$' },
+        idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
+      },
+    },
+    PrinterBinding: {
+      type: 'object', additionalProperties: false,
+      required: ['artifactVersion', 'bindingId', 'storeId', 'merchantId', 'provider', 'deviceId', 'bindingHash', 'version', 'verifiedByWallet', 'signatureHash', 'updatedAt'],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        bindingId: { $ref: '#/components/schemas/Bytes32' },
+        storeId: { type: 'string' },
+        merchantId: { type: 'string' },
+        provider: { $ref: '#/components/schemas/PrintProvider' },
+        deviceId: { type: 'string', minLength: 3, maxLength: 128 },
+        bindingHash: { $ref: '#/components/schemas/Bytes32' },
+        version: { type: 'integer', minimum: 1 },
+        verifiedByWallet: { $ref: '#/components/schemas/Address' },
+        signatureHash: { $ref: '#/components/schemas/Bytes32' },
+        updatedAt: timestamp,
+      },
+    },
+    WaybillBatchRequest: {
+      type: 'object', additionalProperties: false,
+      required: ['provider', 'carrierCode', 'storeId', 'orderIds', 'idempotencyKey'],
+      properties: {
+        provider: { $ref: '#/components/schemas/WaybillProvider' },
+        carrierCode: { type: 'string', enum: ['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS'] },
+        storeId: { type: 'string', minLength: 1, maxLength: 256 },
+        orderIds: { type: 'array', minItems: 1, maxItems: 100, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 256 } },
+        idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
+      },
+    },
+    WaybillResult: {
+      type: 'object', additionalProperties: false,
+      required: ['artifactVersion', 'requestId', 'batchId', 'orderId', 'storeId', 'provider', 'carrierCode', 'state', 'providerReference', 'trackingNumber', 'trackingNumberHash', 'shipmentEvidenceHash', 'printJobId', 'errorCode', 'updatedAt'],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        requestId: { $ref: '#/components/schemas/Bytes32' },
+        batchId: { $ref: '#/components/schemas/Bytes32' },
+        orderId: { type: 'string' },
+        storeId: { type: 'string' },
+        provider: { $ref: '#/components/schemas/WaybillProvider' },
+        carrierCode: { type: 'string', enum: ['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS'] },
+        state: { $ref: '#/components/schemas/WaybillRequestState' },
+        providerReference: nullableString,
+        trackingNumber: nullableString,
+        trackingNumberHash: { anyOf: [{ $ref: '#/components/schemas/Bytes32' }, { type: 'null' }] },
+        shipmentEvidenceHash: { anyOf: [{ $ref: '#/components/schemas/Bytes32' }, { type: 'null' }] },
+        printJobId: { anyOf: [{ $ref: '#/components/schemas/Bytes32' }, { type: 'null' }] },
+        errorCode: nullableString,
+        updatedAt: timestamp,
+      },
+    },
+    WaybillBatchResult: {
+      type: 'object', additionalProperties: false, required: ['artifactVersion', 'batchId', 'items'],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        batchId: { $ref: '#/components/schemas/Bytes32' },
+        items: { type: 'array', items: { $ref: '#/components/schemas/WaybillResult' } },
+      },
+    },
+    PrintJob: {
+      type: 'object', additionalProperties: false,
+      required: ['artifactVersion', 'printJobId', 'orderId', 'storeId', 'jobKind', 'provider', 'deviceId', 'copyCount', 'contentHash', 'state', 'attempts', 'providerReference', 'errorCode', 'nextAttemptAt', 'createdAt', 'updatedAt'],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        printJobId: { $ref: '#/components/schemas/Bytes32' },
+        orderId: { type: 'string' },
+        storeId: { type: 'string' },
+        jobKind: { type: 'string', enum: ['WAYBILL', 'PICKUP_RECEIPT'] },
+        provider: { anyOf: [{ $ref: '#/components/schemas/PrintProvider' }, { type: 'null' }] },
+        deviceId: nullableString,
+        copyCount: { type: 'integer', enum: [1, 2] },
+        contentHash: { $ref: '#/components/schemas/Bytes32' },
+        state: { $ref: '#/components/schemas/PrintJobState' },
+        attempts: { type: 'integer', minimum: 0, maximum: 5 },
+        providerReference: nullableString,
+        errorCode: nullableString,
+        nextAttemptAt: { anyOf: [timestamp, { type: 'null' }] },
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      },
+    },
+    PrintJobRetryRequest: {
+      type: 'object', additionalProperties: false, required: ['idempotencyKey'],
+      properties: { idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 } },
     },
   };
 }
@@ -3059,6 +3281,7 @@ function fulfillmentOpenApiSchemas() {
   const evidenceHash = { $ref: '#/components/schemas/Bytes32' };
   const timestamp = { type: 'string', format: 'date-time' };
   const nullableTimestamp = { anyOf: [timestamp, { type: 'null' }] };
+  const nullableString = { anyOf: [{ type: 'string' }, { type: 'null' }] };
   const commandProperties = { idempotencyKey, evidenceHash };
   const commandRequired = Object.keys(commandProperties);
   const targetProperties = {
@@ -4110,6 +4333,10 @@ export type FulfillmentRequestType = ${union(fulfillmentRequestTypes)};
 export type FulfillmentRequestState = ${union(fulfillmentRequestStates)};
 export type LogisticsProvider = ${union(logisticsProviders)};
 export type LogisticsStatus = ${union(logisticsStatuses)};
+export type PrintProvider = ${union(printProviders)};
+export type PrintJobState = ${union(printJobStates)};
+export type WaybillProvider = ${union(waybillProviders)};
+export type WaybillRequestState = ${union(waybillRequestStates)};
 export type MediaContentType = ${union(mediaContentTypes)};
 export type MediaPurpose = ${union(mediaPurposes)};
 export type MediaResourceType = ${union(mediaResourceTypes)};
@@ -4178,6 +4405,10 @@ export declare const fulfillmentRequestTypes: readonly FulfillmentRequestType[];
 export declare const fulfillmentRequestStates: readonly FulfillmentRequestState[];
 export declare const logisticsProviders: readonly LogisticsProvider[];
 export declare const logisticsStatuses: readonly LogisticsStatus[];
+export declare const printProviders: readonly PrintProvider[];
+export declare const printJobStates: readonly PrintJobState[];
+export declare const waybillProviders: readonly WaybillProvider[];
+export declare const waybillRequestStates: readonly WaybillRequestState[];
 export declare const mediaContentTypes: readonly MediaContentType[];
 export declare const mediaPurposes: readonly MediaPurpose[];
 export declare const mediaResourceTypes: readonly MediaResourceType[];
@@ -4226,6 +4457,96 @@ export declare const riskRestrictionStates: readonly RiskRestrictionState[];
 export declare const riskAppealStates: readonly RiskAppealState[];
 
 export type JsonObject = Readonly<Record<string, unknown>>;
+
+export interface PrinterBindingChallengeRequest {
+  provider: PrintProvider;
+  deviceId: string;
+  idempotencyKey: string;
+}
+
+export interface PrinterBindingChallenge {
+  artifactVersion: typeof artifactVersion;
+  challengeId: Bytes32;
+  storeId: string;
+  merchantId: string;
+  signer: Address;
+  expiresAt: Timestamp;
+  typedData: Eip712TypedData;
+  digest: Bytes32;
+}
+
+export interface ApplyPrinterBindingRequest {
+  challengeId: Bytes32;
+  signature: string;
+  idempotencyKey: string;
+}
+
+export interface PrinterBinding {
+  artifactVersion: typeof artifactVersion;
+  bindingId: Bytes32;
+  storeId: string;
+  merchantId: string;
+  provider: PrintProvider;
+  deviceId: string;
+  bindingHash: Bytes32;
+  version: number;
+  verifiedByWallet: Address;
+  signatureHash: Bytes32;
+  updatedAt: Timestamp;
+}
+
+export interface WaybillBatchRequest {
+  provider: WaybillProvider;
+  carrierCode: 'SF' | 'JD' | 'YTO' | 'ZTO' | 'STO' | 'EMS';
+  storeId: string;
+  orderIds: readonly string[];
+  idempotencyKey: string;
+}
+
+export interface WaybillResult {
+  artifactVersion: typeof artifactVersion;
+  requestId: Bytes32;
+  batchId: Bytes32;
+  orderId: string;
+  storeId: string;
+  provider: WaybillProvider;
+  carrierCode: WaybillBatchRequest['carrierCode'];
+  state: WaybillRequestState;
+  providerReference: string | null;
+  trackingNumber: string | null;
+  trackingNumberHash: Bytes32 | null;
+  shipmentEvidenceHash: Bytes32 | null;
+  printJobId: Bytes32 | null;
+  errorCode: string | null;
+  updatedAt: Timestamp;
+}
+
+export interface WaybillBatchResult {
+  artifactVersion: typeof artifactVersion;
+  batchId: Bytes32;
+  items: readonly WaybillResult[];
+}
+
+export interface PrintJob {
+  artifactVersion: typeof artifactVersion;
+  printJobId: Bytes32;
+  orderId: string;
+  storeId: string;
+  jobKind: 'WAYBILL' | 'PICKUP_RECEIPT';
+  provider: PrintProvider | null;
+  deviceId: string | null;
+  copyCount: 1 | 2;
+  contentHash: Bytes32;
+  state: PrintJobState;
+  attempts: number;
+  providerReference: string | null;
+  errorCode: string | null;
+  nextAttemptAt: Timestamp | null;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface PrintJobRetryRequest { idempotencyKey: string }
 
 export interface SeckillSessionProduct {
   productId: string;

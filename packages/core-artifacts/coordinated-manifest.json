@@ -1,6 +1,6 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.9",
-  "publicationStatus": "COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT",
+  "artifactVersion": "2.0.0-logistics.1",
+  "publicationStatus": "COORDINATED_LOGISTICS_CHECKPOINT",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
   "chain": {
@@ -14,57 +14,57 @@
   "components": {
     "packageMetadata": {
       "path": "package.json",
-      "sha256": "e126eeed15c22cc92e41777ebeb1266a5cd59cd52c9ff1e3aafef0d9cc630082"
+      "sha256": "a3eaa08b987282b30604099a095a270766ed6467832dfd56aef774b3abca7c55"
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "5ada19aa489f9e22567e62d9c08dbee1c200e16b4ea601a930455e1c3fd7a2d6"
+      "sha256": "b88d242d402e2a083ac6dce79bff625cc6b72bff09b34de95e3b16f5f46bb8e3"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "98923a419fea657f5260e105d0180d066643b46058f8d4ed007b69657072b782"
+      "sha256": "2492a4f90ca6b8b67067f3ef9e9c5c65f27c0fb249fb8c27877239b5c820ff83"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "588ddeef8a33d40650bd011e9023f42adf6cd27825c95b0d3d2e668b044f2d1c"
+      "sha256": "eebad58399957a18257aa3b4d736c17aac13676ed765b55dcfc8704f88caf5c4"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "e33de55ed30917df5b994bbdbe25071cc48fda1b8623e7bb1ce4d20c6c771021"
+      "sha256": "342b01f2f291a08a49c84cccc33bed71636118c4d33f38ff8e5ccfde24a91d10"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "66ce931388645ee5d1d35733bc2439ca6d861b519bfa88f9878a8a15f5e559eb"
+      "sha256": "0158a201603def2a7779c791d1ff1f54ca9e1a1a70f3ee3bf8b976a8402371d5"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
-      "sha256": "ed19ebd4ad1edd6f02e0589e3b2a24c7587bae6ded374b47a2489a5dbf28bd63"
+      "sha256": "d411b775e593c566abe9c03b83c636dad9b3d2e9d12b5322ffa6cb1fa295ecd0"
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "ba233760c6a0e539b7b37f0f75a5b331e064dadee2ce10ce97592b314f11201c"
+      "sha256": "4e41cc1e7c787dfda0740b37cee2da40927a6990f0b27bc63cbf84a3d0cb2dd8"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "8d078ae9895c3820bad65dafc920c186c5c656a32578226b0e4964a17bf898e4"
+      "sha256": "786b09d3cbe47869bd141d74348d4e8c1e70400197337f5d183db6e8174c12aa"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "9c29f697be81f4fa77cb01d238f100e7a7ef6b6f344f89f5da6fffa2d8e8b3f9"
+      "sha256": "d15753ae79efeaf81506b1e1dfa8b66178b547e598c4ba6355f23363306287cf"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
-      "sha256": "fa0a17fc2699a5b721fb6349d8a9d61fc137fefec970a5d834097248cf2b0e39"
+      "sha256": "c9ab01d0ec085986dd0721b890d31d8acd8917157484bef3e99638a873070e51"
     }
   },
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "0265438cbbac0f3aa9f68edbab5f8df88ccbe9cc2a5e7eaebd2dcdadbac35d79"
+      "sha256": "e6491e175a7d81d729c74b7adcd46ec624e671c4f4464ca24fc4502f345eb8a4"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "f7f13a78d7ca6911ec99d9bac7fbb5910eb33484cae0b3ec85a52bdd032a4e76"
+      "sha256": "64bd2f2fc45be65cf2261628e1661383407fd4dd70e52ed7b8ed0e3714f9e54d"
     }
   ],
   "httpSurface": [
@@ -99,7 +99,9 @@
     "GET /v2/media/assets/{assetId}/access",
     "GET /v2/merchant/audit/entries",
     "GET /v2/merchant/dashboard",
+    "GET /v2/merchant/print-jobs",
     "GET /v2/merchant/profile",
+    "GET /v2/merchant/stores/{storeId}/printer-binding",
     "GET /v2/merchant/stores/{storeId}/product-slot",
     "GET /v2/notifications",
     "GET /v2/orders",
@@ -164,9 +166,12 @@
     "POST /v2/media/upload-intents",
     "POST /v2/media/upload-intents/{uploadIntentId}/complete",
     "POST /v2/merchant/audit/exports",
+    "POST /v2/merchant/print-jobs/{printJobId}/retry",
     "POST /v2/merchant/products/{productId}/concession-previews",
     "POST /v2/merchant/products/{productId}/delist",
     "POST /v2/merchant/products/{productId}/review-submissions",
+    "POST /v2/merchant/stores/{storeId}/printer-binding/challenge",
+    "POST /v2/merchant/waybills/batches",
     "POST /v2/notification-endpoints",
     "POST /v2/orders/{orderId}/arbitration-decisions",
     "POST /v2/orders/{orderId}/arbitrations",
@@ -199,6 +204,7 @@
     "PUT /v2/buyer/addresses/{addressId}",
     "PUT /v2/buyer/profile",
     "PUT /v2/merchant/profile",
+    "PUT /v2/merchant/stores/{storeId}/printer-binding",
     "PUT /v2/merchant/stores/{storeId}/product-slot"
   ],
   "capabilityStatus": {
@@ -238,6 +244,9 @@
     "fulfillmentTargetHttp": "AVAILABLE",
     "fulfillmentHttp": "AVAILABLE",
     "logisticsWebhookHttp": "AVAILABLE",
+    "printerBindingHttp": "AVAILABLE",
+    "waybillBatchHttp": "AVAILABLE",
+    "durablePrintJobs": "AVAILABLE",
     "takeoverHttp": "AVAILABLE",
     "fulfillmentScheduler": "AVAILABLE",
     "bnmAvailabilityWorker": "AVAILABLE",
@@ -312,6 +321,11 @@
     "FulfillmentOrderPage",
     "ShipmentBatchRequest",
     "ShipmentBatchResult",
+    "PrinterBindingChallenge",
+    "PrinterBinding",
+    "WaybillBatchRequest",
+    "WaybillBatchResult",
+    "PrintJob",
     "AdminOrderSearchPage",
     "OrderBatchActionPreview",
     "FulfillmentCommandInput",

@@ -1,4 +1,4 @@
-export const CORE_ARTIFACT_VERSION = '2.0.0-settlement-admin.9';
+export const CORE_ARTIFACT_VERSION = '2.0.0-logistics.1';
 export const BSC_CHAIN_ID = 56;
 export const USDT_ADDRESS = '0x55d398326f99059ff775485246999027b3197955';
 export const NPL_ADDRESS = '0x4e8277ab31e4956b2cd48449793a57656dfc03d2';
@@ -193,6 +193,32 @@ export type LogisticsProvider = (typeof logisticsProviders)[number];
 
 export const logisticsStatuses = ['PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED', 'EXCEPTION'] as const;
 export type LogisticsStatus = (typeof logisticsStatuses)[number];
+
+export const printProviders = ['FEIE', 'YILIANYUN'] as const;
+export type PrintProvider = (typeof printProviders)[number];
+
+export const waybillProviders = ['KUAIDI100', 'CAINIAO'] as const;
+export type WaybillProvider = (typeof waybillProviders)[number];
+
+export const printJobStates = [
+  'CONFIGURATION_REQUIRED',
+  'QUEUED',
+  'PROCESSING',
+  'ACCEPTED',
+  'RETRYABLE',
+  'FAILED',
+] as const;
+export type PrintJobState = (typeof printJobStates)[number];
+
+export const waybillRequestStates = [
+  'PENDING_PROVIDER',
+  'CONFIGURATION_REQUIRED',
+  'PROVIDER_ACCEPTED',
+  'SHIPMENT_RECORDED',
+  'COMPLETED',
+  'FAILED',
+] as const;
+export type WaybillRequestState = (typeof waybillRequestStates)[number];
 
 export const fulfillmentAssets = ['USDT', 'NPL', 'BNM_POINTS'] as const;
 export type FulfillmentAsset = (typeof fulfillmentAssets)[number];

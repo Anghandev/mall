@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.9",
+  "artifactVersion": "2.0.0-logistics.1",
   "formatVersion": 1,
   "databaseEngine": "postgresql",
   "schemas": {
@@ -95,6 +95,11 @@
           "name": "018_seckill_operations.sql",
           "path": "schema/business/018_seckill_operations.sql",
           "sha256": "af99e694faa269c1b5a40f153f563a168a21463a7675db59e6d256b84bdc2026"
+        },
+        {
+          "name": "019_logistics_printing.sql",
+          "path": "schema/business/019_logistics_printing.sql",
+          "sha256": "1185d41afe30eff22fd75c6779e73d2bb33673a9024e2d14a565455e014f7c85"
         }
       ]
     },

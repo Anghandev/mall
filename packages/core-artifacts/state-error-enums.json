@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.9",
+  "artifactVersion": "2.0.0-logistics.1",
   "orderProjectionStates": [
     "QUOTED",
     "SUBMITTED",
@@ -169,6 +169,30 @@
     "OUT_FOR_DELIVERY",
     "DELIVERED",
     "EXCEPTION"
+  ],
+  "printProviders": [
+    "FEIE",
+    "YILIANYUN"
+  ],
+  "printJobStates": [
+    "CONFIGURATION_REQUIRED",
+    "QUEUED",
+    "PROCESSING",
+    "ACCEPTED",
+    "RETRYABLE",
+    "FAILED"
+  ],
+  "waybillProviders": [
+    "KUAIDI100",
+    "CAINIAO"
+  ],
+  "waybillRequestStates": [
+    "PENDING_PROVIDER",
+    "CONFIGURATION_REQUIRED",
+    "PROVIDER_ACCEPTED",
+    "SHIPMENT_RECORDED",
+    "COMPLETED",
+    "FAILED"
   ],
   "mediaContentTypes": [
     "image/jpeg",

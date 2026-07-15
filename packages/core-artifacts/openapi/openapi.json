@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Abu 24K V2 Core API",
-    "version": "2.0.0-settlement-admin.9"
+    "version": "2.0.0-logistics.1"
   },
-  "x-artifactVersion": "2.0.0-settlement-admin.9",
+  "x-artifactVersion": "2.0.0-logistics.1",
   "servers": [],
   "paths": {
     "/v2/buyer/profile": {
@@ -5899,6 +5899,388 @@
         }
       }
     },
+    "/v2/merchant/stores/{storeId}/printer-binding": {
+      "get": {
+        "operationId": "getMerchantPrinterBinding",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "storeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current wallet-verified printer binding or null",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PrinterBinding"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "applyMerchantPrinterBinding",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "storeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyPrinterBindingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Wallet-verified versioned printer binding",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrinterBinding"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/merchant/stores/{storeId}/printer-binding/challenge": {
+      "post": {
+        "operationId": "createMerchantPrinterBindingChallenge",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "storeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrinterBindingChallengeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Five-minute wallet signature challenge",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrinterBindingChallenge"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/merchant/waybills/batches": {
+      "post": {
+        "operationId": "createMerchantWaybillBatch",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WaybillBatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Idempotent provider waybill and shipment results",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WaybillBatchResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/merchant/print-jobs": {
+      "get": {
+        "operationId": "listMerchantPrintJobs",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Merchant-scoped durable print jobs",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PrintJob"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/merchant/print-jobs/{printJobId}/retry": {
+      "post": {
+        "operationId": "retryMerchantPrintJob",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "printJobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrintJobRetryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Idempotently requeued print job",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrintJob"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v2/bootstrap": {
       "get": {
         "operationId": "getBootstrap",
@@ -8421,7 +8803,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "status": {
             "const": "CORE_API_READY"
@@ -11497,7 +11879,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -11596,7 +11978,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -12536,7 +12918,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "productId": {
             "type": "string",
@@ -12709,7 +13091,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "storeId": {
             "type": "string",
@@ -12835,7 +13217,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "productId": {
             "type": "string",
@@ -12937,7 +13319,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "previewId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -13096,7 +13478,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "adjustmentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -13220,7 +13602,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "uploadIntentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -13317,7 +13699,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -13402,7 +13784,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -13562,7 +13944,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "evidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
@@ -13821,7 +14203,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -14096,7 +14478,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifact_version": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "wallet_address": {
             "$ref": "#/components/schemas/Address"
@@ -14422,7 +14804,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -15566,7 +15948,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15789,7 +16171,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -16655,7 +17037,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "snapshotId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -16738,7 +17120,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -18069,7 +18451,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -18316,7 +18698,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -18671,7 +19053,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "sessionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -18900,7 +19282,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "protocolVersion": {
             "const": 1
@@ -18974,7 +19356,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -19312,7 +19694,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "addresses": {
             "type": "array",
@@ -19493,7 +19875,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -19660,7 +20042,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "orderId": {
             "type": "string",
@@ -19695,7 +20077,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "merchantId": {
             "type": "string",
@@ -20389,7 +20771,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "observation": {
             "$ref": "#/components/schemas/RiskObservation"
@@ -20415,7 +20797,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.9"
+            "const": "2.0.0-logistics.1"
           },
           "generatedAt": {
             "type": "string",
@@ -20575,6 +20957,510 @@
           },
           "evidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "PrintProvider": {
+        "type": "string",
+        "enum": [
+          "FEIE",
+          "YILIANYUN"
+        ]
+      },
+      "WaybillProvider": {
+        "type": "string",
+        "enum": [
+          "KUAIDI100",
+          "CAINIAO"
+        ]
+      },
+      "PrintJobState": {
+        "type": "string",
+        "enum": [
+          "CONFIGURATION_REQUIRED",
+          "QUEUED",
+          "PROCESSING",
+          "ACCEPTED",
+          "RETRYABLE",
+          "FAILED"
+        ]
+      },
+      "WaybillRequestState": {
+        "type": "string",
+        "enum": [
+          "PENDING_PROVIDER",
+          "CONFIGURATION_REQUIRED",
+          "PROVIDER_ACCEPTED",
+          "SHIPMENT_RECORDED",
+          "COMPLETED",
+          "FAILED"
+        ]
+      },
+      "PrinterBindingChallengeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "deviceId",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/PrintProvider"
+          },
+          "deviceId": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "PrinterBindingChallenge": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "challengeId",
+          "storeId",
+          "merchantId",
+          "signer",
+          "expiresAt",
+          "typedData",
+          "digest"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-logistics.1"
+          },
+          "challengeId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "storeId": {
+            "type": "string"
+          },
+          "merchantId": {
+            "type": "string"
+          },
+          "signer": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "typedData": {
+            "type": "object"
+          },
+          "digest": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "ApplyPrinterBindingRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "challengeId",
+          "signature",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "challengeId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^0x(?:[0-9a-fA-F]{2})+$"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "PrinterBinding": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "bindingId",
+          "storeId",
+          "merchantId",
+          "provider",
+          "deviceId",
+          "bindingHash",
+          "version",
+          "verifiedByWallet",
+          "signatureHash",
+          "updatedAt"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-logistics.1"
+          },
+          "bindingId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "storeId": {
+            "type": "string"
+          },
+          "merchantId": {
+            "type": "string"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/PrintProvider"
+          },
+          "deviceId": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          },
+          "bindingHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "verifiedByWallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "signatureHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WaybillBatchRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "carrierCode",
+          "storeId",
+          "orderIds",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/WaybillProvider"
+          },
+          "carrierCode": {
+            "type": "string",
+            "enum": [
+              "SF",
+              "JD",
+              "YTO",
+              "ZTO",
+              "STO",
+              "EMS"
+            ]
+          },
+          "storeId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "orderIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "WaybillResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "requestId",
+          "batchId",
+          "orderId",
+          "storeId",
+          "provider",
+          "carrierCode",
+          "state",
+          "providerReference",
+          "trackingNumber",
+          "trackingNumberHash",
+          "shipmentEvidenceHash",
+          "printJobId",
+          "errorCode",
+          "updatedAt"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-logistics.1"
+          },
+          "requestId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "batchId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "orderId": {
+            "type": "string"
+          },
+          "storeId": {
+            "type": "string"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/WaybillProvider"
+          },
+          "carrierCode": {
+            "type": "string",
+            "enum": [
+              "SF",
+              "JD",
+              "YTO",
+              "ZTO",
+              "STO",
+              "EMS"
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/WaybillRequestState"
+          },
+          "providerReference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trackingNumber": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trackingNumberHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shipmentEvidenceHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "printJobId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "errorCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WaybillBatchResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "batchId",
+          "items"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-logistics.1"
+          },
+          "batchId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WaybillResult"
+            }
+          }
+        }
+      },
+      "PrintJob": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "printJobId",
+          "orderId",
+          "storeId",
+          "jobKind",
+          "provider",
+          "deviceId",
+          "copyCount",
+          "contentHash",
+          "state",
+          "attempts",
+          "providerReference",
+          "errorCode",
+          "nextAttemptAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-logistics.1"
+          },
+          "printJobId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "orderId": {
+            "type": "string"
+          },
+          "storeId": {
+            "type": "string"
+          },
+          "jobKind": {
+            "type": "string",
+            "enum": [
+              "WAYBILL",
+              "PICKUP_RECEIPT"
+            ]
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrintProvider"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deviceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "copyCount": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ]
+          },
+          "contentHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "state": {
+            "$ref": "#/components/schemas/PrintJobState"
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5
+          },
+          "providerReference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "errorCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nextAttemptAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PrintJobRetryRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
           }
         }
       },

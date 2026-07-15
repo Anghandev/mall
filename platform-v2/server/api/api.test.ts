@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import { Wallet } from 'ethers';
@@ -47,6 +47,13 @@ import {
   executeProvider,
   verifyWebhookHmac,
 } from './providers.ts';
+import { AmbiguousProviderResultError } from '../data/logistics-printing-service.ts';
+import {
+  CainiaoWaybillAdapter,
+  FeiePrintAdapter,
+  Kuaidi100WaybillAdapter,
+  YilianyunPrintAdapter,
+} from './logistics-providers.ts';
 import {
   settlementIntentDigest,
   settlementRequestDomain,
@@ -872,6 +879,99 @@ test('provider calls and webhooks fail closed until configured and signed', asyn
   assert.equal(parsed.regionCode, '210211');
 });
 
+test('logistics adapters send provider-documented idempotency and cloud-print fields', async () => {
+  const requests: Array<{ url: string; body: URLSearchParams }> = [];
+  const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    requests.push({ url, body: new URLSearchParams(String(init?.body ?? '')) });
+    if (url.includes('kuaidi100')) {
+      return Response.json({ success: true, code: 200, data: { taskId: 'task-1', kuaidinum: 'SF12345678' } });
+    }
+    if (url.includes('feieyun')) return Response.json({ ret: 0, msg: 'ok', data: 'feie-order-1' });
+    if (url.includes('10ss.net')) return Response.json({ error: 0, body: { id: 'yilian-order-1' } });
+    return Response.json({ success: true, waybillCloudPrintResponseList: [{ objectId: HASH, waybillCode: 'YT12345678' }] });
+  }) as typeof fetch;
+  const waybill = {
+    requestId: HASH,
+    orderId: ORDER_ID,
+    carrierCode: 'SF' as const,
+    sender: { name: 'Abu Store', phone: '13800138000', address: 'Dalian Software Park 1' },
+    recipient: { name: 'Buyer Name', phone: '13900139000', address: 'Dalian Software Park 2' },
+    quantity: '2',
+  };
+
+  await new Kuaidi100WaybillAdapter({
+    key: 'key-1', secret: 'secret-1', customer: 'partner-1', siid: 'printer-1', fetch: fetcher,
+  }).createWaybill(waybill);
+  const kuaidi = requests.at(-1)!.body;
+  const kuaidiParam = JSON.parse(kuaidi.get('param')!) as Record<string, unknown>;
+  assert.equal(kuaidiParam.orderId, HASH.slice(2));
+  assert.equal(kuaidiParam.printType, 'CLOUD');
+  assert.equal(kuaidiParam.siid, 'printer-1');
+  assert.equal(kuaidiParam.reorder, false);
+  assert.equal(kuaidi.get('sign'), createHash('md5')
+    .update(`${kuaidi.get('param')}${kuaidi.get('t')}key-1secret-1`).digest('hex').toUpperCase());
+
+  await new FeiePrintAdapter({ user: 'feie-user', ukey: 'feie-key', fetch: fetcher }).print({
+    printJobId: HASH, deviceId: 'FEIE-001', content: 'receipt', copyCount: 2,
+  });
+  const feie = requests.at(-1)!.body;
+  assert.equal(feie.get('apiname'), 'Open_printMsg');
+  assert.equal(feie.get('times'), '2');
+  assert.equal(feie.get('sig'), createHash('sha1')
+    .update(`feie-userfeie-key${feie.get('stime')}`).digest('hex'));
+
+  await new YilianyunPrintAdapter({
+    clientId: 'client-1', clientSecret: 'client-secret-1', accessToken: 'access-1', fetch: fetcher,
+  }).print({ printJobId: HASH, deviceId: 'YLY-001', content: 'receipt', copyCount: 1 });
+  const yilian = requests.at(-1)!.body;
+  assert.equal(yilian.get('origin_id'), HASH.slice(2));
+  assert.equal(yilian.get('idempotence'), '1');
+  assert.equal(yilian.get('copies'), '1');
+  assert.equal(yilian.get('sign'), createHash('md5')
+    .update(`client-1${yilian.get('timestamp')}client-secret-1`).digest('hex'));
+
+  let signedPayload = '';
+  await new CainiaoWaybillAdapter({
+    logisticProviderId: 'provider-1',
+    signer: { sign: async (payload) => { signedPayload = payload; return 'official-onboarding-digest'; } },
+    fetch: fetcher,
+  }).createWaybill({ ...waybill, carrierCode: 'YTO' });
+  const cainiao = requests.at(-1)!.body;
+  assert.equal(cainiao.get('msg_type'), 'TMS_WAYBILL_GET');
+  assert.equal(cainiao.get('logistic_provider_id'), 'provider-1');
+  assert.equal(cainiao.get('data_digest'), 'official-onboarding-digest');
+  assert.equal(cainiao.get('logistics_interface'), signedPayload);
+});
+
+test('logistics adapters fail closed for missing credentials, oversized payloads and ambiguous transport results', async () => {
+  await assert.rejects(
+    new Kuaidi100WaybillAdapter({}).createWaybill({
+      requestId: HASH,
+      orderId: ORDER_ID,
+      carrierCode: 'SF',
+      sender: { name: 'Sender', phone: '13800138000', address: 'Sender address' },
+      recipient: { name: 'Buyer', phone: '13900139000', address: 'Buyer address' },
+      quantity: '1',
+    }),
+    /KUAIDI100 is not configured/,
+  );
+  await assert.rejects(
+    new FeiePrintAdapter({ user: 'user', ukey: 'key' }).print({
+      printJobId: HASH, deviceId: 'FEIE-001', content: 'x'.repeat(5_001), copyCount: 1,
+    }),
+    /exceeds 5000 bytes/,
+  );
+  await assert.rejects(
+    new FeiePrintAdapter({
+      user: 'user',
+      ukey: 'key',
+      fetch: (async () => { throw new Error('timeout'); }) as typeof fetch,
+    }).print({ printJobId: HASH, deviceId: 'FEIE-001', content: 'receipt', copyCount: 1 }),
+    AmbiguousProviderResultError,
+  );
+});
+
 test('HTTP bootstrap and SIWE flow return correlated JSON and protect order actions', async () => {
   const wallet = Wallet.createRandom();
   const store = new MemoryNonceStore();
@@ -1040,6 +1140,24 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       createStore: async (actor) => ({ storeId: 'store-1', merchantId: actor.merchantId }),
       listStores: async () => [{ storeId: 'store-1', regionCode: '110101' }],
       getOrderTarget: async (actor, orderId) => ({ orderId, buyerWallet: actor.walletAddress }),
+    },
+    logisticsPrintingService: {
+      createPrinterBindingChallenge: async (actor, storeId, input) => ({
+        challengeId: HASH,
+        actor: actor.walletAddress,
+        storeId,
+        ...input,
+      }),
+      applyPrinterBinding: async (actor, storeId, input) => ({
+        bindingId: HASH,
+        actor: actor.walletAddress,
+        storeId,
+        ...input,
+      }),
+      getPrinterBinding: async (_actor, storeId) => ({ bindingId: HASH, storeId }),
+      createWaybillBatch: async (_actor, input) => ({ batchId: HASH, items: input.orderIds }),
+      listPrintJobs: async () => [],
+      retryPrintJob: async (_actor, printJobId) => ({ printJobId, state: 'QUEUED' }),
     },
     evidenceService: {
       createActionEvidence: async (actor, input) => {
@@ -2062,6 +2180,43 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       }),
     });
     assert.equal(createStore.status, 201);
+    const printerChallenge = await fetch(`${base}/v2/merchant/stores/store-1/printer-binding/challenge`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+      body: JSON.stringify({
+        provider: 'YILIANYUN',
+        deviceId: 'printer-001',
+        idempotencyKey: 'printer-challenge-http-1',
+      }),
+    });
+    assert.equal(printerChallenge.status, 201);
+    assert.equal((await fetch(`${base}/v2/merchant/stores/store-1/printer-binding`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+      body: JSON.stringify({ challengeId: HASH, signature: '0x1234', idempotencyKey: 'printer-apply-http-1' }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/merchant/stores/store-1/printer-binding`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/merchant/waybills/batches`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+      body: JSON.stringify({
+        provider: 'KUAIDI100',
+        carrierCode: 'SF',
+        storeId: 'store-1',
+        orderIds: ['order-1'],
+        idempotencyKey: 'waybill-http-batch-1',
+      }),
+    })).status, 201);
+    assert.equal((await fetch(`${base}/v2/merchant/print-jobs?limit=50`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/merchant/print-jobs/${HASH}/retry`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+      body: JSON.stringify({ idempotencyKey: 'print-retry-http-1' }),
+    })).status, 200);
     const target = await fetch(`${base}/v2/orders/order-1/fulfillment-target`, {
       headers: { authorization: `Bearer ${session.token}` },
     });
@@ -2479,14 +2634,17 @@ function completeEnvironment(): Record<string, string> {
     KUAIDI100_CUSTOMER: 'provider-secret',
     KUAIDI100_KEY: 'provider-secret',
     KUAIDI100_SECRET: 'provider-secret',
+    KUAIDI100_SIID: 'provider-secret',
     KUAIDI100_CALLBACK_SECRET: 'provider-secret',
-    CAINIAO_APP_KEY: 'provider-secret',
-    CAINIAO_APP_SECRET: 'provider-secret',
+    CAINIAO_LOGISTIC_PROVIDER_ID: 'provider-secret',
+    CAINIAO_DATA_DIGEST_SIGNER_URL: 'https://cainiao-signer.example.invalid',
+    CAINIAO_DATA_DIGEST_SIGNER_TOKEN: 'provider-secret',
     CAINIAO_CALLBACK_SECRET: 'provider-secret',
     FEIE_USER: 'provider-secret',
     FEIE_UKEY: 'provider-secret',
     YILIANYUN_CLIENT_ID: 'provider-secret',
     YILIANYUN_CLIENT_SECRET: 'provider-secret',
+    YILIANYUN_ACCESS_TOKEN: 'provider-secret',
     BNM_AVAILABILITY_URL: 'https://bnm.example.invalid/v1/order-points/state',
     BNM_API_TOKEN: 'provider-secret',
     BNM_PROJECT_ID: 'abu-24k',

@@ -1,4 +1,4 @@
-export declare const artifactVersion: "2.0.0-settlement-admin.9";
+export declare const artifactVersion: "2.0.0-logistics.1";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
@@ -25,6 +25,10 @@ export type FulfillmentRequestType = "EXCHANGE" | "DELAY" | "ARBITRATION" | "FOR
 export type FulfillmentRequestState = "OPEN" | "APPROVED" | "REJECTED" | "RESOLVED";
 export type LogisticsProvider = "KUAIDI100" | "CAINIAO";
 export type LogisticsStatus = "PICKED_UP" | "IN_TRANSIT" | "OUT_FOR_DELIVERY" | "DELIVERED" | "EXCEPTION";
+export type PrintProvider = "FEIE" | "YILIANYUN";
+export type PrintJobState = "CONFIGURATION_REQUIRED" | "QUEUED" | "PROCESSING" | "ACCEPTED" | "RETRYABLE" | "FAILED";
+export type WaybillProvider = "KUAIDI100" | "CAINIAO";
+export type WaybillRequestState = "PENDING_PROVIDER" | "CONFIGURATION_REQUIRED" | "PROVIDER_ACCEPTED" | "SHIPMENT_RECORDED" | "COMPLETED" | "FAILED";
 export type MediaContentType = "image/jpeg" | "image/png" | "image/webp" | "video/mp4" | "application/pdf";
 export type MediaPurpose = "PRODUCT_IMAGE" | "PRODUCT_VIDEO" | "CATEGORY_ICON" | "STORE_IMAGE" | "FULFILLMENT_EVIDENCE" | "BUYER_AVATAR" | "MERCHANT_LOGO";
 export type MediaResourceType = "PRODUCT" | "CATEGORY" | "STORE" | "ORDER" | "BUYER" | "MERCHANT";
@@ -93,6 +97,10 @@ export declare const fulfillmentRequestTypes: readonly FulfillmentRequestType[];
 export declare const fulfillmentRequestStates: readonly FulfillmentRequestState[];
 export declare const logisticsProviders: readonly LogisticsProvider[];
 export declare const logisticsStatuses: readonly LogisticsStatus[];
+export declare const printProviders: readonly PrintProvider[];
+export declare const printJobStates: readonly PrintJobState[];
+export declare const waybillProviders: readonly WaybillProvider[];
+export declare const waybillRequestStates: readonly WaybillRequestState[];
 export declare const mediaContentTypes: readonly MediaContentType[];
 export declare const mediaPurposes: readonly MediaPurpose[];
 export declare const mediaResourceTypes: readonly MediaResourceType[];
@@ -141,6 +149,96 @@ export declare const riskRestrictionStates: readonly RiskRestrictionState[];
 export declare const riskAppealStates: readonly RiskAppealState[];
 
 export type JsonObject = Readonly<Record<string, unknown>>;
+
+export interface PrinterBindingChallengeRequest {
+  provider: PrintProvider;
+  deviceId: string;
+  idempotencyKey: string;
+}
+
+export interface PrinterBindingChallenge {
+  artifactVersion: typeof artifactVersion;
+  challengeId: Bytes32;
+  storeId: string;
+  merchantId: string;
+  signer: Address;
+  expiresAt: Timestamp;
+  typedData: Eip712TypedData;
+  digest: Bytes32;
+}
+
+export interface ApplyPrinterBindingRequest {
+  challengeId: Bytes32;
+  signature: string;
+  idempotencyKey: string;
+}
+
+export interface PrinterBinding {
+  artifactVersion: typeof artifactVersion;
+  bindingId: Bytes32;
+  storeId: string;
+  merchantId: string;
+  provider: PrintProvider;
+  deviceId: string;
+  bindingHash: Bytes32;
+  version: number;
+  verifiedByWallet: Address;
+  signatureHash: Bytes32;
+  updatedAt: Timestamp;
+}
+
+export interface WaybillBatchRequest {
+  provider: WaybillProvider;
+  carrierCode: 'SF' | 'JD' | 'YTO' | 'ZTO' | 'STO' | 'EMS';
+  storeId: string;
+  orderIds: readonly string[];
+  idempotencyKey: string;
+}
+
+export interface WaybillResult {
+  artifactVersion: typeof artifactVersion;
+  requestId: Bytes32;
+  batchId: Bytes32;
+  orderId: string;
+  storeId: string;
+  provider: WaybillProvider;
+  carrierCode: WaybillBatchRequest['carrierCode'];
+  state: WaybillRequestState;
+  providerReference: string | null;
+  trackingNumber: string | null;
+  trackingNumberHash: Bytes32 | null;
+  shipmentEvidenceHash: Bytes32 | null;
+  printJobId: Bytes32 | null;
+  errorCode: string | null;
+  updatedAt: Timestamp;
+}
+
+export interface WaybillBatchResult {
+  artifactVersion: typeof artifactVersion;
+  batchId: Bytes32;
+  items: readonly WaybillResult[];
+}
+
+export interface PrintJob {
+  artifactVersion: typeof artifactVersion;
+  printJobId: Bytes32;
+  orderId: string;
+  storeId: string;
+  jobKind: 'WAYBILL' | 'PICKUP_RECEIPT';
+  provider: PrintProvider | null;
+  deviceId: string | null;
+  copyCount: 1 | 2;
+  contentHash: Bytes32;
+  state: PrintJobState;
+  attempts: number;
+  providerReference: string | null;
+  errorCode: string | null;
+  nextAttemptAt: Timestamp | null;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface PrintJobRetryRequest { idempotencyKey: string }
 
 export interface SeckillSessionProduct {
   productId: string;
