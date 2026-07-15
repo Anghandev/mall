@@ -687,6 +687,8 @@ test('catalog, settlement/admin and seckill realtime capabilities are published 
     'merchantProfileHttp',
     'merchantScopedAuditHttp',
     'monitoringHttp',
+    'riskManagementHttp',
+    'riskPaymentEnforcement',
     'coverageMonitoring',
     'websocket',
   ]);

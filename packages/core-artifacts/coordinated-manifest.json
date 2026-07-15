@@ -64,7 +64,7 @@
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "5b57c144526db66ca4169f5b7e26454cbd736a5c01599a05bc3c2dbc65d2c4d1"
+      "sha256": "87970f06a4e807860063f4f1e35a06f67a5a916ed44550600627f916b85b18e1"
     }
   ],
   "httpSurface": [
