@@ -29,7 +29,7 @@ const reasonPattern = /^[A-Z][A-Z0-9_]{1,63}$/;
 
 export type CatalogCategoryWrite = Readonly<{
   name: string;
-  parentCategoryId?: string;
+  parentCategoryId?: string | null;
   iconAssetId?: string;
   sortOrder: number;
   status?: CatalogTaxonomyStatus;
@@ -210,7 +210,7 @@ function validateCategoryWrite(input: CatalogCategoryWrite) {
   requireText(input.name, 'name', 80);
   requireSortOrder(input.sortOrder);
   requireIdempotencyKey(input.idempotencyKey);
-  if (input.parentCategoryId !== undefined) resourceId(input.parentCategoryId);
+  if (input.parentCategoryId !== undefined && input.parentCategoryId !== null) resourceId(input.parentCategoryId);
   if (input.iconAssetId !== undefined) requireBytes32(input.iconAssetId, 'iconAssetId');
   if (input.status !== undefined && !catalogTaxonomyStatuses.includes(input.status)) throw invalid('Category status is invalid', 400);
 }

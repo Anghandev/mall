@@ -163,13 +163,13 @@ All test records stay under `tests/**`; no production fixture is shipped.
 ## Catalog Checkpoint Evidence
 
 The current product consumes coordinated artifact
-`@abu24k/core-artifacts@2.0.0-settlement-admin.4` for the Catalog workflow:
+`@abu24k/core-artifacts@2.0.0-settlement-admin.5` for the Catalog workflow:
 
 - `ADM-CAT-001` and `ADM-CAT-002`: ADMIN/OPERATOR/AUDITOR consume the
   versioned three-level category tree and tag library. ADMIN/OPERATOR can
-  create and update name, parent, icon, sort and status. Because `.4` cannot
-  express a nullable parent on update, moving an existing child back to the
-  root remains fail-closed under `GAP-ADM-007`; the unresolved service fee
+  create and update name, parent, icon, sort and status. `.5` distinguishes an
+  omitted parent on create from explicit `parentCategoryId: null` on update,
+  so an existing child can move back to the root. The unresolved service fee
   remains visibly `DecisionBlocked` and is never submitted.
 - `ADM-CAT-003` and `ADM-CAT-006`: taxonomy disable/delete, product HIDE and
   DELIST use Core commands. `ProductWriteLocked` retains and renders the exact
@@ -191,3 +191,22 @@ Global cross-resource batch tagging/export remains `GAP-ADM-003`. Missing
 commercial decisions remain `DecisionBlocked`; real production media/provider,
 wallet, Safe, RPC, domain and device evidence remains `ExternalBlocked` under
 `ADM-GOAL-003`. All fixtures remain under `tests/**`.
+
+## Settlement/Admin `.5` Order Operations Evidence
+
+- `ADM-GLOBAL-001`: ADMIN/OPERATOR/AUDITOR sessions consume exact order ID,
+  product ID, SKU ID, TxHash and wallet filters, start/end and quick date ranges,
+  order state, fulfillment mode, order kind, pending-product-review and breaker
+  projections. Core combines these server-side with AND. OR, fuzzy wallet,
+  UID/phone and Yellow queue remain visibly fail-closed under `GAP-ADM-003`.
+- `ADM-GLOBAL-002`: selected order IDs are sent only to the read-only batch
+  preview. The UI renders each row's authoritative `allowedActions` and the
+  enabled intersection, but never turns that result into an unpublished write.
+  Excel/CSV, waybill/pickup print and arbitrary batch writes remain disabled.
+- `ADM-TAKE-001` and `ADM-TAKE-002`: the Admin order table consumes Core-owned
+  quantity, creation time, order kind, payment TxHash and row-level
+  `allowedActions`. The product no longer performs a second parallel action
+  lookup or derives permissions from order state.
+- `ADM-GOAL-001` and `ADM-GOAL-002`: `.5` response shape, exact query
+  serialization, role denial, nullable category parent and read-only batch
+  preview have consumer tests. Production source and bundle contain no fixture.

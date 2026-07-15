@@ -1,6 +1,7 @@
 import {
-  type AllowedAction,
+  type AdminOrderSearchPage,
   type FulfillmentOrder,
+  type OrderBatchActionPreview,
 } from '@abu24k/core-artifacts';
 import {
   AlertTriangle,
@@ -21,8 +22,9 @@ import { GlobalSearch } from '../components/GlobalSearch';
 import { TakeoverFundingPanel } from '../components/TakeoverFundingPanel';
 import {
   CoreApiError,
-  fetchFulfillmentOrders,
-  fetchOrderAllowedActions,
+  previewAdminOrderBatchActions,
+  searchAdminOrders,
+  type AdminOrderSearchFilters,
   type PlatformFulfillmentCommandResult,
 } from '../coreApi';
 import { useCoreSession } from '../coreSession';
@@ -36,32 +38,39 @@ const stages = [
 
 export function TakeoverPage() {
   const { connect, error: sessionError, session, status } = useCoreSession();
-  const [orders, setOrders] = useState<readonly FulfillmentOrder[]>([]);
+  const [page, setPage] = useState<AdminOrderSearchPage | null>(null);
+  const [filters, setFilters] = useState<AdminOrderSearchFilters>({});
   const [selectedOrderId, setSelectedOrderId] = useState('');
-  const [actions, setActions] = useState<readonly AllowedAction[]>([]);
+  const [selectedBatchOrderIds, setSelectedBatchOrderIds] = useState<readonly string[]>([]);
+  const [batchPreview, setBatchPreview] = useState<OrderBatchActionPreview | null>(null);
+  const [batchPreviewError, setBatchPreviewError] = useState<string | null>(null);
+  const [batchPreviewLoading, setBatchPreviewLoading] = useState(false);
   const [ordersLoading, setOrdersLoading] = useState(false);
-  const [actionsLoading, setActionsLoading] = useState(false);
   const [commandPending, setCommandPending] = useState(false);
   const [resourceError, setResourceError] = useState<CoreApiError | null>(null);
   const [commandResult, setCommandResult] = useState<PlatformFulfillmentCommandResult | null>(null);
-  const hasPlatformRole = session?.roles.some((role) => role === 'ADMIN' || role === 'OPERATOR') ?? false;
+  const hasPlatformRole = session?.roles.some((role) => role === 'ADMIN' || role === 'OPERATOR' || role === 'AUDITOR') ?? false;
+  const orders = page?.orders ?? [];
   const selectedOrder = useMemo(
     () => orders.find((order) => order.orderId === selectedOrderId) ?? null,
     [orders, selectedOrderId],
   );
   useEffect(() => {
-    setOrders([]);
+    setPage(null);
+    setFilters({});
     setSelectedOrderId('');
-    setActions([]);
+    setSelectedBatchOrderIds([]);
+    setBatchPreview(null);
+    setBatchPreviewError(null);
     setResourceError(null);
     setCommandResult(null);
     if (!session || !hasPlatformRole) return;
     const controller = new AbortController();
     setOrdersLoading(true);
-    void fetchFulfillmentOrders(session.token, controller.signal)
-      .then((nextOrders) => {
-        setOrders(nextOrders);
-        setSelectedOrderId(nextOrders[0]?.orderId ?? '');
+    void searchAdminOrders(session.token, {}, controller.signal)
+      .then((nextPage) => {
+        setPage(nextPage);
+        setSelectedOrderId(nextPage.orders[0]?.orderId ?? '');
       })
       .catch((cause) => {
         if (!controller.signal.aborted) setResourceError(asCoreError(cause, '履约订单不可用'));
@@ -72,36 +81,60 @@ export function TakeoverPage() {
     return () => controller.abort();
   }, [hasPlatformRole, session]);
 
-  useEffect(() => {
-    setActions([]);
+  const handleSearch = async (nextFilters: AdminOrderSearchFilters) => {
+    if (!session || !hasPlatformRole) return;
+    setOrdersLoading(true);
     setResourceError(null);
     setCommandResult(null);
-    if (!session || !hasPlatformRole || !selectedOrderId) return;
-    const controller = new AbortController();
-    setActionsLoading(true);
-    void fetchOrderAllowedActions(selectedOrderId, session.token, controller.signal)
-      .then(setActions)
-      .catch((cause) => {
-        if (!controller.signal.aborted) setResourceError(asCoreError(cause, '订单权限不可用'));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setActionsLoading(false);
-      });
-    return () => controller.abort();
-  }, [hasPlatformRole, selectedOrderId, session]);
+    setSelectedBatchOrderIds([]);
+    setBatchPreview(null);
+    setBatchPreviewError(null);
+    try {
+      const nextPage = await searchAdminOrders(session.token, nextFilters);
+      setFilters(nextFilters);
+      setPage(nextPage);
+      setSelectedOrderId(nextPage.orders[0]?.orderId ?? '');
+    } catch (cause) {
+      setResourceError(asCoreError(cause, 'Admin 订单查询不可用'));
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
 
   const handleCommandCompleted = async (result: PlatformFulfillmentCommandResult) => {
     if (!session || !selectedOrder) return;
     setCommandResult(result);
     try {
-      const [nextOrders, nextActions] = await Promise.all([
-        fetchFulfillmentOrders(session.token),
-        fetchOrderAllowedActions(selectedOrder.orderId, session.token),
-      ]);
-      setOrders(nextOrders);
-      setActions(nextActions);
+      const nextPage = await searchAdminOrders(session.token, filters);
+      setPage(nextPage);
+      setSelectedBatchOrderIds([]);
+      setBatchPreview(null);
+      setBatchPreviewError(null);
     } catch (cause) {
       setResourceError(asCoreError(cause, '命令已提交，但最新订单状态读取失败'));
+    }
+  };
+
+  const toggleBatchOrder = (orderId: string) => {
+    setSelectedBatchOrderIds((current) => current.includes(orderId)
+      ? current.filter((item) => item !== orderId)
+      : [...current, orderId]);
+    setBatchPreview(null);
+    setBatchPreviewError(null);
+  };
+
+  const previewBatch = async () => {
+    if (!session || selectedBatchOrderIds.length === 0) return;
+    setBatchPreviewLoading(true);
+    setBatchPreview(null);
+    setBatchPreviewError(null);
+    try {
+      setBatchPreview(await previewAdminOrderBatchActions(selectedBatchOrderIds, session.token));
+    } catch (cause) {
+      const error = asCoreError(cause, '批次 allowedActions 预览不可用');
+      setBatchPreviewError(`${error.code}: ${error.message}${error.correlationId ? ` · ${error.correlationId}` : ''}`);
+    } finally {
+      setBatchPreviewLoading(false);
     }
   };
 
@@ -113,7 +146,16 @@ export function TakeoverPage() {
         <div className="requirement-list"><code>ADM-TAKE-001—002 · partial</code><code>D-V2-004 / 005 / 020</code></div>
       </header>
 
-      <GlobalSearch />
+      <GlobalSearch enabled={Boolean(session && hasPlatformRole)} loading={ordersLoading} onSearch={(nextFilters) => void handleSearch(nextFilters)} />
+
+      {page ? (
+        <section className="admin-order-projection" aria-label="Admin 订单查询投影">
+          <div><span>结果</span><strong>{page.orders.length}</strong><small>{page.nextCursor ? '存在下一页稳定游标' : '当前页结束'}</small></div>
+          <div><span>商品审核</span><strong>{page.pendingProductReview === null ? '未筛选' : page.pendingProductReview ? 'PENDING' : 'NOT_PENDING'}</strong><small>Core product-review projection</small></div>
+          <div><span>Breaker</span><strong>{page.breaker ? page.breaker.active ? 'ACTIVE' : 'INACTIVE' : '未筛选'}</strong><small>{page.breaker?.scope ?? '选择 scope 后读取'}</small></div>
+          <div><span>Paused scopes</span><strong>{page.pausedScopes.length}</strong><small>{page.pausedScopes.join(' · ') || '无'}</small></div>
+        </section>
+      ) : null}
 
       <section className="takeover-stage-grid" aria-label="接管履约阶段">
         {stages.map(({ label, detail, icon: Icon }, index) => (
@@ -124,7 +166,7 @@ export function TakeoverPage() {
       <section className="workspace-grid">
         <article className="panel panel-main takeover-console">
           <div className="panel-heading">
-            <div><p className="section-kicker">GET /v2/orders · POST /v2/actions/order</p><h2>订单与实时操作权限</h2></div>
+            <div><p className="section-kicker">GET /v2/admin/orders</p><h2>订单与实时操作权限</h2></div>
             <span className={hasPlatformRole ? 'status-chip status-ready' : 'status-chip status-blocked'}>
               {hasPlatformRole ? <CheckCircle2 aria-hidden="true" /> : <KeyRound aria-hidden="true" />}
               {session ? session.roles.join(' / ') : '需要 SIWE'}
@@ -139,7 +181,7 @@ export function TakeoverPage() {
               </button>
             </div>
           ) : !hasPlatformRole ? (
-            <div className="resource-state resource-state-error" role="alert"><Ban aria-hidden="true" /><div><strong>Forbidden</strong><p>当前会话缺少 ADMIN 或 OPERATOR 角色，平台订单读取与接管写入均保持关闭。</p></div></div>
+            <div className="resource-state resource-state-error" role="alert"><Ban aria-hidden="true" /><div><strong>Forbidden</strong><p>当前会话缺少 ADMIN、OPERATOR 或 AUDITOR 角色，平台订单读取与接管写入均保持关闭。</p></div></div>
           ) : ordersLoading ? (
             <div className="catalog-loading" aria-label="正在读取履约订单"><span /><span /><span /></div>
           ) : resourceError ? (
@@ -150,15 +192,16 @@ export function TakeoverPage() {
             <>
               <div className="table-scroll takeover-orders">
                 <table className="data-table">
-                  <thead><tr><th>订单</th><th>商家 / SKU</th><th>状态</th><th>最终性</th><th>接管</th><th>查看</th></tr></thead>
+                  <thead><tr><th><span className="sr-only">批次选择</span></th><th>订单</th><th>商品 / SKU</th><th>类型 / 支付</th><th>状态</th><th>最终性</th><th>查看</th></tr></thead>
                   <tbody>
                     {orders.map((order) => (
                       <tr key={order.orderId} className={order.orderId === selectedOrderId ? 'is-selected' : undefined}>
-                        <td><code>{order.orderId}</code><small>{order.fulfillmentMode}</small></td>
-                        <td><strong>{order.merchantId}</strong><small>{order.productId} / {order.skuId}</small></td>
+                        <td><input type="checkbox" aria-label={`选择订单 ${order.orderId}`} checked={selectedBatchOrderIds.includes(order.orderId)} onChange={() => toggleBatchOrder(order.orderId)} disabled={commandPending} /></td>
+                        <td><code>{order.orderId}</code><small>{formatDate(order.createdAt)}</small></td>
+                        <td><strong>{order.productId}</strong><small>{order.skuId} · qty {order.quantity}</small></td>
+                        <td><strong>{order.orderKind}</strong><code>{order.paymentTxHash ?? '未提交 TxHash'}</code></td>
                         <td><strong>{order.state}</strong><small>{formatDate(order.paidAt)}</small></td>
-                        <td><strong>{order.finalityStatus}</strong><small>{formatDate(order.paymentFinalizedAt)}</small></td>
-                        <td><strong>{order.takeoverOpenedAt ? 'OPEN' : 'NOT_OPEN'}</strong><small>{formatDate(order.takeoverOpenedAt)}</small></td>
+                        <td><strong>{order.finalityStatus}</strong><small>{order.fulfillmentMode} · {order.allowedActions.filter((action) => action.enabled).length} enabled</small></td>
                         <td><button className="button button-quiet" type="button" onClick={() => setSelectedOrderId(order.orderId)} aria-pressed={order.orderId === selectedOrderId} disabled={commandPending}>查看</button></td>
                       </tr>
                     ))}
@@ -192,8 +235,8 @@ export function TakeoverPage() {
                     </div>
                   </div>
                   <FulfillmentCommandPanel
-                    actions={actions}
-                    actionsLoading={actionsLoading}
+                    actions={selectedOrder.allowedActions}
+                    actionsLoading={false}
                     onBusyChange={setCommandPending}
                     onCompleted={handleCommandCompleted}
                     order={selectedOrder}
@@ -216,7 +259,15 @@ export function TakeoverPage() {
 
       <TakeoverFundingPanel />
 
-      <BatchActionBar ordinarySoftDelete={false} immutable />
+      <BatchActionBar
+        ordinarySoftDelete={false}
+        immutable
+        selectedCount={selectedBatchOrderIds.length}
+        preview={batchPreview}
+        previewError={batchPreviewError}
+        previewLoading={batchPreviewLoading}
+        onPreview={() => void previewBatch()}
+      />
     </>
   );
 }
