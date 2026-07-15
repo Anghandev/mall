@@ -681,7 +681,7 @@ export function AddressScreen() {
             maxLength={1000}
           />
         </label>
-        <p id="parser-reason" className="field-help">原始粘贴文本只发往 Core 解析，不写入本地缓存或生产 fixture。</p>
+        <p id="parser-reason" className="field-help">原始粘贴文本只发往 Core 解析，不写入本地缓存或持久化记录。</p>
         <button
           className="button button--secondary"
           type="button"
