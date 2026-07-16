@@ -23,8 +23,8 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('settlement admin .14 checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-settlement-admin.14');
+test('settlement admin .15 checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-settlement-admin.15');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
@@ -54,7 +54,7 @@ test('settlement admin .14 checkpoint has one identity, resolvable exports and e
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 26);
+  assert.equal(schemaManifest.schemas.core.migrations.length, 27);
   assert.equal(schemaManifest.schemas.audit.migrations.length, 4);
   for (const migration of [
     ...schemaManifest.schemas.core.migrations,
@@ -516,7 +516,9 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
   assert.deepEqual(enums.merchantLifecycleStatuses, [
     'PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED', 'BLACKLISTED',
   ]);
-  assert.deepEqual(enums.merchantReviewActions, ['APPROVE', 'REJECT', 'BLACKLIST']);
+  assert.deepEqual(enums.merchantReviewActions, [
+    'APPROVE', 'REJECT', 'BLACKLIST', 'CHANGE_SETTLEMENT_WALLET',
+  ]);
   assert.deepEqual(enums.merchantQualificationAccess, ['FULL', 'REDACTED', 'UNAVAILABLE']);
   assert.deepEqual(enums.logisticsCarrierCodes, ['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS']);
   assert.deepEqual(enums.logisticsProviderReadinessStates, ['READY', 'DISABLED', 'CONFIGURATION_REQUIRED']);
@@ -573,12 +575,32 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
   assert.equal(manifest.decisionBlocked.includes('ADMIN_OR_QUERY_SEMANTICS'), false);
   assert.equal(manifest.decisionBlocked.includes('ADMIN_FUZZY_WALLET_SEARCH_POLICY'), false);
   assert.ok(manifest.decisionBlocked.includes('ADMIN_YELLOW_QUEUE_DEFINITION'));
-  assert.equal(openapi.components.schemas.MerchantFulfillmentAnalytics.properties.fastShip48h.properties.status.const, 'DecisionBlocked');
+  assert.deepEqual(
+    openapi.components.schemas.MerchantFulfillmentAnalytics.properties.fastShip48h.anyOf.map(
+      (schema: { properties: { status: { const: string } } }) => schema.properties.status.const,
+    ),
+    ['AVAILABLE', 'UNAVAILABLE'],
+  );
+  assert.deepEqual(
+    openapi.components.schemas.MerchantLifecycleDetail.properties.levelPolicy.anyOf.map(
+      (schema: { properties: { status: { const: string } } }) => schema.properties.status.const,
+    ),
+    ['AVAILABLE', 'DecisionBlocked'],
+  );
+  assert.ok(openapi.components.schemas.MerchantReviewChallengeRequest.properties.proposedSettlementWallet);
+  assert.equal(
+    openapi.components.schemas.MerchantReviewChallengeRequest.required.includes('proposedSettlementWallet'),
+    false,
+  );
   assert.deepEqual(
     Object.keys(openapi.components.schemas.MerchantOrderAnalytics.properties.cumulative.properties),
     ['listPriceUsdt', 'buyerPaidUsdt', 'merchantBaseReceivableUsdt', 'merchantNetReceivableUsdt'],
   );
-  assert.ok(manifest.decisionBlocked.includes('MERCHANT_48_HOUR_SHIPPING_RATE_DENOMINATOR'));
+  for (const resolved of [
+    'MERCHANT_LEVEL_PRICE_BASIS',
+    'MERCHANT_MONTHLY_SECKILL_QUOTA_WINDOW',
+    'MERCHANT_48_HOUR_SHIPPING_RATE_DENOMINATOR',
+  ]) assert.equal(manifest.decisionBlocked.includes(resolved), false, resolved);
   assert.ok(manifest.externalBlocked.includes('MERCHANT_PII_ENCRYPTION_KEY'));
   for (const field of ['governanceActionId', 'rulesContentHash', 'publicationTxHash']) {
     assert.ok(openapi.components.schemas.SeckillSessionProjection.required.includes(field), field);

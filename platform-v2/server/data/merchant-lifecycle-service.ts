@@ -24,6 +24,7 @@ import { CoreError } from '../api/errors.ts';
 import type { SystemConfigSafeApprover } from '../chain/system-config-governance.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
+import { currentMerchantLevelPolicy, merchantLevelRule } from './merchant-level-policy.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 
 const LEVELS = merchantLevels;
@@ -88,6 +89,9 @@ interface ReviewRow {
   actor_wallet: string;
   idempotency_key: string;
   request_hash: string;
+  previous_settlement_wallet: string | null;
+  proposed_settlement_wallet: string | null;
+  wallet_change_applied_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -368,12 +372,14 @@ export class MerchantLifecycleService {
   createReviewChallenge(actor: FulfillmentActor, merchantId: string, input: {
     action: ReviewAction;
     reasonCode: string;
+    proposedSettlementWallet?: string;
     idempotencyKey: string;
     correlationId: string;
   }) {
     validateResourceId(merchantId, 'merchant ID');
     const action = reviewAction(input.action);
     const reasonCode = boundedCode(input.reasonCode, 'merchant review reason');
+    const proposedSettlementWallet = settlementWalletChangeTarget(action, input.proposedSettlementWallet);
     validateIdempotencyKey(input.idempotencyKey);
     const wallet = normalizeAddress(actor.walletAddress);
     return this.#transactions.transaction(async (executor) => {
@@ -387,7 +393,19 @@ export class MerchantLifecycleService {
       if (action === 'APPROVE') {
         if (!application?.license_asset_id) throw new CoreError('ConfigurationRequired', 'Merchant license evidence is incomplete', 409);
       }
-      const requestHash = hashJson({ merchantId, action, reasonCode, applicationVersion: merchant.application_version });
+      if (proposedSettlementWallet) {
+        if (proposedSettlementWallet === merchant.settlement_wallet.toLowerCase()) {
+          throw new CoreError('InvalidRequest', 'Proposed settlement wallet must differ from the approved wallet');
+        }
+        await assertSettlementWalletAvailable(executor, merchantId, proposedSettlementWallet);
+      }
+      const requestHash = hashJson({
+        merchantId,
+        action,
+        reasonCode,
+        proposedSettlementWallet: proposedSettlementWallet ?? null,
+        applicationVersion: merchant.application_version,
+      });
       const existing = await executor.query<ReviewRow>(
         'SELECT * FROM core.merchant_review_actions WHERE actor_wallet = $1 AND idempotency_key = $2',
         [wallet, input.idempotencyKey],
@@ -398,19 +416,27 @@ export class MerchantLifecycleService {
       }
       const policyVersion = await latestPolicyVersion(executor);
       const oldValueHash = merchantStateHash(merchant, merchant.status);
-      const newValueHash = merchantStateHash(merchant, toStatus, reasonCode);
+      const newValueHash = merchantStateHash(
+        merchant,
+        toStatus,
+        reasonCode,
+        proposedSettlementWallet ?? merchant.settlement_wallet,
+      );
       const now = this.#clock();
       const row = (await executor.query<ReviewRow>(
         `INSERT INTO core.merchant_review_actions (
            action_id, merchant_id, action_kind, from_status, to_status,
            application_version, policy_version, reason_code, old_value_hash, new_value_hash,
+           previous_settlement_wallet, proposed_settlement_wallet,
            approval_nonce, approval_deadline, state, governance_safe_address,
            actor_wallet, idempotency_key, request_hash, created_at, updated_at
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'DRAFT',$13,$14,$15,$16,$17,$17)
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'DRAFT',$15,$16,$17,$18,$19,$19)
          RETURNING *`,
         [
           randomHash(), merchantId, action, merchant.status, toStatus,
           merchant.application_version, policyVersion, reasonCode, oldValueHash, newValueHash,
+          proposedSettlementWallet ? merchant.settlement_wallet.toLowerCase() : null,
+          proposedSettlementWallet ?? null,
           randomNonce().toString(), new Date(now.getTime() + 5 * 60_000), this.#governanceSafe,
           wallet, input.idempotencyKey, requestHash, now,
         ],
@@ -455,6 +481,10 @@ export class MerchantLifecycleService {
         const application = await latestApplication(executor, merchant);
         if (!application?.license_asset_id) throw new CoreError('ConfigurationRequired', 'Merchant license evidence is incomplete', 409);
       }
+      if (row.action_kind === 'CHANGE_SETTLEMENT_WALLET') {
+        assertWalletChangeSnapshot(row, merchant);
+        await assertSettlementWalletAvailable(executor, merchantId, row.proposed_settlement_wallet!);
+      }
       const intent = reviewIntent(row);
       const verified = verifySensitiveActionApproval(
         intent,
@@ -498,6 +528,7 @@ export class MerchantLifecycleService {
         row.state !== 'DRAFT'
         || merchant.status !== row.from_status
         || Number(merchant.application_version) !== Number(row.application_version)
+        || merchantStateHash(merchant, merchant.status) !== row.old_value_hash
       ) throw new CoreError('IdempotencyConflict', 'Merchant review changed during Safe approval', 409);
       const now = this.#clock();
       if (row.action_kind === 'APPROVE') {
@@ -518,7 +549,7 @@ export class MerchantLifecycleService {
              evidence_hash = EXCLUDED.evidence_hash, revoked_at = NULL`,
           [merchant.settlement_wallet.toLowerCase(), merchantId, prepared.actionDigest, now],
         );
-      } else {
+      } else if (row.action_kind !== 'CHANGE_SETTLEMENT_WALLET') {
         await executor.query(
           `UPDATE core.wallet_role_bindings SET status = 'SUSPENDED'
            WHERE lower(wallet_address) = $1 AND role = 'MERCHANT' AND merchant_id = $2`,
@@ -526,21 +557,56 @@ export class MerchantLifecycleService {
         );
       }
       await executor.query(
-        `UPDATE core.merchants SET status = $2, reviewed_at = $3, reviewed_by = $4, updated_at = $3
-         WHERE merchant_id = $1`,
-        [merchantId, row.to_status, now, wallet],
-      );
-      await executor.query(
         `UPDATE core.merchant_review_actions SET state = 'PUBLISHED', secondary_signer = $2,
            secondary_signature_hash = $3, action_digest = $4, safe_tx_hash = $5,
            approval_evidence_hash = $6, updated_at = $7 WHERE action_id = $1`,
         [row.action_id, prepared.verified.signer, keccak256(signature).toLowerCase(), prepared.actionDigest, safe.safeTxHash, safe.approvalEvidenceHash, now],
       );
+      if (row.action_kind === 'CHANGE_SETTLEMENT_WALLET') {
+        assertWalletChangeSnapshot(row, merchant);
+        await assertSettlementWalletAvailable(executor, merchantId, row.proposed_settlement_wallet!);
+        await executor.query(
+          `UPDATE core.merchants SET settlement_wallet = $2, reviewed_by = $3, updated_at = $4
+           WHERE merchant_id = $1`,
+          [merchantId, row.proposed_settlement_wallet, wallet, now],
+        );
+        await executor.query(
+          `UPDATE core.wallet_role_bindings SET status = 'REVOKED', revoked_at = $3
+           WHERE lower(wallet_address) = $1 AND role = 'MERCHANT' AND merchant_id = $2`,
+          [row.previous_settlement_wallet, merchantId, now],
+        );
+        await executor.query(
+          `INSERT INTO core.wallet_role_bindings (
+             wallet_address, role, merchant_id, status, evidence_hash, created_at, revoked_at
+           ) VALUES ($1,'MERCHANT',$2,'ACTIVE',$3,$4,NULL)
+           ON CONFLICT (wallet_address, role) DO UPDATE SET
+             merchant_id = EXCLUDED.merchant_id, status = 'ACTIVE',
+             evidence_hash = EXCLUDED.evidence_hash, revoked_at = NULL`,
+          [row.proposed_settlement_wallet, merchantId, prepared.actionDigest, now],
+        );
+        await executor.query(
+          `UPDATE core.merchant_review_actions SET wallet_change_applied_at = $2, updated_at = $2
+           WHERE action_id = $1 AND state = 'PUBLISHED' AND wallet_change_applied_at IS NULL`,
+          [row.action_id, now],
+        );
+      } else {
+        await executor.query(
+          `UPDATE core.merchants SET status = $2, reviewed_at = $3, reviewed_by = $4, updated_at = $3
+           WHERE merchant_id = $1`,
+          [merchantId, row.to_status, now, wallet],
+        );
+      }
       await executor.query(
         `INSERT INTO core.outbox_events (
            event_id, aggregate_type, aggregate_id, event_type, payload, idempotency_key, state
-         ) VALUES ($1,'MERCHANT',$2,'MerchantStatusChanged',$3,$1,'PENDING')`,
-        [`outbox:merchant-review:${row.action_id}`, merchantId, JSON.stringify({
+         ) VALUES ($1,'MERCHANT',$2,$3,$4,$1,'PENDING')`,
+        [
+          `outbox:merchant-review:${row.action_id}`,
+          merchantId,
+          row.action_kind === 'CHANGE_SETTLEMENT_WALLET'
+            ? 'MerchantSettlementWalletChanged'
+            : 'MerchantStatusChanged',
+          JSON.stringify({
           artifactVersion: CORE_ARTIFACT_VERSION,
           merchantId,
           action: row.action_kind,
@@ -548,7 +614,8 @@ export class MerchantLifecycleService {
           toStatus: row.to_status,
           applicationVersion: Number(row.application_version),
           safeTxHash: safe.safeTxHash,
-        })],
+          }),
+        ],
       );
       await lifecycleAudit(executor, {
         eventType: 'MerchantReviewPublished', merchantId, actorWallet: wallet, roles,
@@ -576,9 +643,10 @@ export class MerchantLifecycleService {
     const qualification = application
       ? qualificationProjection(application, this.#encryptionKey, roles)
       : { access: 'UNAVAILABLE' as const, reason: 'PARTIAL_LEGACY' as const, licenseAssetId: null };
-    const [orders, fulfillment, risk, contributions, balances, settlements, reviews] = await Promise.all([
+    const [levelPolicy, orders, fulfillment, risk, contributions, balances, settlements, reviews] = await Promise.all([
+      merchantLevelPolicyProjection(executor, merchant.level),
       merchantOrderStats(executor, merchantId, businessDay(this.#clock())),
-      merchantFulfillmentStats(executor, merchantId),
+      merchantFulfillmentStats(executor, merchantId, this.#clock()),
       merchantRiskStats(executor, merchantId),
       merchantContributionStats(executor, merchantId),
       merchantBalanceStats(executor, merchantId),
@@ -589,10 +657,7 @@ export class MerchantLifecycleService {
       artifactVersion: CORE_ARTIFACT_VERSION,
       merchant: merchantSummaryProjection({ ...merchant, qualification_complete: Boolean(application?.license_asset_id) }),
       qualification,
-      levelPolicy: {
-        status: 'DecisionBlocked' as const,
-        reason: 'Merchant level price basis and monthly quota window are not frozen',
-      },
+      levelPolicy,
       analytics: { orders, fulfillment, risk, contributions },
       balances,
       settlements,
@@ -796,31 +861,89 @@ async function merchantOrderStats(executor: SqlExecutor, merchantId: string, win
   };
 }
 
-async function merchantFulfillmentStats(executor: SqlExecutor, merchantId: string) {
+async function merchantLevelPolicyProjection(executor: SqlExecutor, level: MerchantLevel) {
+  try {
+    const policy = await currentMerchantLevelPolicy(executor);
+    const rule = merchantLevelRule(policy, level);
+    return {
+      status: 'AVAILABLE' as const,
+      configVersionId: policy.configVersionId,
+      version: policy.version,
+      effectiveFrom: policy.effectiveFrom.toISOString(),
+      level: rule.level,
+      maxProductSettlementUsdt: rule.maxProductSettlementUsdt,
+      monthlySeckillQuota: rule.monthlySeckillQuota,
+    };
+  } catch (error) {
+    if (error instanceof CoreError && error.code === 'DecisionBlocked') {
+      return { status: 'DecisionBlocked' as const, reason: error.message };
+    }
+    throw error;
+  }
+}
+
+async function merchantFulfillmentStats(executor: SqlExecutor, merchantId: string, now: Date) {
   const result = await executor.query<{
     pending: string; in_transit: string; completed: string; pickup_completed: string;
+    fast_ship_numerator: string; fast_ship_denominator: string;
   }>(
-    `SELECT
-       count(*) FILTER (WHERE fulfillment_mode = 'DELIVERY' AND state = 'PAID')::text AS pending,
-       count(*) FILTER (WHERE fulfillment_mode = 'DELIVERY' AND state IN ('SHIPPED','DELIVERED'))::text AS in_transit,
-       count(*) FILTER (WHERE state = 'FULFILLED')::text AS completed,
-       count(*) FILTER (WHERE fulfillment_mode = 'PICKUP' AND state = 'FULFILLED')::text AS pickup_completed
-     FROM core.orders WHERE merchant_id = $1`,
-    [merchantId],
+    `WITH fast_ship_cohort AS (
+       SELECT orders.shipped_at, finality.finalized_at
+       FROM core.orders orders
+       JOIN LATERAL (
+         SELECT finality.finalized_at
+         FROM core.transaction_finality finality
+         JOIN core.payment_events payment
+           ON payment.order_id = orders.order_id
+          AND payment.transaction_hash = finality.tx_hash
+          AND payment.block_hash = finality.block_hash
+         WHERE finality.resource_type = 'ORDER_PAYMENT'
+           AND finality.resource_id = orders.order_id
+           AND payment.canonical
+           AND finality.state = 'FINAL'
+           AND finality.receipt_status = 1
+           AND finality.required_confirmations = 15
+           AND finality.confirmations >= finality.required_confirmations
+         ORDER BY finality.finalized_at DESC, finality.updated_at DESC, finality.transaction_id DESC
+         LIMIT 1
+       ) finality ON true
+       WHERE orders.merchant_id = $1
+         AND orders.fulfillment_mode = 'DELIVERY'
+         AND (orders.shipped_at IS NOT NULL OR finality.finalized_at <= $2::timestamptz - interval '48 hours')
+     )
+     SELECT
+       (SELECT count(*)::text FROM core.orders WHERE merchant_id = $1 AND fulfillment_mode = 'DELIVERY' AND state = 'PAID') AS pending,
+       (SELECT count(*)::text FROM core.orders WHERE merchant_id = $1 AND fulfillment_mode = 'DELIVERY' AND state IN ('SHIPPED','DELIVERED')) AS in_transit,
+       (SELECT count(*)::text FROM core.orders WHERE merchant_id = $1 AND state = 'FULFILLED') AS completed,
+       (SELECT count(*)::text FROM core.orders WHERE merchant_id = $1 AND fulfillment_mode = 'PICKUP' AND state = 'FULFILLED') AS pickup_completed,
+       count(*) FILTER (WHERE shipped_at IS NOT NULL AND shipped_at <= finalized_at + interval '48 hours')::text AS fast_ship_numerator,
+       count(*)::text AS fast_ship_denominator
+     FROM fast_ship_cohort`,
+    [merchantId, now],
   );
   const row = result.rows[0];
+  const numerator = row?.fast_ship_numerator ?? '0';
+  const denominator = row?.fast_ship_denominator ?? '0';
   return {
     pendingShipment: row?.pending ?? '0',
     inTransit: row?.in_transit ?? '0',
     completed: row?.completed ?? '0',
     pickupCompleted: row?.pickup_completed ?? '0',
-    fastShip48h: {
-      status: 'DecisionBlocked' as const,
-      numerator: null,
-      denominator: null,
-      bps: null,
-      reason: 'The eligible order denominator for the 48-hour shipping rate is not frozen',
-    },
+    fastShip48h: denominator === '0'
+      ? {
+          status: 'UNAVAILABLE' as const,
+          numerator,
+          denominator,
+          bps: null,
+          reason: 'NO_ELIGIBLE_DELIVERY_ORDERS' as const,
+        }
+      : {
+          status: 'AVAILABLE' as const,
+          numerator,
+          denominator,
+          bps: Number(BigInt(numerator) * 10_000n / BigInt(denominator)),
+          reason: null,
+        },
   };
 }
 
@@ -1050,18 +1173,63 @@ function reviewTransition(status: MerchantStatus, action: ReviewAction) {
   if (action === 'APPROVE' && status === 'PENDING') return 'APPROVED' as const;
   if (action === 'REJECT' && status === 'PENDING') return 'REJECTED' as const;
   if (action === 'BLACKLIST' && status === 'APPROVED') return 'BLACKLISTED' as const;
+  if (action === 'CHANGE_SETTLEMENT_WALLET' && status === 'APPROVED') return 'APPROVED' as const;
   throw new CoreError('UnknownState', `Merchant ${status} cannot apply ${action}`, 409);
 }
 
-function merchantStateHash(merchant: MerchantRow, status: string, reasonCode?: string) {
+function merchantStateHash(
+  merchant: MerchantRow,
+  status: string,
+  reasonCode?: string,
+  settlementWallet = merchant.settlement_wallet,
+) {
   return hashJson({
     merchantId: merchant.merchant_id,
-    settlementWallet: merchant.settlement_wallet.toLowerCase(),
+    settlementWallet: settlementWallet.toLowerCase(),
     status,
     level: merchant.level,
     applicationVersion: Number(merchant.application_version),
     ...(reasonCode ? { reasonCode } : {}),
   });
+}
+
+function settlementWalletChangeTarget(action: ReviewAction, value: string | undefined) {
+  if (action !== 'CHANGE_SETTLEMENT_WALLET') {
+    if (value !== undefined) {
+      throw new CoreError('InvalidRequest', 'Proposed settlement wallet is valid only for a wallet change');
+    }
+    return undefined;
+  }
+  if (value === undefined) throw new CoreError('InvalidRequest', 'Proposed settlement wallet is required');
+  return normalizeAddress(value);
+}
+
+function assertWalletChangeSnapshot(row: ReviewRow, merchant: MerchantRow) {
+  if (
+    row.action_kind !== 'CHANGE_SETTLEMENT_WALLET'
+    || !row.previous_settlement_wallet
+    || !row.proposed_settlement_wallet
+    || row.previous_settlement_wallet.toLowerCase() !== merchant.settlement_wallet.toLowerCase()
+    || row.proposed_settlement_wallet.toLowerCase() === merchant.settlement_wallet.toLowerCase()
+    || merchantStateHash(merchant, row.to_status, row.reason_code, row.proposed_settlement_wallet) !== row.new_value_hash
+  ) throw new CoreError('IdempotencyConflict', 'Merchant settlement wallet snapshot changed', 409);
+}
+
+async function assertSettlementWalletAvailable(executor: SqlExecutor, merchantId: string, wallet: string) {
+  const merchant = await executor.query<{ merchant_id: string }>(
+    `SELECT merchant_id FROM core.merchants
+     WHERE lower(settlement_wallet) = $1 AND merchant_id <> $2 FOR UPDATE`,
+    [wallet.toLowerCase(), merchantId],
+  );
+  if (merchant.rows[0]) throw new CoreError('Forbidden', 'Settlement wallet is bound to another merchant', 403);
+  const binding = await executor.query<{ merchant_id: string | null }>(
+    `SELECT merchant_id FROM core.wallet_role_bindings
+     WHERE lower(wallet_address) = $1 AND role = 'MERCHANT' FOR UPDATE`,
+    [wallet.toLowerCase()],
+  );
+  if (binding.rows[0] && binding.rows[0].merchant_id !== merchantId) {
+    throw new CoreError('Forbidden', 'Settlement wallet is bound to another merchant', 403);
+  }
 }
 
 function applicationInput(input: MerchantApplicationInput) {

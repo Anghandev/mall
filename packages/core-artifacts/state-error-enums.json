@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.14",
+  "artifactVersion": "2.0.0-settlement-admin.15",
   "adminResourceTypes": [
     "ORDER",
     "PRODUCT",
@@ -282,7 +282,8 @@
   "merchantReviewActions": [
     "APPROVE",
     "REJECT",
-    "BLACKLIST"
+    "BLACKLIST",
+    "CHANGE_SETTLEMENT_WALLET"
   ],
   "fulfillmentAssets": [
     "USDT",
@@ -496,7 +497,8 @@
     "ORACLE",
     "GAS",
     "CHAIN",
-    "INTEGRATIONS"
+    "INTEGRATIONS",
+    "MERCHANT_LEVELS"
   ],
   "auditStreamNames": [
     "financial",

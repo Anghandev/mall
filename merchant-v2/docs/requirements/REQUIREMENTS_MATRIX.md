@@ -100,18 +100,19 @@ does not complete or verify a Requirement while its Core capability is missing.
   receivables or an extra seckill share, and test fixtures stay outside the
   production bundle.
 
-## Settlement Admin .13 Consumer Boundary
+## Settlement Admin .14 Consumer Boundary
 
-- `@abu24k/core-artifacts@2.0.0-settlement-admin.13` preserves the existing
+- `@abu24k/core-artifacts@2.0.0-settlement-admin.14` preserves the existing
   Merchant settlement intent, wallet-signed request and tenant-scoped history
   operations without changing Merchant fulfillment or fund calculations.
 - Admin-wide settlement reads, governed intents, coverage-breaker recovery and
-  global catalog/order lifecycle batches remain Admin-only. The Merchant
-  client exposes none of their published operation IDs, and the production
-  bundle rejects all matching Admin routes.
-- The carried-forward Admin-only synchronization completes no Merchant
-  Requirement ID; it records the product ownership boundary without a parallel
-  endpoint, production fixture or browser-side amount calculation.
+  global catalog/order lifecycle batches remain Admin-only. Notification feed,
+  endpoint registration and Admin campaign operations are also excluded because
+  Merchant has no notification-page PRD. The Merchant client exposes none of
+  these published operation IDs.
+- This is `ADM-NOTIFY-001` artifact consumer evidence only. It completes no
+  Merchant Requirement ID and adds no parallel endpoint, page, production
+  fixture or browser-side amount calculation.
 
 ## Settlement Admin .11 Takeover Fulfillment Evidence
 

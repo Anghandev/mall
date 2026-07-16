@@ -1663,10 +1663,10 @@ export function NotificationsScreen() {
           {runtime.notifications.map((item) => (
             <article key={item.messageId}>
               <div className="notification-list__header">
-                <div><p className="eyebrow">{item.topic}</p><h2>{item.sourceEventType}</h2></div>
+                <div><p className="eyebrow">{notificationTopicLabel(item.topic)}</p><h2>{notificationTitle(item)}</h2></div>
                 <span className="status-pill">{notificationStateLabel(item.deliveryState)}</span>
               </div>
-              {notificationTemplateRows(item.templateData).map(([key, value]) => <p key={key}><span>{key}</span><strong>{value}</strong></p>)}
+              {notificationTemplateRows(item.templateData).map(([key, label, value]) => <p key={key}><span>{label}</span><strong>{value}</strong></p>)}
               <time dateTime={item.createdAt}>{formatIso(item.createdAt)}</time>
             </article>
           ))}
@@ -2637,10 +2637,100 @@ function notificationStateLabel(state: MallRuntimeValue['notifications'][number]
   } as const)[state];
 }
 
+function notificationTopicLabel(topic: string) {
+  return ({
+    PAYMENT_FINALIZED: '支付',
+    PAYMENT_REORGED: '支付',
+    SHIPMENT_UPDATED: '发货 / 物流',
+    FULFILLMENT_FINALIZED: '履约',
+    TAKEOVER_OPENED: '履约',
+    BNM_LOCKED: 'BNM',
+    BNM_AVAILABLE: 'BNM',
+    SETTLEMENT_REQUESTED: '结算',
+    SETTLEMENT_BATCHED: '结算',
+    SETTLEMENT_SETTLED: '结算',
+    SETTLEMENT_REORGED: '结算',
+    ANNOUNCEMENT: '公告',
+    MAINTENANCE: '系统维护',
+    ACTIVITY: '活动',
+  } as Record<string, string>)[topic] ?? '业务通知';
+}
+
+function notificationTitle(item: MallRuntimeValue['notifications'][number]) {
+  const titles: Record<string, string> = {
+    PAYMENT_FINALIZED: '支付已确认',
+    PAYMENT_REORGED: '支付确认已回滚',
+    SHIPMENT_UPDATED: '发货与物流已更新',
+    FULFILLMENT_FINALIZED: item.templateData.method === 'PICKUP_VERIFICATION' ? '自提履约已完成' : '订单履约已完成',
+    TAKEOVER_OPENED: '平台接管履约已开启',
+    BNM_LOCKED: 'BNM 已锁定',
+    BNM_AVAILABLE: 'BNM 已可用',
+    SETTLEMENT_REQUESTED: '结算申请已提交',
+    SETTLEMENT_BATCHED: '结算已进入 Safe 批次',
+    SETTLEMENT_SETTLED: '结算已完成',
+    SETTLEMENT_REORGED: '结算确认已回滚',
+    ANNOUNCEMENT: '系统公告',
+    MAINTENANCE: '系统维护通知',
+    ACTIVITY: '活动通知',
+  };
+  return titles[item.topic] ?? notificationTopicLabel(item.topic);
+}
+
 function notificationTemplateRows(template: Readonly<Record<string, unknown>>) {
-  return Object.entries(template)
-    .filter((entry): entry is [string, string | number | boolean] => ['string', 'number', 'boolean'].includes(typeof entry[1]))
-    .map(([key, value]) => [key, String(value)] as const);
+  const rows = Object.entries(template)
+    .filter((entry): entry is [string, string | number | boolean] => entry[0] !== 'copyKey' && ['string', 'number', 'boolean'].includes(typeof entry[1]))
+    .map(([key, value]) => [key, notificationFieldLabel(key), notificationFieldValue(key, value)] as const);
+  const variables = template.variables;
+  if (variables && typeof variables === 'object' && !Array.isArray(variables)) {
+    for (const [key, value] of Object.entries(variables)) {
+      if (['string', 'number', 'boolean'].includes(typeof value)) {
+        rows.push([`variables.${key}`, `活动参数 · ${notificationFieldLabel(key)}`, String(value)] as const);
+      }
+    }
+  }
+  return rows;
+}
+
+function notificationFieldLabel(key: string) {
+  return ({
+    aggregateId: '业务单号',
+    orderId: '订单号',
+    shipmentId: '发货记录',
+    trackingNumberHash: '物流单号哈希',
+    carrierCode: '承运商',
+    logisticsEventId: '物流事件',
+    provider: '物流服务商',
+    status: '物流状态',
+    deliveredAt: '签收时间',
+    occurredAt: '物流更新时间',
+    requestId: '结算申请',
+    rail: '结算类型',
+    safeTxHash: 'Safe 交易',
+    executionTxHash: '执行交易',
+    state: '状态',
+    amount: '数量',
+    stateVersion: 'BNM 状态版本',
+    method: '履约方式',
+    lockedUsdtAmount: 'Locked USDT',
+    lockedNplAmount: 'Locked NPL',
+    availableUsdtAmount: 'Available USDT',
+    availableNplAmount: 'Available NPL',
+    rewardSubtypes: '收益类型',
+    campaignId: '活动编号',
+    transactionHash: '支付交易',
+    confirmations: '链上确认数',
+    titleKey: '标题模板',
+    bodyKey: '正文模板',
+    version: '版本',
+  } as Record<string, string>)[key] ?? key.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+}
+
+function notificationFieldValue(key: string, value: string | number | boolean) {
+  const text = String(value);
+  if (key === 'state') return ({ LOCKED: 'Locked（锁定）', AVAILABLE: 'Available（可用）' } as Record<string, string>)[text] ?? text;
+  if (key === 'method') return ({ PICKUP_VERIFICATION: '自提核销', CUSTOMER_RECEIPT: '客户确认收货', FORCED_RECEIPT: '强制收货', ARBITRATION: '仲裁履约' } as Record<string, string>)[text] ?? text;
+  if (key === 'rail') return ({ REWARD_NPL: 'NPL 收益', PRIZE_USDT: 'USDT 奖励' } as Record<string, string>)[text] ?? text;
+  return text;
 }
 
 function publicContentText(content: Readonly<Record<string, unknown>>) {

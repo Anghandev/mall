@@ -4,6 +4,7 @@ import {
   allowedActionNames,
   artifactVersion,
   executableOrderActionNames,
+  type NotificationInboxItem,
   type PaymentQuoteResponse,
 } from '@abu24k/core-artifacts';
 import { MemoryRouter } from 'react-router-dom';
@@ -12,7 +13,7 @@ import { vi } from 'vitest';
 import { MallApp, mallRuntimeBoundary } from '../src/App';
 import { isCoreOrderActionExecutable, productBaseline } from '../src/bootstrap';
 import { CoreClientError, type CoreClient, type CorePaymentAvailability } from '../src/core-client';
-import type { MallServices, PendingSubmission } from '../src/mall-runtime';
+import { MallRuntimeProvider, useMallRuntime, type MallServices, type PendingSubmission } from '../src/mall-runtime';
 import type { WalletGateway } from '../src/wallet';
 import { catalogCategories, catalogTags, publicMediaAccess } from './catalog-fixtures';
 import {
@@ -77,12 +78,24 @@ function renderAt(path = '/seckill', services = offlineServices()) {
   );
 }
 
+function NotificationConnectionProbe() {
+  const runtime = useMallRuntime();
+  return (
+    <div>
+      <button type="button" onClick={() => void runtime.connectWallet()}>连接测试钱包</button>
+      <button type="button" onClick={() => void runtime.reloadNotifications()}>刷新测试通知</button>
+      <span data-testid="notification-state">{runtime.notificationsState}</span>
+      {runtime.notifications.map((item) => <span key={item.messageId}>{item.messageId}</span>)}
+    </div>
+  );
+}
+
 describe('Mall V2 payment consumer', () => {
   it('consumes the current coordinated Core checkpoint and keeps payment writes fail closed', async () => {
     renderAt('/mall');
 
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.13');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.14');
     expect(productBaseline.manifestsAligned).toBe(true);
     expect(productBaseline.knownOrderActions).toBe(allowedActionNames);
     expect(productBaseline.executableOrderActions).toBe(executableOrderActionNames);
@@ -91,7 +104,7 @@ describe('Mall V2 payment consumer', () => {
     expect(isCoreOrderActionExecutable('CONFIRM_RECEIPT')).toBe(true);
     expect(isCoreOrderActionExecutable('PAY_ORDER')).toBe(false);
     expect(mallRuntimeBoundary).toMatchObject({
-      artifactStatus: '2.0.0-settlement-admin.13',
+      artifactStatus: '2.0.0-settlement-admin.14',
       executableOrderActions: executableOrderActionNames,
       deploymentAuthorized: false,
       settlementAdminCapabilities: {
@@ -1088,15 +1101,44 @@ describe('Mall V2 payment consumer', () => {
       topics: ['*'],
       state: 'ACTIVE',
     });
+    const notifications: readonly NotificationInboxItem[] = [
+      notificationItem,
+      { ...notificationItem },
+      notification('payment-message', 'PaymentFinalized', 'PAYMENT_FINALIZED', { orderId: 'order-payment', state: 'LOCKED' }),
+      notification('shipment-message', 'LogisticsUpdated', 'SHIPMENT_UPDATED', {
+        orderId: 'order-shipment', provider: 'KUAIDI100', carrierCode: 'SF', trackingNumberHash: `0x${'5'.repeat(64)}`, status: 'IN_TRANSIT',
+      }),
+      notification('pickup-message', 'FulfillmentFinalized', 'FULFILLMENT_FINALIZED', {
+        orderId: 'order-pickup', method: 'PICKUP_VERIFICATION', availableNplAmount: '20',
+      }),
+      notification('bnm-locked-message', 'BnmStateFinalized', 'BNM_LOCKED', { state: 'LOCKED', amount: '100', stateVersion: '1' }),
+      notification('bnm-available-message', 'BnmStateFinalized', 'BNM_AVAILABLE', { state: 'AVAILABLE', amount: '100', stateVersion: '2' }),
+      notification('activity-message', 'NotificationCampaignPublished', 'ACTIVITY', {
+        titleKey: 'SECKILL_ACTIVITY', bodyKey: 'SECKILL_ACTIVITY_BODY', campaignId: 'campaign-24k', variables: { version: '2' },
+      }),
+    ];
     const services = readyServices({
-      listNotifications: vi.fn().mockResolvedValue([notificationItem]),
+      listNotifications: vi.fn().mockResolvedValue(notifications),
       registerNotificationEndpoint,
     });
     renderAt('/assets/notifications', services);
 
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
-    await screen.findByRole('heading', { name: 'SettlementFinalized' });
+    await screen.findByRole('heading', { name: '结算已完成' });
+    expect(screen.getAllByRole('heading', { name: '结算已完成' })).toHaveLength(1);
+    expect(screen.getByRole('heading', { name: '支付已确认' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '发货与物流已更新' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '自提履约已完成' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'BNM 已锁定' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'BNM 已可用' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '活动通知' })).toBeTruthy();
+    expect(screen.getByText('物流单号哈希')).toBeTruthy();
+    expect(screen.getByText('自提核销')).toBeTruthy();
+    expect(screen.getAllByText('Locked（锁定）')).toHaveLength(2);
+    expect(screen.getAllByText('Available（可用）')).toHaveLength(1);
+    expect(screen.getByText('活动参数 · 版本')).toBeTruthy();
     expect(screen.getByText(finalSafeTxHash)).toBeTruthy();
+    expect(screen.getByRole('button', { name: `重新验证或切换钱包，当前 ${BUYER}` })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '启用站内通知' }));
     await waitFor(() => expect(registerNotificationEndpoint).toHaveBeenCalledWith('buyer-session', {
       channel: 'IN_APP',
@@ -1105,6 +1147,69 @@ describe('Mall V2 payment consumer', () => {
       topics: ['*'],
     }));
     expect(await screen.findByText('CORE · ACTIVE')).toBeTruthy();
+  });
+
+  it('clears the prior wallet inbox immediately and ignores its late refresh response', async () => {
+    const secondBuyer = '0x2222222222222222222222222222222222222222';
+    const oldRefresh = deferred<readonly NotificationInboxItem[]>();
+    const newInbox = deferred<readonly NotificationInboxItem[]>();
+    const oldItem = notification('old-wallet-message', 'PaymentFinalized', 'PAYMENT_FINALIZED', { orderId: 'old-order' });
+    const newItem = notification('new-wallet-message', 'ShipmentRecorded', 'SHIPMENT_UPDATED', { orderId: 'new-order' });
+    let notificationCall = 0;
+    const listNotifications = vi.fn<CoreClient['listNotifications']>().mockImplementation(() => {
+      notificationCall += 1;
+      if (notificationCall === 1) return Promise.resolve([oldItem]);
+      if (notificationCall === 2) return oldRefresh.promise;
+      return newInbox.promise;
+    });
+    const walletForToken = (token: string) => token === 'buyer-session-2' ? secondBuyer : BUYER;
+    const services = readyServices({
+      authenticate: vi.fn().mockImplementation((walletAddress: string) => Promise.resolve({
+        token: walletAddress === secondBuyer ? 'buyer-session-2' : 'buyer-session',
+        walletAddress,
+        roles: ['BUYER'],
+      })),
+      getBuyerProfile: vi.fn().mockImplementation((token: string) => Promise.resolve({ ...buyerProfile, wallet: walletForToken(token) })),
+      getBuyerOverview: vi.fn().mockImplementation((token: string) => Promise.resolve({ ...buyerOverview, wallet: walletForToken(token) })),
+      listBuyerShoppingStatements: vi.fn().mockImplementation((token: string) => Promise.resolve({
+        artifactVersion, buyerWallet: walletForToken(token), statements: [], nextCursor: null,
+      })),
+      listSettlements: vi.fn().mockImplementation((token: string) => Promise.resolve({
+        artifactVersion, wallet: walletForToken(token), balances: [], points: [], requests: [],
+      })),
+      listNotifications,
+    });
+    services.wallet.connect = vi.fn()
+      .mockResolvedValueOnce(BUYER)
+      .mockResolvedValueOnce(secondBuyer);
+    const user = userEvent.setup();
+    render(<MallRuntimeProvider services={services}><NotificationConnectionProbe /></MallRuntimeProvider>);
+
+    await user.click(screen.getByRole('button', { name: '连接测试钱包' }));
+    expect(await screen.findByText('old-wallet-message')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '刷新测试通知' }));
+    await waitFor(() => expect(listNotifications).toHaveBeenCalledTimes(2));
+    await user.click(screen.getByRole('button', { name: '连接测试钱包' }));
+    expect(screen.queryByText('old-wallet-message')).toBeNull();
+    await waitFor(() => expect(listNotifications).toHaveBeenCalledTimes(3));
+
+    oldRefresh.resolve([oldItem]);
+    await waitFor(() => expect(screen.queryByText('old-wallet-message')).toBeNull());
+    newInbox.resolve([newItem, { ...newItem }]);
+    expect(await screen.findByText('new-wallet-message')).toBeTruthy();
+    expect(screen.getAllByText('new-wallet-message')).toHaveLength(1);
+  });
+
+  it('fails closed without test notification fixtures when the Core inbox errors', async () => {
+    const user = userEvent.setup();
+    renderAt('/assets/notifications', readyServices({
+      listNotifications: vi.fn().mockRejectedValue(new CoreClientError('ExternalBlocked', 'Notification inbox unavailable')),
+    }));
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    expect(await screen.findByRole('heading', { name: '通知同步失败' })).toBeTruthy();
+    expect(screen.queryByText(finalSafeTxHash)).toBeNull();
+    expect(screen.queryByRole('heading', { name: '结算已完成' })).toBeNull();
   });
 
   it('provides accessible names for every icon-only control', () => {
@@ -1269,6 +1374,28 @@ function bootstrap(writesEnabled: boolean): CorePaymentAvailability {
     writesEnabled,
     blockCode: writesEnabled ? null : 'ExternalBlocked',
   };
+}
+
+function notification(
+  messageId: string,
+  sourceEventType: string,
+  topic: string,
+  templateData: NotificationInboxItem['templateData'],
+): NotificationInboxItem {
+  return {
+    messageId,
+    sourceEventType,
+    topic,
+    templateData,
+    deliveryState: 'DELIVERED',
+    createdAt: '2033-05-18T05:10:00.000Z',
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => { resolve = next; });
+  return { promise, resolve };
 }
 
 const BUYER = '0x1111111111111111111111111111111111111111';
