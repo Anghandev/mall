@@ -77,7 +77,8 @@ function MallShell() {
           <button
             className="wallet-button"
             type="button"
-            disabled={runtime.busy || Boolean(runtime.session)}
+            aria-label={runtime.session ? `重新验证或切换钱包，当前 ${runtime.session.walletAddress}` : '连接钱包'}
+            disabled={runtime.busy}
             onClick={() => void runtime.connectWallet()}
           >
             <WalletCards aria-hidden="true" size={17} />

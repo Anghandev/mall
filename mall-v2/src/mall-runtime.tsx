@@ -283,6 +283,8 @@ export function MallRuntimeProvider({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const broadcastInFlight = useRef(false);
+  const walletConnectionAttempt = useRef(0);
+  const notificationRequestGeneration = useRef(0);
   const buyerActionAttempts = useRef(new Map<string, BuyerActionAttempt>());
   const mediaAccessCache = useRef(new Map<string, MediaReadAccessProjection>());
   const mediaAccessInFlight = useRef(new Map<string, Promise<MediaReadAccessProjection>>());
@@ -475,11 +477,14 @@ export function MallRuntimeProvider({
 
     async connectWallet() {
       await run(async () => {
+        const connectionAttempt = ++walletConnectionAttempt.current;
+        resetAuthenticatedState();
         const walletAddress = await services.wallet.connect();
         const nextSession = await services.core.authenticate(
           walletAddress,
           (message) => services.wallet.signMessage(message),
         );
+        if (connectionAttempt !== walletConnectionAttempt.current) return;
         if (!nextSession.roles.includes('BUYER')) throw new CoreClientError('Forbidden', '当前钱包没有购买权限');
         const recovered = services.submissionStore.load(nextSession.walletAddress);
         setPendingSubmission(recovered);
@@ -900,12 +905,14 @@ export function MallRuntimeProvider({
     async enableInAppNotifications() {
       await run(async () => {
         const activeSession = requireSession();
+        const requestGeneration = notificationRequestGeneration.current;
         const endpoint = await services.core.registerNotificationEndpoint(activeSession.token, {
           channel: 'IN_APP',
           provider: 'CORE',
           endpointReference: `recipient://wallet/${activeSession.walletAddress.toLowerCase()}`,
           topics: ['*'],
         });
+        if (requestGeneration !== notificationRequestGeneration.current) return;
         setNotificationEndpoint(endpoint);
         await loadNotificationBundle(activeSession);
       });
@@ -1404,10 +1411,17 @@ export function MallRuntimeProvider({
   }
 
   async function loadNotificationBundle(activeSession: WalletSession) {
+    const requestGeneration = ++notificationRequestGeneration.current;
     setNotificationsState('loading');
-    const nextNotifications = await services.core.listNotifications(activeSession.token);
-    setNotifications(nextNotifications);
-    setNotificationsState(nextNotifications.length > 0 ? 'ready' : 'empty');
+    try {
+      const nextNotifications = deduplicateNotifications(await services.core.listNotifications(activeSession.token));
+      if (requestGeneration !== notificationRequestGeneration.current) return;
+      setNotifications(nextNotifications);
+      setNotificationsState(nextNotifications.length > 0 ? 'ready' : 'empty');
+    } catch (reason) {
+      if (requestGeneration !== notificationRequestGeneration.current) return;
+      throw reason;
+    }
   }
 
   async function loadCms(token?: string) {
@@ -1431,6 +1445,44 @@ export function MallRuntimeProvider({
     setProjection(nextProjection);
     services.submissionStore.clear(submission);
     setPendingSubmission(null);
+  }
+
+  function resetAuthenticatedState() {
+    notificationRequestGeneration.current += 1;
+    buyerActionAttempts.current.clear();
+    setSession(null);
+    setCheckoutTarget(null);
+    setOrders([]);
+    setOrdersState('idle');
+    setOrdersNextCursor(null);
+    setOrderActions({});
+    setOrderTargets({});
+    setOrderCapabilityErrors({});
+    setTakeoverTimelines({});
+    setTakeoverTimelineErrors({});
+    setBuyerProfile(null);
+    setBuyerProfileState('idle');
+    setBuyerAvatarAccess(null);
+    setBuyerAvatarState('idle');
+    setBuyerOverview(null);
+    setBuyerOverviewState('idle');
+    setBuyerAddresses([]);
+    setBuyerAddressesState('idle');
+    setShoppingStatements([]);
+    setShoppingStatementsState('idle');
+    setShoppingStatementsNextCursor(null);
+    setShoppingStatementsLoadingMore(false);
+    setShoppingStatementsError(null);
+    setParsedBuyerAddress(null);
+    setAddressParseState('idle');
+    setSettlements(null);
+    setSettlementsState('idle');
+    setNotifications([]);
+    setNotificationsState('idle');
+    setNotificationEndpoint(null);
+    setPendingSubmission(null);
+    setSubmittedTxHash(null);
+    clearPaymentState();
   }
 }
 
@@ -1630,6 +1682,15 @@ function mergeShoppingStatements(
   const byId = new Map(current.map((statement) => [statement.orderId.toLowerCase(), statement]));
   for (const statement of incoming) byId.set(statement.orderId.toLowerCase(), statement);
   return [...byId.values()];
+}
+
+function deduplicateNotifications(items: readonly NotificationInboxItem[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.messageId)) return false;
+    seen.add(item.messageId);
+    return true;
+  });
 }
 
 function errorMessage(reason: unknown) {

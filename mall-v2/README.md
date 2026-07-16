@@ -5,7 +5,7 @@ Requirement Matrix and consumes only coordinated Core artifacts.
 
 ## Current Runtime Boundary
 
-- Production consumes coordinated Core artifacts `2.0.0-settlement-admin.13` and derives
+- Production consumes coordinated Core artifacts `2.0.0-settlement-admin.14` and derives
   its HTTP paths from the published OpenAPI document.
 - The public catalog consumes active products/SKUs, enabled three-level
   categories, enabled tags, field-level product associations, rich detail,
@@ -51,6 +51,11 @@ Requirement Matrix and consumes only coordinated Core artifacts.
   `FINAL` events and reloads artifacts after close `4409`.
 - Published CMS content, the wallet notification inbox and the IN_APP/CORE
   endpoint are consumed from the same OpenAPI and generated-types checkpoint.
+  Wallet re-verification clears the prior authenticated inbox before requesting
+  the next wallet, ignores late responses from older requests and deduplicates
+  repeated `messageId` values. Notification titles and fields render the real
+  payment, logistics, fulfillment, BNM, settlement and campaign template data;
+  Core errors remain visible and never fall back to production fixtures.
   Reward sub-type attribution renders only when Core projects the wallet's
   genesis, direct, district, city, province, region, operations or rounding
   subtype. BNM account totals render only Locked/Available and never enter a

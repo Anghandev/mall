@@ -1,7 +1,7 @@
 # Mall Core API Publication Boundary
 
 Status: the previous handwritten `mall-api-v1` proposal is retired. Mall now
-consumes coordinated Core artifacts `2.0.0-settlement-admin.13`.
+consumes coordinated Core artifacts `2.0.0-settlement-admin.14`.
 
 The published boundary currently covers:
 

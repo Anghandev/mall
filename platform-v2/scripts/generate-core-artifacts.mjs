@@ -130,6 +130,7 @@ const schemaSources = [
       '024_merchant_fulfillment_completion.sql',
       '025_takeover_assignments.sql',
       '026_admin_product_lifecycle_batches.sql',
+      '027_merchant_governance_completion.sql',
     ],
   },
   {
@@ -425,10 +426,7 @@ const coordinatedManifest = {
     'GENESIS_CREDENTIAL_CONTRACT_AND_TOKEN_ID',
     'PICKUP_TIMEOUT_AND_TAKEOVER_EVIDENCE',
     'EMPTY_SESSION_INJECTED_PRIZE_ALLOCATION',
-    'MERCHANT_LEVEL_PRICE_BASIS',
-    'MERCHANT_MONTHLY_SECKILL_QUOTA_WINDOW',
     'MERCHANT_ABNORMAL_ORDER_RATE_TAXONOMY',
-    'MERCHANT_48_HOUR_SHIPPING_RATE_DENOMINATOR',
     'PII_RETENTION_POLICY_VERSION',
     'ADMIN_UID_IDENTITY',
     'ADMIN_PHONE_SEARCH_AUTHORIZATION',
@@ -1799,8 +1797,9 @@ function merchantLifecycleOpenApiSchemas() {
     MerchantReviewChallengeRequest: object({
       action: ref('MerchantReviewAction'),
       reasonCode: { type: 'string', pattern: '^[A-Z0-9_:-]{2,64}$' },
+      proposedSettlementWallet: ref('Address'),
       idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
-    }),
+    }, ['action', 'reasonCode', 'idempotencyKey']),
     MerchantReviewPublishRequest: object({
       signature: { type: 'string', pattern: '^0x(?:[0-9a-fA-F]{2})+$' },
     }),
@@ -1847,13 +1846,24 @@ function merchantLifecycleOpenApiSchemas() {
       inTransit: atomic,
       completed: atomic,
       pickupCompleted: atomic,
-      fastShip48h: object({
-        status: { const: 'DecisionBlocked' },
-        numerator: { type: 'null' },
-        denominator: { type: 'null' },
-        bps: { type: 'null' },
-        reason: string,
-      }),
+      fastShip48h: {
+        anyOf: [
+          object({
+            status: { const: 'AVAILABLE' },
+            numerator: atomic,
+            denominator: atomic,
+            bps: { type: 'integer', minimum: 0, maximum: 10_000 },
+            reason: { type: 'null' },
+          }),
+          object({
+            status: { const: 'UNAVAILABLE' },
+            numerator: atomic,
+            denominator: { const: '0' },
+            bps: { type: 'null' },
+            reason: { const: 'NO_ELIGIBLE_DELIVERY_ORDERS' },
+          }),
+        ],
+      },
     }),
     MerchantRiskAnalytics: object({
       takeoverCases: atomic,
@@ -1887,7 +1897,20 @@ function merchantLifecycleOpenApiSchemas() {
       artifactVersion: { const: artifactVersion },
       merchant: ref('MerchantLifecycleSummary'),
       qualification: ref('MerchantQualification'),
-      levelPolicy: object({ status: { const: 'DecisionBlocked' }, reason: string }),
+      levelPolicy: {
+        anyOf: [
+          object({
+            status: { const: 'AVAILABLE' },
+            configVersionId: string,
+            version: { type: 'integer', minimum: 1 },
+            effectiveFrom: timestamp,
+            level: ref('MerchantLevel'),
+            maxProductSettlementUsdt: atomic,
+            monthlySeckillQuota: { type: 'integer', minimum: 0 },
+          }),
+          object({ status: { const: 'DecisionBlocked' }, reason: string }),
+        ],
+      },
       analytics: object({
         orders: ref('MerchantOrderAnalytics'),
         fulfillment: ref('MerchantFulfillmentAnalytics'),
@@ -6150,6 +6173,7 @@ export interface MerchantApplicationUpdateRequest {
 export interface MerchantReviewChallengeRequest {
   action: MerchantReviewAction;
   reasonCode: string;
+  proposedSettlementWallet?: Address;
   idempotencyKey: string;
 }
 
@@ -6197,7 +6221,17 @@ export interface MerchantLifecycleDetail {
   artifactVersion: typeof artifactVersion;
   merchant: MerchantLifecycleSummary;
   qualification: MerchantQualification;
-  levelPolicy: Readonly<{ status: 'DecisionBlocked'; reason: string }>;
+  levelPolicy:
+    | Readonly<{
+        status: 'AVAILABLE';
+        configVersionId: string;
+        version: number;
+        effectiveFrom: Timestamp;
+        level: MerchantLevel;
+        maxProductSettlementUsdt: AtomicAmount;
+        monthlySeckillQuota: number;
+      }>
+    | Readonly<{ status: 'DecisionBlocked'; reason: string }>;
   analytics: Readonly<{
     orders: {
       totalFinalized: AtomicAmount;
@@ -6213,9 +6247,14 @@ export interface MerchantLifecycleDetail {
       inTransit: AtomicAmount;
       completed: AtomicAmount;
       pickupCompleted: AtomicAmount;
-      fastShip48h: Readonly<{
-        status: 'DecisionBlocked'; numerator: null; denominator: null; bps: null; reason: string;
-      }>;
+      fastShip48h:
+        | Readonly<{
+            status: 'AVAILABLE'; numerator: AtomicAmount; denominator: AtomicAmount; bps: number; reason: null;
+          }>
+        | Readonly<{
+            status: 'UNAVAILABLE'; numerator: AtomicAmount; denominator: '0'; bps: null;
+            reason: 'NO_ELIGIBLE_DELIVERY_ORDERS';
+          }>;
     };
     risk: {
       takeoverCases: AtomicAmount;
