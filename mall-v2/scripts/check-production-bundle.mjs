@@ -16,6 +16,9 @@ const forbidden = [
   { pattern: /\/v2\/admin\/global\/exports/i, reason: 'Admin resource export entered Mall production' },
   { pattern: /\/v2\/admin\/catalog\/products\/batch-tags/i, reason: 'Admin product batch tags entered Mall production' },
   { pattern: /adminGlobalResourceSearchHttp|adminResourceExportHttp|adminProductBatchTaggingHttp/i, reason: 'Admin-only capability metadata entered Mall production' },
+  { pattern: /\/v2\/merchant\/orders\/exports/i, reason: 'Merchant order export entered Mall production' },
+  { pattern: /exportMerchantOrders|merchantOrderExportHttp/i, reason: 'Merchant order export capability entered Mall production' },
+  { pattern: /MerchantOrderExport(?:Request|Filters)?/i, reason: 'Merchant order export PII schema entered Mall production' },
 ];
 
 for (const root of roots) {
