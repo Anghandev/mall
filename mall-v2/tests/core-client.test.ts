@@ -446,6 +446,7 @@ describe('coordinated Core HTTP client', () => {
     expect(JSON.parse(String(calls.find((call) => call.url.endsWith('/v2/fulfillment-targets/delivery'))?.init?.body))).toEqual(targetDraft);
     expect(JSON.parse(String(calls.find((call) => call.url.endsWith('/v2/actions/order'))?.init?.body))).toEqual({ orderId: deliveryOrder.orderId });
     expect(calls.some((call) => call.url.includes(`cursorOrderId=${encodeURIComponent(deliveryOrder.orderId)}`))).toBe(true);
+    expect(calls.every((call) => !call.url.includes('/v2/admin/logistics/'))).toBe(true);
   });
 
   it('uses generated responses and passes exact quote/routerCall fields through unchanged', async () => {
