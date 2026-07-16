@@ -1,4 +1,4 @@
-export const CORE_ARTIFACT_VERSION = '2.0.0-merchant-lifecycle.1';
+export const CORE_ARTIFACT_VERSION = '2.0.0-logistics-admin.1';
 export const BSC_CHAIN_ID = 56;
 export const USDT_ADDRESS = '0x55d398326f99059ff775485246999027b3197955';
 export const NPL_ADDRESS = '0x4e8277ab31e4956b2cd48449793a57656dfc03d2';
@@ -203,6 +203,18 @@ export type FulfillmentRequestState = (typeof fulfillmentRequestStates)[number];
 
 export const logisticsProviders = ['KUAIDI100', 'CAINIAO'] as const;
 export type LogisticsProvider = (typeof logisticsProviders)[number];
+
+export const logisticsCarrierCodes = ['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS'] as const;
+export type LogisticsCarrierCode = (typeof logisticsCarrierCodes)[number];
+
+export const logisticsWarehouseKinds = ['PLATFORM', 'PARTNER'] as const;
+export type LogisticsWarehouseKind = (typeof logisticsWarehouseKinds)[number];
+
+export const logisticsWarehouseAccessLevels = ['FULL', 'REDACTED'] as const;
+export type LogisticsWarehouseAccess = (typeof logisticsWarehouseAccessLevels)[number];
+
+export const logisticsProviderReadinessStates = ['READY', 'DISABLED', 'CONFIGURATION_REQUIRED'] as const;
+export type LogisticsProviderReadiness = (typeof logisticsProviderReadinessStates)[number];
 
 export const logisticsStatuses = ['PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED', 'EXCEPTION'] as const;
 export type LogisticsStatus = (typeof logisticsStatuses)[number];

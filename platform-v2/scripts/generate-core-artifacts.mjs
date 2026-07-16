@@ -34,8 +34,12 @@ import {
   fulfillmentRequestTypes,
   contractOrderStates,
   infrastructureProviders,
+  logisticsCarrierCodes,
+  logisticsProviderReadinessStates,
   logisticsProviders,
   logisticsStatuses,
+  logisticsWarehouseAccessLevels,
+  logisticsWarehouseKinds,
   printProviders,
   printJobStates,
   waybillProviders,
@@ -117,6 +121,7 @@ const schemaSources = [
       '018_seckill_operations.sql',
       '019_logistics_printing.sql',
       '020_merchant_lifecycle.sql',
+      '021_logistics_admin.sql',
     ],
   },
   {
@@ -171,7 +176,11 @@ const enums = {
   fulfillmentRequestTypes,
   fulfillmentRequestStates,
   logisticsProviders,
+  logisticsCarrierCodes,
+  logisticsProviderReadinessStates,
   logisticsStatuses,
+  logisticsWarehouseKinds,
+  logisticsWarehouseAccessLevels,
   printProviders,
   printJobStates,
   waybillProviders,
@@ -313,7 +322,7 @@ const publishedContractManifest = JSON.parse(readRequired(join(contractsRoot, 'c
 
 const coordinatedManifest = {
   artifactVersion,
-  publicationStatus: 'COORDINATED_MERCHANT_LIFECYCLE_CHECKPOINT',
+  publicationStatus: 'COORDINATED_LOGISTICS_ADMIN_CHECKPOINT',
   deploymentAuthorized: publishedContractManifest.deploymentAuthorized === true,
   deploymentAuthorizationEvidenceHash:
     publishedContractManifest.deploymentAuthorizationEvidenceHash ?? null,
@@ -374,6 +383,9 @@ const coordinatedManifest = {
     printerBindingHttp: 'AVAILABLE',
     waybillBatchHttp: 'AVAILABLE',
     durablePrintJobs: 'AVAILABLE',
+    logisticsAdminConfigHttp: 'AVAILABLE',
+    logisticsWarehouseHttp: 'AVAILABLE',
+    adminWaybillAndPrintHttp: 'AVAILABLE',
     takeoverHttp: 'AVAILABLE',
     fulfillmentScheduler: 'AVAILABLE',
     bnmAvailabilityWorker: 'AVAILABLE',
@@ -490,6 +502,11 @@ const coordinatedManifest = {
     'MerchantLifecycleList',
     'MerchantLifecycleDetail',
     'MerchantReviewChallenge',
+    'LogisticsCarrierConfig',
+    'LogisticsProviderConfigList',
+    'LogisticsWarehouseList',
+    'AdminWaybillList',
+    'AdminPrintJobList',
   ],
 };
 files.set('coordinated-manifest.json', json(coordinatedManifest));
@@ -1002,6 +1019,11 @@ function logisticsPrintingOpenApiPaths(errorResponse) {
   const security = [{ bearerAuth: [] }];
   const storeId = { name: 'storeId', in: 'path', required: true, schema: { type: 'string', minLength: 1, maxLength: 256 } };
   const printJobId = { name: 'printJobId', in: 'path', required: true, schema: { $ref: '#/components/schemas/Bytes32' } };
+  const warehouseId = { name: 'warehouseId', in: 'path', required: true, schema: { type: 'string', minLength: 8, maxLength: 128 } };
+  const adminListParameters = [
+    { name: 'merchantId', in: 'query', schema: { type: 'string', minLength: 1, maxLength: 256 } },
+    { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 } },
+  ];
   return {
     '/v2/merchant/stores/{storeId}/printer-binding': {
       get: {
@@ -1074,15 +1096,161 @@ function logisticsPrintingOpenApiPaths(errorResponse) {
         },
       },
     },
+    '/v2/admin/logistics/carriers': {
+      get: {
+        operationId: 'getAdminLogisticsCarrierConfig',
+        security,
+        responses: {
+          200: response('Current versioned built-in carrier configuration', { $ref: '#/components/schemas/LogisticsCarrierConfig' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/admin/logistics/carrier-versions': {
+      post: {
+        operationId: 'createAdminLogisticsCarrierConfigVersion',
+        security,
+        requestBody: body({ $ref: '#/components/schemas/LogisticsCarrierConfigRequest' }),
+        responses: {
+          201: response('New immediately active carrier configuration version', { $ref: '#/components/schemas/LogisticsCarrierConfig' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/admin/logistics/providers': {
+      get: {
+        operationId: 'listAdminLogisticsProviderConfigs',
+        security,
+        responses: {
+          200: response('Provider reference completeness and runtime readiness without secret values', { $ref: '#/components/schemas/LogisticsProviderConfigList' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/admin/logistics/provider-versions': {
+      post: {
+        operationId: 'createAdminLogisticsProviderConfigVersion',
+        security,
+        requestBody: body({ $ref: '#/components/schemas/LogisticsProviderConfigRequest' }),
+        responses: {
+          201: response('New provider secret-reference version without secret echo', { $ref: '#/components/schemas/LogisticsProviderConfig' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/admin/logistics/warehouses': {
+      get: {
+        operationId: 'listAdminLogisticsWarehouses',
+        security,
+        responses: {
+          200: response('Current encrypted warehouse versions with role-based projection', { $ref: '#/components/schemas/LogisticsWarehouseList' }),
+          default: errorResponse,
+        },
+      },
+      post: {
+        operationId: 'createAdminLogisticsWarehouse',
+        security,
+        requestBody: body({ $ref: '#/components/schemas/LogisticsWarehouseRequest' }),
+        responses: {
+          201: response('Encrypted platform or partner warehouse', { $ref: '#/components/schemas/LogisticsWarehouse' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/admin/logistics/warehouses/{warehouseId}': {
+      put: {
+        operationId: 'updateAdminLogisticsWarehouse',
+        security,
+        parameters: [warehouseId],
+        requestBody: body({ $ref: '#/components/schemas/LogisticsWarehouseUpdateRequest' }),
+        responses: {
+          200: response('New encrypted warehouse version', { $ref: '#/components/schemas/LogisticsWarehouse' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/admin/logistics/warehouses/{warehouseId}/deactivate': {
+      post: {
+        operationId: 'deactivateAdminLogisticsWarehouse',
+        security,
+        parameters: [warehouseId],
+        requestBody: body({ $ref: '#/components/schemas/LogisticsWarehouseDeactivateRequest' }),
+        responses: {
+          200: response('Logically deactivated warehouse version', { $ref: '#/components/schemas/LogisticsWarehouse' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/admin/logistics/waybills/batches': {
+      post: {
+        operationId: 'createAdminWaybillBatch',
+        security,
+        requestBody: body({ $ref: '#/components/schemas/AdminWaybillBatchRequest' }),
+        responses: {
+          201: response('Cross-merchant provider waybill, shipment and print results', { $ref: '#/components/schemas/WaybillBatchResult' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/admin/logistics/waybills': {
+      get: {
+        operationId: 'listAdminWaybills',
+        security,
+        parameters: adminListParameters,
+        responses: {
+          200: response('Cross-merchant waybill operations', { $ref: '#/components/schemas/AdminWaybillList' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/admin/logistics/print-jobs': {
+      get: {
+        operationId: 'listAdminPrintJobs',
+        security,
+        parameters: adminListParameters,
+        responses: {
+          200: response('Cross-merchant durable print jobs', { $ref: '#/components/schemas/AdminPrintJobList' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/admin/logistics/print-jobs/{printJobId}/retry': {
+      post: {
+        operationId: 'retryAdminPrintJob',
+        security,
+        parameters: [printJobId],
+        requestBody: body({ $ref: '#/components/schemas/PrintJobRetryRequest' }),
+        responses: {
+          200: response('RBAC-revalidated admin print retry', { $ref: '#/components/schemas/PrintJob' }),
+          default: errorResponse,
+        },
+      },
+    },
   };
 }
 
 function logisticsPrintingOpenApiSchemas() {
   const nullableString = { anyOf: [{ type: 'string' }, { type: 'null' }] };
   const timestamp = { type: 'string', format: 'date-time' };
+  const secretReference = { type: 'string', pattern: '^(?:vault|secret)://[^\\s]+$', minLength: 10, maxLength: 512 };
+  const warehouseProperties = {
+    warehouseKind: { $ref: '#/components/schemas/LogisticsWarehouseKind' },
+    name: { type: 'string', minLength: 2, maxLength: 120 },
+    partnerName: nullableString,
+    contactName: { type: 'string', minLength: 2, maxLength: 80 },
+    phone: { type: 'string', minLength: 6, maxLength: 32 },
+    regionCode: { type: 'string', pattern: '^[0-9]{6}$' },
+    addressLine: { type: 'string', minLength: 5, maxLength: 500 },
+    enabled: { type: 'boolean' },
+    idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
+  };
   return {
     PrintProvider: { type: 'string', enum: [...printProviders] },
     WaybillProvider: { type: 'string', enum: [...waybillProviders] },
+    LogisticsCarrierCode: { type: 'string', enum: [...logisticsCarrierCodes] },
+    LogisticsProviderReadiness: { type: 'string', enum: [...logisticsProviderReadinessStates] },
+    LogisticsWarehouseKind: { type: 'string', enum: [...logisticsWarehouseKinds] },
+    LogisticsWarehouseAccess: { type: 'string', enum: [...logisticsWarehouseAccessLevels] },
     PrintJobState: { type: 'string', enum: [...printJobStates] },
     WaybillRequestState: { type: 'string', enum: [...waybillRequestStates] },
     PrinterBindingChallengeRequest: {
@@ -1145,11 +1313,12 @@ function logisticsPrintingOpenApiSchemas() {
     },
     WaybillResult: {
       type: 'object', additionalProperties: false,
-      required: ['artifactVersion', 'requestId', 'batchId', 'orderId', 'storeId', 'provider', 'carrierCode', 'state', 'providerReference', 'trackingNumber', 'trackingNumberHash', 'shipmentEvidenceHash', 'printJobId', 'errorCode', 'updatedAt'],
+      required: ['artifactVersion', 'requestId', 'batchId', 'merchantId', 'orderId', 'storeId', 'provider', 'carrierCode', 'state', 'providerReference', 'trackingNumber', 'trackingNumberHash', 'shipmentEvidenceHash', 'printJobId', 'errorCode', 'updatedAt'],
       properties: {
         artifactVersion: { const: artifactVersion },
         requestId: { $ref: '#/components/schemas/Bytes32' },
         batchId: { $ref: '#/components/schemas/Bytes32' },
+        merchantId: { type: 'string' },
         orderId: { type: 'string' },
         storeId: { type: 'string' },
         provider: { $ref: '#/components/schemas/WaybillProvider' },
@@ -1174,10 +1343,11 @@ function logisticsPrintingOpenApiSchemas() {
     },
     PrintJob: {
       type: 'object', additionalProperties: false,
-      required: ['artifactVersion', 'printJobId', 'orderId', 'storeId', 'jobKind', 'provider', 'deviceId', 'copyCount', 'contentHash', 'state', 'attempts', 'providerReference', 'errorCode', 'nextAttemptAt', 'createdAt', 'updatedAt'],
+      required: ['artifactVersion', 'printJobId', 'merchantId', 'orderId', 'storeId', 'jobKind', 'provider', 'deviceId', 'copyCount', 'contentHash', 'state', 'attempts', 'providerReference', 'errorCode', 'nextAttemptAt', 'createdAt', 'updatedAt'],
       properties: {
         artifactVersion: { const: artifactVersion },
         printJobId: { $ref: '#/components/schemas/Bytes32' },
+        merchantId: { type: 'string' },
         orderId: { type: 'string' },
         storeId: { type: 'string' },
         jobKind: { type: 'string', enum: ['WAYBILL', 'PICKUP_RECEIPT'] },
@@ -1197,6 +1367,162 @@ function logisticsPrintingOpenApiSchemas() {
     PrintJobRetryRequest: {
       type: 'object', additionalProperties: false, required: ['idempotencyKey'],
       properties: { idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 } },
+    },
+    LogisticsCarrierConfigRequest: {
+      type: 'object', additionalProperties: false,
+      required: ['carriers', 'defaultCarrierCode', 'idempotencyKey'],
+      properties: {
+        carriers: {
+          type: 'array', minItems: 6, maxItems: 6,
+          items: {
+            type: 'object', additionalProperties: false, required: ['carrierCode', 'enabled'],
+            properties: {
+              carrierCode: { $ref: '#/components/schemas/LogisticsCarrierCode' },
+              enabled: { type: 'boolean' },
+            },
+          },
+        },
+        defaultCarrierCode: { $ref: '#/components/schemas/LogisticsCarrierCode' },
+        idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
+      },
+    },
+    LogisticsCarrierConfig: {
+      type: 'object', additionalProperties: false,
+      required: ['artifactVersion', 'configVersionId', 'version', 'defaultCarrierCode', 'readiness', 'carriers', 'createdBy', 'createdAt'],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        configVersionId: { anyOf: [{ $ref: '#/components/schemas/Bytes32' }, { type: 'null' }] },
+        version: { type: 'integer', minimum: 0 },
+        defaultCarrierCode: { anyOf: [{ $ref: '#/components/schemas/LogisticsCarrierCode' }, { type: 'null' }] },
+        readiness: { type: 'string', enum: ['READY', 'CONFIGURATION_REQUIRED'] },
+        carriers: {
+          type: 'array', minItems: 6, maxItems: 6,
+          items: {
+            type: 'object', additionalProperties: false, required: ['carrierCode', 'enabled'],
+            properties: {
+              carrierCode: { $ref: '#/components/schemas/LogisticsCarrierCode' },
+              enabled: { type: 'boolean' },
+            },
+          },
+        },
+        createdBy: { anyOf: [{ $ref: '#/components/schemas/Address' }, { type: 'null' }] },
+        createdAt: { anyOf: [timestamp, { type: 'null' }] },
+      },
+    },
+    LogisticsProviderConfigRequest: {
+      type: 'object', additionalProperties: false,
+      required: ['provider', 'enabled', 'partnerIdSecretRef', 'credentialSecretRef', 'monthlyAccountSecretRef', 'callbackSecretRef', 'idempotencyKey'],
+      properties: {
+        provider: { $ref: '#/components/schemas/WaybillProvider' },
+        enabled: { type: 'boolean' },
+        partnerIdSecretRef: secretReference,
+        credentialSecretRef: secretReference,
+        monthlyAccountSecretRef: secretReference,
+        callbackSecretRef: secretReference,
+        idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
+      },
+    },
+    LogisticsProviderConfig: {
+      type: 'object', additionalProperties: false,
+      required: ['provider', 'providerConfigVersionId', 'version', 'enabled', 'configured', 'configuredFields', 'configHash', 'readiness', 'createdBy', 'createdAt'],
+      properties: {
+        provider: { $ref: '#/components/schemas/WaybillProvider' },
+        providerConfigVersionId: { anyOf: [{ $ref: '#/components/schemas/Bytes32' }, { type: 'null' }] },
+        version: { type: 'integer', minimum: 0 },
+        enabled: { type: 'boolean' },
+        configured: { type: 'boolean' },
+        configuredFields: {
+          type: 'object', additionalProperties: false,
+          required: ['partnerId', 'credential', 'monthlyAccount', 'callbackSecret'],
+          properties: {
+            partnerId: { type: 'boolean' }, credential: { type: 'boolean' },
+            monthlyAccount: { type: 'boolean' }, callbackSecret: { type: 'boolean' },
+          },
+        },
+        configHash: { anyOf: [{ $ref: '#/components/schemas/Bytes32' }, { type: 'null' }] },
+        readiness: { $ref: '#/components/schemas/LogisticsProviderReadiness' },
+        createdBy: { anyOf: [{ $ref: '#/components/schemas/Address' }, { type: 'null' }] },
+        createdAt: { anyOf: [timestamp, { type: 'null' }] },
+      },
+    },
+    LogisticsProviderConfigList: {
+      type: 'object', additionalProperties: false, required: ['artifactVersion', 'providers'],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        providers: { type: 'array', items: { $ref: '#/components/schemas/LogisticsProviderConfig' } },
+      },
+    },
+    LogisticsWarehouseRequest: {
+      type: 'object', additionalProperties: false,
+      required: Object.keys(warehouseProperties),
+      properties: warehouseProperties,
+    },
+    LogisticsWarehouseUpdateRequest: {
+      type: 'object', additionalProperties: false,
+      required: [...Object.keys(warehouseProperties), 'expectedVersion'],
+      properties: { ...warehouseProperties, expectedVersion: { type: 'integer', minimum: 1 } },
+    },
+    LogisticsWarehouseDeactivateRequest: {
+      type: 'object', additionalProperties: false, required: ['expectedVersion', 'idempotencyKey'],
+      properties: {
+        expectedVersion: { type: 'integer', minimum: 1 },
+        idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
+      },
+    },
+    LogisticsWarehouse: {
+      type: 'object', additionalProperties: false,
+      required: ['artifactVersion', 'warehouseId', 'warehouseVersionId', 'version', 'warehouseKind', 'name', 'partnerName', 'regionCode', 'enabled', 'access', 'contactName', 'phone', 'addressLine', 'payloadHash', 'createdBy', 'createdAt'],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        warehouseId: { type: 'string', minLength: 8, maxLength: 128 },
+        warehouseVersionId: { $ref: '#/components/schemas/Bytes32' },
+        version: { type: 'integer', minimum: 1 },
+        warehouseKind: { $ref: '#/components/schemas/LogisticsWarehouseKind' },
+        name: { type: 'string' },
+        partnerName: nullableString,
+        regionCode: { type: 'string', pattern: '^[0-9]{6}$' },
+        enabled: { type: 'boolean' },
+        access: { $ref: '#/components/schemas/LogisticsWarehouseAccess' },
+        contactName: nullableString,
+        phone: nullableString,
+        addressLine: nullableString,
+        payloadHash: { $ref: '#/components/schemas/Bytes32' },
+        createdBy: { $ref: '#/components/schemas/Address' },
+        createdAt: timestamp,
+      },
+    },
+    LogisticsWarehouseList: {
+      type: 'object', additionalProperties: false, required: ['artifactVersion', 'warehouses'],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        warehouses: { type: 'array', items: { $ref: '#/components/schemas/LogisticsWarehouse' } },
+      },
+    },
+    AdminWaybillBatchRequest: {
+      type: 'object', additionalProperties: false,
+      required: ['merchantId', 'provider', 'carrierCode', 'storeId', 'orderIds', 'idempotencyKey'],
+      properties: {
+        merchantId: { type: 'string', minLength: 1, maxLength: 256 },
+        provider: { $ref: '#/components/schemas/WaybillProvider' },
+        carrierCode: { $ref: '#/components/schemas/LogisticsCarrierCode' },
+        storeId: { type: 'string', minLength: 1, maxLength: 256 },
+        orderIds: { type: 'array', minItems: 1, maxItems: 100, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 256 } },
+        idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
+      },
+    },
+    AdminWaybillList: {
+      type: 'object', additionalProperties: false, required: ['artifactVersion', 'waybills'],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        waybills: { type: 'array', items: { $ref: '#/components/schemas/WaybillResult' } },
+      },
+    },
+    AdminPrintJobList: {
+      type: 'object', additionalProperties: false, required: ['artifactVersion', 'printJobs'],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        printJobs: { type: 'array', items: { $ref: '#/components/schemas/PrintJob' } },
+      },
     },
   };
 }
@@ -4633,6 +4959,10 @@ export type StoreStatus = ${union(storeStatuses)};
 export type FulfillmentRequestType = ${union(fulfillmentRequestTypes)};
 export type FulfillmentRequestState = ${union(fulfillmentRequestStates)};
 export type LogisticsProvider = ${union(logisticsProviders)};
+export type LogisticsCarrierCode = ${union(logisticsCarrierCodes)};
+export type LogisticsProviderReadiness = ${union(logisticsProviderReadinessStates)};
+export type LogisticsWarehouseKind = ${union(logisticsWarehouseKinds)};
+export type LogisticsWarehouseAccess = ${union(logisticsWarehouseAccessLevels)};
 export type LogisticsStatus = ${union(logisticsStatuses)};
 export type PrintProvider = ${union(printProviders)};
 export type PrintJobState = ${union(printJobStates)};
@@ -4709,6 +5039,10 @@ export declare const storeStatuses: readonly StoreStatus[];
 export declare const fulfillmentRequestTypes: readonly FulfillmentRequestType[];
 export declare const fulfillmentRequestStates: readonly FulfillmentRequestState[];
 export declare const logisticsProviders: readonly LogisticsProvider[];
+export declare const logisticsCarrierCodes: readonly LogisticsCarrierCode[];
+export declare const logisticsProviderReadinessStates: readonly LogisticsProviderReadiness[];
+export declare const logisticsWarehouseKinds: readonly LogisticsWarehouseKind[];
+export declare const logisticsWarehouseAccessLevels: readonly LogisticsWarehouseAccess[];
 export declare const logisticsStatuses: readonly LogisticsStatus[];
 export declare const printProviders: readonly PrintProvider[];
 export declare const printJobStates: readonly PrintJobState[];
@@ -4955,7 +5289,7 @@ export interface PrinterBinding {
 
 export interface WaybillBatchRequest {
   provider: WaybillProvider;
-  carrierCode: 'SF' | 'JD' | 'YTO' | 'ZTO' | 'STO' | 'EMS';
+  carrierCode: LogisticsCarrierCode;
   storeId: string;
   orderIds: readonly string[];
   idempotencyKey: string;
@@ -4965,6 +5299,7 @@ export interface WaybillResult {
   artifactVersion: typeof artifactVersion;
   requestId: Bytes32;
   batchId: Bytes32;
+  merchantId: string;
   orderId: string;
   storeId: string;
   provider: WaybillProvider;
@@ -4988,6 +5323,7 @@ export interface WaybillBatchResult {
 export interface PrintJob {
   artifactVersion: typeof artifactVersion;
   printJobId: Bytes32;
+  merchantId: string;
   orderId: string;
   storeId: string;
   jobKind: 'WAYBILL' | 'PICKUP_RECEIPT';
@@ -5005,6 +5341,110 @@ export interface PrintJob {
 }
 
 export interface PrintJobRetryRequest { idempotencyKey: string }
+
+export interface LogisticsCarrierConfigRequest {
+  carriers: readonly Readonly<{ carrierCode: LogisticsCarrierCode; enabled: boolean }>[];
+  defaultCarrierCode: LogisticsCarrierCode;
+  idempotencyKey: string;
+}
+
+export interface LogisticsCarrierConfig {
+  artifactVersion: typeof artifactVersion;
+  configVersionId: Bytes32 | null;
+  version: number;
+  defaultCarrierCode: LogisticsCarrierCode | null;
+  readiness: 'READY' | 'CONFIGURATION_REQUIRED';
+  carriers: readonly Readonly<{ carrierCode: LogisticsCarrierCode; enabled: boolean }>[];
+  createdBy: Address | null;
+  createdAt: Timestamp | null;
+}
+
+export interface LogisticsProviderConfigRequest {
+  provider: WaybillProvider;
+  enabled: boolean;
+  partnerIdSecretRef: string;
+  credentialSecretRef: string;
+  monthlyAccountSecretRef: string;
+  callbackSecretRef: string;
+  idempotencyKey: string;
+}
+
+export interface LogisticsProviderConfig {
+  provider: WaybillProvider;
+  providerConfigVersionId: Bytes32 | null;
+  version: number;
+  enabled: boolean;
+  configured: boolean;
+  configuredFields: Readonly<{
+    partnerId: boolean; credential: boolean; monthlyAccount: boolean; callbackSecret: boolean;
+  }>;
+  configHash: Bytes32 | null;
+  readiness: LogisticsProviderReadiness;
+  createdBy: Address | null;
+  createdAt: Timestamp | null;
+}
+
+export interface LogisticsProviderConfigList {
+  artifactVersion: typeof artifactVersion;
+  providers: readonly LogisticsProviderConfig[];
+}
+
+export interface LogisticsWarehouseRequest {
+  warehouseKind: LogisticsWarehouseKind;
+  name: string;
+  partnerName: string | null;
+  contactName: string;
+  phone: string;
+  regionCode: string;
+  addressLine: string;
+  enabled: boolean;
+  idempotencyKey: string;
+}
+
+export interface LogisticsWarehouseUpdateRequest extends LogisticsWarehouseRequest {
+  expectedVersion: number;
+}
+
+export interface LogisticsWarehouseDeactivateRequest {
+  expectedVersion: number;
+  idempotencyKey: string;
+}
+
+export interface LogisticsWarehouse {
+  artifactVersion: typeof artifactVersion;
+  warehouseId: string;
+  warehouseVersionId: Bytes32;
+  version: number;
+  warehouseKind: LogisticsWarehouseKind;
+  name: string;
+  partnerName: string | null;
+  regionCode: string;
+  enabled: boolean;
+  access: LogisticsWarehouseAccess;
+  contactName: string | null;
+  phone: string | null;
+  addressLine: string | null;
+  payloadHash: Bytes32;
+  createdBy: Address;
+  createdAt: Timestamp;
+}
+
+export interface LogisticsWarehouseList {
+  artifactVersion: typeof artifactVersion;
+  warehouses: readonly LogisticsWarehouse[];
+}
+
+export interface AdminWaybillBatchRequest extends WaybillBatchRequest { merchantId: string }
+
+export interface AdminWaybillList {
+  artifactVersion: typeof artifactVersion;
+  waybills: readonly WaybillResult[];
+}
+
+export interface AdminPrintJobList {
+  artifactVersion: typeof artifactVersion;
+  printJobs: readonly PrintJob[];
+}
 
 export interface SeckillSessionProduct {
   productId: string;

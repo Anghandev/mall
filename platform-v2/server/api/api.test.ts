@@ -1158,6 +1158,31 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       createWaybillBatch: async (_actor, input) => ({ batchId: HASH, items: input.orderIds }),
       listPrintJobs: async () => [],
       retryPrintJob: async (_actor, printJobId) => ({ printJobId, state: 'QUEUED' }),
+      createAdminWaybillBatch: async (_actor, input) => ({ batchId: HASH, merchantId: input.merchantId, items: input.orderIds }),
+      listAdminWaybills: async (_actor, input) => ({ waybills: [{ requestId: HASH, merchantId: input?.merchantId ?? 'merchant-1' }] }),
+      listAdminPrintJobs: async (_actor, input) => ({ printJobs: [{ printJobId: HASH, merchantId: input?.merchantId ?? 'merchant-1' }] }),
+      retryAdminPrintJob: async (_actor, printJobId) => ({ printJobId, state: 'QUEUED', merchantId: 'merchant-1' }),
+    },
+    logisticsAdminService: {
+      listCarrierConfig: async () => ({
+        version: 1,
+        defaultCarrierCode: 'SF',
+        carriers: [{ carrierCode: 'SF', enabled: true }],
+      }),
+      createCarrierConfigVersion: async (_actor, input) => ({ version: 2, ...input }),
+      listProviderConfigs: async () => ({ providers: [{ provider: 'KUAIDI100', readiness: 'READY' }] }),
+      createProviderConfigVersion: async (_actor, input) => ({
+        provider: input.provider,
+        enabled: input.enabled,
+        version: 1,
+        configured: true,
+        readiness: input.enabled ? 'READY' : 'DISABLED',
+        configHash: HASH,
+      }),
+      listWarehouses: async () => ({ warehouses: [] }),
+      createWarehouse: async (_actor, input) => ({ warehouseId: 'warehouse:test', version: 1, ...input }),
+      updateWarehouse: async (_actor, warehouseId, input) => ({ warehouseId, version: input.expectedVersion + 1, ...input }),
+      deactivateWarehouse: async (_actor, warehouseId, input) => ({ warehouseId, version: input.expectedVersion + 1, enabled: false }),
     },
     evidenceService: {
       createActionEvidence: async (actor, input) => {
@@ -2287,6 +2312,111 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
       body: JSON.stringify({ idempotencyKey: 'print-retry-http-1' }),
     })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/logistics/carriers`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/logistics/carrier-versions`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        carriers: [
+          { carrierCode: 'SF', enabled: true },
+          { carrierCode: 'JD', enabled: true },
+          { carrierCode: 'YTO', enabled: true },
+          { carrierCode: 'ZTO', enabled: true },
+          { carrierCode: 'STO', enabled: true },
+          { carrierCode: 'EMS', enabled: true },
+        ],
+        defaultCarrierCode: 'SF',
+        idempotencyKey: 'admin-logistics-carriers-http-1',
+      }),
+    })).status, 201);
+    const providerConfig = await fetch(`${base}/v2/admin/logistics/provider-versions`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        provider: 'KUAIDI100',
+        enabled: true,
+        partnerIdSecretRef: 'secret://logistics/kuaidi100/partner-id',
+        credentialSecretRef: 'vault://logistics/kuaidi100/credential',
+        monthlyAccountSecretRef: 'secret://logistics/kuaidi100/monthly-account',
+        callbackSecretRef: 'vault://logistics/kuaidi100/callback',
+        idempotencyKey: 'admin-logistics-provider-http-1',
+      }),
+    });
+    assert.equal(providerConfig.status, 201);
+    assert.equal(JSON.stringify(await providerConfig.json()).includes('secret://'), false);
+    assert.equal((await fetch(`${base}/v2/admin/logistics/providers`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    const warehouse = await fetch(`${base}/v2/admin/logistics/warehouses`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        warehouseKind: 'PLATFORM',
+        name: 'Dalian Warehouse',
+        partnerName: null,
+        contactName: 'Warehouse Operator',
+        phone: '+8641112345678',
+        regionCode: '210211',
+        addressLine: 'Dalian Logistics Road 18',
+        enabled: true,
+        idempotencyKey: 'admin-logistics-warehouse-http-1',
+      }),
+    });
+    assert.equal(warehouse.status, 201);
+    assert.equal((await fetch(`${base}/v2/admin/logistics/warehouses`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/logistics/warehouses/warehouse%3Atest`, {
+      method: 'PUT',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        warehouseKind: 'PARTNER',
+        name: 'Partner Warehouse',
+        partnerName: 'Partner Logistics',
+        contactName: 'Partner Operator',
+        phone: '+8641187654321',
+        regionCode: '210211',
+        addressLine: 'Dalian Logistics Road 20',
+        enabled: true,
+        expectedVersion: 1,
+        idempotencyKey: 'admin-logistics-warehouse-http-2',
+      }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/logistics/warehouses/warehouse%3Atest/deactivate`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ expectedVersion: 2, idempotencyKey: 'admin-logistics-warehouse-http-3' }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/logistics/waybills/batches`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        merchantId: 'merchant-1',
+        provider: 'KUAIDI100',
+        carrierCode: 'SF',
+        storeId: 'store-1',
+        orderIds: ['order-1'],
+        idempotencyKey: 'admin-waybill-http-batch-1',
+      }),
+    })).status, 201);
+    assert.equal((await fetch(`${base}/v2/admin/logistics/waybills?merchantId=merchant-1&limit=20`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/logistics/print-jobs?merchantId=merchant-1&limit=20`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/logistics/print-jobs/${HASH}/retry`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ idempotencyKey: 'admin-print-retry-http-1' }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/logistics/carrier-versions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${buyerOnlyToken}` },
+      body: '{}',
+    })).status, 403);
     const target = await fetch(`${base}/v2/orders/order-1/fulfillment-target`, {
       headers: { authorization: `Bearer ${session.token}` },
     });

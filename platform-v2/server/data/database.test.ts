@@ -73,6 +73,7 @@ import { BusinessAnalyticsService } from './business-analytics-service.ts';
 import { AccountService } from './account-service.ts';
 import { assertWalletPaymentAllowed, RiskService } from './risk-service.ts';
 import { MerchantLifecycleService } from './merchant-lifecycle-service.ts';
+import { LogisticsAdminService } from './logistics-admin-service.ts';
 import {
   createPickupReceiptEnqueuer,
   LogisticsPrintingService,
@@ -122,6 +123,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '018_seckill_operations.sql',
       '019_logistics_printing.sql',
       '020_merchant_lifecycle.sql',
+      '021_logistics_admin.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -3227,10 +3229,165 @@ test('fulfillment targets encrypt delivery PII and bind quotes to an AMap six-di
   }
 });
 
+test('admin logistics versions carriers and provider references while warehouse PII stays encrypted and RBAC-scoped', async () => {
+  const db = await createBusinessDatabase();
+  const admin = Wallet.createRandom();
+  const auditor = Wallet.createRandom();
+  const outsider = Wallet.createRandom();
+  const now = new Date('2026-07-16T01:00:00.000Z');
+  const encryptionKey = 'e1'.repeat(32);
+  try {
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (wallet_address, role, status, evidence_hash)
+       VALUES ($1,'ADMIN','ACTIVE',$3),($2,'AUDITOR','ACTIVE',$3)`,
+      [admin.address.toLowerCase(), auditor.address.toLowerCase(), HASH],
+    );
+    const service = new LogisticsAdminService({
+      transactions: transactionAdapter(db),
+      encryptionKey,
+      runtimeReadiness: { KUAIDI100: 'READY', CAINIAO: 'CONFIGURATION_REQUIRED' },
+      clock: () => now,
+    });
+    const adminActor = { walletAddress: admin.address, roles: ['ADMIN'] as const };
+    const auditorActor = { walletAddress: auditor.address, roles: ['AUDITOR'] as const };
+    assert.equal((await service.listCarrierConfig(adminActor)).readiness, 'CONFIGURATION_REQUIRED');
+    const carrierInput = {
+      carriers: [
+        { carrierCode: 'SF' as const, enabled: true },
+        { carrierCode: 'JD' as const, enabled: false },
+        { carrierCode: 'YTO' as const, enabled: true },
+        { carrierCode: 'ZTO' as const, enabled: true },
+        { carrierCode: 'STO' as const, enabled: true },
+        { carrierCode: 'EMS' as const, enabled: true },
+      ],
+      defaultCarrierCode: 'SF' as const,
+      idempotencyKey: 'admin-logistics-carriers-1',
+    };
+    const carriers = await service.createCarrierConfigVersion(adminActor, carrierInput);
+    assert.equal(carriers.version, 1);
+    assert.equal(carriers.defaultCarrierCode, 'SF');
+    assert.equal(carriers.carriers.find((item) => item.carrierCode === 'JD')?.enabled, false);
+    assert.equal((await service.createCarrierConfigVersion(adminActor, carrierInput)).configVersionId, carriers.configVersionId);
+    assert.throws(
+      () => service.createCarrierConfigVersion(adminActor, {
+        ...carrierInput,
+        carriers: carrierInput.carriers.map((item) => ({
+          ...item,
+          enabled: item.carrierCode !== 'SF',
+        })),
+        idempotencyKey: 'admin-logistics-carriers-invalid',
+      }),
+      /Default logistics carrier must be enabled/,
+    );
+
+    const provider = await service.createProviderConfigVersion(adminActor, {
+      provider: 'KUAIDI100',
+      enabled: true,
+      partnerIdSecretRef: 'secret://logistics/kuaidi100/partner-id',
+      credentialSecretRef: 'vault://logistics/kuaidi100/credential',
+      monthlyAccountSecretRef: 'secret://logistics/kuaidi100/monthly-account',
+      callbackSecretRef: 'vault://logistics/kuaidi100/callback',
+      idempotencyKey: 'admin-logistics-provider-1',
+    });
+    assert.equal(provider.readiness, 'READY');
+    assert.equal(provider.configured, true);
+    assert.equal(JSON.stringify(provider).includes('secret://'), false);
+    await service.createProviderConfigVersion(adminActor, {
+      provider: 'CAINIAO',
+      enabled: false,
+      partnerIdSecretRef: 'secret://logistics/cainiao/partner-id',
+      credentialSecretRef: 'vault://logistics/cainiao/credential',
+      monthlyAccountSecretRef: 'secret://logistics/cainiao/monthly-account',
+      callbackSecretRef: 'vault://logistics/cainiao/callback',
+      idempotencyKey: 'admin-logistics-provider-2',
+    });
+    const providerList = await service.listProviderConfigs(auditorActor);
+    assert.equal(providerList.providers.find((item) => item.provider === 'CAINIAO')?.readiness, 'DISABLED');
+
+    const warehouse = await service.createWarehouse(adminActor, {
+      warehouseKind: 'PLATFORM',
+      name: 'Dalian Platform Warehouse',
+      partnerName: null,
+      contactName: 'Warehouse Operator',
+      phone: '+8641112345678',
+      regionCode: '210211',
+      addressLine: 'Dalian Ganjingzi Logistics Road 18',
+      enabled: true,
+      idempotencyKey: 'admin-logistics-warehouse-1',
+    });
+    assert.equal(warehouse.access, 'FULL');
+    assert.equal(warehouse.contactName, 'Warehouse Operator');
+    const encrypted = (await db.query<{ encrypted_payload: Uint8Array }>(
+      'SELECT encrypted_payload FROM core.logistics_warehouse_versions WHERE warehouse_id = $1',
+      [warehouse.warehouseId],
+    )).rows[0]!.encrypted_payload;
+    assert.equal(Buffer.from(encrypted).toString('utf8').includes('Warehouse Operator'), false);
+    const redacted = (await service.listWarehouses(auditorActor)).warehouses[0]!;
+    assert.equal(redacted.access, 'REDACTED');
+    assert.equal(redacted.contactName, null);
+    assert.equal(redacted.addressLine, null);
+    const updated = await service.updateWarehouse(adminActor, warehouse.warehouseId, {
+      warehouseKind: 'PLATFORM',
+      name: 'Dalian Platform Warehouse A',
+      partnerName: null,
+      contactName: 'Warehouse Operator 2',
+      phone: '+8641112345679',
+      regionCode: '210211',
+      addressLine: 'Dalian Ganjingzi Logistics Road 20',
+      enabled: true,
+      expectedVersion: 1,
+      idempotencyKey: 'admin-logistics-warehouse-2',
+    });
+    assert.equal(updated.version, 2);
+    await assert.rejects(
+      service.updateWarehouse(adminActor, warehouse.warehouseId, {
+        warehouseKind: 'PLATFORM', name: 'Stale Warehouse', partnerName: null,
+        contactName: 'Warehouse Operator', phone: '+8641112345678', regionCode: '210211',
+        addressLine: 'Dalian Ganjingzi Logistics Road 99', enabled: true,
+        expectedVersion: 1, idempotencyKey: 'admin-logistics-warehouse-stale',
+      }),
+      /Warehouse version changed/,
+    );
+    const deactivated = await service.deactivateWarehouse(adminActor, warehouse.warehouseId, {
+      expectedVersion: 2,
+      idempotencyKey: 'admin-logistics-warehouse-3',
+    });
+    assert.equal(deactivated.version, 3);
+    assert.equal(deactivated.enabled, false);
+    await assert.rejects(
+      service.listCarrierConfig({ walletAddress: outsider.address, roles: ['ADMIN'] }),
+      /Current wallet role cannot manage logistics/,
+    );
+    await db.query(
+      `UPDATE core.wallet_role_bindings SET status = 'REVOKED'
+       WHERE wallet_address = $1 AND role = 'ADMIN'`,
+      [admin.address.toLowerCase()],
+    );
+    await assert.rejects(
+      service.createProviderConfigVersion(adminActor, {
+        provider: 'KUAIDI100', enabled: false,
+        partnerIdSecretRef: 'secret://logistics/kuaidi100/partner-id',
+        credentialSecretRef: 'vault://logistics/kuaidi100/credential',
+        monthlyAccountSecretRef: 'secret://logistics/kuaidi100/monthly-account',
+        callbackSecretRef: 'vault://logistics/kuaidi100/callback',
+        idempotencyKey: 'admin-logistics-provider-revoked',
+      }),
+      /Current wallet role cannot manage logistics/,
+    );
+    assert.equal((await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM core.audit_outbox_events
+       WHERE resource_type IN ('LOGISTICS_CARRIER_CONFIG','LOGISTICS_PROVIDER_CONFIG','LOGISTICS_WAREHOUSE')`,
+    )).rows[0]?.count, '6');
+  } finally {
+    await db.close();
+  }
+});
+
 test('printer binding, provider waybill and durable print jobs form one merchant-scoped idempotent chain', async () => {
   const db = await createBusinessDatabase();
   const now = new Date('2026-07-16T02:00:00.000Z');
   const merchantWallet = Wallet.createRandom();
+  const logisticsAdminWallet = Wallet.createRandom();
   const merchant = {
     walletAddress: merchantWallet.address,
     roles: ['MERCHANT'] as const,
@@ -3240,6 +3397,38 @@ test('printer binding, provider waybill and durable print jobs form one merchant
   const encryptionKey = 'ab'.repeat(32);
   try {
     await seedCatalog(db, 5);
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (wallet_address, role, status, evidence_hash)
+       VALUES ($1,'ADMIN','ACTIVE',$2)`,
+      [logisticsAdminWallet.address.toLowerCase(), HASH],
+    );
+    const logisticsConfig = new LogisticsAdminService({
+      transactions: transactionAdapter(db),
+      encryptionKey,
+      runtimeReadiness: { KUAIDI100: 'READY' },
+      clock: () => now,
+    });
+    const logisticsAdmin = { walletAddress: logisticsAdminWallet.address, roles: ['ADMIN'] as const };
+    await logisticsConfig.createCarrierConfigVersion(logisticsAdmin, {
+      carriers: [
+        { carrierCode: 'SF', enabled: true },
+        { carrierCode: 'JD', enabled: false },
+        { carrierCode: 'YTO', enabled: true },
+        { carrierCode: 'ZTO', enabled: true },
+        { carrierCode: 'STO', enabled: true },
+        { carrierCode: 'EMS', enabled: true },
+      ],
+      defaultCarrierCode: 'SF',
+      idempotencyKey: 'merchant-waybill-carriers-1',
+    });
+    await logisticsConfig.createProviderConfigVersion(logisticsAdmin, {
+      provider: 'KUAIDI100', enabled: true,
+      partnerIdSecretRef: 'secret://logistics/kuaidi100/partner-id',
+      credentialSecretRef: 'vault://logistics/kuaidi100/credential',
+      monthlyAccountSecretRef: 'secret://logistics/kuaidi100/monthly-account',
+      callbackSecretRef: 'vault://logistics/kuaidi100/callback',
+      idempotencyKey: 'merchant-waybill-provider-1',
+    });
     const regions = {
       reverseGeocode: async () => ({
         regionCode: '210211',
@@ -3311,6 +3500,44 @@ test('printer binding, provider waybill and durable print jobs form one merchant
         now,
       ],
     );
+    const adminOrderId = `0x${'e'.repeat(64)}`;
+    await reserveInventory(adapter(db), {
+      reservationId: 'logistics-reservation-admin-1',
+      reservationHash: `0x${'e'.repeat(64)}`,
+      policyVersion: 1,
+      skuId: 'sku-1',
+      buyerWallet: BUYER,
+      quantity: 1,
+      classification: 'ORDINARY',
+      expiresAt: new Date(now.getTime() + 60_000),
+    });
+    await insertOrder(
+      db,
+      adminOrderId,
+      'logistics-reservation-admin-1',
+      delivery.targetHash,
+      delivery.regionCodeHash,
+    );
+    await db.query(
+      `UPDATE core.orders SET state = 'PAID', finality_status = 'FINAL',
+         payment_tx_hash = $2, paid_at = $3 WHERE order_id = $1`,
+      [adminOrderId, `0x${'e'.repeat(64)}`, now],
+    );
+    await db.query(
+      `INSERT INTO core.transaction_finality (
+         transaction_id, resource_type, resource_id, chain_id, contract_address,
+         expected_event_hash, tx_hash, block_number, block_hash, confirmations,
+         required_confirmations, receipt_status, state, evidence, submitted_at, finalized_at
+       ) VALUES ($1,'ORDER_PAYMENT',$2,56,$3,$4,$5,2,$4,15,15,1,'FINAL','{}',$6,$6)`,
+      [
+        'payment-logistics-admin-1',
+        adminOrderId,
+        '0x9999999999999999999999999999999999999999',
+        HASH_2,
+        `0x${'e'.repeat(64)}`,
+        now,
+      ],
+    );
     const fulfillment = new FulfillmentService({ transactions: transactionAdapter(db), clock: () => now });
     const evidence = new EvidenceService({
       transactions: transactionAdapter(db),
@@ -3336,7 +3563,10 @@ test('printer binding, provider waybill and durable print jobs form one merchant
             waybillCalls += 1;
             assert.equal(input.recipient.name, 'Delivery Recipient');
             assert.equal(input.sender.name, 'Dalian Logistics Store');
-            return { providerReference: 'kuaidi-task-1', trackingNumber: 'SF100000001' };
+            return {
+              providerReference: `kuaidi-task-${waybillCalls}`,
+              trackingNumber: `SF10000000${waybillCalls}`,
+            };
           },
         },
       },
@@ -3381,6 +3611,17 @@ test('printer binding, provider waybill and durable print jobs form one merchant
         idempotencyKey: 'waybill-pending-finality-1',
       }),
       /15 canonical confirmations/,
+    );
+    assert.equal(waybillCalls, 0);
+    await assert.rejects(
+      service.createWaybillBatch(merchant, {
+        provider: 'KUAIDI100',
+        carrierCode: 'JD',
+        storeId: store.storeId,
+        orderIds: [orderId],
+        idempotencyKey: 'waybill-disabled-carrier-1',
+      }),
+      /Selected logistics carrier is disabled/,
     );
     assert.equal(waybillCalls, 0);
     const challenge = await service.createPrinterBindingChallenge(merchant, store.storeId, {
@@ -3429,6 +3670,20 @@ test('printer binding, provider waybill and durable print jobs form one merchant
     assert.equal((await service.dispatchNextPrintJob())?.state, 'ACCEPTED');
     assert.deepEqual(printed.map((item) => [item.deviceId, item.copyCount]), [['printer-device-001', 1]]);
 
+    const adminBatch = await service.createAdminWaybillBatch(logisticsAdmin, {
+      merchantId: 'merchant-1',
+      provider: 'KUAIDI100',
+      carrierCode: 'SF',
+      storeId: store.storeId,
+      orderIds: [adminOrderId],
+      idempotencyKey: 'admin-waybill-batch-create-1',
+    });
+    assert.equal(adminBatch.items[0]?.state, 'COMPLETED');
+    assert.equal(adminBatch.items[0]?.trackingNumber, 'SF100000002');
+    assert.equal((await service.listAdminWaybills(logisticsAdmin, { merchantId: 'merchant-1' })).waybills.length, 2);
+    assert.equal((await service.listAdminPrintJobs(logisticsAdmin, { merchantId: 'merchant-1' })).printJobs.length, 2);
+    assert.equal((await service.dispatchNextPrintJob())?.state, 'ACCEPTED');
+
     const enqueuePickup = createPickupReceiptEnqueuer({ encryptionKey, clock: () => now });
     await transactionAdapter(db).transaction((executor) => enqueuePickup(executor, {
       orderId,
@@ -3440,6 +3695,18 @@ test('printer binding, provider waybill and durable print jobs form one merchant
     const jobs = await service.listPrintJobs(merchant);
     assert.equal(jobs.find((job) => job.jobKind === 'PICKUP_RECEIPT')?.state, 'CONFIGURATION_REQUIRED');
     assert.equal(jobs.find((job) => job.jobKind === 'PICKUP_RECEIPT')?.copyCount, 2);
+    const pickupJob = jobs.find((job) => job.jobKind === 'PICKUP_RECEIPT')!;
+    const adminRetry = await service.retryAdminPrintJob(
+      logisticsAdmin,
+      pickupJob.printJobId,
+      'admin-print-job-retry-1',
+    );
+    assert.equal(adminRetry.state, 'CONFIGURATION_REQUIRED');
+    assert.equal(adminRetry.merchantId, 'merchant-1');
+    assert.equal((await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM core.audit_outbox_events
+       WHERE event_type IN ('AdminWaybillBatchCreated','AdminPrintJobRetryQueued')`,
+    )).rows[0]?.count, '2');
     const ciphertext = await db.query<{ content: string }>(
       `SELECT encode(encrypted_content, 'hex') AS content FROM core.print_jobs
        WHERE job_kind = 'PICKUP_RECEIPT'`,

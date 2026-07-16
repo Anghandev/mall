@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-merchant-lifecycle.1",
+  "artifactVersion": "2.0.0-logistics-admin.1",
   "formatVersion": 1,
   "databaseEngine": "postgresql",
   "schemas": {
@@ -105,6 +105,11 @@
           "name": "020_merchant_lifecycle.sql",
           "path": "schema/business/020_merchant_lifecycle.sql",
           "sha256": "bd67a249c12c4ad3022a2f85952aabce62b9bc5d240bcb0c7750e9b4d3832202"
+        },
+        {
+          "name": "021_logistics_admin.sql",
+          "path": "schema/business/021_logistics_admin.sql",
+          "sha256": "f7724abadacb05ba454dea3185e03e435a4a49b54d2cf240f4ada6102d08e20f"
         }
       ]
     },

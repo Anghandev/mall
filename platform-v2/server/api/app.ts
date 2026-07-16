@@ -70,6 +70,12 @@ import type {
 } from '../data/account-service.ts';
 import type { RiskObservationInput, RiskSubjectType } from '../data/risk-service.ts';
 import type {
+  CarrierConfigInput,
+  ProviderConfigInput,
+  WarehouseInput,
+  WarehouseUpdateInput,
+} from '../data/logistics-admin-service.ts';
+import type {
   Carrier,
   EvidenceAction,
   MediaPurpose,
@@ -268,6 +274,31 @@ export interface LogisticsPrintingApiService {
   }): Promise<unknown>;
   listPrintJobs(actor: FulfillmentActor, limit?: number): Promise<unknown>;
   retryPrintJob(actor: FulfillmentActor, printJobId: string, idempotencyKey: string): Promise<unknown>;
+  createAdminWaybillBatch(actor: FulfillmentActor, input: {
+    merchantId: string;
+    provider: 'KUAIDI100' | 'CAINIAO';
+    carrierCode: 'SF' | 'JD' | 'YTO' | 'ZTO' | 'STO' | 'EMS';
+    storeId: string;
+    orderIds: string[];
+    idempotencyKey: string;
+  }): Promise<unknown>;
+  listAdminWaybills(actor: FulfillmentActor, input?: { merchantId?: string; limit?: number }): Promise<unknown>;
+  listAdminPrintJobs(actor: FulfillmentActor, input?: { merchantId?: string; limit?: number }): Promise<unknown>;
+  retryAdminPrintJob(actor: FulfillmentActor, printJobId: string, idempotencyKey: string): Promise<unknown>;
+}
+
+export interface LogisticsAdminApiService {
+  listCarrierConfig(actor: FulfillmentActor): Promise<unknown>;
+  createCarrierConfigVersion(actor: FulfillmentActor, input: CarrierConfigInput): Promise<unknown>;
+  listProviderConfigs(actor: FulfillmentActor): Promise<unknown>;
+  createProviderConfigVersion(actor: FulfillmentActor, input: ProviderConfigInput): Promise<unknown>;
+  listWarehouses(actor: FulfillmentActor): Promise<unknown>;
+  createWarehouse(actor: FulfillmentActor, input: WarehouseInput): Promise<unknown>;
+  updateWarehouse(actor: FulfillmentActor, warehouseId: string, input: WarehouseUpdateInput): Promise<unknown>;
+  deactivateWarehouse(actor: FulfillmentActor, warehouseId: string, input: {
+    expectedVersion: number;
+    idempotencyKey: string;
+  }): Promise<unknown>;
 }
 
 export interface EvidenceApiService {
@@ -589,6 +620,7 @@ export interface ApiDependencies {
   fulfillmentService: FulfillmentApiService;
   fulfillmentTargetService: FulfillmentTargetApiService;
   logisticsPrintingService: LogisticsPrintingApiService;
+  logisticsAdminService: LogisticsAdminApiService;
   evidenceService: EvidenceApiService;
   settlementService: SettlementApiService;
   takeoverFundingService: TakeoverFundingApiService;
@@ -1291,6 +1323,133 @@ async function route(
       ),
       correlationId,
     );
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/admin/logistics/carriers') {
+    assertOnlySearchParams(url, []);
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
+    sendJson(response, 200, await dependencies.logisticsAdminService.listCarrierConfig(
+      fulfillmentActor(claims),
+    ), correlationId);
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/logistics/carrier-versions') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    sendJson(response, 201, await dependencies.logisticsAdminService.createCarrierConfigVersion(
+      fulfillmentActor(claims),
+      logisticsCarrierConfigInput(body),
+    ), correlationId);
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/admin/logistics/providers') {
+    assertOnlySearchParams(url, []);
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
+    sendJson(response, 200, await dependencies.logisticsAdminService.listProviderConfigs(
+      fulfillmentActor(claims),
+    ), correlationId);
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/logistics/provider-versions') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    sendJson(response, 201, await dependencies.logisticsAdminService.createProviderConfigVersion(
+      fulfillmentActor(claims),
+      logisticsProviderConfigInput(body),
+    ), correlationId);
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/admin/logistics/warehouses') {
+    assertOnlySearchParams(url, []);
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
+    sendJson(response, 200, await dependencies.logisticsAdminService.listWarehouses(
+      fulfillmentActor(claims),
+    ), correlationId);
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/logistics/warehouses') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    sendJson(response, 201, await dependencies.logisticsAdminService.createWarehouse(
+      fulfillmentActor(claims),
+      logisticsWarehouseInput(body, false),
+    ), correlationId);
+    return;
+  }
+  const logisticsWarehousePath = matchAdminLogisticsWarehousePath(url.pathname);
+  if (logisticsWarehousePath && request.method === 'PUT' && !logisticsWarehousePath.action) {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    sendJson(response, 200, await dependencies.logisticsAdminService.updateWarehouse(
+      fulfillmentActor(claims),
+      logisticsWarehousePath.warehouseId,
+      logisticsWarehouseInput(body, true),
+    ), correlationId);
+    return;
+  }
+  if (logisticsWarehousePath?.action === 'deactivate' && request.method === 'POST') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['expectedVersion', 'idempotencyKey']);
+    sendJson(response, 200, await dependencies.logisticsAdminService.deactivateWarehouse(
+      fulfillmentActor(claims),
+      logisticsWarehousePath.warehouseId,
+      {
+        expectedVersion: requiredPositiveInteger(body, 'expectedVersion'),
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+      },
+    ), correlationId);
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/logistics/waybills/batches') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['merchantId', 'provider', 'carrierCode', 'storeId', 'orderIds', 'idempotencyKey']);
+    sendJson(response, 201, await dependencies.logisticsPrintingService.createAdminWaybillBatch(
+      fulfillmentActor(claims),
+      {
+        merchantId: requiredString(body, 'merchantId'),
+        provider: requiredEnum(body, 'provider', ['KUAIDI100', 'CAINIAO']),
+        carrierCode: requiredEnum(body, 'carrierCode', ['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS']),
+        storeId: requiredString(body, 'storeId'),
+        orderIds: requiredStringArray(body, 'orderIds'),
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+      },
+    ), correlationId);
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/admin/logistics/waybills') {
+    assertOnlySearchParams(url, ['merchantId', 'limit']);
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const merchantId = url.searchParams.get('merchantId');
+    const limit = optionalPositiveIntegerParameter(url.searchParams.get('limit'), 'limit');
+    sendJson(response, 200, await dependencies.logisticsPrintingService.listAdminWaybills(
+      fulfillmentActor(claims),
+      { ...(merchantId ? { merchantId } : {}), ...(limit ? { limit } : {}) },
+    ), correlationId);
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/admin/logistics/print-jobs') {
+    assertOnlySearchParams(url, ['merchantId', 'limit']);
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const merchantId = url.searchParams.get('merchantId');
+    const limit = optionalPositiveIntegerParameter(url.searchParams.get('limit'), 'limit');
+    sendJson(response, 200, await dependencies.logisticsPrintingService.listAdminPrintJobs(
+      fulfillmentActor(claims),
+      { ...(merchantId ? { merchantId } : {}), ...(limit ? { limit } : {}) },
+    ), correlationId);
+    return;
+  }
+  const adminPrintJobRetryId = matchAdminLogisticsPrintJobRetryPath(url.pathname);
+  if (adminPrintJobRetryId && request.method === 'POST') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['idempotencyKey']);
+    sendJson(response, 200, await dependencies.logisticsPrintingService.retryAdminPrintJob(
+      fulfillmentActor(claims),
+      adminPrintJobRetryId,
+      requiredString(body, 'idempotencyKey'),
+    ), correlationId);
     return;
   }
   if (request.method === 'POST' && url.pathname === '/v2/stores') {
@@ -2974,6 +3133,73 @@ function requiredStringArray(body: Record<string, unknown>, name: string) {
   return value as string[];
 }
 
+function logisticsCarrierConfigInput(body: Record<string, unknown>): CarrierConfigInput {
+  assertOnlyKeys(body, ['carriers', 'defaultCarrierCode', 'idempotencyKey']);
+  if (!Array.isArray(body.carriers)) throw new CoreError('InvalidRequest', 'carriers must be an array');
+  const carriers = body.carriers.map((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new CoreError('InvalidRequest', 'Carrier config entry must be an object');
+    }
+    const entry = value as Record<string, unknown>;
+    assertOnlyKeys(entry, ['carrierCode', 'enabled']);
+    return {
+      carrierCode: requiredEnum(entry, 'carrierCode', ['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS']),
+      enabled: requiredBoolean(entry, 'enabled'),
+    };
+  });
+  return {
+    carriers,
+    defaultCarrierCode: requiredEnum(body, 'defaultCarrierCode', ['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS']),
+    idempotencyKey: requiredString(body, 'idempotencyKey'),
+  };
+}
+
+function logisticsProviderConfigInput(body: Record<string, unknown>): ProviderConfigInput {
+  assertOnlyKeys(body, [
+    'provider', 'enabled', 'partnerIdSecretRef', 'credentialSecretRef',
+    'monthlyAccountSecretRef', 'callbackSecretRef', 'idempotencyKey',
+  ]);
+  return {
+    provider: requiredEnum(body, 'provider', ['KUAIDI100', 'CAINIAO']),
+    enabled: requiredBoolean(body, 'enabled'),
+    partnerIdSecretRef: requiredString(body, 'partnerIdSecretRef'),
+    credentialSecretRef: requiredString(body, 'credentialSecretRef'),
+    monthlyAccountSecretRef: requiredString(body, 'monthlyAccountSecretRef'),
+    callbackSecretRef: requiredString(body, 'callbackSecretRef'),
+    idempotencyKey: requiredString(body, 'idempotencyKey'),
+  };
+}
+
+function logisticsWarehouseInput(body: Record<string, unknown>, requireVersion: false): WarehouseInput;
+function logisticsWarehouseInput(body: Record<string, unknown>, requireVersion: true): WarehouseUpdateInput;
+function logisticsWarehouseInput(
+  body: Record<string, unknown>,
+  requireVersion: boolean,
+): WarehouseInput | WarehouseUpdateInput {
+  assertOnlyKeys(body, [
+    'warehouseKind', 'name', 'partnerName', 'contactName', 'phone', 'regionCode',
+    'addressLine', 'enabled', 'expectedVersion', 'idempotencyKey',
+  ]);
+  if (!Object.hasOwn(body, 'partnerName')) throw new CoreError('InvalidRequest', 'partnerName is required');
+  if (!requireVersion && body.expectedVersion !== undefined) {
+    throw new CoreError('InvalidRequest', 'expectedVersion is unsupported when creating a warehouse');
+  }
+  const value: WarehouseInput = {
+    warehouseKind: requiredEnum(body, 'warehouseKind', ['PLATFORM', 'PARTNER']),
+    name: requiredString(body, 'name'),
+    partnerName: body.partnerName === null ? null : requiredString(body, 'partnerName'),
+    contactName: requiredString(body, 'contactName'),
+    phone: requiredString(body, 'phone'),
+    regionCode: requiredString(body, 'regionCode'),
+    addressLine: requiredString(body, 'addressLine'),
+    enabled: requiredBoolean(body, 'enabled'),
+    idempotencyKey: requiredString(body, 'idempotencyKey'),
+  };
+  return requireVersion
+    ? { ...value, expectedVersion: requiredPositiveInteger(body, 'expectedVersion') }
+    : value;
+}
+
 function requiredPositiveInteger(body: Record<string, unknown>, name: string) {
   const value = body[name];
   if (!Number.isSafeInteger(value) || Number(value) <= 0) {
@@ -3352,6 +3578,29 @@ function matchMerchantPrintJobRetryPath(pathname: string) {
     return decodeURIComponent(match[1]!);
   } catch {
     throw new CoreError('InvalidRequest', 'Invalid print job URL path');
+  }
+}
+
+function matchAdminLogisticsWarehousePath(pathname: string) {
+  const match = /^\/v2\/admin\/logistics\/warehouses\/([^/]+)(?:\/(deactivate))?$/.exec(pathname);
+  if (!match) return undefined;
+  try {
+    return {
+      warehouseId: decodeURIComponent(match[1]!),
+      action: match[2] as 'deactivate' | undefined,
+    };
+  } catch {
+    throw new CoreError('InvalidRequest', 'Invalid logistics warehouse URL path');
+  }
+}
+
+function matchAdminLogisticsPrintJobRetryPath(pathname: string) {
+  const match = /^\/v2\/admin\/logistics\/print-jobs\/([^/]+)\/retry$/.exec(pathname);
+  if (!match) return undefined;
+  try {
+    return decodeURIComponent(match[1]!);
+  } catch {
+    throw new CoreError('InvalidRequest', 'Invalid admin print job URL path');
   }
 }
 

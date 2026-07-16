@@ -1,6 +1,6 @@
 {
-  "artifactVersion": "2.0.0-merchant-lifecycle.1",
-  "publicationStatus": "COORDINATED_MERCHANT_LIFECYCLE_CHECKPOINT",
+  "artifactVersion": "2.0.0-logistics-admin.1",
+  "publicationStatus": "COORDINATED_LOGISTICS_ADMIN_CHECKPOINT",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
   "chain": {
@@ -14,57 +14,57 @@
   "components": {
     "packageMetadata": {
       "path": "package.json",
-      "sha256": "95b9980a81c1a2557fb2c4ec80bb7617f4214f532a3800e0977e11a3635b7ad6"
+      "sha256": "1f663c316dd1d31f78575813f03ec18bc8cc9081024c4af353d51838a1a45d87"
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "c3242020b7834e4cc616b30f635582137fd0dbe63f2970f45e9f42eaf2304b4d"
+      "sha256": "0a1a60475b4aa886547d18ddd9570379214dcaac2f0551de1e540213ef47f264"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "45d32b24c017d41b9b55ee773fcab8d3037e8a885834929a2d86150873ba4b65"
+      "sha256": "8c67dbab052528cff16e89250b19160f836cebf0e65e3a324e60a881d00e5ce4"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "2704aa0c57f64a153903fa0f7d8fb0081c616522da1a5a7455ef8471a78ae0ba"
+      "sha256": "49716011160118d1968aec46d3225b9b5e93d99fb5f8976c23dd18dba01d241e"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "22798523a1fd7924d092661c571de5cd8fe8a3acc102496def477575303255e4"
+      "sha256": "917487edb8faf6d90bae57db6c72fa7665e32042d290c9c1aafc307ec35d50d8"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "b9eaf5fa7e59ce92f03467b88a4a1302581d60d4b6d45a46d532de0a2cefbf87"
+      "sha256": "340c4ebaf5ead2d3cf0fa3da382481d9e6ca45ae110ca83481edf73007f2c2f0"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
-      "sha256": "6b88e23ad395c3de0c3bcfe1dd1b033ce1caac645dd8863edea8d281f2273177"
+      "sha256": "03d520c25b88eb0e099529e48fafea9e34d69be5f53a9471d24a13c18d852f93"
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "beda1e1ab4cbbb50339025bf7be0a8bcb9c90d6c2c6017c21bd0881b60e7b645"
+      "sha256": "cd14359d3e18a7bbe2bb787715aedb181e5d741429c5b5726d2494d6096b7947"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "508b2653b5a7290e0107ff7af9c8c0a8cf405d5b1862327a0e9ad652aa82819b"
+      "sha256": "910a0263b6ffe413c9897e0f08a460d6f7bac6dce92918db2779789beb9a7d25"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "76f2566f9d173bf100af4480daabb833d82de51937fc3eda3744268b733754cd"
+      "sha256": "c05da83ceb2c952b5c7c05f863aa3faf30ebe8e250369ee53a0e10dd28901212"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
-      "sha256": "138a6390a1df6d34270b4b6b92856ec9efc91188c147e2efb18dcf17aef04c04"
+      "sha256": "257119d15300f2bf5a30c8da7f384eca020b3902b1df92a188c0b3a8843c2b77"
     }
   },
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "0454820483f5ca03a64338eeeba3682aba5a87843e0f43fc3e0df11722b47758"
+      "sha256": "2114c4d36aa60b8cadca2b28416b1f700cfb01f1fc6987d123e61442017f0a3e"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "62309bfe1bd836c1f739bc751f1a1833b38997f7e6d3f52ebd3d697ef60162ef"
+      "sha256": "e6edb75519c175c19e2a2457da7911c733110dfb1b82bc6b5ee8f7186d7cdd31"
     }
   ],
   "httpSurface": [
@@ -77,6 +77,11 @@
     "GET /v2/admin/cms/versions/{versionId}",
     "GET /v2/admin/coverage-breaker/actions",
     "GET /v2/admin/dashboard",
+    "GET /v2/admin/logistics/carriers",
+    "GET /v2/admin/logistics/print-jobs",
+    "GET /v2/admin/logistics/providers",
+    "GET /v2/admin/logistics/warehouses",
+    "GET /v2/admin/logistics/waybills",
     "GET /v2/admin/merchants",
     "GET /v2/admin/merchants/{merchantId}",
     "GET /v2/admin/monitoring",
@@ -130,6 +135,12 @@
     "POST /v2/admin/cms/versions/{versionId}/rollback",
     "POST /v2/admin/coverage-breaker/resume-actions",
     "POST /v2/admin/coverage-breaker/resume-challenge",
+    "POST /v2/admin/logistics/carrier-versions",
+    "POST /v2/admin/logistics/print-jobs/{printJobId}/retry",
+    "POST /v2/admin/logistics/provider-versions",
+    "POST /v2/admin/logistics/warehouses",
+    "POST /v2/admin/logistics/warehouses/{warehouseId}/deactivate",
+    "POST /v2/admin/logistics/waybills/batches",
     "POST /v2/admin/merchants",
     "POST /v2/admin/merchants/{merchantId}/review-actions/{actionId}/publish",
     "POST /v2/admin/merchants/{merchantId}/review-challenges",
@@ -205,6 +216,7 @@
     "PUT /v2/admin/catalog/categories/{categoryId}",
     "PUT /v2/admin/catalog/stores/{storeId}/product-slot",
     "PUT /v2/admin/catalog/tags/{tagId}",
+    "PUT /v2/admin/logistics/warehouses/{warehouseId}",
     "PUT /v2/admin/merchants/{merchantId}/application",
     "PUT /v2/admin/policy-drafts/{draftId}",
     "PUT /v2/buyer/addresses/{addressId}",
@@ -257,6 +269,9 @@
     "printerBindingHttp": "AVAILABLE",
     "waybillBatchHttp": "AVAILABLE",
     "durablePrintJobs": "AVAILABLE",
+    "logisticsAdminConfigHttp": "AVAILABLE",
+    "logisticsWarehouseHttp": "AVAILABLE",
+    "adminWaybillAndPrintHttp": "AVAILABLE",
     "takeoverHttp": "AVAILABLE",
     "fulfillmentScheduler": "AVAILABLE",
     "bnmAvailabilityWorker": "AVAILABLE",
@@ -386,6 +401,11 @@
     "RiskAppeal",
     "MerchantLifecycleList",
     "MerchantLifecycleDetail",
-    "MerchantReviewChallenge"
+    "MerchantReviewChallenge",
+    "LogisticsCarrierConfig",
+    "LogisticsProviderConfigList",
+    "LogisticsWarehouseList",
+    "AdminWaybillList",
+    "AdminPrintJobList"
   ]
 }

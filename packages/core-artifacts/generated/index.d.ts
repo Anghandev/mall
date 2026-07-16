@@ -1,4 +1,4 @@
-export declare const artifactVersion: "2.0.0-merchant-lifecycle.1";
+export declare const artifactVersion: "2.0.0-logistics-admin.1";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
@@ -28,6 +28,10 @@ export type StoreStatus = "ACTIVE" | "SUSPENDED" | "CLOSED";
 export type FulfillmentRequestType = "EXCHANGE" | "DELAY" | "ARBITRATION" | "FORCED_RECEIPT";
 export type FulfillmentRequestState = "OPEN" | "APPROVED" | "REJECTED" | "RESOLVED";
 export type LogisticsProvider = "KUAIDI100" | "CAINIAO";
+export type LogisticsCarrierCode = "SF" | "JD" | "YTO" | "ZTO" | "STO" | "EMS";
+export type LogisticsProviderReadiness = "READY" | "DISABLED" | "CONFIGURATION_REQUIRED";
+export type LogisticsWarehouseKind = "PLATFORM" | "PARTNER";
+export type LogisticsWarehouseAccess = "FULL" | "REDACTED";
 export type LogisticsStatus = "PICKED_UP" | "IN_TRANSIT" | "OUT_FOR_DELIVERY" | "DELIVERED" | "EXCEPTION";
 export type PrintProvider = "FEIE" | "YILIANYUN";
 export type PrintJobState = "CONFIGURATION_REQUIRED" | "QUEUED" | "PROCESSING" | "ACCEPTED" | "RETRYABLE" | "FAILED";
@@ -104,6 +108,10 @@ export declare const storeStatuses: readonly StoreStatus[];
 export declare const fulfillmentRequestTypes: readonly FulfillmentRequestType[];
 export declare const fulfillmentRequestStates: readonly FulfillmentRequestState[];
 export declare const logisticsProviders: readonly LogisticsProvider[];
+export declare const logisticsCarrierCodes: readonly LogisticsCarrierCode[];
+export declare const logisticsProviderReadinessStates: readonly LogisticsProviderReadiness[];
+export declare const logisticsWarehouseKinds: readonly LogisticsWarehouseKind[];
+export declare const logisticsWarehouseAccessLevels: readonly LogisticsWarehouseAccess[];
 export declare const logisticsStatuses: readonly LogisticsStatus[];
 export declare const printProviders: readonly PrintProvider[];
 export declare const printJobStates: readonly PrintJobState[];
@@ -350,7 +358,7 @@ export interface PrinterBinding {
 
 export interface WaybillBatchRequest {
   provider: WaybillProvider;
-  carrierCode: 'SF' | 'JD' | 'YTO' | 'ZTO' | 'STO' | 'EMS';
+  carrierCode: LogisticsCarrierCode;
   storeId: string;
   orderIds: readonly string[];
   idempotencyKey: string;
@@ -360,6 +368,7 @@ export interface WaybillResult {
   artifactVersion: typeof artifactVersion;
   requestId: Bytes32;
   batchId: Bytes32;
+  merchantId: string;
   orderId: string;
   storeId: string;
   provider: WaybillProvider;
@@ -383,6 +392,7 @@ export interface WaybillBatchResult {
 export interface PrintJob {
   artifactVersion: typeof artifactVersion;
   printJobId: Bytes32;
+  merchantId: string;
   orderId: string;
   storeId: string;
   jobKind: 'WAYBILL' | 'PICKUP_RECEIPT';
@@ -400,6 +410,110 @@ export interface PrintJob {
 }
 
 export interface PrintJobRetryRequest { idempotencyKey: string }
+
+export interface LogisticsCarrierConfigRequest {
+  carriers: readonly Readonly<{ carrierCode: LogisticsCarrierCode; enabled: boolean }>[];
+  defaultCarrierCode: LogisticsCarrierCode;
+  idempotencyKey: string;
+}
+
+export interface LogisticsCarrierConfig {
+  artifactVersion: typeof artifactVersion;
+  configVersionId: Bytes32 | null;
+  version: number;
+  defaultCarrierCode: LogisticsCarrierCode | null;
+  readiness: 'READY' | 'CONFIGURATION_REQUIRED';
+  carriers: readonly Readonly<{ carrierCode: LogisticsCarrierCode; enabled: boolean }>[];
+  createdBy: Address | null;
+  createdAt: Timestamp | null;
+}
+
+export interface LogisticsProviderConfigRequest {
+  provider: WaybillProvider;
+  enabled: boolean;
+  partnerIdSecretRef: string;
+  credentialSecretRef: string;
+  monthlyAccountSecretRef: string;
+  callbackSecretRef: string;
+  idempotencyKey: string;
+}
+
+export interface LogisticsProviderConfig {
+  provider: WaybillProvider;
+  providerConfigVersionId: Bytes32 | null;
+  version: number;
+  enabled: boolean;
+  configured: boolean;
+  configuredFields: Readonly<{
+    partnerId: boolean; credential: boolean; monthlyAccount: boolean; callbackSecret: boolean;
+  }>;
+  configHash: Bytes32 | null;
+  readiness: LogisticsProviderReadiness;
+  createdBy: Address | null;
+  createdAt: Timestamp | null;
+}
+
+export interface LogisticsProviderConfigList {
+  artifactVersion: typeof artifactVersion;
+  providers: readonly LogisticsProviderConfig[];
+}
+
+export interface LogisticsWarehouseRequest {
+  warehouseKind: LogisticsWarehouseKind;
+  name: string;
+  partnerName: string | null;
+  contactName: string;
+  phone: string;
+  regionCode: string;
+  addressLine: string;
+  enabled: boolean;
+  idempotencyKey: string;
+}
+
+export interface LogisticsWarehouseUpdateRequest extends LogisticsWarehouseRequest {
+  expectedVersion: number;
+}
+
+export interface LogisticsWarehouseDeactivateRequest {
+  expectedVersion: number;
+  idempotencyKey: string;
+}
+
+export interface LogisticsWarehouse {
+  artifactVersion: typeof artifactVersion;
+  warehouseId: string;
+  warehouseVersionId: Bytes32;
+  version: number;
+  warehouseKind: LogisticsWarehouseKind;
+  name: string;
+  partnerName: string | null;
+  regionCode: string;
+  enabled: boolean;
+  access: LogisticsWarehouseAccess;
+  contactName: string | null;
+  phone: string | null;
+  addressLine: string | null;
+  payloadHash: Bytes32;
+  createdBy: Address;
+  createdAt: Timestamp;
+}
+
+export interface LogisticsWarehouseList {
+  artifactVersion: typeof artifactVersion;
+  warehouses: readonly LogisticsWarehouse[];
+}
+
+export interface AdminWaybillBatchRequest extends WaybillBatchRequest { merchantId: string }
+
+export interface AdminWaybillList {
+  artifactVersion: typeof artifactVersion;
+  waybills: readonly WaybillResult[];
+}
+
+export interface AdminPrintJobList {
+  artifactVersion: typeof artifactVersion;
+  printJobs: readonly PrintJob[];
+}
 
 export interface SeckillSessionProduct {
   productId: string;

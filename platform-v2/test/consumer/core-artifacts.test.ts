@@ -23,13 +23,13 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('merchant lifecycle .1 checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-merchant-lifecycle.1');
+test('logistics admin .1 checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-logistics-admin.1');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
   assert.equal(openapi['x-artifactVersion'], artifactVersion);
-  assert.equal(manifest.publicationStatus, 'COORDINATED_MERCHANT_LIFECYCLE_CHECKPOINT');
+  assert.equal(manifest.publicationStatus, 'COORDINATED_LOGISTICS_ADMIN_CHECKPOINT');
   assert.equal(contractManifest.publicationStatus, 'coordinated-settlement-admin-checkpoint');
   assert.ok(manifest.decisionBlocked.includes('SECKILL_PRIZE_POOL_ACCOUNT'));
   assert.deepEqual(
@@ -54,7 +54,7 @@ test('merchant lifecycle .1 checkpoint has one identity, resolvable exports and 
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 20);
+  assert.equal(schemaManifest.schemas.core.migrations.length, 21);
   assert.equal(schemaManifest.schemas.audit.migrations.length, 4);
   for (const migration of [
     ...schemaManifest.schemas.core.migrations,
@@ -83,6 +83,11 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
   'GET /v2/admin/cms/versions/{versionId}',
   'GET /v2/admin/coverage-breaker/actions',
   'GET /v2/admin/dashboard',
+    'GET /v2/admin/logistics/carriers',
+    'GET /v2/admin/logistics/print-jobs',
+    'GET /v2/admin/logistics/providers',
+    'GET /v2/admin/logistics/warehouses',
+    'GET /v2/admin/logistics/waybills',
     'GET /v2/admin/merchants',
     'GET /v2/admin/merchants/{merchantId}',
     'GET /v2/admin/monitoring',
@@ -134,8 +139,14 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'POST /v2/admin/cms/versions',
     'POST /v2/admin/cms/versions/{versionId}/publish',
   'POST /v2/admin/cms/versions/{versionId}/rollback',
-  'POST /v2/admin/coverage-breaker/resume-actions',
-  'POST /v2/admin/coverage-breaker/resume-challenge',
+      'POST /v2/admin/coverage-breaker/resume-actions',
+      'POST /v2/admin/coverage-breaker/resume-challenge',
+    'POST /v2/admin/logistics/carrier-versions',
+    'POST /v2/admin/logistics/print-jobs/{printJobId}/retry',
+    'POST /v2/admin/logistics/provider-versions',
+    'POST /v2/admin/logistics/warehouses',
+    'POST /v2/admin/logistics/warehouses/{warehouseId}/deactivate',
+    'POST /v2/admin/logistics/waybills/batches',
     'POST /v2/admin/merchants',
     'POST /v2/admin/merchants/{merchantId}/review-actions/{actionId}/publish',
     'POST /v2/admin/merchants/{merchantId}/review-challenges',
@@ -211,6 +222,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'PUT /v2/admin/catalog/categories/{categoryId}',
     'PUT /v2/admin/catalog/stores/{storeId}/product-slot',
     'PUT /v2/admin/catalog/tags/{tagId}',
+    'PUT /v2/admin/logistics/warehouses/{warehouseId}',
     'PUT /v2/admin/merchants/{merchantId}/application',
     'PUT /v2/admin/policy-drafts/{draftId}',
     'PUT /v2/buyer/addresses/{addressId}',
@@ -440,6 +452,11 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
     'MerchantLifecycleList',
     'MerchantLifecycleDetail',
     'MerchantReviewChallenge',
+    'LogisticsCarrierConfig',
+    'LogisticsProviderConfigList',
+    'LogisticsWarehouseList',
+    'AdminWaybillList',
+    'AdminPrintJobList',
   ]) assert.match(declarations, new RegExp(`export interface ${name}\\b`), name);
   assert.deepEqual(enums.merchantLevels, ['V1', 'V2', 'V3', 'V4', 'V5']);
   assert.deepEqual(enums.merchantLifecycleStatuses, [
@@ -447,6 +464,10 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
   ]);
   assert.deepEqual(enums.merchantReviewActions, ['APPROVE', 'REJECT', 'BLACKLIST']);
   assert.deepEqual(enums.merchantQualificationAccess, ['FULL', 'REDACTED', 'UNAVAILABLE']);
+  assert.deepEqual(enums.logisticsCarrierCodes, ['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS']);
+  assert.deepEqual(enums.logisticsProviderReadinessStates, ['READY', 'DISABLED', 'CONFIGURATION_REQUIRED']);
+  assert.deepEqual(enums.logisticsWarehouseKinds, ['PLATFORM', 'PARTNER']);
+  assert.deepEqual(enums.logisticsWarehouseAccessLevels, ['FULL', 'REDACTED']);
   assert.deepEqual(enums.merchantGuaranteeDepositStates, ['SUBMITTED', 'MINED', 'FINAL', 'REORGED', 'QUARANTINED']);
   assert.deepEqual(enums.rewardSubtypes, [
     'GENESIS', 'DIRECT_REFERRAL', 'DISTRICT', 'CITY',
@@ -723,6 +744,9 @@ test('catalog, settlement/admin and seckill realtime capabilities are published 
     'printerBindingHttp',
     'waybillBatchHttp',
     'durablePrintJobs',
+    'logisticsAdminConfigHttp',
+    'logisticsWarehouseHttp',
+    'adminWaybillAndPrintHttp',
     'takeoverHttp',
     'fulfillmentScheduler',
     'bnmAvailabilityWorker',

@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-merchant-lifecycle.1",
+  "artifactVersion": "2.0.0-logistics-admin.1",
   "orderProjectionStates": [
     "QUOTED",
     "SUBMITTED",
@@ -163,12 +163,33 @@
     "KUAIDI100",
     "CAINIAO"
   ],
+  "logisticsCarrierCodes": [
+    "SF",
+    "JD",
+    "YTO",
+    "ZTO",
+    "STO",
+    "EMS"
+  ],
+  "logisticsProviderReadinessStates": [
+    "READY",
+    "DISABLED",
+    "CONFIGURATION_REQUIRED"
+  ],
   "logisticsStatuses": [
     "PICKED_UP",
     "IN_TRANSIT",
     "OUT_FOR_DELIVERY",
     "DELIVERED",
     "EXCEPTION"
+  ],
+  "logisticsWarehouseKinds": [
+    "PLATFORM",
+    "PARTNER"
+  ],
+  "logisticsWarehouseAccessLevels": [
+    "FULL",
+    "REDACTED"
   ],
   "printProviders": [
     "FEIE",

@@ -11,6 +11,11 @@ import { CORE_ARTIFACT_VERSION } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import type { FulfillmentActor, ShipmentInput } from './fulfillment-service.ts';
 import type { Carrier } from './evidence-service.ts';
+import {
+  appendLogisticsOperationAudit,
+  assertLogisticsRouteReady,
+  requireCurrentLogisticsRole,
+} from './logistics-admin-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 
 export type PrintProvider = 'FEIE' | 'YILIANYUN';
@@ -87,6 +92,10 @@ export interface WaybillBatchInput {
   storeId: string;
   orderIds: string[];
   idempotencyKey: string;
+}
+
+export interface AdminWaybillBatchInput extends WaybillBatchInput {
+  merchantId: string;
 }
 
 interface BindingChallengeRow {
@@ -437,6 +446,23 @@ export class LogisticsPrintingService {
 
   async createWaybillBatch(actor: FulfillmentActor, input: WaybillBatchInput) {
     assertMerchant(actor);
+    return this.#createWaybillBatch(actor, input, actor.merchantId!, false);
+  }
+
+  async createAdminWaybillBatch(actor: FulfillmentActor, input: AdminWaybillBatchInput) {
+    assertPlatformOperator(actor);
+    if (!input.merchantId || input.merchantId.length > 256) {
+      throw new CoreError('InvalidRequest', 'Waybill merchant ID is invalid');
+    }
+    return this.#createWaybillBatch(actor, input, input.merchantId, true);
+  }
+
+  async #createWaybillBatch(
+    actor: FulfillmentActor,
+    input: WaybillBatchInput,
+    merchantId: string,
+    platformScope: boolean,
+  ) {
     const provider = waybillProvider(input.provider);
     const carrierCode = carrier(input.carrierCode);
     validateIdempotencyKey(input.idempotencyKey);
@@ -449,7 +475,11 @@ export class LogisticsPrintingService {
     const wallet = normalizedAddress(actor.walletAddress, 'actor wallet');
     const requestHash = hashJson({ ...input, provider, carrierCode, orderIds: [...input.orderIds] });
     const batch = await this.#transactions.transaction(async (executor) => {
-      const store = await merchantStore(executor, actor, input.storeId);
+      const roles = platformScope
+        ? await requireCurrentLogisticsRole(executor, actor)
+        : undefined;
+      await assertLogisticsRouteReady(executor, provider, carrierCode);
+      const store = await merchantStore(executor, actor, input.storeId, merchantId, platformScope);
       await executor.query(
         'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
         [`waybill-batch:${wallet}:${input.idempotencyKey}`],
@@ -474,7 +504,7 @@ export class LogisticsPrintingService {
         [batchId, store.merchant_id, wallet, input.idempotencyKey, requestHash, input.orderIds.length, now],
       );
       for (const orderId of input.orderIds) {
-        const context = await deliveryContext(executor, actor, orderId, input.storeId);
+        const context = await deliveryContext(executor, actor, orderId, input.storeId, merchantId, platformScope);
         assertWaybillEligible(context);
         const itemKey = `waybill-item-${hashText(`${input.idempotencyKey}:${orderId}`).slice(2, 50)}`;
         await executor.query(
@@ -496,6 +526,24 @@ export class LogisticsPrintingService {
           ],
         );
       }
+      if (roles) {
+        await appendLogisticsOperationAudit(executor, {
+          eventType: 'AdminWaybillBatchCreated',
+          resourceType: 'WAYBILL_BATCH',
+          resourceId: batchId,
+          actor,
+          roles,
+          requestHash,
+          payload: {
+            merchantId,
+            storeId: input.storeId,
+            provider,
+            carrierCode,
+            itemCount: input.orderIds.length,
+          },
+          now,
+        });
+      }
       return { batchId, store };
     });
     const requests = await this.#transactions.transaction((executor) => executor.query<WaybillRow>(
@@ -503,8 +551,53 @@ export class LogisticsPrintingService {
       [batch.batchId],
     ));
     const items = [];
-    for (const request of requests.rows) items.push(await this.#processWaybill(actor, request));
+    for (const request of requests.rows) {
+      items.push(await this.#processWaybill(actor, request, merchantId, platformScope));
+    }
     return { artifactVersion: CORE_ARTIFACT_VERSION, batchId: batch.batchId, items };
+  }
+
+  listAdminWaybills(actor: FulfillmentActor, input: { merchantId?: string; limit?: number } = {}) {
+    assertPlatformOperator(actor);
+    const key = requireEncryptionKey(this.#encryptionKey);
+    const limit = boundedListLimit(input.limit);
+    if (input.merchantId !== undefined && (!input.merchantId || input.merchantId.length > 256)) {
+      throw new CoreError('InvalidRequest', 'Waybill merchant filter is invalid');
+    }
+    return this.#transactions.transaction(async (executor) => {
+      await requireCurrentLogisticsRole(executor, actor);
+      const result = await executor.query<WaybillRow>(
+        `SELECT * FROM core.waybill_requests
+         WHERE ($1::text IS NULL OR merchant_id = $1)
+         ORDER BY created_at DESC, request_id DESC LIMIT $2`,
+        [input.merchantId ?? null, limit],
+      );
+      return {
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        waybills: result.rows.map((row) => waybillProjection(row, key)),
+      };
+    });
+  }
+
+  listAdminPrintJobs(actor: FulfillmentActor, input: { merchantId?: string; limit?: number } = {}) {
+    assertPlatformOperator(actor);
+    const limit = boundedListLimit(input.limit);
+    if (input.merchantId !== undefined && (!input.merchantId || input.merchantId.length > 256)) {
+      throw new CoreError('InvalidRequest', 'Print-job merchant filter is invalid');
+    }
+    return this.#transactions.transaction(async (executor) => {
+      await requireCurrentLogisticsRole(executor, actor);
+      const result = await executor.query<PrintJobRow>(
+        `SELECT * FROM core.print_jobs
+         WHERE ($1::text IS NULL OR merchant_id = $1)
+         ORDER BY created_at DESC, print_job_id DESC LIMIT $2`,
+        [input.merchantId ?? null, limit],
+      );
+      return {
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        printJobs: result.rows.map(printJobProjection),
+      };
+    });
   }
 
   listPrintJobs(actor: FulfillmentActor, limit = 50) {
@@ -522,20 +615,37 @@ export class LogisticsPrintingService {
 
   retryPrintJob(actor: FulfillmentActor, printJobId: string, idempotencyKey: string) {
     assertMerchant(actor);
+    return this.#retryPrintJob(actor, printJobId, idempotencyKey, false);
+  }
+
+  retryAdminPrintJob(actor: FulfillmentActor, printJobId: string, idempotencyKey: string) {
+    assertPlatformOperator(actor);
+    return this.#retryPrintJob(actor, printJobId, idempotencyKey, true);
+  }
+
+  #retryPrintJob(
+    actor: FulfillmentActor,
+    printJobId: string,
+    idempotencyKey: string,
+    platformScope: boolean,
+  ) {
     if (!isHash(printJobId)) throw new CoreError('InvalidRequest', 'Print job ID is invalid');
     validateIdempotencyKey(idempotencyKey);
     const wallet = normalizedAddress(actor.walletAddress, 'actor wallet');
     const requestHash = hashJson({ printJobId, idempotencyKey });
     return this.#transactions.transaction(async (executor) => {
+      const roles = platformScope
+        ? await requireCurrentLogisticsRole(executor, actor)
+        : undefined;
       const prior = await executor.query<{ request_hash: string }>(
         'SELECT request_hash FROM core.print_job_retry_commands WHERE actor_wallet = $1 AND idempotency_key = $2',
         [wallet, idempotencyKey],
       );
       if (prior.rows[0]) {
         if (prior.rows[0].request_hash !== requestHash) throw idempotencyConflict();
-        return printJobProjection(await requiredPrintJob(executor, actor, printJobId));
+        return printJobProjection(await requiredPrintJob(executor, actor, printJobId, false, platformScope));
       }
-      const job = await requiredPrintJob(executor, actor, printJobId, true);
+      const job = await requiredPrintJob(executor, actor, printJobId, true, platformScope);
       if (job.state === 'ACCEPTED') return printJobProjection(job);
       const binding = await loadBinding(executor, job.store_id);
       const now = this.#clock();
@@ -560,6 +670,18 @@ export class LogisticsPrintingService {
          ) VALUES ($1,$2,$3,$4,$5,$6)`,
         [randomHash(), printJobId, wallet, idempotencyKey, requestHash, now],
       );
+      if (roles) {
+        await appendLogisticsOperationAudit(executor, {
+          eventType: 'AdminPrintJobRetryQueued',
+          resourceType: 'PRINT_JOB',
+          resourceId: printJobId,
+          actor,
+          roles,
+          requestHash,
+          payload: { merchantId: job.merchant_id, storeId: job.store_id, state },
+          now,
+        });
+      }
       return printJobProjection(updated.rows[0]!);
     });
   }
@@ -645,22 +767,28 @@ export class LogisticsPrintingService {
     });
   }
 
-  async #processWaybill(actor: FulfillmentActor, initial: WaybillRow) {
+  async #processWaybill(
+    actor: FulfillmentActor,
+    initial: WaybillRow,
+    merchantId: string,
+    platformScope: boolean,
+  ) {
     const key = requireEncryptionKey(this.#encryptionKey);
     let request = await this.#transactions.transaction((executor) => loadWaybill(executor, initial.request_id));
     const adapter = this.#waybillAdapters[request.waybill_provider];
     if (request.state === 'PENDING_PROVIDER' || request.state === 'CONFIGURATION_REQUIRED') {
       if (!adapter) {
-        request = await this.#markWaybillError(request.request_id, 'CONFIGURATION_REQUIRED', 'WAYBILL_PROVIDER_UNAVAILABLE');
+        request = await this.#markWaybillError(
+          actor, platformScope, request.request_id,
+          'CONFIGURATION_REQUIRED', 'WAYBILL_PROVIDER_UNAVAILABLE',
+        );
         return waybillProjection(request, key);
       }
       try {
-        const context = await this.#transactions.transaction((executor) => deliveryContext(
-          executor,
-          actor,
-          request.order_id,
-          request.store_id,
-        ));
+        const context = await this.#transactions.transaction(async (executor) => {
+          if (platformScope) await requireCurrentLogisticsRole(executor, actor);
+          return deliveryContext(executor, actor, request.order_id, request.store_id, merchantId, platformScope);
+        });
         const recipient = decryptPostalParty(context, key);
         const result = await adapter.createWaybill({
           requestId: request.request_id,
@@ -675,6 +803,7 @@ export class LogisticsPrintingService {
         if (!providerReference) throw new CoreError('ExternalBlocked', 'Waybill provider returned no reference', 503);
         const encrypted = encryptText(trackingNumber, key);
         request = await this.#transactions.transaction(async (executor) => {
+          if (platformScope) await requireCurrentLogisticsRole(executor, actor);
           const updated = await executor.query<WaybillRow>(
             `UPDATE core.waybill_requests SET state = 'PROVIDER_ACCEPTED', provider_reference = $2,
                encrypted_tracking_number = $3, tracking_iv = $4, tracking_tag = $5,
@@ -695,6 +824,8 @@ export class LogisticsPrintingService {
       } catch (error) {
         const code = error instanceof CoreError ? error.code : 'ExternalBlocked';
         request = await this.#markWaybillError(
+          actor,
+          platformScope,
           request.request_id,
           code === 'ConfigurationRequired' ? 'CONFIGURATION_REQUIRED' : 'FAILED',
           code,
@@ -706,6 +837,9 @@ export class LogisticsPrintingService {
     const trackingNumber = decryptTracking(request, key);
     if (request.state === 'PROVIDER_ACCEPTED') {
       try {
+        if (platformScope) {
+          await this.#transactions.transaction((executor) => requireCurrentLogisticsRole(executor, actor));
+        }
         const evidence = await this.#evidence.createTrackingEvidence(actor, {
           orderId: request.order_id,
           carrierCode: request.carrier_code,
@@ -724,6 +858,7 @@ export class LogisticsPrintingService {
         });
         void shipment;
         request = await this.#transactions.transaction(async (executor) => {
+          if (platformScope) await requireCurrentLogisticsRole(executor, actor);
           const updated = await executor.query<WaybillRow>(
             `UPDATE core.waybill_requests SET state = 'SHIPMENT_RECORDED',
                tracking_number_hash = $2, shipment_evidence_hash = $3,
@@ -735,6 +870,8 @@ export class LogisticsPrintingService {
         });
       } catch (error) {
         request = await this.#markWaybillError(
+          actor,
+          platformScope,
           request.request_id,
           'FAILED',
           error instanceof CoreError ? error.code : 'ExternalBlocked',
@@ -743,26 +880,28 @@ export class LogisticsPrintingService {
       }
     }
     if (request.state === 'SHIPMENT_RECORDED') {
-      const context = await this.#transactions.transaction((executor) => deliveryContext(
-        executor,
-        actor,
-        request.order_id,
-        request.store_id,
-      ));
+      const context = await this.#transactions.transaction(async (executor) => {
+        if (platformScope) await requireCurrentLogisticsRole(executor, actor);
+        return deliveryContext(executor, actor, request.order_id, request.store_id, merchantId, platformScope);
+      });
       const recipient = decryptPostalParty(context, key);
       const content = waybillContent({ request, context, recipient, trackingNumber });
-      const job = await this.#transactions.transaction((executor) => enqueuePrintJob(executor, {
-        merchantId: request.merchant_id,
-        storeId: request.store_id,
-        orderId: request.order_id,
-        kind: 'WAYBILL',
-        sourceReference: request.request_id,
-        copyCount: 1,
-        content,
-        encryptionKey: key,
-        now: this.#clock(),
-      }));
+      const job = await this.#transactions.transaction(async (executor) => {
+        if (platformScope) await requireCurrentLogisticsRole(executor, actor);
+        return enqueuePrintJob(executor, {
+          merchantId: request.merchant_id,
+          storeId: request.store_id,
+          orderId: request.order_id,
+          kind: 'WAYBILL',
+          sourceReference: request.request_id,
+          copyCount: 1,
+          content,
+          encryptionKey: key,
+          now: this.#clock(),
+        });
+      });
       request = await this.#transactions.transaction(async (executor) => {
+        if (platformScope) await requireCurrentLogisticsRole(executor, actor);
         const updated = await executor.query<WaybillRow>(
           `UPDATE core.waybill_requests SET state = 'COMPLETED', print_job_id = $2,
              error_code = NULL, updated_at = $3
@@ -775,8 +914,15 @@ export class LogisticsPrintingService {
     return waybillProjection(request, key);
   }
 
-  #markWaybillError(requestId: string, state: 'CONFIGURATION_REQUIRED' | 'FAILED', errorCode: string) {
+  #markWaybillError(
+    actor: FulfillmentActor,
+    platformScope: boolean,
+    requestId: string,
+    state: 'CONFIGURATION_REQUIRED' | 'FAILED',
+    errorCode: string,
+  ) {
     return this.#transactions.transaction(async (executor) => {
+      if (platformScope) await requireCurrentLogisticsRole(executor, actor);
       const updated = await executor.query<WaybillRow>(
         `UPDATE core.waybill_requests SET state = $2, error_code = $3, updated_at = $4
          WHERE request_id = $1 AND state IN ('PENDING_PROVIDER', 'CONFIGURATION_REQUIRED', 'PROVIDER_ACCEPTED')
@@ -864,13 +1010,19 @@ async function enqueuePrintJob(executor: SqlExecutor, input: {
   return job.rows[0]!;
 }
 
-async function merchantStore(executor: SqlExecutor, actor: FulfillmentActor, storeId: string) {
+async function merchantStore(
+  executor: SqlExecutor,
+  actor: FulfillmentActor,
+  storeId: string,
+  merchantId = actor.merchantId,
+  platformScope = false,
+) {
   if (!storeId || storeId.length > 256) throw new CoreError('InvalidRequest', 'Store ID is invalid');
   const result = await executor.query<{
     store_id: string; merchant_id: string; status: string;
   }>('SELECT store_id, merchant_id, status FROM core.merchant_stores WHERE store_id = $1', [storeId]);
   const store = result.rows[0];
-  if (!store || store.merchant_id !== actor.merchantId) {
+  if (!store || store.merchant_id !== merchantId || (!platformScope && store.merchant_id !== actor.merchantId)) {
     throw new CoreError('Forbidden', 'Store is outside the merchant scope', 403);
   }
   if (store.status !== 'ACTIVE') throw new CoreError('InvalidRequest', 'Store is not active', 409);
@@ -882,6 +1034,8 @@ async function deliveryContext(
   actor: FulfillmentActor,
   orderId: string,
   storeId: string,
+  merchantId = actor.merchantId,
+  platformScope = false,
 ) {
   const result = await executor.query<DeliveryContextRow>(
     `SELECT orders.order_id, orders.merchant_id, orders.merchant_wallet, orders.quantity::text,
@@ -900,7 +1054,12 @@ async function deliveryContext(
     [orderId, storeId],
   );
   const row = result.rows[0];
-  if (!row || row.merchant_id !== actor.merchantId || row.fulfillment_mode !== 'DELIVERY') {
+  if (
+    !row
+    || row.merchant_id !== merchantId
+    || (!platformScope && row.merchant_id !== actor.merchantId)
+    || row.fulfillment_mode !== 'DELIVERY'
+  ) {
     throw new CoreError('Forbidden', 'Delivery order is outside the merchant scope', 403);
   }
   if (row.store_id !== storeId) throw new CoreError('InvalidRequest', 'Waybill sender store mismatch', 409);
@@ -977,6 +1136,7 @@ function waybillProjection(row: WaybillRow, key: Buffer) {
     artifactVersion: CORE_ARTIFACT_VERSION,
     requestId: row.request_id,
     batchId: row.batch_id,
+    merchantId: row.merchant_id,
     orderId: row.order_id,
     storeId: row.store_id,
     provider: row.waybill_provider,
@@ -996,6 +1156,7 @@ function printJobProjection(row: PrintJobRow) {
   return {
     artifactVersion: CORE_ARTIFACT_VERSION,
     printJobId: row.print_job_id,
+    merchantId: row.merchant_id,
     orderId: row.order_id,
     storeId: row.store_id,
     jobKind: row.job_kind,
@@ -1033,13 +1194,21 @@ async function loadWaybill(executor: SqlExecutor, requestId: string) {
   return result.rows[0];
 }
 
-async function requiredPrintJob(executor: SqlExecutor, actor: FulfillmentActor, printJobId: string, lock = false) {
+async function requiredPrintJob(
+  executor: SqlExecutor,
+  actor: FulfillmentActor,
+  printJobId: string,
+  lock = false,
+  platformScope = false,
+) {
   const result = await executor.query<PrintJobRow>(
     `SELECT * FROM core.print_jobs WHERE print_job_id = $1${lock ? ' FOR UPDATE' : ''}`,
     [printJobId],
   );
   const job = result.rows[0];
-  if (!job || job.merchant_id !== actor.merchantId) throw new CoreError('Forbidden', 'Print job is outside the merchant scope', 403);
+  if (!job || (!platformScope && job.merchant_id !== actor.merchantId)) {
+    throw new CoreError('Forbidden', 'Print job is outside the merchant scope', 403);
+  }
   return job;
 }
 
@@ -1105,6 +1274,18 @@ function assertMerchant(actor: FulfillmentActor) {
   if (!actor.roles.includes('MERCHANT') || !actor.merchantId) {
     throw new CoreError('Forbidden', 'Merchant role is required', 403);
   }
+}
+
+function assertPlatformOperator(actor: FulfillmentActor) {
+  if (!actor.roles.includes('ADMIN') && !actor.roles.includes('OPERATOR')) {
+    throw new CoreError('Forbidden', 'Admin or Operator role is required', 403);
+  }
+}
+
+function boundedListLimit(value: number | undefined) {
+  if (value === undefined) return 50;
+  if (!Number.isSafeInteger(value)) throw new CoreError('InvalidRequest', 'Logistics list limit is invalid');
+  return Math.min(Math.max(value, 1), 100);
 }
 
 function bindingHash(input: { storeId: string; merchantId: string; provider: PrintProvider; deviceId: string }) {

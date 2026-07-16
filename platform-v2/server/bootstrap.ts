@@ -111,6 +111,7 @@ import {
   createPickupReceiptEnqueuer,
   LogisticsPrintingService,
 } from './data/logistics-printing-service.ts';
+import { LogisticsAdminService } from './data/logistics-admin-service.ts';
 
 const ARTIFACT_ROOT = fileURLToPath(new URL('../../packages/core-artifacts/', import.meta.url));
 const ABI_BUNDLE_PATH = fileURLToPath(
@@ -226,6 +227,14 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
         ...(env.YILIANYUN_CLIENT_SECRET ? { clientSecret: env.YILIANYUN_CLIENT_SECRET } : {}),
         ...(env.YILIANYUN_ACCESS_TOKEN ? { accessToken: env.YILIANYUN_ACCESS_TOKEN } : {}),
       }),
+    },
+  });
+  const logisticsAdminService = new LogisticsAdminService({
+    transactions,
+    ...(env.DELIVERY_DATA_ENCRYPTION_KEY ? { encryptionKey: env.DELIVERY_DATA_ENCRYPTION_KEY } : {}),
+    runtimeReadiness: {
+      KUAIDI100: config.providerReadiness.KUAIDI100,
+      CAINIAO: config.providerReadiness.CAINIAO,
     },
   });
   const logisticsPrintWorker = new LogisticsPrintWorker({ dispatcher: logisticsPrintingService });
@@ -605,6 +614,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     fulfillmentService,
     fulfillmentTargetService,
     logisticsPrintingService,
+    logisticsAdminService,
     evidenceService,
     settlementService,
     policyService,
