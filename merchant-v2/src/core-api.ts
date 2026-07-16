@@ -14,6 +14,7 @@ import {
   fulfillmentRequestStates,
   fulfillmentRequestTypes,
   guaranteeStatuses,
+  logisticsCarrierCodes,
   logisticsProviders,
   logisticsStatuses,
   merchantGuaranteeDepositStates,
@@ -139,7 +140,7 @@ const printJobStateSet = new Set<string>(printJobStates);
 const printProviderSet = new Set<string>(printProviders);
 const waybillProviderSet = new Set<string>(waybillProviders);
 const waybillRequestStateSet = new Set<string>(waybillRequestStates);
-const waybillCarrierSet = new Set<string>(['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS']);
+const waybillCarrierSet = new Set<string>(logisticsCarrierCodes);
 const orderKindSet = new Set<string>(['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] satisfies readonly OrderKind[]);
 
 export interface CoreReadiness {
@@ -1709,6 +1710,7 @@ function parseWaybillResult(
     artifactVersion,
     requestId: bytes32(value.requestId, 'waybill result.requestId'),
     batchId: expected.batchId,
+    merchantId: string(value.merchantId, 'waybill result.merchantId'),
     orderId: string(value.orderId, 'waybill result.orderId'),
     storeId: expected.storeId,
     provider: enumValue(value.provider, waybillProviderSet, 'waybill result.provider'),
@@ -1741,6 +1743,7 @@ function parsePrintJob(input: unknown): PrintJob {
   return {
     artifactVersion,
     printJobId: bytes32(value.printJobId, 'print job.printJobId'),
+    merchantId: string(value.merchantId, 'print job.merchantId'),
     orderId: string(value.orderId, 'print job.orderId'),
     storeId: string(value.storeId, 'print job.storeId'),
     jobKind: enumValue(value.jobKind, new Set(['WAYBILL', 'PICKUP_RECEIPT']), 'print job.jobKind'),

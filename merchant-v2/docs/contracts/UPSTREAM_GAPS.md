@@ -1,6 +1,6 @@
 # Merchant Workbench Core Gaps
 
-The merchant product consumes Core's coordinated `2.0.0-merchant-lifecycle.1` artifact
+The merchant product consumes Core's coordinated `2.0.0-logistics-admin.1` artifact
 workspace package. Bootstrap, SIWE,
 merchant-bound Catalog/SKU/inventory management, immutable media, wallet-scoped fulfillment, merchant finance,
 guarantee-deposit evidence, signed settlement requests and Safe-finality
@@ -35,6 +35,12 @@ have no Merchant write route.
 |---|---|---|
 | GAP-MER-009 | Wallet-bound Feie/Yilianyun Device ID binding plus durable one-copy waybill and two-copy pickup print jobs | The connected merchant signs the exact Core challenge; the workbench renders tenant-scoped jobs and retries with stable command keys |
 | GAP-MER-010 | Kuaidi100/Cainiao waybill batches, provider tracking evidence and shipment recording | Selected eligible delivery orders submit only published provider/carrier/store/order fields; each authoritative result and failure state is rendered without browser-generated tracking data |
+
+The Merchant consumer uses Core's generated carrier-code enum but does not
+read or write platform carrier/provider configuration. A disabled carrier or
+incomplete provider configuration is rejected by Core as `InvalidRequest` or
+`ConfigurationRequired`; the workbench renders that rejection and does not
+create a local success state.
 
 ## Remaining Gaps
 
