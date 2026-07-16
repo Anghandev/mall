@@ -28,8 +28,11 @@ describe('platform admin fail-closed experience', () => {
     expect(packageJson.dependencies['@abu24k/core-artifacts']).toBe(`workspace:${artifactVersion}`);
     expect(productBaseline.artifactVersion).toBe(artifactVersion);
     expect(coreState.artifactVersion).toBe(artifactVersion);
-    expect(coreState.artifactStatus).toBe('coordinated-logistics-admin-checkpoint');
+    expect(coreState.artifactStatus).toBe('coordinated-admin-global-operations-checkpoint');
     expect(coreState.connectionLabel).toContain(artifactVersion);
+    expect(productBaseline.adminCapabilities.adminGlobalResourceSearch).toBe(true);
+    expect(productBaseline.adminCapabilities.adminGlobalResourceExport).toBe(true);
+    expect(productBaseline.adminCapabilities.adminProductBatchTags).toBe(true);
   });
 
   it('publishes the Admin logistics surface while keeping it closed before SIWE', () => {

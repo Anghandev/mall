@@ -13,7 +13,7 @@ export function CoreStatusPage() {
       <header className="page-header">
         <div className="page-icon"><RadioTower aria-hidden="true" /></div>
         <div>
-          <p className="eyebrow">Coordinated logistics checkpoint</p>
+          <p className="eyebrow">Coordinated admin global operations checkpoint</p>
           <h1>Core 状态</h1>
           <p>版本、HTTP 能力和运行时 readiness 均来自同一发布物。未部署、未配置或未发布不会显示为健康。</p>
         </div>
@@ -74,7 +74,7 @@ export function CoreStatusPage() {
 
       <section className="snapshot-rule">
         <ShieldCheck aria-hidden="true" />
-        <div><strong>Admin 边界</strong><p>运单、打印机绑定与打印作业仅发布 Merchant 路径，不会因 Core 全局能力显示 AVAILABLE 而成为 Admin 操作。Admin 物流配置、批量打印和生产部署仍保持 fail-closed。</p></div>
+        <div><strong>Admin 边界</strong><p>Admin 物流配置、跨商家面单、打印作业、全局资源导出和授权商品批量标签均已发布。OR、模糊钱包、UID、手机号、Yellow queue 与生产部署仍保持 fail-closed。</p></div>
       </section>
     </>
   );

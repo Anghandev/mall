@@ -17,6 +17,11 @@ const forbidden = [
   '/v2/merchant/waybills/batches',
   '/v2/merchant/print-jobs',
 ];
+const required = [
+  '/v2/admin/global/resources',
+  '/v2/admin/global/exports',
+  '/v2/admin/catalog/products/batch-tags',
+];
 
 function files(path) {
   return readdirSync(path).flatMap((entry) => {
@@ -27,20 +32,23 @@ function files(path) {
 
 const violations = [];
 let containsArtifactVersion = false;
+const foundRequired = new Set();
 for (const file of files(root)) {
   if (!/\.(?:js|css|html)$/.test(file)) continue;
   const content = readFileSync(file, 'utf8');
   if (content.includes(artifactVersion)) containsArtifactVersion = true;
+  for (const marker of required) if (content.includes(marker)) foundRequired.add(marker);
   for (const marker of forbidden) {
     if (content.includes(marker)) violations.push(`${file}: ${marker}`);
   }
 }
 
 if (!containsArtifactVersion) violations.push(`production bundle does not contain coordinated artifact ${artifactVersion}`);
+for (const marker of required) if (!foundRequired.has(marker)) violations.push(`production bundle does not contain required Admin operation ${marker}`);
 
 if (violations.length > 0) {
   console.error(`Production bundle contains forbidden markers:\n${violations.join('\n')}`);
   process.exit(1);
 }
 
-console.log(`Production bundle check passed for ${artifactVersion}: no samples, deprecated actions or Merchant logistics paths.`);
+console.log(`Production bundle check passed for ${artifactVersion}: coordinated Admin global operations are present with no samples, deprecated actions or Merchant logistics paths.`);
