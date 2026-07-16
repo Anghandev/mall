@@ -5,6 +5,8 @@ import type {
   BuyerOverview,
   BuyerProfile,
   BuyerSavedAddress,
+  BuyerShoppingStatement,
+  BuyerShoppingStatementPage,
   BuyerTakeoverTimeline,
   CatalogCategory,
   CatalogProduct,
@@ -31,6 +33,7 @@ import type {
   NotificationEndpointProjection,
   NotificationEndpointRequest,
   NotificationInboxItem,
+  OrderStatementCursor,
   PaymentProjection,
   PaymentQuoteResponse,
   PaymentSubmissionRequest,
@@ -201,6 +204,7 @@ export interface CoreClient {
   createBuyerAddressTarget(token: string, addressId: string, idempotencyKey: string): Promise<DeliveryTarget>;
   getBuyerOverview(token: string): Promise<BuyerOverview>;
   getBuyerTakeoverTimeline(token: string, orderId: string): Promise<BuyerTakeoverTimeline>;
+  listBuyerShoppingStatements(token: string, cursor?: OrderStatementCursor, limit?: number): Promise<BuyerShoppingStatementPage>;
   createOrdinaryQuote(token: string, selection: QuoteSelection): Promise<PaymentQuoteResponse>;
   createSeckillQuote(token: string, sessionId: string, selection: QuoteSelection): Promise<SeckillQuoteResponse>;
   submitPayment(token: string, request: PaymentSubmissionRequest): Promise<PaymentSubmissionResponse>;
@@ -263,6 +267,7 @@ const buyerAccountOperations = Object.freeze({
   addressTarget: operationPath('createSavedAddressFulfillmentTarget', 'post'),
   overview: operationPath('getBuyerOverview', 'get'),
   takeoverTimeline: operationPath('getBuyerTakeoverTimeline', 'get'),
+  shoppingStatements: operationPath('listBuyerShoppingStatements', 'get'),
 });
 
 const fulfillmentOperations = Object.freeze({
@@ -517,6 +522,24 @@ export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } 
         { headers: authorizedHeaders(token) },
       );
       return parseBuyerTakeoverTimeline(value, orderId);
+    },
+
+    async listBuyerShoppingStatements(token, cursor, limit = 20) {
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+        throw new CoreClientError('InvalidRequest', '购物记录分页数量无效');
+      }
+      if (cursor) validateOrderStatementCursor(cursor);
+      const query = queryString({
+        cursorCreatedAt: cursor?.createdAt,
+        cursorOrderId: cursor?.orderId,
+        limit: String(limit),
+      });
+      const value = await requestJson<unknown>(
+        fetcher,
+        `${baseUrl}${operations.shoppingStatements}${query}`,
+        { headers: authorizedHeaders(token) },
+      );
+      return parseBuyerShoppingStatementPage(value);
     },
 
     async createOrdinaryQuote(token, selection) {
@@ -920,6 +943,85 @@ function parseBuyerTakeoverTimeline(value: unknown, expectedOrderId: string): Bu
     }
   });
   return value as BuyerTakeoverTimeline;
+}
+
+function validateOrderStatementCursor(cursor: OrderStatementCursor) {
+  if (!Number.isFinite(Date.parse(cursor.createdAt)) || !/^0x[0-9a-fA-F]{64}$/.test(cursor.orderId)) {
+    throw new CoreClientError('InvalidRequest', '购物记录游标无效');
+  }
+}
+
+function parseBuyerShoppingStatementPage(value: unknown): BuyerShoppingStatementPage {
+  const page = objectValue(value);
+  assertOnlyKeys(page, ['artifactVersion', 'buyerWallet', 'statements', 'nextCursor'], '购物记录页包含未发布字段');
+  assertArtifactVersion(stringValue(page.artifactVersion));
+  const buyerWallet = addressValue(page.buyerWallet);
+  const statements = arrayValue(page.statements).map(parseBuyerShoppingStatement);
+  if (new Set(statements.map((statement) => statement.orderId.toLowerCase())).size !== statements.length) {
+    throw new CoreClientError('InvalidResponse', '购物记录页包含重复订单');
+  }
+  for (let index = 1; index < statements.length; index += 1) {
+    const previous = statements[index - 1]!;
+    const current = statements[index]!;
+    const previousTime = Date.parse(previous.createdAt);
+    const currentTime = Date.parse(current.createdAt);
+    if (currentTime > previousTime || (
+      currentTime === previousTime
+      && current.orderId.toLowerCase().localeCompare(previous.orderId.toLowerCase()) >= 0
+    )) throw new CoreClientError('InvalidResponse', '购物记录顺序与稳定游标不一致');
+  }
+
+  let nextCursor: OrderStatementCursor | null = null;
+  if (page.nextCursor !== null) {
+    const cursor = objectValue(page.nextCursor);
+    assertOnlyKeys(cursor, ['createdAt', 'orderId'], '购物记录游标包含未发布字段');
+    nextCursor = {
+      createdAt: isoValue(cursor.createdAt),
+      orderId: bytes32Value(cursor.orderId) as OrderStatementCursor['orderId'],
+    };
+    const last = statements.at(-1);
+    if (!last || last.createdAt !== nextCursor.createdAt || last.orderId.toLowerCase() !== nextCursor.orderId.toLowerCase()) {
+      throw new CoreClientError('InvalidResponse', '购物记录游标未绑定本页最后一笔订单');
+    }
+  }
+  return { artifactVersion, buyerWallet, statements, nextCursor };
+}
+
+function parseBuyerShoppingStatement(value: unknown): BuyerShoppingStatement {
+  const statement = objectValue(value);
+  assertOnlyKeys(statement, [
+    'orderId', 'productId', 'skuId', 'quantity', 'orderState', 'paymentTxHash',
+    'paymentFinalizedAt', 'fulfilledAt', 'createdAt', 'orderKind', 'paymentAmounts', 'bnm',
+  ], '购物记录包含未发布字段');
+  bytes32Value(statement.orderId);
+  stringValue(statement.productId);
+  stringValue(statement.skuId);
+  atomicValue(statement.quantity);
+  enumValue(statement.orderState, [
+    'QUOTED', 'SUBMITTED', 'PAID', 'SHIPPED', 'DELIVERED', 'ARBITRATION',
+    'TAKEOVER', 'FULFILLMENT_PENDING', 'FULFILLED', 'REORG_PENDING',
+  ] as const);
+  bytes32Value(statement.paymentTxHash);
+  isoValue(statement.paymentFinalizedAt);
+  optionalIsoValue(statement.fulfilledAt);
+  isoValue(statement.createdAt);
+  enumValue(statement.orderKind, ['ORDINARY', 'FALLBACK_RETAIL'] as const);
+
+  const paymentAmounts = objectValue(statement.paymentAmounts);
+  assertOnlyKeys(paymentAmounts, ['usdtPaymentAmount', 'nplPaymentAmount'], '购物记录付款金额包含未发布字段');
+  atomicValue(paymentAmounts.usdtPaymentAmount);
+  atomicValue(paymentAmounts.nplPaymentAmount);
+
+  const bnm = objectValue(statement.bnm);
+  assertOnlyKeys(bnm, ['amount', 'state', 'transferable', 'journalIds'], 'BNM 记录包含未发布字段');
+  atomicValue(bnm.amount);
+  enumValue(bnm.state, ['LOCKED', 'AVAILABLE'] as const);
+  if (bnm.transferable !== false) throw new CoreClientError('InvalidResponse', 'BNM 不得投影为可转移资产');
+  const journalIds = arrayValue(bnm.journalIds).map(stringValue);
+  if (journalIds.length === 0 || new Set(journalIds).size !== journalIds.length) {
+    throw new CoreClientError('InvalidResponse', 'BNM 账本来源证据无效');
+  }
+  return value as BuyerShoppingStatement;
 }
 
 function parseSavedAddressTarget(value: unknown): DeliveryTarget {

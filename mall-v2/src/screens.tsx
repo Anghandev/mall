@@ -1237,6 +1237,7 @@ function OrderTarget({ target }: { target: FulfillmentTarget }) {
 }
 
 export function ActivityScreen() {
+  const runtime = useMallRuntime();
   const [active, setActive] = useState<'seckill' | 'shopping'>('seckill');
 
   return (
@@ -1251,15 +1252,110 @@ export function ActivityScreen() {
         </button>
       </div>
 
-      <EmptyState title={active === 'seckill' ? '暂无秒杀记录' : '暂无购物记录'}>
-        {active === 'seckill'
-          ? '活动期数、投入、最终结果、USDT 奖金与锁定 BNM 将由权威记录提供。'
-          : '订单、待释放 BNM 与履约最终状态将由权威记录提供。'}
-      </EmptyState>
+      {active === 'seckill' ? (
+        <StatusNotice title="DecisionBlocked：秒杀奖项记录未发布" tone="warning">
+          Core 尚无与中奖人绑定的奖池账本分录。本页不猜测场次、中奖结果、奖金金额或领取状态。
+        </StatusNotice>
+      ) : <ShoppingStatementContent runtime={runtime} />}
+    </div>
+  );
+}
 
-      <StatusNotice title="领取操作已停用">
-        秒杀奖金只在场次最终结算后开放；其他 BNM 与收益只在履约最终确认后开放。
-      </StatusNotice>
+function ShoppingStatementContent({ runtime }: { runtime: MallRuntimeValue }) {
+  if (!runtime.session) {
+    return (
+      <EmptyState title="连接买家钱包后查看">
+        购物记录仅向当前 SIWE 买家会话开放，未鉴权时不请求或展示订单数据。
+      </EmptyState>
+    );
+  }
+  if (runtime.shoppingStatementsState === 'idle' || (
+    runtime.shoppingStatementsState === 'loading' && runtime.shoppingStatements.length === 0
+  )) return <ShoppingStatementSkeleton />;
+  if (runtime.shoppingStatementsState === 'error') {
+    return (
+      <section className="activity-error" role="alert">
+        <ShieldAlert aria-hidden="true" size={24} />
+        <div>
+          <h2>购物记录读取失败</h2>
+          <p>{runtime.shoppingStatementsError ?? '当前会话未取得买家记录访问权限。'}</p>
+        </div>
+        <button className="button button--secondary" type="button" disabled={runtime.busy} onClick={() => void runtime.reloadShoppingStatements()}>
+          <RefreshCw aria-hidden="true" size={17} /> {runtime.busy ? '重新同步中' : '重新同步'}
+        </button>
+      </section>
+    );
+  }
+  if (runtime.shoppingStatementsState === 'empty') {
+    return (
+      <EmptyState title="暂无购物记录">
+        当前买家钱包没有链上最终确认的普通或边界转日常订单。
+      </EmptyState>
+    );
+  }
+  return (
+    <>
+      {runtime.shoppingStatementsError ? (
+        <div className="activity-page-error" role="alert">{runtime.shoppingStatementsError}</div>
+      ) : null}
+      <div className="shopping-statement-list" aria-label="消费购物记录">
+        {runtime.shoppingStatements.map((statement) => (
+          <ShoppingStatementRow key={statement.orderId} statement={statement} />
+        ))}
+      </div>
+      {runtime.shoppingStatementsNextCursor ? (
+        <button
+          className="button button--secondary order-load-more"
+          type="button"
+          disabled={runtime.shoppingStatementsLoadingMore}
+          onClick={() => void runtime.loadMoreShoppingStatements()}
+        >
+          <RefreshCw aria-hidden="true" size={17} />
+          {runtime.shoppingStatementsLoadingMore ? '正在读取下一页' : '加载下一页'}
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+function ShoppingStatementRow({ statement }: { statement: MallRuntimeValue['shoppingStatements'][number] }) {
+  return (
+    <article className="shopping-statement">
+      <header className="shopping-statement__header">
+        <div>
+          <p className="eyebrow">{orderKindLabel(statement.orderKind)}订单</p>
+          <h2>{shortHash(statement.orderId)}</h2>
+        </div>
+        <span className="status-pill">{orderStateLabel(statement.orderState)}</span>
+      </header>
+      <dl className="shopping-statement__facts">
+        <div><dt>商品</dt><dd>{statement.productId}</dd></div>
+        <div><dt>规格</dt><dd>{statement.skuId}</dd></div>
+        <div><dt>数量</dt><dd>{statement.quantity}</dd></div>
+        <div><dt>BNM 状态</dt><dd>{statement.bnm.state === 'LOCKED' ? '已锁定' : '可用'}</dd></div>
+        <div><dt>USDT 实付</dt><dd>{statement.paymentAmounts.usdtPaymentAmount} 原子单位</dd></div>
+        <div><dt>NPL 实付</dt><dd>{statement.paymentAmounts.nplPaymentAmount} 原子单位</dd></div>
+        <div><dt>BNM 后台积分</dt><dd>{statement.bnm.amount} 原子单位</dd></div>
+        <div><dt>下单时间</dt><dd><time dateTime={statement.createdAt}>{statement.createdAt}</time></dd></div>
+        <div><dt>付款最终确认</dt><dd><time dateTime={statement.paymentFinalizedAt}>{statement.paymentFinalizedAt}</time></dd></div>
+        <div><dt>履约最终时间</dt><dd>{statement.fulfilledAt ? <time dateTime={statement.fulfilledAt}>{statement.fulfilledAt}</time> : '尚未最终履约'}</dd></div>
+        <div className="shopping-statement__wide"><dt>订单 ID</dt><dd><code>{statement.orderId}</code></dd></div>
+        <div className="shopping-statement__wide"><dt>付款 TxHash</dt><dd><code>{statement.paymentTxHash}</code></dd></div>
+      </dl>
+      <section className="shopping-statement__journals" aria-label="BNM 账本来源">
+        <div className="section-heading section-heading--compact"><h3>BNM journal provenance</h3><FileClock aria-hidden="true" size={17} /></div>
+        <ul>
+          {statement.bnm.journalIds.map((journalId) => <li key={journalId}><code>{journalId}</code></li>)}
+        </ul>
+      </section>
+    </article>
+  );
+}
+
+function ShoppingStatementSkeleton() {
+  return (
+    <div className="shopping-statement-list" aria-label="正在加载购物记录">
+      {[0, 1].map((item) => <div className="shopping-statement shopping-statement--skeleton" key={item} />)}
     </div>
   );
 }

@@ -62,6 +62,12 @@ import {
   settlementIntent,
   settlementProjection,
 } from './settlement-fixtures';
+import {
+  firstShoppingStatementPage,
+  fallbackShoppingStatement,
+  ordinaryShoppingStatement,
+  secondShoppingStatementPage,
+} from './shopping-statement-fixtures';
 
 function renderAt(path = '/seckill', services = offlineServices()) {
   return render(
@@ -76,7 +82,7 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/mall');
 
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.11');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.12');
     expect(productBaseline.manifestsAligned).toBe(true);
     expect(productBaseline.knownOrderActions).toBe(allowedActionNames);
     expect(productBaseline.executableOrderActions).toBe(executableOrderActionNames);
@@ -85,7 +91,7 @@ describe('Mall V2 payment consumer', () => {
     expect(isCoreOrderActionExecutable('CONFIRM_RECEIPT')).toBe(true);
     expect(isCoreOrderActionExecutable('PAY_ORDER')).toBe(false);
     expect(mallRuntimeBoundary).toMatchObject({
-      artifactStatus: '2.0.0-settlement-admin.11',
+      artifactStatus: '2.0.0-settlement-admin.12',
       executableOrderActions: executableOrderActionNames,
       deploymentAuthorized: false,
       settlementAdminCapabilities: {
@@ -932,6 +938,69 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.queryByLabelText(/证据$/)).toBeNull();
   });
 
+  it('keeps seckill activity DecisionBlocked and shopping records buyer-authenticated', async () => {
+    const user = userEvent.setup();
+    const listBuyerShoppingStatements = vi.fn<CoreClient['listBuyerShoppingStatements']>();
+    renderAt('/assets/activity', readyServices({ listBuyerShoppingStatements }));
+
+    expect(screen.getByText(/DecisionBlocked：秒杀奖项记录未发布/)).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/中奖金额|提取奖金|第\s*\d+\s*期/);
+    await user.click(screen.getByRole('tab', { name: '消费购物' }));
+    expect(screen.getByRole('heading', { name: '连接买家钱包后查看' })).toBeTruthy();
+    expect(listBuyerShoppingStatements).not.toHaveBeenCalled();
+  });
+
+  it('renders exact Core shopping amounts and appends the paired cursor page', async () => {
+    const user = userEvent.setup();
+    const listBuyerShoppingStatements = vi.fn<CoreClient['listBuyerShoppingStatements']>()
+      .mockImplementation((_token, cursor) => Promise.resolve(cursor ? secondShoppingStatementPage : firstShoppingStatementPage));
+    renderAt('/assets/activity', readyServices({ listBuyerShoppingStatements }));
+
+    await user.click(screen.getByRole('tab', { name: '消费购物' }));
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    expect(await screen.findByText(ordinaryShoppingStatement.paymentTxHash)).toBeTruthy();
+    expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.usdtPaymentAmount} 原子单位`)).toBeTruthy();
+    expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.nplPaymentAmount} 原子单位`)).toBeTruthy();
+    expect(screen.getByText(`${ordinaryShoppingStatement.bnm.amount} 原子单位`)).toBeTruthy();
+    expect(screen.getByText('可用')).toBeTruthy();
+    expect(screen.getByText(ordinaryShoppingStatement.createdAt)).toBeTruthy();
+    expect(screen.getByText(ordinaryShoppingStatement.paymentFinalizedAt)).toBeTruthy();
+    expect(screen.getByText(ordinaryShoppingStatement.fulfilledAt!)).toBeTruthy();
+    for (const journalId of ordinaryShoppingStatement.bnm.journalIds) expect(screen.getByText(journalId)).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: '加载下一页' }));
+    expect(await screen.findByText(fallbackShoppingStatement.paymentTxHash)).toBeTruthy();
+    expect(screen.getByText('边界转普通订单')).toBeTruthy();
+    expect(screen.getByText('已锁定')).toBeTruthy();
+    expect(screen.getByText('尚未最终履约')).toBeTruthy();
+    expect(listBuyerShoppingStatements).toHaveBeenLastCalledWith('buyer-session', firstShoppingStatementPage.nextCursor);
+    expect(screen.queryByRole('button', { name: '加载下一页' })).toBeNull();
+  });
+
+  it('shows shopping loading, empty and authorization failure states', async () => {
+    const user = userEvent.setup();
+    type ShoppingPage = Awaited<ReturnType<CoreClient['listBuyerShoppingStatements']>>;
+    let resolvePage!: (page: ShoppingPage) => void;
+    const pendingPage = new Promise<ShoppingPage>((resolve) => { resolvePage = resolve; });
+    const listBuyerShoppingStatements = vi.fn<CoreClient['listBuyerShoppingStatements']>().mockReturnValue(pendingPage);
+    const view = renderAt('/assets/activity', readyServices({ listBuyerShoppingStatements }));
+    await user.click(screen.getByRole('tab', { name: '消费购物' }));
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    expect(await screen.findByLabelText('正在加载购物记录')).toBeTruthy();
+    resolvePage({ ...secondShoppingStatementPage, statements: [] });
+    expect(await screen.findByRole('heading', { name: '暂无购物记录' })).toBeTruthy();
+
+    view.unmount();
+    const forbidden = new CoreClientError('Forbidden', '当前会话无权读取该买家购物记录');
+    renderAt('/assets/activity', readyServices({
+      listBuyerShoppingStatements: vi.fn<CoreClient['listBuyerShoppingStatements']>().mockRejectedValue(forbidden),
+    }));
+    await user.click(screen.getByRole('tab', { name: '消费购物' }));
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    expect(await screen.findByText(forbidden.message, { selector: '.activity-error p' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '重新同步' })).toBeTruthy();
+  });
+
   it('loads anonymous CMS without identity input and reloads authenticated CMS with the session token', async () => {
     const user = userEvent.setup();
     const listPublicCms = vi.fn<CoreClient['listPublicCms']>().mockResolvedValue([publicCmsItem]);
@@ -1093,6 +1162,12 @@ function servicesWith(overrides: Partial<CoreClient>): MallServices {
     getBuyerTakeoverTimeline: vi.fn().mockImplementation((_token: string, orderId: string) => Promise.resolve({
       artifactVersion, orderId, historyStatus: 'COMPLETE', transitions: [],
     })),
+    listBuyerShoppingStatements: vi.fn().mockResolvedValue({
+      artifactVersion,
+      buyerWallet: BUYER,
+      statements: [],
+      nextCursor: null,
+    }),
     createOrdinaryQuote: vi.fn().mockRejectedValue(new Error('not configured')),
     createSeckillQuote: vi.fn().mockRejectedValue(new Error('not configured')),
     submitPayment: vi.fn().mockRejectedValue(new Error('not configured')),
