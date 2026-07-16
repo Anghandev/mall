@@ -7,6 +7,7 @@ import {
   catalogTags,
   completedMediaAsset,
   concessionPreview,
+  managedMerchantStore,
   managedProduct,
   mediaReadAccess,
   mediaUploadIntent,
@@ -49,13 +50,113 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('admin-global-ops.1 Core HTTP consumer', () => {
+describe('merchant-stores.1 Core HTTP consumer', () => {
   it('does not expose Admin global search, export or product batch-tag commands', () => {
     const api = createCoreApi('https://core.example.test');
 
     expect(api).not.toHaveProperty('searchAdminGlobalResources');
     expect(api).not.toHaveProperty('createAdminGlobalExport');
     expect(api).not.toHaveProperty('createAdminProductBatchTags');
+  });
+
+  it('consumes the coordinated merchant store lifecycle routes with versioned commands', async () => {
+    const draftStore = {
+      ...managedMerchantStore,
+      storeId: 'store-created-1',
+      status: 'DRAFT' as const,
+      imageAssetIds: [],
+      allowedActions: [
+        { action: 'UPDATE_PROFILE' as const, enabled: true },
+        { action: 'ACTIVATE' as const, enabled: false, reasonCode: 'STORE_PROFILE_INCOMPLETE' as const },
+        { action: 'CLOSE' as const, enabled: true },
+      ],
+    };
+    const updatedStore = {
+      ...draftStore,
+      version: 2,
+      imageAssetIds: [completedMediaAsset.assetId],
+      allowedActions: [
+        { action: 'UPDATE_PROFILE' as const, enabled: true },
+        { action: 'ACTIVATE' as const, enabled: true },
+        { action: 'CLOSE' as const, enabled: true },
+      ],
+    };
+    const activatedStore = {
+      ...updatedStore,
+      status: 'ACTIVE' as const,
+      version: 3,
+      allowedActions: managedMerchantStore.allowedActions,
+    };
+    const closedStore = {
+      ...activatedStore,
+      status: 'CLOSED' as const,
+      version: 4,
+      allowedActions: [
+        { action: 'UPDATE_PROFILE' as const, enabled: false, reasonCode: 'STORE_CLOSED' as const },
+        { action: 'ACTIVATE' as const, enabled: false, reasonCode: 'STORE_CLOSED' as const },
+        { action: 'CLOSE' as const, enabled: false, reasonCode: 'STORE_CLOSED' as const },
+      ],
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ stores: [managedMerchantStore] }))
+      .mockResolvedValueOnce(jsonResponse(draftStore, 201))
+      .mockResolvedValueOnce(jsonResponse(updatedStore))
+      .mockResolvedValueOnce(jsonResponse(activatedStore))
+      .mockResolvedValueOnce(jsonResponse(closedStore));
+    globalThis.fetch = fetchMock as typeof fetch;
+    const api = createCoreApi('https://core.example.test');
+    const createInput = {
+      idempotencyKey: 'merchant-store-create-1',
+      name: '浦东黄金店',
+      phone: '021-87654321',
+      businessHours: '10:00-20:00',
+      longitude: 121.506,
+      latitude: 31.245,
+    };
+    const updateInput = {
+      name: '浦东黄金旗舰店',
+      phone: createInput.phone,
+      businessHours: createInput.businessHours,
+      imageAssetIds: [completedMediaAsset.assetId],
+      expectedVersion: 1,
+      idempotencyKey: 'merchant-store-update-1',
+    };
+
+    await expect(api.listManagedMerchantStores('merchant-session')).resolves.toEqual([managedMerchantStore]);
+    await expect(api.createMerchantStore(createInput, 'merchant-session')).resolves.toEqual(draftStore);
+    await expect(api.updateMerchantStore(draftStore.storeId, updateInput, 'merchant-session')).resolves.toEqual(updatedStore);
+    await expect(api.activateMerchantStore(draftStore.storeId, {
+      expectedVersion: 2,
+      idempotencyKey: 'merchant-store-activate-1',
+    }, 'merchant-session')).resolves.toEqual(activatedStore);
+    await expect(api.closeMerchantStore(draftStore.storeId, {
+      expectedVersion: 3,
+      idempotencyKey: 'merchant-store-close-1',
+    }, 'merchant-session')).resolves.toEqual(closedStore);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, 'https://core.example.test/v2/merchant/stores', expect.objectContaining({
+      method: 'GET',
+      headers: expect.objectContaining({ authorization: 'Bearer merchant-session' }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, 'https://core.example.test/v2/merchant/stores', expect.objectContaining({
+      method: 'POST', body: JSON.stringify(createInput),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, `https://core.example.test/v2/merchant/stores/${draftStore.storeId}`, expect.objectContaining({
+      method: 'PUT', body: JSON.stringify(updateInput),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(4, `https://core.example.test/v2/merchant/stores/${draftStore.storeId}/activate`, expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(5, `https://core.example.test/v2/merchant/stores/${draftStore.storeId}/close`, expect.objectContaining({ method: 'POST' }));
+  });
+
+  it('fails closed on malformed managed store location and image projections', async () => {
+    for (const malformed of [
+      { ...managedMerchantStore, longitude: 181 },
+      { ...managedMerchantStore, imageAssetIds: [completedMediaAsset.assetId, completedMediaAsset.assetId] },
+    ]) {
+      globalThis.fetch = vi.fn(async () => jsonResponse({ stores: [malformed] })) as typeof fetch;
+      await expect(createCoreApi().listManagedMerchantStores('merchant-session'))
+        .rejects.toMatchObject({ code: 'InvalidResponse' });
+    }
   });
 
   it('consumes signed printer binding, provider waybill and durable print job routes', async () => {
@@ -335,7 +436,7 @@ describe('admin-global-ops.1 Core HTTP consumer', () => {
       'https://core.example.test/v2/catalog/products',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-admin-global-ops.1' }),
+        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-merchant-stores.1' }),
       }),
     );
   });

@@ -115,6 +115,8 @@ export const pickupTarget = {
     latitude: 38.95,
     address: '大连市甘井子区金街 24 号',
     phone: '041100000000',
+    businessHours: '09:00-18:00',
+    imageAssetIds: [`0x${'9'.repeat(64)}`],
     status: 'ACTIVE',
     version: 1,
   },

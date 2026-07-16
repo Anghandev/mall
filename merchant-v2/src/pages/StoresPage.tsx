@@ -1,29 +1,44 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   printProviders,
+  type CreateMerchantStoreRequest,
+  type MediaReadAccessProjection,
+  type MerchantManagedStore,
+  type MerchantStoreAction,
   type PrintProvider,
   type PrinterBinding,
   type PrinterBindingChallenge,
-  type MerchantStore,
+  type UpdateMerchantStoreRequest,
 } from '@abu24k/core-artifacts';
 import {
-  Building2,
   Crosshair,
   ImagePlus,
   MapPin,
   Plus,
   Printer,
   RefreshCw,
+  Save,
   ShieldCheck,
+  Store,
+  Trash2,
+  X,
 } from 'lucide-react';
 import { EmptyState, FieldHelp, LoadingRows, PageHeader } from '../components/ui';
+import {
+  CoreApiError,
+  putMediaFile,
+  sha256File,
+  type MediaUploadIntentRequest,
+} from '../core-api';
 import { readableError, useCoreRuntime } from '../core-runtime';
 
 type LoadState<T> =
   | { phase: 'idle' }
   | { phase: 'loading' }
   | { phase: 'ready'; value: T }
-  | { phase: 'error'; message: string };
+  | { phase: 'error'; message: string; code?: string; status?: number };
+
+type Feedback = { tone: 'success' | 'error' | 'info'; message: string };
 
 type BindingCommandState =
   | { phase: 'idle' }
@@ -39,37 +54,88 @@ type BindingAttempt = {
   signature?: string;
 };
 
+type StoreDraft = {
+  name: string;
+  phone: string;
+  businessHours: string;
+  imageAssetIds: string[];
+};
+
+type CreateDraft = {
+  name: string;
+  phone: string;
+  businessHours: string;
+  longitude: string;
+  latitude: string;
+};
+
+const emptyCreateDraft: CreateDraft = {
+  name: '',
+  phone: '',
+  businessHours: '',
+  longitude: '',
+  latitude: '',
+};
+
+const actionLabels: Record<MerchantStoreAction, string> = {
+  UPDATE_PROFILE: '保存门店资料',
+  ACTIVATE: '激活门店',
+  CLOSE: '关闭门店',
+};
+
+const reasonLabels = {
+  STORE_PROFILE_INCOMPLETE: '需先填写营业时间并绑定至少 1 张门店实景图',
+  STORE_SUSPENDED: '门店已由平台冻结，商家不能修改或激活',
+  STORE_CLOSED: '门店已关闭，历史资料只读',
+  STORE_STATE_MISMATCH: '当前门店状态不允许该操作',
+} as const;
+
 export function StoresPage() {
   const { api, bootstrap, session, signTypedData } = useCoreRuntime();
-  const [storesState, setStoresState] = useState<LoadState<readonly MerchantStore[]>>({ phase: 'idle' });
+  const [storesState, setStoresState] = useState<LoadState<readonly MerchantManagedStore[]>>({ phase: 'idle' });
   const [selectedStoreId, setSelectedStoreId] = useState('');
+  const [draft, setDraft] = useState<StoreDraft>();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createDraft, setCreateDraft] = useState<CreateDraft>(emptyCreateDraft);
+  const [storeBusy, setStoreBusy] = useState<'create' | 'save' | 'upload' | 'activate' | 'close'>();
+  const [storeFeedback, setStoreFeedback] = useState<Feedback>();
+  const [closeArmed, setCloseArmed] = useState(false);
+  const [imageAccess, setImageAccess] = useState<Record<string, MediaReadAccessProjection>>({});
   const [bindingState, setBindingState] = useState<LoadState<PrinterBinding | null>>({ phase: 'idle' });
   const [provider, setProvider] = useState<PrintProvider>('FEIE');
   const [deviceId, setDeviceId] = useState('');
   const [commandState, setCommandState] = useState<BindingCommandState>({ phase: 'idle' });
   const bindingAttempt = useRef<BindingAttempt | undefined>(undefined);
+  const commandKeys = useRef(new Map<string, { fingerprint: string; key: string }>());
   const sessionTokenRef = useRef(session?.token);
   const selectedStoreRef = useRef(selectedStoreId);
   sessionTokenRef.current = session?.token;
   selectedStoreRef.current = selectedStoreId;
 
-  const loadStores = useCallback(async () => {
+  const loadStores = useCallback(async (preferredStoreId?: string) => {
     if (!session) {
       setStoresState({ phase: 'idle' });
       setSelectedStoreId('');
+      setDraft(undefined);
       return;
     }
     const token = session.token;
     setStoresState({ phase: 'loading' });
     try {
-      const stores = (await api.listMerchantStores()).filter((store) => store.merchantId === session.merchantId);
+      const stores = await api.listManagedMerchantStores(token);
+      if (stores.some((store) => store.merchantId !== session.merchantId)) {
+        throw new CoreApiError('InvalidResponse', '门店列表包含不属于当前商家的记录。');
+      }
       if (sessionTokenRef.current !== token) return;
       setStoresState({ phase: 'ready', value: stores });
-      setSelectedStoreId((current) => stores.some((store) => store.storeId === current)
-        ? current
-        : stores[0]?.storeId ?? '');
+      setSelectedStoreId((current) => {
+        const preferred = preferredStoreId && stores.some((store) => store.storeId === preferredStoreId)
+          ? preferredStoreId
+          : undefined;
+        return preferred ?? (stores.some((store) => store.storeId === current) ? current : stores[0]?.storeId ?? '');
+      });
     } catch (error) {
-      if (sessionTokenRef.current === token) setStoresState({ phase: 'error', message: readableError(error) });
+      if (sessionTokenRef.current === token) setStoresState(errorState(error));
     }
   }, [api, session]);
 
@@ -84,7 +150,9 @@ export function StoresPage() {
     try {
       const binding = await api.getMerchantPrinterBinding(storeId, token);
       if (sessionTokenRef.current !== token || selectedStoreRef.current !== storeId) return;
-      if (binding && binding.merchantId !== session.merchantId) throw new Error('打印机绑定不属于当前商家。');
+      if (binding && binding.merchantId !== session.merchantId) {
+        throw new CoreApiError('InvalidResponse', '打印机绑定不属于当前商家。');
+      }
       setBindingState({ phase: 'ready', value: binding });
       if (binding) {
         setProvider(binding.provider);
@@ -92,7 +160,7 @@ export function StoresPage() {
       }
     } catch (error) {
       if (sessionTokenRef.current === token && selectedStoreRef.current === storeId) {
-        setBindingState({ phase: 'error', message: readableError(error) });
+        setBindingState(errorState(error));
       }
     }
   }, [api, selectedStoreId, session]);
@@ -101,36 +169,244 @@ export function StoresPage() {
     void loadStores();
   }, [loadStores]);
 
+  const stores = storesState.phase === 'ready' ? storesState.value : [];
+  const selectedStore = stores.find((store) => store.storeId === selectedStoreId);
+
+  useEffect(() => {
+    setDraft(selectedStore ? storeDraft(selectedStore) : undefined);
+    setImageAccess({});
+    if (!session || !selectedStore) return;
+    const token = session.token;
+    const storeId = selectedStore.storeId;
+    void Promise.all(selectedStore.imageAssetIds.map(async (assetId) => {
+      try {
+        const access = await api.getMediaReadAccess(assetId, token, {
+          resourceType: 'STORE',
+          resourceId: storeId,
+          purpose: 'STORE_IMAGE',
+        });
+        if (sessionTokenRef.current === token && selectedStoreRef.current === storeId) {
+          setImageAccess((current) => ({ ...current, [assetId]: access }));
+        }
+      } catch {
+        // The verified asset ID remains visible if temporary read access cannot be issued.
+      }
+    }));
+  }, [api, selectedStore, session]);
+
   useEffect(() => {
     bindingAttempt.current = undefined;
     setCommandState({ phase: 'idle' });
     void loadBinding();
   }, [loadBinding]);
 
-  const stores = storesState.phase === 'ready' ? storesState.value : [];
-  const selectedStore = stores.find((store) => store.storeId === selectedStoreId);
   const currentBinding = bindingState.phase === 'ready' ? bindingState.value : null;
   const providerReadiness = bootstrap.phase === 'ready'
     ? bootstrap.value.readiness.providers[provider]
     : undefined;
   const providerReady = providerReadiness === 'READY';
   const deviceValid = deviceId.trim().length >= 3 && deviceId.trim().length <= 128;
-  const submitting = commandState.phase === 'submitting';
+  const bindingSubmitting = commandState.phase === 'submitting';
   const bindingAllowed = Boolean(
     session
     && selectedStore
-    && selectedStore.merchantId === session.merchantId
     && bindingState.phase === 'ready'
     && providerReady
     && deviceValid,
   );
+  const canUpdate = capabilityEnabled(selectedStore, 'UPDATE_PROFILE');
+  const canActivate = capabilityEnabled(selectedStore, 'ACTIVATE');
+  const canClose = capabilityEnabled(selectedStore, 'CLOSE');
+  const storeFormValid = Boolean(draft && validName(draft.name) && validPhone(draft.phone)
+    && validBusinessHours(draft.businessHours) && draft.imageAssetIds.length <= 5);
+  const createFormValid = validName(createDraft.name) && validPhone(createDraft.phone)
+    && validBusinessHours(createDraft.businessHours)
+    && validCoordinate(createDraft.longitude, -180, 180)
+    && validCoordinate(createDraft.latitude, -90, 90);
 
   function selectStore(storeId: string) {
     setSelectedStoreId(storeId);
+    setStoreFeedback(undefined);
+    setCloseArmed(false);
     setProvider('FEIE');
     setDeviceId('');
     bindingAttempt.current = undefined;
     setCommandState({ phase: 'idle' });
+  }
+
+  function commandKey(scope: string, payload: unknown) {
+    const fingerprint = JSON.stringify(payload);
+    const previous = commandKeys.current.get(scope);
+    if (previous?.fingerprint === fingerprint) return previous.key;
+    const key = `merchant-${scope}-${crypto.randomUUID()}`;
+    commandKeys.current.set(scope, { fingerprint, key });
+    return key;
+  }
+
+  function completeCommand(scope: string) {
+    commandKeys.current.delete(scope);
+  }
+
+  function updateDraft(update: (current: StoreDraft) => StoreDraft) {
+    setDraft((current) => current ? update(current) : current);
+    setStoreFeedback(undefined);
+    setCloseArmed(false);
+  }
+
+  async function createStore() {
+    if (!session || !createFormValid || storeBusy) return;
+    const value = {
+      name: createDraft.name.trim(),
+      phone: createDraft.phone.trim(),
+      businessHours: createDraft.businessHours.trim(),
+      longitude: Number(createDraft.longitude),
+      latitude: Number(createDraft.latitude),
+    };
+    const scope = 'create-store';
+    const input: CreateMerchantStoreRequest = { ...value, idempotencyKey: commandKey(scope, value) };
+    setStoreBusy('create');
+    setStoreFeedback(undefined);
+    try {
+      const created = await api.createMerchantStore(input, session.token);
+      requireStoreScope(created, session.merchantId);
+      if (created.status !== 'DRAFT') throw new CoreApiError('InvalidResponse', '新门店未以 DRAFT 状态返回。');
+      completeCommand(scope);
+      setCreateDraft(emptyCreateDraft);
+      setCreateOpen(false);
+      await loadStores(created.storeId);
+      setStoreFeedback({ tone: 'success', message: '门店草稿已创建，行政区、地址和坐标已由 Core 绑定高德解析结果。' });
+    } catch (error) {
+      setStoreFeedback({ tone: 'error', message: readableStoreError(error) });
+    } finally {
+      setStoreBusy(undefined);
+    }
+  }
+
+  async function saveStore() {
+    if (!session || !selectedStore || !draft || !canUpdate || !storeFormValid || storeBusy) return;
+    const value = {
+      name: draft.name.trim(),
+      phone: draft.phone.trim(),
+      businessHours: draft.businessHours.trim(),
+      imageAssetIds: draft.imageAssetIds,
+      expectedVersion: selectedStore.version,
+    };
+    const scope = `save-store-${selectedStore.storeId}`;
+    const input: UpdateMerchantStoreRequest = { ...value, idempotencyKey: commandKey(scope, value) };
+    setStoreBusy('save');
+    setStoreFeedback(undefined);
+    try {
+      const saved = await api.updateMerchantStore(selectedStore.storeId, input, session.token);
+      requireStoreScope(saved, session.merchantId, selectedStore.storeId);
+      completeCommand(scope);
+      await loadStores(saved.storeId);
+      setStoreFeedback({ tone: 'success', message: `门店资料已保存为版本 ${saved.version}，位置绑定保持不变。` });
+    } catch (error) {
+      await handleStoreCommandError(error, selectedStore.storeId);
+    } finally {
+      setStoreBusy(undefined);
+    }
+  }
+
+  async function uploadStoreImages(files: readonly File[]) {
+    if (!session || !selectedStore || !draft || !canUpdate || storeBusy) return;
+    const capacity = 5 - draft.imageAssetIds.length;
+    const accepted = files.slice(0, capacity);
+    if (accepted.length === 0) {
+      setStoreFeedback({ tone: 'error', message: '每家门店最多绑定 5 张实景图。' });
+      return;
+    }
+    if (accepted.some((file) => !validImage(file))) {
+      setStoreFeedback({ tone: 'error', message: '门店实景图仅支持 JPG、PNG 或 WebP，单个文件不超过 10 MB。' });
+      return;
+    }
+    setStoreBusy('upload');
+    setStoreFeedback(undefined);
+    try {
+      const uploaded: string[] = [];
+      for (const file of accepted) {
+        const contentSha256 = await sha256File(file);
+        const value: Omit<MediaUploadIntentRequest, 'idempotencyKey'> = {
+          purpose: 'STORE_IMAGE',
+          resourceType: 'STORE',
+          resourceId: selectedStore.storeId,
+          contentType: file.type as MediaUploadIntentRequest['contentType'],
+          sizeBytes: file.size,
+          contentSha256,
+        };
+        const scope = `store-image-${selectedStore.storeId}-${contentSha256}`;
+        const intent = await api.createMediaUploadIntent({
+          ...value,
+          idempotencyKey: commandKey(scope, value),
+        }, session.token, session.walletAddress);
+        await putMediaFile(intent, file);
+        const asset = await api.completeMediaUpload(intent, session.token);
+        const access = await api.getMediaReadAccess(asset.assetId, session.token, {
+          resourceType: 'STORE',
+          resourceId: selectedStore.storeId,
+          purpose: 'STORE_IMAGE',
+        });
+        completeCommand(scope);
+        uploaded.push(asset.assetId);
+        setImageAccess((current) => ({ ...current, [asset.assetId]: access }));
+      }
+      updateDraft((current) => ({ ...current, imageAssetIds: [...current.imageAssetIds, ...uploaded] }));
+      setStoreFeedback({ tone: 'info', message: `已通过 Core 完成 ${uploaded.length} 张图片的上传、封存和归属校验，请保存资料以绑定。` });
+    } catch (error) {
+      setStoreFeedback({ tone: 'error', message: readableStoreError(error) });
+    } finally {
+      setStoreBusy(undefined);
+    }
+  }
+
+  async function activateStore() {
+    if (!session || !selectedStore || !canActivate || storeBusy) return;
+    const value = { expectedVersion: selectedStore.version };
+    const scope = `activate-store-${selectedStore.storeId}`;
+    setStoreBusy('activate');
+    setStoreFeedback(undefined);
+    try {
+      const activated = await api.activateMerchantStore(selectedStore.storeId, {
+        ...value,
+        idempotencyKey: commandKey(scope, value),
+      }, session.token);
+      requireStoreScope(activated, session.merchantId, selectedStore.storeId);
+      completeCommand(scope);
+      await loadStores(activated.storeId);
+      setStoreFeedback({ tone: 'success', message: '门店已激活，可作为商品和到店自提的有效网点。' });
+    } catch (error) {
+      await handleStoreCommandError(error, selectedStore.storeId);
+    } finally {
+      setStoreBusy(undefined);
+    }
+  }
+
+  async function closeStore() {
+    if (!session || !selectedStore || !canClose || !closeArmed || storeBusy) return;
+    const value = { expectedVersion: selectedStore.version };
+    const scope = `close-store-${selectedStore.storeId}`;
+    setStoreBusy('close');
+    setStoreFeedback(undefined);
+    try {
+      const closed = await api.closeMerchantStore(selectedStore.storeId, {
+        ...value,
+        idempotencyKey: commandKey(scope, value),
+      }, session.token);
+      requireStoreScope(closed, session.merchantId, selectedStore.storeId);
+      completeCommand(scope);
+      setCloseArmed(false);
+      await loadStores(closed.storeId);
+      setStoreFeedback({ tone: 'success', message: '门店已关闭，历史资料、订单快照和审计证据保留。' });
+    } catch (error) {
+      await handleStoreCommandError(error, selectedStore.storeId);
+    } finally {
+      setStoreBusy(undefined);
+    }
+  }
+
+  async function handleStoreCommandError(error: unknown, storeId: string) {
+    if (error instanceof CoreApiError && error.status === 409) await loadStores(storeId);
+    setStoreFeedback({ tone: 'error', message: readableStoreError(error) });
   }
 
   function updateBindingDraft(update: () => void) {
@@ -140,7 +416,7 @@ export function StoresPage() {
   }
 
   async function submitBinding() {
-    if (!session || !selectedStore || !bindingAllowed || submitting) return;
+    if (!session || !selectedStore || !bindingAllowed || bindingSubmitting) return;
     const normalizedDeviceId = deviceId.trim();
     const fingerprint = `${selectedStore.storeId}:${provider}:${normalizedDeviceId}`;
     const attempt = bindingAttempt.current?.fingerprint === fingerprint
@@ -164,9 +440,7 @@ export function StoresPage() {
         || challenge.merchantId !== session.merchantId
         || challenge.signer.toLowerCase() !== session.walletAddress.toLowerCase()
         || Date.parse(challenge.expiresAt) <= Date.now()
-      ) {
-        throw new Error('打印机绑定挑战与当前商家会话不匹配。');
-      }
+      ) throw new Error('打印机绑定挑战与当前商家会话不匹配。');
       const signature = attempt.signature ?? await signTypedData(challenge.typedData);
       attempt.signature = signature;
       const binding = await api.applyMerchantPrinterBinding(selectedStore.storeId, {
@@ -179,9 +453,7 @@ export function StoresPage() {
         || binding.verifiedByWallet.toLowerCase() !== session.walletAddress.toLowerCase()
         || binding.provider !== provider
         || binding.deviceId !== normalizedDeviceId
-      ) {
-        throw new Error('打印机绑定结果与签名请求不匹配。');
-      }
+      ) throw new Error('打印机绑定结果与签名请求不匹配。');
       bindingAttempt.current = undefined;
       setBindingState({ phase: 'ready', value: binding });
       setCommandState({ phase: 'success', binding, digest: challenge.digest });
@@ -193,74 +465,203 @@ export function StoresPage() {
   return (
     <div className="page-stack">
       <PageHeader
-        actions={<button className="button primary" disabled type="button"><Plus aria-hidden="true" size={16} /> 新增门店</button>}
-        description="维护允许到店自提的实体网点。打印机更换由当前商家钱包二次签名。"
+        actions={(
+          <button className="button primary" disabled={!session || Boolean(storeBusy)} onClick={() => { setCreateOpen((open) => !open); setStoreFeedback(undefined); }} type="button">
+            {createOpen ? <X aria-hidden="true" size={16} /> : <Plus aria-hidden="true" size={16} />}
+            {createOpen ? '取消新增' : '新增门店'}
+          </button>
+        )}
+        description="创建高德坐标绑定的门店，维护版本化资料、实景图和核销打印设备。"
         eyebrow="04 / 网点设置"
         title="门店管理"
       />
+
+      {createOpen ? (
+        <form className="section-block form-section store-create-panel" onSubmit={(event) => { event.preventDefault(); void createStore(); }} aria-labelledby="create-store-title">
+          <div className="section-heading"><div><p className="eyebrow">AMap-bound draft</p><h2 id="create-store-title">新建门店草稿</h2></div><MapPin aria-hidden="true" size={19} /></div>
+          <div className="store-create-grid">
+            <div className="field"><label htmlFor="create-store-name">门店名称</label><input id="create-store-name" maxLength={100} onChange={(event) => setCreateDraft((current) => ({ ...current, name: event.target.value }))} required value={createDraft.name} /></div>
+            <div className="field"><label htmlFor="create-store-phone">服务电话</label><input id="create-store-phone" inputMode="tel" maxLength={20} onChange={(event) => setCreateDraft((current) => ({ ...current, phone: event.target.value }))} pattern="[+]?[0-9-]{7,20}" required value={createDraft.phone} /></div>
+            <div className="field"><label htmlFor="create-business-hours">营业时间</label><input id="create-business-hours" maxLength={240} onChange={(event) => setCreateDraft((current) => ({ ...current, businessHours: event.target.value }))} placeholder="09:00-18:00" required value={createDraft.businessHours} /></div>
+            <div className="field"><label htmlFor="create-longitude">高德经度</label><input id="create-longitude" inputMode="decimal" max="180" min="-180" onChange={(event) => setCreateDraft((current) => ({ ...current, longitude: event.target.value }))} required step="any" type="number" value={createDraft.longitude} /></div>
+            <div className="field"><label htmlFor="create-latitude">高德纬度</label><input id="create-latitude" inputMode="decimal" max="90" min="-90" onChange={(event) => setCreateDraft((current) => ({ ...current, latitude: event.target.value }))} required step="any" type="number" value={createDraft.latitude} /></div>
+          </div>
+          <div className="signature-note"><Crosshair aria-hidden="true" size={17} />只提交坐标。Core 调用高德反向地理编码后固化 6 位行政区和格式化地址，浏览器不手写地址。</div>
+          {storeFeedback ? <p className={`command-notice ${storeFeedback.tone}`} role={storeFeedback.tone === 'error' ? 'alert' : 'status'}>{storeFeedback.message}</p> : null}
+          <button className="button primary" disabled={!createFormValid || Boolean(storeBusy)} type="submit">{storeBusy === 'create' ? '创建中…' : '创建草稿'}</button>
+        </form>
+      ) : null}
+
       <div className="store-layout">
         <section className="section-block store-list" aria-labelledby="store-list-title">
-          <div className="section-heading"><div><p className="eyebrow">Locations</p><h2 id="store-list-title">旗下门店</h2></div><span>{storesState.phase === 'ready' ? `${stores.length} 家` : '实时 Core 读取'}</span></div>
+          <div className="section-heading"><div><p className="eyebrow">Locations</p><h2 id="store-list-title">旗下门店</h2></div><span>{storesState.phase === 'ready' ? `${stores.length} 家` : '商家范围 Core 读取'}</span></div>
           {storesState.phase === 'loading' ? <LoadingRows count={3} /> : null}
           {storesState.phase === 'idle' ? <EmptyState blocked description="连接授权商家钱包后读取门店。" title="商家会话不可用" /> : null}
-          {storesState.phase === 'error' ? <><EmptyState blocked description={storesState.message} title="门店读取失败" /><button className="button secondary wide" onClick={() => void loadStores()} type="button"><RefreshCw aria-hidden="true" size={16} /> 重试</button></> : null}
-          {storesState.phase === 'ready' && stores.length === 0 ? <EmptyState description="Core 未返回归属当前商家的门店。" title="暂无可管理门店" /> : null}
+          {storesState.phase === 'error' ? <><EmptyState blocked description={storesState.message} title={loadErrorTitle(storesState)} /><button className="button secondary wide" onClick={() => void loadStores()} type="button"><RefreshCw aria-hidden="true" size={16} /> 重试</button></> : null}
+          {storesState.phase === 'ready' && stores.length === 0 ? <EmptyState description="当前商家尚未创建门店，可从右上角建立第一家门店草稿。" title="暂无可管理门店" /> : null}
           {stores.length > 0 ? <div className="store-options" role="list">{stores.map((store) => (
             <button aria-pressed={store.storeId === selectedStoreId} className={store.storeId === selectedStoreId ? 'store-option selected' : 'store-option'} key={store.storeId} onClick={() => selectStore(store.storeId)} role="listitem" type="button">
-              <strong>{store.name}</strong><span>{store.regionCode} · {store.status}</span><small>{store.address}</small>
+              <span className={`store-status status-${store.status.toLowerCase()}`}>{storeStatusLabel(store.status)}</span><strong>{store.name}</strong><span>{store.regionCode} · v{store.version}</span><small>{store.address}</small>
             </button>
           ))}</div> : null}
         </section>
 
-        <form className="section-block form-section" onSubmit={(event) => { event.preventDefault(); void submitBinding(); }} aria-labelledby="store-form-title">
-          <div className="section-heading"><div><p className="eyebrow">Store details</p><h2 id="store-form-title">门店资料</h2></div><Building2 aria-hidden="true" size={19} /></div>
-          <div className="two-column-fields">
-            <div className="field"><label htmlFor="store-name">门店名称</label><input disabled id="store-name" placeholder="选择门店后显示" type="text" value={selectedStore?.name ?? ''} readOnly /></div>
-            <div className="field"><label htmlFor="store-phone">服务电话</label><input disabled id="store-phone" inputMode="tel" placeholder="选择门店后显示" type="tel" value={selectedStore?.phone ?? ''} readOnly /></div>
-          </div>
-          <div className="two-column-fields">
-            <div className="field"><label htmlFor="store-address">门店地址</label><input disabled id="store-address" placeholder="选择门店后显示" type="text" value={selectedStore?.address ?? ''} readOnly /></div>
-            <div className="field"><label htmlFor="coordinates">精准地图坐标</label><div className="input-action"><input disabled id="coordinates" placeholder="由地图定位" type="text" value={selectedStore ? `${selectedStore.longitude}, ${selectedStore.latitude}` : ''} readOnly /><button aria-label="地图定位" className="icon-button" disabled type="button"><Crosshair aria-hidden="true" size={17} /></button></div></div>
-          </div>
-          <fieldset className="field"><legend>门店实景图</legend><button className="inline-upload" disabled type="button"><ImagePlus aria-hidden="true" size={19} /> 上传门店照片</button></fieldset>
+        <div className="store-detail-stack">
+          {!selectedStore || !draft ? <section className="section-block"><EmptyState description="从左侧选择门店，或新建门店草稿。" title="选择门店后继续" /></section> : (
+            <form className="section-block form-section" onSubmit={(event) => { event.preventDefault(); void saveStore(); }} aria-labelledby="store-form-title">
+              <div className="section-heading"><div><p className="eyebrow">Versioned profile</p><h2 id="store-form-title">门店资料</h2></div><span>{storeStatusLabel(selectedStore.status)} · v{selectedStore.version}</span></div>
+              {selectedStore.status === 'SUSPENDED' ? <p className="command-notice error" role="alert">门店已冻结。资料、位置与激活操作均失败关闭，历史读取和履约证据保留。</p> : null}
+              {selectedStore.status === 'CLOSED' ? <p className="command-notice error" role="status">门店已关闭。资料和位置永久只读，历史订单快照不受影响。</p> : null}
+              <div className="two-column-fields">
+                <div className="field"><label htmlFor="store-name">门店名称</label><input disabled={!canUpdate || Boolean(storeBusy)} id="store-name" maxLength={100} onChange={(event) => updateDraft((current) => ({ ...current, name: event.target.value }))} required value={draft.name} /></div>
+                <div className="field"><label htmlFor="store-phone">服务电话</label><input disabled={!canUpdate || Boolean(storeBusy)} id="store-phone" inputMode="tel" maxLength={20} onChange={(event) => updateDraft((current) => ({ ...current, phone: event.target.value }))} pattern="[+]?[0-9-]{7,20}" required value={draft.phone} /></div>
+              </div>
+              <div className="field"><label htmlFor="store-business-hours">营业时间</label><input disabled={!canUpdate || Boolean(storeBusy)} id="store-business-hours" maxLength={240} onChange={(event) => updateDraft((current) => ({ ...current, businessHours: event.target.value }))} required value={draft.businessHours} /><FieldHelp>保存时绑定当前版本 {selectedStore.version}。</FieldHelp></div>
 
-          <div className="immutable-fieldset">
-            <div className="immutable-heading"><MapPin aria-hidden="true" size={20} /><div><strong>行政区划绑定</strong><span>当前批次不开放迁址命令</span></div></div>
-            <div className="two-column-fields">
-              <div className="field"><label htmlFor="region-code">6 位行政区划代码</label><input disabled id="region-code" placeholder="由地图服务反向解析" readOnly type="text" value={selectedStore?.regionCode ?? ''} /><FieldHelp>禁止手工回填。</FieldHelp></div>
-              <div className="field"><label htmlFor="region-proof">门店版本</label><input disabled id="region-proof" placeholder="选择门店后显示" readOnly type="text" value={selectedStore ? String(selectedStore.version) : ''} /></div>
-            </div>
-          </div>
+              <fieldset className="field"><legend>门店实景图</legend>
+                <div className="media-actions">
+                  <label className={`button secondary file-button${!canUpdate || storeBusy ? ' disabled' : ''}`}>
+                    <ImagePlus aria-hidden="true" size={16} /> {storeBusy === 'upload' ? '上传中…' : '上传图片'}
+                    <input accept="image/jpeg,image/png,image/webp" disabled={!canUpdate || Boolean(storeBusy) || draft.imageAssetIds.length >= 5} multiple onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ''; void uploadStoreImages(files); }} type="file" />
+                  </label>
+                  <span className="media-count">{draft.imageAssetIds.length} / 5</span>
+                </div>
+                {draft.imageAssetIds.length === 0 ? <EmptyState description="激活前至少需要 1 张经 Core 校验的 STORE_IMAGE。" title="尚未绑定实景图" /> : (
+                  <div className="store-image-grid">{draft.imageAssetIds.map((assetId, index) => (
+                    <figure key={assetId}>
+                      <div className="store-image-frame">{imageAccess[assetId] ? <img alt={`门店实景图 ${index + 1}`} src={imageAccess[assetId].readUrl} /> : <Store aria-hidden="true" size={28} />}</div>
+                      <figcaption><code>{shortHash(assetId)}</code><button aria-label={`移除门店实景图 ${index + 1}`} className="icon-button" disabled={!canUpdate || Boolean(storeBusy)} onClick={() => updateDraft((current) => ({ ...current, imageAssetIds: current.imageAssetIds.filter((id) => id !== assetId) }))} type="button"><Trash2 aria-hidden="true" size={15} /></button></figcaption>
+                    </figure>
+                  ))}</div>
+                )}
+              </fieldset>
 
-          <section className="printer-binding-panel" aria-labelledby="printer-binding-title">
-            <div className="section-heading"><div><p className="eyebrow">Signed device binding</p><h3 id="printer-binding-title">核销云打印机</h3></div><Printer aria-hidden="true" size={20} /></div>
-            {bindingState.phase === 'loading' ? <LoadingRows count={2} /> : null}
-            {bindingState.phase === 'error' ? <EmptyState blocked description={bindingState.message} title="设备绑定读取失败" /> : null}
-            {bindingState.phase === 'ready' && !currentBinding ? <EmptyState description="该门店尚未绑定打印机。" title="暂无设备" /> : null}
-            {currentBinding ? <dl className="binding-summary">
-              <div><dt>当前设备</dt><dd>{currentBinding.provider} / {currentBinding.deviceId}</dd></div>
-              <div><dt>绑定版本</dt><dd>v{currentBinding.version}</dd></div>
-              <div><dt>签名摘要</dt><dd><code>{currentBinding.signatureHash}</code></dd></div>
-            </dl> : null}
-            <div className="two-column-fields">
-              <div className="field"><label htmlFor="print-provider">打印服务</label><select disabled={!session || !selectedStore || submitting || bindingState.phase !== 'ready'} id="print-provider" onChange={(event) => updateBindingDraft(() => setProvider(event.target.value as PrintProvider))} value={provider}>{printProviders.map((name) => <option key={name} value={name}>{name}</option>)}</select></div>
-              <div className="field"><label htmlFor="printer-device-id">Device ID</label><input autoComplete="off" disabled={!session || !selectedStore || submitting || bindingState.phase !== 'ready'} id="printer-device-id" maxLength={128} minLength={3} onChange={(event) => updateBindingDraft(() => setDeviceId(event.target.value))} placeholder="服务商设备编号" value={deviceId} /></div>
-            </div>
-            {providerReadiness === 'CONFIGURATION_REQUIRED' ? <p className="form-error" role="alert">ConfigurationRequired：{provider} 生产账号或凭据未配置，绑定命令已关闭。</p> : null}
-            {commandState.phase === 'error' ? <p className="form-error" role="alert">{commandState.message}</p> : null}
-            {commandState.phase === 'success' ? <div className="binding-success" role="status"><ShieldCheck aria-hidden="true" size={18} /><div><strong>绑定版本 v{commandState.binding.version} 已生效</strong><span>digest {commandState.digest}</span><span>signature {commandState.binding.signatureHash}</span></div></div> : null}
-            <button aria-label="绑定设备" className="button primary wide" disabled={!bindingAllowed || submitting} type="submit">{submitting ? <RefreshCw aria-hidden="true" size={16} /> : <ShieldCheck aria-hidden="true" size={16} />} {submitting ? '签名并提交中' : '签名并绑定设备'}</button>
-          </section>
-          <div className="signature-note"><ShieldCheck aria-hidden="true" size={17} />Core challenge 绑定门店、商家、设备新旧值、nonce 和有效期；浏览器只签署该 typedData。</div>
-        </form>
+              <div className="immutable-fieldset">
+                <div className="immutable-heading"><MapPin aria-hidden="true" size={20} /><div><strong>高德位置证据已冻结</strong><span>创建后行政区、地址和坐标不可通过资料保存变更</span></div></div>
+                <div className="field"><label htmlFor="store-address">反向解析地址</label><input disabled id="store-address" readOnly value={selectedStore.address} /></div>
+                <div className="two-column-fields">
+                  <div className="field"><label htmlFor="coordinates">高德坐标</label><input disabled id="coordinates" readOnly value={`${selectedStore.longitude}, ${selectedStore.latitude}`} /></div>
+                  <div className="field"><label htmlFor="region-code">6 位行政区划代码</label><input disabled id="region-code" readOnly value={selectedStore.regionCode} /></div>
+                </div>
+              </div>
+
+              <div className="store-capabilities" aria-label="Core 允许的门店操作">{selectedStore.allowedActions.map((capability) => (
+                <div key={capability.action}><strong>{actionLabels[capability.action]}</strong><span className={capability.enabled ? 'state-text success' : 'state-text blocked'}>{capability.enabled ? '可执行' : capability.reasonCode ? reasonLabels[capability.reasonCode] : '不可执行'}</span></div>
+              ))}</div>
+              {storeFeedback && !createOpen ? <p className={`command-notice ${storeFeedback.tone}`} role={storeFeedback.tone === 'error' ? 'alert' : 'status'}>{storeFeedback.message}</p> : null}
+              <div className="store-command-row">
+                <button className="button primary" disabled={!canUpdate || !storeFormValid || Boolean(storeBusy)} type="submit"><Save aria-hidden="true" size={16} /> {storeBusy === 'save' ? '保存中…' : '保存资料'}</button>
+                <button className="button secondary" disabled={!canActivate || Boolean(storeBusy)} onClick={() => void activateStore()} type="button"><ShieldCheck aria-hidden="true" size={16} /> {storeBusy === 'activate' ? '激活中…' : '激活门店'}</button>
+                <button className="button danger" disabled={!canClose || Boolean(storeBusy)} onClick={() => setCloseArmed(true)} type="button"><Trash2 aria-hidden="true" size={16} /> 关闭门店</button>
+              </div>
+              {closeArmed ? <div className="store-close-confirm" role="alert"><div><strong>确认关闭 {selectedStore.name}？</strong><span>关闭后资料只读，门店不再进入新商品和自提流程。</span></div><button className="button quiet" disabled={Boolean(storeBusy)} onClick={() => setCloseArmed(false)} type="button">取消</button><button className="button danger" disabled={Boolean(storeBusy)} onClick={() => void closeStore()} type="button">{storeBusy === 'close' ? '关闭中…' : '确认关闭'}</button></div> : null}
+            </form>
+          )}
+
+          {selectedStore ? (
+            <form className="section-block form-section printer-binding-panel" onSubmit={(event) => { event.preventDefault(); void submitBinding(); }} aria-labelledby="printer-binding-title">
+              <div className="section-heading"><div><p className="eyebrow">Signed device binding</p><h2 id="printer-binding-title">核销云打印机</h2></div><Printer aria-hidden="true" size={20} /></div>
+              {bindingState.phase === 'loading' ? <LoadingRows count={2} /> : null}
+              {bindingState.phase === 'error' ? <EmptyState blocked description={bindingState.message} title={loadErrorTitle(bindingState)} /> : null}
+              {bindingState.phase === 'ready' && !currentBinding ? <EmptyState description="该门店尚未绑定打印机。" title="暂无设备" /> : null}
+              {currentBinding ? <dl className="binding-summary">
+                <div><dt>当前设备</dt><dd>{currentBinding.provider} / {currentBinding.deviceId}</dd></div>
+                <div><dt>绑定版本</dt><dd>v{currentBinding.version}</dd></div>
+                <div><dt>签名摘要</dt><dd><code>{currentBinding.signatureHash}</code></dd></div>
+              </dl> : null}
+              <div className="two-column-fields">
+                <div className="field"><label htmlFor="print-provider">打印服务</label><select disabled={!session || bindingSubmitting || bindingState.phase !== 'ready'} id="print-provider" onChange={(event) => updateBindingDraft(() => setProvider(event.target.value as PrintProvider))} value={provider}>{printProviders.map((name) => <option key={name} value={name}>{name}</option>)}</select></div>
+                <div className="field"><label htmlFor="printer-device-id">Device ID</label><input autoComplete="off" disabled={!session || bindingSubmitting || bindingState.phase !== 'ready'} id="printer-device-id" maxLength={128} minLength={3} onChange={(event) => updateBindingDraft(() => setDeviceId(event.target.value))} placeholder="服务商设备编号" value={deviceId} /></div>
+              </div>
+              {providerReadiness === 'CONFIGURATION_REQUIRED' ? <p className="form-error" role="alert">ConfigurationRequired：{provider} 生产账号或凭据未配置，绑定命令已关闭。</p> : null}
+              {commandState.phase === 'error' ? <p className="form-error" role="alert">{commandState.message}</p> : null}
+              {commandState.phase === 'success' ? <div className="binding-success" role="status"><ShieldCheck aria-hidden="true" size={18} /><div><strong>绑定版本 v{commandState.binding.version} 已生效</strong><span>digest {commandState.digest}</span><span>signature {commandState.binding.signatureHash}</span></div></div> : null}
+              <button aria-label="绑定设备" className="button primary wide" disabled={!bindingAllowed || bindingSubmitting} type="submit">{bindingSubmitting ? <RefreshCw aria-hidden="true" size={16} /> : <ShieldCheck aria-hidden="true" size={16} />} {bindingSubmitting ? '签名并提交中' : '签名并绑定设备'}</button>
+              <div className="signature-note"><ShieldCheck aria-hidden="true" size={17} />Core challenge 绑定门店、商家、设备新旧值、nonce 和有效期；浏览器只签署该 typedData。</div>
+            </form>
+          ) : null}
+        </div>
       </div>
     </div>
   );
 }
 
+function storeDraft(store: MerchantManagedStore): StoreDraft {
+  return {
+    name: store.name,
+    phone: store.phone,
+    businessHours: store.businessHours,
+    imageAssetIds: [...store.imageAssetIds],
+  };
+}
+
+function capabilityEnabled(store: MerchantManagedStore | undefined, action: MerchantStoreAction) {
+  return store?.allowedActions.some((capability) => capability.action === action && capability.enabled) === true;
+}
+
+function requireStoreScope(store: MerchantManagedStore, merchantId: string, storeId?: string) {
+  if (store.merchantId !== merchantId || (storeId !== undefined && store.storeId !== storeId)) {
+    throw new CoreApiError('InvalidResponse', '门店命令结果与当前商家范围不匹配。');
+  }
+}
+
+function errorState(error: unknown): Extract<LoadState<never>, { phase: 'error' }> {
+  return {
+    phase: 'error',
+    message: readableStoreError(error),
+    ...(error instanceof CoreApiError ? { code: error.code } : {}),
+    ...(error instanceof CoreApiError && error.status !== undefined ? { status: error.status } : {}),
+  };
+}
+
+function readableStoreError(error: unknown) {
+  if (!(error instanceof CoreApiError)) return readableError(error);
+  if (error.code === 'ConfigurationRequired') return `ConfigurationRequired：${error.message}`;
+  if (error.code === 'Forbidden' || error.status === 403) return `403 无权执行：${error.message}`;
+  if (error.status === 409 || error.code === 'IdempotencyConflict') return `409 状态或版本冲突：${error.message}（已刷新最新门店版本）`;
+  return readableError(error);
+}
+
+function loadErrorTitle(state: { code?: string; status?: number }) {
+  if (state.code === 'ConfigurationRequired') return '门店配置不完整';
+  if (state.code === 'Forbidden' || state.status === 403) return '无权读取当前门店';
+  if (state.status === 409 || state.code === 'IdempotencyConflict') return '门店状态冲突';
+  return '门店数据不可用';
+}
+
+function storeStatusLabel(status: MerchantManagedStore['status']) {
+  return { DRAFT: '草稿', ACTIVE: '营业中', SUSPENDED: '已冻结', CLOSED: '已关闭' }[status];
+}
+
+function validName(value: string) {
+  return value.trim().length >= 1 && value.trim().length <= 100;
+}
+
+function validPhone(value: string) {
+  return /^[+]?[0-9-]{7,20}$/.test(value.trim());
+}
+
+function validBusinessHours(value: string) {
+  return value.trim().length >= 1 && value.trim().length <= 240;
+}
+
+function validCoordinate(value: string, minimum: number, maximum: number) {
+  if (value.trim() === '') return false;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= minimum && number <= maximum;
+}
+
+function validImage(file: File) {
+  return Number.isSafeInteger(file.size)
+    && file.size >= 1
+    && file.size <= 10 * 1024 * 1024
+    && ['image/jpeg', 'image/png', 'image/webp'].includes(file.type);
+}
+
+function shortHash(value: string) {
+  return `${value.slice(0, 10)}…${value.slice(-8)}`;
+}
+
 function createIdempotencyKey(scope: string) {
-  const random = typeof globalThis.crypto?.randomUUID === 'function'
-    ? globalThis.crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  return `merchant-${scope}-${random}`;
+  return `merchant-${scope}-${crypto.randomUUID()}`;
 }

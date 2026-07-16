@@ -190,6 +190,16 @@ h2 {
   border-color: oklch(88% 0.045 26);
 }
 
+.button.danger {
+  color: var(--surface);
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+.button.danger:not(:disabled):hover {
+  background: oklch(43% 0.15 27);
+}
+
 .button:disabled,
 .icon-button:disabled {
   color: oklch(62% 0.013 85);
@@ -1801,6 +1811,19 @@ td .empty-state {
   gap: 20px;
 }
 
+.store-create-panel,
+.store-detail-stack {
+  display: grid;
+  min-width: 0;
+  gap: 20px;
+}
+
+.store-create-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .immutable-fieldset {
   display: grid;
   gap: 16px;
@@ -1883,6 +1906,143 @@ td .empty-state {
 .store-option span,
 .store-option small {
   color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.store-option .store-status {
+  width: max-content;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  background: var(--surface-muted);
+  font-size: 0.6875rem;
+  font-weight: 750;
+}
+
+.store-option .status-active {
+  border-color: oklch(84% 0.06 151);
+  color: oklch(35% 0.07 151);
+  background: var(--success-soft);
+}
+
+.store-option .status-suspended,
+.store-option .status-closed {
+  border-color: oklch(85% 0.06 27);
+  color: oklch(39% 0.09 27);
+  background: var(--danger-soft);
+}
+
+.media-actions {
+  align-items: center;
+}
+
+.media-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.store-image-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.store-image-grid figure {
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface-muted);
+}
+
+.store-image-frame {
+  display: grid;
+  aspect-ratio: 4 / 3;
+  place-items: center;
+  overflow: hidden;
+  color: var(--muted);
+}
+
+.store-image-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.store-image-grid figcaption {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 5px 4px 9px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.store-image-grid code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.6875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.store-capabilities {
+  display: grid;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.store-capabilities > div {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.45fr) minmax(0, 1.55fr);
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.store-capabilities > div:last-child {
+  border-bottom: 0;
+}
+
+.store-capabilities strong,
+.store-capabilities span {
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.store-command-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.store-close-confirm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid oklch(85% 0.06 27);
+  border-radius: 6px;
+  color: oklch(39% 0.09 27);
+  background: var(--danger-soft);
+}
+
+.store-close-confirm > div {
+  display: grid;
+  gap: 3px;
+}
+
+.store-close-confirm strong,
+.store-close-confirm span {
   font-size: 0.75rem;
   line-height: 1.45;
 }
@@ -3377,8 +3537,25 @@ td > small {
   .two-panel-grid,
   .reward-grid,
   .help-layout,
-  .merchant-rules {
+  .merchant-rules,
+  .store-create-grid {
     grid-template-columns: 1fr;
+  }
+
+  .store-image-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .store-close-confirm {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .store-close-confirm > div {
+    grid-column: span 2;
+  }
+
+  .store-command-row .button {
+    flex: 1 1 180px;
   }
 
   .slot-identifiers,
@@ -3560,6 +3737,24 @@ td > small {
 }
 
 @media (max-width: 520px) {
+  .store-image-grid,
+  .store-capabilities > div {
+    grid-template-columns: 1fr;
+  }
+
+  .store-command-row .button,
+  .store-close-confirm .button {
+    width: 100%;
+  }
+
+  .store-close-confirm {
+    grid-template-columns: 1fr;
+  }
+
+  .store-close-confirm > div {
+    grid-column: auto;
+  }
+
   .bnm-points-grid {
     grid-template-columns: 1fr;
   }

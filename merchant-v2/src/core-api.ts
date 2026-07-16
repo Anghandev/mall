@@ -77,7 +77,12 @@ import {
   type MerchantBusinessDashboard,
   type MerchantAuditExport,
   type MerchantAuditList,
+  type CreateMerchantStoreRequest,
+  type MerchantManagedStore,
   type MerchantStore,
+  type MerchantStoreAction,
+  type MerchantStoreActionReason,
+  type MerchantStoreVersionRequest,
   type MerchantProfile,
   type PickupVerificationRequest,
   type OrderKind,
@@ -97,6 +102,7 @@ import {
   type SettlementListProjection,
   type SettlementRequestProjection,
   type SettlementRequestSubmission,
+  type UpdateMerchantStoreRequest,
   type ProductSlotInput,
   type ProductSlotProjection,
   type UserRole,
@@ -104,6 +110,7 @@ import {
   type WaybillBatchResult,
   type WaybillResult,
 } from '@abu24k/core-artifacts';
+import merchantStoreOperations from 'virtual:merchant-store-operations';
 
 const allowedActionSet = new Set<string>(allowedActionNames);
 const allowedActionReasonSet = new Set<string>(allowedActionReasonCodes);
@@ -142,6 +149,13 @@ const waybillProviderSet = new Set<string>(waybillProviders);
 const waybillRequestStateSet = new Set<string>(waybillRequestStates);
 const waybillCarrierSet = new Set<string>(logisticsCarrierCodes);
 const orderKindSet = new Set<string>(['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] satisfies readonly OrderKind[]);
+const merchantStoreActionSet = new Set<string>(['UPDATE_PROFILE', 'ACTIVATE', 'CLOSE'] satisfies readonly MerchantStoreAction[]);
+const merchantStoreActionReasonSet = new Set<string>([
+  'STORE_PROFILE_INCOMPLETE',
+  'STORE_SUSPENDED',
+  'STORE_CLOSED',
+  'STORE_STATE_MISMATCH',
+] satisfies readonly MerchantStoreActionReason[]);
 
 export interface CoreReadiness {
   chainId: 56;
@@ -249,6 +263,23 @@ export interface CoreApi {
   listCatalogCategories(): Promise<readonly CatalogCategory[]>;
   listCatalogTags(): Promise<readonly CatalogTag[]>;
   listMerchantStores(): Promise<readonly MerchantStore[]>;
+  listManagedMerchantStores(token: string): Promise<readonly MerchantManagedStore[]>;
+  createMerchantStore(input: CreateMerchantStoreRequest, token: string): Promise<MerchantManagedStore>;
+  updateMerchantStore(
+    storeId: string,
+    input: UpdateMerchantStoreRequest,
+    token: string,
+  ): Promise<MerchantManagedStore>;
+  activateMerchantStore(
+    storeId: string,
+    input: MerchantStoreVersionRequest,
+    token: string,
+  ): Promise<MerchantManagedStore>;
+  closeMerchantStore(
+    storeId: string,
+    input: MerchantStoreVersionRequest,
+    token: string,
+  ): Promise<MerchantManagedStore>;
   getMerchantPrinterBinding(storeId: string, token: string): Promise<PrinterBinding | null>;
   createMerchantPrinterBindingChallenge(
     storeId: string,
@@ -425,6 +456,52 @@ export function createCoreApi(baseUrl = import.meta.env.VITE_CORE_API_BASE_URL ?
     async listMerchantStores() {
       const body = await request(normalizedBaseUrl, '/v2/stores');
       return array(record(body, 'merchant stores response').stores, 'stores').map(parseMerchantStore);
+    },
+
+    async listManagedMerchantStores(token) {
+      const body = await request(normalizedBaseUrl, merchantStoreOperations.list, { token });
+      return array(record(body, 'managed merchant stores response').stores, 'stores')
+        .map(parseMerchantManagedStore);
+    },
+
+    async createMerchantStore(input, token) {
+      return parseMerchantManagedStore(await request(normalizedBaseUrl, merchantStoreOperations.create, {
+        method: 'POST',
+        body: JSON.stringify(input),
+        token,
+      }));
+    },
+
+    async updateMerchantStore(storeId, input, token) {
+      const store = parseMerchantManagedStore(await request(
+        normalizedBaseUrl,
+        operationResourcePath(merchantStoreOperations.update, 'storeId', storeId),
+        { method: 'PUT', body: JSON.stringify(input), token },
+      ));
+      exact(store.storeId, storeId, 'updated storeId');
+      return store;
+    },
+
+    async activateMerchantStore(storeId, input, token) {
+      const store = parseMerchantManagedStore(await request(
+        normalizedBaseUrl,
+        operationResourcePath(merchantStoreOperations.activate, 'storeId', storeId),
+        { method: 'POST', body: JSON.stringify(input), token },
+      ));
+      exact(store.storeId, storeId, 'activated storeId');
+      exact(store.status, 'ACTIVE', 'activated store status');
+      return store;
+    },
+
+    async closeMerchantStore(storeId, input, token) {
+      const store = parseMerchantManagedStore(await request(
+        normalizedBaseUrl,
+        operationResourcePath(merchantStoreOperations.close, 'storeId', storeId),
+        { method: 'POST', body: JSON.stringify(input), token },
+      ));
+      exact(store.storeId, storeId, 'closed storeId');
+      exact(store.status, 'CLOSED', 'closed store status');
+      return store;
     },
 
     async getMerchantPrinterBinding(storeId, token) {
@@ -725,6 +802,12 @@ export async function putMediaFile(uploadIntent: MediaUploadIntentProjection, fi
   if (!response.ok) {
     throw new CoreApiError('ExternalBlocked', '媒体存储服务拒绝了文件上传。');
   }
+}
+
+function operationResourcePath(path: string, parameter: string, value: string) {
+  const token = `{${parameter}}`;
+  if (!path.includes(token)) throw new Error(`Coordinated OpenAPI path is missing ${token}`);
+  return path.replace(token, encodeURIComponent(value));
 }
 
 function fulfillmentOrdersPath(options: FulfillmentOrderListOptions) {
@@ -1578,17 +1661,66 @@ function parseFulfillmentTarget(input: unknown): FulfillmentTarget {
 
 function parseMerchantStore(input: unknown): MerchantStore {
   const value = record(input, 'merchant store');
+  const name = string(value.name, 'store.name');
+  const longitude = finiteNumber(value.longitude, 'store.longitude');
+  const latitude = finiteNumber(value.latitude, 'store.latitude');
+  const phone = string(value.phone, 'store.phone');
+  const businessHours = optionalString(value.businessHours, 'store.businessHours');
+  const imageAssetIds = array(value.imageAssetIds, 'store.imageAssetIds').map((assetId) => (
+    bytes32(assetId, 'store.imageAssetId')
+  ));
+  if (name.length > 100) invalid('store.name exceeds the coordinated maximum length');
+  if (longitude < -180 || longitude > 180) invalid('store.longitude is outside the coordinated range');
+  if (latitude < -90 || latitude > 90) invalid('store.latitude is outside the coordinated range');
+  if (!/^[+]?[0-9-]{7,20}$/.test(phone)) invalid('store.phone does not match the coordinated format');
+  if (businessHours.length > 240) invalid('store.businessHours exceeds the coordinated maximum length');
+  if (imageAssetIds.length > 5 || new Set(imageAssetIds).size !== imageAssetIds.length) {
+    invalid('store.imageAssetIds must contain at most five unique assets');
+  }
   return {
     storeId: string(value.storeId, 'store.storeId'),
     merchantId: string(value.merchantId, 'store.merchantId'),
-    name: string(value.name, 'store.name'),
+    name,
     regionCode: regionCode(value.regionCode, 'store.regionCode'),
-    longitude: finiteNumber(value.longitude, 'store.longitude'),
-    latitude: finiteNumber(value.latitude, 'store.latitude'),
+    longitude,
+    latitude,
     address: string(value.address, 'store.address'),
-    phone: string(value.phone, 'store.phone'),
+    phone,
+    businessHours,
+    imageAssetIds,
     status: enumValue(value.status, storeStatusSet, 'store.status'),
     version: positiveInteger(value.version, 'store.version'),
+  };
+}
+
+function parseMerchantManagedStore(input: unknown): MerchantManagedStore {
+  const value = record(input, 'managed merchant store');
+  exact(value.artifactVersion, artifactVersion, 'managed store artifactVersion');
+  const allowedActions = array(value.allowedActions, 'managed store allowedActions').map((inputCapability) => {
+    const capability = record(inputCapability, 'managed store capability');
+    const action = enumValue(capability.action, merchantStoreActionSet, 'managed store capability action');
+    const enabled = boolean(capability.enabled, 'managed store capability enabled');
+    if (enabled && capability.reasonCode !== undefined) invalid('Enabled store capability cannot include a reason code');
+    if (!enabled && capability.reasonCode === undefined) invalid('Disabled store capability requires a reason code');
+    return {
+      action: action as MerchantStoreAction,
+      enabled,
+      ...(!enabled
+        ? { reasonCode: enumValue(
+            capability.reasonCode,
+            merchantStoreActionReasonSet,
+            'managed store capability reasonCode',
+          ) as MerchantStoreActionReason }
+        : {}),
+    };
+  });
+  if (allowedActions.length !== 3 || new Set(allowedActions.map((item) => item.action)).size !== 3) {
+    invalid('Managed store must publish each store capability exactly once');
+  }
+  return {
+    artifactVersion,
+    ...parseMerchantStore(input),
+    allowedActions,
   };
 }
 

@@ -3,7 +3,13 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { artifactVersion, rewardSubtypes, type CatalogProduct, type ManagedCatalogProduct } from '@abu24k/core-artifacts';
+import {
+  artifactVersion,
+  rewardSubtypes,
+  type CatalogProduct,
+  type ManagedCatalogProduct,
+  type MerchantManagedStore,
+} from '@abu24k/core-artifacts';
 import { App } from '../src/App';
 import { productBaseline } from '../src/bootstrap';
 import { CoreApiError, type CoreApi, type CoreBootstrap } from '../src/core-api';
@@ -51,6 +57,7 @@ import {
   completedMediaAsset,
   concessionPreview,
   managedProduct,
+  managedMerchantStore,
   mediaReadAccess,
   mediaUploadIntent,
   merchantStore,
@@ -129,6 +136,41 @@ function createMockCoreApi(overrides: Partial<CoreApi> = {}): CoreApi {
     listCatalogCategories: async () => catalogCategories,
     listCatalogTags: async () => catalogTags,
     listMerchantStores: async () => [merchantStore],
+    listManagedMerchantStores: async () => [managedMerchantStore],
+    createMerchantStore: async (input) => ({
+      ...managedMerchantStore,
+      name: input.name,
+      phone: input.phone,
+      businessHours: input.businessHours,
+      longitude: input.longitude,
+      latitude: input.latitude,
+      status: 'DRAFT',
+      imageAssetIds: [],
+      allowedActions: [
+        { action: 'UPDATE_PROFILE', enabled: true },
+        { action: 'ACTIVATE', enabled: false, reasonCode: 'STORE_PROFILE_INCOMPLETE' },
+        { action: 'CLOSE', enabled: true },
+      ],
+    }),
+    updateMerchantStore: async (_storeId, input) => ({
+      ...managedMerchantStore,
+      name: input.name,
+      phone: input.phone,
+      businessHours: input.businessHours,
+      imageAssetIds: input.imageAssetIds,
+      version: input.expectedVersion + 1,
+    }),
+    activateMerchantStore: async () => managedMerchantStore,
+    closeMerchantStore: async () => ({
+      ...managedMerchantStore,
+      status: 'CLOSED',
+      version: managedMerchantStore.version + 1,
+      allowedActions: [
+        { action: 'UPDATE_PROFILE', enabled: false, reasonCode: 'STORE_CLOSED' },
+        { action: 'ACTIVATE', enabled: false, reasonCode: 'STORE_CLOSED' },
+        { action: 'CLOSE', enabled: false, reasonCode: 'STORE_CLOSED' },
+      ],
+    }),
     getMerchantPrinterBinding: async () => null,
     createMerchantPrinterBindingChallenge: async () => printerChallenge,
     applyMerchantPrinterBinding: async () => printerBinding,
@@ -296,8 +338,8 @@ async function enterSettings(client: CoreApi) {
 }
 
 describe('00 wallet gateway', () => {
-  it('consumes admin-global-ops.1 without widening the merchant action boundary', () => {
-    expect(artifactVersion).toBe('2.0.0-admin-global-ops.1');
+  it('consumes merchant-stores.1 without widening the merchant action boundary', () => {
+    expect(artifactVersion).toBe('2.0.0-merchant-stores.1');
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
     expect(coreBoundary.artifactVersion).toBe(artifactVersion);
     expect(coreBoundary.artifactsAvailable).toBe(true);
@@ -965,6 +1007,210 @@ describe('03 fulfillment center', () => {
 });
 
 describe('04 store controls', () => {
+  it('creates an AMap-bound draft, binds a verified image, saves, activates and closes it by Core version', async () => {
+    const storeImageUploadIntent: typeof mediaUploadIntent = {
+      ...mediaUploadIntent,
+      uploadIntentId: `0x${'3'.repeat(64)}`,
+      purpose: 'STORE_IMAGE',
+      resourceType: 'STORE',
+      resourceId: 'store-created-1',
+      uploadUrl: 'https://media.example.test/upload/store-image',
+    };
+    const storeImageAsset: typeof completedMediaAsset = {
+      ...completedMediaAsset,
+      assetId: `0x${'4'.repeat(64)}`,
+      uploadIntentId: storeImageUploadIntent.uploadIntentId,
+      purpose: 'STORE_IMAGE',
+      resourceType: 'STORE',
+      resourceId: 'store-created-1',
+    };
+    const storeImageReadAccess: typeof mediaReadAccess = {
+      ...mediaReadAccess,
+      assetId: storeImageAsset.assetId,
+      purpose: 'STORE_IMAGE',
+      resourceType: 'STORE',
+      resourceId: 'store-created-1',
+      accessScope: 'AUTHENTICATED',
+      readUrl: 'https://media.example.test/read/store-image',
+    };
+    let stores: MerchantManagedStore[] = [managedMerchantStore];
+    const listManagedMerchantStores = vi.fn(async () => stores);
+    const createMerchantStore = vi.fn(async (input: Parameters<CoreApi['createMerchantStore']>[0]) => {
+      const created: MerchantManagedStore = {
+        ...managedMerchantStore,
+        storeId: 'store-created-1',
+        name: input.name,
+        phone: input.phone,
+        businessHours: input.businessHours,
+        longitude: input.longitude,
+        latitude: input.latitude,
+        address: '上海市浦东新区世纪大道 24 号',
+        regionCode: '310115',
+        imageAssetIds: [],
+        status: 'DRAFT',
+        version: 1,
+        allowedActions: [
+          { action: 'UPDATE_PROFILE', enabled: true },
+          { action: 'ACTIVATE', enabled: false, reasonCode: 'STORE_PROFILE_INCOMPLETE' },
+          { action: 'CLOSE', enabled: true },
+        ],
+      };
+      stores = [...stores, created];
+      return created;
+    });
+    const updateMerchantStore = vi.fn(async (
+      storeIdInput: string,
+      input: Parameters<CoreApi['updateMerchantStore']>[1],
+    ) => {
+      const current = stores.find((store) => store.storeId === storeIdInput)!;
+      const updated: MerchantManagedStore = {
+        ...current,
+        name: input.name,
+        phone: input.phone,
+        businessHours: input.businessHours,
+        imageAssetIds: input.imageAssetIds,
+        version: input.expectedVersion + 1,
+        allowedActions: [
+          { action: 'UPDATE_PROFILE', enabled: true },
+          { action: 'ACTIVATE', enabled: true },
+          { action: 'CLOSE', enabled: true },
+        ],
+      };
+      stores = stores.map((store) => store.storeId === storeIdInput ? updated : store);
+      return updated;
+    });
+    const activateMerchantStore = vi.fn(async (storeIdInput: string, input: Parameters<CoreApi['activateMerchantStore']>[1]) => {
+      const current = stores.find((store) => store.storeId === storeIdInput)!;
+      const activated: MerchantManagedStore = {
+        ...current,
+        status: 'ACTIVE',
+        version: input.expectedVersion + 1,
+        allowedActions: managedMerchantStore.allowedActions,
+      };
+      stores = stores.map((store) => store.storeId === storeIdInput ? activated : store);
+      return activated;
+    });
+    const closeMerchantStore = vi.fn(async (storeIdInput: string, input: Parameters<CoreApi['closeMerchantStore']>[1]) => {
+      const current = stores.find((store) => store.storeId === storeIdInput)!;
+      const closed: MerchantManagedStore = {
+        ...current,
+        status: 'CLOSED',
+        version: input.expectedVersion + 1,
+        allowedActions: [
+          { action: 'UPDATE_PROFILE', enabled: false, reasonCode: 'STORE_CLOSED' },
+          { action: 'ACTIVATE', enabled: false, reasonCode: 'STORE_CLOSED' },
+          { action: 'CLOSE', enabled: false, reasonCode: 'STORE_CLOSED' },
+        ],
+      };
+      stores = stores.map((store) => store.storeId === storeIdInput ? closed : store);
+      return closed;
+    });
+    const createMediaUploadIntent = vi.fn(async () => storeImageUploadIntent);
+    const completeMediaUpload = vi.fn(async () => storeImageAsset);
+    const getMediaReadAccess = vi.fn(async (
+      assetId: string,
+      _token: string,
+      expected?: Parameters<CoreApi['getMediaReadAccess']>[2],
+    ) => ({
+      ...storeImageReadAccess,
+      assetId,
+      purpose: expected?.purpose ?? storeImageReadAccess.purpose,
+      resourceType: expected?.resourceType ?? storeImageReadAccess.resourceType,
+      resourceId: expected?.resourceId ?? storeImageReadAccess.resourceId,
+    }));
+    const providerFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+    const { user } = await enterStores(createMockCoreApi({
+      listManagedMerchantStores,
+      createMerchantStore,
+      updateMerchantStore,
+      activateMerchantStore,
+      closeMerchantStore,
+      createMediaUploadIntent,
+      completeMediaUpload,
+      getMediaReadAccess,
+    }));
+
+    await user.click(await screen.findByRole('button', { name: '新增门店' }));
+    const createForm = screen.getByRole('heading', { name: '新建门店草稿' }).closest('form')!;
+    await user.type(within(createForm).getByLabelText('门店名称'), '浦东黄金店');
+    await user.type(within(createForm).getByLabelText('服务电话'), '021-87654321');
+    await user.type(within(createForm).getByLabelText('营业时间'), '10:00-20:00');
+    await user.type(within(createForm).getByLabelText('高德经度'), '121.506');
+    await user.type(within(createForm).getByLabelText('高德纬度'), '31.245');
+    await user.click(within(createForm).getByRole('button', { name: '创建草稿' }));
+
+    expect(await screen.findByDisplayValue('上海市浦东新区世纪大道 24 号')).toBeTruthy();
+    expect(createMerchantStore).toHaveBeenCalledWith(expect.objectContaining({
+      name: '浦东黄金店',
+      longitude: 121.506,
+      latitude: 31.245,
+      idempotencyKey: expect.stringMatching(/^merchant-create-store-/),
+    }), 'test-session');
+    expect(createMerchantStore.mock.calls[0]?.[0]).not.toHaveProperty('regionCode');
+    expect(createMerchantStore.mock.calls[0]?.[0]).not.toHaveProperty('address');
+
+    const imageInput = document.querySelector<HTMLInputElement>('input[type="file"][multiple]');
+    expect(imageInput).toBeTruthy();
+    await user.upload(imageInput!, new File([new Uint8Array(512)], 'store.webp', { type: 'image/webp' }));
+    await waitFor(() => expect(completeMediaUpload).toHaveBeenCalledWith(storeImageUploadIntent, 'test-session'));
+    expect(createMediaUploadIntent).toHaveBeenCalledWith(expect.objectContaining({
+      purpose: 'STORE_IMAGE',
+      resourceType: 'STORE',
+      resourceId: 'store-created-1',
+      contentType: 'image/webp',
+      sizeBytes: 512,
+    }), 'test-session', walletAddress);
+    expect(providerFetch).toHaveBeenCalledWith(storeImageUploadIntent.uploadUrl, expect.objectContaining({ method: 'PUT' }));
+
+    await user.click(screen.getByRole('button', { name: '保存资料' }));
+    expect(await screen.findByText(/门店资料已保存为版本 2/)).toBeTruthy();
+    expect(updateMerchantStore).toHaveBeenCalledWith('store-created-1', expect.objectContaining({
+      imageAssetIds: [storeImageAsset.assetId],
+      expectedVersion: 1,
+      idempotencyKey: expect.stringMatching(/^merchant-save-store-store-created-1-/),
+    }), 'test-session');
+
+    await user.click(screen.getByRole('button', { name: '激活门店' }));
+    expect(await screen.findByText('营业中 · v3')).toBeTruthy();
+    expect(activateMerchantStore).toHaveBeenCalledWith('store-created-1', expect.objectContaining({
+      expectedVersion: 2,
+      idempotencyKey: expect.stringMatching(/^merchant-activate-store-store-created-1-/),
+    }), 'test-session');
+
+    await user.click(screen.getByRole('button', { name: '关闭门店' }));
+    await user.click(screen.getByRole('button', { name: '确认关闭' }));
+    expect(await screen.findByText('已关闭 · v4')).toBeTruthy();
+    expect(closeMerchantStore).toHaveBeenCalledWith('store-created-1', expect.objectContaining({
+      expectedVersion: 3,
+      idempotencyKey: expect.stringMatching(/^merchant-close-store-store-created-1-/),
+    }), 'test-session');
+  });
+
+  it('refreshes after a version conflict and exposes permission failures without local success', async () => {
+    const refreshedStore = { ...managedMerchantStore, version: 8 };
+    const listManagedMerchantStores = vi.fn()
+      .mockResolvedValueOnce([managedMerchantStore])
+      .mockResolvedValue([refreshedStore]);
+    const updateMerchantStore = vi.fn(async () => {
+      throw new CoreApiError('UnknownState', '门店版本已变更', undefined, undefined, 409);
+    });
+    const { user } = await enterStores(createMockCoreApi({ listManagedMerchantStores, updateMerchantStore }));
+    await user.click(await screen.findByRole('button', { name: '保存资料' }));
+
+    expect((await screen.findByRole('alert')).textContent).toMatch(/409 状态或版本冲突/);
+    expect(screen.getByText('营业中 · v8')).toBeTruthy();
+    expect(listManagedMerchantStores).toHaveBeenCalledTimes(2);
+
+    cleanup();
+    const forbiddenUpdate = vi.fn(async () => {
+      throw new CoreApiError('Forbidden', '无权修改该门店', undefined, undefined, 403);
+    });
+    const forbidden = await enterStores(createMockCoreApi({ updateMerchantStore: forbiddenUpdate }));
+    await forbidden.user.click(await screen.findByRole('button', { name: '保存资料' }));
+    expect((await screen.findByRole('alert')).textContent).toMatch(/403 无权执行/);
+    expect(screen.queryByText(/门店资料已保存/)).toBeNull();
+  });
+
   it('loads merchant stores and signs then applies an exact printer binding challenge', async () => {
     const createMerchantPrinterBindingChallenge = vi.fn(async () => printerChallenge);
     const applyMerchantPrinterBinding = vi.fn()

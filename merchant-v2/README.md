@@ -11,7 +11,7 @@ pnpm --filter @abu24k/merchant check
 ```
 
 The app consumes the coordinated `@abu24k/core-artifacts` workspace package at
-`2.0.0-admin-global-ops.1`. In addition to Bootstrap, merchant SIWE and the
+`2.0.0-merchant-stores.1`. In addition to Bootstrap, merchant SIWE and the
 payment/fulfillment surfaces, the workbench consumes merchant finance,
 guarantee-deposit evidence, settlement intents, signed settlement requests and
 Safe-finality history. The help center reads wallet-targeted published CMS
@@ -26,6 +26,17 @@ reward rows consume Core's generated subtype enum, while BNM consumes the
 Core-projected Locked/Available points totals and remains explicitly
 non-transferable with no settlement action. The browser does not aggregate or
 recalculate authoritative funds.
+
+The store center consumes merchant-scoped managed-store reads and versioned
+create, profile-update, activate and close commands. Creation submits only the
+merchant-entered profile plus AMap coordinates; Core owns reverse geocoding and
+returns the immutable six-digit region, formatted address and coordinates.
+Store photos use owned `STORE_IMAGE` intent -> provider PUT -> completion ->
+controlled-read evidence and are limited to one through five for activation.
+Every command preserves its idempotency key on retry, uses the current Core
+version and renders Core capabilities, conflicts and authorization failures
+without a browser-side state transition. The signed printer-binding flow
+remains available as a separate store-scoped command.
 
 The dashboard and finance-center Today metric consume
 `GET /v2/merchant/dashboard` directly. Core owns the `Asia/Shanghai` day
