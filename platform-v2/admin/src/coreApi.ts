@@ -147,8 +147,25 @@ export async function fetchPaymentProjection(
   token: string,
   signal?: AbortSignal,
 ): Promise<PaymentProjection> {
+  return fetchPaymentProjectionAt('/v2/payments/', orderId, token, signal);
+}
+
+export async function fetchAdminPaymentProjection(
+  orderId: string,
+  token: string,
+  signal?: AbortSignal,
+): Promise<PaymentProjection> {
+  return fetchPaymentProjectionAt('/v2/admin/payments/', orderId, token, signal);
+}
+
+async function fetchPaymentProjectionAt(
+  basePath: string,
+  orderId: string,
+  token: string,
+  signal?: AbortSignal,
+): Promise<PaymentProjection> {
   if (!bytes32Pattern.test(orderId)) throw invalidResponse('Order ID must be a bytes32 value');
-  const body = await requestJson(`/v2/payments/${encodeURIComponent(orderId)}`, {
+  const body = await requestJson(`${basePath}${encodeURIComponent(orderId)}`, {
     headers: { authorization: `Bearer ${token}` },
     ...(signal ? { signal } : {}),
   });
