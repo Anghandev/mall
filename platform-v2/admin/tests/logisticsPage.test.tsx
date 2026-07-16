@@ -5,8 +5,8 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/App';
 
-function renderLogistics() {
-  return render(<MemoryRouter initialEntries={['/logistics']}><App /></MemoryRouter>);
+function renderLogistics(path = '/logistics') {
+  return render(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>);
 }
 
 afterEach(() => {
@@ -210,6 +210,45 @@ describe('Admin logistics operations', () => {
     await waitFor(() => expect(retryBodies).toHaveLength(2));
     expect(retryBodies).toEqual([{ idempotencyKey: 'print-retry-stable' }, { idempotencyKey: 'print-retry-stable' }]);
     expect(screen.queryByRole('button', { name: /退款|退货仓|refund|return warehouse/i })).toBeNull();
+  });
+
+  it('prefills selected orders from the route and submits the existing waybill request shape', async () => {
+    const wallet = address('1');
+    window.ethereum = walletProvider(wallet);
+    const waybillBodies: unknown[] = [];
+    const pickupJob = printJob({ printJobId: hash('b'), orderId: 'order-2', jobKind: 'PICKUP_RECEIPT', state: 'ACCEPTED', attempts: 1, errorCode: null });
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const base = readResponse(url, init, wallet, 'ADMIN', { printJobs: [printJob(), pickupJob] });
+      if (base) return base;
+      if (url.endsWith('/waybills/batches')) {
+        waybillBodies.push(body(init));
+        return jsonResponse({ artifactVersion, batchId: hash('8'), items: [waybill(), waybill({ requestId: hash('c'), orderId: 'order-2' })] }, 201);
+      }
+      return unexpected(url);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderLogistics('/logistics?view=OPERATIONS&merchantId=%20merchant-2%20&orderIds=order-1&orderIds=%20order-2%20&orderIds=order-1');
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    expect((await screen.findByRole('tab', { name: '面单与打印' })).getAttribute('aria-selected')).toBe('true');
+    const waybillForm = formForHeading(await screen.findByRole('heading', { name: '跨商家面单' }));
+    expect((within(waybillForm).getByLabelText('商家 ID') as HTMLInputElement).value).toBe('merchant-2');
+    expect((within(waybillForm).getByLabelText('订单 ID · 每行或逗号分隔') as HTMLTextAreaElement).value).toBe('order-1\norder-2');
+    await user.type(within(waybillForm).getByLabelText('门店 ID'), 'store-2');
+    await user.selectOptions(within(waybillForm).getByLabelText('Provider'), 'CAINIAO');
+    await user.selectOptions(within(waybillForm).getByLabelText('承运商'), 'JD');
+    await user.type(within(waybillForm).getByLabelText('Idempotency key'), 'waybill-prefill-2');
+    await user.click(within(waybillForm).getByRole('button', { name: '创建面单批次' }));
+
+    expect(await screen.findByText(/面单批次 .* 已创建/)).toBeTruthy();
+    expect(waybillBodies).toEqual([{
+      merchantId: 'merchant-2', provider: 'CAINIAO', carrierCode: 'JD', storeId: 'store-2',
+      orderIds: ['order-1', 'order-2'], idempotencyKey: 'waybill-prefill-2',
+    }]);
+    expect(screen.getByText('WAYBILL')).toBeTruthy();
+    expect(screen.getByText('PICKUP_RECEIPT')).toBeTruthy();
   });
 
   it('allows OPERATOR logistics writes while AUDITOR behavior stays independently tested', async () => {
