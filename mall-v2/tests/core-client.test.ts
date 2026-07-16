@@ -1,4 +1,6 @@
 import { artifactVersion } from '@abu24k/core-artifacts';
+import coordinatedManifest from '@abu24k/core-artifacts/manifest' with { type: 'json' };
+import openApi from '@abu24k/core-artifacts/openapi' with { type: 'json' };
 import { TypedDataEncoder } from 'ethers';
 import { vi } from 'vitest';
 
@@ -7,6 +9,7 @@ import {
   coordinatedBuyerAccountOperations,
   coordinatedFulfillmentOperations,
   coordinatedPaymentOperations,
+  coordinatedRealtimeOperations,
   coordinatedSettlementAdminOperations,
   createCoreClient,
   type QuoteSelection,
@@ -61,6 +64,24 @@ import {
 
 const HASH = `0x${'1'.repeat(64)}`;
 const HASH_2 = `0x${'2'.repeat(64)}`;
+
+describe('Mall Core artifact boundary', () => {
+  it('consumes the coordinated artifact without exposing Admin-only operations', () => {
+    const consumerPaths = [
+      ...Object.values(coordinatedPaymentOperations),
+      ...Object.values(coordinatedCatalogMediaOperations),
+      ...Object.values(coordinatedBuyerAccountOperations),
+      ...Object.values(coordinatedFulfillmentOperations),
+      ...Object.values(coordinatedSettlementAdminOperations),
+      ...Object.values(coordinatedRealtimeOperations),
+    ];
+
+    expect(artifactVersion).toBe('2.0.0-admin-global-ops.1');
+    expect(Object.keys(openApi.paths).some((path) => path.startsWith('/v2/admin/'))).toBe(false);
+    expect(Object.keys(coordinatedManifest.capabilityStatus).some((capability) => capability.startsWith('admin'))).toBe(false);
+    expect(consumerPaths.some((path) => path.startsWith('/v2/admin/'))).toBe(false);
+  });
+});
 
 describe('coordinated Core HTTP client', () => {
   it('derives every payment path from coordinated OpenAPI', () => {
