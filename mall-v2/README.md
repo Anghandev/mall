@@ -5,7 +5,7 @@ Requirement Matrix and consumes only coordinated Core artifacts.
 
 ## Current Runtime Boundary
 
-- Production consumes coordinated Core artifacts `2.0.0-merchant-stores.1` and derives
+- Production consumes coordinated Core artifacts `2.0.0-merchant-fulfillment.1` and derives
   its HTTP paths from the published OpenAPI document.
 - The public catalog consumes active products/SKUs, enabled three-level
   categories, enabled tags, field-level product associations, rich detail,
@@ -26,6 +26,10 @@ Requirement Matrix and consumes only coordinated Core artifacts.
   authoritative `allowedActions`; no second action lookup or local state
   inference is used. The checkpoint's carrier, provider, warehouse, waybill
   and print administration remains platform-only and is not exposed by Mall.
+- The coordinated artifact includes the merchant-only order export operation,
+  but Mall strips every `/v2/merchant/**` path and `merchant*` capability before
+  bundling. Merchant export PII schemas and fixtures are not part of Mall
+  production code.
 - Transferable balances now render Core-projected Locked, Available, Requested,
   Batched and Settled states. Available NPL reward and USDT prize balances use
   a wallet-bound EIP-712 settlement intent; the Mall never creates settlement
