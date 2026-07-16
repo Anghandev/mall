@@ -1,7 +1,7 @@
 # Mall Core API Publication Boundary
 
 Status: the previous handwritten `mall-api-v1` proposal is retired. Mall now
-consumes coordinated Core artifacts `2.0.0-merchant-lifecycle.1`.
+consumes coordinated Core artifacts `2.0.0-logistics-admin.1`.
 
 The published boundary currently covers:
 
@@ -43,6 +43,9 @@ The published boundary currently covers:
 
 Mall derives endpoint paths from the coordinated OpenAPI document and consumes
 the generated response types. It does not maintain a parallel API schema.
+The checkpoint also publishes platform-only carrier, provider, warehouse,
+waybill and print operations. Mall does not expose or call those Admin
+operations; its buyer order logistics remains the existing Core projection.
 
 The following Mall capabilities remain incomplete:
 
