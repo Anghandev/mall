@@ -364,6 +364,8 @@ const coordinatedManifest = {
     paymentIndexer: 'AVAILABLE',
     settlementHttp: 'AVAILABLE',
     settlementSafeBatching: 'AVAILABLE',
+    buyerShoppingStatementHttp: 'AVAILABLE',
+    merchantReceivableStatementHttp: 'AVAILABLE',
     guaranteeDepositHttp: 'AVAILABLE',
     guaranteeDepositFinality: 'AVAILABLE',
     takeoverFundingHttp: 'AVAILABLE',
@@ -490,6 +492,14 @@ const coordinatedManifest = {
     'SettlementIntentProjection',
     'SettlementRequestProjection',
     'SettlementListProjection',
+    'OrderStatementCursor',
+    'BuyerShoppingStatement',
+    'BuyerShoppingStatementPage',
+    'MerchantReceivableLifecycle',
+    'MerchantReceivableJournalEvidence',
+    'MerchantReceivableSettlementRef',
+    'MerchantReceivableStatement',
+    'MerchantReceivableStatementPage',
     'AdminSettlementRequestList',
     'AdminSettlementRequestDetail',
     'AdminSettlementBatchList',
@@ -2618,6 +2628,11 @@ function settlementAdminOpenApiPaths(errorResponse) {
     queryParameter('cursorCaseId', { type: 'string', minLength: 1, maxLength: 256 }),
     queryParameter('limit', { type: 'integer', minimum: 1, maximum: 100, default: 25 }),
   ];
+  const orderStatementCursorParameters = [
+    queryParameter('cursorCreatedAt', { type: 'string', format: 'date-time' }),
+    queryParameter('cursorOrderId', { $ref: '#/components/schemas/Bytes32' }),
+    queryParameter('limit', { type: 'integer', minimum: 1, maximum: 100, default: 20 }),
+  ];
   return {
     '/v2/settlement-intents': {
       post: operation('createSettlementIntent', { $ref: '#/components/schemas/SettlementIntentProjection' }, 201, 'SettlementIntentRequest'),
@@ -2630,6 +2645,24 @@ function settlementAdminOpenApiPaths(errorResponse) {
     },
     '/v2/settlements': {
       get: operation('listSettlements', { $ref: '#/components/schemas/SettlementListProjection' }),
+    },
+    '/v2/buyer/shopping-statements': {
+      get: {
+        ...operation('listBuyerShoppingStatements', { $ref: '#/components/schemas/BuyerShoppingStatementPage' }),
+        parameters: [
+          queryParameter('kind', { enum: ['ORDINARY', 'FALLBACK_RETAIL'] }),
+          ...orderStatementCursorParameters,
+        ],
+      },
+    },
+    '/v2/merchant/receivable-statements': {
+      get: {
+        ...operation('listMerchantReceivableStatements', { $ref: '#/components/schemas/MerchantReceivableStatementPage' }),
+        parameters: [
+          queryParameter('kind', { enum: ['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] }),
+          ...orderStatementCursorParameters,
+        ],
+      },
     },
     '/v2/admin/payments/{orderId}': {
       get: bytes32ResourceOperation(
@@ -3184,6 +3217,89 @@ function settlementAdminOpenApiSchemas() {
       balances: { type: 'array', items: ref('SettlementBalance') },
       points: { type: 'array', items: ref('BnmPointsBalance') },
       requests: { type: 'array', items: ref('SettlementRequestProjection') },
+    }),
+    OrderStatementCursor: object({ createdAt: timestamp, orderId: hash }),
+    BuyerShoppingStatement: object({
+      orderId: hash,
+      productId: string,
+      skuId: string,
+      quantity: atomic,
+      orderState: { enum: [...orderProjectionStates] },
+      paymentTxHash: hash,
+      paymentFinalizedAt: timestamp,
+      fulfilledAt: nullableTimestamp,
+      createdAt: timestamp,
+      orderKind: { enum: ['ORDINARY', 'FALLBACK_RETAIL'] },
+      paymentAmounts: object({ usdtPaymentAmount: atomic, nplPaymentAmount: atomic }),
+      bnm: object({
+        amount: atomic,
+        state: { enum: ['LOCKED', 'AVAILABLE'] },
+        transferable: { const: false },
+        journalIds: { type: 'array', minItems: 1, items: string },
+      }),
+    }),
+    BuyerShoppingStatementPage: object({
+      artifactVersion: { const: artifactVersion },
+      buyerWallet: address,
+      statements: { type: 'array', items: ref('BuyerShoppingStatement') },
+      nextCursor: nullable(ref('OrderStatementCursor')),
+    }),
+    MerchantReceivableLifecycle: object({
+      state: { enum: [...balanceStates] },
+      amount: atomic,
+      journalIds: { type: 'array', minItems: 1, items: string },
+    }),
+    MerchantReceivableJournalEvidence: object({
+      journalId: string,
+      eventType: string,
+      state: { enum: [...balanceStates] },
+      delta: { type: 'string', pattern: '^-?[1-9][0-9]*$' },
+      sourceKind: string,
+      sourceReferenceHash: hash,
+      createdAt: timestamp,
+    }),
+    MerchantReceivableSettlementRef: object({
+      requestId: hash,
+      amount: atomic,
+      state: { enum: [...settlementRequestStates] },
+      batchId: nullableHash,
+      finalSafeTxHash: nullableHash,
+      finalExecutionTxHash: nullableHash,
+      journals: object({ requested: string, batched: nullableString, settled: nullableString }),
+      requestedAt: timestamp,
+      batchedAt: nullableTimestamp,
+      settledAt: nullableTimestamp,
+    }),
+    MerchantReceivableStatement: object({
+      orderId: hash,
+      productId: string,
+      skuId: string,
+      quantity: atomic,
+      orderState: { enum: [...orderProjectionStates] },
+      paymentTxHash: hash,
+      paymentFinalizedAt: timestamp,
+      fulfilledAt: nullableTimestamp,
+      createdAt: timestamp,
+      orderKind: { enum: ['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] },
+      frozenAmounts: object({
+        listPriceUsdt: atomic,
+        buyerPaidUsdt: atomic,
+        merchantBaseReceivableUsdt: atomic,
+        merchantConcessionAmount: atomic,
+        merchantNetReceivableUsdt: atomic,
+      }),
+      currentReceivableUsdt: atomic,
+      removedFromReceivableUsdt: atomic,
+      receivableLifecycle: { type: 'array', items: ref('MerchantReceivableLifecycle') },
+      journalEvidence: { type: 'array', items: ref('MerchantReceivableJournalEvidence') },
+      settlementRefs: { type: 'array', items: ref('MerchantReceivableSettlementRef') },
+    }),
+    MerchantReceivableStatementPage: object({
+      artifactVersion: { const: artifactVersion },
+      merchantId: string,
+      settlementWallet: address,
+      statements: { type: 'array', items: ref('MerchantReceivableStatement') },
+      nextCursor: nullable(ref('OrderStatementCursor')),
     }),
     AdminSettlementRequest: object(adminSettlementRequestProperties),
     AdminSettlementRequestCursor: object({ requestedAt: timestamp, requestId: hash }),
@@ -6539,6 +6655,107 @@ export interface SettlementListProjection {
   balances: readonly SettlementBalance[];
   points: readonly BnmPointsBalance[];
   requests: readonly SettlementRequestProjection[];
+}
+
+export interface OrderStatementCursor {
+  createdAt: string;
+  orderId: Bytes32;
+}
+
+export interface BuyerShoppingStatement {
+  orderId: Bytes32;
+  productId: string;
+  skuId: string;
+  quantity: AtomicAmount;
+  orderState: OrderProjectionState;
+  paymentTxHash: Bytes32;
+  paymentFinalizedAt: string;
+  fulfilledAt: string | null;
+  createdAt: string;
+  orderKind: Exclude<OrderKind, 'SECKILL'>;
+  paymentAmounts: {
+    usdtPaymentAmount: AtomicAmount;
+    nplPaymentAmount: AtomicAmount;
+  };
+  bnm: {
+    amount: AtomicAmount;
+    state: 'LOCKED' | 'AVAILABLE';
+    transferable: false;
+    journalIds: readonly string[];
+  };
+}
+
+export interface BuyerShoppingStatementPage {
+  artifactVersion: typeof artifactVersion;
+  buyerWallet: Address;
+  statements: readonly BuyerShoppingStatement[];
+  nextCursor: OrderStatementCursor | null;
+}
+
+export interface MerchantReceivableLifecycle {
+  state: BalanceState;
+  amount: AtomicAmount;
+  journalIds: readonly string[];
+}
+
+export interface MerchantReceivableJournalEvidence {
+  journalId: string;
+  eventType: string;
+  state: BalanceState;
+  delta: string;
+  sourceKind: string;
+  sourceReferenceHash: Bytes32;
+  createdAt: string;
+}
+
+export interface MerchantReceivableSettlementRef {
+  requestId: Bytes32;
+  amount: AtomicAmount;
+  state: SettlementRequestState;
+  batchId: Bytes32 | null;
+  finalSafeTxHash: Bytes32 | null;
+  finalExecutionTxHash: Bytes32 | null;
+  journals: {
+    requested: string;
+    batched: string | null;
+    settled: string | null;
+  };
+  requestedAt: string;
+  batchedAt: string | null;
+  settledAt: string | null;
+}
+
+export interface MerchantReceivableStatement {
+  orderId: Bytes32;
+  productId: string;
+  skuId: string;
+  quantity: AtomicAmount;
+  orderState: OrderProjectionState;
+  paymentTxHash: Bytes32;
+  paymentFinalizedAt: string;
+  fulfilledAt: string | null;
+  createdAt: string;
+  orderKind: OrderKind;
+  frozenAmounts: {
+    listPriceUsdt: AtomicAmount;
+    buyerPaidUsdt: AtomicAmount;
+    merchantBaseReceivableUsdt: AtomicAmount;
+    merchantConcessionAmount: AtomicAmount;
+    merchantNetReceivableUsdt: AtomicAmount;
+  };
+  currentReceivableUsdt: AtomicAmount;
+  removedFromReceivableUsdt: AtomicAmount;
+  receivableLifecycle: readonly MerchantReceivableLifecycle[];
+  journalEvidence: readonly MerchantReceivableJournalEvidence[];
+  settlementRefs: readonly MerchantReceivableSettlementRef[];
+}
+
+export interface MerchantReceivableStatementPage {
+  artifactVersion: typeof artifactVersion;
+  merchantId: string;
+  settlementWallet: Address;
+  statements: readonly MerchantReceivableStatement[];
+  nextCursor: OrderStatementCursor | null;
 }
 
 export interface AdminSettlementRequest {

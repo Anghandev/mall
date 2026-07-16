@@ -22,6 +22,7 @@ import {
 import {
   deliveryOrder,
   deliveryOrderId,
+  deliveryTarget,
   evidenceHash,
   merchantOrderExport,
   pickupOrder,
@@ -43,6 +44,13 @@ import {
   waybillBatchResult,
   waybillPrintJob,
 } from './logistics-fixtures';
+import {
+  fundedTakeoverCase,
+  takeoverAssignment,
+  takeoverCaseDetail,
+  takeoverCaseList,
+  takeoverTrackingEvidence,
+} from './takeover-fixtures';
 
 const originalFetch = globalThis.fetch;
 const productHash = `0x${'a'.repeat(64)}`;
@@ -53,7 +61,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('settlement-admin.10 Core HTTP consumer', () => {
+describe('settlement-admin.11 Core HTTP consumer', () => {
   it('does not expose Admin global operations or clearing commands', () => {
     const api = createCoreApi('https://core.example.test');
     const adminOnlyOperationIds = [
@@ -79,6 +87,96 @@ describe('settlement-admin.10 Core HTTP consumer', () => {
       expect(publishedOperationIds).toContain(operationId);
       expect(api).not.toHaveProperty(operationId);
     }
+  });
+
+  it('consumes assigned takeover cases, tracking evidence and shipment through published routes', async () => {
+    const shipment = {
+      orderId: deliveryOrderId,
+      state: 'SHIPPED',
+      shipmentId: 'replacement-shipment-1',
+      carrierCode: 'SF',
+      trackingNumberHash,
+      recordedAt: '2026-07-16T02:06:00.000Z',
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(takeoverCaseList))
+      .mockResolvedValueOnce(jsonResponse(takeoverCaseDetail))
+      .mockResolvedValueOnce(jsonResponse({ target: deliveryTarget }))
+      .mockResolvedValueOnce(jsonResponse(takeoverTrackingEvidence, 201))
+      .mockResolvedValueOnce(jsonResponse(shipment, 201));
+    globalThis.fetch = fetchMock as typeof fetch;
+    const api = createCoreApi('https://core.example.test');
+
+    const listed = await api.listMerchantTakeoverCases('merchant-session', {
+      state: 'FUNDED',
+      cursor: takeoverCaseList.nextCursor!,
+      limit: 25,
+    });
+    const detail = await api.getMerchantTakeoverCase(fundedTakeoverCase.caseId, 'merchant-session');
+    const target = await api.getOrderFulfillmentTarget(fundedTakeoverCase.orderId, 'merchant-session');
+    const evidenceInput = {
+      carrierCode: 'SF' as const,
+      trackingNumber: 'SF-REPLACEMENT-001',
+      idempotencyKey: 'merchant-takeover-evidence-1',
+    };
+    const evidence = await api.createOrderTrackingEvidence(
+      fundedTakeoverCase.orderId,
+      evidenceInput,
+      'merchant-session',
+    );
+    const shipmentInput = {
+      carrierCode: 'SF',
+      trackingNumberHash: evidence.trackingNumberHash!,
+      evidenceHash: evidence.evidenceHash,
+      idempotencyKey: 'merchant-takeover-shipment-1',
+    };
+    await expect(api.recordShipment(
+      fundedTakeoverCase.orderId,
+      shipmentInput,
+      'merchant-session',
+    )).resolves.toMatchObject({ shipmentId: 'replacement-shipment-1' });
+
+    expect(listed.cases[0]?.currentAssignment).toEqual(takeoverAssignment);
+    expect(detail.case.allowedActions).toEqual([{ action: 'RECORD_SHIPMENT', enabled: true }]);
+    expect(target).toEqual(deliveryTarget);
+    expect(evidence).toEqual(takeoverTrackingEvidence);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      `https://core.example.test/v2/merchant/takeover-cases?state=FUNDED&cursorOpenedAt=${encodeURIComponent(takeoverCaseList.nextCursor!.openedAt)}&cursorCaseId=${takeoverCaseList.nextCursor!.caseId}&limit=25`,
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(2, `https://core.example.test/v2/merchant/takeover-cases/${fundedTakeoverCase.caseId}`, expect.objectContaining({
+      headers: expect.objectContaining({ authorization: 'Bearer merchant-session' }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(4, `https://core.example.test/v2/orders/${fundedTakeoverCase.orderId}/tracking-evidence`, expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify(evidenceInput),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(5, `https://core.example.test/v2/orders/${fundedTakeoverCase.orderId}/shipments`, expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify(shipmentInput),
+    }));
+  });
+
+  it('rejects takeover details with another or historical replacement assignment', async () => {
+    const api = createCoreApi();
+    globalThis.fetch = vi.fn(async () => jsonResponse({
+      ...takeoverCaseDetail,
+      assignments: [
+        { ...takeoverAssignment, assignmentId: `0x${'1'.repeat(64)}`, version: 1 },
+        takeoverAssignment,
+      ],
+    })) as typeof fetch;
+    await expect(api.getMerchantTakeoverCase(fundedTakeoverCase.caseId, 'merchant-session'))
+      .rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    globalThis.fetch = vi.fn(async () => jsonResponse({
+      ...takeoverCaseList,
+      cases: [{
+        ...fundedTakeoverCase,
+        currentAssignment: { ...takeoverAssignment, orderId: `0x${'9'.repeat(64)}` },
+      }],
+    })) as typeof fetch;
+    await expect(api.listMerchantTakeoverCases('merchant-session'))
+      .rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
   it('consumes the coordinated merchant store lifecycle routes with versioned commands', async () => {
@@ -424,7 +522,7 @@ describe('settlement-admin.10 Core HTTP consumer', () => {
         body: JSON.stringify(input),
         headers: expect.objectContaining({
           authorization: 'Bearer merchant-session',
-          'x-abu-artifact-version': '2.0.0-settlement-admin.10',
+          'x-abu-artifact-version': '2.0.0-settlement-admin.11',
         }),
       }),
     );
@@ -524,7 +622,7 @@ describe('settlement-admin.10 Core HTTP consumer', () => {
       'https://core.example.test/v2/catalog/products',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.10' }),
+        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.11' }),
       }),
     );
   });

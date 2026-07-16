@@ -11,6 +11,7 @@ import {
   Menu,
   Settings,
   ShieldCheck,
+  Truck,
   X,
 } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
@@ -23,10 +24,11 @@ const navigation = [
   { to: '/dashboard', label: '运营大盘', index: '01', icon: LayoutDashboard },
   { to: '/product', label: '单品提报', index: '02', icon: Boxes },
   { to: '/fulfillment', label: '履约交付', index: '03', icon: ClipboardList },
-  { to: '/stores', label: '门店管理', index: '04', icon: Building2 },
-  { to: '/assets', label: '资产清算', index: '05', icon: CircleDollarSign },
-  { to: '/settings', label: '系统配置', index: '06', icon: Settings },
-  { to: '/help', label: '帮助中心', index: '07', icon: BadgeHelp },
+  { to: '/takeovers', label: '接管履约', index: '04', icon: Truck },
+  { to: '/stores', label: '门店管理', index: '05', icon: Building2 },
+  { to: '/assets', label: '资产清算', index: '06', icon: CircleDollarSign },
+  { to: '/settings', label: '系统配置', index: '07', icon: Settings },
+  { to: '/help', label: '帮助中心', index: '08', icon: BadgeHelp },
 ];
 
 export function WorkspaceShell({ children }: { children: React.ReactNode }) {

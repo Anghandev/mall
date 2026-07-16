@@ -81,6 +81,40 @@ test('global clearing reads are authenticated, coordinated and Admin-only', () =
   assert.match(merchantCore.reason, /\u6e05\u7b97\u8bfb\u53d6\u4fdd\u6301 Admin-only/);
 });
 
+test('takeover assignment and replacement fulfillment form one coordinated cross-product chain', () => {
+  const operations = [
+    ['GET', '/v2/admin/takeover-cases', 'listAdminTakeoverCases'],
+    ['GET', '/v2/admin/takeover-cases/{caseId}', 'getAdminTakeoverCase'],
+    ['GET', '/v2/admin/takeover-cases/{caseId}/candidates', 'listTakeoverCandidates'],
+    ['POST', '/v2/admin/takeover-cases/{caseId}/assignments', 'assignTakeoverReplacementMerchant'],
+    ['GET', '/v2/merchant/takeover-cases', 'listMerchantTakeoverCases'],
+    ['GET', '/v2/merchant/takeover-cases/{caseId}', 'getMerchantTakeoverCase'],
+    ['GET', '/v2/orders/{orderId}/fulfillment-target', 'getOrderFulfillmentTarget'],
+    ['POST', '/v2/orders/{orderId}/tracking-evidence', 'createOrderTrackingEvidence'],
+    ['POST', '/v2/orders/{orderId}/shipments', 'recordShipment'],
+    ['POST', '/v2/orders/{orderId}/delivery', 'recordDelivery'],
+    ['POST', '/v2/orders/{orderId}/receipt-confirmation', 'confirmReceipt'],
+  ] as const;
+
+  for (const [method, path, operationId] of operations) {
+    const entry = coordinatedOpenApi.paths[path] as Partial<Record<'get' | 'post', {
+      operationId?: string;
+      security?: readonly unknown[];
+    }>> | undefined;
+    const operation = entry?.[method.toLowerCase() as 'get' | 'post'];
+    assert.equal(operation?.operationId, operationId);
+    assert.deepEqual(operation?.security, [{ bearerAuth: [] }]);
+    assert.ok(coordinatedManifest.httpSurface.includes(`${method} ${path}`));
+  }
+  assert.equal(coordinatedManifest.capabilityStatus.takeoverCaseManagementHttp, 'AVAILABLE');
+  assert.equal(coordinatedManifest.capabilityStatus.replacementMerchantFulfillment, 'AVAILABLE');
+  assert.equal(adminBaseline.adminCapabilities.takeoverCaseManagementHttp, true);
+  assert.equal(adminBaseline.adminCapabilities.replacementMerchantFulfillment, true);
+  assert.match(merchantCore.reason, /\u66ff\u4ee3\u5546\u5bb6\u63a5\u7ba1/);
+  assert.equal('takeoverCaseManagementHttp' in mallBaseline, false);
+  assert.equal('takeoverCaseManagementHttp' in merchantBaseline, false);
+});
+
 test('platform seckill governance is one authenticated coordinated Admin surface', () => {
   const operations = [
     ['GET', '/v2/admin/seckill/actions', 'listSeckillGovernanceActions'],

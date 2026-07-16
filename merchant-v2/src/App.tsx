@@ -10,11 +10,13 @@ import { LoginPage } from './pages/LoginPage';
 import { ProductPage } from './pages/ProductPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { StoresPage } from './pages/StoresPage';
+import { TakeoverPage } from './pages/TakeoverPage';
 
 const workspaceRoutes = [
   { path: '/dashboard', element: <DashboardPage /> },
   { path: '/product', element: <ProductPage /> },
   { path: '/fulfillment', element: <FulfillmentPage /> },
+  { path: '/takeovers', element: <TakeoverPage /> },
   { path: '/stores', element: <StoresPage /> },
   { path: '/assets', element: <AssetsPage /> },
   { path: '/settings', element: <SettingsPage /> },

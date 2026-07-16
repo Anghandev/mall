@@ -67,6 +67,7 @@ import { SeckillService } from './seckill-service.ts';
 import { SeckillOperationsService } from './seckill-operations-service.ts';
 import { TakeoverFundingService, type TakeoverFundingApprovalInput } from './takeover-funding-service.ts';
 import { TakeoverCaseService } from './takeover-case-service.ts';
+import { OrderStatementService } from './order-statement-service.ts';
 import { PolicyService } from './policy-service.ts';
 import { NotificationService } from './notification-service.ts';
 import { SystemConfigService } from './system-config-service.ts';
@@ -6944,6 +6945,96 @@ test('production backup enforces encrypted storage acknowledgement and mode 600 
   }
 });
 
+test('buyer shopping and merchant receivable statements preserve tenant-scoped order ledger evidence', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const prepared = await prepareRequestedSettlement(db);
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES
+         ($1,'BUYER',NULL,'ACTIVE',$3),
+         ($2,'MERCHANT','merchant-1','ACTIVE',$3)`,
+      [prepared.intent.buyer, prepared.merchantWallet.address.toLowerCase(), HASH],
+    );
+    const service = new OrderStatementService({ transactions: transactionAdapter(db) });
+    const buyer = { walletAddress: prepared.intent.buyer, roles: ['BUYER'] as const };
+    const buyerStatements = await service.listBuyerShopping(buyer, { kind: 'ORDINARY', limit: 20 });
+    assert.equal(buyerStatements.buyerWallet, prepared.intent.buyer);
+    assert.equal(buyerStatements.nextCursor, null);
+    assert.deepEqual(buyerStatements.statements.map((statement) => ({
+      orderId: statement.orderId,
+      orderKind: statement.orderKind,
+      paymentAmounts: statement.paymentAmounts,
+      bnm: { amount: statement.bnm.amount, state: statement.bnm.state, transferable: statement.bnm.transferable },
+    })), [{
+      orderId: prepared.intent.orderId,
+      orderKind: 'ORDINARY',
+      paymentAmounts: {
+        usdtPaymentAmount: prepared.intent.usdtPaymentAmount,
+        nplPaymentAmount: prepared.intent.nplPaymentAmount,
+      },
+      bnm: { amount: prepared.intent.bnmAmount, state: 'AVAILABLE', transferable: false },
+    }]);
+    assert.ok(buyerStatements.statements[0]!.bnm.journalIds.length >= 1);
+    assert.throws(
+      () => service.listBuyerShopping(buyer, { kind: 'SECKILL' }),
+      (error: unknown) => error instanceof CoreError && error.code === 'DecisionBlocked',
+    );
+    assert.throws(
+      () => service.listBuyerShopping(buyer, { cursorCreatedAt: prepared.now }),
+      /cursor fields must be supplied together/,
+    );
+
+    const otherBuyer = Wallet.createRandom();
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES ($1,'BUYER',NULL,'ACTIVE',$2)`,
+      [otherBuyer.address.toLowerCase(), HASH_2],
+    );
+    assert.equal((await service.listBuyerShopping({
+      walletAddress: otherBuyer.address,
+      roles: ['BUYER'],
+    })).statements.length, 0);
+
+    const merchantStatements = await service.listMerchantReceivables(prepared.merchant, { limit: 20 });
+    const statement = merchantStatements.statements[0]!;
+    assert.equal(merchantStatements.merchantId, 'merchant-1');
+    assert.equal(merchantStatements.settlementWallet, prepared.merchantWallet.address.toLowerCase());
+    assert.equal(statement.orderId, prepared.intent.orderId);
+    assert.equal(statement.frozenAmounts.merchantNetReceivableUsdt, prepared.intent.merchantNetReceivableUsdt);
+    assert.equal(statement.currentReceivableUsdt, prepared.intent.merchantNetReceivableUsdt);
+    assert.equal(statement.removedFromReceivableUsdt, '0');
+    assert.deepEqual(statement.receivableLifecycle.map((balance) => ({ state: balance.state, amount: balance.amount })), [
+      { state: 'REQUESTED', amount: prepared.intent.merchantNetReceivableUsdt },
+    ]);
+    assert.ok(statement.journalEvidence.some((journal) => journal.eventType === 'PAYMENT_LOCKED'));
+    assert.ok(statement.journalEvidence.some((journal) => journal.eventType === 'SETTLEMENT_REQUESTED'));
+    assert.deepEqual(statement.settlementRefs.map((settlement) => ({
+      requestId: settlement.requestId,
+      amount: settlement.amount,
+      state: settlement.state,
+      requestedJournal: settlement.journals.requested,
+    })), [{
+      requestId: prepared.request.request_id,
+      amount: prepared.intent.merchantNetReceivableUsdt,
+      state: 'REQUESTED',
+      requestedJournal: statement.settlementRefs[0]!.journals.requested,
+    }]);
+    await assert.rejects(
+      service.listMerchantReceivables({
+        walletAddress: prepared.merchantWallet.address,
+        roles: ['MERCHANT'],
+        merchantId: 'merchant-other',
+      }),
+      /MERCHANT binding is not active/,
+    );
+  } finally {
+    await db.close();
+  }
+});
+
 test('signed settlement request moves Available to Requested and an immutable covered Safe batch moves it to Batched', async () => {
   const db = await createBusinessDatabase();
   try {
@@ -9171,7 +9262,7 @@ test('takeover funding consumes final guarantee first and records Operations adv
   }
 });
 
-test('takeover assignment authorizes one qualified replacement merchant through real shipment', async () => {
+test('takeover assignment authorizes one qualified replacement merchant through receipt and closure', async () => {
   const db = await createBusinessDatabase();
   const operatorWallet = Wallet.createRandom();
   const auditorWallet = Wallet.createRandom();
@@ -9220,12 +9311,28 @@ test('takeover assignment authorizes one qualified replacement merchant through 
       evidenceHash: `0x${'6'.repeat(64)}`,
       reasonCode: 'NO_SHIPMENT',
     });
-    await db.query(
-      `UPDATE core.takeover_cases SET state = 'FUNDED', required_usdt = 20,
-         platform_advance_usdt = 20, platform_advance_safe_address = $2,
-         merchant_debt_usdt = 20, updated_at = $3 WHERE case_id = $1`,
-      [takeover.caseId, '0x5555555555555555555555555555555555555555', now],
+    const secondary = Wallet.createRandom();
+    const governanceSafe = '0x7777777777777777777777777777777777777777';
+    const operationsSafe = '0x5555555555555555555555555555555555555555';
+    const funding = governedTakeoverFundingService(db, secondary, governanceSafe, () => now);
+    const fundingApproval = await signedTakeoverFundingApproval(
+      funding,
+      operator,
+      { caseId: takeover.caseId, requiredUsdt: '20', operationsSafeAddress: operationsSafe },
+      secondary,
+      '1',
+      String(Math.floor(now.getTime() / 1_000) + 300),
     );
+    const funded = await funding.fundTakeover(operator, {
+      caseId: takeover.caseId,
+      requiredUsdt: '20',
+      operationsSafeAddress: operationsSafe,
+      idempotencyKey: 'replacement-assignment-funding-1',
+      correlationId: 'replacement-assignment-funding-1',
+      approval: fundingApproval,
+    });
+    assert.equal(funded.state, 'FUNDED');
+    assert.equal(funded.platformAdvanceUsdt, '20');
     await seedEligibleReplacementMerchant(db, 'replacement-1', firstWallet.address, '1', now, true);
     await seedEligibleReplacementMerchant(db, 'replacement-2', secondWallet.address, '2', now, true);
     await seedEligibleReplacementMerchant(db, 'replacement-ineligible', ineligibleWallet.address, '3', now, false);
@@ -9323,6 +9430,41 @@ test('takeover assignment authorizes one qualified replacement merchant through 
       }),
       /cannot be assigned from its current state/,
     );
+    const delivered = await fulfillment.recordDelivery(operator, intent.orderId, {
+      idempotencyKey: 'replacement-delivery-command-1',
+      evidenceHash: `0x${'a'.repeat(64)}`,
+    });
+    assert.equal(delivered.state, 'DELIVERED');
+    const received = await fulfillment.confirmReceipt(
+      { walletAddress: intent.buyer, roles: ['BUYER'] },
+      intent.orderId,
+      {
+        idempotencyKey: 'replacement-receipt-command-1',
+        evidenceHash: `0x${'b'.repeat(64)}`,
+      },
+    );
+    assert.equal(received.state, 'FULFILLED');
+    const closed = await db.query<{ order_state: string; case_state: string; closed_at: Date | null }>(
+      `SELECT orders.state AS order_state, takeover.state AS case_state, takeover.closed_at
+       FROM core.orders orders
+       JOIN core.takeover_cases takeover ON takeover.order_id = orders.order_id
+       WHERE orders.order_id = $1`,
+      [intent.orderId],
+    );
+    assert.equal(closed.rows[0]?.order_state, 'FULFILLED');
+    assert.equal(closed.rows[0]?.case_state, 'CLOSED');
+    assert.ok(closed.rows[0]?.closed_at);
+    const closeTransition = await db.query<{ from_state: string; to_state: string; public_evidence_type: string }>(
+      `SELECT from_state, to_state, public_evidence_type
+       FROM core.takeover_case_transitions
+       WHERE case_id = $1 AND to_state = 'CLOSED'`,
+      [takeover.caseId],
+    );
+    assert.deepEqual(closeTransition.rows[0], {
+      from_state: 'FULFILLING',
+      to_state: 'CLOSED',
+      public_evidence_type: 'FULFILLMENT_FINALIZED',
+    });
   } finally {
     await db.close();
   }

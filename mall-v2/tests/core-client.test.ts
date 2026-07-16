@@ -79,6 +79,10 @@ describe('Mall Core artifact boundary', () => {
         post?: { operationId?: string };
       }>;
     };
+    const publishedManifest = JSON.parse(await readFile(
+      resolve(process.cwd(), '../packages/core-artifacts/coordinated-manifest.json'),
+      'utf8',
+    )) as { capabilityStatus: Record<string, string> };
     const consumerPaths = [
       ...Object.values(coordinatedPaymentOperations),
       ...Object.values(coordinatedCatalogMediaOperations),
@@ -88,7 +92,7 @@ describe('Mall Core artifact boundary', () => {
       ...Object.values(coordinatedRealtimeOperations),
     ];
 
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.10');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.11');
     expect(coordinatedOpenApi.paths['/v2/merchant/orders/exports']?.post?.operationId)
       .toBe('exportMerchantOrders');
     expect(coordinatedOpenApi.paths['/v2/admin/payments/{orderId}']?.get?.operationId)
@@ -101,6 +105,16 @@ describe('Mall Core artifact boundary', () => {
       .toBe('listAdminSettlementBatches');
     expect(coordinatedOpenApi.paths['/v2/admin/settlement-batches/{batchId}']?.get?.operationId)
       .toBe('getAdminSettlementBatch');
+    expect(coordinatedOpenApi.paths['/v2/admin/takeover-cases']?.get?.operationId)
+      .toBe('listAdminTakeoverCases');
+    expect(coordinatedOpenApi.paths['/v2/admin/takeover-cases/{caseId}/assignments']?.post?.operationId)
+      .toBe('assignTakeoverReplacementMerchant');
+    expect(coordinatedOpenApi.paths['/v2/merchant/takeover-cases']?.get?.operationId)
+      .toBe('listMerchantTakeoverCases');
+    expect(publishedManifest.capabilityStatus.takeoverCaseManagementHttp).toBe('AVAILABLE');
+    expect(publishedManifest.capabilityStatus.replacementMerchantFulfillment).toBe('AVAILABLE');
+    expect(coordinatedManifest.capabilityStatus.takeoverCaseManagementHttp).toBeUndefined();
+    expect(coordinatedManifest.capabilityStatus.replacementMerchantFulfillment).toBeUndefined();
     expect(Object.keys(openApi.paths).some((path) => path.startsWith('/v2/admin/'))).toBe(false);
     expect(Object.keys(openApi.paths).some((path) => path.startsWith('/v2/merchant/'))).toBe(false);
     expect(Object.keys(coordinatedManifest.capabilityStatus).some((capability) => capability.startsWith('admin'))).toBe(false);
