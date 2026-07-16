@@ -88,7 +88,7 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
   keeps `deploymentAuthorized=false` fail closed and the existing no-rebroadcast
   recovery latch. This row remains `Frozen` until the coordinating release gate
   accepts the complete provider/Core evidence.
-- `MAL-GOAL-005` product evidence: the Mall sends only the coordinated `.13`
+- `MAL-GOAL-005` product evidence: the Mall sends only the coordinated `.14`
   `QuoteSelection`, displays only signed Core amounts and uses the existing
   wallet/PaymentRouter submission plus Core projection recovery path. The
   review snapshot is Mall-only and is not serialized into the quote request.
@@ -98,7 +98,7 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
 
 ## Settlement/Admin .9 Verification Evidence
 
-- `MAL-TRACK-002` and the shopping half of `MAL-ASSET-002`: `.13` consumes
+- `MAL-TRACK-002` and the shopping half of `MAL-ASSET-002`: `.14` consumes
   `GET /v2/buyer/shopping-statements` through the coordinated OpenAPI and
   generated `BuyerShoppingStatementPage`. The buyer wallet is checked against
   the SIWE session; paired `(createdAt, orderId)` cursors append stable pages;
@@ -159,6 +159,11 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
   Locked/Available totals, eligibility-driven Genesis visibility, gasless
   settlement lifecycle and final Safe TxHash are covered by
   `tests/app.test.tsx` and the production bundle negative gate.
+- `ADM-NOTIFY-001` Mall consumption: `.14` notifications stay bound to the
+  latest verified wallet request, clear the prior wallet inbox before a switch,
+  deduplicate `messageId` and render controlled payment, shipment, pickup,
+  fulfillment, BNM Locked/Available, settlement and activity fields. Inbox
+  errors remain fail closed without a production fixture.
 - Responsive evidence is `tests/e2e/mobile.spec.ts` at 375, 393 and 430 pixels
   plus the centered 430-pixel desktop frame. Test fixtures remain under
   `tests/**` and are excluded from the production bundle.
