@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-merchant-fulfillment.1",
+  "artifactVersion": "2.0.0-settlement-admin.10",
   "events": [
     {
       "contract": "BeneficiaryRegistryV2",

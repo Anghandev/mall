@@ -30,12 +30,16 @@ import {
   notificationChannels,
   notificationProviders,
   orderProjectionStates,
+  settlementBatchStates,
   settlementRails,
+  settlementRequestStates,
   systemConfigKeys,
   type AdminExportFormat,
   type AdminResourceType,
   type BreakerScope,
+  type SettlementBatchState,
   type SettlementRail,
+  type SettlementRequestState,
   type UserRole,
 } from './enums.ts';
 import { CoreError, errorBody } from './errors.ts';
@@ -70,6 +74,8 @@ import type {
   StoreVersionInput,
 } from '../data/fulfillment-target-service.ts';
 import type {
+  AdminSettlementBatchQuery,
+  AdminSettlementRequestQuery,
   GovernedSettlementApprovalInput,
   GovernedSettlementRail,
 } from '../data/settlement-service.ts';
@@ -121,6 +127,7 @@ export interface PaymentApiService {
     input: { orderId: string; txHash: string; replacementForTxHash?: string },
   ): Promise<unknown>;
   getPayment(buyerWallet: string, orderId: string): Promise<unknown>;
+  getAdminPayment(actor: FulfillmentActor, orderId: string): Promise<unknown>;
 }
 
 export interface SeckillApiService {
@@ -392,6 +399,10 @@ export interface SettlementApiService {
     input: { intentId: string; signature: string; correlationId: string },
   ): Promise<unknown>;
   list(actor: FulfillmentActor): Promise<unknown>;
+  listAdminRequests(actor: FulfillmentActor, input?: AdminSettlementRequestQuery): Promise<unknown>;
+  getAdminRequest(actor: FulfillmentActor, requestId: string): Promise<unknown>;
+  listAdminBatches(actor: FulfillmentActor, input?: AdminSettlementBatchQuery): Promise<unknown>;
+  getAdminBatch(actor: FulfillmentActor, batchId: string): Promise<unknown>;
 }
 
 export interface TakeoverFundingApiService {
@@ -2156,6 +2167,96 @@ async function routeAdminServices(
   url: URL,
   correlationId: string,
 ) {
+  const adminPaymentOrderId = pathParameter(url.pathname, '/v2/admin/payments/');
+  if (request.method === 'GET' && adminPaymentOrderId) {
+    const claims = authorizeRoles(
+      request,
+      dependencies.config,
+      dependencies.clock(),
+      ['ADMIN', 'OPERATOR', 'AUDITOR'],
+    );
+    sendJson(
+      response,
+      200,
+      await dependencies.paymentService.getAdminPayment(fulfillmentActor(claims), adminPaymentOrderId),
+      correlationId,
+    );
+    return true;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/admin/settlement-requests') {
+    const claims = authorizeRoles(
+      request,
+      dependencies.config,
+      dependencies.clock(),
+      ['ADMIN', 'OPERATOR', 'AUDITOR'],
+    );
+    sendJson(
+      response,
+      200,
+      await dependencies.settlementService.listAdminRequests(
+        fulfillmentActor(claims),
+        adminSettlementRequestQuery(url),
+      ),
+      correlationId,
+    );
+    return true;
+  }
+  const adminSettlementRequestId = pathParameter(url.pathname, '/v2/admin/settlement-requests/');
+  if (request.method === 'GET' && adminSettlementRequestId) {
+    const claims = authorizeRoles(
+      request,
+      dependencies.config,
+      dependencies.clock(),
+      ['ADMIN', 'OPERATOR', 'AUDITOR'],
+    );
+    sendJson(
+      response,
+      200,
+      await dependencies.settlementService.getAdminRequest(
+        fulfillmentActor(claims),
+        adminSettlementRequestId,
+      ),
+      correlationId,
+    );
+    return true;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/admin/settlement-batches') {
+    const claims = authorizeRoles(
+      request,
+      dependencies.config,
+      dependencies.clock(),
+      ['ADMIN', 'OPERATOR', 'AUDITOR'],
+    );
+    sendJson(
+      response,
+      200,
+      await dependencies.settlementService.listAdminBatches(
+        fulfillmentActor(claims),
+        adminSettlementBatchQuery(url),
+      ),
+      correlationId,
+    );
+    return true;
+  }
+  const adminSettlementBatchId = pathParameter(url.pathname, '/v2/admin/settlement-batches/');
+  if (request.method === 'GET' && adminSettlementBatchId) {
+    const claims = authorizeRoles(
+      request,
+      dependencies.config,
+      dependencies.clock(),
+      ['ADMIN', 'OPERATOR', 'AUDITOR'],
+    );
+    sendJson(
+      response,
+      200,
+      await dependencies.settlementService.getAdminBatch(
+        fulfillmentActor(claims),
+        adminSettlementBatchId,
+      ),
+      correlationId,
+    );
+    return true;
+  }
   if (request.method === 'GET' && url.pathname === '/v2/admin/global/resources') {
     const claims = authorizeRoles(
       request,
@@ -3515,6 +3616,98 @@ function merchantAuditQuery(url: URL): Omit<AuditQuery, 'actorWallet' | 'merchan
       ? { limit: optionalPositiveIntegerParameter(url.searchParams.get('limit'), 'limit')! }
       : {}),
   };
+}
+
+function adminSettlementRequestQuery(url: URL): AdminSettlementRequestQuery {
+  assertOnlySearchParams(url, [
+    'requestId', 'merchantId', 'walletAddress', 'orderId', 'batchId', 'safeTxHash',
+    'rail', 'asset', 'state', 'from', 'to', 'cursorRequestedAt', 'cursorRequestId', 'limit',
+  ]);
+  return {
+    ...(url.searchParams.get('requestId') ? { requestId: url.searchParams.get('requestId')! } : {}),
+    ...(url.searchParams.get('merchantId') ? { merchantId: url.searchParams.get('merchantId')! } : {}),
+    ...(url.searchParams.get('walletAddress') ? { walletAddress: url.searchParams.get('walletAddress')! } : {}),
+    ...(url.searchParams.get('orderId') ? { orderId: url.searchParams.get('orderId')! } : {}),
+    ...(url.searchParams.get('batchId') ? { batchId: url.searchParams.get('batchId')! } : {}),
+    ...(url.searchParams.get('safeTxHash') ? { safeTxHash: url.searchParams.get('safeTxHash')! } : {}),
+    ...(url.searchParams.get('rail') ? { rail: adminSettlementRail(url.searchParams.get('rail')) } : {}),
+    ...(url.searchParams.get('asset') ? { asset: adminSettlementAsset(url.searchParams.get('asset')) } : {}),
+    ...(url.searchParams.get('state')
+      ? { state: adminSettlementRequestState(url.searchParams.get('state')) }
+      : {}),
+    ...(url.searchParams.get('from') ? { from: dateParameter(url.searchParams.get('from')!, 'from') } : {}),
+    ...(url.searchParams.get('to') ? { to: dateParameter(url.searchParams.get('to')!, 'to') } : {}),
+    ...(url.searchParams.get('cursorRequestedAt')
+      ? { cursorRequestedAt: dateParameter(url.searchParams.get('cursorRequestedAt')!, 'cursorRequestedAt') }
+      : {}),
+    ...(url.searchParams.get('cursorRequestId')
+      ? { cursorRequestId: url.searchParams.get('cursorRequestId')! }
+      : {}),
+    ...(url.searchParams.get('limit')
+      ? { limit: adminSettlementLimit(url.searchParams.get('limit')) }
+      : {}),
+  };
+}
+
+function adminSettlementBatchQuery(url: URL): AdminSettlementBatchQuery {
+  assertOnlySearchParams(url, [
+    'batchId', 'merchantId', 'orderId', 'safeAddress', 'safeTxHash', 'asset', 'state',
+    'from', 'to', 'cursorCreatedAt', 'cursorBatchId', 'limit',
+  ]);
+  return {
+    ...(url.searchParams.get('batchId') ? { batchId: url.searchParams.get('batchId')! } : {}),
+    ...(url.searchParams.get('merchantId') ? { merchantId: url.searchParams.get('merchantId')! } : {}),
+    ...(url.searchParams.get('orderId') ? { orderId: url.searchParams.get('orderId')! } : {}),
+    ...(url.searchParams.get('safeAddress') ? { safeAddress: url.searchParams.get('safeAddress')! } : {}),
+    ...(url.searchParams.get('safeTxHash') ? { safeTxHash: url.searchParams.get('safeTxHash')! } : {}),
+    ...(url.searchParams.get('asset') ? { asset: adminSettlementAsset(url.searchParams.get('asset')) } : {}),
+    ...(url.searchParams.get('state')
+      ? { state: adminSettlementBatchState(url.searchParams.get('state')) }
+      : {}),
+    ...(url.searchParams.get('from') ? { from: dateParameter(url.searchParams.get('from')!, 'from') } : {}),
+    ...(url.searchParams.get('to') ? { to: dateParameter(url.searchParams.get('to')!, 'to') } : {}),
+    ...(url.searchParams.get('cursorCreatedAt')
+      ? { cursorCreatedAt: dateParameter(url.searchParams.get('cursorCreatedAt')!, 'cursorCreatedAt') }
+      : {}),
+    ...(url.searchParams.get('cursorBatchId')
+      ? { cursorBatchId: url.searchParams.get('cursorBatchId')! }
+      : {}),
+    ...(url.searchParams.get('limit')
+      ? { limit: adminSettlementLimit(url.searchParams.get('limit')) }
+      : {}),
+  };
+}
+
+function adminSettlementRail(value: string | null): SettlementRail {
+  if (!settlementRails.includes(value as SettlementRail)) {
+    throw new CoreError('InvalidRequest', 'Unsupported settlement rail');
+  }
+  return value as SettlementRail;
+}
+
+function adminSettlementAsset(value: string | null): 'USDT' | 'NPL' {
+  if (value !== 'USDT' && value !== 'NPL') throw new CoreError('InvalidRequest', 'Unsupported settlement asset');
+  return value;
+}
+
+function adminSettlementRequestState(value: string | null): SettlementRequestState {
+  if (!settlementRequestStates.includes(value as SettlementRequestState)) {
+    throw new CoreError('InvalidRequest', 'Unsupported settlement request state');
+  }
+  return value as SettlementRequestState;
+}
+
+function adminSettlementBatchState(value: string | null): SettlementBatchState {
+  if (!settlementBatchStates.includes(value as SettlementBatchState)) {
+    throw new CoreError('InvalidRequest', 'Unsupported settlement batch state');
+  }
+  return value as SettlementBatchState;
+}
+
+function adminSettlementLimit(value: string | null) {
+  const limit = optionalPositiveIntegerParameter(value, 'limit')!;
+  if (limit > 100) throw new CoreError('InvalidRequest', 'limit must not exceed 100');
+  return limit;
 }
 
 function requestInput(body: Record<string, unknown>) {

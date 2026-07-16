@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Abu 24K V2 Core API",
-    "version": "2.0.0-merchant-fulfillment.1"
+    "version": "2.0.0-settlement-admin.10"
   },
-  "x-artifactVersion": "2.0.0-merchant-fulfillment.1",
+  "x-artifactVersion": "2.0.0-settlement-admin.10",
   "servers": [],
   "paths": {
     "/v2/buyer/profile": {
@@ -1195,6 +1195,524 @@
             }
           }
         }
+      }
+    },
+    "/v2/admin/payments/{orderId}": {
+      "get": {
+        "operationId": "getAdminPaymentProjection",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/settlement-requests": {
+      "get": {
+        "operationId": "listAdminSettlementRequests",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSettlementRequestList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          },
+          {
+            "name": "merchantId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "walletAddress",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Address"
+            }
+          },
+          {
+            "name": "orderId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          },
+          {
+            "name": "batchId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          },
+          {
+            "name": "safeTxHash",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          },
+          {
+            "name": "rail",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "MERCHANT_USDT",
+                "REWARD_NPL",
+                "PRIZE_USDT",
+                "TAKEOVER_USDT",
+                "OPERATIONS_REIMBURSEMENT_USDT"
+              ]
+            }
+          },
+          {
+            "name": "asset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "USDT",
+                "NPL"
+              ]
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "REQUESTED",
+                "BATCHED",
+                "SETTLED",
+                "RETRYABLE",
+                "QUARANTINED"
+              ]
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "cursorRequestedAt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "cursorRequestId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/settlement-requests/{requestId}": {
+      "get": {
+        "operationId": "getAdminSettlementRequest",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSettlementRequestDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/settlement-batches": {
+      "get": {
+        "operationId": "listAdminSettlementBatches",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSettlementBatchList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "batchId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          },
+          {
+            "name": "merchantId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "orderId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          },
+          {
+            "name": "safeAddress",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Address"
+            }
+          },
+          {
+            "name": "safeTxHash",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          },
+          {
+            "name": "asset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "USDT",
+                "NPL"
+              ]
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "APPROVAL_PENDING",
+                "APPROVED",
+                "SUBMITTING",
+                "SUBMITTED",
+                "MINED",
+                "SETTLED",
+                "FAILED",
+                "REORGED",
+                "RETRYABLE",
+                "QUARANTINED"
+              ]
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "cursorCreatedAt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "cursorBatchId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/settlement-batches/{batchId}": {
+      "get": {
+        "operationId": "getAdminSettlementBatch",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSettlementBatchDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "batchId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ]
       }
     },
     "/v2/merchant/dashboard": {
@@ -10481,7 +10999,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "status": {
             "const": "CORE_API_READY"
@@ -10794,7 +11312,7 @@
             "minimum": 1
           },
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "allowedActions": {
             "type": "array",
@@ -11828,7 +12346,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "relation": {
             "const": "AND"
@@ -11927,7 +12445,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "exportId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -12056,7 +12574,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "operationId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -14141,7 +14659,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -14240,7 +14758,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15180,7 +15698,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "productId": {
             "type": "string",
@@ -15353,7 +15871,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "storeId": {
             "type": "string",
@@ -15479,7 +15997,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "productId": {
             "type": "string",
@@ -15581,7 +16099,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "previewId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15740,7 +16258,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "adjustmentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15865,7 +16383,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "uploadIntentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15963,7 +16481,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -16049,7 +16567,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -16210,7 +16728,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "evidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
@@ -16469,7 +16987,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -16744,7 +17262,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifact_version": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "wallet_address": {
             "$ref": "#/components/schemas/Address"
@@ -17070,7 +17588,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -17092,6 +17610,1274 @@
             "items": {
               "$ref": "#/components/schemas/SettlementRequestProjection"
             }
+          }
+        }
+      },
+      "AdminSettlementRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requestId",
+          "merchantId",
+          "walletAddress",
+          "recipientAddress",
+          "rail",
+          "asset",
+          "safeAddress",
+          "amount",
+          "state",
+          "batchId",
+          "intentDigest",
+          "signatureHash",
+          "finalSafeTxHash",
+          "finalExecutionTxHash",
+          "itemCount",
+          "requestedAt",
+          "batchedAt",
+          "settledAt"
+        ],
+        "properties": {
+          "requestId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "merchantId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "walletAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "recipientAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "rail": {
+            "enum": [
+              "MERCHANT_USDT",
+              "REWARD_NPL",
+              "PRIZE_USDT",
+              "TAKEOVER_USDT",
+              "OPERATIONS_REIMBURSEMENT_USDT"
+            ]
+          },
+          "asset": {
+            "enum": [
+              "USDT",
+              "NPL"
+            ]
+          },
+          "safeAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "state": {
+            "enum": [
+              "REQUESTED",
+              "BATCHED",
+              "SETTLED",
+              "RETRYABLE",
+              "QUARANTINED"
+            ]
+          },
+          "batchId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "intentDigest": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "signatureHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "finalSafeTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finalExecutionTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "itemCount": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "batchedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settledAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "AdminSettlementRequestCursor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requestedAt",
+          "requestId"
+        ],
+        "properties": {
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "requestId": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "AdminSettlementRequestList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "requests",
+          "nextCursor"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.10"
+          },
+          "requests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminSettlementRequest"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminSettlementRequestCursor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "AdminSettlementRequestItemJournals": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requested",
+          "batched",
+          "settled"
+        ],
+        "properties": {
+          "requested": {
+            "type": "string",
+            "minLength": 1
+          },
+          "batched": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settled": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "AdminSettlementRequestItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "itemIndex",
+          "orderId",
+          "accountId",
+          "backingSafeAddress",
+          "amount",
+          "itemHash",
+          "policyVersion",
+          "journals"
+        ],
+        "properties": {
+          "itemIndex": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "backingSafeAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "itemHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "policyVersion": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "journals": {
+            "$ref": "#/components/schemas/AdminSettlementRequestItemJournals"
+          }
+        }
+      },
+      "AdminSettlementRequestTransition": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "transitionId",
+          "requestItemIndex",
+          "batchId",
+          "sequence",
+          "type",
+          "journalId",
+          "createdAt"
+        ],
+        "properties": {
+          "transitionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "requestItemIndex": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "batchId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "enum": [
+              "REQUESTED",
+              "BATCHED",
+              "SETTLED",
+              "BATCH_REVERSED",
+              "FINALITY_REVERSED"
+            ]
+          },
+          "journalId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AdminSettlementRequestDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "request",
+          "items",
+          "transitions"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.10"
+          },
+          "request": {
+            "$ref": "#/components/schemas/AdminSettlementRequest"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminSettlementRequestItem"
+            }
+          },
+          "transitions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminSettlementRequestTransition"
+            }
+          }
+        }
+      },
+      "AdminSettlementBatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "batchId",
+          "asset",
+          "safeAddress",
+          "safeNonce",
+          "itemCount",
+          "totalAmount",
+          "contentHash",
+          "safeTxHash",
+          "state",
+          "approvalThreshold",
+          "approvalCount",
+          "createdBy",
+          "createdAt",
+          "approvedAt",
+          "submittedAt",
+          "settledAt"
+        ],
+        "properties": {
+          "batchId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "asset": {
+            "enum": [
+              "USDT",
+              "NPL"
+            ]
+          },
+          "safeAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "safeNonce": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "itemCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 256
+          },
+          "totalAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "contentHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "safeTxHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "state": {
+            "enum": [
+              "APPROVAL_PENDING",
+              "APPROVED",
+              "SUBMITTING",
+              "SUBMITTED",
+              "MINED",
+              "SETTLED",
+              "FAILED",
+              "REORGED",
+              "RETRYABLE",
+              "QUARANTINED"
+            ]
+          },
+          "approvalThreshold": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "approvalCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "createdBy": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "approvedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "submittedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settledAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "AdminSettlementBatchCursor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "createdAt",
+          "batchId"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "batchId": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "AdminSettlementBatchList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "batches",
+          "nextCursor"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.10"
+          },
+          "batches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminSettlementBatch"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminSettlementBatchCursor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "AdminSettlementBatchEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "batchId",
+          "asset",
+          "safeAddress",
+          "safeNonce",
+          "itemCount",
+          "totalAmount",
+          "contentHash",
+          "safeTxHash",
+          "state",
+          "approvalThreshold",
+          "approvalCount",
+          "createdBy",
+          "createdAt",
+          "approvedAt",
+          "submittedAt",
+          "settledAt",
+          "chainId",
+          "assetAddress",
+          "safeVersion",
+          "safeSingletonAddress",
+          "safeSingletonCodeHash",
+          "ownerSetHash",
+          "safeRuntimeEvidenceHash",
+          "safeRuntimeCheckedAt",
+          "multisendAddress",
+          "multisendCodeHash",
+          "tokenCodeHash",
+          "tokenTransferConformanceEvidenceHash",
+          "itemsHash",
+          "multisendTransactions",
+          "multisendCalldata",
+          "safeTxData",
+          "proposalReferenceHash",
+          "approvalEvidenceHash"
+        ],
+        "properties": {
+          "batchId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "asset": {
+            "enum": [
+              "USDT",
+              "NPL"
+            ]
+          },
+          "safeAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "safeNonce": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "itemCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 256
+          },
+          "totalAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "contentHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "safeTxHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "state": {
+            "enum": [
+              "APPROVAL_PENDING",
+              "APPROVED",
+              "SUBMITTING",
+              "SUBMITTED",
+              "MINED",
+              "SETTLED",
+              "FAILED",
+              "REORGED",
+              "RETRYABLE",
+              "QUARANTINED"
+            ]
+          },
+          "approvalThreshold": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "approvalCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "createdBy": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "approvedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "submittedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settledAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "chainId": {
+            "const": 56
+          },
+          "assetAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "safeVersion": {
+            "type": "string",
+            "minLength": 1
+          },
+          "safeSingletonAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "safeSingletonCodeHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "ownerSetHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "safeRuntimeEvidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "safeRuntimeCheckedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "multisendAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "multisendCodeHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "tokenCodeHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "tokenTransferConformanceEvidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "itemsHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "multisendTransactions": {
+            "type": "string",
+            "pattern": "^0x(?:[0-9a-fA-F]{2})+$"
+          },
+          "multisendCalldata": {
+            "type": "string",
+            "pattern": "^0x(?:[0-9a-fA-F]{2})+$"
+          },
+          "safeTxData": {
+            "type": "string",
+            "pattern": "^0x(?:[0-9a-fA-F]{2})+$"
+          },
+          "proposalReferenceHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approvalEvidenceHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "AdminSettlementBatchItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "itemIndex",
+          "requestId",
+          "requestItemIndex",
+          "orderId",
+          "merchantId",
+          "accountId",
+          "recipientAddress",
+          "tokenAddress",
+          "amount",
+          "transferCalldata",
+          "itemHash"
+        ],
+        "properties": {
+          "itemIndex": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "requestId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "requestItemIndex": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "merchantId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "recipientAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "tokenAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "transferCalldata": {
+            "type": "string",
+            "pattern": "^0x(?:[0-9a-fA-F]{2})+$"
+          },
+          "itemHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "AdminSettlementApproval": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ownerAddress",
+          "safeTxHash",
+          "signatureHash",
+          "approvedAt"
+        ],
+        "properties": {
+          "ownerAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "safeTxHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "signatureHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "approvedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AdminSettlementAttempt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "attemptId",
+          "attemptNumber",
+          "requestDigest",
+          "safeTxHash",
+          "executionTxHash",
+          "outerSender",
+          "outerNonce",
+          "replacementForAttemptId",
+          "state",
+          "createdAt",
+          "submittedAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "attemptId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "attemptNumber": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "requestDigest": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "safeTxHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "executionTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outerSender": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outerNonce": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "replacementForAttemptId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "enum": [
+              "LEASED",
+              "SUBMITTED",
+              "MINED",
+              "SETTLED",
+              "REPLACED",
+              "FAILED",
+              "REORGED",
+              "QUARANTINED"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "submittedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AdminSettlementFinality": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "transactionId",
+          "expectedEventHash",
+          "executionTxHash",
+          "replacementForTxHash",
+          "receiptStatus",
+          "blockNumber",
+          "blockHash",
+          "confirmations",
+          "requiredConfirmations",
+          "state",
+          "evidence",
+          "submittedAt",
+          "finalizedAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "transactionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expectedEventHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "executionTxHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "replacementForTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "receiptStatus": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "enum": [
+                  0,
+                  1
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "blockNumber": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "blockHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confirmations": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "requiredConfirmations": {
+            "const": 15
+          },
+          "state": {
+            "enum": [
+              "SUBMITTED",
+              "MINED",
+              "REPLACED",
+              "REORGED",
+              "FINAL",
+              "FAILED"
+            ]
+          },
+          "evidence": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finalizedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AdminSettlementCoverage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "snapshotId",
+          "blockNumber",
+          "blockHash",
+          "evidenceHash",
+          "recordedAt",
+          "safeAddress",
+          "asset",
+          "verifiedAssets",
+          "unsettledLiabilities",
+          "covered"
+        ],
+        "properties": {
+          "snapshotId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "blockNumber": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "blockHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "safeAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "asset": {
+            "enum": [
+              "USDT",
+              "NPL"
+            ]
+          },
+          "verifiedAssets": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "unsettledLiabilities": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "covered": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AdminSettlementBreaker": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "scope",
+          "paused",
+          "evidenceHash",
+          "policyVersion",
+          "changedBy",
+          "changedAt"
+        ],
+        "properties": {
+          "scope": {
+            "enum": [
+              "NEW_PAYMENT",
+              "SECKILL_PURCHASE",
+              "NEW_SETTLEMENT_BATCH"
+            ]
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "policyVersion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "changedBy": {
+            "type": "string",
+            "minLength": 1
+          },
+          "changedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AdminSettlementLedgerMovement": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "eventType",
+          "asset",
+          "debits",
+          "credits",
+          "balanced"
+        ],
+        "properties": {
+          "eventType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "asset": {
+            "enum": [
+              "USDT",
+              "NPL"
+            ]
+          },
+          "debits": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "credits": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "balanced": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AdminSettlementReconciliation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedItemCount",
+          "actualItemCount",
+          "expectedTotalAmount",
+          "actualTotalAmount",
+          "ledgerMovements",
+          "conserved"
+        ],
+        "properties": {
+          "expectedItemCount": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "actualItemCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "expectedTotalAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "actualTotalAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "ledgerMovements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminSettlementLedgerMovement"
+            }
+          },
+          "conserved": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AdminSettlementBatchDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "batch",
+          "items",
+          "approvals",
+          "attempts",
+          "finality",
+          "coverage",
+          "breakers",
+          "reconciliation"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.10"
+          },
+          "batch": {
+            "$ref": "#/components/schemas/AdminSettlementBatchEnvelope"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminSettlementBatchItem"
+            }
+          },
+          "approvals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminSettlementApproval"
+            }
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminSettlementAttempt"
+            }
+          },
+          "finality": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminSettlementFinality"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "coverage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminSettlementCoverage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "breakers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminSettlementBreaker"
+            }
+          },
+          "reconciliation": {
+            "$ref": "#/components/schemas/AdminSettlementReconciliation"
           }
         }
       },
@@ -18214,7 +20000,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -18437,7 +20223,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -19303,7 +21089,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "snapshotId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -19386,7 +21172,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -20717,7 +22503,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -20964,7 +22750,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -21319,7 +23105,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "sessionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -21548,7 +23334,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "protocolVersion": {
             "const": 1
@@ -21622,7 +23408,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -21960,7 +23746,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "addresses": {
             "type": "array",
@@ -22141,7 +23927,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -22308,7 +24094,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "orderId": {
             "type": "string",
@@ -22343,7 +24129,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "merchantId": {
             "type": "string",
@@ -22819,7 +24605,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "exportId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -23293,7 +25079,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "observation": {
             "$ref": "#/components/schemas/RiskObservation"
@@ -23319,7 +25105,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "generatedAt": {
             "type": "string",
@@ -23590,7 +25376,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "challengeId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -23657,7 +25443,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "bindingId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -23766,7 +25552,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "requestId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -23876,7 +25662,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "batchId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -23913,7 +25699,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "printJobId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -24082,7 +25868,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "configVersionId": {
             "anyOf": [
@@ -24317,7 +26103,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "providers": {
             "type": "array",
@@ -24498,7 +26284,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "warehouseId": {
             "type": "string",
@@ -24589,7 +26375,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "warehouses": {
             "type": "array",
@@ -24654,7 +26440,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "waybills": {
             "type": "array",
@@ -24673,7 +26459,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "printJobs": {
             "type": "array",
@@ -25015,7 +26801,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "merchants": {
             "type": "array",
@@ -25210,7 +26996,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -25649,7 +27435,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-fulfillment.1"
+            "const": "2.0.0-settlement-admin.10"
           },
           "merchant": {
             "$ref": "#/components/schemas/MerchantLifecycleSummary"

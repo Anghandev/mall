@@ -86,6 +86,38 @@ test('platform seckill governance is one authenticated coordinated Admin surface
   assert.equal(adminBaseline.adminCapabilities.writesWithoutRuntimeAuthorization, false);
 });
 
+test('platform logistics and printing stay on the authenticated coordinated Admin surface', () => {
+  const operations = [
+    ['GET', '/v2/admin/logistics/carriers'],
+    ['POST', '/v2/admin/logistics/carrier-versions'],
+    ['GET', '/v2/admin/logistics/providers'],
+    ['POST', '/v2/admin/logistics/provider-versions'],
+    ['GET', '/v2/admin/logistics/warehouses'],
+    ['POST', '/v2/admin/logistics/warehouses'],
+    ['PUT', '/v2/admin/logistics/warehouses/{warehouseId}'],
+    ['POST', '/v2/admin/logistics/warehouses/{warehouseId}/deactivate'],
+    ['POST', '/v2/admin/logistics/waybills/batches'],
+    ['GET', '/v2/admin/logistics/waybills'],
+    ['GET', '/v2/admin/logistics/print-jobs'],
+    ['POST', '/v2/admin/logistics/print-jobs/{printJobId}/retry'],
+  ] as const;
+
+  for (const [method, path] of operations) {
+    const entry = coordinatedOpenApi.paths[path] as Partial<Record<'get' | 'post' | 'put', {
+      operationId?: string;
+      security?: readonly unknown[];
+    }>> | undefined;
+    const operation = entry?.[method.toLowerCase() as 'get' | 'post' | 'put'];
+    assert.ok(operation?.operationId);
+    assert.deepEqual(operation?.security, [{ bearerAuth: [] }]);
+    assert.ok(coordinatedManifest.httpSurface.includes(`${method} ${path}`));
+  }
+  assert.equal(adminBaseline.adminCapabilities.adminLogisticsHttp, true);
+  assert.equal(adminBaseline.adminCapabilities.adminLogisticsSecretReferences, true);
+  assert.equal(adminBaseline.adminCapabilities.adminLogisticsAuditorRedaction, true);
+  assert.equal(adminBaseline.adminCapabilities.writesWithoutRuntimeAuthorization, false);
+});
+
 test('ordinary and seckill quotes conserve funds and keep independent reservations', () => {
   const request = quoteRequest();
   const ordinary = buildPaymentIntent(request, readyPolicy(), 'ORDINARY', request.issuedAt);
