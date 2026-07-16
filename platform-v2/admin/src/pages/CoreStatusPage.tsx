@@ -74,7 +74,7 @@ export function CoreStatusPage() {
 
       <section className="snapshot-rule">
         <ShieldCheck aria-hidden="true" />
-        <div><strong>Admin 边界</strong><p>Admin 物流配置、跨商家面单、打印作业、全局资源导出和授权商品批量标签均已发布。OR、模糊钱包、UID、手机号、Yellow queue 与生产部署仍保持 fail-closed。</p></div>
+        <div><strong>Admin 边界</strong><p>Admin 物流配置、跨商家面单、打印作业、AND/OR 全局检索、精确/模糊钱包、资源导出、商品标签与授权生命周期批处理均已发布。UID、手机号、Yellow queue 与生产部署仍保持 fail-closed。</p></div>
       </section>
     </>
   );

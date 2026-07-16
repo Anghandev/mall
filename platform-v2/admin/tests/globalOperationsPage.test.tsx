@@ -2,6 +2,7 @@ import {
   artifactVersion,
   type AdminGlobalSearchResponse,
   type AdminProductBatchTagResult,
+  type AdminProductLifecycleBatchResult,
   type AdminResourceExport,
   type UserRole,
 } from '@abu24k/core-artifacts';
@@ -32,7 +33,10 @@ describe('Admin global operations page', () => {
     expect(screen.getByRole('heading', { name: '全局资源操作' })).toBeTruthy();
     expect(screen.getByText('Unavailable / DecisionBlocked')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    await user.click(await screen.findByRole('button', { name: 'OR' }));
+    await user.click(screen.getByRole('button', { name: '模糊' }));
     await user.type(await screen.findByLabelText('商家 ID'), 'merchant-1');
+    await user.type(screen.getByLabelText('钱包地址'), 'A1b2C3');
     await user.selectOptions(screen.getByLabelText('审核投影'), 'true');
     await user.click(screen.getByRole('button', { name: '查询' }));
 
@@ -48,10 +52,22 @@ describe('Admin global operations page', () => {
 
     expect(await screen.findByText('标签版本证据')).toBeTruthy();
     expect(screen.getByText(/1 个商品写入新版本/)).toBeTruthy();
+    await user.click(await screen.findByRole('checkbox', { name: '选择 PRODUCT product-1' }));
+    expect(screen.getByRole('button', { name: '审核通过' }).hasAttribute('disabled')).toBe(true);
+    await user.click(screen.getByRole('button', { name: '隐藏商品' }));
+    expect(screen.getByRole('button', { name: '确认隐藏商品' }).hasAttribute('disabled')).toBe(true);
+    await user.type(screen.getByLabelText('原因代码'), 'operations_hide');
+    await user.click(screen.getByRole('button', { name: '确认隐藏商品' }));
+
+    expect(await screen.findByText('生命周期操作证据')).toBeTruthy();
+    expect(screen.getByText(/1 个商品已原子更新/)).toBeTruthy();
     expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes('/v2/admin/global/resources?') && !init?.method)).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('relation=OR') && String(input).includes('wallet=a1b2c3') && String(input).includes('walletMatch=FUZZY'))).toBe(true);
     expect(fetchMock.mock.calls.some(([input, init]) => String(input).endsWith('/v2/admin/global/exports') && init?.method === 'POST')).toBe(true);
     const batchCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/v2/admin/catalog/products/batch-tags'));
     expect(JSON.parse(String(batchCall?.[1]?.body))).toMatchObject({ productIds: ['product-1'], tagIds: ['tag-1'] });
+    const lifecycleCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/v2/admin/catalog/products/batch-lifecycle'));
+    expect(JSON.parse(String(lifecycleCall?.[1]?.body))).toMatchObject({ action: 'HIDE', productIds: ['product-1'], reasonCode: 'OPERATIONS_HIDE' });
   });
 
   it('keeps AUDITOR batch tagging forbidden while preserving export', async () => {
@@ -69,11 +85,41 @@ describe('Admin global operations page', () => {
     await user.click(await screen.findByRole('button', { name: '查询' }));
     await user.click(await screen.findByRole('checkbox', { name: '选择 PRODUCT product-1' }));
 
-    expect(screen.getByText('AUDITOR 只读：Forbidden')).toBeTruthy();
+    expect(screen.getAllByText('AUDITOR 只读：Forbidden')).toHaveLength(2);
     expect(screen.getByRole('button', { name: '批量加标签' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '隐藏商品' }).hasAttribute('disabled')).toBe(true);
     expect(screen.getByRole('button', { name: '导出 CSV' }).hasAttribute('disabled')).toBe(false);
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/v2/admin/catalog/tags'))).toBe(false);
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/v2/admin/catalog/products/batch-tags'))).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/v2/admin/catalog/products/batch-lifecycle'))).toBe(false);
+  });
+
+  it('keeps the lifecycle idempotency key after failure and retries the same atomic request', async () => {
+    const wallet = address('4');
+    window.ethereum = walletProvider(wallet);
+    const fetchMock = globalOperationsFetch(wallet, 'ADMIN', globalSearchResponse(), true);
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<MemoryRouter initialEntries={['/global-operations']}><App /></MemoryRouter>);
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    await user.click(await screen.findByRole('button', { name: '查询' }));
+    await user.click(await screen.findByRole('checkbox', { name: '选择 PRODUCT product-1' }));
+    await user.click(screen.getByRole('button', { name: '隐藏商品' }));
+    await user.type(screen.getByLabelText('原因代码'), 'OPERATIONS_HIDE');
+    const key = (screen.getByLabelText('Lifecycle idempotency key') as HTMLInputElement).value;
+    await user.click(screen.getByRole('button', { name: '确认隐藏商品' }));
+
+    expect(await screen.findByText(/当前幂等键已保留/)).toBeTruthy();
+    expect((screen.getByLabelText('Lifecycle idempotency key') as HTMLInputElement).value).toBe(key);
+    expect(screen.getByLabelText('Lifecycle idempotency key').hasAttribute('disabled')).toBe(true);
+    expect(screen.getByLabelText('原因代码').hasAttribute('disabled')).toBe(true);
+    await user.click(screen.getByRole('button', { name: '确认隐藏商品' }));
+    expect(await screen.findByText('生命周期操作证据')).toBeTruthy();
+    const lifecycleBodies = fetchMock.mock.calls
+      .filter(([input]) => String(input).endsWith('/v2/admin/catalog/products/batch-lifecycle'))
+      .map(([, init]) => JSON.parse(String(init?.body)) as { idempotencyKey: string });
+    expect(lifecycleBodies.map((body) => body.idempotencyKey)).toEqual([key, key]);
   });
 
   it('renders empty and Core failure states without synthetic resources', async () => {
@@ -105,15 +151,24 @@ describe('Admin global operations page', () => {
   });
 });
 
-function globalOperationsFetch(wallet: string, role: UserRole, response: AdminGlobalSearchResponse) {
+function globalOperationsFetch(wallet: string, role: UserRole, response: AdminGlobalSearchResponse, failFirstLifecycle = false) {
+  let lifecycleAttempts = 0;
   return vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
     if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: [role] });
     if (url.endsWith('/v2/admin/catalog/tags')) return jsonResponse({ tags: [{ tagId: 'tag-1', version: '1', name: '新品', example: '新品上架', sortOrder: 1, status: 'ENABLED' }] });
-    if (url.includes('/v2/admin/global/resources?')) return jsonResponse(response);
+    if (url.includes('/v2/admin/global/resources?')) {
+      const query = new URL(url, 'http://localhost').searchParams;
+      return jsonResponse({ ...response, relation: query.get('relation') ?? 'AND', walletMatch: query.get('walletMatch') ?? 'EXACT' });
+    }
     if (url.endsWith('/v2/admin/global/exports')) return jsonResponse(resourceExport(), 201);
     if (url.endsWith('/v2/admin/catalog/products/batch-tags') && init?.method === 'POST') return jsonResponse(batchTagResult());
+    if (url.endsWith('/v2/admin/catalog/products/batch-lifecycle') && init?.method === 'POST') {
+      lifecycleAttempts += 1;
+      if (failFirstLifecycle && lifecycleAttempts === 1) return jsonResponse({ error: { code: 'ExternalBlocked', message: 'Lifecycle service unavailable', correlationId: 'lifecycle-retry' } }, 503);
+      return jsonResponse(lifecycleResult());
+    }
     return jsonResponse({ error: { code: 'InvalidRequest', message: `Unexpected request ${url}` } }, 400);
   });
 }
@@ -122,9 +177,10 @@ function globalSearchResponse(overrides: Partial<AdminGlobalSearchResponse> = {}
   return {
     artifactVersion,
     relation: 'AND',
+    walletMatch: 'EXACT',
     resources: [productResource()],
     truncated: false,
-    unavailableFilters: ['OR', 'FUZZY_WALLET', 'UID', 'PHONE', 'YELLOW_QUEUE'],
+    unavailableFilters: ['UID', 'PHONE', 'YELLOW_QUEUE'],
     ...overrides,
   };
 }
@@ -133,6 +189,11 @@ function productResource(allowedBatchActions: AdminGlobalSearchResponse['resourc
   { action: 'EXPORT_CSV', enabled: true },
   { action: 'EXPORT_EXCEL', enabled: true },
   { action: 'ADD_PRODUCT_TAGS', enabled: true },
+  { action: 'APPROVE_PRODUCTS', enabled: false, reasonCode: 'UnknownState' },
+  { action: 'REJECT_PRODUCTS', enabled: false, reasonCode: 'UnknownState' },
+  { action: 'PUBLISH_PRODUCTS', enabled: false, reasonCode: 'UnknownState' },
+  { action: 'HIDE_PRODUCTS', enabled: true },
+  { action: 'DELIST_PRODUCTS', enabled: true },
 ]) {
   return {
     resourceType: 'PRODUCT' as const,
@@ -154,6 +215,10 @@ function resourceExport(): AdminResourceExport {
 
 function batchTagResult(): AdminProductBatchTagResult {
   return { artifactVersion, operationId: hash('d'), action: 'ADD_PRODUCT_TAGS', tagIds: ['tag-1'], changedCount: 1, products: [{ productId: 'product-1', previousVersion: '1', version: '2', addedTagIds: ['tag-1'] }], createdAt: '2026-07-15T00:00:00.000Z' };
+}
+
+function lifecycleResult(): AdminProductLifecycleBatchResult {
+  return { artifactVersion, operationId: hash('f'), action: 'HIDE', changedCount: 1, products: [{ productId: 'product-1', previousState: 'ACTIVE', state: 'HIDDEN' }], createdAt: '2026-07-15T00:00:00.000Z' };
 }
 
 function nonceResponse() {

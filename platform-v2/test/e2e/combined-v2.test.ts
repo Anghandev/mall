@@ -81,6 +81,38 @@ test('global clearing reads are authenticated, coordinated and Admin-only', () =
   assert.match(merchantCore.reason, /\u6e05\u7b97\u8bfb\u53d6\u4fdd\u6301 Admin-only/);
 });
 
+test('global search and product lifecycle batches are one coordinated Admin-only surface', () => {
+  const operations = [
+    ['GET', '/v2/admin/global/resources', 'searchAdminGlobalResources'],
+    ['POST', '/v2/admin/global/exports', 'exportAdminResources'],
+    ['POST', '/v2/admin/catalog/products/batch-tags', 'batchAddAdminProductTags'],
+    ['POST', '/v2/admin/catalog/products/batch-lifecycle', 'batchApplyAdminProductLifecycle'],
+  ] as const;
+
+  for (const [method, path, operationId] of operations) {
+    const entry = coordinatedOpenApi.paths[path] as Partial<Record<'get' | 'post', {
+      operationId?: string;
+      security?: readonly unknown[];
+    }>> | undefined;
+    const operation = entry?.[method.toLowerCase() as 'get' | 'post'];
+    assert.equal(operation?.operationId, operationId);
+    assert.deepEqual(operation?.security, [{ bearerAuth: [] }]);
+    assert.ok(coordinatedManifest.httpSurface.includes(`${method} ${path}`));
+  }
+
+  const searchParameters = coordinatedOpenApi.paths['/v2/admin/global/resources']?.get.parameters;
+  assert.deepEqual(searchParameters.find((parameter) => parameter.name === 'relation')?.schema.enum, ['AND', 'OR']);
+  assert.deepEqual(searchParameters.find((parameter) => parameter.name === 'walletMatch')?.schema.enum, ['EXACT', 'FUZZY']);
+  assert.equal(coordinatedManifest.capabilityStatus.adminGlobalResourceSearchHttp, 'AVAILABLE');
+  assert.equal(coordinatedManifest.capabilityStatus.adminProductLifecycleBatchHttp, 'AVAILABLE');
+  assert.equal(coordinatedManifest.decisionBlocked.includes('ADMIN_OR_QUERY_SEMANTICS'), false);
+  assert.equal(coordinatedManifest.decisionBlocked.includes('ADMIN_FUZZY_WALLET_SEARCH_POLICY'), false);
+  assert.equal(adminBaseline.adminCapabilities.adminGlobalResourceSearch, true);
+  assert.equal(adminBaseline.adminCapabilities.adminProductLifecycleBatch, true);
+  assert.equal('adminProductLifecycleBatch' in mallBaseline, false);
+  assert.equal('adminProductLifecycleBatch' in merchantBaseline, false);
+});
+
 test('takeover assignment and replacement fulfillment form one coordinated cross-product chain', () => {
   const operations = [
     ['GET', '/v2/admin/takeover-cases', 'listAdminTakeoverCases'],
