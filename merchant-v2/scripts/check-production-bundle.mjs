@@ -5,7 +5,7 @@ import { artifactVersion } from '@abu24k/core-artifacts';
 
 const dist = fileURLToPath(new URL('../dist/', import.meta.url));
 const textExtensions = new Set(['.css', '.html', '.js', '.map']);
-const coreBoundary = '支付、履约、结算、商品、媒体、商家资料、审计与订单导出能力已发布；平台全局运营与清算读取保持 Admin-only';
+const coreBoundary = '支付、履约、替代商家接管、结算、商品、媒体、商家资料、审计与订单导出能力已发布；平台全局运营与清算读取保持 Admin-only';
 const forbidden = [
   'legacy/' + 'v1-npl-only',
   '__merchant_visual_review__',
@@ -39,6 +39,9 @@ const forbidden = [
   '2026-07-04 09:15',
   'merchant-orders-2026-07-01-2026-07-15.xls',
   'PFdvcmtib29rPjxSb3c+b3JkZXI8L1Jvdz48L1dvcmtib29rPg==',
+  'takeover-case-assigned-1',
+  'SF-REPLACEMENT-001',
+  'replacement-shipment-result',
 ];
 
 let filesChecked = 0;

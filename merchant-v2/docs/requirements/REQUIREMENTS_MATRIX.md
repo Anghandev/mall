@@ -60,7 +60,7 @@ does not complete or verify a Requirement while its Core capability is missing.
 - Consumer/UI tests cover exact methods and paths, media ownership, stable
   idempotency, version conflict refresh, 403 failure, activation/close and the
   preserved signed printer binding. `pnpm --filter @abu24k/merchant check`
-  passes 79 tests, typecheck, production build and the no-fixture bundle guard.
+  passes 94 tests, typecheck, production build and the no-fixture bundle guard.
 - Production AMap/object-storage credentials and network, an authorized merchant
   wallet, and real printer accounts/devices remain `ExternalBlocked` acceptance
   under `MER-GOAL-003`; no production fixture or simulated provider success is
@@ -87,18 +87,30 @@ does not complete or verify a Requirement while its Core capability is missing.
   the production build/bundle guard rejects test export fixtures and obsolete
   artifact versions.
 
-## Settlement Admin .10 Consumer Boundary
+## Settlement Admin .11 Consumer Boundary
 
-- `@abu24k/core-artifacts@2.0.0-settlement-admin.10` preserves the existing
+- `@abu24k/core-artifacts@2.0.0-settlement-admin.11` preserves the existing
   Merchant settlement intent, wallet-signed request and tenant-scoped history
   operations without changing Merchant fulfillment or fund calculations.
 - Admin-wide settlement request and batch reads, governed settlement intents
   and coverage-breaker recovery remain Admin-only. The Merchant client exposes
   none of their published operation IDs, and the production bundle rejects all
   matching Admin routes.
-- This synchronization completes no Merchant Requirement ID. It records only
-  the product ownership boundary; no Merchant page, parallel endpoint,
-  production fixture or browser-side amount calculation was added.
+- The carried-forward Admin-only synchronization completes no Merchant
+  Requirement ID; it records the product ownership boundary without a parallel
+  endpoint, production fixture or browser-side amount calculation.
+
+## Settlement Admin .11 Takeover Fulfillment Evidence
+
+- `MER-FUL-004`: the current replacement merchant consumes the assigned-case
+  queue/detail, encrypted fulfillment target, Core tracking evidence and the
+  existing shipment command. Shipment requires both `FUNDED` and enabled
+  `RECORD_SHIPMENT`.
+- `MER-ASSET-004` assigned-case slice: current assignment/version/evidence and
+  takeover state render directly from Core without browser-side funding or
+  compensation calculations.
+- Cross-tenant rows, revoked assignments, unfunded cases and unavailable target
+  decryption fail closed. Test fixtures remain outside the production bundle.
 
 ## Completion Rule
 

@@ -3316,7 +3316,319 @@ td > small {
   display: none;
 }
 
+.takeover-queue,
+.takeover-detail {
+  overflow: hidden;
+}
+
+.takeover-heading {
+  align-items: center;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.takeover-filter-bar {
+  display: grid;
+  grid-template-columns: minmax(220px, 360px) auto;
+  align-items: end;
+  gap: 10px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-muted);
+}
+
+.takeover-filter-bar label {
+  display: grid;
+  gap: 6px;
+}
+
+.takeover-filter-bar label span {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.takeover-filter-bar select {
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.takeover-queue > .loading-rows,
+.takeover-detail > .loading-rows {
+  min-height: 190px;
+  align-content: center;
+  padding: 20px;
+}
+
+.takeover-load-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 18px 20px;
+  padding: 12px 13px;
+  border: 1px solid oklch(87% 0.046 27);
+  border-radius: 6px;
+  color: var(--danger);
+  background: var(--danger-soft);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.takeover-table {
+  min-width: 1040px;
+}
+
+.takeover-table td:first-child strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.8125rem;
+}
+
+.takeover-table td:last-child {
+  text-align: right;
+}
+
+.takeover-pagination {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 20px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.status-funded,
+.status-fulfilling,
+.status-closed {
+  color: var(--success);
+}
+
+.status-open,
+.status-fulfillment_pending {
+  color: var(--warning);
+}
+
+.status-decision_blocked {
+  color: var(--danger);
+}
+
+.takeover-facts {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.takeover-facts > div {
+  min-width: 0;
+  padding: 12px 14px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.takeover-facts > div:nth-child(5n) {
+  border-right: 0;
+}
+
+.takeover-facts > div:nth-last-child(-n + 5) {
+  border-bottom: 0;
+}
+
+.takeover-facts dt,
+.takeover-target dt {
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 0.6875rem;
+  font-weight: 650;
+}
+
+.takeover-facts dd,
+.takeover-target dd {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.takeover-work-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.85fr) minmax(420px, 1.15fr);
+}
+
+.takeover-pane {
+  min-width: 0;
+  padding: 20px;
+}
+
+.takeover-pane + .takeover-pane {
+  border-left: 1px solid var(--border);
+}
+
+.takeover-pane > .section-heading {
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.takeover-pane h3,
+.takeover-history h3 {
+  font-size: 0.9375rem;
+}
+
+.takeover-pane > .section-heading > svg {
+  color: var(--accent-dark);
+}
+
+.takeover-target {
+  display: grid;
+  margin: 0;
+  border-top: 1px solid var(--border);
+}
+
+.takeover-target > div {
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.takeover-target > div:last-child {
+  border-bottom: 0;
+}
+
+.takeover-target code,
+.takeover-evidence code,
+.takeover-history code {
+  display: block;
+  color: var(--muted);
+  font-size: 0.6875rem;
+  overflow-wrap: anywhere;
+}
+
+.takeover-action-state {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.takeover-action-state span {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: 0.6875rem;
+}
+
+.takeover-action-state span + span {
+  border-left: 1px solid var(--border);
+}
+
+.takeover-action-state strong {
+  color: var(--ink);
+  font-size: 0.75rem;
+}
+
+.takeover-pane .two-column-fields,
+.takeover-pane .button.wide,
+.takeover-pane .command-feedback,
+.takeover-evidence,
+.takeover-block-reason {
+  margin-top: 12px;
+}
+
+.takeover-evidence {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid oklch(84% 0.06 151);
+  border-radius: 6px;
+  color: var(--success);
+  background: var(--success-soft);
+}
+
+.takeover-evidence div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.takeover-evidence strong {
+  font-size: 0.75rem;
+}
+
+.takeover-block-reason {
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.takeover-history {
+  padding: 18px 20px 20px;
+  border-top: 1px solid var(--border);
+}
+
+.takeover-history > .section-heading {
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.takeover-history ol {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+  list-style: none;
+}
+
+.takeover-history li {
+  display: grid;
+  grid-template-columns: 150px 180px 160px minmax(240px, 1fr);
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.75rem;
+}
+
+.takeover-history time,
+.takeover-history span {
+  color: var(--muted);
+}
+
 @media (max-width: 1180px) {
+  .takeover-facts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .takeover-facts > div,
+  .takeover-facts > div:nth-child(5n),
+  .takeover-facts > div:nth-last-child(-n + 5) {
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .takeover-facts > div:nth-child(3n) {
+    border-right: 0;
+  }
+
+  .takeover-facts > div:nth-last-child(-n + 1) {
+    border-bottom: 0;
+  }
+
+  .takeover-history li {
+    grid-template-columns: 140px 170px minmax(180px, 1fr);
+  }
+
+  .takeover-history li code {
+    grid-column: 1 / -1;
+  }
+
   .sku-editor {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -3379,6 +3691,15 @@ td > small {
 }
 
 @media (max-width: 960px) {
+  .takeover-work-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .takeover-pane + .takeover-pane {
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+
   .sidebar {
     width: min(86vw, 290px);
     transform: translateX(-102%);
@@ -3544,6 +3865,35 @@ td > small {
   .page-actions .button-group,
   .page-actions .button {
     width: 100%;
+  }
+
+  .takeover-filter-bar,
+  .takeover-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .takeover-filter-bar .button {
+    width: 100%;
+  }
+
+  .takeover-facts > div,
+  .takeover-facts > div:nth-child(3n),
+  .takeover-facts > div:nth-last-child(-n + 1) {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .takeover-facts > div:last-child {
+    border-bottom: 0;
+  }
+
+  .takeover-history li {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .takeover-history li code {
+    grid-column: auto;
   }
 
   .metric-grid,
@@ -3802,6 +4152,33 @@ td > small {
 }
 
 @media (max-width: 520px) {
+  .takeover-heading,
+  .takeover-pagination {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .takeover-heading .button,
+  .takeover-pagination .button-group,
+  .takeover-pagination .button {
+    width: 100%;
+  }
+
+  .takeover-pane,
+  .takeover-history {
+    padding: 16px;
+  }
+
+  .takeover-action-state,
+  .takeover-pane .two-column-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .takeover-action-state span + span {
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+
   .pickup-scanner-toolbar {
     align-items: stretch;
     flex-direction: column;
