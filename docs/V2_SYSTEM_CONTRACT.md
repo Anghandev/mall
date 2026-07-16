@@ -83,6 +83,11 @@ Status: frozen authority for the function-first V2 rewrite from
 
 ## Merchant Concession And Receivable
 
+- The settlement wallet submitted with a merchant application becomes
+  permanently immutable when that application is approved. No merchant,
+  platform role, secondary signer or Safe approval can change it. An incorrect
+  address must be handled before approval by rejecting the application and
+  creating a new application; V2 has no wallet migration or recovery path.
 - Merchant concession does not reduce buyer payment and never changes the
   70/30 buyer legs.
 - `concessionAmount = merchantBaseReceivable * merchantConcessionBps / 10,000`,
@@ -190,6 +195,8 @@ Status: frozen authority for the function-first V2 rewrite from
 - Policy publication and every high-risk change require RBAC, an exact
   secondary-wallet EIP-712 signature and Safe multisig approval. A new
   `policyVersion` affects only future quotes, orders and sessions.
+- Merchant settlement-wallet immutability has no governance exception and is
+  not a high-risk action that Safe approval can override.
 - High-Gas anomalies restrict the address for 24 hours. More than five wallets
   on the same IP or device within one minute blacklists that IP/device. Three
   cancellations within five minutes or frequent address/store changes restrict

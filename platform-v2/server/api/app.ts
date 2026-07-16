@@ -667,9 +667,8 @@ export interface MerchantLifecycleApiService {
     correlationId: string;
   }): Promise<unknown>;
   createReviewChallenge(actor: FulfillmentActor, merchantId: string, input: {
-    action: 'APPROVE' | 'REJECT' | 'BLACKLIST' | 'CHANGE_SETTLEMENT_WALLET';
+    action: 'APPROVE' | 'REJECT' | 'BLACKLIST';
     reasonCode: string;
-    proposedSettlementWallet?: string;
     idempotencyKey: string;
     correlationId: string;
   }): Promise<unknown>;
@@ -2504,16 +2503,13 @@ async function routeAdminServices(
   if (request.method === 'POST' && merchantReviewChallengePath) {
     const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN']);
     const body = await readJson(request);
-    assertOnlyKeys(body, ['action', 'reasonCode', 'proposedSettlementWallet', 'idempotencyKey']);
+    assertOnlyKeys(body, ['action', 'reasonCode', 'idempotencyKey']);
     sendJson(response, 201, await dependencies.merchantLifecycleService.createReviewChallenge(
       fulfillmentActor(claims),
       decodedPathPart(merchantReviewChallengePath[1]!),
       {
         action: merchantReviewAction(body.action),
         reasonCode: requiredString(body, 'reasonCode'),
-        ...(body.proposedSettlementWallet === undefined
-          ? {}
-          : { proposedSettlementWallet: requiredString(body, 'proposedSettlementWallet') }),
         idempotencyKey: requiredString(body, 'idempotencyKey'),
         correlationId,
       },

@@ -670,7 +670,7 @@ test('merchant profile keeps settlement wallet immutable and merchant audit neve
       business.query(
         "UPDATE core.merchants SET settlement_wallet = '0x4444444444444444444444444444444444444444' WHERE merchant_id = 'merchant-1'",
       ),
-      /GovernedWalletMigrationRequired/,
+      /ImmutableSettlementWallet/,
     );
     await business.query("UPDATE core.merchants SET status = 'APPROVED' WHERE merchant_id = 'merchant-1'");
     await assert.rejects(
@@ -965,35 +965,46 @@ test('merchant lifecycle encrypts qualification and governs exact review transit
     assert.equal(safeCalls, 2);
     await assert.rejects(
       db.query("UPDATE core.merchants SET settlement_wallet = $2 WHERE merchant_id = $1", [merchantId, Wallet.createRandom().address]),
-      /GovernedWalletMigrationRequired/,
+      /ImmutableSettlementWallet/,
     );
+    const safeCallsBeforeRejectedWalletChange = safeCalls;
     assert.throws(
       () => service.createReviewChallenge(adminActor, merchantId, {
-        action: 'CHANGE_SETTLEMENT_WALLET', reasonCode: 'WALLET_ROTATION',
+        action: 'CHANGE_SETTLEMENT_WALLET' as never, reasonCode: 'WALLET_ROTATION',
         idempotencyKey: 'merchant-wallet-change-missing', correlationId: 'merchant-wallet-change-missing',
       }),
-      /Proposed settlement wallet is required/,
+      /review action is invalid/,
     );
-    const nextSettlementWallet = Wallet.createRandom().address;
-    const walletChange = await service.createReviewChallenge(adminActor, merchantId, {
-      action: 'CHANGE_SETTLEMENT_WALLET', reasonCode: 'WALLET_ROTATION',
-      proposedSettlementWallet: nextSettlementWallet,
-      idempotencyKey: 'merchant-wallet-change-1', correlationId: 'merchant-wallet-change-correlation',
+    assert.equal(safeCalls, safeCallsBeforeRejectedWalletChange);
+
+    const wrongAddressApplication = await service.createApplication(operatorActor, {
+      ...applicationInput,
+      settlementWallet: Wallet.createRandom().address,
+      idempotencyKey: 'merchant-application-wrong-address-1',
+      correlationId: 'merchant-application-wrong-address-correlation',
     });
-    const walletChangeSignature = await secondary.signTypedData(
-      walletChange.typedData.domain, walletChange.typedData.types, walletChange.typedData.message,
+    const rejectWrongAddress = await service.createReviewChallenge(adminActor, wrongAddressApplication.merchant.merchantId, {
+      action: 'REJECT', reasonCode: 'INCORRECT_SETTLEMENT_WALLET',
+      idempotencyKey: 'merchant-reject-wrong-address-1', correlationId: 'merchant-reject-wrong-address-correlation',
+    });
+    const rejectWrongAddressSignature = await secondary.signTypedData(
+      rejectWrongAddress.typedData.domain, rejectWrongAddress.typedData.types, rejectWrongAddress.typedData.message,
     );
-    const changed = await service.publishReview(adminActor, merchantId, walletChange.actionId, walletChangeSignature);
-    assert.equal(changed.merchant.settlementWallet, nextSettlementWallet.toLowerCase());
-    assert.deepEqual((await db.query<{ wallet_address: string; status: string }>(
-      `SELECT wallet_address, status FROM core.wallet_role_bindings
-       WHERE role = 'MERCHANT' AND merchant_id = $1 ORDER BY wallet_address`,
-      [merchantId],
-    )).rows, [
-      { wallet_address: settlementWallet.toLowerCase(), status: 'REVOKED' },
-      { wallet_address: nextSettlementWallet.toLowerCase(), status: 'ACTIVE' },
-    ].sort((left, right) => left.wallet_address.localeCompare(right.wallet_address)));
-    assert.equal((await service.publishReview(adminActor, merchantId, walletChange.actionId, walletChangeSignature)).merchant.settlementWallet, nextSettlementWallet.toLowerCase());
+    assert.equal((await service.publishReview(
+      adminActor,
+      wrongAddressApplication.merchant.merchantId,
+      rejectWrongAddress.actionId,
+      rejectWrongAddressSignature,
+    )).merchant.status, 'REJECTED');
+    const correctedAddress = Wallet.createRandom().address;
+    const correctedApplication = await service.createApplication(operatorActor, {
+      ...applicationInput,
+      settlementWallet: correctedAddress,
+      idempotencyKey: 'merchant-application-corrected-address-1',
+      correlationId: 'merchant-application-corrected-address-correlation',
+    });
+    assert.equal(correctedApplication.merchant.settlementWallet, correctedAddress.toLowerCase());
+    assert.equal(correctedApplication.merchant.status, 'PENDING');
 
     const blacklist = await service.createReviewChallenge(adminActor, merchantId, {
       action: 'BLACKLIST', reasonCode: 'CONFIRMED_ABUSE',
@@ -1006,7 +1017,7 @@ test('merchant lifecycle encrypts qualification and governs exact review transit
     assert.equal(blacklisted.merchant.status, 'BLACKLISTED');
     assert.equal((await db.query<{ status: string }>(
       "SELECT status FROM core.wallet_role_bindings WHERE wallet_address = $1 AND role = 'MERCHANT'",
-      [nextSettlementWallet.toLowerCase()],
+      [settlementWallet.toLowerCase()],
     )).rows[0]?.status, 'SUSPENDED');
     const publishedActions = await db.query<{ action_kind: string; state: string }>(
       'SELECT action_kind, state FROM core.merchant_review_actions WHERE merchant_id = $1 ORDER BY action_kind',
@@ -1015,7 +1026,6 @@ test('merchant lifecycle encrypts qualification and governs exact review transit
     assert.deepEqual(publishedActions.rows, [
       { action_kind: 'APPROVE', state: 'PUBLISHED' },
       { action_kind: 'BLACKLIST', state: 'PUBLISHED' },
-      { action_kind: 'CHANGE_SETTLEMENT_WALLET', state: 'PUBLISHED' },
     ]);
 
     const staleSettlement = Wallet.createRandom().address;
@@ -5723,7 +5733,7 @@ test('policy drafts remain editable while published policy and historical catalo
       db.query(
         "UPDATE core.merchants SET settlement_wallet = '0x3333333333333333333333333333333333333333' WHERE merchant_id = 'merchant-1'",
       ),
-      /GovernedWalletMigrationRequired/,
+      /ImmutableSettlementWallet/,
     );
     await assert.rejects(db.query("DELETE FROM core.products WHERE product_id = 'product-1'"), /ImmutableRecord/);
   } finally {

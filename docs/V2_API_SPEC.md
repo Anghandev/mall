@@ -160,7 +160,9 @@ Merchant profile and audit routes:
 
 Merchant profile updates accept only shop name and an owned provider-sealed
 Logo asset. The settlement wallet is returned read-only and is never an
-ordinary profile-update field. Merchant audit requires a current active wallet
+ordinary profile-update field. After approval it is permanently immutable and
+is not exposed as an Admin review action; a wrong pre-approval address requires
+rejecting that application and creating a new one. Merchant audit requires a current active wallet
 binding and filters by explicit `merchant_id`; actor-wallet filtering cannot
 cross that boundary. Responses expose bounded summaries and proof references,
 not raw payloads. CSV export requires a time range of at most 31 days, returns

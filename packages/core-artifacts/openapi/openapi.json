@@ -28744,8 +28744,7 @@
         "enum": [
           "APPROVE",
           "REJECT",
-          "BLACKLIST",
-          "CHANGE_SETTLEMENT_WALLET"
+          "BLACKLIST"
         ]
       },
       "MerchantQualificationAccess": {
@@ -29206,9 +29205,6 @@
           "reasonCode": {
             "type": "string",
             "pattern": "^[A-Z0-9_:-]{2,64}$"
-          },
-          "proposedSettlementWallet": {
-            "$ref": "#/components/schemas/Address"
           },
           "idempotencyKey": {
             "type": "string",

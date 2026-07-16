@@ -1797,7 +1797,6 @@ function merchantLifecycleOpenApiSchemas() {
     MerchantReviewChallengeRequest: object({
       action: ref('MerchantReviewAction'),
       reasonCode: { type: 'string', pattern: '^[A-Z0-9_:-]{2,64}$' },
-      proposedSettlementWallet: ref('Address'),
       idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
     }, ['action', 'reasonCode', 'idempotencyKey']),
     MerchantReviewPublishRequest: object({
@@ -6173,7 +6172,6 @@ export interface MerchantApplicationUpdateRequest {
 export interface MerchantReviewChallengeRequest {
   action: MerchantReviewAction;
   reasonCode: string;
-  proposedSettlementWallet?: Address;
   idempotencyKey: string;
 }
 

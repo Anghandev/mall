@@ -517,7 +517,7 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
     'PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED', 'BLACKLISTED',
   ]);
   assert.deepEqual(enums.merchantReviewActions, [
-    'APPROVE', 'REJECT', 'BLACKLIST', 'CHANGE_SETTLEMENT_WALLET',
+    'APPROVE', 'REJECT', 'BLACKLIST',
   ]);
   assert.deepEqual(enums.merchantQualificationAccess, ['FULL', 'REDACTED', 'UNAVAILABLE']);
   assert.deepEqual(enums.logisticsCarrierCodes, ['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS']);
@@ -587,11 +587,7 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
     ),
     ['AVAILABLE', 'DecisionBlocked'],
   );
-  assert.ok(openapi.components.schemas.MerchantReviewChallengeRequest.properties.proposedSettlementWallet);
-  assert.equal(
-    openapi.components.schemas.MerchantReviewChallengeRequest.required.includes('proposedSettlementWallet'),
-    false,
-  );
+  assert.equal('proposedSettlementWallet' in openapi.components.schemas.MerchantReviewChallengeRequest.properties, false);
   assert.deepEqual(
     Object.keys(openapi.components.schemas.MerchantOrderAnalytics.properties.cumulative.properties),
     ['listPriceUsdt', 'buyerPaidUsdt', 'merchantBaseReceivableUsdt', 'merchantNetReceivableUsdt'],

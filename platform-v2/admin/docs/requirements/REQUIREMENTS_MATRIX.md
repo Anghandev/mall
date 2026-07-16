@@ -18,7 +18,7 @@ are never soft-deletable.
 | ADM-DASH-002 | 18-19 | Pending merchant/product reviews, after-sale cases and low-stock products | D-V2-004 | After-sale excludes business refunds and includes exchange/delay/arbitration/takeover queues | Overridden | GAP-ADM-005 |
 | ADM-DASH-003 | 20-21 | Today signed settlement requests and Safe-settled USDT; chain failures; abnormal orders; blacklist blocks; per-asset Safe-assets/unsettled-liabilities coverage and breaker state | D-V2-007, D-V2-016, D-V2-024 | Coverage uses verified Safe assets and append-only liabilities; below 100% pauses new payments and new settlement batches without reporting healthy | Overridden | GAP-ADM-005, GAP-ADM-011, GAP-ADM-017 |
 | ADM-DASH-004 | 22-24 | RPC latency ms, Oracle deviation %, high-Gas blocks, bot orders, CPU, memory, Redis hit, MQ backlog and block height | D-V2-012 | Readiness never reports healthy without real probes | Frozen | GAP-ADM-005, GAP-ADM-018 |
-| ADM-MER-001 | 26-31 | Pending/Approved/Rejected/Blacklist menus; shop, license image, legal name/ID, phone, settlement wallet; approved wallet immutability | D-V2-014, D-V2-015 | PII access is RBAC scoped; wallet changes use governed intent | Verified | - |
+| ADM-MER-001 | 26-31 | Pending/Approved/Rejected/Blacklist menus; shop, license image, legal name/ID, phone, settlement wallet; approved wallet immutability | D-V2-014, D-V2-015, D-V2-029 | PII access is RBAC scoped; approved settlement wallets are permanently immutable with no Admin or Safe override | Verified | - |
 | ADM-MER-002 | 32-33 | V1-V5 levels; per-product max USDT settlement price; monthly seckill quota | - | Validation and version history are authoritative and audited | Verified | - |
 | ADM-MER-003 | 34-36 | Ordinary/seckill cumulative orders, cumulative USDT flow, today sales; pending/transit/signed/pickup counts and 48H fast-ship rate | - | Drilldown reconciles dashboard totals | Verified | - |
 | ADM-MER-004 | 37 | Source forced-refund count, USDT penalties and abnormal-order rate | D-V2-004, D-V2-005, D-V2-018, D-V2-020 | Replace with takeover cases, 1,000-USDT guarantee status, frozen-receivable/future-proceeds deductions, merchant debt and abnormal-order rate; no business-refund or risk-reserve metric | Overridden | GAP-ADM-006, GAP-ADM-010, GAP-ADM-017 |
@@ -225,11 +225,11 @@ The current Admin consumer is pinned to
 merchant lifecycle API and review workspace:
 
 - `ADM-MER-001`: qualification PII remains FULL/REDACTED/UNAVAILABLE by Core
-  RBAC. An APPROVED merchant exposes `CHANGE_SETTLEMENT_WALLET` only in the
-  ADMIN review workflow; the proposed address is required and then bound to
-  the existing challenge, independent secondary EIP-712 signature and Safe
-  publication. Create accepts the initial wallet, while ordinary profile
-  updates expose no wallet field.
+  RBAC. The initial application accepts a settlement wallet, but approval makes
+  it permanently immutable. Admin review exposes no wallet-change action and
+  Safe approval cannot override the database guard. An incorrect address is
+  handled only by rejecting the pending application and creating a new one;
+  ordinary profile updates expose no wallet field.
 - `ADM-MER-002`: AVAILABLE level policy displays the config ID, version,
   effective time, current level, USDT-atomic per-product settlement maximum and
   monthly seckill quota. A missing published policy remains `DecisionBlocked`.

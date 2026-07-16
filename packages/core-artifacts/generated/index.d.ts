@@ -14,7 +14,7 @@ export type TransactionFinalityState = "SUBMITTED" | "MINED" | "REPLACED" | "REO
 export type UserRole = "BUYER" | "MERCHANT" | "ADMIN" | "OPERATOR" | "ARBITRATOR" | "AUDITOR";
 export type MerchantLevel = "V1" | "V2" | "V3" | "V4" | "V5";
 export type MerchantLifecycleStatus = "PENDING" | "APPROVED" | "REJECTED" | "SUSPENDED" | "BLACKLISTED";
-export type MerchantReviewAction = "APPROVE" | "REJECT" | "BLACKLIST" | "CHANGE_SETTLEMENT_WALLET";
+export type MerchantReviewAction = "APPROVE" | "REJECT" | "BLACKLIST";
 export type MerchantQualificationAccess = "FULL" | "REDACTED" | "UNAVAILABLE";
 export type BreakerScope = "NEW_PAYMENT" | "SECKILL_PURCHASE" | "NEW_SETTLEMENT_BATCH";
 export type CatalogProductAction = "SAVE_DRAFT" | "CREATE_CONCESSION_PREVIEW" | "SUBMIT_REVIEW" | "APPROVE" | "REJECT" | "PUBLISH" | "ADJUST_INVENTORY" | "HIDE" | "DELIST";
@@ -233,7 +233,6 @@ export interface MerchantApplicationUpdateRequest {
 export interface MerchantReviewChallengeRequest {
   action: MerchantReviewAction;
   reasonCode: string;
-  proposedSettlementWallet?: Address;
   idempotencyKey: string;
 }
 

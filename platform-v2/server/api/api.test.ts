@@ -1750,10 +1750,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
         idempotencyKey: 'merchant-http-wallet-change-1',
       }),
     });
-    assert.equal(merchantWalletChange.status, 201);
-    assert.equal(((await merchantWalletChange.json()) as {
-      input: { proposedSettlementWallet: string };
-    }).input.proposedSettlementWallet, '0x1212121212121212121212121212121212121212');
+    assert.equal(merchantWalletChange.status, 400);
     assert.equal((await fetch(`${base}/v2/admin/merchants/merchant-created/review-actions/${HASH}/publish`, {
       method: 'POST',
       headers: bearerHeaders,

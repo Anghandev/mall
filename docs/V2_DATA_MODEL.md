@@ -185,6 +185,10 @@ overwrite a later reorg `LOCKED` state.
   resolved from the settlement wallet or immutable order. Multi-merchant Safe
   batches append separate tenant audit entries with merchant-only counts and
   amounts; they never expose another merchant's order, request or recipient.
+- `core.merchants.settlement_wallet` is permanently immutable after approval.
+  Review actions contain no wallet-change kind, and the database trigger has no
+  Admin, signer or Safe exception. Rejected pre-approval applications may be
+  replaced by a new application with the correct address.
 - `core.takeover_case_transitions` records future state changes append-only.
   Existing pre-migration cases are labeled partial; buyer projection omits
   guarantee sources, debt, Safe internals and internal evidence hashes.

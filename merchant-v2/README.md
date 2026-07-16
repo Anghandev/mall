@@ -103,8 +103,9 @@ Pickup verification accepts an exact six-digit code from the browser's native
 camera/BarcodeDetector path or the always-available manual field, then submits
 the existing order/store-bound Core verification command. Unsupported cameras,
 denied permission and recognition failure remain explicit errors and never
-simulate a successful scan. Governed settlement-wallet migration remains fail
-closed. Real provider accounts, authorized production wallets and physical
+simulate a successful scan. The approved settlement wallet is permanently
+immutable and has no migration or recovery action. Real provider accounts,
+authorized production wallets and physical
 camera/printer acceptance remain externally blocked. The browser never calls
 the buyer-only payment projection with a merchant session.
 
