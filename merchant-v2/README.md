@@ -11,7 +11,7 @@ pnpm --filter @abu24k/merchant check
 ```
 
 The app consumes the coordinated `@abu24k/core-artifacts` workspace package at
-`2.0.0-merchant-stores.1`. In addition to Bootstrap, merchant SIWE and the
+`2.0.0-merchant-fulfillment.1`. In addition to Bootstrap, merchant SIWE and the
 payment/fulfillment surfaces, the workbench consumes merchant finance,
 guarantee-deposit evidence, settlement intents, signed settlement requests and
 Safe-finality history. The help center reads wallet-targeted published CMS
@@ -49,10 +49,14 @@ availability does not gate the merchant projection.
 The fulfillment center consumes Core's stable `(createdAt, orderId)` cursor,
 server-side date/SKU/state/mode/order-kind filters, complete quantity/payment
 TxHash/order-kind/`allowedActions` rows, the atomic manual-shipment batch,
-provider-issued electronic waybills and durable print jobs. Batch and print
-retries preserve their idempotency keys. The browser submits only published
-provider/carrier/store/order fields or Core-issued canonical tracking/evidence
-hashes; it does not derive tracking numbers, print content or financial state.
+provider-issued electronic waybills, durable print jobs and the merchant-scoped
+PII-authorized Excel export. Export requests preserve the applied filters and
+current stable cursor, validate the returned tenant/filter snapshot and verify
+the exact downloaded bytes against Core's SHA-256 content hash. Batch, export
+and print retries preserve their idempotency keys. The browser submits only
+published provider/carrier/store/order fields or Core-issued canonical
+tracking/evidence hashes; it does not derive tracking numbers, print content or
+financial state.
 Carrier codes come from the generated Core enum. Platform carrier enablement
 and provider configuration remain Core authority: `ConfigurationRequired` and
 `InvalidRequest` responses stay visible and never become a browser-side
@@ -75,10 +79,14 @@ shows signature and Safe/chain transaction hashes while labeling
 count as global chain proof. Bounded CSV export downloads only Core-returned
 content for ranges of at most 31 days and at most 1,000 rows.
 
-PII-safe Excel export and governed settlement-wallet migration remain fail
+Pickup verification accepts an exact six-digit code from the browser's native
+camera/BarcodeDetector path or the always-available manual field, then submits
+the existing order/store-bound Core verification command. Unsupported cameras,
+denied permission and recognition failure remain explicit errors and never
+simulate a successful scan. Governed settlement-wallet migration remains fail
 closed. Real provider accounts, authorized production wallets and physical
-printer acceptance remain externally blocked. The browser never calls the buyer-only payment
-projection with a merchant session.
+camera/printer acceptance remain externally blocked. The browser never calls
+the buyer-only payment projection with a merchant session.
 
 Core is expected on the same origin. A separately hosted local Core can be
 selected with `VITE_CORE_API_BASE_URL`; production deployment must provide the

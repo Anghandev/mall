@@ -5,7 +5,7 @@ import { artifactVersion } from '@abu24k/core-artifacts';
 
 const dist = fileURLToPath(new URL('../dist/', import.meta.url));
 const textExtensions = new Set(['.css', '.html', '.js', '.map']);
-const coreBoundary = '支付、履约、结算、商品、媒体、商家资料与审计能力已发布；平台全局运营能力保持 Admin-only';
+const coreBoundary = '支付、履约、结算、商品、媒体、商家资料、审计与订单导出能力已发布；平台全局运营能力保持 Admin-only';
 const forbidden = [
   'legacy/' + 'v1-npl-only',
   '__merchant_visual_review__',
@@ -18,6 +18,7 @@ const forbidden = [
   '2.0.0-logistics.1',
   '2.0.0-merchant-lifecycle.1',
   '2.0.0-logistics-admin.1',
+  '2.0.0-merchant-stores.1',
   '/v2/admin/logistics/',
   '/v2/admin/global/resources',
   '/v2/admin/global/exports',
@@ -31,6 +32,8 @@ const forbidden = [
   '0x4f...1e2d',
   '2026-07-05 12:00',
   '2026-07-04 09:15',
+  'merchant-orders-2026-07-01-2026-07-15.xls',
+  'PFdvcmtib29rPjxSb3c+b3JkZXI8L1Jvdz48L1dvcmtib29rPg==',
 ];
 
 let filesChecked = 0;
