@@ -29,8 +29,8 @@ does not complete or verify a Requirement while its Core capability is missing.
 | MER-FUL-004 | 43-45 | Delivery tab; batch/single Ship action; valid tracking input or electronic generation; order state update | D-V2-007, D-V2-017 | Idempotent shipment evidence and verified provider callback update fulfillment only; shipment cannot directly release, request or settle an asset | Verified | - |
 | MER-FUL-005 | 46-47 | Pickup tab fields: order no., bound verification store, PendingPickup/Verified, verification time | - | Camera/manual verification binds signed challenge and store | Frozen | GAP-MER-007 |
 | MER-FUL-006 | 48-52 | Source delivered/manual merchant completion and one-block release; pickup scan; Locked to Available | D-V2-006, D-V2-007, D-V2-008, D-V2-017 | Merchant can only request forced receipt after 7 days; platform reviews; fulfillment finality makes transferable proceeds/rewards Available and BNM backend points Available, without a BNM token or Claim | Overridden | GAP-MER-018 (BNM conformance evidence) |
-| MER-STORE-001 | 53-57 | Store CRUD scope; name, photos, hours, phone and precise coordinates | - | Required fields, upload ownership and loading/error states tested | Frozen | GAP-MER-008 |
-| MER-STORE-002 | 58-60 | Six-digit national region code; AMap reverse geocode; example 210211; permanent lock; pickup regional-beneficiary binding | D-V2-010, D-V2-014, D-V2-017 | No manual region fallback; signed region; later move creates replacement store | Frozen | GAP-MER-008 |
+| MER-STORE-001 | 53-57 | Store CRUD scope; name, photos, hours, phone and precise coordinates | - | Required fields, upload ownership and loading/error states tested | Verified | - |
+| MER-STORE-002 | 58-60 | Six-digit national region code; AMap reverse geocode; example 210211; permanent lock; pickup regional-beneficiary binding | D-V2-010, D-V2-014, D-V2-017 | No manual region fallback; signed region; later move creates replacement store | Verified | - |
 | MER-STORE-003 | 61 | Physical receipt printer Device ID binding and automatic pickup receipt | D-V2-014, D-V2-019, D-V2-021 | Local device adapter, binding validation, secondary-signature intent, retry/error handling and typed ConfigurationRequired are tested; physical printer evidence remains MER-GOAL-003 | Verified | - |
 | MER-ASSET-001 | 62-65 | Financial/reward center; Today plus Locked/Available/Requested/Batched/Settled transferable-asset dashboard and final Safe transaction history | D-V2-007, D-V2-021, D-V2-023 | USDT merchant proceeds remain a separate canonical liability rail; every state and final Safe TxHash comes from Core | Verified | - |
 | MER-ASSET-002 | 66-70 | Natural-day sales; Locked during shipment/transit/pickup; Available after fulfillment finality; Requested, Batched and cumulative Settled | D-V2-006, D-V2-007, D-V2-017, D-V2-023 | Exact Core projection links each state to orders, journal evidence, settlement request, immutable batch and 15-confirmation Safe finality; no frontend netting or premature release | Frozen | GAP-MER-001 (per-order journal linkage) |
@@ -47,6 +47,24 @@ does not complete or verify a Requirement while its Core capability is missing.
 | MER-GOAL-001 | Final Goal | Real runtime for modules 00-07; desktop/tablet/mobile responsive layout; keyboard/focus/labels; complete loading/empty/error/disabled/offline states | D-V2-021 | Type, consumer, accessibility and Playwright tests exercise working reads and allowed writes; disabled, empty, static or review-only surfaces do not satisfy a module | Frozen | GAP-MER-001 |
 | MER-GOAL-002 | Final Goal | Production build has no fixture; shared batch artifacts only; no parallel endpoint/schema/calldata/amount logic; all published Core capabilities are actually consumed | D-V2-021, D-V2-023 | Production-bundle negative scan, same-version consumer tests and real local Core integration pass; empty action catalogs, fail-closed placeholders and simulated success are not completion evidence | Frozen | GAP-MER-001 |
 | MER-GOAL-003 | Final Goal | Real AMap, Kuaidi100/Cainiao, Feie/Yilianyun, existing BNM backend, authorized merchant wallet, provider account and physical device acceptance | D-V2-019 | Real account, credential, wallet, printer and device evidence only; local adapters and typed ConfigurationRequired paths must already pass before external acceptance | ExternalBlocked | GAP-MER-018 |
+
+## Merchant Stores .1 Verification Evidence
+
+- `@abu24k/core-artifacts@2.0.0-merchant-stores.1` publishes and the Merchant
+  consumer uses managed-store list, create, versioned profile update, activate
+  and close operations; every response is merchant-scoped and strictly parsed.
+- The production UI creates a `DRAFT` from profile fields plus AMap coordinates,
+  never accepts a browser-supplied region or address, binds 1-5 provider-sealed
+  `STORE_IMAGE` assets, preserves immutable location fields, and executes
+  `DRAFT -> ACTIVE -> CLOSED` only through Core capabilities and versions.
+- Consumer/UI tests cover exact methods and paths, media ownership, stable
+  idempotency, version conflict refresh, 403 failure, activation/close and the
+  preserved signed printer binding. `pnpm --filter @abu24k/merchant check`
+  passes 79 tests, typecheck, production build and the no-fixture bundle guard.
+- Production AMap/object-storage credentials and network, an authorized merchant
+  wallet, and real printer accounts/devices remain `ExternalBlocked` acceptance
+  under `MER-GOAL-003`; no production fixture or simulated provider success is
+  counted as evidence for those external conditions.
 
 ## Completion Rule
 
