@@ -671,6 +671,7 @@ describe('platform admin fail-closed experience', () => {
 
   it('uses the Core policy challenge for typed-data signing before a Safe proposal', async () => {
     const wallet = '0x1111111111111111111111111111111111111111';
+    const secondarySigner = '0x3333333333333333333333333333333333333333';
     const providerRequest = vi.fn(async ({ method }: { method: string }) => {
       if (method === 'eth_requestAccounts') return [wallet];
       if (method === 'personal_sign') return '0xsiwe';
@@ -683,9 +684,9 @@ describe('platform admin fail-closed experience', () => {
       if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
       if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['ADMIN'] });
       if (url.endsWith('/v2/admin/policy-drafts') && !init?.method) return jsonResponse([policyDraft()]);
-      if (url.endsWith('/approval-challenge')) return jsonResponse({ draftId: 'draft-1', policyVersion: 2, signer: wallet, typedData: { domain: { name: 'Abu24KPolicyRegistry' }, types: { PolicyPublication: [] }, primaryType: 'PolicyPublication', message: { policyHash: hash('1') } }, digest: hash('2') });
-      if (url.endsWith('/secondary-signature')) return jsonResponse(policyDraft({ state: 'SECONDARY_SIGNED', secondarySigner: wallet, secondarySignatureHash: hash('3') }));
-      if (url.endsWith('/safe-proposal')) return jsonResponse(policyDraft({ state: 'SAFE_PROPOSED', secondarySigner: wallet, secondarySignatureHash: hash('3'), safeAddress: '0x2222222222222222222222222222222222222222', safeCalldataHash: hash('4'), safeTxHash: hash('5'), safeProposalHash: hash('6') }), 202);
+      if (url.endsWith('/approval-challenge')) return jsonResponse({ draftId: 'draft-1', policyVersion: 2, signer: secondarySigner, typedData: { domain: { name: 'Abu24KPolicyRegistry' }, types: { PolicyPublication: [] }, primaryType: 'PolicyPublication', message: { policyHash: hash('1') } }, digest: hash('2') });
+      if (url.endsWith('/secondary-signature')) return jsonResponse(policyDraft({ state: 'SECONDARY_SIGNED', secondarySigner, secondarySignatureHash: hash('3') }));
+      if (url.endsWith('/safe-proposal')) return jsonResponse(policyDraft({ state: 'SAFE_PROPOSED', secondarySigner, secondarySignatureHash: hash('3'), safeAddress: '0x2222222222222222222222222222222222222222', safeCalldataHash: hash('4'), safeTxHash: hash('5'), safeProposalHash: hash('6') }), 202);
       return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected request', correlationId: 'policy-test' } }, 400);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -694,12 +695,13 @@ describe('platform admin fail-closed experience', () => {
 
     await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
     expect(await screen.findByRole('button', { name: 'draft-1' })).toBeTruthy();
-    await user.type(screen.getByLabelText('二次签名 nonce'), '7');
-    await user.type(screen.getByLabelText('签名 deadline · Unix 秒'), '1800000000');
     await user.click(screen.getByRole('button', { name: '请求并提交二次签名' }));
 
     expect(await screen.findByText(/二次签名已由 Core 验证/)).toBeTruthy();
-    expect(providerRequest).toHaveBeenCalledWith(expect.objectContaining({ method: 'eth_signTypedData_v4' }));
+    expect(providerRequest).toHaveBeenCalledWith(expect.objectContaining({ method: 'eth_signTypedData_v4', params: [secondarySigner, expect.any(String)] }));
+    const challengeBody = JSON.parse(String(fetchMock.mock.calls.find(([input]) => String(input).endsWith('/approval-challenge'))?.[1]?.body));
+    const signatureBody = JSON.parse(String(fetchMock.mock.calls.find(([input]) => String(input).endsWith('/secondary-signature'))?.[1]?.body));
+    expect(signatureBody).toMatchObject({ nonce: challengeBody.nonce, deadline: challengeBody.deadline, signature: '0xsecondary' });
     const safeButton = screen.getByRole('button', { name: '提交 Safe 多签提案' });
     expect(safeButton.hasAttribute('disabled')).toBe(false);
     await user.click(safeButton);
@@ -1179,7 +1181,18 @@ function policyDraft(overrides: Record<string, unknown> = {}) {
     nextPolicyVersion: '2',
     basePolicyVersion: '1',
     artifactVersion,
-    payload: {},
+    payload: {
+      oracleVersion: '',
+      rulesContentHash: '',
+      policy: {
+        usdtPaymentBps: 7000, nplPaymentBps: 3000, nplBurnListPriceBps: 2000, nplRewardListPriceBps: 1000,
+        genesisBps: 200, directReferralBps: 100, districtBps: 120, cityBps: 80, provinceBps: 60, regionBps: 40, operationsBps: 400,
+        seckillMainDuration: 3600, relayInitial: 60, relayIncrement: 30, relayCap: 60,
+        oracleWindowSeconds: 1800, oracleMaxDeviationBps: 500, oracleMaxAgeSeconds: 600,
+        oracleMinimumUsdtLiquidity: '50000000000000000000000', requiredConfirmations: 15,
+        merchantGuaranteeMinimumUsdt: '1000000000000000000000',
+      },
+    },
     validationErrors: [],
     state: 'DRAFT',
     policyHash: hash('1'),

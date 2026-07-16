@@ -1670,10 +1670,22 @@ export interface NotificationCampaignRetryResult {
 }
 
 export interface SystemConfigCreateRequest {
-  configKey: SystemConfigKey;
+  configKey: Exclude<SystemConfigKey, 'FREIGHT'>;
   payload: JsonObject;
   effectiveFrom: string;
   idempotencyKey: string;
+}
+
+export interface SystemConfigApprovalChallengeRequest {
+  nonce: AtomicAmount;
+  deadline: AtomicAmount;
+}
+
+export interface SystemConfigApprovalChallenge extends Omit<SensitiveApproval, 'signature'> {
+  configVersionId: string;
+  signer: Address;
+  typedData: Eip712TypedData;
+  digest: Bytes32;
 }
 
 export interface SystemConfigProjection {

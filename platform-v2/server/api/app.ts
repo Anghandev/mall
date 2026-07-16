@@ -535,12 +535,13 @@ export interface NotificationApiService {
 
 export interface SystemConfigApiService {
   createVersion(actor: FulfillmentActor, input: {
-    configKey: 'BUSINESS' | 'FREIGHT' | 'RPC' | 'ORACLE' | 'GAS' | 'CHAIN' | 'INTEGRATIONS';
+    configKey: 'BUSINESS' | 'RPC' | 'ORACLE' | 'GAS' | 'CHAIN' | 'INTEGRATIONS' | 'MERCHANT_LEVELS';
     payload: unknown;
     effectiveFrom: string;
     idempotencyKey: string;
     correlationId: string;
   }): Promise<unknown>;
+  approvalChallenge(actor: FulfillmentActor, configVersionId: string, input: { nonce: string; deadline: string }): Promise<unknown>;
   publish(actor: FulfillmentActor, configVersionId: string, approval: ConfigApprovalInput): Promise<unknown>;
   list(actor: FulfillmentActor): Promise<unknown>;
 }
@@ -3139,6 +3140,17 @@ async function routeAdminServices(
     return true;
   }
   const configPath = matchResourceAction(url.pathname, '/v2/admin/system-config/versions/');
+  if (request.method === 'POST' && configPath?.action === 'approval-challenge') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['nonce', 'deadline']);
+    sendJson(response, 200, await dependencies.systemConfigService.approvalChallenge(
+      fulfillmentActor(claims),
+      configPath.resourceId,
+      { nonce: requiredString(body, 'nonce'), deadline: requiredString(body, 'deadline') },
+    ), correlationId);
+    return true;
+  }
   if (request.method === 'POST' && configPath?.action === 'publish') {
     const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN']);
     const body = await readJson(request);

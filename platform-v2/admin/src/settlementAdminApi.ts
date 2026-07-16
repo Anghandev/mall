@@ -31,6 +31,7 @@ import {
   type CoverageBreakerResumeChallenge,
   type CoverageBreakerResumeChallengeRequest,
   type CoverageBreakerResumeRequest,
+  type Eip712TypedData,
   type MerchantFinanceProjection,
   type MonitoringAcknowledgeResult,
   type MonitoringDashboard,
@@ -48,6 +49,7 @@ import {
   type PolicySecondarySignatureRequest,
   type SettlementListProjection,
   type SensitiveApproval,
+  type SystemConfigApprovalChallenge,
   type SystemConfigCreateRequest,
   type SystemConfigProjection,
   type TakeoverFundingChallenge,
@@ -279,6 +281,25 @@ export async function createSystemConfigVersion(input: SystemConfigCreateRequest
   return body;
 }
 
+export async function createSystemConfigApprovalChallenge(
+  configVersionId: string,
+  input: { nonce: string; deadline: string },
+  token: string,
+): Promise<SystemConfigApprovalChallenge> {
+  requireAmount(input.nonce, 'nonce');
+  requireAmount(input.deadline, 'deadline');
+  const body = await authenticatedWrite(
+    `${resourcePath('/v2/admin/system-config/versions/', configVersionId)}/approval-challenge`,
+    'POST',
+    input,
+    token,
+  );
+  if (!isSystemConfigApprovalChallenge(body, configVersionId, input)) {
+    throw invalid('System config approval challenge does not match the coordinated generated type');
+  }
+  return body;
+}
+
 export async function publishSystemConfigVersion(configVersionId: string, approval: SensitiveApproval, token: string): Promise<SystemConfigProjection> {
   if (!isSensitiveApproval(approval)) throw invalid('System config approval does not match SensitiveApproval');
   const body = await authenticatedWrite(`${resourcePath('/v2/admin/system-config/versions/', configVersionId)}/publish`, 'POST', { approval }, token);
@@ -487,6 +508,37 @@ function isSystemConfig(value: unknown): value is SystemConfigProjection {
     && typeof value.published === 'boolean'
     && addressPattern.test(String(value.createdBy))
     && isDateTime(value.createdAt);
+}
+
+function isSystemConfigApprovalChallenge(
+  value: unknown,
+  configVersionId: string,
+  input: { nonce: string; deadline: string },
+): value is SystemConfigApprovalChallenge {
+  const typedData = isRecord(value) ? value.typedData : undefined;
+  if (!isRecord(value)
+    || value.configVersionId !== configVersionId
+    || value.resourceId !== configVersionId
+    || value.action !== 'PUBLISH_SYSTEM_CONFIG'
+    || value.resourceType !== 'SYSTEM_CONFIG'
+    || value.nonce !== input.nonce
+    || value.deadline !== input.deadline
+    || !addressPattern.test(String(value.signer))
+    || !bytes32Pattern.test(String(value.digest))
+    || !isTypedData(typedData)) return false;
+  const message = typedData.message;
+  if (!isRecord(message)) return false;
+  const approval = { ...value, signature: '0xplaceholder' };
+  return isSensitiveApproval(approval)
+    && message.action === value.action
+    && message.resourceType === value.resourceType
+    && message.resourceId === value.resourceId
+    && String(message.policyVersion) === value.policyVersion
+    && String(message.oldValueHash).toLowerCase() === String(value.oldValueHash).toLowerCase()
+    && String(message.newValueHash).toLowerCase() === String(value.newValueHash).toLowerCase()
+    && String(message.safeAddress).toLowerCase() === String(value.safeAddress).toLowerCase()
+    && String(message.nonce) === value.nonce
+    && String(message.deadline) === value.deadline;
 }
 
 function isAuditList(value: unknown): value is AuditListResponse {
@@ -795,7 +847,7 @@ function isNotificationDeliveryCounts(value: unknown): value is NotificationCamp
   return notificationDeliveryStates.every((state) => Number.isSafeInteger(value[state]) && Number(value[state]) >= 0);
 }
 
-function isTypedData(value: unknown) {
+function isTypedData(value: unknown): value is Eip712TypedData {
   return isRecord(value) && isRecord(value.domain) && isRecord(value.types) && typeof value.primaryType === 'string' && isRecord(value.message);
 }
 

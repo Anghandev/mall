@@ -6647,6 +6647,44 @@ test('system config keeps secrets as references and publishes exact old/new vers
     assert.equal(first.version, 1);
     assert.equal(first.payload.primaryRpcSecretRef, 'secret://rpc/primary-v1');
     assert.equal(JSON.stringify(first).includes('https://'), false);
+    const challenge = await service.approvalChallenge(actor, first.configVersionId, {
+      nonce: '101',
+      deadline: String(Math.floor(now.getTime() / 1_000) + 300),
+    });
+    assert.equal(challenge.signer, secondary.address.toLowerCase());
+    assert.notEqual(challenge.signer, admin.address.toLowerCase());
+    assert.equal(challenge.oldValueHash, `0x${'0'.repeat(64)}`);
+    assert.equal(challenge.newValueHash, first.payloadHash);
+    assert.equal(challenge.typedData.message.resourceId, first.configVersionId);
+    assert.equal(challenge.typedData.message.nonce, '101');
+    assert.throws(
+      () => service.approvalChallenge({ walletAddress: admin.address, roles: ['OPERATOR'] }, first.configVersionId, {
+        nonce: '102', deadline: challenge.deadline,
+      }),
+      /Wallet session cannot manage system config/,
+    );
+    assert.throws(
+      () => service.approvalChallenge({ walletAddress: admin.address, roles: ['AUDITOR'] }, first.configVersionId, {
+        nonce: '103', deadline: challenge.deadline,
+      }),
+      /Wallet session cannot manage system config/,
+    );
+    assert.throws(
+      () => service.approvalChallenge(actor, first.configVersionId, {
+        nonce: '104', deadline: String(Math.floor(now.getTime() / 1_000) - 1),
+      }),
+      /System config approval expired/,
+    );
+    assert.throws(
+      () => service.createVersion(actor, {
+        configKey: 'FREIGHT',
+        payload: {},
+        effectiveFrom: '2020-01-01T00:00:00.000Z',
+        idempotencyKey: 'system-freight-retired',
+        correlationId: 'system-freight-retired',
+      }),
+      /Freight is configured per product/,
+    );
     const intent: SensitiveActionIntent = {
       action: 'PUBLISH_SYSTEM_CONFIG',
       resourceType: 'SYSTEM_CONFIG',
@@ -6705,6 +6743,12 @@ test('system config keeps secrets as references and publishes exact old/new vers
       nonce: 102n,
       deadline: BigInt(Math.floor(now.getTime() / 1_000) + 300),
     };
+    const secondChallenge = await service.approvalChallenge(actor, second.configVersionId, {
+      nonce: secondIntent.nonce.toString(),
+      deadline: secondIntent.deadline.toString(),
+    });
+    assert.equal(secondChallenge.oldValueHash, first.payloadHash);
+    assert.equal(secondChallenge.newValueHash, second.payloadHash);
     const secondApproval = {
       action: secondIntent.action,
       resourceType: secondIntent.resourceType,

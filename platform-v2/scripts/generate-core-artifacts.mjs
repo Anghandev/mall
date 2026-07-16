@@ -2961,6 +2961,9 @@ function settlementAdminOpenApiPaths(errorResponse) {
       get: operation('listSystemConfigVersions', { type: 'array', items: { $ref: '#/components/schemas/SystemConfigProjection' } }),
       post: operation('createSystemConfigVersion', { $ref: '#/components/schemas/SystemConfigProjection' }, 201, 'SystemConfigCreateRequest'),
     },
+    '/v2/admin/system-config/versions/{configVersionId}/approval-challenge': {
+      post: resourceOperation('createSystemConfigApprovalChallenge', 'configVersionId', { $ref: '#/components/schemas/SystemConfigApprovalChallenge' }, 200, 'SystemConfigApprovalChallengeRequest'),
+    },
     '/v2/admin/system-config/versions/{configVersionId}/publish': {
       post: resourceOperation('publishSystemConfigVersion', 'configVersionId', { $ref: '#/components/schemas/SystemConfigProjection' }, 200, 'SystemConfigPublishRequest'),
     },
@@ -3981,11 +3984,23 @@ function settlementAdminOpenApiSchemas() {
       retriedDeliveries: { type: 'integer', minimum: 1 },
     }),
     SystemConfigCreateRequest: object({
-      configKey: { enum: [...systemConfigKeys] },
+      configKey: { enum: systemConfigKeys.filter((key) => key !== 'FREIGHT') },
       payload: jsonObject,
       effectiveFrom: timestamp,
       idempotencyKey,
     }),
+    SystemConfigApprovalChallengeRequest: object({ nonce: atomic, deadline: atomic }),
+    SystemConfigApprovalChallenge: object({
+      configVersionId: string,
+      signer: address,
+      ...Object.fromEntries(Object.entries(sensitiveApprovalProperties).filter(([key]) => key !== 'signature')),
+      typedData: eip712TypedData,
+      digest: hash,
+    }, [
+      'configVersionId', 'signer', 'action', 'resourceType', 'resourceId',
+      'policyVersion', 'oldValueHash', 'newValueHash', 'safeAddress', 'nonce',
+      'deadline', 'typedData', 'digest',
+    ]),
     SystemConfigPublishRequest: object({ approval: ref('SensitiveApproval') }),
     SystemConfigProjection: object(configProjectionProperties),
     AuditEntry: object({
@@ -7624,10 +7639,22 @@ export interface NotificationCampaignRetryResult {
 }
 
 export interface SystemConfigCreateRequest {
-  configKey: SystemConfigKey;
+  configKey: Exclude<SystemConfigKey, 'FREIGHT'>;
   payload: JsonObject;
   effectiveFrom: string;
   idempotencyKey: string;
+}
+
+export interface SystemConfigApprovalChallengeRequest {
+  nonce: AtomicAmount;
+  deadline: AtomicAmount;
+}
+
+export interface SystemConfigApprovalChallenge extends Omit<SensitiveApproval, 'signature'> {
+  configVersionId: string;
+  signer: Address;
+  typedData: Eip712TypedData;
+  digest: Bytes32;
 }
 
 export interface SystemConfigProjection {

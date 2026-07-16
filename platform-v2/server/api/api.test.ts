@@ -1406,6 +1406,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     },
     systemConfigService: {
       createVersion: async (_actor, input) => ({ configVersionId: 'config-1', ...input }),
+      approvalChallenge: async (_actor, configVersionId, input) => ({ configVersionId, ...input, signer: SAFE }),
       publish: async (_actor, configVersionId) => ({ configVersionId, published: true }),
       list: async () => [],
     },
@@ -2554,6 +2555,16 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
         idempotencyKey: 'system-config-http-1',
       }),
     })).status, 201);
+    assert.equal((await fetch(`${base}/v2/admin/system-config/versions/config-1/approval-challenge`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ nonce: '1', deadline: '1800000000' }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/system-config/versions/config-1/approval-challenge`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ nonce: '1', deadline: '1800000000', approval: {} }),
+    })).status, 400);
     assert.equal((await fetch(`${base}/v2/admin/system-config/versions/config-1/publish`, {
       method: 'POST',
       headers: bearerHeaders,

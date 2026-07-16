@@ -5049,6 +5049,73 @@
         }
       }
     },
+    "/v2/admin/system-config/versions/{configVersionId}/approval-challenge": {
+      "post": {
+        "operationId": "createSystemConfigApprovalChallenge",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemConfigApprovalChallengeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemConfigApprovalChallenge"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "configVersionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
     "/v2/admin/system-config/versions/{configVersionId}/publish": {
       "post": {
         "operationId": "publishSystemConfigVersion",
@@ -24196,7 +24263,6 @@
           "configKey": {
             "enum": [
               "BUSINESS",
-              "FREIGHT",
               "RPC",
               "ORACLE",
               "GAS",
@@ -24215,6 +24281,111 @@
           },
           "idempotencyKey": {
             "$ref": "#/components/schemas/IdempotencyKey"
+          }
+        }
+      },
+      "SystemConfigApprovalChallengeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "nonce",
+          "deadline"
+        ],
+        "properties": {
+          "nonce": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "deadline": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          }
+        }
+      },
+      "SystemConfigApprovalChallenge": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "configVersionId",
+          "signer",
+          "action",
+          "resourceType",
+          "resourceId",
+          "policyVersion",
+          "oldValueHash",
+          "newValueHash",
+          "safeAddress",
+          "nonce",
+          "deadline",
+          "typedData",
+          "digest"
+        ],
+        "properties": {
+          "configVersionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "signer": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "action": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resourceType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resourceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "policyVersion": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "oldValueHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "newValueHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "safeAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "nonce": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "deadline": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "typedData": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "domain",
+              "types",
+              "primaryType",
+              "message"
+            ],
+            "properties": {
+              "domain": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "types": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "primaryType": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "digest": {
+            "$ref": "#/components/schemas/Bytes32"
           }
         }
       },
