@@ -123,6 +123,7 @@ interface GovernedApprovalRow {
 
 interface TakeoverReplacementSnapshotRow {
   snapshot_id: string;
+  assignment_id: string;
   case_id: string;
   order_id: string;
   recipient_address: string;
@@ -1911,18 +1912,27 @@ async function ensureTakeoverReplacementSnapshot(
     order_id: string;
     policy_version: string | number;
     fulfillment_target_hash: string;
+    assignment_id: string;
   }>(
     `SELECT takeover.case_id, takeover.order_id, takeover.policy_version,
-       lower(orders.fulfillment_target_hash) AS fulfillment_target_hash
+       lower(orders.fulfillment_target_hash) AS fulfillment_target_hash,
+       assignment.assignment_id
      FROM core.takeover_cases takeover
      JOIN core.orders orders ON orders.order_id = takeover.order_id
      JOIN core.fulfillment_targets target
        ON lower(target.target_hash) = lower(orders.fulfillment_target_hash)
+     JOIN LATERAL (
+       SELECT assignment_id, replacement_wallet
+       FROM core.takeover_assignments current_assignment
+       WHERE current_assignment.case_id = takeover.case_id
+       ORDER BY assignment_version DESC LIMIT 1
+     ) assignment ON assignment.replacement_wallet = lower($5)
      WHERE takeover.case_id = $1 AND takeover.order_id = $2
        AND takeover.policy_version = $3
+       AND takeover.state = 'FUNDED'
        AND lower(orders.fulfillment_target_hash) = lower($4)
      FOR UPDATE OF takeover`,
-    [input.caseId, input.orderId, input.policyVersion, input.fulfillmentTargetHash],
+    [input.caseId, input.orderId, input.policyVersion, input.fulfillmentTargetHash, input.recipient],
   );
   if (!authority.rows[0]) {
     throw new CoreError('InvalidFinality', 'Takeover replacement fulfillment target is not authoritative', 409);
@@ -1932,6 +1942,7 @@ async function ensureTakeoverReplacementSnapshot(
     [input.caseId],
   );
   const snapshotContent = {
+    assignmentId: authority.rows[0].assignment_id,
     caseId: input.caseId,
     orderId: input.orderId,
     recipient: input.recipient,
@@ -1948,11 +1959,12 @@ async function ensureTakeoverReplacementSnapshot(
   const snapshotId = randomHash();
   await executor.query(
     `INSERT INTO core.takeover_replacement_fulfillment_snapshots (
-       snapshot_id, case_id, order_id, recipient_address, fulfillment_target_hash,
+       snapshot_id, assignment_id, case_id, order_id, recipient_address, fulfillment_target_hash,
        policy_version, snapshot_hash, created_by, created_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
     [
       snapshotId,
+      authority.rows[0].assignment_id,
       input.caseId,
       input.orderId,
       input.recipient,
@@ -1965,6 +1977,7 @@ async function ensureTakeoverReplacementSnapshot(
   );
   return {
     snapshot_id: snapshotId,
+    assignment_id: authority.rows[0].assignment_id,
     case_id: input.caseId,
     order_id: input.orderId,
     recipient_address: input.recipient,
@@ -2236,7 +2249,7 @@ async function assertAvailableSource(
     let replacementSnapshot: TakeoverReplacementSnapshotRow | undefined;
     if (intent.rail === 'TAKEOVER_USDT') {
       const result = await executor.query<TakeoverReplacementSnapshotRow>(
-        `SELECT snapshot_id, case_id, order_id, recipient_address,
+        `SELECT snapshot_id, assignment_id, case_id, order_id, recipient_address,
            fulfillment_target_hash, policy_version, snapshot_hash
          FROM core.takeover_replacement_fulfillment_snapshots WHERE snapshot_id = $1`,
         [governedApproval.replacement_fulfillment_snapshot_id],
@@ -2305,6 +2318,7 @@ async function assertAvailableSource(
       || replacementSnapshot.fulfillment_target_hash !== source.fulfillment_target_hash
       || BigInt(replacementSnapshot.policy_version) !== BigInt(source.policy_version)
       || replacementSnapshot.snapshot_hash !== hashJson({
+        assignmentId: replacementSnapshot.assignment_id,
         caseId: replacementSnapshot.case_id,
         orderId: replacementSnapshot.order_id,
         recipient: replacementSnapshot.recipient_address,

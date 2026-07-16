@@ -312,6 +312,39 @@ Production Safe/RPC/domain/wallets, provider credentials, physical devices and
 deployment remain `ExternalBlocked` under `ADM-GOAL-003`. No production fixture
 is shipped.
 
+## Settlement/Admin `.10` Global Clearing Evidence
+
+The current Admin consumer is pinned to
+`@abu24k/core-artifacts@2.0.0-settlement-admin.10` and uses only generated DTOs
+and published OpenAPI paths:
+
+- `ADM-CLEAR-001`: an ADMIN/OPERATOR/AUDITOR can read an exact order payment
+  through `GET /v2/admin/payments/{orderId}` without holding the buyer wallet.
+  Router method, immutable intent amounts, submitted TxHash and indexed
+  finality are rendered from Core; BUYER remains `403`.
+- `ADM-CLEAR-002`: filtered request and batch detail renders every published
+  Safe owner approval against the immutable Safe TxHash and batch content hash.
+  Policy/address old/new diff evidence remains governed by the existing policy
+  and audit surfaces; this batch does not relabel unresolved commercial policy
+  requirements complete.
+- `ADM-CLEAR-004`, `ADM-CLEAR-005`, `ADM-CLEAR-006` and `ADM-CLEAR-007`: the
+  workspace renders immutable request items and journal transitions, batch
+  orders/recipients/atomic amounts, content and item hashes, chain/Safe/nonce,
+  approvals, execution replacement attempts, Core finality, verified coverage,
+  all independent breaker projections and Core reconciliation movements. It
+  never totals or reconciles money in the browser.
+- Both list endpoints apply the generated filters on Core and preserve the
+  complete two-field cursor. `MINED 14/15` remains visibly non-final;
+  `FAILED` and `REORGED` are explicit ineffective states. No manual transfer,
+  batch-build, Safe-submit or balance-edit control exists.
+- Matrix row classifications above remain unchanged where full PRD scope or
+  production evidence is still unresolved. Merchant historical BNM aggregate
+  remains unavailable, while production Safe/RPC/owner/deployment evidence is
+  `ExternalBlocked` under `ADM-GOAL-003`.
+
+All fixtures remain in `tests/**` and the production-bundle guard requires the
+three new Admin clearing route families while rejecting Merchant-only routes.
+
 ## Platform Seckill Operations Closure Evidence
 
 The completed Admin consumer remains pinned to the coordinated

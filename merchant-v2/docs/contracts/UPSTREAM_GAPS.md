@@ -1,6 +1,6 @@
 # Merchant Workbench Core Gaps
 
-The merchant product consumes Core's coordinated `2.0.0-merchant-fulfillment.1` artifact
+The merchant product consumes Core's coordinated `2.0.0-settlement-admin.10` artifact
 workspace package. Bootstrap, SIWE,
 merchant-bound Catalog/SKU/inventory management, immutable media, wallet-scoped fulfillment, merchant finance,
 guarantee-deposit evidence, signed settlement requests and Safe-finality
@@ -14,6 +14,10 @@ Platform qualification decisions and business-license PII are admin-owned and
 have no Merchant write route.
 Admin global search/export and product batch-tag operations remain outside the
 Merchant API and production bundle.
+Admin-wide settlement request/batch reads, governed settlement intents and
+coverage-breaker recovery also remain outside the Merchant API and production
+bundle. Existing Merchant settlement intent, signed request and history routes
+remain unchanged.
 
 ## Resolved In Settlement/Admin Batch
 

@@ -4,7 +4,7 @@ export const coreState = Object.freeze({
   artifactStatus: productBaseline.coreArtifacts,
   artifactVersion: productBaseline.artifactVersion,
   connectionLabel: `Core ${productBaseline.artifactVersion} · Admin global ops`,
-  reason: '共享 Core 已发布商家门店管理，但 Admin 仅消费既有平台能力，不调用商家门店写接口。',
+  reason: '共享 Core 已发布全局支付、结算申请和 Safe 批次只读证据；Admin 不构建交易、不计算金额也不设置终态。',
   executableOrderActionNames: productBaseline.publicCatalogs.executableOrderActionNames,
   canRead: productBaseline.adminCapabilities.projections,
   canWriteWithoutRuntimeAuthorization: productBaseline.adminCapabilities.writesWithoutRuntimeAuthorization,

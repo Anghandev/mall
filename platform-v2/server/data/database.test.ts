@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createCipheriv, createHash } from 'node:crypto';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -66,6 +66,7 @@ import { SettlementService } from './settlement-service.ts';
 import { SeckillService } from './seckill-service.ts';
 import { SeckillOperationsService } from './seckill-operations-service.ts';
 import { TakeoverFundingService, type TakeoverFundingApprovalInput } from './takeover-funding-service.ts';
+import { TakeoverCaseService } from './takeover-case-service.ts';
 import { PolicyService } from './policy-service.ts';
 import { NotificationService } from './notification-service.ts';
 import { SystemConfigService } from './system-config-service.ts';
@@ -128,6 +129,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '022_admin_global_operations.sql',
       '023_merchant_store_management.sql',
       '024_merchant_fulfillment_completion.sql',
+      '025_takeover_assignments.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -9169,6 +9171,163 @@ test('takeover funding consumes final guarantee first and records Operations adv
   }
 });
 
+test('takeover assignment authorizes one qualified replacement merchant through real shipment', async () => {
+  const db = await createBusinessDatabase();
+  const operatorWallet = Wallet.createRandom();
+  const auditorWallet = Wallet.createRandom();
+  const firstWallet = Wallet.createRandom();
+  const secondWallet = Wallet.createRandom();
+  const ineligibleWallet = Wallet.createRandom();
+  try {
+    const intent = paymentIntent();
+    const now = new Date((intent.issuedAt + 42) * 1000 + 7 * 24 * 60 * 60 * 1000);
+    const deliveryKey = '11'.repeat(32);
+    const encrypted = encryptTestPayload({
+      recipientName: 'Replacement Buyer', phone: '13800138000',
+      address: 'Beijing Dongcheng 1', longitude: 116.4, latitude: 39.9,
+    }, Buffer.from(deliveryKey, 'hex'));
+    await db.query(
+      `INSERT INTO core.administrative_regions (
+         region_code, province, city, district, source, source_reference_hash, status
+       ) VALUES ('110101','Beijing','Beijing','Dongcheng','GOVERNED_IMPORT',$1,'ACTIVE')`,
+      [HASH],
+    );
+    await db.query(
+      `INSERT INTO core.fulfillment_targets (
+         target_id, target_hash, buyer_wallet, idempotency_key, request_hash,
+         fulfillment_mode, region_code, region_code_hash, encrypted_payload,
+         encryption_iv, encryption_tag, expires_at, created_at
+       ) VALUES ('target:replacement',$1,$2,'replacement-target-1',$1,'DELIVERY',
+         '110101',$1,$3,$4,$5,$6,$7)`,
+      [
+        intent.fulfillmentTargetHash,
+        intent.buyer,
+        encrypted.ciphertext,
+        encrypted.iv,
+        encrypted.tag,
+        new Date(now.getTime() + 60_000),
+        new Date(now.getTime() - 60_000),
+      ],
+    );
+    await recordFinalPayment(db, intent);
+    await grantRole(db, operatorWallet.address, 'OPERATOR');
+    await grantRole(db, auditorWallet.address, 'AUDITOR');
+    const operator = { walletAddress: operatorWallet.address, roles: ['OPERATOR'] as const };
+    const auditor = { walletAddress: auditorWallet.address, roles: ['AUDITOR'] as const };
+    const fulfillment = new FulfillmentService({ transactions: transactionAdapter(db), clock: () => now });
+    const takeover = await fulfillment.openTakeover(operator, intent.orderId, {
+      idempotencyKey: 'replacement-assignment-open-1',
+      evidenceHash: `0x${'6'.repeat(64)}`,
+      reasonCode: 'NO_SHIPMENT',
+    });
+    await db.query(
+      `UPDATE core.takeover_cases SET state = 'FUNDED', required_usdt = 20,
+         platform_advance_usdt = 20, platform_advance_safe_address = $2,
+         merchant_debt_usdt = 20, updated_at = $3 WHERE case_id = $1`,
+      [takeover.caseId, '0x5555555555555555555555555555555555555555', now],
+    );
+    await seedEligibleReplacementMerchant(db, 'replacement-1', firstWallet.address, '1', now, true);
+    await seedEligibleReplacementMerchant(db, 'replacement-2', secondWallet.address, '2', now, true);
+    await seedEligibleReplacementMerchant(db, 'replacement-ineligible', ineligibleWallet.address, '3', now, false);
+
+    const service = new TakeoverCaseService({ transactions: transactionAdapter(db), clock: () => now });
+    const candidates = await service.listCandidates(operator, takeover.caseId);
+    assert.deepEqual(candidates.candidates.map((candidate) => candidate.merchantId), ['replacement-1', 'replacement-2']);
+    assert.equal((await service.listAdmin(auditor)).cases.length, 1);
+    await assert.rejects(
+      service.assign(auditor, takeover.caseId, {
+        replacementMerchantId: 'replacement-1', reasonCode: 'WAREHOUSE_MATCH',
+        evidenceHash: `0x${'7'.repeat(64)}`, idempotencyKey: 'auditor-assignment-denied', correlationId: 'auditor-denied',
+      }),
+      /ADMIN or OPERATOR role is required/,
+    );
+    await assert.rejects(
+      service.assign(operator, takeover.caseId, {
+        replacementMerchantId: 'replacement-ineligible', reasonCode: 'WAREHOUSE_MATCH',
+        evidenceHash: `0x${'7'.repeat(64)}`, idempotencyKey: 'ineligible-assignment-denied', correlationId: 'ineligible-denied',
+      }),
+      /not currently eligible/,
+    );
+    const firstInput = {
+      replacementMerchantId: 'replacement-1', reasonCode: 'WAREHOUSE_MATCH',
+      evidenceHash: `0x${'7'.repeat(64)}`, idempotencyKey: 'replacement-assignment-1', correlationId: 'replacement-1',
+    };
+    const first = await service.assign(operator, takeover.caseId, firstInput);
+    assert.equal(first.assignment.version, 1);
+    assert.equal((await service.assign(operator, takeover.caseId, firstInput)).assignment.assignmentId, first.assignment.assignmentId);
+    const firstActor = { walletAddress: firstWallet.address, roles: ['MERCHANT'] as const, merchantId: 'replacement-1' };
+    const secondActor = { walletAddress: secondWallet.address, roles: ['MERCHANT'] as const, merchantId: 'replacement-2' };
+    assert.equal((await service.listMerchant(firstActor)).cases[0]?.caseId, takeover.caseId);
+    await assert.rejects(service.getMerchant(secondActor, takeover.caseId), /outside the replacement merchant scope/);
+
+    const second = await service.assign(operator, takeover.caseId, {
+      replacementMerchantId: 'replacement-2', reasonCode: 'CAPACITY_REASSIGNMENT',
+      evidenceHash: `0x${'8'.repeat(64)}`, idempotencyKey: 'replacement-assignment-2', correlationId: 'replacement-2',
+    });
+    assert.equal(second.assignment.version, 2);
+    assert.equal(second.assignment.supersedesAssignmentId, first.assignment.assignmentId);
+    await assert.rejects(service.getMerchant(firstActor, takeover.caseId), /outside the replacement merchant scope/);
+    await assert.rejects(
+      db.query('UPDATE core.takeover_assignments SET reason_code = $2 WHERE assignment_id = $1', [
+        first.assignment.assignmentId, 'MUTATED',
+      ]),
+      /ImmutableRecord/,
+    );
+
+    const targets = new FulfillmentTargetService({
+      transactions: transactionAdapter(db),
+      regions: { reverseGeocode: async () => { throw new Error('unused'); } },
+      encryptionKey: deliveryKey,
+      clock: () => now,
+    });
+    assert.equal((await targets.getOrderTarget(secondActor, intent.orderId)).payload.recipientName, 'Replacement Buyer');
+    await assert.rejects(targets.getOrderTarget(firstActor, intent.orderId), /outside the authenticated wallet scope/);
+
+    const evidence = new EvidenceService({
+      transactions: transactionAdapter(db),
+      storage: {
+        createUpload: async () => { throw new Error('unused'); },
+        finalizeUpload: async () => { throw new Error('unused'); },
+        createRead: async () => { throw new Error('unused'); },
+      },
+      trackingHashKey: '22'.repeat(32),
+      trackingEncryptionKey: deliveryKey,
+      clock: () => now,
+    });
+    const tracking = await evidence.createTrackingEvidence(secondActor, {
+      orderId: intent.orderId,
+      carrierCode: 'SF',
+      trackingNumber: 'SF-REPLACEMENT-001',
+      idempotencyKey: 'replacement-tracking-evidence-1',
+    });
+    const trackingNumberHash = tracking.trackingNumberHash;
+    assert.ok(trackingNumberHash);
+    await evidence.assertTrackingEvidence(secondActor, {
+      orderId: intent.orderId,
+      carrierCode: 'SF',
+      trackingNumberHash,
+      evidenceHash: tracking.evidenceHash,
+    });
+    const shipped = await fulfillment.recordShipment(secondActor, intent.orderId, {
+      idempotencyKey: 'replacement-shipment-command-1',
+      evidenceHash: tracking.evidenceHash,
+      carrierCode: 'SF',
+      trackingNumberHash,
+    });
+    assert.equal(shipped.state, 'SHIPPED');
+    assert.equal((await service.getMerchant(secondActor, takeover.caseId)).case.state, 'FULFILLING');
+    await assert.rejects(
+      service.assign(operator, takeover.caseId, {
+        replacementMerchantId: 'replacement-1', reasonCode: 'LATE_REASSIGNMENT',
+        evidenceHash: `0x${'9'.repeat(64)}`, idempotencyKey: 'replacement-assignment-late', correlationId: 'late',
+      }),
+      /cannot be assigned from its current state/,
+    );
+  } finally {
+    await db.close();
+  }
+});
+
 test('governed takeover and Operations reimbursement bind secondary approval, frozen target and separate Safes', async () => {
   const db = await createBusinessDatabase();
   try {
@@ -9205,6 +9364,19 @@ test('governed takeover and Operations reimbursement bind secondary approval, fr
       approval: fundingApproval,
     });
     assert.equal(funded?.platformAdvanceUsdt, '20');
+    const replacementRecipient = '0x8888888888888888888888888888888888888888';
+    await seedEligibleReplacementMerchant(db, 'governed-replacement', replacementRecipient, '4', now, true);
+    await new TakeoverCaseService({ transactions: transactionAdapter(db), clock: () => now }).assign(
+      operator,
+      takeover.caseId,
+      {
+        replacementMerchantId: 'governed-replacement',
+        reasonCode: 'FUNDED_REPLACEMENT',
+        evidenceHash: `0x${'7'.repeat(64)}`,
+        idempotencyKey: 'governed-replacement-assignment',
+        correlationId: 'governed-replacement-assignment',
+      },
+    );
 
     const settlements = new SettlementService({
       transactions: transactionAdapter(db),
@@ -9213,7 +9385,6 @@ test('governed takeover and Operations reimbursement bind secondary approval, fr
       clock: () => now,
     });
     const takeoverAccount = `takeover:${takeover.caseId}:usdt`;
-    const replacementRecipient = '0x8888888888888888888888888888888888888888';
     const takeoverApprovalIntent: SensitiveActionIntent = {
       action: 'CREATE_TAKEOVER_PAYOUT',
       resourceType: 'TAKEOVER_CASE',
@@ -9249,6 +9420,22 @@ test('governed takeover and Operations reimbursement bind secondary approval, fr
       idempotencyKey: 'governed-takeover-intent-1',
       approval: takeoverApproval,
     });
+    const alternateRecipient = '0x9999999999999999999999999999999999999998';
+    await seedEligibleReplacementMerchant(db, 'alternate-replacement', alternateRecipient, '5', now, true);
+    await assert.rejects(
+      new TakeoverCaseService({ transactions: transactionAdapter(db), clock: () => now }).assign(
+        operator,
+        takeover.caseId,
+        {
+          replacementMerchantId: 'alternate-replacement',
+          reasonCode: 'PAYOUT_ALREADY_FROZEN',
+          evidenceHash: `0x${'8'.repeat(64)}`,
+          idempotencyKey: 'governed-replacement-reassign',
+          correlationId: 'governed-replacement-reassign',
+        },
+      ),
+      /payout recipient is frozen/,
+    );
     assert.equal((await settlements.createGovernedIntent(operator, {
       rail: 'TAKEOVER_USDT',
       resourceId: takeover.caseId,
@@ -9300,7 +9487,7 @@ test('governed takeover and Operations reimbursement bind secondary approval, fr
         idempotencyKey: 'governed-takeover-recipient-change',
         approval: await signedGovernedApproval(secondary, governanceSafe, changedRecipientApprovalIntent),
       }),
-      /already frozen/,
+      /not authoritative/,
     );
     const takeoverWalletSignature = await operatorWallet.signTypedData(
       takeoverChallenge.typedData.domain,
@@ -10480,7 +10667,11 @@ async function signedTakeoverFundingApproval(
   return { ...challenge.typedData.message, signature };
 }
 
-async function grantRole(db: PGlite, walletAddress: string, role: 'ADMIN' | 'OPERATOR' | 'ARBITRATOR') {
+async function grantRole(
+  db: PGlite,
+  walletAddress: string,
+  role: 'ADMIN' | 'OPERATOR' | 'ARBITRATOR' | 'AUDITOR',
+) {
   await db.query(
     `INSERT INTO core.wallet_role_bindings (
        wallet_address, role, merchant_id, status, evidence_hash
@@ -10579,7 +10770,8 @@ async function seedCatalog(db: PGlite, stock: number, settlementWallet = MERCHAN
   await db.query(
     `INSERT INTO core.administrative_regions (
        region_code, province, city, district, source, source_reference_hash, status
-     ) VALUES ('110101', 'Beijing', 'Beijing', 'Dongcheng', 'GOVERNED_IMPORT', $1, 'ACTIVE')`,
+     ) VALUES ('110101', 'Beijing', 'Beijing', 'Dongcheng', 'GOVERNED_IMPORT', $1, 'ACTIVE')
+     ON CONFLICT (region_code) DO NOTHING`,
     [HASH],
   );
   await db.query(
@@ -10588,7 +10780,8 @@ async function seedCatalog(db: PGlite, stock: number, settlementWallet = MERCHAN
        fulfillment_mode, region_code, region_code_hash, encrypted_payload,
        encryption_iv, encryption_tag, expires_at, created_at
      ) VALUES ('target:test', $1, $2, 'seed-target-test', $1, 'DELIVERY',
-       '110101', $1, $3, $4, $5, clock_timestamp() + interval '1 day', clock_timestamp())`,
+       '110101', $1, $3, $4, $5, clock_timestamp() + interval '1 day', clock_timestamp())
+     ON CONFLICT (target_hash) DO NOTHING`,
     [HASH, BUYER, Buffer.from('00', 'hex'), Buffer.alloc(12), Buffer.alloc(16)],
   );
   await db.query(
@@ -10608,6 +10801,97 @@ async function seedCatalog(db: PGlite, stock: number, settlementWallet = MERCHAN
      ) VALUES ('sku-1', $1, 'product-1', 1, '{}', 100, 60, $2, $2, 'ACTIVE')`,
     [`0x${'c'.repeat(64)}`, stock],
   );
+}
+
+async function seedEligibleReplacementMerchant(
+  db: PGlite,
+  merchantId: string,
+  settlementWallet: string,
+  hashDigit: string,
+  now: Date,
+  eligible: boolean,
+) {
+  const uploadIntentId = `0x${hashDigit.repeat(64)}`;
+  const assetId = `0x${((Number.parseInt(hashDigit, 16) + 8) % 16).toString(16).repeat(64)}`;
+  await db.query(
+    `INSERT INTO core.merchants (
+       merchant_id, settlement_wallet, status, level, profile, guarantee_status,
+       application_version, reviewed_at, reviewed_by
+     ) VALUES ($1,$2,'APPROVED','V2',$3,$4,1,$5,$6)`,
+    [
+      merchantId,
+      settlementWallet.toLowerCase(),
+      JSON.stringify({ shopName: merchantId }),
+      eligible ? 'READY' : 'BELOW_MINIMUM',
+      now,
+      '0x4444444444444444444444444444444444444444',
+    ],
+  );
+  await db.query(
+    `INSERT INTO core.wallet_role_bindings (
+       wallet_address, role, merchant_id, status, evidence_hash
+     ) VALUES ($1,'MERCHANT',$2,'ACTIVE',$3)`,
+    [settlementWallet.toLowerCase(), merchantId, HASH],
+  );
+  await db.query(
+    `INSERT INTO core.media_upload_intents (
+       upload_intent_id, owner_wallet, purpose, resource_type, resource_id,
+       object_key, content_type, size_bytes, content_sha256, idempotency_key,
+       request_hash, state, expires_at, provider_reference_hash,
+       provider_evidence_hash, verified_at, created_at, updated_at
+     ) VALUES ($1,$2,'MERCHANT_LICENSE','MERCHANT',$3,$4,'application/pdf',100,$5,$6,
+       $5,'VERIFIED',$7,$5,$5,$8,$8,$8)`,
+    [
+      uploadIntentId,
+      settlementWallet.toLowerCase(),
+      merchantId,
+      `merchant-license/${merchantId}/${hashDigit.repeat(32)}`,
+      `0x${hashDigit.repeat(64)}`,
+      `replacement-license-${merchantId}`,
+      new Date(now.getTime() + 60_000),
+      now,
+    ],
+  );
+  await db.query(
+    `INSERT INTO core.media_assets (
+       asset_id, upload_intent_id, owner_wallet, purpose, resource_type, resource_id,
+       object_key, content_type, size_bytes, content_sha256, provider_evidence_hash,
+       object_version_hash, created_at
+     ) VALUES ($1,$2,$3,'MERCHANT_LICENSE','MERCHANT',$4,$5,'application/pdf',100,$6,$6,$6,$7)`,
+    [
+      assetId,
+      uploadIntentId,
+      settlementWallet.toLowerCase(),
+      merchantId,
+      `merchant-license/${merchantId}/${hashDigit.repeat(32)}`,
+      `0x${hashDigit.repeat(64)}`,
+      now,
+    ],
+  );
+  await db.query(
+    `INSERT INTO core.merchant_application_versions (
+       merchant_id, version, encrypted_payload, encryption_iv, encryption_tag,
+       payload_hash, license_asset_id, actor_wallet, idempotency_key, request_hash, created_at
+     ) VALUES ($1,1,$2,$3,$4,$5,$6,$7,$8,$5,$9)`,
+    [
+      merchantId,
+      Buffer.from(hashDigit.repeat(2), 'hex'),
+      Buffer.alloc(12, Number.parseInt(hashDigit, 16)),
+      Buffer.alloc(16, Number.parseInt(hashDigit, 16)),
+      `0x${hashDigit.repeat(64)}`,
+      assetId,
+      settlementWallet.toLowerCase(),
+      `replacement-application-${merchantId}`,
+      now,
+    ],
+  );
+}
+
+function encryptTestPayload(payload: Record<string, unknown>, key: Buffer) {
+  const iv = Buffer.alloc(12, 7);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]);
+  return { ciphertext, iv, tag: cipher.getAuthTag() };
 }
 
 async function publishTestPolicy(db: PGlite, policyVersion: number) {

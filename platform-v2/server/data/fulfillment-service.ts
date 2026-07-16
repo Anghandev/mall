@@ -202,7 +202,7 @@ export class FulfillmentService {
   getOrder(actor: FulfillmentActor, orderId: string) {
     return this.#transactions.transaction(async (executor) => {
       const order = await loadOrder(executor, orderId);
-      assertCanRead(actor, order);
+      await assertCanRead(executor, actor, order);
       const pausedScopes = await loadPausedScopes(executor);
       return orderProjection(
         executor,
@@ -305,7 +305,7 @@ export class FulfillmentService {
       }> = [];
       for (const orderId of [...orderIds].sort()) {
         const order = await loadOrder(executor, orderId);
-        assertCanRead(actor, order);
+        await assertCanRead(executor, actor, order);
         rows.push({
           orderId,
           allowedActions: await allowedActionsForOrder(
@@ -1078,8 +1078,24 @@ async function recordShipmentCommand(
   },
 ) {
   const orderId = order.order_id;
-  assertMerchantOrOperator(actor, order);
   assertFinalPayment(order);
+  const platform = hasRole(actor, 'OPERATOR', 'ADMIN');
+  const assignment = order.state === 'TAKEOVER'
+    ? await currentTakeoverAssignment(executor, orderId)
+    : undefined;
+  const replacementMerchant = assignment?.case_state === 'FUNDED'
+    && actor.roles.includes('MERCHANT')
+    && (
+      normalizedWallet(actor.walletAddress) === assignment.replacement_wallet
+      || actor.merchantId === assignment.replacement_merchant_id
+    );
+  if (order.state === 'TAKEOVER') {
+    if (!platform && !replacementMerchant) {
+      throw new CoreError('Forbidden', 'Funded replacement merchant or platform role is required', 403);
+    }
+  } else {
+    assertMerchantOrOperator(actor, order);
+  }
   const exchange = order.state === 'PAID'
     ? undefined
     : (await executor.query<{ request_id: string }>(
@@ -1088,7 +1104,7 @@ async function recordShipmentCommand(
        ORDER BY resolved_at DESC LIMIT 1 FOR UPDATE`,
       [orderId],
     )).rows[0];
-  const takeover = order.state === 'TAKEOVER' && hasRole(actor, 'OPERATOR', 'ADMIN');
+  const takeover = order.state === 'TAKEOVER' && (platform || replacementMerchant);
   if (
     order.fulfillment_mode !== 'DELIVERY'
     || (
@@ -1535,7 +1551,8 @@ async function allowedActionsForOrder(
   );
   const row = result.rows[0];
   if (!row) throw new CoreError('UnknownState', 'Order action projection is unavailable', 409);
-  return allowedActionsFromState(order, row, actor, now, pausedScopes, executableActions);
+  const assignment = await currentTakeoverAssignment(executor, order.order_id);
+  return allowedActionsFromState(order, row, actor, now, pausedScopes, executableActions, assignment);
 }
 
 function allowedActionsFromState(
@@ -1551,6 +1568,7 @@ function allowedActionsFromState(
   now: Date,
   pausedScopes: ReadonlySet<BreakerScope>,
   executableActions: ReadonlySet<AllowedActionName>,
+  assignment?: Awaited<ReturnType<typeof currentTakeoverAssignment>>,
 ) {
   const projection: OrderProjection = {
     state: order.state,
@@ -1566,6 +1584,11 @@ function allowedActionsFromState(
     openRequestTypes: row.open_request_types,
     activePickupCredential: row.active_pickup_credential,
     approvedExchange: row.approved_exchange,
+    ...(assignment ? {
+      replacementMerchantId: assignment.replacement_merchant_id,
+      replacementMerchantWallet: assignment.replacement_wallet,
+      takeoverFunded: assignment.case_state === 'FUNDED',
+    } : {}),
   };
   return orderAllowedActions(projection, {
     actorWallet: normalizedWallet(actor.walletAddress),
@@ -2014,14 +2037,44 @@ async function outbox(
   );
 }
 
-function assertCanRead(actor: FulfillmentActor, order: OrderRow) {
+async function assertCanRead(executor: SqlExecutor, actor: FulfillmentActor, order: OrderRow) {
   if (
     isBuyer(actor, order)
     || normalizedWallet(actor.walletAddress) === order.merchant_wallet.toLowerCase()
     || actor.merchantId === order.merchant_id
     || hasRole(actor, 'ADMIN', 'OPERATOR', 'ARBITRATOR', 'AUDITOR')
   ) return;
+  const assignment = await currentTakeoverAssignment(executor, order.order_id);
+  if (
+    assignment
+    && actor.roles.includes('MERCHANT')
+    && (
+      normalizedWallet(actor.walletAddress) === assignment.replacement_wallet
+      || actor.merchantId === assignment.replacement_merchant_id
+    )
+  ) return;
   throw new CoreError('Forbidden', 'Order is outside the authenticated wallet scope', 403);
+}
+
+async function currentTakeoverAssignment(executor: SqlExecutor, orderId: string) {
+  const result = await executor.query<{
+    replacement_merchant_id: string;
+    replacement_wallet: string;
+    case_state: string;
+  }>(
+    `SELECT assignment.replacement_merchant_id, assignment.replacement_wallet,
+       takeover.state AS case_state
+     FROM core.takeover_cases takeover
+     JOIN LATERAL (
+       SELECT replacement_merchant_id, replacement_wallet
+       FROM core.takeover_assignments current_assignment
+       WHERE current_assignment.case_id = takeover.case_id
+       ORDER BY assignment_version DESC LIMIT 1
+     ) assignment ON true
+     WHERE takeover.order_id = $1`,
+    [orderId],
+  );
+  return result.rows[0];
 }
 
 function assertBuyer(actor: FulfillmentActor, order: OrderRow) {

@@ -128,6 +128,7 @@ const schemaSources = [
       '022_admin_global_operations.sql',
       '023_merchant_store_management.sql',
       '024_merchant_fulfillment_completion.sql',
+      '025_takeover_assignments.sql',
     ],
   },
   {
@@ -366,6 +367,8 @@ const coordinatedManifest = {
     guaranteeDepositHttp: 'AVAILABLE',
     guaranteeDepositFinality: 'AVAILABLE',
     takeoverFundingHttp: 'AVAILABLE',
+    takeoverCaseManagementHttp: 'AVAILABLE',
+    replacementMerchantFulfillment: 'AVAILABLE',
     policyGovernanceHttp: 'AVAILABLE',
     cmsHttp: 'AVAILABLE',
     notificationHttp: 'AVAILABLE',
@@ -504,6 +507,10 @@ const coordinatedManifest = {
     'TakeoverFundingResult',
     'MerchantFinanceProjection',
     'TakeoverFundingDetail',
+    'TakeoverCaseList',
+    'TakeoverCaseDetail',
+    'TakeoverCandidateList',
+    'TakeoverAssignmentResult',
     'PolicyDraftProjection',
     'CmsVersionProjection',
     'CmsPublicItem',
@@ -2603,6 +2610,14 @@ function settlementAdminOpenApiPaths(errorResponse) {
     }],
   });
   const queryParameter = (name, schema) => ({ name, in: 'query', required: false, schema });
+  const takeoverCaseQueryParameters = [
+    queryParameter('state', { enum: [...takeoverStates] }),
+    queryParameter('originalMerchantId', { type: 'string', minLength: 1, maxLength: 256 }),
+    queryParameter('replacementMerchantId', { type: 'string', minLength: 1, maxLength: 256 }),
+    queryParameter('cursorOpenedAt', { type: 'string', format: 'date-time' }),
+    queryParameter('cursorCaseId', { type: 'string', minLength: 1, maxLength: 256 }),
+    queryParameter('limit', { type: 'integer', minimum: 1, maximum: 100, default: 25 }),
+  ];
   return {
     '/v2/settlement-intents': {
       post: operation('createSettlementIntent', { $ref: '#/components/schemas/SettlementIntentProjection' }, 201, 'SettlementIntentRequest'),
@@ -2753,6 +2768,30 @@ function settlementAdminOpenApiPaths(errorResponse) {
     },
     '/v2/admin/takeover-funding/{caseId}': {
       get: resourceOperation('getTakeoverFunding', 'caseId', { $ref: '#/components/schemas/TakeoverFundingDetail' }),
+    },
+    '/v2/admin/takeover-cases': {
+      get: {
+        ...operation('listAdminTakeoverCases', { $ref: '#/components/schemas/TakeoverCaseList' }),
+        parameters: takeoverCaseQueryParameters,
+      },
+    },
+    '/v2/admin/takeover-cases/{caseId}': {
+      get: resourceOperation('getAdminTakeoverCase', 'caseId', { $ref: '#/components/schemas/TakeoverCaseDetail' }),
+    },
+    '/v2/admin/takeover-cases/{caseId}/candidates': {
+      get: resourceOperation('listTakeoverCandidates', 'caseId', { $ref: '#/components/schemas/TakeoverCandidateList' }),
+    },
+    '/v2/admin/takeover-cases/{caseId}/assignments': {
+      post: resourceOperation('assignTakeoverReplacementMerchant', 'caseId', { $ref: '#/components/schemas/TakeoverAssignmentResult' }, 201, 'TakeoverAssignmentRequest'),
+    },
+    '/v2/merchant/takeover-cases': {
+      get: {
+        ...operation('listMerchantTakeoverCases', { $ref: '#/components/schemas/TakeoverCaseList' }),
+        parameters: takeoverCaseQueryParameters,
+      },
+    },
+    '/v2/merchant/takeover-cases/{caseId}': {
+      get: resourceOperation('getMerchantTakeoverCase', 'caseId', { $ref: '#/components/schemas/TakeoverCaseDetail' }),
     },
     '/v2/cms/public': {
       get: {
@@ -3415,6 +3454,105 @@ function settlementAdminOpenApiSchemas() {
       ...fundingProjection.properties,
       items: { type: 'array', items: ref('TakeoverFundingItem') },
       debtRecoveries: { type: 'array', items: ref('MerchantDebtRecovery') },
+    }),
+    TakeoverAssignmentRequest: object({
+      replacementMerchantId: string,
+      reasonCode: { type: 'string', pattern: '^[A-Z0-9_:-]{2,64}$' },
+      evidenceHash: hash,
+      idempotencyKey,
+    }),
+    TakeoverAssignment: object({
+      assignmentId: hash,
+      caseId: string,
+      orderId: string,
+      version: { type: 'integer', minimum: 1 },
+      originalMerchantId: string,
+      replacementMerchantId: string,
+      replacementWallet: address,
+      replacementApplicationVersion: { type: 'integer', minimum: 1 },
+      replacementLevel: { enum: [...merchantLevels] },
+      replacementLicenseAssetId: hash,
+      supersedesAssignmentId: nullableHash,
+      reasonCode: string,
+      evidenceHash: hash,
+      assignedBy: address,
+      correlationId: string,
+      assignedAt: timestamp,
+    }),
+    TakeoverAssignmentResult: object({
+      artifactVersion: { const: artifactVersion },
+      assignment: ref('TakeoverAssignment'),
+    }),
+    TakeoverCaseFunding: object({
+      guaranteeUsedUsdt: atomic,
+      frozenReceivablesUsedUsdt: atomic,
+      futureProceedsUsedUsdt: atomic,
+      platformAdvanceUsdt: atomic,
+      disbursedUsdt: atomic,
+      merchantDebtUsdt: atomic,
+    }),
+    TakeoverOrderSummary: object({
+      productId: string,
+      skuId: string,
+      quantity: atomic,
+      fulfillmentMode: { enum: [...fulfillmentModes] },
+      fulfillmentTargetHash: hash,
+      state: { enum: [...orderProjectionStates] },
+      paymentFinal: { type: 'boolean' },
+    }),
+    TakeoverCase: object({
+      caseId: string,
+      orderId: string,
+      originalMerchantId: string,
+      policyVersion: atomic,
+      state: { enum: [...takeoverStates] },
+      requiredUsdt: nullableAtomic,
+      funding: ref('TakeoverCaseFunding'),
+      evidenceHash: hash,
+      openedAt: timestamp,
+      closedAt: nullableTimestamp,
+      updatedAt: timestamp,
+      order: ref('TakeoverOrderSummary'),
+      currentAssignment: nullable(ref('TakeoverAssignment')),
+    }),
+    TakeoverCaseCursor: object({ openedAt: timestamp, caseId: string }),
+    TakeoverCaseList: object({
+      artifactVersion: { const: artifactVersion },
+      cases: { type: 'array', items: ref('TakeoverCase') },
+      nextCursor: nullable(ref('TakeoverCaseCursor')),
+    }),
+    TakeoverCandidate: object({
+      merchantId: string,
+      settlementWallet: address,
+      shopName: string,
+      level: { enum: [...merchantLevels] },
+      applicationVersion: { type: 'integer', minimum: 1 },
+      qualificationComplete: { const: true },
+      guaranteeReady: { const: true },
+    }),
+    TakeoverCandidateList: object({
+      artifactVersion: { const: artifactVersion },
+      caseId: string,
+      candidates: { type: 'array', items: ref('TakeoverCandidate') },
+    }),
+    TakeoverCaseTransition: object({
+      transitionId: string,
+      fromState: nullable({ enum: [...takeoverStates] }),
+      toState: { enum: [...takeoverStates] },
+      evidenceType: string,
+      evidenceHash: hash,
+      occurredAt: timestamp,
+    }),
+    TakeoverCaseDetail: object({
+      artifactVersion: { const: artifactVersion },
+      case: {
+        allOf: [
+          ref('TakeoverCase'),
+          object({ allowedActions: { type: 'array', items: ref('AllowedAction') } }),
+        ],
+      },
+      assignments: { type: 'array', items: ref('TakeoverAssignment') },
+      transitions: { type: 'array', items: ref('TakeoverCaseTransition') },
     }),
     SeckillSessionCreateRequest: object({
       policyVersion: atomic,
@@ -6797,6 +6935,115 @@ export interface MerchantDebtRecovery {
 export interface TakeoverFundingDetail extends TakeoverFundingProjection {
   items: readonly TakeoverFundingItem[];
   debtRecoveries: readonly MerchantDebtRecovery[];
+}
+
+export interface TakeoverAssignmentRequest {
+  replacementMerchantId: string;
+  reasonCode: string;
+  evidenceHash: Bytes32;
+  idempotencyKey: string;
+}
+
+export interface TakeoverAssignment {
+  assignmentId: Bytes32;
+  caseId: string;
+  orderId: string;
+  version: number;
+  originalMerchantId: string;
+  replacementMerchantId: string;
+  replacementWallet: Address;
+  replacementApplicationVersion: number;
+  replacementLevel: MerchantLevel;
+  replacementLicenseAssetId: Bytes32;
+  supersedesAssignmentId: Bytes32 | null;
+  reasonCode: string;
+  evidenceHash: Bytes32;
+  assignedBy: Address;
+  correlationId: string;
+  assignedAt: string;
+}
+
+export interface TakeoverAssignmentResult {
+  artifactVersion: string;
+  assignment: TakeoverAssignment;
+}
+
+export interface TakeoverCaseFunding {
+  guaranteeUsedUsdt: AtomicAmount;
+  frozenReceivablesUsedUsdt: AtomicAmount;
+  futureProceedsUsedUsdt: AtomicAmount;
+  platformAdvanceUsdt: AtomicAmount;
+  disbursedUsdt: AtomicAmount;
+  merchantDebtUsdt: AtomicAmount;
+}
+
+export interface TakeoverOrderSummary {
+  productId: string;
+  skuId: string;
+  quantity: AtomicAmount;
+  fulfillmentMode: FulfillmentMode;
+  fulfillmentTargetHash: Bytes32;
+  state: OrderProjectionState;
+  paymentFinal: boolean;
+}
+
+export interface TakeoverCase {
+  caseId: string;
+  orderId: string;
+  originalMerchantId: string;
+  policyVersion: AtomicAmount;
+  state: TakeoverState;
+  requiredUsdt: AtomicAmount | null;
+  funding: TakeoverCaseFunding;
+  evidenceHash: Bytes32;
+  openedAt: string;
+  closedAt: string | null;
+  updatedAt: string;
+  order: TakeoverOrderSummary;
+  currentAssignment: TakeoverAssignment | null;
+}
+
+export interface TakeoverCaseCursor {
+  openedAt: string;
+  caseId: string;
+}
+
+export interface TakeoverCaseList {
+  artifactVersion: string;
+  cases: readonly TakeoverCase[];
+  nextCursor: TakeoverCaseCursor | null;
+}
+
+export interface TakeoverCandidate {
+  merchantId: string;
+  settlementWallet: Address;
+  shopName: string;
+  level: MerchantLevel;
+  applicationVersion: number;
+  qualificationComplete: true;
+  guaranteeReady: true;
+}
+
+export interface TakeoverCandidateList {
+  artifactVersion: string;
+  caseId: string;
+  candidates: readonly TakeoverCandidate[];
+}
+
+export interface TakeoverCaseTransition {
+  transitionId: string;
+  fromState: TakeoverState | null;
+  toState: TakeoverState;
+  evidenceType: string;
+  evidenceHash: Bytes32;
+  occurredAt: string;
+}
+
+export interface TakeoverCaseDetail {
+  artifactVersion: string;
+  case: TakeoverCase & Readonly<{ allowedActions: readonly AllowedAction[] }>;
+  assignments: readonly TakeoverAssignment[];
+  transitions: readonly TakeoverCaseTransition[];
 }
 
 export interface PolicyDraftCreateRequest { payload: JsonObject; idempotencyKey: string }

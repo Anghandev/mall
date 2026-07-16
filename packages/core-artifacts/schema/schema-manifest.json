@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.10",
+  "artifactVersion": "2.0.0-settlement-admin.11",
   "formatVersion": 1,
   "databaseEngine": "postgresql",
   "schemas": {
@@ -125,6 +125,11 @@
           "name": "024_merchant_fulfillment_completion.sql",
           "path": "schema/business/024_merchant_fulfillment_completion.sql",
           "sha256": "c4bfa7e562d27f87e2969e10397da549fa982bd227be2e48c8d9d61f77df7bdc"
+        },
+        {
+          "name": "025_takeover_assignments.sql",
+          "path": "schema/business/025_takeover_assignments.sql",
+          "sha256": "336acb813d02c113c665f5840104a8ee395f4901420b8067cd0623a47c09ace2"
         }
       ]
     },
