@@ -273,6 +273,69 @@ input::placeholder { color: #8b8b82; }
 .takeover-command .healthy-copy { margin: 6px 0 0; }
 .takeover-command-result { margin: 0; padding: 0 18px 18px; }
 .takeover-guard > .button { margin-top: 14px; }
+.takeover-case-workspace { display: grid; gap: 16px; margin-bottom: 16px; }
+.takeover-case-query { padding: 0; overflow: hidden; }
+.takeover-case-query > .panel-heading { min-height: 70px; padding: 15px 18px; border-bottom: 1px solid var(--line); }
+.takeover-case-session { margin: 16px; }
+.takeover-case-filters { display: grid; grid-template-columns: minmax(150px, .7fr) minmax(180px, 1fr) minmax(180px, 1fr) auto; gap: 11px; align-items: end; padding: 16px 18px; }
+.takeover-case-filters label, .takeover-assignment-form label { min-width: 0; display: grid; gap: 5px; color: var(--ink-soft); font-size: 11px; font-weight: 700; }
+.takeover-case-master-detail { display: grid; grid-template-columns: minmax(280px, .62fr) minmax(0, 1.38fr); gap: 16px; align-items: start; }
+.takeover-case-list-panel { position: sticky; top: calc(var(--topbar-height) + 18px); max-height: calc(100dvh - var(--topbar-height) - 42px); padding: 0; overflow: hidden; }
+.takeover-case-list-panel > .panel-heading { min-height: 68px; padding: 14px; border-bottom: 1px solid var(--line); }
+.takeover-case-list-panel > .panel-heading > svg { width: 20px; color: var(--gold-dark); }
+.takeover-case-list-panel > .button { width: calc(100% - 24px); margin: 12px; }
+.takeover-case-list { max-height: calc(100dvh - var(--topbar-height) - 190px); overflow-y: auto; }
+.takeover-case-row { width: 100%; min-height: 112px; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(110px, .85fr); align-items: center; gap: 10px; padding: 12px 14px; color: var(--ink); background: var(--surface); border: 0; border-bottom: 1px solid var(--line); text-align: left; }
+.takeover-case-row:last-child { border-bottom: 0; }
+.takeover-case-row:hover, .takeover-case-row.is-selected { background: var(--gold-soft); }
+.takeover-case-row > span { min-width: 0; display: grid; gap: 3px; }
+.takeover-case-row > span:last-child { justify-items: end; text-align: right; }
+.takeover-case-row code, .takeover-case-row small { max-width: 100%; overflow-wrap: anywhere; font-size: 9px; }
+.takeover-case-row small { color: var(--ink-muted); }
+.takeover-case-detail-panel { min-height: 520px; padding: 0; overflow: hidden; }
+.takeover-case-detail-panel > .panel-heading { min-height: 76px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+.takeover-case-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; border-bottom: 1px solid var(--line); }
+.takeover-case-facts > div { min-width: 0; min-height: 86px; padding: 12px 14px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.takeover-case-facts > div:nth-child(2n) { border-right: 0; }
+.takeover-case-facts dt { color: var(--ink-muted); font-size: 9px; }
+.takeover-case-facts dd { display: grid; gap: 3px; margin: 5px 0 0; overflow-wrap: anywhere; font-size: 11px; font-weight: 750; }
+.takeover-case-facts code, .takeover-case-facts small { overflow-wrap: anywhere; color: var(--ink-muted); font-size: 9px; }
+.takeover-funding-evidence { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); }
+.takeover-funding-evidence > span { min-width: 0; min-height: 68px; display: grid; align-content: center; gap: 3px; padding: 10px 12px; background: var(--surface-muted); }
+.takeover-funding-evidence small { color: var(--ink-muted); font-size: 9px; }
+.takeover-funding-evidence strong { overflow-wrap: anywhere; font-size: 13px; }
+.takeover-history-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); }
+.takeover-history-grid > section { min-width: 0; padding: 14px; background: var(--surface); }
+.takeover-subheading { min-height: 30px; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.takeover-subheading h3 { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 14px; }
+.takeover-subheading svg { width: 17px; color: var(--gold-dark); }
+.takeover-subheading > span { min-width: 26px; min-height: 26px; display: grid; place-items: center; color: var(--ink-soft); background: var(--surface-muted); border: 1px solid var(--line); border-radius: 3px; font-size: 10px; font-weight: 800; }
+.takeover-history-grid ol { display: grid; gap: 8px; margin: 10px 0 0; padding: 0; list-style: none; }
+.takeover-history-grid li { min-width: 0; display: grid; gap: 2px; padding: 9px; background: var(--surface-muted); border-left: 3px solid var(--line-strong); }
+.takeover-history-grid code, .takeover-history-grid small { overflow-wrap: anywhere; color: var(--ink-muted); font-size: 8px; }
+.takeover-history-grid p { color: var(--ink-muted); font-size: 10px; }
+.takeover-candidates { display: grid; gap: 12px; padding: 16px 18px 18px; }
+.takeover-candidate-list { display: grid; gap: 7px; }
+.takeover-candidate-list > label { min-height: 68px; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 12px; background: var(--surface-muted); border: 1px solid var(--line); }
+.takeover-candidate-list > label.is-current { background: var(--success-soft); border-color: #a7cfbb; }
+.takeover-candidate-list input { width: 20px; min-height: 20px; accent-color: var(--ink); }
+.takeover-candidate-list label > span { min-width: 0; display: grid; gap: 2px; }
+.takeover-candidate-list label > span:last-child { grid-template-columns: 16px minmax(0, 1fr); align-items: center; color: var(--success); }
+.takeover-candidate-list code, .takeover-candidate-list small { overflow-wrap: anywhere; color: var(--ink-muted); font-size: 9px; }
+.takeover-assignment-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; padding: 14px; background: var(--surface-muted); border: 1px solid var(--line); }
+.takeover-assignment-form > .takeover-subheading, .takeover-assignment-form > .button { grid-column: 1 / -1; }
+.takeover-readonly { min-height: 70px; display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; padding: 12px 14px; color: var(--ink-soft); background: var(--surface-muted); border-left: 3px solid var(--line-strong); }
+.takeover-readonly > svg { width: 19px; color: var(--gold-dark); }
+.takeover-readonly p { margin: 3px 0 0; font-size: 10px; }
+.takeover-resource-state, .takeover-empty { min-height: 150px; display: grid; place-items: center; align-content: center; gap: 8px; padding: 20px; color: var(--ink-muted); text-align: center; }
+.takeover-resource-state svg, .takeover-empty svg { width: 23px; }
+.takeover-empty h3 { margin: 0; font-size: 14px; }
+.takeover-empty p { max-width: 54ch; margin: 0; font-size: 10px; }
+.takeover-case-error { margin: 0; }
+.takeover-case-error.is-configuration { color: #6d4c00; background: var(--gold-soft); border-color: #d7bf79; }
+.takeover-case-error div { min-width: 0; display: grid; gap: 3px; }
+.takeover-case-error p, .takeover-case-error small { margin: 0; overflow-wrap: anywhere; font-size: 10px; }
+.takeover-assignment-result { margin: 0; }
 .fulfillment-decision { margin: 3px 0; }
 .fulfillment-evidence-streams { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
 .fulfillment-evidence-streams section { min-width: 0; padding: 10px; background: var(--surface-muted); border: 1px solid var(--line); border-radius: 4px; }
@@ -415,6 +478,10 @@ input::placeholder { color: #8b8b82; }
   .search-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .workspace-grid, .policy-layout { grid-template-columns: minmax(0, 1fr); }
   .takeover-stage-grid { grid-template-columns: 1fr 1fr; }
+  .takeover-case-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .takeover-case-filters .button-row { justify-content: flex-end; }
+  .takeover-case-master-detail { grid-template-columns: minmax(250px, .65fr) minmax(0, 1.35fr); }
+  .takeover-funding-evidence { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .takeover-order-detail { grid-template-columns: minmax(0, 1fr); }
   .dashboard-window { grid-template-columns: repeat(2, minmax(0, 1fr)) 44px; }
   .dashboard-evidence-grid { grid-template-columns: minmax(0, 1fr); }
@@ -450,6 +517,9 @@ input::placeholder { color: #8b8b82; }
   .batch-bar { grid-template-columns: 1fr; }
   .batch-actions { justify-content: flex-start; }
   .batch-reason { grid-column: 1; }
+  .takeover-case-master-detail { grid-template-columns: 1fr; }
+  .takeover-case-list-panel { position: static; max-height: none; }
+  .takeover-case-list { max-height: 430px; }
 }
 
 @media (max-width: 560px) {
@@ -474,6 +544,15 @@ input::placeholder { color: #8b8b82; }
   .trace-form > div, .session-prompt { grid-template-columns: 1fr; }
   .session-prompt { align-items: stretch; flex-direction: column; }
   .takeover-stage-grid { grid-template-columns: 1fr; }
+  .takeover-case-filters, .takeover-assignment-form { grid-template-columns: 1fr; }
+  .takeover-case-filters .button-row, .takeover-assignment-form > .takeover-subheading, .takeover-assignment-form > .button { grid-column: 1; }
+  .takeover-case-filters .button-row .button { flex: 1; }
+  .takeover-case-row, .takeover-case-facts, .takeover-history-grid { grid-template-columns: 1fr; }
+  .takeover-case-row > span:last-child { justify-items: start; text-align: left; }
+  .takeover-case-facts > div { border-right: 0; }
+  .takeover-funding-evidence { grid-template-columns: 1fr 1fr; }
+  .takeover-candidate-list > label { grid-template-columns: 20px minmax(0, 1fr); }
+  .takeover-candidate-list label > span:last-child { grid-column: 2; }
   .fulfillment-evidence-streams { grid-template-columns: 1fr; }
   .dashboard-alert { grid-template-columns: 36px 1fr; }
   .dashboard-alert a { grid-column: 2; }

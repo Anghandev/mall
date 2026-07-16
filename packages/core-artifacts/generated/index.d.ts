@@ -1,4 +1,4 @@
-export declare const artifactVersion: "2.0.0-settlement-admin.11";
+export declare const artifactVersion: "2.0.0-settlement-admin.12";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
@@ -826,6 +826,107 @@ export interface SettlementListProjection {
   balances: readonly SettlementBalance[];
   points: readonly BnmPointsBalance[];
   requests: readonly SettlementRequestProjection[];
+}
+
+export interface OrderStatementCursor {
+  createdAt: string;
+  orderId: Bytes32;
+}
+
+export interface BuyerShoppingStatement {
+  orderId: Bytes32;
+  productId: string;
+  skuId: string;
+  quantity: AtomicAmount;
+  orderState: OrderProjectionState;
+  paymentTxHash: Bytes32;
+  paymentFinalizedAt: string;
+  fulfilledAt: string | null;
+  createdAt: string;
+  orderKind: Exclude<OrderKind, 'SECKILL'>;
+  paymentAmounts: {
+    usdtPaymentAmount: AtomicAmount;
+    nplPaymentAmount: AtomicAmount;
+  };
+  bnm: {
+    amount: AtomicAmount;
+    state: 'LOCKED' | 'AVAILABLE';
+    transferable: false;
+    journalIds: readonly string[];
+  };
+}
+
+export interface BuyerShoppingStatementPage {
+  artifactVersion: typeof artifactVersion;
+  buyerWallet: Address;
+  statements: readonly BuyerShoppingStatement[];
+  nextCursor: OrderStatementCursor | null;
+}
+
+export interface MerchantReceivableLifecycle {
+  state: BalanceState;
+  amount: AtomicAmount;
+  journalIds: readonly string[];
+}
+
+export interface MerchantReceivableJournalEvidence {
+  journalId: string;
+  eventType: string;
+  state: BalanceState;
+  delta: string;
+  sourceKind: string;
+  sourceReferenceHash: Bytes32;
+  createdAt: string;
+}
+
+export interface MerchantReceivableSettlementRef {
+  requestId: Bytes32;
+  amount: AtomicAmount;
+  state: SettlementRequestState;
+  batchId: Bytes32 | null;
+  finalSafeTxHash: Bytes32 | null;
+  finalExecutionTxHash: Bytes32 | null;
+  journals: {
+    requested: string;
+    batched: string | null;
+    settled: string | null;
+  };
+  requestedAt: string;
+  batchedAt: string | null;
+  settledAt: string | null;
+}
+
+export interface MerchantReceivableStatement {
+  orderId: Bytes32;
+  productId: string;
+  skuId: string;
+  quantity: AtomicAmount;
+  orderState: OrderProjectionState;
+  paymentTxHash: Bytes32;
+  paymentFinalizedAt: string;
+  fulfilledAt: string | null;
+  createdAt: string;
+  orderKind: OrderKind;
+  frozenAmounts: {
+    listPriceUsdt: AtomicAmount;
+    buyerPaidUsdt: AtomicAmount;
+    merchantBaseReceivableUsdt: AtomicAmount;
+    merchantConcessionAmount: AtomicAmount;
+    merchantNetReceivableUsdt: AtomicAmount;
+  };
+  currentReceivableUsdt: AtomicAmount;
+  removedFromReceivableUsdt: AtomicAmount;
+  receivableLifecycle: readonly MerchantReceivableLifecycle[];
+  journalEvidence: readonly MerchantReceivableJournalEvidence[];
+  settlementRefs: readonly MerchantReceivableSettlementRef[];
+}
+
+export interface MerchantReceivableStatementPage {
+  artifactVersion: typeof artifactVersion;
+  merchantId: string;
+  settlementWallet: Address;
+  statements: readonly MerchantReceivableStatement[];
+  nextCursor: OrderStatementCursor | null;
 }
 
 export interface AdminSettlementRequest {

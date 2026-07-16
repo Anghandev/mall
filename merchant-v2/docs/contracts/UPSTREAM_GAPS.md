@@ -1,6 +1,6 @@
 # Merchant Workbench Core Gaps
 
-The merchant product consumes Core's coordinated `2.0.0-settlement-admin.10` artifact
+The merchant product consumes Core's coordinated `2.0.0-settlement-admin.11` artifact
 workspace package. Bootstrap, SIWE,
 merchant-bound Catalog/SKU/inventory management, immutable media, wallet-scoped fulfillment, merchant finance,
 guarantee-deposit evidence, signed settlement requests and Safe-finality
@@ -60,6 +60,13 @@ create a local success state.
 |---|---|---|
 | GAP-MER-005 | PII-authorized, audit-logged, cursor-paginated server-side Excel export | The workbench resolves `exportMerchantOrders` from the coordinated OpenAPI artifact, preserves applied filters/current list cursor, validates the tenant/filter DTO and SHA-256 before downloading the exact Core bytes; delivery PII remains target/export scoped rather than entering general list rows |
 | GAP-MER-007 | Existing order/store-bound six-digit pickup verification command consumed by a real camera/manual entry path | Native `getUserMedia` plus `BarcodeDetector` fills only an exact six-digit code and never auto-submits; unsupported/denied/failed camera states keep the manual command available without simulated device success |
+
+## Resolved In Takeover Fulfillment Batch
+
+| Gap ID | Published Core capability | Merchant evidence |
+|---|---|---|
+| GAP-MER-001 (replacement-fulfillment slice) | Merchant-scoped assigned takeover queue/detail plus current replacement authority | Queue and detail require the current merchant ID and wallet; revoked or cross-tenant assignments fail closed |
+| GAP-MER-005 (replacement-fulfillment slice) | Existing fulfillment-target, tracking-evidence and shipment routes authorize the funded current replacement | The workbench reads the encrypted target, creates wallet-bound tracking evidence and ships only while `FUNDED` and `RECORD_SHIPMENT` is enabled |
 
 ## Remaining Gaps
 

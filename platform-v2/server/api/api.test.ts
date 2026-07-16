@@ -984,6 +984,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
   };
   const runtimeReadiness = paymentRuntimeReadiness(now, false);
   const fulfillmentCalls: Array<{ operation: string; wallet: string; orderId: string; input?: unknown }> = [];
+  const statementCalls: Array<{ operation: string; wallet: string; input?: unknown }> = [];
   const evidenceCalls: Array<{ operation: string; wallet: string; input: unknown }> = [];
   const cmsPublishedContexts: unknown[] = [];
   let notificationEndpointCorrelationId: string | undefined;
@@ -1141,6 +1142,27 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       confirmReceipt: async (actor, orderId, input) => {
         fulfillmentCalls.push({ operation: 'CONFIRM_RECEIPT', wallet: actor.walletAddress, orderId, input });
         return { orderId, state: 'FULFILLED' };
+      },
+    },
+    orderStatementService: {
+      listBuyerShopping: async (actor, input) => {
+        statementCalls.push({ operation: 'BUYER_SHOPPING', wallet: actor.walletAddress, input });
+        return {
+          artifactVersion: CORE_ARTIFACT_VERSION,
+          buyerWallet: actor.walletAddress,
+          statements: [{ orderId: ORDER_ID, orderKind: input?.kind ?? 'ORDINARY' }],
+          nextCursor: null,
+        };
+      },
+      listMerchantReceivables: async (actor, input) => {
+        statementCalls.push({ operation: 'MERCHANT_RECEIVABLE', wallet: actor.walletAddress, input });
+        return {
+          artifactVersion: CORE_ARTIFACT_VERSION,
+          merchantId: actor.merchantId,
+          settlementWallet: actor.walletAddress,
+          statements: [{ orderId: ORDER_ID, orderKind: input?.kind ?? 'ORDINARY' }],
+          nextCursor: null,
+        };
       },
     },
     fulfillmentTargetService: {
@@ -1547,6 +1569,28 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     });
     assert.equal(merchantDashboard.status, 200);
     assert.equal(((await merchantDashboard.json()) as { merchantId: string }).merchantId, 'merchant-1');
+    const buyerStatements = await fetch(
+      `${base}/v2/buyer/shopping-statements?kind=ORDINARY&limit=20`,
+      { headers: { authorization: `Bearer ${buyerOnlyToken}` } },
+    );
+    assert.equal(buyerStatements.status, 200);
+    assert.equal(((await buyerStatements.json()) as { statements: Array<{ orderKind: string }> }).statements[0]?.orderKind, 'ORDINARY');
+    assert.equal((await fetch(`${base}/v2/buyer/shopping-statements?kind=UNKNOWN`, {
+      headers: { authorization: `Bearer ${buyerOnlyToken}` },
+    })).status, 400);
+    assert.equal((await fetch(`${base}/v2/buyer/shopping-statements?unsupported=true`, {
+      headers: { authorization: `Bearer ${buyerOnlyToken}` },
+    })).status, 400);
+    assert.equal((await fetch(`${base}/v2/merchant/receivable-statements`, {
+      headers: { authorization: `Bearer ${buyerOnlyToken}` },
+    })).status, 403);
+    const merchantStatements = await fetch(
+      `${base}/v2/merchant/receivable-statements?kind=SECKILL&limit=10`,
+      { headers: { authorization: `Bearer ${session.token}` } },
+    );
+    assert.equal(merchantStatements.status, 200);
+    assert.equal(((await merchantStatements.json()) as { statements: Array<{ orderKind: string }> }).statements[0]?.orderKind, 'SECKILL');
+    assert.deepEqual(statementCalls.map((call) => call.operation), ['BUYER_SHOPPING', 'MERCHANT_RECEIVABLE']);
     const adminDashboard = await fetch(`${base}/v2/admin/dashboard`, {
       headers: { authorization: `Bearer ${session.token}` },
     });

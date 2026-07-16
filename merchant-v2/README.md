@@ -11,7 +11,7 @@ pnpm --filter @abu24k/merchant check
 ```
 
 The app consumes the coordinated `@abu24k/core-artifacts` workspace package at
-`2.0.0-settlement-admin.10`. In addition to Bootstrap, merchant SIWE and the
+`2.0.0-settlement-admin.11`. In addition to Bootstrap, merchant SIWE and the
 payment/fulfillment surfaces, the workbench consumes merchant finance,
 guarantee-deposit evidence, settlement intents, signed settlement requests and
 Safe-finality history. The help center reads wallet-targeted published CMS
@@ -61,6 +61,16 @@ Carrier codes come from the generated Core enum. Platform carrier enablement
 and provider configuration remain Core authority: `ConfigurationRequired` and
 `InvalidRequest` responses stay visible and never become a browser-side
 success, and the workbench does not consume platform configuration writes.
+
+The takeover center consumes the merchant-scoped assigned-case list and detail
+operations. It verifies the current replacement merchant and wallet before it
+reads the existing encrypted fulfillment target. Raw tracking numbers go to
+Core only to create a wallet-bound evidence envelope; shipment then submits the
+returned hashes through the existing order command. Both evidence creation and
+shipment require the case to remain `FUNDED` with enabled
+`RECORD_SHIPMENT`. Cross-tenant rows, revoked assignments, unfunded cases and
+missing target encryption fail closed without exposing an address or creating
+local success.
 
 The settings center consumes the tenant-scoped merchant profile with optimistic
 versioning and stable retry keys. Shop name and a provider-sealed,

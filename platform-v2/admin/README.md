@@ -5,7 +5,7 @@ implements shared funds, contracts, API, Schema or signer behavior.
 
 ## Current Product Boundary
 
-- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.10`.
+- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.11`.
 - SIWE/JWT stays in memory. Every protected read and write is role-bound by
   Core and preserves typed `DecisionBlocked`, `ExternalBlocked`,
   `ConfigurationRequired` and correlation evidence.
@@ -41,6 +41,9 @@ implements shared funds, contracts, API, Schema or signer behavior.
 - Policy and takeover funding use Core-issued typed data. The wallet signs the
   exact typed payload; the frontend does not construct calldata, calculate
   funds or set final states.
+- The takeover workspace consumes the Core case queue, immutable assignment
+  history and eligible replacement-merchant projection. ADMIN/OPERATOR can
+  assign or reassign before shipment; AUDITOR remains read-only.
 - CMS and configuration editors accept structured JSON objects because their
   coordinated request types are open objects. Core remains the schema,
   sanitization, decision and publication authority.

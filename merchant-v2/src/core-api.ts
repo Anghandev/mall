@@ -49,6 +49,7 @@ import {
   type CatalogWriteLock,
   type CmsPublicItem,
   type CoreErrorCode,
+  type EvidenceEnvelopeProjection,
   type ForcedReceiptRequestResult,
   type FulfillmentBalance,
   type FulfillmentCompletedResult,
@@ -63,6 +64,7 @@ import {
   type GuaranteeDepositProjection,
   type GuaranteeDepositRequest,
   type LogisticsProjection,
+  type LogisticsCarrierCode,
   type JsonObject,
   type ManagedCatalogProduct,
   type ManagedCatalogSku,
@@ -104,6 +106,13 @@ import {
   type SettlementListProjection,
   type SettlementRequestProjection,
   type SettlementRequestSubmission,
+  type TakeoverAssignment,
+  type TakeoverCase,
+  type TakeoverCaseCursor,
+  type TakeoverCaseDetail,
+  type TakeoverCaseList,
+  type TakeoverCaseTransition,
+  type TakeoverState,
   type UpdateMerchantStoreRequest,
   type ProductSlotInput,
   type ProductSlotProjection,
@@ -150,6 +159,7 @@ const printProviderSet = new Set<string>(printProviders);
 const waybillProviderSet = new Set<string>(waybillProviders);
 const waybillRequestStateSet = new Set<string>(waybillRequestStates);
 const waybillCarrierSet = new Set<string>(logisticsCarrierCodes);
+const merchantLevelSet = new Set<string>(['V1', 'V2', 'V3', 'V4', 'V5']);
 const orderKindSet = new Set<string>(['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] satisfies readonly OrderKind[]);
 const merchantStoreActionSet = new Set<string>(['UPDATE_PROFILE', 'ACTIVATE', 'CLOSE'] satisfies readonly MerchantStoreAction[]);
 const merchantStoreActionReasonSet = new Set<string>([
@@ -184,6 +194,18 @@ export interface FulfillmentOrderListOptions {
   state?: OrderProjectionState;
   fulfillmentMode?: FulfillmentMode;
   orderKind?: OrderKind;
+}
+
+export interface MerchantTakeoverCaseListOptions {
+  state?: TakeoverState;
+  cursor?: TakeoverCaseCursor;
+  limit?: number;
+}
+
+export interface TrackingEvidenceRequest {
+  carrierCode: LogisticsCarrierCode;
+  trackingNumber: string;
+  idempotencyKey: string;
 }
 
 export interface SiweChallenge {
@@ -337,9 +359,19 @@ export interface CoreApi {
   exportMerchantAuditEntries(input: MerchantAuditExportRequest, token: string): Promise<MerchantAuditExport>;
   exportMerchantOrders(input: MerchantOrderExportRequest, token: string): Promise<MerchantOrderExport>;
   listFulfillmentOrders(token: string, options?: FulfillmentOrderListOptions): Promise<FulfillmentOrderPage>;
+  listMerchantTakeoverCases(
+    token: string,
+    options?: MerchantTakeoverCaseListOptions,
+  ): Promise<TakeoverCaseList>;
+  getMerchantTakeoverCase(caseId: string, token: string): Promise<TakeoverCaseDetail>;
   getMerchantBusinessDashboard(token: string): Promise<MerchantBusinessDashboard>;
   getOrderFulfillmentTarget(orderId: string, token: string): Promise<FulfillmentTarget>;
   getOrderAllowedActions(orderId: string, token: string): Promise<readonly AllowedAction[]>;
+  createOrderTrackingEvidence(
+    orderId: string,
+    input: TrackingEvidenceRequest,
+    token: string,
+  ): Promise<EvidenceEnvelopeProjection>;
   recordShipment(orderId: string, input: ShipmentRequest, token: string): Promise<ShipmentResult>;
   recordShipmentBatch(input: ShipmentBatchRequest, token: string): Promise<ShipmentBatchResult>;
   requestForcedReceipt(
@@ -687,6 +719,22 @@ export function createCoreApi(baseUrl = import.meta.env.VITE_CORE_API_BASE_URL ?
       };
     },
 
+    async listMerchantTakeoverCases(token, options = {}) {
+      return parseTakeoverCaseList(await request(
+        normalizedBaseUrl,
+        merchantTakeoverCasesPath(options),
+        { token },
+      ));
+    },
+
+    async getMerchantTakeoverCase(caseId, token) {
+      return parseTakeoverCaseDetail(await request(
+        normalizedBaseUrl,
+        `/v2/merchant/takeover-cases/${encodeURIComponent(caseId)}`,
+        { token },
+      ));
+    },
+
     async getMerchantBusinessDashboard(token) {
       return parseMerchantBusinessDashboard(
         await request(normalizedBaseUrl, '/v2/merchant/dashboard', { token }),
@@ -710,6 +758,14 @@ export function createCoreApi(baseUrl = import.meta.env.VITE_CORE_API_BASE_URL ?
       });
       const value = record(body, 'allowed-actions response');
       return array(value.allowedActions, 'allowedActions').map(parseAllowedAction);
+    },
+
+    async createOrderTrackingEvidence(orderId, input, token) {
+      return parseEvidenceEnvelope(await request(
+        normalizedBaseUrl,
+        `/v2/orders/${encodeURIComponent(orderId)}/tracking-evidence`,
+        { method: 'POST', body: JSON.stringify(input), token },
+      ), orderId, input.carrierCode);
     },
 
     async recordShipment(orderId, input, token) {
@@ -836,6 +892,18 @@ function fulfillmentOrdersPath(options: FulfillmentOrderListOptions) {
   if (options.orderKind) query.set('orderKind', options.orderKind);
   const serialized = query.toString();
   return `/v2/orders${serialized ? `?${serialized}` : ''}`;
+}
+
+function merchantTakeoverCasesPath(options: MerchantTakeoverCaseListOptions) {
+  const query = new URLSearchParams();
+  if (options.state) query.set('state', options.state);
+  if (options.cursor) {
+    query.set('cursorOpenedAt', options.cursor.openedAt);
+    query.set('cursorCaseId', options.cursor.caseId);
+  }
+  if (options.limit !== undefined) query.set('limit', String(options.limit));
+  const serialized = query.toString();
+  return `/v2/merchant/takeover-cases${serialized ? `?${serialized}` : ''}`;
 }
 
 function merchantAuditEntriesPath(options: MerchantAuditListOptions) {
@@ -1721,6 +1789,279 @@ function parseFulfillmentBalance(input: unknown): FulfillmentBalance {
     asset: enumValue(value.asset, fulfillmentAssetSet, 'balance.asset'),
     state: enumValue(value.state, balanceStateSet, 'balance.state'),
     amount: atomicAmount(value.amount, 'balance.amount'),
+  };
+}
+
+function parseTakeoverCaseList(input: unknown): TakeoverCaseList {
+  const value = record(input, 'merchant takeover case list');
+  exactObjectKeys(value, ['artifactVersion', 'cases', 'nextCursor'], 'merchant takeover case list');
+  exact(value.artifactVersion, artifactVersion, 'merchant takeover case list artifactVersion');
+  return {
+    artifactVersion,
+    cases: array(value.cases, 'merchant takeover cases').map(parseTakeoverCase),
+    nextCursor: value.nextCursor === null ? null : parseTakeoverCaseCursor(value.nextCursor),
+  };
+}
+
+function parseTakeoverCaseDetail(input: unknown): TakeoverCaseDetail {
+  const value = record(input, 'merchant takeover case detail');
+  exactObjectKeys(
+    value,
+    ['artifactVersion', 'case', 'assignments', 'transitions'],
+    'merchant takeover case detail',
+  );
+  exact(value.artifactVersion, artifactVersion, 'merchant takeover case detail artifactVersion');
+  const takeover = parseTakeoverCaseWithActions(value.case);
+  const assignments = array(value.assignments, 'merchant takeover assignments').map(parseTakeoverAssignment);
+  if (
+    !takeover.currentAssignment
+    || assignments.length !== 1
+    || assignments[0]?.assignmentId !== takeover.currentAssignment.assignmentId
+  ) invalid('Merchant takeover detail must expose only the current assignment');
+  for (const assignment of assignments) assertTakeoverAssignmentScope(takeover, assignment);
+  return {
+    artifactVersion,
+    case: takeover,
+    assignments,
+    transitions: array(value.transitions, 'merchant takeover transitions').map(parseTakeoverTransition),
+  };
+}
+
+const takeoverCaseKeys = [
+  'caseId',
+  'orderId',
+  'originalMerchantId',
+  'policyVersion',
+  'state',
+  'requiredUsdt',
+  'funding',
+  'evidenceHash',
+  'openedAt',
+  'closedAt',
+  'updatedAt',
+  'order',
+  'currentAssignment',
+] as const;
+
+function parseTakeoverCase(input: unknown): TakeoverCase {
+  const value = record(input, 'merchant takeover case');
+  exactObjectKeys(value, takeoverCaseKeys, 'merchant takeover case');
+  return parseTakeoverCaseValue(value);
+}
+
+function parseTakeoverCaseWithActions(input: unknown): TakeoverCaseDetail['case'] {
+  const value = record(input, 'merchant takeover case detail case');
+  exactObjectKeys(value, [...takeoverCaseKeys, 'allowedActions'], 'merchant takeover case detail case');
+  return {
+    ...parseTakeoverCaseValue(value),
+    allowedActions: array(value.allowedActions, 'merchant takeover allowedActions').map(parseAllowedAction),
+  };
+}
+
+function parseTakeoverCaseValue(value: Record<string, unknown>): TakeoverCase {
+  const funding = record(value.funding, 'merchant takeover funding');
+  exactObjectKeys(funding, [
+    'guaranteeUsedUsdt',
+    'frozenReceivablesUsedUsdt',
+    'futureProceedsUsedUsdt',
+    'platformAdvanceUsdt',
+    'disbursedUsdt',
+    'merchantDebtUsdt',
+  ], 'merchant takeover funding');
+  const order = record(value.order, 'merchant takeover order');
+  exactObjectKeys(order, [
+    'productId',
+    'skuId',
+    'quantity',
+    'fulfillmentMode',
+    'fulfillmentTargetHash',
+    'state',
+    'paymentFinal',
+  ], 'merchant takeover order');
+  const takeover: TakeoverCase = {
+    caseId: string(value.caseId, 'merchant takeover caseId'),
+    orderId: string(value.orderId, 'merchant takeover orderId'),
+    originalMerchantId: string(value.originalMerchantId, 'merchant takeover originalMerchantId'),
+    policyVersion: atomicAmount(value.policyVersion, 'merchant takeover policyVersion'),
+    state: enumValue(value.state, takeoverStateSet, 'merchant takeover state'),
+    requiredUsdt: nullableAtomicAmount(value.requiredUsdt, 'merchant takeover requiredUsdt'),
+    funding: {
+      guaranteeUsedUsdt: atomicAmount(funding.guaranteeUsedUsdt, 'merchant takeover guaranteeUsedUsdt'),
+      frozenReceivablesUsedUsdt: atomicAmount(
+        funding.frozenReceivablesUsedUsdt,
+        'merchant takeover frozenReceivablesUsedUsdt',
+      ),
+      futureProceedsUsedUsdt: atomicAmount(
+        funding.futureProceedsUsedUsdt,
+        'merchant takeover futureProceedsUsedUsdt',
+      ),
+      platformAdvanceUsdt: atomicAmount(funding.platformAdvanceUsdt, 'merchant takeover platformAdvanceUsdt'),
+      disbursedUsdt: atomicAmount(funding.disbursedUsdt, 'merchant takeover disbursedUsdt'),
+      merchantDebtUsdt: atomicAmount(funding.merchantDebtUsdt, 'merchant takeover merchantDebtUsdt'),
+    },
+    evidenceHash: bytes32(value.evidenceHash, 'merchant takeover evidenceHash'),
+    openedAt: dateTime(value.openedAt, 'merchant takeover openedAt'),
+    closedAt: nullableDateTime(value.closedAt, 'merchant takeover closedAt'),
+    updatedAt: dateTime(value.updatedAt, 'merchant takeover updatedAt'),
+    order: {
+      productId: string(order.productId, 'merchant takeover productId'),
+      skuId: string(order.skuId, 'merchant takeover skuId'),
+      quantity: atomicAmount(order.quantity, 'merchant takeover quantity'),
+      fulfillmentMode: enumValue(order.fulfillmentMode, fulfillmentModeSet, 'merchant takeover fulfillmentMode'),
+      fulfillmentTargetHash: bytes32(order.fulfillmentTargetHash, 'merchant takeover fulfillmentTargetHash'),
+      state: enumValue(order.state, orderStateSet, 'merchant takeover order state'),
+      paymentFinal: boolean(order.paymentFinal, 'merchant takeover paymentFinal'),
+    },
+    currentAssignment: value.currentAssignment === null
+      ? null
+      : parseTakeoverAssignment(value.currentAssignment),
+  };
+  if (takeover.currentAssignment) assertTakeoverAssignmentScope(takeover, takeover.currentAssignment);
+  return takeover;
+}
+
+function parseTakeoverAssignment(input: unknown): TakeoverAssignment {
+  const value = record(input, 'merchant takeover assignment');
+  exactObjectKeys(value, [
+    'assignmentId',
+    'caseId',
+    'orderId',
+    'version',
+    'originalMerchantId',
+    'replacementMerchantId',
+    'replacementWallet',
+    'replacementApplicationVersion',
+    'replacementLevel',
+    'replacementLicenseAssetId',
+    'supersedesAssignmentId',
+    'reasonCode',
+    'evidenceHash',
+    'assignedBy',
+    'correlationId',
+    'assignedAt',
+  ], 'merchant takeover assignment');
+  return {
+    assignmentId: bytes32(value.assignmentId, 'merchant takeover assignmentId'),
+    caseId: string(value.caseId, 'merchant takeover assignment caseId'),
+    orderId: string(value.orderId, 'merchant takeover assignment orderId'),
+    version: positiveInteger(value.version, 'merchant takeover assignment version'),
+    originalMerchantId: string(value.originalMerchantId, 'merchant takeover assignment originalMerchantId'),
+    replacementMerchantId: string(
+      value.replacementMerchantId,
+      'merchant takeover assignment replacementMerchantId',
+    ),
+    replacementWallet: address(value.replacementWallet, 'merchant takeover assignment replacementWallet'),
+    replacementApplicationVersion: positiveInteger(
+      value.replacementApplicationVersion,
+      'merchant takeover assignment replacementApplicationVersion',
+    ),
+    replacementLevel: enumValue(
+      value.replacementLevel,
+      merchantLevelSet,
+      'merchant takeover assignment replacementLevel',
+    ),
+    replacementLicenseAssetId: bytes32(
+      value.replacementLicenseAssetId,
+      'merchant takeover assignment replacementLicenseAssetId',
+    ),
+    supersedesAssignmentId: nullableBytes32(
+      value.supersedesAssignmentId,
+      'merchant takeover assignment supersedesAssignmentId',
+    ),
+    reasonCode: string(value.reasonCode, 'merchant takeover assignment reasonCode'),
+    evidenceHash: bytes32(value.evidenceHash, 'merchant takeover assignment evidenceHash'),
+    assignedBy: address(value.assignedBy, 'merchant takeover assignment assignedBy'),
+    correlationId: string(value.correlationId, 'merchant takeover assignment correlationId'),
+    assignedAt: dateTime(value.assignedAt, 'merchant takeover assignment assignedAt'),
+  };
+}
+
+function assertTakeoverAssignmentScope(takeover: TakeoverCase, assignment: TakeoverAssignment) {
+  if (
+    assignment.caseId !== takeover.caseId
+    || assignment.orderId !== takeover.orderId
+    || assignment.originalMerchantId !== takeover.originalMerchantId
+  ) invalid('Takeover assignment is not bound to its case and order');
+}
+
+function parseTakeoverCaseCursor(input: unknown): TakeoverCaseCursor {
+  const value = record(input, 'merchant takeover cursor');
+  exactObjectKeys(value, ['openedAt', 'caseId'], 'merchant takeover cursor');
+  return {
+    openedAt: dateTime(value.openedAt, 'merchant takeover cursor openedAt'),
+    caseId: string(value.caseId, 'merchant takeover cursor caseId'),
+  };
+}
+
+function parseTakeoverTransition(input: unknown): TakeoverCaseTransition {
+  const value = record(input, 'merchant takeover transition');
+  exactObjectKeys(
+    value,
+    ['transitionId', 'fromState', 'toState', 'evidenceType', 'evidenceHash', 'occurredAt'],
+    'merchant takeover transition',
+  );
+  return {
+    transitionId: string(value.transitionId, 'merchant takeover transitionId'),
+    fromState: value.fromState === null
+      ? null
+      : enumValue(value.fromState, takeoverStateSet, 'merchant takeover transition fromState'),
+    toState: enumValue(value.toState, takeoverStateSet, 'merchant takeover transition toState'),
+    evidenceType: string(value.evidenceType, 'merchant takeover transition evidenceType'),
+    evidenceHash: bytes32(value.evidenceHash, 'merchant takeover transition evidenceHash'),
+    occurredAt: dateTime(value.occurredAt, 'merchant takeover transition occurredAt'),
+  };
+}
+
+function parseEvidenceEnvelope(
+  input: unknown,
+  expectedOrderId: string,
+  expectedCarrierCode: LogisticsCarrierCode,
+): EvidenceEnvelopeProjection {
+  const value = record(input, 'tracking evidence');
+  exactObjectKeys(value, [
+    'artifactVersion',
+    'evidenceHash',
+    'ownerWallet',
+    'actorRole',
+    'purpose',
+    'resourceType',
+    'resourceId',
+    'action',
+    'reasonCode',
+    'trackingNumberHash',
+    'mediaAssetIds',
+    'payload',
+    'carrierCode',
+    'createdAt',
+  ], 'tracking evidence');
+  exact(value.artifactVersion, artifactVersion, 'tracking evidence artifactVersion');
+  exact(value.actorRole, 'MERCHANT', 'tracking evidence actorRole');
+  exact(value.purpose, 'SHIPMENT_TRACKING', 'tracking evidence purpose');
+  exact(value.resourceType, 'ORDER', 'tracking evidence resourceType');
+  exact(value.resourceId, expectedOrderId, 'tracking evidence resourceId');
+  exact(value.action, 'RECORD_SHIPMENT', 'tracking evidence action');
+  exact(value.reasonCode, null, 'tracking evidence reasonCode');
+  exact(value.carrierCode, expectedCarrierCode, 'tracking evidence carrierCode');
+  const trackingNumberHash = bytes32(value.trackingNumberHash, 'tracking evidence trackingNumberHash');
+  const mediaAssetIds = array(value.mediaAssetIds, 'tracking evidence mediaAssetIds').map((assetId) => (
+    bytes32(assetId, 'tracking evidence mediaAssetId')
+  ));
+  if (mediaAssetIds.length !== 0) invalid('Tracking evidence cannot contain media assets');
+  return {
+    artifactVersion,
+    evidenceHash: bytes32(value.evidenceHash, 'tracking evidence evidenceHash'),
+    ownerWallet: address(value.ownerWallet, 'tracking evidence ownerWallet'),
+    actorRole: 'MERCHANT',
+    purpose: 'SHIPMENT_TRACKING',
+    resourceType: 'ORDER',
+    resourceId: expectedOrderId,
+    action: 'RECORD_SHIPMENT',
+    reasonCode: null,
+    trackingNumberHash,
+    mediaAssetIds,
+    payload: jsonObject(value.payload, 'tracking evidence payload'),
+    carrierCode: expectedCarrierCode,
+    createdAt: dateTime(value.createdAt, 'tracking evidence createdAt'),
   };
 }
 
