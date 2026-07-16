@@ -5,7 +5,7 @@ implements shared funds, contracts, API, Schema or signer behavior.
 
 ## Current Product Boundary
 
-- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.13`.
+- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.14`.
 - SIWE/JWT stays in memory. Every protected read and write is role-bound by
   Core and preserves typed `DecisionBlocked`, `ExternalBlocked`,
   `ConfigurationRequired` and correlation evidence.
@@ -47,6 +47,11 @@ implements shared funds, contracts, API, Schema or signer behavior.
 - CMS and configuration editors accept structured JSON objects because their
   coordinated request types are open objects. Core remains the schema,
   sanitization, decision and publication authority.
+- Notification operations consume the generated campaign projection, including
+  delivery-state counts and `allowedActions`. ADMIN/OPERATOR create structured
+  ALL/WALLET/MERCHANT/REGION audiences, publish with evidence and retry failed
+  deliveries; AUDITOR remains read-only. Missing provider configuration stays
+  visibly `ConfigurationRequired` and is never presented as delivery success.
 - The risk workspace consumes Core observations, restrictions, appeals,
   manual restriction, override and appeal-decision contracts. AUDITOR is
   read-only, OPERATOR may only appeal and ADMIN owns the other writes. New UID,

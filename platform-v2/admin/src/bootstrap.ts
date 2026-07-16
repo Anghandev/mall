@@ -7,7 +7,7 @@ import {
 } from '@abu24k/core-artifacts';
 
 export const productBaseline = Object.freeze({
-  coreArtifacts: 'coordinated-admin-global-lifecycle-checkpoint',
+  coreArtifacts: 'coordinated-notification-campaign-checkpoint',
   artifactVersion,
   publicCatalogs: Object.freeze({
     breakerScopes,
@@ -55,6 +55,7 @@ export const productBaseline = Object.freeze({
     merchantDrilldown: true,
     cms: true,
     notifications: true,
+    notificationCampaignOperations: true,
     systemConfig: true,
     audit: true,
     monitoring: true,
