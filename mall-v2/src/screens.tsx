@@ -1160,7 +1160,7 @@ export function OrdersScreen() {
             >
               <Headphones aria-hidden="true" size={17} /> 联系客服
             </a>
-          ) : <p className="field-error" role="status">{runtime.supportConfigurationError}</p>}
+          ) : <p className="field-error">{runtime.supportConfigurationError}</p>}
         </div>
       </section>
     </div>
