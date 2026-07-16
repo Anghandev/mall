@@ -18,6 +18,7 @@ import {
   NotFoundScreen,
   NotificationsScreen,
   OrdersScreen,
+  ProductDetailScreen,
   ReviewScreen,
   RewardsScreen,
   SeckillScreen,
@@ -145,6 +146,11 @@ function MallShell() {
 }
 
 function DetailRoute({ pathname }: { pathname: string }) {
+  const productMatch = /^\/mall\/products\/([^/]+)$/.exec(pathname);
+  if (productMatch) {
+    return <ProductDetailScreen productId={decodeURIComponent(productMatch[1]!)} />;
+  }
+
   switch (pathname) {
     case '/assets/addresses':
       return <AddressScreen />;
@@ -185,7 +191,7 @@ export const mallRuntimeBoundary = Object.freeze({
 export const routeEvidence = Object.freeze({
   primary: tabs.map((tab) => tab.path),
   protected: ['/assets/addresses', '/assets/orders', '/assets/activity', '/assets/rewards', '/assets/notifications'],
-  checkout: ['/checkout', '/checkout/review'],
+  checkout: ['/mall/products/:productId', '/checkout', '/checkout/review'],
 });
 
 function shortenAddress(address: string) {

@@ -99,14 +99,21 @@ export interface WalletSession {
   roles: readonly UserRole[];
 }
 
-export interface CheckoutTarget {
+interface CheckoutTargetBinding {
   fulfillmentMode: 'DELIVERY' | 'PICKUP';
   fulfillmentTargetHash: string;
   regionCodeHash: string;
   label: string;
 }
 
-export interface QuoteSelection extends CheckoutTarget {
+export interface CheckoutTarget extends CheckoutTargetBinding {
+  review: Readonly<
+    | { kind: 'DELIVERY'; address: BuyerSavedAddress }
+    | { kind: 'PICKUP'; store: MerchantStore }
+  >;
+}
+
+export interface QuoteSelection extends CheckoutTargetBinding {
   idempotencyKey: string;
   productId: string;
   skuId: string;

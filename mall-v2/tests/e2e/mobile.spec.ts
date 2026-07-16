@@ -10,7 +10,7 @@ import {
   parsedBuyerAddress,
 } from '../account-fixtures';
 import { buyerActionResult, orderActionEvidence } from '../evidence-fixtures';
-import { deliveryOrder, deliveryOrderTarget } from '../fulfillment-fixtures';
+import { deliveryOrder, deliveryOrderTarget, deliveryTarget } from '../fulfillment-fixtures';
 import { product, productVideoAssetId } from '../payment-fixtures';
 import { relayEvent, seckillSession, seckillSessionId } from '../seckill-fixtures';
 
@@ -56,20 +56,51 @@ test('primary mobile shell is usable and does not overflow', async ({ page }, te
 
 test('detail routes stay inside the mobile frame', async ({ page }, testInfo) => {
   await mockPublicCore(page);
-  for (const path of ['/assets/addresses', '/assets/orders', '/assets/activity', '/assets/rewards', '/assets/notifications', '/checkout', '/checkout/review']) {
+  for (const path of [`/mall/products/${product.productId}`, '/assets/addresses', '/assets/orders', '/assets/activity', '/assets/rewards', '/assets/notifications', '/checkout', '/checkout/review']) {
     await page.goto(path);
     await expect(page.locator('.app-frame')).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);
     await expectHealthyDocument(page);
     await page.evaluate(() => window.scrollTo(0, 0));
-    if (testInfo.project.name === 'mobile-393' && ['/assets/rewards', '/assets/notifications'].includes(path)) {
+    if (testInfo.project.name === 'mobile-393' && [`/mall/products/${product.productId}`, '/assets/rewards', '/assets/notifications'].includes(path)) {
       await page.screenshot({
         path: `test-results/screenshots/${testInfo.project.name}-${path.split('/').at(-1)}.png`,
         fullPage: true,
       });
     }
   }
+});
+
+test('product detail and saved-address checkout are keyboard operable and fail closed before a signed quote', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile-393', 'Focused purchase-flow acceptance');
+  await mockWallet(page);
+  await mockPublicCore(page);
+  await page.goto('/mall');
+  await page.getByRole('button', { name: '连接钱包' }).click();
+
+  const detailLink = page.getByRole('link', { name: `查看 ${product.title} 商品详情` });
+  await detailLink.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: '商品详情' })).toBeVisible();
+  await expect(page.getByText(/普通结算禁用/)).toBeVisible();
+  await expect(page.getByText('黑金鞋面，轻量缓震结构。')).toBeVisible();
+
+  const buy = page.getByRole('button', { name: '购买' });
+  await expect(buy).toBeEnabled();
+  await buy.press('Enter');
+  await expect(page.getByRole('heading', { name: '订单配置' })).toBeVisible();
+  await page.getByRole('button', { name: /42码 \/ 黑金/ }).click();
+  const defaultAddress = page.getByRole('button', { name: '使用默认地址' });
+  await defaultAddress.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Core 目标已验证')).toBeVisible();
+  await expect(page.getByText(buyerSavedAddress.formattedAddress, { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '创建签名报价' })).toBeEnabled();
+  await expect(page.getByLabel('详细地址')).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+  await expectHealthyDocument(page);
+  await page.screenshot({ path: 'test-results/screenshots/mobile-393-checkout-saved-address.png', fullPage: true });
 });
 
 test('production surface exposes no business-refund action', async ({ page }) => {
@@ -200,9 +231,16 @@ async function mockPublicCore(page: import('@playwright/test').Page) {
       if (url.pathname === '/v2/orders') return { orders: [deliveryOrder], nextCursor: null };
       if (url.pathname === '/v2/buyer/profile') return buyerProfile;
       if (url.pathname === '/v2/buyer/overview') return buyerOverview;
+      if (url.pathname === '/v2/buyer/shopping-statements') return {
+        artifactVersion,
+        buyerWallet: deliveryOrder.buyerWallet,
+        statements: [],
+        nextCursor: null,
+      };
       if (url.pathname === '/v2/buyer/addresses/parse') return parsedBuyerAddress;
       if (url.pathname === '/v2/buyer/addresses' && route.request().method() === 'POST') return buyerSavedAddress;
       if (url.pathname === '/v2/buyer/addresses') return { artifactVersion, addresses: [buyerSavedAddress] };
+      if (url.pathname === `/v2/buyer/addresses/${buyerSavedAddress.addressId}/fulfillment-target`) return deliveryTarget;
       if (url.pathname === `/v2/orders/${deliveryOrder.orderId}/takeover-timeline`) return buyerTakeoverTimeline;
       if (url.pathname === '/v2/actions/order') return { allowedActions: [{ action: 'REQUEST_EXCHANGE', enabled: true }] };
       if (url.pathname === `/v2/orders/${deliveryOrder.orderId}/fulfillment-target`) return { target: deliveryOrderTarget };

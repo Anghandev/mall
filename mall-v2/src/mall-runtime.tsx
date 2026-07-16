@@ -68,12 +68,6 @@ export interface BrowserPosition {
   longitude: number;
 }
 
-export interface DeliveryTargetDraft {
-  recipientName: string;
-  phone: string;
-  address: string;
-}
-
 export type BuyerAddressDraft = Omit<BuyerAddressWriteRequest, 'expectedVersion' | 'idempotencyKey'>;
 
 export interface MallServices {
@@ -182,7 +176,6 @@ export interface MallRuntimeValue {
   selectSeckillSession(): void;
   reloadStores(regionCode?: string): Promise<void>;
   requestLocation(): Promise<void>;
-  createDeliveryTarget(draft: DeliveryTargetDraft): Promise<void>;
   createPickupTarget(storeId: string): Promise<void>;
   reloadOrders(): Promise<void>;
   loadMoreOrders(): Promise<void>;
@@ -565,28 +558,6 @@ export function MallRuntimeProvider({
       }, () => setLocationState('error'));
     },
 
-    async createDeliveryTarget(draft) {
-      await run(async () => {
-        const activeSession = requireSession();
-        assertDeliveryTargetDraft(draft);
-        const nextLocation = location ?? await services.getCurrentPosition();
-        setLocation(nextLocation);
-        setLocationState('ready');
-        const target = await services.core.createDeliveryTarget(activeSession.token, {
-          idempotencyKey: services.createIdempotencyKey(),
-          ...draft,
-          ...nextLocation,
-        });
-        setCheckoutTarget({
-          fulfillmentMode: target.fulfillmentMode,
-          fulfillmentTargetHash: target.targetHash,
-          regionCodeHash: target.regionCodeHash,
-          label: `${draft.recipientName} · ${draft.address}`,
-        });
-        clearQuoteState();
-      });
-    },
-
     async createPickupTarget(storeId) {
       await run(async () => {
         const activeSession = requireSession();
@@ -601,6 +572,7 @@ export function MallRuntimeProvider({
           fulfillmentTargetHash: target.targetHash,
           regionCodeHash: target.regionCodeHash,
           label: `${target.store.name} · ${target.store.address}`,
+          review: { kind: 'PICKUP', store: target.store },
         });
         clearQuoteState();
       });
@@ -877,6 +849,7 @@ export function MallRuntimeProvider({
           fulfillmentTargetHash: target.targetHash,
           regionCodeHash: target.regionCodeHash,
           label: `${address.recipientName} · ${address.formattedAddress}`,
+          review: { kind: 'DELIVERY', address },
         });
         setFulfillmentModeState('DELIVERY');
         clearQuoteState();
@@ -1216,7 +1189,10 @@ export function MallRuntimeProvider({
       );
     }
     return {
-      ...target,
+      fulfillmentMode: target.fulfillmentMode,
+      fulfillmentTargetHash: target.fulfillmentTargetHash,
+      regionCodeHash: target.regionCodeHash,
+      label: target.label,
       idempotencyKey: services.createIdempotencyKey(),
       productId: selectedProduct.productId,
       skuId: selectedSku.skuId,
@@ -1654,12 +1630,6 @@ function mergeShoppingStatements(
   const byId = new Map(current.map((statement) => [statement.orderId.toLowerCase(), statement]));
   for (const statement of incoming) byId.set(statement.orderId.toLowerCase(), statement);
   return [...byId.values()];
-}
-
-function assertDeliveryTargetDraft(draft: DeliveryTargetDraft) {
-  if (!draft.recipientName.trim() || !/^\d{11}$/.test(draft.phone) || draft.address.trim().length < 5) {
-    throw new CoreClientError('InvalidRequest', '请完整填写收货人、11 位手机号和详细地址');
-  }
 }
 
 function errorMessage(reason: unknown) {
