@@ -5,15 +5,22 @@ implements shared funds, contracts, API, Schema or signer behavior.
 
 ## Current Product Boundary
 
-- Production consumes `@abu24k/core-artifacts@2.0.0-merchant-fulfillment.1`.
+- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.10`.
 - SIWE/JWT stays in memory. Every protected read and write is role-bound by
   Core and preserves typed `DecisionBlocked`, `ExternalBlocked`,
   `ConfigurationRequired` and correlation evidence.
-- The Admin UI consumes payment/fulfillment, wallet-scoped signed settlement,
+- The Admin UI consumes payment/fulfillment, global read-only signed settlement,
   reward subtypes and non-transferable BNM points, merchant guarantee/debt,
   governed takeover funding, policy draft governance, CMS version publication,
   typed system configuration, append-only audit and operations/coverage
   monitoring.
+- The clearing workspace reads an order payment independently of the buyer
+  wallet, server-side filtered settlement-request and immutable Safe-batch
+  lists with stable cursors, and full request/batch detail. It renders Core
+  item totals and hashes, Safe nonce and owner approvals, execution replacements,
+  15-confirmation finality, coverage, independent breakers and reconciliation.
+  `MINED 14/15`, `FAILED` and `REORGED` never render as final. There is no
+  manual transfer, batch construction or browser-side financial calculation.
 - The Dashboard consumes the authenticated `GET /v2/admin/dashboard` business
   projection. It renders the Core `Asia/Shanghai` window, immutable order
   amounts, current fulfillment queues, merchant/product/seckill counts,

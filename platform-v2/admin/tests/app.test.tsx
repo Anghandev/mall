@@ -36,11 +36,14 @@ describe('platform admin fail-closed experience', () => {
     expect(packageJson.dependencies['@abu24k/core-artifacts']).toBe(`workspace:${artifactVersion}`);
     expect(productBaseline.artifactVersion).toBe(artifactVersion);
     expect(coreState.artifactVersion).toBe(artifactVersion);
-    expect(coreState.artifactStatus).toBe('coordinated-merchant-fulfillment-checkpoint');
+    expect(coreState.artifactStatus).toBe('coordinated-settlement-admin-clearing-checkpoint');
     expect(coreState.connectionLabel).toContain(artifactVersion);
     expect(productBaseline.adminCapabilities.adminGlobalResourceSearch).toBe(true);
     expect(productBaseline.adminCapabilities.adminGlobalResourceExport).toBe(true);
     expect(productBaseline.adminCapabilities.adminProductBatchTags).toBe(true);
+    expect(productBaseline.adminCapabilities.adminSettlementRequests).toBe(true);
+    expect(productBaseline.adminCapabilities.adminSettlementBatches).toBe(true);
+    expect(productBaseline.adminCapabilities.adminSettlementReconciliation).toBe(true);
     expect(productBaseline.adminCapabilities.merchantStoreManagement).toBe(false);
     expect(productBaseline.adminCapabilities.merchantOrderExport).toBe(false);
   });
@@ -54,7 +57,7 @@ describe('platform admin fail-closed experience', () => {
       /^\w+ \/v2\/admin\/(?:merchant-)?stores(?:\/|$)/.test(operation),
     );
 
-    expect(artifactVersion).toBe('2.0.0-merchant-fulfillment.1');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.10');
     expect(storeStatuses).toEqual(['DRAFT', 'ACTIVE', 'SUSPENDED', 'CLOSED']);
     expect(generatedDraftStatus).toBe('DRAFT');
     expect(merchantStoreManagementOperations).toEqual([
@@ -821,7 +824,7 @@ describe('platform admin fail-closed experience', () => {
     expect(JSON.parse(String(write?.[1]?.body))).toMatchObject({ parentCategoryId: null, idempotencyKey: 'category-move-root-1' });
   });
 
-  it('uses SIWE and renders the wallet-bound payment submission projection', async () => {
+  it('uses SIWE and renders the global Admin payment projection without a buyer-wallet lookup', async () => {
     const wallet = '0x1111111111111111111111111111111111111111';
     window.ethereum = {
       request: vi.fn(async ({ method }) => {
@@ -830,36 +833,28 @@ describe('platform admin fail-closed experience', () => {
         throw new Error(`Unexpected wallet method ${method}`);
       }),
     };
-    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.endsWith('/v2/auth/nonce')) return jsonResponse({ message: 'SIWE message', nonce: 'nonce', issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString() }, 201);
       if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['BUYER', 'ADMIN'] });
-      if (url.includes('/v2/payments/')) return jsonResponse(paymentProjection());
-      if (url.endsWith('/v2/settlements')) return jsonResponse({
-        artifactVersion,
-        wallet,
-        balances: [{ asset: 'NPL', purpose: 'REWARD', rewardSubtype: 'GENESIS', state: 'AVAILABLE', amount: '2000000' }],
-        points: [{ pointsType: 'BNM', purpose: 'BNM_LIABILITY', state: 'LOCKED', amount: '100000000', transferable: false }],
-        requests: [],
-      });
+      if (url.includes('/v2/admin/payments/')) return jsonResponse(paymentProjection());
       return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected request', correlationId: 'test' } }, 400);
-    }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
     renderAt('/clearing');
 
     await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
-    await waitFor(() => expect(screen.getByText('BUYER / ADMIN')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('BUYER / ADMIN · READ ONLY')).toBeTruthy());
     await user.type(screen.getByLabelText('Order ID · bytes32'), hash('3'));
-    await user.click(screen.getByRole('button', { name: '读取投影' }));
+    await user.click(screen.getByRole('button', { name: '读取支付证据' }));
 
     expect(await screen.findByText('SUBMITTED')).toBeTruthy();
     expect(screen.getByText('70000000')).toBeTruthy();
     expect(screen.getByText('30000000')).toBeTruthy();
     expect(screen.getByText('12 / 15')).toBeTruthy();
     expect(screen.getByText('pay')).toBeTruthy();
-    expect(await screen.findByText('GENESIS · AVAILABLE')).toBeTruthy();
-    expect(screen.getByText('BNM backend points')).toBeTruthy();
-    expect(screen.getByText('LOCKED · NON_TRANSFERABLE')).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/v2/payments/'))).toBe(false);
   });
 });
 
