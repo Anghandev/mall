@@ -1,6 +1,6 @@
 # Merchant Workbench Core Gaps
 
-The merchant product consumes Core's coordinated `2.0.0-logistics-admin.1` artifact
+The merchant product consumes Core's coordinated `2.0.0-admin-global-ops.1` artifact
 workspace package. Bootstrap, SIWE,
 merchant-bound Catalog/SKU/inventory management, immutable media, wallet-scoped fulfillment, merchant finance,
 guarantee-deposit evidence, signed settlement requests and Safe-finality
@@ -12,6 +12,8 @@ state mismatches.
 Merchant self-service profile remains limited to shop name and owned Logo.
 Platform qualification decisions and business-license PII are admin-owned and
 have no Merchant write route.
+Admin global search/export and product batch-tag operations remain outside the
+Merchant API and production bundle.
 
 ## Resolved In Settlement/Admin Batch
 
