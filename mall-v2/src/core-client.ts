@@ -64,6 +64,7 @@ import {
   rewardSubtypes,
   seckillStates,
   settlementRequestStates,
+  storeStatuses,
   userRoles,
 } from '@abu24k/core-artifacts';
 import openApi from '@abu24k/core-artifacts/openapi';
@@ -591,12 +592,11 @@ export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } 
 
     async listStores(regionCode) {
       const query = regionCode ? `?regionCode=${encodeURIComponent(regionCode)}` : '';
-      const value = await requestJson<{ stores: readonly MerchantStore[] }>(
+      const value = await requestJson<unknown>(
         fetcher,
         `${baseUrl}${operations.stores}${query}`,
       );
-      if (!Array.isArray(value.stores)) throw new CoreClientError('InvalidResponse', '门店列表响应无效');
-      return value.stores;
+      return parsePublicMerchantStores(value);
     },
 
     createDeliveryTarget(token, request) {
@@ -1220,6 +1220,55 @@ function parseCatalogProducts(value: unknown): readonly CatalogProduct[] {
   });
 }
 
+function parsePublicMerchantStores(value: unknown): readonly MerchantStore[] {
+  const response = objectValue(value);
+  assertOnlyKeys(response, ['stores'], '门店列表响应包含未发布字段');
+  return arrayValue(response.stores).map((item) => {
+    const store = objectValue(item);
+    assertOnlyKeys(store, [
+      'storeId',
+      'merchantId',
+      'name',
+      'regionCode',
+      'longitude',
+      'latitude',
+      'address',
+      'phone',
+      'businessHours',
+      'imageAssetIds',
+      'status',
+      'version',
+    ], '公开门店响应包含未发布字段');
+    stringValue(store.storeId);
+    stringValue(store.merchantId);
+    boundedNonEmptyStringValue(store.name, 100);
+    if (!/^[0-9]{6}$/.test(stringValue(store.regionCode))) {
+      throw new CoreClientError('InvalidResponse', '公开门店行政区无效');
+    }
+    boundedNumberValue(store.longitude, -180, 180);
+    boundedNumberValue(store.latitude, -90, 90);
+    stringValue(store.address);
+    if (!/^[+]?[0-9-]{7,20}$/.test(stringValue(store.phone))) {
+      throw new CoreClientError('InvalidResponse', '公开门店电话无效');
+    }
+    boundedNonEmptyStringValue(store.businessHours, 240);
+    const imageAssetIds = arrayValue(store.imageAssetIds).map(bytes32Value);
+    if (
+      imageAssetIds.length < 1
+      || imageAssetIds.length > 5
+      || new Set(imageAssetIds.map((assetId) => assetId.toLowerCase())).size !== imageAssetIds.length
+    ) {
+      throw new CoreClientError('InvalidResponse', '公开门店图片投影无效');
+    }
+    const status = enumValue(store.status, storeStatuses);
+    if (status !== 'ACTIVE') {
+      throw new CoreClientError('InvalidResponse', '公开门店列表包含非营业门店');
+    }
+    positiveIntegerValue(store.version);
+    return item as MerchantStore;
+  });
+}
+
 function parseCatalogSeckillOverlay(value: unknown) {
   const overlay = objectValue(value);
   bytes32Value(overlay.sessionId);
@@ -1580,6 +1629,13 @@ function objectValue(value: unknown): Record<string, unknown> {
     throw new CoreClientError('InvalidResponse', 'Core 响应格式无效');
   }
   return value as Record<string, unknown>;
+}
+
+function assertOnlyKeys(value: Record<string, unknown>, keys: readonly string[], message: string) {
+  const allowed = new Set(keys);
+  if (Object.keys(value).some((key) => !allowed.has(key))) {
+    throw new CoreClientError('InvalidResponse', message);
+  }
 }
 
 function stringValue(value: unknown) {

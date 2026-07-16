@@ -396,6 +396,7 @@ export function MallRuntimeProvider({
       })
       .catch(() => {
         if (!active) return;
+        setStores([]);
         setStoresState('error');
       });
     return () => { active = false; };
@@ -530,7 +531,10 @@ export function MallRuntimeProvider({
         const nextStores = await services.core.listStores(regionCode);
         setStores(nextStores);
         setStoresState(nextStores.length > 0 ? 'ready' : 'empty');
-      }, () => setStoresState('error'));
+      }, () => {
+        setStores([]);
+        setStoresState('error');
+      });
     },
 
     async requestLocation() {

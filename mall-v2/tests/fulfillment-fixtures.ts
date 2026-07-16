@@ -11,6 +11,8 @@ import {
 const hash = (value: string) => `0x${value.repeat(64)}`;
 const address = (value: string) => `0x${value.repeat(40)}`;
 
+export const storeImageAssetIds = [hash('a'), hash('b')] as const;
+
 export const store: MerchantStore = {
   storeId: 'store-dalian-001',
   merchantId: 'merchant-001',
@@ -20,6 +22,8 @@ export const store: MerchantStore = {
   latitude: 38.914,
   address: '辽宁省大连市中山区示例路 24 号',
   phone: '0411-88888888',
+  businessHours: '周一至周日 09:30-21:00',
+  imageAssetIds: storeImageAssetIds,
   status: 'ACTIVE',
   version: 3,
 };
