@@ -1399,6 +1399,8 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       },
       createCampaign: async (_actor, input) => ({ campaignId: 'campaign-1', ...input }),
       publishCampaign: async (_actor, campaignId) => ({ campaignId, state: 'PUBLISHED' }),
+      listCampaigns: async () => [{ campaignId: 'campaign-1', state: 'PUBLISHED' }],
+      retryCampaignDeliveries: async (_actor, campaignId) => ({ campaignId, state: 'RETRY_SCHEDULED', retriedDeliveries: 1 }),
       listInbox: async (actor) => ({ wallet: actor.walletAddress, messages: [] }),
     },
     systemConfigService: {
@@ -1548,6 +1550,11 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     };
     const buyerOnlyToken = issueSessionToken(
       { walletAddress: wallet.address, roles: ['BUYER'] },
+      config.jwtSecret!,
+      now,
+    );
+    const auditorOnlyToken = issueSessionToken(
+      { walletAddress: wallet.address, roles: ['AUDITOR'] },
       config.jwtSecret!,
       now,
     );
@@ -2483,11 +2490,35 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
         idempotencyKey: 'notification-campaign-http-1',
       }),
     })).status, 201);
+    assert.equal((await fetch(`${base}/v2/admin/notification-campaigns?limit=25`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/notification-campaigns`, {
+      headers: { authorization: `Bearer ${buyerOnlyToken}` },
+    })).status, 403);
+    assert.equal((await fetch(`${base}/v2/admin/notification-campaigns`, {
+      headers: { authorization: `Bearer ${auditorOnlyToken}` },
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/notification-campaigns`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${auditorOnlyToken}` },
+      body: '{}',
+    })).status, 403);
     assert.equal((await fetch(`${base}/v2/admin/notification-campaigns/campaign-1/publish`, {
       method: 'POST',
       headers: bearerHeaders,
       body: JSON.stringify({ evidenceHash: HASH }),
     })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/notification-campaigns/campaign-1/retry-failed`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: '{}',
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/notification-campaigns/campaign-1/retry-failed`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${auditorOnlyToken}` },
+      body: '{}',
+    })).status, 403);
 
     assert.equal((await fetch(`${base}/v2/admin/system-config/versions`, {
       headers: { authorization: `Bearer ${session.token}` },

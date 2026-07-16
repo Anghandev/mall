@@ -528,6 +528,8 @@ export interface NotificationApiService {
     correlationId: string;
   }): Promise<unknown>;
   publishCampaign(actor: FulfillmentActor, campaignId: string, input: { evidenceHash: string; correlationId: string }): Promise<unknown>;
+  listCampaigns(actor: FulfillmentActor, limit?: number): Promise<unknown>;
+  retryCampaignDeliveries(actor: FulfillmentActor, campaignId: string, input: { correlationId: string }): Promise<unknown>;
   listInbox(actor: FulfillmentActor, limit?: number): Promise<unknown>;
 }
 
@@ -3068,6 +3070,15 @@ async function routeAdminServices(
       return true;
     }
   }
+  if (request.method === 'GET' && url.pathname === '/v2/admin/notification-campaigns') {
+    assertOnlySearchParams(url, ['limit']);
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
+    sendJson(response, 200, await dependencies.notificationService.listCampaigns(
+      fulfillmentActor(claims),
+      optionalPositiveIntegerParameter(url.searchParams.get('limit'), 'limit'),
+    ), correlationId);
+    return true;
+  }
   if (request.method === 'POST' && url.pathname === '/v2/admin/notification-campaigns') {
     const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
     const body = await readJson(request);
@@ -3093,6 +3104,17 @@ async function routeAdminServices(
       fulfillmentActor(claims),
       campaignPath.resourceId,
       { evidenceHash: requiredString(body, 'evidenceHash'), correlationId },
+    ), correlationId);
+    return true;
+  }
+  if (request.method === 'POST' && campaignPath?.action === 'retry-failed') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, []);
+    sendJson(response, 200, await dependencies.notificationService.retryCampaignDeliveries(
+      fulfillmentActor(claims),
+      campaignPath.resourceId,
+      { correlationId },
     ), correlationId);
     return true;
   }

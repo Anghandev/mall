@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Abu 24K V2 Core API",
-    "version": "2.0.0-settlement-admin.13"
+    "version": "2.0.0-settlement-admin.14"
   },
-  "x-artifactVersion": "2.0.0-settlement-admin.13",
+  "x-artifactVersion": "2.0.0-settlement-admin.14",
   "servers": [],
   "paths": {
     "/v2/buyer/profile": {
@@ -4698,6 +4698,65 @@
       }
     },
     "/v2/admin/notification-campaigns": {
+      "get": {
+        "operationId": "listNotificationCampaigns",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NotificationCampaignProjection"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ]
+      },
       "post": {
         "operationId": "createNotificationCampaign",
         "security": [
@@ -4785,6 +4844,73 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/NotificationCampaignPublishResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "campaignId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/notification-campaigns/{campaignId}/retry-failed": {
+      "post": {
+        "operationId": "retryNotificationCampaignDeliveries",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyObject"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationCampaignRetryResult"
                 }
               }
             }
@@ -11724,7 +11850,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "status": {
             "const": "CORE_API_READY"
@@ -12037,7 +12163,7 @@
             "minimum": 1
           },
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "allowedActions": {
             "type": "array",
@@ -13074,7 +13200,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "relation": {
             "enum": [
@@ -13180,7 +13306,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "exportId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -13309,7 +13435,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "operationId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -13439,7 +13565,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "operationId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15521,7 +15647,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15620,7 +15746,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -16560,7 +16686,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "productId": {
             "type": "string",
@@ -16733,7 +16859,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "storeId": {
             "type": "string",
@@ -16859,7 +16985,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "productId": {
             "type": "string",
@@ -16961,7 +17087,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "previewId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -17120,7 +17246,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "adjustmentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -17245,7 +17371,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "uploadIntentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -17343,7 +17469,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -17429,7 +17555,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -17590,7 +17716,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "evidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
@@ -17849,7 +17975,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -18124,7 +18250,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifact_version": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "wallet_address": {
             "$ref": "#/components/schemas/Address"
@@ -18450,7 +18576,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -18627,7 +18753,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "buyerWallet": {
             "$ref": "#/components/schemas/Address"
@@ -19001,7 +19127,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "merchantId": {
             "type": "string",
@@ -19197,7 +19323,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "requests": {
             "type": "array",
@@ -19361,7 +19487,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "request": {
             "$ref": "#/components/schemas/AdminSettlementRequest"
@@ -19522,7 +19648,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "batches": {
             "type": "array",
@@ -20242,7 +20368,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "batch": {
             "$ref": "#/components/schemas/AdminSettlementBatchEnvelope"
@@ -21399,7 +21525,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "assignment": {
             "$ref": "#/components/schemas/TakeoverAssignment"
@@ -21612,7 +21738,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "cases": {
             "type": "array",
@@ -21687,7 +21813,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "caseId": {
             "type": "string",
@@ -21768,7 +21894,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "case": {
             "allOf": [
@@ -21951,7 +22077,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -22174,7 +22300,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -23040,7 +23166,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "snapshotId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -23123,7 +23249,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -23839,6 +23965,177 @@
           }
         }
       },
+      "NotificationCampaignProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "campaignId",
+          "topic",
+          "audience",
+          "message",
+          "contentHash",
+          "cmsVersionId",
+          "startsAt",
+          "endsAt",
+          "state",
+          "createdBy",
+          "createdAt",
+          "publishedAt",
+          "deliveryCounts",
+          "allowedActions"
+        ],
+        "properties": {
+          "campaignId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "topic": {
+            "enum": [
+              "ANNOUNCEMENT",
+              "MAINTENANCE",
+              "ACTIVITY"
+            ]
+          },
+          "audience": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "message": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "contentHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "cmsVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "startsAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "endsAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "enum": [
+              "DRAFT",
+              "PUBLISHED",
+              "CANCELLED"
+            ]
+          },
+          "createdBy": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "publishedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deliveryCounts": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "PENDING",
+              "PROCESSING",
+              "DELIVERED",
+              "RETRY",
+              "CONFIGURATION_REQUIRED",
+              "DEAD_LETTER"
+            ],
+            "properties": {
+              "PENDING": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "PROCESSING": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "DELIVERED": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "RETRY": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "CONFIGURATION_REQUIRED": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "DEAD_LETTER": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "allowedActions": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "PUBLISH",
+                "RETRY_FAILED"
+              ]
+            }
+          }
+        }
+      },
+      "NotificationCampaignRetryResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "campaignId",
+          "state",
+          "retriedDeliveries"
+        ],
+        "properties": {
+          "campaignId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "const": "RETRY_SCHEDULED"
+          },
+          "retriedDeliveries": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
       "SystemConfigCreateRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -24454,7 +24751,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -24701,7 +24998,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -25056,7 +25353,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "sessionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -25285,7 +25582,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "protocolVersion": {
             "const": 1
@@ -25359,7 +25656,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -25697,7 +25994,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "addresses": {
             "type": "array",
@@ -25878,7 +26175,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -26045,7 +26342,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "orderId": {
             "type": "string",
@@ -26080,7 +26377,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "merchantId": {
             "type": "string",
@@ -26556,7 +26853,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "exportId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -27030,7 +27327,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "observation": {
             "$ref": "#/components/schemas/RiskObservation"
@@ -27056,7 +27353,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "generatedAt": {
             "type": "string",
@@ -27327,7 +27624,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "challengeId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -27394,7 +27691,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "bindingId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -27503,7 +27800,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "requestId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -27613,7 +27910,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "batchId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -27650,7 +27947,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "printJobId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -27819,7 +28116,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "configVersionId": {
             "anyOf": [
@@ -28054,7 +28351,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "providers": {
             "type": "array",
@@ -28235,7 +28532,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "warehouseId": {
             "type": "string",
@@ -28326,7 +28623,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "warehouses": {
             "type": "array",
@@ -28391,7 +28688,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "waybills": {
             "type": "array",
@@ -28410,7 +28707,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "printJobs": {
             "type": "array",
@@ -28752,7 +29049,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "merchants": {
             "type": "array",
@@ -28947,7 +29244,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -29386,7 +29683,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.13"
+            "const": "2.0.0-settlement-admin.14"
           },
           "merchant": {
             "$ref": "#/components/schemas/MerchantLifecycleSummary"

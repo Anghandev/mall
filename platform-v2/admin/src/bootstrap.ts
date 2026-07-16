@@ -7,7 +7,7 @@ import {
 } from '@abu24k/core-artifacts';
 
 export const productBaseline = Object.freeze({
-  coreArtifacts: 'coordinated-order-statement-checkpoint',
+  coreArtifacts: 'coordinated-admin-global-lifecycle-checkpoint',
   artifactVersion,
   publicCatalogs: Object.freeze({
     breakerScopes,
@@ -45,6 +45,7 @@ export const productBaseline = Object.freeze({
     adminGlobalResourceSearch: true,
     adminGlobalResourceExport: true,
     adminProductBatchTags: true,
+    adminProductLifecycleBatch: true,
     merchantStoreManagement: false,
     merchantOrderExport: false,
     merchantLogisticsOperations: true,
