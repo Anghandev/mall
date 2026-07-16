@@ -12,7 +12,7 @@
     "check": "pnpm typecheck && pnpm test && pnpm build && pnpm bundle:check"
   },
   "dependencies": {
-    "@abu24k/core-artifacts": "workspace:2.0.0-logistics.1",
+    "@abu24k/core-artifacts": "workspace:2.0.0-merchant-lifecycle.1",
     "lucide-react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",

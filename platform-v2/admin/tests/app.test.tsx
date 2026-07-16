@@ -28,11 +28,11 @@ describe('platform admin fail-closed experience', () => {
     expect(packageJson.dependencies['@abu24k/core-artifacts']).toBe(`workspace:${artifactVersion}`);
     expect(productBaseline.artifactVersion).toBe(artifactVersion);
     expect(coreState.artifactVersion).toBe(artifactVersion);
-    expect(coreState.artifactStatus).toBe('coordinated-logistics-checkpoint');
+    expect(coreState.artifactStatus).toBe('coordinated-merchant-lifecycle-checkpoint');
     expect(coreState.connectionLabel).toContain(artifactVersion);
   });
 
-  it('consumes the logistics checkpoint without exposing Merchant operations to Admin', () => {
+  it('preserves the Merchant-only logistics boundary at the merchant lifecycle checkpoint', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const merchantLogisticsPaths = coordinatedManifest.httpSurface.filter((operation) =>
@@ -49,7 +49,7 @@ describe('platform admin fail-closed experience', () => {
     renderAt('/logistics');
     expect(screen.getByRole('heading', { name: '物流配置' })).toBeTruthy();
     expect(screen.getByText('GAP-ADM-012')).toBeTruthy();
-    expect(screen.getByText(/Admin 未发布的物流配置和打印操作继续 fail-closed/)).toBeTruthy();
+    expect(screen.getByText(/Admin 物流配置和打印操作仍未发布，继续 fail-closed/)).toBeTruthy();
     expect(screen.getByRole('button', { name: '加载资源' }).hasAttribute('disabled')).toBe(true);
     expect(screen.getByRole('button', { name: '打印电子面单' }).hasAttribute('disabled')).toBe(true);
     expect(screen.getByRole('button', { name: '打印自提单' }).hasAttribute('disabled')).toBe(true);

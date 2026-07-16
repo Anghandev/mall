@@ -7,7 +7,7 @@ import {
 } from '@abu24k/core-artifacts';
 
 export const productBaseline = Object.freeze({
-  coreArtifacts: 'coordinated-logistics-checkpoint',
+  coreArtifacts: 'coordinated-merchant-lifecycle-checkpoint',
   artifactVersion,
   publicCatalogs: Object.freeze({
     breakerScopes,
@@ -35,6 +35,10 @@ export const productBaseline = Object.freeze({
     seckillSessionHttp: true,
     seckillRealtime: true,
     merchantLogisticsOperations: false,
+    merchantLifecycleHttp: true,
+    merchantQualificationEncryption: true,
+    merchantReviewGovernance: true,
+    merchantDrilldown: true,
     cms: true,
     notifications: true,
     systemConfig: true,
