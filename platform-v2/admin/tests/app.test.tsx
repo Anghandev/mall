@@ -36,11 +36,12 @@ describe('platform admin fail-closed experience', () => {
     expect(packageJson.dependencies['@abu24k/core-artifacts']).toBe(`workspace:${artifactVersion}`);
     expect(productBaseline.artifactVersion).toBe(artifactVersion);
     expect(coreState.artifactVersion).toBe(artifactVersion);
-    expect(coreState.artifactStatus).toBe('coordinated-order-statement-checkpoint');
+    expect(coreState.artifactStatus).toBe('coordinated-admin-global-lifecycle-checkpoint');
     expect(coreState.connectionLabel).toContain(artifactVersion);
     expect(productBaseline.adminCapabilities.adminGlobalResourceSearch).toBe(true);
     expect(productBaseline.adminCapabilities.adminGlobalResourceExport).toBe(true);
     expect(productBaseline.adminCapabilities.adminProductBatchTags).toBe(true);
+    expect(productBaseline.adminCapabilities.adminProductLifecycleBatch).toBe(true);
     expect(productBaseline.adminCapabilities.adminSettlementRequests).toBe(true);
     expect(productBaseline.adminCapabilities.adminSettlementBatches).toBe(true);
     expect(productBaseline.adminCapabilities.adminSettlementReconciliation).toBe(true);
@@ -59,7 +60,7 @@ describe('platform admin fail-closed experience', () => {
       /^\w+ \/v2\/admin\/(?:merchant-)?stores(?:\/|$)/.test(operation),
     );
 
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.12');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.13');
     expect(coordinatedManifest.capabilityStatus.buyerShoppingStatementHttp).toBe('AVAILABLE');
     expect(coordinatedManifest.capabilityStatus.merchantReceivableStatementHttp).toBe('AVAILABLE');
     expect(storeStatuses).toEqual(['DRAFT', 'ACTIVE', 'SUSPENDED', 'CLOSED']);

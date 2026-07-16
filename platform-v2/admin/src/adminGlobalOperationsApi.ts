@@ -3,10 +3,15 @@ import {
   adminExportFormats,
   adminResourceTypes,
   artifactVersion,
+  catalogProductLifecycleStates,
+  catalogReviewDecisions,
+  coreErrorCodes,
   type AdminExportFormat,
   type AdminGlobalSearchResponse,
   type AdminProductBatchTagRequest,
   type AdminProductBatchTagResult,
+  type AdminProductLifecycleBatchRequest,
+  type AdminProductLifecycleBatchResult,
   type AdminResourceExport,
   type AdminResourceExportRequest,
   type AdminResourceSelection,
@@ -17,17 +22,21 @@ import { CoreApiError, requestCoreJson } from './coreApi';
 
 const bytes32Pattern = /^0x[0-9a-fA-F]{64}$/;
 const addressPattern = /^0x[0-9a-fA-F]{40}$/;
+const walletFragmentPattern = /^(?:0x)?[0-9a-fA-F]{6,40}$/;
 const amountPattern = /^(0|[1-9][0-9]*)$/;
+const reasonCodePattern = /^[A-Z][A-Z0-9_]{1,63}$/;
 const base64Pattern = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
-const unavailableFilters = ['OR', 'FUZZY_WALLET', 'UID', 'PHONE', 'YELLOW_QUEUE'] as const;
+const unavailableFilters = ['UID', 'PHONE', 'YELLOW_QUEUE'] as const;
 
 export type AdminGlobalSearchFilters = Readonly<{
   resourceTypes?: readonly AdminResourceType[];
+  relation?: 'AND' | 'OR';
   orderId?: string;
   productId?: string;
   merchantId?: string;
   txHash?: string;
   wallet?: string;
+  walletMatch?: 'EXACT' | 'FUZZY';
   from?: string;
   to?: string;
   pendingReview?: boolean;
@@ -39,13 +48,32 @@ export async function searchAdminGlobalResources(
   token: string,
   signal?: AbortSignal,
 ): Promise<AdminGlobalSearchResponse> {
-  const query = globalSearchQuery(filters);
+  const relation = filters.relation ?? 'AND';
+  const walletMatch = filters.walletMatch ?? 'EXACT';
+  const query = globalSearchQuery({ ...filters, relation, walletMatch });
   const body = await requestCoreJson(`/v2/admin/global/resources?${query}`, {
     headers: { authorization: `Bearer ${token}` },
     ...(signal ? { signal } : {}),
   });
-  if (!isAdminGlobalSearchResponse(body)) {
+  if (!isAdminGlobalSearchResponse(body, relation, walletMatch)) {
     throw invalidResponse('Admin global resource search does not match the coordinated generated type');
+  }
+  return body;
+}
+
+export async function batchApplyAdminProductLifecycle(
+  input: AdminProductLifecycleBatchRequest,
+  token: string,
+): Promise<AdminProductLifecycleBatchResult> {
+  if (!catalogReviewDecisions.includes(input.action)) throw invalidRequest('Admin product lifecycle action is invalid');
+  const productIds = validateResourceIds(input.productIds, 'productIds', 100);
+  const reasonCode = input.reasonCode.trim();
+  if (!reasonCodePattern.test(reasonCode)) throw invalidRequest('Lifecycle reasonCode must be 2-64 uppercase characters');
+  requireIdempotencyKey(input.idempotencyKey);
+  const request = { ...input, productIds, reasonCode };
+  const body = await requestCoreJson('/v2/admin/catalog/products/batch-lifecycle', authenticatedPost(token, request));
+  if (!isAdminProductLifecycleBatchResult(body, request)) {
+    throw invalidResponse('Admin product lifecycle batch result does not match the coordinated generated type');
   }
   return body;
 }
@@ -95,7 +123,7 @@ export function downloadAdminResourceExport(value: AdminResourceExport) {
   URL.revokeObjectURL(url);
 }
 
-function globalSearchQuery(filters: AdminGlobalSearchFilters) {
+function globalSearchQuery(filters: AdminGlobalSearchFilters & Required<Pick<AdminGlobalSearchFilters, 'relation' | 'walletMatch'>>) {
   const query = new URLSearchParams();
   const resourceTypes = filters.resourceTypes ?? adminResourceTypes;
   if (resourceTypes.length < 1 || resourceTypes.length > adminResourceTypes.length
@@ -104,6 +132,8 @@ function globalSearchQuery(filters: AdminGlobalSearchFilters) {
     throw invalidRequest('At least one unique Admin resource type is required');
   }
   resourceTypes.forEach((type) => query.append('resourceType', type));
+  if (!['AND', 'OR'].includes(filters.relation)) throw invalidRequest('Search relation is invalid');
+  query.set('relation', filters.relation);
   for (const [key, value] of Object.entries({
     orderId: filters.orderId,
     productId: filters.productId,
@@ -118,9 +148,16 @@ function globalSearchQuery(filters: AdminGlobalSearchFilters) {
   }
   if (filters.wallet !== undefined) {
     const wallet = filters.wallet.trim().toLowerCase();
-    if (!addressPattern.test(wallet)) throw invalidRequest('Wallet must be an exact EVM address');
+    if (filters.walletMatch === 'EXACT' && !addressPattern.test(wallet)) {
+      throw invalidRequest('Wallet must be an exact EVM address');
+    }
+    if (filters.walletMatch === 'FUZZY' && !walletFragmentPattern.test(wallet)) {
+      throw invalidRequest('Fuzzy wallet must contain 6-40 hexadecimal characters');
+    }
     query.set('wallet', wallet);
   }
+  if (!['EXACT', 'FUZZY'].includes(filters.walletMatch)) throw invalidRequest('Wallet match mode is invalid');
+  query.set('walletMatch', filters.walletMatch);
   if (filters.from !== undefined) query.set('from', dateTime(filters.from, 'from'));
   if (filters.to !== undefined) query.set('to', dateTime(filters.to, 'to'));
   if (filters.from !== undefined && filters.to !== undefined
@@ -140,10 +177,15 @@ function authenticatedPost(token: string, body: object): RequestInit {
   };
 }
 
-function isAdminGlobalSearchResponse(value: unknown): value is AdminGlobalSearchResponse {
+function isAdminGlobalSearchResponse(
+  value: unknown,
+  expectedRelation: 'AND' | 'OR',
+  expectedWalletMatch: 'EXACT' | 'FUZZY',
+): value is AdminGlobalSearchResponse {
   return isRecord(value)
     && value.artifactVersion === artifactVersion
-    && value.relation === 'AND'
+    && value.relation === expectedRelation
+    && value.walletMatch === expectedWalletMatch
     && Array.isArray(value.resources)
     && value.resources.every(isAdminResourceSummary)
     && typeof value.truncated === 'boolean'
@@ -167,8 +209,28 @@ function isAdminResourceSummary(value: unknown): value is AdminResourceSummary {
     && value.allowedBatchActions.every((capability) => isRecord(capability)
       && adminBatchActions.includes(capability.action as never)
       && typeof capability.enabled === 'boolean'
-      && (capability.reasonCode === undefined || ['Forbidden', 'ProductWriteLocked'].includes(String(capability.reasonCode))))
+      && (capability.reasonCode === undefined || coreErrorCodes.includes(capability.reasonCode as never)))
     && validDate(value.createdAt);
+}
+
+function isAdminProductLifecycleBatchResult(
+  value: unknown,
+  request: AdminProductLifecycleBatchRequest,
+): value is AdminProductLifecycleBatchResult {
+  if (!isRecord(value)
+    || value.artifactVersion !== artifactVersion
+    || !bytes32Pattern.test(String(value.operationId))
+    || value.action !== request.action
+    || value.changedCount !== request.productIds.length
+    || !Array.isArray(value.products)
+    || value.products.length !== request.productIds.length
+    || !validDate(value.createdAt)) return false;
+  if (!value.products.every((item) => isRecord(item)
+    && validResourceId(item.productId)
+    && catalogProductLifecycleStates.includes(item.previousState as never)
+    && catalogProductLifecycleStates.includes(item.state as never)
+    && item.previousState !== item.state)) return false;
+  return sameStringSet(value.products.map((item) => String(item.productId)), request.productIds);
 }
 
 function isAdminResourceExport(
