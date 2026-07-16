@@ -18,11 +18,11 @@ are never soft-deletable.
 | ADM-DASH-002 | 18-19 | Pending merchant/product reviews, after-sale cases and low-stock products | D-V2-004 | After-sale excludes business refunds and includes exchange/delay/arbitration/takeover queues | Overridden | GAP-ADM-005 |
 | ADM-DASH-003 | 20-21 | Today signed settlement requests and Safe-settled USDT; chain failures; abnormal orders; blacklist blocks; per-asset Safe-assets/unsettled-liabilities coverage and breaker state | D-V2-007, D-V2-016, D-V2-024 | Coverage uses verified Safe assets and append-only liabilities; below 100% pauses new payments and new settlement batches without reporting healthy | Overridden | GAP-ADM-005, GAP-ADM-011, GAP-ADM-017 |
 | ADM-DASH-004 | 22-24 | RPC latency ms, Oracle deviation %, high-Gas blocks, bot orders, CPU, memory, Redis hit, MQ backlog and block height | D-V2-012 | Readiness never reports healthy without real probes | Frozen | GAP-ADM-005, GAP-ADM-018 |
-| ADM-MER-001 | 26-31 | Pending/Approved/Rejected/Blacklist menus; shop, license image, legal name/ID, phone, settlement wallet; approved wallet immutability | D-V2-014, D-V2-015 | PII access is RBAC scoped; wallet changes use governed intent | Frozen | GAP-ADM-006 |
-| ADM-MER-002 | 32-33 | V1-V5 levels; per-product max USDT settlement price; monthly seckill quota | - | Validation and version history are authoritative and audited | Frozen | GAP-ADM-006 |
-| ADM-MER-003 | 34-36 | Ordinary/seckill cumulative orders, cumulative USDT flow, today sales; pending/transit/signed/pickup counts and 48H fast-ship rate | - | Drilldown reconciles dashboard totals | Frozen | GAP-ADM-006 |
+| ADM-MER-001 | 26-31 | Pending/Approved/Rejected/Blacklist menus; shop, license image, legal name/ID, phone, settlement wallet; approved wallet immutability | D-V2-014, D-V2-015 | PII access is RBAC scoped; wallet changes use governed intent | Verified | - |
+| ADM-MER-002 | 32-33 | V1-V5 levels; per-product max USDT settlement price; monthly seckill quota | - | Validation and version history are authoritative and audited | Verified | - |
+| ADM-MER-003 | 34-36 | Ordinary/seckill cumulative orders, cumulative USDT flow, today sales; pending/transit/signed/pickup counts and 48H fast-ship rate | - | Drilldown reconciles dashboard totals | Verified | - |
 | ADM-MER-004 | 37 | Source forced-refund count, USDT penalties and abnormal-order rate | D-V2-004, D-V2-005, D-V2-018, D-V2-020 | Replace with takeover cases, 1,000-USDT guarantee status, frozen-receivable/future-proceeds deductions, merchant debt and abnormal-order rate; no business-refund or risk-reserve metric | Overridden | GAP-ADM-006, GAP-ADM-010, GAP-ADM-017 |
-| ADM-MER-005 | 38 | Historical NPL Burn and successfully Available BNM totals | D-V2-003, D-V2-008 | Totals reconcile indexed final events and order snapshots | Frozen | GAP-ADM-006 |
+| ADM-MER-005 | 38 | Historical NPL Burn and successfully Available BNM totals | D-V2-003, D-V2-008 | Totals reconcile indexed final events and order snapshots | Verified | - |
 | ADM-MER-006 | 39 | Source Locked/PendingSettlement/Available/Claimed withdrawal view, TxHash and Gas | D-V2-007, D-V2-023 | USDT proceeds use Locked/Available/Requested/Batched/Settled, signed gasless requests and final Safe TxHash; merchant never broadcasts or pays settlement Gas | Overridden | GAP-ADM-006, GAP-ADM-017 |
 | ADM-CAT-001 | 41-43 | Three-level category tree; name/icon/sort/enabled/service-fee fields | D-V2-014, D-V2-018 | Fee is DecisionBlocked until versioned; other edits audited | DecisionBlocked | GAP-ADM-007, GAP-ADM-008 |
 | ADM-CAT-002 | 44 | Tag library, examples, batch tagging and frontend feed | - | Versioned tags and placement state; no production fixture | Frozen | GAP-ADM-003 (cross-resource batch only) |
@@ -160,9 +160,9 @@ parallel API or local financial calculation:
 - `ADM-SEK-005`: the session draft binds the published CMS rules content hash
   and policy version. The UI never edits the fixed 3600s / 60s / +30s / cap
   60s timers and does not construct calldata or calculate prize allocations.
-- `ADM-MER-005`: wallet-scoped BNM points are now visible, but merchant-wide
-  historical Burn and Available-BNM aggregates remain `GAP-ADM-006` and this
-  row is not reported complete.
+- `ADM-MER-005`: that earlier checkpoint exposed wallet-scoped BNM points; the
+  `.15` evidence below supersedes its missing merchant-wide Burn and
+  Available-BNM aggregates.
 
 All test records stay under `tests/**`; no production fixture is shipped.
 
@@ -218,9 +218,35 @@ wallet, Safe, RPC, domain and device evidence remains `ExternalBlocked` under
   serialization, role denial, nullable category parent and read-only batch
   preview have consumer tests. Production source and bundle contain no fixture.
 
-## Settlement/Admin `.14` Notification Campaign Evidence
+## Settlement/Admin `.15` Merchant Governance Evidence
 
 The current Admin consumer is pinned to
+`@abu24k/core-artifacts@2.0.0-settlement-admin.15` and reuses the existing
+merchant lifecycle API and review workspace:
+
+- `ADM-MER-001`: qualification PII remains FULL/REDACTED/UNAVAILABLE by Core
+  RBAC. An APPROVED merchant exposes `CHANGE_SETTLEMENT_WALLET` only in the
+  ADMIN review workflow; the proposed address is required and then bound to
+  the existing challenge, independent secondary EIP-712 signature and Safe
+  publication. Create accepts the initial wallet, while ordinary profile
+  updates expose no wallet field.
+- `ADM-MER-002`: AVAILABLE level policy displays the config ID, version,
+  effective time, current level, USDT-atomic per-product settlement maximum and
+  monthly seckill quota. A missing published policy remains `DecisionBlocked`.
+- `ADM-MER-003`: named order and fulfillment aggregates retain Core values.
+  AVAILABLE 48H evidence displays numerator, denominator and bps; a zero
+  denominator displays `NO_ELIGIBLE_DELIVERY_ORDERS` and never a synthetic 0%.
+- `ADM-MER-005`: finalized NPL Burn and fulfilled Available BNM totals remain
+  read-only and ledger-reconciled. Abnormal-order rate remains the sole local
+  merchant metric shown as `DecisionBlocked`.
+
+Focused API/page tests cover both metric unions, wallet-change request and Safe
+result binding, profile-field isolation, PII role behavior and Burn/BNM reads.
+All fixtures remain under `tests/**`.
+
+## Settlement/Admin `.14` Notification Campaign Evidence
+
+The `.14` Admin checkpoint was pinned to
 `@abu24k/core-artifacts@2.0.0-settlement-admin.14` and consumes the generated
 notification campaign contracts without a parallel endpoint or provider
 fixture:

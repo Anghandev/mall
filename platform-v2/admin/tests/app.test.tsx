@@ -36,13 +36,16 @@ describe('platform admin fail-closed experience', () => {
     expect(packageJson.dependencies['@abu24k/core-artifacts']).toBe(`workspace:${artifactVersion}`);
     expect(productBaseline.artifactVersion).toBe(artifactVersion);
     expect(coreState.artifactVersion).toBe(artifactVersion);
-    expect(coreState.artifactStatus).toBe('coordinated-notification-campaign-checkpoint');
+    expect(coreState.artifactStatus).toBe('coordinated-merchant-governance-checkpoint');
     expect(coreState.connectionLabel).toContain(artifactVersion);
     expect(productBaseline.adminCapabilities.adminGlobalResourceSearch).toBe(true);
     expect(productBaseline.adminCapabilities.adminGlobalResourceExport).toBe(true);
     expect(productBaseline.adminCapabilities.adminProductBatchTags).toBe(true);
     expect(productBaseline.adminCapabilities.adminProductLifecycleBatch).toBe(true);
     expect(productBaseline.adminCapabilities.notificationCampaignOperations).toBe(true);
+    expect(productBaseline.adminCapabilities.merchantLevelPolicy).toBe(true);
+    expect(productBaseline.adminCapabilities.merchantFastShip48h).toBe(true);
+    expect(productBaseline.adminCapabilities.merchantSettlementWalletGovernance).toBe(true);
     expect(productBaseline.adminCapabilities.adminSettlementRequests).toBe(true);
     expect(productBaseline.adminCapabilities.adminSettlementBatches).toBe(true);
     expect(productBaseline.adminCapabilities.adminSettlementReconciliation).toBe(true);
@@ -61,7 +64,7 @@ describe('platform admin fail-closed experience', () => {
       /^\w+ \/v2\/admin\/(?:merchant-)?stores(?:\/|$)/.test(operation),
     );
 
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.14');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.15');
     expect(coordinatedManifest.capabilityStatus.buyerShoppingStatementHttp).toBe('AVAILABLE');
     expect(coordinatedManifest.capabilityStatus.merchantReceivableStatementHttp).toBe('AVAILABLE');
     expect(storeStatuses).toEqual(['DRAFT', 'ACTIVE', 'SUSPENDED', 'CLOSED']);

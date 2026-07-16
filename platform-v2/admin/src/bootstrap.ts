@@ -7,7 +7,7 @@ import {
 } from '@abu24k/core-artifacts';
 
 export const productBaseline = Object.freeze({
-  coreArtifacts: 'coordinated-notification-campaign-checkpoint',
+  coreArtifacts: 'coordinated-merchant-governance-checkpoint',
   artifactVersion,
   publicCatalogs: Object.freeze({
     breakerScopes,
@@ -53,6 +53,9 @@ export const productBaseline = Object.freeze({
     merchantQualificationEncryption: true,
     merchantReviewGovernance: true,
     merchantDrilldown: true,
+    merchantLevelPolicy: true,
+    merchantFastShip48h: true,
+    merchantSettlementWalletGovernance: true,
     cms: true,
     notifications: true,
     notificationCampaignOperations: true,
