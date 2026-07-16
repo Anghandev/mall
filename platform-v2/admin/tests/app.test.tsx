@@ -36,7 +36,7 @@ describe('platform admin fail-closed experience', () => {
     expect(packageJson.dependencies['@abu24k/core-artifacts']).toBe(`workspace:${artifactVersion}`);
     expect(productBaseline.artifactVersion).toBe(artifactVersion);
     expect(coreState.artifactVersion).toBe(artifactVersion);
-    expect(coreState.artifactStatus).toBe('coordinated-settlement-admin-clearing-checkpoint');
+    expect(coreState.artifactStatus).toBe('coordinated-takeover-assignment-checkpoint');
     expect(coreState.connectionLabel).toContain(artifactVersion);
     expect(productBaseline.adminCapabilities.adminGlobalResourceSearch).toBe(true);
     expect(productBaseline.adminCapabilities.adminGlobalResourceExport).toBe(true);
@@ -44,6 +44,8 @@ describe('platform admin fail-closed experience', () => {
     expect(productBaseline.adminCapabilities.adminSettlementRequests).toBe(true);
     expect(productBaseline.adminCapabilities.adminSettlementBatches).toBe(true);
     expect(productBaseline.adminCapabilities.adminSettlementReconciliation).toBe(true);
+    expect(productBaseline.adminCapabilities.takeoverCaseManagementHttp).toBe(true);
+    expect(productBaseline.adminCapabilities.replacementMerchantFulfillment).toBe(true);
     expect(productBaseline.adminCapabilities.merchantStoreManagement).toBe(false);
     expect(productBaseline.adminCapabilities.merchantOrderExport).toBe(false);
   });
@@ -57,7 +59,7 @@ describe('platform admin fail-closed experience', () => {
       /^\w+ \/v2\/admin\/(?:merchant-)?stores(?:\/|$)/.test(operation),
     );
 
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.10');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.11');
     expect(storeStatuses).toEqual(['DRAFT', 'ACTIVE', 'SUSPENDED', 'CLOSED']);
     expect(generatedDraftStatus).toBe('DRAFT');
     expect(merchantStoreManagementOperations).toEqual([
@@ -503,7 +505,8 @@ describe('platform admin fail-closed experience', () => {
     await user.type(screen.getByLabelText('证据哈希 · bytes32'), hash('9'));
     await user.type(screen.getByLabelText('原因代码'), 'NO_SHIPMENT_AFTER_FINALITY');
     expect(screen.getByRole('button', { name: '执行打开接管案件' }).hasAttribute('disabled')).toBe(true);
-    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/takeover'))).toBe(false);
+    expect(fetchMock.mock.calls.some(([input, init]) =>
+      String(input).endsWith(`/v2/orders/${order.orderId}/takeover`) && init?.method === 'POST')).toBe(false);
   });
 
   it('records replacement shipment only after takeover order state and Core action agree', async () => {

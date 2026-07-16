@@ -19,6 +19,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { BatchActionBar } from '../components/BatchActionBar';
 import { FulfillmentCommandPanel } from '../components/FulfillmentCommandPanel';
 import { GlobalSearch } from '../components/GlobalSearch';
+import { TakeoverCaseWorkspace } from '../components/TakeoverCaseWorkspace';
 import { TakeoverFundingPanel } from '../components/TakeoverFundingPanel';
 import {
   CoreApiError,
@@ -143,7 +144,7 @@ export function TakeoverPage() {
       <header className="page-header takeover-header">
         <div className="page-icon"><ShieldCheck aria-hidden="true" /></div>
         <div><p className="eyebrow">MERCHANT TAKEOVER</p><h1>商家接管履约中心</h1><p>接管不是资金返还流程。订单继续履约，支付与全部奖励保持 Locked。</p></div>
-        <div className="requirement-list"><code>ADM-TAKE-001—002 · partial</code><code>D-V2-004 / 005 / 020</code></div>
+        <div className="requirement-list"><code>ADM-TAKE-001—002</code><code>D-V2-004 / 005 / 020</code></div>
       </header>
 
       <GlobalSearch enabled={Boolean(session && hasPlatformRole)} loading={ordersLoading} onSearch={(nextFilters) => void handleSearch(nextFilters)} />
@@ -162,6 +163,11 @@ export function TakeoverPage() {
           <article key={label}><span className="stage-number">0{index + 1}</span><Icon aria-hidden="true" /><h2>{label}</h2><p>{detail}</p>{index < stages.length - 1 ? <ArrowRight className="stage-arrow" aria-hidden="true" /> : null}</article>
         ))}
       </section>
+
+      <TakeoverCaseWorkspace
+        connecting={status === 'CONNECTING'}
+        session={session}
+      />
 
       <section className="workspace-grid">
         <article className="panel panel-main takeover-console">
