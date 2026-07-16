@@ -88,6 +88,7 @@ import {
   SAFE_L2_SINGLETON_CODE_HASH,
   SAFE_VERSION,
 } from '../chain/safe-multisend.ts';
+import { executeLocalPaymentChain } from '../../test/helpers/local-payment-chain.ts';
 
 const BUSINESS_MIGRATIONS = fileURLToPath(new URL('./migrations/business/', import.meta.url));
 const AUDIT_MIGRATIONS = fileURLToPath(new URL('./migrations/audit/', import.meta.url));
@@ -1277,85 +1278,83 @@ test('PostgreSQL indexer atomically projects payment, rolls back a bad reorg and
   }
 });
 
-test('generated PaymentRouter ABI decodes through the Indexer into a balanced PostgreSQL payment journal', async () => {
+test('local PaymentRouter receipt reaches 15 confirmations and a balanced PostgreSQL order projection', async () => {
+  const execution = await executeLocalPaymentChain();
   const db = await createBusinessDatabase();
   try {
-    await seedCatalog(db, 1);
-    const intent = paymentIntent();
+    const intent = execution.intent;
+    await seedCatalog(db, 1, intent.merchant, {
+      buyerWallet: intent.buyer,
+      oracleVersion: intent.oracleVersion,
+      fulfillmentTargetHash: intent.fulfillmentTargetHash,
+      regionCodeHash: intent.regionCodeHash,
+      listPriceUsdt: intent.listPriceUsdt,
+      merchantCostUsdt: intent.merchantBaseReceivableUsdt,
+      policyPayload: {
+        ...paymentPolicyPayload(),
+        usdtCustodySafe: execution.safes.usdtCustody,
+        nplRewardSafe: execution.safes.nplReward,
+        operationsTreasurySafe: execution.safes.operationsTreasury,
+        genesisCredential: execution.contracts.genesisCredential,
+        concessionDestinationSetHash: intent.concessionAllocationHash,
+        operationsDestinations: [
+          { account: intent.nplRewardAllocations.find((allocation) => allocation.role === 'operations')!.account, weightBps: 10_000 },
+        ],
+      },
+    });
     await reserveInventory(adapter(db), {
       reservationId: intent.reservationId,
       reservationHash: intent.reservationHash,
-      policyVersion: 1,
+      policyVersion: intent.policyVersion,
       skuId: 'sku-1',
-      buyerWallet: BUYER,
-      quantity: 1,
+      buyerWallet: intent.buyer,
+      quantity: intent.quantity,
       classification: 'ORDINARY',
       expiresAt: new Date(intent.reservationDeadline * 1000),
     });
     await insertPaymentQuote(db, intent);
-
-    const routerAddress = '0x9999999999999999999999999999999999999999';
-    const bundle = JSON.parse(readFileSync(ABI_BUNDLE_PATH, 'utf8')) as {
-      contracts: { PaymentRouterV2: InterfaceAbi };
-    };
-    const router = new Interface(bundle.contracts.PaymentRouterV2);
-    const paymentCompleted = router.getEvent('PaymentCompleted');
-    assert.ok(paymentCompleted);
-    const encoded = router.encodeEventLog(paymentCompleted, [
-      intent.orderId,
-      intent.buyer,
-      intent.merchant,
-      0,
-      intent.policyVersion,
-      intent.listPriceUsdt,
-      intent.usdtPaymentAmount,
-      intent.nplPaymentAmount,
-      intent.nplBurnAmount,
-      intent.nplRewardAmount,
-      intent.bnmAmount,
-      intent.reservationId,
-      paymentIntentHash(intent),
-    ]);
-    const block99 = chainBlock(99, blockHash(99), blockHash(98), intent.issuedAt - 1);
-    const block100 = chainBlock(100, blockHash(100), block99.block.hash, intent.issuedAt);
-    const confirmationBlocks: IndexedChainBlock[] = [];
-    let confirmationParent = block100.block.hash;
-    for (let number = 101; number <= 114; number += 1) {
-      const confirmation = chainBlock(
-        number,
-        blockHash(number),
-        confirmationParent,
-        intent.issuedAt + number - 100,
-      );
-      confirmationBlocks.push(confirmation);
-      confirmationParent = confirmation.block.hash;
-    }
-    const decoder = await AbiEventDecoder.load(ABI_BUNDLE_PATH, { PaymentRouterV2: routerAddress });
+    const reservationEvidence = await db.query<{
+      reservation_hash: string;
+      policy_version: string;
+      reservation_sku_id: string;
+      quote_sku_id: string;
+      buyer_wallet: string;
+      quantity: string;
+      classification: string;
+    }>(
+      `SELECT lower(reservation.reservation_hash) AS reservation_hash,
+         reservation.policy_version::text, reservation.sku_id AS reservation_sku_id,
+         quote.sku_id AS quote_sku_id, lower(reservation.buyer_wallet) AS buyer_wallet,
+         reservation.quantity::text, reservation.classification
+       FROM core.inventory_reservations reservation
+       JOIN core.payment_quotes quote ON quote.order_id = $2
+       WHERE reservation.reservation_id = $1`,
+      [intent.reservationId, intent.orderId],
+    );
+    assert.deepEqual(reservationEvidence.rows[0], {
+      reservation_hash: intent.reservationHash.toLowerCase(),
+      policy_version: String(intent.policyVersion),
+      reservation_sku_id: 'sku-1',
+      quote_sku_id: 'sku-1',
+      buyer_wallet: intent.buyer.toLowerCase(),
+      quantity: String(intent.quantity),
+      classification: 'ORDINARY',
+    });
+    const decoder = await AbiEventDecoder.load(ABI_BUNDLE_PATH, { PaymentRouterV2: execution.routerAddress });
     const indexer = new ChainIndexer(decoder, new PostgresIndexerStore(transactionAdapter(db)));
-    await indexer.ingestSegment([
-      { block: block99.block, logs: [] },
-      {
-        block: block100.block,
-        logs: [{
-          address: routerAddress,
-          topics: encoded.topics,
-          data: encoded.data,
-          transactionHash: `0x${'6'.repeat(64)}`,
-          blockHash: block100.block.hash,
-          blockNumber: block100.block.number,
-          logIndex: 0,
-        }],
-      },
-      ...confirmationBlocks.map(({ block }) => ({ block, logs: [] })),
-    ]);
+    await indexer.ingestSegment(execution.segment);
     const projection = await db.query<{
       classification: string;
       confirmations: string;
       canonical: boolean;
-      finalized_at: Date;
+      finality_status: string;
+      order_state: string;
+      payment_tx_hash: string;
     }>(
-      `SELECT payment.classification, payment.confirmations::text, payment.canonical, finality.finalized_at
+      `SELECT payment.classification, payment.confirmations::text, payment.canonical,
+         orders.finality_status, orders.state AS order_state, lower(orders.payment_tx_hash) AS payment_tx_hash
        FROM core.payment_events payment
+       JOIN core.orders orders ON orders.order_id = payment.order_id
        JOIN core.transaction_finality finality ON finality.resource_id = payment.order_id
        WHERE payment.order_id = $1`,
       [intent.orderId],
@@ -1364,9 +1363,42 @@ test('generated PaymentRouter ABI decodes through the Indexer into a balanced Po
       classification: 'ORDINARY',
       confirmations: '15',
       canonical: true,
-      finalized_at: new Date((intent.issuedAt + 14) * 1000),
+      finality_status: 'FINAL',
+      order_state: 'PAID',
+      payment_tx_hash: execution.transactionHash,
     });
-    await assertLedgerBalanced(db, 1);
+    const inventory = await db.query<{ state: string; stock_available: string }>(
+      `SELECT reservation.state, sku.stock_available::text
+       FROM core.inventory_reservations reservation
+       JOIN core.skus sku ON sku.sku_id = reservation.sku_id
+       WHERE reservation.reservation_id = $1`,
+      [intent.reservationId],
+    );
+    assert.deepEqual(inventory.rows[0], { state: 'CONSUMED', stock_available: '0' });
+    const balances = await db.query<{ asset: string; net: string }>(
+      `SELECT account.asset,
+         sum(CASE WHEN line.side = 'DEBIT' THEN line.amount ELSE -line.amount END)::text AS net
+       FROM core.ledger_journals journal
+       JOIN core.ledger_lines line ON line.journal_id = journal.journal_id
+       JOIN core.ledger_accounts account ON account.account_id = line.account_id
+       WHERE journal.order_id = $1 GROUP BY account.asset ORDER BY account.asset`,
+      [intent.orderId],
+    );
+    assert.ok(balances.rows.length >= 3);
+    assert.ok(balances.rows.every((row) => row.net === '0'));
+    assert.deepEqual(await purposeBalances(db, intent.orderId, 'MERCHANT_RECEIVABLE'), {
+      LOCKED: intent.merchantNetReceivableUsdt,
+    });
+    assert.deepEqual(await purposeBalances(db, intent.orderId, 'BNM_LIABILITY'), {
+      LOCKED: intent.bnmAmount,
+    });
+    assert.deepEqual(execution.balances, {
+      custodyUsdt: intent.usdtPaymentAmount,
+      burnedNpl: intent.nplBurnAmount,
+      rewardNpl: intent.nplRewardAmount,
+      routerUsdt: '0',
+      routerNpl: '0',
+    });
   } finally {
     await db.close();
   }
@@ -10869,13 +10901,33 @@ function concurrentTransactionAdapter(db: PGlite): SqlTransactionRunner {
   };
 }
 
-async function seedCatalog(db: PGlite, stock: number, settlementWallet = MERCHANT) {
+async function seedCatalog(
+  db: PGlite,
+  stock: number,
+  settlementWallet = MERCHANT,
+  options: {
+    buyerWallet?: string;
+    oracleVersion?: string;
+    policyPayload?: Record<string, unknown>;
+    listPriceUsdt?: string;
+    merchantCostUsdt?: string;
+    fulfillmentTargetHash?: string;
+    regionCodeHash?: string;
+  } = {},
+) {
+  const buyerWallet = options.buyerWallet ?? BUYER;
+  const oracleVersion = options.oracleVersion ?? HASH_2;
+  const policyPayload = options.policyPayload ?? paymentPolicyPayload();
+  const listPriceUsdt = options.listPriceUsdt ?? '100';
+  const merchantCostUsdt = options.merchantCostUsdt ?? '60';
+  const fulfillmentTargetHash = options.fulfillmentTargetHash ?? HASH;
+  const regionCodeHash = options.regionCodeHash ?? HASH;
   await db.query(
     `INSERT INTO core.policy_snapshots (
        policy_version, artifact_version, policy_hash, oracle_version,
        rules_content_hash, beneficiary_set_hash, payload, publication_status
      ) VALUES (1, '${CORE_ARTIFACT_VERSION}', $1, $2, $1, $2, $3, 'PUBLISHED')`,
-    [HASH, HASH_2, JSON.stringify(paymentPolicyPayload())],
+    [HASH, oracleVersion, JSON.stringify(policyPayload)],
   );
   await db.query(
     `INSERT INTO core.policy_publication_transitions (
@@ -10917,14 +10969,21 @@ async function seedCatalog(db: PGlite, stock: number, settlementWallet = MERCHAN
     [HASH],
   );
   await db.query(
-    `INSERT INTO core.fulfillment_targets (
+     `INSERT INTO core.fulfillment_targets (
        target_id, target_hash, buyer_wallet, idempotency_key, request_hash,
        fulfillment_mode, region_code, region_code_hash, encrypted_payload,
        encryption_iv, encryption_tag, expires_at, created_at
      ) VALUES ('target:test', $1, $2, 'seed-target-test', $1, 'DELIVERY',
-       '110101', $1, $3, $4, $5, clock_timestamp() + interval '1 day', clock_timestamp())
+       '110101', $3, $4, $5, $6, clock_timestamp() + interval '1 day', clock_timestamp())
      ON CONFLICT (target_hash) DO NOTHING`,
-    [HASH, BUYER, Buffer.from('00', 'hex'), Buffer.alloc(12), Buffer.alloc(16)],
+    [
+      fulfillmentTargetHash,
+      buyerWallet,
+      regionCodeHash,
+      Buffer.from('00', 'hex'),
+      Buffer.alloc(12),
+      Buffer.alloc(16),
+    ],
   );
   await db.query(
     `INSERT INTO core.products (
@@ -10937,11 +10996,11 @@ async function seedCatalog(db: PGlite, stock: number, settlementWallet = MERCHAN
     [`0x${'b'.repeat(64)}`, HASH],
   );
   await db.query(
-    `INSERT INTO core.skus (
+     `INSERT INTO core.skus (
        sku_id, chain_sku_id, product_id, sku_version, attributes, list_price_usdt,
        merchant_cost_usdt, stock_total, stock_available, lifecycle_state
-     ) VALUES ('sku-1', $1, 'product-1', 1, '{}', 100, 60, $2, $2, 'ACTIVE')`,
-    [`0x${'c'.repeat(64)}`, stock],
+     ) VALUES ('sku-1', $1, 'product-1', 1, '{}', $2, $3, $4, $4, 'ACTIVE')`,
+    [`0x${'c'.repeat(64)}`, listPriceUsdt, merchantCostUsdt, stock],
   );
 }
 
@@ -11171,13 +11230,13 @@ async function insertPaymentQuote(
 ) {
   const snapshotHash = paymentIntentHash(intent);
   await db.query(
-    `INSERT INTO core.payment_quotes (
+     `INSERT INTO core.payment_quotes (
        order_id, idempotency_key, artifact_version, buyer_wallet, merchant_id, merchant_wallet,
        product_id, sku_id, chain_product_id, chain_sku_id, product_policy_hash,
        list_price_usdt, merchant_cost_usdt, merchant_concession_bps,
        policy_version, quote_kind, authorization_digest, quote_signature, deadline, state
      ) VALUES ($1, $2, $3, $4, 'merchant-1', $5, 'product-1', 'sku-1', $6, $7, $8,
-       100, 60, 2500, $9, 'ORDINARY', $10, $11, $12, 'QUOTED')`,
+       $9, $10, $11, $12, 'ORDINARY', $13, $14, $15, 'QUOTED')`,
     [
       intent.orderId,
       idempotencyKey,
@@ -11187,6 +11246,9 @@ async function insertPaymentQuote(
       intent.productId,
       intent.skuId,
       intent.productPolicyHash,
+      intent.listPriceUsdt,
+      intent.merchantBaseReceivableUsdt,
+      intent.merchantConcessionBps,
       intent.policyVersion,
       snapshotHash,
       `0x${'1'.repeat(130)}`,
