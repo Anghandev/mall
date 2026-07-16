@@ -100,9 +100,9 @@ does not complete or verify a Requirement while its Core capability is missing.
   receivables or an extra seckill share, and test fixtures stay outside the
   production bundle.
 
-## Settlement Admin .14 Consumer Boundary
+## Settlement Admin .15 Consumer Boundary
 
-- `@abu24k/core-artifacts@2.0.0-settlement-admin.14` preserves the existing
+- `@abu24k/core-artifacts@2.0.0-settlement-admin.15` preserves the existing
   Merchant settlement intent, wallet-signed request and tenant-scoped history
   operations without changing Merchant fulfillment or fund calculations.
 - Admin-wide settlement reads, governed intents, coverage-breaker recovery and
