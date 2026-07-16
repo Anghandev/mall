@@ -10660,31 +10660,95 @@
         }
       },
       "MerchantManagedStore": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/MerchantStore"
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "storeId",
+          "merchantId",
+          "name",
+          "regionCode",
+          "longitude",
+          "latitude",
+          "address",
+          "phone",
+          "businessHours",
+          "imageAssetIds",
+          "status",
+          "version",
+          "artifactVersion",
+          "allowedActions"
+        ],
+        "properties": {
+          "storeId": {
+            "type": "string",
+            "minLength": 1
           },
-          {
-            "type": "object",
-            "required": [
-              "artifactVersion",
-              "allowedActions"
-            ],
-            "properties": {
-              "artifactVersion": {
-                "const": "2.0.0-merchant-stores.1"
-              },
-              "allowedActions": {
-                "type": "array",
-                "minItems": 3,
-                "maxItems": 3,
-                "items": {
-                  "$ref": "#/components/schemas/MerchantStoreCapability"
-                }
-              }
+          "merchantId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "regionCode": {
+            "$ref": "#/components/schemas/RegionCode"
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "latitude": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "address": {
+            "type": "string",
+            "minLength": 1
+          },
+          "phone": {
+            "type": "string",
+            "pattern": "^[+]?[0-9-]{7,20}$"
+          },
+          "businessHours": {
+            "type": "string",
+            "maxLength": 240
+          },
+          "imageAssetIds": {
+            "type": "array",
+            "maxItems": 5,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          },
+          "status": {
+            "enum": [
+              "DRAFT",
+              "ACTIVE",
+              "SUSPENDED",
+              "CLOSED"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "artifactVersion": {
+            "const": "2.0.0-merchant-stores.1"
+          },
+          "allowedActions": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": {
+              "$ref": "#/components/schemas/MerchantStoreCapability"
             }
           }
-        ]
+        }
       },
       "CreateMerchantStoreRequest": {
         "type": "object",

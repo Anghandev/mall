@@ -398,6 +398,11 @@ test('generated fulfillment DTOs expose exact amounts, immutable evidence and co
   for (const name of ['FulfillmentTarget', 'ArbitrationDecisionResult', 'ForcedReceiptDecisionResult', 'FulfillmentCommandResult']) {
     assert.match(declarations, new RegExp(`export type ${name}\\b`), name);
   }
+  const managedStore = openapi.components.schemas.MerchantManagedStore;
+  assert.equal(managedStore.additionalProperties, false);
+  assert.equal('allOf' in managedStore, false);
+  assert.ok(managedStore.required.includes('artifactVersion'));
+  assert.ok(managedStore.required.includes('allowedActions'));
   assert.deepEqual(Object.keys(openapi.components.schemas.FulfillmentExactAmounts.properties).sort(), [
     'bnmAmount',
     'listPriceUsdt',

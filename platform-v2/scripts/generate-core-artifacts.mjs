@@ -4050,35 +4050,37 @@ function fulfillmentOpenApiSchemas() {
     regionCodeHash: { $ref: '#/components/schemas/Bytes32' },
     expiresAt: timestamp,
   };
+  const merchantStoreRequired = [
+    'storeId', 'merchantId', 'name', 'regionCode', 'longitude', 'latitude',
+    'address', 'phone', 'businessHours', 'imageAssetIds', 'status', 'version',
+  ];
+  const merchantStoreProperties = {
+    storeId: { type: 'string', minLength: 1 },
+    merchantId: { type: 'string', minLength: 1 },
+    name: { type: 'string', minLength: 1, maxLength: 100 },
+    regionCode: { $ref: '#/components/schemas/RegionCode' },
+    longitude: { type: 'number', minimum: -180, maximum: 180 },
+    latitude: { type: 'number', minimum: -90, maximum: 90 },
+    address: { type: 'string', minLength: 1 },
+    phone: { type: 'string', pattern: '^[+]?[0-9-]{7,20}$' },
+    businessHours: { type: 'string', maxLength: 240 },
+    imageAssetIds: {
+      type: 'array',
+      maxItems: 5,
+      uniqueItems: true,
+      items: { $ref: '#/components/schemas/Bytes32' },
+    },
+    status: { enum: [...storeStatuses] },
+    version: { type: 'integer', minimum: 1 },
+  };
   return {
     IdempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
     RegionCode: { type: 'string', pattern: '^[0-9]{6}$' },
     MerchantStore: {
       type: 'object',
       additionalProperties: false,
-      required: [
-        'storeId', 'merchantId', 'name', 'regionCode', 'longitude', 'latitude',
-        'address', 'phone', 'businessHours', 'imageAssetIds', 'status', 'version',
-      ],
-      properties: {
-        storeId: { type: 'string', minLength: 1 },
-        merchantId: { type: 'string', minLength: 1 },
-        name: { type: 'string', minLength: 1, maxLength: 100 },
-        regionCode: { $ref: '#/components/schemas/RegionCode' },
-        longitude: { type: 'number', minimum: -180, maximum: 180 },
-        latitude: { type: 'number', minimum: -90, maximum: 90 },
-        address: { type: 'string', minLength: 1 },
-        phone: { type: 'string', pattern: '^[+]?[0-9-]{7,20}$' },
-        businessHours: { type: 'string', maxLength: 240 },
-        imageAssetIds: {
-          type: 'array',
-          maxItems: 5,
-          uniqueItems: true,
-          items: { $ref: '#/components/schemas/Bytes32' },
-        },
-        status: { enum: [...storeStatuses] },
-        version: { type: 'integer', minimum: 1 },
-      },
+      required: merchantStoreRequired,
+      properties: merchantStoreProperties,
     },
     MerchantStoreCapability: {
       type: 'object',
@@ -4093,22 +4095,19 @@ function fulfillmentOpenApiSchemas() {
       },
     },
     MerchantManagedStore: {
-      allOf: [
-        { $ref: '#/components/schemas/MerchantStore' },
-        {
-          type: 'object',
-          required: ['artifactVersion', 'allowedActions'],
-          properties: {
-            artifactVersion: { const: artifactVersion },
-            allowedActions: {
-              type: 'array',
-              minItems: 3,
-              maxItems: 3,
-              items: { $ref: '#/components/schemas/MerchantStoreCapability' },
-            },
-          },
+      type: 'object',
+      additionalProperties: false,
+      required: [...merchantStoreRequired, 'artifactVersion', 'allowedActions'],
+      properties: {
+        ...merchantStoreProperties,
+        artifactVersion: { const: artifactVersion },
+        allowedActions: {
+          type: 'array',
+          minItems: 3,
+          maxItems: 3,
+          items: { $ref: '#/components/schemas/MerchantStoreCapability' },
         },
-      ],
+      },
     },
     CreateMerchantStoreRequest: {
       type: 'object',

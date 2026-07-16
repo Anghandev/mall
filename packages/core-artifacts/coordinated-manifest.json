@@ -18,7 +18,7 @@
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "0a430be257c4ca31aa5a0204032ed21231671d453e4e3b4ddc1758d8cb377fda"
+      "sha256": "994f425878b4932e4adbd8936f032e7314f3e46b004b338125f80bde9cd6f0d6"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
@@ -64,7 +64,7 @@
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "368ff4dfe8982e6cd58b1094f8326934a57f09270fb947bf913bb4bbc25ed5d9"
+      "sha256": "c1e54b7051978f172250712797fec9310c9c044c05263a5b288e57eeb8bfcf51"
     }
   ],
   "httpSurface": [
