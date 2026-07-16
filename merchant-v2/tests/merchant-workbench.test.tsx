@@ -31,6 +31,7 @@ import {
   deliveryOrderId,
   deliveryTarget,
   evidenceHash,
+  merchantOrderExport,
   pickupOrder,
   pickupOrderId,
   pickupTarget,
@@ -69,9 +70,13 @@ const styles = readFileSync('src/styles.css', 'utf8');
 const walletAddress = '0x1111111111111111111111111111111111111111';
 const chainProductId = `0x${'a'.repeat(64)}`;
 const chainSkuId = `0x${'b'.repeat(64)}`;
+const originalMediaDevices = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices');
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  if (originalMediaDevices) Object.defineProperty(navigator, 'mediaDevices', originalMediaDevices);
+  else delete (navigator as unknown as { mediaDevices?: MediaDevices }).mediaDevices;
 });
 
 const bootstrap: CoreBootstrap = {
@@ -205,6 +210,20 @@ function createMockCoreApi(overrides: Partial<CoreApi> = {}): CoreApi {
     }),
     listMerchantAuditEntries: async () => merchantAudit,
     exportMerchantAuditEntries: async () => merchantAuditExport,
+    exportMerchantOrders: async (input) => ({
+      ...merchantOrderExport,
+      filters: {
+        from: input.from ?? merchantOrderExport.filters.from,
+        to: input.to ?? merchantOrderExport.filters.to,
+        skuId: input.skuId ?? null,
+        state: input.state ?? null,
+        fulfillmentMode: input.fulfillmentMode ?? null,
+        orderKind: input.orderKind ?? null,
+        cursorCreatedAt: input.cursorCreatedAt ?? null,
+        cursorOrderId: input.cursorOrderId ?? null,
+        limit: input.limit ?? 1_000,
+      },
+    }),
     listFulfillmentOrders: async () => ({ orders: [], nextCursor: null }),
     getMerchantBusinessDashboard: async () => merchantBusinessDashboard,
     getOrderFulfillmentTarget: async () => deliveryTarget,
@@ -338,8 +357,8 @@ async function enterSettings(client: CoreApi) {
 }
 
 describe('00 wallet gateway', () => {
-  it('consumes merchant-stores.1 without widening the merchant action boundary', () => {
-    expect(artifactVersion).toBe('2.0.0-merchant-stores.1');
+  it('consumes merchant-fulfillment.1 without widening the merchant action boundary', () => {
+    expect(artifactVersion).toBe('2.0.0-merchant-fulfillment.1');
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
     expect(coreBoundary.artifactVersion).toBe(artifactVersion);
     expect(coreBoundary.artifactsAvailable).toBe(true);
@@ -488,6 +507,40 @@ describe('01 authoritative dashboard', () => {
     expect(screen.getByText('5000 bps')).toBeTruthy();
     expect(getMerchantBusinessDashboard).toHaveBeenCalledWith('test-session');
     expect(screen.getByRole('link', { name: /快递待发货订单3/ }).getAttribute('href')).toBe('/fulfillment');
+  });
+
+  it('renders the authoritative pickup count and drills into canonical pickup evidence', async () => {
+    const dashboard = {
+      ...merchantBusinessDashboard,
+      orders: { ...merchantBusinessDashboard.orders, pickupVerifiedToday: '17' },
+    };
+    const listFulfillmentOrders = vi.fn(async () => ({ orders: [pickupOrder], nextCursor: null }));
+    const getOrderFulfillmentTarget = vi.fn(async () => pickupTarget);
+    const user = userEvent.setup();
+    installWallet();
+    render(<MemoryRouter><App client={createMockCoreApi({
+      getMerchantBusinessDashboard: async () => dashboard,
+      listFulfillmentOrders,
+      getOrderFulfillmentTarget,
+    })} /></MemoryRouter>);
+    const connect = screen.getByRole('button', { name: '连接钱包' });
+    await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
+    await user.click(connect);
+
+    const pickupLink = await screen.findByRole('link', { name: /今日门店核销17/ });
+    expect(screen.getByLabelText('今日门店核销17').textContent).toBe('17');
+    expect(pickupLink.getAttribute('href')).toBe('/fulfillment?mode=pickup');
+    await user.click(pickupLink);
+
+    expect(await screen.findByRole('heading', { name: '履约交付' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '到店自提' }).getAttribute('aria-pressed')).toBe('true');
+    await waitFor(() => expect(listFulfillmentOrders).toHaveBeenLastCalledWith(
+      'test-session',
+      expect.objectContaining({ fulfillmentMode: 'PICKUP', limit: 100 }),
+    ));
+    await user.click(await screen.findByRole('button', { name: `处理订单 ${pickupOrderId}` }));
+    expect((await screen.findAllByText(pickupTarget.payload.name)).length).toBeGreaterThan(1);
+    expect(getOrderFulfillmentTarget).toHaveBeenCalledWith(pickupOrderId, 'test-session');
   });
 
   it('keeps merchant analytics available when platform SAFE_COVERAGE is externally blocked', async () => {
@@ -742,6 +795,136 @@ describe('03 fulfillment center', () => {
     expect(screen.getByText(/第 2 页/)).toBeTruthy();
   });
 
+  it('downloads the Core Excel for the applied filters and current stable cursor', async () => {
+    const nextCursor = { createdAt: deliveryOrder.createdAt, orderId: deliveryOrder.orderId };
+    const listFulfillmentOrders = vi.fn(async () => ({ orders: [deliveryOrder], nextCursor }));
+    const exportMerchantOrders = vi.fn(async (input: Parameters<CoreApi['exportMerchantOrders']>[0]) => ({
+      ...merchantOrderExport,
+      filters: {
+        from: input.from!,
+        to: input.to!,
+        skuId: input.skuId ?? null,
+        state: input.state ?? null,
+        fulfillmentMode: input.fulfillmentMode ?? null,
+        orderKind: input.orderKind ?? null,
+        cursorCreatedAt: input.cursorCreatedAt ?? null,
+        cursorOrderId: input.cursorOrderId ?? null,
+        limit: input.limit ?? 1_000,
+      },
+    }));
+    const createObjectUrl = vi.fn(() => 'blob:merchant-orders');
+    const revokeObjectUrl = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const user = await enterFulfillment(createMockCoreApi({ listFulfillmentOrders, exportMerchantOrders }));
+    await screen.findByRole('button', { name: `处理订单 ${deliveryOrderId}` });
+
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2026-07-01T00:00' } });
+    fireEvent.change(screen.getByLabelText('结束时间'), { target: { value: '2026-07-15T00:00' } });
+    await user.type(screen.getByLabelText('SKU 筛选'), 'sku-delivery');
+    await user.selectOptions(screen.getByLabelText('订单状态'), 'DELIVERED');
+    await user.selectOptions(screen.getByLabelText('订单类型'), 'SECKILL');
+    await user.click(screen.getByRole('button', { name: '应用筛选' }));
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+    await waitFor(() => expect(listFulfillmentOrders).toHaveBeenLastCalledWith(
+      'test-session',
+      expect.objectContaining({ cursor: nextCursor }),
+    ));
+    await user.click(screen.getByRole('button', { name: '导出 Excel' }));
+
+    await waitFor(() => expect(exportMerchantOrders).toHaveBeenCalledWith(expect.objectContaining({
+      from: expect.any(String),
+      to: expect.any(String),
+      skuId: 'sku-delivery',
+      state: 'DELIVERED',
+      fulfillmentMode: 'DELIVERY',
+      orderKind: 'SECKILL',
+      cursorCreatedAt: nextCursor.createdAt,
+      cursorOrderId: nextCursor.orderId,
+      limit: 1_000,
+      idempotencyKey: expect.stringMatching(/^merchant-order-export-/),
+    }), 'test-session'));
+    await screen.findByText('已下载 1 笔 Core 授权订单。');
+    expect(createObjectUrl).toHaveBeenCalledWith(expect.any(Blob));
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:merchant-orders');
+  });
+
+  it('shows export loading and empty states without creating a local file', async () => {
+    let resolveExport!: (value: typeof merchantOrderExport) => void;
+    const exportMerchantOrders = vi.fn(() => new Promise<typeof merchantOrderExport>((resolve) => {
+      resolveExport = resolve;
+    }));
+    const createObjectUrl = vi.fn(() => 'blob:should-not-exist');
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
+    const user = await enterFulfillment(createMockCoreApi({
+      listFulfillmentOrders: async () => ({ orders: [], nextCursor: null }),
+      exportMerchantOrders,
+    }));
+    await screen.findByRole('button', { name: '导出 Excel' });
+
+    await user.click(screen.getByRole('button', { name: '导出 Excel' }));
+    expect((screen.getByRole('button', { name: '正在导出' }) as HTMLButtonElement).disabled).toBe(true);
+    resolveExport({
+      ...merchantOrderExport,
+      rowCount: 0,
+      filters: {
+        ...merchantOrderExport.filters,
+        skuId: null,
+        state: null,
+        fulfillmentMode: 'DELIVERY',
+        orderKind: null,
+      },
+    });
+
+    expect(await screen.findByText('当前筛选与页游标下没有可导出的订单。')).toBeTruthy();
+    expect(createObjectUrl).not.toHaveBeenCalled();
+  });
+
+  it('refuses an order export outside the authenticated merchant scope', async () => {
+    const createObjectUrl = vi.fn(() => 'blob:should-not-exist');
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
+    const user = await enterFulfillment(createMockCoreApi({
+      listFulfillmentOrders: async () => ({ orders: [deliveryOrder], nextCursor: null }),
+      exportMerchantOrders: async () => ({
+        ...merchantOrderExport,
+        merchantId: 'merchant-other',
+        filters: {
+          ...merchantOrderExport.filters,
+          skuId: null,
+          state: null,
+          fulfillmentMode: 'DELIVERY',
+          orderKind: null,
+        },
+      }),
+    }));
+    await screen.findByRole('button', { name: '导出 Excel' });
+    await user.click(screen.getByRole('button', { name: '导出 Excel' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('订单导出与当前商家会话不一致');
+    expect(createObjectUrl).not.toHaveBeenCalled();
+  });
+
+  it('keeps export retries bound and surfaces explicit 403 and 409 failures', async () => {
+    const exportMerchantOrders = vi.fn()
+      .mockRejectedValueOnce(new CoreApiError('Forbidden', 'merchant export denied', undefined, undefined, 403))
+      .mockRejectedValueOnce(new CoreApiError('UnknownState', 'order changed during export', undefined, undefined, 409));
+    const user = await enterFulfillment(createMockCoreApi({
+      listFulfillmentOrders: async () => ({ orders: [deliveryOrder], nextCursor: null }),
+      exportMerchantOrders,
+    }));
+    await screen.findByRole('button', { name: '导出 Excel' });
+
+    await user.click(screen.getByRole('button', { name: '导出 Excel' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('导出权限被拒绝（403）');
+    await user.click(screen.getByRole('button', { name: '导出 Excel' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('导出状态已变化（409）');
+    expect(exportMerchantOrders).toHaveBeenCalledTimes(2);
+    expect(exportMerchantOrders.mock.calls[0]?.[0].idempotencyKey)
+      .toBe(exportMerchantOrders.mock.calls[1]?.[0].idempotencyKey);
+  });
+
   it('submits authorized rows as one atomic shipment batch and keeps every idempotency key on retry', async () => {
     const secondOrderId = `0x${'a'.repeat(64)}`;
     const shippableOrders = [deliveryOrder, { ...deliveryOrder, orderId: secondOrderId, skuId: 'sku-second' }]
@@ -966,6 +1149,8 @@ describe('03 fulfillment center', () => {
     await user.click(screen.getByRole('button', { name: '到店自提' }));
     await user.click(await screen.findByRole('button', { name: `处理订单 ${pickupOrderId}` }));
     expect((await screen.findByDisplayValue(pickupTarget.storeId) as HTMLInputElement).readOnly).toBe(true);
+    await user.click(screen.getByRole('button', { name: '启动相机扫码' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('请手工输入六位核销码');
     await user.type(screen.getByLabelText('六位核销码'), '123456');
     await user.type(screen.getByLabelText('门店核销证据哈希'), evidenceHash);
     await user.click(screen.getByRole('button', { name: '确认门店核销' }));
@@ -976,6 +1161,63 @@ describe('03 fulfillment center', () => {
       expect.objectContaining({ code: '123456', evidenceHash, storeId: pickupTarget.storeId }),
       'test-session',
     );
+  });
+
+  it('reports denied camera permission while keeping the manual pickup path enabled', async () => {
+    vi.stubGlobal('BarcodeDetector', class {
+      async detect() { return []; }
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn(async () => {
+          throw new DOMException('permission denied', 'NotAllowedError');
+        }),
+      },
+    });
+    const user = await enterFulfillment(createMockCoreApi({
+      listFulfillmentOrders: async () => ({ orders: [pickupOrder], nextCursor: null }),
+      getOrderFulfillmentTarget: async () => pickupTarget,
+    }));
+    await user.click(screen.getByRole('button', { name: '到店自提' }));
+    await user.click(await screen.findByRole('button', { name: `处理订单 ${pickupOrderId}` }));
+    await user.click(screen.getByRole('button', { name: '启动相机扫码' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('相机权限被拒绝');
+    expect((screen.getByLabelText('六位核销码') as HTMLInputElement).disabled).toBe(false);
+  });
+
+  it('fills an exact scanned six-digit code and submits it through the existing pickup contract', async () => {
+    const stop = vi.fn();
+    vi.stubGlobal('BarcodeDetector', class {
+      async detect() { return [{ rawValue: '654321' }]; }
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn(async () => ({ getTracks: () => [{ stop }] }) as unknown as MediaStream),
+      },
+    });
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    const verifyPickup = vi.fn(createMockCoreApi().verifyPickup);
+    const user = await enterFulfillment(createMockCoreApi({
+      listFulfillmentOrders: async () => ({ orders: [pickupOrder], nextCursor: null }),
+      getOrderFulfillmentTarget: async () => pickupTarget,
+      verifyPickup,
+    }));
+    await user.click(screen.getByRole('button', { name: '到店自提' }));
+    await user.click(await screen.findByRole('button', { name: `处理订单 ${pickupOrderId}` }));
+    await user.click(screen.getByRole('button', { name: '启动相机扫码' }));
+
+    await waitFor(() => expect((screen.getByLabelText('六位核销码') as HTMLInputElement).value).toBe('654321'));
+    expect(stop).toHaveBeenCalledTimes(1);
+    await user.type(screen.getByLabelText('门店核销证据哈希'), evidenceHash);
+    await user.click(screen.getByRole('button', { name: '确认门店核销' }));
+    await waitFor(() => expect(verifyPickup).toHaveBeenCalledWith(
+      pickupOrderId,
+      expect.objectContaining({ code: '654321', evidenceHash, storeId: pickupTarget.storeId }),
+      'test-session',
+    ));
   });
 
   it('keeps pickup inputs disabled when Core reports FinalityPending', async () => {

@@ -5,6 +5,7 @@ declare module 'virtual:merchant-store-operations' {
     update: string;
     activate: string;
     close: string;
+    exportOrders: string;
   }>;
 
   export default operations;

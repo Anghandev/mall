@@ -5,6 +5,8 @@ import {
   artifactVersion,
   executableOrderActionNames,
 } from '../../../packages/core-artifacts/generated/index.js';
+import coordinatedManifest from '../../../packages/core-artifacts/coordinated-manifest.json' with { type: 'json' };
+import coordinatedOpenApi from '../../../packages/core-artifacts/openapi/openapi.json' with { type: 'json' };
 import { productBaseline as mallBaseline, isCoreOrderActionExecutable } from '../../../mall-v2/src/bootstrap.ts';
 import { productBaseline as merchantBaseline } from '../../../merchant-v2/src/bootstrap.ts';
 import { coreBoundary as merchantCore } from '../../../merchant-v2/src/core-boundary.ts';
@@ -39,6 +41,20 @@ test('all products consume one coordinated artifact without bypassing runtime au
     assert.equal(isCoreOrderActionExecutable(action), executableOrderActionNames.includes(action), action);
   }
   assert.equal(isCoreOrderActionExecutable('PAY_ORDER'), false);
+});
+
+test('merchant order export is coordinated, consumed by Merchant and absent from other products', () => {
+  const operation = coordinatedOpenApi.paths['/v2/merchant/orders/exports']?.post;
+
+  assert.equal(coordinatedManifest.artifactVersion, artifactVersion);
+  assert.equal(coordinatedManifest.capabilityStatus.merchantOrderExportHttp, 'AVAILABLE');
+  assert.ok(coordinatedManifest.httpSurface.includes('POST /v2/merchant/orders/exports'));
+  assert.equal(operation?.operationId, 'exportMerchantOrders');
+  assert.deepEqual(operation?.security, [{ bearerAuth: [] }]);
+  assert.equal(merchantCore.artifactVersion, artifactVersion);
+  assert.match(merchantCore.reason, /订单导出能力已发布/);
+  assert.equal(adminBaseline.adminCapabilities.merchantOrderExport, false);
+  assert.equal('merchantOrderExport' in mallBaseline, false);
 });
 
 test('ordinary and seckill quotes conserve funds and keep independent reservations', () => {

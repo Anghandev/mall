@@ -77,6 +77,8 @@ import {
   type MerchantBusinessDashboard,
   type MerchantAuditExport,
   type MerchantAuditList,
+  type MerchantOrderExport,
+  type MerchantOrderExportRequest,
   type CreateMerchantStoreRequest,
   type MerchantManagedStore,
   type MerchantStore,
@@ -333,6 +335,7 @@ export interface CoreApi {
   updateMerchantProfile(input: UpdateMerchantProfileRequest, token: string): Promise<MerchantProfile>;
   listMerchantAuditEntries(token: string, options?: MerchantAuditListOptions): Promise<MerchantAuditList>;
   exportMerchantAuditEntries(input: MerchantAuditExportRequest, token: string): Promise<MerchantAuditExport>;
+  exportMerchantOrders(input: MerchantOrderExportRequest, token: string): Promise<MerchantOrderExport>;
   listFulfillmentOrders(token: string, options?: FulfillmentOrderListOptions): Promise<FulfillmentOrderPage>;
   getMerchantBusinessDashboard(token: string): Promise<MerchantBusinessDashboard>;
   getOrderFulfillmentTarget(orderId: string, token: string): Promise<FulfillmentTarget>;
@@ -661,6 +664,14 @@ export function createCoreApi(baseUrl = import.meta.env.VITE_CORE_API_BASE_URL ?
 
     async exportMerchantAuditEntries(input, token) {
       return parseMerchantAuditExport(await request(normalizedBaseUrl, '/v2/merchant/audit/exports', {
+        method: 'POST',
+        body: JSON.stringify(input),
+        token,
+      }));
+    },
+
+    async exportMerchantOrders(input, token) {
+      return parseMerchantOrderExport(await request(normalizedBaseUrl, merchantStoreOperations.exportOrders, {
         method: 'POST',
         body: JSON.stringify(input),
         token,
@@ -1498,6 +1509,95 @@ function parseMerchantAuditExport(input: unknown): MerchantAuditExport {
     filename,
     entryCount,
     csv: string(value.csv, 'merchant audit export csv'),
+  };
+}
+
+function parseMerchantOrderExport(input: unknown): MerchantOrderExport {
+  const value = record(input, 'merchant order export');
+  exactObjectKeys(value, [
+    'artifactVersion',
+    'exportId',
+    'merchantId',
+    'contentType',
+    'filename',
+    'rowCount',
+    'contentHash',
+    'contentBase64',
+    'nextCursor',
+    'filters',
+  ], 'merchant order export');
+  exact(value.artifactVersion, artifactVersion, 'merchant order export artifactVersion');
+  exact(value.contentType, 'application/vnd.ms-excel; charset=utf-8', 'merchant order export contentType');
+  const filename = string(value.filename, 'merchant order export filename');
+  if (filename.length > 160 || /[/\\\r\n]/.test(filename)) invalid('merchant order export filename is unsafe');
+  const rowCount = nonNegativeInteger(value.rowCount, 'merchant order export rowCount');
+  if (rowCount > 1_000) invalid('merchant order export rowCount exceeds 1000');
+  const filters = record(value.filters, 'merchant order export filters');
+  exactObjectKeys(filters, [
+    'from',
+    'to',
+    'skuId',
+    'state',
+    'fulfillmentMode',
+    'orderKind',
+    'cursorCreatedAt',
+    'cursorOrderId',
+    'limit',
+  ], 'merchant order export filters');
+  const limit = positiveInteger(filters.limit, 'merchant order export filters.limit');
+  if (limit > 1_000) invalid('merchant order export filters.limit exceeds 1000');
+  const parsedFilters: MerchantOrderExport['filters'] = {
+    from: dateTime(filters.from, 'merchant order export filters.from'),
+    to: dateTime(filters.to, 'merchant order export filters.to'),
+    skuId: nullableString(filters.skuId, 'merchant order export filters.skuId'),
+    state: filters.state === null
+      ? null
+      : enumValue(filters.state, orderStateSet, 'merchant order export filters.state'),
+    fulfillmentMode: filters.fulfillmentMode === null
+      ? null
+      : enumValue(filters.fulfillmentMode, fulfillmentModeSet, 'merchant order export filters.fulfillmentMode'),
+    orderKind: filters.orderKind === null
+      ? null
+      : enumValue(filters.orderKind, orderKindSet, 'merchant order export filters.orderKind'),
+    cursorCreatedAt: nullableDateTime(
+      filters.cursorCreatedAt,
+      'merchant order export filters.cursorCreatedAt',
+    ),
+    cursorOrderId: nullableString(filters.cursorOrderId, 'merchant order export filters.cursorOrderId'),
+    limit,
+  };
+  if (Date.parse(parsedFilters.from) > Date.parse(parsedFilters.to)) {
+    invalid('merchant order export filters date range is reversed');
+  }
+  if (Date.parse(parsedFilters.to) - Date.parse(parsedFilters.from) > 31 * 24 * 60 * 60 * 1_000) {
+    invalid('merchant order export filters date range exceeds 31 days');
+  }
+  if ((parsedFilters.cursorCreatedAt === null) !== (parsedFilters.cursorOrderId === null)) {
+    invalid('merchant order export cursor is incomplete');
+  }
+  const contentBase64 = base64(value.contentBase64, 'merchant order export contentBase64');
+  return {
+    artifactVersion,
+    exportId: bytes32(value.exportId, 'merchant order export exportId'),
+    merchantId: string(value.merchantId, 'merchant order export merchantId'),
+    contentType: 'application/vnd.ms-excel; charset=utf-8',
+    filename,
+    rowCount,
+    contentHash: bytes32(value.contentHash, 'merchant order export contentHash'),
+    contentBase64,
+    nextCursor: value.nextCursor === null
+      ? null
+      : parseMerchantOrderExportCursor(value.nextCursor),
+    filters: parsedFilters,
+  };
+}
+
+function parseMerchantOrderExportCursor(input: unknown): NonNullable<MerchantOrderExport['nextCursor']> {
+  const value = record(input, 'merchant order export cursor');
+  exactObjectKeys(value, ['createdAt', 'orderId'], 'merchant order export cursor');
+  return {
+    createdAt: dateTime(value.createdAt, 'merchant order export cursor.createdAt'),
+    orderId: string(value.orderId, 'merchant order export cursor.orderId'),
   };
 }
 
@@ -2501,6 +2601,14 @@ function nullableBytes32(input: unknown, name: string) {
 function atomicAmount(input: unknown, name: string) {
   const value = string(input, name);
   if (!/^(0|[1-9][0-9]*)$/.test(value)) invalid(`${name} must be a canonical integer string`);
+  return value;
+}
+
+function base64(input: unknown, name: string) {
+  const value = string(input, name);
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+    invalid(`${name} must be canonical base64`);
+  }
   return value;
 }
 
