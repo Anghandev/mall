@@ -87,6 +87,19 @@ does not complete or verify a Requirement while its Core capability is missing.
   the production build/bundle guard rejects test export fixtures and obsolete
   artifact versions.
 
+## Settlement Admin .10 Consumer Boundary
+
+- `@abu24k/core-artifacts@2.0.0-settlement-admin.10` preserves the existing
+  Merchant settlement intent, wallet-signed request and tenant-scoped history
+  operations without changing Merchant fulfillment or fund calculations.
+- Admin-wide settlement request and batch reads, governed settlement intents
+  and coverage-breaker recovery remain Admin-only. The Merchant client exposes
+  none of their published operation IDs, and the production bundle rejects all
+  matching Admin routes.
+- This synchronization completes no Merchant Requirement ID. It records only
+  the product ownership boundary; no Merchant page, parallel endpoint,
+  production fixture or browser-side amount calculation was added.
+
 ## Completion Rule
 
 `Verified` requires real product code plus the listed automated evidence against

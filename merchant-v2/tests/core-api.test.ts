@@ -53,13 +53,32 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('merchant-fulfillment.1 Core HTTP consumer', () => {
-  it('does not expose Admin global search, export or product batch-tag commands', () => {
+describe('settlement-admin.10 Core HTTP consumer', () => {
+  it('does not expose Admin global operations or clearing commands', () => {
     const api = createCoreApi('https://core.example.test');
+    const adminOnlyOperationIds = [
+      'createGovernedSettlementIntent',
+      'listAdminSettlementRequests',
+      'getAdminSettlementRequest',
+      'listAdminSettlementBatches',
+      'getAdminSettlementBatch',
+      'listCoverageBreakerActions',
+      'createCoverageBreakerResumeChallenge',
+      'authorizeCoverageBreakerResume',
+    ];
+    const publishedOperationIds = Object.values(openApi.paths).flatMap((path) => (
+      Object.values(path as Record<string, { operationId?: string }>)
+        .map((operation) => operation.operationId)
+        .filter((operationId): operationId is string => Boolean(operationId))
+    ));
 
     expect(api).not.toHaveProperty('searchAdminGlobalResources');
     expect(api).not.toHaveProperty('createAdminGlobalExport');
     expect(api).not.toHaveProperty('createAdminProductBatchTags');
+    for (const operationId of adminOnlyOperationIds) {
+      expect(publishedOperationIds).toContain(operationId);
+      expect(api).not.toHaveProperty(operationId);
+    }
   });
 
   it('consumes the coordinated merchant store lifecycle routes with versioned commands', async () => {
@@ -405,7 +424,7 @@ describe('merchant-fulfillment.1 Core HTTP consumer', () => {
         body: JSON.stringify(input),
         headers: expect.objectContaining({
           authorization: 'Bearer merchant-session',
-          'x-abu-artifact-version': '2.0.0-merchant-fulfillment.1',
+          'x-abu-artifact-version': '2.0.0-settlement-admin.10',
         }),
       }),
     );
@@ -505,7 +524,7 @@ describe('merchant-fulfillment.1 Core HTTP consumer', () => {
       'https://core.example.test/v2/catalog/products',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-merchant-fulfillment.1' }),
+        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.10' }),
       }),
     );
   });

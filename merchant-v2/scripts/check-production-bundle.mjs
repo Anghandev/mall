@@ -5,7 +5,7 @@ import { artifactVersion } from '@abu24k/core-artifacts';
 
 const dist = fileURLToPath(new URL('../dist/', import.meta.url));
 const textExtensions = new Set(['.css', '.html', '.js', '.map']);
-const coreBoundary = '支付、履约、结算、商品、媒体、商家资料、审计与订单导出能力已发布；平台全局运营能力保持 Admin-only';
+const coreBoundary = '支付、履约、结算、商品、媒体、商家资料、审计与订单导出能力已发布；平台全局运营与清算读取保持 Admin-only';
 const forbidden = [
   'legacy/' + 'v1-npl-only',
   '__merchant_visual_review__',
@@ -19,10 +19,15 @@ const forbidden = [
   '2.0.0-merchant-lifecycle.1',
   '2.0.0-logistics-admin.1',
   '2.0.0-merchant-stores.1',
+  '2.0.0-merchant-fulfillment.1',
   '/v2/admin/logistics/',
   '/v2/admin/global/resources',
   '/v2/admin/global/exports',
   '/v2/admin/catalog/products/batch-tags',
+  '/v2/admin/settlement-intents',
+  '/v2/admin/settlement-requests',
+  '/v2/admin/settlement-batches',
+  '/v2/admin/coverage-breaker/',
   'CLAIM_' + 'MERCHANT_USDT',
   'Payment' + 'Escrow',
   'Claim' + 'Vault',
