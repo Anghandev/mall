@@ -2,11 +2,13 @@ import {
   artifactVersion,
   type AdminGlobalSearchResponse,
   type AdminProductBatchTagResult,
+  type AdminProductLifecycleBatchResult,
   type AdminResourceExport,
 } from '@abu24k/core-artifacts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   batchAddAdminProductTags,
+  batchApplyAdminProductLifecycle,
   downloadAdminResourceExport,
   exportAdminGlobalResources,
   searchAdminGlobalResources,
@@ -33,9 +35,24 @@ describe('Admin global operations API consumer', () => {
     }, 'jwt')).resolves.toMatchObject({ relation: 'AND', truncated: false });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `/v2/admin/global/resources?resourceType=ORDER&resourceType=PRODUCT&productId=product-1&merchantId=merchant-1&txHash=${hash('a')}&wallet=${address('b')}&from=2026-07-15T00%3A00%3A00.000Z&to=2026-07-16T00%3A00%3A00.000Z&pendingReview=true&limit=100`,
+      `/v2/admin/global/resources?resourceType=ORDER&resourceType=PRODUCT&relation=AND&productId=product-1&merchantId=merchant-1&txHash=${hash('a')}&wallet=${address('b')}&walletMatch=EXACT&from=2026-07-15T00%3A00%3A00.000Z&to=2026-07-16T00%3A00%3A00.000Z&pendingReview=true&limit=100`,
       expect.objectContaining({ headers: { authorization: 'Bearer jwt' } }),
     );
+  });
+
+  it('serializes OR and fuzzy wallet fragments and binds both response modes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(globalSearchResponse({ relation: 'OR', walletMatch: 'FUZZY' })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(searchAdminGlobalResources({ relation: 'OR', wallet: 'AbCdEf', walletMatch: 'FUZZY' }, 'jwt'))
+      .resolves.toMatchObject({ relation: 'OR', walletMatch: 'FUZZY' });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('relation=OR');
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('wallet=abcdef');
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('walletMatch=FUZZY');
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(globalSearchResponse({ relation: 'AND', walletMatch: 'FUZZY' }))));
+    await expect(searchAdminGlobalResources({ relation: 'OR', wallet: 'abcdef', walletMatch: 'FUZZY' }, 'jwt'))
+      .rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
   it('binds audited export content and downloads the returned bytes', async () => {
@@ -83,23 +100,50 @@ describe('Admin global operations API consumer', () => {
     }));
   });
 
+  it('posts and validates one atomic product lifecycle batch', async () => {
+    const result = lifecycleResult();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(result));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(batchApplyAdminProductLifecycle({
+      action: 'HIDE',
+      productIds: ['product-1'],
+      reasonCode: 'OPERATIONS_HIDE',
+      idempotencyKey: 'batch-lifecycle-1',
+    }, 'jwt')).resolves.toEqual(result);
+    expect(fetchMock).toHaveBeenCalledWith('/v2/admin/catalog/products/batch-lifecycle', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ action: 'HIDE', productIds: ['product-1'], reasonCode: 'OPERATIONS_HIDE', idempotencyKey: 'batch-lifecycle-1' }),
+    }));
+  });
+
   it('rejects stale artifacts, invalid exact wallets and response/action drift', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ ...globalSearchResponse(), artifactVersion: 'stale' })));
     await expect(searchAdminGlobalResources({}, 'jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
 
     await expect(searchAdminGlobalResources({ wallet: '0x1234' }, 'jwt')).rejects.toMatchObject({ code: 'InvalidRequest' });
+    await expect(searchAdminGlobalResources({ wallet: '12345', walletMatch: 'FUZZY' }, 'jwt')).rejects.toMatchObject({ code: 'InvalidRequest' });
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ ...batchTagResult(), changedCount: 0 })));
     await expect(batchAddAdminProductTags({
       productIds: ['product-1'], tagIds: ['tag-1'], idempotencyKey: 'batch-tags-2',
     }, 'jwt')).rejects.toBeInstanceOf(CoreApiError);
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ ...lifecycleResult(), action: 'DELIST' })));
+    await expect(batchApplyAdminProductLifecycle({
+      action: 'HIDE', productIds: ['product-1'], reasonCode: 'OPERATIONS_HIDE', idempotencyKey: 'batch-lifecycle-2',
+    }, 'jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
+    await expect(batchApplyAdminProductLifecycle({
+      action: 'HIDE', productIds: ['product-1'], reasonCode: 'invalid reason', idempotencyKey: 'batch-lifecycle-3',
+    }, 'jwt')).rejects.toMatchObject({ code: 'InvalidRequest' });
   });
 });
 
-function globalSearchResponse(): AdminGlobalSearchResponse {
+function globalSearchResponse(overrides: Partial<AdminGlobalSearchResponse> = {}): AdminGlobalSearchResponse {
   return {
     artifactVersion,
     relation: 'AND',
+    walletMatch: 'EXACT',
     resources: [{
       resourceType: 'PRODUCT',
       resourceId: 'product-1',
@@ -116,7 +160,19 @@ function globalSearchResponse(): AdminGlobalSearchResponse {
       createdAt: '2026-07-15T00:00:00.000Z',
     }],
     truncated: false,
-    unavailableFilters: ['OR', 'FUZZY_WALLET', 'UID', 'PHONE', 'YELLOW_QUEUE'],
+    unavailableFilters: ['UID', 'PHONE', 'YELLOW_QUEUE'],
+    ...overrides,
+  };
+}
+
+function lifecycleResult(): AdminProductLifecycleBatchResult {
+  return {
+    artifactVersion,
+    operationId: hash('f'),
+    action: 'HIDE',
+    changedCount: 1,
+    products: [{ productId: 'product-1', previousState: 'ACTIVE', state: 'HIDDEN' }],
+    createdAt: '2026-07-15T00:00:00.000Z',
   };
 }
 

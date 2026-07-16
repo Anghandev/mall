@@ -193,7 +193,8 @@ The current product consumes coordinated artifact
   same reads with no write forms. Desktop/mobile layouts and loading, empty,
   error, blocked and disabled states are covered by product tests.
 
-Global cross-resource batch tagging/export remains `GAP-ADM-003`. Missing
+At that catalog checkpoint, global cross-resource batch tagging/export remained
+`GAP-ADM-003`. Missing
 commercial decisions remain `DecisionBlocked`; real production media/provider,
 wallet, Safe, RPC, domain and device evidence remains `ExternalBlocked` under
 `ADM-GOAL-003`. All fixtures remain under `tests/**`.
@@ -203,8 +204,8 @@ wallet, Safe, RPC, domain and device evidence remains `ExternalBlocked` under
 - `ADM-GLOBAL-001`: ADMIN/OPERATOR/AUDITOR sessions consume exact order ID,
   product ID, SKU ID, TxHash and wallet filters, start/end and quick date ranges,
   order state, fulfillment mode, order kind, pending-product-review and breaker
-  projections. Core combines these server-side with AND. OR, fuzzy wallet,
-  UID/phone and Yellow queue remain visibly fail-closed under `GAP-ADM-003`.
+  projections. At the `.5` checkpoint Core combined these server-side with AND;
+  the `.13` evidence below supersedes its OR/fuzzy-wallet limitation.
 - `ADM-GLOBAL-002`: selected order IDs are sent only to the read-only batch
   preview. The UI renders each row's authoritative `allowedActions` and the
   enabled intersection, but never turns that result into an unpublished write.
@@ -216,6 +217,37 @@ wallet, Safe, RPC, domain and device evidence remains `ExternalBlocked` under
 - `ADM-GOAL-001` and `ADM-GOAL-002`: `.5` response shape, exact query
   serialization, role denial, nullable category parent and read-only batch
   preview have consumer tests. Production source and bundle contain no fixture.
+
+## Settlement/Admin `.13` Global Operations Evidence
+
+The current Admin consumer is pinned to
+`@abu24k/core-artifacts@2.0.0-settlement-admin.13` and consumes only generated
+search and product-lifecycle contracts:
+
+- `ADM-GLOBAL-001`: ADMIN/OPERATOR/AUDITOR can choose server-side AND or OR,
+  exact EVM-address matching or a 6-40 hex-character wallet fragment, exact
+  order/product/merchant IDs and TxHash, PendingReview, start/end and
+  Today/Yesterday/7d/30d ranges. The response relation and wallet mode must
+  match the request. UID, phone and Yellow queue remain visibly fail-closed,
+  so the full source row is not reported complete.
+- `ADM-GLOBAL-002`: a cross-resource selection consumes each row's
+  `allowedBatchActions`; Core creates the audited CSV/Excel bytes and the
+  browser never synthesizes export rows. Electronic-waybill and pickup-print
+  portions remain outside this surface, so the full row is not reported
+  complete.
+- `ADM-GLOBAL-003`: an all-product selection enables approve, reject, publish,
+  hide or delist only when every selected row publishes the corresponding
+  capability. The UI requires an uppercase reason code, an explicit inline
+  confirmation and an idempotency key; Core applies all products or none. A
+  failed request retains the same key for a bounded retry. Arbitrary product
+  field batch editing and physical delete are not introduced, so only the
+  published lifecycle subset is claimed.
+- `ADM-GOAL-001` and `ADM-GOAL-002`: AUDITOR retains search/export but receives
+  no tag or lifecycle write. Loading, empty, success, error, pending,
+  capability-denied and retry states have focused consumer/UI coverage.
+
+All fixtures remain under `tests/**`; the production bundle includes the three
+global operation routes and contains no production fixture.
 
 ## Settlement/Admin `.9` Business Dashboard, Risk And Seckill Evidence
 

@@ -23,6 +23,7 @@ const required = [
   '/v2/admin/global/resources',
   '/v2/admin/global/exports',
   '/v2/admin/catalog/products/batch-tags',
+  '/v2/admin/catalog/products/batch-lifecycle',
   '/v2/admin/payments/',
   '/v2/admin/settlement-requests',
   '/v2/admin/settlement-batches',
