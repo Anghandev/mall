@@ -11,7 +11,7 @@ pnpm --filter @abu24k/merchant check
 ```
 
 The app consumes the coordinated `@abu24k/core-artifacts` workspace package at
-`2.0.0-logistics.1`. In addition to Bootstrap, merchant SIWE and the
+`2.0.0-merchant-lifecycle.1`. In addition to Bootstrap, merchant SIWE and the
 payment/fulfillment surfaces, the workbench consumes merchant finance,
 guarantee-deposit evidence, settlement intents, signed settlement requests and
 Safe-finality history. The help center reads wallet-targeted published CMS
@@ -48,6 +48,8 @@ versioning and stable retry keys. Shop name and a provider-sealed,
 merchant-owned `MERCHANT_LOGO` asset are editable; the settlement wallet is
 always read-only and is never sent in the profile PUT body. Concurrent profile
 updates fail closed and require a fresh Core version before resubmission.
+Platform qualification review and business-license PII stay in the admin-owned
+lifecycle service and are never read or written by this self-service profile.
 
 Merchant audit consumes the reverse-time, tenant-scoped entry stream with
 server-side time/stream/event/module filters and cursor pagination. The UI

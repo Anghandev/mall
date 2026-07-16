@@ -296,8 +296,8 @@ async function enterSettings(client: CoreApi) {
 }
 
 describe('00 wallet gateway', () => {
-  it('consumes logistics.1 and requires a server-authoritative order-action grant', () => {
-    expect(artifactVersion).toBe('2.0.0-logistics.1');
+  it('consumes merchant-lifecycle.1 and requires a server-authoritative order-action grant', () => {
+    expect(artifactVersion).toBe('2.0.0-merchant-lifecycle.1');
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
     expect(coreBoundary.artifactVersion).toBe(artifactVersion);
     expect(coreBoundary.artifactsAvailable).toBe(true);

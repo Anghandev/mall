@@ -49,7 +49,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('logistics.1 Core HTTP consumer', () => {
+describe('merchant-lifecycle.1 Core HTTP consumer', () => {
   it('consumes signed printer binding, provider waybill and durable print job routes', async () => {
     const acceptedJob = { ...waybillPrintJob, state: 'QUEUED' as const, attempts: 0, errorCode: null };
     const fetchMock = vi.fn()
@@ -210,6 +210,12 @@ describe('logistics.1 Core HTTP consumer', () => {
       method: 'PUT',
       body: JSON.stringify(update),
     }));
+    const profileBody = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit | undefined)?.body));
+    expect(Object.keys(profileBody).sort()).toEqual([
+      'expectedVersion', 'idempotencyKey', 'logoAssetId', 'shopName',
+    ]);
+    expect(profileBody).not.toHaveProperty('qualificationStatus');
+    expect(profileBody).not.toHaveProperty('businessLicense');
     const auditUrl = String(fetchMock.mock.calls[2]?.[0]);
     expect(auditUrl).toContain('/v2/merchant/audit/entries?');
     expect(auditUrl).toContain('streamName=financial');
@@ -294,7 +300,7 @@ describe('logistics.1 Core HTTP consumer', () => {
       'https://core.example.test/v2/catalog/products',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-logistics.1' }),
+        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-merchant-lifecycle.1' }),
       }),
     );
   });
