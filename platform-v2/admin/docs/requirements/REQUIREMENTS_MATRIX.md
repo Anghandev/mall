@@ -47,11 +47,11 @@ are never soft-deletable.
 | ADM-RISK-004 | 83 | Same IP/device switches over 5 wallets in 1 minute then blacklist | D-V2-026 | Strict greater-than-five threshold, one-minute window, evidence, privacy retention, expiry and appeal are auditable | Frozen | GAP-ADM-011 |
 | ADM-RISK-005 | 84 | 3 cancellations in 5 minutes or frequent pickup/address changes cause a 2-hour new-payment restriction | D-V2-004, D-V2-026 | Exact window, trigger evidence and expiry are tested; restriction never creates a business refund or blocks fulfillment/reconciliation | Frozen | GAP-ADM-011 |
 | ADM-RISK-006 | 85 | Separate wallet/IP-range/device blacklists; manual/automatic lock | - | RBAC, expiry/reason/evidence and immutable audit required | Frozen | GAP-ADM-011 |
-| ADM-LOG-001 | 87-90 | SF/JD/YTO/ZTO/STO/EMS enabled states and default carrier | - | Provider readiness and carrier versioning tested | Frozen | GAP-ADM-012 |
-| ADM-LOG-002 | 91 | Cainiao/Kuaidi100 PartnerID secret reference, monthly waybill account and real tracking-number adapter | D-V2-019 | Adapter validates secret-reference completeness, callback/error handling and typed ConfigurationRequired without storing/rendering secrets; real account acceptance is ADM-GOAL-003 | Frozen | GAP-ADM-012 |
-| ADM-LOG-003 | 92-93 | Platform/partner warehouse shipping-address library | - | RBAC writes and audit; exact address fields validated | Frozen | GAP-ADM-012 |
-| ADM-LOG-004 | 94 | Source forced-refund return warehouse | D-V2-004 | No refund destination is emitted; exchange/takeover logistics use their own allowedActions | Overridden | GAP-ADM-012 |
-| ADM-LOG-005 | 95 | Per-count/per-weight freight; Dalian pickup free; remote no-delivery rule | - | Signed quote consumes versioned freight result; frontend does not calculate | Frozen | GAP-ADM-012 |
+| ADM-LOG-001 | 87-90 | SF/JD/YTO/ZTO/STO/EMS enabled states and default carrier | - | Provider readiness and carrier versioning tested | Verified | - |
+| ADM-LOG-002 | 91 | Cainiao/Kuaidi100 PartnerID secret reference, monthly waybill account and real tracking-number adapter | D-V2-019 | Adapter validates secret-reference completeness, callback/error handling and typed ConfigurationRequired without storing/rendering secrets; real account acceptance is ADM-GOAL-003 | Verified | - |
+| ADM-LOG-003 | 92-93 | Platform/partner warehouse shipping-address library | - | RBAC writes and audit; exact address fields validated | Verified | - |
+| ADM-LOG-004 | 94 | Source forced-refund return warehouse | D-V2-004 | No refund destination is emitted; exchange/takeover logistics use their own allowedActions | Overridden | - |
+| ADM-LOG-005 | 95 | Per-count/per-weight freight; Dalian pickup free; remote no-delivery rule | D-V2-002, D-V2-022 | DecisionBlocked until freight charging, weight basis and the effects on buyer 70/30 payment, merchant receivable and concession are frozen; frontend must not calculate a substitute | DecisionBlocked | GAP-ADM-012 |
 | ADM-TAKE-001 | 97-99 | Source forced-refund center and action | D-V2-004, D-V2-005 | Renamed Merchant Takeover Fulfillment Center; 7-day no-evidence case opens automatically | Overridden | GAP-ADM-010 |
 | ADM-TAKE-002 | 100-101 | Source USDT return and Locked BNM burn | D-V2-004, D-V2-005 | Customer payment and rewards remain Locked; platform/replacement merchant fulfills order | Overridden | GAP-ADM-010 |
 | ADM-TAKE-003 | 102 | Source merchant pending/guarantee deduction | D-V2-005, D-V2-018, D-V2-020, D-V2-023 | Major loss posts balanced deductions in order from guarantee, frozen receivables and future proceeds; platform advance records merchant debt; no risk-reserve fallback | Overridden | GAP-ADM-010, GAP-ADM-017 |
@@ -262,24 +262,37 @@ All unavailable entries preserve Core `DecisionBlocked` / `ExternalBlocked`
 reason codes and details. An empty coverage projection is never shown as zero
 or healthy. All fixtures remain under `tests/**`.
 
-## Logistics `.1` Consumer Boundary
+## Admin Logistics And Printing Closure Evidence
 
-The current product pin is
-`@abu24k/core-artifacts@2.0.0-logistics.1`. This checkpoint publishes printer
-binding, waybill batches and durable print jobs only under Merchant routes.
-It completes no Admin Requirement ID:
+The Admin product consumes the coordinated logistics contracts while remaining
+pinned to `@abu24k/core-artifacts@2.0.0-merchant-fulfillment.1`; it does not
+publish or copy a parallel API:
 
-- `ADM-LOG-001` through `ADM-LOG-005` and `ADM-GLOBAL-002` remain unchanged.
-  Admin carrier/warehouse/freight configuration, batch print actions and print
-  job operations are not published and remain fail-closed under `GAP-ADM-012`.
-- The product records `merchantLogisticsOperations: false`; its consumer test
-  proves the coordinated manifest contains the Merchant paths and no matching
-  Admin path.
-- The production-bundle guard requires the coordinated artifact version and
-  rejects Merchant printer, waybill or print-job paths in the Admin bundle.
+- `ADM-LOG-001`: ADMIN and OPERATOR submit the complete SF/JD/YTO/ZTO/STO/EMS
+  enabled set, one enabled default carrier and an idempotency key. AUDITOR is
+  read-only and every response is artifact/version validated.
+- `ADM-LOG-002`: Kuaidi100 and Cainiao consume secret references for partner,
+  credential, monthly account and callback signing. Inputs use password fields,
+  are cleared after submission and never appear in Core projections. Readiness
+  and typed `ConfigurationRequired` remain explicit; real provider accounts are
+  `ExternalBlocked` under `ADM-GOAL-003`.
+- `ADM-LOG-003`: platform and partner warehouses use encrypted create, versioned
+  update and logical deactivate commands. Writes carry `expectedVersion`; a
+  stale version remains a visible `409`. AUDITOR receives only the Core
+  `REDACTED` projection and no contact, phone, address or write control.
+- `ADM-LOG-004`: no refund or return-warehouse control, route or destination is
+  rendered. Exchange and takeover retain their separate frozen fulfillment
+  behavior.
+- Cross-merchant merchant-filtered waybill batches, waybill lists, print-job
+  lists and idempotent retry are consumed with exact request bodies. This does
+  not complete the broader export/pickup-print scope in `ADM-GLOBAL-002`.
+- `ADM-LOG-005` remains `DecisionBlocked`: no frontend freight calculator is
+  introduced before freight charge, weight basis and its effects on buyer
+  70/30, merchant receivable and concession are frozen.
 
-Real provider accounts, device acceptance and production deployment remain
-`ExternalBlocked` under `ADM-GOAL-003`. No production fixture is shipped.
+Real Kuaidi100/Cainiao accounts, provider acceptance and physical printer/device
+evidence remain `ExternalBlocked`. All fixtures stay under `tests/**`; none is
+present in the production bundle.
 
 ## Merchant Stores `.1` Consumer Boundary
 
