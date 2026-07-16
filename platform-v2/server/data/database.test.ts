@@ -4097,9 +4097,15 @@ test('order pages use stable scoped cursors and shipment batches are canonical, 
       `INSERT INTO core.wallet_role_bindings (
          wallet_address, role, merchant_id, status, evidence_hash
        ) VALUES
-         ($1,'MERCHANT','merchant-1','ACTIVE',$3),
-         ($2,'ADMIN',NULL,'ACTIVE',$3)`,
-      [merchantAgent, '0x3333333333333333333333333333333333333333', HASH],
+         ($1,'MERCHANT','merchant-1','ACTIVE',$4),
+         ($2,'ADMIN',NULL,'ACTIVE',$4),
+         ($3,'AUDITOR',NULL,'ACTIVE',$4)`,
+      [
+        merchantAgent,
+        '0x3333333333333333333333333333333333333333',
+        '0x4444444444444444444444444444444444444444',
+        HASH,
+      ],
     );
     const createPaidOrder = async (character: string, finalized = true) => {
       const orderId = `0x${character.repeat(64)}`;
@@ -4214,6 +4220,32 @@ test('order pages use stable scoped cursors and shipment batches are canonical, 
     assert.deepEqual((await globalOperations.search(platform, {
       productId: 'product-1',
     })).resources.map((resource) => resource.resourceType), ['PRODUCT', 'ORDER', 'ORDER']);
+    assert.deepEqual((await globalOperations.search(platform, {
+      relation: 'OR',
+      orderId: orderA,
+      productId: 'missing-product',
+    })).resources.map((resource) => [resource.resourceType, resource.resourceId]), [
+      ['ORDER', orderA],
+    ]);
+    const fuzzyResources = await globalOperations.search(platform, {
+      wallet: MERCHANT.slice(8, 20),
+      walletMatch: 'FUZZY',
+    });
+    assert.equal(fuzzyResources.walletMatch, 'FUZZY');
+    assert.deepEqual(new Set(fuzzyResources.resources.map((resource) => resource.resourceType)), new Set([
+      'ORDER', 'PRODUCT', 'MERCHANT',
+    ]));
+    assert.throws(
+      () => globalOperations.search(platform, { wallet: '12%34', walletMatch: 'FUZZY' }),
+      /6-40 hexadecimal characters/,
+    );
+    const productResource = globalPage.resources.find((resource) => resource.resourceType === 'PRODUCT')!;
+    assert.equal(productResource.allowedBatchActions.some((action) => (
+      action.action === 'HIDE_PRODUCTS' && action.enabled
+    )), true);
+    assert.equal(productResource.allowedBatchActions.some((action) => (
+      action.action === 'APPROVE_PRODUCTS' && !action.enabled
+    )), true);
     await db.query("UPDATE core.products SET title = '=SUM(1,1)' WHERE product_id = 'product-1'");
     const exportInput = {
       selection: [
@@ -4244,6 +4276,104 @@ test('order pages use stable scoped cursors and shipment batches are canonical, 
     );
     assert.equal((await db.query<{ count: string }>(
       "SELECT count(*)::text AS count FROM core.audit_outbox_events WHERE event_type = 'AdminResourcesExported'",
+    )).rows[0]?.count, '1');
+    await db.query(
+      `INSERT INTO core.products (
+         product_id, chain_product_id, merchant_id, version, title, lifecycle_state,
+         product_policy_hash, merchant_concession_bps, metadata, allowed_actions,
+         subtitle, main_image_asset_ids, rich_detail, default_freight_usdt, fulfillment_modes
+       ) SELECT 'product-2', $1, merchant_id, version, 'Product Two', 'ACTIVE',
+           product_policy_hash, merchant_concession_bps, metadata, allowed_actions,
+           subtitle, main_image_asset_ids, rich_detail, default_freight_usdt, fulfillment_modes
+         FROM core.products WHERE product_id = 'product-1'`,
+      [`0x${'f'.repeat(64)}`],
+    );
+    await db.query(
+      `INSERT INTO core.products (
+         product_id, chain_product_id, merchant_id, version, title, lifecycle_state,
+         product_policy_hash, merchant_concession_bps, metadata, allowed_actions,
+         subtitle, main_image_asset_ids, rich_detail, default_freight_usdt, fulfillment_modes
+       ) SELECT 'product-3', $1, merchant_id, version, 'Product Three', 'ACTIVE',
+           product_policy_hash, merchant_concession_bps, metadata, allowed_actions,
+           subtitle, main_image_asset_ids, rich_detail, default_freight_usdt, fulfillment_modes
+         FROM core.products WHERE product_id = 'product-1'`,
+      [`0x${'8'.repeat(64)}`],
+    );
+    await db.query(
+      `INSERT INTO core.skus (
+         sku_id, chain_sku_id, product_id, sku_version, attributes, list_price_usdt,
+         merchant_cost_usdt, stock_total, stock_available, stock_reserved,
+         lifecycle_state, proposed_seckill_inventory
+       ) VALUES ('sku-2',$1,'product-2',1,'{}',100,60,10,10,0,'ACTIVE',1)`,
+      [`0x${'e'.repeat(64)}`],
+    );
+    const catalog = new CatalogManagementService({
+      transactions: transactionAdapter(db),
+      signer: { sign: async () => { throw new Error('unused'); } },
+      clock: () => now,
+      bytes32: () => `0x${'e'.repeat(64)}`,
+    });
+    const lifecycleInput = {
+      action: 'HIDE' as const,
+      productIds: ['product-2', 'product-1'],
+      reasonCode: 'OPERATIONS_HIDE',
+      idempotencyKey: 'catalog-product-lifecycle-batch-1',
+    };
+    const lifecycleBatch = await catalog.batchProductLifecycle(platform, lifecycleInput) as {
+      changedCount: number;
+      products: Array<{ productId: string; state: string }>;
+    };
+    assert.equal(lifecycleBatch.changedCount, 2);
+    assert.deepEqual(lifecycleBatch.products.map((product) => [product.productId, product.state]), [
+      ['product-1', 'HIDDEN'],
+      ['product-2', 'HIDDEN'],
+    ]);
+    assert.deepEqual(await catalog.batchProductLifecycle(platform, lifecycleInput), lifecycleBatch);
+    await assert.rejects(
+      catalog.batchProductLifecycle(platform, { ...lifecycleInput, action: 'DELIST' }),
+      /idempotency key was reused/,
+    );
+    await assert.rejects(
+      catalog.batchProductLifecycle({
+        walletAddress: '0x4444444444444444444444444444444444444444',
+        roles: ['AUDITOR'],
+      }, { ...lifecycleInput, idempotencyKey: 'catalog-product-lifecycle-auditor' }),
+      /Catalog write role is required/,
+    );
+    await db.query(
+      `UPDATE core.products SET lifecycle_state = CASE product_id
+         WHEN 'product-2' THEN 'REVIEW' ELSE 'ACTIVE' END
+       WHERE product_id IN ('product-2','product-3')`,
+    );
+    await db.query(
+      "UPDATE core.skus SET lifecycle_state = 'REVIEW' WHERE product_id = 'product-2'",
+    );
+    await assert.rejects(
+      catalog.batchProductLifecycle(platform, {
+        action: 'REJECT',
+        productIds: ['product-2', 'product-3'],
+        reasonCode: 'OPERATIONS_REJECT',
+        idempotencyKey: 'catalog-product-lifecycle-rollback',
+      }),
+      /Cannot REJECT a ACTIVE product/,
+    );
+    assert.equal((await db.query<{ lifecycle_state: string }>(
+      "SELECT lifecycle_state FROM core.products WHERE product_id = 'product-2'",
+    )).rows[0]?.lifecycle_state, 'REVIEW');
+    await db.query("UPDATE core.products SET lifecycle_state = 'REVIEW' WHERE product_id = 'product-1'");
+    await db.query("UPDATE core.skus SET lifecycle_state = 'ACTIVE' WHERE sku_id = 'sku-1'");
+    await assert.rejects(
+      catalog.batchProductLifecycle(platform, {
+        action: 'APPROVE',
+        productIds: ['product-1'],
+        reasonCode: 'OPERATIONS_APPROVE',
+        idempotencyKey: 'catalog-product-lifecycle-locked',
+      }),
+      /Product is locked against catalog writes/,
+    );
+    assert.equal((await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM core.audit_outbox_events
+       WHERE event_type = 'CatalogProductsLifecycleBatchApplied'`,
     )).rows[0]?.count, '1');
     const preview = await service.previewOrderBatchActions(platform, [orderA, orderB]);
     assert.deepEqual(preview.rows.map((row) => row.orderId), [orderA, orderB]);

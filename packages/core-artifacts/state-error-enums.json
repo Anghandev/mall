@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.12",
+  "artifactVersion": "2.0.0-settlement-admin.13",
   "adminResourceTypes": [
     "ORDER",
     "PRODUCT",
@@ -12,7 +12,12 @@
   "adminBatchActions": [
     "EXPORT_CSV",
     "EXPORT_EXCEL",
-    "ADD_PRODUCT_TAGS"
+    "ADD_PRODUCT_TAGS",
+    "APPROVE_PRODUCTS",
+    "REJECT_PRODUCTS",
+    "PUBLISH_PRODUCTS",
+    "HIDE_PRODUCTS",
+    "DELIST_PRODUCTS"
   ],
   "orderProjectionStates": [
     "QUOTED",

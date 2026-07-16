@@ -38,6 +38,7 @@ import {
   type AdminExportFormat,
   type AdminResourceType,
   type BreakerScope,
+  type CatalogReviewDecision,
   type SettlementBatchState,
   type SettlementRail,
   type SettlementRequestState,
@@ -238,6 +239,12 @@ export interface CatalogManagementApiService {
   batchAddProductTags(actor: FulfillmentActor, input: {
     productIds: string[];
     tagIds: string[];
+    idempotencyKey: string;
+  }): Promise<unknown>;
+  batchProductLifecycle(actor: FulfillmentActor, input: {
+    action: CatalogReviewDecision;
+    productIds: string[];
+    reasonCode: string;
     idempotencyKey: string;
   }): Promise<unknown>;
 }
@@ -2368,7 +2375,7 @@ async function routeAdminServices(
     );
     assertOnlySearchParams(url, [
       'resourceType', 'orderId', 'productId', 'merchantId', 'txHash', 'wallet',
-      'from', 'to', 'pendingReview', 'limit',
+      'relation', 'walletMatch', 'from', 'to', 'pendingReview', 'limit',
     ], ['resourceType']);
     sendJson(response, 200, await dependencies.adminGlobalOperationsService.search(
       fulfillmentActor(claims),
@@ -2400,6 +2407,21 @@ async function routeAdminServices(
       {
         productIds: requiredStringArray(body, 'productIds'),
         tagIds: requiredStringArray(body, 'tagIds'),
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+      },
+    ), correlationId);
+    return true;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/catalog/products/batch-lifecycle') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['action', 'productIds', 'reasonCode', 'idempotencyKey']);
+    sendJson(response, 200, await dependencies.catalogManagementService.batchProductLifecycle(
+      platformCatalogActor(claims),
+      {
+        action: catalogReviewDecision(body.action),
+        productIds: requiredStringArray(body, 'productIds'),
+        reasonCode: requiredString(body, 'reasonCode'),
         idempotencyKey: requiredString(body, 'idempotencyKey'),
       },
     ), correlationId);
@@ -3472,11 +3494,17 @@ function adminGlobalSearchQuery(url: URL): AdminGlobalSearchQuery {
   const resourceTypes = url.searchParams.getAll('resourceType');
   return {
     ...(resourceTypes.length ? { resourceTypes: resourceTypes.map(adminResourceType) } : {}),
+    ...(url.searchParams.get('relation')
+      ? { relation: adminSearchRelation(url.searchParams.get('relation')!) }
+      : {}),
     ...(url.searchParams.get('orderId') ? { orderId: url.searchParams.get('orderId')! } : {}),
     ...(url.searchParams.get('productId') ? { productId: url.searchParams.get('productId')! } : {}),
     ...(url.searchParams.get('merchantId') ? { merchantId: url.searchParams.get('merchantId')! } : {}),
     ...(url.searchParams.get('txHash') ? { txHash: url.searchParams.get('txHash')! } : {}),
     ...(url.searchParams.get('wallet') ? { wallet: url.searchParams.get('wallet')! } : {}),
+    ...(url.searchParams.get('walletMatch')
+      ? { walletMatch: adminWalletMatch(url.searchParams.get('walletMatch')!) }
+      : {}),
     ...(url.searchParams.get('from') ? { from: dateParameter(url.searchParams.get('from')!, 'from') } : {}),
     ...(url.searchParams.get('to') ? { to: dateParameter(url.searchParams.get('to')!, 'to') } : {}),
     ...(url.searchParams.get('pendingReview')
@@ -3486,6 +3514,16 @@ function adminGlobalSearchQuery(url: URL): AdminGlobalSearchQuery {
       ? { limit: optionalPositiveIntegerParameter(url.searchParams.get('limit'), 'limit')! }
       : {}),
   };
+}
+
+function adminSearchRelation(value: string): 'AND' | 'OR' {
+  if (value !== 'AND' && value !== 'OR') throw new CoreError('InvalidRequest', 'Unsupported Admin search relation');
+  return value;
+}
+
+function adminWalletMatch(value: string): 'EXACT' | 'FUZZY' {
+  if (value !== 'EXACT' && value !== 'FUZZY') throw new CoreError('InvalidRequest', 'Unsupported Admin wallet match mode');
+  return value;
 }
 
 function adminExportRequest(body: Record<string, unknown>): AdminExportInput {
