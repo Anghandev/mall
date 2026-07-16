@@ -352,7 +352,14 @@ function isSeckillGovernanceAction(value: unknown): value is SeckillGovernanceAc
     && (value.prizeInjection === null || isSeckillPrizeInjection(value.prizeInjection))
     && Array.isArray(value.allowedActions)
     && new Set(value.allowedActions).size === value.allowedActions.length
-    && value.allowedActions.every((item) => governanceAllowedActions.includes(item as never));
+    && value.allowedActions.every((item) => governanceAllowedActions.includes(item as never))
+    && isGovernanceFinalityConsistent(value);
+}
+
+function isGovernanceFinalityConsistent(value: Record<string, unknown>) {
+  if (value.state === 'FINAL') return Number(value.confirmations) >= 15 && value.canonical === true;
+  if (value.state === 'MINED') return Number(value.confirmations) < 15 && value.canonical === true;
+  return true;
 }
 
 function isSeckillSessionPlan(value: unknown) {
@@ -491,7 +498,7 @@ function isSeckillSession(value: unknown): value is SeckillSessionProjection {
   if (!['serverTime', 'startsAt', 'mainDeadline', 'relayDeadline', 'settlementEarliestAt', 'settlementDeadline'].every((field) => isDateTime(value[field]))) return false;
   const timers = value.timers;
   const inventory = value.inventory;
-  if (!isRecord(timers) || !['mainDurationSeconds', 'relayInitialSeconds', 'relayIncrementSeconds', 'relayCapSeconds'].every((field) => positiveInteger(timers[field]))) return false;
+  if (!isFixedTimers(timers)) return false;
   if (!isRecord(inventory) || !['total', 'sold', 'reserved', 'available'].every((field) => amountPattern.test(String(inventory[field])))) return false;
   return amountPattern.test(String(value.prizePoolUsdt))
     && (value.lastBuyerWallet === null || addressPattern.test(String(value.lastBuyerWallet)))
@@ -551,10 +558,6 @@ function requireCursor(value: string) {
 
 function isCursor(value: unknown) {
   return typeof value === 'string' && amountPattern.test(value) && Number.isSafeInteger(Number(value));
-}
-
-function positiveInteger(value: unknown) {
-  return Number.isSafeInteger(value) && Number(value) > 0;
 }
 
 function isFixedTimers(value: unknown) {

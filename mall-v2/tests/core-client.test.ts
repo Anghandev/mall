@@ -1,3 +1,6 @@
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+
 import { artifactVersion } from '@abu24k/core-artifacts';
 import coordinatedManifest from '@abu24k/core-artifacts/manifest' with { type: 'json' };
 import openApi from '@abu24k/core-artifacts/openapi' with { type: 'json' };
@@ -66,7 +69,13 @@ const HASH = `0x${'1'.repeat(64)}`;
 const HASH_2 = `0x${'2'.repeat(64)}`;
 
 describe('Mall Core artifact boundary', () => {
-  it('consumes the coordinated artifact without exposing Admin-only operations', () => {
+  it('consumes the coordinated artifact without exposing Admin or Merchant operations', async () => {
+    const coordinatedOpenApi = JSON.parse(await readFile(
+      resolve(process.cwd(), '../packages/core-artifacts/openapi/openapi.json'),
+      'utf8',
+    )) as {
+      paths: Record<string, { post?: { operationId?: string } }>;
+    };
     const consumerPaths = [
       ...Object.values(coordinatedPaymentOperations),
       ...Object.values(coordinatedCatalogMediaOperations),
@@ -76,10 +85,15 @@ describe('Mall Core artifact boundary', () => {
       ...Object.values(coordinatedRealtimeOperations),
     ];
 
-    expect(artifactVersion).toBe('2.0.0-merchant-stores.1');
+    expect(artifactVersion).toBe('2.0.0-merchant-fulfillment.1');
+    expect(coordinatedOpenApi.paths['/v2/merchant/orders/exports']?.post?.operationId)
+      .toBe('exportMerchantOrders');
     expect(Object.keys(openApi.paths).some((path) => path.startsWith('/v2/admin/'))).toBe(false);
+    expect(Object.keys(openApi.paths).some((path) => path.startsWith('/v2/merchant/'))).toBe(false);
     expect(Object.keys(coordinatedManifest.capabilityStatus).some((capability) => capability.startsWith('admin'))).toBe(false);
+    expect(Object.keys(coordinatedManifest.capabilityStatus).some((capability) => capability.startsWith('merchant'))).toBe(false);
     expect(consumerPaths.some((path) => path.startsWith('/v2/admin/'))).toBe(false);
+    expect(consumerPaths.some((path) => path.startsWith('/v2/merchant/'))).toBe(false);
   });
 });
 

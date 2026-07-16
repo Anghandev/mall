@@ -52,4 +52,17 @@ describe('platform requirement traceability', () => {
     expect(productionSource).not.toContain('/v2/merchant/stores');
     expect(productionSource).not.toMatch(/(?:fetch|create|update|activate|close)MerchantStore/);
   });
+
+  it('does not expose the Merchant PII order export from Admin production source', () => {
+    const sourceRoot = join(process.cwd(), 'src');
+    const productionSource = listFiles(sourceRoot)
+      .filter((file) => /\.(?:ts|tsx)$/.test(file))
+      .map((file) => readFileSync(file, 'utf8'))
+      .join('\n');
+
+    expect(productionSource).not.toContain('/v2/merchant/orders/exports');
+    expect(productionSource).not.toContain('exportMerchantOrders');
+    expect(productionSource).not.toMatch(/\/v2\/admin\/(?:merchant\/)?orders\/exports/);
+    expect(productionSource).not.toMatch(/MerchantOrderExport(?:Request)?/);
+  });
 });

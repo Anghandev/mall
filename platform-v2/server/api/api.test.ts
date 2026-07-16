@@ -1030,6 +1030,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       }),
       submitPayment: async (buyerWallet, input) => ({ ...input, buyerWallet, state: 'SUBMITTED' }),
       getPayment: async (buyerWallet, orderId) => ({ orderId, buyerWallet, state: 'SUBMITTED' }),
+      getAdminPayment: async (actor, orderId) => ({ orderId, actor: actor.walletAddress, state: 'SUBMITTED' }),
     },
     catalogManagementService: {
       listCategories: async (includeInactive) => [{ categoryId: 'category-1', includeInactive }],
@@ -1288,6 +1289,29 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
         state: 'REQUESTED',
       }),
       list: async (actor) => ({ wallet: actor.walletAddress, balances: [], requests: [] }),
+      listAdminRequests: async (actor, input) => ({
+        actor: actor.walletAddress,
+        requests: [{ requestId: HASH, state: input?.state ?? 'REQUESTED' }],
+        nextCursor: null,
+      }),
+      getAdminRequest: async (actor, requestId) => ({
+        actor: actor.walletAddress,
+        request: { requestId, state: 'REQUESTED' },
+        items: [],
+        transitions: [],
+      }),
+      listAdminBatches: async (actor, input) => ({
+        actor: actor.walletAddress,
+        batches: [{ batchId: HASH_2, state: input?.state ?? 'APPROVAL_PENDING' }],
+        nextCursor: null,
+      }),
+      getAdminBatch: async (actor, batchId) => ({
+        actor: actor.walletAddress,
+        batch: { batchId, state: 'APPROVAL_PENDING' },
+        items: [],
+        approvals: [],
+        attempts: [],
+      }),
     },
     takeoverFundingService: {
       fundingApprovalChallenge: async (_actor, input) => ({ ...input, digest: HASH }),
@@ -1520,6 +1544,39 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     });
     assert.equal(adminDashboard.status, 200);
     assert.equal(((await adminDashboard.json()) as { timezone: string }).timezone, 'Asia/Shanghai');
+    assert.equal((await fetch(`${base}/v2/admin/payments/${ORDER_ID}`, {
+      headers: { authorization: `Bearer ${buyerOnlyToken}` },
+    })).status, 403);
+    assert.equal((await fetch(`${base}/v2/admin/settlement-requests`, {
+      headers: { authorization: `Bearer ${buyerOnlyToken}` },
+    })).status, 403);
+    const adminPayment = await fetch(`${base}/v2/admin/payments/${ORDER_ID}`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    });
+    assert.equal(adminPayment.status, 200);
+    assert.equal(((await adminPayment.json()) as { orderId: string }).orderId, ORDER_ID);
+    const adminRequests = await fetch(`${base}/v2/admin/settlement-requests?state=BATCHED&limit=20`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    });
+    assert.equal(adminRequests.status, 200);
+    assert.equal(((await adminRequests.json()) as { requests: Array<{ state: string }> }).requests[0]?.state, 'BATCHED');
+    assert.equal((await fetch(`${base}/v2/admin/settlement-requests?state=UNKNOWN`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 400);
+    assert.equal((await fetch(`${base}/v2/admin/settlement-requests/${HASH}`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    const adminBatches = await fetch(`${base}/v2/admin/settlement-batches?state=APPROVAL_PENDING&limit=20`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    });
+    assert.equal(adminBatches.status, 200);
+    assert.equal(((await adminBatches.json()) as { batches: Array<{ state: string }> }).batches[0]?.state, 'APPROVAL_PENDING');
+    assert.equal((await fetch(`${base}/v2/admin/settlement-batches/${HASH_2}`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/settlement-batches?limit=101`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 400);
     assert.equal((await fetch(`${base}/v2/admin/merchants`, {
       headers: { authorization: `Bearer ${buyerOnlyToken}` },
     })).status, 403);

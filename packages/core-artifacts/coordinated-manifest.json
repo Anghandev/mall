@@ -1,6 +1,6 @@
 {
-  "artifactVersion": "2.0.0-merchant-fulfillment.1",
-  "publicationStatus": "COORDINATED_MERCHANT_FULFILLMENT_CHECKPOINT",
+  "artifactVersion": "2.0.0-settlement-admin.10",
+  "publicationStatus": "COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
   "chain": {
@@ -14,57 +14,57 @@
   "components": {
     "packageMetadata": {
       "path": "package.json",
-      "sha256": "5549c3999027b15ff51da6a802633480043793ad1faa12b4e8b17a4801448152"
+      "sha256": "bd2a0ffe826ea62580210ddfd2fc7658832e7b332b261e1c4610dca34758fc06"
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "2e1d6ae67e31cfaa7fac547df06df3c48cb5b999098ac8e3f54efe758b2255db"
+      "sha256": "5962db3b115ff6337b45578548b1b5d8fe961969f0ec66bb33d6ab4a6f501d70"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "5a22bb9120859892d74146c294b64fb08f1050777e7dc816158da04e8b5aa31a"
+      "sha256": "d56e8c3d1d1a53b698b33540f6bf09723c27e2be1983bb0b463d2453c3e5c574"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "79a0cb796c05caa73f90bd6bd1632f916bd7e9c04b9d4e7f808e29070b656199"
+      "sha256": "79298951baf3134716277440dfafbfda24f24907c660a48dfe61c83ff7bb5889"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "4fcc8469aa9d3ac5a4d84a81d88337b5d0285073f920f5c60a08bb6add6155c9"
+      "sha256": "3b8358d915ac45749469f52270cd72f0d054601dbacf1b7fa9d1bf2c3aa06a80"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "26114aa86a5718ebf1e01d61efbcac079e75f813320645918026e5f1111f03d1"
+      "sha256": "0ddd679169735af0037bbec8ecd53fc02b3c6364484b1d2f8efeb8ec0ab7b542"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
-      "sha256": "73608e20afe647ec1ea21b63dcb47544e79688f0ff174dc83eeb6d7a68ebeda2"
+      "sha256": "ff65e34afb0bbe05fb3863cbbb6fb8b641cde4353b09b5c529a6d7a8e5e6220b"
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "5e5923770ad55e026cd0c72a0fd79b881eeb5d21529785010d59a22ec11024cb"
+      "sha256": "e11018bfa1285c4a27d91d5abb0103f6ceb4b64b8cbc24afbb968256d7382879"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "4ac07980d8e1a14681596218d0432fec66d994528009f951a1349c0d2061119e"
+      "sha256": "cb7f4f1e21b581628abb5b968552026d7cfd67437cc733f303a7f48293cb678a"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "6cda52cce4fe18b5d258965781446266294bf18a3dab5e27ceaa098910825a23"
+      "sha256": "1b4000744f7e67a372711e3ee85ed1301fd2af65da8ae9c763f00c30580b8d24"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
-      "sha256": "6398578375166d4d0d8b7afb9347e3437fc259f68e8260f4b6c988e808db4f75"
+      "sha256": "4c29c439c6318e5f22dcb6c423e99fa716a6504d810ad94a9d4141e0f89b1199"
     }
   },
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "7e4286771470e26746907f9b24ed22023733c6950fe02d2ce07de0f7e3afe1c3"
+      "sha256": "8f8393f273653171d24c18475452f66d6dc07714fce2a811759b9b857ea99805"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "4dadcc6244ec84354f3a88755da970363c3119097d6516aee634e96f9680578b"
+      "sha256": "c2ce37c83e523d4c52f88d981693af689a0fd25cbe633454aefad6e38487c5d4"
     }
   ],
   "httpSurface": [
@@ -87,11 +87,16 @@
     "GET /v2/admin/merchants/{merchantId}",
     "GET /v2/admin/monitoring",
     "GET /v2/admin/orders",
+    "GET /v2/admin/payments/{orderId}",
     "GET /v2/admin/policy-drafts",
     "GET /v2/admin/policy-drafts/{draftId}",
     "GET /v2/admin/risk/overview",
     "GET /v2/admin/seckill/actions",
     "GET /v2/admin/seckill/actions/{actionId}",
+    "GET /v2/admin/settlement-batches",
+    "GET /v2/admin/settlement-batches/{batchId}",
+    "GET /v2/admin/settlement-requests",
+    "GET /v2/admin/settlement-requests/{requestId}",
     "GET /v2/admin/system-config/versions",
     "GET /v2/admin/takeover-funding/{caseId}",
     "GET /v2/bootstrap",
@@ -386,6 +391,10 @@
     "SettlementIntentProjection",
     "SettlementRequestProjection",
     "SettlementListProjection",
+    "AdminSettlementRequestList",
+    "AdminSettlementRequestDetail",
+    "AdminSettlementBatchList",
+    "AdminSettlementBatchDetail",
     "BnmPointsBalance",
     "SeckillSessionProjection",
     "SeckillSessionHistoryPage",

@@ -9,6 +9,7 @@ import {
   type UserRole,
 } from '@abu24k/core-artifacts';
 import coordinatedManifest from '@abu24k/core-artifacts/manifest';
+import coordinatedOpenApi from '@abu24k/core-artifacts/openapi';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
@@ -35,12 +36,13 @@ describe('platform admin fail-closed experience', () => {
     expect(packageJson.dependencies['@abu24k/core-artifacts']).toBe(`workspace:${artifactVersion}`);
     expect(productBaseline.artifactVersion).toBe(artifactVersion);
     expect(coreState.artifactVersion).toBe(artifactVersion);
-    expect(coreState.artifactStatus).toBe('coordinated-merchant-stores-checkpoint');
+    expect(coreState.artifactStatus).toBe('coordinated-merchant-fulfillment-checkpoint');
     expect(coreState.connectionLabel).toContain(artifactVersion);
     expect(productBaseline.adminCapabilities.adminGlobalResourceSearch).toBe(true);
     expect(productBaseline.adminCapabilities.adminGlobalResourceExport).toBe(true);
     expect(productBaseline.adminCapabilities.adminProductBatchTags).toBe(true);
     expect(productBaseline.adminCapabilities.merchantStoreManagement).toBe(false);
+    expect(productBaseline.adminCapabilities.merchantOrderExport).toBe(false);
   });
 
   it('accepts the generated draft read status without exposing Merchant store-management operations', () => {
@@ -52,7 +54,7 @@ describe('platform admin fail-closed experience', () => {
       /^\w+ \/v2\/admin\/(?:merchant-)?stores(?:\/|$)/.test(operation),
     );
 
-    expect(artifactVersion).toBe('2.0.0-merchant-stores.1');
+    expect(artifactVersion).toBe('2.0.0-merchant-fulfillment.1');
     expect(storeStatuses).toEqual(['DRAFT', 'ACTIVE', 'SUSPENDED', 'CLOSED']);
     expect(generatedDraftStatus).toBe('DRAFT');
     expect(merchantStoreManagementOperations).toEqual([
@@ -63,6 +65,29 @@ describe('platform admin fail-closed experience', () => {
       'PUT /v2/merchant/stores/{storeId}',
     ]);
     expect(adminStoreManagementOperations).toEqual([]);
+  });
+
+  it('keeps the PII order export Merchant-only with no Admin API alias', () => {
+    const merchantExport = coordinatedOpenApi.paths['/v2/merchant/orders/exports']?.post;
+    const adminPiiExportOperations = Object.entries(coordinatedOpenApi.paths)
+      .filter(([path]) => path.startsWith('/v2/admin/'))
+      .flatMap(([path, operations]) => Object.entries(operations).map(([method, operation]) => ({ path, method, operation })))
+      .filter(({ operation }) => /exportMerchantOrders|MerchantOrderExport/.test(JSON.stringify(operation)));
+
+    expect(merchantExport).toMatchObject({
+      operationId: 'exportMerchantOrders',
+      security: [{ bearerAuth: [] }],
+      requestBody: {
+        content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantOrderExportRequest' } } },
+      },
+      responses: {
+        200: {
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantOrderExport' } } },
+        },
+      },
+    });
+    expect(coordinatedManifest.httpSurface).toContain('POST /v2/merchant/orders/exports');
+    expect(adminPiiExportOperations).toEqual([]);
   });
 
   it('publishes the Admin logistics surface while keeping it closed before SIWE', () => {

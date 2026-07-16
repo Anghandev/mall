@@ -27,7 +27,9 @@ function mallCoreArtifactBoundary(): Plugin {
         const openApi = JSON.parse(code) as { paths: Record<string, unknown> };
         return JSON.stringify({
           paths: Object.fromEntries(
-            Object.entries(openApi.paths).filter(([path]) => !path.startsWith('/v2/admin/')),
+            Object.entries(openApi.paths).filter(([path]) => (
+              !path.startsWith('/v2/admin/') && !path.startsWith('/v2/merchant/')
+            )),
           ),
         });
       }
@@ -41,7 +43,9 @@ function mallCoreArtifactBoundary(): Plugin {
           artifactVersion: manifest.artifactVersion,
           deploymentAuthorized: manifest.deploymentAuthorized,
           capabilityStatus: Object.fromEntries(
-            Object.entries(manifest.capabilityStatus).filter(([capability]) => !capability.startsWith('admin')),
+            Object.entries(manifest.capabilityStatus).filter(([capability]) => (
+              !capability.startsWith('admin') && !capability.startsWith('merchant')
+            )),
           ),
         });
       }

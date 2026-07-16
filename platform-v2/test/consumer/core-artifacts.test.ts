@@ -23,13 +23,13 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('merchant fulfillment .1 checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-merchant-fulfillment.1');
+test('settlement admin .10 checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-settlement-admin.10');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
   assert.equal(openapi['x-artifactVersion'], artifactVersion);
-  assert.equal(manifest.publicationStatus, 'COORDINATED_MERCHANT_FULFILLMENT_CHECKPOINT');
+  assert.equal(manifest.publicationStatus, 'COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT');
   assert.equal(contractManifest.publicationStatus, 'coordinated-settlement-admin-checkpoint');
   assert.ok(manifest.decisionBlocked.includes('SECKILL_PRIZE_POOL_ACCOUNT'));
   assert.deepEqual(
@@ -93,11 +93,16 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'GET /v2/admin/merchants/{merchantId}',
     'GET /v2/admin/monitoring',
     'GET /v2/admin/orders',
+    'GET /v2/admin/payments/{orderId}',
     'GET /v2/admin/policy-drafts',
     'GET /v2/admin/policy-drafts/{draftId}',
     'GET /v2/admin/risk/overview',
     'GET /v2/admin/seckill/actions',
     'GET /v2/admin/seckill/actions/{actionId}',
+    'GET /v2/admin/settlement-batches',
+    'GET /v2/admin/settlement-batches/{batchId}',
+    'GET /v2/admin/settlement-requests',
+    'GET /v2/admin/settlement-requests/{requestId}',
     'GET /v2/admin/system-config/versions',
     'GET /v2/admin/takeover-funding/{caseId}',
     'GET /v2/bootstrap',
@@ -447,6 +452,10 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
     'SettlementIntentProjection',
     'SettlementRequestProjection',
     'SettlementListProjection',
+    'AdminSettlementRequestList',
+    'AdminSettlementRequestDetail',
+    'AdminSettlementBatchList',
+    'AdminSettlementBatchDetail',
     'BnmPointsBalance',
     'SeckillSessionProjection',
     'SeckillSessionHistoryPage',
@@ -521,6 +530,11 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
   assert.equal(openapi.paths['/v2/admin/policy-drafts'].get.responses['200'].content['application/json'].schema.type, 'array');
   assert.equal(openapi.paths['/v2/admin/system-config/versions'].get.responses['200'].content['application/json'].schema.type, 'array');
   assert.ok(openapi.components.schemas.SettlementListProjection.required.includes('points'));
+  assert.equal(openapi.paths['/v2/admin/payments/{orderId}'].get.operationId, 'getAdminPaymentProjection');
+  assert.equal(openapi.paths['/v2/admin/settlement-batches/{batchId}'].get.operationId, 'getAdminSettlementBatch');
+  assert.equal(openapi.components.schemas.AdminSettlementBatchEnvelope.properties.chainId.const, 56);
+  assert.equal(openapi.components.schemas.AdminSettlementFinality.properties.requiredConfirmations.const, 15);
+  assert.equal(openapi.components.schemas.AdminSettlementBatchDetail.properties.reconciliation.$ref, '#/components/schemas/AdminSettlementReconciliation');
   assert.ok(openapi.components.schemas.SettlementBalance.required.includes('rewardSubtype'));
   assert.equal(openapi.components.schemas.BnmPointsBalance.properties.transferable.const, false);
   assert.equal(openapi.components.schemas.RealtimeEventEnvelope.properties.finality.const, 'FINAL');

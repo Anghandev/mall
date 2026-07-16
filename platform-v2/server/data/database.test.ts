@@ -1986,6 +1986,16 @@ test('catalog payment service builds an authoritative idempotent quote and recor
     const projection = await service.getPayment(BUYER, quote.orderId);
     assert.equal(projection.state, 'SUBMITTED');
     assert.equal(projection.submittedTxHash, replacementTx);
+    const adminProjection = await service.getAdminPayment(
+      { walletAddress: '0x9999999999999999999999999999999999999998', roles: ['AUDITOR'] },
+      quote.orderId,
+    );
+    assert.equal(adminProjection.orderId, quote.orderId);
+    assert.equal(adminProjection.submittedTxHash, replacementTx);
+    assert.throws(
+      () => service.getAdminPayment({ walletAddress: BUYER, roles: ['BUYER'] }, quote.orderId),
+      /Platform role is required/,
+    );
     await db.query("UPDATE core.payment_quotes SET state = 'REORGED' WHERE order_id = $1", [quote.orderId]);
     const reorgReplacement = `0x${'9'.repeat(64)}`;
     assert.equal((await service.submitPayment(BUYER, {
@@ -7295,6 +7305,69 @@ test('signed settlement request moves Available to Requested and an immutable co
     assert.equal(reorgFinality.rows[0]?.block_hash, `0x${'e'.repeat(64)}`);
     assert.equal(reorgFinality.rows[0]?.evidence.canonicalBlockHash, `0x${'a'.repeat(64)}`);
     await assertLedgerBalanced(db, 1);
+  } finally {
+    await db.close();
+  }
+});
+
+test('Admin clearing read model exposes global request and immutable batch evidence without a write path', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const prepared = await prepareBatchedSettlement(db);
+    const admin = {
+      walletAddress: '0x9999999999999999999999999999999999999998',
+      roles: ['ADMIN'] as const,
+    };
+    const requests = await prepared.settlements.listAdminRequests(admin, {
+      merchantId: 'merchant-1',
+      orderId: prepared.intent.orderId,
+      state: 'BATCHED',
+      limit: 20,
+    });
+    assert.equal(requests.requests.length, 1);
+    assert.equal(requests.requests[0]?.requestId, prepared.request.request_id);
+    assert.equal(requests.requests[0]?.signatureHash.length, 66);
+    assert.equal(requests.requests[0]?.itemCount, 1);
+    assert.equal(requests.nextCursor, null);
+
+    const request = await prepared.settlements.getAdminRequest(admin, prepared.request.request_id);
+    assert.equal(request.items[0]?.orderId, prepared.intent.orderId);
+    assert.deepEqual(request.transitions.map((item) => item.type), ['REQUESTED', 'BATCHED']);
+    assert.equal(request.items[0]?.journals.requested?.startsWith('journal:settlement-request:'), true);
+    assert.equal(request.items[0]?.journals.batched?.startsWith('journal:settlement-batch:'), true);
+
+    const batches = await prepared.settlements.listAdminBatches(admin, {
+      merchantId: 'merchant-1',
+      safeTxHash: prepared.batch.safe_tx_hash,
+      state: 'APPROVAL_PENDING',
+      limit: 20,
+    });
+    assert.equal(batches.batches.length, 1);
+    assert.equal(batches.batches[0]?.batchId, prepared.batch.batch_id);
+    assert.equal(batches.batches[0]?.safeNonce, prepared.runtime.safeNonce);
+
+    const batch = await prepared.settlements.getAdminBatch(admin, prepared.batch.batch_id);
+    assert.equal(batch.batch.contentHash, prepared.batch.content_hash);
+    assert.equal(batch.batch.safeTxHash, prepared.batch.safe_tx_hash);
+    assert.equal(batch.batch.multisendCalldata.startsWith('0x'), true);
+    assert.equal(batch.items[0]?.requestId, prepared.request.request_id);
+    assert.equal(batch.coverage?.covered, true);
+    assert.equal(batch.reconciliation.expectedTotalAmount, '45');
+    assert.equal(batch.reconciliation.actualTotalAmount, '45');
+    assert.equal(batch.reconciliation.conserved, true);
+    assert.ok(batch.reconciliation.ledgerMovements.every((item) => item.balanced));
+
+    assert.throws(
+      () => prepared.settlements.listAdminBatches(
+        { walletAddress: BUYER, roles: ['BUYER'] },
+        { limit: 20 },
+      ),
+      /ADMIN or OPERATOR or AUDITOR role is required/,
+    );
+    assert.throws(
+      () => prepared.settlements.listAdminRequests(admin, { cursorRequestedAt: prepared.now }),
+      /cursor is incomplete/,
+    );
   } finally {
     await db.close();
   }

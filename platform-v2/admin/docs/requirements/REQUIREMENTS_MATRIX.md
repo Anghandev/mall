@@ -36,22 +36,22 @@ are never soft-deletable.
 | ADM-POL-004 | 62 | Multiple NPL reward and USDT concession beneficiary addresses and weights | D-V2-009, D-V2-010, D-V2-014, D-V2-022 | Complete asset-specific destinations, payment snapshots, no self/cycles, exact balance and Safe approval are required; missing NPL beneficiaries/remainders credit the circulation pool | Overridden | GAP-ADM-008, GAP-ADM-017 |
 | ADM-POL-005 | 63 | Source address-bound partner/channel no-login Claim link | D-V2-007, D-V2-015, D-V2-023, D-V2-027 | Replace with wallet-bound, one-use, expiring signed settlement request; eligibility, Available balance and Safe batching cannot be bypassed | Overridden | GAP-ADM-008, GAP-ADM-017 |
 | ADM-POL-006 | Final Goal | Merchant concession from 0-100%; base receivable, concession amount, net receivable and platform/prize/node/other configured-destination preview | D-V2-022, D-V2-023 | Core computes and signs exact integer preview; UI validates range and renders every balanced ledger destination without changing buyer 70/30 | Frozen | GAP-ADM-008, GAP-ADM-017 |
-| ADM-SEK-001 | 65-67 | Create/publish session, assign product and lock activity inventory | D-V2-014, D-V2-017, D-V2-018, D-V2-020, D-V2-024 | Cannot publish without governed policy, signed quotes, atomic inventory, merchant guarantee at least 1,000 USDT and coverage at least 100% | Frozen | GAP-ADM-009, GAP-ADM-010, GAP-ADM-017 |
-| ADM-SEK-002 | 68-69 | Main duration, relay initial and per-purchase recharge | D-V2-013, D-V2-014 | Fixed launch 60min/60sec/+30sec/cap60sec/main cap; future policy governance only | Overridden | GAP-ADM-009 |
-| ADM-SEK-003 | 70-71 | Manual force-close and seckill-purchase breaker | D-V2-014, D-V2-016 | Exact session intent, secondary signature, Safe approval and indexed event; seckill purchase, new payment and new settlement-batch breakers remain independent | Overridden | GAP-ADM-004, GAP-ADM-009, GAP-ADM-017 |
-| ADM-SEK-004 | 72 | Inject USDT into current prize pool from Operations Treasury Safe | D-V2-014, D-V2-023, D-V2-024 | Exact asset/amount/session/Safe intent, balanced ledger posting, Safe receipt and prize-liability reconciliation; injection cannot hide coverage below 100% | Overridden | GAP-ADM-004, GAP-ADM-009, GAP-ADM-017 |
-| ADM-SEK-005 | 73-74 | Versioned rich-text rules shared by Mall and Merchant | D-V2-013, D-V2-014 | Published content binds same policyVersion and sanitization | Frozen | GAP-ADM-009, GAP-ADM-013 |
+| ADM-SEK-001 | 65-67 | Create/publish session, assign product and lock activity inventory | D-V2-014, D-V2-017, D-V2-018, D-V2-020, D-V2-024 | Cannot publish without governed policy, signed quotes, atomic inventory, merchant guarantee at least 1,000 USDT and coverage at least 100% | Verified | - |
+| ADM-SEK-002 | 68-69 | Main duration, relay initial and per-purchase recharge | D-V2-013, D-V2-014 | Fixed launch 60min/60sec/+30sec/cap60sec/main cap; future policy governance only | Verified | - |
+| ADM-SEK-003 | 70-71 | Manual force-close and seckill-purchase breaker | D-V2-014, D-V2-016 | Exact session intent, secondary signature, Safe approval and indexed event; seckill purchase, new payment and new settlement-batch breakers remain independent | Verified | - |
+| ADM-SEK-004 | 72 | Inject USDT into current prize pool from Operations Treasury Safe | D-V2-014, D-V2-023, D-V2-024 | Exact asset/amount/session/Safe intent, balanced ledger posting, Safe receipt and prize-liability reconciliation; injection cannot hide coverage below 100% | Verified | - |
+| ADM-SEK-005 | 73-74 | Versioned rich-text rules shared by Mall and Merchant | D-V2-013, D-V2-014 | Published content binds same policyVersion and sanitization | Verified | - |
 | ADM-RISK-001 | 76-78 | High-Gas/front-running monitor and automatic 24-hour address restriction | D-V2-026 | Explainable risk evidence, exact 24-hour expiry, appeal and authorized override are audited | Frozen | GAP-ADM-011 |
 | ADM-RISK-002 | 79 | Source `tx.origin == msg.sender` contract-call ban | D-V2-015 | Never tx.origin; authorization supports ERC-1271; any EOA policy is separate and explicit | Overridden | GAP-ADM-011 |
 | ADM-RISK-003 | 80-82 | Anonymous low-history wallet clustering detection/block | - | Risk signal cannot independently forge authorization/finality | Frozen | GAP-ADM-011 |
 | ADM-RISK-004 | 83 | Same IP/device switches over 5 wallets in 1 minute then blacklist | D-V2-026 | Strict greater-than-five threshold, one-minute window, evidence, privacy retention, expiry and appeal are auditable | Frozen | GAP-ADM-011 |
 | ADM-RISK-005 | 84 | 3 cancellations in 5 minutes or frequent pickup/address changes cause a 2-hour new-payment restriction | D-V2-004, D-V2-026 | Exact window, trigger evidence and expiry are tested; restriction never creates a business refund or blocks fulfillment/reconciliation | Frozen | GAP-ADM-011 |
 | ADM-RISK-006 | 85 | Separate wallet/IP-range/device blacklists; manual/automatic lock | - | RBAC, expiry/reason/evidence and immutable audit required | Frozen | GAP-ADM-011 |
-| ADM-LOG-001 | 87-90 | SF/JD/YTO/ZTO/STO/EMS enabled states and default carrier | - | Provider readiness and carrier versioning tested | Frozen | GAP-ADM-012 |
-| ADM-LOG-002 | 91 | Cainiao/Kuaidi100 PartnerID secret reference, monthly waybill account and real tracking-number adapter | D-V2-019 | Adapter validates secret-reference completeness, callback/error handling and typed ConfigurationRequired without storing/rendering secrets; real account acceptance is ADM-GOAL-003 | Frozen | GAP-ADM-012 |
-| ADM-LOG-003 | 92-93 | Platform/partner warehouse shipping-address library | - | RBAC writes and audit; exact address fields validated | Frozen | GAP-ADM-012 |
-| ADM-LOG-004 | 94 | Source forced-refund return warehouse | D-V2-004 | No refund destination is emitted; exchange/takeover logistics use their own allowedActions | Overridden | GAP-ADM-012 |
-| ADM-LOG-005 | 95 | Per-count/per-weight freight; Dalian pickup free; remote no-delivery rule | - | Signed quote consumes versioned freight result; frontend does not calculate | Frozen | GAP-ADM-012 |
+| ADM-LOG-001 | 87-90 | SF/JD/YTO/ZTO/STO/EMS enabled states and default carrier | - | Provider readiness and carrier versioning tested | Verified | - |
+| ADM-LOG-002 | 91 | Cainiao/Kuaidi100 PartnerID secret reference, monthly waybill account and real tracking-number adapter | D-V2-019 | Adapter validates secret-reference completeness, callback/error handling and typed ConfigurationRequired without storing/rendering secrets; real account acceptance is ADM-GOAL-003 | Verified | - |
+| ADM-LOG-003 | 92-93 | Platform/partner warehouse shipping-address library | - | RBAC writes and audit; exact address fields validated | Verified | - |
+| ADM-LOG-004 | 94 | Source forced-refund return warehouse | D-V2-004 | No refund destination is emitted; exchange/takeover logistics use their own allowedActions | Overridden | - |
+| ADM-LOG-005 | 95 | Per-count/per-weight freight; Dalian pickup free; remote no-delivery rule | D-V2-002, D-V2-022 | DecisionBlocked until freight charging, weight basis and the effects on buyer 70/30 payment, merchant receivable and concession are frozen; frontend must not calculate a substitute | DecisionBlocked | GAP-ADM-012 |
 | ADM-TAKE-001 | 97-99 | Source forced-refund center and action | D-V2-004, D-V2-005 | Renamed Merchant Takeover Fulfillment Center; 7-day no-evidence case opens automatically | Overridden | GAP-ADM-010 |
 | ADM-TAKE-002 | 100-101 | Source USDT return and Locked BNM burn | D-V2-004, D-V2-005 | Customer payment and rewards remain Locked; platform/replacement merchant fulfills order | Overridden | GAP-ADM-010 |
 | ADM-TAKE-003 | 102 | Source merchant pending/guarantee deduction | D-V2-005, D-V2-018, D-V2-020, D-V2-023 | Major loss posts balanced deductions in order from guarantee, frozen receivables and future proceeds; platform advance records merchant debt; no risk-reserve fallback | Overridden | GAP-ADM-010, GAP-ADM-017 |
@@ -262,28 +262,41 @@ All unavailable entries preserve Core `DecisionBlocked` / `ExternalBlocked`
 reason codes and details. An empty coverage projection is never shown as zero
 or healthy. All fixtures remain under `tests/**`.
 
-## Logistics `.1` Consumer Boundary
+## Admin Logistics And Printing Closure Evidence
 
-The current product pin is
-`@abu24k/core-artifacts@2.0.0-logistics.1`. This checkpoint publishes printer
-binding, waybill batches and durable print jobs only under Merchant routes.
-It completes no Admin Requirement ID:
+The Admin product consumes the coordinated logistics contracts while remaining
+pinned to `@abu24k/core-artifacts@2.0.0-merchant-fulfillment.1`; it does not
+publish or copy a parallel API:
 
-- `ADM-LOG-001` through `ADM-LOG-005` and `ADM-GLOBAL-002` remain unchanged.
-  Admin carrier/warehouse/freight configuration, batch print actions and print
-  job operations are not published and remain fail-closed under `GAP-ADM-012`.
-- The product records `merchantLogisticsOperations: false`; its consumer test
-  proves the coordinated manifest contains the Merchant paths and no matching
-  Admin path.
-- The production-bundle guard requires the coordinated artifact version and
-  rejects Merchant printer, waybill or print-job paths in the Admin bundle.
+- `ADM-LOG-001`: ADMIN and OPERATOR submit the complete SF/JD/YTO/ZTO/STO/EMS
+  enabled set, one enabled default carrier and an idempotency key. AUDITOR is
+  read-only and every response is artifact/version validated.
+- `ADM-LOG-002`: Kuaidi100 and Cainiao consume secret references for partner,
+  credential, monthly account and callback signing. Inputs use password fields,
+  are cleared after submission and never appear in Core projections. Readiness
+  and typed `ConfigurationRequired` remain explicit; real provider accounts are
+  `ExternalBlocked` under `ADM-GOAL-003`.
+- `ADM-LOG-003`: platform and partner warehouses use encrypted create, versioned
+  update and logical deactivate commands. Writes carry `expectedVersion`; a
+  stale version remains a visible `409`. AUDITOR receives only the Core
+  `REDACTED` projection and no contact, phone, address or write control.
+- `ADM-LOG-004`: no refund or return-warehouse control, route or destination is
+  rendered. Exchange and takeover retain their separate frozen fulfillment
+  behavior.
+- Cross-merchant merchant-filtered waybill batches, waybill lists, print-job
+  lists and idempotent retry are consumed with exact request bodies. This does
+  not complete the broader export/pickup-print scope in `ADM-GLOBAL-002`.
+- `ADM-LOG-005` remains `DecisionBlocked`: no frontend freight calculator is
+  introduced before freight charge, weight basis and its effects on buyer
+  70/30, merchant receivable and concession are frozen.
 
-Real provider accounts, device acceptance and production deployment remain
-`ExternalBlocked` under `ADM-GOAL-003`. No production fixture is shipped.
+Real Kuaidi100/Cainiao accounts, provider acceptance and physical printer/device
+evidence remain `ExternalBlocked`. All fixtures stay under `tests/**`; none is
+present in the production bundle.
 
 ## Merchant Stores `.1` Consumer Boundary
 
-The current product pin is
+That batch's product pin was
 `@abu24k/core-artifacts@2.0.0-merchant-stores.1`. The shared read status now
 includes `DRAFT`, but merchant store list/create/profile/activate/close remain
 Merchant-only operations. This checkpoint completes no Admin Requirement ID:
@@ -294,6 +307,54 @@ Merchant-only operations. This checkpoint completes no Admin Requirement ID:
   operations and no Admin alias.
 - The production-bundle guard rejects the Merchant store-management route
   prefix, including the base GET/POST path.
+
+Production Safe/RPC/domain/wallets, provider credentials, physical devices and
+deployment remain `ExternalBlocked` under `ADM-GOAL-003`. No production fixture
+is shipped.
+
+## Platform Seckill Operations Closure Evidence
+
+The completed Admin consumer remains pinned to the coordinated
+`@abu24k/core-artifacts@2.0.0-merchant-fulfillment.1`; this product-only closure
+does not publish or handwrite a parallel shared contract:
+
+- `ADM-SEK-001`: ADMIN and OPERATOR authenticate through SIWE, read the real
+  action list/detail, bind an existing published CMS rules projection, and
+  create a session draft that Core validates and locks against real inventory.
+- `ADM-SEK-002`: the UI exposes 3600s / 60s / +30s / cap 60s as read-only
+  evidence. Its strict client rejects any current/history/session-plan response
+  whose timer tuple differs from the frozen values.
+- `ADM-SEK-003` and `ADM-SEK-004`: ADMIN controls submit exact force-close,
+  prize-injection and seckill-breaker-resume bodies. The selected action then
+  consumes the Core-issued EIP-712 challenge, an independent wallet signature,
+  the secondary-signature response and the Safe-proposal command. Cancellation
+  remains restricted to Core `allowedActions`; OPERATOR can cancel only an
+  unproposed opening action and AUDITOR is read-only.
+- `ADM-SEK-005`: the draft form fetches `SECKILL_RULES` through the existing CMS
+  version endpoint, requires a published projection with a bound policyVersion,
+  and copies its contentHash and policyVersion into read-only fields. The UI
+  never constructs calldata or calculates prize allocations.
+- Core `403` / `409`, `FAILED`, `REORGED`, and `MINED 14/15` remain explicit
+  non-success states. A `FINAL` projection with fewer than 15 confirmations or
+  non-canonical evidence is rejected by the Admin client.
+- Production Safe addresses/owners, independent role wallets, RPC/WSS/mTLS,
+  governed content and funded Operations Safe remain `ExternalBlocked`. All
+  fixtures stay under `tests/**`; none is present in the production bundle.
+
+## Merchant Fulfillment `.1` Consumer Boundary
+
+The current product pin is
+`@abu24k/core-artifacts@2.0.0-merchant-fulfillment.1`. Core publishes the
+PII-authorized paginated Excel export only as Merchant operation
+`POST /v2/merchant/orders/exports` (`exportMerchantOrders`). This checkpoint
+completes no Admin Requirement ID:
+
+- Admin exposes no Merchant order-export control, calls no Merchant export
+  route and does not consume its generated PII request/response contracts.
+- Consumer tests prove the Merchant operation, bearer authentication and exact
+  request/response schemas exist while no Admin operation aliases those
+  contracts.
+- The production-bundle guard rejects both the Merchant route and operation ID.
 
 Production Safe/RPC/domain/wallets, provider credentials, physical devices and
 deployment remain `ExternalBlocked` under `ADM-GOAL-003`. No production fixture
