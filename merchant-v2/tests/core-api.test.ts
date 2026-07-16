@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import openApi from '@abu24k/core-artifacts/openapi';
+import merchantOperations from 'virtual:merchant-store-operations';
 import { createCoreApi, putMediaFile } from '../src/core-api';
 import { merchantBusinessDashboard } from './business-dashboard-fixtures';
 import { merchantAudit, merchantAuditExport, merchantProfile } from './account-fixtures';
@@ -21,6 +23,7 @@ import {
   deliveryOrder,
   deliveryOrderId,
   evidenceHash,
+  merchantOrderExport,
   pickupOrder,
   pickupOrderId,
   pickupTarget,
@@ -50,7 +53,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('merchant-stores.1 Core HTTP consumer', () => {
+describe('merchant-fulfillment.1 Core HTTP consumer', () => {
   it('does not expose Admin global search, export or product batch-tag commands', () => {
     const api = createCoreApi('https://core.example.test');
 
@@ -370,6 +373,72 @@ describe('merchant-stores.1 Core HTTP consumer', () => {
     }));
   });
 
+  it('consumes the coordinated merchant order export operation with an exact DTO', async () => {
+    const input = {
+      from: merchantOrderExport.filters.from,
+      to: merchantOrderExport.filters.to,
+      skuId: merchantOrderExport.filters.skuId!,
+      state: merchantOrderExport.filters.state!,
+      fulfillmentMode: merchantOrderExport.filters.fulfillmentMode!,
+      orderKind: merchantOrderExport.filters.orderKind!,
+      limit: 1_000,
+      idempotencyKey: 'merchant-order-export-1',
+    };
+    const fetchMock = vi.fn(async () => jsonResponse(merchantOrderExport));
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const exported = await createCoreApi('https://core.example.test').exportMerchantOrders(
+      input,
+      'merchant-session',
+    );
+
+    const artifactPath = Object.entries(openApi.paths).find(([, entry]) => (
+      (entry as { post?: { operationId?: string } }).post?.operationId === 'exportMerchantOrders'
+    ))?.[0];
+    expect(artifactPath).toBe('/v2/merchant/orders/exports');
+    expect(merchantOperations.exportOrders).toBe(artifactPath);
+    expect(exported).toEqual(merchantOrderExport);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://core.example.test${merchantOperations.exportOrders}`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify(input),
+        headers: expect.objectContaining({
+          authorization: 'Bearer merchant-session',
+          'x-abu-artifact-version': '2.0.0-merchant-fulfillment.1',
+        }),
+      }),
+    );
+  });
+
+  it('rejects malformed merchant order export metadata, content and cursor fields', async () => {
+    const input = { idempotencyKey: 'merchant-order-export-invalid' };
+    const api = createCoreApi();
+    globalThis.fetch = vi.fn(async () => jsonResponse({
+      ...merchantOrderExport,
+      filename: '../merchant-orders.xls',
+    })) as typeof fetch;
+    await expect(api.exportMerchantOrders(input, 'merchant-session')).rejects.toMatchObject({
+      code: 'InvalidResponse',
+    });
+
+    globalThis.fetch = vi.fn(async () => jsonResponse({
+      ...merchantOrderExport,
+      contentBase64: 'not base64',
+    })) as typeof fetch;
+    await expect(api.exportMerchantOrders(input, 'merchant-session')).rejects.toMatchObject({
+      code: 'InvalidResponse',
+    });
+
+    globalThis.fetch = vi.fn(async () => jsonResponse({
+      ...merchantOrderExport,
+      filters: { ...merchantOrderExport.filters, cursorCreatedAt: merchantOrderExport.filters.from },
+    })) as typeof fetch;
+    await expect(api.exportMerchantOrders(input, 'merchant-session')).rejects.toMatchObject({
+      code: 'InvalidResponse',
+    });
+  });
+
   it('rejects mutable settlement identity, wrong audit order and unsafe export metadata', async () => {
     globalThis.fetch = vi.fn(async () => jsonResponse({
       ...merchantProfile,
@@ -436,7 +505,7 @@ describe('merchant-stores.1 Core HTTP consumer', () => {
       'https://core.example.test/v2/catalog/products',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-merchant-stores.1' }),
+        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-merchant-fulfillment.1' }),
       }),
     );
   });

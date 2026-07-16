@@ -8,6 +8,8 @@ import {
   type FulfillmentOrderCursor,
   type FulfillmentOrderPage,
   type FulfillmentTarget,
+  type MerchantOrderExport,
+  type MerchantOrderExportRequest,
   type MerchantStore,
   type OrderKind,
   type OrderProjectionState,
@@ -29,8 +31,11 @@ import {
   Send,
 } from 'lucide-react';
 import { EmptyState, LoadingRows, PageHeader } from '../components/ui';
+import { PickupCodeScanner } from '../components/PickupCodeScanner';
 import { canExecuteOrderAction } from '../core-boundary';
+import { CoreApiError } from '../core-api';
 import { readableError, useCoreRuntime } from '../core-runtime';
+import { useSearchParams } from 'react-router-dom';
 
 type LoadState<T> =
   | { phase: 'idle' }
@@ -49,6 +54,12 @@ type WaybillCommandState =
   | { phase: 'idle' }
   | { phase: 'submitting' }
   | { phase: 'ready'; value: WaybillBatchResult }
+  | { phase: 'error'; message: string };
+
+type ExportState =
+  | { phase: 'idle' }
+  | { phase: 'submitting' }
+  | { phase: 'success'; message: string }
   | { phase: 'error'; message: string };
 
 type BatchCarrierCode = ShipmentBatchItemRequest['carrierCode'];
@@ -79,7 +90,10 @@ const pickupColumns = ['订单号', '订单类型', 'SKU', '数量', '订单状�
 
 export function FulfillmentPage() {
   const { api, bootstrap, session } = useCoreRuntime();
-  const [tab, setTab] = useState<'delivery' | 'pickup'>('delivery');
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState<'delivery' | 'pickup'>(() => (
+    searchParams.get('mode') === 'pickup' ? 'pickup' : 'delivery'
+  ));
   const [ordersState, setOrdersState] = useState<LoadState<FulfillmentOrderPage>>({ phase: 'idle' });
   const [selectedOrderId, setSelectedOrderId] = useState<string>();
   const [targetState, setTargetState] = useState<LoadState<FulfillmentTarget>>({ phase: 'idle' });
@@ -105,10 +119,12 @@ export function FulfillmentPage() {
   const [receiptReasonCode, setReceiptReasonCode] = useState('');
   const [pickupCode, setPickupCode] = useState('');
   const [pickupEvidenceHash, setPickupEvidenceHash] = useState('');
+  const [exportState, setExportState] = useState<ExportState>({ phase: 'idle' });
   const commandKeys = useRef<Partial<Record<CommandKind, string>>>({});
   const batchItemKeys = useRef<Record<string, string>>({});
   const waybillAttempt = useRef<{ fingerprint: string; key: string } | undefined>(undefined);
   const printRetryKeys = useRef<Record<string, string>>({});
+  const exportAttempt = useRef<{ fingerprint: string; key: string } | undefined>(undefined);
   const selectedOrderRef = useRef<string | undefined>(undefined);
   const sessionTokenRef = useRef(session?.token);
   sessionTokenRef.current = session?.token;
@@ -307,6 +323,7 @@ export function FulfillmentPage() {
     setTab(next);
     setCursorHistory([undefined]);
     setPageIndex(0);
+    setExportState({ phase: 'idle' });
     resetOrderContext();
   }
 
@@ -315,6 +332,7 @@ export function FulfillmentPage() {
     setActiveFilters(filterDraft);
     setCursorHistory([undefined]);
     setPageIndex(0);
+    setExportState({ phase: 'idle' });
     resetOrderContext();
   }
 
@@ -323,12 +341,14 @@ export function FulfillmentPage() {
     setActiveFilters(emptyFilters);
     setCursorHistory([undefined]);
     setPageIndex(0);
+    setExportState({ phase: 'idle' });
     resetOrderContext();
   }
 
   function goToPreviousPage() {
     if (pageIndex === 0) return;
     setPageIndex((current) => current - 1);
+    setExportState({ phase: 'idle' });
     resetOrderContext();
   }
 
@@ -340,6 +360,7 @@ export function FulfillmentPage() {
       nextCursor,
     ]);
     setPageIndex((current) => current + 1);
+    setExportState({ phase: 'idle' });
     resetOrderContext();
   }
 
@@ -525,13 +546,48 @@ export function FulfillmentPage() {
     }
   }
 
+  async function exportOrders() {
+    if (!session || ordersState.phase !== 'ready' || exportState.phase === 'submitting') return;
+    let input: Omit<MerchantOrderExportRequest, 'idempotencyKey'>;
+    try {
+      input = merchantOrderExportInput(activeFilters, tab, cursorHistory[pageIndex]);
+    } catch (error) {
+      setExportState({ phase: 'error', message: readableError(error) });
+      return;
+    }
+    const fingerprint = JSON.stringify(input);
+    if (exportAttempt.current?.fingerprint !== fingerprint) {
+      exportAttempt.current = {
+        fingerprint,
+        key: `merchant-order-export-${commandNonce()}`,
+      };
+    }
+    setExportState({ phase: 'submitting' });
+    try {
+      const result = await api.exportMerchantOrders({
+        ...input,
+        idempotencyKey: exportAttempt.current.key,
+      }, session.token);
+      assertMerchantOrderExportScope(result, input, session.merchantId);
+      if (result.rowCount === 0) {
+        setExportState({ phase: 'success', message: '当前筛选与页游标下没有可导出的订单。' });
+      } else {
+        await downloadMerchantOrderExport(result);
+        setExportState({ phase: 'success', message: `已下载 ${result.rowCount} 笔 Core 授权订单。` });
+      }
+      exportAttempt.current = undefined;
+    } catch (error) {
+      setExportState({ phase: 'error', message: exportErrorMessage(error) });
+    }
+  }
+
   return (
     <div className="page-stack">
       <PageHeader
         actions={(
           <div className="button-group">
             <button className="button secondary" disabled={!session || printJobsState.phase === 'loading'} onClick={() => void loadPrintJobs()} type="button"><Printer aria-hidden="true" size={16} /> 刷新打印任务</button>
-            <button className="button secondary" disabled type="button"><Download aria-hidden="true" size={16} /> 导出 Excel</button>
+            <button className="button secondary" disabled={!session || ordersState.phase !== 'ready' || exportState.phase === 'submitting'} onClick={() => void exportOrders()} type="button"><Download aria-hidden="true" size={16} /> {exportState.phase === 'submitting' ? '正在导出' : '导出 Excel'}</button>
             <button className="button primary" disabled={!session || ordersState.phase === 'loading'} onClick={() => void loadOrders()} type="button"><RefreshCw aria-hidden="true" size={16} /> 刷新订单</button>
           </div>
         )}
@@ -547,6 +603,8 @@ export function FulfillmentPage() {
         </div>
         <div className="section-heading"><div><p className="eyebrow">Merchant-scoped orders</p><h2 id="orders-title">商家履约订单</h2></div><span>{ordersState.phase === 'ready' ? `${visibleOrders.length} 笔` : '实时 Core 读取'}</span></div>
         <p className="section-intro">筛选、订单分类、数量、支付 TxHash、下单时间和可执行动作均来自 Core `.5`。浏览器只提交筛选条件，不重算或补写订单字段。</p>
+        {exportState.phase === 'success' ? <p className="form-success export-feedback" role="status">{exportState.message}</p> : null}
+        {exportState.phase === 'error' ? <p className="form-error export-feedback" role="alert">{exportState.message}</p> : null}
         <form className="filter-bar" aria-label="订单筛选" onSubmit={(event) => { event.preventDefault(); applyFilters(); }}>
           <label><span>开始时间</span><input aria-label="开始时间" disabled={!session} onChange={(event) => setFilterDraft((value) => ({ ...value, from: event.target.value }))} type="datetime-local" value={filterDraft.from} /></label>
           <label><span>结束时间</span><input aria-label="结束时间" disabled={!session} onChange={(event) => setFilterDraft((value) => ({ ...value, to: event.target.value }))} type="datetime-local" value={filterDraft.to} /></label>
@@ -609,7 +667,7 @@ export function FulfillmentPage() {
           </form>
           </>
         ) : null}
-        <p className="panel-note">PII-safe Excel 导出仍保持关闭。电子面单路径仅提交 provider、carrier、store 和 orderIds，不在浏览器生成运单号、证据哈希或打印内容。</p>
+        <p className="panel-note">Excel 由 Core 在商家租户范围内解密 PII、审计并生成；本页只传递已应用筛选和当前稳定游标。电子面单路径仅提交 provider、carrier、store 和 orderIds。</p>
       </section>
 
       <section className="section-block order-check" aria-labelledby="order-check-title">
@@ -655,7 +713,8 @@ export function FulfillmentPage() {
           <form className="section-block compact-section" onSubmit={(event) => { event.preventDefault(); submitPickup(); }}>
             <div className="section-heading"><div><p className="eyebrow">Pickup verification</p><h2>门店核销自提</h2></div><ScanLine aria-hidden="true" size={19} /></div>
             <div className="field"><label htmlFor="pickup-store-id">订单绑定门店</label><input id="pickup-store-id" readOnly value={selectedTarget?.fulfillmentMode === 'PICKUP' ? selectedTarget.storeId : '读取中'} /></div>
-            <div className="field"><label htmlFor="pickup-code">六位核销码</label><input autoComplete="one-time-code" disabled={!pickupAllowed || submitting} id="pickup-code" inputMode="numeric" maxLength={6} onChange={(event) => updateCommandInput('pickup', () => setPickupCode(event.target.value))} pattern="[0-9]{6}" placeholder="000000" value={pickupCode} /></div>
+            <PickupCodeScanner key={selectedOrder.orderId} disabled={!pickupAllowed || submitting} onCode={(code) => updateCommandInput('pickup', () => setPickupCode(code))} />
+            <div className="field"><label htmlFor="pickup-code">六位核销码</label><input autoComplete="one-time-code" disabled={!pickupAllowed || submitting} id="pickup-code" inputMode="numeric" maxLength={6} onChange={(event) => updateCommandInput('pickup', () => setPickupCode(event.target.value.replace(/[^0-9]/g, '')))} pattern="[0-9]{6}" placeholder="000000" value={pickupCode} /><span className="field-help">相机不可用或权限被拒绝时，可直接手工输入。</span></div>
             <div className="field"><label htmlFor="pickup-evidence-hash">门店核销证据哈希</label><input autoComplete="off" disabled={!pickupAllowed || submitting} id="pickup-evidence-hash" onChange={(event) => updateCommandInput('pickup', () => setPickupEvidenceHash(event.target.value))} pattern="0x[0-9a-fA-F]{64}" placeholder="0x + 64 位十六进制" value={pickupEvidenceHash} /></div>
             <button className="button primary wide" disabled={!pickupAllowed || !pickupValid || submitting} type="submit">确认门店核销</button>
             <ActionBlockReason action="VERIFY_PICKUP" actions={allowedActions} enabled={pickupAllowed} />
@@ -883,12 +942,106 @@ function timestamp(value: string | null) {
 }
 
 function localDateTimeToIso(value: string) {
-  return new Date(value).toISOString();
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) throw new Error('筛选时间无效。');
+  return parsed.toISOString();
 }
 
 function idempotencyKeyForOrder(kind: string, orderId: string) {
+  return `merchant-${kind}-${orderId.slice(2, 10)}-${commandNonce()}`;
+}
+
+function commandNonce() {
   const random = typeof globalThis.crypto?.randomUUID === 'function'
     ? globalThis.crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  return `merchant-${kind}-${orderId.slice(2, 10)}-${random}`;
+  return random;
+}
+
+function merchantOrderExportInput(
+  filters: FilterDraft,
+  tab: 'delivery' | 'pickup',
+  cursor?: FulfillmentOrderCursor,
+): Omit<MerchantOrderExportRequest, 'idempotencyKey'> {
+  if (Boolean(filters.from) !== Boolean(filters.to)) {
+    throw new Error('订单导出必须同时选择开始和结束时间。');
+  }
+  const from = filters.from ? localDateTimeToIso(filters.from) : undefined;
+  const to = filters.to ? localDateTimeToIso(filters.to) : undefined;
+  if (from && to) {
+    if (Date.parse(from) > Date.parse(to)) throw new Error('开始时间不能晚于结束时间。');
+    if (Date.parse(to) - Date.parse(from) > 31 * 24 * 60 * 60 * 1_000) {
+      throw new Error('订单导出时间范围不能超过 31 天。');
+    }
+  }
+  return {
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
+    ...(filters.skuId.trim() ? { skuId: filters.skuId.trim() } : {}),
+    ...(filters.state ? { state: filters.state } : {}),
+    fulfillmentMode: tab === 'delivery' ? 'DELIVERY' : 'PICKUP',
+    ...(filters.orderKind ? { orderKind: filters.orderKind } : {}),
+    ...(cursor ? { cursorCreatedAt: cursor.createdAt, cursorOrderId: cursor.orderId } : {}),
+    limit: 1_000,
+  };
+}
+
+function assertMerchantOrderExportScope(
+  result: MerchantOrderExport,
+  input: Omit<MerchantOrderExportRequest, 'idempotencyKey'>,
+  merchantId: string,
+) {
+  if (result.merchantId !== merchantId) {
+    throw new CoreApiError('InvalidResponse', '订单导出与当前商家会话不一致。');
+  }
+  const expected = {
+    skuId: input.skuId ?? null,
+    state: input.state ?? null,
+    fulfillmentMode: input.fulfillmentMode ?? null,
+    orderKind: input.orderKind ?? null,
+    cursorCreatedAt: input.cursorCreatedAt ?? null,
+    cursorOrderId: input.cursorOrderId ?? null,
+    limit: input.limit ?? 1_000,
+  };
+  for (const [key, value] of Object.entries(expected)) {
+    if (result.filters[key as keyof typeof expected] !== value) {
+      throw new CoreApiError('InvalidResponse', '订单导出筛选快照与当前列表不一致。');
+    }
+  }
+  if ((input.from && result.filters.from !== input.from) || (input.to && result.filters.to !== input.to)) {
+    throw new CoreApiError('InvalidResponse', '订单导出时间范围与当前列表不一致。');
+  }
+}
+
+async function downloadMerchantOrderExport(result: MerchantOrderExport) {
+  let binary: string;
+  try {
+    binary = globalThis.atob(result.contentBase64);
+  } catch {
+    throw new CoreApiError('InvalidResponse', '订单导出内容不是有效 Base64。');
+  }
+  const buffer = new ArrayBuffer(binary.length);
+  const bytes = new Uint8Array(buffer);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  const digest = await crypto.subtle.digest('SHA-256', buffer);
+  const contentHash = `0x${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+  if (contentHash.toLowerCase() !== result.contentHash.toLowerCase()) {
+    throw new CoreApiError('InvalidResponse', '订单导出内容哈希校验失败。');
+  }
+  const url = URL.createObjectURL(new Blob([buffer], { type: result.contentType }));
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = result.filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportErrorMessage(error: unknown) {
+  if (error instanceof CoreApiError && error.status === 403) {
+    return `导出权限被拒绝（403）：${error.message}`;
+  }
+  if (error instanceof CoreApiError && error.status === 409) {
+    return `导出状态已变化（409）：${error.message}`;
+  }
+  return readableError(error);
 }

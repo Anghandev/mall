@@ -1736,6 +1736,71 @@ tbody tr:last-child td {
   line-height: 1.55;
 }
 
+.form-success {
+  padding: 10px 12px;
+  border: 1px solid oklch(84% 0.06 151);
+  border-radius: 6px;
+  color: oklch(37% 0.075 154);
+  background: var(--success-soft);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.export-feedback {
+  margin: 0 20px 14px;
+}
+
+.pickup-scanner {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-muted);
+}
+
+.pickup-scanner-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pickup-scanner-toolbar > div {
+  display: grid;
+  gap: 3px;
+}
+
+.pickup-scanner-toolbar strong {
+  font-size: 0.8125rem;
+}
+
+.pickup-scanner-toolbar span,
+.scanner-status {
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.pickup-camera-preview {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--ink);
+  object-fit: cover;
+}
+
+.pickup-camera-preview[hidden] {
+  display: none;
+}
+
+.scanner-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
 td .empty-state {
   min-height: 210px;
 }
@@ -3737,6 +3802,15 @@ td > small {
 }
 
 @media (max-width: 520px) {
+  .pickup-scanner-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .pickup-scanner-toolbar .button {
+    width: 100%;
+  }
+
   .store-image-grid,
   .store-capabilities > div {
     grid-template-columns: 1fr;

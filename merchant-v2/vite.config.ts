@@ -11,11 +11,12 @@ const merchantStoreOperations = Object.freeze({
   update: operationPath('updateMerchantStore', 'put'),
   activate: operationPath('activateMerchantStore', 'post'),
   close: operationPath('closeMerchantStore', 'post'),
+  exportOrders: operationPath('exportMerchantOrders', 'post'),
 });
 
 export default defineConfig({
   plugins: [{
-    name: 'merchant-store-openapi-operations',
+    name: 'merchant-openapi-operations',
     resolveId(id) {
       return id === merchantStoreOperationsId ? resolvedMerchantStoreOperationsId : undefined;
     },

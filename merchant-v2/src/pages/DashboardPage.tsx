@@ -108,11 +108,14 @@ export function DashboardPage() {
           label="当前单品状态"
           value={dashboard ? product ? productStateLabels[product.state] : '未提报' : undefined}
         />
-        <Metric
-          hint={dashboard ? `${dashboard.timezone} 当日成功自提核销` : loadHint}
-          label="今日门店核销"
-          value={dashboard?.orders.pickupVerifiedToday}
-        />
+        <Link className="metric-link-wrap" to="/fulfillment?mode=pickup">
+          <Metric
+            hint={dashboard ? `${dashboard.timezone} 当日成功自提核销` : loadHint}
+            label="今日门店核销"
+            linkLabel="查看核销证据"
+            value={dashboard?.orders.pickupVerifiedToday}
+          />
+        </Link>
       </section>
 
       {state.phase === 'loading' ? <LoadingRows count={3} /> : null}
