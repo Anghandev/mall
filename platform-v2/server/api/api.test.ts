@@ -1055,6 +1055,24 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       delistProduct: async (actor, productId, input) => ({ actor: actor.walletAddress, productId, state: 'DELISTED', ...input }),
       adjustInventory: async (actor, skuId, input) => ({ actor: actor.walletAddress, skuId, ...input }),
       listAdminProducts: async (actor) => [{ actor: actor.walletAddress, productId: 'product-managed-1' }],
+      batchAddProductTags: async (actor, input) => ({ actor: actor.walletAddress, ...input }),
+    },
+    adminGlobalOperationsService: {
+      search: async (actor, input) => ({
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        actor: actor.walletAddress,
+        relation: 'AND',
+        resources: [],
+        truncated: false,
+        unavailableFilters: ['OR', 'FUZZY_WALLET', 'UID', 'PHONE', 'YELLOW_QUEUE'],
+        query: input,
+      }),
+      exportSelection: async (actor, input) => ({
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        actor: actor.walletAddress,
+        exportId: HASH,
+        ...input,
+      }),
     },
     seckillService: {
       current: async () => ({ sessionId: SESSION_ID, phase: 'LIVE' }),
@@ -1862,6 +1880,57 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     );
     assert.equal((await fetch(`${base}/v2/admin/orders`, {
       headers: { authorization: `Bearer ${buyerOnlyToken}` },
+    })).status, 403);
+    const globalResources = await fetch(
+      `${base}/v2/admin/global/resources?resourceType=ORDER&resourceType=PRODUCT`
+        + `&productId=product-1&wallet=${SAFE}&pendingReview=false&limit=20`,
+      { headers: bearerHeaders },
+    );
+    assert.equal(globalResources.status, 200);
+    assert.deepEqual(
+      (await globalResources.json() as { query: Record<string, unknown> }).query,
+      {
+        resourceTypes: ['ORDER', 'PRODUCT'],
+        productId: 'product-1',
+        wallet: SAFE,
+        pendingReview: false,
+        limit: 20,
+      },
+    );
+    assert.equal((await fetch(`${base}/v2/admin/global/resources?resourceType=UNKNOWN`, {
+      headers: bearerHeaders,
+    })).status, 400);
+    assert.equal((await fetch(`${base}/v2/admin/global/resources`, {
+      headers: { authorization: `Bearer ${buyerOnlyToken}` },
+    })).status, 403);
+    const globalExport = await fetch(`${base}/v2/admin/global/exports`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        selection: [{ resourceType: 'ORDER', resourceId: 'order-1' }],
+        format: 'CSV',
+        idempotencyKey: 'http-admin-global-export-1',
+      }),
+    });
+    assert.equal(globalExport.status, 201);
+    assert.equal((await globalExport.json() as { format: string }).format, 'CSV');
+    assert.equal((await fetch(`${base}/v2/admin/catalog/products/batch-tags`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        productIds: ['product-managed-1'],
+        tagIds: ['tag-1'],
+        idempotencyKey: 'http-product-batch-tags-1',
+      }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/catalog/products/batch-tags`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${buyerOnlyToken}` },
+      body: JSON.stringify({
+        productIds: ['product-managed-1'],
+        tagIds: ['tag-1'],
+        idempotencyKey: 'http-product-batch-tags-denied',
+      }),
     })).status, 403);
     const actionPreview = await fetch(`${base}/v2/admin/orders/batch-actions/preview`, {
       method: 'POST',

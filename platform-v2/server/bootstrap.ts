@@ -112,6 +112,7 @@ import {
   LogisticsPrintingService,
 } from './data/logistics-printing-service.ts';
 import { LogisticsAdminService } from './data/logistics-admin-service.ts';
+import { AdminGlobalOperationsService } from './data/admin-global-operations-service.ts';
 
 const ARTIFACT_ROOT = fileURLToPath(new URL('../../packages/core-artifacts/', import.meta.url));
 const ABI_BUNDLE_PATH = fileURLToPath(
@@ -162,6 +163,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     paymentRouterAddress: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),
   });
   const catalogManagementService = new CatalogManagementService({ transactions, signer });
+  const adminGlobalOperationsService = new AdminGlobalOperationsService({ transactions });
   const indexerStore = new PostgresIndexerStore(transactions);
   const seckillService = new SeckillService({ transactions });
   const seckillOperationsService = new SeckillOperationsService({
@@ -609,6 +611,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     getPausedScopes: () => getPausedScopes(database),
     paymentService,
     catalogManagementService,
+    adminGlobalOperationsService,
     seckillService,
     seckillOperationsService,
     fulfillmentService,

@@ -1,9 +1,12 @@
-export declare const artifactVersion: "2.0.0-logistics-admin.1";
+export declare const artifactVersion: "2.0.0-admin-global-ops.1";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
 export type Address = string;
 export type Timestamp = string;
+export type AdminResourceType = "ORDER" | "PRODUCT" | "MERCHANT";
+export type AdminExportFormat = "CSV" | "EXCEL";
+export type AdminBatchAction = "EXPORT_CSV" | "EXPORT_EXCEL" | "ADD_PRODUCT_TAGS";
 export type OrderProjectionState = "QUOTED" | "SUBMITTED" | "PAID" | "SHIPPED" | "DELIVERED" | "ARBITRATION" | "TAKEOVER" | "FULFILLMENT_PENDING" | "FULFILLED" | "REORG_PENDING";
 export type ContractOrderState = "NONE" | "PAID" | "SHIPPED" | "DELIVERED" | "ARBITRATION" | "TAKEOVER" | "FULFILLMENT_PENDING" | "FULFILLED";
 export type OrderFinalityStatus = "NOT_SUBMITTED" | "PENDING" | "CONFIRMED" | "REPLACED" | "REORGED" | "FINAL";
@@ -84,6 +87,9 @@ export type RiskSubjectType = "WALLET" | "IP" | "DEVICE";
 export type RiskRestrictionKind = "NEW_PAYMENT" | "BLACKLIST";
 export type RiskRestrictionState = "ACTIVE" | "EXPIRED" | "OVERRIDDEN";
 export type RiskAppealState = "PENDING" | "APPROVED" | "REJECTED";
+export declare const adminResourceTypes: readonly AdminResourceType[];
+export declare const adminExportFormats: readonly AdminExportFormat[];
+export declare const adminBatchActions: readonly AdminBatchAction[];
 export declare const orderProjectionStates: readonly OrderProjectionState[];
 export declare const contractOrderStates: readonly ContractOrderState[];
 export declare const orderFinalityStatuses: readonly OrderFinalityStatus[];
@@ -1916,6 +1922,79 @@ export interface AdminOrderSearchPage extends FulfillmentOrderPage {
   pausedScopes: readonly BreakerScope[];
   breaker: Readonly<{ scope: BreakerScope; active: boolean }> | null;
   pendingProductReview: boolean | null;
+}
+
+export interface AdminBatchCapability {
+  action: AdminBatchAction;
+  enabled: boolean;
+  reasonCode?: 'Forbidden' | 'ProductWriteLocked';
+}
+
+export interface AdminResourceSummary {
+  resourceType: AdminResourceType;
+  resourceId: string;
+  title: string;
+  status: string;
+  merchantId: string | null;
+  productId: string | null;
+  tagIds: readonly string[];
+  allowedBatchActions: readonly AdminBatchCapability[];
+  createdAt: Timestamp;
+}
+
+export interface AdminGlobalSearchResponse {
+  artifactVersion: typeof artifactVersion;
+  relation: 'AND';
+  resources: readonly AdminResourceSummary[];
+  truncated: boolean;
+  unavailableFilters: readonly ('OR' | 'FUZZY_WALLET' | 'UID' | 'PHONE' | 'YELLOW_QUEUE')[];
+}
+
+export interface AdminResourceSelection {
+  resourceType: AdminResourceType;
+  resourceId: string;
+}
+
+export interface AdminResourceExportRequest {
+  selection: readonly AdminResourceSelection[];
+  format: AdminExportFormat;
+  idempotencyKey: string;
+}
+
+export interface AdminResourceExport {
+  artifactVersion: typeof artifactVersion;
+  exportId: Bytes32;
+  format: AdminExportFormat;
+  filename: string;
+  mediaType: 'text/csv; charset=utf-8' | 'application/vnd.ms-excel; charset=utf-8';
+  rowCount: number;
+  byteLength: number;
+  contentHash: Bytes32;
+  contentBase64: string;
+  createdAt: Timestamp;
+}
+
+export interface AdminProductBatchTagRequest {
+  productIds: readonly string[];
+  tagIds: readonly string[];
+  idempotencyKey: string;
+}
+
+export interface AdminProductBatchTagItem {
+  productId: string;
+  previousVersion: AtomicAmount;
+  version: AtomicAmount;
+  addedTagIds: readonly string[];
+}
+
+export interface AdminProductBatchTagResult {
+  artifactVersion: typeof artifactVersion;
+  operationId: Bytes32;
+  action: 'ADD_PRODUCT_TAGS';
+  tagIds: readonly string[];
+  changedCount: number;
+  products: readonly AdminProductBatchTagItem[];
+  createdAt: Timestamp;
 }
 
 export interface OrderBatchActionPreviewRow {

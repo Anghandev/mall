@@ -16,6 +16,8 @@ import type { CoreConfig, RuntimeReadinessSnapshot } from './config.ts';
 import { publicReadiness } from './config.ts';
 import {
   CORE_ARTIFACT_VERSION,
+  adminExportFormats,
+  adminResourceTypes,
   auditStreamNames,
   breakerScopes,
   cmsContentFormats,
@@ -30,6 +32,8 @@ import {
   orderProjectionStates,
   settlementRails,
   systemConfigKeys,
+  type AdminExportFormat,
+  type AdminResourceType,
   type BreakerScope,
   type SettlementRail,
   type UserRole,
@@ -37,6 +41,10 @@ import {
 import { CoreError, errorBody } from './errors.ts';
 import type { CreateOrdinaryQuoteInput, CreateSeckillQuoteInput } from '../data/catalog-payment-service.ts';
 import type { ProductSlotInput } from '../data/catalog-management-service.ts';
+import type {
+  AdminExportInput,
+  AdminGlobalSearchQuery,
+} from '../data/admin-global-operations-service.ts';
 import type {
   ArbitrationDecisionInput,
   DecisionInput,
@@ -212,6 +220,16 @@ export interface CatalogManagementApiService {
     idempotencyKey: string;
   }): Promise<unknown>;
   listAdminProducts(actor: FulfillmentActor): Promise<unknown>;
+  batchAddProductTags(actor: FulfillmentActor, input: {
+    productIds: string[];
+    tagIds: string[];
+    idempotencyKey: string;
+  }): Promise<unknown>;
+}
+
+export interface AdminGlobalOperationsApiService {
+  search(actor: FulfillmentActor, input?: AdminGlobalSearchQuery): Promise<unknown>;
+  exportSelection(actor: FulfillmentActor, input: AdminExportInput): Promise<unknown>;
 }
 
 export interface FulfillmentApiService {
@@ -615,6 +633,7 @@ export interface ApiDependencies {
   getPausedScopes(): Promise<ActionContext['pausedScopes']>;
   paymentService: PaymentApiService;
   catalogManagementService: CatalogManagementApiService;
+  adminGlobalOperationsService: AdminGlobalOperationsApiService;
   seckillService: SeckillApiService;
   seckillOperationsService: SeckillOperationsApiService;
   fulfillmentService: FulfillmentApiService;
@@ -2048,6 +2067,52 @@ async function routeAdminServices(
   url: URL,
   correlationId: string,
 ) {
+  if (request.method === 'GET' && url.pathname === '/v2/admin/global/resources') {
+    const claims = authorizeRoles(
+      request,
+      dependencies.config,
+      dependencies.clock(),
+      ['ADMIN', 'OPERATOR', 'AUDITOR'],
+    );
+    assertOnlySearchParams(url, [
+      'resourceType', 'orderId', 'productId', 'merchantId', 'txHash', 'wallet',
+      'from', 'to', 'pendingReview', 'limit',
+    ], ['resourceType']);
+    sendJson(response, 200, await dependencies.adminGlobalOperationsService.search(
+      fulfillmentActor(claims),
+      adminGlobalSearchQuery(url),
+    ), correlationId);
+    return true;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/global/exports') {
+    const claims = authorizeRoles(
+      request,
+      dependencies.config,
+      dependencies.clock(),
+      ['ADMIN', 'OPERATOR', 'AUDITOR'],
+    );
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['selection', 'format', 'idempotencyKey']);
+    sendJson(response, 201, await dependencies.adminGlobalOperationsService.exportSelection(
+      fulfillmentActor(claims),
+      adminExportRequest(body),
+    ), correlationId);
+    return true;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/admin/catalog/products/batch-tags') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['productIds', 'tagIds', 'idempotencyKey']);
+    sendJson(response, 200, await dependencies.catalogManagementService.batchAddProductTags(
+      platformCatalogActor(claims),
+      {
+        productIds: requiredStringArray(body, 'productIds'),
+        tagIds: requiredStringArray(body, 'tagIds'),
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+      },
+    ), correlationId);
+    return true;
+  }
   if (url.pathname === '/v2/admin/merchants') {
     const claims = authorizeRoles(
       request,
@@ -3069,6 +3134,59 @@ function adminOrderSearchQuery(url: URL): OrderPageQuery {
   };
 }
 
+function adminGlobalSearchQuery(url: URL): AdminGlobalSearchQuery {
+  const resourceTypes = url.searchParams.getAll('resourceType');
+  return {
+    ...(resourceTypes.length ? { resourceTypes: resourceTypes.map(adminResourceType) } : {}),
+    ...(url.searchParams.get('orderId') ? { orderId: url.searchParams.get('orderId')! } : {}),
+    ...(url.searchParams.get('productId') ? { productId: url.searchParams.get('productId')! } : {}),
+    ...(url.searchParams.get('merchantId') ? { merchantId: url.searchParams.get('merchantId')! } : {}),
+    ...(url.searchParams.get('txHash') ? { txHash: url.searchParams.get('txHash')! } : {}),
+    ...(url.searchParams.get('wallet') ? { wallet: url.searchParams.get('wallet')! } : {}),
+    ...(url.searchParams.get('from') ? { from: dateParameter(url.searchParams.get('from')!, 'from') } : {}),
+    ...(url.searchParams.get('to') ? { to: dateParameter(url.searchParams.get('to')!, 'to') } : {}),
+    ...(url.searchParams.get('pendingReview')
+      ? { pendingReview: booleanParameter(url.searchParams.get('pendingReview')!, 'pendingReview') }
+      : {}),
+    ...(url.searchParams.get('limit')
+      ? { limit: optionalPositiveIntegerParameter(url.searchParams.get('limit'), 'limit')! }
+      : {}),
+  };
+}
+
+function adminExportRequest(body: Record<string, unknown>): AdminExportInput {
+  if (!Array.isArray(body.selection)) throw new CoreError('InvalidRequest', 'selection must be an array');
+  return {
+    format: adminExportFormat(body.format),
+    idempotencyKey: requiredString(body, 'idempotencyKey'),
+    selection: body.selection.map((value) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new CoreError('InvalidRequest', 'selection item must be an object');
+      }
+      const item = value as Record<string, unknown>;
+      assertOnlyKeys(item, ['resourceType', 'resourceId']);
+      return {
+        resourceType: adminResourceType(requiredString(item, 'resourceType')),
+        resourceId: requiredString(item, 'resourceId'),
+      };
+    }),
+  };
+}
+
+function adminResourceType(value: string): AdminResourceType {
+  if (!adminResourceTypes.includes(value as AdminResourceType)) {
+    throw new CoreError('InvalidRequest', 'Unsupported Admin resource type');
+  }
+  return value as AdminResourceType;
+}
+
+function adminExportFormat(value: unknown): AdminExportFormat {
+  if (typeof value !== 'string' || !adminExportFormats.includes(value as AdminExportFormat)) {
+    throw new CoreError('InvalidRequest', 'Unsupported Admin export format');
+  }
+  return value as AdminExportFormat;
+}
+
 function breakerScopeParameter(value: string): BreakerScope {
   if (!(breakerScopes as readonly string[]).includes(value)) {
     throw new CoreError('InvalidRequest', 'Unsupported breaker scope');
@@ -3431,10 +3549,10 @@ function matchResourceAction(pathname: string, prefix: string) {
   }
 }
 
-function assertOnlySearchParams(url: URL, allowed: readonly string[]) {
+function assertOnlySearchParams(url: URL, allowed: readonly string[], repeatable: readonly string[] = []) {
   const seen = new Set<string>();
   for (const key of url.searchParams.keys()) {
-    if (!allowed.includes(key) || seen.has(key)) {
+    if (!allowed.includes(key) || (seen.has(key) && !repeatable.includes(key))) {
       throw new CoreError('InvalidRequest', 'Request contains unsupported or duplicate query parameters');
     }
     seen.add(key);

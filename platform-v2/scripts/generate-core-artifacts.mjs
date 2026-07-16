@@ -9,6 +9,9 @@ import {
   NPL_ADDRESS,
   USDT_ADDRESS,
   adapterProviders,
+  adminBatchActions,
+  adminExportFormats,
+  adminResourceTypes,
   allowedActionNames,
   allowedActionReasonCodes,
   arbitrationOutcomes,
@@ -122,6 +125,7 @@ const schemaSources = [
       '019_logistics_printing.sql',
       '020_merchant_lifecycle.sql',
       '021_logistics_admin.sql',
+      '022_admin_global_operations.sql',
     ],
   },
   {
@@ -157,6 +161,9 @@ const schemaManifest = {
 
 const enums = {
   artifactVersion,
+  adminResourceTypes,
+  adminExportFormats,
+  adminBatchActions,
   orderProjectionStates,
   contractOrderStates,
   orderFinalityStatuses,
@@ -322,7 +329,7 @@ const publishedContractManifest = JSON.parse(readRequired(join(contractsRoot, 'c
 
 const coordinatedManifest = {
   artifactVersion,
-  publicationStatus: 'COORDINATED_LOGISTICS_ADMIN_CHECKPOINT',
+  publicationStatus: 'COORDINATED_ADMIN_GLOBAL_OPERATIONS_CHECKPOINT',
   deploymentAuthorized: publishedContractManifest.deploymentAuthorized === true,
   deploymentAuthorizationEvidenceHash:
     publishedContractManifest.deploymentAuthorizationEvidenceHash ?? null,
@@ -386,6 +393,9 @@ const coordinatedManifest = {
     logisticsAdminConfigHttp: 'AVAILABLE',
     logisticsWarehouseHttp: 'AVAILABLE',
     adminWaybillAndPrintHttp: 'AVAILABLE',
+    adminGlobalResourceSearchHttp: 'AVAILABLE',
+    adminResourceExportHttp: 'AVAILABLE',
+    adminProductBatchTaggingHttp: 'AVAILABLE',
     takeoverHttp: 'AVAILABLE',
     fulfillmentScheduler: 'AVAILABLE',
     bnmAvailabilityWorker: 'AVAILABLE',
@@ -409,6 +419,11 @@ const coordinatedManifest = {
     'MERCHANT_ABNORMAL_ORDER_RATE_TAXONOMY',
     'MERCHANT_48_HOUR_SHIPPING_RATE_DENOMINATOR',
     'PII_RETENTION_POLICY_VERSION',
+    'ADMIN_OR_QUERY_SEMANTICS',
+    'ADMIN_FUZZY_WALLET_SEARCH_POLICY',
+    'ADMIN_UID_IDENTITY',
+    'ADMIN_PHONE_SEARCH_AUTHORIZATION',
+    'ADMIN_YELLOW_QUEUE_DEFINITION',
   ],
   externalBlocked: [
     'GOVERNANCE_AND_THREE_SAFE_ADDRESSES',
@@ -459,6 +474,9 @@ const coordinatedManifest = {
     'PrintJob',
     'AdminOrderSearchPage',
     'OrderBatchActionPreview',
+    'AdminGlobalSearchResponse',
+    'AdminResourceExport',
+    'AdminProductBatchTagResult',
     'FulfillmentCommandInput',
     'FulfillmentCommandResult',
     'SettlementIntentProjection',
@@ -605,6 +623,7 @@ function buildOpenApi() {
       ...catalogManagementOpenApiPaths(errorResponse),
       ...logisticsPrintingOpenApiPaths(errorResponse),
       ...merchantLifecycleOpenApiPaths(errorResponse),
+      ...adminGlobalOperationsOpenApiPaths(errorResponse),
       '/v2/bootstrap': {
         get: {
           operationId: 'getBootstrap',
@@ -1797,6 +1816,66 @@ function merchantLifecycleOpenApiSchemas() {
       settlements: { type: 'array', items: ref('MerchantLifecycleSettlement') },
       reviews: { type: 'array', items: ref('MerchantReviewEvidence') },
     }),
+  };
+}
+
+function adminGlobalOperationsOpenApiPaths(errorResponse) {
+  const security = [{ bearerAuth: [] }];
+  return {
+    '/v2/admin/global/resources': {
+      get: {
+        operationId: 'searchAdminGlobalResources',
+        security,
+        parameters: [
+          {
+            name: 'resourceType', in: 'query', required: false,
+            schema: { type: 'array', uniqueItems: true, items: { enum: [...adminResourceTypes] } },
+            style: 'form', explode: true,
+          },
+          { name: 'orderId', in: 'query', schema: { type: 'string', minLength: 1, maxLength: 256 } },
+          { name: 'productId', in: 'query', schema: { type: 'string', minLength: 1, maxLength: 256 } },
+          { name: 'merchantId', in: 'query', schema: { type: 'string', minLength: 1, maxLength: 256 } },
+          { name: 'txHash', in: 'query', schema: { $ref: '#/components/schemas/Bytes32' } },
+          { name: 'wallet', in: 'query', schema: { $ref: '#/components/schemas/Address' } },
+          { name: 'from', in: 'query', schema: { type: 'string', format: 'date-time' } },
+          { name: 'to', in: 'query', schema: { type: 'string', format: 'date-time' } },
+          { name: 'pendingReview', in: 'query', schema: { type: 'boolean' } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 } },
+        ],
+        responses: {
+          200: response('Server-side AND search across safe Admin resource summaries', {
+            $ref: '#/components/schemas/AdminGlobalSearchResponse',
+          }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/admin/global/exports': {
+      post: {
+        operationId: 'exportAdminResources',
+        security,
+        requestBody: body({ $ref: '#/components/schemas/AdminResourceExportRequest' }),
+        responses: {
+          201: response('Audited non-PII resource export snapshot', {
+            $ref: '#/components/schemas/AdminResourceExport',
+          }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/admin/catalog/products/batch-tags': {
+      post: {
+        operationId: 'batchAddAdminProductTags',
+        security,
+        requestBody: body({ $ref: '#/components/schemas/AdminProductBatchTagRequest' }),
+        responses: {
+          200: response('Atomic versioned product tag result', {
+            $ref: '#/components/schemas/AdminProductBatchTagResult',
+          }),
+          default: errorResponse,
+        },
+      },
+    },
   };
 }
 
@@ -4166,6 +4245,129 @@ function fulfillmentOpenApiSchemas() {
         pendingProductReview: { anyOf: [{ type: 'boolean' }, { type: 'null' }] },
       },
     },
+    AdminBatchCapability: {
+      type: 'object', additionalProperties: false, required: ['action', 'enabled'],
+      properties: {
+        action: { enum: [...adminBatchActions] },
+        enabled: { type: 'boolean' },
+        reasonCode: { enum: ['Forbidden', 'ProductWriteLocked'] },
+      },
+    },
+    AdminResourceSummary: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'resourceType', 'resourceId', 'title', 'status', 'merchantId', 'productId',
+        'tagIds', 'allowedBatchActions', 'createdAt',
+      ],
+      properties: {
+        resourceType: { enum: [...adminResourceTypes] },
+        resourceId: { type: 'string', minLength: 1, maxLength: 256 },
+        title: { type: 'string', minLength: 1, maxLength: 256 },
+        status: { type: 'string', minLength: 1, maxLength: 64 },
+        merchantId: { anyOf: [{ type: 'string', minLength: 1, maxLength: 256 }, { type: 'null' }] },
+        productId: { anyOf: [{ type: 'string', minLength: 1, maxLength: 256 }, { type: 'null' }] },
+        tagIds: {
+          type: 'array', uniqueItems: true,
+          items: { type: 'string', minLength: 1, maxLength: 256 },
+        },
+        allowedBatchActions: { type: 'array', items: { $ref: '#/components/schemas/AdminBatchCapability' } },
+        createdAt: timestamp,
+      },
+    },
+    AdminGlobalSearchResponse: {
+      type: 'object', additionalProperties: false,
+      required: ['artifactVersion', 'relation', 'resources', 'truncated', 'unavailableFilters'],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        relation: { const: 'AND' },
+        resources: { type: 'array', items: { $ref: '#/components/schemas/AdminResourceSummary' } },
+        truncated: { type: 'boolean' },
+        unavailableFilters: {
+          type: 'array', uniqueItems: true,
+          items: { enum: ['OR', 'FUZZY_WALLET', 'UID', 'PHONE', 'YELLOW_QUEUE'] },
+        },
+      },
+    },
+    AdminResourceSelection: {
+      type: 'object', additionalProperties: false, required: ['resourceType', 'resourceId'],
+      properties: {
+        resourceType: { enum: [...adminResourceTypes] },
+        resourceId: { type: 'string', minLength: 1, maxLength: 256 },
+      },
+    },
+    AdminResourceExportRequest: {
+      type: 'object', additionalProperties: false, required: ['selection', 'format', 'idempotencyKey'],
+      properties: {
+        selection: {
+          type: 'array', minItems: 1, maxItems: 100, uniqueItems: true,
+          items: { $ref: '#/components/schemas/AdminResourceSelection' },
+        },
+        format: { enum: [...adminExportFormats] },
+        idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
+      },
+    },
+    AdminResourceExport: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'artifactVersion', 'exportId', 'format', 'filename', 'mediaType', 'rowCount',
+        'byteLength', 'contentHash', 'contentBase64', 'createdAt',
+      ],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        exportId: { $ref: '#/components/schemas/Bytes32' },
+        format: { enum: [...adminExportFormats] },
+        filename: { type: 'string', minLength: 1, maxLength: 160 },
+        mediaType: { enum: ['text/csv; charset=utf-8', 'application/vnd.ms-excel; charset=utf-8'] },
+        rowCount: { type: 'integer', minimum: 1, maximum: 100 },
+        byteLength: { type: 'integer', minimum: 1 },
+        contentHash: { $ref: '#/components/schemas/Bytes32' },
+        contentBase64: { type: 'string', minLength: 1, contentEncoding: 'base64' },
+        createdAt: timestamp,
+      },
+    },
+    AdminProductBatchTagRequest: {
+      type: 'object', additionalProperties: false, required: ['productIds', 'tagIds', 'idempotencyKey'],
+      properties: {
+        productIds: {
+          type: 'array', minItems: 1, maxItems: 100, uniqueItems: true,
+          items: { type: 'string', minLength: 1, maxLength: 256 },
+        },
+        tagIds: {
+          type: 'array', minItems: 1, maxItems: 20, uniqueItems: true,
+          items: { type: 'string', minLength: 1, maxLength: 256 },
+        },
+        idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
+      },
+    },
+    AdminProductBatchTagItem: {
+      type: 'object', additionalProperties: false,
+      required: ['productId', 'previousVersion', 'version', 'addedTagIds'],
+      properties: {
+        productId: { type: 'string', minLength: 1, maxLength: 256 },
+        previousVersion: { $ref: '#/components/schemas/AtomicAmount' },
+        version: { $ref: '#/components/schemas/AtomicAmount' },
+        addedTagIds: {
+          type: 'array', uniqueItems: true,
+          items: { type: 'string', minLength: 1, maxLength: 256 },
+        },
+      },
+    },
+    AdminProductBatchTagResult: {
+      type: 'object', additionalProperties: false,
+      required: ['artifactVersion', 'operationId', 'action', 'tagIds', 'changedCount', 'products', 'createdAt'],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        operationId: { $ref: '#/components/schemas/Bytes32' },
+        action: { const: 'ADD_PRODUCT_TAGS' },
+        tagIds: {
+          type: 'array', minItems: 1, maxItems: 20, uniqueItems: true,
+          items: { type: 'string', minLength: 1, maxLength: 256 },
+        },
+        changedCount: { type: 'integer', minimum: 0, maximum: 100 },
+        products: { type: 'array', items: { $ref: '#/components/schemas/AdminProductBatchTagItem' } },
+        createdAt: timestamp,
+      },
+    },
     OrderBatchActionPreviewRequest: {
       type: 'object', additionalProperties: false, required: ['orderIds'],
       properties: {
@@ -4935,6 +5137,9 @@ export type AtomicAmount = string;
 export type Bytes32 = string;
 export type Address = string;
 export type Timestamp = string;
+export type AdminResourceType = ${union(adminResourceTypes)};
+export type AdminExportFormat = ${union(adminExportFormats)};
+export type AdminBatchAction = ${union(adminBatchActions)};
 export type OrderProjectionState = ${union(orderProjectionStates)};
 export type ContractOrderState = ${union(contractOrderStates)};
 export type OrderFinalityStatus = ${union(orderFinalityStatuses)};
@@ -5015,6 +5220,9 @@ export type RiskSubjectType = ${union(riskSubjectTypes)};
 export type RiskRestrictionKind = ${union(riskRestrictionKinds)};
 export type RiskRestrictionState = ${union(riskRestrictionStates)};
 export type RiskAppealState = ${union(riskAppealStates)};
+export declare const adminResourceTypes: readonly AdminResourceType[];
+export declare const adminExportFormats: readonly AdminExportFormat[];
+export declare const adminBatchActions: readonly AdminBatchAction[];
 export declare const orderProjectionStates: readonly OrderProjectionState[];
 export declare const contractOrderStates: readonly ContractOrderState[];
 export declare const orderFinalityStatuses: readonly OrderFinalityStatus[];
@@ -6847,6 +7055,79 @@ export interface AdminOrderSearchPage extends FulfillmentOrderPage {
   pausedScopes: readonly BreakerScope[];
   breaker: Readonly<{ scope: BreakerScope; active: boolean }> | null;
   pendingProductReview: boolean | null;
+}
+
+export interface AdminBatchCapability {
+  action: AdminBatchAction;
+  enabled: boolean;
+  reasonCode?: 'Forbidden' | 'ProductWriteLocked';
+}
+
+export interface AdminResourceSummary {
+  resourceType: AdminResourceType;
+  resourceId: string;
+  title: string;
+  status: string;
+  merchantId: string | null;
+  productId: string | null;
+  tagIds: readonly string[];
+  allowedBatchActions: readonly AdminBatchCapability[];
+  createdAt: Timestamp;
+}
+
+export interface AdminGlobalSearchResponse {
+  artifactVersion: typeof artifactVersion;
+  relation: 'AND';
+  resources: readonly AdminResourceSummary[];
+  truncated: boolean;
+  unavailableFilters: readonly ('OR' | 'FUZZY_WALLET' | 'UID' | 'PHONE' | 'YELLOW_QUEUE')[];
+}
+
+export interface AdminResourceSelection {
+  resourceType: AdminResourceType;
+  resourceId: string;
+}
+
+export interface AdminResourceExportRequest {
+  selection: readonly AdminResourceSelection[];
+  format: AdminExportFormat;
+  idempotencyKey: string;
+}
+
+export interface AdminResourceExport {
+  artifactVersion: typeof artifactVersion;
+  exportId: Bytes32;
+  format: AdminExportFormat;
+  filename: string;
+  mediaType: 'text/csv; charset=utf-8' | 'application/vnd.ms-excel; charset=utf-8';
+  rowCount: number;
+  byteLength: number;
+  contentHash: Bytes32;
+  contentBase64: string;
+  createdAt: Timestamp;
+}
+
+export interface AdminProductBatchTagRequest {
+  productIds: readonly string[];
+  tagIds: readonly string[];
+  idempotencyKey: string;
+}
+
+export interface AdminProductBatchTagItem {
+  productId: string;
+  previousVersion: AtomicAmount;
+  version: AtomicAmount;
+  addedTagIds: readonly string[];
+}
+
+export interface AdminProductBatchTagResult {
+  artifactVersion: typeof artifactVersion;
+  operationId: Bytes32;
+  action: 'ADD_PRODUCT_TAGS';
+  tagIds: readonly string[];
+  changedCount: number;
+  products: readonly AdminProductBatchTagItem[];
+  createdAt: Timestamp;
 }
 
 export interface OrderBatchActionPreviewRow {

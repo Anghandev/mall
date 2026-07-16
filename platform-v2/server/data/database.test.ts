@@ -42,6 +42,7 @@ import { AuditQueryService, enqueueAudit } from './audit-service.ts';
 import { PostgresNonceStore, RedisNonceRateLimiter } from './auth-store.ts';
 import { CatalogPaymentService } from './catalog-payment-service.ts';
 import { CatalogManagementService } from './catalog-management-service.ts';
+import { AdminGlobalOperationsService } from './admin-global-operations-service.ts';
 import { CoverageBreakerService } from './coverage-breaker-service.ts';
 import { CmsService, sanitizeStructuredContent } from './cms-service.ts';
 import { EvidenceService, HttpMediaStorageAdapter, type MediaStorageAdapter } from './evidence-service.ts';
@@ -124,6 +125,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '019_logistics_printing.sql',
       '020_merchant_lifecycle.sql',
       '021_logistics_admin.sql',
+      '022_admin_global_operations.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -153,6 +155,7 @@ test('business and audit migrations apply from empty databases', async () => {
     assert.ok(businessTables.rows.some((row) => row.table_name === 'product_review_events'));
     assert.ok(businessTables.rows.some((row) => row.table_name === 'catalog_inventory_adjustments'));
     assert.ok(businessTables.rows.some((row) => row.table_name === 'merchant_concession_previews'));
+    assert.ok(businessTables.rows.some((row) => row.table_name === 'admin_batch_operations'));
     assert.ok(businessTables.rows.some((row) => row.table_name === 'buyer_profiles'));
     assert.ok(businessTables.rows.some((row) => row.table_name === 'buyer_saved_addresses'));
     assert.ok(businessTables.rows.some((row) => row.table_name === 'takeover_case_transitions'));
@@ -2261,6 +2264,12 @@ test('catalog management enforces product scope, signed preview, review locks an
       sortOrder: 1,
       idempotencyKey: 'catalog-tag-create-1',
     });
+    const fastTag = await service.upsertTag(platform, {
+      name: 'Fast delivery',
+      example: 'Operational delivery tag',
+      sortOrder: 2,
+      idempotencyKey: 'catalog-tag-create-2',
+    });
     assert.throws(
       () => service.upsertCategory(platform, {
         name: 'Blocked Fee',
@@ -2293,6 +2302,33 @@ test('catalog management enforces product scope, signed preview, review locks an
     const skuId = String((draft.skus as Array<{ skuId: string }>)[0]!.skuId);
     assert.equal(draft.lifecycleState, 'DRAFT');
     assert.deepEqual(draft.allowedActions, ['SAVE_DRAFT', 'CREATE_CONCESSION_PREVIEW', 'SUBMIT_REVIEW', 'DELIST']);
+    const tagBatchInput = {
+      productIds: [productId],
+      tagIds: [String(fastTag.tagId)],
+      idempotencyKey: 'catalog-product-batch-tag-1',
+    };
+    const tagBatch = await service.batchAddProductTags(platform, tagBatchInput);
+    assert.equal(tagBatch.changedCount, 1);
+    assert.deepEqual(tagBatch.products, [{
+      productId,
+      previousVersion: '1',
+      version: '2',
+      addedTagIds: [fastTag.tagId],
+    }]);
+    assert.deepEqual((await service.batchAddProductTags(platform, tagBatchInput)), tagBatch);
+    const taggedProduct = (await service.listAdminProducts(platform)).find((product) => product.productId === productId)!;
+    assert.deepEqual(taggedProduct.tagIds, [tag.tagId, fastTag.tagId].sort());
+    assert.equal(taggedProduct.version, '2');
+    await assert.rejects(
+      service.batchAddProductTags(auditActor, {
+        ...tagBatchInput,
+        idempotencyKey: 'catalog-product-batch-tag-auditor',
+      }),
+      /Catalog write role is required/,
+    );
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.audit_outbox_events WHERE event_type = 'CatalogProductsBatchTagged'",
+    )).rows[0]?.count, '1');
     assert.equal(catalogQueries.some((sql) => (
       sql.includes('FROM core.merchant_stores WHERE store_id = $1 FOR UPDATE')
     )), true);
@@ -3726,8 +3762,10 @@ test('order pages use stable scoped cursors and shipment batches are canonical, 
     await db.query(
       `INSERT INTO core.wallet_role_bindings (
          wallet_address, role, merchant_id, status, evidence_hash
-       ) VALUES ($1,'MERCHANT','merchant-1','ACTIVE',$2)`,
-      [merchantAgent, HASH],
+       ) VALUES
+         ($1,'MERCHANT','merchant-1','ACTIVE',$3),
+         ($2,'ADMIN',NULL,'ACTIVE',$3)`,
+      [merchantAgent, '0x3333333333333333333333333333333333333333', HASH],
     );
     const createPaidOrder = async (character: string, finalized = true) => {
       const orderId = `0x${character.repeat(64)}`;
@@ -3826,6 +3864,53 @@ test('order pages use stable scoped cursors and shipment batches are canonical, 
     assert.deepEqual(adminSearch.orders.map((order) => order.orderId), [orderB]);
     assert.deepEqual(adminSearch.breaker, { scope: 'NEW_PAYMENT', active: true });
     assert.deepEqual(adminSearch.pausedScopes, ['NEW_PAYMENT']);
+    const globalOperations = new AdminGlobalOperationsService({
+      transactions: transactionAdapter(db),
+      clock: () => now,
+      bytes32: () => `0x${'d'.repeat(64)}`,
+    });
+    const globalPage = await globalOperations.search(platform, { limit: 10 });
+    assert.equal(globalPage.relation, 'AND');
+    assert.deepEqual(new Set(globalPage.resources.map((resource) => resource.resourceType)), new Set([
+      'ORDER', 'PRODUCT', 'MERCHANT',
+    ]));
+    assert.deepEqual((await globalOperations.search(platform, { wallet: BUYER })).resources.map((resource) => (
+      resource.resourceType
+    )), ['ORDER', 'ORDER']);
+    assert.deepEqual((await globalOperations.search(platform, {
+      productId: 'product-1',
+    })).resources.map((resource) => resource.resourceType), ['PRODUCT', 'ORDER', 'ORDER']);
+    await db.query("UPDATE core.products SET title = '=SUM(1,1)' WHERE product_id = 'product-1'");
+    const exportInput = {
+      selection: [
+        { resourceType: 'ORDER' as const, resourceId: orderA },
+        { resourceType: 'PRODUCT' as const, resourceId: 'product-1' },
+        { resourceType: 'MERCHANT' as const, resourceId: 'merchant-1' },
+      ],
+      format: 'CSV' as const,
+      idempotencyKey: 'admin-global-export-1',
+    };
+    const exported = await globalOperations.exportSelection(platform, exportInput);
+    const csv = Buffer.from(String(exported.contentBase64), 'base64').toString('utf8');
+    assert.equal(exported.rowCount, 3);
+    assert.match(csv, /"'=SUM\(1,1\)"/);
+    assert.equal(csv.includes(BUYER), false);
+    assert.equal(csv.includes(MERCHANT), false);
+    assert.deepEqual(await globalOperations.exportSelection(platform, exportInput), exported);
+    await assert.rejects(
+      globalOperations.exportSelection(platform, { ...exportInput, selection: exportInput.selection.slice(0, 1) }),
+      /idempotency key was reused/,
+    );
+    await assert.rejects(
+      globalOperations.search({
+        walletAddress: '0x5555555555555555555555555555555555555555',
+        roles: ['ADMIN'],
+      }),
+      /Active Admin resource role is required/,
+    );
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.audit_outbox_events WHERE event_type = 'AdminResourcesExported'",
+    )).rows[0]?.count, '1');
     const preview = await service.previewOrderBatchActions(platform, [orderA, orderB]);
     assert.deepEqual(preview.rows.map((row) => row.orderId), [orderA, orderB]);
     assert.equal(preview.enabledActionIntersection.includes('RECORD_SHIPMENT'), true);

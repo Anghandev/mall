@@ -6,6 +6,7 @@ import { CORE_ARTIFACT_VERSION } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import { parsePaymentPolicySnapshot } from '../api/payment-policy.ts';
 import type { SignerRequest } from '../chain/signer.ts';
+import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 
@@ -771,6 +772,130 @@ export class CatalogManagementService {
       return Promise.all(products.rows.map((product) => productProjection(executor, product, actor)));
     });
   }
+
+  batchAddProductTags(actor: FulfillmentActor, input: {
+    productIds: string[];
+    tagIds: string[];
+    idempotencyKey: string;
+  }) {
+    if (!Array.isArray(input.productIds) || input.productIds.length < 1 || input.productIds.length > 100) {
+      throw new CoreError('InvalidRequest', 'Product batch tagging requires 1-100 products');
+    }
+    if (!Array.isArray(input.tagIds) || input.tagIds.length < 1 || input.tagIds.length > 20) {
+      throw new CoreError('InvalidRequest', 'Product batch tagging requires 1-20 tags');
+    }
+    input.productIds.forEach((productId) => validateResourceId(productId, 'productId'));
+    input.tagIds.forEach((tagId) => validateResourceId(tagId, 'tagId'));
+    if (new Set(input.productIds).size !== input.productIds.length || new Set(input.tagIds).size !== input.tagIds.length) {
+      throw new CoreError('InvalidRequest', 'Product batch tagging contains duplicate resources');
+    }
+    validateIdempotencyKey(input.idempotencyKey);
+    const wallet = actorWallet(actor);
+    const value = {
+      productIds: [...input.productIds].sort(),
+      tagIds: [...input.tagIds].sort(),
+      idempotencyKey: input.idempotencyKey,
+    };
+    const requestHash = hashJson({ actor: wallet, ...value });
+    return this.#transactions.transaction(async (executor) => {
+      const role = await requirePlatformRole(executor, actor, false);
+      const existing = await executor.query<{ request_hash: string; result: Record<string, unknown> }>(
+        `SELECT request_hash, result FROM core.admin_batch_operations
+         WHERE actor_wallet = $1 AND operation_type = 'BATCH_ADD_PRODUCT_TAGS'
+           AND idempotency_key = $2`,
+        [wallet, value.idempotencyKey],
+      );
+      if (existing.rows[0]) {
+        if (existing.rows[0].request_hash !== requestHash) throw idempotencyConflict('Product batch tagging');
+        return existing.rows[0].result;
+      }
+      for (const tagId of value.tagIds) {
+        const tag = await loadTagRow(executor, tagId, true);
+        if (!tag || tag.status !== 'ENABLED') throw new CoreError('InvalidRequest', 'Batch tag is unavailable', 409, { tagId });
+      }
+      const now = this.#clock();
+      const productResults = [];
+      for (const productId of value.productIds) {
+        const product = await requireProduct(executor, productId, true);
+        await assertProductWriteUnlocked(executor, product, now);
+        const currentTags = await executor.query<{ tag_id: string }>(
+          `SELECT tag_id FROM core.product_tag_assignments
+           WHERE product_id = $1 AND product_version = $2 ORDER BY tag_id`,
+          [productId, product.version],
+        );
+        const before = currentTags.rows.map((row) => row.tag_id);
+        const after = [...new Set([...before, ...value.tagIds])].sort();
+        const added = after.filter((tagId) => !before.includes(tagId));
+        const previousVersion = Number(product.version);
+        if (added.length > 0) {
+          const nextVersion = previousVersion + 1;
+          const metadata = object(product.metadata);
+          await executor.query(
+            'UPDATE core.products SET version = $2, metadata = $3, updated_at = $4 WHERE product_id = $1',
+            [productId, nextVersion, JSON.stringify({ ...metadata, tagIds: after }), now],
+          );
+          await executor.query(
+            `INSERT INTO core.product_category_assignments (
+               product_id, product_version, category_id, assigned_by, assigned_at
+             ) SELECT product_id, $2, category_id, $3, $4
+               FROM core.product_category_assignments
+              WHERE product_id = $1 AND product_version = $5`,
+            [productId, nextVersion, wallet, now, previousVersion],
+          );
+          for (const tagId of after) {
+            await executor.query(
+              `INSERT INTO core.product_tag_assignments (
+                 product_id, product_version, tag_id, assigned_by, assigned_at
+               ) VALUES ($1,$2,$3,$4,$5)`,
+              [productId, nextVersion, tagId, wallet, now],
+            );
+          }
+          productResults.push({ productId, previousVersion: String(previousVersion), version: String(nextVersion), addedTagIds: added });
+        } else {
+          productResults.push({ productId, previousVersion: String(previousVersion), version: String(previousVersion), addedTagIds: [] });
+        }
+      }
+      const operationId = this.#bytes32().toLowerCase();
+      const result = Object.freeze({
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        operationId,
+        action: 'ADD_PRODUCT_TAGS' as const,
+        tagIds: value.tagIds,
+        changedCount: productResults.filter((item) => item.addedTagIds.length > 0).length,
+        products: productResults,
+        createdAt: now.toISOString(),
+      });
+      await executor.query(
+        `INSERT INTO core.admin_batch_operations (
+           operation_id, operation_type, actor_wallet, actor_role, idempotency_key,
+           request_hash, result, created_at
+         ) VALUES ($1,'BATCH_ADD_PRODUCT_TAGS',$2,$3,$4,$5,$6,$7)`,
+        [operationId, wallet, role, value.idempotencyKey, requestHash, JSON.stringify(result), now],
+      );
+      await enqueueAudit(executor, {
+        sourceEventId: auditSourceId('catalog-batch-tags', { operationId, requestHash }),
+        streamName: 'operational',
+        evidenceProfile: 'RBAC',
+        eventType: 'CatalogProductsBatchTagged',
+        resourceType: 'ADMIN_BATCH_OPERATION',
+        resourceId: operationId,
+        actorWallet: wallet,
+        actorRole: role,
+        correlationId: `catalog-batch-tags:${operationId}`,
+        requestHash: requestHash.slice(2),
+        payload: { productIds: value.productIds, tagIds: value.tagIds, changedCount: result.changedCount },
+        authorizationEvidence: {
+          scheme: 'RBAC_ROLE_REVALIDATION',
+          subject: wallet,
+          roles: [role],
+          evidenceHash: hashJson({ subject: wallet, role, checkedAt: now.toISOString() }),
+          checkedAt: now.toISOString(),
+        },
+        createdAt: now,
+      });
+      return result;
+    });
+  }
 }
 
 async function authorizeStore(
@@ -1340,7 +1465,12 @@ async function productProjection(executor: SqlExecutor, product: ProductRow, act
   };
 }
 
-async function productWriteLock(executor: SqlExecutor, product: ProductRow, now: Date) {
+export interface ProductWriteLockSubject {
+  product_id: string;
+  lifecycle_state: string;
+}
+
+export async function productWriteLock(executor: SqlExecutor, product: ProductWriteLockSubject, now: Date) {
   if (['REVIEW', 'SCHEDULED', 'LOCKED'].includes(product.lifecycle_state)) {
     return { type: 'PRODUCT_STATE', id: product.product_id, state: product.lifecycle_state };
   }

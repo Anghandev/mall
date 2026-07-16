@@ -1,4 +1,4 @@
-export const CORE_ARTIFACT_VERSION = '2.0.0-logistics-admin.1';
+export const CORE_ARTIFACT_VERSION = '2.0.0-admin-global-ops.1';
 export const BSC_CHAIN_ID = 56;
 export const USDT_ADDRESS = '0x55d398326f99059ff775485246999027b3197955';
 export const NPL_ADDRESS = '0x4e8277ab31e4956b2cd48449793a57656dfc03d2';
@@ -58,6 +58,15 @@ export type MerchantReviewAction = (typeof merchantReviewActions)[number];
 
 export const merchantQualificationAccess = ['FULL', 'REDACTED', 'UNAVAILABLE'] as const;
 export type MerchantQualificationAccess = (typeof merchantQualificationAccess)[number];
+
+export const adminResourceTypes = ['ORDER', 'PRODUCT', 'MERCHANT'] as const;
+export type AdminResourceType = (typeof adminResourceTypes)[number];
+
+export const adminExportFormats = ['CSV', 'EXCEL'] as const;
+export type AdminExportFormat = (typeof adminExportFormats)[number];
+
+export const adminBatchActions = ['EXPORT_CSV', 'EXPORT_EXCEL', 'ADD_PRODUCT_TAGS'] as const;
+export type AdminBatchAction = (typeof adminBatchActions)[number];
 
 export const breakerScopes = [
   'NEW_PAYMENT',

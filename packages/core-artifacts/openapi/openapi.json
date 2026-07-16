@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Abu 24K V2 Core API",
-    "version": "2.0.0-logistics-admin.1"
+    "version": "2.0.0-admin-global-ops.1"
   },
-  "x-artifactVersion": "2.0.0-logistics-admin.1",
+  "x-artifactVersion": "2.0.0-admin-global-ops.1",
   "servers": [],
   "paths": {
     "/v2/buyer/profile": {
@@ -7392,6 +7392,258 @@
         }
       }
     },
+    "/v2/admin/global/resources": {
+      "get": {
+        "operationId": "searchAdminGlobalResources",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "resourceType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "ORDER",
+                  "PRODUCT",
+                  "MERCHANT"
+                ]
+              }
+            },
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "orderId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "productId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "merchantId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "txHash",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          },
+          {
+            "name": "wallet",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Address"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "pendingReview",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-side AND search across safe Admin resource summaries",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminGlobalSearchResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/global/exports": {
+      "post": {
+        "operationId": "exportAdminResources",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminResourceExportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Audited non-PII resource export snapshot",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminResourceExport"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/catalog/products/batch-tags": {
+      "post": {
+        "operationId": "batchAddAdminProductTags",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminProductBatchTagRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Atomic versioned product tag result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminProductBatchTagResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v2/bootstrap": {
       "get": {
         "operationId": "getBootstrap",
@@ -9914,7 +10166,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "status": {
             "const": "CORE_API_READY"
@@ -10938,6 +11190,390 @@
                 "type": "null"
               }
             ]
+          }
+        }
+      },
+      "AdminBatchCapability": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "enabled"
+        ],
+        "properties": {
+          "action": {
+            "enum": [
+              "EXPORT_CSV",
+              "EXPORT_EXCEL",
+              "ADD_PRODUCT_TAGS"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "reasonCode": {
+            "enum": [
+              "Forbidden",
+              "ProductWriteLocked"
+            ]
+          }
+        }
+      },
+      "AdminResourceSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "resourceType",
+          "resourceId",
+          "title",
+          "status",
+          "merchantId",
+          "productId",
+          "tagIds",
+          "allowedBatchActions",
+          "createdAt"
+        ],
+        "properties": {
+          "resourceType": {
+            "enum": [
+              "ORDER",
+              "PRODUCT",
+              "MERCHANT"
+            ]
+          },
+          "resourceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "merchantId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "productId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tagIds": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "allowedBatchActions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminBatchCapability"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AdminGlobalSearchResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "relation",
+          "resources",
+          "truncated",
+          "unavailableFilters"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-admin-global-ops.1"
+          },
+          "relation": {
+            "const": "AND"
+          },
+          "resources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminResourceSummary"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "unavailableFilters": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "OR",
+                "FUZZY_WALLET",
+                "UID",
+                "PHONE",
+                "YELLOW_QUEUE"
+              ]
+            }
+          }
+        }
+      },
+      "AdminResourceSelection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "resourceType",
+          "resourceId"
+        ],
+        "properties": {
+          "resourceType": {
+            "enum": [
+              "ORDER",
+              "PRODUCT",
+              "MERCHANT"
+            ]
+          },
+          "resourceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      },
+      "AdminResourceExportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "selection",
+          "format",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "selection": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/AdminResourceSelection"
+            }
+          },
+          "format": {
+            "enum": [
+              "CSV",
+              "EXCEL"
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "AdminResourceExport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "exportId",
+          "format",
+          "filename",
+          "mediaType",
+          "rowCount",
+          "byteLength",
+          "contentHash",
+          "contentBase64",
+          "createdAt"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-admin-global-ops.1"
+          },
+          "exportId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "format": {
+            "enum": [
+              "CSV",
+              "EXCEL"
+            ]
+          },
+          "filename": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "mediaType": {
+            "enum": [
+              "text/csv; charset=utf-8",
+              "application/vnd.ms-excel; charset=utf-8"
+            ]
+          },
+          "rowCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "byteLength": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "contentHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "contentBase64": {
+            "type": "string",
+            "minLength": 1,
+            "contentEncoding": "base64"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AdminProductBatchTagRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "productIds",
+          "tagIds",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "productIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "tagIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "AdminProductBatchTagItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "productId",
+          "previousVersion",
+          "version",
+          "addedTagIds"
+        ],
+        "properties": {
+          "productId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "previousVersion": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "version": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "addedTagIds": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        }
+      },
+      "AdminProductBatchTagResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "operationId",
+          "action",
+          "tagIds",
+          "changedCount",
+          "products",
+          "createdAt"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-admin-global-ops.1"
+          },
+          "operationId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "action": {
+            "const": "ADD_PRODUCT_TAGS"
+          },
+          "tagIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "changedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "products": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminProductBatchTagItem"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -12990,7 +13626,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -13089,7 +13725,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -14029,7 +14665,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "productId": {
             "type": "string",
@@ -14202,7 +14838,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "storeId": {
             "type": "string",
@@ -14328,7 +14964,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "productId": {
             "type": "string",
@@ -14430,7 +15066,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "previewId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -14589,7 +15225,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "adjustmentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -14714,7 +15350,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "uploadIntentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -14812,7 +15448,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -14898,7 +15534,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15059,7 +15695,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "evidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15318,7 +15954,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -15593,7 +16229,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifact_version": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "wallet_address": {
             "$ref": "#/components/schemas/Address"
@@ -15919,7 +16555,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -17063,7 +17699,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -17286,7 +17922,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -18152,7 +18788,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "snapshotId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -18235,7 +18871,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -19566,7 +20202,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -19813,7 +20449,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -20168,7 +20804,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "sessionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -20397,7 +21033,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "protocolVersion": {
             "const": 1
@@ -20471,7 +21107,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -20809,7 +21445,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "addresses": {
             "type": "array",
@@ -20990,7 +21626,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -21157,7 +21793,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "orderId": {
             "type": "string",
@@ -21192,7 +21828,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "merchantId": {
             "type": "string",
@@ -21886,7 +22522,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "observation": {
             "$ref": "#/components/schemas/RiskObservation"
@@ -21912,7 +22548,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "generatedAt": {
             "type": "string",
@@ -22183,7 +22819,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "challengeId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -22250,7 +22886,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "bindingId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -22359,7 +22995,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "requestId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -22469,7 +23105,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "batchId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -22506,7 +23142,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "printJobId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -22675,7 +23311,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "configVersionId": {
             "anyOf": [
@@ -22910,7 +23546,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "providers": {
             "type": "array",
@@ -23091,7 +23727,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "warehouseId": {
             "type": "string",
@@ -23182,7 +23818,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "warehouses": {
             "type": "array",
@@ -23247,7 +23883,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "waybills": {
             "type": "array",
@@ -23266,7 +23902,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "printJobs": {
             "type": "array",
@@ -23608,7 +24244,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "merchants": {
             "type": "array",
@@ -23803,7 +24439,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -24242,7 +24878,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics-admin.1"
+            "const": "2.0.0-admin-global-ops.1"
           },
           "merchant": {
             "$ref": "#/components/schemas/MerchantLifecycleSummary"

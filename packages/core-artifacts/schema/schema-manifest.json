@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-logistics-admin.1",
+  "artifactVersion": "2.0.0-admin-global-ops.1",
   "formatVersion": 1,
   "databaseEngine": "postgresql",
   "schemas": {
@@ -110,6 +110,11 @@
           "name": "021_logistics_admin.sql",
           "path": "schema/business/021_logistics_admin.sql",
           "sha256": "f7724abadacb05ba454dea3185e03e435a4a49b54d2cf240f4ada6102d08e20f"
+        },
+        {
+          "name": "022_admin_global_operations.sql",
+          "path": "schema/business/022_admin_global_operations.sql",
+          "sha256": "4888287e00db0b6be0666359da9ce45e1246967fb1b540631f47a970f34de0f3"
         }
       ]
     },

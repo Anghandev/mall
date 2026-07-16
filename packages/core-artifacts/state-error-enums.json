@@ -1,5 +1,19 @@
 {
-  "artifactVersion": "2.0.0-logistics-admin.1",
+  "artifactVersion": "2.0.0-admin-global-ops.1",
+  "adminResourceTypes": [
+    "ORDER",
+    "PRODUCT",
+    "MERCHANT"
+  ],
+  "adminExportFormats": [
+    "CSV",
+    "EXCEL"
+  ],
+  "adminBatchActions": [
+    "EXPORT_CSV",
+    "EXPORT_EXCEL",
+    "ADD_PRODUCT_TAGS"
+  ],
   "orderProjectionStates": [
     "QUOTED",
     "SUBMITTED",
