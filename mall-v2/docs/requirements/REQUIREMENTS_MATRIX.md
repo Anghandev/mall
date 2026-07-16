@@ -88,7 +88,7 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
   keeps `deploymentAuthorized=false` fail closed and the existing no-rebroadcast
   recovery latch. This row remains `Frozen` until the coordinating release gate
   accepts the complete provider/Core evidence.
-- `MAL-GOAL-005` product evidence: the Mall sends only the coordinated `.12`
+- `MAL-GOAL-005` product evidence: the Mall sends only the coordinated `.13`
   `QuoteSelection`, displays only signed Core amounts and uses the existing
   wallet/PaymentRouter submission plus Core projection recovery path. The
   review snapshot is Mall-only and is not serialized into the quote request.
@@ -98,7 +98,7 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
 
 ## Settlement/Admin .9 Verification Evidence
 
-- `MAL-TRACK-002` and the shopping half of `MAL-ASSET-002`: `.12` consumes
+- `MAL-TRACK-002` and the shopping half of `MAL-ASSET-002`: `.13` consumes
   `GET /v2/buyer/shopping-statements` through the coordinated OpenAPI and
   generated `BuyerShoppingStatementPage`. The buyer wallet is checked against
   the SIWE session; paired `(createdAt, orderId)` cursors append stable pages;

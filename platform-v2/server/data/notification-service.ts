@@ -45,6 +45,23 @@ interface EndpointRow {
   state: 'ACTIVE' | 'PAUSED' | 'REVOKED';
 }
 
+interface CampaignRow {
+  campaign_id: string;
+  topic: string;
+  audience: CampaignAudience;
+  message: Record<string, unknown>;
+  content_hash: string;
+  cms_version_id: string | null;
+  starts_at: Date | string | null;
+  ends_at: Date | string | null;
+  state: 'DRAFT' | 'PUBLISHED' | 'CANCELLED';
+  created_by: string;
+  created_at: Date | string;
+  published_at: Date | string | null;
+}
+
+type NotificationCampaignAction = 'PUBLISH' | 'RETRY_FAILED';
+
 export class NotificationService {
   readonly #transactions: SqlTransactionRunner;
   readonly #clock: () => Date;
@@ -293,6 +310,79 @@ export class NotificationService {
     });
   }
 
+  listCampaigns(actor: FulfillmentActor, limit = 50) {
+    requireSessionRole(actor, 'ADMIN', 'OPERATOR', 'AUDITOR');
+    const wallet = normalizeAddress(actor.walletAddress);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) {
+      throw new CoreError('InvalidRequest', 'Notification campaign limit is invalid');
+    }
+    return this.#transactions.transaction(async (executor) => {
+      const roles = await requireCurrentRole(executor, wallet, ['ADMIN', 'OPERATOR', 'AUDITOR']);
+      const campaigns = await executor.query<CampaignRow>(
+        `SELECT campaign_id, topic, audience, message, content_hash, cms_version_id,
+           starts_at, ends_at, state, created_by, created_at, published_at
+         FROM core.notification_campaigns
+         ORDER BY created_at DESC, campaign_id DESC LIMIT $1`,
+        [limit],
+      );
+      const canWrite = roles.some((role) => role === 'ADMIN' || role === 'OPERATOR');
+      return Promise.all(campaigns.rows.map(async (campaign) => {
+        const counts = await campaignDeliveryCounts(executor, campaign.campaign_id);
+        const failed = (counts.RETRY ?? 0) + (counts.CONFIGURATION_REQUIRED ?? 0) + (counts.DEAD_LETTER ?? 0);
+        const allowedActions: NotificationCampaignAction[] = [];
+        if (canWrite && campaign.state === 'DRAFT') allowedActions.push('PUBLISH');
+        if (canWrite && campaign.state === 'PUBLISHED' && failed > 0) allowedActions.push('RETRY_FAILED');
+        return campaignProjection(campaign, counts, allowedActions);
+      }));
+    });
+  }
+
+  retryCampaignDeliveries(actor: FulfillmentActor, campaignId: string, input: { correlationId: string }) {
+    requireSessionRole(actor, 'ADMIN', 'OPERATOR');
+    const wallet = normalizeAddress(actor.walletAddress);
+    if (!input.correlationId || input.correlationId.length > 128) {
+      throw new CoreError('InvalidRequest', 'Notification retry correlation id is invalid');
+    }
+    return this.#transactions.transaction(async (executor) => {
+      const roles = await requireCurrentRole(executor, wallet, ['ADMIN', 'OPERATOR']);
+      const campaigns = await executor.query<{ campaign_id: string; state: string }>(
+        'SELECT campaign_id, state FROM core.notification_campaigns WHERE campaign_id = $1 FOR UPDATE',
+        [campaignId],
+      );
+      const campaign = campaigns.rows[0];
+      if (!campaign) throw new CoreError('InvalidRequest', 'Notification campaign not found', 404);
+      if (campaign.state !== 'PUBLISHED') throw new CoreError('InvalidRequest', 'Notification campaign is not published', 409);
+      const now = this.#clock();
+      const retried = await executor.query<{ delivery_id: string }>(
+        `UPDATE core.notification_deliveries delivery
+         SET state = 'RETRY', attempt_count = 0, available_at = $2,
+           locked_by = NULL, locked_until = NULL, last_error_code = NULL
+         FROM core.notification_messages message, core.outbox_events source
+         WHERE delivery.message_id = message.message_id
+           AND message.source_event_id = source.event_id
+           AND source.aggregate_type = 'NOTIFICATION_CAMPAIGN'
+           AND source.aggregate_id = $1
+           AND delivery.state IN ('RETRY', 'CONFIGURATION_REQUIRED', 'DEAD_LETTER')
+         RETURNING delivery.delivery_id`,
+        [campaignId, now],
+      );
+      if (retried.rows.length === 0) throw new CoreError('InvalidRequest', 'Notification campaign has no failed deliveries', 409);
+      const deliveryIds = retried.rows.map((row) => row.delivery_id).sort();
+      const requestHash = hashJson({ campaignId, deliveryIds });
+      await campaignAudit(executor, {
+        eventType: 'NotificationCampaignRetryRequested',
+        campaignId,
+        actorWallet: wallet,
+        roles,
+        correlationId: input.correlationId,
+        requestHash,
+        payload: { deliveryCount: deliveryIds.length },
+        now,
+      });
+      return { campaignId, state: 'RETRY_SCHEDULED' as const, retriedDeliveries: deliveryIds.length };
+    });
+  }
+
   projectNext(limit = 20) {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('InvalidNotificationProjectionLimit');
     return this.#transactions.transaction(async (executor) => {
@@ -309,7 +399,8 @@ export class NotificationService {
       );
       for (const event of events.rows) {
         const projection = await projectEvent(executor, event, this.#clock());
-        for (const recipient of projection.recipients) {
+        for (const message of projection.messages) {
+          const recipient = message.recipient;
           await ensureInAppEndpoint(executor, recipient, this.#clock());
           const endpoints = await activeEndpoints(executor, recipient, projection.topic);
           const messageId = `notification-message:${hashJson({ sourceEventId: event.event_id, recipient, topic: projection.topic }).slice(2)}`;
@@ -319,7 +410,7 @@ export class NotificationService {
                topic, template_data, created_at
              ) VALUES ($1,$2,$3,$4,$5,$6,$7)
              ON CONFLICT (source_event_id, recipient_wallet, topic) DO NOTHING`,
-            [messageId, event.event_id, event.event_type, recipient, projection.topic, JSON.stringify(projection.templateData), this.#clock()],
+            [messageId, event.event_id, event.event_type, recipient, projection.topic, JSON.stringify(message.templateData), this.#clock()],
           );
           for (const endpoint of endpoints) {
             await executor.query(
@@ -387,7 +478,13 @@ async function projectEvent(executor: SqlExecutor, event: SourceEventRow, now: D
   if (event.event_type === 'NotificationCampaignPublished') return projectCampaign(executor, event, now);
   const topic = topicForEvent(event);
   const recipients = await eventRecipients(executor, event);
-  return { topic, recipients, templateData: controlledTemplate(event, topic) };
+  return {
+    topic,
+    messages: await Promise.all(recipients.map(async (recipient) => ({
+      recipient,
+      templateData: await controlledTemplate(executor, event, topic, recipient),
+    }))),
+  };
 }
 
 async function projectCampaign(executor: SqlExecutor, event: SourceEventRow, now: Date) {
@@ -405,8 +502,10 @@ async function projectCampaign(executor: SqlExecutor, event: SourceEventRow, now
   }
   return {
     topic: campaign.topic,
-    recipients: await campaignRecipients(executor, campaign.audience),
-    templateData: Object.freeze({ copyKey: 'CAMPAIGN_MESSAGE', ...campaign.message, campaignId: event.aggregate_id }),
+    messages: (await campaignRecipients(executor, campaign.audience)).map((recipient) => ({
+      recipient,
+      templateData: Object.freeze({ copyKey: 'CAMPAIGN_MESSAGE', ...campaign.message, campaignId: event.aggregate_id }),
+    })),
   };
 }
 
@@ -441,9 +540,14 @@ async function eventRecipients(executor: SqlExecutor, event: SourceEventRow) {
     );
     if (!order.rows[0]) throw new CoreError('InvalidRequest', 'Notification order is unavailable', 409);
     const buyerOnly = ['ShipmentRecorded', 'LogisticsUpdated', 'BnmStateFinalized'].includes(event.event_type);
-    return canonicalWallets(buyerOnly
+    const recipients = buyerOnly
       ? [order.rows[0].buyer_wallet]
-      : [order.rows[0].buyer_wallet, order.rows[0].merchant_wallet]);
+      : [order.rows[0].buyer_wallet, order.rows[0].merchant_wallet];
+    const state = event.event_type === 'PaymentFinalized'
+      ? 'LOCKED'
+      : event.event_type === 'FulfillmentFinalized' ? 'AVAILABLE' : undefined;
+    if (state) recipients.push(...await orderPayableWallets(executor, event.aggregate_id, state));
+    return canonicalWallets(recipients);
   }
   if (event.aggregate_type === 'SETTLEMENT_REQUEST') {
     const request = await executor.query<{ wallet_address: string }>(
@@ -461,6 +565,54 @@ async function eventRecipients(executor: SqlExecutor, event: SourceEventRow) {
     return canonicalWallets(requests.rows.map((row) => row.wallet_address));
   }
   throw new CoreError('InvalidRequest', 'Notification source aggregate is unsupported', 409);
+}
+
+const CAMPAIGN_DELIVERY_STATES = [
+  'PENDING',
+  'PROCESSING',
+  'DELIVERED',
+  'RETRY',
+  'CONFIGURATION_REQUIRED',
+  'DEAD_LETTER',
+] as const;
+
+async function campaignDeliveryCounts(executor: SqlExecutor, campaignId: string) {
+  const result = await executor.query<{ state: typeof CAMPAIGN_DELIVERY_STATES[number]; count: string }>(
+    `SELECT delivery.state, count(*)::text AS count
+     FROM core.outbox_events source
+     JOIN core.notification_messages message ON message.source_event_id = source.event_id
+     JOIN core.notification_deliveries delivery ON delivery.message_id = message.message_id
+     WHERE source.aggregate_type = 'NOTIFICATION_CAMPAIGN' AND source.aggregate_id = $1
+     GROUP BY delivery.state ORDER BY delivery.state`,
+    [campaignId],
+  );
+  return Object.freeze(Object.fromEntries(result.rows.map((row) => [row.state, Number(row.count)]))) as Readonly<Partial<Record<
+    typeof CAMPAIGN_DELIVERY_STATES[number],
+    number
+  >>>;
+}
+
+function campaignProjection(
+  campaign: CampaignRow,
+  deliveryCounts: Readonly<Partial<Record<typeof CAMPAIGN_DELIVERY_STATES[number], number>>>,
+  allowedActions: readonly NotificationCampaignAction[],
+) {
+  return Object.freeze({
+    campaignId: campaign.campaign_id,
+    topic: campaign.topic,
+    audience: campaign.audience,
+    message: campaign.message,
+    contentHash: campaign.content_hash,
+    cmsVersionId: campaign.cms_version_id,
+    startsAt: campaign.starts_at ? new Date(campaign.starts_at).toISOString() : null,
+    endsAt: campaign.ends_at ? new Date(campaign.ends_at).toISOString() : null,
+    state: campaign.state,
+    createdBy: campaign.created_by,
+    createdAt: new Date(campaign.created_at).toISOString(),
+    publishedAt: campaign.published_at ? new Date(campaign.published_at).toISOString() : null,
+    deliveryCounts: Object.freeze(Object.fromEntries(CAMPAIGN_DELIVERY_STATES.map((state) => [state, deliveryCounts[state] ?? 0]))),
+    allowedActions: Object.freeze([...allowedActions]),
+  });
 }
 
 async function campaignRecipients(executor: SqlExecutor, audience: CampaignAudience) {
@@ -487,13 +639,69 @@ async function campaignRecipients(executor: SqlExecutor, audience: CampaignAudie
   return canonicalWallets(wallets.rows.map((row) => row.wallet_address));
 }
 
-function controlledTemplate(event: SourceEventRow, topic: string) {
-  const allowed = ['orderId', 'trackingNumber', 'carrier', 'status', 'requestId', 'rail', 'safeTxHash', 'executionTxHash', 'state', 'amount', 'stateVersion'];
+async function controlledTemplate(executor: SqlExecutor, event: SourceEventRow, topic: string, recipient: string) {
+  const allowed = ['orderId', 'trackingNumber', 'carrier', 'status', 'requestId', 'rail', 'safeTxHash', 'executionTxHash', 'state', 'amount', 'stateVersion', 'method'];
   const values = Object.fromEntries(Object.entries(event.payload).filter(([key, value]) => allowed.includes(key) && isTemplatePrimitive(value)));
+  const state = event.event_type === 'PaymentFinalized'
+    ? 'LOCKED'
+    : event.event_type === 'FulfillmentFinalized' ? 'AVAILABLE' : undefined;
+  const balances = state ? await recipientPayableSummary(executor, event.aggregate_id, recipient, state) : {};
   return Object.freeze({
     copyKey: topic === 'BNM_LOCKED' || topic === 'BNM_AVAILABLE' ? `BNM_POINTS_${event.payload.state}` : topic,
     aggregateId: event.aggregate_id,
     ...values,
+    ...balances,
+  });
+}
+
+async function orderPayableWallets(executor: SqlExecutor, orderId: string, state: 'LOCKED' | 'AVAILABLE') {
+  const result = await executor.query<{ owner_id: string }>(
+    `SELECT account.owner_id
+     FROM core.ledger_journals journal
+     JOIN core.ledger_lines line ON line.journal_id = journal.journal_id
+     JOIN core.ledger_accounts account ON account.account_id = line.account_id
+     WHERE journal.order_id = $1 AND line.balance_state = $2
+       AND account.owner_type IN ('BUYER', 'MERCHANT', 'BENEFICIARY')
+       AND account.owner_id ~ '^0x[0-9a-f]{40}$'
+       AND account.asset IN ('USDT', 'NPL')
+     GROUP BY account.owner_id
+     HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) > 0
+     ORDER BY account.owner_id`,
+    [orderId, state],
+  );
+  return result.rows.map((row) => row.owner_id);
+}
+
+async function recipientPayableSummary(
+  executor: SqlExecutor,
+  orderId: string,
+  recipient: string,
+  state: 'LOCKED' | 'AVAILABLE',
+) {
+  const result = await executor.query<{ asset: string; subtype: string | null; amount: string }>(
+    `SELECT account.asset, account.subtype,
+       sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS amount
+     FROM core.ledger_journals journal
+     JOIN core.ledger_lines line ON line.journal_id = journal.journal_id
+     JOIN core.ledger_accounts account ON account.account_id = line.account_id
+     WHERE journal.order_id = $1 AND account.owner_id = $2
+       AND line.balance_state = $3 AND account.asset IN ('USDT', 'NPL')
+     GROUP BY account.asset, account.subtype
+     HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) > 0
+     ORDER BY account.asset, account.subtype`,
+    [orderId, recipient, state],
+  );
+  const totals = new Map<string, bigint>();
+  const rewardSubtypes = new Set<string>();
+  for (const row of result.rows) {
+    totals.set(row.asset, (totals.get(row.asset) ?? 0n) + BigInt(row.amount));
+    if (row.subtype) rewardSubtypes.add(row.subtype);
+  }
+  const prefix = state === 'LOCKED' ? 'locked' : 'available';
+  return Object.freeze({
+    ...(totals.has('USDT') ? { [`${prefix}UsdtAmount`]: totals.get('USDT')!.toString() } : {}),
+    ...(totals.has('NPL') ? { [`${prefix}NplAmount`]: totals.get('NPL')!.toString() } : {}),
+    ...(rewardSubtypes.size > 0 ? { rewardSubtypes: [...rewardSubtypes].sort().join(',') } : {}),
   });
 }
 
