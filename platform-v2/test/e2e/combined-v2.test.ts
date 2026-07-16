@@ -113,6 +113,38 @@ test('global search and product lifecycle batches are one coordinated Admin-only
   assert.equal('adminProductLifecycleBatch' in merchantBaseline, false);
 });
 
+test('event notifications use one wallet inbox and one audited Admin campaign surface', () => {
+  const operations = [
+    ['POST', '/v2/notification-endpoints', 'registerNotificationEndpoint'],
+    ['GET', '/v2/notifications', 'listNotifications'],
+    ['GET', '/v2/admin/notification-campaigns', 'listNotificationCampaigns'],
+    ['POST', '/v2/admin/notification-campaigns', 'createNotificationCampaign'],
+    ['POST', '/v2/admin/notification-campaigns/{campaignId}/publish', 'publishNotificationCampaign'],
+    ['POST', '/v2/admin/notification-campaigns/{campaignId}/retry-failed', 'retryNotificationCampaignDeliveries'],
+  ] as const;
+
+  for (const [method, path, operationId] of operations) {
+    const entry = coordinatedOpenApi.paths[path] as Partial<Record<'get' | 'post', {
+      operationId?: string;
+      security?: readonly unknown[];
+    }>> | undefined;
+    const operation = entry?.[method.toLowerCase() as 'get' | 'post'];
+    assert.equal(operation?.operationId, operationId);
+    assert.deepEqual(operation?.security, [{ bearerAuth: [] }]);
+    assert.ok(coordinatedManifest.httpSurface.includes(`${method} ${path}`));
+  }
+
+  assert.equal(coordinatedManifest.capabilityStatus.notificationHttp, 'AVAILABLE');
+  assert.equal(coordinatedManifest.capabilityStatus.notificationDelivery, 'AVAILABLE');
+  assert.deepEqual(
+    coordinatedOpenApi.components.schemas.NotificationCampaignProjection.properties.allowedActions.items.enum,
+    ['PUBLISH', 'RETRY_FAILED'],
+  );
+  assert.equal(adminBaseline.adminCapabilities.notifications, true);
+  assert.equal(mallBaseline.settlementAdminCapabilities.notifications, true);
+  assert.equal('notifications' in merchantBaseline, false);
+});
+
 test('takeover assignment and replacement fulfillment form one coordinated cross-product chain', () => {
   const operations = [
     ['GET', '/v2/admin/takeover-cases', 'listAdminTakeoverCases'],

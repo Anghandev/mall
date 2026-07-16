@@ -1,4 +1,4 @@
-export const CORE_ARTIFACT_VERSION = '2.0.0-settlement-admin.14';
+export const CORE_ARTIFACT_VERSION = '2.0.0-settlement-admin.15';
 export const BSC_CHAIN_ID = 56;
 export const USDT_ADDRESS = '0x55d398326f99059ff775485246999027b3197955';
 export const NPL_ADDRESS = '0x4e8277ab31e4956b2cd48449793a57656dfc03d2';
@@ -53,7 +53,7 @@ export type MerchantLevel = (typeof merchantLevels)[number];
 export const merchantLifecycleStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED', 'BLACKLISTED'] as const;
 export type MerchantLifecycleStatus = (typeof merchantLifecycleStatuses)[number];
 
-export const merchantReviewActions = ['APPROVE', 'REJECT', 'BLACKLIST'] as const;
+export const merchantReviewActions = ['APPROVE', 'REJECT', 'BLACKLIST', 'CHANGE_SETTLEMENT_WALLET'] as const;
 export type MerchantReviewAction = (typeof merchantReviewActions)[number];
 
 export const merchantQualificationAccess = ['FULL', 'REDACTED', 'UNAVAILABLE'] as const;
@@ -403,7 +403,16 @@ export const notificationDeliveryStates = [
 ] as const;
 export type NotificationDeliveryState = (typeof notificationDeliveryStates)[number];
 
-export const systemConfigKeys = ['BUSINESS', 'FREIGHT', 'RPC', 'ORACLE', 'GAS', 'CHAIN', 'INTEGRATIONS'] as const;
+export const systemConfigKeys = [
+  'BUSINESS',
+  'FREIGHT',
+  'RPC',
+  'ORACLE',
+  'GAS',
+  'CHAIN',
+  'INTEGRATIONS',
+  'MERCHANT_LEVELS',
+] as const;
 export type SystemConfigKey = (typeof systemConfigKeys)[number];
 
 export const auditStreamNames = ['financial', 'governance', 'authentication', 'operational', 'backup'] as const;

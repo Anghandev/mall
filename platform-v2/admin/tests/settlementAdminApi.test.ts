@@ -13,11 +13,13 @@ import {
   fetchCoverageBreakerActions,
   fetchMerchantFinance,
   fetchMonitoringDashboard,
+  fetchNotificationCampaigns,
   fetchNotifications,
   fetchPolicyDrafts,
   fetchSettlementLedger,
   publishSystemConfigVersion,
   publishNotificationCampaign,
+  retryNotificationCampaignDeliveries,
 } from '../src/settlementAdminApi';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -309,18 +311,41 @@ describe('settlement/admin coordinated Core client', () => {
     expect(String(fetchMock.mock.calls[1]?.[0])).toBe('/v2/admin/monitoring/alerts/rpc-height/acknowledge');
   });
 
-  it('consumes wallet inbox events and publishes a campaign with evidence', async () => {
+  it('consumes inbox and campaign projections, then publishes and retries only the exact campaign', async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.includes('/v2/notifications?')) return jsonResponse([{ messageId: 'message-1', sourceEventType: 'SettlementFinalized', topic: 'settlement', templateData: { state: 'SETTLED' }, deliveryState: 'DELIVERED', createdAt: '2026-07-15T00:00:00.000Z' }]);
+      if (url.includes('/v2/admin/notification-campaigns?')) return jsonResponse([notificationCampaign()]);
+      if (url.endsWith('/retry-failed')) return jsonResponse({ campaignId: 'campaign-1', state: 'RETRY_SCHEDULED', retriedDeliveries: 2 });
       if (url.endsWith('/publish')) return jsonResponse({ campaignId: 'campaign-1', state: 'PUBLISHED' });
       return jsonResponse({ campaignId: 'campaign-1', state: 'DRAFT', contentHash: hash('6') }, 201);
     });
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(fetchNotifications('jwt')).resolves.toMatchObject([{ deliveryState: 'DELIVERED' }]);
-    await expect(createNotificationCampaign({ topic: 'ANNOUNCEMENT', audience: {}, message: { title: 'Notice' }, idempotencyKey: 'campaign-create-1' }, 'jwt')).resolves.toMatchObject({ state: 'DRAFT' });
+    await expect(fetchNotificationCampaigns('jwt')).resolves.toMatchObject([{ state: 'PUBLISHED', allowedActions: ['RETRY_FAILED'] }]);
+    await expect(createNotificationCampaign({ topic: 'ANNOUNCEMENT', audience: { type: 'ALL' }, message: { titleKey: 'NOTICE_TITLE', bodyKey: 'NOTICE_BODY', variables: {} }, idempotencyKey: 'campaign-create-1' }, 'jwt')).resolves.toMatchObject({ state: 'DRAFT' });
     await expect(publishNotificationCampaign('campaign-1', hash('7'), 'jwt')).resolves.toEqual({ campaignId: 'campaign-1', state: 'PUBLISHED' });
+    await expect(retryNotificationCampaignDeliveries('campaign-1', 'jwt')).resolves.toEqual({ campaignId: 'campaign-1', state: 'RETRY_SCHEDULED', retriedDeliveries: 2 });
+    expect(fetchMock).toHaveBeenCalledWith('/v2/admin/notification-campaigns/campaign-1/retry-failed', expect.objectContaining({ method: 'POST', body: '{}' }));
+  });
+
+  it('rejects malformed campaign actions, counts and create requests before product use', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse([{
+      ...notificationCampaign(),
+      deliveryCounts: { ...notificationCampaign().deliveryCounts, DEAD_LETTER: -1 },
+      allowedActions: ['PUBLISH'],
+    }]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(fetchNotificationCampaigns('jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
+    await expect(createNotificationCampaign({
+      topic: 'ACTIVITY',
+      audience: { type: 'REGION', regionCodes: ['21020'] },
+      message: { titleKey: 'TITLE', bodyKey: 'BODY', variables: {} },
+      idempotencyKey: 'campaign-create-2',
+    }, 'jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('rejects malformed merchant guarantee and debt values', async () => {
@@ -340,6 +365,17 @@ describe('settlement/admin coordinated Core client', () => {
 function jsonResponse(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }); }
 function hash(digit: string) { return `0x${digit.repeat(64)}`; }
 function address(digit: string) { return `0x${digit.repeat(40)}`; }
+function notificationCampaign() {
+  return {
+    campaignId: 'campaign-1', topic: 'ANNOUNCEMENT', audience: { type: 'ALL' },
+    message: { titleKey: 'NOTICE_TITLE', bodyKey: 'NOTICE_BODY', variables: { source: 'platform' } },
+    contentHash: hash('6'), cmsVersionId: null, startsAt: null, endsAt: null,
+    state: 'PUBLISHED', createdBy: address('1'), createdAt: '2026-07-15T00:00:00.000Z',
+    publishedAt: '2026-07-15T00:01:00.000Z',
+    deliveryCounts: { PENDING: 0, PROCESSING: 0, DELIVERED: 7, RETRY: 1, CONFIGURATION_REQUIRED: 1, DEAD_LETTER: 0 },
+    allowedActions: ['RETRY_FAILED'],
+  };
+}
 function coverageResumeChallenge(nonce: string, deadline: string) {
   const snapshotId = hash('1');
   const safeAddress = address('4');

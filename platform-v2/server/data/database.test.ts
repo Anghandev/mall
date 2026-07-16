@@ -133,6 +133,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '024_merchant_fulfillment_completion.sql',
       '025_takeover_assignments.sql',
       '026_admin_product_lifecycle_batches.sql',
+      '027_merchant_governance_completion.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -826,6 +827,11 @@ test('merchant lifecycle encrypts qualification and governs exact review transit
     const created = await service.createApplication(operatorActor, applicationInput);
     const merchantId = created.merchant.merchantId;
     assert.equal(created.merchant.status, 'PENDING');
+    assert.equal(created.levelPolicy.status, 'DecisionBlocked');
+    assert.deepEqual(created.analytics.fulfillment.fastShip48h, {
+      status: 'UNAVAILABLE', numerator: '0', denominator: '0', bps: null,
+      reason: 'NO_ELIGIBLE_DELIVERY_ORDERS',
+    });
     assert.equal(created.qualification.access, 'FULL');
     assert.equal(created.qualification.legalId, applicationInput.legalId);
     assert.equal((await service.createApplication(operatorActor, applicationInput)).merchant.merchantId, merchantId);
@@ -961,6 +967,33 @@ test('merchant lifecycle encrypts qualification and governs exact review transit
       db.query("UPDATE core.merchants SET settlement_wallet = $2 WHERE merchant_id = $1", [merchantId, Wallet.createRandom().address]),
       /GovernedWalletMigrationRequired/,
     );
+    assert.throws(
+      () => service.createReviewChallenge(adminActor, merchantId, {
+        action: 'CHANGE_SETTLEMENT_WALLET', reasonCode: 'WALLET_ROTATION',
+        idempotencyKey: 'merchant-wallet-change-missing', correlationId: 'merchant-wallet-change-missing',
+      }),
+      /Proposed settlement wallet is required/,
+    );
+    const nextSettlementWallet = Wallet.createRandom().address;
+    const walletChange = await service.createReviewChallenge(adminActor, merchantId, {
+      action: 'CHANGE_SETTLEMENT_WALLET', reasonCode: 'WALLET_ROTATION',
+      proposedSettlementWallet: nextSettlementWallet,
+      idempotencyKey: 'merchant-wallet-change-1', correlationId: 'merchant-wallet-change-correlation',
+    });
+    const walletChangeSignature = await secondary.signTypedData(
+      walletChange.typedData.domain, walletChange.typedData.types, walletChange.typedData.message,
+    );
+    const changed = await service.publishReview(adminActor, merchantId, walletChange.actionId, walletChangeSignature);
+    assert.equal(changed.merchant.settlementWallet, nextSettlementWallet.toLowerCase());
+    assert.deepEqual((await db.query<{ wallet_address: string; status: string }>(
+      `SELECT wallet_address, status FROM core.wallet_role_bindings
+       WHERE role = 'MERCHANT' AND merchant_id = $1 ORDER BY wallet_address`,
+      [merchantId],
+    )).rows, [
+      { wallet_address: settlementWallet.toLowerCase(), status: 'REVOKED' },
+      { wallet_address: nextSettlementWallet.toLowerCase(), status: 'ACTIVE' },
+    ].sort((left, right) => left.wallet_address.localeCompare(right.wallet_address)));
+    assert.equal((await service.publishReview(adminActor, merchantId, walletChange.actionId, walletChangeSignature)).merchant.settlementWallet, nextSettlementWallet.toLowerCase());
 
     const blacklist = await service.createReviewChallenge(adminActor, merchantId, {
       action: 'BLACKLIST', reasonCode: 'CONFIRMED_ABUSE',
@@ -973,7 +1006,7 @@ test('merchant lifecycle encrypts qualification and governs exact review transit
     assert.equal(blacklisted.merchant.status, 'BLACKLISTED');
     assert.equal((await db.query<{ status: string }>(
       "SELECT status FROM core.wallet_role_bindings WHERE wallet_address = $1 AND role = 'MERCHANT'",
-      [settlementWallet.toLowerCase()],
+      [nextSettlementWallet.toLowerCase()],
     )).rows[0]?.status, 'SUSPENDED');
     const publishedActions = await db.query<{ action_kind: string; state: string }>(
       'SELECT action_kind, state FROM core.merchant_review_actions WHERE merchant_id = $1 ORDER BY action_kind',
@@ -982,6 +1015,7 @@ test('merchant lifecycle encrypts qualification and governs exact review transit
     assert.deepEqual(publishedActions.rows, [
       { action_kind: 'APPROVE', state: 'PUBLISHED' },
       { action_kind: 'BLACKLIST', state: 'PUBLISHED' },
+      { action_kind: 'CHANGE_SETTLEMENT_WALLET', state: 'PUBLISHED' },
     ]);
 
     const staleSettlement = Wallet.createRandom().address;
@@ -1052,6 +1086,15 @@ test('merchant drilldown uses named canonical amounts and fails closed when cont
       clock: () => now,
     });
     const detail = await service.get({ walletAddress: admin.address, roles: ['ADMIN'] }, 'merchant-1');
+    assert.deepEqual(detail.levelPolicy, {
+      status: 'AVAILABLE',
+      configVersionId: 'system-config:merchant-levels:test',
+      version: 1,
+      effectiveFrom: '2020-01-01T00:00:00.000Z',
+      level: 'V1',
+      maxProductSettlementUsdt: '1000000000000000000000000',
+      monthlySeckillQuota: 1_000,
+    });
     const shanghaiNow = new Date(now.getTime() + 8 * 60 * 60_000);
     const shanghaiDayStart = new Date(Date.UTC(
       shanghaiNow.getUTCFullYear(), shanghaiNow.getUTCMonth(), shanghaiNow.getUTCDate(),
@@ -1079,11 +1122,11 @@ test('merchant drilldown uses named canonical amounts and fails closed when cont
       },
     });
     assert.deepEqual(detail.analytics.fulfillment.fastShip48h, {
-      status: 'DecisionBlocked',
-      numerator: null,
-      denominator: null,
-      bps: null,
-      reason: 'The eligible order denominator for the 48-hour shipping rate is not frozen',
+      status: 'AVAILABLE',
+      numerator: '1',
+      denominator: '1',
+      bps: 10_000,
+      reason: null,
     });
     assert.deepEqual(detail.analytics.contributions, {
       finalizedNplBurnAmount: intent.nplBurnAmount,
@@ -1658,7 +1701,8 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
     });
     const operatorActor = { walletAddress: operator.address, roles: ['OPERATOR'] as const };
     const adminActor = { walletAddress: admin.address, roles: ['ADMIN'] as const };
-    const sessionAction = await service.createSession(operatorActor, {
+    await seedMerchantLevelConfig(db, 1, '1000000000000000000000000', 2);
+    const sessionInput = {
       policyVersion: '1',
       rulesContentHash: HASH,
       productId: 'product-1',
@@ -1668,10 +1712,25 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
       startsAt: new Date(now.getTime() + 30 * 60_000).toISOString(),
       idempotencyKey: 'seckill-session-001',
       correlationId: 'seckill-session-create',
-    });
+    };
+    const sessionAction = await service.createSession(operatorActor, sessionInput);
     assert.equal(sessionAction.state, 'DRAFT');
     assert.equal(sessionAction.sessionPlan?.inventory, '4');
     assert.equal(sessionAction.sessionPlan?.timers.mainDurationSeconds, 3_600);
+    assert.equal(
+      ((sessionAction.sessionPlan?.snapshot as { merchantLevelPolicy: { monthlySeckillQuota: number } }).merchantLevelPolicy).monthlySeckillQuota,
+      1,
+    );
+    assert.equal((await service.createSession(operatorActor, sessionInput)).actionId, sessionAction.actionId);
+    await assert.rejects(
+      service.createSession(operatorActor, {
+        ...sessionInput,
+        inventory: 1,
+        startsAt: new Date(now.getTime() + 90 * 60_000).toISOString(),
+        idempotencyKey: 'seckill-session-quota-exhausted',
+      }),
+      /monthly seckill quota is exhausted/,
+    );
     assert.deepEqual(
       (await db.query<{ stock_available: number; stock_seckill_locked: number }>(
         'SELECT stock_available, stock_seckill_locked FROM core.skus WHERE sku_id = $1',
@@ -2328,7 +2387,7 @@ test('catalog management enforces product scope, signed preview, review locks an
       /Category service fee is not frozen/,
     );
 
-    const draft = await service.saveProductSlot(merchant, 'store-catalog-1', {
+    const productInput: Parameters<CatalogManagementService['saveProductSlot']>[2] = {
       idempotencyKey: 'catalog-product-save-1',
       title: '24K Product',
       subtitle: 'Verified catalog draft',
@@ -2345,11 +2404,22 @@ test('catalog management enforces product scope, signed preview, review locks an
         stockTotal: 10,
         proposedSeckillInventory: 3,
       }],
-    });
+    };
+    const draft = await service.saveProductSlot(merchant, 'store-catalog-1', productInput);
     const productId = String(draft.productId);
     const skuId = String((draft.skus as Array<{ skuId: string }>)[0]!.skuId);
     assert.equal(draft.lifecycleState, 'DRAFT');
     assert.deepEqual(draft.allowedActions, ['SAVE_DRAFT', 'CREATE_CONCESSION_PREVIEW', 'SUBMIT_REVIEW', 'DELIST']);
+    await seedMerchantLevelConfig(db, 1_000, '50', 2);
+    assert.equal((await service.saveProductSlot(merchant, 'store-catalog-1', productInput)).productId, productId);
+    await assert.rejects(
+      service.saveProductSlot(merchant, 'store-catalog-1', {
+        ...productInput,
+        idempotencyKey: 'catalog-product-over-level-limit',
+      }),
+      /product settlement amount exceeds the published limit/,
+    );
+    await seedMerchantLevelConfig(db, 999, '1000000000000000000000000', 3);
     const tagBatchInput = {
       productIds: [productId],
       tagIds: [String(fastTag.tagId)],
@@ -6447,6 +6517,32 @@ test('notification delivery failures audit exact states and lost leases fail clo
   }
 });
 
+test('notifications project real shipment and operator delivery evidence for the buyer wallet', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const { intent, now } = await completeDeliveryForBnm(db);
+    const service = new NotificationService({ transactions: transactionAdapter(db), clock: () => now });
+    const worker = new NotificationWorker({
+      transactions: transactionAdapter(db),
+      service,
+      workerId: 'real-logistics-notification-worker',
+      clock: () => now,
+    });
+    assert.ok(await worker.pollOnce() > 0);
+    const inbox = await service.listInbox({ walletAddress: intent.buyer, roles: ['BUYER'] });
+    const shipment = inbox.find((message) => message.sourceEventType === 'ShipmentRecorded');
+    assert.equal(shipment?.topic, 'SHIPMENT_UPDATED');
+    assert.equal(shipment?.templateData.carrierCode, 'SF');
+    assert.equal(shipment?.templateData.trackingNumberHash, `0x${'4'.repeat(64)}`);
+    const delivery = inbox.find((message) => message.sourceEventType === 'DeliveryRecorded');
+    assert.equal(delivery?.topic, 'SHIPMENT_UPDATED');
+    assert.equal(delivery?.templateData.state, 'DELIVERED');
+    assert.equal(delivery?.templateData.deliveredAt, now.toISOString());
+  } finally {
+    await db.close();
+  }
+});
+
 test('system config keeps secrets as references and publishes exact old/new versions through RBAC, secondary signature and Safe approval', async () => {
   const db = await createBusinessDatabase();
   try {
@@ -6583,13 +6679,68 @@ test('system config keeps secrets as references and publishes exact old/new vers
     );
     assert.equal(current.rows[0]?.version, 2);
     assert.equal(current.rows[0]?.payload.primaryRpcSecretRef, 'secret://rpc/primary-v2');
+    assert.throws(
+      () => service.createVersion(actor, {
+        configKey: 'MERCHANT_LEVELS',
+        payload: { levels: [{ level: 'V1', maxProductSettlementUsdt: '0', monthlySeckillQuota: -1 }] },
+        effectiveFrom: '2020-01-01T00:00:00.000Z',
+        idempotencyKey: 'merchant-levels-invalid',
+        correlationId: 'merchant-levels-invalid',
+      }),
+      /must contain V1-V5 exactly once/,
+    );
+    const merchantLevelsConfig = await service.createVersion(actor, {
+      configKey: 'MERCHANT_LEVELS',
+      payload: {
+        levels: ['V1', 'V2', 'V3', 'V4', 'V5'].map((level, index) => ({
+          level,
+          maxProductSettlementUsdt: String((index + 1) * 100),
+          monthlySeckillQuota: index,
+        })),
+      },
+      effectiveFrom: '2020-01-01T00:00:00.000Z',
+      idempotencyKey: 'merchant-levels-v1',
+      correlationId: 'merchant-levels-create-v1',
+    });
+    const currentMerchantLevelHash = await db.query<{ payload_hash: string }>(
+      "SELECT payload_hash FROM core.current_system_config WHERE config_key = 'MERCHANT_LEVELS'",
+    );
+    const merchantLevelsIntent: SensitiveActionIntent = {
+      ...intent,
+      resourceId: merchantLevelsConfig.configVersionId,
+      oldValueHash: currentMerchantLevelHash.rows[0]!.payload_hash,
+      newValueHash: merchantLevelsConfig.payloadHash,
+      nonce: 103n,
+      deadline: BigInt(Math.floor(now.getTime() / 1_000) + 300),
+    };
+    const merchantLevelsApproval = {
+      action: merchantLevelsIntent.action,
+      resourceType: merchantLevelsIntent.resourceType,
+      resourceId: merchantLevelsIntent.resourceId,
+      policyVersion: merchantLevelsIntent.policyVersion.toString(),
+      oldValueHash: merchantLevelsIntent.oldValueHash,
+      newValueHash: merchantLevelsIntent.newValueHash,
+      safeAddress: merchantLevelsIntent.safeAddress,
+      nonce: merchantLevelsIntent.nonce.toString(),
+      deadline: merchantLevelsIntent.deadline.toString(),
+      signature: await secondary.signTypedData(
+        sensitiveActionDomain(safe), sensitiveActionTypes, merchantLevelsIntent,
+      ),
+    };
+    assert.equal((await service.publish(
+      actor, merchantLevelsConfig.configVersionId, merchantLevelsApproval,
+    )).published, true);
+    const currentLevels = await db.query<{ payload: { levels: Array<{ level: string }> } }>(
+      "SELECT payload FROM core.current_system_config WHERE config_key = 'MERCHANT_LEVELS'",
+    );
+    assert.deepEqual(currentLevels.rows[0]?.payload.levels.map((rule) => rule.level), ['V1', 'V2', 'V3', 'V4', 'V5']);
     await assert.rejects(
       db.query("UPDATE core.system_config_versions SET payload = '{}' WHERE config_version_id = $1", [first.configVersionId]),
       /ImmutableRecord/,
     );
     assert.equal((await db.query<{ count: string }>(
       "SELECT count(*)::text AS count FROM core.audit_outbox_events WHERE event_type LIKE 'SystemConfig%'",
-    )).rows[0]?.count, '4');
+    )).rows[0]?.count, '6');
   } finally {
     await db.close();
   }
@@ -11209,6 +11360,7 @@ async function seedCatalog(
       }),
     ],
   );
+  await seedMerchantLevelConfig(db);
   await db.query(
     `INSERT INTO core.merchants (
        merchant_id, settlement_wallet, status, level, guarantee_status
@@ -11255,6 +11407,57 @@ async function seedCatalog(
        merchant_cost_usdt, stock_total, stock_available, lifecycle_state
      ) VALUES ('sku-1', $1, 'product-1', 1, '{}', $2, $3, $4, $4, 'ACTIVE')`,
     [`0x${'c'.repeat(64)}`, listPriceUsdt, merchantCostUsdt, stock],
+  );
+}
+
+async function seedMerchantLevelConfig(
+  db: PGlite,
+  quota = 1_000,
+  maximum = '1000000000000000000000000',
+  version = 1,
+) {
+  const levels = ['V1', 'V2', 'V3', 'V4', 'V5'].map((level) => ({
+    level,
+    maxProductSettlementUsdt: maximum,
+    monthlySeckillQuota: quota,
+  }));
+  const payload = { levels };
+  const payloadHash = stableHash(payload);
+  await db.query(
+    `INSERT INTO core.system_config_versions (
+       config_version_id, config_key, version, payload, payload_hash, effective_from,
+       idempotency_key, request_hash, created_by, created_at
+     ) VALUES (
+       $1, 'MERCHANT_LEVELS', $2, $3, $4,
+       '2020-01-01T00:00:00.000Z', $5, $6,
+       '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', clock_timestamp()
+     ) ON CONFLICT (config_version_id) DO NOTHING`,
+    [
+      `system-config:merchant-levels:test${version === 1 ? '' : `:v${version}`}`,
+      version,
+      JSON.stringify(payload),
+      payloadHash,
+      `test-merchant-levels-v${version}`,
+      stableHash({ domain: 'test-merchant-levels', version, payload }),
+    ],
+  );
+  await db.query(
+    `INSERT INTO core.system_config_publication_events (
+       event_id, config_key, active_config_version_id, previous_config_version_id,
+       action_digest, secondary_signer, safe_address, safe_tx_hash, actor_wallet, created_at
+     ) VALUES (
+       $1, 'MERCHANT_LEVELS', $2, $3, $4,
+       '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+       '0xcccccccccccccccccccccccccccccccccccccccc', $5,
+       '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', clock_timestamp()
+     ) ON CONFLICT (event_id) DO NOTHING`,
+    [
+      `system-config-publication:merchant-levels:test${version === 1 ? '' : `:v${version}`}`,
+      `system-config:merchant-levels:test${version === 1 ? '' : `:v${version}`}`,
+      version === 1 ? null : `system-config:merchant-levels:test${version === 2 ? '' : `:v${version - 1}`}`,
+      stableHash({ domain: 'test-merchant-levels-publication', version, payloadHash }),
+      HASH,
+    ],
   );
 }
 
