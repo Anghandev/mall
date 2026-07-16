@@ -26,7 +26,8 @@ export type MediaPurpose =
   | 'STORE_IMAGE'
   | 'FULFILLMENT_EVIDENCE'
   | 'BUYER_AVATAR'
-  | 'MERCHANT_LOGO';
+  | 'MERCHANT_LOGO'
+  | 'MERCHANT_LICENSE';
 export type MediaResourceType = 'PRODUCT' | 'CATEGORY' | 'STORE' | 'ORDER' | 'BUYER' | 'MERCHANT';
 
 export interface MediaUploadLimits {
@@ -338,7 +339,7 @@ export class EvidenceService {
       contentSha256: input.contentSha256.toLowerCase(),
     });
     const row = await this.#transactions.transaction(async (executor) => {
-      await authorizeResource(executor, actor, input.resourceType, input.resourceId);
+      await authorizeResource(executor, actor, input.purpose, input.resourceType, input.resourceId);
       const existing = await executor.query<UploadIntentRow>(
         'SELECT * FROM core.media_upload_intents WHERE owner_wallet = $1 AND idempotency_key = $2',
         [wallet, input.idempotencyKey],
@@ -630,7 +631,7 @@ function validateUploadInput(input: {
     : input.purpose === 'CATEGORY_ICON' ? 'CATEGORY'
     : input.purpose === 'STORE_IMAGE' ? 'STORE'
     : input.purpose === 'BUYER_AVATAR' ? 'BUYER'
-    : input.purpose === 'MERCHANT_LOGO' ? 'MERCHANT'
+    : input.purpose === 'MERCHANT_LOGO' || input.purpose === 'MERCHANT_LICENSE' ? 'MERCHANT'
     : 'ORDER';
   if (input.resourceType !== expected) throw new CoreError('InvalidRequest', 'Media purpose does not match its resource');
   if (!CONTENT_TYPES.includes(input.contentType as (typeof CONTENT_TYPES)[number])) {
@@ -648,7 +649,7 @@ function validateUploadInput(input: {
 
 function contentTypeMatchesPurpose(purpose: MediaPurpose, contentType: string) {
   if (purpose === 'PRODUCT_VIDEO') return contentType === 'video/mp4';
-  if (purpose === 'FULFILLMENT_EVIDENCE') {
+  if (purpose === 'FULFILLMENT_EVIDENCE' || purpose === 'MERCHANT_LICENSE') {
     return contentType === 'application/pdf'
       || IMAGE_CONTENT_TYPES.includes(contentType as (typeof IMAGE_CONTENT_TYPES)[number]);
   }
@@ -658,6 +659,7 @@ function contentTypeMatchesPurpose(purpose: MediaPurpose, contentType: string) {
 async function authorizeResource(
   executor: SqlExecutor,
   actor: FulfillmentActor,
+  purpose: MediaPurpose,
   resourceType: MediaResourceType,
   resourceId: string,
 ) {
@@ -697,6 +699,17 @@ async function authorizeResource(
   } else if (resourceType === 'BUYER') {
     if (hasRole(actor, 'BUYER') && resourceId.toLowerCase() === wallet) return;
   } else if (resourceType === 'MERCHANT') {
+    if (
+      purpose === 'MERCHANT_LICENSE'
+      && hasRole(actor, 'ADMIN', 'OPERATOR')
+      && await hasActivePlatformMediaRole(executor, actor, wallet, ['ADMIN', 'OPERATOR'])
+    ) {
+      const merchant = await executor.query<{ merchant_id: string }>(
+        'SELECT merchant_id FROM core.merchants WHERE merchant_id = $1',
+        [resourceId],
+      );
+      if (merchant.rows[0]) return;
+    }
     if (hasRole(actor, 'MERCHANT') && actor.merchantId === resourceId) {
       const binding = await executor.query<{ active: boolean }>(
         `SELECT EXISTS (
@@ -819,6 +832,12 @@ async function authorizeMediaRead(
   if (await isPublicMediaAsset(executor, asset)) return 'PUBLIC';
   if (!actor) throw new CoreError('Forbidden', 'Media asset is not public', 403);
   const wallet = actorWallet(actor);
+  if (asset.purpose === 'MERCHANT_LICENSE') {
+    if (await hasActivePlatformMediaRole(executor, actor, wallet, ['ADMIN', 'OPERATOR'])) {
+      return 'AUTHENTICATED';
+    }
+    throw new CoreError('Forbidden', 'Merchant license is restricted to active review roles', 403);
+  }
   if (wallet === asset.owner_wallet) return 'AUTHENTICATED';
   if (await hasActivePlatformMediaRole(executor, actor, wallet)) return 'AUTHENTICATED';
   if (asset.resource_type === 'ORDER') {
@@ -903,9 +922,14 @@ async function isPublicMediaAsset(executor: SqlExecutor, asset: MediaAssetRow) {
   return false;
 }
 
-async function hasActivePlatformMediaRole(executor: SqlExecutor, actor: FulfillmentActor, wallet: string) {
+async function hasActivePlatformMediaRole(
+  executor: SqlExecutor,
+  actor: FulfillmentActor,
+  wallet: string,
+  permitted: readonly ('ADMIN' | 'OPERATOR' | 'AUDITOR' | 'ARBITRATOR')[] = ['ADMIN', 'OPERATOR', 'AUDITOR', 'ARBITRATOR'],
+) {
   const platformRoles = ['ADMIN', 'OPERATOR', 'AUDITOR', 'ARBITRATOR'] as const;
-  const allowed = platformRoles.filter((role) => actor.roles.includes(role));
+  const allowed = platformRoles.filter((role) => permitted.includes(role) && actor.roles.includes(role));
   if (allowed.length === 0) return false;
   const result = await executor.query<{ role: (typeof platformRoles)[number] }>(
     `SELECT role FROM core.wallet_role_bindings

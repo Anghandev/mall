@@ -43,6 +43,10 @@ import {
   mediaContentTypes,
   mediaPurposes,
   mediaResourceTypes,
+  merchantLevels,
+  merchantLifecycleStatuses,
+  merchantQualificationAccess,
+  merchantReviewActions,
   merchantGuaranteeDepositStates,
   guaranteeStatuses,
   notificationCampaignStates,
@@ -112,6 +116,7 @@ const schemaSources = [
       '017_risk_management.sql',
       '018_seckill_operations.sql',
       '019_logistics_printing.sql',
+      '020_merchant_lifecycle.sql',
     ],
   },
   {
@@ -174,6 +179,10 @@ const enums = {
   mediaContentTypes,
   mediaPurposes,
   mediaResourceTypes,
+  merchantLevels,
+  merchantLifecycleStatuses,
+  merchantQualificationAccess,
+  merchantReviewActions,
   fulfillmentAssets,
   arbitrationOutcomes,
   settlementRails,
@@ -304,7 +313,7 @@ const publishedContractManifest = JSON.parse(readRequired(join(contractsRoot, 'c
 
 const coordinatedManifest = {
   artifactVersion,
-  publicationStatus: 'COORDINATED_LOGISTICS_CHECKPOINT',
+  publicationStatus: 'COORDINATED_MERCHANT_LIFECYCLE_CHECKPOINT',
   deploymentAuthorized: publishedContractManifest.deploymentAuthorized === true,
   deploymentAuthorizationEvidenceHash:
     publishedContractManifest.deploymentAuthorizationEvidenceHash ?? null,
@@ -349,6 +358,10 @@ const coordinatedManifest = {
     buyerSavedAddressHttp: 'AVAILABLE',
     buyerTakeoverTimelineHttp: 'AVAILABLE',
     merchantProfileHttp: 'AVAILABLE',
+    merchantLifecycleHttp: 'AVAILABLE',
+    merchantQualificationEncryption: 'AVAILABLE',
+    merchantReviewGovernance: 'AVAILABLE',
+    merchantDrilldown: 'AVAILABLE',
     merchantScopedAuditHttp: 'AVAILABLE',
     monitoringHttp: 'AVAILABLE',
     riskManagementHttp: 'AVAILABLE',
@@ -379,6 +392,11 @@ const coordinatedManifest = {
     'GENESIS_CREDENTIAL_CONTRACT_AND_TOKEN_ID',
     'PICKUP_TIMEOUT_AND_TAKEOVER_EVIDENCE',
     'EMPTY_SESSION_INJECTED_PRIZE_ALLOCATION',
+    'MERCHANT_LEVEL_PRICE_BASIS',
+    'MERCHANT_MONTHLY_SECKILL_QUOTA_WINDOW',
+    'MERCHANT_ABNORMAL_ORDER_RATE_TAXONOMY',
+    'MERCHANT_48_HOUR_SHIPPING_RATE_DENOMINATOR',
+    'PII_RETENTION_POLICY_VERSION',
   ],
   externalBlocked: [
     'GOVERNANCE_AND_THREE_SAFE_ADDRESSES',
@@ -393,6 +411,7 @@ const coordinatedManifest = {
     'PHYSICAL_PRINTER_AND_MOBILE_DEVICE_EVIDENCE',
     'PRODUCTION_DOMAINS_AND_HTTPS',
     'APPROVED_MERCHANT_AND_ADMIN_WALLETS',
+    'MERCHANT_PII_ENCRYPTION_KEY',
   ],
   requiredConsumerContracts: [
     'ProductPolicy',
@@ -468,6 +487,9 @@ const coordinatedManifest = {
     'RiskOverview',
     'RiskRestriction',
     'RiskAppeal',
+    'MerchantLifecycleList',
+    'MerchantLifecycleDetail',
+    'MerchantReviewChallenge',
   ],
 };
 files.set('coordinated-manifest.json', json(coordinatedManifest));
@@ -565,6 +587,7 @@ function buildOpenApi() {
       ...seckillRuntimeOpenApiPaths(errorResponse),
       ...catalogManagementOpenApiPaths(errorResponse),
       ...logisticsPrintingOpenApiPaths(errorResponse),
+      ...merchantLifecycleOpenApiPaths(errorResponse),
       '/v2/bootstrap': {
         get: {
           operationId: 'getBootstrap',
@@ -957,6 +980,7 @@ function buildOpenApi() {
         ...accountOpenApiSchemas(),
         ...riskOpenApiSchemas(),
         ...logisticsPrintingOpenApiSchemas(),
+        ...merchantLifecycleOpenApiSchemas(),
         ErrorResponse: {
           type: 'object', additionalProperties: false, required: ['error'],
           properties: {
@@ -1174,6 +1198,279 @@ function logisticsPrintingOpenApiSchemas() {
       type: 'object', additionalProperties: false, required: ['idempotencyKey'],
       properties: { idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 } },
     },
+  };
+}
+
+function merchantLifecycleOpenApiPaths(errorResponse) {
+  const security = [{ bearerAuth: [] }];
+  const merchantId = {
+    name: 'merchantId', in: 'path', required: true,
+    schema: { type: 'string', minLength: 1, maxLength: 256 },
+  };
+  const actionId = {
+    name: 'actionId', in: 'path', required: true,
+    schema: { $ref: '#/components/schemas/Bytes32' },
+  };
+  return {
+    '/v2/admin/merchants': {
+      get: {
+        operationId: 'listMerchantLifecycle',
+        security,
+        parameters: [
+          { name: 'status', in: 'query', schema: { $ref: '#/components/schemas/MerchantLifecycleStatus' } },
+          { name: 'search', in: 'query', schema: { type: 'string', minLength: 1, maxLength: 100 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 } },
+          { name: 'cursorCreatedAt', in: 'query', schema: { type: 'string', format: 'date-time' } },
+          { name: 'cursorMerchantId', in: 'query', schema: { type: 'string', minLength: 1, maxLength: 256 } },
+        ],
+        responses: {
+          200: response('PII-safe merchant lifecycle page', { $ref: '#/components/schemas/MerchantLifecycleList' }),
+          default: errorResponse,
+        },
+      },
+      post: {
+        operationId: 'createMerchantApplication',
+        security,
+        requestBody: body({ $ref: '#/components/schemas/MerchantApplicationCreateRequest' }),
+        responses: {
+          201: response('Encrypted pending merchant application', { $ref: '#/components/schemas/MerchantLifecycleDetail' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/admin/merchants/{merchantId}': {
+      get: {
+        operationId: 'getMerchantLifecycleDetail',
+        security,
+        parameters: [merchantId],
+        responses: {
+          200: response('Role-redacted merchant lifecycle drilldown', { $ref: '#/components/schemas/MerchantLifecycleDetail' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/admin/merchants/{merchantId}/application': {
+      put: {
+        operationId: 'updateMerchantApplication',
+        security,
+        parameters: [merchantId],
+        requestBody: body({ $ref: '#/components/schemas/MerchantApplicationUpdateRequest' }),
+        responses: {
+          200: response('New encrypted merchant application version', { $ref: '#/components/schemas/MerchantLifecycleDetail' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/admin/merchants/{merchantId}/review-challenges': {
+      post: {
+        operationId: 'createMerchantReviewChallenge',
+        security,
+        parameters: [merchantId],
+        requestBody: body({ $ref: '#/components/schemas/MerchantReviewChallengeRequest' }),
+        responses: {
+          201: response('Exact status-bound secondary signature challenge', { $ref: '#/components/schemas/MerchantReviewChallenge' }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/admin/merchants/{merchantId}/review-actions/{actionId}/publish': {
+      post: {
+        operationId: 'publishMerchantReview',
+        security,
+        parameters: [merchantId, actionId],
+        requestBody: body({ $ref: '#/components/schemas/MerchantReviewPublishRequest' }),
+        responses: {
+          200: response('Secondary-signed and Safe-approved merchant status', { $ref: '#/components/schemas/MerchantLifecycleDetail' }),
+          default: errorResponse,
+        },
+      },
+    },
+  };
+}
+
+function merchantLifecycleOpenApiSchemas() {
+  const ref = (name) => ({ $ref: `#/components/schemas/${name}` });
+  const object = (properties, required = Object.keys(properties)) => ({
+    type: 'object', additionalProperties: false, required, properties,
+  });
+  const nullable = (schema) => ({ anyOf: [schema, { type: 'null' }] });
+  const string = { type: 'string', minLength: 1 };
+  const timestamp = { type: 'string', format: 'date-time' };
+  const atomic = ref('AtomicAmount');
+  const hash = ref('Bytes32');
+  const amountSet = object({
+    listPriceUsdt: atomic,
+    buyerPaidUsdt: atomic,
+    merchantBaseReceivableUsdt: atomic,
+    merchantNetReceivableUsdt: atomic,
+  });
+  const qualificationCommon = {
+    legalName: nullable(string),
+    legalId: nullable(string),
+    contactPhone: nullable(string),
+    licenseAssetId: nullable(hash),
+    payloadHash: hash,
+    retentionPolicyVersion: nullable(string),
+    version: { type: 'integer', minimum: 1 },
+    updatedAt: timestamp,
+  };
+  return {
+    MerchantLevel: { type: 'string', enum: [...merchantLevels] },
+    MerchantLifecycleStatus: { type: 'string', enum: [...merchantLifecycleStatuses] },
+    MerchantReviewAction: { type: 'string', enum: [...merchantReviewActions] },
+    MerchantQualificationAccess: { type: 'string', enum: [...merchantQualificationAccess] },
+    MerchantLifecycleSummary: object({
+      merchantId: string,
+      shopName: nullable(string),
+      settlementWallet: ref('Address'),
+      settlementWalletMutable: { const: false },
+      status: ref('MerchantLifecycleStatus'),
+      level: ref('MerchantLevel'),
+      guaranteeStatus: { enum: [...guaranteeStatuses] },
+      applicationVersion: { type: 'integer', minimum: 0 },
+      qualificationComplete: { type: 'boolean' },
+      reviewedAt: nullable(timestamp),
+      reviewedBy: nullable(ref('Address')),
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }),
+    MerchantQualification: {
+      anyOf: [
+        object({ access: { const: 'FULL' }, ...qualificationCommon }),
+        object({ access: { const: 'REDACTED' }, ...qualificationCommon }),
+        object({
+          access: { const: 'UNAVAILABLE' },
+          reason: { const: 'PARTIAL_LEGACY' },
+          licenseAssetId: { type: 'null' },
+        }),
+      ],
+    },
+    MerchantLifecycleList: object({
+      artifactVersion: { const: artifactVersion },
+      merchants: { type: 'array', items: ref('MerchantLifecycleSummary') },
+      nextCursor: nullable(object({ createdAt: timestamp, merchantId: string })),
+    }),
+    MerchantApplicationCreateRequest: object({
+      shopName: { type: 'string', minLength: 1, maxLength: 80 },
+      legalName: { type: 'string', minLength: 2, maxLength: 80 },
+      legalId: { type: 'string', minLength: 6, maxLength: 32 },
+      contactPhone: { type: 'string', minLength: 6, maxLength: 32 },
+      settlementWallet: ref('Address'),
+      level: ref('MerchantLevel'),
+      idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
+    }),
+    MerchantApplicationUpdateRequest: object({
+      shopName: { type: 'string', minLength: 1, maxLength: 80 },
+      legalName: { type: 'string', minLength: 2, maxLength: 80 },
+      legalId: { type: 'string', minLength: 6, maxLength: 32 },
+      contactPhone: { type: 'string', minLength: 6, maxLength: 32 },
+      level: ref('MerchantLevel'),
+      licenseAssetId: nullable(hash),
+      expectedVersion: { type: 'integer', minimum: 1 },
+      idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
+    }),
+    MerchantReviewChallengeRequest: object({
+      action: ref('MerchantReviewAction'),
+      reasonCode: { type: 'string', pattern: '^[A-Z0-9_:-]{2,64}$' },
+      idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
+    }),
+    MerchantReviewPublishRequest: object({
+      signature: { type: 'string', pattern: '^0x(?:[0-9a-fA-F]{2})+$' },
+    }),
+    MerchantReviewChallenge: object({
+      artifactVersion: { const: artifactVersion },
+      actionId: hash,
+      merchantId: string,
+      action: ref('MerchantReviewAction'),
+      fromStatus: ref('MerchantLifecycleStatus'),
+      toStatus: ref('MerchantLifecycleStatus'),
+      applicationVersion: { type: 'integer', minimum: 1 },
+      reasonCode: string,
+      state: { enum: ['DRAFT', 'PUBLISHED', 'EXPIRED'] },
+      secondarySigner: ref('Address'),
+      expiresAt: timestamp,
+      typedData: { type: 'object', additionalProperties: true },
+      digest: hash,
+    }),
+    MerchantReviewEvidence: object({
+      actionId: hash,
+      action: ref('MerchantReviewAction'),
+      fromStatus: ref('MerchantLifecycleStatus'),
+      toStatus: ref('MerchantLifecycleStatus'),
+      applicationVersion: { type: 'integer', minimum: 1 },
+      reasonCode: string,
+      state: { enum: ['DRAFT', 'PUBLISHED', 'EXPIRED'] },
+      secondarySigner: nullable(ref('Address')),
+      actionDigest: nullable(hash),
+      safeTxHash: nullable(hash),
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }),
+    MerchantOrderAnalytics: object({
+      totalFinalized: atomic,
+      ordinaryFinalized: atomic,
+      seckillFinalized: atomic,
+      cumulative: amountSet,
+      today: amountSet,
+      timezone: { const: 'Asia/Shanghai' },
+      window: object({ start: timestamp, end: timestamp }),
+    }),
+    MerchantFulfillmentAnalytics: object({
+      pendingShipment: atomic,
+      inTransit: atomic,
+      completed: atomic,
+      pickupCompleted: atomic,
+      fastShip48h: object({
+        status: { const: 'DecisionBlocked' },
+        numerator: { type: 'null' },
+        denominator: { type: 'null' },
+        bps: { type: 'null' },
+        reason: string,
+      }),
+    }),
+    MerchantRiskAnalytics: object({
+      takeoverCases: atomic,
+      guaranteeUsedUsdt: atomic,
+      frozenReceivableUsedUsdt: atomic,
+      futureProceedsUsedUsdt: atomic,
+      platformAdvanceUsdt: atomic,
+      outstandingDebtUsdt: atomic,
+      abnormalOrderRateBps: { type: 'null' },
+      unavailableReason: { const: 'DecisionBlocked' },
+    }),
+    MerchantContributionAnalytics: object({
+      finalizedNplBurnAmount: atomic,
+      fulfillmentAvailableBnmAmount: atomic,
+      ledgerReconciled: { const: true },
+    }),
+    MerchantLifecycleBalance: object({
+      state: { enum: ['LOCKED', 'AVAILABLE', 'REQUESTED', 'BATCHED', 'SETTLED'] },
+      amount: atomic,
+    }),
+    MerchantLifecycleSettlement: object({
+      requestId: hash,
+      asset: { enum: ['USDT', 'NPL'] },
+      amount: atomic,
+      state: { enum: [...settlementRequestStates] },
+      requestedAt: timestamp,
+      safeTxHash: nullable(hash),
+      settledAt: nullable(timestamp),
+    }),
+    MerchantLifecycleDetail: object({
+      artifactVersion: { const: artifactVersion },
+      merchant: ref('MerchantLifecycleSummary'),
+      qualification: ref('MerchantQualification'),
+      levelPolicy: object({ status: { const: 'DecisionBlocked' }, reason: string }),
+      analytics: object({
+        orders: ref('MerchantOrderAnalytics'),
+        fulfillment: ref('MerchantFulfillmentAnalytics'),
+        risk: ref('MerchantRiskAnalytics'),
+        contributions: ref('MerchantContributionAnalytics'),
+      }),
+      balances: { type: 'array', items: ref('MerchantLifecycleBalance') },
+      settlements: { type: 'array', items: ref('MerchantLifecycleSettlement') },
+      reviews: { type: 'array', items: ref('MerchantReviewEvidence') },
+    }),
   };
 }
 
@@ -4317,6 +4614,10 @@ export type ContractOrderState = ${union(contractOrderStates)};
 export type OrderFinalityStatus = ${union(orderFinalityStatuses)};
 export type TransactionFinalityState = ${union(finalityStates)};
 export type UserRole = ${union(userRoles)};
+export type MerchantLevel = ${union(merchantLevels)};
+export type MerchantLifecycleStatus = ${union(merchantLifecycleStatuses)};
+export type MerchantReviewAction = ${union(merchantReviewActions)};
+export type MerchantQualificationAccess = ${union(merchantQualificationAccess)};
 export type BreakerScope = ${union(breakerScopes)};
 export type CatalogProductAction = ${union(catalogProductActions)};
 export type CatalogProductLifecycleState = ${union(catalogProductLifecycleStates)};
@@ -4389,6 +4690,10 @@ export declare const contractOrderStates: readonly ContractOrderState[];
 export declare const orderFinalityStatuses: readonly OrderFinalityStatus[];
 export declare const finalityStates: readonly TransactionFinalityState[];
 export declare const userRoles: readonly UserRole[];
+export declare const merchantLevels: readonly MerchantLevel[];
+export declare const merchantLifecycleStatuses: readonly MerchantLifecycleStatus[];
+export declare const merchantReviewActions: readonly MerchantReviewAction[];
+export declare const merchantQualificationAccess: readonly MerchantQualificationAccess[];
 export declare const breakerScopes: readonly BreakerScope[];
 export declare const catalogProductActions: readonly CatalogProductAction[];
 export declare const catalogProductLifecycleStates: readonly CatalogProductLifecycleState[];
@@ -4457,6 +4762,159 @@ export declare const riskRestrictionStates: readonly RiskRestrictionState[];
 export declare const riskAppealStates: readonly RiskAppealState[];
 
 export type JsonObject = Readonly<Record<string, unknown>>;
+
+export interface MerchantLifecycleSummary {
+  merchantId: string;
+  shopName: string | null;
+  settlementWallet: Address;
+  settlementWalletMutable: false;
+  status: MerchantLifecycleStatus;
+  level: MerchantLevel;
+  guaranteeStatus: GuaranteeStatus;
+  applicationVersion: number;
+  qualificationComplete: boolean;
+  reviewedAt: Timestamp | null;
+  reviewedBy: Address | null;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export type MerchantQualification =
+  | {
+      access: 'FULL' | 'REDACTED';
+      legalName: string | null;
+      legalId: string | null;
+      contactPhone: string | null;
+      licenseAssetId: Bytes32 | null;
+      payloadHash: Bytes32;
+      retentionPolicyVersion: string | null;
+      version: number;
+      updatedAt: Timestamp;
+    }
+  | { access: 'UNAVAILABLE'; reason: 'PARTIAL_LEGACY'; licenseAssetId: null };
+
+export interface MerchantLifecycleList {
+  artifactVersion: typeof artifactVersion;
+  merchants: readonly MerchantLifecycleSummary[];
+  nextCursor: Readonly<{ createdAt: Timestamp; merchantId: string }> | null;
+}
+
+export interface MerchantApplicationCreateRequest {
+  shopName: string;
+  legalName: string;
+  legalId: string;
+  contactPhone: string;
+  settlementWallet: Address;
+  level: MerchantLevel;
+  idempotencyKey: string;
+}
+
+export interface MerchantApplicationUpdateRequest {
+  shopName: string;
+  legalName: string;
+  legalId: string;
+  contactPhone: string;
+  level: MerchantLevel;
+  licenseAssetId: Bytes32 | null;
+  expectedVersion: number;
+  idempotencyKey: string;
+}
+
+export interface MerchantReviewChallengeRequest {
+  action: MerchantReviewAction;
+  reasonCode: string;
+  idempotencyKey: string;
+}
+
+export interface MerchantReviewPublishRequest { signature: string }
+
+export interface MerchantReviewChallenge {
+  artifactVersion: typeof artifactVersion;
+  actionId: Bytes32;
+  merchantId: string;
+  action: MerchantReviewAction;
+  fromStatus: MerchantLifecycleStatus;
+  toStatus: MerchantLifecycleStatus;
+  applicationVersion: number;
+  reasonCode: string;
+  state: 'DRAFT' | 'PUBLISHED' | 'EXPIRED';
+  secondarySigner: Address;
+  expiresAt: Timestamp;
+  typedData: Eip712TypedData;
+  digest: Bytes32;
+}
+
+export interface MerchantReviewEvidence {
+  actionId: Bytes32;
+  action: MerchantReviewAction;
+  fromStatus: MerchantLifecycleStatus;
+  toStatus: MerchantLifecycleStatus;
+  applicationVersion: number;
+  reasonCode: string;
+  state: 'DRAFT' | 'PUBLISHED' | 'EXPIRED';
+  secondarySigner: Address | null;
+  actionDigest: Bytes32 | null;
+  safeTxHash: Bytes32 | null;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface MerchantNamedAmounts {
+  listPriceUsdt: AtomicAmount;
+  buyerPaidUsdt: AtomicAmount;
+  merchantBaseReceivableUsdt: AtomicAmount;
+  merchantNetReceivableUsdt: AtomicAmount;
+}
+
+export interface MerchantLifecycleDetail {
+  artifactVersion: typeof artifactVersion;
+  merchant: MerchantLifecycleSummary;
+  qualification: MerchantQualification;
+  levelPolicy: Readonly<{ status: 'DecisionBlocked'; reason: string }>;
+  analytics: Readonly<{
+    orders: {
+      totalFinalized: AtomicAmount;
+      ordinaryFinalized: AtomicAmount;
+      seckillFinalized: AtomicAmount;
+      cumulative: MerchantNamedAmounts;
+      today: MerchantNamedAmounts;
+      timezone: 'Asia/Shanghai';
+      window: Readonly<{ start: Timestamp; end: Timestamp }>;
+    };
+    fulfillment: {
+      pendingShipment: AtomicAmount;
+      inTransit: AtomicAmount;
+      completed: AtomicAmount;
+      pickupCompleted: AtomicAmount;
+      fastShip48h: Readonly<{
+        status: 'DecisionBlocked'; numerator: null; denominator: null; bps: null; reason: string;
+      }>;
+    };
+    risk: {
+      takeoverCases: AtomicAmount;
+      guaranteeUsedUsdt: AtomicAmount;
+      frozenReceivableUsedUsdt: AtomicAmount;
+      futureProceedsUsedUsdt: AtomicAmount;
+      platformAdvanceUsdt: AtomicAmount;
+      outstandingDebtUsdt: AtomicAmount;
+      abnormalOrderRateBps: null;
+      unavailableReason: 'DecisionBlocked';
+    };
+    contributions: {
+      finalizedNplBurnAmount: AtomicAmount;
+      fulfillmentAvailableBnmAmount: AtomicAmount;
+      ledgerReconciled: true;
+    };
+  }>;
+  balances: readonly Readonly<{
+    state: 'LOCKED' | 'AVAILABLE' | 'REQUESTED' | 'BATCHED' | 'SETTLED'; amount: AtomicAmount;
+  }>[];
+  settlements: readonly Readonly<{
+    requestId: Bytes32; asset: 'USDT' | 'NPL'; amount: AtomicAmount; state: SettlementRequestState;
+    requestedAt: Timestamp; safeTxHash: Bytes32 | null; settledAt: Timestamp | null;
+  }>[];
+  reviews: readonly MerchantReviewEvidence[];
+}
 
 export interface PrinterBindingChallengeRequest {
   provider: PrintProvider;

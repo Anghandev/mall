@@ -1,6 +1,6 @@
 {
-  "artifactVersion": "2.0.0-logistics.1",
-  "publicationStatus": "COORDINATED_LOGISTICS_CHECKPOINT",
+  "artifactVersion": "2.0.0-merchant-lifecycle.1",
+  "publicationStatus": "COORDINATED_MERCHANT_LIFECYCLE_CHECKPOINT",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
   "chain": {
@@ -14,57 +14,57 @@
   "components": {
     "packageMetadata": {
       "path": "package.json",
-      "sha256": "a3eaa08b987282b30604099a095a270766ed6467832dfd56aef774b3abca7c55"
+      "sha256": "95b9980a81c1a2557fb2c4ec80bb7617f4214f532a3800e0977e11a3635b7ad6"
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "b88d242d402e2a083ac6dce79bff625cc6b72bff09b34de95e3b16f5f46bb8e3"
+      "sha256": "c3242020b7834e4cc616b30f635582137fd0dbe63f2970f45e9f42eaf2304b4d"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "2492a4f90ca6b8b67067f3ef9e9c5c65f27c0fb249fb8c27877239b5c820ff83"
+      "sha256": "45d32b24c017d41b9b55ee773fcab8d3037e8a885834929a2d86150873ba4b65"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "eebad58399957a18257aa3b4d736c17aac13676ed765b55dcfc8704f88caf5c4"
+      "sha256": "2704aa0c57f64a153903fa0f7d8fb0081c616522da1a5a7455ef8471a78ae0ba"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "342b01f2f291a08a49c84cccc33bed71636118c4d33f38ff8e5ccfde24a91d10"
+      "sha256": "22798523a1fd7924d092661c571de5cd8fe8a3acc102496def477575303255e4"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "0158a201603def2a7779c791d1ff1f54ca9e1a1a70f3ee3bf8b976a8402371d5"
+      "sha256": "b9eaf5fa7e59ce92f03467b88a4a1302581d60d4b6d45a46d532de0a2cefbf87"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
-      "sha256": "d411b775e593c566abe9c03b83c636dad9b3d2e9d12b5322ffa6cb1fa295ecd0"
+      "sha256": "6b88e23ad395c3de0c3bcfe1dd1b033ce1caac645dd8863edea8d281f2273177"
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "4e41cc1e7c787dfda0740b37cee2da40927a6990f0b27bc63cbf84a3d0cb2dd8"
+      "sha256": "beda1e1ab4cbbb50339025bf7be0a8bcb9c90d6c2c6017c21bd0881b60e7b645"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "786b09d3cbe47869bd141d74348d4e8c1e70400197337f5d183db6e8174c12aa"
+      "sha256": "508b2653b5a7290e0107ff7af9c8c0a8cf405d5b1862327a0e9ad652aa82819b"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "d15753ae79efeaf81506b1e1dfa8b66178b547e598c4ba6355f23363306287cf"
+      "sha256": "76f2566f9d173bf100af4480daabb833d82de51937fc3eda3744268b733754cd"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
-      "sha256": "c9ab01d0ec085986dd0721b890d31d8acd8917157484bef3e99638a873070e51"
+      "sha256": "138a6390a1df6d34270b4b6b92856ec9efc91188c147e2efb18dcf17aef04c04"
     }
   },
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "e6491e175a7d81d729c74b7adcd46ec624e671c4f4464ca24fc4502f345eb8a4"
+      "sha256": "0454820483f5ca03a64338eeeba3682aba5a87843e0f43fc3e0df11722b47758"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "64bd2f2fc45be65cf2261628e1661383407fd4dd70e52ed7b8ed0e3714f9e54d"
+      "sha256": "62309bfe1bd836c1f739bc751f1a1833b38997f7e6d3f52ebd3d697ef60162ef"
     }
   ],
   "httpSurface": [
@@ -77,6 +77,8 @@
     "GET /v2/admin/cms/versions/{versionId}",
     "GET /v2/admin/coverage-breaker/actions",
     "GET /v2/admin/dashboard",
+    "GET /v2/admin/merchants",
+    "GET /v2/admin/merchants/{merchantId}",
     "GET /v2/admin/monitoring",
     "GET /v2/admin/orders",
     "GET /v2/admin/policy-drafts",
@@ -128,6 +130,9 @@
     "POST /v2/admin/cms/versions/{versionId}/rollback",
     "POST /v2/admin/coverage-breaker/resume-actions",
     "POST /v2/admin/coverage-breaker/resume-challenge",
+    "POST /v2/admin/merchants",
+    "POST /v2/admin/merchants/{merchantId}/review-actions/{actionId}/publish",
+    "POST /v2/admin/merchants/{merchantId}/review-challenges",
     "POST /v2/admin/monitoring/alerts/{alertKey}/acknowledge",
     "POST /v2/admin/notification-campaigns",
     "POST /v2/admin/notification-campaigns/{campaignId}/publish",
@@ -200,6 +205,7 @@
     "PUT /v2/admin/catalog/categories/{categoryId}",
     "PUT /v2/admin/catalog/stores/{storeId}/product-slot",
     "PUT /v2/admin/catalog/tags/{tagId}",
+    "PUT /v2/admin/merchants/{merchantId}/application",
     "PUT /v2/admin/policy-drafts/{draftId}",
     "PUT /v2/buyer/addresses/{addressId}",
     "PUT /v2/buyer/profile",
@@ -235,6 +241,10 @@
     "buyerSavedAddressHttp": "AVAILABLE",
     "buyerTakeoverTimelineHttp": "AVAILABLE",
     "merchantProfileHttp": "AVAILABLE",
+    "merchantLifecycleHttp": "AVAILABLE",
+    "merchantQualificationEncryption": "AVAILABLE",
+    "merchantReviewGovernance": "AVAILABLE",
+    "merchantDrilldown": "AVAILABLE",
     "merchantScopedAuditHttp": "AVAILABLE",
     "monitoringHttp": "AVAILABLE",
     "riskManagementHttp": "AVAILABLE",
@@ -278,7 +288,12 @@
     "FIXED_REMAINDER_ACCOUNTS",
     "GENESIS_CREDENTIAL_CONTRACT_AND_TOKEN_ID",
     "PICKUP_TIMEOUT_AND_TAKEOVER_EVIDENCE",
-    "EMPTY_SESSION_INJECTED_PRIZE_ALLOCATION"
+    "EMPTY_SESSION_INJECTED_PRIZE_ALLOCATION",
+    "MERCHANT_LEVEL_PRICE_BASIS",
+    "MERCHANT_MONTHLY_SECKILL_QUOTA_WINDOW",
+    "MERCHANT_ABNORMAL_ORDER_RATE_TAXONOMY",
+    "MERCHANT_48_HOUR_SHIPPING_RATE_DENOMINATOR",
+    "PII_RETENTION_POLICY_VERSION"
   ],
   "externalBlocked": [
     "GOVERNANCE_AND_THREE_SAFE_ADDRESSES",
@@ -292,7 +307,8 @@
     "BNM_MONOTONIC_CONFORMANCE_EVIDENCE",
     "PHYSICAL_PRINTER_AND_MOBILE_DEVICE_EVIDENCE",
     "PRODUCTION_DOMAINS_AND_HTTPS",
-    "APPROVED_MERCHANT_AND_ADMIN_WALLETS"
+    "APPROVED_MERCHANT_AND_ADMIN_WALLETS",
+    "MERCHANT_PII_ENCRYPTION_KEY"
   ],
   "requiredConsumerContracts": [
     "ProductPolicy",
@@ -367,6 +383,9 @@
     "CoverageBreakerActionProjection",
     "RiskOverview",
     "RiskRestriction",
-    "RiskAppeal"
+    "RiskAppeal",
+    "MerchantLifecycleList",
+    "MerchantLifecycleDetail",
+    "MerchantReviewChallenge"
   ]
 }

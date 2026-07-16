@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-logistics.1",
+  "artifactVersion": "2.0.0-merchant-lifecycle.1",
   "events": [
     {
       "contract": "BeneficiaryRegistryV2",

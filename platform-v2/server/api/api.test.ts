@@ -1346,6 +1346,14 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       submitAppeal: async (_actor, input) => ({ appealId: HASH_2, state: 'PENDING', ...input }),
       decideAppeal: async (_actor, appealId, input) => ({ appealId, state: input.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED' }),
     },
+    merchantLifecycleService: {
+      list: async (_actor, query) => ({ merchants: [], query }),
+      get: async (_actor, merchantId) => ({ merchant: { merchantId } }),
+      createApplication: async (_actor, input) => ({ merchant: { merchantId: 'merchant-created' }, input }),
+      updateApplication: async (_actor, merchantId, input) => ({ merchant: { merchantId }, input }),
+      createReviewChallenge: async (_actor, merchantId, input) => ({ merchantId, actionId: HASH, input }),
+      publishReview: async (_actor, merchantId, actionId) => ({ merchant: { merchantId }, actionId }),
+    },
     riskSignalToken: 'risk-signal-token',
     logisticsWebhookSecrets: {
       KUAIDI100: 'kuaidi-webhook-secret',
@@ -1452,6 +1460,68 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     });
     assert.equal(adminDashboard.status, 200);
     assert.equal(((await adminDashboard.json()) as { timezone: string }).timezone, 'Asia/Shanghai');
+    assert.equal((await fetch(`${base}/v2/admin/merchants`, {
+      headers: { authorization: `Bearer ${buyerOnlyToken}` },
+    })).status, 403);
+    assert.equal((await fetch(`${base}/v2/admin/merchants?status=PENDING&limit=20`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/merchants?status=PENDING&status=APPROVED`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 400);
+    assert.equal((await fetch(`${base}/v2/admin/merchants?unsupported=true`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 400);
+    const merchantApplication = await fetch(`${base}/v2/admin/merchants`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        shopName: 'HTTP Merchant',
+        legalName: 'Legal Name',
+        legalId: '210211199001011234',
+        contactPhone: '13800138000',
+        settlementWallet: SAFE,
+        level: 'V1',
+        idempotencyKey: 'merchant-http-create-1',
+      }),
+    });
+    assert.equal(merchantApplication.status, 201);
+    assert.equal(((await merchantApplication.json()) as { merchant: { merchantId: string } }).merchant.merchantId, 'merchant-created');
+    assert.equal((await fetch(`${base}/v2/admin/merchants`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        shopName: 'HTTP Merchant', legalName: 'Legal Name', legalId: '210211199001011234',
+        contactPhone: '13800138000', settlementWallet: SAFE, level: 'V1',
+        idempotencyKey: 'merchant-http-extra-field', ignored: true,
+      }),
+    })).status, 400);
+    assert.equal((await fetch(`${base}/v2/admin/merchants/merchant-created`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/merchants/merchant-created/application`, {
+      method: 'PUT',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        shopName: 'HTTP Merchant', legalName: 'Legal Name', legalId: '210211199001011234',
+        contactPhone: '13800138000', level: 'V1', licenseAssetId: HASH,
+        expectedVersion: 1, idempotencyKey: 'merchant-http-update-1',
+      }),
+    })).status, 200);
+    const merchantReview = await fetch(`${base}/v2/admin/merchants/merchant-created/review-challenges`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        action: 'APPROVE', reasonCode: 'QUALIFICATION_VERIFIED', idempotencyKey: 'merchant-http-review-1',
+      }),
+    });
+    assert.equal(merchantReview.status, 201);
+    assert.equal(((await merchantReview.json()) as { actionId: string }).actionId, HASH);
+    assert.equal((await fetch(`${base}/v2/admin/merchants/merchant-created/review-actions/${HASH}/publish`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ signature: '0x1234' }),
+    })).status, 200);
     assert.equal((await fetch(`${base}/v2/admin/seckill/actions`, {
       headers: { authorization: `Bearer ${buyerOnlyToken}` },
     })).status, 403);

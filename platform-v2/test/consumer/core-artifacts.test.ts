@@ -23,13 +23,13 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('logistics .1 checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-logistics.1');
+test('merchant lifecycle .1 checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-merchant-lifecycle.1');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
   assert.equal(openapi['x-artifactVersion'], artifactVersion);
-  assert.equal(manifest.publicationStatus, 'COORDINATED_LOGISTICS_CHECKPOINT');
+  assert.equal(manifest.publicationStatus, 'COORDINATED_MERCHANT_LIFECYCLE_CHECKPOINT');
   assert.equal(contractManifest.publicationStatus, 'coordinated-settlement-admin-checkpoint');
   assert.ok(manifest.decisionBlocked.includes('SECKILL_PRIZE_POOL_ACCOUNT'));
   assert.deepEqual(
@@ -54,7 +54,7 @@ test('logistics .1 checkpoint has one identity, resolvable exports and exact che
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 19);
+  assert.equal(schemaManifest.schemas.core.migrations.length, 20);
   assert.equal(schemaManifest.schemas.audit.migrations.length, 4);
   for (const migration of [
     ...schemaManifest.schemas.core.migrations,
@@ -83,6 +83,8 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
   'GET /v2/admin/cms/versions/{versionId}',
   'GET /v2/admin/coverage-breaker/actions',
   'GET /v2/admin/dashboard',
+    'GET /v2/admin/merchants',
+    'GET /v2/admin/merchants/{merchantId}',
     'GET /v2/admin/monitoring',
     'GET /v2/admin/orders',
     'GET /v2/admin/policy-drafts',
@@ -134,6 +136,9 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
   'POST /v2/admin/cms/versions/{versionId}/rollback',
   'POST /v2/admin/coverage-breaker/resume-actions',
   'POST /v2/admin/coverage-breaker/resume-challenge',
+    'POST /v2/admin/merchants',
+    'POST /v2/admin/merchants/{merchantId}/review-actions/{actionId}/publish',
+    'POST /v2/admin/merchants/{merchantId}/review-challenges',
     'POST /v2/admin/monitoring/alerts/{alertKey}/acknowledge',
     'POST /v2/admin/notification-campaigns',
     'POST /v2/admin/notification-campaigns/{campaignId}/publish',
@@ -206,6 +211,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'PUT /v2/admin/catalog/categories/{categoryId}',
     'PUT /v2/admin/catalog/stores/{storeId}/product-slot',
     'PUT /v2/admin/catalog/tags/{tagId}',
+    'PUT /v2/admin/merchants/{merchantId}/application',
     'PUT /v2/admin/policy-drafts/{draftId}',
     'PUT /v2/buyer/addresses/{addressId}',
     'PUT /v2/buyer/profile',
@@ -270,6 +276,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'FULFILLMENT_EVIDENCE',
     'BUYER_AVATAR',
     'MERCHANT_LOGO',
+    'MERCHANT_LICENSE',
   ]);
   assert.equal(openapi.components.schemas.ManagedCatalogProduct.properties.title.maxLength, 60);
   assert.equal(openapi.components.schemas.ProductSlotInput.properties.mainImageAssetIds.maxItems, 5);
@@ -430,7 +437,16 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
     'SystemConfigProjection',
     'AuditListResponse',
     'MonitoringDashboard',
+    'MerchantLifecycleList',
+    'MerchantLifecycleDetail',
+    'MerchantReviewChallenge',
   ]) assert.match(declarations, new RegExp(`export interface ${name}\\b`), name);
+  assert.deepEqual(enums.merchantLevels, ['V1', 'V2', 'V3', 'V4', 'V5']);
+  assert.deepEqual(enums.merchantLifecycleStatuses, [
+    'PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED', 'BLACKLISTED',
+  ]);
+  assert.deepEqual(enums.merchantReviewActions, ['APPROVE', 'REJECT', 'BLACKLIST']);
+  assert.deepEqual(enums.merchantQualificationAccess, ['FULL', 'REDACTED', 'UNAVAILABLE']);
   assert.deepEqual(enums.merchantGuaranteeDepositStates, ['SUBMITTED', 'MINED', 'FINAL', 'REORGED', 'QUARANTINED']);
   assert.deepEqual(enums.rewardSubtypes, [
     'GENESIS', 'DIRECT_REFERRAL', 'DISTRICT', 'CITY',
@@ -460,6 +476,14 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
   assert.ok(openapi.components.schemas.SettlementBalance.required.includes('rewardSubtype'));
   assert.equal(openapi.components.schemas.BnmPointsBalance.properties.transferable.const, false);
   assert.equal(openapi.components.schemas.RealtimeEventEnvelope.properties.finality.const, 'FINAL');
+  assert.equal(openapi.components.schemas.MerchantLifecycleSummary.properties.settlementWalletMutable.const, false);
+  assert.equal(openapi.components.schemas.MerchantFulfillmentAnalytics.properties.fastShip48h.properties.status.const, 'DecisionBlocked');
+  assert.deepEqual(
+    Object.keys(openapi.components.schemas.MerchantOrderAnalytics.properties.cumulative.properties),
+    ['listPriceUsdt', 'buyerPaidUsdt', 'merchantBaseReceivableUsdt', 'merchantNetReceivableUsdt'],
+  );
+  assert.ok(manifest.decisionBlocked.includes('MERCHANT_48_HOUR_SHIPPING_RATE_DENOMINATOR'));
+  assert.ok(manifest.externalBlocked.includes('MERCHANT_PII_ENCRYPTION_KEY'));
   for (const field of ['governanceActionId', 'rulesContentHash', 'publicationTxHash']) {
     assert.ok(openapi.components.schemas.SeckillSessionProjection.required.includes(field), field);
     assert.match(declarations, new RegExp(`\\b${field}\\b`), field);
@@ -717,6 +741,10 @@ test('catalog, settlement/admin and seckill realtime capabilities are published 
     'buyerSavedAddressHttp',
     'buyerTakeoverTimelineHttp',
     'merchantProfileHttp',
+    'merchantLifecycleHttp',
+    'merchantQualificationEncryption',
+    'merchantReviewGovernance',
+    'merchantDrilldown',
     'merchantScopedAuditHttp',
     'monitoringHttp',
     'riskManagementHttp',

@@ -21,6 +21,9 @@ import {
   cmsContentFormats,
   cmsContentTypes,
   executableOrderActionNames,
+  merchantLevels,
+  merchantLifecycleStatuses,
+  merchantReviewActions,
   notificationCampaignTopics,
   notificationChannels,
   notificationProviders,
@@ -529,6 +532,45 @@ export interface RiskApiService {
   }): Promise<unknown>;
 }
 
+export interface MerchantLifecycleApiService {
+  list(actor: FulfillmentActor, query: {
+    status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'SUSPENDED' | 'BLACKLISTED';
+    search?: string;
+    limit?: number;
+    cursorCreatedAt?: Date;
+    cursorMerchantId?: string;
+  }): Promise<unknown>;
+  get(actor: FulfillmentActor, merchantId: string): Promise<unknown>;
+  createApplication(actor: FulfillmentActor, input: {
+    shopName: string;
+    legalName: string;
+    legalId: string;
+    contactPhone: string;
+    settlementWallet: string;
+    level: 'V1' | 'V2' | 'V3' | 'V4' | 'V5';
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<unknown>;
+  updateApplication(actor: FulfillmentActor, merchantId: string, input: {
+    shopName: string;
+    legalName: string;
+    legalId: string;
+    contactPhone: string;
+    level: 'V1' | 'V2' | 'V3' | 'V4' | 'V5';
+    licenseAssetId: string | null;
+    expectedVersion: number;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<unknown>;
+  createReviewChallenge(actor: FulfillmentActor, merchantId: string, input: {
+    action: 'APPROVE' | 'REJECT' | 'BLACKLIST';
+    reasonCode: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<unknown>;
+  publishReview(actor: FulfillmentActor, merchantId: string, actionId: string, signature: string): Promise<unknown>;
+}
+
 export interface ApiDependencies {
   config: CoreConfig;
   runtimeReadiness?: RuntimeReadinessSnapshot | (() => RuntimeReadinessSnapshot | undefined);
@@ -561,6 +603,7 @@ export interface ApiDependencies {
   businessAnalyticsService: BusinessAnalyticsApiService;
   accountService: AccountApiService;
   riskService: RiskApiService;
+  merchantLifecycleService: MerchantLifecycleApiService;
   riskSignalToken?: string;
   recordRuntimeMetric?(kind: 'HTTP' | 'PAYMENT' | 'FULFILLMENT', durationMs: number, error: boolean, at: Date): void;
   logisticsWebhookSecrets?: Readonly<Partial<Record<'KUAIDI100' | 'CAINIAO', string>>>;
@@ -1846,6 +1889,118 @@ async function routeAdminServices(
   url: URL,
   correlationId: string,
 ) {
+  if (url.pathname === '/v2/admin/merchants') {
+    const claims = authorizeRoles(
+      request,
+      dependencies.config,
+      dependencies.clock(),
+      request.method === 'POST' ? ['ADMIN', 'OPERATOR'] : ['ADMIN', 'OPERATOR', 'AUDITOR'],
+    );
+    const actor = fulfillmentActor(claims);
+    if (request.method === 'GET') {
+      assertOnlySearchParams(url, ['status', 'search', 'limit', 'cursorCreatedAt', 'cursorMerchantId']);
+      sendJson(response, 200, await dependencies.merchantLifecycleService.list(actor, {
+        ...(url.searchParams.get('status')
+          ? { status: merchantLifecycleStatus(url.searchParams.get('status')) }
+          : {}),
+        ...(url.searchParams.get('search') ? { search: url.searchParams.get('search')! } : {}),
+        ...(url.searchParams.get('limit')
+          ? { limit: optionalPositiveIntegerParameter(url.searchParams.get('limit'), 'limit')! }
+          : {}),
+        ...(url.searchParams.get('cursorCreatedAt')
+          ? { cursorCreatedAt: dateParameter(url.searchParams.get('cursorCreatedAt')!, 'cursorCreatedAt') }
+          : {}),
+        ...(url.searchParams.get('cursorMerchantId')
+          ? { cursorMerchantId: url.searchParams.get('cursorMerchantId')! }
+          : {}),
+      }), correlationId);
+      return true;
+    }
+    if (request.method === 'POST') {
+      const body = await readJson(request);
+      assertOnlyKeys(body, [
+        'shopName', 'legalName', 'legalId', 'contactPhone', 'settlementWallet', 'level', 'idempotencyKey',
+      ]);
+      sendJson(response, 201, await dependencies.merchantLifecycleService.createApplication(actor, {
+        shopName: requiredString(body, 'shopName'),
+        legalName: requiredString(body, 'legalName'),
+        legalId: requiredString(body, 'legalId'),
+        contactPhone: requiredString(body, 'contactPhone'),
+        settlementWallet: requiredString(body, 'settlementWallet'),
+        level: merchantLifecycleLevel(body.level),
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+        correlationId,
+      }), correlationId);
+      return true;
+    }
+  }
+  const merchantApplicationPath = url.pathname.match(/^\/v2\/admin\/merchants\/([^/]+)\/application$/);
+  if (request.method === 'PUT' && merchantApplicationPath) {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, [
+      'shopName', 'legalName', 'legalId', 'contactPhone', 'level', 'licenseAssetId',
+      'expectedVersion', 'idempotencyKey',
+    ]);
+    sendJson(response, 200, await dependencies.merchantLifecycleService.updateApplication(
+      fulfillmentActor(claims),
+      decodedPathPart(merchantApplicationPath[1]!),
+      {
+        shopName: requiredString(body, 'shopName'),
+        legalName: requiredString(body, 'legalName'),
+        legalId: requiredString(body, 'legalId'),
+        contactPhone: requiredString(body, 'contactPhone'),
+        level: merchantLifecycleLevel(body.level),
+        licenseAssetId: nullableString(body, 'licenseAssetId'),
+        expectedVersion: requiredPositiveInteger(body, 'expectedVersion'),
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+        correlationId,
+      },
+    ), correlationId);
+    return true;
+  }
+  const merchantReviewChallengePath = url.pathname.match(/^\/v2\/admin\/merchants\/([^/]+)\/review-challenges$/);
+  if (request.method === 'POST' && merchantReviewChallengePath) {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['action', 'reasonCode', 'idempotencyKey']);
+    sendJson(response, 201, await dependencies.merchantLifecycleService.createReviewChallenge(
+      fulfillmentActor(claims),
+      decodedPathPart(merchantReviewChallengePath[1]!),
+      {
+        action: merchantReviewAction(body.action),
+        reasonCode: requiredString(body, 'reasonCode'),
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+        correlationId,
+      },
+    ), correlationId);
+    return true;
+  }
+  const merchantReviewPublishPath = url.pathname.match(
+    /^\/v2\/admin\/merchants\/([^/]+)\/review-actions\/(0x[0-9a-fA-F]{64})\/publish$/,
+  );
+  if (request.method === 'POST' && merchantReviewPublishPath) {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['signature']);
+    sendJson(response, 200, await dependencies.merchantLifecycleService.publishReview(
+      fulfillmentActor(claims),
+      decodedPathPart(merchantReviewPublishPath[1]!),
+      merchantReviewPublishPath[2]!.toLowerCase(),
+      requiredString(body, 'signature'),
+    ), correlationId);
+    return true;
+  }
+  const merchantPath = matchResourceAction(url.pathname, '/v2/admin/merchants/');
+  if (request.method === 'GET' && merchantPath && merchantPath.action === undefined) {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
+    assertOnlySearchParams(url, []);
+    sendJson(response, 200, await dependencies.merchantLifecycleService.get(
+      fulfillmentActor(claims),
+      merchantPath.resourceId,
+    ), correlationId);
+    return true;
+  }
   if (request.method === 'GET' && url.pathname === '/v2/admin/seckill/actions') {
     const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
     sendJson(response, 200, await dependencies.seckillOperationsService.list(fulfillmentActor(claims)), correlationId);
@@ -2940,6 +3095,7 @@ function mediaPurpose(value: unknown): MediaPurpose {
     'FULFILLMENT_EVIDENCE',
     'BUYER_AVATAR',
     'MERCHANT_LOGO',
+    'MERCHANT_LICENSE',
   ].includes(String(value))) {
     throw new CoreError('InvalidRequest', 'Unsupported media purpose');
   }
@@ -3049,6 +3205,16 @@ function matchResourceAction(pathname: string, prefix: string) {
   }
 }
 
+function assertOnlySearchParams(url: URL, allowed: readonly string[]) {
+  const seen = new Set<string>();
+  for (const key of url.searchParams.keys()) {
+    if (!allowed.includes(key) || seen.has(key)) {
+      throw new CoreError('InvalidRequest', 'Request contains unsupported or duplicate query parameters');
+    }
+    seen.add(key);
+  }
+}
+
 function optionalPositiveIntegerParameter(value: string | null, name: string) {
   if (value === null) return undefined;
   if (!/^[1-9][0-9]*$/.test(value) || Number(value) > Number.MAX_SAFE_INTEGER) {
@@ -3063,6 +3229,27 @@ function dateParameter(value: string, name: string) {
     throw new CoreError('InvalidRequest', `${name} must be a canonical ISO timestamp`);
   }
   return date;
+}
+
+function merchantLifecycleStatus(value: string | null): NonNullable<Parameters<MerchantLifecycleApiService['list']>[1]['status']> {
+  if (!merchantLifecycleStatuses.includes(value as typeof merchantLifecycleStatuses[number])) {
+    throw new CoreError('InvalidRequest', 'Unsupported merchant lifecycle status');
+  }
+  return value as NonNullable<Parameters<MerchantLifecycleApiService['list']>[1]['status']>;
+}
+
+function merchantLifecycleLevel(value: unknown): Parameters<MerchantLifecycleApiService['createApplication']>[1]['level'] {
+  if (!merchantLevels.includes(value as typeof merchantLevels[number])) {
+    throw new CoreError('InvalidRequest', 'Unsupported merchant level');
+  }
+  return value as Parameters<MerchantLifecycleApiService['createApplication']>[1]['level'];
+}
+
+function merchantReviewAction(value: unknown): Parameters<MerchantLifecycleApiService['createReviewChallenge']>[2]['action'] {
+  if (!merchantReviewActions.includes(value as typeof merchantReviewActions[number])) {
+    throw new CoreError('InvalidRequest', 'Unsupported merchant review action');
+  }
+  return value as Parameters<MerchantLifecycleApiService['createReviewChallenge']>[2]['action'];
 }
 
 function cmsContentType(value: unknown): Parameters<CmsApiService['createVersion']>[1]['contentType'] {

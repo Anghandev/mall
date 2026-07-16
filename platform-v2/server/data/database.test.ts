@@ -72,6 +72,7 @@ import { MonitoringService } from './monitoring-service.ts';
 import { BusinessAnalyticsService } from './business-analytics-service.ts';
 import { AccountService } from './account-service.ts';
 import { assertWalletPaymentAllowed, RiskService } from './risk-service.ts';
+import { MerchantLifecycleService } from './merchant-lifecycle-service.ts';
 import {
   createPickupReceiptEnqueuer,
   LogisticsPrintingService,
@@ -120,6 +121,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '017_risk_management.sql',
       '018_seckill_operations.sql',
       '019_logistics_printing.sql',
+      '020_merchant_lifecycle.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -715,6 +717,381 @@ test('merchant profile keeps settlement wallet immutable and merchant audit neve
   } finally {
     await business.close();
     await audit.close();
+  }
+});
+
+test('merchant lifecycle encrypts qualification and governs exact review transitions with private license evidence', async () => {
+  const db = await createBusinessDatabase();
+  let now = new Date('2026-07-15T08:00:00.000Z');
+  const admin = Wallet.createRandom();
+  const operator = Wallet.createRandom();
+  const auditor = Wallet.createRandom();
+  const arbitrator = Wallet.createRandom();
+  const secondary = Wallet.createRandom();
+  const wrongSigner = Wallet.createRandom();
+  const governanceSafe = Wallet.createRandom().address;
+  const settlementWallet = Wallet.createRandom().address;
+  let rejectSafe = false;
+  let safeCalls = 0;
+  const storage: MediaStorageAdapter = {
+    createUpload: async () => ({
+      method: 'PUT',
+      uploadUrl: 'https://uploads.example.invalid/merchant-license',
+      headers: { 'if-none-match': '*' },
+      providerReferenceHash: `0x${'7'.repeat(64)}`,
+      writeOnce: true,
+    }),
+    finalizeUpload: async () => ({
+      providerEvidenceHash: `0x${'8'.repeat(64)}`,
+      objectVersionHash: `0x${'9'.repeat(64)}`,
+      sealed: true,
+    }),
+    createRead: async (input) => ({
+      method: 'GET',
+      readUrl: 'https://media.example.invalid/merchant-license',
+      expiresAt: input.expiresAt.toISOString(),
+      providerReferenceHash: `0x${'7'.repeat(64)}`,
+      assetId: input.assetId,
+      contentSha256: input.contentSha256,
+      objectVersionHash: input.objectVersionHash,
+    }),
+  };
+  try {
+    await db.query(
+      `INSERT INTO core.policy_snapshots (
+         policy_version, artifact_version, policy_hash, oracle_version,
+         rules_content_hash, beneficiary_set_hash, payload, publication_status
+       ) VALUES (1,$1,$2,$3,$2,$3,'{}','PUBLISHED')`,
+      [CORE_ARTIFACT_VERSION, HASH, HASH_2],
+    );
+    for (const [wallet, role] of [
+      [admin.address, 'ADMIN'],
+      [operator.address, 'OPERATOR'],
+      [auditor.address, 'AUDITOR'],
+      [arbitrator.address, 'ARBITRATOR'],
+    ] as const) {
+      await db.query(
+        `INSERT INTO core.wallet_role_bindings (
+           wallet_address, role, merchant_id, status, evidence_hash
+         ) VALUES ($1,$2,NULL,'ACTIVE',$3)`,
+        [wallet.toLowerCase(), role, HASH],
+      );
+    }
+    const service = new MerchantLifecycleService({
+      transactions: transactionAdapter(db),
+      approver: {
+        verify: async (input) => {
+          safeCalls += 1;
+          if (rejectSafe) throw new CoreError('ExternalBlocked', 'Safe rejected merchant review', 503);
+          return {
+            safeTxHash: stableHash({ kind: 'merchant-review-safe', input }),
+            approvalEvidenceHash: stableHash({ kind: 'merchant-review-evidence', input }),
+          };
+        },
+      },
+      secondarySigner: secondary.address,
+      governanceSafe,
+      verifyingContract: governanceSafe,
+      encryptionKey: '11'.repeat(32),
+      retentionPolicyVersion: 'pii-v1',
+      auditReady: () => true,
+      clock: () => now,
+    });
+    const operatorActor = { walletAddress: operator.address, roles: ['OPERATOR'] as const };
+    const adminActor = { walletAddress: admin.address, roles: ['ADMIN'] as const };
+    const auditorActor = { walletAddress: auditor.address, roles: ['AUDITOR'] as const };
+    const arbitratorActor = { walletAddress: arbitrator.address, roles: ['ARBITRATOR'] as const };
+    const applicationInput = {
+      shopName: 'Private Gold Shop',
+      legalName: 'Li Ming',
+      legalId: '210211199001011234',
+      contactPhone: '13800138000',
+      settlementWallet,
+      level: 'V1' as const,
+      idempotencyKey: 'merchant-application-create-1',
+      correlationId: 'merchant-application-create-correlation',
+    };
+    const created = await service.createApplication(operatorActor, applicationInput);
+    const merchantId = created.merchant.merchantId;
+    assert.equal(created.merchant.status, 'PENDING');
+    assert.equal(created.qualification.access, 'FULL');
+    assert.equal(created.qualification.legalId, applicationInput.legalId);
+    assert.equal((await service.createApplication(operatorActor, applicationInput)).merchant.merchantId, merchantId);
+    await assert.rejects(
+      service.createApplication(operatorActor, { ...applicationInput, legalId: '210211199001019999' }),
+      /idempotency key changed/,
+    );
+    await assert.rejects(
+      service.createApplication(operatorActor, {
+        ...applicationInput,
+        idempotencyKey: 'merchant-application-duplicate-wallet',
+      }),
+      /already merchant-bound/,
+    );
+    await assert.rejects(
+      service.createApplication(auditorActor, {
+        ...applicationInput,
+        settlementWallet: Wallet.createRandom().address,
+        idempotencyKey: 'merchant-application-auditor-denied',
+      }),
+      /role is forbidden/,
+    );
+    const encrypted = await db.query<{
+      encrypted_payload: Uint8Array; payload_hash: string; request_hash: string;
+    }>('SELECT encrypted_payload, payload_hash, request_hash FROM core.merchant_application_versions WHERE merchant_id = $1', [merchantId]);
+    const stored = encrypted.rows[0]!;
+    const serializedStorage = JSON.stringify({
+      encrypted: Buffer.from(stored.encrypted_payload).toString('hex'),
+      payloadHash: stored.payload_hash,
+      requestHash: stored.request_hash,
+    });
+    assert.equal(serializedStorage.includes(applicationInput.legalName), false);
+    assert.equal(serializedStorage.includes(applicationInput.legalId), false);
+    assert.equal(serializedStorage.includes(applicationInput.contactPhone), false);
+    const auditorDetail = await service.get(auditorActor, merchantId);
+    assert.deepEqual(auditorDetail.qualification, {
+      access: 'REDACTED',
+      legalName: null,
+      legalId: null,
+      contactPhone: null,
+      licenseAssetId: null,
+      payloadHash: stored.payload_hash,
+      retentionPolicyVersion: null,
+      version: 1,
+      updatedAt: now.toISOString(),
+    });
+
+    const evidence = new EvidenceService({
+      transactions: transactionAdapter(db),
+      storage,
+      uploadLimits: { maxIntentsPerWalletHour: 10, maxBytesPerWalletHour: 20_000_000n },
+      clock: () => now,
+    });
+    await assert.rejects(
+      evidence.createUploadIntent(auditorActor, {
+        purpose: 'MERCHANT_LICENSE', resourceType: 'MERCHANT', resourceId: merchantId,
+        contentType: 'application/pdf', sizeBytes: 1000, contentSha256: `0x${'6'.repeat(64)}`,
+        idempotencyKey: 'merchant-license-auditor-denied',
+      }),
+      /outside the wallet scope/,
+    );
+    const upload = await evidence.createUploadIntent(operatorActor, {
+      purpose: 'MERCHANT_LICENSE', resourceType: 'MERCHANT', resourceId: merchantId,
+      contentType: 'application/pdf', sizeBytes: 1000, contentSha256: `0x${'6'.repeat(64)}`,
+      idempotencyKey: 'merchant-license-upload-1',
+    });
+    const license = await evidence.completeUpload(operatorActor, upload.uploadIntentId);
+    assert.equal((await evidence.createReadAccess(operatorActor, license.assetId)).accessScope, 'AUTHENTICATED');
+    await assert.rejects(evidence.createReadAccess(auditorActor, license.assetId), /restricted to active review roles/);
+    await assert.rejects(evidence.createReadAccess(arbitratorActor, license.assetId), /restricted to active review roles/);
+    await db.query(
+      "UPDATE core.wallet_role_bindings SET status = 'SUSPENDED' WHERE wallet_address = $1 AND role = 'OPERATOR'",
+      [operator.address.toLowerCase()],
+    );
+    await assert.rejects(evidence.createReadAccess(operatorActor, license.assetId), /restricted to active review roles/);
+    await db.query(
+      "UPDATE core.wallet_role_bindings SET status = 'ACTIVE' WHERE wallet_address = $1 AND role = 'OPERATOR'",
+      [operator.address.toLowerCase()],
+    );
+    const updated = await service.updateApplication(operatorActor, merchantId, {
+      shopName: applicationInput.shopName,
+      legalName: applicationInput.legalName,
+      legalId: applicationInput.legalId,
+      contactPhone: applicationInput.contactPhone,
+      level: 'V1',
+      licenseAssetId: license.assetId,
+      expectedVersion: 1,
+      idempotencyKey: 'merchant-application-update-license-1',
+      correlationId: 'merchant-application-update-correlation',
+    });
+    assert.equal(updated.merchant.qualificationComplete, true);
+    assert.equal(updated.qualification.licenseAssetId, license.assetId);
+    await assert.rejects(
+      service.createReviewChallenge(adminActor, merchantId, {
+        action: 'BLACKLIST', reasonCode: 'RISK_REVIEW',
+        idempotencyKey: 'merchant-blacklist-before-approval', correlationId: 'merchant-blacklist-before-approval',
+      }),
+      /cannot apply BLACKLIST/,
+    );
+    const challenge = await service.createReviewChallenge(adminActor, merchantId, {
+      action: 'APPROVE', reasonCode: 'QUALIFICATION_VERIFIED',
+      idempotencyKey: 'merchant-review-approve-1', correlationId: 'merchant-review-approve-correlation',
+    });
+    const wrongSignature = await wrongSigner.signTypedData(
+      challenge.typedData.domain, challenge.typedData.types, challenge.typedData.message,
+    );
+    await assert.rejects(service.publishReview(adminActor, merchantId, challenge.actionId, wrongSignature), /signer/);
+    const signature = await secondary.signTypedData(
+      challenge.typedData.domain, challenge.typedData.types, challenge.typedData.message,
+    );
+    rejectSafe = true;
+    await assert.rejects(service.publishReview(adminActor, merchantId, challenge.actionId, signature), /Safe rejected/);
+    assert.equal((await service.get(adminActor, merchantId)).merchant.status, 'PENDING');
+    rejectSafe = false;
+    const approved = await service.publishReview(adminActor, merchantId, challenge.actionId, signature);
+    assert.equal(approved.merchant.status, 'APPROVED');
+    assert.equal((await db.query<{ status: string; merchant_id: string }>(
+      "SELECT status, merchant_id FROM core.wallet_role_bindings WHERE wallet_address = $1 AND role = 'MERCHANT'",
+      [settlementWallet.toLowerCase()],
+    )).rows[0]?.status, 'ACTIVE');
+    assert.equal((await service.publishReview(adminActor, merchantId, challenge.actionId, signature)).merchant.status, 'APPROVED');
+    assert.equal(safeCalls, 2);
+    await assert.rejects(
+      db.query("UPDATE core.merchants SET settlement_wallet = $2 WHERE merchant_id = $1", [merchantId, Wallet.createRandom().address]),
+      /GovernedWalletMigrationRequired/,
+    );
+
+    const blacklist = await service.createReviewChallenge(adminActor, merchantId, {
+      action: 'BLACKLIST', reasonCode: 'CONFIRMED_ABUSE',
+      idempotencyKey: 'merchant-review-blacklist-1', correlationId: 'merchant-review-blacklist-correlation',
+    });
+    const blacklistSignature = await secondary.signTypedData(
+      blacklist.typedData.domain, blacklist.typedData.types, blacklist.typedData.message,
+    );
+    const blacklisted = await service.publishReview(adminActor, merchantId, blacklist.actionId, blacklistSignature);
+    assert.equal(blacklisted.merchant.status, 'BLACKLISTED');
+    assert.equal((await db.query<{ status: string }>(
+      "SELECT status FROM core.wallet_role_bindings WHERE wallet_address = $1 AND role = 'MERCHANT'",
+      [settlementWallet.toLowerCase()],
+    )).rows[0]?.status, 'SUSPENDED');
+    const publishedActions = await db.query<{ action_kind: string; state: string }>(
+      'SELECT action_kind, state FROM core.merchant_review_actions WHERE merchant_id = $1 ORDER BY action_kind',
+      [merchantId],
+    );
+    assert.deepEqual(publishedActions.rows, [
+      { action_kind: 'APPROVE', state: 'PUBLISHED' },
+      { action_kind: 'BLACKLIST', state: 'PUBLISHED' },
+    ]);
+
+    const staleSettlement = Wallet.createRandom().address;
+    const stale = await service.createApplication(operatorActor, {
+      ...applicationInput,
+      settlementWallet: staleSettlement,
+      idempotencyKey: 'merchant-application-stale-1',
+      correlationId: 'merchant-application-stale-correlation',
+    });
+    const staleChallenge = await service.createReviewChallenge(adminActor, stale.merchant.merchantId, {
+      action: 'REJECT', reasonCode: 'INCOMPLETE_APPLICATION',
+      idempotencyKey: 'merchant-review-stale-1', correlationId: 'merchant-review-stale-correlation',
+    });
+    const staleSignature = await secondary.signTypedData(
+      staleChallenge.typedData.domain, staleChallenge.typedData.types, staleChallenge.typedData.message,
+    );
+    await db.query("UPDATE core.merchants SET level = 'V2' WHERE merchant_id = $1", [stale.merchant.merchantId]);
+    await assert.rejects(
+      service.publishReview(adminActor, stale.merchant.merchantId, staleChallenge.actionId, staleSignature),
+      /snapshot changed/,
+    );
+
+    const expiring = await service.createApplication(operatorActor, {
+      ...applicationInput,
+      settlementWallet: Wallet.createRandom().address,
+      idempotencyKey: 'merchant-application-expiring-1',
+      correlationId: 'merchant-application-expiring-correlation',
+    });
+    const expiringChallenge = await service.createReviewChallenge(adminActor, expiring.merchant.merchantId, {
+      action: 'REJECT', reasonCode: 'INCOMPLETE_APPLICATION',
+      idempotencyKey: 'merchant-review-expiring-1', correlationId: 'merchant-review-expiring-correlation',
+    });
+    const expiringSignature = await secondary.signTypedData(
+      expiringChallenge.typedData.domain, expiringChallenge.typedData.types, expiringChallenge.typedData.message,
+    );
+    now = new Date(now.getTime() + 6 * 60_000);
+    await assert.rejects(
+      service.publishReview(adminActor, expiring.merchant.merchantId, expiringChallenge.actionId, expiringSignature),
+      /expired/,
+    );
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.merchant_review_actions WHERE action_id = $1',
+      [expiringChallenge.actionId],
+    )).rows[0]?.state, 'EXPIRED');
+    assert.equal(JSON.stringify((await db.query(
+      "SELECT payload FROM core.audit_outbox_events WHERE resource_type = 'MERCHANT'",
+    )).rows).includes(applicationInput.legalId), false);
+  } finally {
+    await db.close();
+  }
+});
+
+test('merchant drilldown uses named canonical amounts and fails closed when contribution snapshots diverge from the ledger', async () => {
+  const db = await createBusinessDatabase();
+  const admin = Wallet.createRandom();
+  const secondary = Wallet.createRandom();
+  const governanceSafe = Wallet.createRandom().address;
+  try {
+    const { intent, now } = await completeDeliveryForBnm(db);
+    await grantRole(db, admin.address, 'ADMIN');
+    const service = new MerchantLifecycleService({
+      transactions: transactionAdapter(db),
+      approver: { verify: async () => { throw new Error('unused'); } },
+      secondarySigner: secondary.address,
+      governanceSafe,
+      verifyingContract: governanceSafe,
+      auditReady: () => true,
+      clock: () => now,
+    });
+    const detail = await service.get({ walletAddress: admin.address, roles: ['ADMIN'] }, 'merchant-1');
+    const shanghaiNow = new Date(now.getTime() + 8 * 60 * 60_000);
+    const shanghaiDayStart = new Date(Date.UTC(
+      shanghaiNow.getUTCFullYear(), shanghaiNow.getUTCMonth(), shanghaiNow.getUTCDate(),
+    ) - 8 * 60 * 60_000);
+    assert.deepEqual(detail.analytics.orders, {
+      totalFinalized: '1',
+      ordinaryFinalized: '1',
+      seckillFinalized: '0',
+      cumulative: {
+        listPriceUsdt: intent.listPriceUsdt,
+        buyerPaidUsdt: intent.usdtPaymentAmount,
+        merchantBaseReceivableUsdt: intent.merchantBaseReceivableUsdt,
+        merchantNetReceivableUsdt: intent.merchantNetReceivableUsdt,
+      },
+      today: {
+        listPriceUsdt: intent.listPriceUsdt,
+        buyerPaidUsdt: intent.usdtPaymentAmount,
+        merchantBaseReceivableUsdt: intent.merchantBaseReceivableUsdt,
+        merchantNetReceivableUsdt: intent.merchantNetReceivableUsdt,
+      },
+      timezone: 'Asia/Shanghai',
+      window: {
+        start: shanghaiDayStart.toISOString(),
+        end: new Date(shanghaiDayStart.getTime() + 24 * 60 * 60_000).toISOString(),
+      },
+    });
+    assert.deepEqual(detail.analytics.fulfillment.fastShip48h, {
+      status: 'DecisionBlocked',
+      numerator: null,
+      denominator: null,
+      bps: null,
+      reason: 'The eligible order denominator for the 48-hour shipping rate is not frozen',
+    });
+    assert.deepEqual(detail.analytics.contributions, {
+      finalizedNplBurnAmount: intent.nplBurnAmount,
+      fulfillmentAvailableBnmAmount: intent.bnmAmount,
+      ledgerReconciled: true,
+    });
+    assert.deepEqual(detail.balances, [
+      { state: 'LOCKED', amount: '0' },
+      { state: 'AVAILABLE', amount: intent.merchantNetReceivableUsdt },
+      { state: 'REQUESTED', amount: '0' },
+      { state: 'BATCHED', amount: '0' },
+      { state: 'SETTLED', amount: '0' },
+    ]);
+    const paymentJournal = await db.query<{ journal_id: string }>(
+      "SELECT journal_id FROM core.ledger_journals WHERE order_id = $1 AND event_type = 'PAYMENT_LOCKED'",
+      [intent.orderId],
+    );
+    await db.query(
+      `INSERT INTO core.ledger_lines (
+         journal_id, account_id, side, amount, balance_state, backing_safe_address
+       ) VALUES ($1,'burn:npl','CREDIT',1,'POSTED',NULL)`,
+      [paymentJournal.rows[0]!.journal_id],
+    );
+    await assert.rejects(
+      service.get({ walletAddress: admin.address, roles: ['ADMIN'] }, 'merchant-1'),
+      /NPL Burn snapshot does not reconcile/,
+    );
+  } finally {
+    await db.close();
   }
 });
 

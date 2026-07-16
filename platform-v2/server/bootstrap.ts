@@ -105,6 +105,7 @@ import { SystemConfigService } from './data/system-config-service.ts';
 import { BusinessAnalyticsService } from './data/business-analytics-service.ts';
 import { AccountService } from './data/account-service.ts';
 import { RiskService } from './data/risk-service.ts';
+import { MerchantLifecycleService } from './data/merchant-lifecycle-service.ts';
 import { SeckillOperationsService } from './data/seckill-operations-service.ts';
 import {
   createPickupReceiptEnqueuer,
@@ -242,6 +243,22 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
       return false;
     }
   };
+  const merchantLifecycleService = new MerchantLifecycleService({
+    transactions,
+    approver: new HttpSystemConfigSafeApprover({
+      ...(env.SYSTEM_CONFIG_SAFE_APPROVER_URL ? { url: env.SYSTEM_CONFIG_SAFE_APPROVER_URL } : {}),
+      ...(env.SYSTEM_CONFIG_SAFE_APPROVER_TOKEN ? { token: env.SYSTEM_CONFIG_SAFE_APPROVER_TOKEN } : {}),
+      mutualTls: config.safeMutualTls,
+    }),
+    secondarySigner: required(config.secondarySignerAddress, 'SECONDARY_SIGNER_ADDRESS'),
+    governanceSafe: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    verifyingContract: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    ...(env.MERCHANT_PII_ENCRYPTION_KEY ? { encryptionKey: env.MERCHANT_PII_ENCRYPTION_KEY } : {}),
+    ...(config.piiRetentionPolicyVersion
+      ? { retentionPolicyVersion: config.piiRetentionPolicyVersion }
+      : {}),
+    auditReady,
+  });
   const takeoverFundingService = new TakeoverFundingService({
     transactions,
     approver: new HttpTakeoverFundingSafeApprover({
@@ -600,6 +617,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     businessAnalyticsService,
     accountService,
     riskService,
+    merchantLifecycleService,
     ...(env.RISK_SIGNAL_TOKEN ? { riskSignalToken: env.RISK_SIGNAL_TOKEN } : {}),
     recordRuntimeMetric: (kind, durationMs, error, at) => runtimeMetrics.record(kind, durationMs, error, at),
     takeoverFundingService: {

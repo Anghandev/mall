@@ -1,4 +1,4 @@
-export declare const artifactVersion: "2.0.0-logistics.1";
+export declare const artifactVersion: "2.0.0-merchant-lifecycle.1";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
@@ -9,6 +9,10 @@ export type ContractOrderState = "NONE" | "PAID" | "SHIPPED" | "DELIVERED" | "AR
 export type OrderFinalityStatus = "NOT_SUBMITTED" | "PENDING" | "CONFIRMED" | "REPLACED" | "REORGED" | "FINAL";
 export type TransactionFinalityState = "SUBMITTED" | "MINED" | "REPLACED" | "REORGED" | "FINAL" | "FAILED";
 export type UserRole = "BUYER" | "MERCHANT" | "ADMIN" | "OPERATOR" | "ARBITRATOR" | "AUDITOR";
+export type MerchantLevel = "V1" | "V2" | "V3" | "V4" | "V5";
+export type MerchantLifecycleStatus = "PENDING" | "APPROVED" | "REJECTED" | "SUSPENDED" | "BLACKLISTED";
+export type MerchantReviewAction = "APPROVE" | "REJECT" | "BLACKLIST";
+export type MerchantQualificationAccess = "FULL" | "REDACTED" | "UNAVAILABLE";
 export type BreakerScope = "NEW_PAYMENT" | "SECKILL_PURCHASE" | "NEW_SETTLEMENT_BATCH";
 export type CatalogProductAction = "SAVE_DRAFT" | "CREATE_CONCESSION_PREVIEW" | "SUBMIT_REVIEW" | "APPROVE" | "REJECT" | "PUBLISH" | "ADJUST_INVENTORY" | "HIDE" | "DELIST";
 export type CatalogProductLifecycleState = "DRAFT" | "REVIEW" | "SCHEDULED" | "ACTIVE" | "SOLD_OUT" | "HIDDEN" | "DELISTED" | "LOCKED";
@@ -30,7 +34,7 @@ export type PrintJobState = "CONFIGURATION_REQUIRED" | "QUEUED" | "PROCESSING" |
 export type WaybillProvider = "KUAIDI100" | "CAINIAO";
 export type WaybillRequestState = "PENDING_PROVIDER" | "CONFIGURATION_REQUIRED" | "PROVIDER_ACCEPTED" | "SHIPMENT_RECORDED" | "COMPLETED" | "FAILED";
 export type MediaContentType = "image/jpeg" | "image/png" | "image/webp" | "video/mp4" | "application/pdf";
-export type MediaPurpose = "PRODUCT_IMAGE" | "PRODUCT_VIDEO" | "CATEGORY_ICON" | "STORE_IMAGE" | "FULFILLMENT_EVIDENCE" | "BUYER_AVATAR" | "MERCHANT_LOGO";
+export type MediaPurpose = "PRODUCT_IMAGE" | "PRODUCT_VIDEO" | "CATEGORY_ICON" | "STORE_IMAGE" | "FULFILLMENT_EVIDENCE" | "BUYER_AVATAR" | "MERCHANT_LOGO" | "MERCHANT_LICENSE";
 export type MediaResourceType = "PRODUCT" | "CATEGORY" | "STORE" | "ORDER" | "BUYER" | "MERCHANT";
 export type FulfillmentAsset = "USDT" | "NPL" | "BNM_POINTS";
 export type ArbitrationOutcome = "FULFILL" | "RESUME_FULFILLMENT";
@@ -81,6 +85,10 @@ export declare const contractOrderStates: readonly ContractOrderState[];
 export declare const orderFinalityStatuses: readonly OrderFinalityStatus[];
 export declare const finalityStates: readonly TransactionFinalityState[];
 export declare const userRoles: readonly UserRole[];
+export declare const merchantLevels: readonly MerchantLevel[];
+export declare const merchantLifecycleStatuses: readonly MerchantLifecycleStatus[];
+export declare const merchantReviewActions: readonly MerchantReviewAction[];
+export declare const merchantQualificationAccess: readonly MerchantQualificationAccess[];
 export declare const breakerScopes: readonly BreakerScope[];
 export declare const catalogProductActions: readonly CatalogProductAction[];
 export declare const catalogProductLifecycleStates: readonly CatalogProductLifecycleState[];
@@ -149,6 +157,159 @@ export declare const riskRestrictionStates: readonly RiskRestrictionState[];
 export declare const riskAppealStates: readonly RiskAppealState[];
 
 export type JsonObject = Readonly<Record<string, unknown>>;
+
+export interface MerchantLifecycleSummary {
+  merchantId: string;
+  shopName: string | null;
+  settlementWallet: Address;
+  settlementWalletMutable: false;
+  status: MerchantLifecycleStatus;
+  level: MerchantLevel;
+  guaranteeStatus: GuaranteeStatus;
+  applicationVersion: number;
+  qualificationComplete: boolean;
+  reviewedAt: Timestamp | null;
+  reviewedBy: Address | null;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export type MerchantQualification =
+  | {
+      access: 'FULL' | 'REDACTED';
+      legalName: string | null;
+      legalId: string | null;
+      contactPhone: string | null;
+      licenseAssetId: Bytes32 | null;
+      payloadHash: Bytes32;
+      retentionPolicyVersion: string | null;
+      version: number;
+      updatedAt: Timestamp;
+    }
+  | { access: 'UNAVAILABLE'; reason: 'PARTIAL_LEGACY'; licenseAssetId: null };
+
+export interface MerchantLifecycleList {
+  artifactVersion: typeof artifactVersion;
+  merchants: readonly MerchantLifecycleSummary[];
+  nextCursor: Readonly<{ createdAt: Timestamp; merchantId: string }> | null;
+}
+
+export interface MerchantApplicationCreateRequest {
+  shopName: string;
+  legalName: string;
+  legalId: string;
+  contactPhone: string;
+  settlementWallet: Address;
+  level: MerchantLevel;
+  idempotencyKey: string;
+}
+
+export interface MerchantApplicationUpdateRequest {
+  shopName: string;
+  legalName: string;
+  legalId: string;
+  contactPhone: string;
+  level: MerchantLevel;
+  licenseAssetId: Bytes32 | null;
+  expectedVersion: number;
+  idempotencyKey: string;
+}
+
+export interface MerchantReviewChallengeRequest {
+  action: MerchantReviewAction;
+  reasonCode: string;
+  idempotencyKey: string;
+}
+
+export interface MerchantReviewPublishRequest { signature: string }
+
+export interface MerchantReviewChallenge {
+  artifactVersion: typeof artifactVersion;
+  actionId: Bytes32;
+  merchantId: string;
+  action: MerchantReviewAction;
+  fromStatus: MerchantLifecycleStatus;
+  toStatus: MerchantLifecycleStatus;
+  applicationVersion: number;
+  reasonCode: string;
+  state: 'DRAFT' | 'PUBLISHED' | 'EXPIRED';
+  secondarySigner: Address;
+  expiresAt: Timestamp;
+  typedData: Eip712TypedData;
+  digest: Bytes32;
+}
+
+export interface MerchantReviewEvidence {
+  actionId: Bytes32;
+  action: MerchantReviewAction;
+  fromStatus: MerchantLifecycleStatus;
+  toStatus: MerchantLifecycleStatus;
+  applicationVersion: number;
+  reasonCode: string;
+  state: 'DRAFT' | 'PUBLISHED' | 'EXPIRED';
+  secondarySigner: Address | null;
+  actionDigest: Bytes32 | null;
+  safeTxHash: Bytes32 | null;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface MerchantNamedAmounts {
+  listPriceUsdt: AtomicAmount;
+  buyerPaidUsdt: AtomicAmount;
+  merchantBaseReceivableUsdt: AtomicAmount;
+  merchantNetReceivableUsdt: AtomicAmount;
+}
+
+export interface MerchantLifecycleDetail {
+  artifactVersion: typeof artifactVersion;
+  merchant: MerchantLifecycleSummary;
+  qualification: MerchantQualification;
+  levelPolicy: Readonly<{ status: 'DecisionBlocked'; reason: string }>;
+  analytics: Readonly<{
+    orders: {
+      totalFinalized: AtomicAmount;
+      ordinaryFinalized: AtomicAmount;
+      seckillFinalized: AtomicAmount;
+      cumulative: MerchantNamedAmounts;
+      today: MerchantNamedAmounts;
+      timezone: 'Asia/Shanghai';
+      window: Readonly<{ start: Timestamp; end: Timestamp }>;
+    };
+    fulfillment: {
+      pendingShipment: AtomicAmount;
+      inTransit: AtomicAmount;
+      completed: AtomicAmount;
+      pickupCompleted: AtomicAmount;
+      fastShip48h: Readonly<{
+        status: 'DecisionBlocked'; numerator: null; denominator: null; bps: null; reason: string;
+      }>;
+    };
+    risk: {
+      takeoverCases: AtomicAmount;
+      guaranteeUsedUsdt: AtomicAmount;
+      frozenReceivableUsedUsdt: AtomicAmount;
+      futureProceedsUsedUsdt: AtomicAmount;
+      platformAdvanceUsdt: AtomicAmount;
+      outstandingDebtUsdt: AtomicAmount;
+      abnormalOrderRateBps: null;
+      unavailableReason: 'DecisionBlocked';
+    };
+    contributions: {
+      finalizedNplBurnAmount: AtomicAmount;
+      fulfillmentAvailableBnmAmount: AtomicAmount;
+      ledgerReconciled: true;
+    };
+  }>;
+  balances: readonly Readonly<{
+    state: 'LOCKED' | 'AVAILABLE' | 'REQUESTED' | 'BATCHED' | 'SETTLED'; amount: AtomicAmount;
+  }>[];
+  settlements: readonly Readonly<{
+    requestId: Bytes32; asset: 'USDT' | 'NPL'; amount: AtomicAmount; state: SettlementRequestState;
+    requestedAt: Timestamp; safeTxHash: Bytes32 | null; settledAt: Timestamp | null;
+  }>[];
+  reviews: readonly MerchantReviewEvidence[];
+}
 
 export interface PrinterBindingChallengeRequest {
   provider: PrintProvider;

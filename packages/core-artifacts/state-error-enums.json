@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-logistics.1",
+  "artifactVersion": "2.0.0-merchant-lifecycle.1",
   "orderProjectionStates": [
     "QUOTED",
     "SUBMITTED",
@@ -208,7 +208,8 @@
     "STORE_IMAGE",
     "FULFILLMENT_EVIDENCE",
     "BUYER_AVATAR",
-    "MERCHANT_LOGO"
+    "MERCHANT_LOGO",
+    "MERCHANT_LICENSE"
   ],
   "mediaResourceTypes": [
     "PRODUCT",
@@ -217,6 +218,30 @@
     "ORDER",
     "BUYER",
     "MERCHANT"
+  ],
+  "merchantLevels": [
+    "V1",
+    "V2",
+    "V3",
+    "V4",
+    "V5"
+  ],
+  "merchantLifecycleStatuses": [
+    "PENDING",
+    "APPROVED",
+    "REJECTED",
+    "SUSPENDED",
+    "BLACKLISTED"
+  ],
+  "merchantQualificationAccess": [
+    "FULL",
+    "REDACTED",
+    "UNAVAILABLE"
+  ],
+  "merchantReviewActions": [
+    "APPROVE",
+    "REJECT",
+    "BLACKLIST"
   ],
   "fulfillmentAssets": [
     "USDT",

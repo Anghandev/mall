@@ -1,4 +1,4 @@
-export const CORE_ARTIFACT_VERSION = '2.0.0-logistics.1';
+export const CORE_ARTIFACT_VERSION = '2.0.0-merchant-lifecycle.1';
 export const BSC_CHAIN_ID = 56;
 export const USDT_ADDRESS = '0x55d398326f99059ff775485246999027b3197955';
 export const NPL_ADDRESS = '0x4e8277ab31e4956b2cd48449793a57656dfc03d2';
@@ -46,6 +46,18 @@ export type OrderFinalityStatus = (typeof orderFinalityStatuses)[number];
 
 export const userRoles = ['BUYER', 'MERCHANT', 'ADMIN', 'OPERATOR', 'ARBITRATOR', 'AUDITOR'] as const;
 export type UserRole = (typeof userRoles)[number];
+
+export const merchantLevels = ['V1', 'V2', 'V3', 'V4', 'V5'] as const;
+export type MerchantLevel = (typeof merchantLevels)[number];
+
+export const merchantLifecycleStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED', 'BLACKLISTED'] as const;
+export type MerchantLifecycleStatus = (typeof merchantLifecycleStatuses)[number];
+
+export const merchantReviewActions = ['APPROVE', 'REJECT', 'BLACKLIST'] as const;
+export type MerchantReviewAction = (typeof merchantReviewActions)[number];
+
+export const merchantQualificationAccess = ['FULL', 'REDACTED', 'UNAVAILABLE'] as const;
+export type MerchantQualificationAccess = (typeof merchantQualificationAccess)[number];
 
 export const breakerScopes = [
   'NEW_PAYMENT',
@@ -167,6 +179,7 @@ export const mediaPurposes = [
   'FULFILLMENT_EVIDENCE',
   'BUYER_AVATAR',
   'MERCHANT_LOGO',
+  'MERCHANT_LICENSE',
 ] as const;
 export type MediaPurpose = (typeof mediaPurposes)[number];
 

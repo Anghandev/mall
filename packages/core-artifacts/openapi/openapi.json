@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Abu 24K V2 Core API",
-    "version": "2.0.0-logistics.1"
+    "version": "2.0.0-merchant-lifecycle.1"
   },
-  "x-artifactVersion": "2.0.0-logistics.1",
+  "x-artifactVersion": "2.0.0-merchant-lifecycle.1",
   "servers": [],
   "paths": {
     "/v2/buyer/profile": {
@@ -6281,6 +6281,421 @@
         }
       }
     },
+    "/v2/admin/merchants": {
+      "get": {
+        "operationId": "listMerchantLifecycle",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/MerchantLifecycleStatus"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursorCreatedAt",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "cursorMerchantId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "PII-safe merchant lifecycle page",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantLifecycleList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createMerchantApplication",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MerchantApplicationCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Encrypted pending merchant application",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantLifecycleDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/merchants/{merchantId}": {
+      "get": {
+        "operationId": "getMerchantLifecycleDetail",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "merchantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Role-redacted merchant lifecycle drilldown",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantLifecycleDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/merchants/{merchantId}/application": {
+      "put": {
+        "operationId": "updateMerchantApplication",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "merchantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MerchantApplicationUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "New encrypted merchant application version",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantLifecycleDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/merchants/{merchantId}/review-challenges": {
+      "post": {
+        "operationId": "createMerchantReviewChallenge",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "merchantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MerchantReviewChallengeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Exact status-bound secondary signature challenge",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantReviewChallenge"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/merchants/{merchantId}/review-actions/{actionId}/publish": {
+      "post": {
+        "operationId": "publishMerchantReview",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "merchantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "actionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MerchantReviewPublishRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Secondary-signed and Safe-approved merchant status",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantLifecycleDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v2/bootstrap": {
       "get": {
         "operationId": "getBootstrap",
@@ -8803,7 +9218,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "status": {
             "const": "CORE_API_READY"
@@ -11879,7 +12294,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -11978,7 +12393,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -12918,7 +13333,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "productId": {
             "type": "string",
@@ -13091,7 +13506,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "storeId": {
             "type": "string",
@@ -13217,7 +13632,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "productId": {
             "type": "string",
@@ -13319,7 +13734,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "previewId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -13478,7 +13893,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "adjustmentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -13537,7 +13952,8 @@
               "STORE_IMAGE",
               "FULFILLMENT_EVIDENCE",
               "BUYER_AVATAR",
-              "MERCHANT_LOGO"
+              "MERCHANT_LOGO",
+              "MERCHANT_LICENSE"
             ]
           },
           "resourceType": {
@@ -13602,7 +14018,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "uploadIntentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -13618,7 +14034,8 @@
               "STORE_IMAGE",
               "FULFILLMENT_EVIDENCE",
               "BUYER_AVATAR",
-              "MERCHANT_LOGO"
+              "MERCHANT_LOGO",
+              "MERCHANT_LICENSE"
             ]
           },
           "resourceType": {
@@ -13699,7 +14116,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -13718,7 +14135,8 @@
               "STORE_IMAGE",
               "FULFILLMENT_EVIDENCE",
               "BUYER_AVATAR",
-              "MERCHANT_LOGO"
+              "MERCHANT_LOGO",
+              "MERCHANT_LICENSE"
             ]
           },
           "resourceType": {
@@ -13784,7 +14202,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -13797,7 +14215,8 @@
               "STORE_IMAGE",
               "FULFILLMENT_EVIDENCE",
               "BUYER_AVATAR",
-              "MERCHANT_LOGO"
+              "MERCHANT_LOGO",
+              "MERCHANT_LICENSE"
             ]
           },
           "resourceType": {
@@ -13944,7 +14363,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "evidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
@@ -14203,7 +14622,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -14478,7 +14897,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifact_version": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "wallet_address": {
             "$ref": "#/components/schemas/Address"
@@ -14804,7 +15223,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -15948,7 +16367,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -16171,7 +16590,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -17037,7 +17456,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "snapshotId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -17120,7 +17539,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -18451,7 +18870,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -18698,7 +19117,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -19053,7 +19472,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "sessionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -19282,7 +19701,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "protocolVersion": {
             "const": 1
@@ -19356,7 +19775,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -19694,7 +20113,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "addresses": {
             "type": "array",
@@ -19875,7 +20294,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -20042,7 +20461,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "orderId": {
             "type": "string",
@@ -20077,7 +20496,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "merchantId": {
             "type": "string",
@@ -20771,7 +21190,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "observation": {
             "$ref": "#/components/schemas/RiskObservation"
@@ -20797,7 +21216,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "generatedAt": {
             "type": "string",
@@ -21035,7 +21454,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "challengeId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -21102,7 +21521,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "bindingId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -21210,7 +21629,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "requestId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -21317,7 +21736,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "batchId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -21353,7 +21772,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-logistics.1"
+            "const": "2.0.0-merchant-lifecycle.1"
           },
           "printJobId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -21461,6 +21880,1041 @@
             "type": "string",
             "minLength": 8,
             "maxLength": 128
+          }
+        }
+      },
+      "MerchantLevel": {
+        "type": "string",
+        "enum": [
+          "V1",
+          "V2",
+          "V3",
+          "V4",
+          "V5"
+        ]
+      },
+      "MerchantLifecycleStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "APPROVED",
+          "REJECTED",
+          "SUSPENDED",
+          "BLACKLISTED"
+        ]
+      },
+      "MerchantReviewAction": {
+        "type": "string",
+        "enum": [
+          "APPROVE",
+          "REJECT",
+          "BLACKLIST"
+        ]
+      },
+      "MerchantQualificationAccess": {
+        "type": "string",
+        "enum": [
+          "FULL",
+          "REDACTED",
+          "UNAVAILABLE"
+        ]
+      },
+      "MerchantLifecycleSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "merchantId",
+          "shopName",
+          "settlementWallet",
+          "settlementWalletMutable",
+          "status",
+          "level",
+          "guaranteeStatus",
+          "applicationVersion",
+          "qualificationComplete",
+          "reviewedAt",
+          "reviewedBy",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "merchantId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "shopName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settlementWallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "settlementWalletMutable": {
+            "const": false
+          },
+          "status": {
+            "$ref": "#/components/schemas/MerchantLifecycleStatus"
+          },
+          "level": {
+            "$ref": "#/components/schemas/MerchantLevel"
+          },
+          "guaranteeStatus": {
+            "enum": [
+              "DECISION_BLOCKED",
+              "BELOW_MINIMUM",
+              "READY",
+              "FROZEN"
+            ]
+          },
+          "applicationVersion": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "qualificationComplete": {
+            "type": "boolean"
+          },
+          "reviewedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reviewedBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MerchantQualification": {
+        "anyOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "access",
+              "legalName",
+              "legalId",
+              "contactPhone",
+              "licenseAssetId",
+              "payloadHash",
+              "retentionPolicyVersion",
+              "version",
+              "updatedAt"
+            ],
+            "properties": {
+              "access": {
+                "const": "FULL"
+              },
+              "legalName": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "legalId": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "contactPhone": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "licenseAssetId": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Bytes32"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "payloadHash": {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              "retentionPolicyVersion": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "access",
+              "legalName",
+              "legalId",
+              "contactPhone",
+              "licenseAssetId",
+              "payloadHash",
+              "retentionPolicyVersion",
+              "version",
+              "updatedAt"
+            ],
+            "properties": {
+              "access": {
+                "const": "REDACTED"
+              },
+              "legalName": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "legalId": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "contactPhone": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "licenseAssetId": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Bytes32"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "payloadHash": {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              "retentionPolicyVersion": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "access",
+              "reason",
+              "licenseAssetId"
+            ],
+            "properties": {
+              "access": {
+                "const": "UNAVAILABLE"
+              },
+              "reason": {
+                "const": "PARTIAL_LEGACY"
+              },
+              "licenseAssetId": {
+                "type": "null"
+              }
+            }
+          }
+        ]
+      },
+      "MerchantLifecycleList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "merchants",
+          "nextCursor"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-merchant-lifecycle.1"
+          },
+          "merchants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantLifecycleSummary"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "createdAt",
+                  "merchantId"
+                ],
+                "properties": {
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "merchantId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "MerchantApplicationCreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "shopName",
+          "legalName",
+          "legalId",
+          "contactPhone",
+          "settlementWallet",
+          "level",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "shopName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "legalName": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80
+          },
+          "legalId": {
+            "type": "string",
+            "minLength": 6,
+            "maxLength": 32
+          },
+          "contactPhone": {
+            "type": "string",
+            "minLength": 6,
+            "maxLength": 32
+          },
+          "settlementWallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "level": {
+            "$ref": "#/components/schemas/MerchantLevel"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "MerchantApplicationUpdateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "shopName",
+          "legalName",
+          "legalId",
+          "contactPhone",
+          "level",
+          "licenseAssetId",
+          "expectedVersion",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "shopName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "legalName": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80
+          },
+          "legalId": {
+            "type": "string",
+            "minLength": 6,
+            "maxLength": 32
+          },
+          "contactPhone": {
+            "type": "string",
+            "minLength": 6,
+            "maxLength": 32
+          },
+          "level": {
+            "$ref": "#/components/schemas/MerchantLevel"
+          },
+          "licenseAssetId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "MerchantReviewChallengeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "reasonCode",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/MerchantReviewAction"
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z0-9_:-]{2,64}$"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "MerchantReviewPublishRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "signature"
+        ],
+        "properties": {
+          "signature": {
+            "type": "string",
+            "pattern": "^0x(?:[0-9a-fA-F]{2})+$"
+          }
+        }
+      },
+      "MerchantReviewChallenge": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "actionId",
+          "merchantId",
+          "action",
+          "fromStatus",
+          "toStatus",
+          "applicationVersion",
+          "reasonCode",
+          "state",
+          "secondarySigner",
+          "expiresAt",
+          "typedData",
+          "digest"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-merchant-lifecycle.1"
+          },
+          "actionId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "merchantId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "action": {
+            "$ref": "#/components/schemas/MerchantReviewAction"
+          },
+          "fromStatus": {
+            "$ref": "#/components/schemas/MerchantLifecycleStatus"
+          },
+          "toStatus": {
+            "$ref": "#/components/schemas/MerchantLifecycleStatus"
+          },
+          "applicationVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reasonCode": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "enum": [
+              "DRAFT",
+              "PUBLISHED",
+              "EXPIRED"
+            ]
+          },
+          "secondarySigner": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "typedData": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "digest": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "MerchantReviewEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "actionId",
+          "action",
+          "fromStatus",
+          "toStatus",
+          "applicationVersion",
+          "reasonCode",
+          "state",
+          "secondarySigner",
+          "actionDigest",
+          "safeTxHash",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "actionId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "action": {
+            "$ref": "#/components/schemas/MerchantReviewAction"
+          },
+          "fromStatus": {
+            "$ref": "#/components/schemas/MerchantLifecycleStatus"
+          },
+          "toStatus": {
+            "$ref": "#/components/schemas/MerchantLifecycleStatus"
+          },
+          "applicationVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reasonCode": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "enum": [
+              "DRAFT",
+              "PUBLISHED",
+              "EXPIRED"
+            ]
+          },
+          "secondarySigner": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actionDigest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "safeTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MerchantOrderAnalytics": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "totalFinalized",
+          "ordinaryFinalized",
+          "seckillFinalized",
+          "cumulative",
+          "today",
+          "timezone",
+          "window"
+        ],
+        "properties": {
+          "totalFinalized": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "ordinaryFinalized": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "seckillFinalized": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "cumulative": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "listPriceUsdt",
+              "buyerPaidUsdt",
+              "merchantBaseReceivableUsdt",
+              "merchantNetReceivableUsdt"
+            ],
+            "properties": {
+              "listPriceUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "buyerPaidUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "merchantBaseReceivableUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "merchantNetReceivableUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              }
+            }
+          },
+          "today": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "listPriceUsdt",
+              "buyerPaidUsdt",
+              "merchantBaseReceivableUsdt",
+              "merchantNetReceivableUsdt"
+            ],
+            "properties": {
+              "listPriceUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "buyerPaidUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "merchantBaseReceivableUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "merchantNetReceivableUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              }
+            }
+          },
+          "timezone": {
+            "const": "Asia/Shanghai"
+          },
+          "window": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "start",
+              "end"
+            ],
+            "properties": {
+              "start": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "end": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      },
+      "MerchantFulfillmentAnalytics": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pendingShipment",
+          "inTransit",
+          "completed",
+          "pickupCompleted",
+          "fastShip48h"
+        ],
+        "properties": {
+          "pendingShipment": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "inTransit": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "completed": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "pickupCompleted": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "fastShip48h": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "numerator",
+              "denominator",
+              "bps",
+              "reason"
+            ],
+            "properties": {
+              "status": {
+                "const": "DecisionBlocked"
+              },
+              "numerator": {
+                "type": "null"
+              },
+              "denominator": {
+                "type": "null"
+              },
+              "bps": {
+                "type": "null"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      },
+      "MerchantRiskAnalytics": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "takeoverCases",
+          "guaranteeUsedUsdt",
+          "frozenReceivableUsedUsdt",
+          "futureProceedsUsedUsdt",
+          "platformAdvanceUsdt",
+          "outstandingDebtUsdt",
+          "abnormalOrderRateBps",
+          "unavailableReason"
+        ],
+        "properties": {
+          "takeoverCases": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "guaranteeUsedUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "frozenReceivableUsedUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "futureProceedsUsedUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "platformAdvanceUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "outstandingDebtUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "abnormalOrderRateBps": {
+            "type": "null"
+          },
+          "unavailableReason": {
+            "const": "DecisionBlocked"
+          }
+        }
+      },
+      "MerchantContributionAnalytics": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "finalizedNplBurnAmount",
+          "fulfillmentAvailableBnmAmount",
+          "ledgerReconciled"
+        ],
+        "properties": {
+          "finalizedNplBurnAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "fulfillmentAvailableBnmAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "ledgerReconciled": {
+            "const": true
+          }
+        }
+      },
+      "MerchantLifecycleBalance": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state",
+          "amount"
+        ],
+        "properties": {
+          "state": {
+            "enum": [
+              "LOCKED",
+              "AVAILABLE",
+              "REQUESTED",
+              "BATCHED",
+              "SETTLED"
+            ]
+          },
+          "amount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          }
+        }
+      },
+      "MerchantLifecycleSettlement": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requestId",
+          "asset",
+          "amount",
+          "state",
+          "requestedAt",
+          "safeTxHash",
+          "settledAt"
+        ],
+        "properties": {
+          "requestId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "asset": {
+            "enum": [
+              "USDT",
+              "NPL"
+            ]
+          },
+          "amount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "state": {
+            "enum": [
+              "REQUESTED",
+              "BATCHED",
+              "SETTLED",
+              "RETRYABLE",
+              "QUARANTINED"
+            ]
+          },
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "safeTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settledAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "MerchantLifecycleDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "merchant",
+          "qualification",
+          "levelPolicy",
+          "analytics",
+          "balances",
+          "settlements",
+          "reviews"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-merchant-lifecycle.1"
+          },
+          "merchant": {
+            "$ref": "#/components/schemas/MerchantLifecycleSummary"
+          },
+          "qualification": {
+            "$ref": "#/components/schemas/MerchantQualification"
+          },
+          "levelPolicy": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "reason"
+            ],
+            "properties": {
+              "status": {
+                "const": "DecisionBlocked"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "analytics": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "orders",
+              "fulfillment",
+              "risk",
+              "contributions"
+            ],
+            "properties": {
+              "orders": {
+                "$ref": "#/components/schemas/MerchantOrderAnalytics"
+              },
+              "fulfillment": {
+                "$ref": "#/components/schemas/MerchantFulfillmentAnalytics"
+              },
+              "risk": {
+                "$ref": "#/components/schemas/MerchantRiskAnalytics"
+              },
+              "contributions": {
+                "$ref": "#/components/schemas/MerchantContributionAnalytics"
+              }
+            }
+          },
+          "balances": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantLifecycleBalance"
+            }
+          },
+          "settlements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantLifecycleSettlement"
+            }
+          },
+          "reviews": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantReviewEvidence"
+            }
           }
         }
       },
