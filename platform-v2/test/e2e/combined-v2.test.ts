@@ -57,6 +57,35 @@ test('merchant order export is coordinated, consumed by Merchant and absent from
   assert.equal('merchantOrderExport' in mallBaseline, false);
 });
 
+test('platform seckill governance is one authenticated coordinated Admin surface', () => {
+  const operations = [
+    ['GET', '/v2/admin/seckill/actions', 'listSeckillGovernanceActions'],
+    ['GET', '/v2/admin/seckill/actions/{actionId}', 'getSeckillGovernanceAction'],
+    ['POST', '/v2/admin/seckill/actions/{actionId}/approval-challenge', 'createSeckillGovernanceChallenge'],
+    ['POST', '/v2/admin/seckill/actions/{actionId}/secondary-signature', 'submitSeckillGovernanceApproval'],
+    ['POST', '/v2/admin/seckill/actions/{actionId}/safe-proposal', 'proposeSeckillGovernanceAction'],
+    ['POST', '/v2/admin/seckill/actions/{actionId}/cancel', 'cancelSeckillGovernanceAction'],
+    ['POST', '/v2/admin/seckill/sessions', 'createSeckillSessionDraft'],
+    ['POST', '/v2/admin/seckill/sessions/{sessionId}/force-close', 'createSeckillForceClose'],
+    ['POST', '/v2/admin/seckill/sessions/{sessionId}/prize-injections', 'createSeckillPrizeInjection'],
+    ['POST', '/v2/admin/seckill/breaker/resume', 'createSeckillBreakerResume'],
+  ] as const;
+
+  for (const [method, path, operationId] of operations) {
+    const entry = coordinatedOpenApi.paths[path] as Partial<Record<'get' | 'post', {
+      operationId?: string;
+      security?: readonly unknown[];
+    }>> | undefined;
+    const operation = entry?.[method.toLowerCase() as 'get' | 'post'];
+    assert.equal(operation?.operationId, operationId);
+    assert.deepEqual(operation?.security, [{ bearerAuth: [] }]);
+    assert.ok(coordinatedManifest.httpSurface.includes(`${method} ${path}`));
+  }
+  assert.equal(adminBaseline.adminCapabilities.seckillSessionHttp, true);
+  assert.equal(adminBaseline.adminCapabilities.seckillRealtime, true);
+  assert.equal(adminBaseline.adminCapabilities.writesWithoutRuntimeAuthorization, false);
+});
+
 test('ordinary and seckill quotes conserve funds and keep independent reservations', () => {
   const request = quoteRequest();
   const ordinary = buildPaymentIntent(request, readyPolicy(), 'ORDINARY', request.issuedAt);
