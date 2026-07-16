@@ -53,6 +53,11 @@ import {
   waybillPrintJob,
 } from './logistics-fixtures';
 import {
+  takeoverCaseDetail,
+  takeoverCaseList,
+  takeoverTrackingEvidence,
+} from './takeover-fixtures';
+import {
   catalogCategories,
   catalogTags,
   completedMediaAsset,
@@ -225,6 +230,8 @@ function createMockCoreApi(overrides: Partial<CoreApi> = {}): CoreApi {
       },
     }),
     listFulfillmentOrders: async () => ({ orders: [], nextCursor: null }),
+    listMerchantTakeoverCases: async () => takeoverCaseList,
+    getMerchantTakeoverCase: async () => takeoverCaseDetail,
     getMerchantBusinessDashboard: async () => merchantBusinessDashboard,
     getOrderFulfillmentTarget: async () => deliveryTarget,
     getOrderAllowedActions: async () => [{
@@ -232,6 +239,7 @@ function createMockCoreApi(overrides: Partial<CoreApi> = {}): CoreApi {
       enabled: false,
       reasonCode: 'ConfigurationRequired',
     }],
+    createOrderTrackingEvidence: async () => takeoverTrackingEvidence,
     recordShipment: async (orderId, input) => ({
       orderId,
       state: 'SHIPPED',
@@ -307,6 +315,18 @@ async function enterFulfillment(client: CoreApi) {
   return user;
 }
 
+async function enterTakeovers(client: CoreApi) {
+  const user = userEvent.setup();
+  installWallet();
+  render(<MemoryRouter><App client={client} /></MemoryRouter>);
+  const connect = screen.getByRole('button', { name: '连接钱包' });
+  await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
+  await user.click(connect);
+  const navigation = await screen.findByRole('navigation', { name: '商家工作台导航' });
+  await user.click(within(navigation).getByRole('link', { name: /接管履约/ }));
+  return user;
+}
+
 async function enterStores(client: CoreApi) {
   const user = userEvent.setup();
   const walletRequest = installWallet();
@@ -357,8 +377,8 @@ async function enterSettings(client: CoreApi) {
 }
 
 describe('00 wallet gateway', () => {
-  it('consumes settlement-admin.10 without widening the merchant action boundary', () => {
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.10');
+  it('consumes settlement-admin.11 without widening the merchant action boundary', () => {
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.11');
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
     expect(coreBoundary.artifactVersion).toBe(artifactVersion);
     expect(coreBoundary.artifactsAvailable).toBe(true);
@@ -1245,6 +1265,135 @@ describe('03 fulfillment center', () => {
   it('contains wide tables inside their horizontal scroll region', () => {
     expect(styles).toMatch(/\.page-stack,\s*\.page-stack > \* \{\s*min-width: 0;/);
     expect(styles).toMatch(/\.table-wrap \{[^}]*max-width: 100%;[^}]*min-width: 0;[^}]*overflow-x: auto;/);
+  });
+});
+
+describe('03b assigned takeover fulfillment', () => {
+  it('reads the current assignment and encrypted target, then creates tracking evidence before shipment', async () => {
+    const listMerchantTakeoverCases = vi.fn(async () => takeoverCaseList);
+    const getMerchantTakeoverCase = vi.fn(async () => takeoverCaseDetail);
+    const getOrderFulfillmentTarget = vi.fn(async () => deliveryTarget);
+    const createOrderTrackingEvidence = vi.fn(async () => takeoverTrackingEvidence);
+    const recordShipment = vi.fn(async () => ({
+      orderId: deliveryOrderId,
+      state: 'SHIPPED' as const,
+      shipmentId: 'replacement-shipment-result',
+      carrierCode: 'SF',
+      trackingNumberHash,
+      recordedAt: '2026-07-16T02:06:00.000Z',
+    }));
+    const user = await enterTakeovers(createMockCoreApi({
+      listMerchantTakeoverCases,
+      getMerchantTakeoverCase,
+      getOrderFulfillmentTarget,
+      createOrderTrackingEvidence,
+      recordShipment,
+    }));
+
+    await user.click(await screen.findByRole('button', { name: '处理案件' }));
+    expect(await screen.findByText(deliveryTarget.payload.address)).toBeTruthy();
+    expect(screen.getByText(takeoverCaseDetail.case.currentAssignment!.evidenceHash)).toBeTruthy();
+    const confirm = screen.getByRole('button', { name: '确认发货' }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+
+    await user.type(screen.getByLabelText('物流单号'), 'SF-REPLACEMENT-001');
+    await user.click(screen.getByRole('button', { name: '创建物流证据' }));
+    expect(await screen.findByText('Core 已封存物流证据')).toBeTruthy();
+    expect(confirm.disabled).toBe(false);
+    await user.click(confirm);
+
+    expect(await screen.findByText('已发货：replacement-shipment-result')).toBeTruthy();
+    expect(createOrderTrackingEvidence).toHaveBeenCalledWith(deliveryOrderId, expect.objectContaining({
+      carrierCode: 'SF',
+      trackingNumber: 'SF-REPLACEMENT-001',
+      idempotencyKey: expect.stringMatching(/^merchant-takeover-tracking-/),
+    }), 'test-session');
+    expect(recordShipment).toHaveBeenCalledWith(deliveryOrderId, expect.objectContaining({
+      carrierCode: 'SF',
+      trackingNumberHash,
+      evidenceHash: takeoverTrackingEvidence.evidenceHash,
+      idempotencyKey: expect.stringMatching(/^merchant-takeover-shipment-/),
+    }), 'test-session');
+    expect(getOrderFulfillmentTarget).toHaveBeenCalledWith(deliveryOrderId, 'test-session');
+    expect(listMerchantTakeoverCases).toHaveBeenCalledWith('test-session', expect.objectContaining({
+      state: 'FUNDED',
+      limit: 25,
+    }));
+  });
+
+  it('fails closed for an unfunded case even when a malformed projection enables shipment', async () => {
+    const unfundedDetail = {
+      ...takeoverCaseDetail,
+      case: { ...takeoverCaseDetail.case, state: 'OPEN' as const },
+    };
+    const createOrderTrackingEvidence = vi.fn(async () => takeoverTrackingEvidence);
+    const user = await enterTakeovers(createMockCoreApi({
+      listMerchantTakeoverCases: async () => ({
+        ...takeoverCaseList,
+        cases: [{ ...takeoverCaseList.cases[0]!, state: 'OPEN' }],
+      }),
+      getMerchantTakeoverCase: async () => unfundedDetail,
+      getOrderFulfillmentTarget: async () => deliveryTarget,
+      createOrderTrackingEvidence,
+    }));
+
+    await user.click(await screen.findByRole('button', { name: '处理案件' }));
+    await screen.findByText(deliveryTarget.payload.address);
+    expect((screen.getByLabelText('物流单号') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: '创建物流证据' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/仅 `FUNDED`/)).toBeTruthy();
+    expect(createOrderTrackingEvidence).not.toHaveBeenCalled();
+  });
+
+  it('rejects cross-tenant queues and a case whose assignment was revoked before detail read', async () => {
+    const getMerchantTakeoverCase = vi.fn(async () => takeoverCaseDetail);
+    await enterTakeovers(createMockCoreApi({
+      listMerchantTakeoverCases: async () => ({
+        ...takeoverCaseList,
+        cases: [{
+          ...takeoverCaseList.cases[0]!,
+          currentAssignment: {
+            ...takeoverCaseList.cases[0]!.currentAssignment!,
+            replacementMerchantId: 'merchant-other',
+          },
+        }],
+      }),
+      getMerchantTakeoverCase,
+    }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('接管案件与当前商家会话不一致');
+    expect(screen.queryByRole('button', { name: '处理案件' })).toBeNull();
+    expect(getMerchantTakeoverCase).not.toHaveBeenCalled();
+
+    cleanup();
+    const getOrderFulfillmentTarget = vi.fn(async () => deliveryTarget);
+    const user = await enterTakeovers(createMockCoreApi({
+      getMerchantTakeoverCase: async () => {
+        throw new CoreApiError('Forbidden', 'Takeover case is outside the replacement merchant scope', undefined, undefined, 403);
+      },
+      getOrderFulfillmentTarget,
+    }));
+    await user.click(await screen.findByRole('button', { name: '处理案件' }));
+
+    expect(await screen.findByText('案件读取被拒绝')).toBeTruthy();
+    expect(screen.getByText(/outside the replacement merchant scope/)).toBeTruthy();
+    expect(getOrderFulfillmentTarget).not.toHaveBeenCalled();
+  });
+
+  it('does not expose the address or shipment actions when target decryption is not configured', async () => {
+    const createOrderTrackingEvidence = vi.fn(async () => takeoverTrackingEvidence);
+    const user = await enterTakeovers(createMockCoreApi({
+      getOrderFulfillmentTarget: async () => {
+        throw new CoreApiError('ConfigurationRequired', 'Fulfillment target encryption key is unavailable');
+      },
+      createOrderTrackingEvidence,
+    }));
+    await user.click(await screen.findByRole('button', { name: '处理案件' }));
+
+    expect(await screen.findByText('案件读取被拒绝')).toBeTruthy();
+    expect(screen.queryByText(deliveryTarget.payload.address)).toBeNull();
+    expect(screen.queryByRole('button', { name: '创建物流证据' })).toBeNull();
+    expect(createOrderTrackingEvidence).not.toHaveBeenCalled();
   });
 });
 
