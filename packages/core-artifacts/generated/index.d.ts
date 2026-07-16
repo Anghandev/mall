@@ -1,4 +1,4 @@
-export declare const artifactVersion: "2.0.0-merchant-fulfillment.1";
+export declare const artifactVersion: "2.0.0-settlement-admin.10";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
@@ -826,6 +826,227 @@ export interface SettlementListProjection {
   balances: readonly SettlementBalance[];
   points: readonly BnmPointsBalance[];
   requests: readonly SettlementRequestProjection[];
+}
+
+export interface AdminSettlementRequest {
+  requestId: Bytes32;
+  merchantId: string | null;
+  walletAddress: Address;
+  recipientAddress: Address;
+  rail: SettlementRail;
+  asset: 'USDT' | 'NPL';
+  safeAddress: Address;
+  amount: AtomicAmount;
+  state: SettlementRequestState;
+  batchId: Bytes32 | null;
+  intentDigest: Bytes32;
+  signatureHash: Bytes32;
+  finalSafeTxHash: Bytes32 | null;
+  finalExecutionTxHash: Bytes32 | null;
+  itemCount: number;
+  requestedAt: string;
+  batchedAt: string | null;
+  settledAt: string | null;
+}
+
+export interface AdminSettlementRequestCursor {
+  requestedAt: string;
+  requestId: Bytes32;
+}
+
+export interface AdminSettlementRequestList {
+  artifactVersion: typeof artifactVersion;
+  requests: readonly AdminSettlementRequest[];
+  nextCursor: AdminSettlementRequestCursor | null;
+}
+
+export interface AdminSettlementRequestItemJournals {
+  requested: string;
+  batched: string | null;
+  settled: string | null;
+}
+
+export interface AdminSettlementRequestItem {
+  itemIndex: number;
+  orderId: Bytes32;
+  accountId: string;
+  backingSafeAddress: Address;
+  amount: AtomicAmount;
+  itemHash: Bytes32;
+  policyVersion: AtomicAmount;
+  journals: AdminSettlementRequestItemJournals;
+}
+
+export interface AdminSettlementRequestTransition {
+  transitionId: string;
+  requestItemIndex: number;
+  batchId: Bytes32 | null;
+  sequence: number;
+  type: 'REQUESTED' | 'BATCHED' | 'SETTLED' | 'BATCH_REVERSED' | 'FINALITY_REVERSED';
+  journalId: string;
+  createdAt: string;
+}
+
+export interface AdminSettlementRequestDetail {
+  artifactVersion: typeof artifactVersion;
+  request: AdminSettlementRequest;
+  items: readonly AdminSettlementRequestItem[];
+  transitions: readonly AdminSettlementRequestTransition[];
+}
+
+export interface AdminSettlementBatch {
+  batchId: Bytes32;
+  asset: 'USDT' | 'NPL';
+  safeAddress: Address;
+  safeNonce: AtomicAmount;
+  itemCount: number;
+  totalAmount: AtomicAmount;
+  contentHash: Bytes32;
+  safeTxHash: Bytes32;
+  state: SettlementBatchState;
+  approvalThreshold: number;
+  approvalCount: number;
+  createdBy: Address;
+  createdAt: string;
+  approvedAt: string | null;
+  submittedAt: string | null;
+  settledAt: string | null;
+}
+
+export interface AdminSettlementBatchCursor {
+  createdAt: string;
+  batchId: Bytes32;
+}
+
+export interface AdminSettlementBatchList {
+  artifactVersion: typeof artifactVersion;
+  batches: readonly AdminSettlementBatch[];
+  nextCursor: AdminSettlementBatchCursor | null;
+}
+
+export interface AdminSettlementBatchEnvelope extends AdminSettlementBatch {
+  chainId: 56;
+  assetAddress: Address;
+  safeVersion: string;
+  safeSingletonAddress: Address;
+  safeSingletonCodeHash: Bytes32;
+  ownerSetHash: Bytes32;
+  safeRuntimeEvidenceHash: Bytes32;
+  safeRuntimeCheckedAt: string;
+  multisendAddress: Address;
+  multisendCodeHash: Bytes32;
+  tokenCodeHash: Bytes32;
+  tokenTransferConformanceEvidenceHash: Bytes32;
+  itemsHash: Bytes32;
+  multisendTransactions: string;
+  multisendCalldata: string;
+  safeTxData: string;
+  proposalReferenceHash: Bytes32 | null;
+  approvalEvidenceHash: Bytes32 | null;
+}
+
+export interface AdminSettlementBatchItem {
+  itemIndex: number;
+  requestId: Bytes32;
+  requestItemIndex: number;
+  orderId: Bytes32;
+  merchantId: string | null;
+  accountId: string;
+  recipientAddress: Address;
+  tokenAddress: Address;
+  amount: AtomicAmount;
+  transferCalldata: string;
+  itemHash: Bytes32;
+}
+
+export interface AdminSettlementApproval {
+  ownerAddress: Address;
+  safeTxHash: Bytes32;
+  signatureHash: Bytes32;
+  approvedAt: string;
+}
+
+export interface AdminSettlementAttempt {
+  attemptId: string;
+  attemptNumber: number;
+  requestDigest: Bytes32;
+  safeTxHash: Bytes32;
+  executionTxHash: Bytes32 | null;
+  outerSender: Address | null;
+  outerNonce: AtomicAmount | null;
+  replacementForAttemptId: string | null;
+  state: 'LEASED' | 'SUBMITTED' | 'MINED' | 'SETTLED' | 'REPLACED' | 'FAILED' | 'REORGED' | 'QUARANTINED';
+  createdAt: string;
+  submittedAt: string | null;
+  updatedAt: string;
+}
+
+export interface AdminSettlementFinality {
+  transactionId: string;
+  expectedEventHash: Bytes32;
+  executionTxHash: Bytes32;
+  replacementForTxHash: Bytes32 | null;
+  receiptStatus: 0 | 1 | null;
+  blockNumber: AtomicAmount | null;
+  blockHash: Bytes32 | null;
+  confirmations: number;
+  requiredConfirmations: 15;
+  state: FinalityState;
+  evidence: Readonly<Record<string, unknown>>;
+  submittedAt: string;
+  finalizedAt: string | null;
+  updatedAt: string;
+}
+
+export interface AdminSettlementCoverage {
+  snapshotId: string;
+  blockNumber: AtomicAmount;
+  blockHash: Bytes32;
+  evidenceHash: Bytes32;
+  recordedAt: string;
+  safeAddress: Address;
+  asset: 'USDT' | 'NPL';
+  verifiedAssets: AtomicAmount;
+  unsettledLiabilities: AtomicAmount;
+  covered: boolean;
+}
+
+export interface AdminSettlementBreaker {
+  scope: BreakerScope;
+  paused: boolean;
+  evidenceHash: Bytes32;
+  policyVersion: AtomicAmount | null;
+  changedBy: string;
+  changedAt: string;
+}
+
+export interface AdminSettlementLedgerMovement {
+  eventType: string;
+  asset: 'USDT' | 'NPL';
+  debits: AtomicAmount;
+  credits: AtomicAmount;
+  balanced: boolean;
+}
+
+export interface AdminSettlementReconciliation {
+  expectedItemCount: number;
+  actualItemCount: number;
+  expectedTotalAmount: AtomicAmount;
+  actualTotalAmount: AtomicAmount;
+  ledgerMovements: readonly AdminSettlementLedgerMovement[];
+  conserved: boolean;
+}
+
+export interface AdminSettlementBatchDetail {
+  artifactVersion: typeof artifactVersion;
+  batch: AdminSettlementBatchEnvelope;
+  items: readonly AdminSettlementBatchItem[];
+  approvals: readonly AdminSettlementApproval[];
+  attempts: readonly AdminSettlementAttempt[];
+  finality: AdminSettlementFinality | null;
+  coverage: AdminSettlementCoverage | null;
+  breakers: readonly AdminSettlementBreaker[];
+  reconciliation: AdminSettlementReconciliation;
 }
 
 export interface GuaranteeDepositRequest {

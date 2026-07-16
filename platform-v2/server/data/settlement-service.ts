@@ -9,7 +9,12 @@ import {
   CORE_ARTIFACT_VERSION,
   NPL_ADDRESS,
   USDT_ADDRESS,
+  settlementBatchStates,
+  settlementRails,
+  settlementRequestStates,
+  type SettlementBatchState,
   type SettlementRail,
+  type SettlementRequestState,
 } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import {
@@ -147,7 +152,175 @@ interface BatchProjectionRow extends Record<string, unknown> {
   batch_id: string;
   state: string;
   total_amount: string;
+  content_hash: string;
   safe_tx_hash: string;
+}
+
+interface AdminSettlementRequestRow {
+  request_id: string;
+  merchant_id: string | null;
+  wallet_address: string;
+  recipient_address: string;
+  rail: SettlementRail;
+  asset: 'USDT' | 'NPL';
+  safe_address: string;
+  amount: string;
+  state: SettlementRequestState;
+  batch_id: string | null;
+  intent_digest: string;
+  signature_hash: string;
+  final_safe_tx_hash: string | null;
+  final_execution_tx_hash: string | null;
+  requested_at: Date | string;
+  batched_at: Date | string | null;
+  settled_at: Date | string | null;
+  item_count: string;
+}
+
+interface AdminSettlementRequestItemRow {
+  item_index: number;
+  order_id: string;
+  account_id: string;
+  backing_safe_address: string;
+  amount: string;
+  item_hash: string;
+  requested_journal_id: string;
+  batched_journal_id: string | null;
+  settled_journal_id: string | null;
+  policy_version: string;
+}
+
+interface AdminSettlementTransitionRow {
+  transition_id: string;
+  request_item_index: number;
+  batch_id: string | null;
+  transition_sequence: number;
+  transition_type: string;
+  journal_id: string;
+  created_at: Date | string;
+}
+
+interface AdminSettlementBatchRow {
+  batch_id: string;
+  asset: 'USDT' | 'NPL';
+  safe_address: string;
+  safe_nonce: string;
+  item_count: number;
+  total_amount: string;
+  content_hash: string;
+  safe_tx_hash: string;
+  state: SettlementBatchState;
+  approval_threshold: number;
+  approval_count: string;
+  created_by: string;
+  created_at: Date | string;
+  approved_at: Date | string | null;
+  submitted_at: Date | string | null;
+  settled_at: Date | string | null;
+}
+
+interface AdminSettlementBatchDetailRow extends AdminSettlementBatchRow {
+  chain_id: string | number;
+  artifact_version: string;
+  asset_address: string;
+  safe_version: string;
+  safe_singleton_address: string;
+  safe_singleton_code_hash: string;
+  owner_set_hash: string;
+  safe_runtime_evidence_hash: string;
+  safe_runtime_checked_at: Date | string;
+  multisend_address: string;
+  multisend_code_hash: string;
+  token_code_hash: string;
+  token_transfer_conformance_evidence_hash: string;
+  items_hash: string;
+  multisend_transactions: string;
+  multisend_calldata: string;
+  safe_tx_data: string;
+  proposal_reference_hash: string | null;
+  approval_evidence_hash: string | null;
+}
+
+interface AdminSettlementBatchItemRow {
+  item_index: number;
+  request_id: string;
+  request_item_index: number;
+  order_id: string;
+  merchant_id: string | null;
+  account_id: string;
+  recipient_address: string;
+  token_address: string;
+  amount: string;
+  transfer_calldata: string;
+  item_hash: string;
+}
+
+interface AdminSettlementApprovalRow {
+  owner_address: string;
+  safe_tx_hash: string;
+  signature_hash: string;
+  approved_at: Date | string;
+}
+
+interface AdminSettlementAttemptRow {
+  attempt_id: string;
+  attempt_number: number;
+  request_digest: string;
+  safe_tx_hash: string;
+  execution_tx_hash: string | null;
+  outer_sender: string | null;
+  outer_nonce: string | null;
+  replacement_for_attempt_id: string | null;
+  state: string;
+  created_at: Date | string;
+  submitted_at: Date | string | null;
+  updated_at: Date | string;
+}
+
+interface AdminSettlementFinalityRow {
+  transaction_id: string;
+  expected_event_hash: string;
+  tx_hash: string;
+  replacement_for_tx_hash: string | null;
+  receipt_status: number | null;
+  block_number: string | null;
+  block_hash: string | null;
+  confirmations: number;
+  required_confirmations: number;
+  state: string;
+  evidence: Record<string, unknown>;
+  submitted_at: Date | string;
+  finalized_at: Date | string | null;
+  updated_at: Date | string;
+}
+
+interface AdminSettlementLedgerMovementRow {
+  event_type: string;
+  asset: string;
+  debits: string;
+  credits: string;
+}
+
+interface AdminSettlementCoverageRow {
+  snapshot_id: string;
+  block_number: string;
+  block_hash: string;
+  evidence_hash: string;
+  recorded_at: Date | string;
+  safe_address: string;
+  asset: 'USDT' | 'NPL';
+  verified_asset_balance: string;
+  unsettled_liability: string;
+  coverage_met: boolean;
+}
+
+interface AdminSettlementBreakerRow {
+  scope: string;
+  paused: boolean;
+  evidence_hash: string;
+  policy_version: string | null;
+  changed_by: string;
+  changed_at: Date | string;
 }
 
 export interface SafeRuntimeEvidence {
@@ -164,6 +337,38 @@ export interface SafeRuntimeEvidence {
   tokenTransferConformanceEvidenceHash: string;
   evidenceHash: string;
   checkedAt: Date;
+}
+
+export interface AdminSettlementRequestQuery {
+  requestId?: string;
+  merchantId?: string;
+  walletAddress?: string;
+  orderId?: string;
+  batchId?: string;
+  safeTxHash?: string;
+  rail?: SettlementRail;
+  asset?: 'USDT' | 'NPL';
+  state?: SettlementRequestState;
+  from?: Date;
+  to?: Date;
+  cursorRequestedAt?: Date;
+  cursorRequestId?: string;
+  limit?: number;
+}
+
+export interface AdminSettlementBatchQuery {
+  batchId?: string;
+  merchantId?: string;
+  orderId?: string;
+  safeAddress?: string;
+  safeTxHash?: string;
+  asset?: 'USDT' | 'NPL';
+  state?: SettlementBatchState;
+  from?: Date;
+  to?: Date;
+  cursorCreatedAt?: Date;
+  cursorBatchId?: string;
+  limit?: number;
 }
 
 export class SettlementService {
@@ -828,6 +1033,340 @@ export class SettlementService {
           transferable: false as const,
         })),
         requests: await Promise.all(requests.rows.map((row) => loadRequestProjection(executor, row.request_id))),
+      };
+    });
+  }
+
+  listAdminRequests(actor: FulfillmentActor, input: AdminSettlementRequestQuery = {}) {
+    assertRole(actor, 'ADMIN', 'OPERATOR', 'AUDITOR');
+    const query = validateAdminRequestQuery(input);
+    return this.#transactions.transaction(async (executor) => {
+      const result = await executor.query<AdminSettlementRequestRow>(
+        `SELECT request.request_id, request.merchant_id, request.wallet_address,
+           request.recipient_address, request.rail, request.asset, request.safe_address,
+           request.amount::text, request.state, request.batch_id, request.intent_digest,
+           request.signature_hash, request.final_safe_tx_hash,
+           request.final_execution_tx_hash, request.requested_at, request.batched_at,
+           request.settled_at, count(item.item_index)::text AS item_count
+         FROM core.settlement_requests request
+         JOIN core.settlement_request_items item ON item.request_id = request.request_id
+         WHERE ($1::text IS NULL OR request.request_id = $1)
+           AND ($2::text IS NULL OR request.merchant_id = $2)
+           AND ($3::text IS NULL OR request.wallet_address = $3)
+           AND ($4::text IS NULL OR EXISTS (
+             SELECT 1 FROM core.settlement_request_items requested_item
+             WHERE requested_item.request_id = request.request_id AND requested_item.order_id = $4
+           ))
+           AND ($5::text IS NULL OR request.batch_id = $5)
+           AND ($6::text IS NULL OR request.final_safe_tx_hash = $6)
+           AND ($7::text IS NULL OR request.rail = $7)
+           AND ($8::text IS NULL OR request.asset = $8)
+           AND ($9::text IS NULL OR request.state = $9)
+           AND ($10::timestamptz IS NULL OR request.requested_at >= $10)
+           AND ($11::timestamptz IS NULL OR request.requested_at < $11)
+           AND ($12::timestamptz IS NULL OR (request.requested_at, request.request_id) < ($12, $13))
+         GROUP BY request.request_id
+         ORDER BY request.requested_at DESC, request.request_id DESC
+         LIMIT $14`,
+        [
+          query.requestId ?? null,
+          query.merchantId ?? null,
+          query.walletAddress ?? null,
+          query.orderId ?? null,
+          query.batchId ?? null,
+          query.safeTxHash ?? null,
+          query.rail ?? null,
+          query.asset ?? null,
+          query.state ?? null,
+          query.from ?? null,
+          query.to ?? null,
+          query.cursorRequestedAt ?? null,
+          query.cursorRequestId ?? null,
+          query.limit + 1,
+        ],
+      );
+      const page = result.rows.slice(0, query.limit);
+      const last = result.rows.length > query.limit ? page.at(-1) : undefined;
+      return {
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        requests: page.map(adminRequestProjection),
+        nextCursor: last
+          ? { requestedAt: timestamp(last.requested_at), requestId: last.request_id }
+          : null,
+      };
+    });
+  }
+
+  getAdminRequest(actor: FulfillmentActor, requestId: string) {
+    assertRole(actor, 'ADMIN', 'OPERATOR', 'AUDITOR');
+    requireHash(requestId, 'settlement request ID');
+    return this.#transactions.transaction(async (executor) => {
+      const request = await loadAdminRequest(executor, requestId);
+      const items = await executor.query<AdminSettlementRequestItemRow>(
+        `SELECT item.item_index, item.order_id, item.account_id,
+           item.backing_safe_address, item.amount::text, intent_item.item_hash,
+           item.requested_journal_id, item.batched_journal_id,
+           item.settled_journal_id, orders.policy_version::text
+         FROM core.settlement_request_items item
+         JOIN core.settlement_requests request ON request.request_id = item.request_id
+         JOIN core.settlement_intent_items intent_item
+           ON intent_item.intent_id = request.intent_id AND intent_item.item_index = item.item_index
+         JOIN core.orders orders ON orders.order_id = item.order_id
+         WHERE item.request_id = $1 ORDER BY item.item_index`,
+        [requestId],
+      );
+      const transitions = await executor.query<AdminSettlementTransitionRow>(
+        `SELECT transition_id, request_item_index, batch_id,
+           transition_sequence, transition_type, journal_id, created_at
+         FROM core.settlement_request_item_transitions
+         WHERE request_id = $1
+         ORDER BY request_item_index, transition_sequence`,
+        [requestId],
+      );
+      return {
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        request: adminRequestProjection(request),
+        items: items.rows.map((row) => ({
+          itemIndex: row.item_index,
+          orderId: row.order_id,
+          accountId: row.account_id,
+          backingSafeAddress: row.backing_safe_address,
+          amount: row.amount,
+          itemHash: row.item_hash,
+          policyVersion: row.policy_version,
+          journals: {
+            requested: row.requested_journal_id,
+            batched: row.batched_journal_id,
+            settled: row.settled_journal_id,
+          },
+        })),
+        transitions: transitions.rows.map((row) => ({
+          transitionId: row.transition_id,
+          requestItemIndex: row.request_item_index,
+          batchId: row.batch_id,
+          sequence: row.transition_sequence,
+          type: row.transition_type,
+          journalId: row.journal_id,
+          createdAt: timestamp(row.created_at),
+        })),
+      };
+    });
+  }
+
+  listAdminBatches(actor: FulfillmentActor, input: AdminSettlementBatchQuery = {}) {
+    assertRole(actor, 'ADMIN', 'OPERATOR', 'AUDITOR');
+    const query = validateAdminBatchQuery(input);
+    return this.#transactions.transaction(async (executor) => {
+      const result = await executor.query<AdminSettlementBatchRow>(
+        `${adminBatchSelect()}
+         WHERE ($1::text IS NULL OR batch.batch_id = $1)
+           AND ($2::text IS NULL OR EXISTS (
+             SELECT 1 FROM core.settlement_batch_items batch_item
+             JOIN core.settlement_requests request ON request.request_id = batch_item.request_id
+             WHERE batch_item.batch_id = batch.batch_id AND request.merchant_id = $2
+           ))
+           AND ($3::text IS NULL OR EXISTS (
+             SELECT 1 FROM core.settlement_batch_items batch_item
+             WHERE batch_item.batch_id = batch.batch_id AND batch_item.order_id = $3
+           ))
+           AND ($4::text IS NULL OR batch.safe_address = $4)
+           AND ($5::text IS NULL OR batch.safe_tx_hash = $5)
+           AND ($6::text IS NULL OR batch.asset = $6)
+           AND ($7::text IS NULL OR batch.state = $7)
+           AND ($8::timestamptz IS NULL OR batch.created_at >= $8)
+           AND ($9::timestamptz IS NULL OR batch.created_at < $9)
+           AND ($10::timestamptz IS NULL OR (batch.created_at, batch.batch_id) < ($10, $11))
+         ORDER BY batch.created_at DESC, batch.batch_id DESC
+         LIMIT $12`,
+        [
+          query.batchId ?? null,
+          query.merchantId ?? null,
+          query.orderId ?? null,
+          query.safeAddress ?? null,
+          query.safeTxHash ?? null,
+          query.asset ?? null,
+          query.state ?? null,
+          query.from ?? null,
+          query.to ?? null,
+          query.cursorCreatedAt ?? null,
+          query.cursorBatchId ?? null,
+          query.limit + 1,
+        ],
+      );
+      const page = result.rows.slice(0, query.limit);
+      const last = result.rows.length > query.limit ? page.at(-1) : undefined;
+      return {
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        batches: page.map(adminBatchProjection),
+        nextCursor: last
+          ? { createdAt: timestamp(last.created_at), batchId: last.batch_id }
+          : null,
+      };
+    });
+  }
+
+  getAdminBatch(actor: FulfillmentActor, batchId: string) {
+    assertRole(actor, 'ADMIN', 'OPERATOR', 'AUDITOR');
+    requireHash(batchId, 'settlement batch ID');
+    return this.#transactions.transaction(async (executor) => {
+      const batchResult = await executor.query<AdminSettlementBatchDetailRow>(
+        `${adminBatchDetailSelect()} WHERE batch.batch_id = $1`,
+        [batchId],
+      );
+      const batch = batchResult.rows[0];
+      if (!batch) throw new CoreError('InvalidRequest', 'Settlement batch not found', 404);
+      const items = await executor.query<AdminSettlementBatchItemRow>(
+        `SELECT item.item_index, item.request_id, item.request_item_index,
+           item.order_id, request.merchant_id, item.account_id,
+           item.recipient_address, item.token_address, item.amount::text,
+           item.transfer_calldata, item.item_hash
+         FROM core.settlement_batch_items item
+         JOIN core.settlement_requests request ON request.request_id = item.request_id
+         WHERE item.batch_id = $1 ORDER BY item.item_index`,
+        [batchId],
+      );
+      const approvals = await executor.query<AdminSettlementApprovalRow>(
+        `SELECT owner_address, safe_tx_hash, signature_hash, approved_at
+         FROM core.settlement_batch_approvals
+         WHERE batch_id = $1 ORDER BY owner_address`,
+        [batchId],
+      );
+      const attempts = await executor.query<AdminSettlementAttemptRow>(
+        `SELECT attempt.attempt_id, attempt.attempt_number, attempt.request_digest,
+           attempt.safe_tx_hash, attempt.execution_tx_hash, attempt.outer_sender,
+           attempt.outer_nonce::text, attempt.replacement_for_attempt_id,
+           attempt.state, attempt.created_at, attempt.submitted_at, attempt.updated_at
+         FROM core.settlement_execution_attempts attempt
+         WHERE attempt.batch_id = $1 ORDER BY attempt.attempt_number`,
+        [batchId],
+      );
+      const finality = await executor.query<AdminSettlementFinalityRow>(
+        `SELECT transaction_id, expected_event_hash, tx_hash,
+           replacement_for_tx_hash, receipt_status, block_number::text,
+           block_hash, confirmations, required_confirmations, state,
+           evidence, submitted_at, finalized_at, updated_at
+         FROM core.transaction_finality
+         WHERE resource_type = 'SETTLEMENT_BATCH' AND resource_id = $1
+         ORDER BY updated_at DESC, transaction_id DESC LIMIT 1`,
+        [batchId],
+      );
+      const movements = await executor.query<AdminSettlementLedgerMovementRow>(
+        `SELECT journal.event_type, account.asset,
+           COALESCE(sum(CASE WHEN line.side = 'DEBIT' THEN line.amount ELSE 0 END), 0)::text AS debits,
+           COALESCE(sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE 0 END), 0)::text AS credits
+         FROM core.ledger_journals journal
+         JOIN core.ledger_lines line ON line.journal_id = journal.journal_id
+         JOIN core.ledger_accounts account ON account.account_id = line.account_id
+         WHERE journal.resource_type = 'SETTLEMENT_BATCH' AND journal.resource_id = $1
+         GROUP BY journal.event_type, account.asset
+         ORDER BY journal.event_type, account.asset`,
+        [batchId],
+      );
+      const coverage = await executor.query<AdminSettlementCoverageRow>(
+        `SELECT snapshot.snapshot_id, snapshot.block_number::text,
+           snapshot.block_hash, snapshot.evidence_hash, snapshot.recorded_at,
+           item.safe_address, item.asset, item.verified_asset_balance::text,
+           item.unsettled_liability::text, item.coverage_met
+         FROM core.coverage_snapshots snapshot
+         JOIN core.coverage_snapshot_items item ON item.snapshot_id = snapshot.snapshot_id
+         WHERE item.safe_address = $1 AND item.asset = $2
+           AND COALESCE((
+             SELECT canonical FROM core.coverage_snapshot_canonicality observation
+             WHERE observation.snapshot_id = snapshot.snapshot_id
+             ORDER BY observation.observed_at DESC, observation.observation_id DESC LIMIT 1
+           ), snapshot.canonical)
+         ORDER BY snapshot.block_number DESC, snapshot.recorded_at DESC LIMIT 1`,
+        [batch.safe_address, batch.asset],
+      );
+      const breakers = await executor.query<AdminSettlementBreakerRow>(
+        `SELECT scope, paused, evidence_hash, policy_version::text,
+           changed_by, changed_at FROM core.circuit_breakers ORDER BY scope`,
+      );
+      const itemAmount = items.rows.reduce((sum, item) => sum + BigInt(item.amount), 0n).toString();
+      const ledgerMovements = movements.rows.map((row) => ({
+        eventType: row.event_type,
+        asset: row.asset,
+        debits: row.debits,
+        credits: row.credits,
+        balanced: row.debits === row.credits,
+      }));
+      return {
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        batch: {
+          ...adminBatchProjection(batch),
+          chainId: Number(batch.chain_id),
+          assetAddress: batch.asset_address,
+          safeVersion: batch.safe_version,
+          safeSingletonAddress: batch.safe_singleton_address,
+          safeSingletonCodeHash: batch.safe_singleton_code_hash,
+          ownerSetHash: batch.owner_set_hash,
+          safeRuntimeEvidenceHash: batch.safe_runtime_evidence_hash,
+          safeRuntimeCheckedAt: timestamp(batch.safe_runtime_checked_at),
+          multisendAddress: batch.multisend_address,
+          multisendCodeHash: batch.multisend_code_hash,
+          tokenCodeHash: batch.token_code_hash,
+          tokenTransferConformanceEvidenceHash: batch.token_transfer_conformance_evidence_hash,
+          itemsHash: batch.items_hash,
+          multisendTransactions: batch.multisend_transactions,
+          multisendCalldata: batch.multisend_calldata,
+          safeTxData: batch.safe_tx_data,
+          proposalReferenceHash: batch.proposal_reference_hash,
+          approvalEvidenceHash: batch.approval_evidence_hash,
+        },
+        items: items.rows.map((row) => ({
+          itemIndex: row.item_index,
+          requestId: row.request_id,
+          requestItemIndex: row.request_item_index,
+          orderId: row.order_id,
+          merchantId: row.merchant_id,
+          accountId: row.account_id,
+          recipientAddress: row.recipient_address,
+          tokenAddress: row.token_address,
+          amount: row.amount,
+          transferCalldata: row.transfer_calldata,
+          itemHash: row.item_hash,
+        })),
+        approvals: approvals.rows.map((row) => ({
+          ownerAddress: row.owner_address,
+          safeTxHash: row.safe_tx_hash,
+          signatureHash: row.signature_hash,
+          approvedAt: timestamp(row.approved_at),
+        })),
+        attempts: attempts.rows.map((row) => ({
+          attemptId: row.attempt_id,
+          attemptNumber: row.attempt_number,
+          requestDigest: row.request_digest,
+          safeTxHash: row.safe_tx_hash,
+          executionTxHash: row.execution_tx_hash,
+          outerSender: row.outer_sender,
+          outerNonce: row.outer_nonce,
+          replacementForAttemptId: row.replacement_for_attempt_id,
+          state: row.state,
+          createdAt: timestamp(row.created_at),
+          submittedAt: nullableTimestamp(row.submitted_at),
+          updatedAt: timestamp(row.updated_at),
+        })),
+        finality: finality.rows[0] ? adminFinalityProjection(finality.rows[0]) : null,
+        coverage: coverage.rows[0] ? adminCoverageProjection(coverage.rows[0]) : null,
+        breakers: breakers.rows.map((row) => ({
+          scope: row.scope,
+          paused: row.paused,
+          evidenceHash: row.evidence_hash,
+          policyVersion: row.policy_version,
+          changedBy: row.changed_by,
+          changedAt: timestamp(row.changed_at),
+        })),
+        reconciliation: {
+          expectedItemCount: batch.item_count,
+          actualItemCount: items.rows.length,
+          expectedTotalAmount: batch.total_amount,
+          actualTotalAmount: itemAmount,
+          ledgerMovements,
+          conserved: batch.item_count === items.rows.length
+            && batch.total_amount === itemAmount
+            && ledgerMovements.length > 0
+            && ledgerMovements.every((row) => row.balanced),
+        },
       };
     });
   }
@@ -1981,6 +2520,207 @@ async function assertBatchCreationAvailable(
     || !row.coverage_met
     || now.getTime() - new Date(row.recorded_at).getTime() > RUNTIME_EVIDENCE_MAX_AGE_MS
   ) throw new CoreError('ExternalBlocked', 'Fresh Safe coverage evidence is unavailable', 503);
+}
+
+function validateAdminRequestQuery(input: AdminSettlementRequestQuery) {
+  const query = { ...input, limit: validateAdminLimit(input.limit) };
+  if (query.requestId) query.requestId = requireHash(query.requestId, 'settlement request ID');
+  if (query.orderId) query.orderId = requireHash(query.orderId, 'order ID');
+  if (query.batchId) query.batchId = requireHash(query.batchId, 'settlement batch ID');
+  if (query.safeTxHash) query.safeTxHash = requireHash(query.safeTxHash, 'Safe TxHash');
+  if (query.walletAddress) query.walletAddress = normalizedAddress(query.walletAddress, 'wallet address');
+  if (query.rail && !settlementRails.includes(query.rail)) {
+    throw new CoreError('InvalidRequest', 'Settlement rail filter is invalid');
+  }
+  if (query.asset && !['USDT', 'NPL'].includes(query.asset)) {
+    throw new CoreError('InvalidRequest', 'Settlement asset filter is invalid');
+  }
+  if (query.state && !settlementRequestStates.includes(query.state)) {
+    throw new CoreError('InvalidRequest', 'Settlement request state filter is invalid');
+  }
+  validateAdminDateRange(query.from, query.to);
+  if (Boolean(query.cursorRequestedAt) !== Boolean(query.cursorRequestId)) {
+    throw new CoreError('InvalidRequest', 'Settlement request cursor is incomplete');
+  }
+  if (query.cursorRequestId) query.cursorRequestId = requireHash(query.cursorRequestId, 'request cursor ID');
+  return query;
+}
+
+function validateAdminBatchQuery(input: AdminSettlementBatchQuery) {
+  const query = { ...input, limit: validateAdminLimit(input.limit) };
+  if (query.batchId) query.batchId = requireHash(query.batchId, 'settlement batch ID');
+  if (query.orderId) query.orderId = requireHash(query.orderId, 'order ID');
+  if (query.safeTxHash) query.safeTxHash = requireHash(query.safeTxHash, 'Safe TxHash');
+  if (query.safeAddress) query.safeAddress = normalizedAddress(query.safeAddress, 'Safe address');
+  if (query.asset && !['USDT', 'NPL'].includes(query.asset)) {
+    throw new CoreError('InvalidRequest', 'Settlement asset filter is invalid');
+  }
+  if (query.state && !settlementBatchStates.includes(query.state)) {
+    throw new CoreError('InvalidRequest', 'Settlement batch state filter is invalid');
+  }
+  validateAdminDateRange(query.from, query.to);
+  if (Boolean(query.cursorCreatedAt) !== Boolean(query.cursorBatchId)) {
+    throw new CoreError('InvalidRequest', 'Settlement batch cursor is incomplete');
+  }
+  if (query.cursorBatchId) query.cursorBatchId = requireHash(query.cursorBatchId, 'batch cursor ID');
+  return query;
+}
+
+function validateAdminDateRange(from?: Date, to?: Date) {
+  if (from && !Number.isFinite(from.getTime())) throw new CoreError('InvalidRequest', 'From timestamp is invalid');
+  if (to && !Number.isFinite(to.getTime())) throw new CoreError('InvalidRequest', 'To timestamp is invalid');
+  if (from && to && from >= to) throw new CoreError('InvalidRequest', 'Settlement date range is invalid');
+}
+
+function validateAdminLimit(limit = 50) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+    throw new CoreError('InvalidRequest', 'Settlement page limit must be between 1 and 100');
+  }
+  return limit;
+}
+
+async function loadAdminRequest(executor: SqlExecutor, requestId: string) {
+  const result = await executor.query<AdminSettlementRequestRow>(
+    `SELECT request.request_id, request.merchant_id, request.wallet_address,
+       request.recipient_address, request.rail, request.asset, request.safe_address,
+       request.amount::text, request.state, request.batch_id, request.intent_digest,
+       request.signature_hash, request.final_safe_tx_hash,
+       request.final_execution_tx_hash, request.requested_at, request.batched_at,
+       request.settled_at, (
+         SELECT count(*)::text FROM core.settlement_request_items item
+         WHERE item.request_id = request.request_id
+       ) AS item_count
+     FROM core.settlement_requests request WHERE request.request_id = $1`,
+    [requestId],
+  );
+  if (!result.rows[0]) throw new CoreError('InvalidRequest', 'Settlement request not found', 404);
+  return result.rows[0];
+}
+
+function adminRequestProjection(row: AdminSettlementRequestRow) {
+  return {
+    requestId: row.request_id,
+    merchantId: row.merchant_id,
+    walletAddress: row.wallet_address,
+    recipientAddress: row.recipient_address,
+    rail: row.rail,
+    asset: row.asset,
+    safeAddress: row.safe_address,
+    amount: row.amount,
+    state: row.state,
+    batchId: row.batch_id,
+    intentDigest: row.intent_digest,
+    signatureHash: row.signature_hash,
+    finalSafeTxHash: row.final_safe_tx_hash,
+    finalExecutionTxHash: row.final_execution_tx_hash,
+    itemCount: Number(row.item_count),
+    requestedAt: timestamp(row.requested_at),
+    batchedAt: nullableTimestamp(row.batched_at),
+    settledAt: nullableTimestamp(row.settled_at),
+  };
+}
+
+function adminBatchSelect() {
+  return `SELECT batch.batch_id, batch.asset, batch.safe_address,
+    batch.safe_nonce::text, batch.item_count, batch.total_amount::text,
+    batch.content_hash, batch.safe_tx_hash, batch.state,
+    batch.approval_threshold, (
+      SELECT count(*)::text FROM core.settlement_batch_approvals approval
+      WHERE approval.batch_id = batch.batch_id
+    ) AS approval_count,
+    batch.created_by, batch.created_at, batch.approved_at,
+    batch.submitted_at, batch.settled_at
+    FROM core.settlement_batches batch`;
+}
+
+function adminBatchDetailSelect() {
+  return `SELECT batch.batch_id, batch.artifact_version, batch.chain_id,
+    batch.asset, batch.asset_address, batch.safe_address, batch.safe_version,
+    batch.safe_singleton_address, batch.safe_singleton_code_hash,
+    batch.safe_nonce::text, batch.owner_set_hash,
+    batch.safe_runtime_evidence_hash, batch.safe_runtime_checked_at,
+    batch.multisend_address, batch.multisend_code_hash, batch.token_code_hash,
+    batch.token_transfer_conformance_evidence_hash, batch.item_count,
+    batch.total_amount::text, batch.items_hash, batch.content_hash,
+    batch.multisend_transactions, batch.multisend_calldata, batch.safe_tx_data,
+    batch.safe_tx_hash, batch.state, batch.approval_threshold,
+    batch.proposal_reference_hash, batch.approval_evidence_hash, (
+      SELECT count(*)::text FROM core.settlement_batch_approvals approval
+      WHERE approval.batch_id = batch.batch_id
+    ) AS approval_count,
+    batch.created_by, batch.created_at, batch.approved_at,
+    batch.submitted_at, batch.settled_at
+    FROM core.settlement_batches batch`;
+}
+
+function adminBatchProjection(row: AdminSettlementBatchRow) {
+  return {
+    batchId: row.batch_id,
+    asset: row.asset,
+    safeAddress: row.safe_address,
+    safeNonce: row.safe_nonce,
+    itemCount: row.item_count,
+    totalAmount: row.total_amount,
+    contentHash: row.content_hash,
+    safeTxHash: row.safe_tx_hash,
+    state: row.state,
+    approvalThreshold: row.approval_threshold,
+    approvalCount: Number(row.approval_count),
+    createdBy: row.created_by,
+    createdAt: timestamp(row.created_at),
+    approvedAt: nullableTimestamp(row.approved_at),
+    submittedAt: nullableTimestamp(row.submitted_at),
+    settledAt: nullableTimestamp(row.settled_at),
+  };
+}
+
+function adminFinalityProjection(row: AdminSettlementFinalityRow) {
+  return {
+    transactionId: row.transaction_id,
+    expectedEventHash: row.expected_event_hash,
+    executionTxHash: row.tx_hash,
+    replacementForTxHash: row.replacement_for_tx_hash,
+    receiptStatus: row.receipt_status,
+    blockNumber: row.block_number,
+    blockHash: row.block_hash,
+    confirmations: row.confirmations,
+    requiredConfirmations: row.required_confirmations,
+    state: row.state,
+    evidence: row.evidence,
+    submittedAt: timestamp(row.submitted_at),
+    finalizedAt: nullableTimestamp(row.finalized_at),
+    updatedAt: timestamp(row.updated_at),
+  };
+}
+
+function adminCoverageProjection(row: AdminSettlementCoverageRow) {
+  return {
+    snapshotId: row.snapshot_id,
+    blockNumber: row.block_number,
+    blockHash: row.block_hash,
+    evidenceHash: row.evidence_hash,
+    recordedAt: timestamp(row.recorded_at),
+    safeAddress: row.safe_address,
+    asset: row.asset,
+    verifiedAssets: row.verified_asset_balance,
+    unsettledLiabilities: row.unsettled_liability,
+    covered: row.coverage_met,
+  };
+}
+
+function timestamp(value: Date | string) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) throw new CoreError('UnknownState', 'Settlement timestamp is invalid', 409);
+  return date.toISOString();
+}
+
+function nullableTimestamp(value: Date | string | null) {
+  return value === null ? null : timestamp(value);
+}
+
+function requireHash(value: string, name: string) {
+  if (!isHash(value)) throw new CoreError('InvalidRequest', `${name} is invalid`);
+  return value.toLowerCase();
 }
 
 async function loadBatchProjection(executor: SqlExecutor, batchId: string) {

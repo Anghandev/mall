@@ -2,6 +2,7 @@ import {
   artifactVersion,
   type FulfillmentOrder,
   type FulfillmentTarget,
+  type MerchantOrderExport,
 } from '@abu24k/core-artifacts';
 
 export const deliveryOrderId = `0x${'1'.repeat(64)}`;
@@ -121,3 +122,26 @@ export const pickupTarget = {
     version: 1,
   },
 } satisfies FulfillmentTarget;
+
+export const merchantOrderExport: MerchantOrderExport = {
+  artifactVersion,
+  exportId: `0x${'a'.repeat(64)}`,
+  merchantId: 'merchant-1',
+  contentType: 'application/vnd.ms-excel; charset=utf-8',
+  filename: 'merchant-orders-2026-07-01-2026-07-15.xls',
+  rowCount: 1,
+  contentHash: '0x2c43a932a1286939e54d75351b4dbfe5130806fac610863d7e683d975752d34d',
+  contentBase64: 'PFdvcmtib29rPjxSb3c+b3JkZXI8L1Jvdz48L1dvcmtib29rPg==',
+  nextCursor: null,
+  filters: {
+    from: '2026-07-01T00:00:00.000Z',
+    to: '2026-07-15T00:00:00.000Z',
+    skuId: 'sku-delivery',
+    state: 'DELIVERED',
+    fulfillmentMode: 'DELIVERY',
+    orderKind: 'SECKILL',
+    cursorCreatedAt: null,
+    cursorOrderId: null,
+    limit: 1_000,
+  },
+};

@@ -16,7 +16,7 @@ does not complete or verify a Requirement while its Core capability is missing.
 | MER-DASH-001 | 12-16 | Default full-screen dashboard; minute-level single-shop data; pending shipment count and drilldown to module 03 | - | Authoritative day boundary and count; no zero-as-unavailable | Verified | - |
 | MER-DASH-002 | 17 | Today 00:00-24:00 chain-final buyer payments and merchant USDT base/net receivable | D-V2-021, D-V2-022 | Core supplies the authoritative timezone, exact payment total and separate signed receivable projection | Verified | - |
 | MER-DASH-003 | 18-19 | Unique-product status: Draft, PendingReview, Scheduled, Live, SoldOut/Delisted | - | Unknown status fails closed; labels use generated enum | Verified | - |
-| MER-DASH-004 | 20 | Today's successful pickup-scan count across merchant stores | - | Count links to canonical pickup evidence | Frozen | GAP-MER-007 |
+| MER-DASH-004 | 20 | Today's successful pickup-scan count across merchant stores | - | Count links to canonical pickup evidence | Verified | - |
 | MER-PROD-001 | 21-24 | One-shop-one-product; no list; one unique maintenance form | - | API and UI both enforce one product slot | Verified | - |
 | MER-PROD-002 | 25 | Title max 60, 1-5 main images and rich detail | - | Field validation and signed upload metadata tests | Verified | - |
 | MER-PROD-003 | 26-28 | SKU name such as size/color, USDT merchant base receivable, positive integer seckill inventory entered once, delivery/pickup multiselect | D-V2-002, D-V2-021 | Core supplies canonical decimal/atomic amounts; invalid amount, inventory or fulfillment mode blocks submit | Verified | - |
@@ -24,10 +24,10 @@ does not complete or verify a Requirement while its Core capability is missing.
 | MER-PROD-005 | 31 | Unlock only after settled/sold out or platform delist; SoldOut/Delisted enables edit/clear/new product | - | Transition comes from Core allowedActions, never local time | Verified | - |
 | MER-PROD-006 | New Goal | Merchant concession from 0-100%; buyer 70/30 remains unchanged; preview base receivable, concession, net receivable and platform/prize-pool/node/configured destinations | D-V2-002, D-V2-021, D-V2-022 | Submit requires a signed Core preview whose version, exact integer amounts and destination totals reconcile; frontend never calculates weights or authoritative amounts | Verified | - |
 | MER-FUL-001 | 32-34 | Seckill and ordinary orders; no merchant repricing; no customer self-refund | D-V2-004 | Merchant surface contains no business-refund control | Verified | - |
-| MER-FUL-002 | 35-38 | Time/SKU/status/mode filters; Export Excel; exact fields order no., TxHash, consignee, phone, full address, quantity, order time, tracking no., verification status | - | Server-side paginated export is PII-authorized and audit logged | Frozen | GAP-MER-005 |
+| MER-FUL-002 | 35-38 | Time/SKU/status/mode filters; Export Excel; exact fields order no., TxHash, consignee, phone, full address, quantity, order time, tracking no., verification status | - | Server-side paginated export is PII-authorized and audit logged | Verified | - |
 | MER-FUL-003 | 39-42 | Feie/Yilianyun adapter; batch electronic waybill printing; pickup scan creates one two-copy receipt job | D-V2-019, D-V2-021 | Local adapter, validation, idempotency, retry/error handling and typed ConfigurationRequired paths are implemented and tested; real account/device evidence remains MER-GOAL-003 | Verified | - |
 | MER-FUL-004 | 43-45 | Delivery tab; batch/single Ship action; valid tracking input or electronic generation; order state update | D-V2-007, D-V2-017 | Idempotent shipment evidence and verified provider callback update fulfillment only; shipment cannot directly release, request or settle an asset | Verified | - |
-| MER-FUL-005 | 46-47 | Pickup tab fields: order no., bound verification store, PendingPickup/Verified, verification time | - | Camera/manual verification binds signed challenge and store | Frozen | GAP-MER-007 |
+| MER-FUL-005 | 46-47 | Pickup tab fields: order no., bound verification store, PendingPickup/Verified, verification time | - | Camera/manual verification binds signed challenge and store | Verified | - |
 | MER-FUL-006 | 48-52 | Source delivered/manual merchant completion and one-block release; pickup scan; Locked to Available | D-V2-006, D-V2-007, D-V2-008, D-V2-017 | Merchant can only request forced receipt after 7 days; platform reviews; fulfillment finality makes transferable proceeds/rewards Available and BNM backend points Available, without a BNM token or Claim | Overridden | GAP-MER-018 (BNM conformance evidence) |
 | MER-STORE-001 | 53-57 | Store CRUD scope; name, photos, hours, phone and precise coordinates | - | Required fields, upload ownership and loading/error states tested | Verified | - |
 | MER-STORE-002 | 58-60 | Six-digit national region code; AMap reverse geocode; example 210211; permanent lock; pickup regional-beneficiary binding | D-V2-010, D-V2-014, D-V2-017 | No manual region fallback; signed region; later move creates replacement store | Verified | - |
@@ -65,6 +65,27 @@ does not complete or verify a Requirement while its Core capability is missing.
   wallet, and real printer accounts/devices remain `ExternalBlocked` acceptance
   under `MER-GOAL-003`; no production fixture or simulated provider success is
   counted as evidence for those external conditions.
+
+## Merchant Fulfillment .1 Verification Evidence
+
+- `@abu24k/core-artifacts@2.0.0-merchant-fulfillment.1` publishes
+  `exportMerchantOrders`; the Merchant client resolves its path by operationId
+  from that same OpenAPI artifact and strictly parses the tenant, filters,
+  stable cursor, file metadata, Base64 content and generated enums.
+- Excel download sends the applied time/SKU/state/mode/kind filters plus the
+  current list cursor, preserves one idempotency key on retry, rejects 403/409,
+  tenant/filter mismatches and invalid SHA-256, and downloads only Core bytes.
+- `pickupVerifiedToday` remains the exact Core dashboard value. Its metric links
+  to `/fulfillment?mode=pickup`, which deterministically loads the canonical
+  pickup order/store evidence rather than counting browser rows.
+- Pickup entry uses native camera permission plus `BarcodeDetector` only to fill
+  an exact six-digit code into the existing order/store-bound verification
+  command. Unsupported, denied and recognition-failure states remain explicit,
+  keep manual entry usable and never simulate a successful device scan.
+- Focused Core consumer and Merchant workbench tests cover the real success,
+  loading, empty, malformed, 403, 409, cross-tenant, camera and manual paths;
+  the production build/bundle guard rejects test export fixtures and obsolete
+  artifact versions.
 
 ## Completion Rule
 

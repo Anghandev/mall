@@ -5,6 +5,8 @@ import {
   artifactVersion,
   executableOrderActionNames,
 } from '../../../packages/core-artifacts/generated/index.js';
+import coordinatedManifest from '../../../packages/core-artifacts/coordinated-manifest.json' with { type: 'json' };
+import coordinatedOpenApi from '../../../packages/core-artifacts/openapi/openapi.json' with { type: 'json' };
 import { productBaseline as mallBaseline, isCoreOrderActionExecutable } from '../../../mall-v2/src/bootstrap.ts';
 import { productBaseline as merchantBaseline } from '../../../merchant-v2/src/bootstrap.ts';
 import { coreBoundary as merchantCore } from '../../../merchant-v2/src/core-boundary.ts';
@@ -39,6 +41,81 @@ test('all products consume one coordinated artifact without bypassing runtime au
     assert.equal(isCoreOrderActionExecutable(action), executableOrderActionNames.includes(action), action);
   }
   assert.equal(isCoreOrderActionExecutable('PAY_ORDER'), false);
+});
+
+test('merchant order export is coordinated, consumed by Merchant and absent from other products', () => {
+  const operation = coordinatedOpenApi.paths['/v2/merchant/orders/exports']?.post;
+
+  assert.equal(coordinatedManifest.artifactVersion, artifactVersion);
+  assert.equal(coordinatedManifest.capabilityStatus.merchantOrderExportHttp, 'AVAILABLE');
+  assert.ok(coordinatedManifest.httpSurface.includes('POST /v2/merchant/orders/exports'));
+  assert.equal(operation?.operationId, 'exportMerchantOrders');
+  assert.deepEqual(operation?.security, [{ bearerAuth: [] }]);
+  assert.equal(merchantCore.artifactVersion, artifactVersion);
+  assert.match(merchantCore.reason, /订单导出能力已发布/);
+  assert.equal(adminBaseline.adminCapabilities.merchantOrderExport, false);
+  assert.equal('merchantOrderExport' in mallBaseline, false);
+});
+
+test('platform seckill governance is one authenticated coordinated Admin surface', () => {
+  const operations = [
+    ['GET', '/v2/admin/seckill/actions', 'listSeckillGovernanceActions'],
+    ['GET', '/v2/admin/seckill/actions/{actionId}', 'getSeckillGovernanceAction'],
+    ['POST', '/v2/admin/seckill/actions/{actionId}/approval-challenge', 'createSeckillGovernanceChallenge'],
+    ['POST', '/v2/admin/seckill/actions/{actionId}/secondary-signature', 'submitSeckillGovernanceApproval'],
+    ['POST', '/v2/admin/seckill/actions/{actionId}/safe-proposal', 'proposeSeckillGovernanceAction'],
+    ['POST', '/v2/admin/seckill/actions/{actionId}/cancel', 'cancelSeckillGovernanceAction'],
+    ['POST', '/v2/admin/seckill/sessions', 'createSeckillSessionDraft'],
+    ['POST', '/v2/admin/seckill/sessions/{sessionId}/force-close', 'createSeckillForceClose'],
+    ['POST', '/v2/admin/seckill/sessions/{sessionId}/prize-injections', 'createSeckillPrizeInjection'],
+    ['POST', '/v2/admin/seckill/breaker/resume', 'createSeckillBreakerResume'],
+  ] as const;
+
+  for (const [method, path, operationId] of operations) {
+    const entry = coordinatedOpenApi.paths[path] as Partial<Record<'get' | 'post', {
+      operationId?: string;
+      security?: readonly unknown[];
+    }>> | undefined;
+    const operation = entry?.[method.toLowerCase() as 'get' | 'post'];
+    assert.equal(operation?.operationId, operationId);
+    assert.deepEqual(operation?.security, [{ bearerAuth: [] }]);
+    assert.ok(coordinatedManifest.httpSurface.includes(`${method} ${path}`));
+  }
+  assert.equal(adminBaseline.adminCapabilities.seckillSessionHttp, true);
+  assert.equal(adminBaseline.adminCapabilities.seckillRealtime, true);
+  assert.equal(adminBaseline.adminCapabilities.writesWithoutRuntimeAuthorization, false);
+});
+
+test('platform logistics and printing stay on the authenticated coordinated Admin surface', () => {
+  const operations = [
+    ['GET', '/v2/admin/logistics/carriers'],
+    ['POST', '/v2/admin/logistics/carrier-versions'],
+    ['GET', '/v2/admin/logistics/providers'],
+    ['POST', '/v2/admin/logistics/provider-versions'],
+    ['GET', '/v2/admin/logistics/warehouses'],
+    ['POST', '/v2/admin/logistics/warehouses'],
+    ['PUT', '/v2/admin/logistics/warehouses/{warehouseId}'],
+    ['POST', '/v2/admin/logistics/warehouses/{warehouseId}/deactivate'],
+    ['POST', '/v2/admin/logistics/waybills/batches'],
+    ['GET', '/v2/admin/logistics/waybills'],
+    ['GET', '/v2/admin/logistics/print-jobs'],
+    ['POST', '/v2/admin/logistics/print-jobs/{printJobId}/retry'],
+  ] as const;
+
+  for (const [method, path] of operations) {
+    const entry = coordinatedOpenApi.paths[path] as Partial<Record<'get' | 'post' | 'put', {
+      operationId?: string;
+      security?: readonly unknown[];
+    }>> | undefined;
+    const operation = entry?.[method.toLowerCase() as 'get' | 'post' | 'put'];
+    assert.ok(operation?.operationId);
+    assert.deepEqual(operation?.security, [{ bearerAuth: [] }]);
+    assert.ok(coordinatedManifest.httpSurface.includes(`${method} ${path}`));
+  }
+  assert.equal(adminBaseline.adminCapabilities.adminLogisticsHttp, true);
+  assert.equal(adminBaseline.adminCapabilities.adminLogisticsSecretReferences, true);
+  assert.equal(adminBaseline.adminCapabilities.adminLogisticsAuditorRedaction, true);
+  assert.equal(adminBaseline.adminCapabilities.writesWithoutRuntimeAuthorization, false);
 });
 
 test('ordinary and seckill quotes conserve funds and keep independent reservations', () => {

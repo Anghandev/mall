@@ -331,7 +331,7 @@ const publishedContractManifest = JSON.parse(readRequired(join(contractsRoot, 'c
 
 const coordinatedManifest = {
   artifactVersion,
-  publicationStatus: 'COORDINATED_MERCHANT_FULFILLMENT_CHECKPOINT',
+  publicationStatus: 'COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT',
   deploymentAuthorized: publishedContractManifest.deploymentAuthorized === true,
   deploymentAuthorizationEvidenceHash:
     publishedContractManifest.deploymentAuthorizationEvidenceHash ?? null,
@@ -487,6 +487,10 @@ const coordinatedManifest = {
     'SettlementIntentProjection',
     'SettlementRequestProjection',
     'SettlementListProjection',
+    'AdminSettlementRequestList',
+    'AdminSettlementRequestDetail',
+    'AdminSettlementBatchList',
+    'AdminSettlementBatchDetail',
     'BnmPointsBalance',
     'SeckillSessionProjection',
     'SeckillSessionHistoryPage',
@@ -2589,6 +2593,16 @@ function settlementAdminOpenApiPaths(errorResponse) {
     ...operation(operationId, responseSchema, status, requestSchema),
     parameters: [resourceParameter(parameter)],
   });
+  const bytes32ResourceOperation = (operationId, parameter, responseSchema) => ({
+    ...operation(operationId, responseSchema),
+    parameters: [{
+      name: parameter,
+      in: 'path',
+      required: true,
+      schema: { $ref: '#/components/schemas/Bytes32' },
+    }],
+  });
+  const queryParameter = (name, schema) => ({ name, in: 'query', required: false, schema });
   return {
     '/v2/settlement-intents': {
       post: operation('createSettlementIntent', { $ref: '#/components/schemas/SettlementIntentProjection' }, 201, 'SettlementIntentRequest'),
@@ -2601,6 +2615,67 @@ function settlementAdminOpenApiPaths(errorResponse) {
     },
     '/v2/settlements': {
       get: operation('listSettlements', { $ref: '#/components/schemas/SettlementListProjection' }),
+    },
+    '/v2/admin/payments/{orderId}': {
+      get: bytes32ResourceOperation(
+        'getAdminPaymentProjection',
+        'orderId',
+        { $ref: '#/components/schemas/PaymentProjection' },
+      ),
+    },
+    '/v2/admin/settlement-requests': {
+      get: {
+        ...operation('listAdminSettlementRequests', { $ref: '#/components/schemas/AdminSettlementRequestList' }),
+        parameters: [
+          queryParameter('requestId', { $ref: '#/components/schemas/Bytes32' }),
+          queryParameter('merchantId', { type: 'string', minLength: 1 }),
+          queryParameter('walletAddress', { $ref: '#/components/schemas/Address' }),
+          queryParameter('orderId', { $ref: '#/components/schemas/Bytes32' }),
+          queryParameter('batchId', { $ref: '#/components/schemas/Bytes32' }),
+          queryParameter('safeTxHash', { $ref: '#/components/schemas/Bytes32' }),
+          queryParameter('rail', { type: 'string', enum: [...settlementRails] }),
+          queryParameter('asset', { type: 'string', enum: ['USDT', 'NPL'] }),
+          queryParameter('state', { type: 'string', enum: [...settlementRequestStates] }),
+          queryParameter('from', { type: 'string', format: 'date-time' }),
+          queryParameter('to', { type: 'string', format: 'date-time' }),
+          queryParameter('cursorRequestedAt', { type: 'string', format: 'date-time' }),
+          queryParameter('cursorRequestId', { $ref: '#/components/schemas/Bytes32' }),
+          queryParameter('limit', { type: 'integer', minimum: 1, maximum: 100 }),
+        ],
+      },
+    },
+    '/v2/admin/settlement-requests/{requestId}': {
+      get: bytes32ResourceOperation(
+        'getAdminSettlementRequest',
+        'requestId',
+        { $ref: '#/components/schemas/AdminSettlementRequestDetail' },
+      ),
+    },
+    '/v2/admin/settlement-batches': {
+      get: {
+        ...operation('listAdminSettlementBatches', { $ref: '#/components/schemas/AdminSettlementBatchList' }),
+        parameters: [
+          queryParameter('batchId', { $ref: '#/components/schemas/Bytes32' }),
+          queryParameter('merchantId', { type: 'string', minLength: 1 }),
+          queryParameter('orderId', { $ref: '#/components/schemas/Bytes32' }),
+          queryParameter('safeAddress', { $ref: '#/components/schemas/Address' }),
+          queryParameter('safeTxHash', { $ref: '#/components/schemas/Bytes32' }),
+          queryParameter('asset', { type: 'string', enum: ['USDT', 'NPL'] }),
+          queryParameter('state', { type: 'string', enum: [...settlementBatchStates] }),
+          queryParameter('from', { type: 'string', format: 'date-time' }),
+          queryParameter('to', { type: 'string', format: 'date-time' }),
+          queryParameter('cursorCreatedAt', { type: 'string', format: 'date-time' }),
+          queryParameter('cursorBatchId', { $ref: '#/components/schemas/Bytes32' }),
+          queryParameter('limit', { type: 'integer', minimum: 1, maximum: 100 }),
+        ],
+      },
+    },
+    '/v2/admin/settlement-batches/{batchId}': {
+      get: bytes32ResourceOperation(
+        'getAdminSettlementBatch',
+        'batchId',
+        { $ref: '#/components/schemas/AdminSettlementBatchDetail' },
+      ),
     },
     '/v2/merchant/dashboard': {
       get: operation('getMerchantBusinessDashboard', { $ref: '#/components/schemas/MerchantBusinessDashboard' }),
@@ -2975,6 +3050,44 @@ function settlementAdminOpenApiSchemas() {
     createdBy: address,
     createdAt: timestamp,
   };
+  const adminSettlementRequestProperties = {
+    requestId: hash,
+    merchantId: nullableString,
+    walletAddress: address,
+    recipientAddress: address,
+    rail: { enum: [...settlementRails] },
+    asset: { enum: ['USDT', 'NPL'] },
+    safeAddress: address,
+    amount: atomic,
+    state: { enum: [...settlementRequestStates] },
+    batchId: nullableHash,
+    intentDigest: hash,
+    signatureHash: hash,
+    finalSafeTxHash: nullableHash,
+    finalExecutionTxHash: nullableHash,
+    itemCount: { type: 'integer', minimum: 1 },
+    requestedAt: timestamp,
+    batchedAt: nullableTimestamp,
+    settledAt: nullableTimestamp,
+  };
+  const adminSettlementBatchProperties = {
+    batchId: hash,
+    asset: { enum: ['USDT', 'NPL'] },
+    safeAddress: address,
+    safeNonce: atomic,
+    itemCount: { type: 'integer', minimum: 1, maximum: 256 },
+    totalAmount: atomic,
+    contentHash: hash,
+    safeTxHash: hash,
+    state: { enum: [...settlementBatchStates] },
+    approvalThreshold: { type: 'integer', minimum: 1 },
+    approvalCount: { type: 'integer', minimum: 0 },
+    createdBy: address,
+    createdAt: timestamp,
+    approvedAt: nullableTimestamp,
+    submittedAt: nullableTimestamp,
+    settledAt: nullableTimestamp,
+  };
   return {
     EmptyObject: emptyObject,
     SensitiveApproval: object(sensitiveApprovalProperties),
@@ -3032,6 +3145,166 @@ function settlementAdminOpenApiSchemas() {
       balances: { type: 'array', items: ref('SettlementBalance') },
       points: { type: 'array', items: ref('BnmPointsBalance') },
       requests: { type: 'array', items: ref('SettlementRequestProjection') },
+    }),
+    AdminSettlementRequest: object(adminSettlementRequestProperties),
+    AdminSettlementRequestCursor: object({ requestedAt: timestamp, requestId: hash }),
+    AdminSettlementRequestList: object({
+      artifactVersion: { const: artifactVersion },
+      requests: { type: 'array', items: ref('AdminSettlementRequest') },
+      nextCursor: nullable(ref('AdminSettlementRequestCursor')),
+    }),
+    AdminSettlementRequestItemJournals: object({
+      requested: string,
+      batched: nullableString,
+      settled: nullableString,
+    }),
+    AdminSettlementRequestItem: object({
+      itemIndex: { type: 'integer', minimum: 0 },
+      orderId: hash,
+      accountId: string,
+      backingSafeAddress: address,
+      amount: atomic,
+      itemHash: hash,
+      policyVersion: atomic,
+      journals: ref('AdminSettlementRequestItemJournals'),
+    }),
+    AdminSettlementRequestTransition: object({
+      transitionId: string,
+      requestItemIndex: { type: 'integer', minimum: 0 },
+      batchId: nullableHash,
+      sequence: { type: 'integer', minimum: 1 },
+      type: { enum: ['REQUESTED', 'BATCHED', 'SETTLED', 'BATCH_REVERSED', 'FINALITY_REVERSED'] },
+      journalId: string,
+      createdAt: timestamp,
+    }),
+    AdminSettlementRequestDetail: object({
+      artifactVersion: { const: artifactVersion },
+      request: ref('AdminSettlementRequest'),
+      items: { type: 'array', items: ref('AdminSettlementRequestItem') },
+      transitions: { type: 'array', items: ref('AdminSettlementRequestTransition') },
+    }),
+    AdminSettlementBatch: object(adminSettlementBatchProperties),
+    AdminSettlementBatchCursor: object({ createdAt: timestamp, batchId: hash }),
+    AdminSettlementBatchList: object({
+      artifactVersion: { const: artifactVersion },
+      batches: { type: 'array', items: ref('AdminSettlementBatch') },
+      nextCursor: nullable(ref('AdminSettlementBatchCursor')),
+    }),
+    AdminSettlementBatchEnvelope: object({
+      ...adminSettlementBatchProperties,
+      chainId: { const: 56 },
+      assetAddress: address,
+      safeVersion: string,
+      safeSingletonAddress: address,
+      safeSingletonCodeHash: hash,
+      ownerSetHash: hash,
+      safeRuntimeEvidenceHash: hash,
+      safeRuntimeCheckedAt: timestamp,
+      multisendAddress: address,
+      multisendCodeHash: hash,
+      tokenCodeHash: hash,
+      tokenTransferConformanceEvidenceHash: hash,
+      itemsHash: hash,
+      multisendTransactions: { type: 'string', pattern: '^0x(?:[0-9a-fA-F]{2})+$' },
+      multisendCalldata: { type: 'string', pattern: '^0x(?:[0-9a-fA-F]{2})+$' },
+      safeTxData: { type: 'string', pattern: '^0x(?:[0-9a-fA-F]{2})+$' },
+      proposalReferenceHash: nullableHash,
+      approvalEvidenceHash: nullableHash,
+    }),
+    AdminSettlementBatchItem: object({
+      itemIndex: { type: 'integer', minimum: 0 },
+      requestId: hash,
+      requestItemIndex: { type: 'integer', minimum: 0 },
+      orderId: hash,
+      merchantId: nullableString,
+      accountId: string,
+      recipientAddress: address,
+      tokenAddress: address,
+      amount: atomic,
+      transferCalldata: { type: 'string', pattern: '^0x(?:[0-9a-fA-F]{2})+$' },
+      itemHash: hash,
+    }),
+    AdminSettlementApproval: object({
+      ownerAddress: address,
+      safeTxHash: hash,
+      signatureHash: hash,
+      approvedAt: timestamp,
+    }),
+    AdminSettlementAttempt: object({
+      attemptId: string,
+      attemptNumber: { type: 'integer', minimum: 1 },
+      requestDigest: hash,
+      safeTxHash: hash,
+      executionTxHash: nullableHash,
+      outerSender: nullableAddress,
+      outerNonce: nullableAtomic,
+      replacementForAttemptId: nullableString,
+      state: { enum: ['LEASED', 'SUBMITTED', 'MINED', 'SETTLED', 'REPLACED', 'FAILED', 'REORGED', 'QUARANTINED'] },
+      createdAt: timestamp,
+      submittedAt: nullableTimestamp,
+      updatedAt: timestamp,
+    }),
+    AdminSettlementFinality: object({
+      transactionId: string,
+      expectedEventHash: hash,
+      executionTxHash: hash,
+      replacementForTxHash: nullableHash,
+      receiptStatus: nullable({ type: 'integer', enum: [0, 1] }),
+      blockNumber: nullableAtomic,
+      blockHash: nullableHash,
+      confirmations: { type: 'integer', minimum: 0 },
+      requiredConfirmations: { const: 15 },
+      state: { enum: ['SUBMITTED', 'MINED', 'REPLACED', 'REORGED', 'FINAL', 'FAILED'] },
+      evidence: jsonObject,
+      submittedAt: timestamp,
+      finalizedAt: nullableTimestamp,
+      updatedAt: timestamp,
+    }),
+    AdminSettlementCoverage: object({
+      snapshotId: string,
+      blockNumber: atomic,
+      blockHash: hash,
+      evidenceHash: hash,
+      recordedAt: timestamp,
+      safeAddress: address,
+      asset: { enum: ['USDT', 'NPL'] },
+      verifiedAssets: atomic,
+      unsettledLiabilities: atomic,
+      covered: { type: 'boolean' },
+    }),
+    AdminSettlementBreaker: object({
+      scope: { enum: [...breakerScopes] },
+      paused: { type: 'boolean' },
+      evidenceHash: hash,
+      policyVersion: nullableAtomic,
+      changedBy: string,
+      changedAt: timestamp,
+    }),
+    AdminSettlementLedgerMovement: object({
+      eventType: string,
+      asset: { enum: ['USDT', 'NPL'] },
+      debits: atomic,
+      credits: atomic,
+      balanced: { type: 'boolean' },
+    }),
+    AdminSettlementReconciliation: object({
+      expectedItemCount: { type: 'integer', minimum: 1 },
+      actualItemCount: { type: 'integer', minimum: 0 },
+      expectedTotalAmount: atomic,
+      actualTotalAmount: atomic,
+      ledgerMovements: { type: 'array', items: ref('AdminSettlementLedgerMovement') },
+      conserved: { type: 'boolean' },
+    }),
+    AdminSettlementBatchDetail: object({
+      artifactVersion: { const: artifactVersion },
+      batch: ref('AdminSettlementBatchEnvelope'),
+      items: { type: 'array', items: ref('AdminSettlementBatchItem') },
+      approvals: { type: 'array', items: ref('AdminSettlementApproval') },
+      attempts: { type: 'array', items: ref('AdminSettlementAttempt') },
+      finality: nullable(ref('AdminSettlementFinality')),
+      coverage: nullable(ref('AdminSettlementCoverage')),
+      breakers: { type: 'array', items: ref('AdminSettlementBreaker') },
+      reconciliation: ref('AdminSettlementReconciliation'),
     }),
     GuaranteeDepositRequest: object({
       policyVersion: atomic,
@@ -6128,6 +6401,227 @@ export interface SettlementListProjection {
   balances: readonly SettlementBalance[];
   points: readonly BnmPointsBalance[];
   requests: readonly SettlementRequestProjection[];
+}
+
+export interface AdminSettlementRequest {
+  requestId: Bytes32;
+  merchantId: string | null;
+  walletAddress: Address;
+  recipientAddress: Address;
+  rail: SettlementRail;
+  asset: 'USDT' | 'NPL';
+  safeAddress: Address;
+  amount: AtomicAmount;
+  state: SettlementRequestState;
+  batchId: Bytes32 | null;
+  intentDigest: Bytes32;
+  signatureHash: Bytes32;
+  finalSafeTxHash: Bytes32 | null;
+  finalExecutionTxHash: Bytes32 | null;
+  itemCount: number;
+  requestedAt: string;
+  batchedAt: string | null;
+  settledAt: string | null;
+}
+
+export interface AdminSettlementRequestCursor {
+  requestedAt: string;
+  requestId: Bytes32;
+}
+
+export interface AdminSettlementRequestList {
+  artifactVersion: typeof artifactVersion;
+  requests: readonly AdminSettlementRequest[];
+  nextCursor: AdminSettlementRequestCursor | null;
+}
+
+export interface AdminSettlementRequestItemJournals {
+  requested: string;
+  batched: string | null;
+  settled: string | null;
+}
+
+export interface AdminSettlementRequestItem {
+  itemIndex: number;
+  orderId: Bytes32;
+  accountId: string;
+  backingSafeAddress: Address;
+  amount: AtomicAmount;
+  itemHash: Bytes32;
+  policyVersion: AtomicAmount;
+  journals: AdminSettlementRequestItemJournals;
+}
+
+export interface AdminSettlementRequestTransition {
+  transitionId: string;
+  requestItemIndex: number;
+  batchId: Bytes32 | null;
+  sequence: number;
+  type: 'REQUESTED' | 'BATCHED' | 'SETTLED' | 'BATCH_REVERSED' | 'FINALITY_REVERSED';
+  journalId: string;
+  createdAt: string;
+}
+
+export interface AdminSettlementRequestDetail {
+  artifactVersion: typeof artifactVersion;
+  request: AdminSettlementRequest;
+  items: readonly AdminSettlementRequestItem[];
+  transitions: readonly AdminSettlementRequestTransition[];
+}
+
+export interface AdminSettlementBatch {
+  batchId: Bytes32;
+  asset: 'USDT' | 'NPL';
+  safeAddress: Address;
+  safeNonce: AtomicAmount;
+  itemCount: number;
+  totalAmount: AtomicAmount;
+  contentHash: Bytes32;
+  safeTxHash: Bytes32;
+  state: SettlementBatchState;
+  approvalThreshold: number;
+  approvalCount: number;
+  createdBy: Address;
+  createdAt: string;
+  approvedAt: string | null;
+  submittedAt: string | null;
+  settledAt: string | null;
+}
+
+export interface AdminSettlementBatchCursor {
+  createdAt: string;
+  batchId: Bytes32;
+}
+
+export interface AdminSettlementBatchList {
+  artifactVersion: typeof artifactVersion;
+  batches: readonly AdminSettlementBatch[];
+  nextCursor: AdminSettlementBatchCursor | null;
+}
+
+export interface AdminSettlementBatchEnvelope extends AdminSettlementBatch {
+  chainId: 56;
+  assetAddress: Address;
+  safeVersion: string;
+  safeSingletonAddress: Address;
+  safeSingletonCodeHash: Bytes32;
+  ownerSetHash: Bytes32;
+  safeRuntimeEvidenceHash: Bytes32;
+  safeRuntimeCheckedAt: string;
+  multisendAddress: Address;
+  multisendCodeHash: Bytes32;
+  tokenCodeHash: Bytes32;
+  tokenTransferConformanceEvidenceHash: Bytes32;
+  itemsHash: Bytes32;
+  multisendTransactions: string;
+  multisendCalldata: string;
+  safeTxData: string;
+  proposalReferenceHash: Bytes32 | null;
+  approvalEvidenceHash: Bytes32 | null;
+}
+
+export interface AdminSettlementBatchItem {
+  itemIndex: number;
+  requestId: Bytes32;
+  requestItemIndex: number;
+  orderId: Bytes32;
+  merchantId: string | null;
+  accountId: string;
+  recipientAddress: Address;
+  tokenAddress: Address;
+  amount: AtomicAmount;
+  transferCalldata: string;
+  itemHash: Bytes32;
+}
+
+export interface AdminSettlementApproval {
+  ownerAddress: Address;
+  safeTxHash: Bytes32;
+  signatureHash: Bytes32;
+  approvedAt: string;
+}
+
+export interface AdminSettlementAttempt {
+  attemptId: string;
+  attemptNumber: number;
+  requestDigest: Bytes32;
+  safeTxHash: Bytes32;
+  executionTxHash: Bytes32 | null;
+  outerSender: Address | null;
+  outerNonce: AtomicAmount | null;
+  replacementForAttemptId: string | null;
+  state: 'LEASED' | 'SUBMITTED' | 'MINED' | 'SETTLED' | 'REPLACED' | 'FAILED' | 'REORGED' | 'QUARANTINED';
+  createdAt: string;
+  submittedAt: string | null;
+  updatedAt: string;
+}
+
+export interface AdminSettlementFinality {
+  transactionId: string;
+  expectedEventHash: Bytes32;
+  executionTxHash: Bytes32;
+  replacementForTxHash: Bytes32 | null;
+  receiptStatus: 0 | 1 | null;
+  blockNumber: AtomicAmount | null;
+  blockHash: Bytes32 | null;
+  confirmations: number;
+  requiredConfirmations: 15;
+  state: FinalityState;
+  evidence: Readonly<Record<string, unknown>>;
+  submittedAt: string;
+  finalizedAt: string | null;
+  updatedAt: string;
+}
+
+export interface AdminSettlementCoverage {
+  snapshotId: string;
+  blockNumber: AtomicAmount;
+  blockHash: Bytes32;
+  evidenceHash: Bytes32;
+  recordedAt: string;
+  safeAddress: Address;
+  asset: 'USDT' | 'NPL';
+  verifiedAssets: AtomicAmount;
+  unsettledLiabilities: AtomicAmount;
+  covered: boolean;
+}
+
+export interface AdminSettlementBreaker {
+  scope: BreakerScope;
+  paused: boolean;
+  evidenceHash: Bytes32;
+  policyVersion: AtomicAmount | null;
+  changedBy: string;
+  changedAt: string;
+}
+
+export interface AdminSettlementLedgerMovement {
+  eventType: string;
+  asset: 'USDT' | 'NPL';
+  debits: AtomicAmount;
+  credits: AtomicAmount;
+  balanced: boolean;
+}
+
+export interface AdminSettlementReconciliation {
+  expectedItemCount: number;
+  actualItemCount: number;
+  expectedTotalAmount: AtomicAmount;
+  actualTotalAmount: AtomicAmount;
+  ledgerMovements: readonly AdminSettlementLedgerMovement[];
+  conserved: boolean;
+}
+
+export interface AdminSettlementBatchDetail {
+  artifactVersion: typeof artifactVersion;
+  batch: AdminSettlementBatchEnvelope;
+  items: readonly AdminSettlementBatchItem[];
+  approvals: readonly AdminSettlementApproval[];
+  attempts: readonly AdminSettlementAttempt[];
+  finality: AdminSettlementFinality | null;
+  coverage: AdminSettlementCoverage | null;
+  breakers: readonly AdminSettlementBreaker[];
+  reconciliation: AdminSettlementReconciliation;
 }
 
 export interface GuaranteeDepositRequest {

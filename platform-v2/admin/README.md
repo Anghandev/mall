@@ -5,7 +5,7 @@ implements shared funds, contracts, API, Schema or signer behavior.
 
 ## Current Product Boundary
 
-- Production consumes `@abu24k/core-artifacts@2.0.0-merchant-stores.1`.
+- Production consumes `@abu24k/core-artifacts@2.0.0-merchant-fulfillment.1`.
 - SIWE/JWT stays in memory. Every protected read and write is role-bound by
   Core and preserves typed `DecisionBlocked`, `ExternalBlocked`,
   `ConfigurationRequired` and correlation evidence.
@@ -57,6 +57,10 @@ implements shared funds, contracts, API, Schema or signer behavior.
   publishes merchant-owned store create, profile update, activate and close
   operations. Admin consumes the coordinated version but exposes no store
   editor and never calls or bundles those Merchant store-management routes.
+- The merchant-fulfillment checkpoint publishes the PII-authorized paginated
+  order export only at `POST /v2/merchant/orders/exports`. Admin exposes no
+  alias for this operation and neither calls nor bundles its route, operation
+  ID or generated request/response contracts.
 
 ## Local Verification
 

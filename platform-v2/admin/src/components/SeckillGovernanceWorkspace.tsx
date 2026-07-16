@@ -1,4 +1,5 @@
 import type {
+  CmsVersionProjection,
   SeckillGovernanceActionProjection,
   SeckillSessionCreateRequest,
   SeckillSessionProjection,
@@ -20,6 +21,7 @@ import {
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { CoreApiError } from '../coreApi';
 import { useCoreSession } from '../coreSession';
+import { fetchCmsVersion } from '../settlementAdminApi';
 import {
   cancelSeckillGovernanceAction,
   createSeckillBreakerResume,
@@ -53,6 +55,8 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
   const [notice, setNotice] = useState('');
   const [reload, setReload] = useState(0);
   const [draft, setDraft] = useState<SeckillSessionCreateRequest>(emptySessionDraft);
+  const [rulesVersionId, setRulesVersionId] = useState('');
+  const [rulesBinding, setRulesBinding] = useState<CmsVersionProjection | null>(null);
   const [targetSessionId, setTargetSessionId] = useState('');
   const [forceReason, setForceReason] = useState('');
   const [forceKey, setForceKey] = useState('');
@@ -115,8 +119,28 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
 
   const submitSession = (event: FormEvent) => {
     event.preventDefault();
-    if (!session || !canCreate) return;
+    if (!session || !canCreate || !rulesBinding) return;
     void run('create', () => createSeckillSessionDraft(draft, session.token), '场次草稿已创建，当前 {state}；活动库存以 Core 锁定证据为准。');
+  };
+
+  const loadRulesBinding = async () => {
+    if (!session || !canCreate || !rulesVersionId.trim() || pendingAction) return;
+    setPendingAction('rules'); setError(null); setNotice(''); setRulesBinding(null);
+    try {
+      const version = await fetchCmsVersion(rulesVersionId.trim(), session.token);
+      if (!version.published || version.contentType !== 'SECKILL_RULES' || !version.policyVersion) {
+        throw new CoreApiError({ code: 'InvalidResponse', message: 'CMS version 必须是已发布且已绑定 policyVersion 的 SECKILL_RULES', status: 409 });
+      }
+      setRulesBinding(version);
+      setDraft({ ...draft, policyVersion: version.policyVersion, rulesContentHash: version.contentHash });
+      setNotice(`已绑定 CMS ${version.versionId} · policyVersion ${version.policyVersion}；建场时 Core 会重新校验当前发布状态。`);
+    } catch (cause) { setError(asCoreError(cause)); }
+    finally { setPendingAction(''); }
+  };
+
+  const changeRulesVersion = (value: string) => {
+    setRulesVersionId(value); setRulesBinding(null);
+    setDraft({ ...draft, policyVersion: '', rulesContentHash: '' });
   };
 
   const submitForceClose = (event: FormEvent) => {
@@ -218,7 +242,7 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
             </aside>
           </div>
 
-          {canCreate ? <SessionDraftForm input={draft} setInput={setDraft} pending={Boolean(pendingAction)} onSubmit={submitSession} /> : null}
+          {canCreate ? <SessionDraftForm input={draft} setInput={setDraft} rulesVersionId={rulesVersionId} setRulesVersionId={changeRulesVersion} rulesBinding={rulesBinding} pending={Boolean(pendingAction)} onLoadRules={() => void loadRulesBinding()} onSubmit={submitSession} /> : null}
           {isAdmin ? <ControlForms targetSessionId={targetSessionId} setTargetSessionId={setTargetSessionId} forceReason={forceReason} setForceReason={setForceReason} forceKey={forceKey} setForceKey={setForceKey} prizeAmount={prizeAmount} setPrizeAmount={setPrizeAmount} prizeKey={prizeKey} setPrizeKey={setPrizeKey} resumeKey={resumeKey} setResumeKey={setResumeKey} pendingAction={pendingAction} onForceClose={submitForceClose} onPrize={submitPrize} onResume={submitResume} /> : null}
         </>
       ) : null}
@@ -231,17 +255,19 @@ function RoleBoundary({ isAdmin, canCreate }: { isAdmin: boolean; canCreate: boo
   return <div className="seckill-role-boundary" role="status"><ShieldCheck aria-hidden="true" /><div><strong>{label}</strong><p>最终写入仍由 Core 重新校验 RBAC、二次钱包、Safe 和链上终局。</p></div></div>;
 }
 
-function SessionDraftForm({ input, setInput, pending, onSubmit }: { input: SeckillSessionCreateRequest; setInput(value: SeckillSessionCreateRequest): void; pending: boolean; onSubmit(event: FormEvent): void }) {
+function SessionDraftForm({ input, setInput, rulesVersionId, setRulesVersionId, rulesBinding, pending, onLoadRules, onSubmit }: { input: SeckillSessionCreateRequest; setInput(value: SeckillSessionCreateRequest): void; rulesVersionId: string; setRulesVersionId(value: string): void; rulesBinding: CmsVersionProjection | null; pending: boolean; onLoadRules(): void; onSubmit(event: FormEvent): void }) {
   return <form className="panel seckill-session-form" onSubmit={onSubmit}><div className="panel-heading"><div><p className="section-kicker">ADMIN / OPERATOR</p><h2>创建场次草稿</h2></div><Plus aria-hidden="true" /></div><div className="seckill-fixed-timers" aria-label="固定秒杀计时参数"><div><span>主场</span><strong>3600s</strong></div><div><span>初始接力</span><strong>60s</strong></div><div><span>终局购买</span><strong>+30s</strong></div><div><span>接力上限</span><strong>60s</strong></div><LockKeyhole aria-hidden="true" /></div><div className="seckill-form-grid">
-    <label>Policy version<input inputMode="numeric" pattern="[1-9][0-9]*" value={input.policyVersion} onChange={(event) => setInput({ ...input, policyVersion: event.target.value })} disabled={pending} required /></label>
-    <label>Rules content hash<input pattern="0x[0-9a-fA-F]{64}" value={input.rulesContentHash} onChange={(event) => setInput({ ...input, rulesContentHash: event.target.value })} disabled={pending} required /></label>
+    <label>CMS rules version ID<input value={rulesVersionId} onChange={(event) => setRulesVersionId(event.target.value)} disabled={pending} required /></label>
+    <button className="button button-quiet" type="button" onClick={onLoadRules} disabled={pending || !rulesVersionId.trim()}><RefreshCw aria-hidden="true" />{pending && !rulesBinding ? '读取中' : '读取已发布秒杀规则'}</button>
+    <label>Policy version<input value={input.policyVersion} readOnly aria-readonly="true" required /></label>
+    <label>Rules content hash<input value={input.rulesContentHash} readOnly aria-readonly="true" required /></label>
     <label>Product ID<input value={input.productId} onChange={(event) => setInput({ ...input, productId: event.target.value })} disabled={pending} required /></label>
     <label>SKU ID<input value={input.skuId} onChange={(event) => setInput({ ...input, skuId: event.target.value })} disabled={pending} required /></label>
     <label>活动库存<input type="number" min="1" step="1" value={input.inventory} onChange={(event) => setInput({ ...input, inventory: Number(event.target.value) })} disabled={pending} required /></label>
     <label>秒杀价 · USDT atomic<input inputMode="numeric" pattern="[1-9][0-9]*" value={input.seckillListPriceUsdt} onChange={(event) => setInput({ ...input, seckillListPriceUsdt: event.target.value })} disabled={pending} required /></label>
     <label>开始时间 · ISO 8601<input value={input.startsAt} onChange={(event) => setInput({ ...input, startsAt: event.target.value })} placeholder="2026-07-18T01:00:00.000Z" disabled={pending} required /></label>
     <label>Idempotency key<input minLength={8} maxLength={128} value={input.idempotencyKey} onChange={(event) => setInput({ ...input, idempotencyKey: event.target.value })} disabled={pending} required /></label>
-  </div><button className="button button-primary" type="submit" disabled={pending}><TimerReset aria-hidden="true" />{pending ? '提交中' : '创建并锁定活动库存'}</button></form>;
+  </div>{rulesBinding ? <p className="healthy-copy" role="status"><ShieldCheck aria-hidden="true" />{rulesBinding.versionId} · {rulesBinding.contentType} · PUBLISHED</p> : <p className="muted-copy">必须先从 Core 读取已发布的 SECKILL_RULES；不允许手写 policyVersion 或 content hash。</p>}<button className="button button-primary" type="submit" disabled={pending || !rulesBinding}><TimerReset aria-hidden="true" />{pending ? '提交中' : '创建并锁定活动库存'}</button></form>;
 }
 
 function ControlForms(props: {
@@ -269,7 +295,7 @@ function ActionDetail({ action }: { action: SeckillGovernanceActionProjection })
 
 function PlanEvidence({ action }: { action: SeckillGovernanceActionProjection }) {
   const plan = action.sessionPlan!;
-  return <div className="seckill-plan-evidence"><h3>场次计划 · 参数只读</h3><dl><div><dt>Product / SKU</dt><dd>{plan.productId} / {plan.skuId}</dd></div><div><dt>Inventory lock</dt><dd>{plan.inventory} · {plan.inventoryLockState}<small>{plan.releasedAt ?? '未释放'}</small></dd></div><div><dt>Price</dt><dd>{plan.seckillListPriceUsdt} USDT atomic</dd></div><div><dt>Timers</dt><dd>{plan.timers.mainDurationSeconds}s / {plan.timers.relayInitialSeconds}s / +{plan.timers.relayIncrementSeconds}s / cap {plan.timers.relayCapSeconds}s</dd></div></dl></div>;
+  return <div className="seckill-plan-evidence"><h3>场次计划 · 参数只读</h3><dl><div><dt>Product / SKU</dt><dd>{plan.productId} / {plan.skuId}</dd></div><div><dt>CMS rules / policy</dt><dd><code>{plan.rulesContentHash}</code><small>policyVersion {action.policyVersion}</small></dd></div><div><dt>Inventory lock</dt><dd>{plan.inventory} · {plan.inventoryLockState}<small>{plan.releasedAt ?? '未释放'}</small></dd></div><div><dt>Price</dt><dd>{plan.seckillListPriceUsdt} USDT atomic</dd></div><div><dt>Timers</dt><dd>{plan.timers.mainDurationSeconds}s / {plan.timers.relayInitialSeconds}s / +{plan.timers.relayIncrementSeconds}s / cap {plan.timers.relayCapSeconds}s</dd></div></dl></div>;
 }
 
 function PrizeEvidence({ action }: { action: SeckillGovernanceActionProjection }) {
