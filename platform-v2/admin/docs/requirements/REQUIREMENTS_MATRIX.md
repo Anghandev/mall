@@ -218,9 +218,31 @@ wallet, Safe, RPC, domain and device evidence remains `ExternalBlocked` under
   serialization, role denial, nullable category parent and read-only batch
   preview have consumer tests. Production source and bundle contain no fixture.
 
-## Settlement/Admin `.13` Global Operations Evidence
+## Settlement/Admin `.14` Notification Campaign Evidence
 
 The current Admin consumer is pinned to
+`@abu24k/core-artifacts@2.0.0-settlement-admin.14` and consumes the generated
+notification campaign contracts without a parallel endpoint or provider
+fixture:
+
+- `ADM-NOTIFY-001`: ADMIN/OPERATOR create structured ALL, WALLET, MERCHANT or
+  REGION audiences, controlled title/body copy keys, bounded variables,
+  optional schedules and a stable idempotency key. The activity list renders
+  the authoritative state, all six delivery-state counts and Core
+  `allowedActions`; publish and failed-delivery retry remain disabled unless
+  the selected projection publishes the exact action. AUDITOR is read-only.
+- `ADM-NOTIFY-002`: the wallet inbox, loading, empty and typed error states are
+  retained. `CONFIGURATION_REQUIRED`, retry and dead-letter evidence remain
+  visible, and the product never substitutes a synthetic SMS/SMTP/Push success.
+  Real provider acceptance remains `ExternalBlocked` under `ADM-GOAL-003`.
+
+Focused API and page tests cover projection validation, structured request
+serialization, idempotent retry, role denial, allowed-action denial and the
+provider-configuration failure path. All fixtures remain under `tests/**`.
+
+## Settlement/Admin `.13` Global Operations Evidence
+
+The `.13` Admin checkpoint was pinned to
 `@abu24k/core-artifacts@2.0.0-settlement-admin.13` and consumes only generated
 search and product-lifecycle contracts:
 

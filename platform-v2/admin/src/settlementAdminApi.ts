@@ -35,8 +35,10 @@ import {
   type MonitoringAcknowledgeResult,
   type MonitoringDashboard,
   type NotificationCampaignCreateResult,
+  type NotificationCampaignProjection,
   type NotificationCampaignPublishResult,
   type NotificationCampaignRequest,
+  type NotificationCampaignRetryResult,
   type NotificationInboxItem,
   type PolicyApprovalChallenge,
   type PolicyDraftCreateRequest,
@@ -308,10 +310,23 @@ export async function fetchNotifications(token: string, limit = 50, signal?: Abo
   return Object.freeze([...body]);
 }
 
+export async function fetchNotificationCampaigns(token: string, limit = 50, signal?: AbortSignal): Promise<readonly NotificationCampaignProjection[]> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) throw invalid('Notification campaign limit must be between 1 and 200');
+  const body = await authenticatedGet(`/v2/admin/notification-campaigns?limit=${limit}`, token, signal);
+  if (!Array.isArray(body) || !body.every(isNotificationCampaignProjection)) {
+    throw invalid('Notification campaigns do not match the coordinated generated type');
+  }
+  return Object.freeze([...body]);
+}
+
 export async function createNotificationCampaign(input: NotificationCampaignRequest, token: string): Promise<NotificationCampaignCreateResult> {
-  if (!notificationCampaignTopics.includes(input.topic)) throw invalid('Notification campaign topic is invalid');
+  if (!isNotificationCampaignRequest(input)) throw invalid('Notification campaign request is invalid');
   const body = await authenticatedWrite('/v2/admin/notification-campaigns', 'POST', input, token);
-  if (!isRecord(body) || typeof body.campaignId !== 'string' || !notificationCampaignStates.includes(body.state as never) || !bytes32Pattern.test(String(body.contentHash))) {
+  if (!isRecord(body)
+    || !hasExactKeys(body, ['campaignId', 'state', 'contentHash'])
+    || !nonEmpty(body, ['campaignId'])
+    || !notificationCampaignStates.includes(body.state as never)
+    || !bytes32Pattern.test(String(body.contentHash))) {
     throw invalid('Notification campaign result does not match the coordinated generated type');
   }
   return body as unknown as NotificationCampaignCreateResult;
@@ -320,8 +335,23 @@ export async function createNotificationCampaign(input: NotificationCampaignRequ
 export async function publishNotificationCampaign(campaignId: string, evidenceHash: string, token: string): Promise<NotificationCampaignPublishResult> {
   if (!bytes32Pattern.test(evidenceHash)) throw invalid('Notification evidence hash must be bytes32');
   const body = await authenticatedWrite(`${resourcePath('/v2/admin/notification-campaigns/', campaignId)}/publish`, 'POST', { evidenceHash }, token);
-  if (!isRecord(body) || body.campaignId !== campaignId || body.state !== 'PUBLISHED') throw invalid('Notification publication does not match the coordinated generated type');
+  if (!isRecord(body) || !hasExactKeys(body, ['campaignId', 'state']) || body.campaignId !== campaignId || body.state !== 'PUBLISHED') {
+    throw invalid('Notification publication does not match the coordinated generated type');
+  }
   return body as unknown as NotificationCampaignPublishResult;
+}
+
+export async function retryNotificationCampaignDeliveries(campaignId: string, token: string): Promise<NotificationCampaignRetryResult> {
+  const body = await authenticatedWrite(`${resourcePath('/v2/admin/notification-campaigns/', campaignId)}/retry-failed`, 'POST', {}, token);
+  if (!isRecord(body)
+    || !hasExactKeys(body, ['campaignId', 'state', 'retriedDeliveries'])
+    || body.campaignId !== campaignId
+    || body.state !== 'RETRY_SCHEDULED'
+    || !Number.isSafeInteger(body.retriedDeliveries)
+    || Number(body.retriedDeliveries) < 1) {
+    throw invalid('Notification retry result does not match the coordinated generated type');
+  }
+  return body as unknown as NotificationCampaignRetryResult;
 }
 
 export async function acknowledgeMonitoringAlert(alertKey: string, token: string): Promise<MonitoringAcknowledgeResult> {
@@ -690,6 +720,78 @@ function isNotificationInboxItem(value: unknown): value is NotificationInboxItem
     && isRecord(value.templateData)
     && notificationDeliveryStates.includes(value.deliveryState as never)
     && isDateTime(value.createdAt);
+}
+
+const notificationCampaignActions = ['PUBLISH', 'RETRY_FAILED'] as const;
+
+function isNotificationCampaignProjection(value: unknown): value is NotificationCampaignProjection {
+  if (!isRecord(value)
+    || !hasExactKeys(value, [
+      'campaignId', 'topic', 'audience', 'message', 'contentHash', 'cmsVersionId',
+      'startsAt', 'endsAt', 'state', 'createdBy', 'createdAt', 'publishedAt',
+      'deliveryCounts', 'allowedActions',
+    ])
+    || !nonEmpty(value, ['campaignId'])
+    || !notificationCampaignTopics.includes(value.topic as never)
+    || !isNotificationAudience(value.audience)
+    || !isNotificationMessage(value.message)
+    || !bytes32Pattern.test(String(value.contentHash))
+    || !(value.cmsVersionId === null || (typeof value.cmsVersionId === 'string' && value.cmsVersionId.length > 0))
+    || !(value.startsAt === null || isDateTime(value.startsAt))
+    || !(value.endsAt === null || isDateTime(value.endsAt))
+    || !notificationCampaignStates.includes(value.state as never)
+    || !addressPattern.test(String(value.createdBy))
+    || !isDateTime(value.createdAt)
+    || !(value.publishedAt === null || isDateTime(value.publishedAt))
+    || !isNotificationDeliveryCounts(value.deliveryCounts)
+    || !Array.isArray(value.allowedActions)
+    || !value.allowedActions.every((action) => notificationCampaignActions.includes(action as never))
+    || new Set(value.allowedActions).size !== value.allowedActions.length) return false;
+
+  const failedDeliveries = value.deliveryCounts.RETRY + value.deliveryCounts.CONFIGURATION_REQUIRED + value.deliveryCounts.DEAD_LETTER;
+  if (value.allowedActions.includes('PUBLISH') && value.state !== 'DRAFT') return false;
+  if (value.allowedActions.includes('RETRY_FAILED') && (value.state !== 'PUBLISHED' || failedDeliveries === 0)) return false;
+  return true;
+}
+
+function isNotificationCampaignRequest(value: NotificationCampaignRequest) {
+  if (!notificationCampaignTopics.includes(value.topic)
+    || !isNotificationAudience(value.audience)
+    || !isNotificationMessage(value.message)
+    || !/^[A-Za-z0-9:_-]{8,128}$/.test(value.idempotencyKey)
+    || !(value.cmsVersionId === undefined || value.cmsVersionId.length > 0)
+    || !(value.startsAt === undefined || isDateTime(value.startsAt))
+    || !(value.endsAt === undefined || isDateTime(value.endsAt))) return false;
+  if (value.endsAt !== undefined && (value.startsAt === undefined || Date.parse(value.endsAt) <= Date.parse(value.startsAt))) return false;
+  return true;
+}
+
+function isNotificationAudience(value: unknown) {
+  if (!isRecord(value) || !['ALL', 'WALLET', 'MERCHANT', 'REGION'].includes(String(value.type))) return false;
+  if (value.type === 'ALL') return hasExactKeys(value, ['type']);
+  const listKey = value.type === 'WALLET' ? 'wallets' : value.type === 'MERCHANT' ? 'merchantIds' : 'regionCodes';
+  const pattern = value.type === 'WALLET'
+    ? addressPattern
+    : value.type === 'MERCHANT' ? /^[A-Za-z0-9:_-]{3,128}$/ : /^\d{6}$/;
+  return hasExactKeys(value, ['type', listKey])
+    && Array.isArray(value[listKey])
+    && value[listKey].length > 0
+    && value[listKey].every((item) => typeof item === 'string' && pattern.test(item));
+}
+
+function isNotificationMessage(value: unknown) {
+  if (!isRecord(value) || !hasExactKeys(value, ['titleKey', 'bodyKey', 'variables'])) return false;
+  const copyKeyPattern = /^[A-Z][A-Z0-9_]{2,95}$/;
+  return copyKeyPattern.test(String(value.titleKey))
+    && copyKeyPattern.test(String(value.bodyKey))
+    && isRecord(value.variables)
+    && Object.keys(value.variables).length <= 32
+    && Object.values(value.variables).every((item) => item === null || ['string', 'number', 'boolean'].includes(typeof item));
+}
+
+function isNotificationDeliveryCounts(value: unknown): value is NotificationCampaignProjection['deliveryCounts'] {
+  if (!isRecord(value) || !hasExactKeys(value, notificationDeliveryStates)) return false;
+  return notificationDeliveryStates.every((state) => Number.isSafeInteger(value[state]) && Number(value[state]) >= 0);
 }
 
 function isTypedData(value: unknown) {
