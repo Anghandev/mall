@@ -28,11 +28,11 @@ describe('platform admin fail-closed experience', () => {
     expect(packageJson.dependencies['@abu24k/core-artifacts']).toBe(`workspace:${artifactVersion}`);
     expect(productBaseline.artifactVersion).toBe(artifactVersion);
     expect(coreState.artifactVersion).toBe(artifactVersion);
-    expect(coreState.artifactStatus).toBe('coordinated-merchant-lifecycle-checkpoint');
+    expect(coreState.artifactStatus).toBe('coordinated-logistics-admin-checkpoint');
     expect(coreState.connectionLabel).toContain(artifactVersion);
   });
 
-  it('preserves the Merchant-only logistics boundary at the merchant lifecycle checkpoint', () => {
+  it('publishes the Admin logistics surface while keeping it closed before SIWE', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const merchantLogisticsPaths = coordinatedManifest.httpSurface.filter((operation) =>
@@ -43,17 +43,79 @@ describe('platform admin fail-closed experience', () => {
     );
 
     expect(merchantLogisticsPaths).toHaveLength(6);
-    expect(adminLogisticsPaths).toEqual([]);
-    expect(productBaseline.adminCapabilities.merchantLogisticsOperations).toBe(false);
+    expect(adminLogisticsPaths).toHaveLength(12);
+    expect(productBaseline.adminCapabilities.adminLogisticsHttp).toBe(true);
+    expect(productBaseline.adminCapabilities.adminLogisticsSecretReferences).toBe(true);
+    expect(productBaseline.adminCapabilities.adminLogisticsAuditorRedaction).toBe(true);
 
     renderAt('/logistics');
     expect(screen.getByRole('heading', { name: '物流配置' })).toBeTruthy();
-    expect(screen.getByText('GAP-ADM-012')).toBeTruthy();
-    expect(screen.getByText(/Admin 物流配置和打印操作仍未发布，继续 fail-closed/)).toBeTruthy();
-    expect(screen.getByRole('button', { name: '加载资源' }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByRole('button', { name: '打印电子面单' }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByRole('button', { name: '打印自提单' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText('ADM-LOG-001')).toBeTruthy();
+    expect(screen.getByText('ADM-LOG-002')).toBeTruthy();
+    expect(screen.getByText('ADM-LOG-003')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'SIWE 连接' })).toBeTruthy();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('loads five Admin logistics projections and never echoes provider secret references', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    window.ethereum = walletProvider(wallet);
+    const providerReferences: string[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['ADMIN'] });
+      if (url.endsWith('/v2/admin/logistics/carriers')) return jsonResponse(logisticsCarrierConfig());
+      if (url.endsWith('/v2/admin/logistics/providers') && !init?.method) return jsonResponse(logisticsProviderList());
+      if (url.endsWith('/v2/admin/logistics/warehouses')) return jsonResponse({ artifactVersion, warehouses: [] });
+      if (url.endsWith('/v2/admin/logistics/waybills?limit=50')) return jsonResponse({ artifactVersion, waybills: [] });
+      if (url.endsWith('/v2/admin/logistics/print-jobs?limit=50')) return jsonResponse({ artifactVersion, printJobs: [logisticsPrintJob()] });
+      if (url.endsWith('/v2/admin/logistics/provider-versions')) {
+        const body = JSON.parse(String(init?.body)) as Record<string, string>;
+        providerReferences.push(String(body.credentialSecretRef));
+        return jsonResponse(logisticsProviderList().providers[0], 201);
+      }
+      return jsonResponse({ error: { code: 'InvalidRequest', message: `Unexpected logistics request ${url}`, correlationId: 'logistics-ui-test' } }, 400);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderAt('/logistics');
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+
+    expect(await screen.findByRole('heading', { name: '承运商策略' })).toBeTruthy();
+    expect(screen.getAllByRole('checkbox').length).toBe(7);
+    expect(screen.getAllByText('KUAIDI100').length).toBeGreaterThan(0);
+    await user.type(screen.getByLabelText('Partner ID secret ref'), 'secret://partner');
+    await user.type(screen.getByLabelText('Credential secret ref'), 'secret://credential');
+    await user.type(screen.getByLabelText('Monthly account secret ref'), 'secret://monthly');
+    await user.type(screen.getByLabelText('Callback secret ref'), 'secret://callback');
+    await user.type(screen.getAllByLabelText('Idempotency key')[1]!, 'provider-version-1');
+    await user.click(screen.getByRole('button', { name: '提交引用版本' }));
+
+    expect(await screen.findByText(/输入已清除/)).toBeTruthy();
+    expect(providerReferences).toEqual(['secret://credential']);
+    expect((screen.getByLabelText('Credential secret ref') as HTMLInputElement).value).toBe('');
+    expect(screen.queryByDisplayValue('secret://credential')).toBeNull();
+    expect(fetchMock.mock.calls.filter(([input]) => /\/v2\/admin\/logistics\/(?:carriers|providers|warehouses|waybills\?|print-jobs\?)/.test(String(input))).length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('renders Auditor warehouses as redacted and keeps all logistics writes absent', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    window.ethereum = walletProvider(wallet);
+    const fetchMock = logisticsReadFetch(wallet, 'AUDITOR', [logisticsWarehouseRedacted()]);
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderAt('/logistics');
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    await user.click(await screen.findByRole('tab', { name: '仓库' }));
+
+    expect(screen.getByText('AUDITOR 只读')).toBeTruthy();
+    expect(screen.getByText('Core 脱敏投影')).toBeTruthy();
+    expect(screen.getAllByText('已脱敏')).toHaveLength(3);
+    expect(screen.queryByRole('button', { name: '新建仓库' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '保存新版本' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '停用仓库' })).toBeNull();
+    expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes('/v2/admin/logistics/') && Boolean(init?.method && init.method !== 'GET'))).toBe(false);
   });
 
   it('treats the static action catalog as capability metadata, not runtime authorization', () => {
@@ -1097,6 +1159,55 @@ function seckillSession() {
 
 function realtimeEvent(sessionId: string) {
   return { artifactVersion, protocolVersion: 1, eventId: 'relay-event-1', channel: `seckill:${sessionId}`, cursor: '1', eventType: 'SeckillRelayExtended', resourceType: 'SECKILL_SESSION', resourceId: sessionId, occurredAt: '2026-07-15T05:00:30.000Z', finality: 'FINAL', payload: {} };
+}
+
+function logisticsCarrierConfig() {
+  return {
+    artifactVersion, configVersionId: hash('b'), version: 1, defaultCarrierCode: 'SF', readiness: 'READY',
+    carriers: ['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS'].map((carrierCode) => ({ carrierCode, enabled: true })),
+    createdBy: '0x1111111111111111111111111111111111111111', createdAt: '2026-07-16T00:00:00.000Z',
+  };
+}
+
+function logisticsProviderList() {
+  return {
+    artifactVersion,
+    providers: [{
+      provider: 'KUAIDI100', providerConfigVersionId: hash('c'), version: 1, enabled: true, configured: true,
+      configuredFields: { partnerId: true, credential: true, monthlyAccount: true, callbackSecret: true },
+      configHash: hash('d'), readiness: 'READY', createdBy: '0x1111111111111111111111111111111111111111', createdAt: '2026-07-16T00:00:00.000Z',
+    }],
+  };
+}
+
+function logisticsPrintJob() {
+  return {
+    artifactVersion, printJobId: hash('e'), merchantId: 'merchant-1', orderId: 'order-1', storeId: 'store-1', jobKind: 'WAYBILL', provider: 'FEIE', deviceId: 'printer-1', copyCount: 1,
+    contentHash: hash('f'), state: 'RETRYABLE', attempts: 1, providerReference: null, errorCode: 'TIMEOUT', nextAttemptAt: null,
+    createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T00:01:00.000Z',
+  };
+}
+
+function logisticsWarehouseRedacted() {
+  return {
+    artifactVersion, warehouseId: 'warehouse-platform-1', warehouseVersionId: hash('1'), version: 1, warehouseKind: 'PLATFORM', name: '平台一仓', partnerName: null,
+    regionCode: 'CN-11', enabled: true, access: 'REDACTED', contactName: null, phone: null, addressLine: null, payloadHash: hash('2'),
+    createdBy: '0x1111111111111111111111111111111111111111', createdAt: '2026-07-16T00:00:00.000Z',
+  };
+}
+
+function logisticsReadFetch(wallet: string, role: UserRole, warehouses: readonly unknown[]) {
+  return vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
+    if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: [role] });
+    if (url.endsWith('/v2/admin/logistics/carriers')) return jsonResponse(logisticsCarrierConfig());
+    if (url.endsWith('/v2/admin/logistics/providers')) return jsonResponse(logisticsProviderList());
+    if (url.endsWith('/v2/admin/logistics/warehouses')) return jsonResponse({ artifactVersion, warehouses });
+    if (url.endsWith('/v2/admin/logistics/waybills?limit=50')) return jsonResponse({ artifactVersion, waybills: [] });
+    if (url.endsWith('/v2/admin/logistics/print-jobs?limit=50')) return jsonResponse({ artifactVersion, printJobs: [] });
+    return jsonResponse({ error: { code: 'InvalidRequest', message: `Unexpected logistics request ${url}`, correlationId: 'logistics-auditor-test' } }, 400);
+  });
 }
 
 class TestWebSocket {

@@ -1,17 +1,29 @@
-import { artifactVersion } from '@abu24k/core-artifacts';
+import { artifactVersion, type LogisticsCarrierConfigRequest } from '@abu24k/core-artifacts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  createAdminLogisticsCarrierConfigVersion,
+  createAdminLogisticsProviderConfigVersion,
+  createAdminLogisticsWarehouse,
+  createAdminWaybillBatch,
   decideArbitration,
   decideForcedReceipt,
   decideFulfillmentRequest,
+  deactivateAdminLogisticsWarehouse,
   createWalletSession,
+  fetchAdminLogisticsCarrierConfig,
+  fetchAdminLogisticsProviderConfigs,
+  fetchAdminLogisticsWarehouses,
+  fetchAdminPrintJobs,
+  fetchAdminWaybills,
   fetchCatalogProducts,
   fetchCoreBootstrap,
   openArbitration,
   previewAdminOrderBatchActions,
   recordDelivery,
   recordShipment,
+  retryAdminPrintJob,
   searchAdminOrders,
+  updateAdminLogisticsWarehouse,
 } from '../src/coreApi';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -247,6 +259,68 @@ describe('coordinated fulfillment Core client', () => {
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' });
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ orderIds });
   });
+
+  it('consumes only the published Admin logistics HTTP surface', async () => {
+    const warehouse = logisticsWarehouse();
+    const waybill = logisticsWaybill();
+    const printJob = logisticsPrintJob();
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/v2/admin/logistics/carriers' && !init?.method) return jsonResponse(logisticsCarriers());
+      if (url === '/v2/admin/logistics/carrier-versions') return jsonResponse(logisticsCarriers({ version: 2 }), 201);
+      if (url === '/v2/admin/logistics/providers' && !init?.method) return jsonResponse({ artifactVersion, providers: [logisticsProvider()] });
+      if (url === '/v2/admin/logistics/provider-versions') return jsonResponse(logisticsProvider({ version: 2 }), 201);
+      if (url === '/v2/admin/logistics/warehouses' && !init?.method) return jsonResponse({ artifactVersion, warehouses: [warehouse] });
+      if (url === '/v2/admin/logistics/warehouses' && init?.method === 'POST') return jsonResponse(warehouse, 201);
+      if (url === `/v2/admin/logistics/warehouses/${warehouse.warehouseId}`) return jsonResponse({ ...warehouse, version: 2 });
+      if (url === `/v2/admin/logistics/warehouses/${warehouse.warehouseId}/deactivate`) return jsonResponse({ ...warehouse, version: 2, enabled: false });
+      if (url === '/v2/admin/logistics/waybills/batches') return jsonResponse({ artifactVersion, batchId: waybill.batchId, items: [waybill] }, 201);
+      if (url === '/v2/admin/logistics/waybills?limit=25&merchantId=merchant-1') return jsonResponse({ artifactVersion, waybills: [waybill] });
+      if (url === '/v2/admin/logistics/print-jobs?limit=25&merchantId=merchant-1') return jsonResponse({ artifactVersion, printJobs: [printJob] });
+      if (url === `/v2/admin/logistics/print-jobs/${printJob.printJobId}/retry`) return jsonResponse({ ...printJob, state: 'QUEUED' });
+      return jsonResponse({ error: { code: 'InvalidRequest', message: `Unexpected ${url}` } }, 400);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const carriersRequest: LogisticsCarrierConfigRequest = {
+      carriers: [
+        { carrierCode: 'SF', enabled: true }, { carrierCode: 'JD', enabled: true }, { carrierCode: 'YTO', enabled: true },
+        { carrierCode: 'ZTO', enabled: true }, { carrierCode: 'STO', enabled: true }, { carrierCode: 'EMS', enabled: true },
+      ],
+      defaultCarrierCode: 'SF',
+      idempotencyKey: 'carrier-v2',
+    };
+    const providerRequest = { provider: 'KUAIDI100' as const, enabled: true, partnerIdSecretRef: 'secret://partner', credentialSecretRef: 'secret://credential', monthlyAccountSecretRef: 'secret://account', callbackSecretRef: 'secret://callback', idempotencyKey: 'provider-v2' };
+    const warehouseRequest = { warehouseKind: 'PLATFORM' as const, name: '平台一仓', partnerName: null, contactName: '负责人', phone: '13800000000', regionCode: 'CN-11', addressLine: '受控地址', enabled: true, idempotencyKey: 'warehouse-v1' };
+    const waybillRequest = { merchantId: 'merchant-1', provider: 'KUAIDI100' as const, carrierCode: 'SF' as const, storeId: 'store-1', orderIds: ['order-1'], idempotencyKey: 'waybill-v1' };
+
+    await expect(fetchAdminLogisticsCarrierConfig('jwt')).resolves.toMatchObject({ readiness: 'READY' });
+    await expect(createAdminLogisticsCarrierConfigVersion(carriersRequest, 'jwt')).resolves.toMatchObject({ version: 2 });
+    await expect(fetchAdminLogisticsProviderConfigs('jwt')).resolves.toMatchObject({ providers: [{ configured: true }] });
+    await expect(createAdminLogisticsProviderConfigVersion(providerRequest, 'jwt')).resolves.toMatchObject({ version: 2 });
+    await expect(fetchAdminLogisticsWarehouses('jwt')).resolves.toMatchObject({ warehouses: [{ warehouseId: warehouse.warehouseId }] });
+    await expect(createAdminLogisticsWarehouse(warehouseRequest, 'jwt')).resolves.toMatchObject({ warehouseId: warehouse.warehouseId });
+    await expect(updateAdminLogisticsWarehouse(warehouse.warehouseId, { ...warehouseRequest, expectedVersion: 1 }, 'jwt')).resolves.toMatchObject({ version: 2 });
+    await expect(deactivateAdminLogisticsWarehouse(warehouse.warehouseId, { expectedVersion: 1, idempotencyKey: 'warehouse-off' }, 'jwt')).resolves.toMatchObject({ enabled: false });
+    await expect(createAdminWaybillBatch(waybillRequest, 'jwt')).resolves.toMatchObject({ items: [{ requestId: waybill.requestId }] });
+    await expect(fetchAdminWaybills('jwt', 'merchant-1', 25)).resolves.toMatchObject({ waybills: [{ merchantId: 'merchant-1' }] });
+    await expect(fetchAdminPrintJobs('jwt', 'merchant-1', 25)).resolves.toMatchObject({ printJobs: [{ state: 'RETRYABLE' }] });
+    await expect(retryAdminPrintJob(printJob.printJobId, { idempotencyKey: 'print-retry' }, 'jwt')).resolves.toMatchObject({ state: 'QUEUED' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(12);
+    for (const [, init] of fetchMock.mock.calls) expect(init?.headers).toMatchObject({ authorization: 'Bearer jwt' });
+    const providerCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/provider-versions'));
+    expect(JSON.parse(String(providerCall?.[1]?.body))).toEqual(providerRequest);
+    expect(providerCall?.[1]?.method).toBe('POST');
+  });
+
+  it('rejects stale logistics projections and invalid list filters before use', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ...logisticsCarriers(), artifactVersion: 'stale' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(fetchAdminLogisticsCarrierConfig('jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
+    await expect(fetchAdminWaybills('jwt', ' ', 50)).rejects.toMatchObject({ code: 'InvalidResponse', status: 400 });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
 });
 
 function jsonResponse(body: unknown, status = 200) {
@@ -281,5 +355,50 @@ function fulfillmentOrder(overrides: Record<string, unknown> = {}) {
     deliveredAt: null, fulfilledAt: null, takeoverOpenedAt: null, arbitrationOpenedAt: null,
     requests: [], shipments: [], logistics: [], balances: [], allowedActions: [],
     ...overrides,
+  };
+}
+
+function logisticsCarriers(overrides: Record<string, unknown> = {}) {
+  return {
+    artifactVersion,
+    configVersionId: hash('a'),
+    version: 1,
+    defaultCarrierCode: 'SF',
+    readiness: 'READY',
+    carriers: ['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS'].map((carrierCode) => ({ carrierCode, enabled: true })),
+    createdBy: '0x1111111111111111111111111111111111111111',
+    createdAt: '2026-07-16T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function logisticsProvider(overrides: Record<string, unknown> = {}) {
+  return {
+    provider: 'KUAIDI100', providerConfigVersionId: hash('b'), version: 1, enabled: true, configured: true,
+    configuredFields: { partnerId: true, credential: true, monthlyAccount: true, callbackSecret: true },
+    configHash: hash('c'), readiness: 'READY', createdBy: '0x1111111111111111111111111111111111111111', createdAt: '2026-07-16T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function logisticsWarehouse() {
+  return {
+    artifactVersion, warehouseId: 'warehouse-platform-1', warehouseVersionId: hash('d'), version: 1, warehouseKind: 'PLATFORM', name: '平台一仓', partnerName: null,
+    regionCode: 'CN-11', enabled: true, access: 'FULL', contactName: '负责人', phone: '13800000000', addressLine: '受控地址', payloadHash: hash('e'),
+    createdBy: '0x1111111111111111111111111111111111111111', createdAt: '2026-07-16T00:00:00.000Z',
+  };
+}
+
+function logisticsWaybill() {
+  return {
+    artifactVersion, requestId: hash('1'), batchId: hash('2'), merchantId: 'merchant-1', orderId: 'order-1', storeId: 'store-1', provider: 'KUAIDI100', carrierCode: 'SF', state: 'COMPLETED',
+    providerReference: 'provider-1', trackingNumber: 'SF123', trackingNumberHash: hash('3'), shipmentEvidenceHash: hash('4'), printJobId: hash('5'), errorCode: null, updatedAt: '2026-07-16T00:00:00.000Z',
+  };
+}
+
+function logisticsPrintJob() {
+  return {
+    artifactVersion, printJobId: hash('5'), merchantId: 'merchant-1', orderId: 'order-1', storeId: 'store-1', jobKind: 'WAYBILL', provider: 'FEIE', deviceId: 'printer-1', copyCount: 1,
+    contentHash: hash('6'), state: 'RETRYABLE', attempts: 1, providerReference: null, errorCode: 'TIMEOUT', nextAttemptAt: null, createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T00:01:00.000Z',
   };
 }
