@@ -55,7 +55,7 @@ export const product: CatalogProduct = {
   }],
 };
 
-export function paymentQuote(): PaymentQuoteResponse {
+export function paymentQuote(fulfillmentMode: 'DELIVERY' | 'PICKUP' = 'DELIVERY'): PaymentQuoteResponse {
   const buyer = address('1');
   const router = address('9');
   const intent = {
@@ -67,7 +67,7 @@ export function paymentQuote(): PaymentQuoteResponse {
     productId: product.chainProductId,
     skuId: product.skus[0]!.chainSkuId,
     quantity: 1,
-    fulfillmentMode: 'DELIVERY' as const,
+    fulfillmentMode,
     fulfillmentTargetHash: hash('1'),
     regionCodeHash: hash('2'),
     productPolicyHash: hash('3'),
@@ -104,7 +104,8 @@ export function paymentQuote(): PaymentQuoteResponse {
     nplRewardAllocations: [],
     requiredConfirmations: 15 as const,
   };
-  const routerIntent = { ...intent, fulfillmentMode: 0 as const };
+  const fulfillmentModeCode = fulfillmentMode === 'DELIVERY' ? 0 as const : 1 as const;
+  const routerIntent = { ...intent, fulfillmentMode: fulfillmentModeCode };
   const approvalRequirements = [
     approval(chainIdentity.usdtAddress, router, intent.usdtPaymentAmount),
     approval(chainIdentity.nplAddress, router, intent.nplPaymentAmount),
@@ -118,7 +119,7 @@ export function paymentQuote(): PaymentQuoteResponse {
     productId: intent.productId,
     skuId: intent.skuId,
     quantity: 1,
-    fulfillmentMode: 0 as const,
+    fulfillmentMode: fulfillmentModeCode,
     listPriceUsdt: intent.listPriceUsdt,
     usdtPaymentAmount: intent.usdtPaymentAmount,
     nplPaymentAmount: intent.nplPaymentAmount,

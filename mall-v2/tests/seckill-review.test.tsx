@@ -92,7 +92,6 @@ describe('seckill signed quote review', () => {
       selectSeckillSession: vi.fn(),
       reloadStores: vi.fn(),
       requestLocation: vi.fn(),
-      createDeliveryTarget: vi.fn(),
       createPickupTarget: vi.fn(),
       reloadOrders: vi.fn(),
       loadMoreOrders: vi.fn(),
