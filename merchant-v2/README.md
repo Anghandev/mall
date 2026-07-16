@@ -11,7 +11,7 @@ pnpm --filter @abu24k/merchant check
 ```
 
 The app consumes the coordinated `@abu24k/core-artifacts` workspace package at
-`2.0.0-merchant-lifecycle.1`. In addition to Bootstrap, merchant SIWE and the
+`2.0.0-logistics-admin.1`. In addition to Bootstrap, merchant SIWE and the
 payment/fulfillment surfaces, the workbench consumes merchant finance,
 guarantee-deposit evidence, settlement intents, signed settlement requests and
 Safe-finality history. The help center reads wallet-targeted published CMS
@@ -42,6 +42,10 @@ provider-issued electronic waybills and durable print jobs. Batch and print
 retries preserve their idempotency keys. The browser submits only published
 provider/carrier/store/order fields or Core-issued canonical tracking/evidence
 hashes; it does not derive tracking numbers, print content or financial state.
+Carrier codes come from the generated Core enum. Platform carrier enablement
+and provider configuration remain Core authority: `ConfigurationRequired` and
+`InvalidRequest` responses stay visible and never become a browser-side
+success, and the workbench does not consume platform configuration writes.
 
 The settings center consumes the tenant-scoped merchant profile with optimistic
 versioning and stable retry keys. Shop name and a provider-sealed,

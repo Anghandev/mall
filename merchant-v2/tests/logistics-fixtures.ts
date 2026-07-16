@@ -70,6 +70,7 @@ export const waybillBatchResult: WaybillBatchResult = {
     artifactVersion,
     requestId: hash('3'),
     batchId: hash('2'),
+    merchantId,
     orderId: deliveryOrderId,
     storeId,
     provider: 'KUAIDI100',
@@ -88,6 +89,7 @@ export const waybillBatchResult: WaybillBatchResult = {
 export const waybillPrintJob: PrintJob = {
   artifactVersion,
   printJobId: hash('6'),
+  merchantId,
   orderId: deliveryOrderId,
   storeId,
   jobKind: 'WAYBILL',
@@ -107,6 +109,7 @@ export const waybillPrintJob: PrintJob = {
 export const pickupPrintJob: PrintJob = {
   artifactVersion,
   printJobId: hash('8'),
+  merchantId,
   orderId: pickupOrderId,
   storeId: 'store-dalian-1',
   jobKind: 'PICKUP_RECEIPT',

@@ -296,8 +296,8 @@ async function enterSettings(client: CoreApi) {
 }
 
 describe('00 wallet gateway', () => {
-  it('consumes merchant-lifecycle.1 and requires a server-authoritative order-action grant', () => {
-    expect(artifactVersion).toBe('2.0.0-merchant-lifecycle.1');
+  it('consumes logistics-admin.1 and requires a server-authoritative order-action grant', () => {
+    expect(artifactVersion).toBe('2.0.0-logistics-admin.1');
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
     expect(coreBoundary.artifactVersion).toBe(artifactVersion);
     expect(coreBoundary.artifactsAvailable).toBe(true);
@@ -786,6 +786,34 @@ describe('03 fulfillment center', () => {
       orderIds: [deliveryOrderId],
       idempotencyKey: expect.stringMatching(/^merchant-waybill-batch-/),
     }), 'test-session');
+  });
+
+  it.each([
+    ['ConfigurationRequired', 'Waybill provider configuration is incomplete'],
+    ['InvalidRequest', 'Carrier is disabled by the current platform configuration'],
+  ] as const)('fails closed when Core rejects a waybill with %s', async (code, message) => {
+    const shippableOrder = {
+      ...deliveryOrder,
+      state: 'PAID' as const,
+      shippedAt: null,
+      deliveredAt: null,
+      shipments: [],
+      logistics: [],
+      allowedActions: [{ action: 'RECORD_SHIPMENT' as const, enabled: true }],
+    };
+    const createMerchantWaybillBatch = vi.fn(async () => {
+      throw new CoreApiError(code, message);
+    });
+    const user = await enterFulfillment(createMockCoreApi({
+      listFulfillmentOrders: async () => ({ orders: [shippableOrder], nextCursor: null }),
+      createMerchantWaybillBatch,
+    }));
+    await user.click(await screen.findByLabelText(`选择批量发货 ${deliveryOrderId}`));
+    await user.click(screen.getByRole('button', { name: '创建电子面单批次' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain(`${code}：${message}`);
+    expect(createMerchantWaybillBatch).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('SF1234567890')).toBeNull();
   });
 
   it('reads durable waybill and pickup receipt jobs and retries a non-accepted job with one stable command', async () => {

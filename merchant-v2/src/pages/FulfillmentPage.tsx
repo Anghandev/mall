@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  logisticsCarrierCodes,
   orderProjectionStates,
   type AllowedAction,
   type AllowedActionName,
@@ -71,7 +72,7 @@ const carrierPattern = /^[A-Z0-9_-]{2,32}$/;
 const reasonCodePattern = /^[A-Z0-9_:-]{2,64}$/;
 const pickupCodePattern = /^[0-9]{6}$/;
 const orderKinds = ['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] satisfies readonly OrderKind[];
-const batchCarrierCodes = ['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS'] satisfies readonly BatchCarrierCode[];
+const batchCarrierCodes = logisticsCarrierCodes satisfies readonly BatchCarrierCode[];
 const emptyFilters: FilterDraft = { from: '', to: '', skuId: '', state: '', orderKind: '' };
 const deliveryColumns = ['选择', '订单号', '订单类型', 'SKU', '数量', '订单状态', '支付 TxHash', '下单时间', '支付最终性', '物流单号哈希', '操作'];
 const pickupColumns = ['订单号', '订单类型', 'SKU', '数量', '订单状态', '支付 TxHash', '下单时间', '核销门店', '完成时间', '支付最终性', '操作'];

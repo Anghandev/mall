@@ -49,7 +49,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('merchant-lifecycle.1 Core HTTP consumer', () => {
+describe('logistics-admin.1 Core HTTP consumer', () => {
   it('consumes signed printer binding, provider waybill and durable print job routes', async () => {
     const acceptedJob = { ...waybillPrintJob, state: 'QUEUED' as const, attempts: 0, errorCode: null };
     const fetchMock = vi.fn()
@@ -130,6 +130,33 @@ describe('merchant-lifecycle.1 Core HTTP consumer', () => {
       deviceId: printerBinding.deviceId,
       idempotencyKey: 'printer-challenge-mismatch-1',
     }, 'merchant-session')).rejects.toMatchObject({ code: 'InvalidResponse' });
+  });
+
+  it.each([
+    ['ConfigurationRequired', 503],
+    ['InvalidRequest', 400],
+  ] as const)('preserves Core %s rejection for a merchant waybill command', async (code, status) => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({
+      error: {
+        code,
+        message: code === 'ConfigurationRequired'
+          ? 'Waybill provider configuration is incomplete'
+          : 'Carrier is disabled by the current platform configuration',
+        details: {},
+      },
+    }, status, { 'x-correlation-id': `waybill-${code}` })) as typeof fetch;
+
+    await expect(createCoreApi().createMerchantWaybillBatch({
+      provider: 'KUAIDI100',
+      carrierCode: 'SF',
+      storeId,
+      orderIds: [deliveryOrderId],
+      idempotencyKey: `waybill-${code}`,
+    }, 'merchant-session')).rejects.toMatchObject({
+      code,
+      correlationId: `waybill-${code}`,
+      status,
+    });
   });
 
   it('uses the published SIWE nonce and verify request bodies without a password fallback', async () => {
@@ -300,7 +327,7 @@ describe('merchant-lifecycle.1 Core HTTP consumer', () => {
       'https://core.example.test/v2/catalog/products',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-merchant-lifecycle.1' }),
+        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-logistics-admin.1' }),
       }),
     );
   });
