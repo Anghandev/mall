@@ -283,7 +283,7 @@ Real provider accounts, device acceptance and production deployment remain
 
 ## Merchant Stores `.1` Consumer Boundary
 
-The current product pin is
+That batch's product pin was
 `@abu24k/core-artifacts@2.0.0-merchant-stores.1`. The shared read status now
 includes `DRAFT`, but merchant store list/create/profile/activate/close remain
 Merchant-only operations. This checkpoint completes no Admin Requirement ID:
@@ -294,6 +294,25 @@ Merchant-only operations. This checkpoint completes no Admin Requirement ID:
   operations and no Admin alias.
 - The production-bundle guard rejects the Merchant store-management route
   prefix, including the base GET/POST path.
+
+Production Safe/RPC/domain/wallets, provider credentials, physical devices and
+deployment remain `ExternalBlocked` under `ADM-GOAL-003`. No production fixture
+is shipped.
+
+## Merchant Fulfillment `.1` Consumer Boundary
+
+The current product pin is
+`@abu24k/core-artifacts@2.0.0-merchant-fulfillment.1`. Core publishes the
+PII-authorized paginated Excel export only as Merchant operation
+`POST /v2/merchant/orders/exports` (`exportMerchantOrders`). This checkpoint
+completes no Admin Requirement ID:
+
+- Admin exposes no Merchant order-export control, calls no Merchant export
+  route and does not consume its generated PII request/response contracts.
+- Consumer tests prove the Merchant operation, bearer authentication and exact
+  request/response schemas exist while no Admin operation aliases those
+  contracts.
+- The production-bundle guard rejects both the Merchant route and operation ID.
 
 Production Safe/RPC/domain/wallets, provider credentials, physical devices and
 deployment remain `ExternalBlocked` under `ADM-GOAL-003`. No production fixture
