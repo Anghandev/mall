@@ -41,6 +41,8 @@ import {
   cmsRules,
   guaranteeDepositResult,
   merchantFinance,
+  merchantReceivableStatements,
+  merchantReceivableStatementsNext,
   requestedSettlement,
   settlementIntent,
   settlementList,
@@ -274,6 +276,9 @@ function createMockCoreApi(overrides: Partial<CoreApi> = {}): CoreApi {
       fulfilledAt: '2026-07-14T12:05:00.000Z',
     }),
     listSettlements: async () => settlementList,
+    listMerchantReceivableStatements: async (_token, options) => (
+      options?.cursor ? merchantReceivableStatementsNext : merchantReceivableStatements
+    ),
     createSettlementIntent: async () => settlementIntent,
     submitSettlementRequest: async () => requestedSettlement,
     getMerchantFinance: async () => merchantFinance,
@@ -377,8 +382,8 @@ async function enterSettings(client: CoreApi) {
 }
 
 describe('00 wallet gateway', () => {
-  it('consumes settlement-admin.11 without widening the merchant action boundary', () => {
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.11');
+  it('consumes settlement-admin.12 without widening the merchant action boundary', () => {
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.12');
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
     expect(coreBoundary.artifactVersion).toBe(artifactVersion);
     expect(coreBoundary.artifactsAvailable).toBe(true);
@@ -1658,6 +1663,8 @@ describe('05 asset rails', () => {
     expect(await screen.findByText('8000000000000000000000')).toBeTruthy();
     expect(screen.getByText(/2026-07-14T16:00:00.000Z 至 2026-07-15T16:00:00.000Z/)).toBeTruthy();
     expect(screen.getByLabelText('USDT 商家货款五状态余额')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '逐单应收账单' })).toBeTruthy();
+    expect(screen.getByText('秒杀额外分成 DecisionBlocked')).toBeTruthy();
     const nplRewards = screen.getByLabelText('NPL 奖励收益子类');
     for (const subtype of rewardSubtypes) expect(within(nplRewards).getByText(subtype)).toBeTruthy();
     expect(within(nplRewards).getByText('2108')).toBeTruthy();
@@ -1675,6 +1682,53 @@ describe('05 asset rails', () => {
     expect(screen.getByText('takeover-1')).toBeTruthy();
     expect(screen.getAllByText('200000000000000000000').length).toBeGreaterThan(0);
     expect(screen.queryByText(/CLAIM_MERCHANT_USDT|ClaimVault|PaymentEscrow/)).toBeNull();
+  });
+
+  it('renders authoritative per-order journals and loads the next stable cursor page', async () => {
+    const listMerchantReceivableStatements = vi.fn(createMockCoreApi().listMerchantReceivableStatements);
+    const { user } = await enterAssets(createMockCoreApi({ listMerchantReceivableStatements }));
+
+    const firstOrderIds = await screen.findAllByText(merchantReceivableStatements.statements[0]!.orderId);
+    expect(firstOrderIds.length).toBeGreaterThan(0);
+    expect(screen.getByText('SECKILL')).toBeTruthy();
+    expect(screen.getByText('ORDINARY')).toBeTruthy();
+    const firstStatement = firstOrderIds[0]!.closest('details')!;
+    await user.click(firstOrderIds[0]!);
+    expect(within(firstStatement).getByText('冻结金额快照')).toBeTruthy();
+    expect(within(firstStatement).getAllByText('journal:a:lifecycle')).toHaveLength(2);
+    expect(within(firstStatement).getByText('journal:a:requested')).toBeTruthy();
+    expect(within(firstStatement).getByRole('link', { name: new RegExp(`0x${'b'.repeat(64)}`) }).getAttribute('href'))
+      .toBe(`https://bscscan.com/tx/0x${'b'.repeat(64)}`);
+
+    await user.click(screen.getByRole('button', { name: '加载下一页' }));
+    expect((await screen.findAllByText(merchantReceivableStatementsNext.statements[0]!.orderId)).length)
+      .toBeGreaterThan(0);
+    expect(screen.getByText('FALLBACK_RETAIL')).toBeTruthy();
+    expect(listMerchantReceivableStatements).toHaveBeenNthCalledWith(1, 'test-session', { limit: 20 });
+    expect(listMerchantReceivableStatements).toHaveBeenNthCalledWith(2, 'test-session', {
+      cursor: merchantReceivableStatements.nextCursor,
+      limit: 20,
+    });
+    expect((screen.getByRole('button', { name: '加载下一页' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('fails closed on receivable authorization and tenant identity mismatch', async () => {
+    await enterAssets(createMockCoreApi({
+      listMerchantReceivableStatements: async () => {
+        throw new CoreApiError('Unauthorized', '商家会话已失效。', 'corr-receivable-auth');
+      },
+    }));
+    expect(await screen.findByText(/Unauthorized：商家会话已失效.*corr-receivable-auth/)).toBeTruthy();
+
+    cleanup();
+    await enterAssets(createMockCoreApi({
+      listMerchantReceivableStatements: async () => ({
+        ...merchantReceivableStatements,
+        merchantId: 'merchant-other',
+      }),
+    }));
+    expect(await screen.findByText('逐单应收投影与当前商家不一致。')).toBeTruthy();
+    expect(screen.queryByText(merchantReceivableStatements.statements[0]!.orderId)).toBeNull();
   });
 
   it('creates the exact merchant settlement intent, signs Core EIP-712 data and submits the signed request', async () => {

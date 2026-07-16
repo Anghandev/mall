@@ -1058,15 +1058,17 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       adjustInventory: async (actor, skuId, input) => ({ actor: actor.walletAddress, skuId, ...input }),
       listAdminProducts: async (actor) => [{ actor: actor.walletAddress, productId: 'product-managed-1' }],
       batchAddProductTags: async (actor, input) => ({ actor: actor.walletAddress, ...input }),
+      batchProductLifecycle: async (actor, input) => ({ actor: actor.walletAddress, ...input }),
     },
     adminGlobalOperationsService: {
       search: async (actor, input) => ({
         artifactVersion: CORE_ARTIFACT_VERSION,
         actor: actor.walletAddress,
-        relation: 'AND',
+        relation: input?.relation ?? 'AND',
+        walletMatch: input?.walletMatch ?? 'EXACT',
         resources: [],
         truncated: false,
-        unavailableFilters: ['OR', 'FUZZY_WALLET', 'UID', 'PHONE', 'YELLOW_QUEUE'],
+        unavailableFilters: ['UID', 'PHONE', 'YELLOW_QUEUE'],
         query: input,
       }),
       exportSelection: async (actor, input) => ({
@@ -2085,7 +2087,8 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     })).status, 403);
     const globalResources = await fetch(
       `${base}/v2/admin/global/resources?resourceType=ORDER&resourceType=PRODUCT`
-        + `&productId=product-1&wallet=${SAFE}&pendingReview=false&limit=20`,
+        + `&relation=OR&productId=product-1&wallet=${SAFE}&walletMatch=FUZZY`
+        + '&pendingReview=false&limit=20',
       { headers: bearerHeaders },
     );
     assert.equal(globalResources.status, 200);
@@ -2093,13 +2096,21 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       (await globalResources.json() as { query: Record<string, unknown> }).query,
       {
         resourceTypes: ['ORDER', 'PRODUCT'],
+        relation: 'OR',
         productId: 'product-1',
         wallet: SAFE,
+        walletMatch: 'FUZZY',
         pendingReview: false,
         limit: 20,
       },
     );
     assert.equal((await fetch(`${base}/v2/admin/global/resources?resourceType=UNKNOWN`, {
+      headers: bearerHeaders,
+    })).status, 400);
+    assert.equal((await fetch(`${base}/v2/admin/global/resources?relation=XOR`, {
+      headers: bearerHeaders,
+    })).status, 400);
+    assert.equal((await fetch(`${base}/v2/admin/global/resources?walletMatch=PREFIX`, {
       headers: bearerHeaders,
     })).status, 400);
     assert.equal((await fetch(`${base}/v2/admin/global/resources`, {
@@ -2132,6 +2143,28 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
         productIds: ['product-managed-1'],
         tagIds: ['tag-1'],
         idempotencyKey: 'http-product-batch-tags-denied',
+      }),
+    })).status, 403);
+    const lifecycleBatch = await fetch(`${base}/v2/admin/catalog/products/batch-lifecycle`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        action: 'HIDE',
+        productIds: ['product-managed-1'],
+        reasonCode: 'OPERATIONS_HIDE',
+        idempotencyKey: 'http-product-batch-lifecycle-1',
+      }),
+    });
+    assert.equal(lifecycleBatch.status, 200);
+    assert.equal((await lifecycleBatch.json() as { action: string }).action, 'HIDE');
+    assert.equal((await fetch(`${base}/v2/admin/catalog/products/batch-lifecycle`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${buyerOnlyToken}` },
+      body: JSON.stringify({
+        action: 'DELIST',
+        productIds: ['product-managed-1'],
+        reasonCode: 'OPERATIONS_DELIST',
+        idempotencyKey: 'http-product-batch-lifecycle-denied',
       }),
     })).status, 403);
     const actionPreview = await fetch(`${base}/v2/admin/orders/batch-actions/preview`, {

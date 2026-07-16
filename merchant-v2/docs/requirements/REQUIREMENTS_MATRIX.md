@@ -33,7 +33,7 @@ does not complete or verify a Requirement while its Core capability is missing.
 | MER-STORE-002 | 58-60 | Six-digit national region code; AMap reverse geocode; example 210211; permanent lock; pickup regional-beneficiary binding | D-V2-010, D-V2-014, D-V2-017 | No manual region fallback; signed region; later move creates replacement store | Verified | - |
 | MER-STORE-003 | 61 | Physical receipt printer Device ID binding and automatic pickup receipt | D-V2-014, D-V2-019, D-V2-021 | Local device adapter, binding validation, secondary-signature intent, retry/error handling and typed ConfigurationRequired are tested; physical printer evidence remains MER-GOAL-003 | Verified | - |
 | MER-ASSET-001 | 62-65 | Financial/reward center; Today plus Locked/Available/Requested/Batched/Settled transferable-asset dashboard and final Safe transaction history | D-V2-007, D-V2-021, D-V2-023 | USDT merchant proceeds remain a separate canonical liability rail; every state and final Safe TxHash comes from Core | Verified | - |
-| MER-ASSET-002 | 66-70 | Natural-day sales; Locked during shipment/transit/pickup; Available after fulfillment finality; Requested, Batched and cumulative Settled | D-V2-006, D-V2-007, D-V2-017, D-V2-023 | Exact Core projection links each state to orders, journal evidence, settlement request, immutable batch and 15-confirmation Safe finality; no frontend netting or premature release | Frozen | GAP-MER-001 (per-order journal linkage) |
+| MER-ASSET-002 | 66-70 | Natural-day sales; Locked during shipment/transit/pickup; Available after fulfillment finality; Requested, Batched and cumulative Settled | D-V2-006, D-V2-007, D-V2-017, D-V2-023 | Exact Core projection links each state to orders, journal evidence, settlement request, immutable batch and 15-confirmation Safe finality; no frontend netting or premature release | Verified | - |
 | MER-ASSET-003 | 71-76 | Seckill revenue detail; store NPL payable in five settlement states; BNM backend-points total with Locked/Available tracking only | D-V2-007, D-V2-008, D-V2-009, D-V2-023 | All eight generated NPL reward subtypes and Core-projected BNM Locked/Available totals render without frontend aggregation; USDT, NPL and BNM rails never merge; BNM has no ERC-20, Safe transfer, Gas, mint, settlement action or on-chain Claim | Overridden | GAP-MER-013 (seckill revenue detail only) |
 | MER-ASSET-004 | New Goal | 1,000 USDT minimum guarantee; major-loss order guarantee -> frozen receivables -> future proceeds; listing, new orders and settlement requests freeze when required | D-V2-005, D-V2-018, D-V2-020, D-V2-021 | Core projects exact guarantee/debt evidence and allowedActions; below-minimum and takeover states block product listing, new orders and merchant settlement requests without affecting buyer prize eligibility | Frozen | GAP-MER-004 |
 | MER-CLAIM-001 | 77-78 | Gasless wallet-signed request to settle Available merchant USDT into the bound settlement wallet | D-V2-007, D-V2-015, D-V2-023 | Request is wallet/asset/amount bound, nonce-protected, expiring and idempotent; merchant signs but never broadcasts a Safe transaction or pays settlement Gas | Verified | - |
@@ -87,9 +87,22 @@ does not complete or verify a Requirement while its Core capability is missing.
   the production build/bundle guard rejects test export fixtures and obsolete
   artifact versions.
 
-## Settlement Admin .11 Consumer Boundary
+## Settlement Admin .12 Per-Order Receivable Evidence
 
-- `@abu24k/core-artifacts@2.0.0-settlement-admin.11` preserves the existing
+- `@abu24k/core-artifacts@2.0.0-settlement-admin.12` publishes the
+  merchant-scoped `GET /v2/merchant/receivable-statements` operation, paired
+  `(createdAt, orderId)` cursor and generated receivable statement DTOs.
+- `MER-ASSET-002`: the asset center renders ordinary, fallback-retail and
+  seckill-classified orders with frozen base/concession/net values, current
+  lifecycle, journal IDs and settlement request/batch/final Safe linkage.
+- Cross-tenant merchant or settlement-wallet responses and authorization
+  failures close only the statement surface. The browser never calculates
+  receivables or an extra seckill share, and test fixtures stay outside the
+  production bundle.
+
+## Settlement Admin .12 Consumer Boundary
+
+- `@abu24k/core-artifacts@2.0.0-settlement-admin.12` preserves the existing
   Merchant settlement intent, wallet-signed request and tenant-scoped history
   operations without changing Merchant fulfillment or fund calculations.
 - Admin-wide settlement request and batch reads, governed settlement intents

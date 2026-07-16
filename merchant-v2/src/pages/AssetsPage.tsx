@@ -17,6 +17,8 @@ import type {
   BnmPointsBalance,
   MerchantBusinessDashboard,
   MerchantFinanceProjection,
+  MerchantReceivableStatement,
+  MerchantReceivableStatementPage,
   RewardSubtype,
   SettlementBalance,
   SettlementListProjection,
@@ -47,6 +49,9 @@ export function AssetsPage() {
   const [settlementsState, setSettlementsState] = useState<LoadState<SettlementListProjection>>({ phase: 'idle' });
   const [financeState, setFinanceState] = useState<LoadState<MerchantFinanceProjection>>({ phase: 'idle' });
   const [dashboardState, setDashboardState] = useState<LoadState<MerchantBusinessDashboard>>({ phase: 'idle' });
+  const [receivableStatementsState, setReceivableStatementsState] = useState<LoadState<MerchantReceivableStatementPage>>({ phase: 'idle' });
+  const [receivablePageLoading, setReceivablePageLoading] = useState(false);
+  const [receivablePageError, setReceivablePageError] = useState<string>();
   const [settlementAmount, setSettlementAmount] = useState('');
   const [settlementCommand, setSettlementCommand] = useState<CommandState>({ phase: 'idle' });
   const [depositPolicyVersion, setDepositPolicyVersion] = useState('');
@@ -63,18 +68,24 @@ export function AssetsPage() {
       setSettlementsState({ phase: 'idle' });
       setFinanceState({ phase: 'idle' });
       setDashboardState({ phase: 'idle' });
+      setReceivableStatementsState({ phase: 'idle' });
+      setReceivablePageLoading(false);
+      setReceivablePageError(undefined);
       return;
     }
     if (!quiet) {
       setSettlementsState({ phase: 'loading' });
       setFinanceState({ phase: 'loading' });
       setDashboardState({ phase: 'loading' });
+      setReceivableStatementsState({ phase: 'loading' });
     }
+    setReceivablePageError(undefined);
     const token = session.token;
-    const [settlementsResult, financeResult, dashboardResult] = await Promise.allSettled([
+    const [settlementsResult, financeResult, dashboardResult, receivableStatementsResult] = await Promise.allSettled([
       api.listSettlements(token),
       api.getMerchantFinance(token),
       api.getMerchantBusinessDashboard(token),
+      api.listMerchantReceivableStatements(token, { limit: 20 }),
     ]);
     if (sessionTokenRef.current !== token) return;
 
@@ -110,6 +121,18 @@ export function AssetsPage() {
     } else {
       setDashboardState({ phase: 'error', message: readableError(dashboardResult.reason) });
     }
+
+    if (receivableStatementsResult.status === 'fulfilled') {
+      const scopeError = merchantReceivableScopeError(receivableStatementsResult.value, session);
+      setReceivableStatementsState(scopeError
+        ? { phase: 'error', message: scopeError }
+        : { phase: 'ready', value: receivableStatementsResult.value });
+    } else {
+      setReceivableStatementsState({
+        phase: 'error',
+        message: readableError(receivableStatementsResult.reason),
+      });
+    }
   }, [api, session]);
 
   useEffect(() => {
@@ -119,6 +142,9 @@ export function AssetsPage() {
   const settlements = settlementsState.phase === 'ready' ? settlementsState.value : undefined;
   const finance = financeState.phase === 'ready' ? financeState.value : undefined;
   const dashboard = dashboardState.phase === 'ready' ? dashboardState.value : undefined;
+  const receivableStatements = receivableStatementsState.phase === 'ready'
+    ? receivableStatementsState.value
+    : undefined;
   const merchantBalances = settlements?.balances.filter((balance) => (
     balance.asset === 'USDT' && balance.purpose === 'MERCHANT_RECEIVABLE'
   )) ?? [];
@@ -156,6 +182,33 @@ export function AssetsPage() {
   function resetDepositAttempt() {
     depositKey.current = undefined;
     setDepositCommand({ phase: 'idle' });
+  }
+
+  async function loadMoreReceivableStatements() {
+    if (!session || !receivableStatements?.nextCursor || receivablePageLoading) return;
+    const token = session.token;
+    const cursor = receivableStatements.nextCursor;
+    setReceivablePageLoading(true);
+    setReceivablePageError(undefined);
+    try {
+      const nextPage = await api.listMerchantReceivableStatements(token, { cursor, limit: 20 });
+      if (sessionTokenRef.current !== token) return;
+      const scopeError = merchantReceivableScopeError(nextPage, session);
+      if (scopeError) throw new CoreApiError('InvalidResponse', scopeError);
+      setReceivableStatementsState((current) => current.phase === 'ready'
+        ? {
+            phase: 'ready',
+            value: {
+              ...nextPage,
+              statements: [...current.value.statements, ...nextPage.statements],
+            },
+          }
+        : current);
+    } catch (error) {
+      if (sessionTokenRef.current === token) setReceivablePageError(readableError(error));
+    } finally {
+      if (sessionTokenRef.current === token) setReceivablePageLoading(false);
+    }
   }
 
   async function submitSettlement(event: React.FormEvent<HTMLFormElement>) {
@@ -265,6 +318,52 @@ export function AssetsPage() {
             <div className="inline-warning finance-warning" role="status">
               <AlertTriangle aria-hidden="true" size={17} />
               <span>Disputed 仲裁锁定：{disputedMerchantBalances.map((item) => `${item.amount} ${item.asset}`).join(' / ')}</span>
+            </div>
+          ) : null}
+        </ProjectionState>
+      </section>
+
+      <section className="section-block finance-section" aria-labelledby="receivable-statements-title">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Order journal / USDT atomic</p>
+            <h2 id="receivable-statements-title">逐单应收账单</h2>
+          </div>
+          <CircleDollarSign aria-hidden="true" size={19} />
+        </div>
+        <p className="section-intro">
+          每笔订单的冻结金额、当前余额、账本生命周期和 Safe 结算引用均直接来自 Core；本页不重算净应收或结算金额。
+        </p>
+        <div className="decision-notice receivable-decision" role="status">
+          <AlertTriangle aria-hidden="true" size={17} />
+          <div>
+            <strong>秒杀额外分成 DecisionBlocked</strong>
+            <span>秒杀订单仅展示已冻结的基础应收、让利和净应收。奖池与门店额外收益比例尚未冻结，本页不推算额外分成。</span>
+          </div>
+        </div>
+        <ProjectionState state={receivableStatementsState}>
+          {receivableStatements?.statements.length ? (
+            <div className="receivable-statement-list">
+              {receivableStatements.statements.map((statement) => (
+                <MerchantReceivableStatementRow key={statement.orderId} statement={statement} />
+              ))}
+            </div>
+          ) : (
+            <EmptyState description="Core 尚未返回该商家的逐单应收记录。" title="暂无逐单应收" />
+          )}
+          {receivableStatements ? (
+            <div className="receivable-pagination">
+              <span>{receivableStatements.nextCursor ? '还有更早订单可加载' : '已加载全部逐单应收'}</span>
+              {receivablePageError ? <p role="alert">{receivablePageError}</p> : null}
+              <button
+                className="button secondary"
+                disabled={!receivableStatements.nextCursor || receivablePageLoading}
+                onClick={() => void loadMoreReceivableStatements()}
+                type="button"
+              >
+                {receivablePageLoading ? <LoaderCircle aria-hidden="true" className="spin" size={16} /> : null}
+                {receivablePageLoading ? '正在加载' : '加载下一页'}
+              </button>
             </div>
           ) : null}
         </ProjectionState>
@@ -450,6 +549,127 @@ export function AssetsPage() {
       </div>
     </div>
   );
+}
+
+function MerchantReceivableStatementRow({ statement }: { statement: MerchantReceivableStatement }) {
+  return (
+    <details className="receivable-statement">
+      <summary>
+        <span className="receivable-order-identity">
+          <strong className="mono-value">{statement.orderId}</strong>
+          <small>{statement.productId} / {statement.skuId} / 数量 {statement.quantity}</small>
+        </span>
+        <span className="receivable-order-state">
+          <StatusText state={statement.orderKind} />
+          <StatusText state={statement.orderState} />
+        </span>
+        <span className="receivable-order-amount">
+          <small>冻结净应收 / 当前应收</small>
+          <strong>{statement.frozenAmounts.merchantNetReceivableUsdt} / {statement.currentReceivableUsdt}</strong>
+        </span>
+      </summary>
+      <div className="receivable-statement-body">
+        <dl className="receivable-order-facts">
+          <div><dt>创建时间</dt><dd><time dateTime={statement.createdAt}>{statement.createdAt}</time></dd></div>
+          <div><dt>支付最终性</dt><dd><time dateTime={statement.paymentFinalizedAt}>{statement.paymentFinalizedAt}</time></dd></div>
+          <div><dt>履约最终性</dt><dd>{statement.fulfilledAt ? <time dateTime={statement.fulfilledAt}>{statement.fulfilledAt}</time> : '--'}</dd></div>
+          <div><dt>支付 TxHash</dt><dd><ExplorerHash hash={statement.paymentTxHash} /></dd></div>
+        </dl>
+
+        <section aria-label={`订单 ${statement.orderId} 冻结应收`} className="receivable-evidence-block">
+          <h3>冻结金额快照</h3>
+          <dl className="receivable-amount-grid">
+            <div><dt>商品总价</dt><dd>{statement.frozenAmounts.listPriceUsdt}</dd></div>
+            <div><dt>买家实付 USDT</dt><dd>{statement.frozenAmounts.buyerPaidUsdt}</dd></div>
+            <div><dt>基础应收</dt><dd>{statement.frozenAmounts.merchantBaseReceivableUsdt}</dd></div>
+            <div><dt>商家让利</dt><dd>{statement.frozenAmounts.merchantConcessionAmount}</dd></div>
+            <div><dt>净应收</dt><dd>{statement.frozenAmounts.merchantNetReceivableUsdt}</dd></div>
+            <div><dt>当前应收</dt><dd>{statement.currentReceivableUsdt}</dd></div>
+            <div><dt>已移出应收</dt><dd>{statement.removedFromReceivableUsdt}</dd></div>
+          </dl>
+        </section>
+
+        <section aria-label={`订单 ${statement.orderId} 应收生命周期`} className="receivable-evidence-block">
+          <h3>应收生命周期</h3>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th scope="col">状态</th><th scope="col">金额</th><th scope="col">Journal IDs</th></tr></thead>
+              <tbody>
+                {statement.receivableLifecycle.length ? statement.receivableLifecycle.map((entry) => (
+                  <tr key={`${entry.state}:${entry.journalIds.join(':')}`}>
+                    <td><StatusText state={entry.state} /></td>
+                    <td className="mono-value">{entry.amount}</td>
+                    <td className="mono-value">{entry.journalIds.length ? entry.journalIds.join(' / ') : '--'}</td>
+                  </tr>
+                )) : <tr><td colSpan={3}>该订单暂无应收生命周期记录。</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section aria-label={`订单 ${statement.orderId} journal evidence`} className="receivable-evidence-block">
+          <h3>Journal evidence</h3>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th scope="col">Journal / 时间</th><th scope="col">事件 / 状态</th><th scope="col">Delta</th><th scope="col">来源 / Reference hash</th></tr></thead>
+              <tbody>
+                {statement.journalEvidence.length ? statement.journalEvidence.map((evidence) => (
+                  <tr key={evidence.journalId}>
+                    <td><strong className="mono-value">{evidence.journalId}</strong><small><time dateTime={evidence.createdAt}>{evidence.createdAt}</time></small></td>
+                    <td><strong>{evidence.eventType}</strong><small><StatusText state={evidence.state} /></small></td>
+                    <td className="mono-value">{evidence.delta}</td>
+                    <td><strong>{evidence.sourceKind}</strong><small className="mono-value">{evidence.sourceReferenceHash}</small></td>
+                  </tr>
+                )) : <tr><td colSpan={4}>该订单暂无 journal evidence。</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section aria-label={`订单 ${statement.orderId} settlement refs`} className="receivable-evidence-block">
+          <h3>Settlement request / batch / Safe finality</h3>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th scope="col">Request / 金额</th><th scope="col">状态 / 批次</th><th scope="col">Journal linkage</th><th scope="col">最终 Safe TxHash</th><th scope="col">时间</th></tr></thead>
+              <tbody>
+                {statement.settlementRefs.length ? statement.settlementRefs.map((reference) => (
+                  <tr key={reference.requestId}>
+                    <td><strong className="mono-value">{reference.requestId}</strong><small>{reference.amount} USDT atomic</small></td>
+                    <td><StatusText state={reference.state} /><small className="mono-value">{reference.batchId ?? '--'}</small></td>
+                    <td className="mono-value">
+                      <strong>{reference.journals.requested}</strong>
+                      <small>{reference.journals.batched ?? '--'} / {reference.journals.settled ?? '--'}</small>
+                    </td>
+                    <td>
+                      {reference.finalSafeTxHash ? <ExplorerHash hash={reference.finalSafeTxHash} /> : '--'}
+                      {reference.finalExecutionTxHash && reference.finalExecutionTxHash !== reference.finalSafeTxHash
+                        ? <small><ExplorerHash hash={reference.finalExecutionTxHash} /></small>
+                        : null}
+                    </td>
+                    <td>
+                      <time dateTime={reference.requestedAt}>{reference.requestedAt}</time>
+                      <small>{reference.batchedAt ?? '--'} / {reference.settledAt ?? '--'}</small>
+                    </td>
+                  </tr>
+                )) : <tr><td colSpan={5}>该订单尚未关联结算申请。</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </details>
+  );
+}
+
+function merchantReceivableScopeError(
+  page: MerchantReceivableStatementPage,
+  session: { merchantId: string; walletAddress: string },
+) {
+  if (page.merchantId !== session.merchantId) return '逐单应收投影与当前商家不一致。';
+  if (page.settlementWallet.toLowerCase() !== session.walletAddress.toLowerCase()) {
+    return '逐单应收投影与当前结算钱包不一致。';
+  }
+  return undefined;
 }
 
 function RewardSubtypeGrid({ balances }: { balances: readonly SettlementBalance[] }) {

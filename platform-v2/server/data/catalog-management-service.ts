@@ -2,7 +2,11 @@ import { createHash, randomBytes } from 'node:crypto';
 import { normalizeAddress } from '../api/auth.ts';
 import { concessionPreviewAuthorization } from '../api/catalog-signing.ts';
 import { buildMerchantConcessionPreview } from '../api/checkout.ts';
-import { CORE_ARTIFACT_VERSION } from '../api/enums.ts';
+import {
+  CORE_ARTIFACT_VERSION,
+  catalogReviewDecisions,
+  type CatalogReviewDecision,
+} from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import { parsePaymentPolicySnapshot } from '../api/payment-policy.ts';
 import type { SignerRequest } from '../chain/signer.ts';
@@ -43,6 +47,13 @@ export interface ProductSlotInput {
   categoryId?: string;
   tagIds?: string[];
   skus: ProductSkuInput[];
+}
+
+export interface CatalogProductLifecycleBatchInput {
+  action: CatalogReviewDecision;
+  productIds: string[];
+  reasonCode: string;
+  idempotencyKey: string;
 }
 
 interface ProductRow {
@@ -584,7 +595,7 @@ export class CatalogManagementService {
   }
 
   decideReview(actor: FulfillmentActor, productId: string, input: {
-    decision: 'APPROVE' | 'REJECT' | 'PUBLISH' | 'HIDE' | 'DELIST';
+    decision: CatalogReviewDecision;
     reasonCode: string;
     idempotencyKey: string;
   }) {
@@ -604,36 +615,9 @@ export class CatalogManagementService {
         if (duplicate.rows[0].snapshot_hash !== requestHash) throw idempotencyConflict('Review decision');
         return productProjection(executor, await requireProduct(executor, productId), actor);
       }
-      const transition = reviewTransition(product.lifecycle_state, input.decision);
-      if (!['HIDDEN', 'DELISTED'].includes(transition.to)) {
-        await assertProductWriteUnlocked(executor, product, this.#clock(), true);
-      }
-      if (input.decision === 'APPROVE' || input.decision === 'PUBLISH') {
-        await assertSubmittedPreviewCurrent(executor, product, this.#clock());
-      }
-      if (input.decision === 'PUBLISH') {
-        const merchant = await executor.query<{ status: string; guarantee_status: string }>(
-          'SELECT status, guarantee_status FROM core.merchants WHERE merchant_id = $1',
-          [product.merchant_id],
-        );
-        if (merchant.rows[0]?.status !== 'APPROVED' || merchant.rows[0]?.guarantee_status !== 'READY') {
-          throw new CoreError('Forbidden', 'Merchant is not eligible for publication', 409);
-        }
-      }
       const now = this.#clock();
-      await executor.query(
-        `UPDATE core.products SET lifecycle_state = $2,
-           submission_hash = CASE WHEN $2 = 'DRAFT' THEN NULL ELSE submission_hash END,
-           submission_preview_id = CASE WHEN $2 = 'DRAFT' THEN NULL ELSE submission_preview_id END,
-           updated_at = $3 WHERE product_id = $1`,
-        [productId, transition.to, now],
-      );
-      await executor.query(
-        `UPDATE core.skus SET lifecycle_state = $2
-         WHERE product_id = $1 AND lifecycle_state <> 'DELISTED'`,
-        [productId, skuStateForProduct(transition.to)],
-      );
-      await insertReviewEvent(executor, {
+      const transition = await prepareProductLifecycleDecision(executor, product, input.decision, now);
+      await applyProductLifecycleDecision(executor, {
         eventId: this.#bytes32(), product, decision: transition.event,
         from: product.lifecycle_state, to: transition.to, reasonCode: input.reasonCode,
         snapshotHash: requestHash, wallet, idempotencyKey: input.idempotencyKey, now,
@@ -884,6 +868,99 @@ export class CatalogManagementService {
         correlationId: `catalog-batch-tags:${operationId}`,
         requestHash: requestHash.slice(2),
         payload: { productIds: value.productIds, tagIds: value.tagIds, changedCount: result.changedCount },
+        authorizationEvidence: {
+          scheme: 'RBAC_ROLE_REVALIDATION',
+          subject: wallet,
+          roles: [role],
+          evidenceHash: hashJson({ subject: wallet, role, checkedAt: now.toISOString() }),
+          checkedAt: now.toISOString(),
+        },
+        createdAt: now,
+      });
+      return result;
+    });
+  }
+
+  batchProductLifecycle(actor: FulfillmentActor, input: CatalogProductLifecycleBatchInput) {
+    const value = validateProductLifecycleBatchInput(input);
+    const wallet = actorWallet(actor);
+    const requestHash = hashJson({ actor: wallet, ...value });
+    return this.#transactions.transaction(async (executor) => {
+      const role = await requirePlatformRole(executor, actor, false);
+      const existing = await executor.query<{ request_hash: string; result: Record<string, unknown> }>(
+        `SELECT request_hash, result FROM core.admin_batch_operations
+         WHERE actor_wallet = $1 AND operation_type = 'BATCH_PRODUCT_LIFECYCLE'
+           AND idempotency_key = $2`,
+        [wallet, value.idempotencyKey],
+      );
+      if (existing.rows[0]) {
+        if (existing.rows[0].request_hash !== requestHash) throw idempotencyConflict('Product lifecycle batch');
+        return existing.rows[0].result;
+      }
+
+      const products: ProductRow[] = [];
+      for (const productId of value.productIds) products.push(await requireProduct(executor, productId, true));
+      const now = this.#clock();
+      const prepared = [];
+      for (const product of products) {
+        prepared.push({
+          product,
+          transition: await prepareProductLifecycleDecision(executor, product, value.action, now),
+        });
+      }
+
+      const operationId = this.#bytes32().toLowerCase();
+      for (const item of prepared) {
+        const eventSeed = { operationId, productId: item.product.product_id };
+        await applyProductLifecycleDecision(executor, {
+          eventId: hashJson({ ...eventSeed, kind: 'PRODUCT_REVIEW_EVENT' }),
+          product: item.product,
+          decision: item.transition.event,
+          from: item.product.lifecycle_state,
+          to: item.transition.to,
+          reasonCode: value.reasonCode,
+          snapshotHash: hashJson({ requestHash, productId: item.product.product_id }),
+          wallet,
+          idempotencyKey: `batch:${hashJson(eventSeed).slice(2)}`,
+          now,
+        });
+      }
+      const result = Object.freeze({
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        operationId,
+        action: value.action,
+        changedCount: prepared.length,
+        products: prepared.map((item) => ({
+          productId: item.product.product_id,
+          previousState: item.product.lifecycle_state,
+          state: item.transition.to,
+        })),
+        createdAt: now.toISOString(),
+      });
+      await executor.query(
+        `INSERT INTO core.admin_batch_operations (
+           operation_id, operation_type, actor_wallet, actor_role, idempotency_key,
+           request_hash, result, created_at
+         ) VALUES ($1,'BATCH_PRODUCT_LIFECYCLE',$2,$3,$4,$5,$6,$7)`,
+        [operationId, wallet, role, value.idempotencyKey, requestHash, JSON.stringify(result), now],
+      );
+      await enqueueAudit(executor, {
+        sourceEventId: auditSourceId('catalog-product-lifecycle-batch', { operationId, requestHash }),
+        streamName: 'operational',
+        evidenceProfile: 'RBAC',
+        eventType: 'CatalogProductsLifecycleBatchApplied',
+        resourceType: 'ADMIN_BATCH_OPERATION',
+        resourceId: operationId,
+        actorWallet: wallet,
+        actorRole: role,
+        correlationId: `catalog-product-lifecycle-batch:${operationId}`,
+        requestHash: requestHash.slice(2),
+        payload: {
+          action: value.action,
+          productIds: value.productIds,
+          reasonCode: value.reasonCode,
+          changedCount: result.changedCount,
+        },
         authorizationEvidence: {
           scheme: 'RBAC_ROLE_REVALIDATION',
           subject: wallet,
@@ -1491,24 +1568,25 @@ export async function productWriteLock(executor: SqlExecutor, product: ProductWr
   return liability ? { type: 'ORDER', id: liability.order_id, state: liability.balance_state } : null;
 }
 
+export async function productLifecycleDecisionAvailability(
+  executor: SqlExecutor,
+  productId: string,
+  decision: CatalogReviewDecision,
+  now: Date,
+) {
+  try {
+    const product = await requireProduct(executor, productId);
+    await prepareProductLifecycleDecision(executor, product, decision, now);
+    return { enabled: true as const };
+  } catch (error) {
+    if (error instanceof CoreError) return { enabled: false as const, reasonCode: error.code };
+    throw error;
+  }
+}
+
 function allowedProductActions(product: ProductRow, actor: FulfillmentActor, writeLock: unknown) {
   const platform = actor.roles.includes('ADMIN') || actor.roles.includes('OPERATOR');
-  if (platform) {
-    if (product.lifecycle_state === 'DELISTED') return [];
-    if (product.lifecycle_state === 'HIDDEN') return ['DELIST'];
-    if (product.lifecycle_state === 'LOCKED') return ['HIDE', 'DELIST'];
-    const lock = writeLock as { type?: string } | null;
-    if (lock && lock.type !== 'PRODUCT_STATE') return ['HIDE', 'DELIST'];
-    if (product.lifecycle_state === 'DRAFT') {
-      return ['SAVE_DRAFT', 'CREATE_CONCESSION_PREVIEW', 'SUBMIT_REVIEW', 'ADJUST_INVENTORY', 'HIDE', 'DELIST'];
-    }
-    if (product.lifecycle_state === 'REVIEW') return ['APPROVE', 'REJECT', 'HIDE', 'DELIST'];
-    if (product.lifecycle_state === 'SCHEDULED') return ['PUBLISH', 'REJECT', 'HIDE', 'DELIST'];
-    if (['ACTIVE', 'SOLD_OUT'].includes(product.lifecycle_state)) {
-      return ['SAVE_DRAFT', 'ADJUST_INVENTORY', 'HIDE', 'DELIST'];
-    }
-    return ['HIDE', 'DELIST'];
-  }
+  if (platform) return platformProductActions(product, writeLock);
   if (!actor.roles.includes('MERCHANT')) return [];
   if (writeLock) return [];
   if (product.lifecycle_state === 'DRAFT') return ['SAVE_DRAFT', 'CREATE_CONCESSION_PREVIEW', 'SUBMIT_REVIEW', 'DELIST'];
@@ -1516,7 +1594,85 @@ function allowedProductActions(product: ProductRow, actor: FulfillmentActor, wri
   return [];
 }
 
-function reviewTransition(from: ProductLifecycle, decision: 'APPROVE' | 'REJECT' | 'PUBLISH' | 'HIDE' | 'DELIST') {
+function platformProductActions(product: ProductRow, writeLock: unknown): string[] {
+  if (product.lifecycle_state === 'DELISTED') return [];
+  if (product.lifecycle_state === 'HIDDEN') return ['DELIST'];
+  if (product.lifecycle_state === 'LOCKED') return ['HIDE', 'DELIST'];
+  const lock = writeLock as { type?: string } | null;
+  if (lock && lock.type !== 'PRODUCT_STATE') return ['HIDE', 'DELIST'];
+  if (product.lifecycle_state === 'DRAFT') {
+    return ['SAVE_DRAFT', 'CREATE_CONCESSION_PREVIEW', 'SUBMIT_REVIEW', 'ADJUST_INVENTORY', 'HIDE', 'DELIST'];
+  }
+  if (product.lifecycle_state === 'REVIEW') return ['APPROVE', 'REJECT', 'HIDE', 'DELIST'];
+  if (product.lifecycle_state === 'SCHEDULED') return ['PUBLISH', 'REJECT', 'HIDE', 'DELIST'];
+  if (['ACTIVE', 'SOLD_OUT'].includes(product.lifecycle_state)) {
+    return ['SAVE_DRAFT', 'ADJUST_INVENTORY', 'HIDE', 'DELIST'];
+  }
+  return ['HIDE', 'DELIST'];
+}
+
+async function prepareProductLifecycleDecision(
+  executor: SqlExecutor,
+  product: ProductRow,
+  decision: CatalogReviewDecision,
+  now: Date,
+) {
+  const writeLock = await productWriteLock(executor, product, now);
+  if (!platformProductActions(product, writeLock).includes(decision)) {
+    if (writeLock && !['HIDE', 'DELIST'].includes(decision)) {
+      const lock = writeLock as { type: string; id: string; state: string };
+      throw productLock(lock.type, lock.id, lock.state);
+    }
+    reviewTransition(product.lifecycle_state, decision);
+    throw new CoreError('InvalidRequest', `Cannot ${decision} a ${product.lifecycle_state} product`, 409);
+  }
+  const transition = reviewTransition(product.lifecycle_state, decision);
+  if (!['HIDDEN', 'DELISTED'].includes(transition.to)) {
+    await assertProductWriteUnlocked(executor, product, now, true);
+  }
+  if (decision === 'APPROVE' || decision === 'PUBLISH') {
+    await assertSubmittedPreviewCurrent(executor, product, now);
+  }
+  if (decision === 'PUBLISH') {
+    const merchant = await executor.query<{ status: string; guarantee_status: string }>(
+      'SELECT status, guarantee_status FROM core.merchants WHERE merchant_id = $1',
+      [product.merchant_id],
+    );
+    if (merchant.rows[0]?.status !== 'APPROVED' || merchant.rows[0]?.guarantee_status !== 'READY') {
+      throw new CoreError('Forbidden', 'Merchant is not eligible for publication', 409);
+    }
+  }
+  return transition;
+}
+
+async function applyProductLifecycleDecision(executor: SqlExecutor, input: {
+  eventId: string;
+  product: ProductRow;
+  decision: string;
+  from: ProductLifecycle;
+  to: ProductLifecycle;
+  reasonCode: string;
+  snapshotHash: string;
+  wallet: string;
+  idempotencyKey: string;
+  now: Date;
+}) {
+  await executor.query(
+    `UPDATE core.products SET lifecycle_state = $2,
+       submission_hash = CASE WHEN $2 = 'DRAFT' THEN NULL ELSE submission_hash END,
+       submission_preview_id = CASE WHEN $2 = 'DRAFT' THEN NULL ELSE submission_preview_id END,
+       updated_at = $3 WHERE product_id = $1`,
+    [input.product.product_id, input.to, input.now],
+  );
+  await executor.query(
+    `UPDATE core.skus SET lifecycle_state = $2
+     WHERE product_id = $1 AND lifecycle_state <> 'DELISTED'`,
+    [input.product.product_id, skuStateForProduct(input.to)],
+  );
+  await insertReviewEvent(executor, input);
+}
+
+function reviewTransition(from: ProductLifecycle, decision: CatalogReviewDecision) {
   if (decision === 'APPROVE' && from === 'REVIEW') return { to: 'SCHEDULED' as const, event: 'APPROVED' as const };
   if (decision === 'REJECT' && (from === 'REVIEW' || from === 'SCHEDULED')) {
     return { to: 'DRAFT' as const, event: 'REJECTED' as const };
@@ -1874,6 +2030,27 @@ function validateIdempotencyKey(value: string) {
 
 function validateReasonCode(value: string) {
   if (!/^[A-Z][A-Z0-9_]{1,63}$/.test(value)) throw new CoreError('InvalidRequest', 'reasonCode is invalid');
+}
+
+function validateProductLifecycleBatchInput(input: CatalogProductLifecycleBatchInput) {
+  if (!catalogReviewDecisions.includes(input.action)) {
+    throw new CoreError('InvalidRequest', 'Product lifecycle batch action is invalid');
+  }
+  if (!Array.isArray(input.productIds) || input.productIds.length < 1 || input.productIds.length > 100) {
+    throw new CoreError('InvalidRequest', 'Product lifecycle batch requires 1-100 products');
+  }
+  input.productIds.forEach((productId) => validateResourceId(productId, 'productId'));
+  if (new Set(input.productIds).size !== input.productIds.length) {
+    throw new CoreError('InvalidRequest', 'Product lifecycle batch contains duplicate products');
+  }
+  validateReasonCode(input.reasonCode);
+  validateIdempotencyKey(input.idempotencyKey);
+  return {
+    action: input.action,
+    productIds: [...input.productIds].sort(),
+    reasonCode: input.reasonCode,
+    idempotencyKey: input.idempotencyKey,
+  };
 }
 
 function validateBps(value: number) {

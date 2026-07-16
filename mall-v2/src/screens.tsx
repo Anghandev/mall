@@ -40,7 +40,7 @@ import {
   Zap,
   X,
 } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import type {
   AllowedAction,
   AllowedActionName,
@@ -258,7 +258,6 @@ function RelayEvent({ event }: { event: RealtimeEventEnvelope }) {
 
 export function MallScreen() {
   const runtime = useMallRuntime();
-  const navigate = useNavigate();
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [tagId, setTagId] = useState<string | null>(null);
   const visibleProducts = useMemo(() => {
@@ -344,7 +343,12 @@ export function MallScreen() {
             const ordinarySkuCount = product.skus.filter((sku) => sku.seckill === null).length;
             const activityOnly = Boolean(overlay && ordinarySkuCount === 0);
             return (
-            <article className={overlay ? 'product-card product-card--seckill' : 'product-card'} key={product.productId}>
+            <Link
+              aria-label={`查看 ${product.title} 商品详情`}
+              className={overlay ? 'product-card product-card--seckill' : 'product-card'}
+              key={product.productId}
+              to={`/mall/products/${encodeURIComponent(product.productId)}`}
+            >
               <div className="product-card__visual">
                 {product.mainImageAssetIds[0] ? (
                   <PublicCatalogMedia
@@ -375,27 +379,125 @@ export function MallScreen() {
                   <div><dt>普通可售规格</dt><dd>{ordinarySkuCount} / {product.skus.length}</dd></div>
                   <div><dt>默认运费</dt><dd>{product.defaultFreightUsdt} USDT 原子单位</dd></div>
                 </dl>
-                <button
-                  className="button button--primary"
-                  type="button"
-                  disabled={runtime.busy || Boolean(runtime.pendingSubmission)}
-                  onClick={() => {
-                    if (activityOnly) navigate('/seckill');
-                    else {
-                      runtime.selectProduct(product.productId);
-                      navigate('/checkout');
-                    }
-                  }}
-                >
-                  {activityOnly ? '前往秒杀' : '选择商品'} <ChevronRight aria-hidden="true" size={17} />
-                </button>
+                <span className="button button--primary">
+                  {activityOnly ? '查看活动商品' : '查看商品'} <ChevronRight aria-hidden="true" size={17} />
+                </span>
               </div>
-            </article>
+            </Link>
           );})}
         </div>
       ) : null}
       {runtime.catalogState === 'ready' && visibleProducts.length === 0 ? (
         <EmptyState title="当前筛选无商品">筛选结果仅使用 Core 发布的类目与标签关联。</EmptyState>
+      ) : null}
+    </div>
+  );
+}
+
+export function ProductDetailScreen({ productId }: { productId: string }) {
+  const runtime = useMallRuntime();
+  const navigate = useNavigate();
+  const product = runtime.catalog.find((item) => item.productId === productId) ?? null;
+  const ordinarySkus = product?.skus.filter((sku) => sku.seckill === null) ?? [];
+  const hasOrdinaryStock = ordinarySkus.some((sku) => BigInt(sku.stockAvailable) > 0n);
+
+  return (
+    <div className="screen screen--detail screen--product-detail">
+      <ScreenHeader eyebrow="PRODUCT DETAIL" title="商品详情" description="商品、媒体、规格与库存均来自 Core" backTo="/mall" />
+
+      {runtime.catalogState === 'loading' ? <div className="product-detail-skeleton" aria-label="正在加载商品详情"><span /><span /><span /></div> : null}
+      {runtime.catalogState === 'error' ? (
+        <div className="catalog-retry">
+          <StatusNotice title="商品详情同步失败" tone="warning">不展示缓存商品、示例规格或本地价格。</StatusNotice>
+          <button className="button button--secondary" type="button" onClick={() => void runtime.reloadCatalog()} disabled={runtime.busy}>
+            <RefreshCw aria-hidden="true" size={18} /> 重新同步
+          </button>
+        </div>
+      ) : null}
+      {runtime.catalogState !== 'loading' && runtime.catalogState !== 'error' && !product ? (
+        <EmptyState title="商品不可用">该商品未出现在当前 Core 可售目录中，请返回商城重新选择。</EmptyState>
+      ) : null}
+
+      {product ? (
+        <>
+          <section className="product-detail-gallery" aria-label={`${product.title} 商品媒体`}>
+            {product.mainImageAssetIds.map((assetId, index) => (
+              <PublicCatalogMedia
+                alt={`${product.title} 商品图 ${index + 1}`}
+                assetId={assetId}
+                expectedPurpose="PRODUCT_IMAGE"
+                expectedResourceId={product.productId}
+                expectedResourceType="PRODUCT"
+                key={assetId}
+                kind="image"
+              />
+            ))}
+            {product.videoAssetId ? (
+              <PublicCatalogMedia
+                alt={`${product.title} 商品视频`}
+                assetId={product.videoAssetId}
+                expectedPurpose="PRODUCT_VIDEO"
+                expectedResourceId={product.productId}
+                expectedResourceType="PRODUCT"
+                kind="video"
+              />
+            ) : null}
+            {product.mainImageAssetIds.length === 0 && !product.videoAssetId ? <ImageOff aria-hidden="true" size={30} /> : null}
+          </section>
+
+          <section className="product-detail-copy" aria-labelledby="product-detail-title">
+            <div>
+              <p className="eyebrow">CORE PRODUCT · {product.productId}</p>
+              <h2 id="product-detail-title">{product.title}</h2>
+              {product.subtitle ? <p className="product-detail-copy__subtitle">{product.subtitle}</p> : null}
+            </div>
+            {richDetailText(product.richDetail) ? <p>{richDetailText(product.richDetail)}</p> : null}
+            <div className="product-card__badges" aria-label="商品属性">
+              <span>BNM 履约后释放</span>
+              {product.fulfillmentModes.map((mode) => <span key={mode}>{fulfillmentModeLabel(mode)}</span>)}
+              {product.tagIds.map((id) => <span key={id}>{runtime.tags.find((tag) => tag.tagId === id)?.name ?? id}</span>)}
+            </div>
+            <dl className="product-core-detail__facts">
+              <div><dt>默认运费</dt><dd>{product.defaultFreightUsdt} USDT 原子单位</dd></div>
+              <div><dt>普通可售规格</dt><dd>{ordinarySkus.length} / {product.skus.length}</dd></div>
+            </dl>
+          </section>
+
+          <section className="section-block" aria-labelledby="product-skus-title">
+            <div className="section-heading"><h2 id="product-skus-title">规格与实时库存</h2><Box aria-hidden="true" size={19} /></div>
+            <div className="product-detail-skus">
+              {product.skus.map((sku) => (
+                <article className={sku.seckill ? 'product-detail-sku is-seckill' : 'product-detail-sku'} key={sku.skuId}>
+                  <div><strong>{skuLabel(sku.attributes, sku.skuId)}</strong><code>{sku.skuId}</code></div>
+                  <span>{sku.seckill ? `活动库存 ${sku.seckill.inventory.available}` : `普通库存 ${sku.stockAvailable}`}</span>
+                  <span>{sku.seckill ? `${seckillOverlayLabel(sku.seckill.phase)} · 普通结算禁用` : `${sku.listPriceUsdt} USDT 原子单位`}</span>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          {product.skus.some((sku) => sku.seckill) ? (
+            <StatusNotice title="活动 SKU 独立结算" tone="warning">带秒杀遮罩的 SKU 不进入普通购买；请从秒杀大厅绑定当前权威场次。</StatusNotice>
+          ) : null}
+
+          <div className="product-detail-buybar">
+            {ordinarySkus.length === 0 ? (
+              <button className="button button--primary" type="button" onClick={() => navigate('/seckill')}>前往秒杀大厅 <ChevronRight aria-hidden="true" size={17} /></button>
+            ) : (
+              <button
+                className="button button--primary"
+                type="button"
+                disabled={!hasOrdinaryStock || runtime.busy || Boolean(runtime.pendingSubmission)}
+                onClick={() => {
+                  runtime.selectProduct(product.productId);
+                  navigate('/checkout');
+                }}
+              >
+                <ShoppingBag aria-hidden="true" size={18} /> {hasOrdinaryStock ? '购买' : '普通规格已售罄'}
+              </button>
+            )}
+          </div>
+        </>
       ) : null}
     </div>
   );
@@ -681,6 +783,7 @@ function BuyerProfileForm({ onClose }: { onClose(): void }) {
 
 export function AddressScreen() {
   const runtime = useMallRuntime();
+  const location = useLocation();
   const [rawText, setRawText] = useState('');
   const [label, setLabel] = useState('家');
   const [isDefault, setIsDefault] = useState(false);
@@ -691,7 +794,7 @@ export function AddressScreen() {
         eyebrow="DELIVERY PROFILE"
         title="我的收货地址"
         description="个人信息只提交到经过发布的安全服务"
-        backTo="/assets"
+        backTo={location.state && typeof location.state === 'object' && 'returnTo' in location.state && location.state.returnTo === '/checkout' ? '/checkout' : '/assets'}
       />
 
       <section className="section-block" aria-labelledby="paste-address-title">
@@ -1237,6 +1340,7 @@ function OrderTarget({ target }: { target: FulfillmentTarget }) {
 }
 
 export function ActivityScreen() {
+  const runtime = useMallRuntime();
   const [active, setActive] = useState<'seckill' | 'shopping'>('seckill');
 
   return (
@@ -1251,15 +1355,110 @@ export function ActivityScreen() {
         </button>
       </div>
 
-      <EmptyState title={active === 'seckill' ? '暂无秒杀记录' : '暂无购物记录'}>
-        {active === 'seckill'
-          ? '活动期数、投入、最终结果、USDT 奖金与锁定 BNM 将由权威记录提供。'
-          : '订单、待释放 BNM 与履约最终状态将由权威记录提供。'}
-      </EmptyState>
+      {active === 'seckill' ? (
+        <StatusNotice title="DecisionBlocked：秒杀奖项记录未发布" tone="warning">
+          Core 尚无与中奖人绑定的奖池账本分录。本页不猜测场次、中奖结果、奖金金额或领取状态。
+        </StatusNotice>
+      ) : <ShoppingStatementContent runtime={runtime} />}
+    </div>
+  );
+}
 
-      <StatusNotice title="领取操作已停用">
-        秒杀奖金只在场次最终结算后开放；其他 BNM 与收益只在履约最终确认后开放。
-      </StatusNotice>
+function ShoppingStatementContent({ runtime }: { runtime: MallRuntimeValue }) {
+  if (!runtime.session) {
+    return (
+      <EmptyState title="连接买家钱包后查看">
+        购物记录仅向当前 SIWE 买家会话开放，未鉴权时不请求或展示订单数据。
+      </EmptyState>
+    );
+  }
+  if (runtime.shoppingStatementsState === 'idle' || (
+    runtime.shoppingStatementsState === 'loading' && runtime.shoppingStatements.length === 0
+  )) return <ShoppingStatementSkeleton />;
+  if (runtime.shoppingStatementsState === 'error') {
+    return (
+      <section className="activity-error" role="alert">
+        <ShieldAlert aria-hidden="true" size={24} />
+        <div>
+          <h2>购物记录读取失败</h2>
+          <p>{runtime.shoppingStatementsError ?? '当前会话未取得买家记录访问权限。'}</p>
+        </div>
+        <button className="button button--secondary" type="button" disabled={runtime.busy} onClick={() => void runtime.reloadShoppingStatements()}>
+          <RefreshCw aria-hidden="true" size={17} /> {runtime.busy ? '重新同步中' : '重新同步'}
+        </button>
+      </section>
+    );
+  }
+  if (runtime.shoppingStatementsState === 'empty') {
+    return (
+      <EmptyState title="暂无购物记录">
+        当前买家钱包没有链上最终确认的普通或边界转日常订单。
+      </EmptyState>
+    );
+  }
+  return (
+    <>
+      {runtime.shoppingStatementsError ? (
+        <div className="activity-page-error" role="alert">{runtime.shoppingStatementsError}</div>
+      ) : null}
+      <div className="shopping-statement-list" aria-label="消费购物记录">
+        {runtime.shoppingStatements.map((statement) => (
+          <ShoppingStatementRow key={statement.orderId} statement={statement} />
+        ))}
+      </div>
+      {runtime.shoppingStatementsNextCursor ? (
+        <button
+          className="button button--secondary order-load-more"
+          type="button"
+          disabled={runtime.shoppingStatementsLoadingMore}
+          onClick={() => void runtime.loadMoreShoppingStatements()}
+        >
+          <RefreshCw aria-hidden="true" size={17} />
+          {runtime.shoppingStatementsLoadingMore ? '正在读取下一页' : '加载下一页'}
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+function ShoppingStatementRow({ statement }: { statement: MallRuntimeValue['shoppingStatements'][number] }) {
+  return (
+    <article className="shopping-statement">
+      <header className="shopping-statement__header">
+        <div>
+          <p className="eyebrow">{orderKindLabel(statement.orderKind)}订单</p>
+          <h2>{shortHash(statement.orderId)}</h2>
+        </div>
+        <span className="status-pill">{orderStateLabel(statement.orderState)}</span>
+      </header>
+      <dl className="shopping-statement__facts">
+        <div><dt>商品</dt><dd>{statement.productId}</dd></div>
+        <div><dt>规格</dt><dd>{statement.skuId}</dd></div>
+        <div><dt>数量</dt><dd>{statement.quantity}</dd></div>
+        <div><dt>BNM 状态</dt><dd>{statement.bnm.state === 'LOCKED' ? '已锁定' : '可用'}</dd></div>
+        <div><dt>USDT 实付</dt><dd>{statement.paymentAmounts.usdtPaymentAmount} 原子单位</dd></div>
+        <div><dt>NPL 实付</dt><dd>{statement.paymentAmounts.nplPaymentAmount} 原子单位</dd></div>
+        <div><dt>BNM 后台积分</dt><dd>{statement.bnm.amount} 原子单位</dd></div>
+        <div><dt>下单时间</dt><dd><time dateTime={statement.createdAt}>{statement.createdAt}</time></dd></div>
+        <div><dt>付款最终确认</dt><dd><time dateTime={statement.paymentFinalizedAt}>{statement.paymentFinalizedAt}</time></dd></div>
+        <div><dt>履约最终时间</dt><dd>{statement.fulfilledAt ? <time dateTime={statement.fulfilledAt}>{statement.fulfilledAt}</time> : '尚未最终履约'}</dd></div>
+        <div className="shopping-statement__wide"><dt>订单 ID</dt><dd><code>{statement.orderId}</code></dd></div>
+        <div className="shopping-statement__wide"><dt>付款 TxHash</dt><dd><code>{statement.paymentTxHash}</code></dd></div>
+      </dl>
+      <section className="shopping-statement__journals" aria-label="BNM 账本来源">
+        <div className="section-heading section-heading--compact"><h3>BNM journal provenance</h3><FileClock aria-hidden="true" size={17} /></div>
+        <ul>
+          {statement.bnm.journalIds.map((journalId) => <li key={journalId}><code>{journalId}</code></li>)}
+        </ul>
+      </section>
+    </article>
+  );
+}
+
+function ShoppingStatementSkeleton() {
+  return (
+    <div className="shopping-statement-list" aria-label="正在加载购物记录">
+      {[0, 1].map((item) => <div className="shopping-statement shopping-statement--skeleton" key={item} />)}
     </div>
   );
 }
@@ -1535,7 +1734,7 @@ export function CheckoutScreen() {
         eyebrow={runtime.selectedSeckillSessionId ? 'SECKILL ORDER SETUP' : 'ORDER SETUP'}
         title={runtime.selectedSeckillSessionId ? '秒杀订单配置' : '订单配置'}
         description="规格、数量与履约方式需完整确认"
-        backTo={runtime.selectedSeckillSessionId ? '/seckill' : '/mall'}
+        backTo={runtime.selectedSeckillSessionId ? '/seckill' : product ? `/mall/products/${encodeURIComponent(product.productId)}` : '/mall'}
       />
 
       {runtime.selectedSeckillSessionId && runtime.seckillSession ? (
@@ -1687,9 +1886,7 @@ export function CheckoutScreen() {
 
 function CheckoutTargetSelector() {
   const runtime = useMallRuntime();
-  const [recipientName, setRecipientName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [address, setAddress] = useState('');
+  const addresses = [...runtime.buyerAddresses].sort((left, right) => Number(right.isDefault) - Number(left.isDefault));
 
   return (
     <section className="checkout-target" aria-labelledby="checkout-target-title">
@@ -1702,29 +1899,38 @@ function CheckoutTargetSelector() {
       </div>
 
       {runtime.fulfillmentMode === 'DELIVERY' ? (
-        <form
-          className="checkout-target__form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void runtime.createDeliveryTarget({ recipientName, phone, address });
-          }}
-          noValidate
-        >
-          <div className="checkout-target__person">
-            <label className="field">收货人<input value={recipientName} onChange={(event) => setRecipientName(event.target.value)} autoComplete="name" maxLength={64} /></label>
-            <label className="field">手机号<input value={phone} onChange={(event) => setPhone(event.target.value.replace(/\D/g, '').slice(0, 11))} inputMode="numeric" autoComplete="tel" /></label>
-          </div>
-          <label className="field">详细地址<textarea value={address} onChange={(event) => setAddress(event.target.value)} autoComplete="street-address" rows={3} maxLength={300} /></label>
-          <button
-            className="button button--secondary"
-            type="submit"
-            disabled={!runtime.session || runtime.busy || !recipientName.trim() || !/^\d{11}$/.test(phone) || address.trim().length < 5}
-          >
-            <LocateFixed aria-hidden="true" size={18} />
-            {runtime.locationState === 'loading' ? '定位中' : '验证快递目标'}
-          </button>
-          {runtime.locationState !== 'ready' ? <p className="control-reason">需要浏览器定位与 Core AMap 行政区验证，拒绝定位时保持 fail-closed。</p> : null}
-        </form>
+        <div className="delivery-options">
+          {!runtime.session ? <StatusNotice title="需要钱包登录">登录后只读取当前 BUYER 会话的加密地址簿。</StatusNotice> : null}
+          {runtime.session && runtime.buyerAddressesState === 'loading' ? <div className="address-list-skeleton" aria-label="正在加载结算地址" /> : null}
+          {runtime.session && runtime.buyerAddressesState === 'error' ? (
+            <div className="catalog-retry">
+              <StatusNotice title="地址同步失败" tone="warning">不使用浏览器输入或缓存地址替代 Core 地址簿。</StatusNotice>
+              <button className="button button--secondary" type="button" onClick={() => void runtime.reloadBuyerAccount()} disabled={runtime.busy}><RefreshCw aria-hidden="true" size={18} /> 重新同步</button>
+            </div>
+          ) : null}
+          {runtime.session && runtime.buyerAddressesState === 'empty' ? <EmptyState title="暂无已保存地址">请先到地址簿完成解析、复核和保存，再返回创建快递订单。</EmptyState> : null}
+          {addresses.map((savedAddress) => {
+            const active = runtime.checkoutTarget?.review.kind === 'DELIVERY'
+              && runtime.checkoutTarget.review.address.addressId === savedAddress.addressId;
+            return (
+              <article className={active ? 'delivery-option is-active' : 'delivery-option'} key={savedAddress.addressId}>
+                <div className="delivery-option__heading"><strong>{savedAddress.label}</strong>{savedAddress.isDefault ? <span>默认地址</span> : null}</div>
+                <p>{savedAddress.recipientName} · {savedAddress.phone}</p>
+                <p>{savedAddress.formattedAddress}</p>
+                <small>{savedAddress.province} / {savedAddress.city} / {savedAddress.district} · {savedAddress.regionCode}</small>
+                <button
+                  className="button button--secondary"
+                  type="button"
+                  disabled={runtime.busy || active}
+                  onClick={() => void runtime.selectSavedAddress(savedAddress.addressId)}
+                >
+                  {active ? '已选择' : savedAddress.isDefault ? '使用默认地址' : '使用这个地址'}
+                </button>
+              </article>
+            );
+          })}
+          <Link className="button button--secondary" to="/assets/addresses" state={{ returnTo: '/checkout' }}><MapPinned aria-hidden="true" size={18} /> 管理收货地址</Link>
+        </div>
       ) : (
         <div className="pickup-options">
           {runtime.storesState === 'loading' ? <StoreListSkeleton /> : null}
@@ -1782,10 +1988,10 @@ export function ReviewScreen() {
     ),
   );
   const reviewRows = [
-    { icon: Package, label: '商品与最终规格', value: runtime.selectedProduct && runtime.selectedSku ? `${runtime.selectedProduct.title} · ${skuLabel(runtime.selectedSku.attributes, runtime.selectedSku.skuId)}` : '待签名预留' },
+    { icon: Package, label: '商品与最终规格', value: runtime.selectedProduct && runtime.selectedSku ? `${runtime.selectedProduct.title} (${runtime.selectedProduct.productId}) · ${skuLabel(runtime.selectedSku.attributes, runtime.selectedSku.skuId)} (${runtime.selectedSku.skuId})` : '待签名预留' },
     { icon: ScanLine, label: '数量与总价', value: intent ? `x${intent.quantity} · ${intent.listPriceUsdt} USDT 原子单位` : '待签名报价' },
     { icon: Truck, label: '履约方式', value: intent ? (intent.fulfillmentMode === 0 ? '快递邮寄' : '到店自提') : '待确认' },
-    { icon: MapPinned, label: '地址或门店', value: intent ? shortHash(intent.fulfillmentTargetHash) : '待权威校验' },
+    { icon: MapPinned, label: '地址或门店', value: runtime.checkoutTarget?.label ?? (intent ? shortHash(intent.fulfillmentTargetHash) : '待权威校验') },
   ];
 
   return (
@@ -1810,11 +2016,13 @@ export function ReviewScreen() {
         </li>
       </ol>
 
+      {runtime.checkoutTarget ? <CheckoutTargetReview target={runtime.checkoutTarget} /> : null}
+
       <section className="immutable-warning" aria-labelledby="immutable-warning-title">
         <ShieldAlert aria-hidden="true" size={22} />
         <div>
           <h2 id="immutable-warning-title">付款前请最终确认</h2>
-          <p>付款成功后，履约方式以及地址或门店的行政区划将写入订单快照，后续不可修改。</p>
+          <p>付款成功后，履约方式与行政区 {runtime.checkoutTarget?.review.kind === 'DELIVERY' ? runtime.checkoutTarget.review.address.regionCode : runtime.checkoutTarget?.review.store.regionCode ?? '--'} 将写入订单快照，后续不可修改。Region hash：{runtime.checkoutTarget ? shortHash(runtime.checkoutTarget.regionCodeHash) : '--'}。</p>
         </div>
       </section>
 
@@ -1906,6 +2114,40 @@ export function ReviewScreen() {
   );
 }
 
+function CheckoutTargetReview({ target }: { target: NonNullable<MallRuntimeValue['checkoutTarget']> }) {
+  if (target.review.kind === 'DELIVERY') {
+    const address = target.review.address;
+    return (
+      <section className="checkout-review-target" aria-labelledby="checkout-review-target-title">
+        <div className="section-heading"><h2 id="checkout-review-target-title">完整收货信息</h2><Truck aria-hidden="true" size={19} /></div>
+        <dl>
+          <div><dt>收货人</dt><dd>{address.recipientName}</dd></div>
+          <div><dt>手机号</dt><dd>{address.phone}</dd></div>
+          <div><dt>省 / 市 / 区</dt><dd>{address.province} / {address.city} / {address.district}</dd></div>
+          <div><dt>详细地址</dt><dd>{address.formattedAddress}</dd></div>
+          <div><dt>行政区代码</dt><dd>{address.regionCode}</dd></div>
+          <div><dt>目标哈希</dt><dd><code>{target.fulfillmentTargetHash}</code></dd></div>
+        </dl>
+      </section>
+    );
+  }
+  const store = target.review.store;
+  return (
+    <section className="checkout-review-target" aria-labelledby="checkout-review-target-title">
+      <div className="section-heading"><h2 id="checkout-review-target-title">完整自提信息</h2><Store aria-hidden="true" size={19} /></div>
+      <dl>
+        <div><dt>门店</dt><dd>{store.name}</dd></div>
+        <div><dt>地址</dt><dd>{store.address}</dd></div>
+        <div><dt>营业时间</dt><dd>{store.businessHours}</dd></div>
+        <div><dt>联系电话</dt><dd>{store.phone}</dd></div>
+        <div><dt>行政区代码</dt><dd>{store.regionCode}</dd></div>
+        <div><dt>目标哈希</dt><dd><code>{target.fulfillmentTargetHash}</code></dd></div>
+      </dl>
+      <p>请在营业时间内到店，并以 Core 订单状态和现场核销结果为准。</p>
+    </section>
+  );
+}
+
 export function NotFoundScreen() {
   return (
     <div className="screen screen--detail">
@@ -1942,7 +2184,7 @@ function quoteDisabledReason(runtime: MallRuntimeValue) {
       || runtime.seckillSession.phase !== 'LIVE'
   )) return 'Core 当前场次阶段不允许创建秒杀报价';
   if (!runtime.checkoutTarget || runtime.checkoutTarget.fulfillmentMode !== runtime.fulfillmentMode) {
-    return runtime.fulfillmentMode === 'DELIVERY' ? '请先验证快递目标' : '请先选择自提门店';
+    return runtime.fulfillmentMode === 'DELIVERY' ? '请先选择 Core 已保存的收货地址' : '请先选择自提门店';
   }
   return '请完成当前配置';
 }

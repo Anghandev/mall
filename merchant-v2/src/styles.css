@@ -2475,6 +2475,182 @@ td .empty-state {
   background: var(--warning-soft);
 }
 
+.receivable-decision {
+  margin-top: -4px;
+}
+
+.receivable-statement-list {
+  display: grid;
+  gap: 10px;
+}
+
+.receivable-statement {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.receivable-statement > summary {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.4fr) auto minmax(260px, 1fr) 20px;
+  align-items: center;
+  gap: 16px;
+  min-height: 72px;
+  padding: 12px 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.receivable-statement > summary::-webkit-details-marker {
+  display: none;
+}
+
+.receivable-statement > summary::after {
+  content: "+";
+  color: var(--muted);
+  font-size: 1.1rem;
+  font-weight: 750;
+  text-align: center;
+}
+
+.receivable-statement[open] > summary::after {
+  content: "-";
+}
+
+.receivable-statement > summary:hover {
+  background: var(--surface-muted);
+}
+
+.receivable-statement > summary:focus-visible {
+  outline: 3px solid oklch(68% 0.13 72 / 0.45);
+  outline-offset: -3px;
+}
+
+.receivable-order-identity,
+.receivable-order-amount {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.receivable-order-identity strong,
+.receivable-order-amount strong {
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+.receivable-order-identity small,
+.receivable-order-amount small {
+  color: var(--muted);
+  font-size: 0.6875rem;
+  line-height: 1.45;
+}
+
+.receivable-order-state {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.receivable-order-amount {
+  text-align: right;
+}
+
+.receivable-statement-body {
+  display: grid;
+  gap: 18px;
+  padding: 18px 16px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-muted);
+}
+
+.receivable-order-facts,
+.receivable-amount-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.receivable-order-facts > div,
+.receivable-amount-grid > div {
+  min-width: 0;
+  padding: 11px 12px;
+  border-right: 1px solid var(--border);
+}
+
+.receivable-order-facts > div:last-child,
+.receivable-amount-grid > div:nth-child(4n) {
+  border-right: 0;
+}
+
+.receivable-amount-grid > div:nth-child(n + 5) {
+  border-top: 1px solid var(--border);
+}
+
+.receivable-order-facts dt,
+.receivable-amount-grid dt {
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 0.6875rem;
+}
+
+.receivable-order-facts dd,
+.receivable-amount-grid dd {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.receivable-evidence-block {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.receivable-evidence-block h3 {
+  font-size: 0.8125rem;
+}
+
+.receivable-evidence-block .table-wrap {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.receivable-evidence-block table {
+  min-width: 820px;
+}
+
+.receivable-pagination {
+  display: grid;
+  grid-template-columns: 1fr minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.receivable-pagination span,
+.receivable-pagination p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.receivable-pagination p {
+  color: var(--danger);
+  text-align: right;
+}
+
 .finance-command-form {
   display: grid;
   grid-template-columns: minmax(260px, 1fr) auto;
@@ -3790,6 +3966,38 @@ td > small {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .receivable-statement > summary {
+    grid-template-columns: minmax(220px, 1fr) auto 20px;
+  }
+
+  .receivable-order-amount {
+    grid-column: 1 / -2;
+    grid-row: 2;
+    text-align: left;
+  }
+
+  .receivable-order-facts,
+  .receivable-amount-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .receivable-order-facts > div,
+  .receivable-order-facts > div:last-child,
+  .receivable-amount-grid > div,
+  .receivable-amount-grid > div:nth-child(4n) {
+    border-right: 1px solid var(--border);
+  }
+
+  .receivable-order-facts > div:nth-child(2n),
+  .receivable-amount-grid > div:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .receivable-order-facts > div:nth-child(n + 3),
+  .receivable-amount-grid > div:nth-child(n + 3) {
+    border-top: 1px solid var(--border);
+  }
+
   .finance-summary > div:nth-child(2) {
     border-right: 0;
   }
@@ -4020,6 +4228,52 @@ td > small {
   }
 
   .finance-command-form .button {
+    width: 100%;
+  }
+
+  .receivable-statement > summary {
+    grid-template-columns: 1fr 20px;
+    gap: 10px;
+  }
+
+  .receivable-order-state,
+  .receivable-order-amount {
+    grid-column: 1;
+    grid-row: auto;
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .receivable-statement > summary::after {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+  }
+
+  .receivable-order-facts,
+  .receivable-amount-grid,
+  .receivable-pagination {
+    grid-template-columns: 1fr;
+  }
+
+  .receivable-order-facts > div,
+  .receivable-order-facts > div:last-child,
+  .receivable-order-facts > div:nth-child(2n),
+  .receivable-amount-grid > div,
+  .receivable-amount-grid > div:nth-child(2n),
+  .receivable-amount-grid > div:nth-child(4n) {
+    border-right: 0;
+  }
+
+  .receivable-order-facts > div:not(:first-child),
+  .receivable-amount-grid > div:not(:first-child) {
+    border-top: 1px solid var(--border);
+  }
+
+  .receivable-pagination p {
+    text-align: left;
+  }
+
+  .receivable-pagination .button {
     width: 100%;
   }
 

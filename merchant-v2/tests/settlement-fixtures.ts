@@ -3,6 +3,8 @@ import {
   type CmsPublicItem,
   type GuaranteeDepositProjection,
   type MerchantFinanceProjection,
+  type MerchantReceivableStatement,
+  type MerchantReceivableStatementPage,
   type SettlementIntentProjection,
   type SettlementListProjection,
   type SettlementRequestProjection,
@@ -59,6 +61,54 @@ export const settlementList: SettlementListProjection = {
     { pointsType: 'BNM', purpose: 'BNM_LIABILITY', state: 'AVAILABLE', amount: '3600', transferable: false },
   ],
   requests: [requestedSettlement, batchedSettlement, settledSettlement],
+};
+
+export const seckillReceivableStatement = receivableStatement({
+  hashCharacter: 'a',
+  orderKind: 'SECKILL',
+  orderState: 'FULFILLED',
+  currentReceivableUsdt: '0',
+  removedFromReceivableUsdt: '9000',
+  lifecycleState: 'SETTLED',
+  settlementState: 'SETTLED',
+  finalSafeTxHash: hash('b'),
+});
+
+export const ordinaryReceivableStatement = receivableStatement({
+  hashCharacter: 'c',
+  orderKind: 'ORDINARY',
+  orderState: 'SHIPPED',
+  currentReceivableUsdt: '9000',
+  removedFromReceivableUsdt: '0',
+  lifecycleState: 'LOCKED',
+});
+
+export const fallbackReceivableStatement = receivableStatement({
+  hashCharacter: 'd',
+  orderKind: 'FALLBACK_RETAIL',
+  orderState: 'FULFILLED',
+  currentReceivableUsdt: '9000',
+  removedFromReceivableUsdt: '0',
+  lifecycleState: 'AVAILABLE',
+});
+
+export const merchantReceivableStatements: MerchantReceivableStatementPage = {
+  artifactVersion,
+  merchantId: 'merchant-1',
+  settlementWallet: merchantWallet,
+  statements: [seckillReceivableStatement, ordinaryReceivableStatement],
+  nextCursor: {
+    createdAt: ordinaryReceivableStatement.createdAt,
+    orderId: ordinaryReceivableStatement.orderId,
+  },
+};
+
+export const merchantReceivableStatementsNext: MerchantReceivableStatementPage = {
+  artifactVersion,
+  merchantId: 'merchant-1',
+  settlementWallet: merchantWallet,
+  statements: [fallbackReceivableStatement],
+  nextCursor: null,
 };
 
 export const settlementIntent: SettlementIntentProjection = {
@@ -287,5 +337,75 @@ function settlementRequest(input: {
       journal_id: `journal:${input.requestId}:transition`,
       created_at: '2026-07-15T08:01:00.000Z',
     }],
+  };
+}
+
+function receivableStatement(input: {
+  hashCharacter: string;
+  orderKind: MerchantReceivableStatement['orderKind'];
+  orderState: MerchantReceivableStatement['orderState'];
+  currentReceivableUsdt: string;
+  removedFromReceivableUsdt: string;
+  lifecycleState: MerchantReceivableStatement['receivableLifecycle'][number]['state'];
+  settlementState?: MerchantReceivableStatement['settlementRefs'][number]['state'];
+  finalSafeTxHash?: string;
+}): MerchantReceivableStatement {
+  const orderId = hash(input.hashCharacter);
+  const lifecycleJournalId = `journal:${input.hashCharacter}:lifecycle`;
+  const settlementRequestId = hash(input.hashCharacter === 'a' ? 'e' : 'f');
+  return {
+    orderId,
+    productId: `product-${input.hashCharacter}`,
+    skuId: `sku-${input.hashCharacter}`,
+    quantity: '1',
+    orderState: input.orderState,
+    paymentTxHash: hash(input.hashCharacter === 'a' ? '1' : '2'),
+    paymentFinalizedAt: '2026-07-15T08:00:00.000Z',
+    fulfilledAt: input.orderState === 'FULFILLED' ? '2026-07-15T09:00:00.000Z' : null,
+    createdAt: input.hashCharacter === 'a'
+      ? '2026-07-15T07:59:00.000Z'
+      : input.hashCharacter === 'c'
+        ? '2026-07-14T07:59:00.000Z'
+        : '2026-07-13T07:59:00.000Z',
+    orderKind: input.orderKind,
+    frozenAmounts: {
+      listPriceUsdt: '12000',
+      buyerPaidUsdt: '8400',
+      merchantBaseReceivableUsdt: '10000',
+      merchantConcessionAmount: '1000',
+      merchantNetReceivableUsdt: '9000',
+    },
+    currentReceivableUsdt: input.currentReceivableUsdt,
+    removedFromReceivableUsdt: input.removedFromReceivableUsdt,
+    receivableLifecycle: [{
+      state: input.lifecycleState,
+      amount: input.lifecycleState === 'SETTLED' ? input.removedFromReceivableUsdt : input.currentReceivableUsdt,
+      journalIds: [lifecycleJournalId],
+    }],
+    journalEvidence: [{
+      journalId: lifecycleJournalId,
+      eventType: input.lifecycleState === 'LOCKED' ? 'PAYMENT_FINAL' : 'FULFILLMENT_FINAL',
+      state: input.lifecycleState,
+      delta: input.lifecycleState === 'SETTLED' ? '-9000' : '9000',
+      sourceKind: 'ORDER',
+      sourceReferenceHash: orderId,
+      createdAt: '2026-07-15T09:00:00.000Z',
+    }],
+    settlementRefs: input.settlementState ? [{
+      requestId: settlementRequestId,
+      amount: '9000',
+      state: input.settlementState,
+      batchId: hash('6'),
+      finalSafeTxHash: input.finalSafeTxHash ?? null,
+      finalExecutionTxHash: input.finalSafeTxHash ?? null,
+      journals: {
+        requested: `journal:${input.hashCharacter}:requested`,
+        batched: `journal:${input.hashCharacter}:batched`,
+        settled: input.finalSafeTxHash ? `journal:${input.hashCharacter}:settled` : null,
+      },
+      requestedAt: '2026-07-15T09:05:00.000Z',
+      batchedAt: '2026-07-15T09:06:00.000Z',
+      settledAt: input.finalSafeTxHash ? '2026-07-15T09:15:00.000Z' : null,
+    }] : [],
   };
 }

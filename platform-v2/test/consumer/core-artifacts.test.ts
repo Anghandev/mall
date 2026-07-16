@@ -23,8 +23,8 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('settlement admin .12 checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-settlement-admin.12');
+test('settlement admin .13 checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-settlement-admin.13');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
@@ -54,7 +54,7 @@ test('settlement admin .12 checkpoint has one identity, resolvable exports and e
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 25);
+  assert.equal(schemaManifest.schemas.core.migrations.length, 26);
   assert.equal(schemaManifest.schemas.audit.migrations.length, 4);
   for (const migration of [
     ...schemaManifest.schemas.core.migrations,
@@ -144,6 +144,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'GET /v2/stores',
     'POST /v2/actions/order',
     'POST /v2/admin/catalog/categories',
+    'POST /v2/admin/catalog/products/batch-lifecycle',
     'POST /v2/admin/catalog/products/batch-tags',
     'POST /v2/admin/catalog/products/{productId}/concession-previews',
     'POST /v2/admin/catalog/products/{productId}/delist',
@@ -505,6 +506,7 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
     'AdminGlobalSearchResponse',
     'AdminResourceExport',
     'AdminProductBatchTagResult',
+    'AdminProductLifecycleBatchResult',
   ]) assert.match(declarations, new RegExp(`export interface ${name}\\b`), name);
   assert.deepEqual(enums.merchantLevels, ['V1', 'V2', 'V3', 'V4', 'V5']);
   assert.deepEqual(enums.merchantLifecycleStatuses, [
@@ -518,7 +520,10 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
   assert.deepEqual(enums.logisticsWarehouseAccessLevels, ['FULL', 'REDACTED']);
   assert.deepEqual(enums.adminResourceTypes, ['ORDER', 'PRODUCT', 'MERCHANT']);
   assert.deepEqual(enums.adminExportFormats, ['CSV', 'EXCEL']);
-  assert.deepEqual(enums.adminBatchActions, ['EXPORT_CSV', 'EXPORT_EXCEL', 'ADD_PRODUCT_TAGS']);
+  assert.deepEqual(enums.adminBatchActions, [
+    'EXPORT_CSV', 'EXPORT_EXCEL', 'ADD_PRODUCT_TAGS', 'APPROVE_PRODUCTS',
+    'REJECT_PRODUCTS', 'PUBLISH_PRODUCTS', 'HIDE_PRODUCTS', 'DELIST_PRODUCTS',
+  ]);
   assert.deepEqual(enums.merchantGuaranteeDepositStates, ['SUBMITTED', 'MINED', 'FINAL', 'REORGED', 'QUARANTINED']);
   assert.deepEqual(enums.rewardSubtypes, [
     'GENESIS', 'DIRECT_REFERRAL', 'DISTRICT', 'CITY',
@@ -554,10 +559,12 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
   assert.equal(openapi.components.schemas.BnmPointsBalance.properties.transferable.const, false);
   assert.equal(openapi.components.schemas.RealtimeEventEnvelope.properties.finality.const, 'FINAL');
   assert.equal(openapi.components.schemas.MerchantLifecycleSummary.properties.settlementWalletMutable.const, false);
-  assert.deepEqual(openapi.components.schemas.AdminGlobalSearchResponse.properties.relation, { const: 'AND' });
+  assert.deepEqual(openapi.components.schemas.AdminGlobalSearchResponse.properties.relation, { enum: ['AND', 'OR'] });
+  assert.ok(openapi.paths['/v2/admin/catalog/products/batch-lifecycle']);
   assert.equal('wallet' in openapi.components.schemas.AdminResourceSummary.properties, false);
   assert.equal('phone' in openapi.components.schemas.AdminResourceSummary.properties, false);
-  assert.ok(manifest.decisionBlocked.includes('ADMIN_OR_QUERY_SEMANTICS'));
+  assert.equal(manifest.decisionBlocked.includes('ADMIN_OR_QUERY_SEMANTICS'), false);
+  assert.equal(manifest.decisionBlocked.includes('ADMIN_FUZZY_WALLET_SEARCH_POLICY'), false);
   assert.ok(manifest.decisionBlocked.includes('ADMIN_YELLOW_QUEUE_DEFINITION'));
   assert.equal(openapi.components.schemas.MerchantFulfillmentAnalytics.properties.fastShip48h.properties.status.const, 'DecisionBlocked');
   assert.deepEqual(
@@ -813,6 +820,7 @@ test('catalog, settlement/admin and seckill realtime capabilities are published 
     'adminGlobalResourceSearchHttp',
     'adminResourceExportHttp',
     'adminProductBatchTaggingHttp',
+    'adminProductLifecycleBatchHttp',
     'takeoverHttp',
     'fulfillmentScheduler',
     'bnmAvailabilityWorker',

@@ -1,4 +1,4 @@
-export const CORE_ARTIFACT_VERSION = '2.0.0-settlement-admin.12';
+export const CORE_ARTIFACT_VERSION = '2.0.0-settlement-admin.13';
 export const BSC_CHAIN_ID = 56;
 export const USDT_ADDRESS = '0x55d398326f99059ff775485246999027b3197955';
 export const NPL_ADDRESS = '0x4e8277ab31e4956b2cd48449793a57656dfc03d2';
@@ -65,7 +65,16 @@ export type AdminResourceType = (typeof adminResourceTypes)[number];
 export const adminExportFormats = ['CSV', 'EXCEL'] as const;
 export type AdminExportFormat = (typeof adminExportFormats)[number];
 
-export const adminBatchActions = ['EXPORT_CSV', 'EXPORT_EXCEL', 'ADD_PRODUCT_TAGS'] as const;
+export const adminBatchActions = [
+  'EXPORT_CSV',
+  'EXPORT_EXCEL',
+  'ADD_PRODUCT_TAGS',
+  'APPROVE_PRODUCTS',
+  'REJECT_PRODUCTS',
+  'PUBLISH_PRODUCTS',
+  'HIDE_PRODUCTS',
+  'DELIST_PRODUCTS',
+] as const;
 export type AdminBatchAction = (typeof adminBatchActions)[number];
 
 export const breakerScopes = [

@@ -12,6 +12,7 @@ import type {
   BuyerOverview,
   BuyerProfile,
   BuyerSavedAddress,
+  BuyerShoppingStatement,
   BuyerTakeoverTimeline,
   CatalogCategory,
   CatalogProduct,
@@ -28,6 +29,7 @@ import type {
   MediaUploadIntentProjection,
   NotificationEndpointProjection,
   NotificationInboxItem,
+  OrderStatementCursor,
   PaymentProjection,
   PaymentQuoteResponse,
   PaymentSubmissionRequest,
@@ -64,12 +66,6 @@ type LoadState = 'loading' | 'ready' | 'empty' | 'error';
 export interface BrowserPosition {
   latitude: number;
   longitude: number;
-}
-
-export interface DeliveryTargetDraft {
-  recipientName: string;
-  phone: string;
-  address: string;
 }
 
 export type BuyerAddressDraft = Omit<BuyerAddressWriteRequest, 'expectedVersion' | 'idempotencyKey'>;
@@ -145,6 +141,11 @@ export interface MallRuntimeValue {
   buyerOverviewState: 'idle' | LoadState;
   buyerAddresses: readonly BuyerSavedAddress[];
   buyerAddressesState: 'idle' | LoadState;
+  shoppingStatements: readonly BuyerShoppingStatement[];
+  shoppingStatementsState: 'idle' | LoadState;
+  shoppingStatementsNextCursor: OrderStatementCursor | null;
+  shoppingStatementsLoadingMore: boolean;
+  shoppingStatementsError: string | null;
   parsedBuyerAddress: ParsedBuyerAddress | null;
   addressParseState: 'idle' | 'loading' | 'ready' | 'error';
   settlements: SettlementListProjection | null;
@@ -175,7 +176,6 @@ export interface MallRuntimeValue {
   selectSeckillSession(): void;
   reloadStores(regionCode?: string): Promise<void>;
   requestLocation(): Promise<void>;
-  createDeliveryTarget(draft: DeliveryTargetDraft): Promise<void>;
   createPickupTarget(storeId: string): Promise<void>;
   reloadOrders(): Promise<void>;
   loadMoreOrders(): Promise<void>;
@@ -193,6 +193,8 @@ export interface MallRuntimeValue {
   deleteBuyerAddress(addressId: string): Promise<boolean>;
   setDefaultBuyerAddress(addressId: string): Promise<boolean>;
   selectSavedAddress(addressId: string): Promise<boolean>;
+  reloadShoppingStatements(): Promise<void>;
+  loadMoreShoppingStatements(): Promise<void>;
   reloadSettlements(): Promise<void>;
   requestSettlement(rail: 'REWARD_NPL' | 'PRIZE_USDT', amount: string): Promise<void>;
   reloadNotifications(): Promise<void>;
@@ -254,6 +256,11 @@ export function MallRuntimeProvider({
   const [buyerOverviewState, setBuyerOverviewState] = useState<'idle' | LoadState>('idle');
   const [buyerAddresses, setBuyerAddresses] = useState<readonly BuyerSavedAddress[]>([]);
   const [buyerAddressesState, setBuyerAddressesState] = useState<'idle' | LoadState>('idle');
+  const [shoppingStatements, setShoppingStatements] = useState<readonly BuyerShoppingStatement[]>([]);
+  const [shoppingStatementsState, setShoppingStatementsState] = useState<'idle' | LoadState>('idle');
+  const [shoppingStatementsNextCursor, setShoppingStatementsNextCursor] = useState<OrderStatementCursor | null>(null);
+  const [shoppingStatementsLoadingMore, setShoppingStatementsLoadingMore] = useState(false);
+  const [shoppingStatementsError, setShoppingStatementsError] = useState<string | null>(null);
   const [parsedBuyerAddress, setParsedBuyerAddress] = useState<ParsedBuyerAddress | null>(null);
   const [addressParseState, setAddressParseState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [settlements, setSettlements] = useState<SettlementListProjection | null>(null);
@@ -438,6 +445,11 @@ export function MallRuntimeProvider({
     buyerOverviewState,
     buyerAddresses,
     buyerAddressesState,
+    shoppingStatements,
+    shoppingStatementsState,
+    shoppingStatementsNextCursor,
+    shoppingStatementsLoadingMore,
+    shoppingStatementsError,
     parsedBuyerAddress,
     addressParseState,
     settlements,
@@ -546,28 +558,6 @@ export function MallRuntimeProvider({
       }, () => setLocationState('error'));
     },
 
-    async createDeliveryTarget(draft) {
-      await run(async () => {
-        const activeSession = requireSession();
-        assertDeliveryTargetDraft(draft);
-        const nextLocation = location ?? await services.getCurrentPosition();
-        setLocation(nextLocation);
-        setLocationState('ready');
-        const target = await services.core.createDeliveryTarget(activeSession.token, {
-          idempotencyKey: services.createIdempotencyKey(),
-          ...draft,
-          ...nextLocation,
-        });
-        setCheckoutTarget({
-          fulfillmentMode: target.fulfillmentMode,
-          fulfillmentTargetHash: target.targetHash,
-          regionCodeHash: target.regionCodeHash,
-          label: `${draft.recipientName} · ${draft.address}`,
-        });
-        clearQuoteState();
-      });
-    },
-
     async createPickupTarget(storeId) {
       await run(async () => {
         const activeSession = requireSession();
@@ -582,6 +572,7 @@ export function MallRuntimeProvider({
           fulfillmentTargetHash: target.targetHash,
           regionCodeHash: target.regionCodeHash,
           label: `${target.store.name} · ${target.store.address}`,
+          review: { kind: 'PICKUP', store: target.store },
         });
         clearQuoteState();
       });
@@ -858,6 +849,7 @@ export function MallRuntimeProvider({
           fulfillmentTargetHash: target.targetHash,
           regionCodeHash: target.regionCodeHash,
           label: `${address.recipientName} · ${address.formattedAddress}`,
+          review: { kind: 'DELIVERY', address },
         });
         setFulfillmentModeState('DELIVERY');
         clearQuoteState();
@@ -868,6 +860,15 @@ export function MallRuntimeProvider({
       } finally {
         setBusy(false);
       }
+    },
+
+    async reloadShoppingStatements() {
+      await run(async () => loadShoppingStatementBundle(requireSession()));
+    },
+
+    async loadMoreShoppingStatements() {
+      if (!shoppingStatementsNextCursor || shoppingStatementsLoadingMore) return;
+      await run(async () => loadShoppingStatementBundle(requireSession(), shoppingStatementsNextCursor));
     },
 
     async reloadSettlements() {
@@ -1084,6 +1085,11 @@ export function MallRuntimeProvider({
     buyerOverviewState,
     buyerAddresses,
     buyerAddressesState,
+    shoppingStatements,
+    shoppingStatementsState,
+    shoppingStatementsNextCursor,
+    shoppingStatementsLoadingMore,
+    shoppingStatementsError,
     parsedBuyerAddress,
     addressParseState,
     settlements,
@@ -1183,7 +1189,10 @@ export function MallRuntimeProvider({
       );
     }
     return {
-      ...target,
+      fulfillmentMode: target.fulfillmentMode,
+      fulfillmentTargetHash: target.fulfillmentTargetHash,
+      regionCodeHash: target.regionCodeHash,
+      label: target.label,
       idempotencyKey: services.createIdempotencyKey(),
       productId: selectedProduct.productId,
       skuId: selectedSku.skuId,
@@ -1237,6 +1246,7 @@ export function MallRuntimeProvider({
     const results = await Promise.allSettled([
       loadBuyerAccountBundle(activeSession),
       loadOrderBundle(activeSession),
+      loadShoppingStatementBundle(activeSession),
       loadSettlementBundle(activeSession),
       loadNotificationBundle(activeSession),
     ]);
@@ -1246,8 +1256,9 @@ export function MallRuntimeProvider({
       setBuyerAddressesState('error');
     }
     if (results[1]?.status === 'rejected') setOrdersState('error');
-    if (results[2]?.status === 'rejected') setSettlementsState('error');
-    if (results[3]?.status === 'rejected') setNotificationsState('error');
+    if (results[2]?.status === 'rejected') setShoppingStatementsState('error');
+    if (results[3]?.status === 'rejected') setSettlementsState('error');
+    if (results[4]?.status === 'rejected') setNotificationsState('error');
     if (results.some((result) => result.status === 'rejected')) {
       setError('部分账户数据同步失败，可在对应页面重试');
     }
@@ -1299,6 +1310,32 @@ export function MallRuntimeProvider({
     const addresses = await services.core.listBuyerAddresses(activeSession.token);
     setBuyerAddresses(addresses);
     setBuyerAddressesState(addresses.length > 0 ? 'ready' : 'empty');
+  }
+
+  async function loadShoppingStatementBundle(activeSession: WalletSession, cursor?: OrderStatementCursor) {
+    if (cursor) setShoppingStatementsLoadingMore(true);
+    else setShoppingStatementsState('loading');
+    setShoppingStatementsError(null);
+    try {
+      const page = await services.core.listBuyerShoppingStatements(activeSession.token, cursor);
+      assertBuyerProjectionWallet(page.buyerWallet, activeSession);
+      const nextStatements = cursor
+        ? mergeShoppingStatements(shoppingStatements, page.statements)
+        : page.statements;
+      setShoppingStatements(nextStatements);
+      setShoppingStatementsNextCursor(page.nextCursor);
+      setShoppingStatementsState(nextStatements.length > 0 ? 'ready' : 'empty');
+    } catch (reason) {
+      setShoppingStatementsError(errorMessage(reason));
+      if (!cursor) {
+        setShoppingStatements([]);
+        setShoppingStatementsNextCursor(null);
+        setShoppingStatementsState('error');
+      }
+      throw reason;
+    } finally {
+      setShoppingStatementsLoadingMore(false);
+    }
   }
 
   async function writeSavedAddress(
@@ -1586,10 +1623,13 @@ function mergeOrders(
   return [...byId.values()];
 }
 
-function assertDeliveryTargetDraft(draft: DeliveryTargetDraft) {
-  if (!draft.recipientName.trim() || !/^\d{11}$/.test(draft.phone) || draft.address.trim().length < 5) {
-    throw new CoreClientError('InvalidRequest', '请完整填写收货人、11 位手机号和详细地址');
-  }
+function mergeShoppingStatements(
+  current: readonly BuyerShoppingStatement[],
+  incoming: readonly BuyerShoppingStatement[],
+) {
+  const byId = new Map(current.map((statement) => [statement.orderId.toLowerCase(), statement]));
+  for (const statement of incoming) byId.set(statement.orderId.toLowerCase(), statement);
+  return [...byId.values()];
 }
 
 function errorMessage(reason: unknown) {
