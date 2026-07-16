@@ -12,6 +12,10 @@ const forbidden = [
   { pattern: /canonical evidence 生成\/上传契约尚未发布/i, reason: 'retired evidence placeholder entered production' },
   { pattern: /PaymentEscrowV2|ClaimVaultV2|BNMTokenV2|CLAIM_[A-Z_]+/i, reason: 'retired funds surface entered production' },
   { pattern: /申请退款|强制退款|无理由退款/i, reason: 'business-refund copy entered production' },
+  { pattern: /\/v2\/admin\/global\/resources/i, reason: 'Admin global search entered Mall production' },
+  { pattern: /\/v2\/admin\/global\/exports/i, reason: 'Admin resource export entered Mall production' },
+  { pattern: /\/v2\/admin\/catalog\/products\/batch-tags/i, reason: 'Admin product batch tags entered Mall production' },
+  { pattern: /adminGlobalResourceSearchHttp|adminResourceExportHttp|adminProductBatchTaggingHttp/i, reason: 'Admin-only capability metadata entered Mall production' },
 ];
 
 for (const root of roots) {

@@ -13,7 +13,7 @@
     "check": "pnpm typecheck && pnpm test && pnpm build && pnpm bundle:check"
   },
   "dependencies": {
-    "@abu24k/core-artifacts": "workspace:2.0.0-logistics-admin.1",
+    "@abu24k/core-artifacts": "workspace:2.0.0-admin-global-ops.1",
     "ethers": "6.17.0",
     "lucide-react": "catalog:",
     "react": "catalog:",
