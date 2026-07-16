@@ -1,6 +1,6 @@
 # Merchant Workbench Core Gaps
 
-The merchant product consumes Core's coordinated `2.0.0-settlement-admin.11` artifact
+The merchant product consumes Core's coordinated `2.0.0-settlement-admin.12` artifact
 workspace package. Bootstrap, SIWE,
 merchant-bound Catalog/SKU/inventory management, immutable media, wallet-scoped fulfillment, merchant finance,
 guarantee-deposit evidence, signed settlement requests and Safe-finality
@@ -34,6 +34,7 @@ remain unchanged.
 | GAP-MER-003 | Merchant business dashboard with authoritative timezone/day, exact payment snapshots, current fulfillment queues and generated product/seckill state | Dashboard and finance Today metric consume `/v2/merchant/dashboard`; zero remains a real Core value while request failure stays visibly unavailable |
 | GAP-MER-014 | Tenant-scoped merchant profile, immutable settlement identity and owned Logo media validation | Settings consumes GET/PUT profile with expectedVersion/idempotency; only shopName/logoAssetId are editable and settlement wallet never enters the PUT body |
 | GAP-MER-015 | Merchant-scoped reverse-time audit read model and bounded CSV export | Filters/cursor, partial-history label, signature/Safe-or-chain hashes and exact Core CSV download are live without a browser-side audit replica |
+| GAP-MER-001 (per-order receivable slice) | Merchant-scoped stable-cursor order statements with frozen amounts, lifecycle, journal and settlement references | Ordinary, fallback-retail and seckill-classified orders render exact Core evidence; tenant/wallet mismatch and authorization failure close the statement without browser netting |
 
 ## Resolved In Logistics Batch
 

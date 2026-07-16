@@ -34,6 +34,8 @@ import {
   cmsRules,
   guaranteeDepositResult,
   merchantFinance,
+  merchantReceivableStatements,
+  merchantReceivableStatementsNext,
   requestedSettlement,
   settlementIntent,
   settlementList,
@@ -61,7 +63,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('settlement-admin.11 Core HTTP consumer', () => {
+describe('settlement-admin.12 Core HTTP consumer', () => {
   it('does not expose Admin global operations or clearing commands', () => {
     const api = createCoreApi('https://core.example.test');
     const adminOnlyOperationIds = [
@@ -522,7 +524,7 @@ describe('settlement-admin.11 Core HTTP consumer', () => {
         body: JSON.stringify(input),
         headers: expect.objectContaining({
           authorization: 'Bearer merchant-session',
-          'x-abu-artifact-version': '2.0.0-settlement-admin.11',
+          'x-abu-artifact-version': '2.0.0-settlement-admin.12',
         }),
       }),
     );
@@ -622,7 +624,7 @@ describe('settlement-admin.11 Core HTTP consumer', () => {
       'https://core.example.test/v2/catalog/products',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.11' }),
+        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.12' }),
       }),
     );
   });
@@ -1022,6 +1024,47 @@ describe('settlement-admin.11 Core HTTP consumer', () => {
       5,
       'https://core.example.test/v2/finance/merchant/guarantee-deposits',
       expect.objectContaining({ body: JSON.stringify(depositInput) }),
+    );
+  });
+
+  it('consumes strict merchant receivable statements with the paired stable cursor', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(merchantReceivableStatements))
+      .mockResolvedValueOnce(jsonResponse(merchantReceivableStatementsNext));
+    globalThis.fetch = fetchMock as typeof fetch;
+    const api = createCoreApi('https://core.example.test');
+
+    const firstPage = await api.listMerchantReceivableStatements('merchant-session', {
+      kind: 'SECKILL',
+      limit: 20,
+    });
+    const nextPage = await api.listMerchantReceivableStatements('merchant-session', {
+      cursor: firstPage.nextCursor!,
+      limit: 20,
+    });
+
+    expect(firstPage.statements[0]).toMatchObject({
+      orderKind: 'SECKILL',
+      frozenAmounts: {
+        merchantBaseReceivableUsdt: '10000',
+        merchantConcessionAmount: '1000',
+        merchantNetReceivableUsdt: '9000',
+      },
+      currentReceivableUsdt: '0',
+      removedFromReceivableUsdt: '9000',
+    });
+    expect(firstPage.statements[0]?.journalEvidence[0]?.journalId).toBe('journal:a:lifecycle');
+    expect(firstPage.statements[0]?.settlementRefs[0]?.finalSafeTxHash).toBe(`0x${'b'.repeat(64)}`);
+    expect(nextPage.statements[0]?.orderKind).toBe('FALLBACK_RETAIL');
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://core.example.test/v2/merchant/receivable-statements?kind=SECKILL&limit=20',
+      expect.objectContaining({ headers: expect.objectContaining({ authorization: 'Bearer merchant-session' }) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `https://core.example.test/v2/merchant/receivable-statements?cursorCreatedAt=${encodeURIComponent(firstPage.nextCursor!.createdAt)}&cursorOrderId=${firstPage.nextCursor!.orderId}&limit=20`,
+      expect.any(Object),
     );
   });
 
