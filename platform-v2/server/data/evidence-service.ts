@@ -928,6 +928,22 @@ async function isPublicMediaAsset(executor: SqlExecutor, asset: MediaAssetRow) {
     );
     return result.rows[0]?.visible === true;
   }
+  if (asset.resource_type === 'STORE' && asset.purpose === 'STORE_IMAGE') {
+    const result = await executor.query<{ visible: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM core.merchant_stores store
+         JOIN core.merchants merchant ON merchant.merchant_id = store.merchant_id
+         WHERE store.store_id = $1 AND store.status = 'ACTIVE'
+           AND merchant.status = 'APPROVED'
+           AND EXISTS (
+             SELECT 1 FROM jsonb_array_elements_text(store.image_asset_ids) media(asset_id)
+             WHERE media.asset_id = $2
+           )
+       ) AS visible`,
+      [asset.resource_id, asset.asset_id],
+    );
+    return result.rows[0]?.visible === true;
+  }
   return false;
 }
 

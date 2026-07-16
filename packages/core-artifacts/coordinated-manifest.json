@@ -1,6 +1,6 @@
 {
-  "artifactVersion": "2.0.0-admin-global-ops.1",
-  "publicationStatus": "COORDINATED_ADMIN_GLOBAL_OPERATIONS_CHECKPOINT",
+  "artifactVersion": "2.0.0-merchant-stores.1",
+  "publicationStatus": "COORDINATED_MERCHANT_STORE_MANAGEMENT_CHECKPOINT",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
   "chain": {
@@ -14,57 +14,57 @@
   "components": {
     "packageMetadata": {
       "path": "package.json",
-      "sha256": "a904901f854f2447453e2fc26b6af40175275f6656d901b9aed8f32599feb96f"
+      "sha256": "d6757361681f8c7fb986ce126041ce710909fd99604906f77c6173f6d1dd55b9"
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "a4fbd310251913cbf03d66f24ef779db83c86b700a8744069b0ea87de2d88bda"
+      "sha256": "0a430be257c4ca31aa5a0204032ed21231671d453e4e3b4ddc1758d8cb377fda"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "44abf89dc2cea3f3181f33c5f07f570305f5c81aa07d04b9fe76d4ef5f05166e"
+      "sha256": "2a3f2db24d6a0faa493662585063d4c327073eef4147813aeaf42f64a86676cd"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "2893c50d7eb0ee5efa285e451de431be647657f3d8de1e7516766a9f8416ed22"
+      "sha256": "fec01a33036b3fb08d2b55531b03bb1d9c02f280428afcc85312d620777bfd2d"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "a2fa33f83a5e97e6cf9aa3f04f3b371b489c06f4e3e37fca8d4bf6cae6ffeff2"
+      "sha256": "2a9e0b67323f166d21e341ba631aaa08e199a04a58e0cb7a9bc1f41cbea51145"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "227f465ffa4c1065388ea12d8c2acb0377b6ea65265e6389c5a92b4955997c36"
+      "sha256": "a7301de7a2e08d7b9c82e2eba73d71a69b8defcc516dab1d4f79a64029a3f3bf"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
-      "sha256": "1f2b57398c38cb2d4adc62720680ba7da9a6a348a07d98b8e5dd684ceb14292c"
+      "sha256": "710000c9e2781b543c6ffe3960e43b336b4fb89d777644da4e16f64e1ea7c181"
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "b183bdd0af3acfeaee52d051339ea01c12bf3601ee8163bcfcae3e094a2ef06c"
+      "sha256": "c225d55b4f49e3ff14d31dfaeca9f96507e4963ee1ec56e6cc267a6a4d524af3"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "58e198880b4a942f09b8ed99467f3d11d70b06d5c2cd3b2413a2c1944f10c73d"
+      "sha256": "3c148740506aa4052f2d5b952e6bd3e6fed17d9b051de6164f3d73af55631e77"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "d8ae8e8b5de0fc9c80f7af9c8f862bf3bb85503f94679524984d978f91eda73d"
+      "sha256": "6173f3e733f0aed54a8029b948653d977f7c41128d18029abb4aa89157050d65"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
-      "sha256": "5ae504e99a713522d71b4026a7fa98fd645335cee4cf04f550f604e75a4d6f67"
+      "sha256": "1e22fe91d652c59a05c7be988fd425024aa3baf43c8abb9d96ed05b51b0d2366"
     }
   },
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "d351837d488135ab60c3239e556d4fda460aeb650e01756e17b5f9860a8692fc"
+      "sha256": "793b34b1c9b27589194e805b6c44d1bcc6212560c7318e4611e3678f0f864611"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "2188e80601e9e093f642d2fb3dd23efe6a8082f99cd6eda8f2213e67c864f2c7"
+      "sha256": "368ff4dfe8982e6cd58b1094f8326934a57f09270fb947bf913bb4bbc25ed5d9"
     }
   ],
   "httpSurface": [
@@ -109,6 +109,7 @@
     "GET /v2/merchant/dashboard",
     "GET /v2/merchant/print-jobs",
     "GET /v2/merchant/profile",
+    "GET /v2/merchant/stores",
     "GET /v2/merchant/stores/{storeId}/printer-binding",
     "GET /v2/merchant/stores/{storeId}/product-slot",
     "GET /v2/notifications",
@@ -189,6 +190,9 @@
     "POST /v2/merchant/products/{productId}/concession-previews",
     "POST /v2/merchant/products/{productId}/delist",
     "POST /v2/merchant/products/{productId}/review-submissions",
+    "POST /v2/merchant/stores",
+    "POST /v2/merchant/stores/{storeId}/activate",
+    "POST /v2/merchant/stores/{storeId}/close",
     "POST /v2/merchant/stores/{storeId}/printer-binding/challenge",
     "POST /v2/merchant/waybills/batches",
     "POST /v2/notification-endpoints",
@@ -215,7 +219,6 @@
     "POST /v2/settlement-intents",
     "POST /v2/settlement-requests",
     "POST /v2/shipments/batches",
-    "POST /v2/stores",
     "PUT /v2/admin/catalog/categories/{categoryId}",
     "PUT /v2/admin/catalog/stores/{storeId}/product-slot",
     "PUT /v2/admin/catalog/tags/{tagId}",
@@ -225,6 +228,7 @@
     "PUT /v2/buyer/addresses/{addressId}",
     "PUT /v2/buyer/profile",
     "PUT /v2/merchant/profile",
+    "PUT /v2/merchant/stores/{storeId}",
     "PUT /v2/merchant/stores/{storeId}/printer-binding",
     "PUT /v2/merchant/stores/{storeId}/product-slot"
   ],
@@ -266,6 +270,7 @@
     "riskPaymentEnforcement": "AVAILABLE",
     "coverageMonitoring": "AVAILABLE",
     "storesHttp": "AVAILABLE",
+    "merchantStoreManagementHttp": "AVAILABLE",
     "fulfillmentTargetHttp": "AVAILABLE",
     "fulfillmentHttp": "AVAILABLE",
     "logisticsWebhookHttp": "AVAILABLE",
@@ -358,6 +363,7 @@
     "AllowedAction",
     "PaymentFinality",
     "MerchantStore",
+    "MerchantManagedStore",
     "FulfillmentTarget",
     "FulfillmentOrder",
     "FulfillmentOrderPage",

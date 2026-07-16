@@ -1,4 +1,4 @@
-export declare const artifactVersion: "2.0.0-admin-global-ops.1";
+export declare const artifactVersion: "2.0.0-merchant-stores.1";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
@@ -27,7 +27,7 @@ export type CoreErrorCode = "ArtifactVersionMismatch" | "BreakerActive" | "Confi
 export type FulfillmentMode = "DELIVERY" | "PICKUP";
 export type OrderKind = 'ORDINARY' | 'SECKILL' | 'FALLBACK_RETAIL';
 export type FulfillmentMethod = "CUSTOMER_RECEIPT" | "PICKUP_VERIFICATION" | "FORCED_RECEIPT" | "ARBITRATION";
-export type StoreStatus = "ACTIVE" | "SUSPENDED" | "CLOSED";
+export type StoreStatus = "DRAFT" | "ACTIVE" | "SUSPENDED" | "CLOSED";
 export type FulfillmentRequestType = "EXCHANGE" | "DELAY" | "ARBITRATION" | "FORCED_RECEIPT";
 export type FulfillmentRequestState = "OPEN" | "APPROVED" | "REJECTED" | "RESOLVED";
 export type LogisticsProvider = "KUAIDI100" | "CAINIAO";
@@ -1777,16 +1777,47 @@ export interface MerchantStore {
   latitude: number;
   address: string;
   phone: string;
+  businessHours: string;
+  imageAssetIds: readonly Bytes32[];
   status: StoreStatus;
   version: number;
+}
+
+export type MerchantStoreAction = 'UPDATE_PROFILE' | 'ACTIVATE' | 'CLOSE';
+export type MerchantStoreActionReason = 'STORE_PROFILE_INCOMPLETE' | 'STORE_SUSPENDED' | 'STORE_CLOSED' | 'STORE_STATE_MISMATCH';
+
+export interface MerchantStoreCapability {
+  action: MerchantStoreAction;
+  enabled: boolean;
+  reasonCode?: MerchantStoreActionReason;
+}
+
+export interface MerchantManagedStore extends MerchantStore {
+  artifactVersion: typeof artifactVersion;
+  allowedActions: readonly MerchantStoreCapability[];
 }
 
 export interface CreateMerchantStoreRequest {
   idempotencyKey: string;
   name: string;
   phone: string;
+  businessHours: string;
   longitude: number;
   latitude: number;
+}
+
+export interface UpdateMerchantStoreRequest {
+  name: string;
+  phone: string;
+  businessHours: string;
+  imageAssetIds: readonly Bytes32[];
+  expectedVersion: number;
+  idempotencyKey: string;
+}
+
+export interface MerchantStoreVersionRequest {
+  expectedVersion: number;
+  idempotencyKey: string;
 }
 
 export interface CreateDeliveryTargetRequest {

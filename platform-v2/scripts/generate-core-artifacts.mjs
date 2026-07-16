@@ -126,6 +126,7 @@ const schemaSources = [
       '020_merchant_lifecycle.sql',
       '021_logistics_admin.sql',
       '022_admin_global_operations.sql',
+      '023_merchant_store_management.sql',
     ],
   },
   {
@@ -329,7 +330,7 @@ const publishedContractManifest = JSON.parse(readRequired(join(contractsRoot, 'c
 
 const coordinatedManifest = {
   artifactVersion,
-  publicationStatus: 'COORDINATED_ADMIN_GLOBAL_OPERATIONS_CHECKPOINT',
+  publicationStatus: 'COORDINATED_MERCHANT_STORE_MANAGEMENT_CHECKPOINT',
   deploymentAuthorized: publishedContractManifest.deploymentAuthorized === true,
   deploymentAuthorizationEvidenceHash:
     publishedContractManifest.deploymentAuthorizationEvidenceHash ?? null,
@@ -384,6 +385,7 @@ const coordinatedManifest = {
     riskPaymentEnforcement: 'AVAILABLE',
     coverageMonitoring: 'AVAILABLE',
     storesHttp: 'AVAILABLE',
+    merchantStoreManagementHttp: 'AVAILABLE',
     fulfillmentTargetHttp: 'AVAILABLE',
     fulfillmentHttp: 'AVAILABLE',
     logisticsWebhookHttp: 'AVAILABLE',
@@ -462,6 +464,7 @@ const coordinatedManifest = {
     'AllowedAction',
     'PaymentFinality',
     'MerchantStore',
+    'MerchantManagedStore',
     'FulfillmentTarget',
     'FulfillmentOrder',
     'FulfillmentOrderPage',
@@ -685,12 +688,65 @@ function buildOpenApi() {
             default: errorResponse,
           },
         },
+      },
+      '/v2/merchant/stores': {
+        get: {
+          operationId: 'listManagedMerchantStores',
+          security: [{ bearerAuth: [] }],
+          responses: {
+            200: response('Current merchant store workspace', {
+              type: 'object',
+              additionalProperties: false,
+              required: ['stores'],
+              properties: {
+                stores: { type: 'array', items: { $ref: '#/components/schemas/MerchantManagedStore' } },
+              },
+            }),
+            default: errorResponse,
+          },
+        },
         post: {
           operationId: 'createMerchantStore',
           security: [{ bearerAuth: [] }],
           requestBody: body({ $ref: '#/components/schemas/CreateMerchantStoreRequest' }),
           responses: {
-            201: response('AMap-bound merchant store', { $ref: '#/components/schemas/MerchantStore' }),
+            201: response('AMap-bound merchant store draft', { $ref: '#/components/schemas/MerchantManagedStore' }),
+            default: errorResponse,
+          },
+        },
+      },
+      '/v2/merchant/stores/{storeId}': {
+        put: {
+          operationId: 'updateMerchantStore',
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: 'storeId', in: 'path', required: true, schema: { type: 'string', minLength: 1 } }],
+          requestBody: body({ $ref: '#/components/schemas/UpdateMerchantStoreRequest' }),
+          responses: {
+            200: response('Versioned merchant store profile', { $ref: '#/components/schemas/MerchantManagedStore' }),
+            default: errorResponse,
+          },
+        },
+      },
+      '/v2/merchant/stores/{storeId}/activate': {
+        post: {
+          operationId: 'activateMerchantStore',
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: 'storeId', in: 'path', required: true, schema: { type: 'string', minLength: 1 } }],
+          requestBody: body({ $ref: '#/components/schemas/MerchantStoreVersionRequest' }),
+          responses: {
+            200: response('Activated pickup store', { $ref: '#/components/schemas/MerchantManagedStore' }),
+            default: errorResponse,
+          },
+        },
+      },
+      '/v2/merchant/stores/{storeId}/close': {
+        post: {
+          operationId: 'closeMerchantStore',
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: 'storeId', in: 'path', required: true, schema: { type: 'string', minLength: 1 } }],
+          requestBody: body({ $ref: '#/components/schemas/MerchantStoreVersionRequest' }),
+          responses: {
+            200: response('Closed pickup store', { $ref: '#/components/schemas/MerchantManagedStore' }),
             default: errorResponse,
           },
         },
@@ -4002,7 +4058,7 @@ function fulfillmentOpenApiSchemas() {
       additionalProperties: false,
       required: [
         'storeId', 'merchantId', 'name', 'regionCode', 'longitude', 'latitude',
-        'address', 'phone', 'status', 'version',
+        'address', 'phone', 'businessHours', 'imageAssetIds', 'status', 'version',
       ],
       properties: {
         storeId: { type: 'string', minLength: 1 },
@@ -4013,20 +4069,85 @@ function fulfillmentOpenApiSchemas() {
         latitude: { type: 'number', minimum: -90, maximum: 90 },
         address: { type: 'string', minLength: 1 },
         phone: { type: 'string', pattern: '^[+]?[0-9-]{7,20}$' },
-        status: { enum: ['ACTIVE', 'SUSPENDED', 'CLOSED'] },
+        businessHours: { type: 'string', maxLength: 240 },
+        imageAssetIds: {
+          type: 'array',
+          maxItems: 5,
+          uniqueItems: true,
+          items: { $ref: '#/components/schemas/Bytes32' },
+        },
+        status: { enum: [...storeStatuses] },
         version: { type: 'integer', minimum: 1 },
       },
+    },
+    MerchantStoreCapability: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['action', 'enabled'],
+      properties: {
+        action: { enum: ['UPDATE_PROFILE', 'ACTIVATE', 'CLOSE'] },
+        enabled: { type: 'boolean' },
+        reasonCode: {
+          enum: ['STORE_PROFILE_INCOMPLETE', 'STORE_SUSPENDED', 'STORE_CLOSED', 'STORE_STATE_MISMATCH'],
+        },
+      },
+    },
+    MerchantManagedStore: {
+      allOf: [
+        { $ref: '#/components/schemas/MerchantStore' },
+        {
+          type: 'object',
+          required: ['artifactVersion', 'allowedActions'],
+          properties: {
+            artifactVersion: { const: artifactVersion },
+            allowedActions: {
+              type: 'array',
+              minItems: 3,
+              maxItems: 3,
+              items: { $ref: '#/components/schemas/MerchantStoreCapability' },
+            },
+          },
+        },
+      ],
     },
     CreateMerchantStoreRequest: {
       type: 'object',
       additionalProperties: false,
-      required: ['idempotencyKey', 'name', 'phone', 'longitude', 'latitude'],
+      required: ['idempotencyKey', 'name', 'phone', 'businessHours', 'longitude', 'latitude'],
       properties: {
         idempotencyKey,
         name: { type: 'string', minLength: 1, maxLength: 100 },
         phone: { type: 'string', pattern: '^[+]?[0-9-]{7,20}$' },
+        businessHours: { type: 'string', minLength: 1, maxLength: 240 },
         longitude: { type: 'number', minimum: -180, maximum: 180 },
         latitude: { type: 'number', minimum: -90, maximum: 90 },
+      },
+    },
+    UpdateMerchantStoreRequest: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['name', 'phone', 'businessHours', 'imageAssetIds', 'expectedVersion', 'idempotencyKey'],
+      properties: {
+        name: { type: 'string', minLength: 1, maxLength: 100 },
+        phone: { type: 'string', pattern: '^[+]?[0-9-]{7,20}$' },
+        businessHours: { type: 'string', minLength: 1, maxLength: 240 },
+        imageAssetIds: {
+          type: 'array',
+          maxItems: 5,
+          uniqueItems: true,
+          items: { $ref: '#/components/schemas/Bytes32' },
+        },
+        expectedVersion: { type: 'integer', minimum: 1 },
+        idempotencyKey,
+      },
+    },
+    MerchantStoreVersionRequest: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['expectedVersion', 'idempotencyKey'],
+      properties: {
+        expectedVersion: { type: 'integer', minimum: 1 },
+        idempotencyKey,
       },
     },
     CreateDeliveryTargetRequest: {
@@ -6910,16 +7031,47 @@ export interface MerchantStore {
   latitude: number;
   address: string;
   phone: string;
+  businessHours: string;
+  imageAssetIds: readonly Bytes32[];
   status: StoreStatus;
   version: number;
+}
+
+export type MerchantStoreAction = 'UPDATE_PROFILE' | 'ACTIVATE' | 'CLOSE';
+export type MerchantStoreActionReason = 'STORE_PROFILE_INCOMPLETE' | 'STORE_SUSPENDED' | 'STORE_CLOSED' | 'STORE_STATE_MISMATCH';
+
+export interface MerchantStoreCapability {
+  action: MerchantStoreAction;
+  enabled: boolean;
+  reasonCode?: MerchantStoreActionReason;
+}
+
+export interface MerchantManagedStore extends MerchantStore {
+  artifactVersion: typeof artifactVersion;
+  allowedActions: readonly MerchantStoreCapability[];
 }
 
 export interface CreateMerchantStoreRequest {
   idempotencyKey: string;
   name: string;
   phone: string;
+  businessHours: string;
   longitude: number;
   latitude: number;
+}
+
+export interface UpdateMerchantStoreRequest {
+  name: string;
+  phone: string;
+  businessHours: string;
+  imageAssetIds: readonly Bytes32[];
+  expectedVersion: number;
+  idempotencyKey: string;
+}
+
+export interface MerchantStoreVersionRequest {
+  expectedVersion: number;
+  idempotencyKey: string;
 }
 
 export interface CreateDeliveryTargetRequest {

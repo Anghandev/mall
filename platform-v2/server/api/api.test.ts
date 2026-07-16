@@ -1157,6 +1157,10 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       }),
       createStore: async (actor) => ({ storeId: 'store-1', merchantId: actor.merchantId }),
       listStores: async () => [{ storeId: 'store-1', regionCode: '110101' }],
+      listMerchantStores: async (actor) => [{ storeId: 'store-1', merchantId: actor.merchantId }],
+      updateStore: async (actor, storeId, input) => ({ storeId, merchantId: actor.merchantId, ...input }),
+      activateStore: async (actor, storeId, input) => ({ storeId, merchantId: actor.merchantId, ...input, status: 'ACTIVE' }),
+      closeStore: async (actor, storeId, input) => ({ storeId, merchantId: actor.merchantId, ...input, status: 'CLOSED' }),
       getOrderTarget: async (actor, orderId) => ({ orderId, buyerWallet: actor.walletAddress }),
     },
     logisticsPrintingService: {
@@ -2332,18 +2336,56 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       body: JSON.stringify({ idempotencyKey: 'pickup-target-1', storeId: 'store-1' }),
     });
     assert.equal(pickupTarget.status, 201);
-    const createStore = await fetch(`${base}/v2/stores`, {
+    assert.equal((await fetch(`${base}/v2/stores`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
       body: JSON.stringify({
         idempotencyKey: 'create-store-1',
         name: 'Store',
         phone: '+8613800000000',
+        businessHours: '09:00-18:00',
+        longitude: 116.397,
+        latitude: 39.908,
+      }),
+    })).status, 404);
+    assert.equal((await fetch(`${base}/v2/merchant/stores`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    const createStore = await fetch(`${base}/v2/merchant/stores`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+      body: JSON.stringify({
+        idempotencyKey: 'create-store-1',
+        name: 'Store',
+        phone: '+8613800000000',
+        businessHours: '09:00-18:00',
         longitude: 116.397,
         latitude: 39.908,
       }),
     });
     assert.equal(createStore.status, 201);
+    assert.equal((await fetch(`${base}/v2/merchant/stores/store-1`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+      body: JSON.stringify({
+        name: 'Updated Store',
+        phone: '+8613900000000',
+        businessHours: '10:00-20:00',
+        imageAssetIds: [HASH],
+        expectedVersion: 1,
+        idempotencyKey: 'update-store-1',
+      }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/merchant/stores/store-1/activate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+      body: JSON.stringify({ expectedVersion: 2, idempotencyKey: 'activate-store-1' }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/merchant/stores/store-1/close`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+      body: JSON.stringify({ expectedVersion: 3, idempotencyKey: 'close-store-1' }),
+    })).status, 200);
     const printerChallenge = await fetch(`${base}/v2/merchant/stores/store-1/printer-binding/challenge`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },

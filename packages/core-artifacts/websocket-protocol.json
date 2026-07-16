@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-admin-global-ops.1",
+  "artifactVersion": "2.0.0-merchant-stores.1",
   "protocolVersion": 1,
   "transport": "wss",
   "publicationStatus": "AVAILABLE",
@@ -31,7 +31,7 @@
     ],
     "properties": {
       "artifactVersion": {
-        "const": "2.0.0-admin-global-ops.1"
+        "const": "2.0.0-merchant-stores.1"
       },
       "protocolVersion": {
         "const": 1

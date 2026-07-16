@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Abu 24K V2 Core API",
-    "version": "2.0.0-admin-global-ops.1"
+    "version": "2.0.0-merchant-stores.1"
   },
-  "x-artifactVersion": "2.0.0-admin-global-ops.1",
+  "x-artifactVersion": "2.0.0-merchant-stores.1",
   "servers": [],
   "paths": {
     "/v2/buyer/profile": {
@@ -7905,6 +7905,64 @@
             }
           }
         }
+      }
+    },
+    "/v2/merchant/stores": {
+      "get": {
+        "operationId": "listManagedMerchantStores",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current merchant store workspace",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "stores"
+                  ],
+                  "properties": {
+                    "stores": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MerchantManagedStore"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
       },
       "post": {
         "operationId": "createMerchantStore",
@@ -7925,7 +7983,7 @@
         },
         "responses": {
           "201": {
-            "description": "AMap-bound merchant store",
+            "description": "AMap-bound merchant store draft",
             "headers": {
               "x-correlation-id": {
                 "schema": {
@@ -7936,7 +7994,208 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MerchantStore"
+                  "$ref": "#/components/schemas/MerchantManagedStore"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/merchant/stores/{storeId}": {
+      "put": {
+        "operationId": "updateMerchantStore",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "storeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMerchantStoreRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Versioned merchant store profile",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantManagedStore"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/merchant/stores/{storeId}/activate": {
+      "post": {
+        "operationId": "activateMerchantStore",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "storeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MerchantStoreVersionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Activated pickup store",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantManagedStore"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/merchant/stores/{storeId}/close": {
+      "post": {
+        "operationId": "closeMerchantStore",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "storeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MerchantStoreVersionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Closed pickup store",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantManagedStore"
                 }
               }
             }
@@ -10166,7 +10425,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "status": {
             "const": "CORE_API_READY"
@@ -10306,6 +10565,8 @@
           "latitude",
           "address",
           "phone",
+          "businessHours",
+          "imageAssetIds",
           "status",
           "version"
         ],
@@ -10344,8 +10605,21 @@
             "type": "string",
             "pattern": "^[+]?[0-9-]{7,20}$"
           },
+          "businessHours": {
+            "type": "string",
+            "maxLength": 240
+          },
+          "imageAssetIds": {
+            "type": "array",
+            "maxItems": 5,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          },
           "status": {
             "enum": [
+              "DRAFT",
               "ACTIVE",
               "SUSPENDED",
               "CLOSED"
@@ -10357,6 +10631,61 @@
           }
         }
       },
+      "MerchantStoreCapability": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "enabled"
+        ],
+        "properties": {
+          "action": {
+            "enum": [
+              "UPDATE_PROFILE",
+              "ACTIVATE",
+              "CLOSE"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "reasonCode": {
+            "enum": [
+              "STORE_PROFILE_INCOMPLETE",
+              "STORE_SUSPENDED",
+              "STORE_CLOSED",
+              "STORE_STATE_MISMATCH"
+            ]
+          }
+        }
+      },
+      "MerchantManagedStore": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/MerchantStore"
+          },
+          {
+            "type": "object",
+            "required": [
+              "artifactVersion",
+              "allowedActions"
+            ],
+            "properties": {
+              "artifactVersion": {
+                "const": "2.0.0-merchant-stores.1"
+              },
+              "allowedActions": {
+                "type": "array",
+                "minItems": 3,
+                "maxItems": 3,
+                "items": {
+                  "$ref": "#/components/schemas/MerchantStoreCapability"
+                }
+              }
+            }
+          }
+        ]
+      },
       "CreateMerchantStoreRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -10364,6 +10693,7 @@
           "idempotencyKey",
           "name",
           "phone",
+          "businessHours",
           "longitude",
           "latitude"
         ],
@@ -10380,6 +10710,11 @@
             "type": "string",
             "pattern": "^[+]?[0-9-]{7,20}$"
           },
+          "businessHours": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
           "longitude": {
             "type": "number",
             "minimum": -180,
@@ -10389,6 +10724,66 @@
             "type": "number",
             "minimum": -90,
             "maximum": 90
+          }
+        }
+      },
+      "UpdateMerchantStoreRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "phone",
+          "businessHours",
+          "imageAssetIds",
+          "expectedVersion",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "phone": {
+            "type": "string",
+            "pattern": "^[+]?[0-9-]{7,20}$"
+          },
+          "businessHours": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "imageAssetIds": {
+            "type": "array",
+            "maxItems": 5,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          }
+        }
+      },
+      "MerchantStoreVersionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
           }
         }
       },
@@ -11313,7 +11708,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "relation": {
             "const": "AND"
@@ -11412,7 +11807,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "exportId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -11541,7 +11936,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "operationId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -13626,7 +14021,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -13725,7 +14120,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -14665,7 +15060,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "productId": {
             "type": "string",
@@ -14838,7 +15233,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "storeId": {
             "type": "string",
@@ -14964,7 +15359,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "productId": {
             "type": "string",
@@ -15066,7 +15461,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "previewId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15225,7 +15620,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "adjustmentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15350,7 +15745,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "uploadIntentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15448,7 +15843,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15534,7 +15929,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15695,7 +16090,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "evidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15954,7 +16349,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -16229,7 +16624,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifact_version": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "wallet_address": {
             "$ref": "#/components/schemas/Address"
@@ -16555,7 +16950,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -17699,7 +18094,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -17922,7 +18317,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -18788,7 +19183,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "snapshotId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -18871,7 +19266,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -20202,7 +20597,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -20449,7 +20844,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -20804,7 +21199,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "sessionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -21033,7 +21428,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "protocolVersion": {
             "const": 1
@@ -21107,7 +21502,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -21445,7 +21840,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "addresses": {
             "type": "array",
@@ -21626,7 +22021,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -21793,7 +22188,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "orderId": {
             "type": "string",
@@ -21828,7 +22223,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "merchantId": {
             "type": "string",
@@ -22522,7 +22917,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "observation": {
             "$ref": "#/components/schemas/RiskObservation"
@@ -22548,7 +22943,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "generatedAt": {
             "type": "string",
@@ -22819,7 +23214,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "challengeId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -22886,7 +23281,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "bindingId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -22995,7 +23390,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "requestId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -23105,7 +23500,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "batchId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -23142,7 +23537,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "printJobId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -23311,7 +23706,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "configVersionId": {
             "anyOf": [
@@ -23546,7 +23941,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "providers": {
             "type": "array",
@@ -23727,7 +24122,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "warehouseId": {
             "type": "string",
@@ -23818,7 +24213,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "warehouses": {
             "type": "array",
@@ -23883,7 +24278,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "waybills": {
             "type": "array",
@@ -23902,7 +24297,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "printJobs": {
             "type": "array",
@@ -24244,7 +24639,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "merchants": {
             "type": "array",
@@ -24439,7 +24834,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -24878,7 +25273,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-admin-global-ops.1"
+            "const": "2.0.0-merchant-stores.1"
           },
           "merchant": {
             "$ref": "#/components/schemas/MerchantLifecycleSummary"

@@ -64,6 +64,8 @@ import type {
   DeliveryTargetInput,
   PickupTargetInput,
   StoreInput,
+  StoreProfileInput,
+  StoreVersionInput,
 } from '../data/fulfillment-target-service.ts';
 import type {
   GovernedSettlementApprovalInput,
@@ -268,6 +270,10 @@ export interface FulfillmentTargetApiService {
   createPickupTarget(actor: FulfillmentActor, input: PickupTargetInput): Promise<unknown>;
   createStore(actor: FulfillmentActor, input: StoreInput): Promise<unknown>;
   listStores(regionCode?: string): Promise<unknown>;
+  listMerchantStores(actor: FulfillmentActor): Promise<unknown>;
+  updateStore(actor: FulfillmentActor, storeId: string, input: StoreProfileInput): Promise<unknown>;
+  activateStore(actor: FulfillmentActor, storeId: string, input: StoreVersionInput): Promise<unknown>;
+  closeStore(actor: FulfillmentActor, storeId: string, input: StoreVersionInput): Promise<unknown>;
   getOrderTarget(actor: FulfillmentActor, orderId: string): Promise<unknown>;
 }
 
@@ -1242,6 +1248,79 @@ async function route(
     );
     return;
   }
+  if (request.method === 'GET' && url.pathname === '/v2/merchant/stores') {
+    assertOnlySearchParams(url, []);
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
+    sendJson(
+      response,
+      200,
+      { stores: await dependencies.fulfillmentTargetService.listMerchantStores(fulfillmentActor(claims)) },
+      correlationId,
+    );
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/merchant/stores') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['idempotencyKey', 'name', 'phone', 'businessHours', 'longitude', 'latitude']);
+    sendJson(
+      response,
+      201,
+      await dependencies.fulfillmentTargetService.createStore(fulfillmentActor(claims), {
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+        name: requiredString(body, 'name'),
+        phone: requiredString(body, 'phone'),
+        businessHours: requiredString(body, 'businessHours'),
+        longitude: requiredNumber(body, 'longitude'),
+        latitude: requiredNumber(body, 'latitude'),
+        correlationId,
+      }),
+      correlationId,
+    );
+    return;
+  }
+  const merchantStorePath = matchMerchantStorePath(url.pathname);
+  if (merchantStorePath && request.method === 'PUT' && !merchantStorePath.action) {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, [
+      'name', 'phone', 'businessHours', 'imageAssetIds', 'expectedVersion', 'idempotencyKey',
+    ]);
+    sendJson(
+      response,
+      200,
+      await dependencies.fulfillmentTargetService.updateStore(
+        fulfillmentActor(claims),
+        merchantStorePath.storeId,
+        {
+          name: requiredString(body, 'name'),
+          phone: requiredString(body, 'phone'),
+          businessHours: requiredString(body, 'businessHours'),
+          imageAssetIds: requiredStringArray(body, 'imageAssetIds'),
+          expectedVersion: requiredPositiveInteger(body, 'expectedVersion'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+          correlationId,
+        },
+      ),
+      correlationId,
+    );
+    return;
+  }
+  if (merchantStorePath?.action && request.method === 'POST') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['expectedVersion', 'idempotencyKey']);
+    const input = {
+      expectedVersion: requiredPositiveInteger(body, 'expectedVersion'),
+      idempotencyKey: requiredString(body, 'idempotencyKey'),
+      correlationId,
+    };
+    const store = merchantStorePath.action === 'activate'
+      ? await dependencies.fulfillmentTargetService.activateStore(fulfillmentActor(claims), merchantStorePath.storeId, input)
+      : await dependencies.fulfillmentTargetService.closeStore(fulfillmentActor(claims), merchantStorePath.storeId, input);
+    sendJson(response, 200, store, correlationId);
+    return;
+  }
   const printerBindingPath = matchMerchantPrinterBindingPath(url.pathname);
   if (printerBindingPath && request.method === 'GET' && !printerBindingPath.action) {
     const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
@@ -1469,24 +1548,6 @@ async function route(
       adminPrintJobRetryId,
       requiredString(body, 'idempotencyKey'),
     ), correlationId);
-    return;
-  }
-  if (request.method === 'POST' && url.pathname === '/v2/stores') {
-    const claims = authorize(request, dependencies.config, dependencies.clock());
-    const body = await readJson(request);
-    assertOnlyKeys(body, ['idempotencyKey', 'name', 'phone', 'longitude', 'latitude']);
-    sendJson(
-      response,
-      201,
-      await dependencies.fulfillmentTargetService.createStore(fulfillmentActor(claims), {
-        idempotencyKey: requiredString(body, 'idempotencyKey'),
-        name: requiredString(body, 'name'),
-        phone: requiredString(body, 'phone'),
-        longitude: requiredNumber(body, 'longitude'),
-        latitude: requiredNumber(body, 'latitude'),
-      }),
-      correlationId,
-    );
     return;
   }
   if (request.method === 'POST' && url.pathname === '/v2/fulfillment-targets/delivery') {
@@ -3686,6 +3747,19 @@ function matchMerchantPrinterBindingPath(pathname: string) {
     };
   } catch {
     throw new CoreError('InvalidRequest', 'Invalid printer binding URL path');
+  }
+}
+
+function matchMerchantStorePath(pathname: string) {
+  const match = /^\/v2\/merchant\/stores\/([^/]+)(?:\/(activate|close))?$/.exec(pathname);
+  if (!match) return undefined;
+  try {
+    return {
+      storeId: decodeURIComponent(match[1]!),
+      action: match[2] as 'activate' | 'close' | undefined,
+    };
+  } catch {
+    throw new CoreError('InvalidRequest', 'Invalid merchant store URL path');
   }
 }
 

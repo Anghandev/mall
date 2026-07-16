@@ -1,6 +1,8 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { AdministrativeRegionResolver } from '../api/providers.ts';
+import { CORE_ARTIFACT_VERSION } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
+import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 
@@ -24,8 +26,26 @@ export interface StoreInput {
   idempotencyKey: string;
   name: string;
   phone: string;
+  businessHours: string;
   longitude: number;
   latitude: number;
+  correlationId: string;
+}
+
+export interface StoreProfileInput {
+  name: string;
+  phone: string;
+  businessHours: string;
+  imageAssetIds: string[];
+  expectedVersion: number;
+  idempotencyKey: string;
+  correlationId: string;
+}
+
+export interface StoreVersionInput {
+  expectedVersion: number;
+  idempotencyKey: string;
+  correlationId: string;
 }
 
 interface TargetRow {
@@ -56,8 +76,17 @@ interface StoreRow {
   latitude: string | number;
   address: string;
   phone: string;
-  status: 'ACTIVE' | 'SUSPENDED' | 'CLOSED';
+  business_hours: string;
+  image_asset_ids: unknown;
+  status: 'DRAFT' | 'ACTIVE' | 'SUSPENDED' | 'CLOSED';
   version: string | number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+interface StoreCommandRow {
+  request_hash: string;
+  result: ReturnType<typeof managedStoreProjection>;
 }
 
 export class FulfillmentTargetService {
@@ -216,31 +245,29 @@ export class FulfillmentTargetService {
   async createStore(actor: FulfillmentActor, input: StoreInput) {
     assertMerchantRole(actor);
     validateStoreInput(input);
-    const requestHash = hashJson(input);
+    const wallet = normalizedWallet(actor.walletAddress);
+    const requestHash = hashJson(storeCreatePayload(input));
     const merchantId = actor.merchantId!;
-    const existing = await this.#transactions.transaction((executor) => loadStoreByIdempotency(
-      executor,
-      merchantId,
-      input.idempotencyKey,
-      requestHash,
-    ));
-    if (existing) return storeProjection(existing);
+    const existing = await this.#transactions.transaction(async (executor) => {
+      await requireMerchantStoreScope(executor, actor);
+      return loadStoreCommand(executor, wallet, input.idempotencyKey, requestHash);
+    });
+    if (existing) return existing.result;
     const region = await this.#regions.reverseGeocode({ longitude: input.longitude, latitude: input.latitude });
     return this.#transactions.transaction(async (executor) => {
-      const raced = await loadStoreByIdempotency(executor, merchantId, input.idempotencyKey, requestHash);
-      if (raced) return storeProjection(raced);
-      const merchant = await executor.query<{ status: string }>(
-        'SELECT status FROM core.merchants WHERE merchant_id = $1 FOR UPDATE',
-        [merchantId],
-      );
-      if (merchant.rows[0]?.status !== 'APPROVED') throw new CoreError('Forbidden', 'Merchant is not approved', 403);
+      await lockStoreCommand(executor, wallet, input.idempotencyKey);
+      const raced = await loadStoreCommand(executor, wallet, input.idempotencyKey, requestHash);
+      if (raced) return raced.result;
+      await requireMerchantStoreScope(executor, actor, true);
       await ensureRegion(executor, region);
       const storeId = `store:${randomUUID()}`;
+      const now = this.#clock();
       await executor.query(
         `INSERT INTO core.merchant_stores (
            store_id, merchant_id, idempotency_key, request_hash, name, region_code,
-           longitude, latitude, address, phone, status, version
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'ACTIVE',1)`,
+           longitude, latitude, address, phone, business_hours, image_asset_ids,
+           status, version, created_at, updated_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'[]'::jsonb,'DRAFT',1,$12,$12)`,
         [
           storeId,
           merchantId,
@@ -252,20 +279,140 @@ export class FulfillmentTargetService {
           input.latitude,
           region.formattedAddress,
           input.phone,
+          input.businessHours.trim(),
+          now,
         ],
       );
-      return {
-        storeId,
-        merchantId,
-        name: input.name,
-        regionCode: region.regionCode,
-        longitude: input.longitude,
-        latitude: input.latitude,
-        address: region.formattedAddress,
-        phone: input.phone,
-        status: 'ACTIVE' as const,
-        version: 1,
-      };
+      const store = await requiredStore(executor, storeId, true);
+      const projection = managedStoreProjection(store);
+      const commandId = `store-command:${randomUUID()}`;
+      await insertStoreCommand(executor, {
+        commandId, storeId, merchantId, wallet, commandType: 'CREATE',
+        idempotencyKey: input.idempotencyKey, requestHash, result: projection, now,
+      });
+      await insertStoreVersion(executor, store, commandId, wallet, now);
+      await enqueueStoreAudit(executor, {
+        eventType: 'MerchantStoreCreated', store, wallet, correlationId: input.correlationId,
+        requestHash, commandId, now,
+      });
+      return projection;
+    });
+  }
+
+  listMerchantStores(actor: FulfillmentActor) {
+    assertMerchantRole(actor);
+    return this.#transactions.transaction(async (executor) => {
+      await requireMerchantStoreScope(executor, actor);
+      const result = await executor.query<StoreRow>(
+        `SELECT * FROM core.merchant_stores
+         WHERE merchant_id = $1 ORDER BY created_at, store_id`,
+        [actor.merchantId],
+      );
+      return result.rows.map(managedStoreProjection);
+    });
+  }
+
+  updateStore(actor: FulfillmentActor, storeId: string, input: StoreProfileInput) {
+    assertMerchantRole(actor);
+    validateStoreProfileInput(input);
+    const wallet = normalizedWallet(actor.walletAddress);
+    const requestHash = hashJson({ storeId, ...storeProfilePayload(input) });
+    return this.#transactions.transaction(async (executor) => {
+      await lockStoreCommand(executor, wallet, input.idempotencyKey);
+      const existing = await loadStoreCommand(executor, wallet, input.idempotencyKey, requestHash);
+      if (existing) return existing.result;
+      await requireMerchantStoreScope(executor, actor, true);
+      const store = await requiredMerchantStore(executor, storeId, actor.merchantId!, true);
+      assertExpectedStoreVersion(store, input.expectedVersion);
+      if (store.status === 'CLOSED') throw new CoreError('Forbidden', 'Closed store profile is immutable', 409);
+      if (store.status === 'SUSPENDED') throw new CoreError('Forbidden', 'Suspended store profile cannot be changed by merchant', 409);
+      await verifyStoreImages(executor, store, wallet, input.imageAssetIds);
+      const now = this.#clock();
+      const nextVersion = Number(store.version) + 1;
+      await executor.query(
+        `UPDATE core.merchant_stores
+         SET name = $2, phone = $3, business_hours = $4, image_asset_ids = $5,
+             version = $6, updated_at = $7
+         WHERE store_id = $1`,
+        [
+          storeId,
+          input.name.trim(),
+          input.phone,
+          input.businessHours.trim(),
+          JSON.stringify(input.imageAssetIds),
+          nextVersion,
+          now,
+        ],
+      );
+      const updated = await requiredStore(executor, storeId, true);
+      const projection = managedStoreProjection(updated);
+      const commandId = `store-command:${randomUUID()}`;
+      await insertStoreCommand(executor, {
+        commandId, storeId, merchantId: actor.merchantId!, wallet, commandType: 'UPDATE_PROFILE',
+        idempotencyKey: input.idempotencyKey, requestHash, result: projection, now,
+      });
+      await insertStoreVersion(executor, updated, commandId, wallet, now);
+      await enqueueStoreAudit(executor, {
+        eventType: 'MerchantStoreProfileUpdated', store: updated, wallet,
+        correlationId: input.correlationId, requestHash, commandId, now,
+      });
+      return projection;
+    });
+  }
+
+  activateStore(actor: FulfillmentActor, storeId: string, input: StoreVersionInput) {
+    return this.transitionStore(actor, storeId, 'ACTIVATE', input);
+  }
+
+  closeStore(actor: FulfillmentActor, storeId: string, input: StoreVersionInput) {
+    return this.transitionStore(actor, storeId, 'CLOSE', input);
+  }
+
+  private transitionStore(
+    actor: FulfillmentActor,
+    storeId: string,
+    commandType: 'ACTIVATE' | 'CLOSE',
+    input: StoreVersionInput,
+  ) {
+    assertMerchantRole(actor);
+    validateStoreVersionInput(input);
+    const wallet = normalizedWallet(actor.walletAddress);
+    const requestHash = hashJson({ storeId, commandType, expectedVersion: input.expectedVersion });
+    return this.#transactions.transaction(async (executor) => {
+      await lockStoreCommand(executor, wallet, input.idempotencyKey);
+      const existing = await loadStoreCommand(executor, wallet, input.idempotencyKey, requestHash);
+      if (existing) return existing.result;
+      await requireMerchantStoreScope(executor, actor, commandType === 'ACTIVATE');
+      const store = await requiredMerchantStore(executor, storeId, actor.merchantId!, true);
+      assertExpectedStoreVersion(store, input.expectedVersion);
+      if (commandType === 'ACTIVATE') {
+        if (store.status !== 'DRAFT') throw new CoreError('Forbidden', 'Only a draft store can be activated', 409);
+        if (!store.business_hours.trim() || storeImageIds(store.image_asset_ids).length === 0) {
+          throw new CoreError('InvalidRequest', 'Store requires business hours and at least one verified image before activation', 409);
+        }
+      } else if (store.status === 'CLOSED') {
+        throw new CoreError('IdempotencyConflict', 'Store is already closed', 409);
+      }
+      const now = this.#clock();
+      const nextStatus = commandType === 'ACTIVATE' ? 'ACTIVE' : 'CLOSED';
+      await executor.query(
+        `UPDATE core.merchant_stores
+         SET status = $2, version = $3, updated_at = $4 WHERE store_id = $1`,
+        [storeId, nextStatus, Number(store.version) + 1, now],
+      );
+      const updated = await requiredStore(executor, storeId, true);
+      const projection = managedStoreProjection(updated);
+      const commandId = `store-command:${randomUUID()}`;
+      await insertStoreCommand(executor, {
+        commandId, storeId, merchantId: actor.merchantId!, wallet, commandType,
+        idempotencyKey: input.idempotencyKey, requestHash, result: projection, now,
+      });
+      await insertStoreVersion(executor, updated, commandId, wallet, now);
+      await enqueueStoreAudit(executor, {
+        eventType: commandType === 'ACTIVATE' ? 'MerchantStoreActivated' : 'MerchantStoreClosed',
+        store: updated, wallet, correlationId: input.correlationId, requestHash, commandId, now,
+      });
+      return projection;
     });
   }
 
@@ -360,23 +507,6 @@ async function loadTargetByIdempotency(
   return target;
 }
 
-async function loadStoreByIdempotency(
-  executor: SqlExecutor,
-  merchantId: string,
-  idempotencyKey: string,
-  requestHash: string,
-) {
-  const result = await executor.query<StoreRow>(
-    'SELECT * FROM core.merchant_stores WHERE merchant_id = $1 AND idempotency_key = $2',
-    [merchantId, idempotencyKey],
-  );
-  const store = result.rows[0];
-  if (store && store.request_hash.toLowerCase() !== requestHash.toLowerCase()) {
-    throw new CoreError('IdempotencyConflict', 'Store idempotency key was reused with different input', 409);
-  }
-  return store;
-}
-
 async function loadStore(executor: SqlExecutor, storeId: string) {
   const result = await executor.query<StoreRow>('SELECT * FROM core.merchant_stores WHERE store_id = $1', [storeId]);
   if (!result.rows[0]) throw new CoreError('InvalidRequest', 'Pickup store not found', 404);
@@ -437,9 +567,256 @@ function storeProjection(store: StoreRow) {
     latitude: Number(store.latitude),
     address: store.address,
     phone: store.phone,
+    businessHours: store.business_hours,
+    imageAssetIds: storeImageIds(store.image_asset_ids),
     status: store.status,
     version: Number(store.version),
   };
+}
+
+function managedStoreProjection(store: StoreRow) {
+  const images = storeImageIds(store.image_asset_ids);
+  return {
+    artifactVersion: CORE_ARTIFACT_VERSION,
+    ...storeProjection(store),
+    allowedActions: [
+      storeCapability('UPDATE_PROFILE', !['SUSPENDED', 'CLOSED'].includes(store.status), store.status),
+      storeCapability('ACTIVATE', store.status === 'DRAFT' && store.business_hours.trim().length > 0 && images.length > 0, store.status, images.length),
+      storeCapability('CLOSE', store.status !== 'CLOSED', store.status),
+    ],
+  };
+}
+
+function storeCapability(
+  action: 'UPDATE_PROFILE' | 'ACTIVATE' | 'CLOSE',
+  enabled: boolean,
+  status: StoreRow['status'],
+  imageCount = 0,
+) {
+  if (enabled) return { action, enabled: true as const };
+  const reasonCode = action === 'ACTIVATE' && status === 'DRAFT' && imageCount === 0
+    ? 'STORE_PROFILE_INCOMPLETE'
+    : status === 'SUSPENDED'
+      ? 'STORE_SUSPENDED'
+      : status === 'CLOSED'
+        ? 'STORE_CLOSED'
+        : 'STORE_STATE_MISMATCH';
+  return { action, enabled: false as const, reasonCode };
+}
+
+function storeImageIds(value: unknown) {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+    throw new CoreError('UnknownState', 'Store image projection is invalid', 409);
+  }
+  return value as string[];
+}
+
+function storeCreatePayload(input: StoreInput) {
+  return {
+    name: input.name.trim(),
+    phone: input.phone,
+    businessHours: input.businessHours.trim(),
+    longitude: input.longitude,
+    latitude: input.latitude,
+  };
+}
+
+function storeProfilePayload(input: StoreProfileInput) {
+  return {
+    name: input.name.trim(),
+    phone: input.phone,
+    businessHours: input.businessHours.trim(),
+    imageAssetIds: input.imageAssetIds,
+    expectedVersion: input.expectedVersion,
+  };
+}
+
+async function requireMerchantStoreScope(executor: SqlExecutor, actor: FulfillmentActor, approved = false) {
+  const wallet = normalizedWallet(actor.walletAddress);
+  const result = await executor.query<{ merchant_id: string; status: string }>(
+    `SELECT merchant.merchant_id, merchant.status
+     FROM core.wallet_role_bindings binding
+     JOIN core.merchants merchant ON merchant.merchant_id = binding.merchant_id
+     WHERE lower(binding.wallet_address) = $1 AND binding.role = 'MERCHANT'
+       AND binding.status = 'ACTIVE' AND binding.merchant_id = $2`,
+    [wallet, actor.merchantId],
+  );
+  const row = result.rows[0];
+  if (!row || row.merchant_id !== actor.merchantId) {
+    throw new CoreError('Forbidden', 'Merchant store scope is unavailable', 403);
+  }
+  if (approved && row.status !== 'APPROVED') {
+    throw new CoreError('Forbidden', 'Merchant must be approved to activate pickup stores', 403);
+  }
+}
+
+async function requiredStore(executor: SqlExecutor, storeId: string, write = false) {
+  const result = await executor.query<StoreRow>(
+    `SELECT * FROM core.merchant_stores WHERE store_id = $1${write ? ' FOR UPDATE' : ''}`,
+    [storeId],
+  );
+  if (!result.rows[0]) throw new CoreError('UnknownState', 'Merchant store was not found', 404);
+  return result.rows[0];
+}
+
+async function requiredMerchantStore(executor: SqlExecutor, storeId: string, merchantId: string, write = false) {
+  const store = await requiredStore(executor, storeId, write);
+  if (store.merchant_id !== merchantId) throw new CoreError('Forbidden', 'Store is outside the merchant scope', 403);
+  return store;
+}
+
+function assertExpectedStoreVersion(store: StoreRow, expectedVersion: number) {
+  if (Number(store.version) !== expectedVersion) {
+    throw new CoreError('IdempotencyConflict', 'Store version changed; reload before retrying', 409);
+  }
+}
+
+async function verifyStoreImages(executor: SqlExecutor, store: StoreRow, wallet: string, assetIds: string[]) {
+  if (assetIds.length > 5 || new Set(assetIds.map((value) => value.toLowerCase())).size !== assetIds.length) {
+    throw new CoreError('InvalidRequest', 'Store image assets must contain at most five unique items');
+  }
+  if (assetIds.some((assetId) => !/^0x[0-9a-fA-F]{64}$/.test(assetId))) {
+    throw new CoreError('InvalidRequest', 'Store image asset ID is invalid');
+  }
+  if (store.status === 'ACTIVE' && assetIds.length === 0) {
+    throw new CoreError('InvalidRequest', 'An active store must retain at least one image');
+  }
+  if (assetIds.length === 0) return;
+  const result = await executor.query<{ asset_id: string }>(
+    `SELECT asset_id FROM core.media_assets
+     WHERE asset_id = ANY($1::text[]) AND owner_wallet = $2
+       AND purpose = 'STORE_IMAGE' AND resource_type = 'STORE' AND resource_id = $3`,
+    [assetIds, wallet, store.store_id],
+  );
+  if (result.rows.length !== assetIds.length) {
+    throw new CoreError('InvalidRequest', 'Store images are not verified for this store and wallet', 409);
+  }
+}
+
+async function lockStoreCommand(executor: SqlExecutor, wallet: string, idempotencyKey: string) {
+  await executor.query(
+    'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+    [`merchant-store:${wallet}:${idempotencyKey}`],
+  );
+}
+
+async function loadStoreCommand(
+  executor: SqlExecutor,
+  wallet: string,
+  idempotencyKey: string,
+  requestHash: string,
+) {
+  const result = await executor.query<StoreCommandRow>(
+    `SELECT request_hash, result FROM core.merchant_store_commands
+     WHERE actor_wallet = $1 AND idempotency_key = $2`,
+    [wallet, idempotencyKey],
+  );
+  const command = result.rows[0];
+  if (command && command.request_hash !== requestHash) {
+    throw new CoreError('IdempotencyConflict', 'Store command key was reused with different input', 409);
+  }
+  return command;
+}
+
+async function insertStoreCommand(executor: SqlExecutor, input: {
+  commandId: string;
+  storeId: string;
+  merchantId: string;
+  wallet: string;
+  commandType: 'CREATE' | 'UPDATE_PROFILE' | 'ACTIVATE' | 'CLOSE';
+  idempotencyKey: string;
+  requestHash: string;
+  result: ReturnType<typeof managedStoreProjection>;
+  now: Date;
+}) {
+  await executor.query(
+    `INSERT INTO core.merchant_store_commands (
+       command_id, store_id, merchant_id, actor_wallet, command_type,
+       idempotency_key, request_hash, result, created_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [
+      input.commandId,
+      input.storeId,
+      input.merchantId,
+      input.wallet,
+      input.commandType,
+      input.idempotencyKey,
+      input.requestHash,
+      JSON.stringify(input.result),
+      input.now,
+    ],
+  );
+}
+
+async function insertStoreVersion(
+  executor: SqlExecutor,
+  store: StoreRow,
+  commandId: string,
+  wallet: string,
+  now: Date,
+) {
+  await executor.query(
+    `INSERT INTO core.merchant_store_versions (
+       store_id, version, command_id, name, business_hours, image_asset_ids,
+       phone, status, actor_wallet, created_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [
+      store.store_id,
+      Number(store.version),
+      commandId,
+      store.name,
+      store.business_hours,
+      JSON.stringify(storeImageIds(store.image_asset_ids)),
+      store.phone,
+      store.status,
+      wallet,
+      now,
+    ],
+  );
+}
+
+async function enqueueStoreAudit(executor: SqlExecutor, input: {
+  eventType: string;
+  store: StoreRow;
+  wallet: string;
+  correlationId: string;
+  requestHash: string;
+  commandId: string;
+  now: Date;
+}) {
+  const evidenceHash = hashJson({ wallet: input.wallet, merchantId: input.store.merchant_id, checkedAt: input.now.toISOString() });
+  await enqueueAudit(executor, {
+    sourceEventId: auditSourceId('audit:merchant-store', {
+      eventType: input.eventType,
+      resourceId: input.store.store_id,
+      requestHash: input.requestHash,
+    }),
+    streamName: 'operational',
+    evidenceProfile: 'RBAC',
+    eventType: input.eventType,
+    resourceType: 'MERCHANT_STORE',
+    resourceId: input.store.store_id,
+    actorWallet: input.wallet,
+    actorRole: 'MERCHANT',
+    merchantId: input.store.merchant_id,
+    correlationId: input.correlationId,
+    requestHash: input.requestHash.slice(2),
+    payload: {
+      commandId: input.commandId,
+      version: Number(input.store.version),
+      status: input.store.status,
+      regionCode: input.store.region_code,
+      imageCount: storeImageIds(input.store.image_asset_ids).length,
+    },
+    authorizationEvidence: {
+      scheme: 'RBAC_ROLE_REVALIDATION',
+      subject: input.wallet,
+      roles: ['MERCHANT'],
+      evidenceHash,
+      checkedAt: input.now.toISOString(),
+    },
+    createdAt: input.now,
+  });
 }
 
 function encrypt(payload: Record<string, unknown>, key: Buffer) {
@@ -489,10 +866,37 @@ function validateDeliveryInput(input: DeliveryTargetInput) {
 
 function validateStoreInput(input: StoreInput) {
   validateIdempotencyKey(input.idempotencyKey);
-  if (input.name.trim().length < 1 || input.name.length > 100 || !/^[+]?[0-9-]{7,20}$/.test(input.phone)) {
+  if (
+    input.name.trim().length < 1
+    || input.name.length > 100
+    || !/^[+]?[0-9-]{7,20}$/.test(input.phone)
+    || input.businessHours.trim().length < 1
+    || input.businessHours.length > 240
+  ) {
     throw new CoreError('InvalidRequest', 'Invalid store input');
   }
   validateCoordinates(input.longitude, input.latitude);
+}
+
+function validateStoreProfileInput(input: StoreProfileInput) {
+  validateIdempotencyKey(input.idempotencyKey);
+  if (
+    input.name.trim().length < 1
+    || input.name.length > 100
+    || !/^[+]?[0-9-]{7,20}$/.test(input.phone)
+    || input.businessHours.trim().length < 1
+    || input.businessHours.length > 240
+    || !Array.isArray(input.imageAssetIds)
+    || !Number.isSafeInteger(input.expectedVersion)
+    || input.expectedVersion < 1
+  ) throw new CoreError('InvalidRequest', 'Invalid store profile input');
+}
+
+function validateStoreVersionInput(input: StoreVersionInput) {
+  validateIdempotencyKey(input.idempotencyKey);
+  if (!Number.isSafeInteger(input.expectedVersion) || input.expectedVersion < 1) {
+    throw new CoreError('InvalidRequest', 'Invalid expected store version');
+  }
 }
 
 function validateCoordinates(longitude: number, latitude: number) {

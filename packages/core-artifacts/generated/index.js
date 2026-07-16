@@ -1,4 +1,4 @@
-export const artifactVersion = "2.0.0-admin-global-ops.1";
+export const artifactVersion = "2.0.0-merchant-stores.1";
 export const chainIdentity = Object.freeze({"chainId":56,"usdtAddress":"0x55d398326f99059ff775485246999027b3197955","nplAddress":"0x4e8277ab31e4956b2cd48449793a57656dfc03d2"});
 export const adminResourceTypes = Object.freeze(["ORDER","PRODUCT","MERCHANT"]);
 export const adminExportFormats = Object.freeze(["CSV","EXCEL"]);
@@ -18,7 +18,7 @@ export const executableOrderActionNames = Object.freeze(["REQUEST_EXCHANGE","REQ
 export const allowedActionReasonCodes = Object.freeze(["ArtifactVersionMismatch","BreakerActive","ConfigurationRequired","DecisionBlocked","ExternalBlocked","FinalityPending","Forbidden","MerchantFrozen","PickupTakeoverDecisionBlocked","UnknownState"]);
 export const fulfillmentModes = Object.freeze(["DELIVERY","PICKUP"]);
 export const fulfillmentMethods = Object.freeze(["CUSTOMER_RECEIPT","PICKUP_VERIFICATION","FORCED_RECEIPT","ARBITRATION"]);
-export const storeStatuses = Object.freeze(["ACTIVE","SUSPENDED","CLOSED"]);
+export const storeStatuses = Object.freeze(["DRAFT","ACTIVE","SUSPENDED","CLOSED"]);
 export const fulfillmentRequestTypes = Object.freeze(["EXCHANGE","DELAY","ARBITRATION","FORCED_RECEIPT"]);
 export const fulfillmentRequestStates = Object.freeze(["OPEN","APPROVED","REJECTED","RESOLVED"]);
 export const logisticsProviders = Object.freeze(["KUAIDI100","CAINIAO"]);

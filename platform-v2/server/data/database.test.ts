@@ -126,6 +126,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '020_merchant_lifecycle.sql',
       '021_logistics_admin.sql',
       '022_admin_global_operations.sql',
+      '023_merchant_store_management.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -2710,6 +2711,172 @@ test('catalog management enforces product scope, signed preview, review locks an
   }
 });
 
+test('merchant store management versions verified profiles while AMap location remains immutable', async () => {
+  const db = await createBusinessDatabase();
+  const now = new Date('2026-07-16T01:00:00.000Z');
+  try {
+    await seedCatalog(db, 3);
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES ($1,'MERCHANT','merchant-1','ACTIVE',$2)`,
+      [MERCHANT, HASH],
+    );
+    const service = new FulfillmentTargetService({
+      transactions: transactionAdapter(db),
+      regions: {
+        reverseGeocode: async () => ({
+          regionCode: '210211',
+          province: 'Liaoning',
+          city: 'Dalian',
+          district: 'Ganjingzi',
+          formattedAddress: 'Dalian Ganjingzi Software Park 24',
+          sourceReferenceHash: HASH_2,
+        }),
+      },
+      encryptionKey: 'ab'.repeat(32),
+      clock: () => now,
+    });
+    const merchant = { walletAddress: MERCHANT, roles: ['MERCHANT'] as const, merchantId: 'merchant-1' };
+    const created = await service.createStore(merchant, {
+      idempotencyKey: 'merchant-store-create-full-1',
+      name: 'Abu Dalian Store',
+      phone: '+8641112345678',
+      businessHours: '09:00-18:00',
+      longitude: 121.53,
+      latitude: 38.88,
+      correlationId: 'merchant-store-create-full-1',
+    });
+    assert.equal(created.status, 'DRAFT');
+    assert.equal(created.regionCode, '210211');
+    assert.equal(created.allowedActions.find((item) => item.action === 'ACTIVATE')?.enabled, false);
+    assert.equal((await service.createStore(merchant, {
+      idempotencyKey: 'merchant-store-create-full-1',
+      name: 'Abu Dalian Store',
+      phone: '+8641112345678',
+      businessHours: '09:00-18:00',
+      longitude: 121.53,
+      latitude: 38.88,
+      correlationId: 'merchant-store-create-full-retry',
+    })).storeId, created.storeId);
+    assert.equal((await service.listStores()).length, 0);
+    await assert.rejects(
+      service.listMerchantStores({
+        walletAddress: '0x9999999999999999999999999999999999999999',
+        roles: ['MERCHANT'],
+        merchantId: 'merchant-1',
+      }),
+      /scope is unavailable/,
+    );
+
+    const uploadIntentId = `0x${'d'.repeat(64)}`;
+    const imageAssetId = `0x${'e'.repeat(64)}`;
+    await db.query(
+      `INSERT INTO core.media_upload_intents (
+         upload_intent_id, owner_wallet, purpose, resource_type, resource_id,
+         object_key, content_type, size_bytes, content_sha256, idempotency_key,
+         request_hash, state, expires_at, provider_reference_hash,
+         provider_evidence_hash, verified_at, created_at, updated_at
+       ) VALUES ($1,$2,'STORE_IMAGE','STORE',$3,$4,'image/webp',512,$5,$6,$5,
+         'VERIFIED',$7,$8,$9,$10,$10,$10)`,
+      [
+        uploadIntentId,
+        MERCHANT,
+        created.storeId,
+        `stores/${created.storeId}/main.webp`,
+        HASH,
+        'merchant-store-image-full-1',
+        new Date(now.getTime() + 3_600_000),
+        HASH_2,
+        `0x${'3'.repeat(64)}`,
+        now,
+      ],
+    );
+    await db.query(
+      `INSERT INTO core.media_assets (
+         asset_id, upload_intent_id, owner_wallet, purpose, resource_type,
+         resource_id, object_key, content_type, size_bytes, content_sha256,
+         provider_evidence_hash, object_version_hash, created_at
+       ) VALUES ($1,$2,$3,'STORE_IMAGE','STORE',$4,$5,'image/webp',512,$6,$7,$8,$9)`,
+      [
+        imageAssetId,
+        uploadIntentId,
+        MERCHANT,
+        created.storeId,
+        `stores/${created.storeId}/main.webp`,
+        HASH,
+        `0x${'3'.repeat(64)}`,
+        `0x${'4'.repeat(64)}`,
+        now,
+      ],
+    );
+    const updated = await service.updateStore(merchant, created.storeId, {
+      name: 'Abu Dalian Flagship',
+      phone: '+8641187654321',
+      businessHours: '10:00-20:00',
+      imageAssetIds: [imageAssetId],
+      expectedVersion: 1,
+      idempotencyKey: 'merchant-store-update-full-1',
+      correlationId: 'merchant-store-update-full-1',
+    });
+    assert.equal(updated.version, 2);
+    assert.deepEqual(updated.imageAssetIds, [imageAssetId]);
+    assert.equal(updated.allowedActions.find((item) => item.action === 'ACTIVATE')?.enabled, true);
+    await assert.rejects(
+      service.updateStore(merchant, created.storeId, {
+        name: 'Stale Update',
+        phone: '+8641187654321',
+        businessHours: '10:00-20:00',
+        imageAssetIds: [imageAssetId],
+        expectedVersion: 1,
+        idempotencyKey: 'merchant-store-update-stale-1',
+        correlationId: 'merchant-store-update-stale-1',
+      }),
+      /version changed/,
+    );
+    await assert.rejects(
+      db.query(
+        `UPDATE core.merchant_stores
+         SET region_code = '110101', version = version + 1 WHERE store_id = $1`,
+        [created.storeId],
+      ),
+      /ImmutableStoreLocation/,
+    );
+
+    const activated = await service.activateStore(merchant, created.storeId, {
+      expectedVersion: 2,
+      idempotencyKey: 'merchant-store-activate-full-1',
+      correlationId: 'merchant-store-activate-full-1',
+    });
+    assert.equal(activated.status, 'ACTIVE');
+    assert.equal(activated.version, 3);
+    assert.equal((await service.listStores('210211'))[0]?.storeId, created.storeId);
+    assert.equal((await service.activateStore(merchant, created.storeId, {
+      expectedVersion: 2,
+      idempotencyKey: 'merchant-store-activate-full-1',
+      correlationId: 'merchant-store-activate-full-retry',
+    })).version, 3);
+
+    const closed = await service.closeStore(merchant, created.storeId, {
+      expectedVersion: 3,
+      idempotencyKey: 'merchant-store-close-full-1',
+      correlationId: 'merchant-store-close-full-1',
+    });
+    assert.equal(closed.status, 'CLOSED');
+    assert.equal(closed.version, 4);
+    assert.equal((await service.listStores()).length, 0);
+    assert.equal((await db.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM core.merchant_store_versions WHERE store_id = $1',
+      [created.storeId],
+    )).rows[0]?.count, '4');
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.audit_outbox_events WHERE resource_type = 'MERCHANT_STORE'",
+    )).rows[0]?.count, '4');
+  } finally {
+    await db.close();
+  }
+});
+
 test('seckill quote locks both inventories and final classification releases the unused fallback leg', async () => {
   const db = await createBusinessDatabase();
   try {
@@ -3138,6 +3305,12 @@ test('fulfillment targets encrypt delivery PII and bind quotes to an AMap six-di
   const db = await createBusinessDatabase();
   try {
     await seedCatalog(db, 3);
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES ($1,'MERCHANT','merchant-1','ACTIVE',$2)`,
+      [MERCHANT, HASH],
+    );
     let regionCalls = 0;
     const regions = {
       reverseGeocode: async () => {
@@ -3164,17 +3337,25 @@ test('fulfillment targets encrypt delivery PII and bind quotes to an AMap six-di
       idempotencyKey: 'store-create-command-1',
       name: 'Huangpu Store',
       phone: '+862112345678',
+      businessHours: '09:00-18:00',
       longitude: 121.4737,
       latitude: 31.2304,
+      correlationId: 'store-create-1',
     });
     assert.equal((await service.createStore(merchant, {
       idempotencyKey: 'store-create-command-1',
       name: 'Huangpu Store',
       phone: '+862112345678',
+      businessHours: '09:00-18:00',
       longitude: 121.4737,
       latitude: 31.2304,
+      correlationId: 'store-create-retry-1',
     })).storeId, store.storeId);
     assert.equal(regionCalls, 1);
+    await db.query(
+      "UPDATE core.merchant_stores SET status = 'ACTIVE', version = version + 1 WHERE store_id = $1",
+      [store.storeId],
+    );
 
     const delivery = await service.createDeliveryTarget(buyer, {
       idempotencyKey: 'delivery-target-command-1',
@@ -3434,6 +3615,12 @@ test('printer binding, provider waybill and durable print jobs form one merchant
   try {
     await seedCatalog(db, 5);
     await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES ($1,'MERCHANT','merchant-1','ACTIVE',$2)`,
+      [merchantWallet.address.toLowerCase(), HASH],
+    );
+    await db.query(
       `INSERT INTO core.wallet_role_bindings (wallet_address, role, status, evidence_hash)
        VALUES ($1,'ADMIN','ACTIVE',$2)`,
       [logisticsAdminWallet.address.toLowerCase(), HASH],
@@ -3485,16 +3672,24 @@ test('printer binding, provider waybill and durable print jobs form one merchant
       idempotencyKey: 'logistics-store-create-1',
       name: 'Dalian Logistics Store',
       phone: '+8641112345678',
+      businessHours: '09:00-18:00',
       longitude: 121.53,
       latitude: 38.88,
+      correlationId: 'logistics-store-create-1',
     });
     const unboundStore = await targets.createStore(merchant, {
       idempotencyKey: 'logistics-store-create-2',
       name: 'Unbound Pickup Store',
       phone: '+8641187654321',
+      businessHours: '09:00-18:00',
       longitude: 121.54,
       latitude: 38.89,
+      correlationId: 'logistics-store-create-2',
     });
+    await db.query(
+      "UPDATE core.merchant_stores SET status = 'ACTIVE', version = version + 1 WHERE store_id = ANY($1::text[])",
+      [[store.storeId, unboundStore.storeId]],
+    );
     const delivery = await targets.createDeliveryTarget(buyer, {
       idempotencyKey: 'logistics-delivery-target-1',
       recipientName: 'Delivery Recipient',

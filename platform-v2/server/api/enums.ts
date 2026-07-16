@@ -1,4 +1,4 @@
-export const CORE_ARTIFACT_VERSION = '2.0.0-admin-global-ops.1';
+export const CORE_ARTIFACT_VERSION = '2.0.0-merchant-stores.1';
 export const BSC_CHAIN_ID = 56;
 export const USDT_ADDRESS = '0x55d398326f99059ff775485246999027b3197955';
 export const NPL_ADDRESS = '0x4e8277ab31e4956b2cd48449793a57656dfc03d2';
@@ -146,7 +146,7 @@ export const fulfillmentMethods = [
 ] as const;
 export type FulfillmentMethod = (typeof fulfillmentMethods)[number];
 
-export const storeStatuses = ['ACTIVE', 'SUSPENDED', 'CLOSED'] as const;
+export const storeStatuses = ['DRAFT', 'ACTIVE', 'SUSPENDED', 'CLOSED'] as const;
 export type StoreStatus = (typeof storeStatuses)[number];
 
 export const catalogProductLifecycleStates = [

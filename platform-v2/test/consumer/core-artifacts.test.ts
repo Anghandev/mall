@@ -23,13 +23,13 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('admin global operations .1 checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-admin-global-ops.1');
+test('merchant store management .1 checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-merchant-stores.1');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
   assert.equal(openapi['x-artifactVersion'], artifactVersion);
-  assert.equal(manifest.publicationStatus, 'COORDINATED_ADMIN_GLOBAL_OPERATIONS_CHECKPOINT');
+  assert.equal(manifest.publicationStatus, 'COORDINATED_MERCHANT_STORE_MANAGEMENT_CHECKPOINT');
   assert.equal(contractManifest.publicationStatus, 'coordinated-settlement-admin-checkpoint');
   assert.ok(manifest.decisionBlocked.includes('SECKILL_PRIZE_POOL_ACCOUNT'));
   assert.deepEqual(
@@ -54,7 +54,7 @@ test('admin global operations .1 checkpoint has one identity, resolvable exports
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 22);
+  assert.equal(schemaManifest.schemas.core.migrations.length, 23);
   assert.equal(schemaManifest.schemas.audit.migrations.length, 4);
   for (const migration of [
     ...schemaManifest.schemas.core.migrations,
@@ -115,6 +115,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'GET /v2/merchant/dashboard',
     'GET /v2/merchant/print-jobs',
     'GET /v2/merchant/profile',
+    'GET /v2/merchant/stores',
     'GET /v2/merchant/stores/{storeId}/printer-binding',
     'GET /v2/merchant/stores/{storeId}/product-slot',
     'GET /v2/notifications',
@@ -195,6 +196,9 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'POST /v2/merchant/products/{productId}/concession-previews',
     'POST /v2/merchant/products/{productId}/delist',
     'POST /v2/merchant/products/{productId}/review-submissions',
+    'POST /v2/merchant/stores',
+    'POST /v2/merchant/stores/{storeId}/activate',
+    'POST /v2/merchant/stores/{storeId}/close',
     'POST /v2/merchant/stores/{storeId}/printer-binding/challenge',
     'POST /v2/merchant/waybills/batches',
     'POST /v2/notification-endpoints',
@@ -221,7 +225,6 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'POST /v2/settlement-intents',
     'POST /v2/settlement-requests',
     'POST /v2/shipments/batches',
-    'POST /v2/stores',
     'PUT /v2/admin/catalog/categories/{categoryId}',
     'PUT /v2/admin/catalog/stores/{storeId}/product-slot',
     'PUT /v2/admin/catalog/tags/{tagId}',
@@ -231,6 +234,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'PUT /v2/buyer/addresses/{addressId}',
     'PUT /v2/buyer/profile',
     'PUT /v2/merchant/profile',
+    'PUT /v2/merchant/stores/{storeId}',
     'PUT /v2/merchant/stores/{storeId}/printer-binding',
     'PUT /v2/merchant/stores/{storeId}/product-slot',
   ]);
@@ -358,7 +362,10 @@ test('generated payment DTOs match the PaymentRouter tuple and current response 
 test('generated fulfillment DTOs expose exact amounts, immutable evidence and command results', () => {
   for (const name of [
     'MerchantStore',
+    'MerchantManagedStore',
     'CreateMerchantStoreRequest',
+    'UpdateMerchantStoreRequest',
+    'MerchantStoreVersionRequest',
     'DeliveryTarget',
     'PickupTarget',
     'DeliveryTargetPayload',
@@ -752,6 +759,7 @@ test('catalog, settlement/admin and seckill realtime capabilities are published 
     'seckillQuoteHttp',
     'seckillSessionHttp',
     'storesHttp',
+    'merchantStoreManagementHttp',
     'fulfillmentTargetHttp',
     'fulfillmentHttp',
     'logisticsWebhookHttp',
