@@ -880,6 +880,15 @@ test('merchant lifecycle encrypts qualification and governs exact review transit
       contentType: 'application/pdf', sizeBytes: 1000, contentSha256: `0x${'6'.repeat(64)}`,
       idempotencyKey: 'merchant-license-upload-1',
     });
+    await db.query(
+      "UPDATE core.wallet_role_bindings SET status = 'SUSPENDED' WHERE wallet_address = $1 AND role = 'OPERATOR'",
+      [operator.address.toLowerCase()],
+    );
+    await assert.rejects(evidence.completeUpload(operatorActor, upload.uploadIntentId), /outside the wallet scope/);
+    await db.query(
+      "UPDATE core.wallet_role_bindings SET status = 'ACTIVE' WHERE wallet_address = $1 AND role = 'OPERATOR'",
+      [operator.address.toLowerCase()],
+    );
     const license = await evidence.completeUpload(operatorActor, upload.uploadIntentId);
     assert.equal((await evidence.createReadAccess(operatorActor, license.assetId)).accessScope, 'AUTHENTICATED');
     await assert.rejects(evidence.createReadAccess(auditorActor, license.assetId), /restricted to active review roles/);

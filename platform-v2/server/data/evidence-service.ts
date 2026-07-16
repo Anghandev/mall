@@ -421,6 +421,9 @@ export class EvidenceService {
       );
       const value = current.rows[0];
       if (!value || value.owner_wallet !== wallet) throw new CoreError('Forbidden', 'Media upload ownership changed', 403);
+      if (value.purpose === 'MERCHANT_LICENSE') {
+        await authorizeResource(executor, actor, value.purpose, value.resource_type, value.resource_id);
+      }
       if (value.state === 'VERIFIED') throw new CoreError('UnknownState', 'Media upload is already verified', 409);
       if (value.state === 'REJECTED') throw new CoreError('UnknownState', 'Media upload was rejected', 409);
       if (value.provider_reference_hash && value.provider_reference_hash !== target.providerReferenceHash) {
@@ -463,6 +466,9 @@ export class EvidenceService {
       const value = result.rows[0];
       if (!value) throw new CoreError('UnknownState', 'Media upload intent was not found', 404);
       if (value.owner_wallet !== wallet) throw new CoreError('Forbidden', 'Media upload belongs to another wallet', 403);
+      if (value.purpose === 'MERCHANT_LICENSE') {
+        await authorizeResource(executor, actor, value.purpose, value.resource_type, value.resource_id);
+      }
       if (value.state === 'REJECTED') throw new CoreError('UnknownState', 'Media upload was rejected', 409);
       if (value.state === 'PENDING') throw new CoreError('UnknownState', 'Media upload target was not issued', 409);
       return value;
@@ -483,6 +489,9 @@ export class EvidenceService {
       );
       const value = current.rows[0];
       if (!value || value.owner_wallet !== wallet) throw new CoreError('Forbidden', 'Media upload ownership changed', 403);
+      if (value.purpose === 'MERCHANT_LICENSE') {
+        await authorizeResource(executor, actor, value.purpose, value.resource_type, value.resource_id);
+      }
       if (value.state === 'VERIFIED') return loadMediaAsset(executor, uploadIntentId);
       if (value.state !== 'UPLOADED') throw new CoreError('UnknownState', 'Media upload can no longer be verified', 409);
       if (value.expires_at <= this.#clock()) throw new CoreError('UnknownState', 'Media upload intent expired', 409);
