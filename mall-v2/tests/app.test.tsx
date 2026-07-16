@@ -1106,7 +1106,7 @@ describe('Mall V2 payment consumer', () => {
       { ...notificationItem },
       notification('payment-message', 'PaymentFinalized', 'PAYMENT_FINALIZED', { orderId: 'order-payment', state: 'LOCKED' }),
       notification('shipment-message', 'LogisticsUpdated', 'SHIPMENT_UPDATED', {
-        orderId: 'order-shipment', carrier: 'KUAIDI100', trackingNumber: 'TRACK-24K', status: 'IN_TRANSIT',
+        orderId: 'order-shipment', provider: 'KUAIDI100', carrierCode: 'SF', trackingNumberHash: `0x${'5'.repeat(64)}`, status: 'IN_TRANSIT',
       }),
       notification('pickup-message', 'FulfillmentFinalized', 'FULFILLMENT_FINALIZED', {
         orderId: 'order-pickup', method: 'PICKUP_VERIFICATION', availableNplAmount: '20',
@@ -1132,7 +1132,7 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByRole('heading', { name: 'BNM 已锁定' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'BNM 已可用' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '活动通知' })).toBeTruthy();
-    expect(screen.getByText('物流单号')).toBeTruthy();
+    expect(screen.getByText('物流单号哈希')).toBeTruthy();
     expect(screen.getByText('自提核销')).toBeTruthy();
     expect(screen.getAllByText('Locked（锁定）')).toHaveLength(2);
     expect(screen.getAllByText('Available（可用）')).toHaveLength(1);

@@ -6447,6 +6447,32 @@ test('notification delivery failures audit exact states and lost leases fail clo
   }
 });
 
+test('notifications project real shipment and operator delivery evidence for the buyer wallet', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const { intent, now } = await completeDeliveryForBnm(db);
+    const service = new NotificationService({ transactions: transactionAdapter(db), clock: () => now });
+    const worker = new NotificationWorker({
+      transactions: transactionAdapter(db),
+      service,
+      workerId: 'real-logistics-notification-worker',
+      clock: () => now,
+    });
+    assert.ok(await worker.pollOnce() > 0);
+    const inbox = await service.listInbox({ walletAddress: intent.buyer, roles: ['BUYER'] });
+    const shipment = inbox.find((message) => message.sourceEventType === 'ShipmentRecorded');
+    assert.equal(shipment?.topic, 'SHIPMENT_UPDATED');
+    assert.equal(shipment?.templateData.carrierCode, 'SF');
+    assert.equal(shipment?.templateData.trackingNumberHash, `0x${'4'.repeat(64)}`);
+    const delivery = inbox.find((message) => message.sourceEventType === 'DeliveryRecorded');
+    assert.equal(delivery?.topic, 'SHIPMENT_UPDATED');
+    assert.equal(delivery?.templateData.state, 'DELIVERED');
+    assert.equal(delivery?.templateData.deliveredAt, now.toISOString());
+  } finally {
+    await db.close();
+  }
+});
+
 test('system config keeps secrets as references and publishes exact old/new versions through RBAC, secondary signature and Safe approval', async () => {
   const db = await createBusinessDatabase();
   try {

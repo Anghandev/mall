@@ -10,6 +10,7 @@ const SOURCE_EVENT_TYPES = [
   'PaymentFinalized',
   'PaymentReorged',
   'ShipmentRecorded',
+  'DeliveryRecorded',
   'LogisticsUpdated',
   'FulfillmentFinalized',
   'TakeoverOpened',
@@ -519,6 +520,7 @@ function topicForEvent(event: SourceEventRow) {
     PaymentFinalized: 'PAYMENT_FINALIZED',
     PaymentReorged: 'PAYMENT_REORGED',
     ShipmentRecorded: 'SHIPMENT_UPDATED',
+    DeliveryRecorded: 'SHIPMENT_UPDATED',
     LogisticsUpdated: 'SHIPMENT_UPDATED',
     FulfillmentFinalized: 'FULFILLMENT_FINALIZED',
     TakeoverOpened: 'TAKEOVER_OPENED',
@@ -539,7 +541,7 @@ async function eventRecipients(executor: SqlExecutor, event: SourceEventRow) {
       [event.aggregate_id],
     );
     if (!order.rows[0]) throw new CoreError('InvalidRequest', 'Notification order is unavailable', 409);
-    const buyerOnly = ['ShipmentRecorded', 'LogisticsUpdated', 'BnmStateFinalized'].includes(event.event_type);
+    const buyerOnly = ['ShipmentRecorded', 'DeliveryRecorded', 'LogisticsUpdated', 'BnmStateFinalized'].includes(event.event_type);
     const recipients = buyerOnly
       ? [order.rows[0].buyer_wallet]
       : [order.rows[0].buyer_wallet, order.rows[0].merchant_wallet];
@@ -640,7 +642,27 @@ async function campaignRecipients(executor: SqlExecutor, audience: CampaignAudie
 }
 
 async function controlledTemplate(executor: SqlExecutor, event: SourceEventRow, topic: string, recipient: string) {
-  const allowed = ['orderId', 'trackingNumber', 'carrier', 'status', 'requestId', 'rail', 'safeTxHash', 'executionTxHash', 'state', 'amount', 'stateVersion', 'method'];
+  const allowed = [
+    'orderId',
+    'shipmentId',
+    'carrierCode',
+    'trackingNumberHash',
+    'logisticsEventId',
+    'provider',
+    'status',
+    'deliveredAt',
+    'occurredAt',
+    'requestId',
+    'rail',
+    'safeTxHash',
+    'executionTxHash',
+    'transactionHash',
+    'confirmations',
+    'state',
+    'amount',
+    'stateVersion',
+    'method',
+  ];
   const values = Object.fromEntries(Object.entries(event.payload).filter(([key, value]) => allowed.includes(key) && isTemplatePrimitive(value)));
   const state = event.event_type === 'PaymentFinalized'
     ? 'LOCKED'
