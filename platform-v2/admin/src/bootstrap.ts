@@ -7,7 +7,7 @@ import {
 } from '@abu24k/core-artifacts';
 
 export const productBaseline = Object.freeze({
-  coreArtifacts: 'coordinated-takeover-assignment-checkpoint',
+  coreArtifacts: 'coordinated-order-statement-checkpoint',
   artifactVersion,
   publicCatalogs: Object.freeze({
     breakerScopes,

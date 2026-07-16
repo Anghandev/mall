@@ -64,6 +64,11 @@ import {
   settlementIntent,
   settlementProjection,
 } from './settlement-fixtures';
+import {
+  firstShoppingStatementPage,
+  ordinaryShoppingStatement,
+  secondShoppingStatementPage,
+} from './shopping-statement-fixtures';
 
 const HASH = `0x${'1'.repeat(64)}`;
 const HASH_2 = `0x${'2'.repeat(64)}`;
@@ -92,7 +97,7 @@ describe('Mall Core artifact boundary', () => {
       ...Object.values(coordinatedRealtimeOperations),
     ];
 
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.11');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.12');
     expect(coordinatedOpenApi.paths['/v2/merchant/orders/exports']?.post?.operationId)
       .toBe('exportMerchantOrders');
     expect(coordinatedOpenApi.paths['/v2/admin/payments/{orderId}']?.get?.operationId)
@@ -115,6 +120,7 @@ describe('Mall Core artifact boundary', () => {
     expect(publishedManifest.capabilityStatus.replacementMerchantFulfillment).toBe('AVAILABLE');
     expect(coordinatedManifest.capabilityStatus.takeoverCaseManagementHttp).toBeUndefined();
     expect(coordinatedManifest.capabilityStatus.replacementMerchantFulfillment).toBeUndefined();
+    expect(coordinatedManifest.capabilityStatus.buyerShoppingStatementHttp).toBe('AVAILABLE');
     expect(Object.keys(openApi.paths).some((path) => path.startsWith('/v2/admin/'))).toBe(false);
     expect(Object.keys(openApi.paths).some((path) => path.startsWith('/v2/merchant/'))).toBe(false);
     expect(Object.keys(coordinatedManifest.capabilityStatus).some((capability) => capability.startsWith('admin'))).toBe(false);
@@ -178,7 +184,48 @@ describe('coordinated Core HTTP client', () => {
       addressTarget: '/v2/buyer/addresses/{addressId}/fulfillment-target',
       overview: '/v2/buyer/overview',
       takeoverTimeline: '/v2/orders/{orderId}/takeover-timeline',
+      shoppingStatements: '/v2/buyer/shopping-statements',
     });
+  });
+
+  it('consumes buyer-scoped shopping statements with the paired stable cursor', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, ...(init ? { init } : {}) });
+      return json(url.includes('cursorCreatedAt=') ? secondShoppingStatementPage : firstShoppingStatementPage);
+    });
+    const client = createCoreClient({ baseUrl: 'https://core.mall.test', fetch: fetcher });
+
+    expect(await client.listBuyerShoppingStatements('session', undefined, 1)).toEqual(firstShoppingStatementPage);
+    expect(await client.listBuyerShoppingStatements('session', firstShoppingStatementPage.nextCursor!, 1))
+      .toEqual(secondShoppingStatementPage);
+    expect(calls[0]?.url).toBe('https://core.mall.test/v2/buyer/shopping-statements?limit=1');
+    expect(calls[1]?.url).toContain(`cursorCreatedAt=${encodeURIComponent(ordinaryShoppingStatement.createdAt)}`);
+    expect(calls[1]?.url).toContain(`cursorOrderId=${encodeURIComponent(ordinaryShoppingStatement.orderId)}`);
+    expect(calls.every((call) => (call.init?.headers as Record<string, string>)?.authorization === 'Bearer session')).toBe(true);
+
+    await expect(client.listBuyerShoppingStatements('session', {
+      createdAt: 'not-a-time',
+      orderId: ordinaryShoppingStatement.orderId,
+    })).rejects.toMatchObject({ code: 'InvalidRequest' });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects seckill, transferable BNM and unbound statement cursors', async () => {
+    const clientFor = (body: unknown) => createCoreClient({ fetch: vi.fn(async () => json(body)) });
+    await expect(clientFor({
+      ...firstShoppingStatementPage,
+      statements: [{ ...ordinaryShoppingStatement, orderKind: 'SECKILL' }],
+    }).listBuyerShoppingStatements('session')).rejects.toMatchObject({ code: 'InvalidResponse' });
+    await expect(clientFor({
+      ...firstShoppingStatementPage,
+      statements: [{ ...ordinaryShoppingStatement, bnm: { ...ordinaryShoppingStatement.bnm, transferable: true } }],
+    }).listBuyerShoppingStatements('session')).rejects.toMatchObject({ code: 'InvalidResponse' });
+    await expect(clientFor({
+      ...firstShoppingStatementPage,
+      nextCursor: { ...firstShoppingStatementPage.nextCursor!, orderId: `0x${'99'.repeat(32)}` },
+    }).listBuyerShoppingStatements('session')).rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
   it('consumes the complete buyer profile, address, overview and takeover chain with exact versions', async () => {

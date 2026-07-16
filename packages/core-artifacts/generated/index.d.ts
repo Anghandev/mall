@@ -1,4 +1,4 @@
-export declare const artifactVersion: "2.0.0-settlement-admin.12";
+export declare const artifactVersion: "2.0.0-settlement-admin.13";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
@@ -6,7 +6,7 @@ export type Address = string;
 export type Timestamp = string;
 export type AdminResourceType = "ORDER" | "PRODUCT" | "MERCHANT";
 export type AdminExportFormat = "CSV" | "EXCEL";
-export type AdminBatchAction = "EXPORT_CSV" | "EXPORT_EXCEL" | "ADD_PRODUCT_TAGS";
+export type AdminBatchAction = "EXPORT_CSV" | "EXPORT_EXCEL" | "ADD_PRODUCT_TAGS" | "APPROVE_PRODUCTS" | "REJECT_PRODUCTS" | "PUBLISH_PRODUCTS" | "HIDE_PRODUCTS" | "DELIST_PRODUCTS";
 export type OrderProjectionState = "QUOTED" | "SUBMITTED" | "PAID" | "SHIPPED" | "DELIVERED" | "ARBITRATION" | "TAKEOVER" | "FULFILLMENT_PENDING" | "FULFILLED" | "REORG_PENDING";
 export type ContractOrderState = "NONE" | "PAID" | "SHIPPED" | "DELIVERED" | "ARBITRATION" | "TAKEOVER" | "FULFILLMENT_PENDING" | "FULFILLED";
 export type OrderFinalityStatus = "NOT_SUBMITTED" | "PENDING" | "CONFIRMED" | "REPLACED" | "REORGED" | "FINAL";
@@ -2389,7 +2389,7 @@ export interface AdminOrderSearchPage extends FulfillmentOrderPage {
 export interface AdminBatchCapability {
   action: AdminBatchAction;
   enabled: boolean;
-  reasonCode?: 'Forbidden' | 'ProductWriteLocked';
+  reasonCode?: CoreErrorCode;
 }
 
 export interface AdminResourceSummary {
@@ -2406,10 +2406,11 @@ export interface AdminResourceSummary {
 
 export interface AdminGlobalSearchResponse {
   artifactVersion: typeof artifactVersion;
-  relation: 'AND';
+  relation: 'AND' | 'OR';
+  walletMatch: 'EXACT' | 'FUZZY';
   resources: readonly AdminResourceSummary[];
   truncated: boolean;
-  unavailableFilters: readonly ('OR' | 'FUZZY_WALLET' | 'UID' | 'PHONE' | 'YELLOW_QUEUE')[];
+  unavailableFilters: readonly ('UID' | 'PHONE' | 'YELLOW_QUEUE')[];
 }
 
 export interface AdminResourceSelection {
@@ -2456,6 +2457,28 @@ export interface AdminProductBatchTagResult {
   tagIds: readonly string[];
   changedCount: number;
   products: readonly AdminProductBatchTagItem[];
+  createdAt: Timestamp;
+}
+
+export interface AdminProductLifecycleBatchRequest {
+  action: CatalogReviewDecision;
+  productIds: readonly string[];
+  reasonCode: string;
+  idempotencyKey: string;
+}
+
+export interface AdminProductLifecycleBatchItem {
+  productId: string;
+  previousState: CatalogProductLifecycleState;
+  state: CatalogProductLifecycleState;
+}
+
+export interface AdminProductLifecycleBatchResult {
+  artifactVersion: typeof artifactVersion;
+  operationId: Bytes32;
+  action: CatalogReviewDecision;
+  changedCount: number;
+  products: readonly AdminProductLifecycleBatchItem[];
   createdAt: Timestamp;
 }
 

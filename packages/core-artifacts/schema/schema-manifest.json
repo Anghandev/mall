@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.12",
+  "artifactVersion": "2.0.0-settlement-admin.13",
   "formatVersion": 1,
   "databaseEngine": "postgresql",
   "schemas": {
@@ -130,6 +130,11 @@
           "name": "025_takeover_assignments.sql",
           "path": "schema/business/025_takeover_assignments.sql",
           "sha256": "336acb813d02c113c665f5840104a8ee395f4901420b8067cd0623a47c09ace2"
+        },
+        {
+          "name": "026_admin_product_lifecycle_batches.sql",
+          "path": "schema/business/026_admin_product_lifecycle_batches.sql",
+          "sha256": "ab2c466ed6bff9ccdb6574edc4d0140f346ee4d72e216b81217831c30792d26d"
         }
       ]
     },

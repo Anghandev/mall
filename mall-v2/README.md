@@ -5,7 +5,7 @@ Requirement Matrix and consumes only coordinated Core artifacts.
 
 ## Current Runtime Boundary
 
-- Production consumes coordinated Core artifacts `2.0.0-settlement-admin.11` and derives
+- Production consumes coordinated Core artifacts `2.0.0-settlement-admin.12` and derives
   its HTTP paths from the published OpenAPI document.
 - The public catalog consumes active products/SKUs, enabled three-level
   categories, enabled tags, field-level product associations, rich detail,
@@ -26,6 +26,11 @@ Requirement Matrix and consumes only coordinated Core artifacts.
   authoritative `allowedActions`; no second action lookup or local state
   inference is used. The checkpoint's carrier, provider, warehouse, waybill
   and print administration remains platform-only and is not exposed by Mall.
+- Buyer shopping activity consumes the buyer-scoped statement endpoint with a
+  stable `(createdAt, orderId)` cursor. It renders exact Core-projected USDT/NPL
+  payment atoms, BNM Locked/Available state, payment and fulfillment times, and
+  BNM journal provenance without calculating browser-side totals. Seckill prize
+  activity remains `DecisionBlocked` until winner-bound prize journals exist.
 - The coordinated artifact includes the merchant-only order export operation,
   but Mall strips every `/v2/merchant/**` path and `merchant*` capability before
   bundling. Merchant export PII schemas and fixtures are not part of Mall
