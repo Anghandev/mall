@@ -15,6 +15,7 @@ const forbidden = [
   '2.0.0-settlement-admin.2',
   '2.0.0-settlement-admin.3',
   '2.0.0-settlement-admin.6',
+  '2.0.0-logistics.1',
   'CLAIM_' + 'MERCHANT_USDT',
   'Payment' + 'Escrow',
   'Claim' + 'Vault',
@@ -42,7 +43,7 @@ for (const path of walk(dist)) {
 }
 
 if (!sawCoreBoundary) {
-  throw new Error('Production bundle is missing the coordinated settlement-admin boundary');
+  throw new Error('Production bundle is missing the coordinated Core boundary');
 }
 
 if (!sawArtifactVersion) {
