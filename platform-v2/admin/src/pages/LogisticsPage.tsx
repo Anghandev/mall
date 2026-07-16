@@ -32,6 +32,7 @@ import {
   Truck,
 } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   CoreApiError,
   createAdminLogisticsCarrierConfigVersion,
@@ -71,7 +72,10 @@ const emptyWaybill: AdminWaybillBatchRequest = {
 
 export function LogisticsPage() {
   const { connect, session, status } = useCoreSession();
-  const [view, setView] = useState<View>('CARRIERS');
+  const [searchParams] = useSearchParams();
+  const presetKey = searchParams.toString();
+  const operationsPreset = useMemo(() => readOperationsPreset(searchParams), [searchParams]);
+  const [view, setView] = useState<View>(operationsPreset.open ? 'OPERATIONS' : 'CARRIERS');
   const [data, setData] = useState<LogisticsData | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<CoreApiError | null>(null);
@@ -84,6 +88,10 @@ export function LogisticsPage() {
   const canRead = roles.some((role) => ['ADMIN', 'OPERATOR', 'AUDITOR'].includes(role));
   const canWrite = roles.some((role) => ['ADMIN', 'OPERATOR'].includes(role));
   const isAuditor = roles.includes('AUDITOR') && !canWrite;
+
+  useEffect(() => {
+    if (operationsPreset.open) setView('OPERATIONS');
+  }, [operationsPreset.open, presetKey]);
 
   useEffect(() => {
     if (!session || !canRead) { setData(null); setLoadError(null); return; }
@@ -138,7 +146,7 @@ export function LogisticsPage() {
           {loading && !data ? <LoadingState /> : null}
           {data && view === 'CARRIERS' ? <CarrierProviderView data={data} token={session.token} canWrite={canWrite} loading={loading} runAction={runAction} /> : null}
           {data && view === 'WAREHOUSES' ? <WarehouseView warehouses={data.warehouses.warehouses} token={session.token} canWrite={canWrite} loading={loading} runAction={runAction} /> : null}
-          {data && view === 'OPERATIONS' ? <OperationsView data={data} token={session.token} canWrite={canWrite} loading={loading} merchantFilterDraft={merchantFilterDraft} setMerchantFilterDraft={setMerchantFilterDraft} applyMerchantFilter={(event) => { event.preventDefault(); setMerchantFilter(merchantFilterDraft.trim()); }} runAction={runAction} /> : null}
+          {data && view === 'OPERATIONS' ? <OperationsView key={presetKey} data={data} token={session.token} canWrite={canWrite} loading={loading} initialMerchantId={operationsPreset.merchantId} initialOrderIds={operationsPreset.orderIds} merchantFilterDraft={merchantFilterDraft} setMerchantFilterDraft={setMerchantFilterDraft} applyMerchantFilter={(event) => { event.preventDefault(); setMerchantFilter(merchantFilterDraft.trim()); }} runAction={runAction} /> : null}
         </>
       )}
     </>
@@ -228,10 +236,10 @@ function WarehouseView({ warehouses, token, canWrite, loading, runAction }: { wa
   </section>;
 }
 
-function OperationsView(props: { data: LogisticsData; token: string; canWrite: boolean; loading: boolean; merchantFilterDraft: string; setMerchantFilterDraft(value: string): void; applyMerchantFilter(event: FormEvent): void; runAction(action: () => Promise<string>): Promise<void> }) {
-  const { data, token, canWrite, loading, merchantFilterDraft, setMerchantFilterDraft, applyMerchantFilter, runAction } = props;
-  const [waybill, setWaybill] = useState({ ...emptyWaybill });
-  const [orderIds, setOrderIds] = useState('');
+function OperationsView(props: { data: LogisticsData; token: string; canWrite: boolean; loading: boolean; initialMerchantId: string; initialOrderIds: readonly string[]; merchantFilterDraft: string; setMerchantFilterDraft(value: string): void; applyMerchantFilter(event: FormEvent): void; runAction(action: () => Promise<string>): Promise<void> }) {
+  const { data, token, canWrite, loading, initialMerchantId, initialOrderIds, merchantFilterDraft, setMerchantFilterDraft, applyMerchantFilter, runAction } = props;
+  const [waybill, setWaybill] = useState({ ...emptyWaybill, merchantId: initialMerchantId });
+  const [orderIds, setOrderIds] = useState(initialOrderIds.join('\n'));
   const retryableJobs = useMemo(() => data.printJobs.printJobs.filter((job) => ['RETRYABLE', 'FAILED', 'CONFIGURATION_REQUIRED'].includes(job.state)), [data.printJobs.printJobs]);
   const [printJobId, setPrintJobId] = useState('');
   const [retryKey, setRetryKey] = useState('');
@@ -261,7 +269,7 @@ function OperationsView(props: { data: LogisticsData; token: string; canWrite: b
     </section>
     <section className="logistics-lists">
       <article className="panel logistics-panel"><div className="panel-heading"><div><p className="section-kicker">GET /v2/admin/logistics/waybills</p><h2>面单记录</h2></div><span className="status-chip">{data.waybills.waybills.length}</span></div>{!data.waybills.waybills.length ? <EmptyState icon={PackagePlus} text="Core 返回真实空面单列表" /> : <div className="table-scroll"><table className="data-table"><thead><tr><th>订单 / 商家</th><th>Provider / 承运商</th><th>状态</th><th>运单号</th><th>更新时间</th></tr></thead><tbody>{data.waybills.waybills.map((item) => <tr key={item.requestId}><td><strong>{item.orderId}</strong><small>{item.merchantId}</small></td><td>{item.provider} / {item.carrierCode}</td><td>{item.state}</td><td>{item.trackingNumber ?? '未生成'}</td><td>{item.updatedAt}</td></tr>)}</tbody></table></div>}</article>
-      <article className="panel logistics-panel"><div className="panel-heading"><div><p className="section-kicker">GET /v2/admin/logistics/print-jobs</p><h2>打印作业</h2></div><span className="status-chip">{data.printJobs.printJobs.length}</span></div>{!data.printJobs.printJobs.length ? <EmptyState icon={Printer} text="Core 返回真实空打印列表" /> : <div className="table-scroll"><table className="data-table"><thead><tr><th>作业 / 订单</th><th>类型</th><th>Provider / 设备</th><th>状态</th><th>尝试</th></tr></thead><tbody>{data.printJobs.printJobs.map((job) => <tr key={job.printJobId}><td><code>{shortId(job.printJobId)}</code><small>{job.orderId} · {job.merchantId}</small></td><td>{job.jobKind}</td><td>{job.provider ?? '未绑定'} / {job.deviceId ?? '未绑定'}</td><td>{job.state}</td><td>{job.attempts}</td></tr>)}</tbody></table></div>}</article>
+      <article className="panel logistics-panel"><div className="panel-heading"><div><p className="section-kicker">GET /v2/admin/logistics/print-jobs</p><h2>打印作业</h2><small>Core 作业类型：WAYBILL / PICKUP_RECEIPT</small></div><span className="status-chip">{data.printJobs.printJobs.length}</span></div>{!data.printJobs.printJobs.length ? <EmptyState icon={Printer} text="Core 返回真实空打印列表" /> : <div className="table-scroll"><table className="data-table"><thead><tr><th>作业 / 订单</th><th>类型</th><th>Provider / 设备</th><th>状态</th><th>尝试</th></tr></thead><tbody>{data.printJobs.printJobs.map((job) => <tr key={job.printJobId}><td><code>{shortId(job.printJobId)}</code><small>{job.orderId} · {job.merchantId}</small></td><td>{job.jobKind}</td><td>{job.provider ?? '未绑定'} / {job.deviceId ?? '未绑定'}</td><td>{job.state}</td><td>{job.attempts}</td></tr>)}</tbody></table></div>}</article>
     </section>
   </>;
 }
@@ -271,5 +279,13 @@ function ViewTab({ active, onClick, children }: { active: boolean; onClick(): vo
 function LoadingState() { return <div className="resource-state logistics-loading" role="status" aria-busy="true"><LoaderCircle className="spin" aria-hidden="true" /><div><strong>正在读取 Core 物流投影</strong><p>配置、仓库、面单和打印作业均等待真实响应。</p></div></div>; }
 function CoreErrorState({ error }: { error: CoreApiError }) { return <div className="resource-state resource-state-error logistics-error" role="alert"><Ban aria-hidden="true" /><div><strong>{error.code}</strong><p>{error.message}</p>{error.correlationId ? <code>{error.correlationId}</code> : null}</div></div>; }
 function EmptyState({ icon: Icon, text }: { icon: typeof Truck; text: string }) { return <div className="logistics-empty" role="status"><Icon aria-hidden="true" /><span>{text}</span></div>; }
+function readOperationsPreset(searchParams: URLSearchParams) {
+  const orderIds = [...new Set(searchParams.getAll('orderIds').map((value) => value.trim()).filter(Boolean))];
+  return {
+    open: searchParams.get('view') === 'OPERATIONS',
+    merchantId: searchParams.get('merchantId')?.trim() ?? '',
+    orderIds,
+  };
+}
 function shortId(value: string) { return `${value.slice(0, 8)}…${value.slice(-6)}`; }
 function asCoreError(cause: unknown, message: string) { return cause instanceof CoreApiError ? cause : new CoreApiError({ code: 'ExternalBlocked', message, status: 503 }); }

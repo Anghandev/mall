@@ -5,7 +5,7 @@ implements shared funds, contracts, API, Schema or signer behavior.
 
 ## Current Product Boundary
 
-- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.14`.
+- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.15`.
 - SIWE/JWT stays in memory. Every protected read and write is role-bound by
   Core and preserves typed `DecisionBlocked`, `ExternalBlocked`,
   `ConfigurationRequired` and correlation evidence.
@@ -44,6 +44,12 @@ implements shared funds, contracts, API, Schema or signer behavior.
 - The takeover workspace consumes the Core case queue, immutable assignment
   history and eligible replacement-merchant projection. ADMIN/OPERATOR can
   assign or reassign before shipment; AUDITOR remains read-only.
+- The merchant drilldown consumes the versioned V1-V5 level policy, named
+  sales and fulfillment aggregates, the zero-denominator-safe 48-hour ship
+  rate, finalized NPL Burn and Available BNM totals. Approved settlement-wallet
+  changes reuse the ADMIN review challenge, independent secondary EIP-712
+  signature and Safe publication path; ordinary profile edits expose no wallet
+  field.
 - CMS and configuration editors accept structured JSON objects because their
   coordinated request types are open objects. Core remains the schema,
   sanitization, decision and publication authority.

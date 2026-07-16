@@ -3,7 +3,7 @@
 The platform-admin product is a consumer. It cannot add shared endpoints,
 schemas, financial logic, calldata, signers or database behavior.
 
-The coordinated consumer is `@abu24k/core-artifacts@2.0.0-settlement-admin.14`.
+The coordinated consumer is `@abu24k/core-artifacts@2.0.0-settlement-admin.15`.
 Published paths still fail closed when Core returns `DecisionBlocked`,
 `ExternalBlocked` or `ConfigurationRequired`.
 
@@ -14,7 +14,7 @@ Published paths still fail closed when Core returns `DecisionBlocked`,
 | GAP-ADM-003 | Cross-resource AND/OR search, exact/fuzzy wallet matching, exact ID/TxHash/date/review filters, row-level batch capabilities, audited CSV/Excel export, product batch tags and atomic approve/reject/publish/hide/delist are published and consumed | UID/phone PII search and Yellow queue remain unavailable; electronic-waybill/pickup print, arbitrary product-field batch modification and any physical-delete path are not exposed here |
 | GAP-ADM-004 | Policy, takeover funding and `.9` seckill actions publish EIP-712 challenge/signature/Safe proposal evidence; the products consume the exact Core typed data and never construct calldata | Production Safe service, Safe addresses and independent secondary signer remain external configuration |
 | GAP-ADM-005 | `.9` authenticated Admin Dashboard publishes the `Asia/Shanghai` business window, immutable order/GMV amounts, shipment ratio, merchant/product/seckill counts, fulfillment queues, signed-settlement totals and failures, per-asset coverage, independent breakers, four risk counts and typed unavailable evidence; the product consumes it directly | New UID identity and low-stock threshold remain `DecisionBlocked`; monitoring alerts are not transaction-risk evidence |
-| GAP-ADM-006 | Merchant guarantee, deposit finality, debt and takeover-finance projection is published | Qualification, level, PII, sales and wallet-change governance remain unavailable |
+| GAP-ADM-006 | Encrypted/redacted qualification, V1-V5 level policy, named sales/fulfillment aggregates, zero-denominator-safe 48H rate, finalized NPL Burn/Available BNM totals and governed approved-wallet rotation are published and consumed alongside guarantee, debt and takeover finance | Abnormal-order-rate classification and denominator remain `DecisionBlocked`; production Safe and independent secondary-wallet evidence remain `ExternalBlocked` |
 | GAP-ADM-007 | `.5` admin category/tag versions, nullable category parent, all managed products, store product slot, signed concession preview, review submission/decisions, delist, inventory adjustment and controlled media reads are published and consumed | Remaining generic batch modification and print scope stays under `GAP-ADM-003`; unresolved category service fees remain `DecisionBlocked` |
 | GAP-ADM-008 | Policy governance plus the product-scoped signed concession preview are published and consumed | Missing service/prize/store/concession-destination commercial decisions remain `DecisionBlocked`; the product never infers them |
 | GAP-ADM-010 | Fulfillment commands, case-wide takeover projections, eligible replacement merchants, append-only assignment/reassignment history, ordered deductions, platform advance and debt are published and consumed | Production role wallets, replacement-merchant operations and Safe evidence remain `ExternalBlocked` until configured |

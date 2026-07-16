@@ -111,6 +111,15 @@ export async function createMerchantReviewChallenge(
   requireReason(input.reasonCode);
   requireIdempotencyKey(input.idempotencyKey);
   requireAddress(actorWallet, 'actorWallet');
+  if (input.action === 'CHANGE_SETTLEMENT_WALLET') {
+    if (input.proposedSettlementWallet === undefined) throw invalid('proposedSettlementWallet is required', 400);
+    requireAddress(input.proposedSettlementWallet, 'proposedSettlementWallet');
+    if (input.proposedSettlementWallet.toLowerCase() === merchant.merchant.settlementWallet.toLowerCase()) {
+      throw invalid('proposedSettlementWallet must differ from the current wallet', 400);
+    }
+  } else if (input.proposedSettlementWallet !== undefined) {
+    throw invalid('proposedSettlementWallet is valid only for a wallet change', 400);
+  }
   const expected = reviewTransition(merchant.merchant.status, input.action);
   const body = await authenticatedWrite(
     `/v2/admin/merchants/${encodeURIComponent(resourceId(merchant.merchant.merchantId))}/review-challenges`,
@@ -131,11 +140,18 @@ export async function publishMerchantReview(
   challenge: MerchantReviewChallenge,
   signature: string,
   token: string,
+  proposedSettlementWallet?: string,
 ): Promise<MerchantLifecycleDetail> {
   if (challenge.state !== 'DRAFT' || Date.parse(challenge.expiresAt) <= Date.now()) {
     throw invalid('Merchant review challenge is expired', 401);
   }
   if (!signaturePattern.test(signature)) throw invalid('Merchant review signature is invalid', 400);
+  if (challenge.action === 'CHANGE_SETTLEMENT_WALLET') {
+    if (proposedSettlementWallet === undefined) throw invalid('Expected settlement wallet is required', 400);
+    requireAddress(proposedSettlementWallet, 'proposedSettlementWallet');
+  } else if (proposedSettlementWallet !== undefined) {
+    throw invalid('Expected settlement wallet is valid only for a wallet change', 400);
+  }
   const body = await authenticatedWrite(
     `/v2/admin/merchants/${encodeURIComponent(resourceId(challenge.merchantId))}/review-actions/${challenge.actionId.toLowerCase()}/publish`,
     'POST',
@@ -147,6 +163,8 @@ export async function publishMerchantReview(
       || body.merchant.merchantId !== challenge.merchantId
       || body.merchant.status !== challenge.toStatus
       || body.merchant.applicationVersion !== challenge.applicationVersion
+      || (challenge.action === 'CHANGE_SETTLEMENT_WALLET'
+        && body.merchant.settlementWallet.toLowerCase() !== proposedSettlementWallet?.toLowerCase())
       || !body.reviews.some((review) => review.actionId.toLowerCase() === challenge.actionId.toLowerCase()
         && review.state === 'PUBLISHED'
         && review.safeTxHash !== null)
@@ -261,7 +279,7 @@ function isMerchantSummary(value: unknown): value is MerchantLifecycleDetail['me
 
 function isMerchantLifecycleDetail(value: unknown): value is MerchantLifecycleDetail {
   if (!isRecord(value) || value.artifactVersion !== artifactVersion || !isMerchantSummary(value.merchant) || !isQualification(value.qualification)) return false;
-  if (!isRecord(value.levelPolicy) || value.levelPolicy.status !== 'DecisionBlocked' || typeof value.levelPolicy.reason !== 'string') return false;
+  if (!isLevelPolicy(value.levelPolicy, value.merchant.level)) return false;
   if (!isRecord(value.analytics) || !isOrderAnalytics(value.analytics.orders) || !isFulfillmentAnalytics(value.analytics.fulfillment)
     || !isRiskAnalytics(value.analytics.risk) || !isContributionAnalytics(value.analytics.contributions)) return false;
   if (!Array.isArray(value.balances) || value.balances.length !== 5 || !value.balances.every((item) => isRecord(item)
@@ -269,6 +287,19 @@ function isMerchantLifecycleDetail(value: unknown): value is MerchantLifecycleDe
     || new Set(value.balances.map((item) => item.state)).size !== 5) return false;
   if (!Array.isArray(value.settlements) || !value.settlements.every(isSettlement)) return false;
   return Array.isArray(value.reviews) && value.reviews.every(isReviewEvidence);
+}
+
+function isLevelPolicy(value: unknown, merchantLevel: MerchantLifecycleDetail['merchant']['level']) {
+  if (!isRecord(value)) return false;
+  if (value.status === 'DecisionBlocked') return typeof value.reason === 'string' && value.reason.length > 0;
+  return value.status === 'AVAILABLE'
+    && validResourceId(value.configVersionId)
+    && Number.isSafeInteger(value.version) && Number(value.version) >= 1
+    && validDate(value.effectiveFrom)
+    && merchantLevels.includes(value.level as never)
+    && value.level === merchantLevel
+    && amountPattern.test(String(value.maxProductSettlementUsdt))
+    && Number.isSafeInteger(value.monthlySeckillQuota) && Number(value.monthlySeckillQuota) >= 0;
 }
 
 function isQualification(value: unknown) {
@@ -295,9 +326,18 @@ function isNamedAmounts(value: unknown) {
 
 function isFulfillmentAnalytics(value: unknown) {
   return isRecord(value) && ['pendingShipment', 'inTransit', 'completed', 'pickupCompleted'].every((field) => amountPattern.test(String(value[field])))
-    && isRecord(value.fastShip48h) && value.fastShip48h.status === 'DecisionBlocked'
-    && value.fastShip48h.numerator === null && value.fastShip48h.denominator === null && value.fastShip48h.bps === null
-    && typeof value.fastShip48h.reason === 'string';
+    && isFastShip48h(value.fastShip48h);
+}
+
+function isFastShip48h(value: unknown) {
+  if (!isRecord(value) || !amountPattern.test(String(value.numerator)) || !amountPattern.test(String(value.denominator))) return false;
+  if (value.status === 'UNAVAILABLE') {
+    return value.denominator === '0' && value.bps === null && value.reason === 'NO_ELIGIBLE_DELIVERY_ORDERS';
+  }
+  return value.status === 'AVAILABLE'
+    && value.denominator !== '0'
+    && Number.isSafeInteger(value.bps) && Number(value.bps) >= 0 && Number(value.bps) <= 10_000
+    && value.reason === null;
 }
 
 function isRiskAnalytics(value: unknown) {
@@ -383,6 +423,7 @@ function reviewTransition(status: MerchantLifecycleStatus, action: MerchantRevie
   if (status === 'PENDING' && action === 'APPROVE') return 'APPROVED';
   if (status === 'PENDING' && action === 'REJECT') return 'REJECTED';
   if (status === 'APPROVED' && action === 'BLACKLIST') return 'BLACKLISTED';
+  if (status === 'APPROVED' && action === 'CHANGE_SETTLEMENT_WALLET') return 'APPROVED';
   throw invalid(`Merchant ${status} cannot apply ${action}`, 409);
 }
 
