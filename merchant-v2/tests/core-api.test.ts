@@ -63,8 +63,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('settlement-admin.13 Core HTTP consumer', () => {
-  it('does not expose Admin global operations or clearing commands', () => {
+describe('settlement-admin.14 Core HTTP consumer', () => {
+  it('does not expose Admin global operations, notifications or clearing commands', () => {
     const api = createCoreApi('https://core.example.test');
     const adminOnlyOperationIds = [
       'createGovernedSettlementIntent',
@@ -77,6 +77,14 @@ describe('settlement-admin.13 Core HTTP consumer', () => {
       'authorizeCoverageBreakerResume',
       'batchApplyAdminProductLifecycle',
     ];
+    const excludedNotificationOperationIds = [
+      'registerNotificationEndpoint',
+      'listNotifications',
+      'listNotificationCampaigns',
+      'createNotificationCampaign',
+      'publishNotificationCampaign',
+      'retryNotificationCampaignDeliveries',
+    ];
     const publishedOperationIds = Object.values(openApi.paths).flatMap((path) => (
       Object.values(path as Record<string, { operationId?: string }>)
         .map((operation) => operation.operationId)
@@ -87,6 +95,10 @@ describe('settlement-admin.13 Core HTTP consumer', () => {
     expect(api).not.toHaveProperty('createAdminGlobalExport');
     expect(api).not.toHaveProperty('createAdminProductBatchTags');
     for (const operationId of adminOnlyOperationIds) {
+      expect(publishedOperationIds).toContain(operationId);
+      expect(api).not.toHaveProperty(operationId);
+    }
+    for (const operationId of excludedNotificationOperationIds) {
       expect(publishedOperationIds).toContain(operationId);
       expect(api).not.toHaveProperty(operationId);
     }
@@ -525,7 +537,7 @@ describe('settlement-admin.13 Core HTTP consumer', () => {
         body: JSON.stringify(input),
         headers: expect.objectContaining({
           authorization: 'Bearer merchant-session',
-          'x-abu-artifact-version': '2.0.0-settlement-admin.13',
+          'x-abu-artifact-version': '2.0.0-settlement-admin.14',
         }),
       }),
     );
@@ -625,7 +637,7 @@ describe('settlement-admin.13 Core HTTP consumer', () => {
       'https://core.example.test/v2/catalog/products',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.13' }),
+        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.14' }),
       }),
     );
   });
