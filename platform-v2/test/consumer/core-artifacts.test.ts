@@ -23,8 +23,8 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('settlement admin .10 checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-settlement-admin.10');
+test('settlement admin .11 checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-settlement-admin.11');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
@@ -54,7 +54,7 @@ test('settlement admin .10 checkpoint has one identity, resolvable exports and e
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 24);
+  assert.equal(schemaManifest.schemas.core.migrations.length, 25);
   assert.equal(schemaManifest.schemas.audit.migrations.length, 4);
   for (const migration of [
     ...schemaManifest.schemas.core.migrations,
@@ -104,6 +104,9 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'GET /v2/admin/settlement-requests',
     'GET /v2/admin/settlement-requests/{requestId}',
     'GET /v2/admin/system-config/versions',
+    'GET /v2/admin/takeover-cases',
+    'GET /v2/admin/takeover-cases/{caseId}',
+    'GET /v2/admin/takeover-cases/{caseId}/candidates',
     'GET /v2/admin/takeover-funding/{caseId}',
     'GET /v2/bootstrap',
     'GET /v2/buyer/addresses',
@@ -123,6 +126,8 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'GET /v2/merchant/stores',
     'GET /v2/merchant/stores/{storeId}/printer-binding',
     'GET /v2/merchant/stores/{storeId}/product-slot',
+    'GET /v2/merchant/takeover-cases',
+    'GET /v2/merchant/takeover-cases/{caseId}',
     'GET /v2/notifications',
     'GET /v2/orders',
     'GET /v2/orders/{orderId}',
@@ -182,6 +187,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'POST /v2/admin/settlement-intents',
     'POST /v2/admin/system-config/versions',
     'POST /v2/admin/system-config/versions/{configVersionId}/publish',
+    'POST /v2/admin/takeover-cases/{caseId}/assignments',
     'POST /v2/admin/takeover-funding',
     'POST /v2/admin/takeover-funding/approval-challenge',
     'POST /v2/auth/nonce',
@@ -806,6 +812,8 @@ test('catalog, settlement/admin and seckill realtime capabilities are published 
     'guaranteeDepositHttp',
     'guaranteeDepositFinality',
     'takeoverFundingHttp',
+    'takeoverCaseManagementHttp',
+    'replacementMerchantFulfillment',
     'policyGovernanceHttp',
     'cmsHttp',
     'notificationHttp',

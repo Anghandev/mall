@@ -96,6 +96,7 @@ import { PostgresIndexerStore } from './data/indexer-store.ts';
 import { SettlementService } from './data/settlement-service.ts';
 import { SeckillService } from './data/seckill-service.ts';
 import { TakeoverFundingService } from './data/takeover-funding-service.ts';
+import { TakeoverCaseService } from './data/takeover-case-service.ts';
 import { AuditQueryService } from './data/audit-service.ts';
 import { CmsService } from './data/cms-service.ts';
 import { MonitoringService } from './data/monitoring-service.ts';
@@ -181,6 +182,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
       ? { enqueuePickupReceipt: createPickupReceiptEnqueuer({ encryptionKey: env.DELIVERY_DATA_ENCRYPTION_KEY }) }
       : {}),
   });
+  const takeoverCaseService = new TakeoverCaseService({ transactions });
   const uploadLimits = mediaUploadLimits(env);
   const evidenceService = new EvidenceService({
     transactions,
@@ -623,6 +625,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     logisticsAdminService,
     evidenceService,
     settlementService,
+    takeoverCaseService,
     policyService,
     coverageBreakerService,
     cmsService,

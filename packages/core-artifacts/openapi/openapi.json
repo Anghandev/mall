@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Abu 24K V2 Core API",
-    "version": "2.0.0-settlement-admin.10"
+    "version": "2.0.0-settlement-admin.11"
   },
-  "x-artifactVersion": "2.0.0-settlement-admin.10",
+  "x-artifactVersion": "2.0.0-settlement-admin.11",
   "servers": [],
   "paths": {
     "/v2/buyer/profile": {
@@ -3022,6 +3022,470 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/TakeoverFundingDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "caseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/takeover-cases": {
+      "get": {
+        "operationId": "listAdminTakeoverCases",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoverCaseList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "OPEN",
+                "FUNDED",
+                "FULFILLING",
+                "FULFILLMENT_PENDING",
+                "CLOSED",
+                "DECISION_BLOCKED"
+              ]
+            }
+          },
+          {
+            "name": "originalMerchantId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "replacementMerchantId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "cursorOpenedAt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "cursorCaseId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/takeover-cases/{caseId}": {
+      "get": {
+        "operationId": "getAdminTakeoverCase",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoverCaseDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "caseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/takeover-cases/{caseId}/candidates": {
+      "get": {
+        "operationId": "listTakeoverCandidates",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoverCandidateList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "caseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/takeover-cases/{caseId}/assignments": {
+      "post": {
+        "operationId": "assignTakeoverReplacementMerchant",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TakeoverAssignmentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoverAssignmentResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "caseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/merchant/takeover-cases": {
+      "get": {
+        "operationId": "listMerchantTakeoverCases",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoverCaseList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "OPEN",
+                "FUNDED",
+                "FULFILLING",
+                "FULFILLMENT_PENDING",
+                "CLOSED",
+                "DECISION_BLOCKED"
+              ]
+            }
+          },
+          {
+            "name": "originalMerchantId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "replacementMerchantId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "cursorOpenedAt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "cursorCaseId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ]
+      }
+    },
+    "/v2/merchant/takeover-cases/{caseId}": {
+      "get": {
+        "operationId": "getMerchantTakeoverCase",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoverCaseDetail"
                 }
               }
             }
@@ -10999,7 +11463,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "status": {
             "const": "CORE_API_READY"
@@ -11312,7 +11776,7 @@
             "minimum": 1
           },
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "allowedActions": {
             "type": "array",
@@ -12346,7 +12810,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "relation": {
             "const": "AND"
@@ -12445,7 +12909,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "exportId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -12574,7 +13038,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "operationId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -14659,7 +15123,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -14758,7 +15222,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15698,7 +16162,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "productId": {
             "type": "string",
@@ -15871,7 +16335,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "storeId": {
             "type": "string",
@@ -15997,7 +16461,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "productId": {
             "type": "string",
@@ -16099,7 +16563,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "previewId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -16258,7 +16722,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "adjustmentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -16383,7 +16847,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "uploadIntentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -16481,7 +16945,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -16567,7 +17031,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -16728,7 +17192,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "evidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
@@ -16987,7 +17451,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -17262,7 +17726,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifact_version": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "wallet_address": {
             "$ref": "#/components/schemas/Address"
@@ -17588,7 +18052,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -17782,7 +18246,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "requests": {
             "type": "array",
@@ -17946,7 +18410,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "request": {
             "$ref": "#/components/schemas/AdminSettlementRequest"
@@ -18107,7 +18571,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "batches": {
             "type": "array",
@@ -18827,7 +19291,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "batch": {
             "$ref": "#/components/schemas/AdminSettlementBatchEnvelope"
@@ -19855,6 +20319,542 @@
           }
         }
       },
+      "TakeoverAssignmentRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "replacementMerchantId",
+          "reasonCode",
+          "evidenceHash",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "replacementMerchantId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z0-9_:-]{2,64}$"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          }
+        }
+      },
+      "TakeoverAssignment": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "assignmentId",
+          "caseId",
+          "orderId",
+          "version",
+          "originalMerchantId",
+          "replacementMerchantId",
+          "replacementWallet",
+          "replacementApplicationVersion",
+          "replacementLevel",
+          "replacementLicenseAssetId",
+          "supersedesAssignmentId",
+          "reasonCode",
+          "evidenceHash",
+          "assignedBy",
+          "correlationId",
+          "assignedAt"
+        ],
+        "properties": {
+          "assignmentId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "caseId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "orderId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "originalMerchantId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "replacementMerchantId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "replacementWallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "replacementApplicationVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "replacementLevel": {
+            "enum": [
+              "V1",
+              "V2",
+              "V3",
+              "V4",
+              "V5"
+            ]
+          },
+          "replacementLicenseAssetId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "supersedesAssignmentId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reasonCode": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "assignedBy": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "correlationId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "assignedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TakeoverAssignmentResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "assignment"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.11"
+          },
+          "assignment": {
+            "$ref": "#/components/schemas/TakeoverAssignment"
+          }
+        }
+      },
+      "TakeoverCaseFunding": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "guaranteeUsedUsdt",
+          "frozenReceivablesUsedUsdt",
+          "futureProceedsUsedUsdt",
+          "platformAdvanceUsdt",
+          "disbursedUsdt",
+          "merchantDebtUsdt"
+        ],
+        "properties": {
+          "guaranteeUsedUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "frozenReceivablesUsedUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "futureProceedsUsedUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "platformAdvanceUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "disbursedUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "merchantDebtUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          }
+        }
+      },
+      "TakeoverOrderSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "productId",
+          "skuId",
+          "quantity",
+          "fulfillmentMode",
+          "fulfillmentTargetHash",
+          "state",
+          "paymentFinal"
+        ],
+        "properties": {
+          "productId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "skuId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quantity": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "fulfillmentMode": {
+            "enum": [
+              "DELIVERY",
+              "PICKUP"
+            ]
+          },
+          "fulfillmentTargetHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "state": {
+            "enum": [
+              "QUOTED",
+              "SUBMITTED",
+              "PAID",
+              "SHIPPED",
+              "DELIVERED",
+              "ARBITRATION",
+              "TAKEOVER",
+              "FULFILLMENT_PENDING",
+              "FULFILLED",
+              "REORG_PENDING"
+            ]
+          },
+          "paymentFinal": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TakeoverCase": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "caseId",
+          "orderId",
+          "originalMerchantId",
+          "policyVersion",
+          "state",
+          "requiredUsdt",
+          "funding",
+          "evidenceHash",
+          "openedAt",
+          "closedAt",
+          "updatedAt",
+          "order",
+          "currentAssignment"
+        ],
+        "properties": {
+          "caseId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "orderId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "originalMerchantId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "policyVersion": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "state": {
+            "enum": [
+              "OPEN",
+              "FUNDED",
+              "FULFILLING",
+              "FULFILLMENT_PENDING",
+              "CLOSED",
+              "DECISION_BLOCKED"
+            ]
+          },
+          "requiredUsdt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "funding": {
+            "$ref": "#/components/schemas/TakeoverCaseFunding"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "openedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "closedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "order": {
+            "$ref": "#/components/schemas/TakeoverOrderSummary"
+          },
+          "currentAssignment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TakeoverAssignment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "TakeoverCaseCursor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "openedAt",
+          "caseId"
+        ],
+        "properties": {
+          "openedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "caseId": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "TakeoverCaseList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "cases",
+          "nextCursor"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.11"
+          },
+          "cases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TakeoverCase"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TakeoverCaseCursor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "TakeoverCandidate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "merchantId",
+          "settlementWallet",
+          "shopName",
+          "level",
+          "applicationVersion",
+          "qualificationComplete",
+          "guaranteeReady"
+        ],
+        "properties": {
+          "merchantId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "settlementWallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "shopName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "level": {
+            "enum": [
+              "V1",
+              "V2",
+              "V3",
+              "V4",
+              "V5"
+            ]
+          },
+          "applicationVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "qualificationComplete": {
+            "const": true
+          },
+          "guaranteeReady": {
+            "const": true
+          }
+        }
+      },
+      "TakeoverCandidateList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "caseId",
+          "candidates"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.11"
+          },
+          "caseId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TakeoverCandidate"
+            }
+          }
+        }
+      },
+      "TakeoverCaseTransition": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "transitionId",
+          "fromState",
+          "toState",
+          "evidenceType",
+          "evidenceHash",
+          "occurredAt"
+        ],
+        "properties": {
+          "transitionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "fromState": {
+            "anyOf": [
+              {
+                "enum": [
+                  "OPEN",
+                  "FUNDED",
+                  "FULFILLING",
+                  "FULFILLMENT_PENDING",
+                  "CLOSED",
+                  "DECISION_BLOCKED"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "toState": {
+            "enum": [
+              "OPEN",
+              "FUNDED",
+              "FULFILLING",
+              "FULFILLMENT_PENDING",
+              "CLOSED",
+              "DECISION_BLOCKED"
+            ]
+          },
+          "evidenceType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TakeoverCaseDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "case",
+          "assignments",
+          "transitions"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.11"
+          },
+          "case": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TakeoverCase"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "allowedActions"
+                ],
+                "properties": {
+                  "allowedActions": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/AllowedAction"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "assignments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TakeoverAssignment"
+            }
+          },
+          "transitions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TakeoverCaseTransition"
+            }
+          }
+        }
+      },
       "SeckillSessionCreateRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -20000,7 +21000,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -20223,7 +21223,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -21089,7 +22089,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "snapshotId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -21172,7 +22172,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -22503,7 +23503,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -22750,7 +23750,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -23105,7 +24105,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "sessionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -23334,7 +24334,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "protocolVersion": {
             "const": 1
@@ -23408,7 +24408,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -23746,7 +24746,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "addresses": {
             "type": "array",
@@ -23927,7 +24927,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -24094,7 +25094,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "orderId": {
             "type": "string",
@@ -24129,7 +25129,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "merchantId": {
             "type": "string",
@@ -24605,7 +25605,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "exportId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -25079,7 +26079,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "observation": {
             "$ref": "#/components/schemas/RiskObservation"
@@ -25105,7 +26105,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "generatedAt": {
             "type": "string",
@@ -25376,7 +26376,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "challengeId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -25443,7 +26443,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "bindingId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -25552,7 +26552,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "requestId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -25662,7 +26662,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "batchId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -25699,7 +26699,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "printJobId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -25868,7 +26868,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "configVersionId": {
             "anyOf": [
@@ -26103,7 +27103,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "providers": {
             "type": "array",
@@ -26284,7 +27284,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "warehouseId": {
             "type": "string",
@@ -26375,7 +27375,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "warehouses": {
             "type": "array",
@@ -26440,7 +27440,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "waybills": {
             "type": "array",
@@ -26459,7 +27459,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "printJobs": {
             "type": "array",
@@ -26801,7 +27801,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "merchants": {
             "type": "array",
@@ -26996,7 +27996,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -27435,7 +28435,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-settlement-admin.10"
+            "const": "2.0.0-settlement-admin.11"
           },
           "merchant": {
             "$ref": "#/components/schemas/MerchantLifecycleSummary"

@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.10",
+  "artifactVersion": "2.0.0-settlement-admin.11",
   "publicationStatus": "COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
@@ -14,57 +14,57 @@
   "components": {
     "packageMetadata": {
       "path": "package.json",
-      "sha256": "bd2a0ffe826ea62580210ddfd2fc7658832e7b332b261e1c4610dca34758fc06"
+      "sha256": "aeeb1fd3719c58991db83d42ab047461183b2fc303132598527be2b7a7524137"
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "5962db3b115ff6337b45578548b1b5d8fe961969f0ec66bb33d6ab4a6f501d70"
+      "sha256": "dbd3b3156d5a1eac683e2eb09b338616baa5cd1323e8c3611f69b0d53897d657"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "d56e8c3d1d1a53b698b33540f6bf09723c27e2be1983bb0b463d2453c3e5c574"
+      "sha256": "44cc2acaf9fff5b8a98a564733a252fa7b01359d6eca988ac4162a4da68ad49a"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "79298951baf3134716277440dfafbfda24f24907c660a48dfe61c83ff7bb5889"
+      "sha256": "a1e0419407cd43150df84984779fed9a8a06796546de60cd261ed86072633cca"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "3b8358d915ac45749469f52270cd72f0d054601dbacf1b7fa9d1bf2c3aa06a80"
+      "sha256": "475731729902c4e3bd7364430c6e65feb12991313e2eed32b28c70a8af684282"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "0ddd679169735af0037bbec8ecd53fc02b3c6364484b1d2f8efeb8ec0ab7b542"
+      "sha256": "d63b0a43c0ea26a23e503b92819fa5a348e814d5c48ebe8616b8e93df5f662c3"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
-      "sha256": "ff65e34afb0bbe05fb3863cbbb6fb8b641cde4353b09b5c529a6d7a8e5e6220b"
+      "sha256": "14e1742ef33ea5ddfc22d42bb550b3d81c8fac2be05341b1782b8927196d0707"
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "e11018bfa1285c4a27d91d5abb0103f6ceb4b64b8cbc24afbb968256d7382879"
+      "sha256": "764f125f544a6cda1834c52af972b6f4c00f33b9295649c240870320e3cf4e5f"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "cb7f4f1e21b581628abb5b968552026d7cfd67437cc733f303a7f48293cb678a"
+      "sha256": "454a3dedda02ab123b99a8f0a7c414ee09bd5a2267dcda1e1b6f02adf01933b1"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "1b4000744f7e67a372711e3ee85ed1301fd2af65da8ae9c763f00c30580b8d24"
+      "sha256": "5e47ee8c96bf25ba9f59114ac25496fb4d505225b5a32f2e5537e6a33fe31ab7"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
-      "sha256": "4c29c439c6318e5f22dcb6c423e99fa716a6504d810ad94a9d4141e0f89b1199"
+      "sha256": "a2ada02c22551f4ff2a59a817292880d9c3381397ae7f0a5a15d97d3a15a34dd"
     }
   },
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "8f8393f273653171d24c18475452f66d6dc07714fce2a811759b9b857ea99805"
+      "sha256": "24f3e1001ae0e9477cfb81edf1973ac0770d7665ffd89ea017795c986f942f4f"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "c2ce37c83e523d4c52f88d981693af689a0fd25cbe633454aefad6e38487c5d4"
+      "sha256": "1e946d00a52e8e6c1969803c3e5c79819c204b84ba4e40f00a255a38b7d8b942"
     }
   ],
   "httpSurface": [
@@ -98,6 +98,9 @@
     "GET /v2/admin/settlement-requests",
     "GET /v2/admin/settlement-requests/{requestId}",
     "GET /v2/admin/system-config/versions",
+    "GET /v2/admin/takeover-cases",
+    "GET /v2/admin/takeover-cases/{caseId}",
+    "GET /v2/admin/takeover-cases/{caseId}/candidates",
     "GET /v2/admin/takeover-funding/{caseId}",
     "GET /v2/bootstrap",
     "GET /v2/buyer/addresses",
@@ -117,6 +120,8 @@
     "GET /v2/merchant/stores",
     "GET /v2/merchant/stores/{storeId}/printer-binding",
     "GET /v2/merchant/stores/{storeId}/product-slot",
+    "GET /v2/merchant/takeover-cases",
+    "GET /v2/merchant/takeover-cases/{caseId}",
     "GET /v2/notifications",
     "GET /v2/orders",
     "GET /v2/orders/{orderId}",
@@ -176,6 +181,7 @@
     "POST /v2/admin/settlement-intents",
     "POST /v2/admin/system-config/versions",
     "POST /v2/admin/system-config/versions/{configVersionId}/publish",
+    "POST /v2/admin/takeover-cases/{caseId}/assignments",
     "POST /v2/admin/takeover-funding",
     "POST /v2/admin/takeover-funding/approval-challenge",
     "POST /v2/auth/nonce",
@@ -256,6 +262,8 @@
     "guaranteeDepositHttp": "AVAILABLE",
     "guaranteeDepositFinality": "AVAILABLE",
     "takeoverFundingHttp": "AVAILABLE",
+    "takeoverCaseManagementHttp": "AVAILABLE",
+    "replacementMerchantFulfillment": "AVAILABLE",
     "policyGovernanceHttp": "AVAILABLE",
     "cmsHttp": "AVAILABLE",
     "notificationHttp": "AVAILABLE",
@@ -408,6 +416,10 @@
     "TakeoverFundingResult",
     "MerchantFinanceProjection",
     "TakeoverFundingDetail",
+    "TakeoverCaseList",
+    "TakeoverCaseDetail",
+    "TakeoverCandidateList",
+    "TakeoverAssignmentResult",
     "PolicyDraftProjection",
     "CmsVersionProjection",
     "CmsPublicItem",
