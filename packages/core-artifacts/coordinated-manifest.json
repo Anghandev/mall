@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.12",
+  "artifactVersion": "2.0.0-settlement-admin.13",
   "publicationStatus": "COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
@@ -14,57 +14,57 @@
   "components": {
     "packageMetadata": {
       "path": "package.json",
-      "sha256": "04ab097f2e904541ed4cf8b3dafce19ca09f80e05a7c6eb4dfcd0b88ffa708c6"
+      "sha256": "c278f81af1a9aeaef20bd5dd7e79a4c5939ac81d083f81898e988a545d539c10"
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "7a67dc84183d17edf18ca06e925e8af8bf6f6f19142d2f437538e3903723ceaa"
+      "sha256": "b408c7bbe5a2c933d489a076ff3f45903725c2dd8397b7ffb8ebbd2d696b7a67"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "c81faec980b77abd2d39b854edaaf162a7937815c84e006f731c624788c341e4"
+      "sha256": "bd7b03980c6dbd2e48d31c21e6b851f54f5dcda7a2b293693c1d878f9aef34e7"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "5d78ae4347f5f7e7dcb698fd13011ff16b4f45db63a90b60d27ef50ce5470320"
+      "sha256": "d8fe3c10e6d79d4aa3138d3c2456aea250bfe962723b31b611b924b3bbfa465f"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "f4287430dc8db5855c19fa5664cbbe04aabedf32e033d86f5bffa29a5326dcae"
+      "sha256": "04d8cd630709b5ae07f7789360fbc15ef2928ed554951ca6542fc8e3554736dd"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "52029f5e416f860bdbbbfad168072f24c7e75944c24dc973d707913d7afca5f2"
+      "sha256": "83912c22799ac66e1a82d92aee10fd743b5aed1b33c72e520bd5eafc0afa8952"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
-      "sha256": "23c977ddc03a068f407a292317747e8647b9d13e5f77e09bfb63fce3e6ab502b"
+      "sha256": "ed59fde4177a8afc1047e55320f699b3a0d94eff2d5ab7737f1cffec5bbe4c09"
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "7991c14ea572cd898edcc70dcb4d68e83cbc873405967635a4369af7509f2bd5"
+      "sha256": "22634bd99d565ed81b36aeb15a675d23cdc3a6149e3700b1293b4e712d8e77be"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "fb14960a38a7dcb6caa9389e775075d891134dc2ff1718954506d37f78955787"
+      "sha256": "67432d349633e1a537797785a37debf5f3fd6b4c9b2d19d843f3dab4f6905389"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "a8483e068c0f9ebd605cd750711472fe2bec6d6650c9648793edc4ec87561e53"
+      "sha256": "ebf1f8b916b8e1ab223fb859b6e6135ca8af8aa7e101e518894ae3c87fcfaee2"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
-      "sha256": "ef3c1410da722e74c472fd14611e35a08b842545a3ad4c3a2acf7b7306c9ab59"
+      "sha256": "ffc95077f399c3e8dc1852d73caede868a607424ebe5660ba5383c9d61435df4"
     }
   },
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "a4b731985a000ab56a34bbb9d14db40e301bb124ef401d9d958fbc875aa932a5"
+      "sha256": "1b343d0262f85e4b5d32bbbebe7dc78a5f798365f787fb02d720e582cb1cb698"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "c0faf0d49b3cf083e0134b9c0ebfcfd993df5668303e55920aba92ad56c41a56"
+      "sha256": "9a4bccd493f25257095d80b43ccefb010f2768f4103cb6d426163d5b122f3393"
     }
   ],
   "httpSurface": [
@@ -138,6 +138,7 @@
     "GET /v2/stores",
     "POST /v2/actions/order",
     "POST /v2/admin/catalog/categories",
+    "POST /v2/admin/catalog/products/batch-lifecycle",
     "POST /v2/admin/catalog/products/batch-tags",
     "POST /v2/admin/catalog/products/{productId}/concession-previews",
     "POST /v2/admin/catalog/products/{productId}/delist",
@@ -302,6 +303,7 @@
     "adminGlobalResourceSearchHttp": "AVAILABLE",
     "adminResourceExportHttp": "AVAILABLE",
     "adminProductBatchTaggingHttp": "AVAILABLE",
+    "adminProductLifecycleBatchHttp": "AVAILABLE",
     "takeoverHttp": "AVAILABLE",
     "fulfillmentScheduler": "AVAILABLE",
     "bnmAvailabilityWorker": "AVAILABLE",
@@ -339,8 +341,6 @@
     "MERCHANT_ABNORMAL_ORDER_RATE_TAXONOMY",
     "MERCHANT_48_HOUR_SHIPPING_RATE_DENOMINATOR",
     "PII_RETENTION_POLICY_VERSION",
-    "ADMIN_OR_QUERY_SEMANTICS",
-    "ADMIN_FUZZY_WALLET_SEARCH_POLICY",
     "ADMIN_UID_IDENTITY",
     "ADMIN_PHONE_SEARCH_AUTHORIZATION",
     "ADMIN_YELLOW_QUEUE_DEFINITION"

@@ -129,6 +129,7 @@ const schemaSources = [
       '023_merchant_store_management.sql',
       '024_merchant_fulfillment_completion.sql',
       '025_takeover_assignments.sql',
+      '026_admin_product_lifecycle_batches.sql',
     ],
   },
   {
@@ -405,6 +406,7 @@ const coordinatedManifest = {
     adminGlobalResourceSearchHttp: 'AVAILABLE',
     adminResourceExportHttp: 'AVAILABLE',
     adminProductBatchTaggingHttp: 'AVAILABLE',
+    adminProductLifecycleBatchHttp: 'AVAILABLE',
     takeoverHttp: 'AVAILABLE',
     fulfillmentScheduler: 'AVAILABLE',
     bnmAvailabilityWorker: 'AVAILABLE',
@@ -428,8 +430,6 @@ const coordinatedManifest = {
     'MERCHANT_ABNORMAL_ORDER_RATE_TAXONOMY',
     'MERCHANT_48_HOUR_SHIPPING_RATE_DENOMINATOR',
     'PII_RETENTION_POLICY_VERSION',
-    'ADMIN_OR_QUERY_SEMANTICS',
-    'ADMIN_FUZZY_WALLET_SEARCH_POLICY',
     'ADMIN_UID_IDENTITY',
     'ADMIN_PHONE_SEARCH_AUTHORIZATION',
     'ADMIN_YELLOW_QUEUE_DEFINITION',
@@ -1916,14 +1916,24 @@ function adminGlobalOperationsOpenApiPaths(errorResponse) {
           { name: 'productId', in: 'query', schema: { type: 'string', minLength: 1, maxLength: 256 } },
           { name: 'merchantId', in: 'query', schema: { type: 'string', minLength: 1, maxLength: 256 } },
           { name: 'txHash', in: 'query', schema: { $ref: '#/components/schemas/Bytes32' } },
-          { name: 'wallet', in: 'query', schema: { $ref: '#/components/schemas/Address' } },
+          { name: 'relation', in: 'query', schema: { enum: ['AND', 'OR'], default: 'AND' } },
+          {
+            name: 'wallet', in: 'query',
+            schema: {
+              anyOf: [
+                { $ref: '#/components/schemas/Address' },
+                { type: 'string', pattern: '^(0x)?[0-9a-fA-F]{6,40}$' },
+              ],
+            },
+          },
+          { name: 'walletMatch', in: 'query', schema: { enum: ['EXACT', 'FUZZY'], default: 'EXACT' } },
           { name: 'from', in: 'query', schema: { type: 'string', format: 'date-time' } },
           { name: 'to', in: 'query', schema: { type: 'string', format: 'date-time' } },
           { name: 'pendingReview', in: 'query', schema: { type: 'boolean' } },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 } },
         ],
         responses: {
-          200: response('Server-side AND search across safe Admin resource summaries', {
+          200: response('Server-side AND/OR search across safe Admin resource summaries', {
             $ref: '#/components/schemas/AdminGlobalSearchResponse',
           }),
           default: errorResponse,
@@ -1951,6 +1961,19 @@ function adminGlobalOperationsOpenApiPaths(errorResponse) {
         responses: {
           200: response('Atomic versioned product tag result', {
             $ref: '#/components/schemas/AdminProductBatchTagResult',
+          }),
+          default: errorResponse,
+        },
+      },
+    },
+    '/v2/admin/catalog/products/batch-lifecycle': {
+      post: {
+        operationId: 'batchApplyAdminProductLifecycle',
+        security,
+        requestBody: body({ $ref: '#/components/schemas/AdminProductLifecycleBatchRequest' }),
+        responses: {
+          200: response('Atomic product lifecycle batch result', {
+            $ref: '#/components/schemas/AdminProductLifecycleBatchResult',
           }),
           default: errorResponse,
         },
@@ -4946,7 +4969,7 @@ function fulfillmentOpenApiSchemas() {
       properties: {
         action: { enum: [...adminBatchActions] },
         enabled: { type: 'boolean' },
-        reasonCode: { enum: ['Forbidden', 'ProductWriteLocked'] },
+        reasonCode: { $ref: '#/components/schemas/CoreErrorCode' },
       },
     },
     AdminResourceSummary: {
@@ -4972,15 +4995,16 @@ function fulfillmentOpenApiSchemas() {
     },
     AdminGlobalSearchResponse: {
       type: 'object', additionalProperties: false,
-      required: ['artifactVersion', 'relation', 'resources', 'truncated', 'unavailableFilters'],
+      required: ['artifactVersion', 'relation', 'walletMatch', 'resources', 'truncated', 'unavailableFilters'],
       properties: {
         artifactVersion: { const: artifactVersion },
-        relation: { const: 'AND' },
+        relation: { enum: ['AND', 'OR'] },
+        walletMatch: { enum: ['EXACT', 'FUZZY'] },
         resources: { type: 'array', items: { $ref: '#/components/schemas/AdminResourceSummary' } },
         truncated: { type: 'boolean' },
         unavailableFilters: {
           type: 'array', uniqueItems: true,
-          items: { enum: ['OR', 'FUZZY_WALLET', 'UID', 'PHONE', 'YELLOW_QUEUE'] },
+          items: { enum: ['UID', 'PHONE', 'YELLOW_QUEUE'] },
         },
       },
     },
@@ -5061,6 +5085,40 @@ function fulfillmentOpenApiSchemas() {
         },
         changedCount: { type: 'integer', minimum: 0, maximum: 100 },
         products: { type: 'array', items: { $ref: '#/components/schemas/AdminProductBatchTagItem' } },
+        createdAt: timestamp,
+      },
+    },
+    AdminProductLifecycleBatchRequest: {
+      type: 'object', additionalProperties: false,
+      required: ['action', 'productIds', 'reasonCode', 'idempotencyKey'],
+      properties: {
+        action: { enum: [...catalogReviewDecisions] },
+        productIds: {
+          type: 'array', minItems: 1, maxItems: 100, uniqueItems: true,
+          items: { type: 'string', minLength: 1, maxLength: 256 },
+        },
+        reasonCode: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{1,63}$' },
+        idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
+      },
+    },
+    AdminProductLifecycleBatchItem: {
+      type: 'object', additionalProperties: false,
+      required: ['productId', 'previousState', 'state'],
+      properties: {
+        productId: { type: 'string', minLength: 1, maxLength: 256 },
+        previousState: { enum: [...catalogProductLifecycleStates] },
+        state: { enum: [...catalogProductLifecycleStates] },
+      },
+    },
+    AdminProductLifecycleBatchResult: {
+      type: 'object', additionalProperties: false,
+      required: ['artifactVersion', 'operationId', 'action', 'changedCount', 'products', 'createdAt'],
+      properties: {
+        artifactVersion: { const: artifactVersion },
+        operationId: { $ref: '#/components/schemas/Bytes32' },
+        action: { enum: [...catalogReviewDecisions] },
+        changedCount: { type: 'integer', minimum: 1, maximum: 100 },
+        products: { type: 'array', minItems: 1, maxItems: 100, items: { $ref: '#/components/schemas/AdminProductLifecycleBatchItem' } },
         createdAt: timestamp,
       },
     },
@@ -8218,7 +8276,7 @@ export interface AdminOrderSearchPage extends FulfillmentOrderPage {
 export interface AdminBatchCapability {
   action: AdminBatchAction;
   enabled: boolean;
-  reasonCode?: 'Forbidden' | 'ProductWriteLocked';
+  reasonCode?: CoreErrorCode;
 }
 
 export interface AdminResourceSummary {
@@ -8235,10 +8293,11 @@ export interface AdminResourceSummary {
 
 export interface AdminGlobalSearchResponse {
   artifactVersion: typeof artifactVersion;
-  relation: 'AND';
+  relation: 'AND' | 'OR';
+  walletMatch: 'EXACT' | 'FUZZY';
   resources: readonly AdminResourceSummary[];
   truncated: boolean;
-  unavailableFilters: readonly ('OR' | 'FUZZY_WALLET' | 'UID' | 'PHONE' | 'YELLOW_QUEUE')[];
+  unavailableFilters: readonly ('UID' | 'PHONE' | 'YELLOW_QUEUE')[];
 }
 
 export interface AdminResourceSelection {
@@ -8285,6 +8344,28 @@ export interface AdminProductBatchTagResult {
   tagIds: readonly string[];
   changedCount: number;
   products: readonly AdminProductBatchTagItem[];
+  createdAt: Timestamp;
+}
+
+export interface AdminProductLifecycleBatchRequest {
+  action: CatalogReviewDecision;
+  productIds: readonly string[];
+  reasonCode: string;
+  idempotencyKey: string;
+}
+
+export interface AdminProductLifecycleBatchItem {
+  productId: string;
+  previousState: CatalogProductLifecycleState;
+  state: CatalogProductLifecycleState;
+}
+
+export interface AdminProductLifecycleBatchResult {
+  artifactVersion: typeof artifactVersion;
+  operationId: Bytes32;
+  action: CatalogReviewDecision;
+  changedCount: number;
+  products: readonly AdminProductLifecycleBatchItem[];
   createdAt: Timestamp;
 }
 

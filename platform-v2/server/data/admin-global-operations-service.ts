@@ -7,9 +7,14 @@ import {
   type AdminBatchAction,
   type AdminExportFormat,
   type AdminResourceType,
+  type CatalogReviewDecision,
 } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
-import { productWriteLock, type ProductWriteLockSubject } from './catalog-management-service.ts';
+import {
+  productLifecycleDecisionAvailability,
+  productWriteLock,
+  type ProductWriteLockSubject,
+} from './catalog-management-service.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
@@ -18,11 +23,13 @@ type PlatformRole = 'ADMIN' | 'OPERATOR' | 'AUDITOR';
 
 export interface AdminGlobalSearchQuery {
   resourceTypes?: AdminResourceType[];
+  relation?: 'AND' | 'OR';
   orderId?: string;
   productId?: string;
   merchantId?: string;
   txHash?: string;
   wallet?: string;
+  walletMatch?: 'EXACT' | 'FUZZY';
   from?: Date;
   to?: Date;
   pendingReview?: boolean;
@@ -89,10 +96,11 @@ export class AdminGlobalOperationsService {
       }
       return {
         artifactVersion: CORE_ARTIFACT_VERSION,
-        relation: 'AND' as const,
+        relation: query.relation,
+        walletMatch: query.walletMatch,
         resources,
         truncated,
-        unavailableFilters: ['OR', 'FUZZY_WALLET', 'UID', 'PHONE', 'YELLOW_QUEUE'] as const,
+        unavailableFilters: ['UID', 'PHONE', 'YELLOW_QUEUE'] as const,
       };
     });
   }
@@ -160,11 +168,11 @@ export class AdminGlobalOperationsService {
 }
 
 async function searchOrders(executor: SqlExecutor, query: ReturnType<typeof searchQuery>) {
-  const clauses: string[] = [];
+  const criteria: string[] = [];
   const params: unknown[] = [];
   const add = (sql: string, value: unknown) => {
     params.push(value);
-    clauses.push(sql.replace('?', `$${params.length}`));
+    criteria.push(sql.replace('?', `$${params.length}`));
   };
   if (query.orderId) add('orders.order_id = ?', query.orderId);
   if (query.productId) add('orders.product_id = ?', query.productId);
@@ -172,13 +180,14 @@ async function searchOrders(executor: SqlExecutor, query: ReturnType<typeof sear
   if (query.txHash) add('lower(orders.payment_tx_hash) = ?', query.txHash);
   if (query.wallet) {
     params.push(query.wallet);
-    clauses.push(`(lower(orders.buyer_wallet) = $${params.length} OR lower(orders.merchant_wallet) = $${params.length})`);
+    criteria.push(query.walletMatch === 'EXACT'
+      ? `(lower(orders.buyer_wallet) = $${params.length} OR lower(orders.merchant_wallet) = $${params.length})`
+      : `(strpos(lower(orders.buyer_wallet), $${params.length}) > 0 OR strpos(lower(orders.merchant_wallet), $${params.length}) > 0)`);
   }
-  if (query.from) add('orders.created_at >= ?', query.from);
-  if (query.to) add('orders.created_at < ?', query.to);
+  addDateCriterion(criteria, params, 'orders.created_at', query.from, query.to);
   if (query.pendingReview !== undefined) {
     params.push(query.pendingReview);
-    clauses.push(`(product.lifecycle_state = 'REVIEW') = $${params.length}`);
+    criteria.push(`(product.lifecycle_state = 'REVIEW') = $${params.length}`);
   }
   params.push(query.limit + 1);
   const result = await executor.query<ResourceRow>(
@@ -188,7 +197,7 @@ async function searchOrders(executor: SqlExecutor, query: ReturnType<typeof sear
        ''::text AS lifecycle_state
      FROM core.orders orders
      JOIN core.products product ON product.product_id = orders.product_id
-     ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''}
+     ${searchWhere(query, criteria)}
      ORDER BY orders.created_at DESC, orders.order_id DESC LIMIT $${params.length}`,
     params,
   );
@@ -196,18 +205,19 @@ async function searchOrders(executor: SqlExecutor, query: ReturnType<typeof sear
 }
 
 async function searchProducts(executor: SqlExecutor, query: ReturnType<typeof searchQuery>) {
-  if (query.orderId || query.txHash) return [];
-  const clauses: string[] = [];
+  if (query.relation === 'AND' && (query.orderId || query.txHash)) return [];
+  const criteria: string[] = [];
   const params: unknown[] = [];
   const add = (sql: string, value: unknown) => {
     params.push(value);
-    clauses.push(sql.replace('?', `$${params.length}`));
+    criteria.push(sql.replace('?', `$${params.length}`));
   };
   if (query.productId) add('product.product_id = ?', query.productId);
   if (query.merchantId) add('product.merchant_id = ?', query.merchantId);
-  if (query.wallet) add('lower(merchant.settlement_wallet) = ?', query.wallet);
-  if (query.from) add('product.created_at >= ?', query.from);
-  if (query.to) add('product.created_at < ?', query.to);
+  if (query.wallet) add(query.walletMatch === 'EXACT'
+    ? 'lower(merchant.settlement_wallet) = ?'
+    : 'strpos(lower(merchant.settlement_wallet), ?) > 0', query.wallet);
+  addDateCriterion(criteria, params, 'product.created_at', query.from, query.to);
   if (query.pendingReview !== undefined) add("(product.lifecycle_state = 'REVIEW') = ?", query.pendingReview);
   params.push(query.limit + 1);
   const result = await executor.query<ResourceRow>(
@@ -221,7 +231,7 @@ async function searchProducts(executor: SqlExecutor, query: ReturnType<typeof se
        product.lifecycle_state
      FROM core.products product
      JOIN core.merchants merchant ON merchant.merchant_id = product.merchant_id
-     ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''}
+     ${searchWhere(query, criteria)}
      ORDER BY product.created_at DESC, product.product_id DESC LIMIT $${params.length}`,
     params,
   );
@@ -229,17 +239,18 @@ async function searchProducts(executor: SqlExecutor, query: ReturnType<typeof se
 }
 
 async function searchMerchants(executor: SqlExecutor, query: ReturnType<typeof searchQuery>) {
-  if (query.orderId || query.productId || query.txHash) return [];
-  const clauses: string[] = [];
+  if (query.relation === 'AND' && (query.orderId || query.productId || query.txHash)) return [];
+  const criteria: string[] = [];
   const params: unknown[] = [];
   const add = (sql: string, value: unknown) => {
     params.push(value);
-    clauses.push(sql.replace('?', `$${params.length}`));
+    criteria.push(sql.replace('?', `$${params.length}`));
   };
   if (query.merchantId) add('merchant.merchant_id = ?', query.merchantId);
-  if (query.wallet) add('lower(merchant.settlement_wallet) = ?', query.wallet);
-  if (query.from) add('merchant.created_at >= ?', query.from);
-  if (query.to) add('merchant.created_at < ?', query.to);
+  if (query.wallet) add(query.walletMatch === 'EXACT'
+    ? 'lower(merchant.settlement_wallet) = ?'
+    : 'strpos(lower(merchant.settlement_wallet), ?) > 0', query.wallet);
+  addDateCriterion(criteria, params, 'merchant.created_at', query.from, query.to);
   if (query.pendingReview !== undefined) add("(merchant.status = 'PENDING') = ?", query.pendingReview);
   params.push(query.limit + 1);
   const result = await executor.query<ResourceRow>(
@@ -249,7 +260,7 @@ async function searchMerchants(executor: SqlExecutor, query: ReturnType<typeof s
        merchant.created_at, '[]'::jsonb AS tag_ids,
        ''::text AS lifecycle_state
      FROM core.merchants merchant
-     ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''}
+     ${searchWhere(query, criteria)}
      ORDER BY merchant.created_at DESC, merchant.merchant_id DESC LIMIT $${params.length}`,
     params,
   );
@@ -292,8 +303,12 @@ async function allowedBatchActions(
     { action: 'EXPORT_EXCEL', enabled: true },
   ];
   if (row.resource_type === 'PRODUCT') {
-    if (role === 'AUDITOR') actions.push({ action: 'ADD_PRODUCT_TAGS', enabled: false, reasonCode: 'Forbidden' });
-    else {
+    if (role === 'AUDITOR') {
+      actions.push({ action: 'ADD_PRODUCT_TAGS', enabled: false, reasonCode: 'Forbidden' });
+      for (const item of productLifecycleBatchActions) {
+        actions.push({ action: item.action, enabled: false, reasonCode: 'Forbidden' });
+      }
+    } else {
       const subject: ProductWriteLockSubject = {
         product_id: row.product_id!,
         lifecycle_state: row.lifecycle_state,
@@ -302,10 +317,32 @@ async function allowedBatchActions(
       actions.push(lock
         ? { action: 'ADD_PRODUCT_TAGS', enabled: false, reasonCode: 'ProductWriteLocked' }
         : { action: 'ADD_PRODUCT_TAGS', enabled: true });
+      for (const item of productLifecycleBatchActions) {
+        const availability = await productLifecycleDecisionAvailability(
+          executor,
+          row.product_id!,
+          item.decision,
+          now,
+        );
+        actions.push(availability.enabled
+          ? { action: item.action, enabled: true }
+          : { action: item.action, enabled: false, reasonCode: availability.reasonCode });
+      }
     }
   }
   return actions;
 }
+
+const productLifecycleBatchActions: ReadonlyArray<{
+  action: AdminBatchAction;
+  decision: CatalogReviewDecision;
+}> = [
+  { action: 'APPROVE_PRODUCTS', decision: 'APPROVE' },
+  { action: 'REJECT_PRODUCTS', decision: 'REJECT' },
+  { action: 'PUBLISH_PRODUCTS', decision: 'PUBLISH' },
+  { action: 'HIDE_PRODUCTS', decision: 'HIDE' },
+  { action: 'DELIST_PRODUCTS', decision: 'DELIST' },
+];
 
 function resourceProjection(row: ResourceRow, allowedActions: Awaited<ReturnType<typeof allowedBatchActions>>) {
   return Object.freeze({
@@ -316,7 +353,7 @@ function resourceProjection(row: ResourceRow, allowedActions: Awaited<ReturnType
     merchantId: row.merchant_id,
     productId: row.product_id,
     tagIds: stringArray(row.tag_ids),
-    allowedBatchActions,
+    allowedBatchActions: allowedActions,
     createdAt: new Date(row.created_at).toISOString(),
   });
 }
@@ -383,14 +420,29 @@ function searchQuery(input: AdminGlobalSearchQuery) {
   for (const [name, value] of Object.entries({
     orderId: input.orderId, productId: input.productId, merchantId: input.merchantId,
   })) if (value !== undefined) validateResourceId(value, name);
+  const relation = input.relation ?? 'AND';
+  if (relation !== 'AND' && relation !== 'OR') throw new CoreError('InvalidRequest', 'Admin search relation is invalid');
+  const walletMatch = input.walletMatch ?? 'EXACT';
+  if (walletMatch !== 'EXACT' && walletMatch !== 'FUZZY') {
+    throw new CoreError('InvalidRequest', 'Admin wallet match mode is invalid');
+  }
   const txHash = input.txHash?.toLowerCase();
   if (txHash && !/^0x[0-9a-f]{64}$/.test(txHash)) throw new CoreError('InvalidRequest', 'txHash is invalid');
-  const wallet = input.wallet ? normalizedWallet(input.wallet) : undefined;
+  const wallet = input.wallet
+    ? walletMatch === 'EXACT' ? normalizedWallet(input.wallet) : fuzzyWalletFragment(input.wallet)
+    : undefined;
   if (input.from && input.to && input.from >= input.to) throw new CoreError('InvalidRequest', 'Search time range is invalid');
   const limit = input.limit ?? 50;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new CoreError('InvalidRequest', 'Search limit must be 1-100');
+  const hasCriteria = Boolean(
+    input.orderId || input.productId || input.merchantId || txHash || wallet || input.from || input.to
+      || input.pendingReview !== undefined,
+  );
   return {
     resourceTypes,
+    relation,
+    walletMatch,
+    hasCriteria,
     ...(input.orderId ? { orderId: input.orderId } : {}),
     ...(input.productId ? { productId: input.productId } : {}),
     ...(input.merchantId ? { merchantId: input.merchantId } : {}),
@@ -401,6 +453,39 @@ function searchQuery(input: AdminGlobalSearchQuery) {
     ...(input.pendingReview !== undefined ? { pendingReview: input.pendingReview } : {}),
     limit,
   };
+}
+
+function addDateCriterion(
+  criteria: string[],
+  params: unknown[],
+  column: string,
+  from?: Date,
+  to?: Date,
+) {
+  const parts: string[] = [];
+  if (from) {
+    params.push(from);
+    parts.push(`${column} >= $${params.length}`);
+  }
+  if (to) {
+    params.push(to);
+    parts.push(`${column} < $${params.length}`);
+  }
+  if (parts.length) criteria.push(`(${parts.join(' AND ')})`);
+}
+
+function searchWhere(query: ReturnType<typeof searchQuery>, criteria: string[]) {
+  if (criteria.length) return `WHERE ${criteria.join(` ${query.relation} `)}`;
+  return query.hasCriteria ? 'WHERE false' : '';
+}
+
+function fuzzyWalletFragment(value: string) {
+  if (typeof value !== 'string') throw new CoreError('InvalidRequest', 'Fuzzy wallet fragment is invalid');
+  const fragment = value.toLowerCase().replace(/^0x/, '');
+  if (!/^[0-9a-f]{6,40}$/.test(fragment)) {
+    throw new CoreError('InvalidRequest', 'Fuzzy wallet fragment must contain 6-40 hexadecimal characters');
+  }
+  return fragment;
 }
 
 function exportInput(input: AdminExportInput) {
