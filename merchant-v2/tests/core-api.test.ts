@@ -49,7 +49,15 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('logistics-admin.1 Core HTTP consumer', () => {
+describe('admin-global-ops.1 Core HTTP consumer', () => {
+  it('does not expose Admin global search, export or product batch-tag commands', () => {
+    const api = createCoreApi('https://core.example.test');
+
+    expect(api).not.toHaveProperty('searchAdminGlobalResources');
+    expect(api).not.toHaveProperty('createAdminGlobalExport');
+    expect(api).not.toHaveProperty('createAdminProductBatchTags');
+  });
+
   it('consumes signed printer binding, provider waybill and durable print job routes', async () => {
     const acceptedJob = { ...waybillPrintJob, state: 'QUEUED' as const, attempts: 0, errorCode: null };
     const fetchMock = vi.fn()
@@ -327,7 +335,7 @@ describe('logistics-admin.1 Core HTTP consumer', () => {
       'https://core.example.test/v2/catalog/products',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-logistics-admin.1' }),
+        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-admin-global-ops.1' }),
       }),
     );
   });
