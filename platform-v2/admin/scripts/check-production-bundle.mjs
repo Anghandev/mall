@@ -13,7 +13,7 @@ const forbidden = [
   'USDT Claim',
   'NPL/BNM Claim',
   'Escrow',
-  '/v2/merchant/stores/',
+  '/v2/merchant/stores',
   '/v2/merchant/waybills/batches',
   '/v2/merchant/print-jobs',
 ];
@@ -51,4 +51,4 @@ if (violations.length > 0) {
   process.exit(1);
 }
 
-console.log(`Production bundle check passed for ${artifactVersion}: coordinated Admin global operations are present with no samples, deprecated actions or Merchant logistics paths.`);
+console.log(`Production bundle check passed for ${artifactVersion}: coordinated Admin operations are present with no samples, deprecated actions, Merchant store-management calls or Merchant logistics paths.`);

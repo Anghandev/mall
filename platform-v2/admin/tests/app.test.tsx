@@ -1,6 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { artifactVersion, executableOrderActionNames, type ManagedCatalogProduct, type UserRole } from '@abu24k/core-artifacts';
+import {
+  artifactVersion,
+  executableOrderActionNames,
+  storeStatuses,
+  type ManagedCatalogProduct,
+  type MerchantStore,
+  type UserRole,
+} from '@abu24k/core-artifacts';
 import coordinatedManifest from '@abu24k/core-artifacts/manifest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -28,11 +35,34 @@ describe('platform admin fail-closed experience', () => {
     expect(packageJson.dependencies['@abu24k/core-artifacts']).toBe(`workspace:${artifactVersion}`);
     expect(productBaseline.artifactVersion).toBe(artifactVersion);
     expect(coreState.artifactVersion).toBe(artifactVersion);
-    expect(coreState.artifactStatus).toBe('coordinated-admin-global-operations-checkpoint');
+    expect(coreState.artifactStatus).toBe('coordinated-merchant-stores-checkpoint');
     expect(coreState.connectionLabel).toContain(artifactVersion);
     expect(productBaseline.adminCapabilities.adminGlobalResourceSearch).toBe(true);
     expect(productBaseline.adminCapabilities.adminGlobalResourceExport).toBe(true);
     expect(productBaseline.adminCapabilities.adminProductBatchTags).toBe(true);
+    expect(productBaseline.adminCapabilities.merchantStoreManagement).toBe(false);
+  });
+
+  it('accepts the generated draft read status without exposing Merchant store-management operations', () => {
+    const generatedDraftStatus: MerchantStore['status'] = 'DRAFT';
+    const merchantStoreManagementOperations = coordinatedManifest.httpSurface.filter((operation) =>
+      /^(?:GET|POST) \/v2\/merchant\/stores$|^PUT \/v2\/merchant\/stores\/\{storeId\}$|^POST \/v2\/merchant\/stores\/\{storeId\}\/(?:activate|close)$/.test(operation),
+    );
+    const adminStoreManagementOperations = coordinatedManifest.httpSurface.filter((operation) =>
+      /^\w+ \/v2\/admin\/(?:merchant-)?stores(?:\/|$)/.test(operation),
+    );
+
+    expect(artifactVersion).toBe('2.0.0-merchant-stores.1');
+    expect(storeStatuses).toEqual(['DRAFT', 'ACTIVE', 'SUSPENDED', 'CLOSED']);
+    expect(generatedDraftStatus).toBe('DRAFT');
+    expect(merchantStoreManagementOperations).toEqual([
+      'GET /v2/merchant/stores',
+      'POST /v2/merchant/stores',
+      'POST /v2/merchant/stores/{storeId}/activate',
+      'POST /v2/merchant/stores/{storeId}/close',
+      'PUT /v2/merchant/stores/{storeId}',
+    ]);
+    expect(adminStoreManagementOperations).toEqual([]);
   });
 
   it('publishes the Admin logistics surface while keeping it closed before SIWE', () => {
