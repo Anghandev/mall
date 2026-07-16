@@ -9171,7 +9171,7 @@ test('takeover funding consumes final guarantee first and records Operations adv
   }
 });
 
-test('takeover assignment authorizes one qualified replacement merchant through real shipment', async () => {
+test('takeover assignment authorizes one qualified replacement merchant through receipt and closure', async () => {
   const db = await createBusinessDatabase();
   const operatorWallet = Wallet.createRandom();
   const auditorWallet = Wallet.createRandom();
@@ -9220,12 +9220,28 @@ test('takeover assignment authorizes one qualified replacement merchant through 
       evidenceHash: `0x${'6'.repeat(64)}`,
       reasonCode: 'NO_SHIPMENT',
     });
-    await db.query(
-      `UPDATE core.takeover_cases SET state = 'FUNDED', required_usdt = 20,
-         platform_advance_usdt = 20, platform_advance_safe_address = $2,
-         merchant_debt_usdt = 20, updated_at = $3 WHERE case_id = $1`,
-      [takeover.caseId, '0x5555555555555555555555555555555555555555', now],
+    const secondary = Wallet.createRandom();
+    const governanceSafe = '0x7777777777777777777777777777777777777777';
+    const operationsSafe = '0x5555555555555555555555555555555555555555';
+    const funding = governedTakeoverFundingService(db, secondary, governanceSafe, () => now);
+    const fundingApproval = await signedTakeoverFundingApproval(
+      funding,
+      operator,
+      { caseId: takeover.caseId, requiredUsdt: '20', operationsSafeAddress: operationsSafe },
+      secondary,
+      '1',
+      String(Math.floor(now.getTime() / 1_000) + 300),
     );
+    const funded = await funding.fundTakeover(operator, {
+      caseId: takeover.caseId,
+      requiredUsdt: '20',
+      operationsSafeAddress: operationsSafe,
+      idempotencyKey: 'replacement-assignment-funding-1',
+      correlationId: 'replacement-assignment-funding-1',
+      approval: fundingApproval,
+    });
+    assert.equal(funded.state, 'FUNDED');
+    assert.equal(funded.platformAdvanceUsdt, '20');
     await seedEligibleReplacementMerchant(db, 'replacement-1', firstWallet.address, '1', now, true);
     await seedEligibleReplacementMerchant(db, 'replacement-2', secondWallet.address, '2', now, true);
     await seedEligibleReplacementMerchant(db, 'replacement-ineligible', ineligibleWallet.address, '3', now, false);
@@ -9323,6 +9339,41 @@ test('takeover assignment authorizes one qualified replacement merchant through 
       }),
       /cannot be assigned from its current state/,
     );
+    const delivered = await fulfillment.recordDelivery(operator, intent.orderId, {
+      idempotencyKey: 'replacement-delivery-command-1',
+      evidenceHash: `0x${'a'.repeat(64)}`,
+    });
+    assert.equal(delivered.state, 'DELIVERED');
+    const received = await fulfillment.confirmReceipt(
+      { walletAddress: intent.buyer, roles: ['BUYER'] },
+      intent.orderId,
+      {
+        idempotencyKey: 'replacement-receipt-command-1',
+        evidenceHash: `0x${'b'.repeat(64)}`,
+      },
+    );
+    assert.equal(received.state, 'FULFILLED');
+    const closed = await db.query<{ order_state: string; case_state: string; closed_at: Date | null }>(
+      `SELECT orders.state AS order_state, takeover.state AS case_state, takeover.closed_at
+       FROM core.orders orders
+       JOIN core.takeover_cases takeover ON takeover.order_id = orders.order_id
+       WHERE orders.order_id = $1`,
+      [intent.orderId],
+    );
+    assert.equal(closed.rows[0]?.order_state, 'FULFILLED');
+    assert.equal(closed.rows[0]?.case_state, 'CLOSED');
+    assert.ok(closed.rows[0]?.closed_at);
+    const closeTransition = await db.query<{ from_state: string; to_state: string; public_evidence_type: string }>(
+      `SELECT from_state, to_state, public_evidence_type
+       FROM core.takeover_case_transitions
+       WHERE case_id = $1 AND to_state = 'CLOSED'`,
+      [takeover.caseId],
+    );
+    assert.deepEqual(closeTransition.rows[0], {
+      from_state: 'FULFILLING',
+      to_state: 'CLOSED',
+      public_evidence_type: 'FULFILLMENT_FINALIZED',
+    });
   } finally {
     await db.close();
   }
