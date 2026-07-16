@@ -58,6 +58,17 @@ describe('seckill admin coordinated Core client', () => {
     expect(() => parseRealtimeEvent({ ...realtimeEvent(sessionId), finality: 'MINED' }, sessionId)).toThrow(/coordinated protocol/);
   });
 
+  it('rejects mutable timer projections and a premature FINAL governance action', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      ...seckillSession(), timers: { mainDurationSeconds: 3600, relayInitialSeconds: 60, relayIncrementSeconds: 31, relayCapSeconds: 60 },
+    })));
+    await expect(fetchCurrentSeckillSession()).rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    const prematureFinal = governanceAction({ state: 'FINAL', confirmations: 14, canonical: true, allowedActions: [] });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([prematureFinal])));
+    await expect(fetchSeckillGovernanceActions('jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
+  });
+
   it('deduplicates event IDs and closes on a non-increasing unseen cursor', () => {
     const sessionId = hash('a');
     const socket = new TestSocket();

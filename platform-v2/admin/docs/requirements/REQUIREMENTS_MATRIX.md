@@ -36,11 +36,11 @@ are never soft-deletable.
 | ADM-POL-004 | 62 | Multiple NPL reward and USDT concession beneficiary addresses and weights | D-V2-009, D-V2-010, D-V2-014, D-V2-022 | Complete asset-specific destinations, payment snapshots, no self/cycles, exact balance and Safe approval are required; missing NPL beneficiaries/remainders credit the circulation pool | Overridden | GAP-ADM-008, GAP-ADM-017 |
 | ADM-POL-005 | 63 | Source address-bound partner/channel no-login Claim link | D-V2-007, D-V2-015, D-V2-023, D-V2-027 | Replace with wallet-bound, one-use, expiring signed settlement request; eligibility, Available balance and Safe batching cannot be bypassed | Overridden | GAP-ADM-008, GAP-ADM-017 |
 | ADM-POL-006 | Final Goal | Merchant concession from 0-100%; base receivable, concession amount, net receivable and platform/prize/node/other configured-destination preview | D-V2-022, D-V2-023 | Core computes and signs exact integer preview; UI validates range and renders every balanced ledger destination without changing buyer 70/30 | Frozen | GAP-ADM-008, GAP-ADM-017 |
-| ADM-SEK-001 | 65-67 | Create/publish session, assign product and lock activity inventory | D-V2-014, D-V2-017, D-V2-018, D-V2-020, D-V2-024 | Cannot publish without governed policy, signed quotes, atomic inventory, merchant guarantee at least 1,000 USDT and coverage at least 100% | Frozen | GAP-ADM-009, GAP-ADM-010, GAP-ADM-017 |
-| ADM-SEK-002 | 68-69 | Main duration, relay initial and per-purchase recharge | D-V2-013, D-V2-014 | Fixed launch 60min/60sec/+30sec/cap60sec/main cap; future policy governance only | Overridden | GAP-ADM-009 |
-| ADM-SEK-003 | 70-71 | Manual force-close and seckill-purchase breaker | D-V2-014, D-V2-016 | Exact session intent, secondary signature, Safe approval and indexed event; seckill purchase, new payment and new settlement-batch breakers remain independent | Overridden | GAP-ADM-004, GAP-ADM-009, GAP-ADM-017 |
-| ADM-SEK-004 | 72 | Inject USDT into current prize pool from Operations Treasury Safe | D-V2-014, D-V2-023, D-V2-024 | Exact asset/amount/session/Safe intent, balanced ledger posting, Safe receipt and prize-liability reconciliation; injection cannot hide coverage below 100% | Overridden | GAP-ADM-004, GAP-ADM-009, GAP-ADM-017 |
-| ADM-SEK-005 | 73-74 | Versioned rich-text rules shared by Mall and Merchant | D-V2-013, D-V2-014 | Published content binds same policyVersion and sanitization | Frozen | GAP-ADM-009, GAP-ADM-013 |
+| ADM-SEK-001 | 65-67 | Create/publish session, assign product and lock activity inventory | D-V2-014, D-V2-017, D-V2-018, D-V2-020, D-V2-024 | Cannot publish without governed policy, signed quotes, atomic inventory, merchant guarantee at least 1,000 USDT and coverage at least 100% | Verified | - |
+| ADM-SEK-002 | 68-69 | Main duration, relay initial and per-purchase recharge | D-V2-013, D-V2-014 | Fixed launch 60min/60sec/+30sec/cap60sec/main cap; future policy governance only | Verified | - |
+| ADM-SEK-003 | 70-71 | Manual force-close and seckill-purchase breaker | D-V2-014, D-V2-016 | Exact session intent, secondary signature, Safe approval and indexed event; seckill purchase, new payment and new settlement-batch breakers remain independent | Verified | - |
+| ADM-SEK-004 | 72 | Inject USDT into current prize pool from Operations Treasury Safe | D-V2-014, D-V2-023, D-V2-024 | Exact asset/amount/session/Safe intent, balanced ledger posting, Safe receipt and prize-liability reconciliation; injection cannot hide coverage below 100% | Verified | - |
+| ADM-SEK-005 | 73-74 | Versioned rich-text rules shared by Mall and Merchant | D-V2-013, D-V2-014 | Published content binds same policyVersion and sanitization | Verified | - |
 | ADM-RISK-001 | 76-78 | High-Gas/front-running monitor and automatic 24-hour address restriction | D-V2-026 | Explainable risk evidence, exact 24-hour expiry, appeal and authorized override are audited | Frozen | GAP-ADM-011 |
 | ADM-RISK-002 | 79 | Source `tx.origin == msg.sender` contract-call ban | D-V2-015 | Never tx.origin; authorization supports ERC-1271; any EOA policy is separate and explicit | Overridden | GAP-ADM-011 |
 | ADM-RISK-003 | 80-82 | Anonymous low-history wallet clustering detection/block | - | Risk signal cannot independently forge authorization/finality | Frozen | GAP-ADM-011 |
@@ -298,6 +298,35 @@ Merchant-only operations. This checkpoint completes no Admin Requirement ID:
 Production Safe/RPC/domain/wallets, provider credentials, physical devices and
 deployment remain `ExternalBlocked` under `ADM-GOAL-003`. No production fixture
 is shipped.
+
+## Platform Seckill Operations Closure Evidence
+
+The completed Admin consumer remains pinned to the coordinated
+`@abu24k/core-artifacts@2.0.0-merchant-fulfillment.1`; this product-only closure
+does not publish or handwrite a parallel shared contract:
+
+- `ADM-SEK-001`: ADMIN and OPERATOR authenticate through SIWE, read the real
+  action list/detail, bind an existing published CMS rules projection, and
+  create a session draft that Core validates and locks against real inventory.
+- `ADM-SEK-002`: the UI exposes 3600s / 60s / +30s / cap 60s as read-only
+  evidence. Its strict client rejects any current/history/session-plan response
+  whose timer tuple differs from the frozen values.
+- `ADM-SEK-003` and `ADM-SEK-004`: ADMIN controls submit exact force-close,
+  prize-injection and seckill-breaker-resume bodies. The selected action then
+  consumes the Core-issued EIP-712 challenge, an independent wallet signature,
+  the secondary-signature response and the Safe-proposal command. Cancellation
+  remains restricted to Core `allowedActions`; OPERATOR can cancel only an
+  unproposed opening action and AUDITOR is read-only.
+- `ADM-SEK-005`: the draft form fetches `SECKILL_RULES` through the existing CMS
+  version endpoint, requires a published projection with a bound policyVersion,
+  and copies its contentHash and policyVersion into read-only fields. The UI
+  never constructs calldata or calculates prize allocations.
+- Core `403` / `409`, `FAILED`, `REORGED`, and `MINED 14/15` remain explicit
+  non-success states. A `FINAL` projection with fewer than 15 confirmations or
+  non-canonical evidence is rejected by the Admin client.
+- Production Safe addresses/owners, independent role wallets, RPC/WSS/mTLS,
+  governed content and funded Operations Safe remain `ExternalBlocked`. All
+  fixtures stay under `tests/**`; none is present in the production bundle.
 
 ## Merchant Fulfillment `.1` Consumer Boundary
 
