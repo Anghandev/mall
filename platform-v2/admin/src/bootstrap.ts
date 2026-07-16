@@ -7,7 +7,7 @@ import {
 } from '@abu24k/core-artifacts';
 
 export const productBaseline = Object.freeze({
-  coreArtifacts: 'coordinated-merchant-stores-checkpoint',
+  coreArtifacts: 'coordinated-merchant-fulfillment-checkpoint',
   artifactVersion,
   publicCatalogs: Object.freeze({
     breakerScopes,
@@ -41,6 +41,7 @@ export const productBaseline = Object.freeze({
     adminGlobalResourceExport: true,
     adminProductBatchTags: true,
     merchantStoreManagement: false,
+    merchantOrderExport: false,
     merchantLogisticsOperations: true,
     merchantLifecycleHttp: true,
     merchantQualificationEncryption: true,
