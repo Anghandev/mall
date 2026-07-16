@@ -490,9 +490,11 @@ function StoreRow({ store, location }: { store: MerchantStore; location: Browser
           {store.status === 'ACTIVE' ? '营业中' : store.status}
         </span>
       </div>
+      <StoreMediaGallery store={store} />
       <dl className="store-row__facts">
         <div><dt>行政区</dt><dd>{store.regionCode}</dd></div>
         <div><dt>距离</dt><dd>{distance === null ? '定位后显示' : `${distance.toFixed(1)} km`}</dd></div>
+        <div><dt>营业时间</dt><dd>{store.businessHours}</dd></div>
         <div><dt>版本</dt><dd>v{store.version}</dd></div>
       </dl>
       <div className="split-actions">
@@ -504,6 +506,27 @@ function StoreRow({ store, location }: { store: MerchantStore; location: Browser
         </button>
       </div>
     </article>
+  );
+}
+
+function StoreMediaGallery({ store, compact = false }: { store: MerchantStore; compact?: boolean }) {
+  return (
+    <div
+      className={`store-media-gallery${compact ? ' store-media-gallery--compact' : ''}`}
+      aria-label={`${store.name} 门店图片`}
+    >
+      {store.imageAssetIds.map((assetId, index) => (
+        <PublicCatalogMedia
+          key={assetId}
+          alt={`${store.name} 门店图片 ${index + 1}`}
+          assetId={assetId}
+          expectedPurpose="STORE_IMAGE"
+          expectedResourceId={store.storeId}
+          expectedResourceType="STORE"
+          kind="image"
+        />
+      ))}
+    </div>
   );
 }
 
@@ -1708,16 +1731,25 @@ function CheckoutTargetSelector() {
           {runtime.storesState === 'empty' ? <p className="section-copy">当前没有可用自提门店。</p> : null}
           {runtime.storesState === 'error' ? <p className="field-error">门店列表不可用，无法创建自提目标。</p> : null}
           {runtime.stores.map((store) => (
-            <button
-              key={store.storeId}
-              type="button"
-              className="pickup-option"
-              disabled={!runtime.session || runtime.busy || store.status !== 'ACTIVE'}
-              onClick={() => void runtime.createPickupTarget(store.storeId)}
-            >
-              <span><strong>{store.name}</strong><small>{store.address}</small></span>
-              <ChevronRight aria-hidden="true" size={17} />
-            </button>
+            <article className="pickup-option" key={store.storeId}>
+              <StoreMediaGallery store={store} compact />
+              <div className="pickup-option__selection">
+                <span>
+                  <strong>{store.name}</strong>
+                  <small>{store.address}</small>
+                  <small>营业时间：{store.businessHours}</small>
+                </span>
+                <button
+                  type="button"
+                  className="button button--secondary"
+                  aria-label={`选择 ${store.name}`}
+                  disabled={!runtime.session || runtime.busy}
+                  onClick={() => void runtime.createPickupTarget(store.storeId)}
+                >
+                  选择 <ChevronRight aria-hidden="true" size={17} />
+                </button>
+              </div>
+            </article>
           ))}
         </div>
       )}

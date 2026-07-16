@@ -76,7 +76,7 @@ describe('Mall Core artifact boundary', () => {
       ...Object.values(coordinatedRealtimeOperations),
     ];
 
-    expect(artifactVersion).toBe('2.0.0-admin-global-ops.1');
+    expect(artifactVersion).toBe('2.0.0-merchant-stores.1');
     expect(Object.keys(openApi.paths).some((path) => path.startsWith('/v2/admin/'))).toBe(false);
     expect(Object.keys(coordinatedManifest.capabilityStatus).some((capability) => capability.startsWith('admin'))).toBe(false);
     expect(consumerPaths.some((path) => path.startsWith('/v2/admin/'))).toBe(false);
@@ -468,6 +468,28 @@ describe('coordinated Core HTTP client', () => {
     expect(JSON.parse(String(calls.find((call) => call.url.endsWith('/v2/actions/order'))?.init?.body))).toEqual({ orderId: deliveryOrder.orderId });
     expect(calls.some((call) => call.url.includes(`cursorOrderId=${encodeURIComponent(deliveryOrder.orderId)}`))).toBe(true);
     expect(calls.every((call) => !call.url.includes('/v2/admin/logistics/'))).toBe(true);
+  });
+
+  it('accepts only exact active public stores with business hours and one to five unique images', async () => {
+    const invalidResponses = [
+      { ...store, status: 'DRAFT' },
+      { ...store, businessHours: '' },
+      { ...store, imageAssetIds: [] },
+      { ...store, imageAssetIds: [store.imageAssetIds[0], store.imageAssetIds[0]] },
+      { ...store, imageAssetIds: Array.from({ length: 6 }, (_, index) => `0x${String(index + 1).repeat(64)}`) },
+      { ...store, internalNote: 'not public' },
+    ];
+
+    for (const invalidStore of invalidResponses) {
+      const client = createCoreClient({
+        fetch: vi.fn().mockResolvedValue(json({ stores: [invalidStore] })),
+      });
+      await expect(client.listStores()).rejects.toMatchObject({ code: 'InvalidResponse' });
+    }
+
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json({ stores: [store], cursor: null })),
+    }).listStores()).rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
   it('uses generated responses and passes exact quote/routerCall fields through unchanged', async () => {

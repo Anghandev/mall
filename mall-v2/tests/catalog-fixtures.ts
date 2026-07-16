@@ -6,6 +6,7 @@ import {
 } from '@abu24k/core-artifacts';
 
 import { product, productImageAssetId, productVideoAssetId } from './payment-fixtures';
+import { store, storeImageAssetIds } from './fulfillment-fixtures';
 
 const hash = (value: string) => `0x${value.repeat(64)}`;
 
@@ -80,6 +81,12 @@ function assetIdentity(assetId: string) {
     resourceType: 'CATEGORY' as const,
     resourceId: catalogCategories[0]!.categoryId,
     contentType: 'image/png' as const,
+  };
+  if ((storeImageAssetIds as readonly string[]).includes(assetId)) return {
+    purpose: 'STORE_IMAGE' as const,
+    resourceType: 'STORE' as const,
+    resourceId: store.storeId,
+    contentType: 'image/webp' as const,
   };
   throw new Error(`Unknown catalog media asset ${assetId}`);
 }

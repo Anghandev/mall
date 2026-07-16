@@ -5,7 +5,7 @@ Requirement Matrix and consumes only coordinated Core artifacts.
 
 ## Current Runtime Boundary
 
-- Production consumes coordinated Core artifacts `2.0.0-admin-global-ops.1` and derives
+- Production consumes coordinated Core artifacts `2.0.0-merchant-stores.1` and derives
   its HTTP paths from the published OpenAPI document.
 - The public catalog consumes active products/SKUs, enabled three-level
   categories, enabled tags, field-level product associations, rich detail,

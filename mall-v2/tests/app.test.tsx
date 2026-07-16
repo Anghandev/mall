@@ -43,6 +43,7 @@ import {
   deliveryTarget,
   pickupTarget,
   store,
+  storeImageAssetIds,
 } from './fulfillment-fixtures';
 import { paymentQuote, product, seckillQuote } from './payment-fixtures';
 import {
@@ -75,7 +76,7 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/mall');
 
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
-    expect(artifactVersion).toBe('2.0.0-admin-global-ops.1');
+    expect(artifactVersion).toBe('2.0.0-merchant-stores.1');
     expect(productBaseline.manifestsAligned).toBe(true);
     expect(productBaseline.knownOrderActions).toBe(allowedActionNames);
     expect(productBaseline.executableOrderActions).toBe(executableOrderActionNames);
@@ -84,7 +85,7 @@ describe('Mall V2 payment consumer', () => {
     expect(isCoreOrderActionExecutable('CONFIRM_RECEIPT')).toBe(true);
     expect(isCoreOrderActionExecutable('PAY_ORDER')).toBe(false);
     expect(mallRuntimeBoundary).toMatchObject({
-      artifactStatus: '2.0.0-admin-global-ops.1',
+      artifactStatus: '2.0.0-merchant-stores.1',
       executableOrderActions: executableOrderActionNames,
       deploymentAuthorized: false,
       settlementAdminCapabilities: {
@@ -659,16 +660,40 @@ describe('Mall V2 payment consumer', () => {
 
   it('renders Core stores, browser distance and keeps native navigation ExternalBlocked', async () => {
     const user = userEvent.setup();
-    const services = readyServices();
+    const createPublicMediaReadAccess = vi.fn((assetId: string) => Promise.resolve(publicMediaAccess(assetId)));
+    const services = readyServices({ createPublicMediaReadAccess });
     renderAt('/stores', services);
 
     await screen.findByRole('heading', { name: store.name });
+    expect(screen.getByText(store.businessHours)).toBeTruthy();
+    const storeImages = await screen.findAllByRole('img', { name: new RegExp(`${store.name} 门店图片`) });
+    expect(storeImages).toHaveLength(storeImageAssetIds.length);
+    for (const [index, assetId] of storeImageAssetIds.entries()) {
+      expect(storeImages[index]?.getAttribute('src')).toBe(publicMediaAccess(assetId).readUrl);
+      expect(createPublicMediaReadAccess).toHaveBeenCalledWith(assetId.toLowerCase());
+    }
     expect(screen.getByText('定位后显示')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '获取距离' }));
     await screen.findByText('0.0 km');
     expect(screen.getByRole('link', { name: `拨打 ${store.name} 电话` }).getAttribute('href')).toBe(`tel:${store.phone}`);
     expect(screen.getByRole('button', { name: '导航' }).hasAttribute('disabled')).toBe(true);
     expect(screen.getByText(/原生地图桥接.*ExternalBlocked/)).toBeTruthy();
+  });
+
+  it('clears stale public stores when a filtered reload fails', async () => {
+    const user = userEvent.setup();
+    const listStores = vi.fn<CoreClient['listStores']>()
+      .mockResolvedValueOnce([store])
+      .mockRejectedValueOnce(new CoreClientError('ExternalBlocked', '门店投影暂不可用'));
+    renderAt('/stores', readyServices({ listStores }));
+
+    await screen.findByRole('heading', { name: store.name });
+    await user.type(screen.getByLabelText('六位行政区代码'), store.regionCode);
+    await user.click(screen.getByRole('button', { name: '筛选门店' }));
+
+    expect(await screen.findByText('门店同步失败')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: store.name })).toBeNull();
+    expect(screen.queryByRole('img', { name: new RegExp(`${store.name} 门店图片`) })).toBeNull();
   });
 
   it('binds a pickup target only through a published Core store snapshot', async () => {
@@ -682,6 +707,8 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: /选择商品/ }));
     await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
     await user.click(screen.getByRole('button', { name: '到店自提' }));
+    expect(await screen.findByText(`营业时间：${store.businessHours}`)).toBeTruthy();
+    expect(await screen.findAllByRole('img', { name: new RegExp(`${store.name} 门店图片`) })).toHaveLength(storeImageAssetIds.length);
     await user.click(await screen.findByRole('button', { name: new RegExp(store.name) }));
 
     expect(createPickupTarget).toHaveBeenCalledWith('buyer-session', {
