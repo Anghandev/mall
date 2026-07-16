@@ -1,4 +1,4 @@
-export declare const artifactVersion: "2.0.0-settlement-admin.10";
+export declare const artifactVersion: "2.0.0-settlement-admin.11";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
@@ -1222,6 +1222,115 @@ export interface MerchantDebtRecovery {
 export interface TakeoverFundingDetail extends TakeoverFundingProjection {
   items: readonly TakeoverFundingItem[];
   debtRecoveries: readonly MerchantDebtRecovery[];
+}
+
+export interface TakeoverAssignmentRequest {
+  replacementMerchantId: string;
+  reasonCode: string;
+  evidenceHash: Bytes32;
+  idempotencyKey: string;
+}
+
+export interface TakeoverAssignment {
+  assignmentId: Bytes32;
+  caseId: string;
+  orderId: string;
+  version: number;
+  originalMerchantId: string;
+  replacementMerchantId: string;
+  replacementWallet: Address;
+  replacementApplicationVersion: number;
+  replacementLevel: MerchantLevel;
+  replacementLicenseAssetId: Bytes32;
+  supersedesAssignmentId: Bytes32 | null;
+  reasonCode: string;
+  evidenceHash: Bytes32;
+  assignedBy: Address;
+  correlationId: string;
+  assignedAt: string;
+}
+
+export interface TakeoverAssignmentResult {
+  artifactVersion: string;
+  assignment: TakeoverAssignment;
+}
+
+export interface TakeoverCaseFunding {
+  guaranteeUsedUsdt: AtomicAmount;
+  frozenReceivablesUsedUsdt: AtomicAmount;
+  futureProceedsUsedUsdt: AtomicAmount;
+  platformAdvanceUsdt: AtomicAmount;
+  disbursedUsdt: AtomicAmount;
+  merchantDebtUsdt: AtomicAmount;
+}
+
+export interface TakeoverOrderSummary {
+  productId: string;
+  skuId: string;
+  quantity: AtomicAmount;
+  fulfillmentMode: FulfillmentMode;
+  fulfillmentTargetHash: Bytes32;
+  state: OrderProjectionState;
+  paymentFinal: boolean;
+}
+
+export interface TakeoverCase {
+  caseId: string;
+  orderId: string;
+  originalMerchantId: string;
+  policyVersion: AtomicAmount;
+  state: TakeoverState;
+  requiredUsdt: AtomicAmount | null;
+  funding: TakeoverCaseFunding;
+  evidenceHash: Bytes32;
+  openedAt: string;
+  closedAt: string | null;
+  updatedAt: string;
+  order: TakeoverOrderSummary;
+  currentAssignment: TakeoverAssignment | null;
+}
+
+export interface TakeoverCaseCursor {
+  openedAt: string;
+  caseId: string;
+}
+
+export interface TakeoverCaseList {
+  artifactVersion: string;
+  cases: readonly TakeoverCase[];
+  nextCursor: TakeoverCaseCursor | null;
+}
+
+export interface TakeoverCandidate {
+  merchantId: string;
+  settlementWallet: Address;
+  shopName: string;
+  level: MerchantLevel;
+  applicationVersion: number;
+  qualificationComplete: true;
+  guaranteeReady: true;
+}
+
+export interface TakeoverCandidateList {
+  artifactVersion: string;
+  caseId: string;
+  candidates: readonly TakeoverCandidate[];
+}
+
+export interface TakeoverCaseTransition {
+  transitionId: string;
+  fromState: TakeoverState | null;
+  toState: TakeoverState;
+  evidenceType: string;
+  evidenceHash: Bytes32;
+  occurredAt: string;
+}
+
+export interface TakeoverCaseDetail {
+  artifactVersion: string;
+  case: TakeoverCase & Readonly<{ allowedActions: readonly AllowedAction[] }>;
+  assignments: readonly TakeoverAssignment[];
+  transitions: readonly TakeoverCaseTransition[];
 }
 
 export interface PolicyDraftCreateRequest { payload: JsonObject; idempotencyKey: string }

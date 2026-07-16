@@ -74,7 +74,10 @@ describe('Mall Core artifact boundary', () => {
       resolve(process.cwd(), '../packages/core-artifacts/openapi/openapi.json'),
       'utf8',
     )) as {
-      paths: Record<string, { post?: { operationId?: string } }>;
+      paths: Record<string, {
+        get?: { operationId?: string };
+        post?: { operationId?: string };
+      }>;
     };
     const consumerPaths = [
       ...Object.values(coordinatedPaymentOperations),
@@ -85,9 +88,19 @@ describe('Mall Core artifact boundary', () => {
       ...Object.values(coordinatedRealtimeOperations),
     ];
 
-    expect(artifactVersion).toBe('2.0.0-merchant-fulfillment.1');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.10');
     expect(coordinatedOpenApi.paths['/v2/merchant/orders/exports']?.post?.operationId)
       .toBe('exportMerchantOrders');
+    expect(coordinatedOpenApi.paths['/v2/admin/payments/{orderId}']?.get?.operationId)
+      .toBe('getAdminPaymentProjection');
+    expect(coordinatedOpenApi.paths['/v2/admin/settlement-requests']?.get?.operationId)
+      .toBe('listAdminSettlementRequests');
+    expect(coordinatedOpenApi.paths['/v2/admin/settlement-requests/{requestId}']?.get?.operationId)
+      .toBe('getAdminSettlementRequest');
+    expect(coordinatedOpenApi.paths['/v2/admin/settlement-batches']?.get?.operationId)
+      .toBe('listAdminSettlementBatches');
+    expect(coordinatedOpenApi.paths['/v2/admin/settlement-batches/{batchId}']?.get?.operationId)
+      .toBe('getAdminSettlementBatch');
     expect(Object.keys(openApi.paths).some((path) => path.startsWith('/v2/admin/'))).toBe(false);
     expect(Object.keys(openApi.paths).some((path) => path.startsWith('/v2/merchant/'))).toBe(false);
     expect(Object.keys(coordinatedManifest.capabilityStatus).some((capability) => capability.startsWith('admin'))).toBe(false);

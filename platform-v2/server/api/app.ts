@@ -34,12 +34,14 @@ import {
   settlementRails,
   settlementRequestStates,
   systemConfigKeys,
+  takeoverStates,
   type AdminExportFormat,
   type AdminResourceType,
   type BreakerScope,
   type SettlementBatchState,
   type SettlementRail,
   type SettlementRequestState,
+  type TakeoverState,
   type UserRole,
 } from './enums.ts';
 import { CoreError, errorBody } from './errors.ts';
@@ -80,6 +82,7 @@ import type {
   GovernedSettlementRail,
 } from '../data/settlement-service.ts';
 import type { ConfigApprovalInput } from '../data/system-config-service.ts';
+import type { TakeoverAssignmentInput, TakeoverCaseQuery } from '../data/takeover-case-service.ts';
 import type { AuditQuery } from '../data/audit-service.ts';
 import type {
   BuyerAddressInput,
@@ -424,6 +427,15 @@ export interface TakeoverFundingApiService {
   getTakeoverFunding(actor: FulfillmentActor, caseId: string): Promise<unknown>;
 }
 
+export interface TakeoverCaseApiService {
+  listAdmin(actor: FulfillmentActor, input?: TakeoverCaseQuery): Promise<unknown>;
+  getAdmin(actor: FulfillmentActor, caseId: string): Promise<unknown>;
+  listCandidates(actor: FulfillmentActor, caseId: string): Promise<unknown>;
+  assign(actor: FulfillmentActor, caseId: string, input: TakeoverAssignmentInput): Promise<unknown>;
+  listMerchant(actor: FulfillmentActor, input?: TakeoverCaseQuery): Promise<unknown>;
+  getMerchant(actor: FulfillmentActor, caseId: string): Promise<unknown>;
+}
+
 export interface GuaranteeDepositApiService {
   submit(actor: FulfillmentActor, input: {
     policyVersion: string;
@@ -671,6 +683,7 @@ export interface ApiDependencies {
   evidenceService: EvidenceApiService;
   settlementService: SettlementApiService;
   takeoverFundingService: TakeoverFundingApiService;
+  takeoverCaseService: TakeoverCaseApiService;
   guaranteeDepositService: GuaranteeDepositApiService;
   policyService: PolicyApiService;
   coverageBreakerService: CoverageBreakerApiService;
@@ -1193,6 +1206,62 @@ async function route(
       ),
       correlationId,
     );
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/admin/takeover-cases') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
+    sendJson(response, 200, await dependencies.takeoverCaseService.listAdmin(
+      fulfillmentActor(claims),
+      takeoverCaseQuery(url),
+    ), correlationId);
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/merchant/takeover-cases') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
+    sendJson(response, 200, await dependencies.takeoverCaseService.listMerchant(
+      fulfillmentActor(claims),
+      takeoverCaseQuery(url),
+    ), correlationId);
+    return;
+  }
+  const adminTakeoverCasePath = url.pathname.match(/^\/v2\/admin\/takeover-cases\/([^/]+)(?:\/(candidates|assignments))?$/);
+  if (adminTakeoverCasePath) {
+    const caseId = decodedPathPart(adminTakeoverCasePath[1]!);
+    const action = adminTakeoverCasePath[2];
+    if (request.method === 'GET' && action === undefined) {
+      const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
+      assertOnlySearchParams(url, []);
+      sendJson(response, 200, await dependencies.takeoverCaseService.getAdmin(fulfillmentActor(claims), caseId), correlationId);
+      return;
+    }
+    if (request.method === 'GET' && action === 'candidates') {
+      const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
+      assertOnlySearchParams(url, []);
+      sendJson(response, 200, await dependencies.takeoverCaseService.listCandidates(fulfillmentActor(claims), caseId), correlationId);
+      return;
+    }
+    if (request.method === 'POST' && action === 'assignments') {
+      const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+      const body = await readJson(request);
+      assertOnlyKeys(body, ['replacementMerchantId', 'reasonCode', 'evidenceHash', 'idempotencyKey']);
+      sendJson(response, 201, await dependencies.takeoverCaseService.assign(fulfillmentActor(claims), caseId, {
+        replacementMerchantId: requiredString(body, 'replacementMerchantId'),
+        reasonCode: requiredString(body, 'reasonCode'),
+        evidenceHash: requiredString(body, 'evidenceHash'),
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+        correlationId,
+      }), correlationId);
+      return;
+    }
+  }
+  const merchantTakeoverCasePath = url.pathname.match(/^\/v2\/merchant\/takeover-cases\/([^/]+)$/);
+  if (request.method === 'GET' && merchantTakeoverCasePath) {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
+    assertOnlySearchParams(url, []);
+    sendJson(response, 200, await dependencies.takeoverCaseService.getMerchant(
+      fulfillmentActor(claims),
+      decodedPathPart(merchantTakeoverCasePath[1]!),
+    ), correlationId);
     return;
   }
   if (request.method === 'POST' && url.pathname === '/v2/finance/merchant/guarantee-deposits') {
@@ -3881,6 +3950,36 @@ function dateParameter(value: string, name: string) {
     throw new CoreError('InvalidRequest', `${name} must be a canonical ISO timestamp`);
   }
   return date;
+}
+
+function takeoverCaseQuery(url: URL): TakeoverCaseQuery {
+  assertOnlySearchParams(url, [
+    'state', 'originalMerchantId', 'replacementMerchantId',
+    'cursorOpenedAt', 'cursorCaseId', 'limit',
+  ]);
+  return {
+    ...(url.searchParams.get('state') ? { state: takeoverCaseState(url.searchParams.get('state')) } : {}),
+    ...(url.searchParams.get('originalMerchantId')
+      ? { originalMerchantId: url.searchParams.get('originalMerchantId')! }
+      : {}),
+    ...(url.searchParams.get('replacementMerchantId')
+      ? { replacementMerchantId: url.searchParams.get('replacementMerchantId')! }
+      : {}),
+    ...(url.searchParams.get('cursorOpenedAt')
+      ? { cursorOpenedAt: dateParameter(url.searchParams.get('cursorOpenedAt')!, 'cursorOpenedAt') }
+      : {}),
+    ...(url.searchParams.get('cursorCaseId') ? { cursorCaseId: url.searchParams.get('cursorCaseId')! } : {}),
+    ...(url.searchParams.get('limit')
+      ? { limit: optionalPositiveIntegerParameter(url.searchParams.get('limit'), 'limit')! }
+      : {}),
+  };
+}
+
+function takeoverCaseState(value: string | null): TakeoverState {
+  if (!takeoverStates.includes(value as TakeoverState)) {
+    throw new CoreError('InvalidRequest', 'Unsupported takeover state');
+  }
+  return value as TakeoverState;
 }
 
 function merchantLifecycleStatus(value: string | null): NonNullable<Parameters<MerchantLifecycleApiService['list']>[1]['status']> {

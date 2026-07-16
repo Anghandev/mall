@@ -1071,10 +1071,29 @@ async function authorizeShipmentOrder(
   orderId: string,
 ): Promise<EvidenceRow['actor_role']> {
   const row = await loadOrderScope(executor, orderId);
+  const wallet = actorWallet(actor);
   if (
     hasRole(actor, 'MERCHANT')
     && actor.merchantId === row.merchant_id
   ) return 'MERCHANT';
+  if (hasRole(actor, 'MERCHANT') && actor.merchantId) {
+    const replacement = await executor.query<{ replacement_merchant_id: string; replacement_wallet: string }>(
+      `SELECT assignment.replacement_merchant_id, assignment.replacement_wallet
+       FROM core.takeover_cases takeover
+       JOIN LATERAL (
+         SELECT replacement_merchant_id, replacement_wallet
+         FROM core.takeover_assignments current_assignment
+         WHERE current_assignment.case_id = takeover.case_id
+         ORDER BY assignment_version DESC LIMIT 1
+       ) assignment ON true
+       WHERE takeover.order_id = $1 AND takeover.state = 'FUNDED'`,
+      [orderId],
+    );
+    if (
+      replacement.rows[0]?.replacement_merchant_id === actor.merchantId
+      && replacement.rows[0].replacement_wallet === wallet
+    ) return 'MERCHANT';
+  }
   const platform = platformActorRole(actor);
   if (platform) return platform;
   throw new CoreError('Forbidden', 'Shipment evidence is outside the actor order scope', 403);

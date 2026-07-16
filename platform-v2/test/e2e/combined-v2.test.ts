@@ -57,6 +57,30 @@ test('merchant order export is coordinated, consumed by Merchant and absent from
   assert.equal('merchantOrderExport' in mallBaseline, false);
 });
 
+test('global clearing reads are authenticated, coordinated and Admin-only', () => {
+  const operations = [
+    ['GET', '/v2/admin/payments/{orderId}', 'getAdminPaymentProjection'],
+    ['GET', '/v2/admin/settlement-requests', 'listAdminSettlementRequests'],
+    ['GET', '/v2/admin/settlement-requests/{requestId}', 'getAdminSettlementRequest'],
+    ['GET', '/v2/admin/settlement-batches', 'listAdminSettlementBatches'],
+    ['GET', '/v2/admin/settlement-batches/{batchId}', 'getAdminSettlementBatch'],
+  ] as const;
+
+  for (const [method, path, operationId] of operations) {
+    const operation = coordinatedOpenApi.paths[path]?.get;
+    assert.equal(operation?.operationId, operationId);
+    assert.deepEqual(operation?.security, [{ bearerAuth: [] }]);
+    assert.ok(coordinatedManifest.httpSurface.includes(`${method} ${path}`));
+  }
+  assert.equal(adminBaseline.adminCapabilities.paymentProjection, 'ADMIN_GLOBAL_READ');
+  assert.equal(adminBaseline.adminCapabilities.adminSettlementRequests, true);
+  assert.equal(adminBaseline.adminCapabilities.adminSettlementBatches, true);
+  assert.equal(adminBaseline.adminCapabilities.adminSettlementReconciliation, true);
+  assert.equal('adminSettlementRequests' in mallBaseline, false);
+  assert.equal('adminSettlementRequests' in merchantBaseline, false);
+  assert.match(merchantCore.reason, /\u6e05\u7b97\u8bfb\u53d6\u4fdd\u6301 Admin-only/);
+});
+
 test('platform seckill governance is one authenticated coordinated Admin surface', () => {
   const operations = [
     ['GET', '/v2/admin/seckill/actions', 'listSeckillGovernanceActions'],
