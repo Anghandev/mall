@@ -3268,6 +3268,24 @@ test('payment event atomically consumes inventory and posts balanced Locked jour
     assert.equal(canonical.rows[0]?.count, '1');
     await assertLedgerBalanced(db, 1);
 
+    await advancePaymentFinality(adapter(db), replacement.event.blockNumber + 14);
+    const notifications = new NotificationService({ transactions: transactionAdapter(db) });
+    const notificationWorker = new NotificationWorker({
+      transactions: transactionAdapter(db),
+      service: notifications,
+      workerId: 'real-payment-notification-worker',
+    });
+    assert.ok(await notificationWorker.pollOnce() > 0);
+    assert.ok((await notifications.listInbox({ walletAddress: BUYER, roles: ['BUYER'] }))
+      .some((message) => message.topic === 'PAYMENT_FINALIZED'));
+    const genesisInbox = await notifications.listInbox({
+      walletAddress: intent.beneficiaries.genesis!,
+      roles: ['BUYER'],
+    });
+    const genesisPayment = genesisInbox.find((message) => message.topic === 'PAYMENT_FINALIZED');
+    assert.equal(genesisPayment?.templateData.lockedNplAmount, '20');
+    assert.equal(genesisPayment?.templateData.rewardSubtypes, 'GENESIS');
+
     await assert.rejects(
       db.query(
         `SELECT core.post_balanced_journal(
@@ -5035,6 +5053,21 @@ test('takeover freezes the merchant after seven days while funds stay Locked and
       pickupReceipts.map(({ orderId, storeId, quantity }) => ({ orderId, storeId, quantity })),
       [{ orderId: intent.orderId, storeId: 'store-pickup-1', quantity: '1' }],
     );
+    const pickupNotifications = new NotificationService({ transactions: transactionAdapter(pickupDb), clock: () => now });
+    const pickupNotificationWorker = new NotificationWorker({
+      transactions: transactionAdapter(pickupDb),
+      service: pickupNotifications,
+      workerId: 'pickup-notification-worker',
+      clock: () => now,
+    });
+    assert.ok(await pickupNotificationWorker.pollOnce() > 0);
+    const genesisPickup = (await pickupNotifications.listInbox({
+      walletAddress: intent.beneficiaries.genesis!,
+      roles: ['BUYER'],
+    })).find((message) => message.topic === 'FULFILLMENT_FINALIZED');
+    assert.equal(genesisPickup?.templateData.availableNplAmount, '20');
+    assert.equal(genesisPickup?.templateData.rewardSubtypes, 'GENESIS');
+    assert.equal(genesisPickup?.templateData.method, 'PICKUP_VERIFICATION');
     await assert.rejects(
       service.verifyPickup(merchant, intent.orderId, {
         idempotencyKey: 'pickup-replay-code-1',
@@ -6007,6 +6040,30 @@ test('notifications consume finalized domain events independently and isolate Co
     );
     await insertOrder(db, 'order-notification', 'reservation-notification');
     const now = new Date('2026-07-15T05:00:00.000Z');
+    const beneficiary = '0x3333333333333333333333333333333333333333';
+    await db.query(
+      `INSERT INTO core.ledger_accounts (
+         account_id, owner_type, owner_id, asset, purpose, safe_address, subtype
+       ) VALUES
+         ('notification-safe-npl','SAFE',$1,'NPL','SAFE_ASSET',$1,NULL),
+         ('notification-beneficiary-npl','BENEFICIARY',$2,'NPL','REWARD_LIABILITY',NULL,'GENESIS')`,
+      ['0x4444444444444444444444444444444444444444', beneficiary],
+    );
+    await db.query(
+      `SELECT core.post_balanced_journal(
+         'journal:notification-beneficiary','notification-beneficiary-locked','PAYMENT_LOCKED',
+         'order-notification',1,$1,$2,$3,NULL,'{}',$4
+       )`,
+      [
+        HASH,
+        `0x${'7'.repeat(64)}`,
+        `0x${'8'.repeat(64)}`,
+        JSON.stringify([
+          { account_id: 'notification-safe-npl', side: 'DEBIT', amount: '10', balance_state: 'POSTED' },
+          { account_id: 'notification-beneficiary-npl', side: 'CREDIT', amount: '10', balance_state: 'LOCKED' },
+        ]),
+      ],
+    );
     const service = new NotificationService({ transactions: transactionAdapter(db), clock: () => now });
     const endpoint = await service.registerEndpoint({ walletAddress: BUYER, roles: ['BUYER'] }, {
       channel: 'SMS',
@@ -6100,10 +6157,10 @@ test('notifications consume finalized domain events independently and isolate Co
     )).rows[0]?.count, '2');
     assert.equal((await db.query<{ count: string }>(
       'SELECT count(*)::text AS count FROM core.notification_messages',
-    )).rows[0]?.count, '3');
+    )).rows[0]?.count, '4');
     assert.equal((await db.query<{ count: string }>(
       'SELECT count(*)::text AS count FROM core.notification_deliveries',
-    )).rows[0]?.count, '5');
+    )).rows[0]?.count, '6');
 
     const unconfigured = new NotificationWorker({
       transactions: transactionAdapter(db),
@@ -6111,20 +6168,20 @@ test('notifications consume finalized domain events independently and isolate Co
       workerId: 'notification-worker-unconfigured',
       clock: () => now,
     });
-    assert.equal(await unconfigured.pollOnce(), 5);
+    assert.equal(await unconfigured.pollOnce(), 6);
     const deliveryStates = await db.query<{ provider: string; state: string; count: string }>(
       `SELECT provider, state, count(*)::text AS count FROM core.notification_deliveries
        GROUP BY provider, state ORDER BY provider, state`,
     );
     assert.deepEqual(deliveryStates.rows, [
       { provider: 'ALIYUN_SMS', state: 'CONFIGURATION_REQUIRED', count: '2' },
-      { provider: 'CORE', state: 'DELIVERED', count: '3' },
+      { provider: 'CORE', state: 'DELIVERED', count: '4' },
     ]);
     const initialDeliveryAudits = await db.query<{ event_type: string; payload: Record<string, unknown> }>(
       `SELECT event_type, payload FROM core.audit_outbox_events
        WHERE resource_type = 'NOTIFICATION_DELIVERY' ORDER BY event_type`,
     );
-    assert.equal(initialDeliveryAudits.rows.filter((row) => row.event_type === 'NotificationDeliveryDelivered').length, 3);
+    assert.equal(initialDeliveryAudits.rows.filter((row) => row.event_type === 'NotificationDeliveryDelivered').length, 4);
     assert.equal(initialDeliveryAudits.rows.filter((row) => row.event_type === 'NotificationDeliveryConfigurationRequired').length, 2);
     assert.ok(initialDeliveryAudits.rows.every((row) => typeof row.payload.endpointReferenceHash === 'string'));
     assert.doesNotMatch(JSON.stringify(initialDeliveryAudits.rows), /secret:\/\/recipients\/buyer-sms/);
@@ -6133,6 +6190,11 @@ test('notifications consume finalized domain events independently and isolate Co
     const bnm = inbox.find((message) => message.topic === 'BNM_AVAILABLE');
     assert.equal(bnm?.templateData.copyKey, 'BNM_POINTS_AVAILABLE');
     assert.doesNotMatch(JSON.stringify(bnm), /mint|claim|token/i);
+    const beneficiaryInbox = await service.listInbox({ walletAddress: beneficiary, roles: ['BUYER'] });
+    assert.equal(beneficiaryInbox.length, 1);
+    assert.equal(beneficiaryInbox[0]?.templateData.lockedNplAmount, '10');
+    assert.equal(beneficiaryInbox[0]?.templateData.rewardSubtypes, 'GENESIS');
+    assert.equal((await service.listInbox({ walletAddress: '0x9999999999999999999999999999999999999999', roles: ['BUYER'] })).length, 0);
 
     const configured = new NotificationWorker({
       transactions: transactionAdapter(db),
@@ -6155,6 +6217,38 @@ test('notifications consume finalized domain events independently and isolate Co
     assert.equal((await db.query<{ count: string }>(
       "SELECT count(*)::text AS count FROM core.notification_deliveries WHERE provider = 'ALIYUN_SMS' AND state = 'DELIVERED'",
     )).rows[0]?.count, '2');
+
+    await db.query(
+      `SELECT core.post_balanced_journal(
+         'journal:notification-beneficiary-available','notification-beneficiary-available','FULFILLMENT_AVAILABLE',
+         'order-notification',1,$1,$2,NULL,NULL,$3,$4
+       )`,
+      [
+        HASH_2,
+        HASH,
+        JSON.stringify({ method: 'PICKUP_VERIFICATION' }),
+        JSON.stringify([
+          { account_id: 'notification-beneficiary-npl', side: 'DEBIT', amount: '10', balance_state: 'LOCKED' },
+          { account_id: 'notification-beneficiary-npl', side: 'CREDIT', amount: '10', balance_state: 'AVAILABLE' },
+        ]),
+      ],
+    );
+    await db.query(
+      `INSERT INTO core.outbox_events (
+         event_id, aggregate_type, aggregate_id, event_type, payload,
+         idempotency_key, state, available_at, created_at
+       ) VALUES ('notify-fulfillment-final', 'ORDER', 'order-notification', 'FulfillmentFinalized',
+         '{"orderId":"order-notification","method":"PICKUP_VERIFICATION"}',
+         'notify-fulfillment-final', 'PENDING', $1, $1)`,
+      [now],
+    );
+    assert.equal(await service.projectNext(), 1);
+    assert.equal(await configured.pollOnce(), 4);
+    const beneficiaryAvailable = (await service.listInbox({ walletAddress: beneficiary, roles: ['BUYER'] }))
+      .find((message) => message.topic === 'FULFILLMENT_FINALIZED');
+    assert.equal(beneficiaryAvailable?.templateData.availableNplAmount, '10');
+    assert.equal(beneficiaryAvailable?.templateData.rewardSubtypes, 'GENESIS');
+    assert.equal(beneficiaryAvailable?.templateData.method, 'PICKUP_VERIFICATION');
 
     await db.query(
       `INSERT INTO core.outbox_events (
@@ -6202,9 +6296,38 @@ test('notifications consume finalized domain events independently and isolate Co
     assert.equal((await db.query<{ count: string }>(
       "SELECT count(*)::text AS count FROM core.notification_messages WHERE topic = 'ANNOUNCEMENT'",
     )).rows[0]?.count, '1');
+    await db.query(
+      `UPDATE core.notification_deliveries delivery SET state = 'DEAD_LETTER'
+       FROM core.notification_messages message, core.outbox_events source
+       WHERE delivery.message_id = message.message_id AND message.source_event_id = source.event_id
+         AND source.aggregate_id = $1`,
+      [campaign.campaignId],
+    );
+    const campaignList = await service.listCampaigns({ walletAddress: admin.address, roles: ['ADMIN'] });
+    assert.equal(campaignList[0]?.deliveryCounts.DEAD_LETTER, 2);
+    assert.deepEqual(campaignList[0]?.allowedActions, ['RETRY_FAILED']);
+    const auditor = Wallet.createRandom();
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (wallet_address, role, status, evidence_hash)
+       VALUES ($1,'AUDITOR','ACTIVE',$2)`,
+      [auditor.address.toLowerCase(), HASH],
+    );
+    const auditView = await service.listCampaigns({ walletAddress: auditor.address, roles: ['AUDITOR'] });
+    assert.deepEqual(auditView[0]?.allowedActions, []);
+    assert.throws(
+      () => service.listCampaigns({ walletAddress: BUYER, roles: ['BUYER'] }),
+      /Wallet session cannot manage notifications/,
+    );
+    const retry = await service.retryCampaignDeliveries({ walletAddress: admin.address, roles: ['ADMIN'] }, campaign.campaignId, {
+      correlationId: 'notification-campaign-retry',
+    });
+    assert.equal(retry.retriedDeliveries, 2);
+    assert.equal((await service.listCampaigns({ walletAddress: admin.address, roles: ['ADMIN'] }))[0]?.deliveryCounts.RETRY, 2);
+    assert.equal(await configured.pollOnce(), 5);
+    assert.equal((await service.listCampaigns({ walletAddress: admin.address, roles: ['ADMIN'] }))[0]?.deliveryCounts.DELIVERED, 2);
     assert.equal((await db.query<{ count: string }>(
       "SELECT count(*)::text AS count FROM core.audit_outbox_events WHERE event_type LIKE 'NotificationCampaign%'",
-    )).rows[0]?.count, '2');
+    )).rows[0]?.count, '3');
   } finally {
     await db.close();
   }

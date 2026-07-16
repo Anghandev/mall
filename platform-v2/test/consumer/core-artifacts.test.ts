@@ -23,8 +23,8 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('settlement admin .13 checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-settlement-admin.13');
+test('settlement admin .14 checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-settlement-admin.14');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
@@ -92,6 +92,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'GET /v2/admin/merchants',
     'GET /v2/admin/merchants/{merchantId}',
     'GET /v2/admin/monitoring',
+    'GET /v2/admin/notification-campaigns',
     'GET /v2/admin/orders',
     'GET /v2/admin/payments/{orderId}',
     'GET /v2/admin/policy-drafts',
@@ -170,6 +171,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'POST /v2/admin/monitoring/alerts/{alertKey}/acknowledge',
     'POST /v2/admin/notification-campaigns',
     'POST /v2/admin/notification-campaigns/{campaignId}/publish',
+    'POST /v2/admin/notification-campaigns/{campaignId}/retry-failed',
     'POST /v2/admin/orders/batch-actions/preview',
     'POST /v2/admin/policy-drafts',
     'POST /v2/admin/policy-drafts/{draftId}/approval-challenge',
@@ -492,6 +494,8 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
     'CmsPublicItem',
     'NotificationEndpointProjection',
     'NotificationInboxItem',
+    'NotificationCampaignProjection',
+    'NotificationCampaignRetryResult',
     'SystemConfigProjection',
     'AuditListResponse',
     'MonitoringDashboard',
@@ -547,6 +551,9 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
   ]);
   assert.equal(openapi.paths['/v2/cms/public'].get.responses['200'].content['application/json'].schema.type, 'array');
   assert.equal(openapi.paths['/v2/notifications'].get.responses['200'].content['application/json'].schema.type, 'array');
+  assert.equal(openapi.paths['/v2/admin/notification-campaigns'].get.responses['200'].content['application/json'].schema.type, 'array');
+  assert.equal(openapi.paths['/v2/admin/notification-campaigns/{campaignId}/retry-failed'].post.operationId, 'retryNotificationCampaignDeliveries');
+  assert.deepEqual(openapi.components.schemas.NotificationCampaignProjection.properties.allowedActions.items.enum, ['PUBLISH', 'RETRY_FAILED']);
   assert.equal(openapi.paths['/v2/admin/policy-drafts'].get.responses['200'].content['application/json'].schema.type, 'array');
   assert.equal(openapi.paths['/v2/admin/system-config/versions'].get.responses['200'].content['application/json'].schema.type, 'array');
   assert.ok(openapi.components.schemas.SettlementListProjection.required.includes('points'));

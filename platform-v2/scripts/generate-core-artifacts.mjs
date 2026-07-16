@@ -526,6 +526,8 @@ const coordinatedManifest = {
     'CmsPublicItem',
     'NotificationEndpointProjection',
     'NotificationInboxItem',
+    'NotificationCampaignProjection',
+    'NotificationCampaignRetryResult',
     'SystemConfigProjection',
     'AuditListResponse',
     'MonitoringDashboard',
@@ -2919,10 +2921,17 @@ function settlementAdminOpenApiPaths(errorResponse) {
       post: resourceOperation('rollbackCmsVersion', 'versionId', { $ref: '#/components/schemas/CmsVersionProjection' }, 200, 'EvidenceHashRequest'),
     },
     '/v2/admin/notification-campaigns': {
+      get: {
+        ...operation('listNotificationCampaigns', { type: 'array', items: { $ref: '#/components/schemas/NotificationCampaignProjection' } }),
+        parameters: [{ name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 200 } }],
+      },
       post: operation('createNotificationCampaign', { $ref: '#/components/schemas/NotificationCampaignCreateResult' }, 201, 'NotificationCampaignRequest'),
     },
     '/v2/admin/notification-campaigns/{campaignId}/publish': {
       post: resourceOperation('publishNotificationCampaign', 'campaignId', { $ref: '#/components/schemas/NotificationCampaignPublishResult' }, 200, 'EvidenceHashRequest'),
+    },
+    '/v2/admin/notification-campaigns/{campaignId}/retry-failed': {
+      post: resourceOperation('retryNotificationCampaignDeliveries', 'campaignId', { $ref: '#/components/schemas/NotificationCampaignRetryResult' }, 200, 'EmptyObject'),
     },
     '/v2/admin/system-config/versions': {
       get: operation('listSystemConfigVersions', { type: 'array', items: { $ref: '#/components/schemas/SystemConfigProjection' } }),
@@ -3919,6 +3928,27 @@ function settlementAdminOpenApiSchemas() {
       contentHash: hash,
     }),
     NotificationCampaignPublishResult: object({ campaignId: string, state: { const: 'PUBLISHED' } }),
+    NotificationCampaignProjection: object({
+      campaignId: string,
+      topic: { enum: [...notificationCampaignTopics] },
+      audience: jsonObject,
+      message: jsonObject,
+      contentHash: hash,
+      cmsVersionId: nullableString,
+      startsAt: nullableTimestamp,
+      endsAt: nullableTimestamp,
+      state: { enum: [...notificationCampaignStates] },
+      createdBy: ref('Address'),
+      createdAt: timestamp,
+      publishedAt: nullableTimestamp,
+      deliveryCounts: object(Object.fromEntries(notificationDeliveryStates.map((state) => [state, { type: 'integer', minimum: 0 }]))),
+      allowedActions: { type: 'array', items: { enum: ['PUBLISH', 'RETRY_FAILED'] } },
+    }),
+    NotificationCampaignRetryResult: object({
+      campaignId: string,
+      state: { const: 'RETRY_SCHEDULED' },
+      retriedDeliveries: { type: 'integer', minimum: 1 },
+    }),
     SystemConfigCreateRequest: object({
       configKey: { enum: [...systemConfigKeys] },
       payload: jsonObject,
@@ -5957,6 +5987,7 @@ export type NotificationEndpointState = ${union(notificationEndpointStates)};
 export type NotificationCampaignTopic = ${union(notificationCampaignTopics)};
 export type NotificationCampaignState = ${union(notificationCampaignStates)};
 export type NotificationDeliveryState = ${union(notificationDeliveryStates)};
+export type NotificationCampaignAction = 'PUBLISH' | 'RETRY_FAILED';
 export type SystemConfigKey = ${union(systemConfigKeys)};
 export type AuditStreamName = ${union(auditStreamNames)};
 export type AuditEvidenceProfile = ${union(auditEvidenceProfiles)};
@@ -7512,6 +7543,29 @@ export interface NotificationCampaignCreateResult {
 }
 
 export interface NotificationCampaignPublishResult { campaignId: string; state: 'PUBLISHED' }
+
+export interface NotificationCampaignProjection {
+  campaignId: string;
+  topic: NotificationCampaignTopic;
+  audience: JsonObject;
+  message: JsonObject;
+  contentHash: Bytes32;
+  cmsVersionId: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  state: NotificationCampaignState;
+  createdBy: Address;
+  createdAt: string;
+  publishedAt: string | null;
+  deliveryCounts: Readonly<Record<NotificationDeliveryState, number>>;
+  allowedActions: readonly NotificationCampaignAction[];
+}
+
+export interface NotificationCampaignRetryResult {
+  campaignId: string;
+  state: 'RETRY_SCHEDULED';
+  retriedDeliveries: number;
+}
 
 export interface SystemConfigCreateRequest {
   configKey: SystemConfigKey;

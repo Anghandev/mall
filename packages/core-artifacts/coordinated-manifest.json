@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.13",
+  "artifactVersion": "2.0.0-settlement-admin.14",
   "publicationStatus": "COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
@@ -14,57 +14,57 @@
   "components": {
     "packageMetadata": {
       "path": "package.json",
-      "sha256": "c278f81af1a9aeaef20bd5dd7e79a4c5939ac81d083f81898e988a545d539c10"
+      "sha256": "90f9068a82fa5c47c42ae902fb346162ca011673894bcf05b189b538299433cc"
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "b408c7bbe5a2c933d489a076ff3f45903725c2dd8397b7ffb8ebbd2d696b7a67"
+      "sha256": "5f658e838f787a7203765069181f6962fde2f1da96abc87b64cb04b3c8fdf671"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "bd7b03980c6dbd2e48d31c21e6b851f54f5dcda7a2b293693c1d878f9aef34e7"
+      "sha256": "cbe24200c97813105bc1e0152373a4d8939c759ffdc609ad7b3e5706f81cceb1"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "d8fe3c10e6d79d4aa3138d3c2456aea250bfe962723b31b611b924b3bbfa465f"
+      "sha256": "193e6e2498a3c400fe03e3c5b8469172d9f512868ea644a226da5630796d4292"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "04d8cd630709b5ae07f7789360fbc15ef2928ed554951ca6542fc8e3554736dd"
+      "sha256": "afa394827d099f1b46ec6c99754575f92939a832eb12eaa2366bd1d313e9f2fe"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "83912c22799ac66e1a82d92aee10fd743b5aed1b33c72e520bd5eafc0afa8952"
+      "sha256": "3618434c4bcb778e8a5b44baab54643257e76d36c3ae86c41ea193b63779a746"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
-      "sha256": "ed59fde4177a8afc1047e55320f699b3a0d94eff2d5ab7737f1cffec5bbe4c09"
+      "sha256": "d8cb98d2f12b4be28ff3b5274021ed9ce93a8fab8eb097dd42d93fe21cc24c2d"
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "22634bd99d565ed81b36aeb15a675d23cdc3a6149e3700b1293b4e712d8e77be"
+      "sha256": "6081648566fc18a3f660856ee8d9f1a67f3134e0d302b9b5e239b2e594466d97"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "67432d349633e1a537797785a37debf5f3fd6b4c9b2d19d843f3dab4f6905389"
+      "sha256": "e580da16289bbd7e6f63d10e591f559613bfc17694315854dd62b56bf2ba8a27"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "ebf1f8b916b8e1ab223fb859b6e6135ca8af8aa7e101e518894ae3c87fcfaee2"
+      "sha256": "e64d4d3dd97ce233fadd2fad24dd5bea9b126e8097837110c708c0d97e0343b3"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
-      "sha256": "ffc95077f399c3e8dc1852d73caede868a607424ebe5660ba5383c9d61435df4"
+      "sha256": "366d18fc05f13e6de152284451ad595e1f52078f03e1277dd20829dab0792906"
     }
   },
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "1b343d0262f85e4b5d32bbbebe7dc78a5f798365f787fb02d720e582cb1cb698"
+      "sha256": "35cda9f069ab3de0d6f13f84bc26de320f83145645d6a2273cee71f53ff9f2e8"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "9a4bccd493f25257095d80b43ccefb010f2768f4103cb6d426163d5b122f3393"
+      "sha256": "40f1fc508a1e921e0432f87c8867d44ef284d9ef4516a4a0182d1378768a2bd9"
     }
   ],
   "httpSurface": [
@@ -86,6 +86,7 @@
     "GET /v2/admin/merchants",
     "GET /v2/admin/merchants/{merchantId}",
     "GET /v2/admin/monitoring",
+    "GET /v2/admin/notification-campaigns",
     "GET /v2/admin/orders",
     "GET /v2/admin/payments/{orderId}",
     "GET /v2/admin/policy-drafts",
@@ -164,6 +165,7 @@
     "POST /v2/admin/monitoring/alerts/{alertKey}/acknowledge",
     "POST /v2/admin/notification-campaigns",
     "POST /v2/admin/notification-campaigns/{campaignId}/publish",
+    "POST /v2/admin/notification-campaigns/{campaignId}/retry-failed",
     "POST /v2/admin/orders/batch-actions/preview",
     "POST /v2/admin/policy-drafts",
     "POST /v2/admin/policy-drafts/{draftId}/approval-challenge",
@@ -437,6 +439,8 @@
     "CmsPublicItem",
     "NotificationEndpointProjection",
     "NotificationInboxItem",
+    "NotificationCampaignProjection",
+    "NotificationCampaignRetryResult",
     "SystemConfigProjection",
     "AuditListResponse",
     "MonitoringDashboard",

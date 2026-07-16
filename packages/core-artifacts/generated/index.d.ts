@@ -1,4 +1,4 @@
-export declare const artifactVersion: "2.0.0-settlement-admin.13";
+export declare const artifactVersion: "2.0.0-settlement-admin.14";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
@@ -70,6 +70,7 @@ export type NotificationEndpointState = "ACTIVE" | "PAUSED" | "REVOKED";
 export type NotificationCampaignTopic = "ANNOUNCEMENT" | "MAINTENANCE" | "ACTIVITY";
 export type NotificationCampaignState = "DRAFT" | "PUBLISHED" | "CANCELLED";
 export type NotificationDeliveryState = "PENDING" | "PROCESSING" | "DELIVERED" | "RETRY" | "CONFIGURATION_REQUIRED" | "DEAD_LETTER";
+export type NotificationCampaignAction = 'PUBLISH' | 'RETRY_FAILED';
 export type SystemConfigKey = "BUSINESS" | "FREIGHT" | "RPC" | "ORACLE" | "GAS" | "CHAIN" | "INTEGRATIONS";
 export type AuditStreamName = "financial" | "governance" | "authentication" | "operational" | "backup";
 export type AuditEvidenceProfile = "RBAC" | "AUTHORIZATION" | "SIGNED_OFFCHAIN" | "SAFE_APPROVED" | "CHAIN_OBSERVED" | "CHAIN_FINAL" | "SYSTEM";
@@ -1625,6 +1626,29 @@ export interface NotificationCampaignCreateResult {
 }
 
 export interface NotificationCampaignPublishResult { campaignId: string; state: 'PUBLISHED' }
+
+export interface NotificationCampaignProjection {
+  campaignId: string;
+  topic: NotificationCampaignTopic;
+  audience: JsonObject;
+  message: JsonObject;
+  contentHash: Bytes32;
+  cmsVersionId: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  state: NotificationCampaignState;
+  createdBy: Address;
+  createdAt: string;
+  publishedAt: string | null;
+  deliveryCounts: Readonly<Record<NotificationDeliveryState, number>>;
+  allowedActions: readonly NotificationCampaignAction[];
+}
+
+export interface NotificationCampaignRetryResult {
+  campaignId: string;
+  state: 'RETRY_SCHEDULED';
+  retriedDeliveries: number;
+}
 
 export interface SystemConfigCreateRequest {
   configKey: SystemConfigKey;
