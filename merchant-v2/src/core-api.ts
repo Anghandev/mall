@@ -88,6 +88,9 @@ import {
   type MerchantStoreActionReason,
   type MerchantStoreVersionRequest,
   type MerchantProfile,
+  type MerchantReceivableStatement,
+  type MerchantReceivableStatementPage,
+  type OrderStatementCursor,
   type PickupVerificationRequest,
   type OrderKind,
   type OrderProjectionState,
@@ -199,6 +202,12 @@ export interface FulfillmentOrderListOptions {
 export interface MerchantTakeoverCaseListOptions {
   state?: TakeoverState;
   cursor?: TakeoverCaseCursor;
+  limit?: number;
+}
+
+export interface MerchantReceivableStatementListOptions {
+  kind?: OrderKind;
+  cursor?: OrderStatementCursor;
   limit?: number;
 }
 
@@ -385,6 +394,10 @@ export interface CoreApi {
     token: string,
   ): Promise<FulfillmentCompletedResult>;
   listSettlements(token: string): Promise<SettlementListProjection>;
+  listMerchantReceivableStatements(
+    token: string,
+    options?: MerchantReceivableStatementListOptions,
+  ): Promise<MerchantReceivableStatementPage>;
   createSettlementIntent(input: SettlementIntentRequest, token: string): Promise<SettlementIntentProjection>;
   submitSettlementRequest(
     input: SettlementRequestSubmission,
@@ -808,6 +821,14 @@ export function createCoreApi(baseUrl = import.meta.env.VITE_CORE_API_BASE_URL ?
       return parseSettlementList(await request(normalizedBaseUrl, '/v2/settlements', { token }));
     },
 
+    async listMerchantReceivableStatements(token, options = {}) {
+      return parseMerchantReceivableStatementPage(await request(
+        normalizedBaseUrl,
+        merchantReceivableStatementsPath(options),
+        { token },
+      ));
+    },
+
     async createSettlementIntent(input, token) {
       return parseSettlementIntent(await request(normalizedBaseUrl, '/v2/settlement-intents', {
         method: 'POST',
@@ -922,6 +943,23 @@ function merchantAuditEntriesPath(options: MerchantAuditListOptions) {
   if (options.limit !== undefined) query.set('limit', String(options.limit));
   const serialized = query.toString();
   return `/v2/merchant/audit/entries${serialized ? `?${serialized}` : ''}`;
+}
+
+function merchantReceivableStatementsPath(options: MerchantReceivableStatementListOptions) {
+  const query = new URLSearchParams();
+  if (options.kind) query.set('kind', enumValue(options.kind, orderKindSet, 'receivable statement kind'));
+  if (options.cursor) {
+    query.set('cursorCreatedAt', dateTime(options.cursor.createdAt, 'receivable statement cursor.createdAt'));
+    query.set('cursorOrderId', bytes32(options.cursor.orderId, 'receivable statement cursor.orderId'));
+  }
+  if (options.limit !== undefined) {
+    if (!Number.isSafeInteger(options.limit) || options.limit < 1 || options.limit > 100) {
+      throw new CoreApiError('InvalidResponse', 'Receivable statement limit must be an integer from 1 to 100.');
+    }
+    query.set('limit', String(options.limit));
+  }
+  const serialized = query.toString();
+  return `/v2/merchant/receivable-statements${serialized ? `?${serialized}` : ''}`;
 }
 
 async function request(baseUrl: string, path: string, options: { method?: string; body?: string; token?: string } = {}) {
@@ -2528,6 +2566,140 @@ function parseSettlementList(input: unknown): SettlementListProjection {
   };
 }
 
+function parseMerchantReceivableStatementPage(input: unknown): MerchantReceivableStatementPage {
+  const value = record(input, 'merchant receivable statement page');
+  exactObjectKeys(
+    value,
+    ['artifactVersion', 'merchantId', 'settlementWallet', 'statements', 'nextCursor'],
+    'merchant receivable statement page',
+  );
+  exact(value.artifactVersion, artifactVersion, 'merchant receivable statement page artifactVersion');
+  return {
+    artifactVersion,
+    merchantId: string(value.merchantId, 'merchant receivable statement page merchantId'),
+    settlementWallet: address(value.settlementWallet, 'merchant receivable statement page settlementWallet'),
+    statements: array(value.statements, 'merchant receivable statements').map(parseMerchantReceivableStatement),
+    nextCursor: value.nextCursor === null ? null : parseOrderStatementCursor(value.nextCursor),
+  };
+}
+
+function parseOrderStatementCursor(input: unknown): OrderStatementCursor {
+  const value = record(input, 'order statement cursor');
+  exactObjectKeys(value, ['createdAt', 'orderId'], 'order statement cursor');
+  return {
+    createdAt: dateTime(value.createdAt, 'order statement cursor.createdAt'),
+    orderId: bytes32(value.orderId, 'order statement cursor.orderId'),
+  };
+}
+
+function parseMerchantReceivableStatement(input: unknown): MerchantReceivableStatement {
+  const value = record(input, 'merchant receivable statement');
+  exactObjectKeys(value, [
+    'orderId', 'productId', 'skuId', 'quantity', 'orderState', 'paymentTxHash',
+    'paymentFinalizedAt', 'fulfilledAt', 'createdAt', 'orderKind', 'frozenAmounts',
+    'currentReceivableUsdt', 'removedFromReceivableUsdt', 'receivableLifecycle',
+    'journalEvidence', 'settlementRefs',
+  ], 'merchant receivable statement');
+  const frozenAmounts = record(value.frozenAmounts, 'merchant receivable frozen amounts');
+  exactObjectKeys(frozenAmounts, [
+    'listPriceUsdt', 'buyerPaidUsdt', 'merchantBaseReceivableUsdt',
+    'merchantConcessionAmount', 'merchantNetReceivableUsdt',
+  ], 'merchant receivable frozen amounts');
+  return {
+    orderId: bytes32(value.orderId, 'merchant receivable orderId'),
+    productId: string(value.productId, 'merchant receivable productId'),
+    skuId: string(value.skuId, 'merchant receivable skuId'),
+    quantity: positiveAtomicAmount(value.quantity, 'merchant receivable quantity'),
+    orderState: enumValue(value.orderState, orderStateSet, 'merchant receivable orderState'),
+    paymentTxHash: bytes32(value.paymentTxHash, 'merchant receivable paymentTxHash'),
+    paymentFinalizedAt: dateTime(value.paymentFinalizedAt, 'merchant receivable paymentFinalizedAt'),
+    fulfilledAt: nullableDateTime(value.fulfilledAt, 'merchant receivable fulfilledAt'),
+    createdAt: dateTime(value.createdAt, 'merchant receivable createdAt'),
+    orderKind: enumValue(value.orderKind, orderKindSet, 'merchant receivable orderKind'),
+    frozenAmounts: {
+      listPriceUsdt: atomicAmount(frozenAmounts.listPriceUsdt, 'merchant receivable listPriceUsdt'),
+      buyerPaidUsdt: atomicAmount(frozenAmounts.buyerPaidUsdt, 'merchant receivable buyerPaidUsdt'),
+      merchantBaseReceivableUsdt: atomicAmount(
+        frozenAmounts.merchantBaseReceivableUsdt,
+        'merchant receivable merchantBaseReceivableUsdt',
+      ),
+      merchantConcessionAmount: atomicAmount(
+        frozenAmounts.merchantConcessionAmount,
+        'merchant receivable merchantConcessionAmount',
+      ),
+      merchantNetReceivableUsdt: atomicAmount(
+        frozenAmounts.merchantNetReceivableUsdt,
+        'merchant receivable merchantNetReceivableUsdt',
+      ),
+    },
+    currentReceivableUsdt: atomicAmount(value.currentReceivableUsdt, 'merchant receivable currentReceivableUsdt'),
+    removedFromReceivableUsdt: atomicAmount(
+      value.removedFromReceivableUsdt,
+      'merchant receivable removedFromReceivableUsdt',
+    ),
+    receivableLifecycle: array(value.receivableLifecycle, 'merchant receivable lifecycle').map((entry) => {
+      const lifecycle = record(entry, 'merchant receivable lifecycle entry');
+      exactObjectKeys(lifecycle, ['state', 'amount', 'journalIds'], 'merchant receivable lifecycle entry');
+      return {
+        state: enumValue(lifecycle.state, balanceStateSet, 'merchant receivable lifecycle state'),
+        amount: atomicAmount(lifecycle.amount, 'merchant receivable lifecycle amount'),
+        journalIds: stringArray(lifecycle.journalIds, 'merchant receivable lifecycle journalIds'),
+      };
+    }),
+    journalEvidence: array(value.journalEvidence, 'merchant receivable journal evidence').map((entry) => {
+      const evidence = record(entry, 'merchant receivable journal evidence entry');
+      exactObjectKeys(
+        evidence,
+        ['journalId', 'eventType', 'state', 'delta', 'sourceKind', 'sourceReferenceHash', 'createdAt'],
+        'merchant receivable journal evidence entry',
+      );
+      return {
+        journalId: string(evidence.journalId, 'merchant receivable journalId'),
+        eventType: string(evidence.eventType, 'merchant receivable eventType'),
+        state: enumValue(evidence.state, balanceStateSet, 'merchant receivable journal state'),
+        delta: signedAtomicAmount(evidence.delta, 'merchant receivable journal delta'),
+        sourceKind: string(evidence.sourceKind, 'merchant receivable journal sourceKind'),
+        sourceReferenceHash: bytes32(
+          evidence.sourceReferenceHash,
+          'merchant receivable journal sourceReferenceHash',
+        ),
+        createdAt: dateTime(evidence.createdAt, 'merchant receivable journal createdAt'),
+      };
+    }),
+    settlementRefs: array(value.settlementRefs, 'merchant receivable settlement refs').map((entry) => {
+      const reference = record(entry, 'merchant receivable settlement ref');
+      exactObjectKeys(reference, [
+        'requestId', 'amount', 'state', 'batchId', 'finalSafeTxHash', 'finalExecutionTxHash',
+        'journals', 'requestedAt', 'batchedAt', 'settledAt',
+      ], 'merchant receivable settlement ref');
+      const journals = record(reference.journals, 'merchant receivable settlement journals');
+      exactObjectKeys(journals, ['requested', 'batched', 'settled'], 'merchant receivable settlement journals');
+      return {
+        requestId: bytes32(reference.requestId, 'merchant receivable settlement requestId'),
+        amount: positiveAtomicAmount(reference.amount, 'merchant receivable settlement amount'),
+        state: enumValue(reference.state, settlementRequestStateSet, 'merchant receivable settlement state'),
+        batchId: nullableBytes32(reference.batchId, 'merchant receivable settlement batchId'),
+        finalSafeTxHash: nullableBytes32(
+          reference.finalSafeTxHash,
+          'merchant receivable settlement finalSafeTxHash',
+        ),
+        finalExecutionTxHash: nullableBytes32(
+          reference.finalExecutionTxHash,
+          'merchant receivable settlement finalExecutionTxHash',
+        ),
+        journals: {
+          requested: string(journals.requested, 'merchant receivable settlement requested journal'),
+          batched: nullableString(journals.batched, 'merchant receivable settlement batched journal'),
+          settled: nullableString(journals.settled, 'merchant receivable settlement settled journal'),
+        },
+        requestedAt: dateTime(reference.requestedAt, 'merchant receivable settlement requestedAt'),
+        batchedAt: nullableDateTime(reference.batchedAt, 'merchant receivable settlement batchedAt'),
+        settledAt: nullableDateTime(reference.settledAt, 'merchant receivable settlement settledAt'),
+      };
+    }),
+  };
+}
+
 function parseSettlementRequest(input: unknown): SettlementRequestProjection {
   const value = record(input, 'settlement request');
   exact(value.artifact_version, artifactVersion, 'settlement request artifact_version');
@@ -2942,6 +3114,12 @@ function nullableBytes32(input: unknown, name: string) {
 function atomicAmount(input: unknown, name: string) {
   const value = string(input, name);
   if (!/^(0|[1-9][0-9]*)$/.test(value)) invalid(`${name} must be a canonical integer string`);
+  return value;
+}
+
+function signedAtomicAmount(input: unknown, name: string) {
+  const value = string(input, name);
+  if (!/^(0|-?[1-9][0-9]*)$/.test(value)) invalid(`${name} must be a canonical signed integer string`);
   return value;
 }
 

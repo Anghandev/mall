@@ -115,6 +115,30 @@ test('takeover assignment and replacement fulfillment form one coordinated cross
   assert.equal('takeoverCaseManagementHttp' in merchantBaseline, false);
 });
 
+test('buyer shopping and merchant receivable statements use one tenant-scoped artifact surface', () => {
+  const buyerOperation = coordinatedOpenApi.paths['/v2/buyer/shopping-statements']?.get;
+  const merchantOperation = coordinatedOpenApi.paths['/v2/merchant/receivable-statements']?.get;
+  assert.equal(buyerOperation?.operationId, 'listBuyerShoppingStatements');
+  assert.equal(merchantOperation?.operationId, 'listMerchantReceivableStatements');
+  assert.deepEqual(buyerOperation?.security, [{ bearerAuth: [] }]);
+  assert.deepEqual(merchantOperation?.security, [{ bearerAuth: [] }]);
+  assert.equal(coordinatedManifest.capabilityStatus.buyerShoppingStatementHttp, 'AVAILABLE');
+  assert.equal(coordinatedManifest.capabilityStatus.merchantReceivableStatementHttp, 'AVAILABLE');
+  assert.equal(mallBaseline.coreArtifacts, artifactVersion);
+  assert.equal(merchantBaseline.coreArtifacts, artifactVersion);
+  assert.equal(adminBaseline.artifactVersion, artifactVersion);
+  const requiredContracts = new Set(coordinatedManifest.requiredConsumerContracts);
+  for (const contract of [
+    'OrderStatementCursor',
+    'BuyerShoppingStatementPage',
+    'MerchantReceivableStatementPage',
+  ]) assert.equal(requiredContracts.has(contract), true, contract);
+  const buyerKind = buyerOperation?.parameters.find((parameter) => parameter.name === 'kind');
+  const merchantKind = merchantOperation?.parameters.find((parameter) => parameter.name === 'kind');
+  assert.deepEqual(buyerKind?.schema.enum, ['ORDINARY', 'FALLBACK_RETAIL']);
+  assert.deepEqual(merchantKind?.schema.enum, ['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL']);
+});
+
 test('platform seckill governance is one authenticated coordinated Admin surface', () => {
   const operations = [
     ['GET', '/v2/admin/seckill/actions', 'listSeckillGovernanceActions'],

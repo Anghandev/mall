@@ -5,7 +5,7 @@ implements shared funds, contracts, API, Schema or signer behavior.
 
 ## Current Product Boundary
 
-- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.11`.
+- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.12`.
 - SIWE/JWT stays in memory. Every protected read and write is role-bound by
   Core and preserves typed `DecisionBlocked`, `ExternalBlocked`,
   `ConfigurationRequired` and correlation evidence.
@@ -71,6 +71,9 @@ implements shared funds, contracts, API, Schema or signer behavior.
   order export only at `POST /v2/merchant/orders/exports`. Admin exposes no
   alias for this operation and neither calls nor bundles its route, operation
   ID or generated request/response contracts.
+- The order-statement checkpoint publishes Buyer shopping statements and
+  Merchant receivable statements. Admin accepts their coordinated capability
+  metadata in Core readiness, but exposes no parallel statement UI or API.
 
 ## Local Verification
 

@@ -36,7 +36,7 @@ describe('platform admin fail-closed experience', () => {
     expect(packageJson.dependencies['@abu24k/core-artifacts']).toBe(`workspace:${artifactVersion}`);
     expect(productBaseline.artifactVersion).toBe(artifactVersion);
     expect(coreState.artifactVersion).toBe(artifactVersion);
-    expect(coreState.artifactStatus).toBe('coordinated-takeover-assignment-checkpoint');
+    expect(coreState.artifactStatus).toBe('coordinated-order-statement-checkpoint');
     expect(coreState.connectionLabel).toContain(artifactVersion);
     expect(productBaseline.adminCapabilities.adminGlobalResourceSearch).toBe(true);
     expect(productBaseline.adminCapabilities.adminGlobalResourceExport).toBe(true);
@@ -59,7 +59,9 @@ describe('platform admin fail-closed experience', () => {
       /^\w+ \/v2\/admin\/(?:merchant-)?stores(?:\/|$)/.test(operation),
     );
 
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.11');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.12');
+    expect(coordinatedManifest.capabilityStatus.buyerShoppingStatementHttp).toBe('AVAILABLE');
+    expect(coordinatedManifest.capabilityStatus.merchantReceivableStatementHttp).toBe('AVAILABLE');
     expect(storeStatuses).toEqual(['DRAFT', 'ACTIVE', 'SUSPENDED', 'CLOSED']);
     expect(generatedDraftStatus).toBe('DRAFT');
     expect(merchantStoreManagementOperations).toEqual([
@@ -715,6 +717,8 @@ describe('platform admin fail-closed experience', () => {
     expect((await screen.findAllByText('Fail closed')).length).toBeGreaterThan(0);
     expect(screen.getByText('FIXED_REMAINDER_ACCOUNTS')).toBeTruthy();
     expect(screen.getByText('PAYMENT_ROUTER_ADDRESS_MANIFEST')).toBeTruthy();
+    expect(screen.getByText('buyerShoppingStatementHttp').closest('li')?.className).toBe('capability-available');
+    expect(screen.getByText('merchantReceivableStatementHttp').closest('li')?.className).toBe('capability-available');
   });
 
   it('renders the authenticated Core-managed product, SKU, amount and stock values', async () => {
