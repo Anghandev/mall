@@ -3476,7 +3476,7 @@ test('printer binding, provider waybill and durable print jobs form one merchant
       buyerWallet: BUYER,
       quantity: 1,
       classification: 'ORDINARY',
-      expiresAt: new Date(now.getTime() + 60_000),
+      expiresAt: new Date(Date.now() + 10 * 60_000),
     });
     const orderId = `0x${'b'.repeat(64)}`;
     await insertOrder(db, orderId, reservationId, delivery.targetHash, delivery.regionCodeHash);
@@ -3509,7 +3509,7 @@ test('printer binding, provider waybill and durable print jobs form one merchant
       buyerWallet: BUYER,
       quantity: 1,
       classification: 'ORDINARY',
-      expiresAt: new Date(now.getTime() + 60_000),
+      expiresAt: new Date(Date.now() + 10 * 60_000),
     });
     await insertOrder(
       db,
@@ -3589,7 +3589,7 @@ test('printer binding, provider waybill and durable print jobs form one merchant
       buyerWallet: BUYER,
       quantity: 1,
       classification: 'ORDINARY',
-      expiresAt: new Date(now.getTime() + 60_000),
+      expiresAt: new Date(Date.now() + 10 * 60_000),
     });
     await insertOrder(
       db,
