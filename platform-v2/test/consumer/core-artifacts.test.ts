@@ -54,7 +54,8 @@ test('settlement admin .15 checkpoint has one identity, resolvable exports and e
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 27);
+  assert.equal(schemaManifest.schemas.core.migrations.length, 28);
+  assert.equal(schemaManifest.schemas.core.migrations.at(-1)?.path, 'schema/business/028_buyer_uid.sql');
   assert.equal(schemaManifest.schemas.audit.migrations.length, 4);
   for (const migration of [
     ...schemaManifest.schemas.core.migrations,

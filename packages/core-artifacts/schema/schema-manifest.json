@@ -140,6 +140,11 @@
           "name": "027_merchant_governance_completion.sql",
           "path": "schema/business/027_merchant_governance_completion.sql",
           "sha256": "a022b18f8f55a42dbf3a3e8c668d178d3e8cce6d67bf8f9c910089f93f75a5e8"
+        },
+        {
+          "name": "028_buyer_uid.sql",
+          "path": "schema/business/028_buyer_uid.sql",
+          "sha256": "32d7622a0ca03a46c69531ad4593b542b5bca6428dd75e89d848282423242e35"
         }
       ]
     },

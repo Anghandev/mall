@@ -859,9 +859,7 @@ function parseBuyerProfile(value: unknown): BuyerProfile {
   const profile = objectValue(value);
   assertArtifactVersion(stringValue(profile.artifactVersion));
   addressValue(profile.wallet);
-  if (profile.accountId !== null || profile.accountIdStatus !== 'DecisionBlocked') {
-    throw new CoreClientError('InvalidResponse', '买家账号未按冻结状态返回');
-  }
+  if (atomicValue(profile.accountId) === '0') throw new CoreClientError('InvalidResponse', '买家 UID 无效');
   if (profile.nickname !== null) boundedNonEmptyStringValue(profile.nickname, 40);
   optionalBytes32Value(profile.avatarAssetId);
   nonNegativeIntegerValue(profile.version);

@@ -14,7 +14,7 @@ are never soft-deletable.
 | ADM-GLOBAL-001 | 4-8 | AND/OR search; exact order ID/product ID/TxHash; fuzzy/exact wallet; exact UID/phone; start/end and Today/Yesterday/7d/30d; PendingReview/Yellow/BreakerRed status | - | Shared list shell serializes filters server-side and preserves PII authorization | Frozen | GAP-ADM-003 |
 | ADM-GLOBAL-002 | 9-11 | List batch engine; Export Excel/CSV; batch electronic-waybill/pickup printing | - | Resource capability and selected rows come from allowedActions; exports/prints are audited | Frozen | GAP-ADM-003, GAP-ADM-012 |
 | ADM-GLOBAL-003 | 12 | Batch modify/list/delist/review approve-reject/soft delete | D-V2-017, D-V2-021 | Soft delete only for ordinary resources explicitly authorized; funds/chain/audit never delete | Overridden | GAP-ADM-003 |
-| ADM-DASH-001 | 14-17 | Today orders, GMV USDT, ship rate, seckill sessions, new UID users and merchants | - | Authoritative timezone and canonical values; unavailable is not zero | Frozen | GAP-ADM-005 |
+| ADM-DASH-001 | 14-17 | Today orders, GMV USDT, ship rate, seckill sessions, new UID users and merchants | D-V2-030 | Authoritative timezone and canonical values; unavailable is not zero | Verified | - |
 | ADM-DASH-002 | 18-19 | Pending merchant/product reviews, after-sale cases and low-stock products | D-V2-004 | After-sale excludes business refunds and includes exchange/delay/arbitration/takeover queues | Overridden | GAP-ADM-005 |
 | ADM-DASH-003 | 20-21 | Today signed settlement requests and Safe-settled USDT; chain failures; abnormal orders; blacklist blocks; per-asset Safe-assets/unsettled-liabilities coverage and breaker state | D-V2-007, D-V2-016, D-V2-024 | Coverage uses verified Safe assets and append-only liabilities; below 100% pauses new payments and new settlement batches without reporting healthy | Overridden | GAP-ADM-005, GAP-ADM-011, GAP-ADM-017 |
 | ADM-DASH-004 | 22-24 | RPC latency ms, Oracle deviation %, high-Gas blocks, bot orders, CPU, memory, Redis hit, MQ backlog and block height | D-V2-012 | Readiness never reports healthy without real probes | Frozen | GAP-ADM-005, GAP-ADM-018 |
@@ -276,8 +276,9 @@ search and product-lifecycle contracts:
   exact EVM-address matching or a 6-40 hex-character wallet fragment, exact
   order/product/merchant IDs and TxHash, PendingReview, start/end and
   Today/Yesterday/7d/30d ranges. The response relation and wallet mode must
-  match the request. UID, phone and Yellow queue remain visibly fail-closed,
-  so the full source row is not reported complete.
+  match the request. At `.13`, UID, phone and Yellow queue remained visibly
+  fail-closed. `D-V2-030` now closes exact UID search; phone and Yellow queue
+  remain unavailable, so the full source row is not reported complete.
 - `ADM-GLOBAL-002`: a cross-resource selection consumes each row's
   `allowedBatchActions`; Core creates the audited CSV/Excel bytes and the
   browser never synthesizes export rows. Electronic-waybill and pickup-print
@@ -306,9 +307,8 @@ financial calculation or production fixture:
 
 - `ADM-DASH-001`: renders the exact `Asia/Shanghai` `[start,end)` window,
   15-confirmation finalized-order cohort, immutable list-price GMV,
-  buyer-paid USDT, and nullable shipment-rate numerator/denominator/bps. New
-  UID identity remains `DecisionBlocked`, so the full row is not reported
-  complete.
+  buyer-paid USDT, nullable shipment-rate numerator/denominator/bps, merchant
+  counts, seckill counts and immutable total/today-new buyer UID counts.
 - `ADM-DASH-002`: renders pending merchant/product review and the current
   exchange, delay, arbitration, forced-receipt and takeover queues. Low-stock
   threshold remains `DecisionBlocked`, so the full row is not reported

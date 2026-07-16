@@ -39,7 +39,7 @@ describe('settlement/admin coordinated Core client', () => {
     });
     expect(dashboard.coverage[0]).toMatchObject({ covered: false });
     expect(dashboard.breakers[0]).toEqual({ scope: 'NEW_PAYMENT', paused: true });
-    expect(dashboard.unavailable[0]).toMatchObject({ metric: 'NEW_UID_USERS', reasonCode: 'DecisionBlocked' });
+    expect(dashboard.buyers).toEqual({ total: '10', newToday: '2' });
     expect(fetchMock).toHaveBeenCalledWith('/v2/admin/dashboard', {
       headers: { authorization: 'Bearer jwt' },
     });
@@ -452,6 +452,7 @@ function adminBusinessDashboard() {
       pendingShipment: '4', shipped: '5', delivered: '6', fulfilled: '7',
       shipmentRate: { numerator: '0', denominator: '0', bps: null },
     },
+    buyers: { total: '10', newToday: '2' },
     merchants: { total: '8', newToday: '1', pending: '2', approved: '5', suspended: '1' },
     products: { total: '9', pendingReview: '3', soldOut: '2' },
     seckill: { createdToday: '1', active: '1', settling: '0' },
@@ -465,7 +466,6 @@ function adminBusinessDashboard() {
       { scope: 'NEW_SETTLEMENT_BATCH', paused: true },
     ],
     unavailable: [
-      { metric: 'NEW_UID_USERS', reasonCode: 'DecisionBlocked', detail: 'Buyer UID identity is not frozen' },
       { metric: 'LOW_STOCK_PRODUCTS', reasonCode: 'DecisionBlocked', detail: 'Low-stock threshold is not frozen' },
     ],
   };

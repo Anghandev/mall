@@ -18,7 +18,7 @@
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "e68c0db2322c143691cdc483f2f7b23cb37c623ba8feb7c14f721668789b10b8"
+      "sha256": "037583e808d0da9e2d670248fb02ac90b24735867d53c1d1b33b5b71a0d2b052"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
@@ -26,11 +26,11 @@
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "89f7a1c5b05cca87ea4531941d3a079096da51ea865533e2a2752bb8d0c32a95"
+      "sha256": "8ed05a8f6ef0bdd035e231a4890a9f64b7d4ce72b7eed2212ae451fd9d895573"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "7ed0cc09d27d20fd2956b24c8e5fc7373e815d9c6759fb88ebead77321f935e1"
+      "sha256": "692a1c8e664c70baaf4e4c75ded507753693aa4c7afe5fb413f87ff660010f8c"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
@@ -60,11 +60,11 @@
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "019ad859315483839212ec2e3b933e8db81244e6f111650cbdbc7e65d1fb79f5"
+      "sha256": "aca309458189a0bab8c2b029af1a476b3e5dd2902eab95373959894178a1ec4e"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "8b5a89cb5b8691562cc303deb0ec7a34bd368478bdb7c7abb219cfa1c717282b"
+      "sha256": "4427a258e4b5a2bc955902af13553d50d1639a1491e682651a4418a292d26985"
     }
   ],
   "httpSurface": [

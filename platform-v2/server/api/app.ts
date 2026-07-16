@@ -565,6 +565,7 @@ export interface BusinessAnalyticsApiService {
 }
 
 export interface AccountApiService {
+  ensureBuyerUid(walletAddress: string): Promise<string>;
   getBuyerProfile(actor: FulfillmentActor): Promise<unknown>;
   updateBuyerProfile(actor: FulfillmentActor, input: BuyerProfileUpdate): Promise<unknown>;
   parseBuyerAddress(actor: FulfillmentActor, rawText: string): Promise<unknown>;
@@ -851,6 +852,7 @@ async function route(
       dependencies.config.jwtSecret,
       dependencies.clock(),
     );
+    if (binding.roles.includes('BUYER')) await dependencies.accountService.ensureBuyerUid(verified.walletAddress);
     sendJson(response, 200, {
       token,
       walletAddress: verified.walletAddress,
@@ -2376,7 +2378,7 @@ async function routeAdminServices(
       ['ADMIN', 'OPERATOR', 'AUDITOR'],
     );
     assertOnlySearchParams(url, [
-      'resourceType', 'orderId', 'productId', 'merchantId', 'txHash', 'wallet',
+      'resourceType', 'orderId', 'productId', 'merchantId', 'txHash', 'uid', 'wallet',
       'relation', 'walletMatch', 'from', 'to', 'pendingReview', 'limit',
     ], ['resourceType']);
     sendJson(response, 200, await dependencies.adminGlobalOperationsService.search(
@@ -3523,6 +3525,7 @@ function adminGlobalSearchQuery(url: URL): AdminGlobalSearchQuery {
     ...(url.searchParams.get('productId') ? { productId: url.searchParams.get('productId')! } : {}),
     ...(url.searchParams.get('merchantId') ? { merchantId: url.searchParams.get('merchantId')! } : {}),
     ...(url.searchParams.get('txHash') ? { txHash: url.searchParams.get('txHash')! } : {}),
+    ...(url.searchParams.get('uid') ? { uid: url.searchParams.get('uid')! } : {}),
     ...(url.searchParams.get('wallet') ? { wallet: url.searchParams.get('wallet')! } : {}),
     ...(url.searchParams.get('walletMatch')
       ? { walletMatch: adminWalletMatch(url.searchParams.get('walletMatch')!) }

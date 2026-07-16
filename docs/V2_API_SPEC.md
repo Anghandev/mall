@@ -149,8 +149,9 @@ audit. Saving requires complete name, mainland mobile number, address and
 coordinates plus a current AMap six-digit region result. Nickname and address
 PII use AES-256-GCM; one active default address is enforced transactionally.
 A saved address creates a fresh 30-minute fulfillment target and never rewrites
-the target snapshot of an existing quote or order. Buyer UID/account-ID policy
-and production PII retention remain `DecisionBlocked`.
+the target snapshot of an existing quote or order. The first successful BUYER
+SIWE creates one permanent numeric UID for the wallet; buyer profile returns it
+as `accountId`. Production PII retention remains `DecisionBlocked`.
 
 Merchant profile and audit routes:
 
@@ -281,9 +282,10 @@ amounts include an order only when its canonical payment reaches 15-confirmation
 finality inside that window. Amounts come from immutable `exactAmounts`; current
 order queues remain separate from the finality-window cohort. Shipment rates
 return numerator, denominator and nullable basis points, so an empty cohort is
-not reported as zero percent. Metrics whose identity or threshold is not frozen
-(buyer UID and low stock) are explicit `DecisionBlocked` entries rather than
-synthetic zeroes. Risk observations, blacklist blocks, active restrictions and
+not reported as zero percent. The Admin dashboard returns total and today-new
+buyer UID counts from immutable buyer-account rows. The unfrozen low-stock
+threshold remains an explicit `DecisionBlocked` entry rather than a synthetic
+zero. Risk observations, blacklist blocks, active restrictions and
 pending appeals are derived from append-only risk records and are not inferred
 from operations monitoring alerts.
 Safe coverage is included only when the latest snapshot has a fresh canonical

@@ -1792,6 +1792,7 @@ export interface AdminBusinessDashboard {
     pendingShipment: AtomicAmount; shipped: AtomicAmount; delivered: AtomicAmount;
     fulfilled: AtomicAmount; shipmentRate: BusinessRatio;
   };
+  buyers: { total: AtomicAmount; newToday: AtomicAmount };
   merchants: { total: AtomicAmount; newToday: AtomicAmount; pending: AtomicAmount; approved: AtomicAmount; suspended: AtomicAmount };
   products: { total: AtomicAmount; pendingReview: AtomicAmount; soldOut: AtomicAmount };
   seckill: { createdToday: AtomicAmount; active: AtomicAmount; settling: AtomicAmount };
@@ -2449,7 +2450,7 @@ export interface AdminGlobalSearchResponse {
   walletMatch: 'EXACT' | 'FUZZY';
   resources: readonly AdminResourceSummary[];
   truncated: boolean;
-  unavailableFilters: readonly ('UID' | 'PHONE' | 'YELLOW_QUEUE')[];
+  unavailableFilters: readonly ('PHONE' | 'YELLOW_QUEUE')[];
 }
 
 export interface AdminResourceSelection {
@@ -2928,8 +2929,7 @@ export interface AllowedAction {
 export interface BuyerProfile {
   artifactVersion: typeof artifactVersion;
   wallet: Address;
-  accountId: null;
-  accountIdStatus: 'DecisionBlocked';
+  accountId: AtomicAmount;
   nickname: string | null;
   avatarAssetId: Bytes32 | null;
   version: number;

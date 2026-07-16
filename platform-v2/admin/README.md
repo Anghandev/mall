@@ -60,8 +60,8 @@ implements shared funds, contracts, API, Schema or signer behavior.
   visibly `ConfigurationRequired` and is never presented as delivery success.
 - The risk workspace consumes Core observations, restrictions, appeals,
   manual restriction, override and appeal-decision contracts. AUDITOR is
-  read-only, OPERATOR may only appeal and ADMIN owns the other writes. New UID,
-  low-stock thresholds, low-history wallet clustering and frequent
+  read-only, OPERATOR may only appeal and ADMIN owns the other writes. Low-stock
+  thresholds, low-history wallet clustering and frequent
   address/store-change thresholds remain explicit fail-closed capabilities;
   monitoring alerts are never relabeled as transaction-risk events. Global
   batch actions, logistics configuration and production provider accounts

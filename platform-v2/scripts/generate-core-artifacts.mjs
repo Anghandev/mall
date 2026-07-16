@@ -131,6 +131,7 @@ const schemaSources = [
       '025_takeover_assignments.sql',
       '026_admin_product_lifecycle_batches.sql',
       '027_merchant_governance_completion.sql',
+      '028_buyer_uid.sql',
     ],
   },
   {
@@ -1940,6 +1941,7 @@ function adminGlobalOperationsOpenApiPaths(errorResponse) {
           { name: 'productId', in: 'query', schema: { type: 'string', minLength: 1, maxLength: 256 } },
           { name: 'merchantId', in: 'query', schema: { type: 'string', minLength: 1, maxLength: 256 } },
           { name: 'txHash', in: 'query', schema: { $ref: '#/components/schemas/Bytes32' } },
+          { name: 'uid', in: 'query', schema: { type: 'string', pattern: '^[1-9][0-9]{0,18}$' } },
           { name: 'relation', in: 'query', schema: { enum: ['AND', 'OR'], default: 'AND' } },
           {
             name: 'wallet', in: 'query',
@@ -2384,8 +2386,7 @@ function accountOpenApiSchemas() {
     BuyerProfile: object({
       artifactVersion: { const: artifactVersion },
       wallet: ref('Address'),
-      accountId: { type: 'null' },
-      accountIdStatus: { const: 'DecisionBlocked' },
+      accountId: ref('AtomicAmount'),
       nickname: nullable(string),
       avatarAssetId: nullable(ref('Bytes32')),
       version,
@@ -4076,6 +4077,7 @@ function settlementAdminOpenApiSchemas() {
         pendingShipment: atomic, shipped: atomic, delivered: atomic, fulfilled: atomic,
         shipmentRate: ref('BusinessRatio'),
       }),
+      buyers: object({ total: atomic, newToday: atomic }),
       merchants: object({ total: atomic, newToday: atomic, pending: atomic, approved: atomic, suspended: atomic }),
       products: object({ total: atomic, pendingReview: atomic, soldOut: atomic }),
       seckill: object({ createdToday: atomic, active: atomic, settling: atomic }),
@@ -5056,7 +5058,7 @@ function fulfillmentOpenApiSchemas() {
         truncated: { type: 'boolean' },
         unavailableFilters: {
           type: 'array', uniqueItems: true,
-          items: { enum: ['UID', 'PHONE', 'YELLOW_QUEUE'] },
+          items: { enum: ['PHONE', 'YELLOW_QUEUE'] },
         },
       },
     },
@@ -7731,6 +7733,7 @@ export interface AdminBusinessDashboard {
     pendingShipment: AtomicAmount; shipped: AtomicAmount; delivered: AtomicAmount;
     fulfilled: AtomicAmount; shipmentRate: BusinessRatio;
   };
+  buyers: { total: AtomicAmount; newToday: AtomicAmount };
   merchants: { total: AtomicAmount; newToday: AtomicAmount; pending: AtomicAmount; approved: AtomicAmount; suspended: AtomicAmount };
   products: { total: AtomicAmount; pendingReview: AtomicAmount; soldOut: AtomicAmount };
   seckill: { createdToday: AtomicAmount; active: AtomicAmount; settling: AtomicAmount };
@@ -8388,7 +8391,7 @@ export interface AdminGlobalSearchResponse {
   walletMatch: 'EXACT' | 'FUZZY';
   resources: readonly AdminResourceSummary[];
   truncated: boolean;
-  unavailableFilters: readonly ('UID' | 'PHONE' | 'YELLOW_QUEUE')[];
+  unavailableFilters: readonly ('PHONE' | 'YELLOW_QUEUE')[];
 }
 
 export interface AdminResourceSelection {
@@ -8867,8 +8870,7 @@ export interface AllowedAction {
 export interface BuyerProfile {
   artifactVersion: typeof artifactVersion;
   wallet: Address;
-  accountId: null;
-  accountIdStatus: 'DecisionBlocked';
+  accountId: AtomicAmount;
   nickname: string | null;
   avatarAssetId: Bytes32 | null;
   version: number;

@@ -536,6 +536,7 @@ function isAdminBusinessDashboard(value: unknown): value is AdminBusinessDashboa
       ])
       || !isRecord(value.orders)
       || !isBusinessRatio(value.orders.shipmentRate)
+      || !hasAmounts(value.buyers, ['total', 'newToday'])
       || !hasAmounts(value.merchants, ['total', 'newToday', 'pending', 'approved', 'suspended'])
       || !hasAmounts(value.products, ['total', 'pendingReview', 'soldOut'])
       || !hasAmounts(value.seckill, ['createdToday', 'active', 'settling'])

@@ -35,6 +35,7 @@ Requirement Matrices.
 | D-V2-027 | External settlement links are wallet-bound, one-use, expiring signed requests and cannot bypass Safe batching or eligibility | Platform no-login direct-Claim wording |
 | D-V2-028 | Undeployed pre-rewrite V2 funds runtime has no compatibility path; only `legacy/v1-npl-only` remains read-only | Prevents preserving the wrong funds model |
 | D-V2-029 | A merchant settlement wallet becomes permanently immutable when the application is approved. No merchant, platform role, secondary signer or Safe may change it; an incorrect pre-approval address requires rejecting the application and creating a new one | Removes governed wallet migration, emergency rebinding and post-settlement rebinding |
+| D-V2-030 | The first successful SIWE session with a BUYER role atomically creates one global, permanent numeric UID bound to that wallet. UID is off-chain display and exact-search identity only; it never participates in funds or signatures | Resolves buyer accountId and Admin new-UID/search gaps |
 
 ## Closure
 

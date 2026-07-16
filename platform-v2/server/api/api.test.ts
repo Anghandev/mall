@@ -989,6 +989,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
   const cmsPublishedContexts: unknown[] = [];
   let notificationEndpointCorrelationId: string | undefined;
   let monitoringCorrelationId: string | undefined;
+  let ensuredBuyerUidWallet: string | undefined;
   const server = createApiServer({
     config,
     runtimeReadiness,
@@ -1068,7 +1069,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
         walletMatch: input?.walletMatch ?? 'EXACT',
         resources: [],
         truncated: false,
-        unavailableFilters: ['UID', 'PHONE', 'YELLOW_QUEUE'],
+        unavailableFilters: ['PHONE', 'YELLOW_QUEUE'],
         query: input,
       }),
       exportSelection: async (actor, input) => ({
@@ -1440,6 +1441,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       }),
     },
     accountService: {
+      ensureBuyerUid: async (walletAddress) => { ensuredBuyerUidWallet = walletAddress; return '1'; },
       getBuyerProfile: async (actor) => ({ wallet: actor.walletAddress, version: 0 }),
       updateBuyerProfile: async (actor, input) => ({ wallet: actor.walletAddress, ...input, version: 1 }),
       parseBuyerAddress: async (_actor, rawText) => ({ rawTextLength: rawText.length, canSave: true }),
@@ -1542,6 +1544,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       body: JSON.stringify({ message: challenge.message, signature }),
     });
     assert.equal(login.status, 200);
+    assert.equal(ensuredBuyerUidWallet, wallet.address.toLowerCase());
     const session = (await login.json()) as { token: string; merchantId?: string };
     assert.equal(session.merchantId, 'merchant-1');
     const bearerHeaders = {
@@ -2120,6 +2123,14 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
         pendingReview: false,
         limit: 20,
       },
+    );
+    const globalUidResources = await fetch(`${base}/v2/admin/global/resources?uid=42`, {
+      headers: bearerHeaders,
+    });
+    assert.equal(globalUidResources.status, 200);
+    assert.equal(
+      (await globalUidResources.json() as { query: Record<string, unknown> }).query.uid,
+      '42',
     );
     assert.equal((await fetch(`${base}/v2/admin/global/resources?resourceType=UNKNOWN`, {
       headers: bearerHeaders,

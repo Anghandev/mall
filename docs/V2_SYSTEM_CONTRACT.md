@@ -192,6 +192,10 @@ Status: frozen authority for the function-first V2 rewrite from
 
 ## Governance, Risk And Retention
 
+- The first successful SIWE session carrying the BUYER role atomically creates
+  one globally unique numeric UID bound permanently to that wallet. UID is
+  off-chain, display/search only and never participates in payment, settlement,
+  signatures or asset ownership.
 - Policy publication and every high-risk change require RBAC, an exact
   secondary-wallet EIP-712 signature and Safe multisig approval. A new
   `policyVersion` affects only future quotes, orders and sessions.
@@ -226,8 +230,8 @@ Status: frozen authority for the function-first V2 rewrite from
 - Still `DecisionBlocked`: platform service-fee proportion, seckill prize-pool
   proportion, merchant-store reward proportion, merchant-concession
   destination weights, fixed circulation/remainder accounts and any policy
-  beneficiary not frozen above, buyer account-ID policy, and production buyer
-  PII retention/deletion policy. No default may be inferred.
+  beneficiary not frozen above, and production buyer PII retention/deletion
+  policy. No default may be inferred.
 - `ExternalBlocked`: USDT Custody, NPL Reward and Operations Treasury Safe
   addresses and Owners, role wallets, production RPC/fallback RPC,
   domains/HTTPS/WSS, the existing BNM backend project's API/schema/credentials

@@ -107,11 +107,11 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
   product/session title is inferred. `MAL-ASSET-002` remains `Frozen` because
   the winner-bound seckill prize journal and lifecycle are `DecisionBlocked`.
 
-- `MAL-ASSET-001`: authenticated profile reads/writes preserve the frozen
-  `accountIdStatus=DecisionBlocked`, display canonical overview counts and bind
-  avatar updates only after the `BUYER_AVATAR` / `BUYER` write-once upload is
-  provider-verified. Media identity, owner wallet and content hashes are checked
-  before rendering or binding.
+- `MAL-ASSET-001`: authenticated profile reads/writes display the permanent
+  Core-generated numeric `accountId`, display canonical overview counts and
+  bind avatar updates only after the `BUYER_AVATAR` / `BUYER` write-once upload
+  is provider-verified. Media identity, owner wallet and content hashes are
+  checked before rendering or binding.
 - `MAL-ADDR-001`: raw pasted text is sent only to the Core parser, every parsed
   field must be reviewed before create, and saved addresses support list,
   update, delete and default writes with optimistic versions. Checkout hashes

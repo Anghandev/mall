@@ -721,7 +721,7 @@ export function AssetsScreen() {
         </div>
         <div className="profile-strip__copy">
           <h2 id="profile-title">{runtime.buyerProfile?.nickname ?? (runtime.session ? '未设置昵称' : '未连接钱包')}</h2>
-          <p>买家 UID：{runtime.buyerProfile?.accountIdStatus ?? (runtime.session ? '正在同步' : 'DecisionBlocked')}</p>
+          <p>买家 UID：{runtime.buyerProfile?.accountId ?? (runtime.session ? '正在同步' : '请先登录')}</p>
         </div>
         <div className="profile-strip__actions">
           <button

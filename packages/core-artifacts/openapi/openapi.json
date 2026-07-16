@@ -8793,6 +8793,14 @@
             }
           },
           {
+            "name": "uid",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            }
+          },
+          {
             "name": "relation",
             "in": "query",
             "schema": {
@@ -13228,7 +13236,6 @@
             "uniqueItems": true,
             "items": {
               "enum": [
-                "UID",
                 "PHONE",
                 "YELLOW_QUEUE"
               ]
@@ -24988,6 +24995,7 @@
           "timezone",
           "window",
           "orders",
+          "buyers",
           "merchants",
           "products",
           "seckill",
@@ -25045,6 +25053,22 @@
               },
               "shipmentRate": {
                 "$ref": "#/components/schemas/BusinessRatio"
+              }
+            }
+          },
+          "buyers": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "total",
+              "newToday"
+            ],
+            "properties": {
+              "total": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "newToday": {
+                "$ref": "#/components/schemas/AtomicAmount"
               }
             }
           },
@@ -25650,7 +25674,6 @@
           "artifactVersion",
           "wallet",
           "accountId",
-          "accountIdStatus",
           "nickname",
           "avatarAssetId",
           "version",
@@ -25664,10 +25687,7 @@
             "$ref": "#/components/schemas/Address"
           },
           "accountId": {
-            "type": "null"
-          },
-          "accountIdStatus": {
-            "const": "DecisionBlocked"
+            "$ref": "#/components/schemas/AtomicAmount"
           },
           "nickname": {
             "anyOf": [

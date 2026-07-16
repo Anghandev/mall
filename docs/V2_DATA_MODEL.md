@@ -169,9 +169,11 @@ overwrite a later reorg `LOCKED` state.
 
 ## Account And Tenant Audit Storage
 
+- `core.buyer_accounts` assigns one database-generated numeric UID to the buyer
+  wallet on its first successful BUYER SIWE. The wallet, UID and creation time
+  are immutable; UID is off-chain display/search identity only.
 - `core.buyer_profiles` stores AES-256-GCM encrypted nicknames and optional
-  provider-sealed avatar identity. Buyer account ID remains explicitly
-  `DecisionBlocked` rather than being synthesized from a wallet.
+  provider-sealed avatar identity.
 - `core.buyer_saved_addresses` stores encrypted address payloads, AMap region
   evidence, logical deletion, optimistic versions and one active transactional
   default per wallet. Raw parser text is never stored. A saved row is not a
@@ -247,5 +249,5 @@ not a substitute for production PostgreSQL backup and restore evidence.
 Production PostgreSQL, Redis, encrypted backup storage, Safe addresses, RPCs,
 signer services and providers remain `ExternalBlocked`. Missing commercial
 allocation inputs remain `DecisionBlocked`. There is no fixture-backed success
-path and no business-refund or Claim table/API in V2. Buyer account-ID policy
-and production PII retention/deletion policy also remain `DecisionBlocked`.
+path and no business-refund or Claim table/API in V2. Production PII
+retention/deletion policy also remains `DecisionBlocked`.

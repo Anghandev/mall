@@ -229,7 +229,7 @@ describe('platform admin fail-closed experience', () => {
     const pendingAppealMetric = screen.getByText('待处理风险申诉').closest('div')!;
     expect(within(abnormalRiskMetric).getByText('11')).toBeTruthy();
     expect(within(pendingAppealMetric).getByText('14')).toBeTruthy();
-    expect(screen.getAllByText('Buyer UID identity is not frozen')).toHaveLength(2);
+    expect(within(screen.getByText('今日新增 UID').closest('div')!).getByText('2')).toBeTruthy();
     expect(screen.getByText('0x4444444444444444444444444444444444444444')).toBeTruthy();
     expect(screen.getAllByText('paused = true')).toHaveLength(2);
     expect(screen.getByLabelText('Approval nonce').hasAttribute('disabled')).toBe(true);
@@ -973,6 +973,7 @@ function adminDashboardResponse() {
       pendingShipment: '4', shipped: '5', delivered: '6', fulfilled: '7',
       shipmentRate: { numerator: '0', denominator: '0', bps: null },
     },
+    buyers: { total: '10', newToday: '2' },
     merchants: { total: '8', newToday: '1', pending: '2', approved: '5', suspended: '1' },
     products: { total: '9', pendingReview: '3', soldOut: '2' },
     seckill: { createdToday: '1', active: '1', settling: '0' },
@@ -986,7 +987,6 @@ function adminDashboardResponse() {
       { scope: 'NEW_SETTLEMENT_BATCH', paused: true },
     ],
     unavailable: [
-      { metric: 'NEW_UID_USERS', reasonCode: 'DecisionBlocked', detail: 'Buyer UID identity is not frozen' },
       { metric: 'LOW_STOCK_PRODUCTS', reasonCode: 'DecisionBlocked', detail: 'Low-stock threshold is not frozen' },
     ],
   };

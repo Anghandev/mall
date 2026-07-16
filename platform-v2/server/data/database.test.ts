@@ -134,6 +134,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '025_takeover_assignments.sql',
       '026_admin_product_lifecycle_batches.sql',
       '027_merchant_governance_completion.sql',
+      '028_buyer_uid.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -517,6 +518,13 @@ test('buyer account data is encrypted, tenant scoped and creates targets only fr
       clock: () => now,
     });
     const buyer = { walletAddress: BUYER, roles: ['BUYER'] as const };
+    const uid = await service.ensureBuyerUid(BUYER);
+    assert.equal(await service.ensureBuyerUid(BUYER), uid);
+    assert.notEqual(await service.ensureBuyerUid('0x3333333333333333333333333333333333333333'), uid);
+    await assert.rejects(
+      db.query('UPDATE core.buyer_accounts SET created_at = created_at + interval \'1 second\' WHERE buyer_wallet = $1', [BUYER]),
+      /ImmutableRecord/,
+    );
     const profile = await service.updateBuyerProfile(buyer, {
       nickname: 'Private Nickname',
       avatarAssetId: null,
@@ -524,6 +532,7 @@ test('buyer account data is encrypted, tenant scoped and creates targets only fr
       idempotencyKey: 'buyer-profile-update-1',
     });
     assert.equal(profile.nickname, 'Private Nickname');
+    assert.equal(profile.accountId, uid);
     const profileStorage = await db.query<{ encrypted: string }>(
       "SELECT encode(encrypted_nickname, 'hex') AS encrypted FROM core.buyer_profiles WHERE buyer_wallet = $1",
       [BUYER],
@@ -2127,6 +2136,10 @@ test('business analytics uses canonical Asia Shanghai finality windows and fail-
       [MERCHANT, admin, HASH],
     );
     const now = new Date((intent.issuedAt + 120) * 1_000);
+    await db.query(
+      'INSERT INTO core.buyer_accounts (buyer_wallet, created_at) VALUES ($1,$2)',
+      [BUYER, now],
+    );
     const service = new BusinessAnalyticsService({ transactions: transactionAdapter(db), clock: () => now });
     const merchant = await service.merchantDashboard({
       walletAddress: MERCHANT,
@@ -2152,6 +2165,7 @@ test('business analytics uses canonical Asia Shanghai finality windows and fail-
     assert.equal(platform.orders.listPriceUsdt, '100');
     assert.equal(platform.orders.pendingShipment, '1');
     assert.equal(platform.merchants.total, '1');
+    assert.deepEqual(platform.buyers, { total: '1', newToday: '1' });
     assert.equal(platform.products.total, '1');
     assert.deepEqual(platform.risk, {
       abnormalObservationsToday: '0',
@@ -2159,7 +2173,7 @@ test('business analytics uses canonical Asia Shanghai finality windows and fail-
       activeRestrictions: '0',
       pendingAppeals: '0',
     });
-    assert.equal(platform.unavailable.find((metric) => metric.metric === 'NEW_UID_USERS')?.reasonCode, 'DecisionBlocked');
+    assert.equal(platform.unavailable.some((metric) => metric.metric === 'NEW_UID_USERS'), false);
     assert.equal(platform.unavailable.some((metric) => metric.metric === 'ABNORMAL_ORDERS'), false);
     assert.equal(platform.unavailable.some((metric) => metric.metric === 'BLACKLIST_BLOCKS'), false);
     assert.deepEqual(platform.breakers, [
@@ -4308,6 +4322,10 @@ test('order pages use stable scoped cursors and shipment batches are canonical, 
       clock: () => now,
       bytes32: () => `0x${'d'.repeat(64)}`,
     });
+    const buyerUid = (await db.query<{ uid: string }>(
+      'INSERT INTO core.buyer_accounts (buyer_wallet, created_at) VALUES ($1,$2) RETURNING uid::text AS uid',
+      [BUYER, now],
+    )).rows[0]!.uid;
     const globalPage = await globalOperations.search(platform, { limit: 10 });
     assert.equal(globalPage.relation, 'AND');
     assert.deepEqual(new Set(globalPage.resources.map((resource) => resource.resourceType)), new Set([
@@ -4316,6 +4334,18 @@ test('order pages use stable scoped cursors and shipment batches are canonical, 
     assert.deepEqual((await globalOperations.search(platform, { wallet: BUYER })).resources.map((resource) => (
       resource.resourceType
     )), ['ORDER', 'ORDER']);
+    const uidPage = await globalOperations.search(platform, { uid: buyerUid });
+    assert.deepEqual(uidPage.resources.map((resource) => resource.resourceType), ['ORDER', 'ORDER']);
+    assert.deepEqual(uidPage.unavailableFilters, ['PHONE', 'YELLOW_QUEUE']);
+    assert.deepEqual((await globalOperations.search(platform, { uid: '999999999' })).resources, []);
+    assert.throws(
+      () => globalOperations.search(platform, { uid: '9223372036854775808' }),
+      /Buyer UID is invalid/,
+    );
+    assert.throws(
+      () => globalOperations.search(platform, { uid: buyerUid, relation: 'OR' }),
+      /requires exact AND search/,
+    );
     assert.deepEqual((await globalOperations.search(platform, {
       productId: 'product-1',
     })).resources.map((resource) => resource.resourceType), ['PRODUCT', 'ORDER', 'ORDER']);
