@@ -97,7 +97,7 @@ describe('Mall Core artifact boundary', () => {
       ...Object.values(coordinatedRealtimeOperations),
     ];
 
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.14');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.15');
     expect(coordinatedOpenApi.paths['/v2/merchant/orders/exports']?.post?.operationId)
       .toBe('exportMerchantOrders');
     expect(coordinatedOpenApi.paths['/v2/admin/payments/{orderId}']?.get?.operationId)
