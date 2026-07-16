@@ -1,0 +1,172 @@
+import {
+  artifactVersion,
+  type AdminGlobalSearchResponse,
+  type AdminProductBatchTagResult,
+  type AdminResourceExport,
+  type UserRole,
+} from '@abu24k/core-artifacts';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { App } from '../src/App';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  delete window.ethereum;
+});
+
+describe('Admin global operations page', () => {
+  it('searches, selects, downloads CSV and writes tags only with row authorization', async () => {
+    const wallet = address('1');
+    window.ethereum = walletProvider(wallet);
+    const fetchMock = globalOperationsFetch(wallet, 'ADMIN', globalSearchResponse({ truncated: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn().mockReturnValue('blob:global-export') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const user = userEvent.setup();
+    render(<MemoryRouter initialEntries={['/global-operations']}><App /></MemoryRouter>);
+
+    expect(screen.getByRole('heading', { name: '全局资源操作' })).toBeTruthy();
+    expect(screen.getByText('Unavailable / DecisionBlocked')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    await user.type(await screen.findByLabelText('商家 ID'), 'merchant-1');
+    await user.selectOptions(screen.getByLabelText('审核投影'), 'true');
+    await user.click(screen.getByRole('button', { name: '查询' }));
+
+    expect(await screen.findByText('结果已截断')).toBeTruthy();
+    expect(screen.getByText('24K 金章')).toBeTruthy();
+    await user.click(screen.getByRole('checkbox', { name: '选择 PRODUCT product-1' }));
+    expect(screen.getByRole('button', { name: '导出 CSV' }).hasAttribute('disabled')).toBe(false);
+    await user.click(screen.getByRole('button', { name: '导出 CSV' }));
+    expect(await screen.findByText(/abu24k-admin-resources.csv 已下载/)).toBeTruthy();
+
+    await user.click(screen.getByRole('checkbox', { name: /新品/ }));
+    await user.click(screen.getByRole('button', { name: '批量加标签' }));
+
+    expect(await screen.findByText('标签版本证据')).toBeTruthy();
+    expect(screen.getByText(/1 个商品写入新版本/)).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes('/v2/admin/global/resources?') && !init?.method)).toBe(true);
+    expect(fetchMock.mock.calls.some(([input, init]) => String(input).endsWith('/v2/admin/global/exports') && init?.method === 'POST')).toBe(true);
+    const batchCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/v2/admin/catalog/products/batch-tags'));
+    expect(JSON.parse(String(batchCall?.[1]?.body))).toMatchObject({ productIds: ['product-1'], tagIds: ['tag-1'] });
+  });
+
+  it('keeps AUDITOR batch tagging forbidden while preserving export', async () => {
+    const wallet = address('2');
+    window.ethereum = walletProvider(wallet);
+    const response = globalSearchResponse({
+      resources: [productResource([{ action: 'EXPORT_CSV', enabled: true }, { action: 'EXPORT_EXCEL', enabled: true }, { action: 'ADD_PRODUCT_TAGS', enabled: false, reasonCode: 'Forbidden' }])],
+    });
+    const fetchMock = globalOperationsFetch(wallet, 'AUDITOR', response);
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<MemoryRouter initialEntries={['/global-operations']}><App /></MemoryRouter>);
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    await user.click(await screen.findByRole('button', { name: '查询' }));
+    await user.click(await screen.findByRole('checkbox', { name: '选择 PRODUCT product-1' }));
+
+    expect(screen.getByText('AUDITOR 只读：Forbidden')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '批量加标签' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '导出 CSV' }).hasAttribute('disabled')).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/v2/admin/catalog/tags'))).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/v2/admin/catalog/products/batch-tags'))).toBe(false);
+  });
+
+  it('renders empty and Core failure states without synthetic resources', async () => {
+    const wallet = address('3');
+    window.ethereum = walletProvider(wallet);
+    let searches = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['AUDITOR'] });
+      if (url.includes('/v2/admin/global/resources?')) {
+        searches += 1;
+        return searches === 1
+          ? jsonResponse(globalSearchResponse({ resources: [] }))
+          : jsonResponse({ error: { code: 'ExternalBlocked', message: 'Admin projection unavailable', correlationId: 'global-down' } }, 503);
+      }
+      return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected request' } }, 400);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<MemoryRouter initialEntries={['/global-operations']}><App /></MemoryRouter>);
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    await user.click(await screen.findByRole('button', { name: '查询' }));
+    expect(await screen.findByRole('heading', { name: '没有匹配资源' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '查询' }));
+    expect(await screen.findByText('Admin projection unavailable')).toBeTruthy();
+    expect(screen.queryByText('24K 金章')).toBeNull();
+  });
+});
+
+function globalOperationsFetch(wallet: string, role: UserRole, response: AdminGlobalSearchResponse) {
+  return vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
+    if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: [role] });
+    if (url.endsWith('/v2/admin/catalog/tags')) return jsonResponse({ tags: [{ tagId: 'tag-1', version: '1', name: '新品', example: '新品上架', sortOrder: 1, status: 'ENABLED' }] });
+    if (url.includes('/v2/admin/global/resources?')) return jsonResponse(response);
+    if (url.endsWith('/v2/admin/global/exports')) return jsonResponse(resourceExport(), 201);
+    if (url.endsWith('/v2/admin/catalog/products/batch-tags') && init?.method === 'POST') return jsonResponse(batchTagResult());
+    return jsonResponse({ error: { code: 'InvalidRequest', message: `Unexpected request ${url}` } }, 400);
+  });
+}
+
+function globalSearchResponse(overrides: Partial<AdminGlobalSearchResponse> = {}): AdminGlobalSearchResponse {
+  return {
+    artifactVersion,
+    relation: 'AND',
+    resources: [productResource()],
+    truncated: false,
+    unavailableFilters: ['OR', 'FUZZY_WALLET', 'UID', 'PHONE', 'YELLOW_QUEUE'],
+    ...overrides,
+  };
+}
+
+function productResource(allowedBatchActions: AdminGlobalSearchResponse['resources'][number]['allowedBatchActions'] = [
+  { action: 'EXPORT_CSV', enabled: true },
+  { action: 'EXPORT_EXCEL', enabled: true },
+  { action: 'ADD_PRODUCT_TAGS', enabled: true },
+]) {
+  return {
+    resourceType: 'PRODUCT' as const,
+    resourceId: 'product-1',
+    title: '24K 金章',
+    status: 'PUBLISHED',
+    merchantId: 'merchant-1',
+    productId: 'product-1',
+    tagIds: [],
+    allowedBatchActions,
+    createdAt: '2026-07-15T00:00:00.000Z',
+  };
+}
+
+function resourceExport(): AdminResourceExport {
+  const content = '\uFEFFresourceType,resourceId\r\n"PRODUCT","product-1"\r\n';
+  return { artifactVersion, exportId: hash('e'), format: 'CSV', filename: 'abu24k-admin-resources.csv', mediaType: 'text/csv; charset=utf-8', rowCount: 1, byteLength: Buffer.byteLength(content), contentHash: hash('c'), contentBase64: Buffer.from(content).toString('base64'), createdAt: '2026-07-15T00:00:00.000Z' };
+}
+
+function batchTagResult(): AdminProductBatchTagResult {
+  return { artifactVersion, operationId: hash('d'), action: 'ADD_PRODUCT_TAGS', tagIds: ['tag-1'], changedCount: 1, products: [{ productId: 'product-1', previousVersion: '1', version: '2', addedTagIds: ['tag-1'] }], createdAt: '2026-07-15T00:00:00.000Z' };
+}
+
+function nonceResponse() {
+  return jsonResponse({ message: 'SIWE message', nonce: 'nonce', issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString() }, 201);
+}
+
+function walletProvider(wallet: string) {
+  return { request: vi.fn(async ({ method }: { method: string }) => method === 'eth_requestAccounts' ? [wallet] : method === 'personal_sign' ? '0xsigned' : Promise.reject(new Error(`Unexpected wallet method ${method}`))) };
+}
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+}
+
+function hash(character: string) { return `0x${character.repeat(64)}`; }
+function address(character: string) { return `0x${character.repeat(40)}`; }

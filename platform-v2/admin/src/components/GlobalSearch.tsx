@@ -72,14 +72,14 @@ export function GlobalSearch({ enabled = false, loading = false, onSearch }: Pro
     <details className="search-panel">
       <summary>
         <span className="summary-title"><SlidersHorizontal aria-hidden="true" /> 高级组合检索</span>
-        <span className="summary-meta">Core `.5` · AND 精确检索 · UID / 手机号仍受限</span>
+        <span className="summary-meta">订单 AND 精确检索 · UID / 手机号仍受限</span>
       </summary>
       <form className="search-form" onSubmit={submit} aria-describedby="search-capability">
         <fieldset className="segmented-field">
           <legend>条件关系</legend>
           <div className="segmented" aria-label="条件关系">
             <button className="is-active" type="button" aria-pressed="true" disabled={!enabled}>AND</button>
-            <button type="button" aria-pressed="false" disabled title="Core `.5` 未发布 OR 查询">OR</button>
+            <button type="button" aria-pressed="false" disabled title="OR 查询未发布">OR</button>
           </div>
         </fieldset>
 
@@ -126,7 +126,7 @@ export function GlobalSearch({ enabled = false, loading = false, onSearch }: Pro
             <button className="button button-primary" type="submit" disabled={!enabled || loading}><Search aria-hidden="true" /> {loading ? '查询中' : '查询'}</button>
           </div>
         </div>
-        <p className="inline-notice" id="search-capability">{enabled ? '查询条件由 Core 服务端按 AND 执行。模糊钱包、OR、UID、手机号和 Yellow queue 未发布，保持 fail-closed。' : '连接 ADMIN / OPERATOR / AUDITOR 会话后启用 `.5` 精确订单检索。'}</p>
+        <p className="inline-notice" id="search-capability">{enabled ? '查询条件由 Core 服务端按 AND 执行。模糊钱包、OR、UID、手机号和 Yellow queue 未发布，保持 fail-closed。' : '连接 ADMIN / OPERATOR / AUDITOR 会话后启用精确订单检索。'}</p>
       </form>
     </details>
   );

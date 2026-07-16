@@ -3,8 +3,8 @@ import { productBaseline } from './bootstrap';
 export const coreState = Object.freeze({
   artifactStatus: productBaseline.coreArtifacts,
   artifactVersion: productBaseline.artifactVersion,
-  connectionLabel: `Core ${productBaseline.artifactVersion} · Logistics admin`,
-  reason: '共享 Core 已发布 Admin 承运商、Provider 密钥引用、加密仓库、跨商家面单与打印作业接口。',
+  connectionLabel: `Core ${productBaseline.artifactVersion} · Admin global ops`,
+  reason: '共享 Core 已发布 Admin 跨资源精确检索、审计导出和授权商品批量标签接口。',
   executableOrderActionNames: productBaseline.publicCatalogs.executableOrderActionNames,
   canRead: productBaseline.adminCapabilities.projections,
   canWriteWithoutRuntimeAuthorization: productBaseline.adminCapabilities.writesWithoutRuntimeAuthorization,

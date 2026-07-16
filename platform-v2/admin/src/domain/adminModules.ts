@@ -10,6 +10,7 @@ import {
   Megaphone,
   PackageSearch,
   RadioTower,
+  SearchCheck,
   Scale,
   Settings2,
   ShieldCheck,
@@ -45,6 +46,19 @@ export const adminModules: readonly AdminModule[] = [
     gap: 'GAP-ADM-005 / GAP-ADM-011 / GAP-ADM-018',
     fields: ['订单与 GMV', '发货与场次', '用户与商家', '签名结算与异常', 'RPC 与 Oracle', '主机与中间件'],
     evidence: ['Core 聚合窗口', '风险事件投影', '基础设施实时探针'],
+    immutable: true,
+  },
+  {
+    id: 'global',
+    path: '/global-operations',
+    label: '全局操作',
+    eyebrow: '检索与批处理',
+    description: '跨订单、商品与商家执行服务端 AND 精确检索、审计导出和授权商品批量标签。',
+    icon: SearchCheck,
+    requirements: ['ADM-GLOBAL-001', 'ADM-GLOBAL-002'],
+    gap: 'OR / fuzzy wallet / UID / phone / Yellow queue remain unavailable',
+    fields: ['订单 / 商品 / 商家', '精确 ID / TxHash / wallet', '时间与待审核', 'CSV / Excel', '商品标签'],
+    evidence: ['server-side AND', 'row allowedBatchActions', 'export content hash', 'product version result'],
     immutable: true,
   },
   {
@@ -120,7 +134,7 @@ export const adminModules: readonly AdminModule[] = [
     description: '维护六家承运商、Provider 密钥引用、加密仓库，以及跨商家面单与打印重试。密钥只显示配置状态。',
     icon: Truck,
     requirements: ['ADM-LOG-001', 'ADM-LOG-002', 'ADM-LOG-003', 'ADM-LOG-004', 'ADM-LOG-005'],
-    gap: 'Core 2.0.0-logistics-admin.1',
+    gap: 'Core 2.0.0-admin-global-ops.1',
     fields: ['SF / JD / YTO / ZTO / STO / EMS', '默认承运商', 'Provider readiness', '平台 / 合作仓地址', '跨商家面单', '打印作业与重试'],
     evidence: ['provider version', 'secret reference status', 'encrypted warehouse version', 'waybill / print audit'],
     ordinarySoftDelete: true,
@@ -233,4 +247,4 @@ export const adminModules: readonly AdminModule[] = [
 
 export const requirementIds = adminModules.flatMap((module) => module.requirements);
 
-export const globalRequirementIds = ['ADM-GLOBAL-001', 'ADM-GLOBAL-002', 'ADM-GLOBAL-003', 'ADM-SRC-001'] as const;
+export const globalRequirementIds = ['ADM-GLOBAL-003', 'ADM-SRC-001'] as const;
