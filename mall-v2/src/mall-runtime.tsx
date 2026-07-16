@@ -79,6 +79,7 @@ export interface MallServices {
   submissionStore: SubmissionStore;
   realtime: SeckillRealtimeClient;
   walletWritesAuthorized: boolean;
+  supportUrl?: string | null;
 }
 
 export interface SubmissionStore {
@@ -168,12 +169,14 @@ export interface MallRuntimeValue {
   busy: boolean;
   error: string | null;
   walletWritesAuthorized: boolean;
+  supportUrl: string | null;
+  supportConfigurationError: string | null;
   connectWallet(): Promise<void>;
   reloadCatalog(): Promise<void>;
   reloadTaxonomy(): Promise<void>;
   resolvePublicMedia(assetId: string, forceRefresh?: boolean): Promise<MediaReadAccessProjection>;
   reloadSeckill(): Promise<void>;
-  selectSeckillSession(): void;
+  selectSeckillSession(): boolean;
   reloadStores(regionCode?: string): Promise<void>;
   requestLocation(): Promise<void>;
   createPickupTarget(storeId: string): Promise<void>;
@@ -291,6 +294,7 @@ export function MallRuntimeProvider({
 
   const selectedProduct = catalog.find((product) => product.productId === selectedProductId) ?? null;
   const selectedSku = selectedProduct?.skus.find((sku) => sku.skuId === selectedSkuId) ?? null;
+  const supportConfiguration = validateSupportUrl(services.supportUrl);
 
   useEffect(() => {
     let active = true;
@@ -474,6 +478,8 @@ export function MallRuntimeProvider({
     busy,
     error,
     walletWritesAuthorized: services.walletWritesAuthorized,
+    supportUrl: supportConfiguration.url,
+    supportConfigurationError: supportConfiguration.error,
 
     async connectWallet() {
       await run(async () => {
@@ -524,22 +530,31 @@ export function MallRuntimeProvider({
     },
 
     selectSeckillSession() {
-      if (pendingSubmission) return setError('当前链上交易尚未提交到 Core，请先恢复跟踪');
-      if (!seckillSession) return setError('当前没有 Core 发布的秒杀场次');
+      if (pendingSubmission) {
+        setError('当前链上交易尚未提交到 Core，请先恢复跟踪');
+        return false;
+      }
+      if (!seckillSession) {
+        setError('当前没有 Core 发布的秒杀场次');
+        return false;
+      }
       if (seckillSession.phase !== 'LIVE' || BigInt(seckillSession.inventory.available) === 0n) {
-        return setError('Core 当前场次阶段或库存不允许创建秒杀订单');
+        setError('Core 当前场次阶段或库存不允许创建秒杀订单');
+        return false;
       }
       const product = catalog.find((item) => item.productId === seckillSession.product.productId);
       const sku = product?.skus.find((item) => item.skuId === seckillSession.product.skuId);
       if (!product || !sku || sku.seckill?.sessionId.toLowerCase() !== seckillSession.sessionId.toLowerCase()
         || sku.seckill.phase !== 'LIVE') {
-        return setError('秒杀商品与当前可售目录 overlay 不一致，已停止进入结算');
+        setError('秒杀商品与当前可售目录 overlay 不一致，已停止进入结算');
+        return false;
       }
       setSelectedProductId(product.productId);
       setSelectedSkuId(sku.skuId);
       setSelectedSeckillSessionId(seckillSession.sessionId);
       setQuantityState(1);
       clearPaymentState();
+      return true;
     },
 
     async reloadStores(regionCode) {
@@ -1653,7 +1668,26 @@ export const defaultMallServices: MallServices = Object.freeze({
     productBaseline.deploymentAuthorized
       && productBaseline.payOrderExecutable
       && productBaseline.paymentRouterAddress !== null,
+  supportUrl: import.meta.env.VITE_MALL_SUPPORT_URL ?? null,
 });
+
+export function validateSupportUrl(value: string | null | undefined) {
+  const raw = value?.trim();
+  if (!raw) return { url: null, error: 'ConfigurationRequired：客服入口未配置' } as const;
+  if (/\s/.test(raw)) return { url: null, error: 'ConfigurationRequired：客服入口配置无效' } as const;
+  try {
+    const url = new URL(raw);
+    if (!['https:', 'mailto:', 'tel:'].includes(url.protocol)) {
+      return { url: null, error: 'ConfigurationRequired：客服入口仅允许 https、mailto 或 tel' } as const;
+    }
+    if ((url.protocol === 'https:' && !url.hostname) || (url.protocol !== 'https:' && !url.pathname)) {
+      return { url: null, error: 'ConfigurationRequired：客服入口配置无效' } as const;
+    }
+    return { url: url.href, error: null } as const;
+  } catch {
+    return { url: null, error: 'ConfigurationRequired：客服入口配置无效' } as const;
+  }
+}
 
 function readinessError(bootstrap: CorePaymentAvailability | null) {
   if (!bootstrap) return new CoreClientError('ConfigurationRequired', 'Core 安全状态尚未同步');

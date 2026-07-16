@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -123,23 +123,102 @@ export function EmptyState({
   );
 }
 
-export function RulesDisclosure() {
+export function RulesDisclosure({ onOpen }: { onOpen(): void }) {
   return (
-    <details className="rules-disclosure">
-      <summary>
-        <CircleHelp aria-hidden="true" size={18} />
-        规则说明
-      </summary>
-      <div className="rules-disclosure__body">
+    <button className="button button--secondary rules-disclosure" type="button" aria-haspopup="dialog" onClick={onOpen}>
+      <CircleHelp aria-hidden="true" size={18} />
+      规则说明
+    </button>
+  );
+}
+
+export function RulesDialog({
+  open,
+  confirmationRequired,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  confirmationRequired: boolean;
+  onClose(): void;
+  onConfirm(): void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const initialFocusRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (!open) return;
+    const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    initialFocusRef.current?.focus();
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ));
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      returnFocus?.focus();
+    };
+  }, [open]);
+
+  if (!open) return null;
+
+  return (
+    <div className="dialog-backdrop">
+      <div
+        ref={dialogRef}
+        className="rules-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rules-dialog-title"
+        aria-describedby="rules-dialog-description"
+      >
+        <header>
+          <div>
+            <p className="eyebrow">SECKILL RULES</p>
+            <h2 id="rules-dialog-title">{confirmationRequired ? '进入配置前确认规则' : '秒杀规则'}</h2>
+          </div>
+        </header>
+        <p id="rules-dialog-description">最终报价和金额仍在双报价订单核对页中确认，本弹窗不计算付款金额。</p>
         <ul>
           <li>主场固定 60 分钟，接力初始 60 秒。</li>
           <li>每笔链上最终确认的秒杀购买增加 30 秒，接力最高 60 秒且不超过主场截止。</li>
           <li>区块时间决定订单归类。截止后的交易只可按已签名的日常报价与库存原子执行。</li>
-          <li>秒杀与日常报价都须在付款前确认，BNM 在履约最终确认前保持锁定。</li>
+          <li>商品付款基数为 70% USDT + 30% Oracle 等值 NPL；秒杀与日常双报价都须在付款前确认。</li>
+          <li>BNM 是按商品 USDT 标价 1:1 记录的后台积分，不是代币，履约最终确认前保持 Locked。</li>
           <li>TxHash 仅代表已提交，最终结果以链上确认和业务状态同步为准。</li>
         </ul>
+        <div className="rules-dialog__actions">
+          <button ref={initialFocusRef} className="button button--secondary" type="button" onClick={onClose}>
+            {confirmationRequired ? '取消' : '关闭'}
+          </button>
+          {confirmationRequired ? (
+            <button className="button button--primary" type="button" onClick={onConfirm}>我已阅读并确认规则</button>
+          ) : null}
+        </div>
       </div>
-    </details>
+    </div>
   );
 }
 
