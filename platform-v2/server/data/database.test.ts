@@ -67,6 +67,7 @@ import { SeckillService } from './seckill-service.ts';
 import { SeckillOperationsService } from './seckill-operations-service.ts';
 import { TakeoverFundingService, type TakeoverFundingApprovalInput } from './takeover-funding-service.ts';
 import { TakeoverCaseService } from './takeover-case-service.ts';
+import { OrderStatementService } from './order-statement-service.ts';
 import { PolicyService } from './policy-service.ts';
 import { NotificationService } from './notification-service.ts';
 import { SystemConfigService } from './system-config-service.ts';
@@ -6941,6 +6942,96 @@ test('production backup enforces encrypted storage acknowledgement and mode 600 
     );
   } finally {
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('buyer shopping and merchant receivable statements preserve tenant-scoped order ledger evidence', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const prepared = await prepareRequestedSettlement(db);
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES
+         ($1,'BUYER',NULL,'ACTIVE',$3),
+         ($2,'MERCHANT','merchant-1','ACTIVE',$3)`,
+      [prepared.intent.buyer, prepared.merchantWallet.address.toLowerCase(), HASH],
+    );
+    const service = new OrderStatementService({ transactions: transactionAdapter(db) });
+    const buyer = { walletAddress: prepared.intent.buyer, roles: ['BUYER'] as const };
+    const buyerStatements = await service.listBuyerShopping(buyer, { kind: 'ORDINARY', limit: 20 });
+    assert.equal(buyerStatements.buyerWallet, prepared.intent.buyer);
+    assert.equal(buyerStatements.nextCursor, null);
+    assert.deepEqual(buyerStatements.statements.map((statement) => ({
+      orderId: statement.orderId,
+      orderKind: statement.orderKind,
+      paymentAmounts: statement.paymentAmounts,
+      bnm: { amount: statement.bnm.amount, state: statement.bnm.state, transferable: statement.bnm.transferable },
+    })), [{
+      orderId: prepared.intent.orderId,
+      orderKind: 'ORDINARY',
+      paymentAmounts: {
+        usdtPaymentAmount: prepared.intent.usdtPaymentAmount,
+        nplPaymentAmount: prepared.intent.nplPaymentAmount,
+      },
+      bnm: { amount: prepared.intent.bnmAmount, state: 'AVAILABLE', transferable: false },
+    }]);
+    assert.ok(buyerStatements.statements[0]!.bnm.journalIds.length >= 1);
+    assert.throws(
+      () => service.listBuyerShopping(buyer, { kind: 'SECKILL' }),
+      (error: unknown) => error instanceof CoreError && error.code === 'DecisionBlocked',
+    );
+    assert.throws(
+      () => service.listBuyerShopping(buyer, { cursorCreatedAt: prepared.now }),
+      /cursor fields must be supplied together/,
+    );
+
+    const otherBuyer = Wallet.createRandom();
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES ($1,'BUYER',NULL,'ACTIVE',$2)`,
+      [otherBuyer.address.toLowerCase(), HASH_2],
+    );
+    assert.equal((await service.listBuyerShopping({
+      walletAddress: otherBuyer.address,
+      roles: ['BUYER'],
+    })).statements.length, 0);
+
+    const merchantStatements = await service.listMerchantReceivables(prepared.merchant, { limit: 20 });
+    const statement = merchantStatements.statements[0]!;
+    assert.equal(merchantStatements.merchantId, 'merchant-1');
+    assert.equal(merchantStatements.settlementWallet, prepared.merchantWallet.address.toLowerCase());
+    assert.equal(statement.orderId, prepared.intent.orderId);
+    assert.equal(statement.frozenAmounts.merchantNetReceivableUsdt, prepared.intent.merchantNetReceivableUsdt);
+    assert.equal(statement.currentReceivableUsdt, prepared.intent.merchantNetReceivableUsdt);
+    assert.equal(statement.removedFromReceivableUsdt, '0');
+    assert.deepEqual(statement.receivableLifecycle.map((balance) => ({ state: balance.state, amount: balance.amount })), [
+      { state: 'REQUESTED', amount: prepared.intent.merchantNetReceivableUsdt },
+    ]);
+    assert.ok(statement.journalEvidence.some((journal) => journal.eventType === 'PAYMENT_LOCKED'));
+    assert.ok(statement.journalEvidence.some((journal) => journal.eventType === 'SETTLEMENT_REQUESTED'));
+    assert.deepEqual(statement.settlementRefs.map((settlement) => ({
+      requestId: settlement.requestId,
+      amount: settlement.amount,
+      state: settlement.state,
+      requestedJournal: settlement.journals.requested,
+    })), [{
+      requestId: prepared.request.request_id,
+      amount: prepared.intent.merchantNetReceivableUsdt,
+      state: 'REQUESTED',
+      requestedJournal: statement.settlementRefs[0]!.journals.requested,
+    }]);
+    await assert.rejects(
+      service.listMerchantReceivables({
+        walletAddress: prepared.merchantWallet.address,
+        roles: ['MERCHANT'],
+        merchantId: 'merchant-other',
+      }),
+      /MERCHANT binding is not active/,
+    );
+  } finally {
+    await db.close();
   }
 });
 
