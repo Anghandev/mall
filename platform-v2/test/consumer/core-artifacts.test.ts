@@ -23,8 +23,8 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('settlement admin .11 checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-settlement-admin.11');
+test('settlement admin .12 checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-settlement-admin.12');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
@@ -112,6 +112,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'GET /v2/buyer/addresses',
     'GET /v2/buyer/overview',
     'GET /v2/buyer/profile',
+    'GET /v2/buyer/shopping-statements',
     'GET /v2/catalog/categories',
     'GET /v2/catalog/products',
     'GET /v2/catalog/products/{productId}',
@@ -123,6 +124,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'GET /v2/merchant/dashboard',
     'GET /v2/merchant/print-jobs',
     'GET /v2/merchant/profile',
+    'GET /v2/merchant/receivable-statements',
     'GET /v2/merchant/stores',
     'GET /v2/merchant/stores/{storeId}/printer-binding',
     'GET /v2/merchant/stores/{storeId}/product-slot',
@@ -420,6 +422,13 @@ test('generated fulfillment DTOs expose exact amounts, immutable evidence and co
   assert.ok(merchantOrderExport.required.includes('contentBase64'));
   assert.ok(merchantOrderExport.required.includes('contentHash'));
   assert.equal(openapi.components.schemas.MerchantOrderExportRequest.properties.limit.maximum, 1000);
+  assert.deepEqual(openapi.components.schemas.BuyerShoppingStatement.properties.orderKind.enum, [
+    'ORDINARY', 'FALLBACK_RETAIL',
+  ]);
+  assert.deepEqual(openapi.components.schemas.MerchantReceivableLifecycle.properties.state.enum, [
+    'LOCKED', 'AVAILABLE', 'REQUESTED', 'BATCHED', 'SETTLED', 'DISPUTED',
+  ]);
+  assert.equal(openapi.components.schemas.MerchantReceivableJournalEvidence.properties.delta.pattern, '^-?[1-9][0-9]*$');
   assert.deepEqual(Object.keys(openapi.components.schemas.FulfillmentExactAmounts.properties).sort(), [
     'bnmAmount',
     'listPriceUsdt',
@@ -809,6 +818,8 @@ test('catalog, settlement/admin and seckill realtime capabilities are published 
     'bnmAvailabilityWorker',
     'settlementHttp',
     'settlementSafeBatching',
+    'buyerShoppingStatementHttp',
+    'merchantReceivableStatementHttp',
     'guaranteeDepositHttp',
     'guaranteeDepositFinality',
     'takeoverFundingHttp',

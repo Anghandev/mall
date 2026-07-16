@@ -3,7 +3,7 @@
 The platform-admin product is a consumer. It cannot add shared endpoints,
 schemas, financial logic, calldata, signers or database behavior.
 
-The coordinated consumer is `@abu24k/core-artifacts@2.0.0-settlement-admin.10`.
+The coordinated consumer is `@abu24k/core-artifacts@2.0.0-settlement-admin.11`.
 Published paths still fail closed when Core returns `DecisionBlocked`,
 `ExternalBlocked` or `ConfigurationRequired`.
 
@@ -17,7 +17,7 @@ Published paths still fail closed when Core returns `DecisionBlocked`,
 | GAP-ADM-006 | Merchant guarantee, deposit finality, debt and takeover-finance projection is published | Qualification, level, PII, sales and wallet-change governance remain unavailable |
 | GAP-ADM-007 | `.5` admin category/tag versions, nullable category parent, all managed products, store product slot, signed concession preview, review submission/decisions, delist, inventory adjustment and controlled media reads are published and consumed | Global cross-resource batch selection remains `GAP-ADM-003`; unresolved category service fees remain `DecisionBlocked` |
 | GAP-ADM-008 | Policy governance plus the product-scoped signed concession preview are published and consumed | Missing service/prize/store/concession-destination commercial decisions remain `DecisionBlocked`; the product never infers them |
-| GAP-ADM-010 | Fulfillment commands plus takeover funding, ordered deductions, platform advance and debt projections are published | Replacement-merchant administration and case-wide list projection remain unavailable |
+| GAP-ADM-010 | Fulfillment commands, case-wide takeover projections, eligible replacement merchants, append-only assignment/reassignment history, ordered deductions, platform advance and debt are published and consumed | Production role wallets, replacement-merchant operations and Safe evidence remain `ExternalBlocked` until configured |
 | GAP-ADM-011 | `.9` retains published risk observations, wallet/IP/device restrictions and blacklists, appeal/override audit evidence, payment enforcement, Admin overview and role-scoped manual restriction/appeal/decision writes; the product consumes generated DTOs and all published Admin paths | Low-history wallet clustering and frequent address/store-change thresholds remain `DecisionBlocked`; production device fingerprint and mempool/RPC high-Gas sources remain external |
 | GAP-ADM-012 | Admin now consumes six-carrier/default versioning, Kuaidi100/Cainiao secret-reference readiness, encrypted role-scoped warehouses, cross-merchant waybill batches/lists and durable print-job retry | `ADM-LOG-005` freight charging and weight basis remain `DecisionBlocked`; real provider accounts and physical printer/device acceptance remain `ExternalBlocked`; broader `ADM-GLOBAL-002` export/pickup-print scope is unchanged |
 | GAP-ADM-013 | CMS create/read/publish/rollback contracts are published and consumed | Real content, audience and production approval evidence must be supplied externally |

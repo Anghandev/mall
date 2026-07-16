@@ -83,6 +83,7 @@ import type {
 } from '../data/settlement-service.ts';
 import type { ConfigApprovalInput } from '../data/system-config-service.ts';
 import type { TakeoverAssignmentInput, TakeoverCaseQuery } from '../data/takeover-case-service.ts';
+import type { OrderStatementQuery } from '../data/order-statement-service.ts';
 import type { AuditQuery } from '../data/audit-service.ts';
 import type {
   BuyerAddressInput,
@@ -275,6 +276,11 @@ export interface FulfillmentApiService {
   requestForcedReceipt(actor: FulfillmentActor, orderId: string, input: RequestInput): Promise<unknown>;
   decideForcedReceipt(actor: FulfillmentActor, orderId: string, input: DecisionInput): Promise<unknown>;
   confirmReceipt(actor: FulfillmentActor, orderId: string, input: FulfillmentCommandInput): Promise<unknown>;
+}
+
+export interface OrderStatementApiService {
+  listBuyerShopping(actor: FulfillmentActor, input?: OrderStatementQuery): Promise<unknown>;
+  listMerchantReceivables(actor: FulfillmentActor, input?: OrderStatementQuery): Promise<unknown>;
 }
 
 export interface FulfillmentTargetApiService {
@@ -677,6 +683,7 @@ export interface ApiDependencies {
   seckillService: SeckillApiService;
   seckillOperationsService: SeckillOperationsApiService;
   fulfillmentService: FulfillmentApiService;
+  orderStatementService: OrderStatementApiService;
   fulfillmentTargetService: FulfillmentTargetApiService;
   logisticsPrintingService: LogisticsPrintingApiService;
   logisticsAdminService: LogisticsAdminApiService;
@@ -1190,6 +1197,32 @@ async function route(
       response,
       200,
       await dependencies.settlementService.list(fulfillmentActor(claims)),
+      correlationId,
+    );
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/buyer/shopping-statements') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['BUYER']);
+    sendJson(
+      response,
+      200,
+      await dependencies.orderStatementService.listBuyerShopping(
+        fulfillmentActor(claims),
+        orderStatementQuery(url),
+      ),
+      correlationId,
+    );
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/merchant/receivable-statements') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
+    sendJson(
+      response,
+      200,
+      await dependencies.orderStatementService.listMerchantReceivables(
+        fulfillmentActor(claims),
+        orderStatementQuery(url),
+      ),
       correlationId,
     );
     return;
@@ -3345,6 +3378,22 @@ function fulfillmentOrderPageQuery(url: URL): OrderPageQuery {
       ? { fulfillmentMode: fulfillmentMode(url.searchParams.get('fulfillmentMode')) }
       : {}),
     ...(orderKind ? { orderKind: orderKindParameter(orderKind) } : {}),
+  };
+}
+
+function orderStatementQuery(url: URL): OrderStatementQuery {
+  assertOnlySearchParams(url, ['kind', 'cursorCreatedAt', 'cursorOrderId', 'limit']);
+  return {
+    ...(url.searchParams.get('kind') ? { kind: orderKindParameter(url.searchParams.get('kind')!) } : {}),
+    ...(url.searchParams.get('cursorCreatedAt')
+      ? { cursorCreatedAt: dateParameter(url.searchParams.get('cursorCreatedAt')!, 'cursorCreatedAt') }
+      : {}),
+    ...(url.searchParams.get('cursorOrderId')
+      ? { cursorOrderId: url.searchParams.get('cursorOrderId')! }
+      : {}),
+    ...(url.searchParams.get('limit')
+      ? { limit: optionalPositiveIntegerParameter(url.searchParams.get('limit'), 'limit')! }
+      : {}),
   };
 }
 

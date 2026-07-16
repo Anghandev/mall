@@ -7,7 +7,7 @@ import {
 } from '@abu24k/core-artifacts';
 
 export const productBaseline = Object.freeze({
-  coreArtifacts: 'coordinated-settlement-admin-clearing-checkpoint',
+  coreArtifacts: 'coordinated-takeover-assignment-checkpoint',
   artifactVersion,
   publicCatalogs: Object.freeze({
     breakerScopes,
@@ -34,6 +34,8 @@ export const productBaseline = Object.freeze({
     settlement: true,
     merchantFinance: true,
     takeoverFunding: true,
+    takeoverCaseManagementHttp: true,
+    replacementMerchantFulfillment: true,
     policyPublication: true,
     seckillSessionHttp: true,
     seckillRealtime: true,

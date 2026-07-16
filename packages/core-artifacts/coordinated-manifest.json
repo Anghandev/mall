@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.11",
+  "artifactVersion": "2.0.0-settlement-admin.12",
   "publicationStatus": "COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
@@ -14,57 +14,57 @@
   "components": {
     "packageMetadata": {
       "path": "package.json",
-      "sha256": "aeeb1fd3719c58991db83d42ab047461183b2fc303132598527be2b7a7524137"
+      "sha256": "04ab097f2e904541ed4cf8b3dafce19ca09f80e05a7c6eb4dfcd0b88ffa708c6"
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "dbd3b3156d5a1eac683e2eb09b338616baa5cd1323e8c3611f69b0d53897d657"
+      "sha256": "7a67dc84183d17edf18ca06e925e8af8bf6f6f19142d2f437538e3903723ceaa"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "44cc2acaf9fff5b8a98a564733a252fa7b01359d6eca988ac4162a4da68ad49a"
+      "sha256": "c81faec980b77abd2d39b854edaaf162a7937815c84e006f731c624788c341e4"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "a1e0419407cd43150df84984779fed9a8a06796546de60cd261ed86072633cca"
+      "sha256": "5d78ae4347f5f7e7dcb698fd13011ff16b4f45db63a90b60d27ef50ce5470320"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "475731729902c4e3bd7364430c6e65feb12991313e2eed32b28c70a8af684282"
+      "sha256": "f4287430dc8db5855c19fa5664cbbe04aabedf32e033d86f5bffa29a5326dcae"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "d63b0a43c0ea26a23e503b92819fa5a348e814d5c48ebe8616b8e93df5f662c3"
+      "sha256": "52029f5e416f860bdbbbfad168072f24c7e75944c24dc973d707913d7afca5f2"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
-      "sha256": "14e1742ef33ea5ddfc22d42bb550b3d81c8fac2be05341b1782b8927196d0707"
+      "sha256": "23c977ddc03a068f407a292317747e8647b9d13e5f77e09bfb63fce3e6ab502b"
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "764f125f544a6cda1834c52af972b6f4c00f33b9295649c240870320e3cf4e5f"
+      "sha256": "7991c14ea572cd898edcc70dcb4d68e83cbc873405967635a4369af7509f2bd5"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "454a3dedda02ab123b99a8f0a7c414ee09bd5a2267dcda1e1b6f02adf01933b1"
+      "sha256": "fb14960a38a7dcb6caa9389e775075d891134dc2ff1718954506d37f78955787"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "5e47ee8c96bf25ba9f59114ac25496fb4d505225b5a32f2e5537e6a33fe31ab7"
+      "sha256": "a8483e068c0f9ebd605cd750711472fe2bec6d6650c9648793edc4ec87561e53"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
-      "sha256": "a2ada02c22551f4ff2a59a817292880d9c3381397ae7f0a5a15d97d3a15a34dd"
+      "sha256": "ef3c1410da722e74c472fd14611e35a08b842545a3ad4c3a2acf7b7306c9ab59"
     }
   },
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "24f3e1001ae0e9477cfb81edf1973ac0770d7665ffd89ea017795c986f942f4f"
+      "sha256": "a4b731985a000ab56a34bbb9d14db40e301bb124ef401d9d958fbc875aa932a5"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "1e946d00a52e8e6c1969803c3e5c79819c204b84ba4e40f00a255a38b7d8b942"
+      "sha256": "c0faf0d49b3cf083e0134b9c0ebfcfd993df5668303e55920aba92ad56c41a56"
     }
   ],
   "httpSurface": [
@@ -106,6 +106,7 @@
     "GET /v2/buyer/addresses",
     "GET /v2/buyer/overview",
     "GET /v2/buyer/profile",
+    "GET /v2/buyer/shopping-statements",
     "GET /v2/catalog/categories",
     "GET /v2/catalog/products",
     "GET /v2/catalog/products/{productId}",
@@ -117,6 +118,7 @@
     "GET /v2/merchant/dashboard",
     "GET /v2/merchant/print-jobs",
     "GET /v2/merchant/profile",
+    "GET /v2/merchant/receivable-statements",
     "GET /v2/merchant/stores",
     "GET /v2/merchant/stores/{storeId}/printer-binding",
     "GET /v2/merchant/stores/{storeId}/product-slot",
@@ -259,6 +261,8 @@
     "paymentIndexer": "AVAILABLE",
     "settlementHttp": "AVAILABLE",
     "settlementSafeBatching": "AVAILABLE",
+    "buyerShoppingStatementHttp": "AVAILABLE",
+    "merchantReceivableStatementHttp": "AVAILABLE",
     "guaranteeDepositHttp": "AVAILABLE",
     "guaranteeDepositFinality": "AVAILABLE",
     "takeoverFundingHttp": "AVAILABLE",
@@ -399,6 +403,14 @@
     "SettlementIntentProjection",
     "SettlementRequestProjection",
     "SettlementListProjection",
+    "OrderStatementCursor",
+    "BuyerShoppingStatement",
+    "BuyerShoppingStatementPage",
+    "MerchantReceivableLifecycle",
+    "MerchantReceivableJournalEvidence",
+    "MerchantReceivableSettlementRef",
+    "MerchantReceivableStatement",
+    "MerchantReceivableStatementPage",
     "AdminSettlementRequestList",
     "AdminSettlementRequestDetail",
     "AdminSettlementBatchList",

@@ -114,6 +114,7 @@ import {
 } from './data/logistics-printing-service.ts';
 import { LogisticsAdminService } from './data/logistics-admin-service.ts';
 import { AdminGlobalOperationsService } from './data/admin-global-operations-service.ts';
+import { OrderStatementService } from './data/order-statement-service.ts';
 
 const ARTIFACT_ROOT = fileURLToPath(new URL('../../packages/core-artifacts/', import.meta.url));
 const ABI_BUNDLE_PATH = fileURLToPath(
@@ -182,6 +183,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
       ? { enqueuePickupReceipt: createPickupReceiptEnqueuer({ encryptionKey: env.DELIVERY_DATA_ENCRYPTION_KEY }) }
       : {}),
   });
+  const orderStatementService = new OrderStatementService({ transactions });
   const takeoverCaseService = new TakeoverCaseService({ transactions });
   const uploadLimits = mediaUploadLimits(env);
   const evidenceService = new EvidenceService({
@@ -620,6 +622,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     seckillService,
     seckillOperationsService,
     fulfillmentService,
+    orderStatementService,
     fulfillmentTargetService,
     logisticsPrintingService,
     logisticsAdminService,

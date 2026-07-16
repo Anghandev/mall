@@ -45,6 +45,8 @@ function mallCoreArtifactBoundary(): Plugin {
           capabilityStatus: Object.fromEntries(
             Object.entries(manifest.capabilityStatus).filter(([capability]) => (
               !capability.startsWith('admin') && !capability.startsWith('merchant')
+              && capability !== 'takeoverCaseManagementHttp'
+              && capability !== 'replacementMerchantFulfillment'
             )),
           ),
         });
