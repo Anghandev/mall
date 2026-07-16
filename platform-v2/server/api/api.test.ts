@@ -1161,6 +1161,18 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       updateStore: async (actor, storeId, input) => ({ storeId, merchantId: actor.merchantId, ...input }),
       activateStore: async (actor, storeId, input) => ({ storeId, merchantId: actor.merchantId, ...input, status: 'ACTIVE' }),
       closeStore: async (actor, storeId, input) => ({ storeId, merchantId: actor.merchantId, ...input, status: 'CLOSED' }),
+      exportMerchantOrders: async (actor, input) => ({
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        exportId: HASH,
+        merchantId: actor.merchantId!,
+        contentType: 'application/vnd.ms-excel; charset=utf-8' as const,
+        filename: 'merchant-orders.xls',
+        rowCount: 1,
+        contentHash: HASH_2,
+        contentBase64: 'PGV4Y2VsIC8+',
+        nextCursor: null,
+        filters: { limit: input.limit ?? 1_000 },
+      }),
       getOrderTarget: async (actor, orderId) => ({ orderId, buyerWallet: actor.walletAddress }),
     },
     logisticsPrintingService: {
@@ -1384,6 +1396,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       getMerchantProfile: async (actor) => ({ merchantId: actor.merchantId, settlementWalletMutable: false }),
       updateMerchantProfile: async (actor, input) => ({ merchantId: actor.merchantId, ...input }),
       recordMerchantAuditExport: async () => ({ recorded: true }),
+      recordMerchantOrderExport: async () => ({ recorded: true }),
     },
     riskService: {
       ingestObservation: async (input) => ({ observation: input, restrictions: [] }),
@@ -1778,6 +1791,36 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     });
     assert.equal(auditExport.status, 200);
     assert.equal(((await auditExport.json()) as { merchantId: string }).merchantId, 'merchant-1');
+    assert.equal((await fetch(`${base}/v2/merchant/orders/exports`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${buyerOnlyToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ idempotencyKey: 'merchant-order-export-buyer-denied' }),
+    })).status, 403);
+    const orderExport = await fetch(`${base}/v2/merchant/orders/exports`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        from: '2026-07-14T00:00:00.000Z',
+        to: '2026-07-15T00:00:00.000Z',
+        fulfillmentMode: 'DELIVERY',
+        orderKind: 'ORDINARY',
+        limit: 100,
+        idempotencyKey: 'merchant-order-export-http-1',
+      }),
+    });
+    assert.equal(orderExport.status, 200);
+    assert.deepEqual(await orderExport.json(), {
+      artifactVersion: CORE_ARTIFACT_VERSION,
+      exportId: HASH,
+      merchantId: 'merchant-1',
+      contentType: 'application/vnd.ms-excel; charset=utf-8',
+      filename: 'merchant-orders.xls',
+      rowCount: 1,
+      contentHash: HASH_2,
+      contentBase64: 'PGV4Y2VsIC8+',
+      nextCursor: null,
+      filters: { limit: 100 },
+    });
 
     const productSlotBody = {
       idempotencyKey: 'http-product-slot-save-1',

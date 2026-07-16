@@ -62,6 +62,8 @@ import type {
 } from '../data/fulfillment-service.ts';
 import type {
   DeliveryTargetInput,
+  MerchantOrderExportInput,
+  MerchantOrderExportResult,
   PickupTargetInput,
   StoreInput,
   StoreProfileInput,
@@ -274,6 +276,7 @@ export interface FulfillmentTargetApiService {
   updateStore(actor: FulfillmentActor, storeId: string, input: StoreProfileInput): Promise<unknown>;
   activateStore(actor: FulfillmentActor, storeId: string, input: StoreVersionInput): Promise<unknown>;
   closeStore(actor: FulfillmentActor, storeId: string, input: StoreVersionInput): Promise<unknown>;
+  exportMerchantOrders(actor: FulfillmentActor, input: MerchantOrderExportInput): Promise<MerchantOrderExportResult>;
   getOrderTarget(actor: FulfillmentActor, orderId: string): Promise<unknown>;
 }
 
@@ -549,6 +552,14 @@ export interface AccountApiService {
     from: Date;
     to: Date;
     entryCount: number;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<unknown>;
+  recordMerchantOrderExport(actor: FulfillmentActor, input: {
+    exportId: string;
+    contentHash: string;
+    rowCount: number;
+    filters: Record<string, unknown>;
     idempotencyKey: string;
     correlationId: string;
   }): Promise<unknown>;
@@ -1029,6 +1040,23 @@ async function route(
       from,
       to,
       entryCount: exported.entryCount,
+      idempotencyKey: requiredString(body, 'idempotencyKey'),
+      correlationId,
+    });
+    sendJson(response, 200, exported, correlationId);
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/merchant/orders/exports') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
+    const actor = fulfillmentActor(claims);
+    const body = await readJson(request);
+    const input = merchantOrderExportInput(body);
+    const exported = await dependencies.fulfillmentTargetService.exportMerchantOrders(actor, input);
+    await dependencies.accountService.recordMerchantOrderExport(actor, {
+      exportId: exported.exportId,
+      contentHash: exported.contentHash,
+      rowCount: exported.rowCount,
+      filters: exported.filters,
       idempotencyKey: requiredString(body, 'idempotencyKey'),
       correlationId,
     });
@@ -3147,6 +3175,32 @@ function fulfillmentOrderPageQuery(url: URL): OrderPageQuery {
       ? { fulfillmentMode: fulfillmentMode(url.searchParams.get('fulfillmentMode')) }
       : {}),
     ...(orderKind ? { orderKind: orderKindParameter(orderKind) } : {}),
+  };
+}
+
+function merchantOrderExportInput(body: Record<string, unknown>): MerchantOrderExportInput {
+  assertOnlyKeys(body, [
+    'from', 'to', 'skuId', 'state', 'fulfillmentMode', 'orderKind',
+    'cursorCreatedAt', 'cursorOrderId', 'limit', 'idempotencyKey',
+  ]);
+  return {
+    ...(body.from === undefined ? {} : { from: requiredDate(body, 'from') }),
+    ...(body.to === undefined ? {} : { to: requiredDate(body, 'to') }),
+    ...(body.skuId === undefined ? {} : { skuId: requiredString(body, 'skuId') }),
+    ...(body.state === undefined ? {} : { state: orderStateParameter(requiredString(body, 'state')) }),
+    ...(body.fulfillmentMode === undefined
+      ? {}
+      : { fulfillmentMode: fulfillmentMode(requiredString(body, 'fulfillmentMode')) }),
+    ...(body.orderKind === undefined
+      ? {}
+      : { orderKind: orderKindParameter(requiredString(body, 'orderKind')) }),
+    ...(body.cursorCreatedAt === undefined
+      ? {}
+      : { cursorCreatedAt: requiredDate(body, 'cursorCreatedAt') }),
+    ...(body.cursorOrderId === undefined
+      ? {}
+      : { cursorOrderId: requiredString(body, 'cursorOrderId') }),
+    ...(body.limit === undefined ? {} : { limit: requiredPositiveInteger(body, 'limit') }),
   };
 }
 

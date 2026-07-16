@@ -23,13 +23,13 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('merchant store management .1 checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-merchant-stores.1');
+test('merchant fulfillment .1 checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-merchant-fulfillment.1');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
   assert.equal(openapi['x-artifactVersion'], artifactVersion);
-  assert.equal(manifest.publicationStatus, 'COORDINATED_MERCHANT_STORE_MANAGEMENT_CHECKPOINT');
+  assert.equal(manifest.publicationStatus, 'COORDINATED_MERCHANT_FULFILLMENT_CHECKPOINT');
   assert.equal(contractManifest.publicationStatus, 'coordinated-settlement-admin-checkpoint');
   assert.ok(manifest.decisionBlocked.includes('SECKILL_PRIZE_POOL_ACCOUNT'));
   assert.deepEqual(
@@ -54,7 +54,7 @@ test('merchant store management .1 checkpoint has one identity, resolvable expor
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 23);
+  assert.equal(schemaManifest.schemas.core.migrations.length, 24);
   assert.equal(schemaManifest.schemas.audit.migrations.length, 4);
   for (const migration of [
     ...schemaManifest.schemas.core.migrations,
@@ -192,6 +192,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'POST /v2/media/upload-intents',
     'POST /v2/media/upload-intents/{uploadIntentId}/complete',
     'POST /v2/merchant/audit/exports',
+    'POST /v2/merchant/orders/exports',
     'POST /v2/merchant/print-jobs/{printJobId}/retry',
     'POST /v2/merchant/products/{productId}/concession-previews',
     'POST /v2/merchant/products/{productId}/delist',
@@ -403,6 +404,11 @@ test('generated fulfillment DTOs expose exact amounts, immutable evidence and co
   assert.equal('allOf' in managedStore, false);
   assert.ok(managedStore.required.includes('artifactVersion'));
   assert.ok(managedStore.required.includes('allowedActions'));
+  const merchantOrderExport = openapi.components.schemas.MerchantOrderExport;
+  assert.equal(merchantOrderExport.additionalProperties, false);
+  assert.ok(merchantOrderExport.required.includes('contentBase64'));
+  assert.ok(merchantOrderExport.required.includes('contentHash'));
+  assert.equal(openapi.components.schemas.MerchantOrderExportRequest.properties.limit.maximum, 1000);
   assert.deepEqual(Object.keys(openapi.components.schemas.FulfillmentExactAmounts.properties).sort(), [
     'bnmAmount',
     'listPriceUsdt',
@@ -765,6 +771,7 @@ test('catalog, settlement/admin and seckill realtime capabilities are published 
     'seckillSessionHttp',
     'storesHttp',
     'merchantStoreManagementHttp',
+    'merchantOrderExportHttp',
     'fulfillmentTargetHttp',
     'fulfillmentHttp',
     'logisticsWebhookHttp',

@@ -185,6 +185,9 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   const evidenceService = new EvidenceService({
     transactions,
     ...(env.TRACKING_HASH_KEY ? { trackingHashKey: env.TRACKING_HASH_KEY } : {}),
+    ...(env.DELIVERY_DATA_ENCRYPTION_KEY
+      ? { trackingEncryptionKey: env.DELIVERY_DATA_ENCRYPTION_KEY }
+      : {}),
     ...(uploadLimits ? { uploadLimits } : {}),
     storage: new HttpMediaStorageAdapter({
       ...(env.MEDIA_STORAGE_SIGNER_URL ? { url: env.MEDIA_STORAGE_SIGNER_URL } : {}),

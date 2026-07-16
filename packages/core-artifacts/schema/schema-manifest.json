@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-merchant-stores.1",
+  "artifactVersion": "2.0.0-merchant-fulfillment.1",
   "formatVersion": 1,
   "databaseEngine": "postgresql",
   "schemas": {
@@ -120,6 +120,11 @@
           "name": "023_merchant_store_management.sql",
           "path": "schema/business/023_merchant_store_management.sql",
           "sha256": "72690281f1146c2bf5c95fb560bda954fb83f718d4aad66e2318c57aaee57c35"
+        },
+        {
+          "name": "024_merchant_fulfillment_completion.sql",
+          "path": "schema/business/024_merchant_fulfillment_completion.sql",
+          "sha256": "c4bfa7e562d27f87e2969e10397da549fa982bd227be2e48c8d9d61f77df7bdc"
         }
       ]
     },

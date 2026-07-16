@@ -1,9 +1,14 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { AdministrativeRegionResolver } from '../api/providers.ts';
-import { CORE_ARTIFACT_VERSION } from '../api/enums.ts';
+import {
+  CORE_ARTIFACT_VERSION,
+  fulfillmentModes,
+  orderProjectionStates,
+  type OrderState,
+} from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
-import type { FulfillmentActor } from './fulfillment-service.ts';
+import type { FulfillmentActor, OrderKind } from './fulfillment-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 
 const TARGET_TTL_MS = 30 * 60 * 1000;
@@ -48,6 +53,31 @@ export interface StoreVersionInput {
   correlationId: string;
 }
 
+export interface MerchantOrderExportInput {
+  from?: Date;
+  to?: Date;
+  skuId?: string;
+  state?: OrderState;
+  fulfillmentMode?: 'DELIVERY' | 'PICKUP';
+  orderKind?: OrderKind;
+  cursorCreatedAt?: Date;
+  cursorOrderId?: string;
+  limit?: number;
+}
+
+export interface MerchantOrderExportResult {
+  artifactVersion: string;
+  exportId: string;
+  merchantId: string;
+  contentType: 'application/vnd.ms-excel; charset=utf-8';
+  filename: string;
+  rowCount: number;
+  contentHash: string;
+  contentBase64: string;
+  nextCursor: { createdAt: string; orderId: string } | null;
+  filters: Record<string, unknown>;
+}
+
 interface TargetRow {
   target_id: string;
   target_hash: string;
@@ -87,6 +117,26 @@ interface StoreRow {
 interface StoreCommandRow {
   request_hash: string;
   result: ReturnType<typeof managedStoreProjection>;
+}
+
+interface MerchantOrderExportRow extends TargetRow {
+  order_id: string;
+  payment_tx_hash: string | null;
+  quantity: string | number;
+  order_created_at: Date;
+  order_state: string;
+  order_fulfillment_mode: 'DELIVERY' | 'PICKUP';
+  sku_id: string;
+  quote_kind: 'ORDINARY' | 'SECKILL' | null;
+  seckill_snapshot: unknown;
+  shipment_tracking_hash: string | null;
+  waybill_tracking: Uint8Array | null;
+  waybill_iv: Uint8Array | null;
+  waybill_tag: Uint8Array | null;
+  manual_tracking: Uint8Array | null;
+  manual_tracking_iv: Uint8Array | null;
+  manual_tracking_tag: Uint8Array | null;
+  pickup_verified_at: Date | null;
 }
 
 export class FulfillmentTargetService {
@@ -430,6 +480,104 @@ export class FulfillmentTargetService {
     });
   }
 
+  exportMerchantOrders(actor: FulfillmentActor, input: MerchantOrderExportInput = {}) {
+    assertMerchantRole(actor);
+    const query = merchantOrderExportQuery(input, this.#clock());
+    const key = requireEncryptionKey(this.#key);
+    return this.#transactions.transaction(async (executor) => {
+      await requireMerchantStoreScope(executor, actor);
+      const params: unknown[] = [actor.merchantId];
+      const conditions = ['orders.merchant_id = $1'];
+      const add = (value: unknown) => {
+        params.push(value);
+        return `$${params.length}`;
+      };
+      conditions.push(`orders.created_at >= ${add(query.from)}`);
+      conditions.push(`orders.created_at <= ${add(query.to)}`);
+      if (query.skuId) conditions.push(`orders.sku_id = ${add(query.skuId)}`);
+      if (query.state) conditions.push(`orders.state = ${add(query.state)}`);
+      if (query.fulfillmentMode) conditions.push(`orders.fulfillment_mode = ${add(query.fulfillmentMode)}`);
+      if (query.orderKind) {
+        conditions.push(`CASE
+          WHEN orders.seckill_snapshot IS NOT NULL THEN 'SECKILL'
+          WHEN quote.quote_kind = 'SECKILL' THEN 'FALLBACK_RETAIL'
+          ELSE 'ORDINARY'
+        END = ${add(query.orderKind)}`);
+      }
+      if (query.cursorCreatedAt && query.cursorOrderId) {
+        conditions.push(`(orders.created_at, orders.order_id) < (${add(query.cursorCreatedAt)}, ${add(query.cursorOrderId)})`);
+      }
+      params.push(query.limit + 1);
+      const result = await executor.query<MerchantOrderExportRow>(
+        `SELECT target.*, orders.order_id, orders.payment_tx_hash,
+           orders.quantity, orders.created_at AS order_created_at,
+           orders.state AS order_state, orders.fulfillment_mode AS order_fulfillment_mode,
+           orders.sku_id, orders.seckill_snapshot, quote.quote_kind,
+           shipment.tracking_number_hash AS shipment_tracking_hash,
+           waybill.encrypted_tracking_number AS waybill_tracking,
+           waybill.tracking_iv AS waybill_iv, waybill.tracking_tag AS waybill_tag,
+           manual.encrypted_tracking_number AS manual_tracking,
+           manual.tracking_iv AS manual_tracking_iv, manual.tracking_tag AS manual_tracking_tag,
+           pickup.attempted_at AS pickup_verified_at
+         FROM core.orders orders
+         JOIN core.fulfillment_targets target
+           ON lower(target.target_hash) = lower(orders.fulfillment_target_hash)
+         LEFT JOIN core.payment_quotes quote ON quote.order_id = orders.order_id
+         LEFT JOIN LATERAL (
+           SELECT tracking_number_hash FROM core.shipments
+           WHERE order_id = orders.order_id ORDER BY created_at DESC, shipment_id DESC LIMIT 1
+         ) shipment ON true
+         LEFT JOIN LATERAL (
+           SELECT encrypted_tracking_number, tracking_iv, tracking_tag
+           FROM core.waybill_requests WHERE order_id = orders.order_id
+             AND encrypted_tracking_number IS NOT NULL
+           ORDER BY updated_at DESC, request_id DESC LIMIT 1
+         ) waybill ON true
+         LEFT JOIN LATERAL (
+           SELECT encrypted_tracking_number, tracking_iv, tracking_tag
+           FROM core.evidence_envelopes WHERE resource_id = orders.order_id
+             AND purpose = 'SHIPMENT_TRACKING'
+           ORDER BY created_at DESC, evidence_hash DESC LIMIT 1
+         ) manual ON true
+         LEFT JOIN LATERAL (
+           SELECT attempted_at FROM core.pickup_verification_attempts
+           WHERE order_id = orders.order_id AND successful
+           ORDER BY attempted_at DESC, attempt_id DESC LIMIT 1
+         ) pickup ON true
+         WHERE ${conditions.join(' AND ')}
+         ORDER BY orders.created_at DESC, orders.order_id DESC
+         LIMIT $${params.length}`,
+        params,
+      );
+      const pageRows = result.rows.slice(0, query.limit);
+      const rows = pageRows.map((row) => merchantOrderExportRow(row, key));
+      const content = merchantOrderExcel(rows);
+      const contentHash = `0x${createHash('sha256').update(content).digest('hex')}`;
+      const exportId = hashJson({
+        domain: 'ABU24K_MERCHANT_ORDER_EXPORT_V1',
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        merchantId: actor.merchantId,
+        query: exportQueryProjection(query),
+        contentHash,
+      });
+      const last = pageRows.at(-1);
+      return {
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        exportId,
+        merchantId: actor.merchantId!,
+        contentType: 'application/vnd.ms-excel; charset=utf-8' as const,
+        filename: `merchant-orders-${query.from.toISOString().slice(0, 10)}-${query.to.toISOString().slice(0, 10)}.xls`,
+        rowCount: rows.length,
+        contentHash,
+        contentBase64: Buffer.from(content, 'utf8').toString('base64'),
+        nextCursor: result.rows.length > query.limit && last
+          ? { createdAt: last.order_created_at.toISOString(), orderId: last.order_id }
+          : null,
+        filters: exportQueryProjection(query),
+      };
+    });
+  }
+
   getOrderTarget(actor: FulfillmentActor, orderId: string) {
     const key = requireEncryptionKey(this.#key);
     const wallet = normalizedWallet(actor.walletAddress);
@@ -585,6 +733,138 @@ function managedStoreProjection(store: StoreRow) {
       storeCapability('CLOSE', store.status !== 'CLOSED', store.status),
     ],
   };
+}
+
+function merchantOrderExportQuery(input: MerchantOrderExportInput, now: Date) {
+  if ((input.from === undefined) !== (input.to === undefined)) {
+    throw new CoreError('InvalidRequest', 'Merchant order export requires both from and to');
+  }
+  const to = input.to ?? now;
+  const from = input.from ?? new Date(to.getTime() - 31 * 24 * 60 * 60 * 1_000);
+  if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from > to) {
+    throw new CoreError('InvalidRequest', 'Merchant order export date range is invalid');
+  }
+  if (to.getTime() - from.getTime() > 31 * 24 * 60 * 60 * 1_000) {
+    throw new CoreError('InvalidRequest', 'Merchant order export range cannot exceed 31 days');
+  }
+  const limit = input.limit ?? 1_000;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000) {
+    throw new CoreError('InvalidRequest', 'Merchant order export limit must be 1-1000');
+  }
+  if ((input.cursorCreatedAt === undefined) !== (input.cursorOrderId === undefined)) {
+    throw new CoreError('InvalidRequest', 'Merchant order export cursor is incomplete');
+  }
+  if (input.cursorCreatedAt && !Number.isFinite(input.cursorCreatedAt.getTime())) {
+    throw new CoreError('InvalidRequest', 'Merchant order export cursor time is invalid');
+  }
+  if (input.cursorOrderId && (input.cursorOrderId.length < 1 || input.cursorOrderId.length > 256)) {
+    throw new CoreError('InvalidRequest', 'Merchant order export cursor order is invalid');
+  }
+  if (input.skuId && (input.skuId.length < 1 || input.skuId.length > 256)) {
+    throw new CoreError('InvalidRequest', 'Merchant order export SKU is invalid');
+  }
+  if (input.state && !orderProjectionStates.includes(input.state)) {
+    throw new CoreError('InvalidRequest', 'Merchant order export state is invalid');
+  }
+  if (input.fulfillmentMode && !fulfillmentModes.includes(input.fulfillmentMode)) {
+    throw new CoreError('InvalidRequest', 'Merchant order export fulfillment mode is invalid');
+  }
+  if (input.orderKind && !['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'].includes(input.orderKind)) {
+    throw new CoreError('InvalidRequest', 'Merchant order export kind is invalid');
+  }
+  return { ...input, from, to, limit };
+}
+
+function exportQueryProjection(query: ReturnType<typeof merchantOrderExportQuery>) {
+  return {
+    from: query.from.toISOString(),
+    to: query.to.toISOString(),
+    skuId: query.skuId ?? null,
+    state: query.state ?? null,
+    fulfillmentMode: query.fulfillmentMode ?? null,
+    orderKind: query.orderKind ?? null,
+    cursorCreatedAt: query.cursorCreatedAt?.toISOString() ?? null,
+    cursorOrderId: query.cursorOrderId ?? null,
+    limit: query.limit,
+  };
+}
+
+function merchantOrderExportRow(row: MerchantOrderExportRow, key: Buffer) {
+  if (row.order_fulfillment_mode !== row.fulfillment_mode) {
+    throw new CoreError('UnknownState', 'Order fulfillment target mode changed', 409);
+  }
+  const target = decrypt(row, key);
+  const delivery = row.fulfillment_mode === 'DELIVERY';
+  const trackingNumber = row.waybill_tracking && row.waybill_iv && row.waybill_tag
+    ? decryptTrackingText(row.waybill_tracking, row.waybill_iv, row.waybill_tag, key)
+    : row.manual_tracking && row.manual_tracking_iv && row.manual_tracking_tag
+      ? decryptTrackingText(row.manual_tracking, row.manual_tracking_iv, row.manual_tracking_tag, key)
+      : null;
+  if (delivery && row.shipment_tracking_hash && !trackingNumber) {
+    throw new CoreError('UnknownState', 'Shipment tracking number is unavailable for export', 409);
+  }
+  return {
+    orderId: row.order_id,
+    paymentTxHash: row.payment_tx_hash ?? '',
+    consignee: payloadText(target, delivery ? 'recipientName' : 'name'),
+    phone: payloadText(target, 'phone'),
+    fullAddress: payloadText(target, 'address'),
+    quantity: String(row.quantity),
+    orderedAt: row.order_created_at.toISOString(),
+    trackingNumber: delivery ? trackingNumber ?? '' : '',
+    verificationStatus: delivery ? 'NOT_APPLICABLE' : row.pickup_verified_at ? 'VERIFIED' : 'PENDING_PICKUP',
+  };
+}
+
+const merchantOrderExportColumns = [
+  ['orderId', '订单号'],
+  ['paymentTxHash', '支付TxHash'],
+  ['consignee', '收货人'],
+  ['phone', '电话'],
+  ['fullAddress', '完整地址'],
+  ['quantity', '数量'],
+  ['orderedAt', '下单时间'],
+  ['trackingNumber', '物流单号'],
+  ['verificationStatus', '核销状态'],
+] as const;
+
+function merchantOrderExcel(rows: Array<ReturnType<typeof merchantOrderExportRow>>) {
+  const rowXml = [
+    merchantOrderExportColumns.map(([, label]) => excelCell(label)),
+    ...rows.map((row) => merchantOrderExportColumns.map(([key]) => excelCell(row[key]))),
+  ].map((cells) => `<Row>${cells.join('')}</Row>`).join('');
+  return `<?xml version="1.0" encoding="UTF-8"?><?mso-application progid="Excel.Sheet"?>` +
+    `<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" ` +
+    `xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Worksheet ss:Name="Merchant Orders">` +
+    `<Table>${rowXml}</Table></Worksheet></Workbook>`;
+}
+
+function excelCell(value: string) {
+  const guarded = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return `<Cell><Data ss:Type="String">${xmlEscape(guarded)}</Data></Cell>`;
+}
+
+function xmlEscape(value: string) {
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;').replaceAll("'", '&apos;');
+}
+
+function payloadText(payload: Record<string, unknown>, key: string) {
+  const value = payload[key];
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new CoreError('UnknownState', `Fulfillment target ${key} is unavailable`, 409);
+  }
+  return value;
+}
+
+function decryptTrackingText(ciphertext: Uint8Array, iv: Uint8Array, tag: Uint8Array, key: Buffer) {
+  try {
+    const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(iv));
+    decipher.setAuthTag(Buffer.from(tag));
+    return Buffer.concat([decipher.update(Buffer.from(ciphertext)), decipher.final()]).toString('utf8');
+  } catch {
+    throw new CoreError('ExternalBlocked', 'Tracking number decryption failed', 503);
+  }
 }
 
 function storeCapability(

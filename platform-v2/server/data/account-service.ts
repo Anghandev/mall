@@ -607,6 +607,70 @@ export class AccountService {
     });
   }
 
+  recordMerchantOrderExport(actor: FulfillmentActor, input: {
+    exportId: string;
+    contentHash: string;
+    rowCount: number;
+    filters: Record<string, unknown>;
+    idempotencyKey: string;
+    correlationId: string;
+  }) {
+    validateIdempotencyKey(input.idempotencyKey);
+    if (!/^0x[0-9a-f]{64}$/.test(input.exportId) || !/^0x[0-9a-f]{64}$/.test(input.contentHash)) {
+      throw new CoreError('InvalidRequest', 'Merchant order export identity is invalid');
+    }
+    if (!Number.isSafeInteger(input.rowCount) || input.rowCount < 0 || input.rowCount > 1_000) {
+      throw new CoreError('InvalidRequest', 'Merchant order export count is invalid');
+    }
+    const wallet = normalizedWallet(actor.walletAddress);
+    return this.#transactions.transaction(async (executor) => {
+      const merchant = await authorizedMerchant(executor, actor, true);
+      const requestHash = hashJson({
+        domain: 'ABU24K_MERCHANT_ORDER_EXPORT_AUDIT_V1',
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        wallet,
+        merchantId: merchant.merchant_id,
+        exportId: input.exportId,
+        contentHash: input.contentHash,
+        rowCount: input.rowCount,
+        filters: input.filters,
+        idempotencyKey: input.idempotencyKey,
+      });
+      const duplicate = await accountCommand(executor, wallet, input.idempotencyKey, requestHash);
+      if (duplicate) {
+        assertCommand(duplicate, 'MERCHANT_ORDER_EXPORT', input.exportId);
+        return { recorded: true as const, existing: true as const };
+      }
+      const now = this.#clock();
+      await insertCommand(executor, {
+        wallet,
+        merchantId: merchant.merchant_id,
+        commandType: 'MERCHANT_ORDER_EXPORT',
+        resourceId: input.exportId,
+        idempotencyKey: input.idempotencyKey,
+        requestHash,
+        createdAt: now,
+      });
+      await enqueueAccountAudit(executor, {
+        wallet,
+        role: 'MERCHANT',
+        merchantId: merchant.merchant_id,
+        eventType: 'MerchantOrdersExported',
+        resourceType: 'MERCHANT_ORDER_EXPORT',
+        resourceId: input.exportId,
+        requestHash,
+        correlationId: input.correlationId,
+        payload: {
+          contentHash: input.contentHash,
+          rowCount: input.rowCount,
+          filters: input.filters,
+        },
+        createdAt: now,
+      });
+      return { recorded: true as const, existing: false as const };
+    });
+  }
+
   private async writeBuyerAddress(
     wallet: string,
     addressId: string | undefined,

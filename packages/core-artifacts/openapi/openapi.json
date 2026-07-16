@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Abu 24K V2 Core API",
-    "version": "2.0.0-merchant-stores.1"
+    "version": "2.0.0-merchant-fulfillment.1"
   },
-  "x-artifactVersion": "2.0.0-merchant-stores.1",
+  "x-artifactVersion": "2.0.0-merchant-fulfillment.1",
   "servers": [],
   "paths": {
     "/v2/buyer/profile": {
@@ -903,6 +903,62 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MerchantAuditExport"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/merchant/orders/exports": {
+      "post": {
+        "operationId": "exportMerchantOrders",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MerchantOrderExportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "PII-authorized paginated Excel order export",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantOrderExport"
                 }
               }
             }
@@ -10425,7 +10481,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "status": {
             "const": "CORE_API_READY"
@@ -10738,7 +10794,7 @@
             "minimum": 1
           },
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "allowedActions": {
             "type": "array",
@@ -11772,7 +11828,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "relation": {
             "const": "AND"
@@ -11871,7 +11927,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "exportId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -12000,7 +12056,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "operationId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -14085,7 +14141,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -14184,7 +14240,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15124,7 +15180,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "productId": {
             "type": "string",
@@ -15297,7 +15353,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "storeId": {
             "type": "string",
@@ -15423,7 +15479,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "productId": {
             "type": "string",
@@ -15525,7 +15581,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "previewId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15684,7 +15740,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "adjustmentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15809,7 +15865,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "uploadIntentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15907,7 +15963,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15993,7 +16049,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -16154,7 +16210,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "evidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
@@ -16413,7 +16469,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -16688,7 +16744,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifact_version": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "wallet_address": {
             "$ref": "#/components/schemas/Address"
@@ -17014,7 +17070,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -18158,7 +18214,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -18381,7 +18437,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -19247,7 +19303,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "snapshotId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -19330,7 +19386,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -20661,7 +20717,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -20908,7 +20964,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -21263,7 +21319,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "sessionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -21492,7 +21548,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "protocolVersion": {
             "const": 1
@@ -21566,7 +21622,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -21904,7 +21960,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "addresses": {
             "type": "array",
@@ -22085,7 +22141,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -22252,7 +22308,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "orderId": {
             "type": "string",
@@ -22287,7 +22343,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "merchantId": {
             "type": "string",
@@ -22564,6 +22620,262 @@
           },
           "csv": {
             "type": "string"
+          }
+        }
+      },
+      "MerchantOrderExportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey"
+        ],
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "skuId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "state": {
+            "enum": [
+              "QUOTED",
+              "SUBMITTED",
+              "PAID",
+              "SHIPPED",
+              "DELIVERED",
+              "ARBITRATION",
+              "TAKEOVER",
+              "FULFILLMENT_PENDING",
+              "FULFILLED",
+              "REORG_PENDING"
+            ]
+          },
+          "fulfillmentMode": {
+            "enum": [
+              "DELIVERY",
+              "PICKUP"
+            ]
+          },
+          "orderKind": {
+            "enum": [
+              "ORDINARY",
+              "SECKILL",
+              "FALLBACK_RETAIL"
+            ]
+          },
+          "cursorCreatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cursorOrderId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        }
+      },
+      "MerchantOrderExportFilters": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "from",
+          "to",
+          "skuId",
+          "state",
+          "fulfillmentMode",
+          "orderKind",
+          "cursorCreatedAt",
+          "cursorOrderId",
+          "limit"
+        ],
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "skuId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "QUOTED",
+                  "SUBMITTED",
+                  "PAID",
+                  "SHIPPED",
+                  "DELIVERED",
+                  "ARBITRATION",
+                  "TAKEOVER",
+                  "FULFILLMENT_PENDING",
+                  "FULFILLED",
+                  "REORG_PENDING"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fulfillmentMode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "DELIVERY",
+                  "PICKUP"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "orderKind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ORDINARY",
+                  "SECKILL",
+                  "FALLBACK_RETAIL"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cursorCreatedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cursorOrderId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          }
+        }
+      },
+      "MerchantOrderExport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "exportId",
+          "merchantId",
+          "contentType",
+          "filename",
+          "rowCount",
+          "contentHash",
+          "contentBase64",
+          "nextCursor",
+          "filters"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-merchant-fulfillment.1"
+          },
+          "exportId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "merchantId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "contentType": {
+            "const": "application/vnd.ms-excel; charset=utf-8"
+          },
+          "filename": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "rowCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          },
+          "contentHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "contentBase64": {
+            "type": "string",
+            "minLength": 1,
+            "contentEncoding": "base64"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "createdAt",
+                  "orderId"
+                ],
+                "properties": {
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "orderId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "filters": {
+            "$ref": "#/components/schemas/MerchantOrderExportFilters"
           }
         }
       },
@@ -22981,7 +23293,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "observation": {
             "$ref": "#/components/schemas/RiskObservation"
@@ -23007,7 +23319,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "generatedAt": {
             "type": "string",
@@ -23278,7 +23590,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "challengeId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -23345,7 +23657,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "bindingId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -23454,7 +23766,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "requestId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -23564,7 +23876,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "batchId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -23601,7 +23913,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "printJobId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -23770,7 +24082,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "configVersionId": {
             "anyOf": [
@@ -24005,7 +24317,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "providers": {
             "type": "array",
@@ -24186,7 +24498,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "warehouseId": {
             "type": "string",
@@ -24277,7 +24589,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "warehouses": {
             "type": "array",
@@ -24342,7 +24654,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "waybills": {
             "type": "array",
@@ -24361,7 +24673,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "printJobs": {
             "type": "array",
@@ -24703,7 +25015,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "merchants": {
             "type": "array",
@@ -24898,7 +25210,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -25337,7 +25649,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-merchant-stores.1"
+            "const": "2.0.0-merchant-fulfillment.1"
           },
           "merchant": {
             "$ref": "#/components/schemas/MerchantLifecycleSummary"

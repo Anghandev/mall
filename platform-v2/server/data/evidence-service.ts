@@ -1,4 +1,4 @@
-import { createHash, createHmac } from 'node:crypto';
+import { createCipheriv, createHash, createHmac, randomBytes } from 'node:crypto';
 import { normalizeAddress } from '../api/auth.ts';
 import { CORE_ARTIFACT_VERSION } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
@@ -63,6 +63,9 @@ interface EvidenceRow {
   action_type: string;
   reason_code: string | null;
   tracking_number_hash: string | null;
+  encrypted_tracking_number: Uint8Array | null;
+  tracking_iv: Uint8Array | null;
+  tracking_tag: Uint8Array | null;
   media_asset_ids: unknown;
   payload: unknown;
   payload_hash: string;
@@ -129,6 +132,7 @@ export class EvidenceService {
   readonly #transactions: SqlTransactionRunner;
   readonly #storage: MediaStorageAdapter;
   readonly #trackingHashKey: string | undefined;
+  readonly #trackingEncryptionKey: Buffer | undefined;
   readonly #uploadLimits: MediaUploadLimits | undefined;
   readonly #clock: () => Date;
 
@@ -136,12 +140,14 @@ export class EvidenceService {
     transactions: SqlTransactionRunner;
     storage: MediaStorageAdapter;
     trackingHashKey?: string;
+    trackingEncryptionKey?: string;
     uploadLimits?: MediaUploadLimits;
     clock?: () => Date;
   }) {
     this.#transactions = input.transactions;
     this.#storage = input.storage;
     this.#trackingHashKey = input.trackingHashKey;
+    this.#trackingEncryptionKey = parseTrackingEncryptionKey(input.trackingEncryptionKey);
     this.#uploadLimits = input.uploadLimits;
     this.#clock = input.clock ?? (() => new Date());
   }
@@ -233,6 +239,10 @@ export class EvidenceService {
       input.carrierCode,
       normalizedTracking,
     );
+    const encryptedTracking = encryptTracking(
+      normalizedTracking,
+      requireTrackingEncryptionKey(this.#trackingEncryptionKey),
+    );
     return this.#transactions.transaction(async (executor) => {
       const actorRole = await authorizeShipmentOrder(executor, actor, input.orderId);
       const requestHash = hashJson({
@@ -257,8 +267,9 @@ export class EvidenceService {
         `INSERT INTO core.evidence_envelopes (
            evidence_hash, owner_wallet, actor_role, purpose, resource_type, resource_id,
            action_type, reason_code, tracking_number_hash, media_asset_ids,
-           payload, payload_hash, idempotency_key, created_at
-         ) VALUES ($1,$2,$3,'SHIPMENT_TRACKING','ORDER',$4,'RECORD_SHIPMENT',NULL,$5,'[]',$6,$7,$8,$9)
+           payload, payload_hash, idempotency_key, created_at,
+           encrypted_tracking_number, tracking_iv, tracking_tag
+         ) VALUES ($1,$2,$3,'SHIPMENT_TRACKING','ORDER',$4,'RECORD_SHIPMENT',NULL,$5,'[]',$6,$7,$8,$9,$10,$11,$12)
          ON CONFLICT (owner_wallet, idempotency_key) DO NOTHING
          RETURNING *`,
         [
@@ -271,6 +282,9 @@ export class EvidenceService {
           requestHash,
           input.idempotencyKey,
           createdAt,
+          encryptedTracking.ciphertext,
+          encryptedTracking.iv,
+          encryptedTracking.tag,
         ],
       );
       if (inserted.rows[0]) return evidenceProjection(inserted.rows[0]);
@@ -1267,6 +1281,25 @@ function trackingHash(key: string | undefined, orderId: string, carrier: Carrier
   return `0x${createHmac('sha256', Buffer.from(key, 'hex'))
     .update(`ABU24K_TRACKING_V2\0${orderId}\0${carrier}\0${trackingNumber}`)
     .digest('hex')}`;
+}
+
+function parseTrackingEncryptionKey(value: string | undefined) {
+  if (!value) return undefined;
+  const key = /^[0-9a-fA-F]{64}$/.test(value) ? Buffer.from(value, 'hex') : Buffer.from(value, 'base64');
+  if (key.length !== 32) throw new CoreError('InvalidRequest', 'Tracking encryption key must contain 32 bytes', 500);
+  return key;
+}
+
+function requireTrackingEncryptionKey(key: Buffer | undefined) {
+  if (!key) throw new CoreError('ConfigurationRequired', 'Tracking encryption is unavailable', 503);
+  return key;
+}
+
+function encryptTracking(value: string, key: Buffer) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
+  return { ciphertext, iv, tag: cipher.getAuthTag() };
 }
 
 function hashJson(value: unknown) {

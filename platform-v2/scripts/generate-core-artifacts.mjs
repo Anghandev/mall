@@ -127,6 +127,7 @@ const schemaSources = [
       '021_logistics_admin.sql',
       '022_admin_global_operations.sql',
       '023_merchant_store_management.sql',
+      '024_merchant_fulfillment_completion.sql',
     ],
   },
   {
@@ -330,7 +331,7 @@ const publishedContractManifest = JSON.parse(readRequired(join(contractsRoot, 'c
 
 const coordinatedManifest = {
   artifactVersion,
-  publicationStatus: 'COORDINATED_MERCHANT_STORE_MANAGEMENT_CHECKPOINT',
+  publicationStatus: 'COORDINATED_MERCHANT_FULFILLMENT_CHECKPOINT',
   deploymentAuthorized: publishedContractManifest.deploymentAuthorized === true,
   deploymentAuthorizationEvidenceHash:
     publishedContractManifest.deploymentAuthorizationEvidenceHash ?? null,
@@ -386,6 +387,7 @@ const coordinatedManifest = {
     coverageMonitoring: 'AVAILABLE',
     storesHttp: 'AVAILABLE',
     merchantStoreManagementHttp: 'AVAILABLE',
+    merchantOrderExportHttp: 'AVAILABLE',
     fulfillmentTargetHttp: 'AVAILABLE',
     fulfillmentHttp: 'AVAILABLE',
     logisticsWebhookHttp: 'AVAILABLE',
@@ -515,6 +517,7 @@ const coordinatedManifest = {
     'MerchantProfile',
     'MerchantAuditList',
     'MerchantAuditExport',
+    'MerchantOrderExport',
     'CoverageBreakerResumeChallenge',
     'CoverageBreakerActionProjection',
     'RiskOverview',
@@ -2275,6 +2278,17 @@ function accountOpenApiPaths(errorResponse) {
         },
       },
     },
+    '/v2/merchant/orders/exports': {
+      post: {
+        operationId: 'exportMerchantOrders',
+        security,
+        requestBody: body({ $ref: '#/components/schemas/MerchantOrderExportRequest' }),
+        responses: {
+          200: response('PII-authorized paginated Excel order export', { $ref: '#/components/schemas/MerchantOrderExport' }),
+          default: errorResponse,
+        },
+      },
+    },
   };
 }
 
@@ -2435,6 +2449,41 @@ function accountOpenApiSchemas() {
       filename: string,
       entryCount: { type: 'integer', minimum: 0, maximum: 1000 },
       csv: { type: 'string' },
+    }),
+    MerchantOrderExportRequest: object({
+      from: timestamp,
+      to: timestamp,
+      skuId: { type: 'string', minLength: 1, maxLength: 256 },
+      state: { enum: [...orderProjectionStates] },
+      fulfillmentMode: { enum: [...fulfillmentModes] },
+      orderKind: { enum: ['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] },
+      cursorCreatedAt: timestamp,
+      cursorOrderId: { type: 'string', minLength: 1, maxLength: 256 },
+      limit: { type: 'integer', minimum: 1, maximum: 1000 },
+      idempotencyKey,
+    }, ['idempotencyKey']),
+    MerchantOrderExportFilters: object({
+      from: timestamp,
+      to: timestamp,
+      skuId: nullable(string),
+      state: nullable({ enum: [...orderProjectionStates] }),
+      fulfillmentMode: nullable({ enum: [...fulfillmentModes] }),
+      orderKind: nullable({ enum: ['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] }),
+      cursorCreatedAt: nullable(timestamp),
+      cursorOrderId: nullable(string),
+      limit: { type: 'integer', minimum: 1, maximum: 1000 },
+    }),
+    MerchantOrderExport: object({
+      artifactVersion: { const: artifactVersion },
+      exportId: ref('Bytes32'),
+      merchantId: string,
+      contentType: { const: 'application/vnd.ms-excel; charset=utf-8' },
+      filename: { type: 'string', minLength: 1, maxLength: 160 },
+      rowCount: { type: 'integer', minimum: 0, maximum: 1000 },
+      contentHash: ref('Bytes32'),
+      contentBase64: { type: 'string', minLength: 1, contentEncoding: 'base64' },
+      nextCursor: nullable(object({ createdAt: timestamp, orderId: string })),
+      filters: ref('MerchantOrderExportFilters'),
     }),
   };
 }
@@ -7786,6 +7835,44 @@ export interface MerchantAuditExport {
   filename: string;
   entryCount: number;
   csv: string;
+}
+
+export interface MerchantOrderExportRequest {
+  from?: Timestamp;
+  to?: Timestamp;
+  skuId?: string;
+  state?: OrderState;
+  fulfillmentMode?: FulfillmentMode;
+  orderKind?: OrderKind;
+  cursorCreatedAt?: Timestamp;
+  cursorOrderId?: string;
+  limit?: number;
+  idempotencyKey: string;
+}
+
+export interface MerchantOrderExportFilters {
+  from: Timestamp;
+  to: Timestamp;
+  skuId: string | null;
+  state: OrderState | null;
+  fulfillmentMode: FulfillmentMode | null;
+  orderKind: OrderKind | null;
+  cursorCreatedAt: Timestamp | null;
+  cursorOrderId: string | null;
+  limit: number;
+}
+
+export interface MerchantOrderExport {
+  artifactVersion: typeof artifactVersion;
+  exportId: Bytes32;
+  merchantId: string;
+  contentType: 'application/vnd.ms-excel; charset=utf-8';
+  filename: string;
+  rowCount: number;
+  contentHash: Bytes32;
+  contentBase64: string;
+  nextCursor: Readonly<{ createdAt: Timestamp; orderId: string }> | null;
+  filters: MerchantOrderExportFilters;
 }
 
 export interface PaymentFinality {

@@ -127,6 +127,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '021_logistics_admin.sql',
       '022_admin_global_operations.sql',
       '023_merchant_store_management.sql',
+      '024_merchant_fulfillment_completion.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -3414,12 +3415,104 @@ test('fulfillment targets encrypt delivery PII and bind quotes to an AMap six-di
     await insertOrder(db, targetOrderId, reservationId, delivery.targetHash, delivery.regionCodeHash);
     const detail = await service.getOrderTarget(buyer, targetOrderId);
     assert.equal(detail.payload.recipientName, 'Test Recipient');
+    const exportNow = new Date();
+    const paymentTxHash = `0x${'6'.repeat(64)}`;
+    await db.query(
+      `UPDATE core.orders SET state = 'PAID', finality_status = 'FINAL',
+         payment_tx_hash = $2, paid_at = $3, updated_at = $3 WHERE order_id = $1`,
+      [targetOrderId, paymentTxHash, exportNow],
+    );
+    await db.query(
+      `INSERT INTO core.transaction_finality (
+         transaction_id, resource_type, resource_id, chain_id, contract_address,
+         expected_event_hash, tx_hash, block_number, block_hash, confirmations,
+         required_confirmations, receipt_status, state, evidence, submitted_at,
+         finalized_at, updated_at
+       ) VALUES ($1,'ORDER_PAYMENT',$2,56,$3,$4,$5,100,$6,15,15,1,'FINAL','{}',$7,$7,$7)`,
+      ['merchant-export-finality-1', targetOrderId, MERCHANT, HASH, paymentTxHash, HASH_2, exportNow],
+    );
+    const evidence = new EvidenceService({
+      transactions: transactionAdapter(db),
+      trackingHashKey: 'cd'.repeat(32),
+      trackingEncryptionKey: 'ab'.repeat(32),
+      clock: () => exportNow,
+      storage: {
+        createUpload: async () => { throw new Error('unused'); },
+        finalizeUpload: async () => { throw new Error('unused'); },
+        createRead: async () => { throw new Error('unused'); },
+      },
+    });
+    const tracking = await evidence.createTrackingEvidence(merchant, {
+      orderId: targetOrderId,
+      carrierCode: 'SF',
+      trackingNumber: 'SF123456789',
+      idempotencyKey: 'merchant-export-tracking-1',
+    });
+    await new FulfillmentService({ transactions: transactionAdapter(db), clock: () => exportNow }).recordShipment(
+      merchant,
+      targetOrderId,
+      {
+        idempotencyKey: 'merchant-export-shipment-1',
+        evidenceHash: String(tracking.evidenceHash),
+        carrierCode: 'SF',
+        trackingNumberHash: String(tracking.trackingNumberHash),
+      },
+    );
+    const exported = await service.exportMerchantOrders(merchant, {
+      from: new Date(exportNow.getTime() - 60_000),
+      to: new Date(exportNow.getTime() + 60_000),
+      fulfillmentMode: 'DELIVERY',
+      limit: 100,
+    });
+    const workbook = Buffer.from(exported.contentBase64, 'base64').toString('utf8');
+    assert.equal(exported.rowCount, 1);
+    assert.equal(exported.nextCursor, null);
+    assert.match(workbook, /Merchant Orders/);
+    for (const value of ['订单号', '支付TxHash', '收货人', '电话', '完整地址', '物流单号', 'Test Recipient', '+8613800000000', 'SF123456789']) {
+      assert.equal(workbook.includes(value), true);
+    }
+    const storedTracking = await db.query<{ encrypted: string; payload: unknown }>(
+      `SELECT encode(encrypted_tracking_number, 'hex') AS encrypted, payload
+       FROM core.evidence_envelopes WHERE evidence_hash = $1`,
+      [tracking.evidenceHash],
+    );
+    assert.equal(storedTracking.rows[0]?.encrypted.includes(Buffer.from('SF123456789').toString('hex')), false);
+    assert.equal(JSON.stringify(storedTracking.rows[0]?.payload).includes('SF123456789'), false);
+    const account = new AccountService({
+      transactions: transactionAdapter(db),
+      regions,
+      parser: { parse: async () => { throw new Error('unused'); } },
+      encryptionKey: 'ab'.repeat(32),
+      retentionPolicyVersion: 'pii-v1',
+      createDeliveryTarget: async () => { throw new Error('unused'); },
+      clock: () => exportNow,
+    });
+    const auditInput = {
+      exportId: exported.exportId,
+      contentHash: exported.contentHash,
+      rowCount: exported.rowCount,
+      filters: exported.filters,
+      idempotencyKey: 'merchant-order-export-audit-1',
+      correlationId: 'merchant-order-export-correlation-1',
+    };
+    assert.deepEqual(await account.recordMerchantOrderExport(merchant, auditInput), { recorded: true, existing: false });
+    assert.deepEqual(await account.recordMerchantOrderExport(merchant, auditInput), { recorded: true, existing: true });
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.audit_outbox_events WHERE event_type = 'MerchantOrdersExported'",
+    )).rows[0]?.count, '1');
     await assert.rejects(
       service.getOrderTarget(
         { walletAddress: '0x9999999999999999999999999999999999999999', roles: ['BUYER'] },
         targetOrderId,
       ),
       /outside the authenticated wallet scope/,
+    );
+    await assert.rejects(
+      service.exportMerchantOrders(
+        { walletAddress: '0x9999999999999999999999999999999999999999', roles: ['MERCHANT'], merchantId: 'merchant-1' },
+        { from: new Date(exportNow.getTime() - 60_000), to: new Date(exportNow.getTime() + 60_000) },
+      ),
+      /scope is unavailable/,
     );
     await assert.rejects(
       service.getOrderTarget(
@@ -3773,6 +3866,7 @@ test('printer binding, provider waybill and durable print jobs form one merchant
     const evidence = new EvidenceService({
       transactions: transactionAdapter(db),
       trackingHashKey: 'cd'.repeat(32),
+      trackingEncryptionKey: 'ef'.repeat(32),
       clock: () => now,
       storage: {
         createUpload: async () => { throw new Error('unused'); },
@@ -4117,6 +4211,7 @@ test('order pages use stable scoped cursors and shipment batches are canonical, 
     const evidence = new EvidenceService({
       transactions: transactionAdapter(db),
       trackingHashKey: 'ab'.repeat(32),
+      trackingEncryptionKey: 'cd'.repeat(32),
       clock: () => now,
       storage: {
         createUpload: async () => { throw new Error('unused'); },
@@ -9462,6 +9557,7 @@ test('evidence and media stay scoped, idempotent, hashed and immutable', async (
       transactions: transactionAdapter(db),
       storage,
       trackingHashKey: 'ab'.repeat(32),
+      trackingEncryptionKey: 'cd'.repeat(32),
       uploadLimits,
       clock: () => now,
     });
