@@ -1,7 +1,7 @@
 # Mall Core API Publication Boundary
 
 Status: the previous handwritten `mall-api-v1` proposal is retired. Mall now
-consumes coordinated Core artifacts `2.0.0-settlement-admin.11`.
+consumes coordinated Core artifacts `2.0.0-settlement-admin.12`.
 
 The published boundary currently covers:
 
@@ -30,6 +30,9 @@ The published boundary currently covers:
   operations and saved-address fulfillment-target creation;
 - buyer-scoped takeover timelines with explicit `COMPLETE` /
   `PARTIAL_LEGACY` history status and public transitions only;
+- buyer-scoped ordinary and fallback-retail shopping statements with exact
+  USDT/NPL payment atoms, BNM Locked/Available state, journal provenance and a
+  paired `(createdAt, orderId)` cursor;
 - wallet settlement balances and requests, signed EIP-712 settlement intents,
   Safe batching state and final Safe TxHash;
 - seckill current/history/session projections, authoritative timer anchors,
@@ -52,6 +55,7 @@ projections.
 
 The following Mall capabilities remain incomplete:
 
+- winner-bound seckill prize journal statements and their payable lifecycle;
 - an `OPEN_TAKEOVER` evidence action matching the published takeover command;
 - buyer authority for `VERIFY_PICKUP` evidence, if buyer-side pickup execution
   is ever intended; current Core authority is merchant/platform only;

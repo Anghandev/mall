@@ -32,7 +32,7 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
 | MAL-ORDER-001 | 102-107 | Pending Payment/Shipment/Receipt/After-sale groups; seckill badge; inline carrier/latest logistics; Support/Exchange and Confirm Receipt buttons | - | Actions render only from allowedActions; loading/empty/error states covered | Verified | - |
 | MAL-AFTER-001 | 108-111 | No no-reason action; Exchange or Delay only; arbitration state and linked reward lock | D-V2-004, D-V2-006, D-V2-007 | No business-refund entry point; arbitration is Disputed and retains payment, BNM and every transferable reward as Locked, with no settlement request action | Verified | - |
 | MAL-TRACK-001 | 112-118 | Seckill product/session/input/result; source USDT prize withdrawal; Locked BNM amount | D-V2-007, D-V2-008, D-V2-013, D-V2-023 | Prize becomes Available only after final session settlement, then follows signed request and Safe-batch states; BNM remains backend points with only Locked/Available | Overridden | GAP-MAL-007, GAP-MAL-015 |
-| MAL-TRACK-002 | 119-122 | Ordinary shopping rows; `+ BNM` pending release; released state | D-V2-006, D-V2-008 | BNM changes only from Locked to Available after authoritative fulfillment finality; no token payout or transferable-asset state is implied | Overridden | GAP-MAL-007 |
+| MAL-TRACK-002 | 119-122 | Ordinary shopping rows; `+ BNM` pending release; released state | D-V2-006, D-V2-008 | BNM changes only from Locked to Available after authoritative fulfillment finality; no token payout or transferable-asset state is implied | Verified | - |
 | MAL-RWD-001 | 123-127 | Reward-center layout and lifecycle metrics | D-V2-007, D-V2-008, D-V2-023 | Each transferable rail exposes exact Locked/Available/Requested/Batched/Settled amounts and final Safe TxHash; BNM exposes only Locked/Available backend-point totals | Verified | - |
 | MAL-RWD-002 | 128-130 | BNM source, Locked/Available rule, source withdrawal control and provenance TxHash/timestamp | D-V2-008 | Order-linked backend BNM exposes Locked/Available and payment/fulfillment provenance only; V2 renders no ERC-20, mint, Safe payout or on-chain withdrawal action | Verified | - |
 | MAL-RWD-003 | 131-134 | Genesis credential visibility; 2% NPL; source session-timing and withdrawal/Gas wording | D-V2-007, D-V2-009, D-V2-010, D-V2-023 | Payment snapshot plus fulfillment finality govern Locked/Available; ordinary wallets see no module; eligible wallets sign gasless settlement requests and track Safe batch finality | Verified | - |
@@ -56,6 +56,15 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
 | MAL-GOAL-006 | Final Goal | Transferable-asset ledger lifecycle and BNM backend-points lifecycle | D-V2-007, D-V2-008, D-V2-017, D-V2-023 | USDT/NPL/prize rows prove Locked/Available/Requested/Batched/Settled, immutable batch identity and final 15-confirmation Safe TxHash; BNM proves only Locked/Available with no ERC-20, mint, Safe transfer or on-chain withdrawal | Verified | - |
 
 ## Settlement/Admin .9 Verification Evidence
+
+- `MAL-TRACK-002` and the shopping half of `MAL-ASSET-002`: `.12` consumes
+  `GET /v2/buyer/shopping-statements` through the coordinated OpenAPI and
+  generated `BuyerShoppingStatementPage`. The buyer wallet is checked against
+  the SIWE session; paired `(createdAt, orderId)` cursors append stable pages;
+  rows render exact USDT/NPL payment atoms, BNM Locked/Available state, order,
+  payment and fulfillment times, and every BNM journal ID. No browser total or
+  product/session title is inferred. `MAL-ASSET-002` remains `Frozen` because
+  the winner-bound seckill prize journal and lifecycle are `DecisionBlocked`.
 
 - `MAL-ASSET-001`: authenticated profile reads/writes preserve the frozen
   `accountIdStatus=DecisionBlocked`, display canonical overview counts and bind
