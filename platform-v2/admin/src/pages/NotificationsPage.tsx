@@ -183,7 +183,7 @@ export function NotificationsPage() {
           <thead><tr><th>消息</th><th>来源事件</th><th>Topic</th><th>Delivery</th><th>时间</th></tr></thead>
           <tbody>{items.map((item) => <tr key={item.messageId}><td><code>{item.messageId}</code></td><td>{item.sourceEventType}</td><td>{item.topic}</td><td><span className={`notification-delivery-state is-${item.deliveryState.toLowerCase()}`}>{deliveryLabels[item.deliveryState]}</span></td><td>{formatDateTime(item.createdAt)}</td></tr>)}</tbody>
         </table>
-      </div> : <EmptyState icon="inbox" title="收件箱暂无消息" detail="Core 返回真实空收件箱，不使用生产 fixture。" />}
+      </div> : <EmptyState icon="inbox" title="收件箱暂无消息" detail="Core 返回真实空收件箱，不会用本地示例消息替代。" />}
     </section>
 
     {session && canReadCampaigns ? <section className="notification-workspace">
