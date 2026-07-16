@@ -25,6 +25,7 @@ import { reserveInventory } from './inventory.ts';
 import { assertWalletPaymentAllowed } from './risk-service.ts';
 import { assertQuoteFulfillmentTarget } from './fulfillment-target-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
+import type { FulfillmentActor } from './fulfillment-service.ts';
 import {
   blocksOrdinaryQuote,
   effectiveSeckillPhase,
@@ -561,13 +562,25 @@ export class CatalogPaymentService {
 
   getPayment(buyerWallet: string, orderId: string) {
     const buyer = normalizeAddress(buyerWallet);
+    return this.#getPayment(orderId, buyer);
+  }
+
+  getAdminPayment(actor: FulfillmentActor, orderId: string) {
+    if (!actor.roles.some((role) => ['ADMIN', 'OPERATOR', 'AUDITOR'].includes(role))) {
+      throw new CoreError('Forbidden', 'Platform role is required', 403);
+    }
+    return this.#getPayment(orderId);
+  }
+
+  #getPayment(orderId: string, buyer?: string) {
     if (!isHash(orderId)) throw new CoreError('InvalidRequest', 'Invalid order ID');
     return this.#transactions.transaction(async (executor) => {
       const identity = await loadStoredQuoteIdentity(executor, orderId, buyer);
       if (!identity) throw new CoreError('InvalidRequest', 'Payment not found', 404);
+      const owner = identity.buyer_wallet;
       const finality = await loadPaymentFinality(executor, orderId);
       if (identity.quote_kind === 'SECKILL') {
-        const quotes = await loadStoredSeckillQuoteByOrder(executor, orderId, buyer);
+        const quotes = await loadStoredSeckillQuoteByOrder(executor, orderId, owner);
         const seckill = quotes.find((row) => row.classification === 'SECKILL');
         const fallback = quotes.find((row) => row.classification === 'FALLBACK_RETAIL');
         if (!seckill || !fallback) throw new CoreError('InvalidFinality', 'Seckill quote legs are incomplete', 409);
@@ -588,7 +601,7 @@ export class CatalogPaymentService {
           finality,
         };
       }
-      const quote = await loadStoredQuote(executor, orderId, buyer);
+      const quote = await loadStoredQuote(executor, orderId, owner);
       if (!quote) throw new CoreError('InvalidFinality', 'Ordinary quote leg is unavailable', 409);
       return {
         ...quoteResponse(
@@ -914,10 +927,11 @@ function existingSeckillQuoteResponse(
   );
 }
 
-async function loadStoredQuoteIdentity(executor: SqlExecutor, orderId: string, buyer: string) {
-  const result = await executor.query<{ quote_kind: 'ORDINARY' | 'SECKILL' }>(
-    'SELECT quote_kind FROM core.payment_quotes WHERE order_id = $1 AND buyer_wallet = $2',
-    [orderId, buyer],
+async function loadStoredQuoteIdentity(executor: SqlExecutor, orderId: string, buyer?: string) {
+  const result = await executor.query<{ quote_kind: 'ORDINARY' | 'SECKILL'; buyer_wallet: string }>(
+    `SELECT quote_kind, buyer_wallet FROM core.payment_quotes
+     WHERE order_id = $1 AND ($2::text IS NULL OR buyer_wallet = $2)`,
+    [orderId, buyer ?? null],
   );
   return result.rows[0];
 }
