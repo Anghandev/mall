@@ -1,6 +1,6 @@
 # Merchant Workbench Core Gaps
 
-The merchant product consumes Core's coordinated `2.0.0-admin-global-ops.1` artifact
+The merchant product consumes Core's coordinated `2.0.0-merchant-stores.1` artifact
 workspace package. Bootstrap, SIWE,
 merchant-bound Catalog/SKU/inventory management, immutable media, wallet-scoped fulfillment, merchant finance,
 guarantee-deposit evidence, signed settlement requests and Safe-finality
@@ -44,6 +44,12 @@ incomplete provider configuration is rejected by Core as `InvalidRequest` or
 `ConfigurationRequired`; the workbench renders that rejection and does not
 create a local success state.
 
+## Resolved In Merchant Store Batch
+
+| Gap ID | Published Core capability | Merchant evidence |
+|---|---|---|
+| GAP-MER-008 | Merchant-scoped store create/update/activate/close, AMap reverse geocode and immutable six-digit region/location | The workbench submits coordinates without a manual region/address fallback, binds 1-5 verified `STORE_IMAGE` assets, uses `expectedVersion` for every mutation and renders Core capabilities plus 403/409 failures |
+
 ## Remaining Gaps
 
 | Gap ID | Required Core capability | Fail-closed behavior |
@@ -52,6 +58,5 @@ create a local success state.
 | GAP-MER-002 | Secondary-signature intents beyond the published printer binding plus production merchant allowlist and domain configuration | Printer binding signs the exact Core challenge; unpublished region-change intent, unauthorized/rejected/wrong-chain states remain fail closed |
 | GAP-MER-005 | PII-authorized, audit-logged server-side Excel export and list-row consignee/contact projection | Cursor/filter/manual-batch reads and writes are live; Excel export stays unavailable and delivery PII is fetched only through the authorized immutable target endpoint |
 | GAP-MER-007 | Camera challenge/scan transport beyond the published six-digit order/store verification command | Manual order/store-bound verification is live; camera launch stays unavailable |
-| GAP-MER-008 | AMap reverse geocode plus signed immutable six-digit region | Region read-only; store save disabled |
 | GAP-MER-013 | Authoritative seckill revenue detail | Published NPL subtype balances and finance-center BNM totals are live; only the unpublished seckill revenue projection remains unavailable |
 | GAP-MER-018 | Provider accounts/devices, authorized merchant wallet, RPC/domain/Safe inputs | ExternalBlocked; no simulated success |

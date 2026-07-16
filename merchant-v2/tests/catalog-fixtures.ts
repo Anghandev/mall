@@ -7,6 +7,7 @@ import {
   type MediaReadAccessProjection,
   type MediaUploadIntentProjection,
   type MerchantConcessionPreview,
+  type MerchantManagedStore,
   type MerchantStore,
   type ProductSlotProjection,
 } from '@abu24k/core-artifacts';
@@ -29,8 +30,20 @@ export const merchantStore: MerchantStore = {
   latitude: 31.2304,
   address: '上海市黄浦区金陵东路 24 号',
   phone: '021-12345678',
+  businessHours: '09:00-18:00',
+  imageAssetIds: [mediaAssetId],
   status: 'ACTIVE',
   version: 1,
+};
+
+export const managedMerchantStore: MerchantManagedStore = {
+  ...merchantStore,
+  artifactVersion,
+  allowedActions: [
+    { action: 'UPDATE_PROFILE', enabled: true },
+    { action: 'ACTIVATE', enabled: false, reasonCode: 'STORE_STATE_MISMATCH' },
+    { action: 'CLOSE', enabled: true },
+  ],
 };
 
 export const catalogCategories: readonly CatalogCategory[] = [{
