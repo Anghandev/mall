@@ -41,4 +41,15 @@ describe('platform requirement traceability', () => {
     expect(productionSource).not.toMatch(/(?:mock|fixture|sample)AdminRecords/);
     expect(productionSource).not.toContain('sampleOrderTxHash');
   });
+
+  it('does not expose Merchant store-management calls from Admin production source', () => {
+    const sourceRoot = join(process.cwd(), 'src');
+    const productionSource = listFiles(sourceRoot)
+      .filter((file) => /\.(?:ts|tsx)$/.test(file))
+      .map((file) => readFileSync(file, 'utf8'))
+      .join('\n');
+
+    expect(productionSource).not.toContain('/v2/merchant/stores');
+    expect(productionSource).not.toMatch(/(?:fetch|create|update|activate|close)MerchantStore/);
+  });
 });

@@ -134,7 +134,7 @@ export const adminModules: readonly AdminModule[] = [
     description: '维护六家承运商、Provider 密钥引用、加密仓库，以及跨商家面单与打印重试。密钥只显示配置状态。',
     icon: Truck,
     requirements: ['ADM-LOG-001', 'ADM-LOG-002', 'ADM-LOG-003', 'ADM-LOG-004', 'ADM-LOG-005'],
-    gap: 'Core 2.0.0-admin-global-ops.1',
+    gap: 'Core 2.0.0-merchant-stores.1',
     fields: ['SF / JD / YTO / ZTO / STO / EMS', '默认承运商', 'Provider readiness', '平台 / 合作仓地址', '跨商家面单', '打印作业与重试'],
     evidence: ['provider version', 'secret reference status', 'encrypted warehouse version', 'waybill / print audit'],
     ordinarySoftDelete: true,

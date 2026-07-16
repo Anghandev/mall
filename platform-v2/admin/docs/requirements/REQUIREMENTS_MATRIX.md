@@ -280,3 +280,21 @@ It completes no Admin Requirement ID:
 
 Real provider accounts, device acceptance and production deployment remain
 `ExternalBlocked` under `ADM-GOAL-003`. No production fixture is shipped.
+
+## Merchant Stores `.1` Consumer Boundary
+
+The current product pin is
+`@abu24k/core-artifacts@2.0.0-merchant-stores.1`. The shared read status now
+includes `DRAFT`, but merchant store list/create/profile/activate/close remain
+Merchant-only operations. This checkpoint completes no Admin Requirement ID:
+
+- Admin exposes no store editor and does not call Merchant store-management
+  routes.
+- Consumer tests prove the coordinated manifest contains the five Merchant
+  operations and no Admin alias.
+- The production-bundle guard rejects the Merchant store-management route
+  prefix, including the base GET/POST path.
+
+Production Safe/RPC/domain/wallets, provider credentials, physical devices and
+deployment remain `ExternalBlocked` under `ADM-GOAL-003`. No production fixture
+is shipped.

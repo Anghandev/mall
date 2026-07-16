@@ -5,7 +5,7 @@ implements shared funds, contracts, API, Schema or signer behavior.
 
 ## Current Product Boundary
 
-- Production consumes `@abu24k/core-artifacts@2.0.0-logistics.1`.
+- Production consumes `@abu24k/core-artifacts@2.0.0-merchant-stores.1`.
 - SIWE/JWT stays in memory. Every protected read and write is role-bound by
   Core and preserves typed `DecisionBlocked`, `ExternalBlocked`,
   `ConfigurationRequired` and correlation evidence.
@@ -52,9 +52,11 @@ implements shared funds, contracts, API, Schema or signer behavior.
 - Funds, chain, policy, audit and historical evidence surfaces never expose a
   delete control. No production fixture is shipped.
 - The logistics checkpoint publishes printer binding, waybill batches and
-  durable print jobs only under Merchant routes. Admin consumes the coordinated
-  version but exposes no parallel endpoint, configuration write or print action;
-  its logistics workspace remains fail-closed under `GAP-ADM-012`.
+  durable print jobs under Merchant routes and separate platform logistics
+  operations under Admin routes. The merchant-store checkpoint additionally
+  publishes merchant-owned store create, profile update, activate and close
+  operations. Admin consumes the coordinated version but exposes no store
+  editor and never calls or bundles those Merchant store-management routes.
 
 ## Local Verification
 
