@@ -1,4 +1,4 @@
-export declare const artifactVersion: "2.0.0-settlement-admin.14";
+export declare const artifactVersion: "2.0.0-settlement-admin.15";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
@@ -14,7 +14,7 @@ export type TransactionFinalityState = "SUBMITTED" | "MINED" | "REPLACED" | "REO
 export type UserRole = "BUYER" | "MERCHANT" | "ADMIN" | "OPERATOR" | "ARBITRATOR" | "AUDITOR";
 export type MerchantLevel = "V1" | "V2" | "V3" | "V4" | "V5";
 export type MerchantLifecycleStatus = "PENDING" | "APPROVED" | "REJECTED" | "SUSPENDED" | "BLACKLISTED";
-export type MerchantReviewAction = "APPROVE" | "REJECT" | "BLACKLIST";
+export type MerchantReviewAction = "APPROVE" | "REJECT" | "BLACKLIST" | "CHANGE_SETTLEMENT_WALLET";
 export type MerchantQualificationAccess = "FULL" | "REDACTED" | "UNAVAILABLE";
 export type BreakerScope = "NEW_PAYMENT" | "SECKILL_PURCHASE" | "NEW_SETTLEMENT_BATCH";
 export type CatalogProductAction = "SAVE_DRAFT" | "CREATE_CONCESSION_PREVIEW" | "SUBMIT_REVIEW" | "APPROVE" | "REJECT" | "PUBLISH" | "ADJUST_INVENTORY" | "HIDE" | "DELIST";
@@ -71,7 +71,7 @@ export type NotificationCampaignTopic = "ANNOUNCEMENT" | "MAINTENANCE" | "ACTIVI
 export type NotificationCampaignState = "DRAFT" | "PUBLISHED" | "CANCELLED";
 export type NotificationDeliveryState = "PENDING" | "PROCESSING" | "DELIVERED" | "RETRY" | "CONFIGURATION_REQUIRED" | "DEAD_LETTER";
 export type NotificationCampaignAction = 'PUBLISH' | 'RETRY_FAILED';
-export type SystemConfigKey = "BUSINESS" | "FREIGHT" | "RPC" | "ORACLE" | "GAS" | "CHAIN" | "INTEGRATIONS";
+export type SystemConfigKey = "BUSINESS" | "FREIGHT" | "RPC" | "ORACLE" | "GAS" | "CHAIN" | "INTEGRATIONS" | "MERCHANT_LEVELS";
 export type AuditStreamName = "financial" | "governance" | "authentication" | "operational" | "backup";
 export type AuditEvidenceProfile = "RBAC" | "AUTHORIZATION" | "SIGNED_OFFCHAIN" | "SAFE_APPROVED" | "CHAIN_OBSERVED" | "CHAIN_FINAL" | "SYSTEM";
 export type OperationsMetricComponent = "HOST" | "REDIS" | "MQ" | "DATABASE" | "HTTP" | "PAYMENT" | "FULFILLMENT" | "RPC_PRIMARY" | "RPC_FALLBACK" | "EXPLORER";
@@ -233,6 +233,7 @@ export interface MerchantApplicationUpdateRequest {
 export interface MerchantReviewChallengeRequest {
   action: MerchantReviewAction;
   reasonCode: string;
+  proposedSettlementWallet?: Address;
   idempotencyKey: string;
 }
 
@@ -280,7 +281,17 @@ export interface MerchantLifecycleDetail {
   artifactVersion: typeof artifactVersion;
   merchant: MerchantLifecycleSummary;
   qualification: MerchantQualification;
-  levelPolicy: Readonly<{ status: 'DecisionBlocked'; reason: string }>;
+  levelPolicy:
+    | Readonly<{
+        status: 'AVAILABLE';
+        configVersionId: string;
+        version: number;
+        effectiveFrom: Timestamp;
+        level: MerchantLevel;
+        maxProductSettlementUsdt: AtomicAmount;
+        monthlySeckillQuota: number;
+      }>
+    | Readonly<{ status: 'DecisionBlocked'; reason: string }>;
   analytics: Readonly<{
     orders: {
       totalFinalized: AtomicAmount;
@@ -296,9 +307,14 @@ export interface MerchantLifecycleDetail {
       inTransit: AtomicAmount;
       completed: AtomicAmount;
       pickupCompleted: AtomicAmount;
-      fastShip48h: Readonly<{
-        status: 'DecisionBlocked'; numerator: null; denominator: null; bps: null; reason: string;
-      }>;
+      fastShip48h:
+        | Readonly<{
+            status: 'AVAILABLE'; numerator: AtomicAmount; denominator: AtomicAmount; bps: number; reason: null;
+          }>
+        | Readonly<{
+            status: 'UNAVAILABLE'; numerator: AtomicAmount; denominator: '0'; bps: null;
+            reason: 'NO_ELIGIBLE_DELIVERY_ORDERS';
+          }>;
     };
     risk: {
       takeoverCases: AtomicAmount;

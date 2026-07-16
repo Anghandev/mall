@@ -6,12 +6,14 @@ import {
   CORE_ARTIFACT_VERSION,
   catalogReviewDecisions,
   type CatalogReviewDecision,
+  type MerchantLevel,
 } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import { parsePaymentPolicySnapshot } from '../api/payment-policy.ts';
 import type { SignerRequest } from '../chain/signer.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
+import { currentMerchantLevelPolicy, merchantLevelRule } from './merchant-level-policy.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 
 const LOCKED_SESSION_PHASES = ['PREHEAT', 'LIVE', 'SETTLING'] as const;
@@ -382,6 +384,7 @@ export class CatalogManagementService {
         if (duplicate.rows[0].request_hash !== requestHash) throw idempotencyConflict('Product');
         return productProjection(executor, await requireProduct(executor, duplicate.rows[0].resource_id), actor);
       }
+      await assertMerchantLevelProductLimit(executor, scope.merchantId, value.skus);
       const current = await loadCurrentStoreProduct(executor, storeId, true);
       if (current) await assertProductWriteUnlocked(executor, current, this.#clock());
       const hasHistory = current ? await productHasHistory(executor, current.product_id) : false;
@@ -971,6 +974,28 @@ export class CatalogManagementService {
         createdAt: now,
       });
       return result;
+    });
+  }
+}
+
+async function assertMerchantLevelProductLimit(
+  executor: SqlExecutor,
+  merchantId: string,
+  skus: ReturnType<typeof validateProductSlotInput>['skus'],
+) {
+  const merchant = await executor.query<{ level: MerchantLevel }>(
+    'SELECT level FROM core.merchants WHERE merchant_id = $1',
+    [merchantId],
+  );
+  const level = merchant.rows[0]?.level;
+  if (!level) throw new CoreError('Forbidden', 'Merchant is unavailable for product validation', 403);
+  const policy = await currentMerchantLevelPolicy(executor);
+  const rule = merchantLevelRule(policy, level);
+  if (skus.some((sku) => BigInt(sku.merchantBaseReceivableUsdt) > BigInt(rule.maxProductSettlementUsdt))) {
+    throw new CoreError('Forbidden', `${level} product settlement amount exceeds the published limit`, 409, {
+      level,
+      configVersionId: policy.configVersionId,
+      maxProductSettlementUsdt: rule.maxProductSettlementUsdt,
     });
   }
 }

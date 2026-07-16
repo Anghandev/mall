@@ -10,6 +10,7 @@ import {
 import {
   NPL_ADDRESS,
   NPL_USDT_PAIR_ADDRESS,
+  systemConfigKeys,
   USDT_ADDRESS,
 } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
@@ -19,10 +20,11 @@ import type {
 } from '../chain/system-config-governance.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
+import { validateMerchantLevelPayload } from './merchant-level-policy.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 
 const ZERO_HASH = `0x${'0'.repeat(64)}`;
-const CONFIG_KEYS = ['BUSINESS', 'FREIGHT', 'RPC', 'ORACLE', 'GAS', 'CHAIN', 'INTEGRATIONS'] as const;
+const CONFIG_KEYS = systemConfigKeys;
 type ConfigKey = (typeof CONFIG_KEYS)[number];
 
 interface ConfigRow {
@@ -343,6 +345,7 @@ function validateConfigPayload(key: ConfigKey, value: unknown) {
     if (new Set(safes).size !== 3) throw new CoreError('InvalidRequest', 'Custody, Reward and Operations Safes must be distinct');
     return result;
   }
+  if (key === 'MERCHANT_LEVELS') return validateMerchantLevelPayload(input);
   exactKeys(input, ['ossCredentialRef', 'cdnEnabled', 'aiPromptVersion', 'aiProviderSecretRef']);
   if (typeof input.cdnEnabled !== 'boolean') throw new CoreError('InvalidRequest', 'CDN enabled must be boolean');
   return {
