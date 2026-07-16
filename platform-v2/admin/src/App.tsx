@@ -9,6 +9,7 @@ import { CmsPage } from './pages/CmsPage';
 import { CoreStatusPage } from './pages/CoreStatusPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { MerchantFinancePage } from './pages/MerchantFinancePage';
+import { LogisticsPage } from './pages/LogisticsPage';
 import { MonitoringPage } from './pages/MonitoringPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { PaymentTracePage } from './pages/PaymentTracePage';
@@ -26,6 +27,7 @@ export function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/catalog" element={<CatalogPage />} />
           <Route path="/merchants" element={<MerchantFinancePage />} />
+          <Route path="/logistics" element={<LogisticsPage />} />
           <Route path="/policy" element={<PolicyPage />} />
           <Route path="/risk" element={<RiskPage />} />
           <Route path="/seckill" element={<SeckillPage />} />
@@ -37,7 +39,7 @@ export function App() {
           <Route path="/operations" element={<MonitoringPage />} />
           <Route path="/clearing" element={<PaymentTracePage />} />
           <Route path="/core-status" element={<CoreStatusPage />} />
-          {adminModules.filter((module) => !['dashboard', 'merchants', 'catalog', 'policy', 'risk', 'seckill', 'takeover', 'cms', 'notifications', 'system', 'audit', 'operations', 'clearing', 'core'].includes(module.id)).map((module) => (
+          {adminModules.filter((module) => !['dashboard', 'merchants', 'catalog', 'logistics', 'policy', 'risk', 'seckill', 'takeover', 'cms', 'notifications', 'system', 'audit', 'operations', 'clearing', 'core'].includes(module.id)).map((module) => (
             <Route key={module.path} path={module.path} element={<ModuleWorkspace module={module} />} />
           ))}
           <Route path="*" element={<Navigate to="/" replace />} />

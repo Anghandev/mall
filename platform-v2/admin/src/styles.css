@@ -864,3 +864,73 @@ input::placeholder { color: #8b8b82; }
   .seckill-action-row { grid-template-columns: 1fr; }
   .seckill-action-row .status-chip { justify-self: start; }
 }
+
+.logistics-session-prompt { margin-top: 20px; }
+.logistics-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 20px 0 16px; }
+.logistics-toolbar .merchant-status-tabs { min-width: min(100%, 480px); }
+.logistics-toolbar .merchant-status-tabs button { flex: 1; }
+.logistics-auditor-note { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; padding: 11px 14px; color: #315847; background: var(--success-soft); border: 1px solid #a7cfbb; border-radius: 4px; font-size: 12px; }
+.logistics-auditor-note svg { flex: 0 0 auto; width: 18px; }
+.logistics-auditor-note strong { margin-right: 8px; }
+.logistics-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; margin: 16px 0; }
+.logistics-panel { min-width: 0; display: grid; align-content: start; gap: 16px; }
+.logistics-panel > .panel-heading > svg { width: 20px; color: var(--gold-dark); }
+.logistics-form { border-top: 1px solid var(--line); }
+.logistics-form fieldset { margin: 0; padding: 0; border: 0; }
+.logistics-form legend { margin-bottom: 9px; color: var(--ink-soft); font-size: 12px; font-weight: 750; }
+.carrier-toggle-grid { display: grid; grid-template-columns: repeat(6, minmax(54px, 1fr)); gap: 6px; }
+.carrier-toggle { min-height: 48px; display: grid; place-items: center; gap: 2px; padding: 6px; background: var(--surface-muted); border: 1px solid var(--line); border-radius: 4px; color: var(--ink-soft); font-size: 11px; font-weight: 800; cursor: pointer; }
+.carrier-toggle:has(input:checked) { color: #315847; background: var(--success-soft); border-color: #8ebca3; }
+.carrier-toggle input { width: 15px; height: 15px; margin: 0; accent-color: #315847; }
+.provider-status-list { display: grid; border: 1px solid var(--line); }
+.provider-status { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 12px; border-bottom: 1px solid var(--line); }
+.provider-status:last-child { border-bottom: 0; }
+.provider-status > span:first-child { display: grid; gap: 3px; }
+.provider-status small { color: var(--ink-muted); font-size: 10px; }
+.provider-status dl { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0; overflow: hidden; background: var(--line); border: 1px solid var(--line); }
+.provider-status dl > div { min-width: 0; padding: 8px; background: var(--surface); }
+.provider-status dt { color: var(--ink-muted); overflow-wrap: anywhere; font-size: 9px; }
+.provider-status dd { margin: 3px 0 0; font-size: 11px; font-weight: 750; }
+.checkbox-label { align-content: center; grid-template-columns: 18px 1fr !important; }
+.checkbox-label input { width: 16px; height: 16px; margin: 0; accent-color: #315847; }
+.warehouse-list { display: grid; max-height: 620px; overflow-y: auto; border: 1px solid var(--line); }
+.warehouse-row { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px 10px; padding: 12px; color: var(--ink); background: var(--surface); border: 0; border-bottom: 1px solid var(--line); text-align: left; }
+.warehouse-row:last-child { border-bottom: 0; }
+.warehouse-row:hover, .warehouse-row.is-selected { background: var(--gold-soft); }
+.warehouse-row > span:first-child { min-width: 0; display: grid; gap: 3px; }
+.warehouse-row small { color: var(--ink-muted); overflow-wrap: anywhere; font-size: 9px; }
+.warehouse-row > small { grid-column: 1 / -1; }
+.warehouse-redacted { display: grid; gap: 12px; padding: 18px; background: var(--surface-muted); border-left: 3px solid var(--line-strong); }
+.warehouse-redacted > svg { width: 22px; color: #315847; }
+.warehouse-redacted h3, .warehouse-redacted p { margin: 0; }
+.warehouse-redacted dl { display: grid; gap: 8px; margin: 0; }
+.warehouse-redacted dl > div { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px; }
+.warehouse-redacted dt { color: var(--ink-muted); font-size: 10px; }
+.warehouse-redacted dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 11px; }
+.form-span { grid-column: 1 / -1; }
+.logistics-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.logistics-filter { margin: 16px 0; }
+.logistics-filter .inline-query-form { display: flex; align-items: end; gap: 10px; }
+.logistics-filter label { flex: 1; }
+.operations-grid { grid-template-columns: minmax(0, 1.3fr) minmax(280px, .7fr); }
+.logistics-lists { display: grid; gap: 16px; margin-bottom: 20px; }
+.logistics-lists .data-table td:first-child { display: grid; gap: 3px; min-width: 210px; }
+.logistics-lists .data-table td:first-child strong, .logistics-lists .data-table td:first-child small { overflow-wrap: anywhere; }
+.logistics-lists .data-table td small { color: var(--ink-muted); font-size: 9px; }
+.logistics-empty { min-height: 104px; display: grid; place-items: center; align-content: center; gap: 8px; padding: 16px; color: var(--ink-muted); background: var(--surface-muted); border: 1px dashed var(--line-strong); text-align: center; font-size: 11px; }
+.logistics-empty svg { width: 22px; }
+.logistics-loading, .logistics-error { margin: 16px 0; }
+
+@media (max-width: 980px) {
+  .logistics-grid, .operations-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 620px) {
+  .logistics-toolbar { align-items: stretch; }
+  .logistics-toolbar .merchant-status-tabs { min-width: 0; }
+  .logistics-toolbar .merchant-status-tabs button { min-width: 110px; }
+  .carrier-toggle-grid { grid-template-columns: repeat(3, minmax(54px, 1fr)); }
+  .provider-status dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .logistics-filter .inline-query-form { align-items: stretch; flex-direction: column; }
+  .logistics-filter .button, .logistics-actions .button, .logistics-form > .button { width: 100%; }
+}

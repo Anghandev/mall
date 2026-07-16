@@ -12,12 +12,23 @@ import {
   fulfillmentRequestStates,
   fulfillmentRequestTypes,
   logisticsProviders,
+  logisticsCarrierCodes,
+  logisticsProviderReadinessStates,
   logisticsStatuses,
+  logisticsWarehouseAccessLevels,
+  logisticsWarehouseKinds,
   orderFinalityStatuses,
   orderProjectionStates,
+  printJobStates,
+  printProviders,
   userRoles,
+  waybillProviders,
+  waybillRequestStates,
   type AllowedAction,
+  type AdminPrintJobList,
   type AdminOrderSearchPage,
+  type AdminWaybillBatchRequest,
+  type AdminWaybillList,
   type ArbitrationDecision,
   type ArbitrationDecisionResult,
   type ArbitrationOpenedResult,
@@ -36,11 +47,25 @@ import {
   type FulfillmentRequestDecision,
   type FulfillmentRequestDecisionResult,
   type FulfillmentReasonRequest,
+  type LogisticsCarrierConfig,
+  type LogisticsCarrierConfigRequest,
+  type LogisticsProviderConfig,
+  type LogisticsProviderConfigList,
+  type LogisticsProviderConfigRequest,
+  type LogisticsWarehouse,
+  type LogisticsWarehouseDeactivateRequest,
+  type LogisticsWarehouseList,
+  type LogisticsWarehouseRequest,
+  type LogisticsWarehouseUpdateRequest,
   type PaymentProjection,
+  type PrintJob,
+  type PrintJobRetryRequest,
   type ShipmentRequest,
   type ShipmentResult,
   type TakeoverOpenedResult,
   type UserRole,
+  type WaybillBatchResult,
+  type WaybillResult,
 } from '@abu24k/core-artifacts';
 
 const bytes32Pattern = /^0x[0-9a-fA-F]{64}$/;
@@ -316,6 +341,153 @@ export async function decideForcedReceipt(
     isForcedReceiptDecisionResult,
     'Forced-receipt decision',
   );
+}
+
+export async function fetchAdminLogisticsCarrierConfig(
+  token: string,
+  signal?: AbortSignal,
+): Promise<LogisticsCarrierConfig> {
+  const body = await requestJson('/v2/admin/logistics/carriers', authenticated(token, signal));
+  if (!isLogisticsCarrierConfig(body)) throw invalidResponse('Carrier configuration does not match the coordinated generated type');
+  return body;
+}
+
+export async function createAdminLogisticsCarrierConfigVersion(
+  input: LogisticsCarrierConfigRequest,
+  token: string,
+): Promise<LogisticsCarrierConfig> {
+  const body = await requestJson('/v2/admin/logistics/carrier-versions', authenticatedJson(token, 'POST', input));
+  if (!isLogisticsCarrierConfig(body)) throw invalidResponse('Carrier configuration does not match the coordinated generated type');
+  return body;
+}
+
+export async function fetchAdminLogisticsProviderConfigs(
+  token: string,
+  signal?: AbortSignal,
+): Promise<LogisticsProviderConfigList> {
+  const body = await requestJson('/v2/admin/logistics/providers', authenticated(token, signal));
+  if (!isLogisticsProviderConfigList(body)) throw invalidResponse('Provider configuration list does not match the coordinated generated type');
+  return body;
+}
+
+export async function createAdminLogisticsProviderConfigVersion(
+  input: LogisticsProviderConfigRequest,
+  token: string,
+): Promise<LogisticsProviderConfig> {
+  const body = await requestJson('/v2/admin/logistics/provider-versions', authenticatedJson(token, 'POST', input));
+  if (!isLogisticsProviderConfig(body)) throw invalidResponse('Provider configuration does not match the coordinated generated type');
+  return body;
+}
+
+export async function fetchAdminLogisticsWarehouses(
+  token: string,
+  signal?: AbortSignal,
+): Promise<LogisticsWarehouseList> {
+  const body = await requestJson('/v2/admin/logistics/warehouses', authenticated(token, signal));
+  if (!isLogisticsWarehouseList(body)) throw invalidResponse('Warehouse list does not match the coordinated generated type');
+  return body;
+}
+
+export async function createAdminLogisticsWarehouse(
+  input: LogisticsWarehouseRequest,
+  token: string,
+): Promise<LogisticsWarehouse> {
+  const body = await requestJson('/v2/admin/logistics/warehouses', authenticatedJson(token, 'POST', input));
+  if (!isLogisticsWarehouse(body)) throw invalidResponse('Warehouse does not match the coordinated generated type');
+  return body;
+}
+
+export async function updateAdminLogisticsWarehouse(
+  warehouseId: string,
+  input: LogisticsWarehouseUpdateRequest,
+  token: string,
+): Promise<LogisticsWarehouse> {
+  const body = await requestJson(`/v2/admin/logistics/warehouses/${encodeURIComponent(warehouseId)}`, authenticatedJson(token, 'PUT', input));
+  if (!isLogisticsWarehouse(body) || body.warehouseId !== warehouseId) throw invalidResponse('Warehouse does not match the coordinated generated type');
+  return body;
+}
+
+export async function deactivateAdminLogisticsWarehouse(
+  warehouseId: string,
+  input: LogisticsWarehouseDeactivateRequest,
+  token: string,
+): Promise<LogisticsWarehouse> {
+  const body = await requestJson(`/v2/admin/logistics/warehouses/${encodeURIComponent(warehouseId)}/deactivate`, authenticatedJson(token, 'POST', input));
+  if (!isLogisticsWarehouse(body) || body.warehouseId !== warehouseId || body.enabled) throw invalidResponse('Deactivated warehouse does not match the coordinated generated type');
+  return body;
+}
+
+export async function createAdminWaybillBatch(
+  input: AdminWaybillBatchRequest,
+  token: string,
+): Promise<WaybillBatchResult> {
+  const body = await requestJson('/v2/admin/logistics/waybills/batches', authenticatedJson(token, 'POST', input));
+  if (!isWaybillBatchResult(body)) throw invalidResponse('Waybill batch does not match the coordinated generated type');
+  return body;
+}
+
+export async function fetchAdminWaybills(
+  token: string,
+  merchantId?: string,
+  limit = 50,
+  signal?: AbortSignal,
+): Promise<AdminWaybillList> {
+  const query = logisticsListQuery(merchantId, limit);
+  const body = await requestJson(`/v2/admin/logistics/waybills?${query}`, authenticated(token, signal));
+  if (!isAdminWaybillList(body)) throw invalidResponse('Waybill list does not match the coordinated generated type');
+  return body;
+}
+
+export async function fetchAdminPrintJobs(
+  token: string,
+  merchantId?: string,
+  limit = 50,
+  signal?: AbortSignal,
+): Promise<AdminPrintJobList> {
+  const query = logisticsListQuery(merchantId, limit);
+  const body = await requestJson(`/v2/admin/logistics/print-jobs?${query}`, authenticated(token, signal));
+  if (!isAdminPrintJobList(body)) throw invalidResponse('Print job list does not match the coordinated generated type');
+  return body;
+}
+
+export async function retryAdminPrintJob(
+  printJobId: string,
+  input: PrintJobRetryRequest,
+  token: string,
+): Promise<PrintJob> {
+  if (!bytes32Pattern.test(printJobId)) throw invalidResponse('Print job ID must be bytes32', 400);
+  const body = await requestJson(`/v2/admin/logistics/print-jobs/${encodeURIComponent(printJobId)}/retry`, authenticatedJson(token, 'POST', input));
+  if (!isPrintJob(body) || body.printJobId !== printJobId) throw invalidResponse('Print job retry does not match the coordinated generated type');
+  return body;
+}
+
+function authenticated(token: string, signal?: AbortSignal): RequestInit {
+  return {
+    headers: { authorization: `Bearer ${token}` },
+    ...(signal ? { signal } : {}),
+  };
+}
+
+function authenticatedJson(token: string, method: 'POST' | 'PUT', body: object): RequestInit {
+  return {
+    body: JSON.stringify(body),
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
+    method,
+  };
+}
+
+function logisticsListQuery(merchantId: string | undefined, limit: number) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw invalidResponse('Logistics list limit must be between 1 and 100', 400);
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (merchantId !== undefined) {
+    const value = merchantId.trim();
+    if (!value || value.length > 256) throw invalidResponse('Merchant ID filter is invalid', 400);
+    query.set('merchantId', value);
+  }
+  return query.toString();
 }
 
 export async function createWalletSession(provider: WalletProvider): Promise<CoreSession> {
@@ -760,6 +932,129 @@ function isFulfillmentCommandInput(value: FulfillmentCommandInput) {
 
 function isReasonCode(value: string) {
   return /^[A-Z0-9_:-]{2,64}$/.test(value);
+}
+
+function isLogisticsCarrierConfig(value: unknown): value is LogisticsCarrierConfig {
+  return isRecord(value)
+    && value.artifactVersion === artifactVersion
+    && (value.configVersionId === null || bytes32Pattern.test(String(value.configVersionId)))
+    && Number.isSafeInteger(value.version)
+    && Number(value.version) >= 0
+    && (value.defaultCarrierCode === null || logisticsCarrierCodes.includes(value.defaultCarrierCode as never))
+    && (value.readiness === 'READY' || value.readiness === 'CONFIGURATION_REQUIRED')
+    && Array.isArray(value.carriers)
+    && value.carriers.length === logisticsCarrierCodes.length
+    && value.carriers.every((entry) => isRecord(entry)
+      && logisticsCarrierCodes.includes(entry.carrierCode as never)
+      && typeof entry.enabled === 'boolean')
+    && new Set(value.carriers.map((entry) => String(entry.carrierCode))).size === logisticsCarrierCodes.length
+    && (value.createdBy === null || addressPattern.test(String(value.createdBy)))
+    && isNullableDateTime(value.createdAt);
+}
+
+function isLogisticsProviderConfigList(value: unknown): value is LogisticsProviderConfigList {
+  return isRecord(value)
+    && value.artifactVersion === artifactVersion
+    && Array.isArray(value.providers)
+    && value.providers.every(isLogisticsProviderConfig);
+}
+
+function isLogisticsProviderConfig(value: unknown): value is LogisticsProviderConfig {
+  return isRecord(value)
+    && waybillProviders.includes(value.provider as never)
+    && (value.providerConfigVersionId === null || bytes32Pattern.test(String(value.providerConfigVersionId)))
+    && Number.isSafeInteger(value.version)
+    && Number(value.version) >= 0
+    && typeof value.enabled === 'boolean'
+    && typeof value.configured === 'boolean'
+    && isRecord(value.configuredFields)
+    && ['partnerId', 'credential', 'monthlyAccount', 'callbackSecret'].every((field) => typeof (value.configuredFields as Record<string, unknown>)[field] === 'boolean')
+    && (value.configHash === null || bytes32Pattern.test(String(value.configHash)))
+    && logisticsProviderReadinessStates.includes(value.readiness as never)
+    && (value.createdBy === null || addressPattern.test(String(value.createdBy)))
+    && isNullableDateTime(value.createdAt);
+}
+
+function isLogisticsWarehouseList(value: unknown): value is LogisticsWarehouseList {
+  return isRecord(value)
+    && value.artifactVersion === artifactVersion
+    && Array.isArray(value.warehouses)
+    && value.warehouses.every(isLogisticsWarehouse);
+}
+
+function isLogisticsWarehouse(value: unknown): value is LogisticsWarehouse {
+  return isRecord(value)
+    && value.artifactVersion === artifactVersion
+    && typeof value.warehouseId === 'string'
+    && value.warehouseId.length >= 8
+    && value.warehouseId.length <= 128
+    && bytes32Pattern.test(String(value.warehouseVersionId))
+    && Number.isSafeInteger(value.version)
+    && Number(value.version) >= 1
+    && logisticsWarehouseKinds.includes(value.warehouseKind as never)
+    && nonEmptyStrings(value, ['name', 'regionCode'])
+    && (value.partnerName === null || typeof value.partnerName === 'string')
+    && typeof value.enabled === 'boolean'
+    && logisticsWarehouseAccessLevels.includes(value.access as never)
+    && ['contactName', 'phone', 'addressLine'].every((field) => value[field] === null || typeof value[field] === 'string')
+    && bytes32Pattern.test(String(value.payloadHash))
+    && addressPattern.test(String(value.createdBy))
+    && isDateTime(value.createdAt);
+}
+
+function isWaybillBatchResult(value: unknown): value is WaybillBatchResult {
+  return isRecord(value)
+    && value.artifactVersion === artifactVersion
+    && bytes32Pattern.test(String(value.batchId))
+    && Array.isArray(value.items)
+    && value.items.every(isWaybillResult);
+}
+
+function isAdminWaybillList(value: unknown): value is AdminWaybillList {
+  return isRecord(value)
+    && value.artifactVersion === artifactVersion
+    && Array.isArray(value.waybills)
+    && value.waybills.every(isWaybillResult);
+}
+
+function isWaybillResult(value: unknown): value is WaybillResult {
+  return isRecord(value)
+    && value.artifactVersion === artifactVersion
+    && bytes32Pattern.test(String(value.requestId))
+    && bytes32Pattern.test(String(value.batchId))
+    && nonEmptyStrings(value, ['merchantId', 'orderId', 'storeId'])
+    && waybillProviders.includes(value.provider as never)
+    && logisticsCarrierCodes.includes(value.carrierCode as never)
+    && waybillRequestStates.includes(value.state as never)
+    && ['providerReference', 'trackingNumber', 'errorCode'].every((field) => value[field] === null || typeof value[field] === 'string')
+    && ['trackingNumberHash', 'shipmentEvidenceHash', 'printJobId'].every((field) => value[field] === null || bytes32Pattern.test(String(value[field])))
+    && isDateTime(value.updatedAt);
+}
+
+function isAdminPrintJobList(value: unknown): value is AdminPrintJobList {
+  return isRecord(value)
+    && value.artifactVersion === artifactVersion
+    && Array.isArray(value.printJobs)
+    && value.printJobs.every(isPrintJob);
+}
+
+function isPrintJob(value: unknown): value is PrintJob {
+  return isRecord(value)
+    && value.artifactVersion === artifactVersion
+    && bytes32Pattern.test(String(value.printJobId))
+    && nonEmptyStrings(value, ['merchantId', 'orderId', 'storeId'])
+    && (value.jobKind === 'WAYBILL' || value.jobKind === 'PICKUP_RECEIPT')
+    && (value.provider === null || printProviders.includes(value.provider as never))
+    && (value.deviceId === null || typeof value.deviceId === 'string')
+    && (value.copyCount === 1 || value.copyCount === 2)
+    && bytes32Pattern.test(String(value.contentHash))
+    && printJobStates.includes(value.state as never)
+    && Number.isSafeInteger(value.attempts)
+    && Number(value.attempts) >= 0
+    && ['providerReference', 'errorCode'].every((field) => value[field] === null || typeof value[field] === 'string')
+    && isNullableDateTime(value.nextAttemptAt)
+    && isDateTime(value.createdAt)
+    && isDateTime(value.updatedAt);
 }
 
 async function postFulfillmentCommand<T extends { orderId: string }>(
