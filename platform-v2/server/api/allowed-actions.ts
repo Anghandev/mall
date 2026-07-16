@@ -13,6 +13,9 @@ export interface OrderProjection {
   buyerWallet: string;
   merchantId: string;
   merchantWallet: string;
+  replacementMerchantId?: string;
+  replacementMerchantWallet?: string;
+  takeoverFunded?: boolean;
   deliveredAt?: Date;
   paidAt?: Date;
   shipmentEvidence: boolean;
@@ -42,6 +45,13 @@ export function orderAllowedActions(order: OrderProjection, context: ActionConte
   const buyerActor = actor === buyer && context.roles.includes('BUYER');
   const merchantActor = context.roles.includes('MERCHANT')
     && (actor === merchant || context.actorMerchantId === order.merchantId);
+  const replacementMerchantActor = context.roles.includes('MERCHANT')
+    && order.replacementMerchantId !== undefined
+    && order.replacementMerchantWallet !== undefined
+    && (
+      actor === order.replacementMerchantWallet.toLowerCase()
+      || context.actorMerchantId === order.replacementMerchantId
+    );
   const fulfillmentFinal = order.paymentFinalityStatus === undefined || order.paymentFinalityStatus === 'FINAL';
 
   if (order.state === 'QUOTED' && buyerActor) {
@@ -52,7 +62,10 @@ export function orderAllowedActions(order: OrderProjection, context: ActionConte
     && (operator || merchantActor)
     && (
       order.state === 'PAID'
-      || (order.state === 'TAKEOVER' && operator)
+      || (
+        order.state === 'TAKEOVER'
+        && (operator || (replacementMerchantActor && order.takeoverFunded === true))
+      )
       || (['SHIPPED', 'DELIVERED'].includes(order.state) && order.approvedExchange)
     )
   ) {

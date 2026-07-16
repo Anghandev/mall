@@ -7,7 +7,7 @@ import {
 } from '@abu24k/core-artifacts';
 
 export const productBaseline = Object.freeze({
-  coreArtifacts: 'coordinated-merchant-fulfillment-checkpoint',
+  coreArtifacts: 'coordinated-settlement-admin-clearing-checkpoint',
   artifactVersion,
   publicCatalogs: Object.freeze({
     breakerScopes,
@@ -21,7 +21,10 @@ export const productBaseline = Object.freeze({
     catalogAdmin: true,
     catalogMediaReadAccess: true,
     catalogSignedConcessionPreview: true,
-    paymentProjection: 'BUYER_WALLET_SCOPED',
+    paymentProjection: 'ADMIN_GLOBAL_READ',
+    adminSettlementRequests: true,
+    adminSettlementBatches: true,
+    adminSettlementReconciliation: true,
     fulfillmentOrderProjection: 'ADMIN_RBAC_SCOPED',
     adminOrderSearch: true,
     adminOrderBatchActionPreview: true,

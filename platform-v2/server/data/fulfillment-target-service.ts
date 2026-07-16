@@ -582,12 +582,25 @@ export class FulfillmentTargetService {
     const key = requireEncryptionKey(this.#key);
     const wallet = normalizedWallet(actor.walletAddress);
     return this.#transactions.transaction(async (executor) => {
-      const result = await executor.query<TargetRow & { buyer: string; merchant: string; merchant_id: string }>(
+      const result = await executor.query<TargetRow & {
+        buyer: string;
+        merchant: string;
+        merchant_id: string;
+        replacement_merchant_id: string | null;
+        replacement_wallet: string | null;
+      }>(
         `SELECT target.*, orders.buyer_wallet AS buyer, orders.merchant_wallet AS merchant,
-           orders.merchant_id
+           orders.merchant_id, assignment.replacement_merchant_id, assignment.replacement_wallet
          FROM core.orders orders
          JOIN core.fulfillment_targets target
            ON lower(target.target_hash) = lower(orders.fulfillment_target_hash)
+         LEFT JOIN core.takeover_cases takeover ON takeover.order_id = orders.order_id
+         LEFT JOIN LATERAL (
+           SELECT replacement_merchant_id, replacement_wallet
+           FROM core.takeover_assignments current_assignment
+           WHERE current_assignment.case_id = takeover.case_id
+           ORDER BY assignment_version DESC LIMIT 1
+         ) assignment ON true
          WHERE orders.order_id = $1`,
         [orderId],
       );
@@ -598,6 +611,11 @@ export class FulfillmentTargetService {
         wallet !== target.buyer.toLowerCase()
         && wallet !== target.merchant.toLowerCase()
         && actor.merchantId !== target.merchant_id
+        && (
+          target.replacement_merchant_id === null
+          || actor.merchantId !== target.replacement_merchant_id
+          || wallet !== target.replacement_wallet
+        )
         && !privileged
       ) throw new CoreError('Forbidden', 'Fulfillment target is outside the authenticated wallet scope', 403);
       return {

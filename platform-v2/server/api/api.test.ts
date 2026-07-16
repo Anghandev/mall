@@ -1322,6 +1322,14 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       }),
       getTakeoverFunding: async (_actor, caseId) => ({ caseId, state: 'FUNDED' }),
     },
+    takeoverCaseService: {
+      listAdmin: async (_actor, input) => ({ artifactVersion: CORE_ARTIFACT_VERSION, cases: [{ caseId: 'takeover-1', state: input?.state ?? 'OPEN' }], nextCursor: null }),
+      getAdmin: async (_actor, caseId) => ({ artifactVersion: CORE_ARTIFACT_VERSION, case: { caseId } }),
+      listCandidates: async (_actor, caseId) => ({ artifactVersion: CORE_ARTIFACT_VERSION, caseId, candidates: [{ merchantId: 'replacement-1' }] }),
+      assign: async (_actor, caseId, input) => ({ artifactVersion: CORE_ARTIFACT_VERSION, assignment: { caseId, ...input } }),
+      listMerchant: async (_actor, input) => ({ artifactVersion: CORE_ARTIFACT_VERSION, cases: [{ caseId: 'takeover-1', state: input?.state ?? 'FUNDED' }], nextCursor: null }),
+      getMerchant: async (_actor, caseId) => ({ artifactVersion: CORE_ARTIFACT_VERSION, case: { caseId } }),
+    },
     guaranteeDepositService: {
       submit: async (actor, input) => ({ merchantId: actor.merchantId, ...input, state: 'SUBMITTED' }),
     },
@@ -1577,6 +1585,52 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     assert.equal((await fetch(`${base}/v2/admin/settlement-batches?limit=101`, {
       headers: { authorization: `Bearer ${session.token}` },
     })).status, 400);
+    assert.equal((await fetch(`${base}/v2/admin/takeover-cases`, {
+      headers: { authorization: `Bearer ${buyerOnlyToken}` },
+    })).status, 403);
+    const takeoverCases = await fetch(`${base}/v2/admin/takeover-cases?state=FUNDED&limit=20`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    });
+    assert.equal(takeoverCases.status, 200);
+    assert.equal(((await takeoverCases.json()) as { cases: Array<{ state: string }> }).cases[0]?.state, 'FUNDED');
+    assert.equal((await fetch(`${base}/v2/admin/takeover-cases?state=UNKNOWN`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 400);
+    assert.equal((await fetch(`${base}/v2/admin/takeover-cases/takeover-1`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/takeover-cases/takeover-1/candidates`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    const takeoverAssignment = await fetch(`${base}/v2/admin/takeover-cases/takeover-1/assignments`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        replacementMerchantId: 'replacement-1',
+        reasonCode: 'WAREHOUSE_MATCH',
+        evidenceHash: HASH,
+        idempotencyKey: 'takeover-assignment-http-1',
+      }),
+    });
+    assert.equal(takeoverAssignment.status, 201);
+    assert.equal(((await takeoverAssignment.json()) as { assignment: { replacementMerchantId: string } }).assignment.replacementMerchantId, 'replacement-1');
+    assert.equal((await fetch(`${base}/v2/admin/takeover-cases/takeover-1/assignments`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        replacementMerchantId: 'replacement-1', reasonCode: 'WAREHOUSE_MATCH',
+        evidenceHash: HASH, idempotencyKey: 'takeover-assignment-extra', ignored: true,
+      }),
+    })).status, 400);
+    assert.equal((await fetch(`${base}/v2/merchant/takeover-cases`, {
+      headers: { authorization: `Bearer ${buyerOnlyToken}` },
+    })).status, 403);
+    assert.equal((await fetch(`${base}/v2/merchant/takeover-cases?state=FUNDED`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/merchant/takeover-cases/takeover-1`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    })).status, 200);
     assert.equal((await fetch(`${base}/v2/admin/merchants`, {
       headers: { authorization: `Bearer ${buyerOnlyToken}` },
     })).status, 403);

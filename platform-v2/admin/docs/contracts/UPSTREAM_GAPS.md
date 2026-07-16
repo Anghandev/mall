@@ -3,7 +3,7 @@
 The platform-admin product is a consumer. It cannot add shared endpoints,
 schemas, financial logic, calldata, signers or database behavior.
 
-The coordinated consumer is `@abu24k/core-artifacts@2.0.0-merchant-fulfillment.1`.
+The coordinated consumer is `@abu24k/core-artifacts@2.0.0-settlement-admin.10`.
 Published paths still fail closed when Core returns `DecisionBlocked`,
 `ExternalBlocked` or `ConfigurationRequired`.
 
@@ -24,5 +24,5 @@ Published paths still fail closed when Core returns `DecisionBlocked`,
 | GAP-ADM-014 | Notification endpoints, inbox, campaign create/publish and worker states are published | Real SMS/SMTP/Push accounts remain `ConfigurationRequired` / `ExternalBlocked` |
 | GAP-ADM-015 | Typed versioned system-config create/list/publish is published and consumed | Real RPC/Safe/provider secret references and deployment addresses remain external blockers |
 | GAP-ADM-016 | Append-only audit query, cursor and per-stream hash-chain proof are published and consumed | Real audit database, retention and backup/restore environment evidence remain external blockers |
-| GAP-ADM-017 | Signed settlement projections include reward subtype and non-transferable BNM points; immutable Safe batching/finality, policy evidence, coverage and takeover funding are published | Admin-wide payment search, merchant historical BNM aggregate and a batch-wide settlement list are not published; wallet and resource scope remains enforced |
+| GAP-ADM-017 | Global Admin payment-by-order, server-side filtered settlement request/batch lists, immutable item/content evidence, Safe nonce and approvals, execution replacements, finality, coverage, breakers and Core reconciliation are published and consumed read-only | Merchant historical BNM aggregate remains unavailable; production Safe service, owners, RPC and deployed-address evidence remain `ExternalBlocked` |
 | GAP-ADM-018 | Host/middleware/HTTP/chain metrics, alerts and acknowledgement are published and consumed | Real production probes and independent explorer credentials remain external blockers |
