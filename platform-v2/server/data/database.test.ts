@@ -132,6 +132,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '023_merchant_store_management.sql',
       '024_merchant_fulfillment_completion.sql',
       '025_takeover_assignments.sql',
+      '026_admin_product_lifecycle_batches.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
