@@ -3,7 +3,7 @@
 Mall cannot resolve residual gaps by adding shared endpoints, schemas,
 financial logic or custom calldata.
 
-Mall consumes `@abu24k/core-artifacts@2.0.0-merchant-fulfillment.1`. Catalog, SIWE,
+Mall consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.10`. Catalog, SIWE,
 payments, stores, checkout targets, order/fulfillment projections and the
 fulfillment action catalog are published and consumed. Settlement balances,
 signed requests, Safe finality, public CMS and notifications are also consumed.
@@ -16,9 +16,10 @@ receipt confirmation and arbitration without exposing raw hashes. Takeover and
 pickup verification retain the exact fail-closed boundaries below. `PAY_ORDER` remains
 non-executable and the manifest does not authorize deployment.
 The artifact's merchant order export and platform carrier, provider, warehouse,
-waybill and print administration are intentionally outside the Mall consumer
-surface. Mall strips merchant-only OpenAPI paths and capability metadata before
-bundling and has no merchant export parser or fixture.
+waybill, print and global clearing administration are intentionally outside the
+Mall consumer surface. Mall strips Merchant/Admin OpenAPI paths and capability
+metadata before bundling and has no merchant export or clearing parser, UI or
+fixture.
 
 | Gap ID | Required Core capability | Fail-closed behavior |
 |---|---|---|
