@@ -145,6 +145,11 @@
           "name": "028_buyer_uid.sql",
           "path": "schema/business/028_buyer_uid.sql",
           "sha256": "32d7622a0ca03a46c69531ad4593b542b5bca6428dd75e89d848282423242e35"
+        },
+        {
+          "name": "029_usdt_freight.sql",
+          "path": "schema/business/029_usdt_freight.sql",
+          "sha256": "f1cbddf879720fe72b84e6d812704d2ac9fd82624eac87d574ef1571fc3596e5"
         }
       ]
     },

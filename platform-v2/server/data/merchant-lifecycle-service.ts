@@ -1011,7 +1011,8 @@ async function merchantBalanceStats(executor: SqlExecutor, merchantId: string) {
      JOIN core.ledger_accounts account ON account.account_id = line.account_id
      JOIN core.orders orders ON orders.order_id = journal.order_id
      WHERE orders.merchant_id = $1 AND account.owner_type = 'MERCHANT' AND account.asset = 'USDT'
-       AND account.purpose = 'MERCHANT_RECEIVABLE' AND line.balance_state <> 'POSTED'
+       AND account.purpose IN ('MERCHANT_RECEIVABLE','MERCHANT_FREIGHT_RECEIVABLE')
+       AND line.balance_state <> 'POSTED'
      GROUP BY line.balance_state ORDER BY line.balance_state`,
     [merchantId],
   );

@@ -549,10 +549,10 @@ test('governed USDT allocation identifies seckill prize liability without affect
 
 test('payment snapshot and EIP-712 digest match the frozen Solidity encoding vector', () => {
   const intent = signingVectorIntent();
-  assert.equal(paymentIntentHash(intent), '0xc125633288a4ba4ccb0602dae00c885dbe1adb7a0a77cc842f34d3d425d9279f');
+  assert.equal(paymentIntentHash(intent), '0xb62baf1a1ca33005a377c88d3945fd917e755ed50422b569fa20dd7f3e2f45a2');
   assert.equal(
     paymentAuthorizationDigest(intent, '0x9999999999999999999999999999999999999999'),
-    '0x3b991a7728e91bdf283431b553258f94dffe4b516b6283ad3c34a588f7cd21a0',
+    '0x2e6c9e58ee5c29ece2ca985969d75228df81663d98a12fb4556ecc11049c9a74',
   );
 });
 
@@ -563,10 +563,10 @@ test('seckill snapshot and EIP-712 digest bind both Router payment intents', () 
     seckill: { ...base, seckill: true, sessionId: `0x${'5'.repeat(64)}` },
     fallback: { ...base, reservationId: `0x${'6'.repeat(64)}`, reservationHash: `0x${'7'.repeat(64)}` },
   };
-  assert.equal(seckillIntentHash(dual), '0x292fee156f4df5e8469fcff24055093e8820768b91784e417559b0fabd4d1bce');
+  assert.equal(seckillIntentHash(dual), '0x8d85308df953fedd0ead161d722a6106bcc1032d8fec00f045c29971f1667f5c');
   assert.equal(
     seckillAuthorizationDigest(dual, '0x9999999999999999999999999999999999999999'),
-    '0x8fd49d5723d836b830cc81647eaaad6b4e5e996f560a9bd034402549241e8246',
+    '0x68fd9c29eb7472528bbd2e646334f3af78fab8e3f6767580609cbc74f8e43823',
   );
 });
 
@@ -3063,6 +3063,7 @@ function quoteRequest(): PaymentQuoteRequest {
     nonce: 1n,
     deadline: issuedAt + 300,
     listPriceUsdt: 100n,
+    freightUsdt: 0n,
     nplQuoteAmount: 1_000n,
     merchantBaseReceivableUsdt: 60n,
     merchantConcessionBps: 2_500,
@@ -3132,6 +3133,8 @@ function signingVectorIntent(): CanonicalPaymentIntent {
     deadline: 1_800_000_300,
     nonce: '7',
     listPriceUsdt: '100000000000000000000',
+    productUsdtPaymentAmount: '70000000000000000000',
+    freightUsdt: '0',
     usdtPaymentAmount: '70000000000000000000',
     nplQuoteAmount: '1000000000000000000000',
     nplPaymentAmount: '300000000000000000000',

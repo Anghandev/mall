@@ -45,7 +45,8 @@ order snapshots are never recalculated from current configuration.
   other's inventory. Session activation and ordinary quote issuance take the
   same SKU row lock; activation rejects any unexpired submittable ordinary
   quote for that SKU.
-- `core.payment_quotes` records one immutable ordinary or seckill quote identity.
+- `core.payment_quotes` records one immutable ordinary or seckill quote identity,
+  including the order's snapshotted flat `freight_usdt`.
   `core.payment_quote_legs` records the exact ordinary, seckill and fallback
   intent snapshots and distinct reservations.
 
@@ -103,6 +104,10 @@ The coordinated checkpoints publish these journal events:
 - `PAYMENT_LOCKED` records Custody Safe assets, merchant and policy USDT
   liabilities, Reward Safe assets and beneficiary NPL liabilities, Burn, and
   Locked BNM points;
+- product net proceeds use `MERCHANT_RECEIVABLE`; delivery freight uses the
+  separate `MERCHANT_FREIGHT_RECEIVABLE`. Both are backed by the Custody Safe,
+  follow the same order finality and fulfillment states, and are consumed by
+  the existing `MERCHANT_USDT` settlement rail without merging their snapshots;
 - `PAYMENT_REORG_REVERSAL` reverses the exact original lines and links the
   original journal.
 - fulfillment completion moves eligible order liabilities from `Locked` to

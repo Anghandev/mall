@@ -35,6 +35,11 @@ Status: frozen authority for the function-first V2 rewrite from
   price in USDT and 30% of the same price as Oracle-equivalent NPL. Without an
   explicitly funded NPL subsidy, no later policy may set the buyer NPL leg
   below 30%.
+- Delivery adds the product snapshot's flat `defaultFreightUsdt` once per order
+  as pure USDT; pickup freight is zero. This freight is outside the product
+  70/30 base and never changes NPL payment, Burn, reward, BNM, merchant
+  concession or seckill-prize calculations. The signed intent binds product
+  USDT, freight USDT and their total separately.
 - Quotes use integer token units and canonical decimal strings. They bind
   `policyVersion`, Oracle observation, reservation, product/SKU/quantity,
   fulfillment mode, beneficiary snapshot, nonce, deadline and exact Router
@@ -95,6 +100,10 @@ Status: frozen authority for the function-first V2 rewrite from
 - Merchant net receivable equals base receivable minus concession. The
   concession is credited in the USDT ledger to versioned platform, prize-pool,
   node or other configured accounts. No frontend invents allocation weights.
+- Delivery freight becomes a separate `MERCHANT_FREIGHT_RECEIVABLE` backed by
+  the USDT Custody Safe. It follows the order's fulfillment lifecycle and is
+  settled with product proceeds through the existing `MERCHANT_USDT` rail;
+  it is never concessioned or included in product revenue formulas.
 - Product maintenance shows the signed Core preview of base receivable,
   concession, net receivable and each configured destination before submit.
 

@@ -1013,7 +1013,11 @@ function parseBuyerShoppingStatement(value: unknown): BuyerShoppingStatement {
   enumValue(statement.orderKind, ['ORDINARY', 'FALLBACK_RETAIL'] as const);
 
   const paymentAmounts = objectValue(statement.paymentAmounts);
-  assertOnlyKeys(paymentAmounts, ['usdtPaymentAmount', 'nplPaymentAmount'], '购物记录付款金额包含未发布字段');
+  assertOnlyKeys(paymentAmounts, [
+    'productUsdtPaymentAmount', 'freightUsdt', 'usdtPaymentAmount', 'nplPaymentAmount',
+  ], '购物记录付款金额包含未发布字段');
+  atomicValue(paymentAmounts.productUsdtPaymentAmount);
+  atomicValue(paymentAmounts.freightUsdt);
   atomicValue(paymentAmounts.usdtPaymentAmount);
   atomicValue(paymentAmounts.nplPaymentAmount);
 
@@ -1931,7 +1935,8 @@ function parseFulfillmentOrder(value: unknown): FulfillmentOrder {
   enumValue(order.finalityStatus, ['NOT_SUBMITTED', 'PENDING', 'CONFIRMED', 'REPLACED', 'REORGED', 'FINAL'] as const);
   const amounts = objectValue(order.exactAmounts);
   for (const field of [
-    'listPriceUsdt', 'usdtPaymentAmount', 'nplQuoteAmount', 'nplPaymentAmount',
+    'listPriceUsdt', 'productUsdtPaymentAmount', 'freightUsdt', 'usdtPaymentAmount',
+    'nplQuoteAmount', 'nplPaymentAmount',
     'nplBurnAmount', 'nplRewardAmount', 'merchantBaseReceivableUsdt',
     'merchantConcessionAmount', 'merchantNetReceivableUsdt', 'bnmAmount',
   ] as const) atomicValue(amounts[field]);

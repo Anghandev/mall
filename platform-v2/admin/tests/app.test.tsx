@@ -863,6 +863,8 @@ describe('platform admin fail-closed experience', () => {
 
     expect(await screen.findByText('SUBMITTED')).toBeTruthy();
     expect(screen.getByText('70000000')).toBeTruthy();
+    expect(screen.getByText('5000000')).toBeTruthy();
+    expect(screen.getByText('75000000')).toBeTruthy();
     expect(screen.getByText('30000000')).toBeTruthy();
     expect(screen.getByText('12 / 15')).toBeTruthy();
     expect(screen.getByText('pay')).toBeTruthy();
@@ -1091,7 +1093,9 @@ function paymentProjection() {
       reservationDeadline: 1_800_000_000,
       quantity: 1,
       listPriceUsdt: '100000000',
-      usdtPaymentAmount: '70000000',
+      productUsdtPaymentAmount: '70000000',
+      freightUsdt: '5000000',
+      usdtPaymentAmount: '75000000',
       nplPaymentAmount: '30000000',
       nplBurnAmount: '20000000',
       nplRewardAmount: '10000000',
@@ -1130,7 +1134,9 @@ function fulfillmentOrder(overrides: Record<string, unknown> = {}) {
     finalityStatus: 'FINAL',
     exactAmounts: {
       listPriceUsdt: '100000000',
-      usdtPaymentAmount: '70000000',
+      productUsdtPaymentAmount: '70000000',
+      freightUsdt: '5000000',
+      usdtPaymentAmount: '75000000',
       nplQuoteAmount: '30000000',
       nplPaymentAmount: '30000000',
       nplBurnAmount: '20000000',

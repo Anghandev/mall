@@ -2301,6 +2301,18 @@
             "internalType": "uint256"
           },
           {
+            "name": "productUsdtPaid",
+            "type": "uint256",
+            "indexed": false,
+            "internalType": "uint256"
+          },
+          {
+            "name": "freightUsdt",
+            "type": "uint256",
+            "indexed": false,
+            "internalType": "uint256"
+          },
+          {
             "name": "usdtPaid",
             "type": "uint256",
             "indexed": false,
@@ -2800,6 +2812,16 @@
                 "internalType": "uint256"
               },
               {
+                "name": "productUsdtPaymentAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "freightUsdt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
                 "name": "usdtPaymentAmount",
                 "type": "uint256",
                 "internalType": "uint256"
@@ -3028,6 +3050,16 @@
                     "internalType": "uint256"
                   },
                   {
+                    "name": "productUsdtPaymentAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "freightUsdt",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
                     "name": "usdtPaymentAmount",
                     "type": "uint256",
                     "internalType": "uint256"
@@ -3228,6 +3260,16 @@
                   },
                   {
                     "name": "listPriceUsdt",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "productUsdtPaymentAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "freightUsdt",
                     "type": "uint256",
                     "internalType": "uint256"
                   },
@@ -3577,6 +3619,16 @@
                 "internalType": "uint256"
               },
               {
+                "name": "productUsdtPaymentAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "freightUsdt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
                 "name": "usdtPaymentAmount",
                 "type": "uint256",
                 "internalType": "uint256"
@@ -3822,6 +3874,16 @@
                     "internalType": "uint256"
                   },
                   {
+                    "name": "productUsdtPaymentAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "freightUsdt",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
                     "name": "usdtPaymentAmount",
                     "type": "uint256",
                     "internalType": "uint256"
@@ -4022,6 +4084,16 @@
                   },
                   {
                     "name": "listPriceUsdt",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "productUsdtPaymentAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "freightUsdt",
                     "type": "uint256",
                     "internalType": "uint256"
                   },

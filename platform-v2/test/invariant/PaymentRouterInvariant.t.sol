@@ -80,6 +80,8 @@ contract PaymentHandler {
             deadline: uint64(block.timestamp + 5 minutes),
             nonce: nonce,
             listPriceUsdt: 100 ether,
+            productUsdtPaymentAmount: 70 ether,
+            freightUsdt: 0,
             usdtPaymentAmount: 70 ether,
             nplQuoteAmount: 1_000 ether,
             nplPaymentAmount: 300 ether,

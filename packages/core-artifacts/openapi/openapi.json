@@ -12704,6 +12704,8 @@
         "additionalProperties": false,
         "required": [
           "listPriceUsdt",
+          "productUsdtPaymentAmount",
+          "freightUsdt",
           "usdtPaymentAmount",
           "nplQuoteAmount",
           "nplPaymentAmount",
@@ -12716,6 +12718,12 @@
         ],
         "properties": {
           "listPriceUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "productUsdtPaymentAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "freightUsdt": {
             "$ref": "#/components/schemas/AtomicAmount"
           },
           "usdtPaymentAmount": {
@@ -15124,6 +15132,8 @@
           "deadline",
           "nonce",
           "listPriceUsdt",
+          "productUsdtPaymentAmount",
+          "freightUsdt",
           "usdtPaymentAmount",
           "nplQuoteAmount",
           "nplPaymentAmount",
@@ -15207,6 +15217,12 @@
             "$ref": "#/components/schemas/AtomicAmount"
           },
           "listPriceUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "productUsdtPaymentAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "freightUsdt": {
             "$ref": "#/components/schemas/AtomicAmount"
           },
           "usdtPaymentAmount": {
@@ -16005,6 +16021,8 @@
           "deadline",
           "nonce",
           "listPriceUsdt",
+          "productUsdtPaymentAmount",
+          "freightUsdt",
           "usdtPaymentAmount",
           "nplQuoteAmount",
           "nplPaymentAmount",
@@ -16084,6 +16102,12 @@
             "$ref": "#/components/schemas/AtomicAmount"
           },
           "listPriceUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "productUsdtPaymentAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "freightUsdt": {
             "$ref": "#/components/schemas/AtomicAmount"
           },
           "usdtPaymentAmount": {
@@ -18703,10 +18727,18 @@
             "type": "object",
             "additionalProperties": false,
             "required": [
+              "productUsdtPaymentAmount",
+              "freightUsdt",
               "usdtPaymentAmount",
               "nplPaymentAmount"
             ],
             "properties": {
+              "productUsdtPaymentAmount": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "freightUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
               "usdtPaymentAmount": {
                 "$ref": "#/components/schemas/AtomicAmount"
               },
@@ -19073,6 +19105,8 @@
             "additionalProperties": false,
             "required": [
               "listPriceUsdt",
+              "productUsdtPaymentAmount",
+              "freightUsdt",
               "buyerPaidUsdt",
               "merchantBaseReceivableUsdt",
               "merchantConcessionAmount",
@@ -19080,6 +19114,12 @@
             ],
             "properties": {
               "listPriceUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "productUsdtPaymentAmount": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "freightUsdt": {
                 "$ref": "#/components/schemas/AtomicAmount"
               },
               "buyerPaidUsdt": {

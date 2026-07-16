@@ -1213,7 +1213,9 @@ function OrderRow({
         <div><dt>规格</dt><dd>{order.skuId}</dd></div>
         <div><dt>数量</dt><dd>{order.quantity}</dd></div>
         <div><dt>创建时间</dt><dd>{formatIso(order.createdAt)}</dd></div>
-        <div><dt>USDT 支付</dt><dd>{order.exactAmounts.usdtPaymentAmount}</dd></div>
+        <div><dt>商品 USDT</dt><dd>{order.exactAmounts.productUsdtPaymentAmount}</dd></div>
+        <div><dt>运费 USDT</dt><dd>{order.exactAmounts.freightUsdt}</dd></div>
+        <div><dt>USDT 实付</dt><dd>{order.exactAmounts.usdtPaymentAmount}</dd></div>
         <div><dt>NPL 支付</dt><dd>{order.exactAmounts.nplPaymentAmount}</dd></div>
         <div className="order-row__tx"><dt>付款 TxHash</dt><dd>{order.paymentTxHash ? <code>{order.paymentTxHash}</code> : '尚未提交'}</dd></div>
         <div><dt>付款记录</dt><dd>{order.paidAt ? formatIso(order.paidAt) : '待付款'}</dd></div>
@@ -1523,6 +1525,8 @@ function ShoppingStatementRow({ statement }: { statement: MallRuntimeValue['shop
         <div><dt>规格</dt><dd>{statement.skuId}</dd></div>
         <div><dt>数量</dt><dd>{statement.quantity}</dd></div>
         <div><dt>BNM 状态</dt><dd>{statement.bnm.state === 'LOCKED' ? '已锁定' : '可用'}</dd></div>
+        <div><dt>商品 USDT</dt><dd>{statement.paymentAmounts.productUsdtPaymentAmount} 原子单位</dd></div>
+        <div><dt>运费 USDT</dt><dd>{statement.paymentAmounts.freightUsdt} 原子单位</dd></div>
         <div><dt>USDT 实付</dt><dd>{statement.paymentAmounts.usdtPaymentAmount} 原子单位</dd></div>
         <div><dt>NPL 实付</dt><dd>{statement.paymentAmounts.nplPaymentAmount} 原子单位</dd></div>
         <div><dt>BNM 后台积分</dt><dd>{statement.bnm.amount} 原子单位</dd></div>
@@ -2140,7 +2144,9 @@ export function ReviewScreen() {
         <section className="payment-intent" aria-labelledby="payment-intent-title">
           <div className="section-heading"><h2 id="payment-intent-title">精确支付意图</h2><WalletCards aria-hidden="true" size={19} /></div>
           <dl>
-            <div><dt>USDT 支付</dt><dd>{intent?.usdtPaymentAmount}</dd></div>
+            <div><dt>商品 USDT</dt><dd>{intent?.productUsdtPaymentAmount}</dd></div>
+            <div><dt>运费 USDT</dt><dd>{intent?.freightUsdt}</dd></div>
+            <div><dt>USDT 实付</dt><dd>{intent?.usdtPaymentAmount}</dd></div>
             <div><dt>NPL 支付</dt><dd>{intent?.nplPaymentAmount}</dd></div>
             <div><dt>NPL Burn</dt><dd>{intent?.nplBurnAmount}</dd></div>
             <div><dt>NPL Reward Safe</dt><dd>{intent?.nplRewardAmount}</dd></div>
@@ -2168,8 +2174,8 @@ export function ReviewScreen() {
         <section className="dual-quote" aria-labelledby="dual-quote-title">
           <div className="section-heading"><h2 id="dual-quote-title">秒杀与日常备用报价</h2><Zap aria-hidden="true" size={19} /></div>
           <div className="dual-quote__grid">
-            <div><strong>区块时间在场内</strong><span>总价 {quote.routerCall.intent.seckillPayment.listPriceUsdt}</span><span>USDT {quote.routerCall.intent.seckillPayment.usdtPaymentAmount}</span><span>NPL {quote.routerCall.intent.seckillPayment.nplPaymentAmount}</span></div>
-            <div><strong>区块时间已过截止</strong><span>总价 {quote.routerCall.intent.fallbackPayment.listPriceUsdt}</span><span>USDT {quote.routerCall.intent.fallbackPayment.usdtPaymentAmount}</span><span>NPL {quote.routerCall.intent.fallbackPayment.nplPaymentAmount}</span></div>
+            <div><strong>区块时间在场内</strong><span>商品 {quote.routerCall.intent.seckillPayment.listPriceUsdt}</span><span>运费 {quote.routerCall.intent.seckillPayment.freightUsdt}</span><span>USDT 实付 {quote.routerCall.intent.seckillPayment.usdtPaymentAmount}</span><span>NPL {quote.routerCall.intent.seckillPayment.nplPaymentAmount}</span></div>
+            <div><strong>区块时间已过截止</strong><span>商品 {quote.routerCall.intent.fallbackPayment.listPriceUsdt}</span><span>运费 {quote.routerCall.intent.fallbackPayment.freightUsdt}</span><span>USDT 实付 {quote.routerCall.intent.fallbackPayment.usdtPaymentAmount}</span><span>NPL {quote.routerCall.intent.fallbackPayment.nplPaymentAmount}</span></div>
           </div>
           <p className="field-help">分类只由 PaymentRouter 的链上区块时间决定；截止后原子使用日常报价和独立库存预留。</p>
           <label className="check-field approval-check">

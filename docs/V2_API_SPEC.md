@@ -40,15 +40,19 @@ return `ExternalBlocked` or `ConfigurationRequired`.
 For a signed launch quote:
 
 ```text
-buyer USDT payment = 70% of USDT list price
+product USDT leg   = 70% of USDT list price
+delivery freight  = product defaultFreightUsdt; pickup freight = 0
+buyer USDT payment = product USDT leg + freight
 buyer NPL payment  = 30% of the Oracle-equivalent NPL quote
 NPL Burn           = 20% of the same Oracle-equivalent quote
 NPL Reward Safe    = 10% of the same Oracle-equivalent quote
 BNM Locked         = USDT list price, as backend points only
 ```
 
-Merchant concession never changes buyer payment. Core returns merchant base
-receivable, concession, net receivable and exact versioned allocation entries.
+Freight is pure USDT outside the product 70/30 base. It never changes NPL,
+Burn, reward, BNM, concession or prize amounts. Merchant concession never
+changes buyer payment. Core returns merchant base receivable, concession, net
+receivable, freight receivable and exact versioned allocation entries.
 The NPL reward allocation balances exactly to the Reward Safe amount; missing
 beneficiaries and rounding remainder use the frozen circulation pool.
 For a seckill quote, governed `seckillPrizePoolAccount` and `seckillPrizeBps`
@@ -57,7 +61,8 @@ quotes never create that entry. The prize account is included in the
 Safe-published allocation-set hash and is never inferred from array position or
 destination weight.
 
-An ordinary quote contains the exact `CanonicalPaymentIntent`, Router address,
+An ordinary quote contains the exact `CanonicalPaymentIntent`, including
+`productUsdtPaymentAmount`, `freightUsdt` and total `usdtPaymentAmount`, Router address,
 snapshot hash, EIP-712 authorization digest, quote signature and two approval
 requirements. Each requirement includes the exact amount, MaxUint256 approval
 policy, `ONLY_IF_ALLOWANCE_BELOW_REQUIRED`, unlimited-allowance risk and an
@@ -75,7 +80,7 @@ the two possible branches. `PaymentRouterV2` uses block timestamp to select the
 branch atomically; products never select it.
 
 Public catalog products expose typed subtitle, category/tag assignments,
-structured rich detail, default freight display value, fulfillment modes and a
+structured rich detail, flat default delivery freight, fulfillment modes and a
 nullable SKU-level seckill overlay. `PREHEAT`, `LIVE` and `SETTLING` overlays
 set `ordinaryCheckoutAllowed: false`. Core independently rejects an ordinary
 quote for the same product/SKU in those effective phases; the overlay is not a

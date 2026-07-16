@@ -36,6 +36,7 @@ Requirement Matrices.
 | D-V2-028 | Undeployed pre-rewrite V2 funds runtime has no compatibility path; only `legacy/v1-npl-only` remains read-only | Prevents preserving the wrong funds model |
 | D-V2-029 | A merchant settlement wallet becomes permanently immutable when the application is approved. No merchant, platform role, secondary signer or Safe may change it; an incorrect pre-approval address requires rejecting the application and creating a new one | Removes governed wallet migration, emergency rebinding and post-settlement rebinding |
 | D-V2-030 | The first successful SIWE session with a BUYER role atomically creates one global, permanent numeric UID bound to that wallet. UID is off-chain display and exact-search identity only; it never participates in funds or signatures | Resolves buyer accountId and Admin new-UID/search gaps |
+| D-V2-031 | Delivery adds the product's existing flat `defaultFreightUsdt` once per order as pure USDT; pickup freight is zero. Freight is outside the product 70% USDT + 30% NPL base, never affects NPL Burn/rewards, BNM, concession or prize calculations, and becomes a separate merchant USDT receivable settled through the existing `MERCHANT_USDT` rail | Replaces per-item, weight, remote-area and unresolved freight models |
 
 ## Closure
 

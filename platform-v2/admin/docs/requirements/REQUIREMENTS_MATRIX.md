@@ -27,7 +27,7 @@ are never soft-deletable.
 | ADM-CAT-001 | 41-43 | Three-level category tree; name/icon/sort/enabled/service-fee fields | D-V2-014, D-V2-018 | Fee is DecisionBlocked until versioned; other edits audited | DecisionBlocked | GAP-ADM-007, GAP-ADM-008 |
 | ADM-CAT-002 | 44 | Tag library, examples, batch tagging and frontend feed | - | Versioned tags and placement state; no production fixture | Frozen | GAP-ADM-003 (cross-resource batch only) |
 | ADM-CAT-003 | 45 | Category/tag delete-disable lock while a seckill product or order with Locked funds exists | D-V2-017, D-V2-025 | Core and UI deny delete/disable with the exact blocking resource; historical products only delist, and funds/policies/batches/chain/audit evidence never delete | Overridden | - |
-| ADM-CAT-004 | 46-50 | Create/proxy-list; title/subtitle/main images/video/rich detail/default freight; settlement merchant allowlist; multi-SKU attributes/stock/USDT cost | D-V2-002 | Exact amounts, signed uploads and merchant eligibility required | Frozen | - |
+| ADM-CAT-004 | 46-50 | Create/proxy-list; title/subtitle/main images/video/rich detail/flat default delivery freight; settlement merchant allowlist; multi-SKU attributes/stock/USDT cost | D-V2-002, D-V2-031 | Exact amounts, signed uploads and merchant eligibility required; pickup freight is always zero | Frozen | - |
 | ADM-CAT-005 | 51 | Platform inventory +/- and USDT cost edit | D-V2-014, D-V2-017 | Cannot mutate active order/session snapshot; new policy/version only | Overridden | - |
 | ADM-CAT-006 | 52 | Historical product cannot physically delete; delist/hide only | D-V2-017 | Chain/order evidence remains queryable forever | Frozen | - |
 | ADM-POL-001 | 54-57 | Product/session financial-policy panel; merchant base receivable, concession, net receivable and USDT settlement destinations | D-V2-002, D-V2-014, D-V2-022 | Signed Core preview validates exact base/concession/net values, configured destinations, future-only scope and governed publish | Overridden | GAP-ADM-008, GAP-ADM-017 |
@@ -51,7 +51,7 @@ are never soft-deletable.
 | ADM-LOG-002 | 91 | Cainiao/Kuaidi100 PartnerID secret reference, monthly waybill account and real tracking-number adapter | D-V2-019 | Adapter validates secret-reference completeness, callback/error handling and typed ConfigurationRequired without storing/rendering secrets; real account acceptance is ADM-GOAL-003 | Verified | - |
 | ADM-LOG-003 | 92-93 | Platform/partner warehouse shipping-address library | - | RBAC writes and audit; exact address fields validated | Verified | - |
 | ADM-LOG-004 | 94 | Source forced-refund return warehouse | D-V2-004 | No refund destination is emitted; exchange/takeover logistics use their own allowedActions | Overridden | - |
-| ADM-LOG-005 | 95 | Per-count/per-weight freight; Dalian pickup free; remote no-delivery rule | D-V2-002, D-V2-022 | DecisionBlocked until freight charging, weight basis and the effects on buyer 70/30 payment, merchant receivable and concession are frozen; frontend must not calculate a substitute | DecisionBlocked | GAP-ADM-012 |
+| ADM-LOG-005 | 95 | Source per-count/per-weight/remote freight model | D-V2-002, D-V2-022, D-V2-031 | Replaced by one product-level flat `defaultFreightUsdt` for delivery and zero for pickup; Core binds product USDT, freight and total separately, with freight excluded from NPL/BNM/concession/prize formulas | Overridden | - |
 | ADM-TAKE-001 | 97-99 | Source forced-refund center and action | D-V2-004, D-V2-005 | Renamed Merchant Takeover Fulfillment Center; 7-day no-evidence case opens automatically | Overridden | GAP-ADM-010 |
 | ADM-TAKE-002 | 100-101 | Source USDT return and Locked BNM burn | D-V2-004, D-V2-005 | Customer payment and rewards remain Locked; platform/replacement merchant fulfills order | Overridden | GAP-ADM-010 |
 | ADM-TAKE-003 | 102 | Source merchant pending/guarantee deduction | D-V2-005, D-V2-018, D-V2-020, D-V2-023 | Major loss posts balanced deductions in order from guarantee, frozen receivables and future proceeds; platform advance records merchant debt; no risk-reserve fallback | Overridden | GAP-ADM-010, GAP-ADM-017 |
@@ -366,9 +366,9 @@ publish or copy a parallel API:
 - Cross-merchant merchant-filtered waybill batches, waybill lists, print-job
   lists and idempotent retry are consumed with exact request bodies. This does
   not complete the broader export/pickup-print scope in `ADM-GLOBAL-002`.
-- `ADM-LOG-005` remains `DecisionBlocked`: no frontend freight calculator is
-  introduced before freight charge, weight basis and its effects on buyer
-  70/30, merchant receivable and concession are frozen.
+- `ADM-LOG-005`: the original count/weight/remote model is overridden. Product
+  management writes the existing flat `defaultFreightUsdt`; payment trace reads
+  Core's product USDT, freight and total fields. Admin performs no calculation.
 
 Real Kuaidi100/Cainiao accounts, provider acceptance and physical printer/device
 evidence remain `ExternalBlocked`. All fixtures stay under `tests/**`; none is

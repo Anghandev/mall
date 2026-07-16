@@ -580,6 +580,8 @@ function MerchantReceivableStatementRow({ statement }: { statement: MerchantRece
           <h3>冻结金额快照</h3>
           <dl className="receivable-amount-grid">
             <div><dt>商品总价</dt><dd>{statement.frozenAmounts.listPriceUsdt}</dd></div>
+            <div><dt>商品 USDT</dt><dd>{statement.frozenAmounts.productUsdtPaymentAmount}</dd></div>
+            <div><dt>运费 USDT</dt><dd>{statement.frozenAmounts.freightUsdt}</dd></div>
             <div><dt>买家实付 USDT</dt><dd>{statement.frozenAmounts.buyerPaidUsdt}</dd></div>
             <div><dt>基础应收</dt><dd>{statement.frozenAmounts.merchantBaseReceivableUsdt}</dd></div>
             <div><dt>商家让利</dt><dd>{statement.frozenAmounts.merchantConcessionAmount}</dd></div>

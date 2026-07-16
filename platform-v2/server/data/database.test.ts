@@ -135,6 +135,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '026_admin_product_lifecycle_batches.sql',
       '027_merchant_governance_completion.sql',
       '028_buyer_uid.sql',
+      '029_usdt_freight.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -2054,11 +2055,13 @@ test('catalog payment service builds an authoritative idempotent quote and recor
     await db.query("UPDATE core.seckill_sessions SET phase = 'FORCE_CLOSED' WHERE session_id = $1", [sessionId]);
 
     const quote = await service.createOrdinaryQuote(BUYER, request);
-    assert.equal(quote.intent.usdtPaymentAmount, '70');
+    assert.equal(quote.intent.productUsdtPaymentAmount, '70');
+    assert.equal(quote.intent.freightUsdt, '5');
+    assert.equal(quote.intent.usdtPaymentAmount, '75');
     assert.equal(quote.intent.nplPaymentAmount, '300');
     assert.equal(quote.intent.productId, `0x${'b'.repeat(64)}`);
     assert.equal(quote.snapshotHash, paymentIntentHash(quote.intent));
-    assert.equal(quote.approvalRequirements[0]?.requiredAmount, '70');
+    assert.equal(quote.approvalRequirements[0]?.requiredAmount, '75');
     assert.equal(quote.approvalRequirements[0]?.approvalMode, 'ONLY_IF_ALLOWANCE_BELOW_REQUIRED');
     assert.equal(quote.approvalRequirements[0]?.revocation.method, 'ERC20_APPROVE_ZERO');
     assert.equal((await service.createOrdinaryQuote(BUYER, request)).orderId, quote.orderId);
@@ -3075,7 +3078,7 @@ test('seckill quote locks both inventories and final classification releases the
     assert.equal(quote.dual.fallback.listPriceUsdt, '100');
     assert.deepEqual(
       quote.approvalRequirements.map((item) => item.requiredAmount),
-      ['70', '300'],
+      ['75', '300'],
     );
     const repeated = await service.createSeckillQuote(BUYER, request);
     assert.equal(repeated.orderId, quote.orderId);
@@ -3217,7 +3220,8 @@ test('seckill quote locks both inventories and final classification releases the
     );
     assert.equal(relayAfterReplay.rows[0]!.relay_deadline.getTime(), relayAfterFinality.rows[0]!.relay_deadline.getTime());
     assert.equal(relayAfterReplay.rows[0]!.events, '1');
-    await assertLedgerBalanced(db, 1, { usdt: 63n, nplReward: 90n, bnm: 90n });
+    await assertLedgerBalanced(db, 1, { usdt: 68n, nplReward: 90n, bnm: 90n });
+    assert.deepEqual(await purposeBalances(db, quote.orderId, 'MERCHANT_FREIGHT_RECEIVABLE'), { LOCKED: '5' });
 
     const fulfillment = new FulfillmentService({
       transactions: transactionAdapter(db),
@@ -3252,7 +3256,7 @@ test('seckill quote locks both inventories and final classification releases the
     assert.deepEqual(await liabilityStates(db, quote.orderId, 'AVAILABLE'), {
       BNM_POINTS: '90',
       NPL: '90',
-      USDT: '61',
+      USDT: '66',
     });
     assert.deepEqual(await liabilityStates(db, quote.orderId, 'LOCKED'), { USDT: '2' });
 
@@ -7448,6 +7452,8 @@ test('buyer shopping and merchant receivable statements preserve tenant-scoped o
       orderId: prepared.intent.orderId,
       orderKind: 'ORDINARY',
       paymentAmounts: {
+        productUsdtPaymentAmount: prepared.intent.productUsdtPaymentAmount,
+        freightUsdt: prepared.intent.freightUsdt,
         usdtPaymentAmount: prepared.intent.usdtPaymentAmount,
         nplPaymentAmount: prepared.intent.nplPaymentAmount,
       },
@@ -7480,6 +7486,8 @@ test('buyer shopping and merchant receivable statements preserve tenant-scoped o
     assert.equal(merchantStatements.merchantId, 'merchant-1');
     assert.equal(merchantStatements.settlementWallet, prepared.merchantWallet.address.toLowerCase());
     assert.equal(statement.orderId, prepared.intent.orderId);
+    assert.equal(statement.frozenAmounts.productUsdtPaymentAmount, prepared.intent.productUsdtPaymentAmount);
+    assert.equal(statement.frozenAmounts.freightUsdt, prepared.intent.freightUsdt);
     assert.equal(statement.frozenAmounts.merchantNetReceivableUsdt, prepared.intent.merchantNetReceivableUsdt);
     assert.equal(statement.currentReceivableUsdt, prepared.intent.merchantNetReceivableUsdt);
     assert.equal(statement.removedFromReceivableUsdt, '0');
@@ -9730,7 +9738,7 @@ test('takeover funding consumes final guarantee first and records Operations adv
     assert.equal(debtReorgAudit.rows[0]?.payload.reversedDebtRecoveries, 1);
     assert.equal(debtReorgAudit.rows[0]?.transaction_evidence.txHash, futurePayment.event.transactionHash);
     assert.equal(debtReorgAudit.rows[0]?.transaction_evidence.eventSignatureHash, id(
-      'PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)',
+      'PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)',
     ));
     assert.equal(debtReorgAudit.rows[0]?.transaction_evidence.logIndex, futurePayment.event.logIndex);
     await assertLedgerBalanced(db, 1);
@@ -11054,6 +11062,8 @@ function paymentIntent(): CanonicalPaymentIntent {
     deadline: now + 300,
     nonce: '1',
     listPriceUsdt: '100',
+    productUsdtPaymentAmount: '70',
+    freightUsdt: '0',
     usdtPaymentAmount: '70',
     nplQuoteAmount: '1000',
     nplPaymentAmount: '300',
@@ -11117,6 +11127,8 @@ function paymentInput(
       merchant: intent.merchant,
       policyVersion: intent.policyVersion,
       listPriceUsdt: intent.listPriceUsdt,
+      productUsdtPaid: intent.productUsdtPaymentAmount,
+      freightUsdt: intent.freightUsdt,
       usdtPaid: intent.usdtPaymentAmount,
       nplPaid: intent.nplPaymentAmount,
       nplBurned: intent.nplBurnAmount,
@@ -11176,7 +11188,7 @@ function decodedPaymentEvent(intent: CanonicalPaymentIntent, canonicalBlockHash:
     artifactVersion: CORE_ARTIFACT_VERSION,
     contract: 'PaymentRouterV2',
     eventName: 'PaymentCompleted',
-    eventSignature: 'PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)',
+    eventSignature: 'PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)',
     resourceId: intent.orderId,
     contractAddress: '0x9999999999999999999999999999999999999999',
     eventHash: HASH,
@@ -11191,6 +11203,8 @@ function decodedPaymentEvent(intent: CanonicalPaymentIntent, canonicalBlockHash:
       classification: '0',
       policyVersion: String(intent.policyVersion),
       listPriceUsdt: intent.listPriceUsdt,
+      productUsdtPaid: intent.productUsdtPaymentAmount,
+      freightUsdt: intent.freightUsdt,
       usdtPaid: intent.usdtPaymentAmount,
       nplPaid: intent.nplPaymentAmount,
       nplBurned: intent.nplBurnAmount,

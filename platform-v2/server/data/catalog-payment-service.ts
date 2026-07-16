@@ -272,6 +272,7 @@ export class CatalogPaymentService {
     const deadline = now + 5 * 60;
     const reservationDeadline = now + 10 * 60;
     const listPriceUsdt = BigInt(prepared.catalog.list_price_usdt) * BigInt(input.quantity);
+    const freightUsdt = input.fulfillmentMode === 'DELIVERY' ? BigInt(prepared.catalog.default_freight_usdt) : 0n;
     const merchantBaseReceivableUsdt = BigInt(prepared.catalog.merchant_cost_usdt) * BigInt(input.quantity);
     const oracle = await this.#oracle.quote({
       listPriceUsdt,
@@ -310,6 +311,7 @@ export class CatalogPaymentService {
       deadline,
       nonce: this.#nonce(),
       listPriceUsdt,
+      freightUsdt,
       nplQuoteAmount: oracle.nplQuoteAmount,
       merchantBaseReceivableUsdt,
       merchantConcessionBps: Number(prepared.catalog.merchant_concession_bps),
@@ -390,6 +392,7 @@ export class CatalogPaymentService {
     const deadline = now + 5 * 60;
     const reservationDeadline = now + 10 * 60;
     const merchantBaseReceivableUsdt = BigInt(prepared.catalog.merchant_cost_usdt) * BigInt(input.quantity);
+    const freightUsdt = input.fulfillmentMode === 'DELIVERY' ? BigInt(prepared.catalog.default_freight_usdt) : 0n;
     const seckillListPriceUsdt = BigInt(prepared.session.seckill_list_price_usdt) * BigInt(input.quantity);
     const fallbackListPriceUsdt = BigInt(prepared.catalog.list_price_usdt) * BigInt(input.quantity);
     const [seckillOracle, fallbackOracle, beneficiaries] = await Promise.all([
@@ -432,6 +435,7 @@ export class CatalogPaymentService {
       issuedAt: now,
       deadline,
       nonce,
+      freightUsdt,
       merchantBaseReceivableUsdt,
       merchantConcessionBps: Number(prepared.catalog.merchant_concession_bps),
       beneficiaries,
@@ -745,9 +749,9 @@ async function insertQuote(
     `INSERT INTO core.payment_quotes (
        order_id, idempotency_key, artifact_version, buyer_wallet, merchant_id,
        merchant_wallet, product_id, sku_id, chain_product_id, chain_sku_id,
-       product_policy_hash, list_price_usdt, merchant_cost_usdt, merchant_concession_bps,
+       product_policy_hash, list_price_usdt, freight_usdt, merchant_cost_usdt, merchant_concession_bps,
        policy_version, quote_kind, authorization_digest, quote_signature, deadline, state
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'ORDINARY',$16,$17,$18,'QUOTED')`,
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'ORDINARY',$17,$18,$19,'QUOTED')`,
     [
       input.intent.orderId,
       input.idempotencyKey,
@@ -761,6 +765,7 @@ async function insertQuote(
       input.catalog.chain_sku_id,
       input.catalog.product_policy_hash,
       input.catalog.list_price_usdt,
+      input.intent.freightUsdt,
       input.catalog.merchant_cost_usdt,
       input.catalog.merchant_concession_bps,
       input.policyVersion,
@@ -795,11 +800,11 @@ async function insertSeckillQuote(
     `INSERT INTO core.payment_quotes (
        order_id, idempotency_key, artifact_version, buyer_wallet, merchant_id,
        merchant_wallet, product_id, sku_id, chain_product_id, chain_sku_id,
-       product_policy_hash, list_price_usdt, seckill_list_price_usdt,
+       product_policy_hash, list_price_usdt, seckill_list_price_usdt, freight_usdt,
        merchant_cost_usdt, merchant_concession_bps, policy_version, quote_kind,
        session_id, authorization_digest, quote_signature, deadline, state
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
-       'SECKILL',$17,$18,$19,$20,'QUOTED')`,
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
+       'SECKILL',$18,$19,$20,$21,'QUOTED')`,
     [
       input.dual.seckill.orderId,
       input.idempotencyKey,
@@ -814,6 +819,7 @@ async function insertSeckillQuote(
       input.catalog.product_policy_hash,
       input.catalog.list_price_usdt,
       input.seckillUnitPrice,
+      input.dual.seckill.freightUsdt,
       input.catalog.merchant_cost_usdt,
       input.catalog.merchant_concession_bps,
       input.policyVersion,
@@ -1235,6 +1241,7 @@ function preparationFingerprint(value: { catalog: CatalogRow; policy: PolicyRow;
     productPolicyHash: value.catalog.product_policy_hash,
     concessionBps: value.catalog.merchant_concession_bps,
     listPrice: value.catalog.list_price_usdt,
+    freight: value.catalog.default_freight_usdt,
     merchantCost: value.catalog.merchant_cost_usdt,
     stock: String(value.catalog.stock_available),
     merchant: value.catalog.settlement_wallet,

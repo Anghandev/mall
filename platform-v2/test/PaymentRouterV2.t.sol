@@ -13,10 +13,10 @@ contract PaymentRouterV2Test is CoreFixture {
     function testPaymentEncodingMatchesCoreSigningVector() public pure {
         V2Types.PaymentIntent memory intent = _signingVectorIntent();
         bytes32 paymentHash = keccak256(abi.encode(intent));
-        assertEq(paymentHash, 0xc125633288a4ba4ccb0602dae00c885dbe1adb7a0a77cc842f34d3d425d9279f);
+        assertEq(paymentHash, 0xb62baf1a1ca33005a377c88d3945fd917e755ed50422b569fa20dd7f3e2f45a2);
         assertEq(
             _paymentAuthorizationDigest(intent, paymentHash),
-            0x3b991a7728e91bdf283431b553258f94dffe4b516b6283ad3c34a588f7cd21a0
+            0x2e6c9e58ee5c29ece2ca985969d75228df81663d98a12fb4556ecc11049c9a74
         );
     }
 
@@ -33,10 +33,10 @@ contract PaymentRouterV2Test is CoreFixture {
             sessionId: seckillPayment.sessionId, seckillPayment: seckillPayment, fallbackPayment: fallbackPayment
         });
         bytes32 seckillHash = keccak256(abi.encode(intent));
-        assertEq(seckillHash, 0x292fee156f4df5e8469fcff24055093e8820768b91784e417559b0fabd4d1bce);
+        assertEq(seckillHash, 0x8d85308df953fedd0ead161d722a6106bcc1032d8fec00f045c29971f1667f5c);
         assertEq(
             _seckillAuthorizationDigest(intent, seckillHash),
-            0x8fd49d5723d836b830cc81647eaaad6b4e5e996f560a9bd034402549241e8246
+            0x68fd9c29eb7472528bbd2e646334f3af78fab8e3f6767580609cbc74f8e43823
         );
     }
 
@@ -61,6 +61,8 @@ contract PaymentRouterV2Test is CoreFixture {
             deadline: 1_800_000_300,
             nonce: 7,
             listPriceUsdt: 100 ether,
+            productUsdtPaymentAmount: 70 ether,
+            freightUsdt: 0,
             usdtPaymentAmount: 70 ether,
             nplQuoteAmount: 1_000 ether,
             nplPaymentAmount: 300 ether,
@@ -189,6 +191,32 @@ contract PaymentRouterV2Test is CoreFixture {
         assertEq(npl.balanceOf(nplRewardSafe), 100 ether);
         assertEq(usdt.balanceOf(address(router)), 0);
         assertEq(npl.balanceOf(address(router)), 0);
+    }
+
+    function testDeliveryFreightIsPureUsdtAndPickupCannotChargeFreight() public {
+        V2Types.PaymentIntent memory delivery =
+            _makePayment(keccak256("delivery-freight"), buyer, 19, false, keccak256("reservation-19"));
+        delivery.freightUsdt = 5 ether;
+        delivery.usdtPaymentAmount = delivery.productUsdtPaymentAmount + delivery.freightUsdt;
+        uint256 custodyBefore = usdt.balanceOf(usdtCustodySafe);
+        uint256 burnBefore = npl.balanceOf(V2Types.NPL_BURN_ADDRESS);
+        uint256 rewardBefore = npl.balanceOf(nplRewardSafe);
+
+        _pay(delivery, BUYER_KEY);
+
+        assertEq(usdt.balanceOf(usdtCustodySafe) - custodyBefore, 75 ether);
+        assertEq(npl.balanceOf(V2Types.NPL_BURN_ADDRESS) - burnBefore, 200 ether);
+        assertEq(npl.balanceOf(nplRewardSafe) - rewardBefore, 100 ether);
+        assertEq(delivery.bnmAmount, delivery.listPriceUsdt);
+
+        V2Types.PaymentIntent memory pickup =
+            _makePayment(keccak256("pickup-freight"), buyer, 20, false, keccak256("reservation-20"));
+        pickup.fulfillmentMode = V2Types.FulfillmentMode.Pickup;
+        pickup.freightUsdt = 1;
+        pickup.usdtPaymentAmount = pickup.productUsdtPaymentAmount + pickup.freightUsdt;
+        bytes32 digest = router.hashPayment(pickup);
+        vm.expectRevert(PaymentRouterV2.InvalidAmounts.selector);
+        router.pay(pickup, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest));
     }
 
     function testConcessionNeverChangesBuyerPaymentAndAllowsZeroOrFull() public {

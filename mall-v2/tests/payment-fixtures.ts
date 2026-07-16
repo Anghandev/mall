@@ -58,6 +58,7 @@ export const product: CatalogProduct = {
 export function paymentQuote(fulfillmentMode: 'DELIVERY' | 'PICKUP' = 'DELIVERY'): PaymentQuoteResponse {
   const buyer = address('1');
   const router = address('9');
+  const freightUsdt = fulfillmentMode === 'DELIVERY' ? product.defaultFreightUsdt : '0';
   const intent = {
     orderId: hash('c'),
     policyVersion: 1,
@@ -78,7 +79,9 @@ export function paymentQuote(fulfillmentMode: 'DELIVERY' | 'PICKUP' = 'DELIVERY'
     deadline: 2_000_000_300,
     nonce: '1',
     listPriceUsdt: '120000000000000000000',
-    usdtPaymentAmount: '84000000000000000000',
+    productUsdtPaymentAmount: '84000000000000000000',
+    freightUsdt,
+    usdtPaymentAmount: (84_000_000_000_000_000_000n + BigInt(freightUsdt)).toString(),
     nplQuoteAmount: '240000000000000000000',
     nplPaymentAmount: '72000000000000000000',
     nplBurnAmount: '48000000000000000000',

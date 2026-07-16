@@ -433,6 +433,8 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText(`${quote.intent.listPriceUsdt} USDT 原子单位`)).toBeTruthy();
 
     await user.click(screen.getByRole('link', { name: /核对报价/ }));
+    expect(screen.getByText(quote.intent.productUsdtPaymentAmount)).toBeTruthy();
+    expect(screen.getByText(quote.intent.freightUsdt)).toBeTruthy();
     expect(screen.getByText(quote.intent.usdtPaymentAmount)).toBeTruthy();
     expect(screen.getByText(quote.intent.nplPaymentAmount)).toBeTruthy();
     expect(screen.getByText(/pay · BSC 56/)).toBeTruthy();
@@ -1114,6 +1116,8 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('tab', { name: '消费购物' }));
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     expect(await screen.findByText(ordinaryShoppingStatement.paymentTxHash)).toBeTruthy();
+    expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.productUsdtPaymentAmount} 原子单位`)).toBeTruthy();
+    expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.freightUsdt} 原子单位`)).toBeTruthy();
     expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.usdtPaymentAmount} 原子单位`)).toBeTruthy();
     expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.nplPaymentAmount} 原子单位`)).toBeTruthy();
     expect(screen.getByText(`${ordinaryShoppingStatement.bnm.amount} 原子单位`)).toBeTruthy();

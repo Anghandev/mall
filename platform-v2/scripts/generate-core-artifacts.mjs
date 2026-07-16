@@ -132,6 +132,7 @@ const schemaSources = [
       '026_admin_product_lifecycle_batches.sql',
       '027_merchant_governance_completion.sql',
       '028_buyer_uid.sql',
+      '029_usdt_freight.sql',
     ],
   },
   {
@@ -3285,7 +3286,12 @@ function settlementAdminOpenApiSchemas() {
       fulfilledAt: nullableTimestamp,
       createdAt: timestamp,
       orderKind: { enum: ['ORDINARY', 'FALLBACK_RETAIL'] },
-      paymentAmounts: object({ usdtPaymentAmount: atomic, nplPaymentAmount: atomic }),
+      paymentAmounts: object({
+        productUsdtPaymentAmount: atomic,
+        freightUsdt: atomic,
+        usdtPaymentAmount: atomic,
+        nplPaymentAmount: atomic,
+      }),
       bnm: object({
         amount: atomic,
         state: { enum: ['LOCKED', 'AVAILABLE'] },
@@ -3338,6 +3344,8 @@ function settlementAdminOpenApiSchemas() {
       orderKind: { enum: ['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] },
       frozenAmounts: object({
         listPriceUsdt: atomic,
+        productUsdtPaymentAmount: atomic,
+        freightUsdt: atomic,
         buyerPaidUsdt: atomic,
         merchantBaseReceivableUsdt: atomic,
         merchantConcessionAmount: atomic,
@@ -4931,12 +4939,14 @@ function fulfillmentOpenApiSchemas() {
       type: 'object',
       additionalProperties: false,
       required: [
-        'listPriceUsdt', 'usdtPaymentAmount', 'nplQuoteAmount', 'nplPaymentAmount',
+        'listPriceUsdt', 'productUsdtPaymentAmount', 'freightUsdt', 'usdtPaymentAmount',
+        'nplQuoteAmount', 'nplPaymentAmount',
         'nplBurnAmount', 'nplRewardAmount', 'merchantBaseReceivableUsdt',
         'merchantConcessionAmount', 'merchantNetReceivableUsdt', 'bnmAmount',
       ],
       properties: Object.fromEntries([
-        'listPriceUsdt', 'usdtPaymentAmount', 'nplQuoteAmount', 'nplPaymentAmount',
+        'listPriceUsdt', 'productUsdtPaymentAmount', 'freightUsdt', 'usdtPaymentAmount',
+        'nplQuoteAmount', 'nplPaymentAmount',
         'nplBurnAmount', 'nplRewardAmount', 'merchantBaseReceivableUsdt',
         'merchantConcessionAmount', 'merchantNetReceivableUsdt', 'bnmAmount',
       ].map((name) => [name, { $ref: '#/components/schemas/AtomicAmount' }])),
@@ -5657,7 +5667,8 @@ function paymentOpenApiSchemas() {
         'orderId', 'policyVersion', 'oracleVersion', 'buyer', 'merchant', 'productId', 'skuId', 'quantity',
         'fulfillmentMode', 'fulfillmentTargetHash', 'regionCodeHash', 'productPolicyHash', 'reservationId',
         'reservationHash', 'reservationDeadline', 'issuedAt', 'deadline', 'nonce', 'listPriceUsdt',
-        'usdtPaymentAmount', 'nplQuoteAmount', 'nplPaymentAmount', 'nplBurnAmount', 'nplRewardAmount',
+        'productUsdtPaymentAmount', 'freightUsdt', 'usdtPaymentAmount', 'nplQuoteAmount',
+        'nplPaymentAmount', 'nplBurnAmount', 'nplRewardAmount',
         'merchantBaseReceivableUsdt', 'merchantConcessionBps', 'merchantConcessionAmount',
         'merchantNetReceivableUsdt', 'concessionAllocationHash', 'bnmAmount', 'seckill', 'sessionId',
         'beneficiaries', 'merchantConcessionAllocations', 'otherUsdtAllocations', 'nplRewardAllocations',
@@ -5683,6 +5694,8 @@ function paymentOpenApiSchemas() {
         deadline: { type: 'integer', minimum: 1 },
         nonce: { $ref: '#/components/schemas/AtomicAmount' },
         listPriceUsdt: { $ref: '#/components/schemas/AtomicAmount' },
+        productUsdtPaymentAmount: { $ref: '#/components/schemas/AtomicAmount' },
+        freightUsdt: { $ref: '#/components/schemas/AtomicAmount' },
         usdtPaymentAmount: { $ref: '#/components/schemas/AtomicAmount' },
         nplQuoteAmount: { $ref: '#/components/schemas/AtomicAmount' },
         nplPaymentAmount: { $ref: '#/components/schemas/AtomicAmount' },
@@ -6802,6 +6815,8 @@ export interface BuyerShoppingStatement {
   createdAt: string;
   orderKind: Exclude<OrderKind, 'SECKILL'>;
   paymentAmounts: {
+    productUsdtPaymentAmount: AtomicAmount;
+    freightUsdt: AtomicAmount;
     usdtPaymentAmount: AtomicAmount;
     nplPaymentAmount: AtomicAmount;
   };
@@ -6866,6 +6881,8 @@ export interface MerchantReceivableStatement {
   orderKind: OrderKind;
   frozenAmounts: {
     listPriceUsdt: AtomicAmount;
+    productUsdtPaymentAmount: AtomicAmount;
+    freightUsdt: AtomicAmount;
     buyerPaidUsdt: AtomicAmount;
     merchantBaseReceivableUsdt: AtomicAmount;
     merchantConcessionAmount: AtomicAmount;
@@ -8280,6 +8297,8 @@ export type FulfillmentTarget =
 
 export interface FulfillmentExactAmounts {
   listPriceUsdt: AtomicAmount;
+  productUsdtPaymentAmount: AtomicAmount;
+  freightUsdt: AtomicAmount;
   usdtPaymentAmount: AtomicAmount;
   nplQuoteAmount: AtomicAmount;
   nplPaymentAmount: AtomicAmount;
@@ -8706,6 +8725,8 @@ export interface PaymentRouterIntent {
   deadline: number;
   nonce: AtomicAmount;
   listPriceUsdt: AtomicAmount;
+  productUsdtPaymentAmount: AtomicAmount;
+  freightUsdt: AtomicAmount;
   usdtPaymentAmount: AtomicAmount;
   nplQuoteAmount: AtomicAmount;
   nplPaymentAmount: AtomicAmount;

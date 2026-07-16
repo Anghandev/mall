@@ -18,7 +18,7 @@
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "037583e808d0da9e2d670248fb02ac90b24735867d53c1d1b33b5b71a0d2b052"
+      "sha256": "89f1124960825e6684a10b32061dce678b2f9f4a1a8d68f4c024a0174946204d"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
@@ -26,11 +26,11 @@
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "8ed05a8f6ef0bdd035e231a4890a9f64b7d4ce72b7eed2212ae451fd9d895573"
+      "sha256": "e6438ebcea4d3689a73fccb70bf2847f8daef2ee162877a9fdf38c27c3888def"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "692a1c8e664c70baaf4e4c75ded507753693aa4c7afe5fb413f87ff660010f8c"
+      "sha256": "6e439ab01fee37d69700426e3f85d4e3be4737381b103c1c7005797c24ede3df"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
@@ -42,15 +42,15 @@
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "4a2a8cbf45e442f5e0237f0da644c3c70d736ce0911765eeef4ccca9a6afd020"
+      "sha256": "9ece0cfc04f5fb7016f083d1644322b2c634e3229abd97c04e1493a591bb61bb"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "6a4b6bc6652357138d306eb1c98d990e78d58971ee2c13252aacd9abc51aa00c"
+      "sha256": "d09f61c98429ce01bf06e4cfe48825d7b70bbb794e2bbe7c86479ec5f8d02e7f"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "48bd7c4cbe9f6b70fcdfec010f62f9010ac728e6abe8a30ad160c7762fe7d5c2"
+      "sha256": "1307d1ec9dc61decd719d41f69f2526d5b0c66c1bb322a5e1fe7f38955adab5f"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
@@ -60,11 +60,11 @@
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "aca309458189a0bab8c2b029af1a476b3e5dd2902eab95373959894178a1ec4e"
+      "sha256": "3c475d3a54dd4c11716909949b59d9bcdec1af340731875e49fa36b3907b964f"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "4427a258e4b5a2bc955902af13553d50d1639a1491e682651a4418a292d26985"
+      "sha256": "4ac789ab86916ee938f9a2ef43e5eb565c701d0526c053f72e5780aa5663af50"
     }
   ],
   "httpSurface": [

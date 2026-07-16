@@ -202,7 +202,7 @@
     {
       "contract": "PaymentRouterV2",
       "name": "PaymentCompleted",
-      "signature": "PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)",
+      "signature": "PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)",
       "inputs": [
         {
           "name": "orderId",
@@ -236,6 +236,18 @@
         },
         {
           "name": "listPriceUsdt",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "productUsdtPaid",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "freightUsdt",
           "type": "uint256",
           "indexed": false,
           "internalType": "uint256"

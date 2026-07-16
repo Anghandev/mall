@@ -73,6 +73,7 @@ export interface PaymentQuoteRequest {
   deadline: number;
   nonce: bigint;
   listPriceUsdt: bigint;
+  freightUsdt: bigint;
   nplQuoteAmount: bigint;
   merchantBaseReceivableUsdt: bigint;
   merchantConcessionBps: number;
@@ -101,6 +102,8 @@ export interface CanonicalPaymentIntent {
   deadline: number;
   nonce: string;
   listPriceUsdt: string;
+  productUsdtPaymentAmount: string;
+  freightUsdt: string;
   usdtPaymentAmount: string;
   nplQuoteAmount: string;
   nplPaymentAmount: string;
@@ -133,12 +136,13 @@ export function buildPaymentIntent(
   }
   validateRequest(request, now);
 
-  const usdtPayment = mulBps(request.listPriceUsdt, policy.usdtPaymentBps);
+  const productUsdtPayment = mulBps(request.listPriceUsdt, policy.usdtPaymentBps);
+  const usdtPayment = productUsdtPayment + request.freightUsdt;
   const nplPayment = mulBps(request.nplQuoteAmount, policy.nplPaymentBps);
   const nplBurn = mulBps(request.nplQuoteAmount, policy.nplBurnListPriceBps);
   const nplReward = nplPayment - nplBurn;
   if (
-    usdtPayment === 0n || nplPayment === 0n
+    productUsdtPayment === 0n || nplPayment === 0n
       || (policy.nplBurnListPriceBps > 0 && nplBurn === 0n)
       || (policy.nplRewardListPriceBps > 0 && nplReward === 0n)
   ) {
@@ -147,7 +151,7 @@ export function buildPaymentIntent(
   if (nplReward !== mulBps(request.nplQuoteAmount, policy.nplRewardListPriceBps) && request.nplQuoteAmount % BPS === 0n) {
     throw new CoreError('InvalidRequest', 'NPL reward allocation is inconsistent');
   }
-  if (request.merchantBaseReceivableUsdt > usdtPayment) {
+  if (request.merchantBaseReceivableUsdt > productUsdtPayment) {
     throw new CoreError('InvalidRequest', 'Merchant base receivable exceeds buyer USDT payment');
   }
   const concessionAmount = mulBps(request.merchantBaseReceivableUsdt, request.merchantConcessionBps);
@@ -155,7 +159,7 @@ export function buildPaymentIntent(
   const concessionAllocations = allocateWeighted(concessionAmount, policy.concessionDestinations!);
   const otherAllocations = canonicalExactAllocations(request.otherUsdtAllocations);
   const otherTotal = otherAllocations.reduce((sum, item) => sum + item.amount, 0n);
-  if (merchantNet + concessionAmount + otherTotal !== usdtPayment) {
+  if (merchantNet + concessionAmount + otherTotal !== productUsdtPayment) {
     throw new CoreError('DecisionBlocked', 'USDT custody liabilities do not equal the signed buyer payment', 409);
   }
   const nplAllocations = allocateNplRewards(
@@ -186,6 +190,8 @@ export function buildPaymentIntent(
     deadline: request.deadline,
     nonce: request.nonce.toString(),
     listPriceUsdt: request.listPriceUsdt.toString(),
+    productUsdtPaymentAmount: productUsdtPayment.toString(),
+    freightUsdt: request.freightUsdt.toString(),
     usdtPaymentAmount: usdtPayment.toString(),
     nplQuoteAmount: request.nplQuoteAmount.toString(),
     nplPaymentAmount: nplPayment.toString(),
@@ -250,6 +256,7 @@ function validateDualRequests(seckill: PaymentQuoteRequest, fallback: PaymentQuo
     'issuedAt',
     'deadline',
     'nonce',
+    'freightUsdt',
     'merchantBaseReceivableUsdt',
     'merchantConcessionBps',
   ] as const;
@@ -318,7 +325,10 @@ export function assertPolicyReady(policy: FrozenPaymentPolicy) {
 }
 
 function validateRequest(request: PaymentQuoteRequest, now: number) {
-  if (request.quantity <= 0 || request.listPriceUsdt <= 0n || request.nplQuoteAmount <= 0n) {
+  if (
+    request.quantity <= 0 || request.listPriceUsdt <= 0n || request.nplQuoteAmount <= 0n
+      || request.freightUsdt < 0n || (request.fulfillmentMode === 'PICKUP' && request.freightUsdt !== 0n)
+  ) {
     throw new CoreError('InvalidRequest', 'Invalid payment quantity or amount');
   }
   if (!Number.isInteger(request.merchantConcessionBps) || request.merchantConcessionBps < 0 || request.merchantConcessionBps > 10_000) {

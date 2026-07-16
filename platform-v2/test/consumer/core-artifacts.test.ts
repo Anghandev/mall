@@ -54,8 +54,8 @@ test('settlement admin .15 checkpoint has one identity, resolvable exports and e
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 28);
-  assert.equal(schemaManifest.schemas.core.migrations.at(-1)?.path, 'schema/business/028_buyer_uid.sql');
+  assert.equal(schemaManifest.schemas.core.migrations.length, 29);
+  assert.equal(schemaManifest.schemas.core.migrations.at(-1)?.path, 'schema/business/029_usdt_freight.sql');
   assert.equal(schemaManifest.schemas.audit.migrations.length, 4);
   for (const migration of [
     ...schemaManifest.schemas.core.migrations,
@@ -435,6 +435,7 @@ test('generated fulfillment DTOs expose exact amounts, immutable evidence and co
   assert.equal(openapi.components.schemas.MerchantReceivableJournalEvidence.properties.delta.pattern, '^-?[1-9][0-9]*$');
   assert.deepEqual(Object.keys(openapi.components.schemas.FulfillmentExactAmounts.properties).sort(), [
     'bnmAmount',
+    'freightUsdt',
     'listPriceUsdt',
     'merchantBaseReceivableUsdt',
     'merchantConcessionAmount',
@@ -443,6 +444,7 @@ test('generated fulfillment DTOs expose exact amounts, immutable evidence and co
     'nplPaymentAmount',
     'nplQuoteAmount',
     'nplRewardAmount',
+    'productUsdtPaymentAmount',
     'usdtPaymentAmount',
   ]);
   assert.deepEqual(enums.logisticsProviders, ['KUAIDI100', 'CAINIAO']);
@@ -970,6 +972,8 @@ function signingVectorRouterIntent() {
     deadline: 1_800_000_300,
     nonce: '7',
     listPriceUsdt: '100000000000000000000',
+    productUsdtPaymentAmount: '70000000000000000000',
+    freightUsdt: '0',
     usdtPaymentAmount: '70000000000000000000',
     nplQuoteAmount: '1000000000000000000000',
     nplPaymentAmount: '300000000000000000000',

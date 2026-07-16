@@ -861,6 +861,8 @@ export interface BuyerShoppingStatement {
   createdAt: string;
   orderKind: Exclude<OrderKind, 'SECKILL'>;
   paymentAmounts: {
+    productUsdtPaymentAmount: AtomicAmount;
+    freightUsdt: AtomicAmount;
     usdtPaymentAmount: AtomicAmount;
     nplPaymentAmount: AtomicAmount;
   };
@@ -925,6 +927,8 @@ export interface MerchantReceivableStatement {
   orderKind: OrderKind;
   frozenAmounts: {
     listPriceUsdt: AtomicAmount;
+    productUsdtPaymentAmount: AtomicAmount;
+    freightUsdt: AtomicAmount;
     buyerPaidUsdt: AtomicAmount;
     merchantBaseReceivableUsdt: AtomicAmount;
     merchantConcessionAmount: AtomicAmount;
@@ -2339,6 +2343,8 @@ export type FulfillmentTarget =
 
 export interface FulfillmentExactAmounts {
   listPriceUsdt: AtomicAmount;
+  productUsdtPaymentAmount: AtomicAmount;
+  freightUsdt: AtomicAmount;
   usdtPaymentAmount: AtomicAmount;
   nplQuoteAmount: AtomicAmount;
   nplPaymentAmount: AtomicAmount;
@@ -2765,6 +2771,8 @@ export interface PaymentRouterIntent {
   deadline: number;
   nonce: AtomicAmount;
   listPriceUsdt: AtomicAmount;
+  productUsdtPaymentAmount: AtomicAmount;
+  freightUsdt: AtomicAmount;
   usdtPaymentAmount: AtomicAmount;
   nplQuoteAmount: AtomicAmount;
   nplPaymentAmount: AtomicAmount;
