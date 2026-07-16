@@ -20,7 +20,7 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
 | MAL-CAT-001 | 35-39 | Horizontal multilevel categories, product waterfall, BNM badge, seckill overlay and route | - | Category filtering works; active seckill blocks ordinary checkout | Verified | - |
 | MAL-CAT-002 | 40-42 | Product detail, sticky Buy action, seckill-disabled state, SlideUp configuration sheet | - | Action remains reachable and follows authoritative product state | Frozen | - |
 | MAL-CHK-001 | 43-49 | Confirmation prerequisite; SKU matrix/manual selection; +/- quantity; delivery/pickup; default full address fields; empty-address guidance; nearest store/address/hours/detail | D-V2-002, D-V2-012, D-V2-021 | No confirmation without valid SKU, quantity, mode and authoritative address/store; exact 70/30 legs, Oracle snapshot, five-minute expiry and totals come only from the signed Core quote | Frozen | GAP-MAL-003, GAP-MAL-006, GAP-MAL-010 |
-| MAL-STORE-001 | 50-53 | Country/city/district selectors; GPS 1.2km display; Call and Navigation buttons; JSBridge AMap/Baidu launch | - | Browser/local tests cover permission, loading, denial, unavailable, deep-link generation and fallback states; real-device proof is tracked only by MAL-GOAL-004 | Frozen | GAP-MAL-010 |
+| MAL-STORE-001 | 50-53 | Country/city/district selectors; GPS 1.2km display; Call and Navigation buttons; JSBridge AMap/Baidu launch | - | Browser/local tests cover permission, loading, denial, unavailable, deep-link generation and fallback states; real-device proof is tracked only by MAL-GOAL-004 | Verified | - |
 | MAL-ASSET-001 | 54-64 | Assets shell; avatar, nickname, account ID, address entry; four order groups/counts; View All | - | Profile and canonical counts render from Core projection | Verified | - |
 | MAL-ASSET-002 | 65-70 | Seckill/shopping tabs; session number; exact 70% USDT + 30% NPL payment; Locked BNM; winner/prize and non-winner states | D-V2-002, D-V2-007, D-V2-008 | Exact integer/canonical payment amounts render from Core; prize exposes Locked/Available/Requested/Batched/Settled and final Safe TxHash; BNM exposes only Locked/Available | Frozen | GAP-MAL-007, GAP-MAL-015 |
 | MAL-ASSET-003 | 71-74 | Source BNM totals, provenance link and withdrawal control | D-V2-008 | BNM is existing backend points with only Locked and Available totals plus order/fulfillment provenance; no token address, mint, Safe transfer or on-chain withdrawal action is rendered | Verified | - |
@@ -70,6 +70,14 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
 - Buyer order rows consume takeover timelines and render only history status,
   public state transitions, evidence type and occurrence time. Internal evidence
   hashes are rejected by the strict client parser.
+
+- `MAL-STORE-001`: Merchant Stores `.1` accepts only exact `ACTIVE` public
+  store DTOs with business hours and one to five unique image asset IDs. Store
+  lists and pickup selection resolve every `STORE_IMAGE` through signed public
+  media access, and a failed initial load or filtered reload clears stale store
+  data. Existing local coverage verifies GPS distance, telephone links and the
+  navigation fallback; physical-device evidence remains `MAL-GOAL-004`
+  `ExternalBlocked`.
 
 - `MAL-CAT-001`: the Mall consumes `.9` `categoryId`, `tagIds`, `subtitle`,
   `richDetail`, `defaultFreightUsdt`, `fulfillmentModes` and each SKU's
