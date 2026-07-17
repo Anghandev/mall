@@ -75,11 +75,12 @@ const EXECUTABLE_ACTIONS = new Set(allowedActionNames);
 
 test('typed config reports blocked inputs without exposing secret values', () => {
   const blocked = loadConfig({ CHAIN_ID: '56' });
-  assert.ok(blocked.decisionBlocked.includes('PLATFORM_SERVICE_FEE_BPS'));
-  assert.ok(blocked.decisionBlocked.includes('PII_RETENTION_POLICY_VERSION'));
+  assert.deepEqual(blocked.decisionBlocked, []);
+  assert.deepEqual(blocked.paymentDecisionBlocked, []);
   assert.equal(blocked.requiredConfirmations, 15);
-  assert.ok(blocked.decisionBlocked.includes('PICKUP_TIMEOUT_AND_TAKEOVER_EVIDENCE'));
   assert.ok(blocked.externalBlocked.includes('DATABASE_URL'));
+  assert.ok(blocked.externalBlocked.includes('PII_RETENTION_POLICY_VERSION'));
+  assert.ok(blocked.paymentExternalBlocked.includes('PLATFORM_SERVICE_FEE_SAFE_ADDRESS'));
   assert.equal(blocked.providerReadiness.KUAIDI100, 'CONFIGURATION_REQUIRED');
   assert.equal(blocked.providerReadiness.BNM, 'CONFIGURATION_REQUIRED');
   assert.equal(publicReadiness(blocked).writesEnabled, false);
@@ -106,7 +107,7 @@ test('typed config reports blocked inputs without exposing secret values', () =>
   const paymentReady = {
     ...ready,
     deploymentReady: true,
-    decisionBlocked: ['PICKUP_TIMEOUT_AND_TAKEOVER_EVIDENCE'],
+    decisionBlocked: [],
     externalBlocked: ['AUDIT_DATABASE_URL', 'SETTLEMENT_EXECUTOR_URL'],
     paymentDecisionBlocked: [],
     paymentExternalBlocked: [],
@@ -116,8 +117,8 @@ test('typed config reports blocked inputs without exposing secret values', () =>
   };
   assert.equal(publicReadiness(paymentReady, paymentRuntimeReadiness(readinessTime, true), readinessTime).writesEnabled, true);
   assert.throws(
-    () => loadConfig({ ...completeEnvironment(), PLATFORM_SERVICE_FEE_BPS: 'not-a-number' }),
-    /integer BPS/,
+    () => loadConfig({ ...completeEnvironment(), PLATFORM_SERVICE_FEE_SAFE_ADDRESS: 'not-an-address' }),
+    /address/,
   );
   assert.throws(() => loadConfig({ ...completeEnvironment(), REQUIRED_CONFIRMATIONS: '12' }), /frozen at 15/);
   assert.throws(
@@ -138,8 +139,14 @@ test('typed config reports blocked inputs without exposing secret values', () =>
   );
   assert.throws(
     () => loadConfig({ ...completeEnvironment(), QUOTE_SIGNER_ADDRESS: SAFE }),
-    /distinct addresses/,
+    /must not use a Safe address/,
   );
+  assert.doesNotThrow(() => loadConfig({
+    ...completeEnvironment(),
+    SECONDARY_SIGNER_ADDRESS: '0x5555555555555555555555555555555555555555',
+    QUOTE_SIGNER_ADDRESS: '0x5555555555555555555555555555555555555555',
+    FINALITY_SIGNER_ADDRESS: '0x5555555555555555555555555555555555555555',
+  }));
 });
 
 test('SIWE nonce is domain-bound, one-use and yields an expiring RBAC session', async () => {
@@ -3179,6 +3186,7 @@ function completeEnvironment(): Record<string, string> {
     QUOTE_SIGNER_ADDRESS: '0x6666666666666666666666666666666666666666',
     FINALITY_SIGNER_ADDRESS: '0x7777777777777777777777777777777777777777',
     TWAP_SOURCE_ADDRESS: '0x8888888888888888888888888888888888888888',
+    TWAP_SOURCE_CODEHASH: HASH,
     SIGNER_SERVICE_URL: 'https://signer.example.invalid',
     SIGNER_SERVICE_TOKEN: 'provider-secret',
     SETTLEMENT_EXECUTOR_URL: 'https://executor.example.invalid',
@@ -3212,14 +3220,6 @@ function completeEnvironment(): Record<string, string> {
     OPERATIONS_SAFE_MODULES_HASH: HASH_2,
     OPERATIONS_TOKEN_CODE_HASH: HASH,
     OPERATIONS_TRANSFER_CONFORMANCE_EVIDENCE_HASH: HASH_2,
-    PLATFORM_SERVICE_FEE_BPS: '500',
-    SECKILL_PRIZE_POOL_BPS: '1000',
-    MERCHANT_STORE_REWARD_BPS: '0',
-    MERCHANT_CONCESSION_DESTINATIONS_JSON:
-      '[{"account":"0x1111111111111111111111111111111111111111","weightBps":4000},{"account":"0x2222222222222222222222222222222222222222","weightBps":6000}]',
-    CIRCULATION_REWARD_POOL_ADDRESS: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-    GENESIS_CREDENTIAL_ADDRESS: '0x9999999999999999999999999999999999999999',
-    GENESIS_CREDENTIAL_TOKEN_ID: '1',
     REQUIRED_CONFIRMATIONS: '15',
     AMAP_WEB_SERVICE_KEY: 'provider-secret',
     KUAIDI100_CUSTOMER: 'provider-secret',

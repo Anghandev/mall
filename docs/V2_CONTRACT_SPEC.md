@@ -1,7 +1,7 @@
 # Abu 24K V2 Payment Contract Freeze
 
 Status: coordinated local settlement/admin checkpoint
-`2.0.0-settlement-admin.9`. The generated
+`2.0.0-settlement-admin.15`. The generated
 manifest contains no deployment addresses and has `deploymentAuthorized:
 false`. This document does not authorize deployment or a transaction.
 
@@ -10,7 +10,7 @@ false`. This document does not authorize deployment or a transaction.
 | Contract | Responsibility | Funds held |
 |---|---|---|
 | `PolicyRegistryV2` | Immutable policy versions; Safe/RBAC publication with an exact secondary EIP-712 signature | None |
-| `BeneficiaryRegistryV2` | Referral-cycle prevention, region beneficiaries and ERC-721/ERC-1155 genesis eligibility | None |
+| `BeneficiaryRegistryV2` | Referral-cycle prevention and immutable region-beneficiary snapshot validation; the legacy genesis field must be zero | None |
 | `TwapOracleAdapterV2` | Fixed NPL/USDT pair, 30-minute TWAP, 5% deviation, 10-minute age and 50,000 USDT liquidity checks | None |
 | `PaymentRouterV2` | Signed ordinary/seckill payment, replay protection, Safe transfers, boundary classification and payment breakers | Normally zero |
 
@@ -33,8 +33,9 @@ The signed `PaymentIntent` binds:
 - buyer, merchant, product, SKU, quantity and fulfillment mode;
 - fulfillment target, region and product-policy hashes;
 - reservation ID/hash/deadline, issue time, quote deadline and buyer nonce;
-- exact list price, product USDT leg, freight USDT, total USDT debit, NPL
-  payment, Burn, Reward Safe, merchant concession and BNM-points amounts;
+- exact list price, product USDT leg, Platform Service Fee Safe amount, Custody
+  product USDT, freight USDT, total USDT debit, NPL payment, Burn, Reward Safe,
+  merchant concession and BNM-points amounts;
 - concession allocation hash, session identity and six beneficiary addresses.
   The governed allocation-set hash also binds the explicit seckill prize-pool
   account and `SECKILL_PRIZE_LIABILITY_V1` purpose domain; no consumer infers
@@ -50,8 +51,11 @@ For the frozen launch policy:
 
 ```text
 product USDT leg = 70% of USDT list price
+platform service fee = 1% of list price -> Platform Service Fee Safe
+Custody product USDT = product USDT leg - service fee (nominally 69%)
 delivery freight = product defaultFreightUsdt; pickup freight = 0
-USDT buyer debit = product USDT leg + freight -> USDT Custody Safe
+USDT buyer debit = product USDT leg + freight
+Custody receipt = Custody product USDT + freight -> USDT Custody Safe
 NPL buyer debit  = 30% of Oracle-equivalent list price
 NPL Burn         = 20% of Oracle-equivalent list price -> dead address
 NPL rewards      = 10% of Oracle-equivalent list price -> NPL Reward Safe
@@ -63,9 +67,9 @@ reverts the whole call. A successful call leaves the Router's prior USDT and NPL
 balances unchanged. There is no arbitrary withdrawal, business refund or
 on-chain Claim function.
 
-`PaymentCompleted` records classification, product USDT, freight USDT, total
-USDT paid, exact NPL paid/Burn/reward amounts, BNM Locked points, reservation
-and immutable snapshot hash.
+`PaymentCompleted` records classification, product USDT, service fee, Custody
+product USDT, freight USDT, total USDT paid, exact NPL paid/Burn/reward amounts,
+BNM Locked points, reservation and immutable snapshot hash.
 `MerchantReceivableSnapshotted` records merchant base receivable, concession,
 net receivable and allocation hash. These events are evidence for the canonical
 off-chain double-entry ledger; they are not settlement authorization.
@@ -111,12 +115,13 @@ The future deployment order is:
 3. `TwapOracleAdapterV2`
 4. `PaymentRouterV2`
 
-Governance Safe, USDT Custody Safe, NPL Reward Safe, Operations Treasury Safe,
-secondary policy signer, quote signer, TWAP source and primary/fallback RPC are
-`ExternalBlocked`. Commercial allocation destinations remain
-`DecisionBlocked`. Until those inputs, bytecode verification, role verification,
-full local gates and a separate approved transaction plan exist, no deployment
-or mainnet transaction is permitted.
+The five configured Safes and primary/fallback RPC have passed read-only runtime
+checks, and the configured technical wallet supplies the local deployment,
+secondary-signing, quote-signing and finality roles. Safe owners and thresholds
+remain user-managed. There are no current business `DecisionBlocked` entries.
+Production TWAP source/codehash attestation, deployed bytecode, runtime roles,
+production services and an exact separately approved transaction packet remain
+`ExternalBlocked`; no deployment or mainnet transaction is permitted.
 
 Every deployed contract manifest entry must record its address, deployment
 block and actual runtime `deployedCodeHash`. The external TWAP source additionally

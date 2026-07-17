@@ -10,29 +10,6 @@ import coordinatedManifest from '../../../packages/core-artifacts/coordinated-ma
 import contractManifest from '../../../packages/core-artifacts/contracts/contract-manifest.json' with { type: 'json' };
 import { CoreError } from './errors.ts';
 
-const decisionVariables = [
-  'PLATFORM_SERVICE_FEE_BPS',
-  'SECKILL_PRIZE_POOL_BPS',
-  'MERCHANT_STORE_REWARD_BPS',
-  'MERCHANT_CONCESSION_DESTINATIONS_JSON',
-  'CIRCULATION_REWARD_POOL_ADDRESS',
-  'GENESIS_CREDENTIAL_ADDRESS',
-  'GENESIS_CREDENTIAL_TOKEN_ID',
-] as const;
-
-const unresolvedPublishedDecisions = [
-  'FIXED_REMAINDER_ACCOUNTS',
-  'PICKUP_TIMEOUT_AND_TAKEOVER_EVIDENCE',
-  'EMPTY_SESSION_INJECTED_PRIZE_ALLOCATION',
-] as const;
-
-const paymentUnresolvedPublishedDecisions = [
-  'FIXED_REMAINDER_ACCOUNTS',
-  'EMPTY_SESSION_INJECTED_PRIZE_ALLOCATION',
-] as const;
-
-const accountDecisionVariables = ['PII_RETENTION_POLICY_VERSION'] as const;
-
 const externalVariables = [
   'DATABASE_URL',
   'AUDIT_DATABASE_URL',
@@ -40,6 +17,7 @@ const externalVariables = [
   'JWT_SECRET',
   'AUTH_DOMAIN',
   'AUTH_URI',
+  'PII_RETENTION_POLICY_VERSION',
   'DELIVERY_DATA_ENCRYPTION_KEY',
   'TRACKING_HASH_KEY',
   'AMAP_WEB_SERVICE_KEY',
@@ -263,14 +241,9 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
   }
   validateFrozenOverrides(env);
 
-  const missingDecisionVariables = decisionVariables.filter((name) => !env[name]);
-  const missingAccountDecisionVariables = accountDecisionVariables.filter((name) => !env[name]);
-  const decisionBlocked = [
-    ...missingDecisionVariables,
-    ...missingAccountDecisionVariables,
-    ...unresolvedPublishedDecisions,
-  ];
-  const paymentDecisionBlocked = [...missingDecisionVariables, ...paymentUnresolvedPublishedDecisions];
+  const manifestDecisionBlocked: readonly string[] = coordinatedManifest.decisionBlocked;
+  const decisionBlocked = [...manifestDecisionBlocked];
+  const paymentDecisionBlocked = [...manifestDecisionBlocked];
   const deploymentReady = coordinatedDeploymentReady();
   const paymentRouterDeployment = manifestContractDeployment('PaymentRouterV2');
   const paymentRouterAddress = paymentRouterDeployment?.address;
@@ -296,7 +269,6 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     ...(!beneficiaryRegistryAddress ? ['BENEFICIARY_REGISTRY_ADDRESS_MANIFEST'] : []),
     ...(!twapOracleAddress ? ['TWAP_ORACLE_ADDRESS_MANIFEST'] : []),
   ];
-  if (missingDecisionVariables.length === 0) validateDecisionValues(env);
   validateProductionEndpoints(env);
   if (env.SAFE_INTERNAL_MTLS_ENABLED && env.SAFE_INTERNAL_MTLS_ENABLED !== 'true') {
     throw new CoreError('InvalidRequest', 'SAFE_INTERNAL_MTLS_ENABLED must be true', 500);
@@ -551,25 +523,24 @@ function validateAuthOrigin(env: Readonly<Record<string, string | undefined>>) {
 }
 
 function validateDistinctAuthorities(env: Readonly<Record<string, string | undefined>>) {
-  const names = [
-    'PLATFORM_SAFE_ADDRESS',
+  const technicalAuthorities = [
     'SECONDARY_SIGNER_ADDRESS',
     'QUOTE_SIGNER_ADDRESS',
     'FINALITY_SIGNER_ADDRESS',
-  ];
-  const configured = names.map((name) => env[name]?.toLowerCase()).filter((value): value is string => Boolean(value));
-  if (new Set(configured).size !== configured.length) {
-    throw new CoreError('InvalidRequest', 'Safe and signer authorities must use distinct addresses', 500);
-  }
-  const custodySafes = [
+  ].map((name) => env[name]?.toLowerCase()).filter((value): value is string => Boolean(value));
+  const safes = [
     env.PLATFORM_SAFE_ADDRESS,
     env.PLATFORM_SERVICE_FEE_SAFE_ADDRESS,
     env.USDT_CUSTODY_SAFE_ADDRESS,
     env.NPL_REWARD_SAFE_ADDRESS,
     env.OPERATIONS_TREASURY_SAFE_ADDRESS,
   ].filter((value): value is string => Boolean(value)).map((value) => value.toLowerCase());
-  if (new Set(custodySafes).size !== custodySafes.length) {
+  if (new Set(safes).size !== safes.length) {
     throw new CoreError('InvalidRequest', 'Governance, fee, custody, reward and operations Safes must be distinct', 500);
+  }
+  const safeSet = new Set(safes);
+  if (technicalAuthorities.some((authority) => safeSet.has(authority))) {
+    throw new CoreError('InvalidRequest', 'Technical signer authorities must not use a Safe address', 500);
   }
 }
 
@@ -643,23 +614,6 @@ function safeExpectation(
   };
 }
 
-function validateDecisionValues(env: Readonly<Record<string, string | undefined>>) {
-  for (const name of ['PLATFORM_SERVICE_FEE_BPS', 'SECKILL_PRIZE_POOL_BPS', 'MERCHANT_STORE_REWARD_BPS']) {
-    const value = Number(env[name]);
-    if (!Number.isInteger(value) || value < 0 || value > 10_000) {
-      throw new CoreError('InvalidRequest', `${name} must be integer BPS`, 500);
-    }
-  }
-  normalizeOptionalAddress(env.CIRCULATION_REWARD_POOL_ADDRESS);
-  validateConcessionDestinations(env.MERCHANT_CONCESSION_DESTINATIONS_JSON!);
-  normalizeOptionalAddress(env.GENESIS_CREDENTIAL_ADDRESS);
-  try {
-    if (BigInt(env.GENESIS_CREDENTIAL_TOKEN_ID!) < 0n) throw new Error('negative token id');
-  } catch {
-    throw new CoreError('InvalidRequest', 'GENESIS_CREDENTIAL_TOKEN_ID must be a non-negative integer', 500);
-  }
-}
-
 function validateFrozenOverrides(env: Readonly<Record<string, string | undefined>>) {
   const exact = [
     ['REQUIRED_CONFIRMATIONS', '15'],
@@ -672,33 +626,6 @@ function validateFrozenOverrides(env: Readonly<Record<string, string | undefined
       throw new CoreError('InvalidRequest', `${name} is frozen at ${expected}`, 500);
     }
   }
-}
-
-function validateConcessionDestinations(value: string) {
-  let destinations: unknown;
-  try {
-    destinations = JSON.parse(value);
-  } catch {
-    throw new CoreError('InvalidRequest', 'MERCHANT_CONCESSION_DESTINATIONS_JSON must be valid JSON', 500);
-  }
-  if (!Array.isArray(destinations) || destinations.length === 0) {
-    throw new CoreError('InvalidRequest', 'Merchant concession destinations are required', 500);
-  }
-  let total = 0;
-  let previous = '';
-  for (const item of destinations) {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) {
-      throw new CoreError('InvalidRequest', 'Invalid merchant concession destination', 500);
-    }
-    const { account, weightBps } = item as { account?: unknown; weightBps?: unknown };
-    const normalized = typeof account === 'string' ? account.toLowerCase() : '';
-    if (!/^0x[0-9a-f]{40}$/.test(normalized) || normalized <= previous || !Number.isInteger(weightBps) || (weightBps as number) <= 0) {
-      throw new CoreError('InvalidRequest', 'Merchant concession destinations must be sorted and positive', 500);
-    }
-    total += weightBps as number;
-    previous = normalized;
-  }
-  if (total !== 10_000) throw new CoreError('InvalidRequest', 'Merchant concession destination weights must sum to 100%', 500);
 }
 
 function parseOptionalPositiveBigInt(value: string | undefined, name: string) {

@@ -9,7 +9,7 @@ The file contains no secrets. It is committed with the release so both
 
 ```json
 {
-  "artifactVersion": "2.0.0-payment.1",
+  "artifactVersion": "2.0.0-settlement-admin.15",
   "chainId": 56,
   "deploymentAuthorized": true,
   "authorizationEvidenceHash": "0x...32-byte-release-evidence-hash...",
