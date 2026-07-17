@@ -20,6 +20,7 @@ import {
 import type { CanonicalPaymentIntent } from '../../server/api/checkout.ts';
 import { NPL_ADDRESS, USDT_ADDRESS } from '../../server/api/enums.ts';
 import { paymentIntentHash } from '../../server/api/payment-signing.ts';
+import { paymentAllocationSetHash, paymentBeneficiarySetHash } from '../../server/api/payment-policy.ts';
 import type { ChainSegmentBlock } from '../../server/chain/indexer.ts';
 
 const PLATFORM_ROOT = fileURLToPath(new URL('../..', import.meta.url));
@@ -45,14 +46,13 @@ export interface LocalPaymentChainResult {
   transactionHash: string;
   segment: ChainSegmentBlock[];
   safes: {
+    platformServiceFee: string;
     usdtCustody: string;
     nplReward: string;
     operationsTreasury: string;
   };
-  contracts: {
-    genesisCredential: string;
-  };
   balances: {
+    platformServiceFeeUsdt: string;
     custodyUsdt: string;
     burnedNpl: string;
     rewardNpl: string;
@@ -84,21 +84,28 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
   const safeAddress = safeWallet.address.toLowerCase();
   const buyerAddress = buyerWallet.address.toLowerCase();
   const merchantAddress = merchantWallet.address.toLowerCase();
+  const platformServiceFee = '0x0000000000000000000000000000000000007000';
   const usdtCustody = '0x0000000000000000000000000000000000007001';
   const nplReward = '0x0000000000000000000000000000000000007002';
   const operationsTreasury = '0x0000000000000000000000000000000000007003';
   const circulationPool = '0x0000000000000000000000000000000000007004';
   const beneficiaryAddresses = {
-    genesis: buyerAddress,
+    genesis: '0x0000000000000000000000000000000000000000',
+    genesisNode: '0x0000000000000000000000000000000000005002',
     directReferral: '0x0000000000000000000000000000000000005003',
     district: '0x0000000000000000000000000000000000005004',
     city: '0x0000000000000000000000000000000000005005',
     province: '0x0000000000000000000000000000000000005006',
     region: '0x0000000000000000000000000000000000005007',
-    operations: '0x0000000000000000000000000000000000006001',
+    operations: [
+      '0x0000000000000000000000000000000000006001',
+      '0x0000000000000000000000000000000000006002',
+      '0x0000000000000000000000000000000000006003',
+      '0x0000000000000000000000000000000000006004',
+    ],
   } as const;
   const regionCodeHash = keccak256(toUtf8Bytes('210211'));
-  const concessionAllocationHash = keccak256(toUtf8Bytes('test-concession-allocation'));
+  const concessionAllocationHash = paymentAllocationSetHash();
   const oracleVersion = keccak256(toUtf8Bytes('pancake-v2-npl-usdt-30m-v1'));
 
   const tokenArtifact = artifact('Mocks.sol/CallbackERC20.json');
@@ -109,7 +116,6 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
   const usdt = new Contract(USDT_ADDRESS, tokenArtifact.abi, safe);
   const npl = new Contract(NPL_ADDRESS, tokenArtifact.abi, safe);
 
-  const credential = await deploy(artifact('Mocks.sol/MockCredential.json'), safe);
   const twapSource = await deploy(artifact('Mocks.sol/MockTwapSource.json'), safe);
   const policyRegistry = await deploy(
     artifact('PolicyRegistryV2.sol/PolicyRegistryV2.json'),
@@ -122,7 +128,6 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
     [await policyRegistry.getAddress()],
   );
 
-  await transact(credential, 'mint', [buyerAddress]);
   const latest = await provider.getBlock('latest');
   if (!latest) throw new Error('Local Anvil head is unavailable');
   const publicationDeadline = BigInt(latest.timestamp + 3_600);
@@ -140,10 +145,12 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
     rawSignature(secondaryWallet, regionDigest),
   ]);
 
-  const operationsAccounts = [beneficiaryAddresses.operations];
-  const operationsWeights = [10_000];
-  const beneficiarySetHash = keccak256(
-    AbiCoder.defaultAbiCoder().encode(['address[]', 'uint16[]'], [operationsAccounts, operationsWeights]),
+  const genesisNodeDestinations = [{ account: beneficiaryAddresses.genesisNode, weightBps: 10_000 }];
+  const operationsAccounts = [...beneficiaryAddresses.operations];
+  const operationsWeights = [2_500, 2_500, 2_500, 2_500];
+  const beneficiarySetHash = paymentBeneficiarySetHash(
+    genesisNodeDestinations,
+    operationsAccounts.map((account) => ({ account, weightBps: 2_500 })),
   );
   const policy = {
     version: 1,
@@ -158,8 +165,8 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
     provinceBps: 60,
     regionBps: 40,
     operationsBps: 400,
-    platformFeeBps: 500,
-    seckillPrizeBps: 1_000,
+    platformFeeBps: 100,
+    seckillPrizeBps: 0,
     seckillMainDuration: 3_600,
     relayInitial: 60,
     relayIncrement: 30,
@@ -172,9 +179,6 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
     nplRewardSafe: nplReward,
     operationsTreasurySafe: operationsTreasury,
     circulationPool,
-    genesisCredential: await credential.getAddress(),
-    genesisTokenId: 1,
-    genesisCredentialStandard: 1,
     beneficiarySetHash,
     concessionDestinationSetHash: concessionAllocationHash,
     decisionEvidenceHash: keccak256(toUtf8Bytes('local-payment-policy-evidence')),
@@ -203,6 +207,7 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
       await policyRegistry.getAddress(),
       await beneficiaryRegistry.getAddress(),
       await oracle.getAddress(),
+      platformServiceFee,
       usdtCustody,
       nplReward,
       operationsTreasury,
@@ -231,7 +236,6 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
   });
   const {
     merchantConcessionAllocations: _merchantConcessionAllocations,
-    otherUsdtAllocations: _otherUsdtAllocations,
     nplRewardAllocations: _nplRewardAllocations,
     requiredConfirmations: _requiredConfirmations,
     ...paymentFields
@@ -297,9 +301,9 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
     routerAddress,
     transactionHash: receipt.hash.toLowerCase(),
     segment,
-    safes: { usdtCustody, nplReward, operationsTreasury },
-    contracts: { genesisCredential: (await credential.getAddress()).toLowerCase() },
+    safes: { platformServiceFee, usdtCustody, nplReward, operationsTreasury },
     balances: {
+      platformServiceFeeUsdt: String(await readContract<bigint>(usdt, 'balanceOf', [platformServiceFee])),
       custodyUsdt: String(await readContract<bigint>(usdt, 'balanceOf', [usdtCustody])),
       burnedNpl: String(await readContract<bigint>(npl, 'balanceOf', [BURN_ADDRESS])),
       rewardNpl: String(await readContract<bigint>(npl, 'balanceOf', [nplReward])),
@@ -316,7 +320,16 @@ function paymentIntent(input: {
   oracleVersion: string;
   regionCodeHash: string;
   concessionAllocationHash: string;
-  beneficiaries: Record<'genesis' | 'directReferral' | 'district' | 'city' | 'province' | 'region' | 'operations', string>;
+  beneficiaries: {
+    genesis: string;
+    genesisNode: string;
+    directReferral: string;
+    district: string;
+    city: string;
+    province: string;
+    region: string;
+    operations: readonly string[];
+  };
 }): CanonicalPaymentIntent {
   const amount = (value: bigint) => (value * ONE_TOKEN).toString();
   return {
@@ -340,16 +353,18 @@ function paymentIntent(input: {
     nonce: '1',
     listPriceUsdt: amount(100n),
     productUsdtPaymentAmount: amount(70n),
+    platformServiceFeeUsdt: amount(1n),
+    custodyProductUsdt: amount(69n),
     freightUsdt: '0',
     usdtPaymentAmount: amount(70n),
     nplQuoteAmount: amount(1_000n),
     nplPaymentAmount: amount(300n),
     nplBurnAmount: amount(200n),
     nplRewardAmount: amount(100n),
-    merchantBaseReceivableUsdt: amount(60n),
+    merchantBaseReceivableUsdt: amount(69n),
     merchantConcessionBps: 2_500,
-    merchantConcessionAmount: amount(15n),
-    merchantNetReceivableUsdt: amount(45n),
+    merchantConcessionAmount: (1_725n * ONE_TOKEN / 100n).toString(),
+    merchantNetReceivableUsdt: (5_175n * ONE_TOKEN / 100n).toString(),
     concessionAllocationHash: input.concessionAllocationHash,
     bnmAmount: amount(100n),
     seckill: false,
@@ -363,20 +378,18 @@ function paymentIntent(input: {
       region: input.beneficiaries.region,
     },
     merchantConcessionAllocations: [
-      { account: '0x7000000000000000000000000000000000000001', amount: amount(6n) },
-      { account: '0x7000000000000000000000000000000000000002', amount: amount(9n) },
-    ],
-    otherUsdtAllocations: [
-      { account: '0x7000000000000000000000000000000000000003', amount: amount(10n), purpose: 'POLICY_ALLOCATION' },
+      { pool: 'SECKILL_PRIZE', amount: (1_725n * ONE_TOKEN * 4_500n / 1_000_000n).toString(), balanceState: 'LOCKED' },
+      { pool: 'NODE_REWARD', amount: (1_725n * ONE_TOKEN * 4_500n / 1_000_000n).toString(), balanceState: 'LOCKED' },
+      { pool: 'REWARD_RESERVE', amount: (1_725n * ONE_TOKEN * 1_000n / 1_000_000n).toString(), balanceState: 'LOCKED' },
     ],
     nplRewardAllocations: [
-      { role: 'genesis', account: input.beneficiaries.genesis, amount: amount(20n) },
+      { role: 'genesis', account: input.beneficiaries.genesisNode, amount: amount(20n) },
       { role: 'directReferral', account: input.beneficiaries.directReferral, amount: amount(10n) },
       { role: 'district', account: input.beneficiaries.district, amount: amount(12n) },
       { role: 'city', account: input.beneficiaries.city, amount: amount(8n) },
       { role: 'province', account: input.beneficiaries.province, amount: amount(6n) },
       { role: 'region', account: input.beneficiaries.region, amount: amount(4n) },
-      { role: 'operations', account: input.beneficiaries.operations, amount: amount(40n) },
+      ...input.beneficiaries.operations.map((account) => ({ role: 'operations', account, amount: amount(10n) })),
     ],
     requiredConfirmations: 15,
   };

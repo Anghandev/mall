@@ -46,6 +46,7 @@ const externalVariables = [
   'BSC_RPC_URL',
   'BSC_FALLBACK_RPC_URL',
   'PLATFORM_SAFE_ADDRESS',
+  'PLATFORM_SERVICE_FEE_SAFE_ADDRESS',
   'USDT_CUSTODY_SAFE_ADDRESS',
   'NPL_REWARD_SAFE_ADDRESS',
   'OPERATIONS_TREASURY_SAFE_ADDRESS',
@@ -119,6 +120,7 @@ const paymentExternalVariables = [
   'BSC_RPC_URL',
   'BSC_FALLBACK_RPC_URL',
   'PLATFORM_SAFE_ADDRESS',
+  'PLATFORM_SERVICE_FEE_SAFE_ADDRESS',
   'USDT_CUSTODY_SAFE_ADDRESS',
   'NPL_REWARD_SAFE_ADDRESS',
   'OPERATIONS_TREASURY_SAFE_ADDRESS',
@@ -195,6 +197,7 @@ export interface CoreConfig {
   beneficiaryRegistryAddress: string | undefined;
   twapOracleAddress: string | undefined;
   safeAddress: string | undefined;
+  platformServiceFeeSafeAddress: string | undefined;
   usdtCustodySafeAddress: string | undefined;
   nplRewardSafeAddress: string | undefined;
   operationsTreasurySafeAddress: string | undefined;
@@ -342,6 +345,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     beneficiaryRegistryAddress,
     twapOracleAddress,
     safeAddress: normalizeOptionalAddress(env.PLATFORM_SAFE_ADDRESS),
+    platformServiceFeeSafeAddress: normalizeOptionalAddress(env.PLATFORM_SERVICE_FEE_SAFE_ADDRESS),
     usdtCustodySafeAddress: normalizeOptionalAddress(env.USDT_CUSTODY_SAFE_ADDRESS),
     nplRewardSafeAddress: normalizeOptionalAddress(env.NPL_REWARD_SAFE_ADDRESS),
     operationsTreasurySafeAddress: normalizeOptionalAddress(env.OPERATIONS_TREASURY_SAFE_ADDRESS),
@@ -558,12 +562,14 @@ function validateDistinctAuthorities(env: Readonly<Record<string, string | undef
     throw new CoreError('InvalidRequest', 'Safe and signer authorities must use distinct addresses', 500);
   }
   const custodySafes = [
+    env.PLATFORM_SAFE_ADDRESS,
+    env.PLATFORM_SERVICE_FEE_SAFE_ADDRESS,
     env.USDT_CUSTODY_SAFE_ADDRESS,
     env.NPL_REWARD_SAFE_ADDRESS,
     env.OPERATIONS_TREASURY_SAFE_ADDRESS,
   ].filter((value): value is string => Boolean(value)).map((value) => value.toLowerCase());
   if (new Set(custodySafes).size !== custodySafes.length) {
-    throw new CoreError('InvalidRequest', 'Custody, reward and operations Safes must be distinct', 500);
+    throw new CoreError('InvalidRequest', 'Governance, fee, custody, reward and operations Safes must be distinct', 500);
   }
 }
 

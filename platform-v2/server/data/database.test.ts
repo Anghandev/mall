@@ -13,7 +13,7 @@ import type { CanonicalPaymentIntent } from '../api/checkout.ts';
 import { CORE_ARTIFACT_VERSION, USDT_ADDRESS } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import { MiddlewareMonitoringSource, RpcExplorerHeightSource } from '../api/monitoring-sources.ts';
-import { paymentAllocationSetHash } from '../api/payment-policy.ts';
+import { paymentAllocationSetHash, paymentBeneficiarySetHash } from '../api/payment-policy.ts';
 import { paymentIntentHash } from '../api/payment-signing.ts';
 import { AbiEventDecoder } from '../chain/abi-decoder.ts';
 import { BnmAvailabilityWorker } from '../chain/bnm-availability-worker.ts';
@@ -65,6 +65,7 @@ import { leaseDurableJobs } from './queue.ts';
 import { SettlementService } from './settlement-service.ts';
 import { SeckillService } from './seckill-service.ts';
 import { SeckillOperationsService } from './seckill-operations-service.ts';
+import { settleMaturedSeckillPrizes } from './seckill-prize-service.ts';
 import { TakeoverFundingService, type TakeoverFundingApprovalInput } from './takeover-funding-service.ts';
 import { TakeoverCaseService } from './takeover-case-service.ts';
 import { OrderStatementService } from './order-statement-service.ts';
@@ -136,6 +137,9 @@ test('business and audit migrations apply from empty databases', async () => {
       '027_merchant_governance_completion.sql',
       '028_buyer_uid.sql',
       '029_usdt_freight.sql',
+      '030_platform_service_fee.sql',
+      '031_change_risk_alerts.sql',
+      '032_seckill_prize_settlement.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -624,6 +628,30 @@ test('buyer account data is encrypted, tenant scoped and creates targets only fr
     const serializedAudit = JSON.stringify(auditPayloads.rows);
     assert.equal(serializedAudit.includes('13800138000'), false);
     assert.equal(serializedAudit.includes('Zhang San'), false);
+    for (let index = 0; index < 7; index += 1) {
+      await service.createBuyerAddress(buyer, {
+        label: `Alert ${index}`,
+        recipientName: 'Risk Evidence',
+        phone: '13700137000',
+        detailAddress: `Dalian Software Park Building ${index + 3}`,
+        longitude: 121.62 + index / 1_000,
+        latitude: 38.92 + index / 1_000,
+        isDefault: false,
+        idempotencyKey: `buyer-address-alert-${index}`,
+      });
+    }
+    const addressAlert = await db.query<{ signal_type: string; source_type: string }>(
+      "SELECT signal_type, source_type FROM core.risk_observations WHERE signal_type = 'ADDRESS_CHANGE'",
+    );
+    assert.deepEqual(addressAlert.rows, [{ signal_type: 'ADDRESS_CHANGE', source_type: 'ACCOUNT_SERVICE' }]);
+    assert.equal((await db.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM core.risk_restrictions WHERE subject_value = $1',
+      [BUYER],
+    )).rows[0]?.count, '0');
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.audit_outbox_events WHERE event_type = 'RiskChangeThresholdReached'",
+    )).rows[0]?.count, '1');
+    await assert.doesNotReject(assertWalletPaymentAllowed(adapter(db), BUYER, now));
     await db.query(
       `UPDATE core.buyer_saved_addresses
        SET encryption_tag = decode($3, 'hex')
@@ -830,14 +858,13 @@ test('merchant lifecycle encrypts qualification and governs exact review transit
       legalId: '210211199001011234',
       contactPhone: '13800138000',
       settlementWallet,
-      level: 'V1' as const,
       idempotencyKey: 'merchant-application-create-1',
       correlationId: 'merchant-application-create-correlation',
     };
     const created = await service.createApplication(operatorActor, applicationInput);
     const merchantId = created.merchant.merchantId;
     assert.equal(created.merchant.status, 'PENDING');
-    assert.equal(created.levelPolicy.status, 'DecisionBlocked');
+    assert.deepEqual(created.levelPolicy, { status: 'Deprecated' });
     assert.deepEqual(created.analytics.fulfillment.fastShip48h, {
       status: 'UNAVAILABLE', numerator: '0', denominator: '0', bps: null,
       reason: 'NO_ELIGIBLE_DELIVERY_ORDERS',
@@ -935,7 +962,6 @@ test('merchant lifecycle encrypts qualification and governs exact review transit
       legalName: applicationInput.legalName,
       legalId: applicationInput.legalId,
       contactPhone: applicationInput.contactPhone,
-      level: 'V1',
       licenseAssetId: license.assetId,
       expectedVersion: 1,
       idempotencyKey: 'merchant-application-update-license-1',
@@ -1106,15 +1132,7 @@ test('merchant drilldown uses named canonical amounts and fails closed when cont
       clock: () => now,
     });
     const detail = await service.get({ walletAddress: admin.address, roles: ['ADMIN'] }, 'merchant-1');
-    assert.deepEqual(detail.levelPolicy, {
-      status: 'AVAILABLE',
-      configVersionId: 'system-config:merchant-levels:test',
-      version: 1,
-      effectiveFrom: '2020-01-01T00:00:00.000Z',
-      level: 'V1',
-      maxProductSettlementUsdt: '1000000000000000000000000',
-      monthlySeckillQuota: 1_000,
-    });
+    assert.deepEqual(detail.levelPolicy, { status: 'Deprecated' });
     const shanghaiNow = new Date(now.getTime() + 8 * 60 * 60_000);
     const shanghaiDayStart = new Date(Date.UTC(
       shanghaiNow.getUTCFullYear(), shanghaiNow.getUTCMonth(), shanghaiNow.getUTCDate(),
@@ -1356,13 +1374,18 @@ test('local PaymentRouter receipt reaches 15 confirmations and a balanced Postgr
       merchantCostUsdt: intent.merchantBaseReceivableUsdt,
       policyPayload: {
         ...paymentPolicyPayload(),
+        platformServiceFeeSafe: execution.safes.platformServiceFee,
         usdtCustodySafe: execution.safes.usdtCustody,
         nplRewardSafe: execution.safes.nplReward,
         operationsTreasurySafe: execution.safes.operationsTreasury,
-        genesisCredential: execution.contracts.genesisCredential,
         concessionDestinationSetHash: intent.concessionAllocationHash,
+        genesisNodeDestinations: intent.nplRewardAllocations
+          .filter((allocation) => allocation.role === 'genesis')
+          .map((allocation) => ({ account: allocation.account, weightBps: 10_000 })),
         operationsDestinations: [
-          { account: intent.nplRewardAllocations.find((allocation) => allocation.role === 'operations')!.account, weightBps: 10_000 },
+          ...intent.nplRewardAllocations
+            .filter((allocation) => allocation.role === 'operations')
+            .map((allocation) => ({ account: allocation.account, weightBps: 2_500 })),
         ],
       },
     });
@@ -1457,7 +1480,8 @@ test('local PaymentRouter receipt reaches 15 confirmations and a balanced Postgr
       LOCKED: intent.bnmAmount,
     });
     assert.deepEqual(execution.balances, {
-      custodyUsdt: intent.usdtPaymentAmount,
+      platformServiceFeeUsdt: intent.platformServiceFeeUsdt,
+      custodyUsdt: (BigInt(intent.custodyProductUsdt) + BigInt(intent.freightUsdt)).toString(),
       burnedNpl: intent.nplBurnAmount,
       rewardNpl: intent.nplRewardAmount,
       routerUsdt: '0',
@@ -1737,20 +1761,8 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
     assert.equal(sessionAction.state, 'DRAFT');
     assert.equal(sessionAction.sessionPlan?.inventory, '4');
     assert.equal(sessionAction.sessionPlan?.timers.mainDurationSeconds, 3_600);
-    assert.equal(
-      ((sessionAction.sessionPlan?.snapshot as { merchantLevelPolicy: { monthlySeckillQuota: number } }).merchantLevelPolicy).monthlySeckillQuota,
-      1,
-    );
+    assert.equal('merchantLevelPolicy' in sessionAction.sessionPlan!.snapshot, false);
     assert.equal((await service.createSession(operatorActor, sessionInput)).actionId, sessionAction.actionId);
-    await assert.rejects(
-      service.createSession(operatorActor, {
-        ...sessionInput,
-        inventory: 1,
-        startsAt: new Date(now.getTime() + 90 * 60_000).toISOString(),
-        idempotencyKey: 'seckill-session-quota-exhausted',
-      }),
-      /monthly seckill quota is exhausted/,
-    );
     assert.deepEqual(
       (await db.query<{ stock_available: number; stock_seckill_locked: number }>(
         'SELECT stock_available, stock_seckill_locked FROM core.skus WHERE sku_id = $1',
@@ -1938,6 +1950,13 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
       (await db.query<{ phase: string }>('SELECT phase FROM core.seckill_sessions WHERE session_id = $1', [sessionAction.sessionId])).rows[0]?.phase,
       'FORCE_CLOSED',
     );
+    const secondSession = await service.createSession(operatorActor, {
+      ...sessionInput,
+      inventory: 1,
+      startsAt: new Date(now.getTime() + 90 * 60_000).toISOString(),
+      idempotencyKey: 'seckill-session-no-level-quota',
+    });
+    assert.equal(secondSession.state, 'DRAFT');
   } finally {
     await db.close();
   }
@@ -1969,7 +1988,7 @@ test('catalog payment service builds an authoritative idempotent quote and recor
       },
       beneficiaries: {
         resolve: async () => ({
-          genesis: '0x5000000000000000000000000000000000000001',
+          genesis: '0x0000000000000000000000000000000000000000',
           directReferral: '0x5000000000000000000000000000000000000002',
           district: '0x5000000000000000000000000000000000000003',
           city: '0x5000000000000000000000000000000000000004',
@@ -2157,8 +2176,8 @@ test('business analytics uses canonical Asia Shanghai finality windows and fail-
     assert.deepEqual(merchant.sales, {
       listPriceUsdt: '100',
       buyerUsdtPaid: '70',
-      merchantBaseReceivableUsdt: '60',
-      merchantNetReceivableUsdt: '45',
+      merchantBaseReceivableUsdt: '69',
+      merchantNetReceivableUsdt: '52',
     });
     assert.deepEqual(merchant.shipmentRate, { numerator: '0', denominator: '1', bps: '0' });
     assert.equal(merchant.product?.state, 'SOLD_OUT');
@@ -2432,20 +2451,13 @@ test('catalog management enforces product scope, signed preview, review locks an
         proposedSeckillInventory: 3,
       }],
     };
+    await seedMerchantLevelConfig(db, 1_000, '50', 2);
     const draft = await service.saveProductSlot(merchant, 'store-catalog-1', productInput);
     const productId = String(draft.productId);
     const skuId = String((draft.skus as Array<{ skuId: string }>)[0]!.skuId);
     assert.equal(draft.lifecycleState, 'DRAFT');
     assert.deepEqual(draft.allowedActions, ['SAVE_DRAFT', 'CREATE_CONCESSION_PREVIEW', 'SUBMIT_REVIEW', 'DELIST']);
-    await seedMerchantLevelConfig(db, 1_000, '50', 2);
     assert.equal((await service.saveProductSlot(merchant, 'store-catalog-1', productInput)).productId, productId);
-    await assert.rejects(
-      service.saveProductSlot(merchant, 'store-catalog-1', {
-        ...productInput,
-        idempotencyKey: 'catalog-product-over-level-limit',
-      }),
-      /product settlement amount exceeds the published limit/,
-    );
     await seedMerchantLevelConfig(db, 999, '1000000000000000000000000', 3);
     const tagBatchInput = {
       productIds: [productId],
@@ -2561,9 +2573,9 @@ test('catalog management enforces product scope, signed preview, review locks an
         allocations: Array<{ amount: string }>;
       }>;
     };
-    assert.equal(previewPayload.items[0]?.merchantConcessionAmount, '15');
-    assert.equal(previewPayload.items[0]?.merchantNetReceivableUsdt, '45');
-    assert.deepEqual(previewPayload.items[0]?.allocations.map((item) => item.amount), ['6', '9']);
+    assert.equal(previewPayload.items[0]?.merchantConcessionAmount, '17');
+    assert.equal(previewPayload.items[0]?.merchantNetReceivableUsdt, '52');
+    assert.deepEqual(previewPayload.items[0]?.allocations.map((item) => item.amount), ['7', '7', '3']);
     assert.equal((preview.authorization as { signature: string }).signature, `0x${'1'.repeat(130)}`);
 
     const submitted = await service.submitReview(merchant, productId, {
@@ -3049,7 +3061,7 @@ test('seckill quote locks both inventories and final classification releases the
       },
       beneficiaries: {
         resolve: async () => ({
-          genesis: '0x5000000000000000000000000000000000000001',
+          genesis: '0x0000000000000000000000000000000000000000',
           directReferral: '0x5000000000000000000000000000000000000002',
           district: '0x5000000000000000000000000000000000000003',
           city: '0x5000000000000000000000000000000000000004',
@@ -3074,6 +3086,8 @@ test('seckill quote locks both inventories and final classification releases the
       regionCodeHash: HASH,
     };
     const quote = await service.createSeckillQuote(BUYER, request);
+    const seckillPrizeAmount = quote.dual.seckill.merchantConcessionAllocations
+      .find((allocation) => allocation.pool === 'SECKILL_PRIZE')!.amount;
     assert.equal(quote.dual.seckill.listPriceUsdt, '90');
     assert.equal(quote.dual.fallback.listPriceUsdt, '100');
     assert.deepEqual(
@@ -3177,7 +3191,7 @@ test('seckill quote locks both inventories and final classification releases the
       transferable: false,
     }]);
     const genesisAssets = await settlementProjection.list({
-      walletAddress: '0x5000000000000000000000000000000000000001',
+      walletAddress: '0x5000000000000000000000000000000000000011',
       roles: ['BUYER'],
     });
     assert.ok(genesisAssets.balances.some((balance) =>
@@ -3242,7 +3256,7 @@ test('seckill quote locks both inventories and final classification releases the
       reasonCode: 'SECKILL_DELIVERY_DISPUTE',
     });
     assert.deepEqual(await purposeBalances(db, quote.orderId, 'SECKILL_PRIZE_LIABILITY'), {
-      DISPUTED: '2',
+      DISPUTED: seckillPrizeAmount,
     });
     await fulfillment.decideArbitration(arbitrator, quote.orderId, {
       idempotencyKey: 'seckill-prize-fulfill',
@@ -3251,14 +3265,14 @@ test('seckill quote locks both inventories and final classification releases the
       noteCode: 'PRIZE_REMAINS_LOCKED',
     });
     assert.deepEqual(await purposeBalances(db, quote.orderId, 'SECKILL_PRIZE_LIABILITY'), {
-      LOCKED: '2',
+      LOCKED: seckillPrizeAmount,
     });
     assert.deepEqual(await liabilityStates(db, quote.orderId, 'AVAILABLE'), {
       BNM_POINTS: '90',
       NPL: '90',
-      USDT: '66',
+      USDT: '62',
     });
-    assert.deepEqual(await liabilityStates(db, quote.orderId, 'LOCKED'), { USDT: '2' });
+    assert.deepEqual(await liabilityStates(db, quote.orderId, 'LOCKED'), { USDT: seckillPrizeAmount });
 
     const selectedEventKey = paymentEventKey(
       event.event.transactionHash,
@@ -3303,6 +3317,264 @@ test('seckill quote locks both inventories and final classification releases the
       { state: 'RELEASED', classification: 'FALLBACK_RETAIL', jobs: '2' },
     ]);
     await assertLedgerBalanced(db, 0, { usdt: 63n, nplReward: 90n, bnm: 90n });
+  } finally {
+    await db.close();
+  }
+});
+
+test('seckill prize freezes the final canonical order and only the reviewed winner can settle the whole session pool', async () => {
+  const db = await createBusinessDatabase();
+  const admin = Wallet.createRandom();
+  const secondary = Wallet.createRandom();
+  try {
+    await seedCatalog(db, 1);
+    const now = new Date(Math.floor(Date.now() / 1000) * 1000);
+    const sessionId = `0x${'6'.repeat(64)}`;
+    await insertLiveSeckillSession(db, sessionId, now, 90);
+    const ids = [`0x${'1'.repeat(64)}`, `0x${'2'.repeat(64)}`, `0x${'3'.repeat(64)}`];
+    const catalog = new CatalogPaymentService({
+      transactions: transactionAdapter(db),
+      signer: {
+        sign: async () => ({
+          signature: `0x${'1'.repeat(130)}`,
+          signer: '0x8888888888888888888888888888888888888888',
+        }),
+      },
+      oracle: {
+        quote: async ({ listPriceUsdt, oracleVersion }) => ({
+          nplQuoteAmount: listPriceUsdt * 10n,
+          oracleVersion,
+        }),
+      },
+      beneficiaries: {
+        resolve: async () => ({
+          genesis: '0x0000000000000000000000000000000000000000',
+          directReferral: '0x5000000000000000000000000000000000000002',
+          district: '0x5000000000000000000000000000000000000003',
+          city: '0x5000000000000000000000000000000000000004',
+          province: '0x5000000000000000000000000000000000000005',
+          region: '0x5000000000000000000000000000000000000006',
+        }),
+      },
+      policies: { assertPublished: async () => undefined },
+      paymentRouterAddress: '0x9999999999999999999999999999999999999999',
+      clock: () => now,
+      bytes32: () => ids.shift()!,
+      nonce: () => 9n,
+    });
+    const quote = await catalog.createSeckillQuote(BUYER, {
+      idempotencyKey: 'seckill-prize-final-order',
+      sessionId,
+      productId: 'product-1',
+      skuId: 'sku-1',
+      quantity: 1,
+      fulfillmentMode: 'DELIVERY',
+      fulfillmentTargetHash: HASH,
+      regionCodeHash: HASH,
+    });
+    const prizeAmount = quote.dual.seckill.merchantConcessionAllocations
+      .find((allocation) => allocation.pool === 'SECKILL_PRIZE')!.amount;
+    const payment = paymentInput(quote.dual.seckill, 'SECKILL');
+    payment.event.blockTimestamp = new Date(now.getTime() + 42_000);
+    payment.event.finalizedAt = new Date(now.getTime() + 84_000);
+    await new PostgresPaymentStore(transactionAdapter(db)).record(payment);
+    const initialRelay = (await db.query<{ relay_deadline: Date }>(
+      'SELECT relay_deadline FROM core.seckill_sessions WHERE session_id = $1',
+      [sessionId],
+    )).rows[0]!.relay_deadline;
+    await recordSeckillRelayProjection(
+      adapter(db),
+      {
+        number: payment.event.blockNumber,
+        hash: payment.event.blockHash,
+        parentHash: blockHash(payment.event.blockNumber - 1),
+        timestamp: Math.floor(payment.event.blockTimestamp.getTime() / 1000),
+      },
+      decodedSeckillRelayEvent(
+        sessionId,
+        quote.orderId,
+        payment.event.blockHash,
+        Math.floor(initialRelay.getTime() / 1000) + 30,
+      ),
+    );
+    await advancePaymentFinality(adapter(db), payment.event.blockNumber + 14);
+    assert.equal((await db.query<{ amount: string; pool: string }>(
+      `SELECT contribution.amount_usdt::text AS amount, session.prize_pool_usdt::text AS pool
+       FROM core.seckill_prize_contributions contribution
+       JOIN core.seckill_sessions session ON session.session_id = contribution.session_id
+       WHERE contribution.order_id = $1`,
+      [quote.orderId],
+    )).rows[0]?.amount, prizeAmount);
+
+    const settlementAt = new Date(now.getTime() + 7 * 60_000);
+    assert.deepEqual(await settleMaturedSeckillPrizes(adapter(db), settlementAt), [sessionId]);
+    const seckill = new SeckillService({ transactions: transactionAdapter(db), clock: () => settlementAt });
+    const pending = await seckill.get(sessionId);
+    assert.equal(pending.winnerWallet, null);
+    assert.equal(pending.prizeSettlement?.state, 'REVIEW_PENDING');
+    assert.equal(pending.prizeSettlement?.candidate?.orderId, quote.orderId);
+    assert.equal(pending.prizeSettlement?.poolAmountUsdt, prizeAmount);
+
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES ($1,'ADMIN',NULL,'ACTIVE',$2)`,
+      [admin.address.toLowerCase(), HASH],
+    );
+    const operations = new SeckillOperationsService({
+      transactions: transactionAdapter(db),
+      governanceSafeAddress: '0x3333333333333333333333333333333333333333',
+      operationsSafeAddress: '0x5555555555555555555555555555555555555555',
+      custodySafeAddress: '0x3333333333333333333333333333333333333333',
+      paymentRouterAddress: '0x6666666666666666666666666666666666666666',
+      secondarySignerAddress: secondary.address,
+      clock: () => settlementAt,
+    });
+    const reviewInput = {
+      decision: 'APPROVE' as const,
+      reasonCode: 'ORDER_VALID',
+      evidenceHash: HASH_2,
+      idempotencyKey: 'seckill-winner-review-approve',
+      correlationId: 'seckill-winner-review-approve',
+    };
+    const approved = await operations.reviewWinner(
+      { walletAddress: admin.address, roles: ['ADMIN'] },
+      sessionId,
+      reviewInput,
+    );
+    assert.equal(approved.state, 'APPROVED');
+    assert.equal(approved.candidate?.buyerWallet, BUYER);
+    assert.equal(approved.payout?.state, 'AVAILABLE');
+    assert.equal((await operations.reviewWinner(
+      { walletAddress: admin.address, roles: ['ADMIN'] },
+      sessionId,
+      reviewInput,
+    )).awardJournalId, approved.awardJournalId);
+    await assert.rejects(
+      operations.reviewWinner(
+        { walletAddress: admin.address, roles: ['ADMIN'] },
+        sessionId,
+        { ...reviewInput, decision: 'REJECT', idempotencyKey: 'seckill-winner-review-replace' },
+      ),
+      (error: unknown) => error instanceof CoreError && error.code === 'InvalidRequest',
+    );
+
+    const settlements = new SettlementService({ transactions: transactionAdapter(db), clock: () => settlementAt });
+    const intent = await settlements.createIntent(
+      { walletAddress: BUYER, roles: ['BUYER'] },
+      { rail: 'PRIZE_USDT', amount: prizeAmount, idempotencyKey: 'seckill-prize-winner-intent' },
+    );
+    assert.equal(intent.intent.wallet, BUYER);
+    assert.equal(intent.intent.recipient, BUYER);
+    assert.equal(intent.intent.amount, prizeAmount);
+    await assert.rejects(
+      settlements.createIntent(
+        { walletAddress: '0x7777777777777777777777777777777777777777', roles: ['BUYER'] },
+        { rail: 'PRIZE_USDT', amount: prizeAmount, idempotencyKey: 'seckill-prize-nonwinner-intent' },
+      ),
+      (error: unknown) => error instanceof CoreError && error.code === 'FinalityPending',
+    );
+    const finalProjection = await seckill.get(sessionId);
+    assert.equal(finalProjection.phase, 'SETTLED');
+    assert.equal(finalProjection.winnerWallet, BUYER);
+    assert.equal(finalProjection.prizeSettlement?.payout?.state, 'AVAILABLE');
+  } finally {
+    await db.close();
+  }
+});
+
+test('empty seckill rolls its existing locked prize into the next session without creating a winner', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    await seedCatalog(db, 2);
+    const now = new Date(Math.floor(Date.now() / 1000) * 1000);
+    const sourceSessionId = `0x${'4'.repeat(64)}`;
+    const targetSessionId = `0x${'5'.repeat(64)}`;
+    await insertLiveSeckillSession(db, sourceSessionId, now, 90);
+    await insertLiveSeckillSession(db, targetSessionId, new Date(now.getTime() + 60 * 60_000), 90);
+    const custodySafe = paymentPolicyPayload().usdtCustodySafe;
+    const safeAccountId = `safe:usdt-custody:${custodySafe}:usdt`;
+    const sourceAccountId = `seckill-prize:${sourceSessionId}:usdt`;
+    await db.query(
+      `INSERT INTO core.ledger_accounts (
+         account_id, owner_type, owner_id, asset, purpose, safe_address
+       ) VALUES
+         ($1,'SAFE',$2,'USDT','SAFE_ASSET',$2),
+         ($3,'BENEFICIARY',$4,'USDT','SECKILL_PRIZE_LIABILITY',NULL)`,
+      [safeAccountId, custodySafe, sourceAccountId, sourceSessionId],
+    );
+    await db.query(
+      'SELECT core.post_resource_balanced_journal($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)',
+      [
+        `journal:empty-prize:${sourceSessionId}`,
+        `empty-prize:${sourceSessionId}`,
+        'SECKILL_PRIZE_INJECTED',
+        'SECKILL_SESSION',
+        sourceSessionId,
+        null,
+        1,
+        HASH,
+        null,
+        null,
+        'GOVERNED_EVIDENCE',
+        HASH,
+        null,
+        JSON.stringify({ source: 'test-injection', amountUsdt: '50' }),
+        JSON.stringify([
+          {
+            account_id: safeAccountId,
+            side: 'DEBIT',
+            amount: '50',
+            balance_state: 'POSTED',
+            backing_safe_address: custodySafe,
+          },
+          {
+            account_id: sourceAccountId,
+            side: 'CREDIT',
+            amount: '50',
+            balance_state: 'LOCKED',
+            backing_safe_address: custodySafe,
+          },
+        ]),
+      ],
+    );
+    await db.query(
+      'UPDATE core.seckill_sessions SET prize_pool_usdt = 50 WHERE session_id = $1',
+      [sourceSessionId],
+    );
+
+    assert.deepEqual(
+      await settleMaturedSeckillPrizes(adapter(db), new Date(now.getTime() + 7 * 60_000)),
+      [sourceSessionId],
+    );
+    const sessions = await db.query<{ session_id: string; phase: string; prize_pool_usdt: string }>(
+      `SELECT session_id, phase, prize_pool_usdt::text
+       FROM core.seckill_sessions WHERE session_id IN ($1,$2) ORDER BY session_id`,
+      [sourceSessionId, targetSessionId],
+    );
+    assert.deepEqual(sessions.rows, [
+      { session_id: sourceSessionId, phase: 'SETTLED', prize_pool_usdt: '0' },
+      { session_id: targetSessionId, phase: 'LIVE', prize_pool_usdt: '50' },
+    ]);
+    const outcome = await db.query<{
+      state: string;
+      candidate_order_id: string | null;
+      rollover_target_session_id: string | null;
+      rollover_journal_id: string | null;
+    }>(
+      `SELECT state, candidate_order_id, rollover_target_session_id, rollover_journal_id
+       FROM core.seckill_prize_settlements WHERE session_id = $1`,
+      [sourceSessionId],
+    );
+    assert.equal(outcome.rows[0]?.state, 'ROLLED_OVER');
+    assert.equal(outcome.rows[0]?.candidate_order_id, null);
+    assert.equal(outcome.rows[0]?.rollover_target_session_id, targetSessionId);
+    assert.ok(outcome.rows[0]?.rollover_journal_id);
+    assert.equal((await db.query<{ amount: string }>(
+      `SELECT sum(CASE WHEN side = 'CREDIT' THEN amount ELSE -amount END)::text AS amount
+       FROM core.ledger_lines WHERE account_id = $1 AND balance_state = 'LOCKED'`,
+      [`seckill-prize:${targetSessionId}:usdt`],
+    )).rows[0]?.amount, '50');
   } finally {
     await db.close();
   }
@@ -3377,7 +3649,7 @@ test('payment event atomically consumes inventory and posts balanced Locked jour
     assert.ok((await notifications.listInbox({ walletAddress: BUYER, roles: ['BUYER'] }))
       .some((message) => message.topic === 'PAYMENT_FINALIZED'));
     const genesisInbox = await notifications.listInbox({
-      walletAddress: intent.beneficiaries.genesis!,
+      walletAddress: intent.nplRewardAllocations.find((allocation) => allocation.role === 'genesis')!.account,
       roles: ['BUYER'],
     });
     const genesisPayment = genesisInbox.find((message) => message.topic === 'PAYMENT_FINALIZED');
@@ -3406,8 +3678,10 @@ test('payment projection rejects a snapshot whose off-chain allocations differ f
     const original = paymentIntent();
     const intent: CanonicalPaymentIntent = {
       ...original,
-      otherUsdtAllocations: [
-        { account: '0x7999999999999999999999999999999999999999', amount: '10', purpose: 'POLICY_ALLOCATION' },
+      merchantConcessionAllocations: [
+        { pool: 'SECKILL_PRIZE', amount: '8', balanceState: 'LOCKED' },
+        { pool: 'NODE_REWARD', amount: '6', balanceState: 'LOCKED' },
+        { pool: 'REWARD_RESERVE', amount: '3', balanceState: 'LOCKED' },
       ],
     };
     await reserveInventory(adapter(db), {
@@ -3691,7 +3965,38 @@ test('fulfillment targets encrypt delivery PII and bind quotes to an AMap six-di
     assert.equal(pickup.fulfillmentMode, 'PICKUP');
     assert.equal(pickup.storeId, store.storeId);
     assert.equal(pickup.store.regionCode, '310101');
-    assert.equal((await service.listStores('310101')).length, 1);
+    const alternateStore = await service.createStore(merchant, {
+      idempotencyKey: 'store-create-command-2',
+      name: 'Huangpu Alternate Store',
+      phone: '+862112345679',
+      businessHours: '10:00-19:00',
+      longitude: 121.4837,
+      latitude: 31.2404,
+      correlationId: 'store-create-2',
+    });
+    await db.query(
+      "UPDATE core.merchant_stores SET status = 'ACTIVE', version = version + 1 WHERE store_id = $1",
+      [alternateStore.storeId],
+    );
+    for (let index = 0; index < 10; index += 1) {
+      await service.createPickupTarget(buyer, {
+        idempotencyKey: `pickup-target-change-${index}`,
+        storeId: index % 2 === 0 ? alternateStore.storeId : store.storeId,
+      });
+    }
+    const pickupAlert = await db.query<{ signal_type: string; source_type: string }>(
+      "SELECT signal_type, source_type FROM core.risk_observations WHERE signal_type = 'PICKUP_STORE_CHANGE'",
+    );
+    assert.deepEqual(pickupAlert.rows, [{
+      signal_type: 'PICKUP_STORE_CHANGE',
+      source_type: 'FULFILLMENT_TARGET_SERVICE',
+    }]);
+    assert.equal((await db.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM core.risk_restrictions WHERE subject_value = $1',
+      [BUYER],
+    )).rows[0]?.count, '0');
+    await assert.doesNotReject(assertWalletPaymentAllowed(adapter(db), BUYER, new Date()));
+    assert.equal((await service.listStores('310101')).length, 2);
     assert.throws(
       () => new FulfillmentTargetService({ transactions: transactionAdapter(db), regions, encryptionKey: 'short' }),
       /must contain 32 bytes/,
@@ -4764,7 +5069,7 @@ test('fulfillment service keeps evidence append-only and unlocks every order lia
     });
 
     const lockedBeforeReceipt = await liabilityStates(db, intent.orderId, 'LOCKED');
-    assert.deepEqual(lockedBeforeReceipt, { BNM_POINTS: '100', NPL: '100', USDT: '70' });
+    assert.deepEqual(lockedBeforeReceipt, { BNM_POINTS: '100', NPL: '100', USDT: '69' });
     assert.deepEqual(await liabilityStates(db, intent.orderId, 'AVAILABLE'), {});
 
     now = new Date(now.getTime() + 60_000);
@@ -4776,11 +5081,11 @@ test('fulfillment service keeps evidence append-only and unlocks every order lia
       { state: fulfilled.state, method: fulfilled.method },
       { state: 'FULFILLED', method: 'CUSTOMER_RECEIPT' },
     );
-    assert.deepEqual(await liabilityStates(db, intent.orderId, 'LOCKED'), {});
+    assert.deepEqual(await liabilityStates(db, intent.orderId, 'LOCKED'), { USDT: '7' });
     assert.deepEqual(await liabilityStates(db, intent.orderId, 'AVAILABLE'), {
       BNM_POINTS: '100',
       NPL: '100',
-      USDT: '70',
+      USDT: '62',
     });
     const projection = await service.getOrder(buyer, intent.orderId);
     assert.equal(projection.state, 'FULFILLED');
@@ -4868,7 +5173,7 @@ test('arbitration moves Locked liabilities to Disputed and only an arbitrator ca
     assert.deepEqual(await liabilityStates(db, intent.orderId, 'DISPUTED'), {
       BNM_POINTS: '100',
       NPL: '100',
-      USDT: '70',
+      USDT: '69',
     });
     await assert.rejects(
       service.decideFulfillmentRequest(merchant, intent.orderId, {
@@ -4900,7 +5205,7 @@ test('arbitration moves Locked liabilities to Disputed and only an arbitrator ca
     assert.deepEqual(await liabilityStates(db, intent.orderId, 'LOCKED'), {
       BNM_POINTS: '100',
       NPL: '100',
-      USDT: '70',
+      USDT: '69',
     });
 
     now = new Date(now.getTime() + 60_000);
@@ -4918,8 +5223,9 @@ test('arbitration moves Locked liabilities to Disputed and only an arbitrator ca
     assert.deepEqual(await liabilityStates(db, intent.orderId, 'AVAILABLE'), {
       BNM_POINTS: '100',
       NPL: '100',
-      USDT: '70',
+      USDT: '62',
     });
+    assert.deepEqual(await liabilityStates(db, intent.orderId, 'LOCKED'), { USDT: '7' });
     await assertLedgerBalanced(db, 1);
   } finally {
     await db.close();
@@ -4962,7 +5268,7 @@ test('merchant forced receipt remains a platform-reviewed request until seven da
     assert.deepEqual(await liabilityStates(db, intent.orderId, 'LOCKED'), {
       BNM_POINTS: '100',
       NPL: '100',
-      USDT: '70',
+      USDT: '69',
     });
     await service.decideForcedReceipt(operator, intent.orderId, {
       idempotencyKey: 'forced-approval-command-1',
@@ -4973,8 +5279,9 @@ test('merchant forced receipt remains a platform-reviewed request until seven da
     assert.deepEqual(await liabilityStates(db, intent.orderId, 'AVAILABLE'), {
       BNM_POINTS: '100',
       NPL: '100',
-      USDT: '70',
+      USDT: '62',
     });
+    assert.deepEqual(await liabilityStates(db, intent.orderId, 'LOCKED'), { USDT: '7' });
     const requests = await db.query<{ state: string; resolved_by: string }>(
       `SELECT state, resolved_by FROM core.fulfillment_requests
        WHERE order_id = $1 AND request_type = 'FORCED_RECEIPT'`,
@@ -5003,7 +5310,7 @@ test('takeover freezes the merchant after seven days while funds stay Locked and
     assert.deepEqual(await liabilityStates(deliveryDb, intent.orderId, 'LOCKED'), {
       BNM_POINTS: '100',
       NPL: '100',
-      USDT: '70',
+      USDT: '69',
     });
     const frozen = await deliveryDb.query<{ status: string; guarantee_status: string; lifecycle_state: string }>(
       `SELECT merchant.status, merchant.guarantee_status, product.lifecycle_state
@@ -5037,8 +5344,9 @@ test('takeover freezes the merchant after seven days while funds stay Locked and
     assert.deepEqual(await liabilityStates(deliveryDb, intent.orderId, 'AVAILABLE'), {
       BNM_POINTS: '100',
       NPL: '100',
-      USDT: '70',
+      USDT: '62',
     });
+    assert.deepEqual(await liabilityStates(deliveryDb, intent.orderId, 'LOCKED'), { USDT: '7' });
   } finally {
     await deliveryDb.close();
   }
@@ -5161,8 +5469,9 @@ test('takeover freezes the merchant after seven days while funds stay Locked and
     assert.deepEqual(await liabilityStates(pickupDb, intent.orderId, 'AVAILABLE'), {
       BNM_POINTS: '100',
       NPL: '100',
-      USDT: '70',
+      USDT: '62',
     });
+    assert.deepEqual(await liabilityStates(pickupDb, intent.orderId, 'LOCKED'), { USDT: '7' });
     assert.deepEqual(
       pickupReceipts.map(({ orderId, storeId, quantity }) => ({ orderId, storeId, quantity })),
       [{ orderId: intent.orderId, storeId: 'store-pickup-1', quantity: '1' }],
@@ -5176,7 +5485,7 @@ test('takeover freezes the merchant after seven days while funds stay Locked and
     });
     assert.ok(await pickupNotificationWorker.pollOnce() > 0);
     const genesisPickup = (await pickupNotifications.listInbox({
-      walletAddress: intent.beneficiaries.genesis!,
+      walletAddress: intent.nplRewardAllocations.find((allocation) => allocation.role === 'genesis')!.account,
       roles: ['BUYER'],
     })).find((message) => message.topic === 'FULFILLMENT_FINALIZED');
     assert.equal(genesisPickup?.templateData.availableNplAmount, '20');
@@ -5807,11 +6116,7 @@ test('policy publication binds the Registry signature and Safe proposal, activat
       [rulesHash, HASH, admin.address.toLowerCase(), new Date('2026-07-15T03:00:00.000Z')],
     );
     const policy = paymentPolicyPayload();
-    policy.concessionDestinationSetHash = paymentAllocationSetHash(
-      policy.concessionDestinations,
-      policy.otherUsdtDestinations,
-      policy.seckillPrizePoolAccount,
-    ).toLowerCase();
+    policy.concessionDestinationSetHash = paymentAllocationSetHash().toLowerCase();
     let now = new Date('2026-07-15T03:00:00.000Z');
     const frozenSessionId = `0x${'9'.repeat(64)}`;
     await insertLiveSeckillSession(db, frozenSessionId, now, 80);
@@ -7497,6 +7802,8 @@ test('buyer shopping and merchant receivable statements preserve tenant-scoped o
       orderKind: 'ORDINARY',
       paymentAmounts: {
         productUsdtPaymentAmount: prepared.intent.productUsdtPaymentAmount,
+        platformServiceFeeUsdt: prepared.intent.platformServiceFeeUsdt,
+        custodyProductUsdt: prepared.intent.custodyProductUsdt,
         freightUsdt: prepared.intent.freightUsdt,
         usdtPaymentAmount: prepared.intent.usdtPaymentAmount,
         nplPaymentAmount: prepared.intent.nplPaymentAmount,
@@ -7536,7 +7843,11 @@ test('buyer shopping and merchant receivable statements preserve tenant-scoped o
     assert.equal(statement.currentReceivableUsdt, prepared.intent.merchantNetReceivableUsdt);
     assert.equal(statement.removedFromReceivableUsdt, '0');
     assert.deepEqual(statement.receivableLifecycle.map((balance) => ({ state: balance.state, amount: balance.amount })), [
-      { state: 'REQUESTED', amount: prepared.intent.merchantNetReceivableUsdt },
+      {
+        state: 'AVAILABLE',
+        amount: (BigInt(prepared.intent.merchantNetReceivableUsdt) - BigInt(prepared.requestedAmount)).toString(),
+      },
+      { state: 'REQUESTED', amount: prepared.requestedAmount },
     ]);
     assert.ok(statement.journalEvidence.some((journal) => journal.eventType === 'PAYMENT_LOCKED'));
     assert.ok(statement.journalEvidence.some((journal) => journal.eventType === 'SETTLEMENT_REQUESTED'));
@@ -7547,7 +7858,7 @@ test('buyer shopping and merchant receivable statements preserve tenant-scoped o
       requestedJournal: settlement.journals.requested,
     })), [{
       requestId: prepared.request.request_id,
-      amount: prepared.intent.merchantNetReceivableUsdt,
+      amount: prepared.requestedAmount,
       state: 'REQUESTED',
       requestedJournal: statement.settlementRefs[0]!.journals.requested,
     }]);
@@ -7625,7 +7936,7 @@ test('signed settlement request moves Available to Requested and an immutable co
     await assert.rejects(
       settlements.createIntent(merchant, {
         rail: 'MERCHANT_USDT',
-        amount: '1',
+        amount: '8',
         idempotencyKey: 'merchant-settlement-intent-2',
       }),
       /insufficient/,
@@ -7641,7 +7952,10 @@ test('signed settlement request moves Available to Requested and an immutable co
        ORDER BY line.balance_state`,
       [merchantWallet.address.toLowerCase()],
     );
-    assert.deepEqual(merchantStates.rows, [{ balance_state: 'REQUESTED', amount: '45' }]);
+    assert.deepEqual(merchantStates.rows, [
+      { balance_state: 'AVAILABLE', amount: '7' },
+      { balance_state: 'REQUESTED', amount: '45' },
+    ]);
 
     await db.query(
       `INSERT INTO core.coverage_snapshots (
@@ -7704,7 +8018,10 @@ test('signed settlement request moves Available to Requested and an immutable co
        ORDER BY line.balance_state`,
       [merchantWallet.address.toLowerCase()],
     );
-    assert.deepEqual(afterBatch.rows, [{ balance_state: 'BATCHED', amount: '45' }]);
+    assert.deepEqual(afterBatch.rows, [
+      { balance_state: 'AVAILABLE', amount: '7' },
+      { balance_state: 'BATCHED', amount: '45' },
+    ]);
     await assert.rejects(
       db.query('UPDATE core.settlement_batches SET total_amount = 44 WHERE batch_id = $1', [batch.batch_id]),
       /ImmutableSettlementBatch/,
@@ -8110,6 +8427,51 @@ test('one Safe batch emits isolated tenant audit entries for every affected merc
          ('journal:buyer-prize-available',$2,'DEBIT',10,'AVAILABLE',$3)`,
       [buyerPrizeAccount, buyerPrizeClearing, safeAddress],
     );
+    const prizeSessionId = `0x${'8'.repeat(64)}`;
+    const prizePaymentEventKey = 'buyer-prize-payment-event';
+    await db.query(
+      `INSERT INTO core.payment_events (
+         event_key, order_id, journal_id, transaction_hash, log_index, block_number,
+         block_hash, snapshot_hash, classification, confirmations, canonical, observed_at
+       ) VALUES ($1,$2,'journal:buyer-prize-available',$3,0,100,$4,$5,'SECKILL',15,true,$6)`,
+      [prizePaymentEventKey, orderTwo, HASH, HASH_2, `0x${'7'.repeat(64)}`, prepared.now],
+    );
+    await db.query(
+      `INSERT INTO core.seckill_sessions (
+         session_id, policy_version, merchant_id, product_id, sku_id,
+         product_policy_hash, starts_at, main_deadline, relay_deadline,
+         inventory, sold, seckill_list_price_usdt, phase, prize_pool_usdt, snapshot
+       ) VALUES ($1,1,'merchant-2','product-1','sku-1',$2,$3,$4,$4,1,1,90,'SETTLED',10,'{}')`,
+      [
+        prizeSessionId,
+        HASH,
+        new Date(prepared.now.getTime() - 60 * 60_000),
+        prepared.now,
+      ],
+    );
+    await db.query(
+      `INSERT INTO core.seckill_prize_settlements (
+         session_id, cutoff_at, state, candidate_order_id, candidate_buyer_wallet,
+         candidate_payment_event_key, candidate_block_number, candidate_log_index,
+         candidate_evidence_hash, pool_amount_usdt, pool_snapshot_hash,
+         review_decision, review_reason_code, review_evidence_hash, reviewed_by,
+         reviewed_at, review_idempotency_key, review_request_hash,
+         award_account_id, award_journal_id, created_at, updated_at
+       ) VALUES ($1,$2,'APPROVED',$3,$4,$5,100,0,$6,10,$7,
+         'APPROVED','ORDER_VALID',$6,$8,$2,'seed-prize-review',$7,
+         $9,'journal:buyer-prize-available',$2,$2)`,
+      [
+        prizeSessionId,
+        prepared.now,
+        orderTwo,
+        merchantTwoBuyer.address.toLowerCase(),
+        prizePaymentEventKey,
+        HASH_2,
+        `0x${'6'.repeat(64)}`,
+        prepared.operator.walletAddress.toLowerCase(),
+        buyerPrizeAccount,
+      ],
+    );
     const merchantTwo = {
       walletAddress: merchantTwoWallet.address,
       roles: ['MERCHANT'] as const,
@@ -8199,7 +8561,7 @@ test('coverage worker derives per-Safe liabilities, pauses on deficit and never 
           safeAddress: '0x3333333333333333333333333333333333333333',
           asset: 'USDT',
           tokenAddress: '0x55d398326f99059ff775485246999027b3197955',
-          balance: '69',
+          balance: '68',
         },
         {
           safeAddress: '0x4444444444444444444444444444444444444444',
@@ -8225,7 +8587,7 @@ test('coverage worker derives per-Safe liabilities, pauses on deficit and never 
       liability: item.unsettledLiability,
       met: item.coverageMet,
     }])), {
-      USDT: { liability: '70', met: false },
+      USDT: { liability: '69', met: false },
       NPL: { liability: '100', met: true },
     });
     const paused = await db.query<{ scope: string }>(
@@ -8308,7 +8670,7 @@ test('coverage breaker Safe action retries, reaches finality and replaces reorge
         safeAddress: '0x3333333333333333333333333333333333333333',
         asset: 'USDT',
         tokenAddress: '0x55d398326f99059ff775485246999027b3197955',
-        balance: '69',
+        balance: '68',
       }],
     };
     const coverage = new CoverageWorker({
@@ -8567,7 +8929,7 @@ test('coverage recovery requires independent EIP-712 approval and Safe finality,
         safeAddress: '0x3333333333333333333333333333333333333333',
         asset: 'USDT',
         tokenAddress: '0x55d398326f99059ff775485246999027b3197955',
-        balance: '69',
+        balance: '68',
       }],
     };
     const coverage = new CoverageWorker({
@@ -8635,7 +8997,7 @@ test('coverage recovery requires independent EIP-712 approval and Safe finality,
       blockHash: `0x${'6'.repeat(64)}`,
       evidenceHash: `0x${'7'.repeat(64)}`,
       observedAt: new Date('2026-07-15T10:02:00.000Z'),
-      assets: observation.assets.map((item) => ({ ...item, balance: '70' })),
+      assets: observation.assets.map((item) => ({ ...item, balance: '69' })),
     };
     await coverage.pollOnce();
     let clock = new Date('2026-07-15T10:03:00.000Z');
@@ -8708,7 +9070,7 @@ test('coverage recovery requires independent EIP-712 approval and Safe finality,
       blockHash: `0x${'a'.repeat(64)}`,
       evidenceHash: `0x${'b'.repeat(64)}`,
       observedAt: new Date('2026-07-15T10:03:10.000Z'),
-      assets: observation.assets.map((item) => ({ ...item, balance: '69' })),
+      assets: observation.assets.map((item) => ({ ...item, balance: '68' })),
     };
     await coverage.pollOnce();
     await governance.pollOnce();
@@ -8726,7 +9088,7 @@ test('coverage recovery requires independent EIP-712 approval and Safe finality,
       blockHash: `0x${'c'.repeat(64)}`,
       evidenceHash: `0x${'d'.repeat(64)}`,
       observedAt: new Date('2026-07-15T10:04:00.000Z'),
-      assets: observation.assets.map((item) => ({ ...item, balance: '70' })),
+      assets: observation.assets.map((item) => ({ ...item, balance: '69' })),
     };
     await coverage.pollOnce();
     clock = new Date('2026-07-15T10:05:00.000Z');
@@ -9782,7 +10144,7 @@ test('takeover funding consumes final guarantee first and records Operations adv
     assert.equal(debtReorgAudit.rows[0]?.payload.reversedDebtRecoveries, 1);
     assert.equal(debtReorgAudit.rows[0]?.transaction_evidence.txHash, futurePayment.event.transactionHash);
     assert.equal(debtReorgAudit.rows[0]?.transaction_evidence.eventSignatureHash, id(
-      'PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)',
+      'PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)',
     ));
     assert.equal(debtReorgAudit.rows[0]?.transaction_evidence.logIndex, futurePayment.event.logIndex);
     await assertLedgerBalanced(db, 1);
@@ -10987,7 +11349,17 @@ async function prepareRequestedSettlement(db: PGlite) {
     evidenceHash: `0x${'b'.repeat(64)}`,
     checkedAt: now,
   };
-  return { merchantWallet, intent, now, settlements, merchant, operator, runtime, request };
+  return {
+    merchantWallet,
+    intent,
+    now,
+    settlements,
+    merchant,
+    operator,
+    runtime,
+    request,
+    requestedAmount: challenge.intent.amount,
+  };
 }
 
 async function prepareBatchedSettlement(db: PGlite) {
@@ -11107,22 +11479,24 @@ function paymentIntent(): CanonicalPaymentIntent {
     nonce: '1',
     listPriceUsdt: '100',
     productUsdtPaymentAmount: '70',
+    platformServiceFeeUsdt: '1',
+    custodyProductUsdt: '69',
     freightUsdt: '0',
     usdtPaymentAmount: '70',
     nplQuoteAmount: '1000',
     nplPaymentAmount: '300',
     nplBurnAmount: '200',
     nplRewardAmount: '100',
-    merchantBaseReceivableUsdt: '60',
+    merchantBaseReceivableUsdt: '69',
     merchantConcessionBps: 2_500,
-    merchantConcessionAmount: '15',
-    merchantNetReceivableUsdt: '45',
-    concessionAllocationHash: HASH,
+    merchantConcessionAmount: '17',
+    merchantNetReceivableUsdt: '52',
+    concessionAllocationHash: paymentAllocationSetHash(),
     bnmAmount: '100',
     seckill: false,
     sessionId: `0x${'0'.repeat(64)}`,
     beneficiaries: {
-      genesis: '0x5000000000000000000000000000000000000001',
+      genesis: '0x0000000000000000000000000000000000000000',
       directReferral: '0x5000000000000000000000000000000000000002',
       district: '0x5000000000000000000000000000000000000003',
       city: '0x5000000000000000000000000000000000000004',
@@ -11130,20 +11504,21 @@ function paymentIntent(): CanonicalPaymentIntent {
       region: '0x5000000000000000000000000000000000000006',
     },
     merchantConcessionAllocations: [
-      { account: '0x7000000000000000000000000000000000000001', amount: '6' },
-      { account: '0x7000000000000000000000000000000000000002', amount: '9' },
-    ],
-    otherUsdtAllocations: [
-      { account: '0x7000000000000000000000000000000000000003', amount: '10', purpose: 'POLICY_ALLOCATION' },
+      { pool: 'SECKILL_PRIZE', amount: '7', balanceState: 'LOCKED' },
+      { pool: 'NODE_REWARD', amount: '7', balanceState: 'LOCKED' },
+      { pool: 'REWARD_RESERVE', amount: '3', balanceState: 'LOCKED' },
     ],
     nplRewardAllocations: [
-      { role: 'genesis', account: '0x5000000000000000000000000000000000000001', amount: '20' },
+      { role: 'genesis', account: '0x5000000000000000000000000000000000000011', amount: '20' },
       { role: 'directReferral', account: '0x5000000000000000000000000000000000000002', amount: '10' },
       { role: 'district', account: '0x5000000000000000000000000000000000000003', amount: '12' },
       { role: 'city', account: '0x5000000000000000000000000000000000000004', amount: '8' },
       { role: 'province', account: '0x5000000000000000000000000000000000000005', amount: '6' },
       { role: 'region', account: '0x5000000000000000000000000000000000000006', amount: '4' },
-      { role: 'operations', account: '0x5000000000000000000000000000000000000007', amount: '40' },
+      { role: 'operations', account: '0x5000000000000000000000000000000000000007', amount: '10' },
+      { role: 'operations', account: '0x5000000000000000000000000000000000000008', amount: '10' },
+      { role: 'operations', account: '0x5000000000000000000000000000000000000009', amount: '10' },
+      { role: 'operations', account: '0x5000000000000000000000000000000000000010', amount: '10' },
     ],
     requiredConfirmations: 15,
   };
@@ -11172,6 +11547,8 @@ function paymentInput(
       policyVersion: intent.policyVersion,
       listPriceUsdt: intent.listPriceUsdt,
       productUsdtPaid: intent.productUsdtPaymentAmount,
+      platformServiceFeeUsdt: intent.platformServiceFeeUsdt,
+      custodyProductUsdt: intent.custodyProductUsdt,
       freightUsdt: intent.freightUsdt,
       usdtPaid: intent.usdtPaymentAmount,
       nplPaid: intent.nplPaymentAmount,
@@ -11187,7 +11564,12 @@ function paymentInput(
 async function assertLedgerBalanced(
   db: PGlite,
   expectedPaymentMultiple: number,
-  expected = { usdt: 70n, nplReward: 100n, bnm: 100n },
+  expected: { usdt: bigint; serviceFee?: bigint; nplReward: bigint; bnm: bigint } = {
+    usdt: 69n,
+    serviceFee: 1n,
+    nplReward: 100n,
+    bnm: 100n,
+  },
 ) {
   const balances = await db.query<{ asset: string; delta: string }>(
     `SELECT account.asset,
@@ -11202,12 +11584,17 @@ async function assertLedgerBalanced(
        sum(CASE WHEN line.side = 'DEBIT' THEN line.amount ELSE -line.amount END)::text AS delta
      FROM core.ledger_lines line
      WHERE line.account_id IN (
+       'safe:platform-service-fee:0x2222222222222222222222222222222222222223:usdt',
        'safe:usdt-custody:0x3333333333333333333333333333333333333333:usdt',
        'safe:npl-reward:0x4444444444444444444444444444444444444444:npl',
        'buyer:${BUYER}:bnm')
      GROUP BY line.account_id ORDER BY line.account_id`,
   );
   const values = new Map(safeBalances.rows.map((row) => [row.account_id, BigInt(row.delta)]));
+  assert.equal(
+    values.get('safe:platform-service-fee:0x2222222222222222222222222222222222222223:usdt') ?? 0n,
+    (expected.serviceFee ?? 0n) * BigInt(expectedPaymentMultiple),
+  );
   assert.equal(
     values.get('safe:usdt-custody:0x3333333333333333333333333333333333333333:usdt') ?? 0n,
     expected.usdt * BigInt(expectedPaymentMultiple),
@@ -11232,7 +11619,7 @@ function decodedPaymentEvent(intent: CanonicalPaymentIntent, canonicalBlockHash:
     artifactVersion: CORE_ARTIFACT_VERSION,
     contract: 'PaymentRouterV2',
     eventName: 'PaymentCompleted',
-    eventSignature: 'PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)',
+    eventSignature: 'PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)',
     resourceId: intent.orderId,
     contractAddress: '0x9999999999999999999999999999999999999999',
     eventHash: HASH,
@@ -11248,6 +11635,8 @@ function decodedPaymentEvent(intent: CanonicalPaymentIntent, canonicalBlockHash:
       policyVersion: String(intent.policyVersion),
       listPriceUsdt: intent.listPriceUsdt,
       productUsdtPaid: intent.productUsdtPaymentAmount,
+      platformServiceFeeUsdt: intent.platformServiceFeeUsdt,
+      custodyProductUsdt: intent.custodyProductUsdt,
       freightUsdt: intent.freightUsdt,
       usdtPaid: intent.usdtPaymentAmount,
       nplPaid: intent.nplPaymentAmount,
@@ -11704,8 +12093,8 @@ function paymentPolicyPayload() {
     provinceBps: 60,
     regionBps: 40,
     operationsBps: 400,
-    platformFeeBps: 500,
-    seckillPrizeBps: 300,
+    platformFeeBps: 100,
+    seckillPrizeBps: 0,
     seckillMainDuration: 3_600,
     relayInitial: 60,
     relayIncrement: 30,
@@ -11716,26 +12105,22 @@ function paymentPolicyPayload() {
     oracleMinimumUsdtLiquidity: (50_000n * 10n ** 18n).toString(),
     requiredConfirmations: 15,
     merchantGuaranteeMinimumUsdt: (1_000n * 10n ** 18n).toString(),
+    platformServiceFeeSafe: '0x2222222222222222222222222222222222222223',
     usdtCustodySafe: '0x3333333333333333333333333333333333333333',
     nplRewardSafe: '0x4444444444444444444444444444444444444444',
     operationsTreasurySafe: '0x5555555555555555555555555555555555555555',
     circulationPool: '0x6000000000000000000000000000000000000001',
-    genesisCredential: '0x6000000000000000000000000000000000000002',
-    genesisTokenId: '1',
-    genesisCredentialStandard: 1,
-    concessionDestinationSetHash: HASH,
+    concessionDestinationSetHash: paymentAllocationSetHash(),
     decisionEvidenceHash: HASH_2,
-    concessionDestinations: [
-      { account: '0x7000000000000000000000000000000000000001', weightBps: 4_000 },
-      { account: '0x7000000000000000000000000000000000000002', weightBps: 6_000 },
+    genesisNodeDestinations: [
+      { account: '0x5000000000000000000000000000000000000011', weightBps: 10_000 },
     ],
     operationsDestinations: [
-      { account: '0x5000000000000000000000000000000000000007', weightBps: 10_000 },
+      { account: '0x5000000000000000000000000000000000000007', weightBps: 2_500 },
+      { account: '0x5000000000000000000000000000000000000008', weightBps: 2_500 },
+      { account: '0x5000000000000000000000000000000000000009', weightBps: 2_500 },
+      { account: '0x5000000000000000000000000000000000000010', weightBps: 2_500 },
     ],
-    otherUsdtDestinations: [
-      { account: '0x7000000000000000000000000000000000000003', weightBps: 10_000 },
-    ],
-    seckillPrizePoolAccount: '0x7000000000000000000000000000000000000004',
   };
 }
 
@@ -11812,9 +12197,21 @@ async function insertPaymentQuote(
   );
   await db.query(
     `INSERT INTO core.payment_quote_legs (
-       order_id, classification, reservation_id, snapshot_hash, intent
-     ) VALUES ($1, 'ORDINARY', $2, $3, $4)`,
-    [intent.orderId, intent.reservationId, snapshotHash, JSON.stringify(intent)],
+       order_id, classification, reservation_id, snapshot_hash, intent,
+       product_usdt_payment_amount, platform_service_fee_usdt,
+       custody_product_usdt, freight_usdt, usdt_payment_amount
+     ) VALUES ($1, 'ORDINARY', $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [
+      intent.orderId,
+      intent.reservationId,
+      snapshotHash,
+      JSON.stringify(intent),
+      intent.productUsdtPaymentAmount,
+      intent.platformServiceFeeUsdt,
+      intent.custodyProductUsdt,
+      intent.freightUsdt,
+      intent.usdtPaymentAmount,
+    ],
   );
 }
 

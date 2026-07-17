@@ -18,15 +18,15 @@
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "c1a319b20afc0bc254d022690c320db49f4df60b240275e9a2a9239f3cc6cddc"
+      "sha256": "d2c574733aa4884dd951eb7925a6e9bf1ef9766f3cbead5cec7a037ef5fe8ed3"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "e70117d3b028a6dec3be2ecb924bc34b01958aeed063d41ce77f69f5e84d56e5"
+      "sha256": "fd1b77520af8ef2e81e61dabaa77797fbfff3aedec0f41443cba0283e8d75d16"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "8bf719b0bbb96e44555b0af92522aa4784f1c19cbe13eb021d2e49b8b2608feb"
+      "sha256": "8db21abb8aaf51c927e8f6d824c01e387edbac6e4d56ccc66dbce65802297fc4"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
@@ -34,7 +34,7 @@
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "cd684a2ce04e42ab636a82660d9ffeaa52eb018a84a16ca803b1da83992f7f01"
+      "sha256": "1ecb6d81a73e816f03ef8726988e9be08d09aed26af0eb3073ca39746eecd9f0"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
@@ -42,15 +42,15 @@
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "9ece0cfc04f5fb7016f083d1644322b2c634e3229abd97c04e1493a591bb61bb"
+      "sha256": "f02d677e7c882ab520b7530203ddd47ce540c78c85d7edda0a45a938bc385482"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "d09f61c98429ce01bf06e4cfe48825d7b70bbb794e2bbe7c86479ec5f8d02e7f"
+      "sha256": "010469daa1e8e7063070d78448a82f08bb17814271e71c386b952d2bd04fb5d7"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "1307d1ec9dc61decd719d41f69f2526d5b0c66c1bb322a5e1fe7f38955adab5f"
+      "sha256": "cd84be6520cd68a32d0c549c3463d9d228ffb008799b9329f22845f5fb9b0452"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
@@ -60,11 +60,11 @@
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "c8ba1807b6373de267f2c895258ab881ea2e47834e6acca47ab10e25fffb4e2a"
+      "sha256": "3e40bb4354a1bc1ca5b1e1314bd8290a1ef814c367bb47775602f1f8c8b61354"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "b632ed41107f71faece2afe018151f661398260ce3da7b967bf469e1da52eedb"
+      "sha256": "e15fb56f7118276c482b5b95546c673a66a4ae90d18f774bec0b2c6244adbcfc"
     }
   ],
   "httpSurface": [
@@ -183,6 +183,7 @@
     "POST /v2/admin/seckill/sessions",
     "POST /v2/admin/seckill/sessions/{sessionId}/force-close",
     "POST /v2/admin/seckill/sessions/{sessionId}/prize-injections",
+    "POST /v2/admin/seckill/sessions/{sessionId}/winner-review",
     "POST /v2/admin/settlement-intents",
     "POST /v2/admin/system-config/versions",
     "POST /v2/admin/system-config/versions/{configVersionId}/approval-challenge",
@@ -329,27 +330,9 @@
     "DECIDE_ARBITRATION",
     "DECIDE_FORCED_RECEIPT"
   ],
-  "decisionBlocked": [
-    "PLATFORM_SERVICE_FEE_BPS",
-    "SECKILL_PRIZE_POOL_BPS",
-    "MERCHANT_STORE_REWARD_BPS",
-    "SECKILL_PRIZE_POOL_ACCOUNT",
-    "MERCHANT_CONCESSION_DESTINATION_WEIGHTS",
-    "FIXED_REMAINDER_ACCOUNTS",
-    "GENESIS_CREDENTIAL_CONTRACT_AND_TOKEN_ID",
-    "PICKUP_TIMEOUT_AND_TAKEOVER_EVIDENCE",
-    "EMPTY_SESSION_INJECTED_PRIZE_ALLOCATION",
-    "MERCHANT_ABNORMAL_ORDER_RATE_TAXONOMY",
-    "PII_RETENTION_POLICY_VERSION",
-    "ADMIN_UID_IDENTITY",
-    "ADMIN_PHONE_SEARCH_AUTHORIZATION",
-    "ADMIN_YELLOW_QUEUE_DEFINITION"
-  ],
+  "decisionBlocked": [],
   "externalBlocked": [
-    "GOVERNANCE_AND_THREE_SAFE_ADDRESSES",
-    "SECONDARY_POLICY_AND_QUOTE_SIGNERS",
     "TWAP_SOURCE",
-    "BSC_RPC_URL",
     "DEPLOYED_CONTRACT_ADDRESSES",
     "REMOTE_SIGNER",
     "DATABASE_AUDIT_DATABASE_AND_REDIS",
@@ -418,6 +401,7 @@
     "BnmPointsBalance",
     "SeckillSessionProjection",
     "SeckillSessionHistoryPage",
+    "SeckillPrizeSettlementProjection",
     "SeckillGovernanceActionProjection",
     "SeckillGovernanceChallenge",
     "SeckillSessionPlanProjection",

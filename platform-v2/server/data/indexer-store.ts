@@ -299,6 +299,8 @@ function canonicalPaymentEvent(
     policyVersion: safeInteger(event.values, 'policyVersion'),
     listPriceUsdt: decimalValue(event.values, 'listPriceUsdt'),
     productUsdtPaid: decimalValue(event.values, 'productUsdtPaid'),
+    platformServiceFeeUsdt: decimalValue(event.values, 'platformServiceFeeUsdt'),
+    custodyProductUsdt: decimalValue(event.values, 'custodyProductUsdt'),
     freightUsdt: decimalValue(event.values, 'freightUsdt'),
     usdtPaid: decimalValue(event.values, 'usdtPaid'),
     nplPaid: decimalValue(event.values, 'nplPaid'),

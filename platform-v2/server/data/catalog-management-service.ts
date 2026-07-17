@@ -6,14 +6,12 @@ import {
   CORE_ARTIFACT_VERSION,
   catalogReviewDecisions,
   type CatalogReviewDecision,
-  type MerchantLevel,
 } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import { parsePaymentPolicySnapshot } from '../api/payment-policy.ts';
 import type { SignerRequest } from '../chain/signer.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
-import { currentMerchantLevelPolicy, merchantLevelRule } from './merchant-level-policy.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 
 const LOCKED_SESSION_PHASES = ['PREHEAT', 'LIVE', 'SETTLING'] as const;
@@ -384,7 +382,6 @@ export class CatalogManagementService {
         if (duplicate.rows[0].request_hash !== requestHash) throw idempotencyConflict('Product');
         return productProjection(executor, await requireProduct(executor, duplicate.rows[0].resource_id), actor);
       }
-      await assertMerchantLevelProductLimit(executor, scope.merchantId, value.skus);
       const current = await loadCurrentStoreProduct(executor, storeId, true);
       if (current) await assertProductWriteUnlocked(executor, current, this.#clock());
       const hasHistory = current ? await productHasHistory(executor, current.product_id) : false;
@@ -471,9 +468,8 @@ export class CatalogManagementService {
       const items = skus.map((sku) => ({
         skuId: sku.sku_id,
         ...buildMerchantConcessionPreview(
-          BigInt(sku.merchant_cost_usdt),
+          postFeeMerchantBase(sku.list_price_usdt),
           input.merchantConcessionBps,
-          policy.policy.concessionDestinations,
         ),
       }));
       const expiresAt = new Date(this.#clock().getTime() + 5 * 60_000);
@@ -978,28 +974,6 @@ export class CatalogManagementService {
   }
 }
 
-async function assertMerchantLevelProductLimit(
-  executor: SqlExecutor,
-  merchantId: string,
-  skus: ReturnType<typeof validateProductSlotInput>['skus'],
-) {
-  const merchant = await executor.query<{ level: MerchantLevel }>(
-    'SELECT level FROM core.merchants WHERE merchant_id = $1',
-    [merchantId],
-  );
-  const level = merchant.rows[0]?.level;
-  if (!level) throw new CoreError('Forbidden', 'Merchant is unavailable for product validation', 403);
-  const policy = await currentMerchantLevelPolicy(executor);
-  const rule = merchantLevelRule(policy, level);
-  if (skus.some((sku) => BigInt(sku.merchantBaseReceivableUsdt) > BigInt(rule.maxProductSettlementUsdt))) {
-    throw new CoreError('Forbidden', `${level} product settlement amount exceeds the published limit`, 409, {
-      level,
-      configVersionId: policy.configVersionId,
-      maxProductSettlementUsdt: rule.maxProductSettlementUsdt,
-    });
-  }
-}
-
 async function authorizeStore(
   executor: SqlExecutor,
   actor: FulfillmentActor,
@@ -1424,7 +1398,7 @@ async function productPolicyHash(executor: SqlExecutor, productId: string, versi
       skuId: sku.sku_id,
       version: Number(sku.sku_version),
       listPriceUsdt: sku.list_price_usdt,
-      merchantBaseReceivableUsdt: sku.merchant_cost_usdt,
+      merchantBaseReceivableUsdt: postFeeMerchantBase(sku.list_price_usdt).toString(),
     })),
   });
 }
@@ -1553,7 +1527,7 @@ async function productProjection(executor: SqlExecutor, product: ProductRow, act
       version: String(sku.sku_version),
       attributes: object(sku.attributes),
       listPriceUsdt: sku.list_price_usdt,
-      merchantBaseReceivableUsdt: sku.merchant_cost_usdt,
+      merchantBaseReceivableUsdt: postFeeMerchantBase(sku.list_price_usdt).toString(),
       stockTotal: String(sku.stock_total),
       stockAvailable: String(sku.stock_available),
       stockReserved: String(sku.stock_reserved),
@@ -2021,9 +1995,14 @@ function catalogFingerprint(product: ProductRow, skus: SkuRow[]) {
     skus: skus.filter((sku) => sku.lifecycle_state !== 'DELISTED').map((sku) => ({
       skuId: sku.sku_id,
       skuVersion: Number(sku.sku_version),
-      merchantBaseReceivableUsdt: sku.merchant_cost_usdt,
+      listPriceUsdt: sku.list_price_usdt,
+      merchantBaseReceivableUsdt: postFeeMerchantBase(sku.list_price_usdt).toString(),
     })),
   });
+}
+
+function postFeeMerchantBase(listPriceUsdt: string) {
+  return BigInt(listPriceUsdt) * 6_900n / 10_000n;
 }
 
 function productLock(type: string, id: string, state: string) {

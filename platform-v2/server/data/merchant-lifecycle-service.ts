@@ -24,7 +24,6 @@ import { CoreError } from '../api/errors.ts';
 import type { SystemConfigSafeApprover } from '../chain/system-config-governance.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
-import { currentMerchantLevelPolicy, merchantLevelRule } from './merchant-level-policy.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 
 const LEVELS = merchantLevels;
@@ -99,7 +98,7 @@ export interface MerchantApplicationInput {
   legalId: string;
   contactPhone: string;
   settlementWallet: string;
-  level: MerchantLevel;
+  level?: MerchantLevel;
   idempotencyKey: string;
   correlationId: string;
 }
@@ -109,7 +108,7 @@ export interface MerchantApplicationUpdateInput {
   legalName: string;
   legalId: string;
   contactPhone: string;
-  level: MerchantLevel;
+  level?: MerchantLevel;
   licenseAssetId: string | null;
   expectedVersion: number;
   idempotencyKey: string;
@@ -268,8 +267,8 @@ export class MerchantLifecycleService {
         `INSERT INTO core.merchants (
            merchant_id, settlement_wallet, status, level, profile, guarantee_status,
            application_version, created_at, updated_at
-         ) VALUES ($1,$2,'PENDING',$3,$4,'DECISION_BLOCKED',1,$5,$5)`,
-        [merchantId, normalized.settlementWallet, normalized.level, JSON.stringify({ shopName: normalized.shopName }), now],
+         ) VALUES ($1,$2,'PENDING','V1',$3,'DECISION_BLOCKED',1,$4,$4)`,
+        [merchantId, normalized.settlementWallet, JSON.stringify({ shopName: normalized.shopName }), now],
       );
       await executor.query(
         `INSERT INTO core.merchant_application_versions (
@@ -286,7 +285,7 @@ export class MerchantLifecycleService {
         roles,
         correlationId: normalized.correlationId,
         requestHash,
-        payload: { applicationVersion: 1, payloadHash, level: normalized.level, qualificationComplete: false },
+        payload: { applicationVersion: 1, payloadHash, qualificationComplete: false },
         now,
       });
       return this.#merchantDetail(executor, merchantId, roles);
@@ -347,10 +346,10 @@ export class MerchantLifecycleService {
         [merchantId, nextVersion, encrypted.ciphertext, encrypted.iv, encrypted.tag, payloadHash, normalized.licenseAssetId, wallet, normalized.idempotencyKey, requestHash, now],
       );
       await executor.query(
-        `UPDATE core.merchants SET profile = $2, level = $3, status = 'PENDING',
-           application_version = $4, reviewed_at = NULL, reviewed_by = NULL, updated_at = $5
+        `UPDATE core.merchants SET profile = $2, status = 'PENDING',
+           application_version = $3, reviewed_at = NULL, reviewed_by = NULL, updated_at = $4
          WHERE merchant_id = $1`,
-        [merchantId, JSON.stringify({ ...merchant.profile, shopName: normalized.shopName }), normalized.level, nextVersion, now],
+        [merchantId, JSON.stringify({ ...merchant.profile, shopName: normalized.shopName }), nextVersion, now],
       );
       await lifecycleAudit(executor, {
         eventType: 'MerchantApplicationUpdated',
@@ -359,7 +358,7 @@ export class MerchantLifecycleService {
         roles,
         correlationId: normalized.correlationId,
         requestHash,
-        payload: { applicationVersion: nextVersion, payloadHash, level: normalized.level, qualificationComplete: Boolean(normalized.licenseAssetId) },
+        payload: { applicationVersion: nextVersion, payloadHash, qualificationComplete: Boolean(normalized.licenseAssetId) },
         now,
       });
       return this.#merchantDetail(executor, merchantId, roles);
@@ -588,8 +587,7 @@ export class MerchantLifecycleService {
     const qualification = application
       ? qualificationProjection(application, this.#encryptionKey, roles)
       : { access: 'UNAVAILABLE' as const, reason: 'PARTIAL_LEGACY' as const, licenseAssetId: null };
-    const [levelPolicy, orders, fulfillment, risk, contributions, balances, settlements, reviews] = await Promise.all([
-      merchantLevelPolicyProjection(executor, merchant.level),
+    const [orders, fulfillment, risk, contributions, balances, settlements, reviews] = await Promise.all([
       merchantOrderStats(executor, merchantId, businessDay(this.#clock())),
       merchantFulfillmentStats(executor, merchantId, this.#clock()),
       merchantRiskStats(executor, merchantId),
@@ -602,7 +600,7 @@ export class MerchantLifecycleService {
       artifactVersion: CORE_ARTIFACT_VERSION,
       merchant: merchantSummaryProjection({ ...merchant, qualification_complete: Boolean(application?.license_asset_id) }),
       qualification,
-      levelPolicy,
+      levelPolicy: { status: 'Deprecated' as const },
       analytics: { orders, fulfillment, risk, contributions },
       balances,
       settlements,
@@ -804,27 +802,6 @@ async function merchantOrderStats(executor: SqlExecutor, merchantId: string, win
     timezone: 'Asia/Shanghai' as const,
     window: { start: window.start.toISOString(), end: window.end.toISOString() },
   };
-}
-
-async function merchantLevelPolicyProjection(executor: SqlExecutor, level: MerchantLevel) {
-  try {
-    const policy = await currentMerchantLevelPolicy(executor);
-    const rule = merchantLevelRule(policy, level);
-    return {
-      status: 'AVAILABLE' as const,
-      configVersionId: policy.configVersionId,
-      version: policy.version,
-      effectiveFrom: policy.effectiveFrom.toISOString(),
-      level: rule.level,
-      maxProductSettlementUsdt: rule.maxProductSettlementUsdt,
-      monthlySeckillQuota: rule.monthlySeckillQuota,
-    };
-  } catch (error) {
-    if (error instanceof CoreError && error.code === 'DecisionBlocked') {
-      return { status: 'DecisionBlocked' as const, reason: error.message };
-    }
-    throw error;
-  }
 }
 
 async function merchantFulfillmentStats(executor: SqlExecutor, merchantId: string, now: Date) {
@@ -1146,7 +1123,6 @@ function applicationInput(input: MerchantApplicationInput) {
     legalId: boundedText(input.legalId, 'legal ID', 6, 32),
     contactPhone: boundedText(input.contactPhone, 'contact phone', 6, 32),
     settlementWallet: normalizeAddress(input.settlementWallet),
-    level: merchantLevel(input.level),
     idempotencyKey: input.idempotencyKey,
     correlationId: boundedText(input.correlationId, 'correlation ID', 1, 128),
   };
@@ -1161,17 +1137,11 @@ function applicationUpdateInput(input: MerchantApplicationUpdateInput) {
     legalName: boundedText(input.legalName, 'legal name', 2, 80),
     legalId: boundedText(input.legalId, 'legal ID', 6, 32),
     contactPhone: boundedText(input.contactPhone, 'contact phone', 6, 32),
-    level: merchantLevel(input.level),
     licenseAssetId: input.licenseAssetId === null ? null : hashValue(input.licenseAssetId, 'merchant license asset ID'),
     expectedVersion: input.expectedVersion,
     idempotencyKey: input.idempotencyKey,
     correlationId: boundedText(input.correlationId, 'correlation ID', 1, 128),
   };
-}
-
-function merchantLevel(value: string) {
-  if (!LEVELS.includes(value as MerchantLevel)) throw new CoreError('InvalidRequest', 'Merchant level is invalid');
-  return value as MerchantLevel;
 }
 
 function merchantStatus(value: string) {

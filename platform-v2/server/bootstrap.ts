@@ -586,6 +586,10 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     twapSource: required(config.twapSourceAddress, 'TWAP_SOURCE_ADDRESS'),
     twapSourceCodeHash: required(config.twapSourceCodeHash, 'TWAP_SOURCE_CODEHASH'),
     governanceSafe: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    platformServiceFeeSafe: required(
+      config.platformServiceFeeSafeAddress,
+      'PLATFORM_SERVICE_FEE_SAFE_ADDRESS',
+    ),
     usdtCustodySafe: required(config.usdtCustodySafeAddress, 'USDT_CUSTODY_SAFE_ADDRESS'),
     nplRewardSafe: required(config.nplRewardSafeAddress, 'NPL_REWARD_SAFE_ADDRESS'),
     operationsTreasurySafe: required(config.operationsTreasurySafeAddress, 'OPERATIONS_TREASURY_SAFE_ADDRESS'),

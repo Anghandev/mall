@@ -6,16 +6,28 @@ import type { FulfillmentActor } from './fulfillment-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 
 const FIVE_MINUTES_MS = 5 * 60 * 1_000;
+const TWENTY_MINUTES_MS = 20 * 60 * 1_000;
 const TWO_HOURS_MS = 2 * 60 * 60 * 1_000;
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1_000;
 
-export type RiskSignalType = 'HIGH_GAS' | 'WALLET_CONTEXT' | 'ORDER_CANCELLATION';
+export type RiskSignalType =
+  | 'HIGH_GAS'
+  | 'WALLET_CONTEXT'
+  | 'ORDER_CANCELLATION'
+  | 'ADDRESS_CHANGE'
+  | 'PICKUP_STORE_CHANGE';
+export type RiskSourceType =
+  | 'CHAIN_MONITOR'
+  | 'EDGE_AUTH'
+  | 'ORDER_SERVICE'
+  | 'ACCOUNT_SERVICE'
+  | 'FULFILLMENT_TARGET_SERVICE';
 export type RiskSubjectType = 'WALLET' | 'IP' | 'DEVICE';
 
 export interface RiskObservationInput {
   observationId: string;
   signalType: RiskSignalType;
-  sourceType: 'CHAIN_MONITOR' | 'EDGE_AUTH' | 'ORDER_SERVICE';
+  sourceType: RiskSourceType;
   walletAddress: string;
   ipHash?: string;
   deviceHash?: string;
@@ -184,7 +196,7 @@ export class RiskService {
             }));
           }
         }
-      } else {
+      } else if (normalized.signalType === 'ORDER_CANCELLATION') {
         const count = await cancellationsInWindow(executor, normalized.walletAddress, normalized.observedAt);
         if (count >= 3) {
           created.push(await createRestriction(executor, {
@@ -251,8 +263,7 @@ export class RiskService {
         restrictions: restrictions.rows.map(restrictionProjection),
         appeals: appeals.rows.map(appealProjection),
         decisionBlocked: Object.freeze([
-          { capability: 'LOW_HISTORY_WALLET_CLUSTERING', reasonCode: 'DecisionBlocked' as const },
-          { capability: 'FREQUENT_ADDRESS_OR_STORE_CHANGE_THRESHOLD', reasonCode: 'DecisionBlocked' as const },
+          { capability: 'LOW_HISTORY_WALLET_CLUSTERING', reasonCode: 'ExternalBlocked' as const },
           { capability: 'PRODUCTION_DEVICE_FINGERPRINT_SOURCE', reasonCode: 'ExternalBlocked' as const },
         ]),
       });
@@ -457,6 +468,78 @@ export async function assertWalletPaymentAllowed(executor: SqlExecutor, walletAd
       expiresAt: result.rows[0].expires_at?.toISOString() ?? null,
     });
   }
+}
+
+export async function recordFrequentChangeAlert(executor: SqlExecutor, input: {
+  signalType: 'ADDRESS_CHANGE' | 'PICKUP_STORE_CHANGE';
+  walletAddress: string;
+  resourceId: string;
+  requestHash: string;
+  correlationId: string;
+  observedAt: Date;
+}) {
+  const walletAddress = address(input.walletAddress);
+  const eventTypes = input.signalType === 'ADDRESS_CHANGE'
+    ? ['BuyerAddressCreated', 'BuyerAddressUpdated', 'BuyerAddressDeleted', 'BuyerDefaultAddressChanged']
+    : ['BuyerPickupStoreTargetChanged'];
+  const count = await executor.query<{ count: string }>(
+    `SELECT count(*)::text AS count FROM core.audit_outbox_events
+     WHERE actor_wallet = $1 AND event_type = ANY($2::text[])
+       AND created_at > $3 AND created_at <= $4`,
+    [walletAddress, eventTypes, new Date(input.observedAt.getTime() - TWENTY_MINUTES_MS), input.observedAt],
+  );
+  const changeCount = Number(count.rows[0]?.count ?? '0');
+  if (changeCount !== 10) return { alerted: false as const, changeCount };
+
+  const sourceType: RiskSourceType = input.signalType === 'ADDRESS_CHANGE'
+    ? 'ACCOUNT_SERVICE'
+    : 'FULFILLMENT_TARGET_SERVICE';
+  const observationId = hashJson({
+    domain: 'ABU24K_FREQUENT_CHANGE_ALERT_V1',
+    signalType: input.signalType,
+    walletAddress,
+    resourceId: input.resourceId,
+    requestHash: input.requestHash,
+  });
+  const existing = await executor.query<{ observation_id: string }>(
+    'SELECT observation_id FROM core.risk_observations WHERE observation_id = $1',
+    [observationId],
+  );
+  if (!existing.rows[0]) {
+    await executor.query(
+      `INSERT INTO core.risk_observations (
+         observation_id, signal_type, source_type, wallet_address, resource_id,
+         evidence_hash, request_hash, observed_at, recorded_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$6,$7,$7)`,
+      [
+        observationId,
+        input.signalType,
+        sourceType,
+        walletAddress,
+        input.resourceId,
+        input.requestHash,
+        input.observedAt,
+      ],
+    );
+    await enqueueRiskAudit(executor, {
+      eventType: 'RiskChangeThresholdReached',
+      resourceType: 'RISK_OBSERVATION',
+      resourceId: observationId,
+      actorWallet: walletAddress,
+      actorRole: 'SYSTEM',
+      correlationId: input.correlationId,
+      requestHash: input.requestHash,
+      payload: {
+        signalType: input.signalType,
+        changeCount,
+        windowSeconds: TWENTY_MINUTES_MS / 1_000,
+        automaticRestrictionCreated: false,
+        evidenceHash: input.requestHash,
+      },
+      createdAt: input.observedAt,
+    });
+  }
+  return { alerted: true as const, changeCount, observationId };
 }
 
 async function highGasThreshold(executor: SqlExecutor) {
@@ -692,10 +775,16 @@ function enqueueRiskAudit(
 
 function normalizeObservation(input: RiskObservationInput) {
   const signalType = input.signalType;
-  if (!['HIGH_GAS', 'WALLET_CONTEXT', 'ORDER_CANCELLATION'].includes(signalType)) throw new CoreError('InvalidRequest', 'Risk signal type is invalid');
+  if (!['HIGH_GAS', 'WALLET_CONTEXT', 'ORDER_CANCELLATION', 'ADDRESS_CHANGE', 'PICKUP_STORE_CHANGE'].includes(signalType)) throw new CoreError('InvalidRequest', 'Risk signal type is invalid');
   const sourceType = input.sourceType;
-  const expectedSource = { HIGH_GAS: 'CHAIN_MONITOR', WALLET_CONTEXT: 'EDGE_AUTH', ORDER_CANCELLATION: 'ORDER_SERVICE' }[signalType];
-  if (sourceType !== expectedSource) throw new CoreError('InvalidRequest', 'Risk signal source is invalid');
+  const expectedSource: Record<RiskSignalType, RiskSourceType> = {
+    HIGH_GAS: 'CHAIN_MONITOR',
+    WALLET_CONTEXT: 'EDGE_AUTH',
+    ORDER_CANCELLATION: 'ORDER_SERVICE',
+    ADDRESS_CHANGE: 'ACCOUNT_SERVICE',
+    PICKUP_STORE_CHANGE: 'FULFILLMENT_TARGET_SERVICE',
+  };
+  if (sourceType !== expectedSource[signalType]) throw new CoreError('InvalidRequest', 'Risk signal source is invalid');
   const normalized = {
     observationId: hash(input.observationId, 'risk observation id'),
     signalType,
@@ -712,6 +801,9 @@ function normalizeObservation(input: RiskObservationInput) {
   if (signalType === 'WALLET_CONTEXT' && !normalized.ipHash && !normalized.deviceHash) throw new CoreError('InvalidRequest', 'Wallet context requires IP or device hash');
   if (signalType === 'HIGH_GAS' && (!normalized.txHash || normalized.gasPriceWei === null)) throw new CoreError('InvalidRequest', 'High-Gas observation is incomplete');
   if (signalType === 'ORDER_CANCELLATION' && (!normalized.resourceId || normalized.resourceId.length > 128)) throw new CoreError('InvalidRequest', 'Cancellation resource is invalid');
+  if ((signalType === 'ADDRESS_CHANGE' || signalType === 'PICKUP_STORE_CHANGE') && (!normalized.resourceId || normalized.resourceId.length > 128)) {
+    throw new CoreError('InvalidRequest', 'Change alert resource is invalid');
+  }
   return normalized;
 }
 

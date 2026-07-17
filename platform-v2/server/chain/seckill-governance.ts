@@ -4,6 +4,10 @@ import { CoreError } from '../api/errors.ts';
 import { auditSourceId, enqueueAudit } from '../data/audit-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from '../data/migrations.ts';
 import {
+  rollPendingSeckillPrizesIntoSession,
+  settleMaturedSeckillPrizes,
+} from '../data/seckill-prize-service.ts';
+import {
   releaseSeckillPlanInventory,
   type SeckillActionRow,
 } from '../data/seckill-operations-service.ts';
@@ -616,13 +620,13 @@ export class SeckillGovernanceWorker {
   #settleMaturedSessionInventory() {
     return this.#transactions.transaction(async (executor) => {
       const now = this.#clock();
+      await settleMaturedSeckillPrizes(executor, now);
       const sessions = await executor.query<{ session_id: string }>(
         `SELECT session.session_id
          FROM core.seckill_sessions session
          JOIN core.seckill_session_plans plan ON plan.session_id = session.session_id
-         WHERE session.phase NOT IN ('SETTLED','FORCE_CLOSED')
-           AND plan.inventory_lock_state = 'LOCKED'
-           AND LEAST(session.main_deadline, session.relay_deadline) + interval '10 minutes' <= $1
+         JOIN core.seckill_prize_settlements prize ON prize.session_id = session.session_id
+         WHERE plan.inventory_lock_state = 'LOCKED'
            AND NOT EXISTS (
              SELECT 1 FROM core.payment_quotes quote
              WHERE quote.session_id = session.session_id
@@ -636,24 +640,6 @@ export class SeckillGovernanceWorker {
         [now],
       );
       for (const session of sessions.rows) {
-        await executor.query(
-          "UPDATE core.seckill_sessions SET phase = 'SETTLED', updated_at = $2 WHERE session_id = $1",
-          [session.session_id, now],
-        );
-        await releaseSeckillPlanInventory(executor, session.session_id, now, true);
-      }
-      const forceClosed = await executor.query<{ session_id: string }>(
-        `SELECT session.session_id
-         FROM core.seckill_sessions session
-         JOIN core.seckill_session_plans plan ON plan.session_id = session.session_id
-         WHERE session.phase = 'FORCE_CLOSED' AND plan.inventory_lock_state = 'LOCKED'
-           AND NOT EXISTS (
-             SELECT 1 FROM core.payment_quotes quote
-             WHERE quote.session_id = session.session_id AND quote.state = 'SUBMITTED'
-           )
-         ORDER BY session.updated_at, session.session_id FOR UPDATE OF session`,
-      );
-      for (const session of forceClosed.rows) {
         await releaseSeckillPlanInventory(executor, session.session_id, now, true);
       }
     });
@@ -769,6 +755,7 @@ async function finalizeAction(
         JSON.stringify({ sessionId: action.session_id, actionId: action.action_id, transactionHash: observation.executionTxHash }),
       ],
     );
+    await rollPendingSeckillPrizesIntoSession(executor, action.session_id, at);
     return;
   }
   if (action.action_kind === 'FORCE_CLOSE') {
@@ -777,7 +764,6 @@ async function finalizeAction(
       [action.session_id, at],
     );
     await upsertSeckillBreaker(executor, action, true, at);
-    await releaseSeckillPlanInventory(executor, action.session_id, at, true);
     return;
   }
   if (action.action_kind === 'RESUME_PURCHASES') {
