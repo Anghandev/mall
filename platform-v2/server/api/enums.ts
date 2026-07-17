@@ -477,10 +477,22 @@ export type InfrastructureProvider = (typeof infrastructureProviders)[number];
 export const providerReadinessStates = ['READY', 'CONFIGURATION_REQUIRED'] as const;
 export type ProviderReadinessState = (typeof providerReadinessStates)[number];
 
-export const riskSignalTypes = ['HIGH_GAS', 'WALLET_CONTEXT', 'ORDER_CANCELLATION'] as const;
+export const riskSignalTypes = [
+  'HIGH_GAS',
+  'WALLET_CONTEXT',
+  'ORDER_CANCELLATION',
+  'ADDRESS_CHANGE',
+  'PICKUP_STORE_CHANGE',
+] as const;
 export type RiskSignalType = (typeof riskSignalTypes)[number];
 
-export const riskSourceTypes = ['CHAIN_MONITOR', 'EDGE_AUTH', 'ORDER_SERVICE'] as const;
+export const riskSourceTypes = [
+  'CHAIN_MONITOR',
+  'EDGE_AUTH',
+  'ORDER_SERVICE',
+  'ACCOUNT_SERVICE',
+  'FULFILLMENT_TARGET_SERVICE',
+] as const;
 export type RiskSourceType = (typeof riskSourceTypes)[number];
 
 export const riskSubjectTypes = ['WALLET', 'IP', 'DEVICE'] as const;

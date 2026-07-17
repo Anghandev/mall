@@ -31,6 +31,25 @@ interface SessionRow {
   relay_increment: string | number;
   relay_cap: string | number;
   main_duration: string | number;
+  prize_settlement_state: string | null;
+  candidate_order_id: string | null;
+  candidate_buyer_wallet: string | null;
+  candidate_payment_event_key: string | null;
+  candidate_evidence_hash: string | null;
+  pool_snapshot_amount_usdt: string | null;
+  pool_snapshot_hash: string | null;
+  review_decision: string | null;
+  review_reason_code: string | null;
+  review_evidence_hash: string | null;
+  reviewed_at: Date | null;
+  award_journal_id: string | null;
+  rollover_target_session_id: string | null;
+  rollover_journal_id: string | null;
+  payout_state: string | null;
+  payout_request_id: string | null;
+  payout_batch_id: string | null;
+  payout_safe_tx_hash: string | null;
+  payout_execution_tx_hash: string | null;
 }
 
 interface RelayEventRow {
@@ -174,11 +193,32 @@ function sessionSelect() {
     policy.payload ->> 'relayInitial' AS relay_initial,
     policy.payload ->> 'relayIncrement' AS relay_increment,
     policy.payload ->> 'relayCap' AS relay_cap,
-    policy.payload ->> 'seckillMainDuration' AS main_duration
+    policy.payload ->> 'seckillMainDuration' AS main_duration,
+    prize.state AS prize_settlement_state,
+    prize.candidate_order_id, prize.candidate_buyer_wallet,
+    prize.candidate_payment_event_key, prize.candidate_evidence_hash,
+    prize.pool_amount_usdt::text AS pool_snapshot_amount_usdt,
+    prize.pool_snapshot_hash, prize.review_decision, prize.review_reason_code,
+    prize.review_evidence_hash, prize.reviewed_at, prize.award_journal_id,
+    prize.rollover_target_session_id, prize.rollover_journal_id,
+    payout.state AS payout_state, payout.request_id AS payout_request_id,
+    payout.batch_id AS payout_batch_id,
+    payout.final_safe_tx_hash AS payout_safe_tx_hash,
+    payout.final_execution_tx_hash AS payout_execution_tx_hash
   FROM core.seckill_sessions session
   JOIN core.products product ON product.product_id = session.product_id
   JOIN core.skus sku ON sku.sku_id = session.sku_id
-  JOIN core.policy_snapshots policy ON policy.policy_version = session.policy_version`;
+  JOIN core.policy_snapshots policy ON policy.policy_version = session.policy_version
+  LEFT JOIN core.seckill_prize_settlements prize ON prize.session_id = session.session_id
+  LEFT JOIN LATERAL (
+    SELECT request.request_id, request.state, request.batch_id,
+      request.final_safe_tx_hash, request.final_execution_tx_hash
+    FROM core.settlement_request_items item
+    JOIN core.settlement_requests request ON request.request_id = item.request_id
+    WHERE item.order_id = prize.candidate_order_id
+      AND item.account_id = prize.award_account_id
+    ORDER BY request.requested_at DESC, request.request_id DESC LIMIT 1
+  ) payout ON true`;
 }
 
 function sessionProjection(row: SessionRow, now: Date) {
@@ -223,7 +263,34 @@ function sessionProjection(row: SessionRow, now: Date) {
     },
     prizePoolUsdt: row.prize_pool_usdt,
     lastBuyerWallet: row.last_buyer_wallet,
-    winnerWallet: phase === 'SETTLED' ? row.last_buyer_wallet : null,
+    winnerWallet: row.review_decision === 'APPROVED' ? row.candidate_buyer_wallet : null,
+    prizeSettlement: row.prize_settlement_state ? {
+      state: row.prize_settlement_state,
+      candidate: row.candidate_order_id ? {
+        orderId: row.candidate_order_id,
+        buyerWallet: row.candidate_buyer_wallet,
+        paymentEventKey: row.candidate_payment_event_key,
+        evidenceHash: row.candidate_evidence_hash,
+      } : null,
+      poolAmountUsdt: row.pool_snapshot_amount_usdt,
+      poolSnapshotHash: row.pool_snapshot_hash,
+      review: row.review_decision ? {
+        decision: row.review_decision,
+        reasonCode: row.review_reason_code,
+        evidenceHash: row.review_evidence_hash,
+        reviewedAt: row.reviewed_at ? iso(row.reviewed_at) : null,
+      } : null,
+      awardJournalId: row.award_journal_id,
+      rolloverTargetSessionId: row.rollover_target_session_id,
+      rolloverJournalId: row.rollover_journal_id,
+      payout: row.review_decision === 'APPROVED' ? {
+        state: row.payout_state ?? (BigInt(row.pool_snapshot_amount_usdt ?? '0') > 0n ? 'AVAILABLE' : 'SETTLED'),
+        requestId: row.payout_request_id,
+        batchId: row.payout_batch_id,
+        finalSafeTxHash: row.payout_safe_tx_hash,
+        finalExecutionTxHash: row.payout_execution_tx_hash,
+      } : null,
+    } : null,
     snapshot: object(row.snapshot),
     governanceActionId: row.governance_action_id,
     rulesContentHash: row.rules_content_hash,

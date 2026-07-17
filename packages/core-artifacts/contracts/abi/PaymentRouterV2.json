@@ -28,6 +28,11 @@
         "internalType": "contract ITwapOracleV2"
       },
       {
+        "name": "platformServiceFeeSafe_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
         "name": "usdtCustodySafe_",
         "type": "address",
         "internalType": "address"
@@ -259,6 +264,18 @@
       },
       {
         "name": "productUsdtPaid",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "platformServiceFeeUsdt",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "custodyProductUsdt",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -774,6 +791,16 @@
             "internalType": "uint256"
           },
           {
+            "name": "platformServiceFeeUsdt",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "custodyProductUsdt",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
             "name": "freightUsdt",
             "type": "uint256",
             "internalType": "uint256"
@@ -1012,6 +1039,16 @@
                 "internalType": "uint256"
               },
               {
+                "name": "platformServiceFeeUsdt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "custodyProductUsdt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
                 "name": "freightUsdt",
                 "type": "uint256",
                 "internalType": "uint256"
@@ -1222,6 +1259,16 @@
               },
               {
                 "name": "productUsdtPaymentAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "platformServiceFeeUsdt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "custodyProductUsdt",
                 "type": "uint256",
                 "internalType": "uint256"
               },
@@ -1581,6 +1628,16 @@
             "internalType": "uint256"
           },
           {
+            "name": "platformServiceFeeUsdt",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "custodyProductUsdt",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
             "name": "freightUsdt",
             "type": "uint256",
             "internalType": "uint256"
@@ -1836,6 +1893,16 @@
                 "internalType": "uint256"
               },
               {
+                "name": "platformServiceFeeUsdt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "custodyProductUsdt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
                 "name": "freightUsdt",
                 "type": "uint256",
                 "internalType": "uint256"
@@ -2050,6 +2117,16 @@
                 "internalType": "uint256"
               },
               {
+                "name": "platformServiceFeeUsdt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "custodyProductUsdt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
                 "name": "freightUsdt",
                 "type": "uint256",
                 "internalType": "uint256"
@@ -2173,6 +2250,19 @@
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "platformServiceFeeSafe",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",

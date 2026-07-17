@@ -56,7 +56,6 @@ export type BreakerCauseType = "COVERAGE" | "GOVERNANCE" | "SECURITY" | "OPERATI
 export type ReservationState = "ACTIVE" | "CONSUMED" | "EXPIRED" | "RELEASED";
 export type BalanceState = "LOCKED" | "AVAILABLE" | "REQUESTED" | "BATCHED" | "SETTLED" | "DISPUTED";
 export type RewardSubtype = "GENESIS" | "DIRECT_REFERRAL" | "DISTRICT" | "CITY" | "PROVINCE" | "REGION" | "OPERATIONS" | "ROUNDING_REMAINDER";
-export type UsdtLiabilityPurpose = 'POLICY_ALLOCATION' | 'SECKILL_PRIZE_LIABILITY';
 export type TakeoverState = "OPEN" | "FUNDED" | "FULFILLING" | "FULFILLMENT_PENDING" | "CLOSED" | "DECISION_BLOCKED";
 export type SeckillState = "PREHEAT" | "LIVE" | "SETTLING" | "SETTLED" | "FORCE_CLOSED";
 export type PolicyPublicationState = "DRAFT" | "DECISION_BLOCKED" | "PUBLISHED" | "SUPERSEDED";
@@ -82,8 +81,8 @@ export type OperationsAlertSeverity = "WARNING" | "CRITICAL";
 export type AdapterProvider = "AMAP" | "KUAIDI100" | "CAINIAO" | "FEIE" | "YILIANYUN" | "BNM" | "ALIYUN_SMS" | "TENCENT_SMS" | "ALIYUN_OSS" | "SMTP" | "FIREBASE" | "JPUSH";
 export type InfrastructureProvider = "RPC_PRIMARY" | "RPC_FALLBACK" | "EXPLORER";
 export type ProviderReadinessState = "READY" | "CONFIGURATION_REQUIRED";
-export type RiskSignalType = "HIGH_GAS" | "WALLET_CONTEXT" | "ORDER_CANCELLATION";
-export type RiskSourceType = "CHAIN_MONITOR" | "EDGE_AUTH" | "ORDER_SERVICE";
+export type RiskSignalType = "HIGH_GAS" | "WALLET_CONTEXT" | "ORDER_CANCELLATION" | "ADDRESS_CHANGE" | "PICKUP_STORE_CHANGE";
+export type RiskSourceType = "CHAIN_MONITOR" | "EDGE_AUTH" | "ORDER_SERVICE" | "ACCOUNT_SERVICE" | "FULFILLMENT_TARGET_SERVICE";
 export type RiskSubjectType = "WALLET" | "IP" | "DEVICE";
 export type RiskRestrictionKind = "NEW_PAYMENT" | "BLACKLIST";
 export type RiskRestrictionState = "ACTIVE" | "EXPIRED" | "OVERRIDDEN";
@@ -179,6 +178,7 @@ export interface MerchantLifecycleSummary {
   settlementWallet: Address;
   settlementWalletMutable: false;
   status: MerchantLifecycleStatus;
+  /** @deprecated V1-V5 has no business effect. */
   level: MerchantLevel;
   guaranteeStatus: GuaranteeStatus;
   applicationVersion: number;
@@ -215,7 +215,8 @@ export interface MerchantApplicationCreateRequest {
   legalId: string;
   contactPhone: string;
   settlementWallet: Address;
-  level: MerchantLevel;
+  /** @deprecated Ignored by Core. */
+  level?: MerchantLevel;
   idempotencyKey: string;
 }
 
@@ -224,7 +225,8 @@ export interface MerchantApplicationUpdateRequest {
   legalName: string;
   legalId: string;
   contactPhone: string;
-  level: MerchantLevel;
+  /** @deprecated Ignored by Core. */
+  level?: MerchantLevel;
   licenseAssetId: Bytes32 | null;
   expectedVersion: number;
   idempotencyKey: string;
@@ -280,17 +282,8 @@ export interface MerchantLifecycleDetail {
   artifactVersion: typeof artifactVersion;
   merchant: MerchantLifecycleSummary;
   qualification: MerchantQualification;
-  levelPolicy:
-    | Readonly<{
-        status: 'AVAILABLE';
-        configVersionId: string;
-        version: number;
-        effectiveFrom: Timestamp;
-        level: MerchantLevel;
-        maxProductSettlementUsdt: AtomicAmount;
-        monthlySeckillQuota: number;
-      }>
-    | Readonly<{ status: 'DecisionBlocked'; reason: string }>;
+  /** @deprecated V1-V5 price and quota policy is disabled. */
+  levelPolicy: Readonly<{ status: 'Deprecated' }>;
   analytics: Readonly<{
     orders: {
       totalFinalized: AtomicAmount;
@@ -560,6 +553,40 @@ export interface SeckillSessionInventory {
   available: AtomicAmount;
 }
 
+export interface SeckillPrizeCandidate {
+  orderId: Bytes32;
+  buyerWallet: Address;
+  paymentEventKey: string;
+  evidenceHash: Bytes32;
+}
+
+export interface SeckillPrizeReview {
+  decision: 'APPROVED' | 'REJECTED';
+  reasonCode: string;
+  evidenceHash: Bytes32;
+  reviewedAt: string;
+}
+
+export interface SeckillPrizePayout {
+  state: 'AVAILABLE' | 'REQUESTED' | 'BATCHED' | 'SETTLED' | 'RETRYABLE' | 'QUARANTINED';
+  requestId: Bytes32 | null;
+  batchId: Bytes32 | null;
+  finalSafeTxHash: Bytes32 | null;
+  finalExecutionTxHash: Bytes32 | null;
+}
+
+export interface SeckillPrizeSettlementProjection {
+  state: 'REVIEW_PENDING' | 'APPROVED' | 'ROLLOVER_PENDING' | 'ROLLED_OVER' | 'QUARANTINED';
+  candidate: SeckillPrizeCandidate | null;
+  poolAmountUsdt: AtomicAmount;
+  poolSnapshotHash: Bytes32;
+  review: SeckillPrizeReview | null;
+  awardJournalId: string | null;
+  rolloverTargetSessionId: Bytes32 | null;
+  rolloverJournalId: string | null;
+  payout: SeckillPrizePayout | null;
+}
+
 export interface SeckillSessionProjection {
   artifactVersion: typeof artifactVersion;
   sessionId: Bytes32;
@@ -579,6 +606,7 @@ export interface SeckillSessionProjection {
   prizePoolUsdt: AtomicAmount;
   lastBuyerWallet: Address | null;
   winnerWallet: Address | null;
+  prizeSettlement: SeckillPrizeSettlementProjection | null;
   snapshot: JsonObject;
   governanceActionId: Bytes32 | null;
   rulesContentHash: Bytes32 | null;
@@ -609,6 +637,12 @@ export interface SeckillSessionCreateRequest {
 
 export interface SeckillForceCloseRequest { reasonCode: string; idempotencyKey: string }
 export interface SeckillPrizeInjectionRequest { amountUsdt: AtomicAmount; idempotencyKey: string }
+export interface SeckillWinnerReviewRequest {
+  decision: 'APPROVE' | 'REJECT';
+  reasonCode: string;
+  evidenceHash: Bytes32;
+  idempotencyKey: string;
+}
 export interface SeckillBreakerResumeRequest { sessionId: Bytes32; idempotencyKey: string }
 export interface SeckillGovernanceChallengeRequest { nonce: AtomicAmount; deadline: AtomicAmount }
 export interface SeckillGovernanceApprovalRequest extends SeckillGovernanceChallengeRequest { signature: string }
@@ -862,6 +896,8 @@ export interface BuyerShoppingStatement {
   orderKind: Exclude<OrderKind, 'SECKILL'>;
   paymentAmounts: {
     productUsdtPaymentAmount: AtomicAmount;
+    platformServiceFeeUsdt: AtomicAmount;
+    custodyProductUsdt: AtomicAmount;
     freightUsdt: AtomicAmount;
     usdtPaymentAmount: AtomicAmount;
     nplPaymentAmount: AtomicAmount;
@@ -928,6 +964,8 @@ export interface MerchantReceivableStatement {
   frozenAmounts: {
     listPriceUsdt: AtomicAmount;
     productUsdtPaymentAmount: AtomicAmount;
+    platformServiceFeeUsdt: AtomicAmount;
+    custodyProductUsdt: AtomicAmount;
     freightUsdt: AtomicAmount;
     buyerPaidUsdt: AtomicAmount;
     merchantBaseReceivableUsdt: AtomicAmount;
@@ -1956,15 +1994,14 @@ export interface ProductPolicy {
   oracleMinimumUsdtLiquidity: AtomicAmount;
   requiredConfirmations: 15;
   merchantGuaranteeMinimumUsdt: AtomicAmount;
+  platformServiceFeeSafe: Address;
   usdtCustodySafe: Address;
   nplRewardSafe: Address;
   operationsTreasurySafe: Address;
   circulationPool: Address;
   concessionDestinationSetHash: Bytes32;
-  concessionDestinations: readonly WeightedDestination[];
+  genesisNodeDestinations: readonly WeightedDestination[];
   operationsDestinations: readonly WeightedDestination[];
-  otherUsdtDestinations: readonly WeightedDestination[];
-  seckillPrizePoolAccount: Address;
 }
 
 export interface WeightedDestination {
@@ -2122,8 +2159,9 @@ export interface ProductSlotProjection {
 }
 
 export interface MerchantConcessionAllocation {
-  account: Address;
+  pool: 'SECKILL_PRIZE' | 'NODE_REWARD' | 'REWARD_RESERVE';
   amount: AtomicAmount;
+  balanceState: 'LOCKED';
 }
 
 export interface MerchantConcessionPreviewItem {
@@ -2356,6 +2394,8 @@ export type FulfillmentTarget =
 export interface FulfillmentExactAmounts {
   listPriceUsdt: AtomicAmount;
   productUsdtPaymentAmount: AtomicAmount;
+  platformServiceFeeUsdt: AtomicAmount;
+  custodyProductUsdt: AtomicAmount;
   freightUsdt: AtomicAmount;
   usdtPaymentAmount: AtomicAmount;
   nplQuoteAmount: AtomicAmount;
@@ -2742,12 +2782,9 @@ export interface BeneficiarySnapshot {
 }
 
 export interface MerchantConcessionAllocation {
-  account: Address;
+  pool: 'SECKILL_PRIZE' | 'NODE_REWARD' | 'REWARD_RESERVE';
   amount: AtomicAmount;
-}
-
-export interface OtherUsdtAllocation extends MerchantConcessionAllocation {
-  purpose: UsdtLiabilityPurpose;
+  balanceState: 'LOCKED';
 }
 
 export type NplRewardRole = 'genesis' | 'directReferral' | 'district' | 'city' | 'province' | 'region' | 'operations' | 'roundingRemainder';
@@ -2759,7 +2796,6 @@ export interface NplRewardAllocation extends MerchantConcessionAllocation {
 export interface AllocationSnapshot {
   beneficiaries: BeneficiarySnapshot;
   concession: readonly MerchantConcessionAllocation[];
-  otherUsdt: readonly OtherUsdtAllocation[];
   nplRewards: readonly NplRewardAllocation[];
 }
 
@@ -2784,6 +2820,8 @@ export interface PaymentRouterIntent {
   nonce: AtomicAmount;
   listPriceUsdt: AtomicAmount;
   productUsdtPaymentAmount: AtomicAmount;
+  platformServiceFeeUsdt: AtomicAmount;
+  custodyProductUsdt: AtomicAmount;
   freightUsdt: AtomicAmount;
   usdtPaymentAmount: AtomicAmount;
   nplQuoteAmount: AtomicAmount;
@@ -2804,7 +2842,6 @@ export interface PaymentRouterIntent {
 export interface CanonicalPaymentIntent extends Omit<PaymentRouterIntent, 'fulfillmentMode'> {
   fulfillmentMode: FulfillmentMode;
   merchantConcessionAllocations: readonly MerchantConcessionAllocation[];
-  otherUsdtAllocations: readonly OtherUsdtAllocation[];
   nplRewardAllocations: readonly NplRewardAllocation[];
   requiredConfirmations: 15;
 }

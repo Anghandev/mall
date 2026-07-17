@@ -19,6 +19,7 @@ import {
   type PaymentQuoteRequest,
 } from '../../server/api/checkout.ts';
 import { CoreError } from '../../server/api/errors.ts';
+import { paymentAllocationSetHash } from '../../server/api/payment-policy.ts';
 import { applyReceipt, replaceTransaction, requireFinal, submittedFinality } from '../../server/api/finality.ts';
 import { assertEmptySessionPrizeDecision, evaluateForcedReceipt, evaluateTakeover } from '../../server/api/fulfillment.ts';
 import { loadConfig, requireProvider } from '../../server/api/config.ts';
@@ -269,9 +270,12 @@ test('ordinary and seckill quotes conserve funds and keep independent reservatio
   const ordinary = buildPaymentIntent(request, readyPolicy(), 'ORDINARY', request.issuedAt);
   assert.equal(
     BigInt(ordinary.merchantNetReceivableUsdt) +
-      BigInt(ordinary.merchantConcessionAmount) +
-      ordinary.otherUsdtAllocations.reduce((sum, item) => sum + BigInt(item.amount), 0n),
-    BigInt(ordinary.usdtPaymentAmount),
+      BigInt(ordinary.merchantConcessionAmount),
+    BigInt(ordinary.custodyProductUsdt),
+  );
+  assert.equal(
+    BigInt(ordinary.platformServiceFeeUsdt) + BigInt(ordinary.custodyProductUsdt),
+    BigInt(ordinary.productUsdtPaymentAmount),
   );
   assert.equal(BigInt(ordinary.nplBurnAmount) + BigInt(ordinary.nplRewardAmount), BigInt(ordinary.nplPaymentAmount));
 
@@ -416,21 +420,19 @@ function readyPolicy(): FrozenPaymentPolicy {
     provinceBps: 60,
     regionBps: 40,
     operationsBps: 400,
+    platformFeeBps: 100,
     oracleWindowSeconds: 1_800,
     oracleMaxDeviationBps: 500,
     oracleMaxAgeSeconds: 600,
     oracleMinimumUsdtLiquidity: 50_000n * 10n ** 18n,
     requiredConfirmations: 15,
     merchantGuaranteeMinimumUsdt: 1_000n * 10n ** 18n,
+    platformServiceFeeSafe: '0x2222222222222222222222222222222222222223',
     usdtCustodySafe: '0x3333333333333333333333333333333333333333',
     nplRewardSafe: '0x4444444444444444444444444444444444444444',
     operationsTreasurySafe: '0x5555555555555555555555555555555555555555',
     circulationPool: '0x6666666666666666666666666666666666666666',
-    concessionDestinationSetHash: HASH_2,
-    concessionDestinations: [
-      { account: '0x7777777777777777777777777777777777777777', weightBps: 4_000 },
-      { account: '0x8888888888888888888888888888888888888888', weightBps: 6_000 },
-    ],
+    concessionDestinationSetHash: paymentAllocationSetHash(),
     operationsDestinations: [
       { account: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', weightBps: 4_000 },
       { account: '0xcccccccccccccccccccccccccccccccccccccccc', weightBps: 6_000 },
@@ -461,11 +463,7 @@ function quoteRequest(): PaymentQuoteRequest {
     listPriceUsdt: 100n,
     freightUsdt: 0n,
     nplQuoteAmount: 1_000n,
-    merchantBaseReceivableUsdt: 60n,
     merchantConcessionBps: 2_500,
-    otherUsdtAllocations: [
-      { account: '0x9999999999999999999999999999999999999999', amount: 10n, purpose: 'POLICY_ALLOCATION' },
-    ],
     beneficiaries: {
       genesis: CONTRACT,
       directReferral: '0x5555555555555555555555555555555555555555',

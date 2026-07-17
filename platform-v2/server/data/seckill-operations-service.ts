@@ -6,12 +6,12 @@ import {
   verifySensitiveActionApproval,
   type SensitiveActionIntent,
 } from '../api/auth.ts';
-import { CORE_ARTIFACT_VERSION, USDT_ADDRESS, type MerchantLevel } from '../api/enums.ts';
+import { CORE_ARTIFACT_VERSION, USDT_ADDRESS } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
-import { currentMerchantLevelPolicy, merchantLevelRule, shanghaiMonth } from './merchant-level-policy.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
+import { reviewSeckillPrize } from './seckill-prize-service.ts';
 
 const ROUTER = new Interface([
   'function openSeckillSession(bytes32 sessionId,uint64 policyVersion,uint64 startsAt)',
@@ -166,7 +166,6 @@ export class SeckillOperationsService {
       if (existing) return actionProjection(executor, existing);
       const policy = await requireSessionPolicy(executor, parsed.policyVersion, parsed.rulesContentHash);
       const catalog = await requireSessionCatalog(executor, parsed.productId, parsed.skuId, parsed.inventory);
-      const levelPolicy = await requireMerchantSeckillQuota(executor, catalog, parsed.startsAt);
       await requireGuarantee(executor, catalog.merchant_id);
       const coverageSnapshotId = await requireFullCoverage(executor);
       await requireSeckillBreakerOpen(executor);
@@ -196,7 +195,6 @@ export class SeckillOperationsService {
         timers: FIXED_TIMERS,
         guaranteeEvidenceHash: catalog.guarantee_evidence_hash,
         coverageSnapshotId,
-        merchantLevelPolicy: levelPolicy,
       };
       const evidenceHash = hashJson(snapshot);
       const calldata = ROUTER.encodeFunctionData('openSeckillSession', [
@@ -435,6 +433,86 @@ export class SeckillOperationsService {
         [actionId, normalizedSessionId, amount.toString(), this.#operationsSafe, this.#custodySafe, this.#usdt, this.#clock()],
       );
       return actionProjection(executor, await loadAction(executor, actionId));
+    });
+  }
+
+  reviewWinner(
+    actor: FulfillmentActor,
+    sessionId: string,
+    input: {
+      decision: 'APPROVE' | 'REJECT';
+      reasonCode: string;
+      evidenceHash: string;
+      idempotencyKey: string;
+      correlationId: string;
+    },
+  ) {
+    assertHash(sessionId, 'seckill session ID');
+    if (!['APPROVE', 'REJECT'].includes(input.decision)) {
+      throw new CoreError('InvalidRequest', 'Seckill winner review decision is invalid');
+    }
+    const reasonCode = boundedText(input.reasonCode, 'winner review reason', 2, 128);
+    assertHash(input.evidenceHash, 'winner review evidence hash');
+    validateIdempotencyKey(input.idempotencyKey);
+    return this.#transactions.transaction(async (executor) => {
+      const wallet = await requireCurrentRole(executor, actor, ['ADMIN']);
+      const normalizedSessionId = sessionId.toLowerCase();
+      const requestHash = hashJson({
+        wallet,
+        sessionId: normalizedSessionId,
+        decision: input.decision,
+        reasonCode,
+        evidenceHash: input.evidenceHash.toLowerCase(),
+      });
+      const now = this.#clock();
+      const authorizationEvidenceHash = hashJson({
+        wallet,
+        roles: ['ADMIN'],
+        checkedAt: now.toISOString(),
+      });
+      const projection = await reviewSeckillPrize(executor, {
+        sessionId: normalizedSessionId,
+        actorWallet: wallet,
+        decision: input.decision,
+        reasonCode,
+        evidenceHash: input.evidenceHash.toLowerCase(),
+        idempotencyKey: input.idempotencyKey,
+        requestHash,
+        at: now,
+      });
+      await enqueueAudit(executor, {
+        sourceEventId: auditSourceId('audit:seckill-prize-review', {
+          sessionId: normalizedSessionId,
+          requestHash,
+        }),
+        streamName: 'financial',
+        evidenceProfile: 'RBAC',
+        eventType: input.decision === 'APPROVE'
+          ? 'SeckillWinnerReviewApproved'
+          : 'SeckillWinnerReviewRejected',
+        resourceType: 'SECKILL_SESSION',
+        resourceId: normalizedSessionId,
+        actorWallet: wallet,
+        actorRole: 'ADMIN',
+        correlationId: input.correlationId,
+        requestHash: requestHash.slice(2),
+        payload: {
+          decision: input.decision,
+          reasonCode,
+          evidenceHash: input.evidenceHash.toLowerCase(),
+          candidateOrderId: projection.candidate?.orderId ?? null,
+          replacementWinner: null,
+        },
+        authorizationEvidence: {
+          scheme: 'RBAC_ROLE_REVALIDATION',
+          subject: wallet,
+          roles: ['ADMIN'],
+          evidenceHash: authorizationEvidenceHash,
+          checkedAt: now.toISOString(),
+        },
+        createdAt: now,
+      });
+      return projection;
     });
   }
 
@@ -780,7 +858,6 @@ async function requireSessionPolicy(executor: SqlExecutor, policyVersion: bigint
 async function requireSessionCatalog(executor: SqlExecutor, productId: string, skuId: string, inventory: number) {
   const result = await executor.query<{
     merchant_id: string;
-    merchant_level: MerchantLevel;
     merchant_status: string;
     guarantee_status: string;
     product_version: string | number;
@@ -794,7 +871,7 @@ async function requireSessionCatalog(executor: SqlExecutor, productId: string, s
     proposed_seckill_inventory: string | number;
     guarantee_evidence_hash: string;
   }>(
-    `SELECT product.merchant_id, merchant.level AS merchant_level, merchant.status AS merchant_status,
+    `SELECT product.merchant_id, merchant.status AS merchant_status,
        merchant.guarantee_status, product.version AS product_version,
        product.product_policy_hash, product.chain_product_id,
        product.lifecycle_state AS product_state, sku.sku_version,
@@ -825,40 +902,6 @@ async function requireSessionCatalog(executor: SqlExecutor, productId: string, s
   }
   if (!row.guarantee_evidence_hash) throw new CoreError('FinalityPending', 'Merchant guarantee evidence is unavailable', 409);
   return row;
-}
-
-async function requireMerchantSeckillQuota(
-  executor: SqlExecutor,
-  catalog: { merchant_id: string; merchant_level: MerchantLevel },
-  startsAt: Date,
-) {
-  const policy = await currentMerchantLevelPolicy(executor);
-  const rule = merchantLevelRule(policy, catalog.merchant_level);
-  const month = shanghaiMonth(startsAt);
-  const usage = await executor.query<{ used: string }>(
-    `SELECT count(*)::text AS used FROM core.seckill_session_plans
-     WHERE merchant_id = $1 AND starts_at >= $2 AND starts_at < $3`,
-    [catalog.merchant_id, month.start, month.end],
-  );
-  const used = Number(usage.rows[0]?.used ?? '0');
-  if (used >= rule.monthlySeckillQuota) {
-    throw new CoreError('Forbidden', `${catalog.merchant_level} monthly seckill quota is exhausted`, 409, {
-      level: catalog.merchant_level,
-      configVersionId: policy.configVersionId,
-      monthlySeckillQuota: rule.monthlySeckillQuota,
-      monthStart: month.start.toISOString(),
-      monthEnd: month.end.toISOString(),
-    });
-  }
-  return {
-    configVersionId: policy.configVersionId,
-    version: policy.version,
-    level: catalog.merchant_level,
-    monthlySeckillQuota: rule.monthlySeckillQuota,
-    usedBeforeReservation: used,
-    monthStart: month.start.toISOString(),
-    monthEnd: month.end.toISOString(),
-  };
 }
 
 async function requireGuarantee(executor: SqlExecutor, merchantId: string) {

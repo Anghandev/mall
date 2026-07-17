@@ -456,21 +456,6 @@
                 "internalType": "address"
               },
               {
-                "name": "genesisCredential",
-                "type": "address",
-                "internalType": "address"
-              },
-              {
-                "name": "genesisTokenId",
-                "type": "uint256",
-                "internalType": "uint256"
-              },
-              {
-                "name": "genesisCredentialStandard",
-                "type": "uint8",
-                "internalType": "enum V2Types.CredentialStandard"
-              },
-              {
                 "name": "beneficiarySetHash",
                 "type": "bytes32",
                 "internalType": "bytes32"
@@ -672,21 +657,6 @@
                 "internalType": "address"
               },
               {
-                "name": "genesisCredential",
-                "type": "address",
-                "internalType": "address"
-              },
-              {
-                "name": "genesisTokenId",
-                "type": "uint256",
-                "internalType": "uint256"
-              },
-              {
-                "name": "genesisCredentialStandard",
-                "type": "uint8",
-                "internalType": "enum V2Types.CredentialStandard"
-              },
-              {
                 "name": "beneficiarySetHash",
                 "type": "bytes32",
                 "internalType": "bytes32"
@@ -771,19 +741,6 @@
             "name": "",
             "type": "uint64",
             "internalType": "uint64"
-          }
-        ],
-        "stateMutability": "view"
-      },
-      {
-        "type": "function",
-        "name": "MAX_OPERATIONS_ACCOUNTS",
-        "inputs": [],
-        "outputs": [
-          {
-            "name": "",
-            "type": "uint256",
-            "internalType": "uint256"
           }
         ],
         "stateMutability": "view"
@@ -952,21 +909,6 @@
                 "name": "circulationPool",
                 "type": "address",
                 "internalType": "address"
-              },
-              {
-                "name": "genesisCredential",
-                "type": "address",
-                "internalType": "address"
-              },
-              {
-                "name": "genesisTokenId",
-                "type": "uint256",
-                "internalType": "uint256"
-              },
-              {
-                "name": "genesisCredentialStandard",
-                "type": "uint8",
-                "internalType": "enum V2Types.CredentialStandard"
               },
               {
                 "name": "beneficiarySetHash",
@@ -1161,11 +1103,6 @@
       {
         "type": "error",
         "name": "InvalidAddress",
-        "inputs": []
-      },
-      {
-        "type": "error",
-        "name": "InvalidGenesisCredential",
         "inputs": []
       },
       {
@@ -1545,30 +1482,6 @@
             "name": "role",
             "type": "bytes32",
             "internalType": "bytes32"
-          },
-          {
-            "name": "account",
-            "type": "address",
-            "internalType": "address"
-          }
-        ],
-        "outputs": [
-          {
-            "name": "",
-            "type": "bool",
-            "internalType": "bool"
-          }
-        ],
-        "stateMutability": "view"
-      },
-      {
-        "type": "function",
-        "name": "isGenesisEligible",
-        "inputs": [
-          {
-            "name": "policyVersion",
-            "type": "uint64",
-            "internalType": "uint64"
           },
           {
             "name": "account",
@@ -2071,6 +1984,11 @@
             "internalType": "contract ITwapOracleV2"
           },
           {
+            "name": "platformServiceFeeSafe_",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
             "name": "usdtCustodySafe_",
             "type": "address",
             "internalType": "address"
@@ -2302,6 +2220,18 @@
           },
           {
             "name": "productUsdtPaid",
+            "type": "uint256",
+            "indexed": false,
+            "internalType": "uint256"
+          },
+          {
+            "name": "platformServiceFeeUsdt",
+            "type": "uint256",
+            "indexed": false,
+            "internalType": "uint256"
+          },
+          {
+            "name": "custodyProductUsdt",
             "type": "uint256",
             "indexed": false,
             "internalType": "uint256"
@@ -2817,6 +2747,16 @@
                 "internalType": "uint256"
               },
               {
+                "name": "platformServiceFeeUsdt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "custodyProductUsdt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
                 "name": "freightUsdt",
                 "type": "uint256",
                 "internalType": "uint256"
@@ -3055,6 +2995,16 @@
                     "internalType": "uint256"
                   },
                   {
+                    "name": "platformServiceFeeUsdt",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "custodyProductUsdt",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
                     "name": "freightUsdt",
                     "type": "uint256",
                     "internalType": "uint256"
@@ -3265,6 +3215,16 @@
                   },
                   {
                     "name": "productUsdtPaymentAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "platformServiceFeeUsdt",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "custodyProductUsdt",
                     "type": "uint256",
                     "internalType": "uint256"
                   },
@@ -3624,6 +3584,16 @@
                 "internalType": "uint256"
               },
               {
+                "name": "platformServiceFeeUsdt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "custodyProductUsdt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
                 "name": "freightUsdt",
                 "type": "uint256",
                 "internalType": "uint256"
@@ -3879,6 +3849,16 @@
                     "internalType": "uint256"
                   },
                   {
+                    "name": "platformServiceFeeUsdt",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "custodyProductUsdt",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
                     "name": "freightUsdt",
                     "type": "uint256",
                     "internalType": "uint256"
@@ -4093,6 +4073,16 @@
                     "internalType": "uint256"
                   },
                   {
+                    "name": "platformServiceFeeUsdt",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "custodyProductUsdt",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
                     "name": "freightUsdt",
                     "type": "uint256",
                     "internalType": "uint256"
@@ -4216,6 +4206,19 @@
         ],
         "outputs": [],
         "stateMutability": "nonpayable"
+      },
+      {
+        "type": "function",
+        "name": "platformServiceFeeSafe",
+        "inputs": [],
+        "outputs": [
+          {
+            "name": "",
+            "type": "address",
+            "internalType": "address"
+          }
+        ],
+        "stateMutability": "view"
       },
       {
         "type": "function",

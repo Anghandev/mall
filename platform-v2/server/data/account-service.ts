@@ -15,6 +15,7 @@ import type {
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
+import { recordFrequentChangeAlert } from './risk-service.ts';
 
 type DeliveryTargetCreator = (
   actor: FulfillmentActor,
@@ -329,6 +330,14 @@ export class AccountService {
         payload: { addressId },
         createdAt: now,
       });
+      await recordFrequentChangeAlert(executor, {
+        signalType: 'ADDRESS_CHANGE',
+        walletAddress: wallet,
+        resourceId: addressId,
+        requestHash,
+        correlationId: input.idempotencyKey,
+        observedAt: now,
+      });
       return { addressId, status: 'DELETED' as const };
     });
   }
@@ -393,6 +402,14 @@ export class AccountService {
         correlationId: input.idempotencyKey,
         payload: { addressId },
         createdAt: now,
+      });
+      await recordFrequentChangeAlert(executor, {
+        signalType: 'ADDRESS_CHANGE',
+        walletAddress: wallet,
+        resourceId: addressId,
+        requestHash,
+        correlationId: input.idempotencyKey,
+        observedAt: now,
       });
       return buyerAddressProjection(
         await loadBuyerAddress(executor, wallet, addressId),
@@ -822,6 +839,14 @@ export class AccountService {
         correlationId: input.idempotencyKey,
         payload: { addressId: normalizedAddressId, regionBound: true, isDefault: shouldDefault },
         createdAt: now,
+      });
+      await recordFrequentChangeAlert(executor, {
+        signalType: 'ADDRESS_CHANGE',
+        walletAddress: wallet,
+        resourceId: normalizedAddressId,
+        requestHash,
+        correlationId: input.idempotencyKey,
+        observedAt: now,
       });
       return buyerAddressProjection(
         await loadBuyerAddress(executor, wallet, normalizedAddressId),

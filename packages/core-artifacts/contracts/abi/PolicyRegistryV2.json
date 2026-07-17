@@ -453,21 +453,6 @@
             "internalType": "address"
           },
           {
-            "name": "genesisCredential",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "genesisTokenId",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "genesisCredentialStandard",
-            "type": "uint8",
-            "internalType": "enum V2Types.CredentialStandard"
-          },
-          {
             "name": "beneficiarySetHash",
             "type": "bytes32",
             "internalType": "bytes32"
@@ -669,21 +654,6 @@
             "internalType": "address"
           },
           {
-            "name": "genesisCredential",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "genesisTokenId",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "genesisCredentialStandard",
-            "type": "uint8",
-            "internalType": "enum V2Types.CredentialStandard"
-          },
-          {
             "name": "beneficiarySetHash",
             "type": "bytes32",
             "internalType": "bytes32"
@@ -768,19 +738,6 @@
         "name": "",
         "type": "uint64",
         "internalType": "uint64"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "MAX_OPERATIONS_ACCOUNTS",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -949,21 +906,6 @@
             "name": "circulationPool",
             "type": "address",
             "internalType": "address"
-          },
-          {
-            "name": "genesisCredential",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "genesisTokenId",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "genesisCredentialStandard",
-            "type": "uint8",
-            "internalType": "enum V2Types.CredentialStandard"
           },
           {
             "name": "beneficiarySetHash",

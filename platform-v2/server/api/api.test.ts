@@ -35,7 +35,6 @@ import {
   seckillIntentHash,
 } from './payment-signing.ts';
 import {
-  buildOtherUsdtAllocations,
   parsePaymentPolicySnapshot,
   paymentAllocationSetHash,
   type PaymentPolicySnapshot,
@@ -371,7 +370,8 @@ test('Core quote math conserves both assets and dual quote keeps independent res
       merchantBase: ordinary.merchantBaseReceivableUsdt,
       concession: ordinary.merchantConcessionAmount,
       merchantNet: ordinary.merchantNetReceivableUsdt,
-      other: ordinary.otherUsdtAllocations.reduce((sum, item) => sum + BigInt(item.amount), 0n).toString(),
+      fee: ordinary.platformServiceFeeUsdt,
+      custody: ordinary.custodyProductUsdt,
       npl: ordinary.nplPaymentAmount,
       burned: ordinary.nplBurnAmount,
       reward: ordinary.nplRewardAmount,
@@ -379,17 +379,18 @@ test('Core quote math conserves both assets and dual quote keeps independent res
     },
     {
       usdt: '70',
-      merchantBase: '60',
-      concession: '15',
-      merchantNet: '45',
-      other: '10',
+      merchantBase: '69',
+      concession: '17',
+      merchantNet: '52',
+      fee: '1',
+      custody: '69',
       npl: '300',
       burned: '200',
       reward: '100',
       bnm: '100',
     },
   );
-  assert.equal(ordinary.merchantConcessionAllocations.reduce((sum, item) => sum + BigInt(item.amount), 0n), 15n);
+  assert.equal(ordinary.merchantConcessionAllocations.reduce((sum, item) => sum + BigInt(item.amount), 0n), 17n);
   assert.equal(ordinary.nplRewardAllocations.reduce((sum, item) => sum + BigInt(item.amount), 0n), 100n);
   assert.equal(ordinary.requiredConfirmations, 15);
 
@@ -491,68 +492,38 @@ test('Core quote math conserves both assets and dual quote keeps independent res
   );
 });
 
-test('governed USDT allocation identifies seckill prize liability without affecting fallback quotes', () => {
+test('governed USDT concession uses only the fixed 45/45/10 Custody pools', () => {
   const policy = governedPaymentPolicy();
-  assert.deepEqual(buildOtherUsdtAllocations(100n, 60n, policy, 'ORDINARY'), [
-    { account: '0x9999999999999999999999999999999999999999', amount: 10n, purpose: 'POLICY_ALLOCATION' },
+  const request = quoteRequest();
+  const intent = buildPaymentIntent(request, policy, 'ORDINARY', request.issuedAt);
+  assert.deepEqual(intent.merchantConcessionAllocations, [
+    { pool: 'SECKILL_PRIZE', amount: '7', balanceState: 'LOCKED' },
+    { pool: 'NODE_REWARD', amount: '7', balanceState: 'LOCKED' },
+    { pool: 'REWARD_RESERVE', amount: '3', balanceState: 'LOCKED' },
   ]);
-  assert.deepEqual(buildOtherUsdtAllocations(100n, 60n, policy, 'SECKILL'), [
-    { account: '0x9999999999999999999999999999999999999999', amount: 7n, purpose: 'POLICY_ALLOCATION' },
-    { account: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', amount: 3n, purpose: 'SECKILL_PRIZE_LIABILITY' },
-  ]);
-  assert.deepEqual(buildOtherUsdtAllocations(100n, 60n, policy, 'FALLBACK_RETAIL'), [
-    { account: '0x9999999999999999999999999999999999999999', amount: 10n, purpose: 'POLICY_ALLOCATION' },
-  ]);
-  assert.throws(
-    () => buildOtherUsdtAllocations(100n, 68n, policy, 'SECKILL'),
-    /cannot be funded/,
-  );
-  assert.throws(
-    () => buildOtherUsdtAllocations(1n, 0n, { ...policy, seckillPrizeBps: 1 }, 'SECKILL'),
-    /cannot be funded/,
-  );
-
-  const hash = paymentAllocationSetHash(
-    policy.concessionDestinations,
-    policy.otherUsdtDestinations,
-    policy.seckillPrizePoolAccount,
-  );
-  assert.notEqual(
-    hash,
-    paymentAllocationSetHash(
-      policy.concessionDestinations,
-      policy.otherUsdtDestinations,
-      '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-    ),
-  );
+  assert.equal(policy.concessionDestinationSetHash, paymentAllocationSetHash());
 
   const payload = {
     ...policy,
     oracleMinimumUsdtLiquidity: policy.oracleMinimumUsdtLiquidity.toString(),
     merchantGuaranteeMinimumUsdt: policy.merchantGuaranteeMinimumUsdt.toString(),
-    genesisTokenId: policy.genesisTokenId.toString(),
   };
-  const { seckillPrizePoolAccount: _missing, ...missingPrizeAccount } = payload;
-  assert.throws(() => parsePaymentPolicySnapshot(1, HASH, missingPrizeAccount), /missing seckillPrizePoolAccount/);
   assert.throws(
-    () => parsePaymentPolicySnapshot(1, HASH, { ...payload, seckillPrizePoolAccount: '0x0000000000000000000000000000000000000000' }),
-    /invalid governed fields/,
+    () => parsePaymentPolicySnapshot(1, HASH, { ...payload, platformFeeBps: 101 }),
+    /Frozen launch payment or safety policy/,
   );
   assert.throws(
-    () => parsePaymentPolicySnapshot(1, HASH, {
-      ...payload,
-      seckillPrizePoolAccount: policy.otherUsdtDestinations[0]!.account,
-    }),
+    () => parsePaymentPolicySnapshot(1, HASH, { ...payload, concessionDestinationSetHash: HASH }),
     /invalid governed fields/,
   );
 });
 
 test('payment snapshot and EIP-712 digest match the frozen Solidity encoding vector', () => {
   const intent = signingVectorIntent();
-  assert.equal(paymentIntentHash(intent), '0xb62baf1a1ca33005a377c88d3945fd917e755ed50422b569fa20dd7f3e2f45a2');
+  assert.equal(paymentIntentHash(intent), '0x99ccfc957ff13dd932246ab4f65c3636c3557d7bfdd00369ee9a4c4a597c90b9');
   assert.equal(
     paymentAuthorizationDigest(intent, '0x9999999999999999999999999999999999999999'),
-    '0x2e6c9e58ee5c29ece2ca985969d75228df81663d98a12fb4556ecc11049c9a74',
+    '0x8d92356ce3efbaa3271f6c99d9166b7bb90787905fd35308c9b0b6bb094ff033',
   );
 });
 
@@ -563,10 +534,10 @@ test('seckill snapshot and EIP-712 digest bind both Router payment intents', () 
     seckill: { ...base, seckill: true, sessionId: `0x${'5'.repeat(64)}` },
     fallback: { ...base, reservationId: `0x${'6'.repeat(64)}`, reservationHash: `0x${'7'.repeat(64)}` },
   };
-  assert.equal(seckillIntentHash(dual), '0x8d85308df953fedd0ead161d722a6106bcc1032d8fec00f045c29971f1667f5c');
+  assert.equal(seckillIntentHash(dual), '0xf222066b7b08d6c1cec6fd2121354ff180c25df10879612465567ec53447536b');
   assert.equal(
     seckillAuthorizationDigest(dual, '0x9999999999999999999999999999999999999999'),
-    '0x68fd9c29eb7472528bbd2e646334f3af78fab8e3f6767580609cbc74f8e43823',
+    '0x19d2d96a413026200dce3a6b06fffe55ee6a9dffba237ed48ca03f92eb09d4fd',
   );
 });
 
@@ -1097,6 +1068,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       createForceClose: async (actor, sessionId, input) => ({ actionId: HASH, actor: actor.walletAddress, sessionId, ...input }),
       createResume: async (actor, input) => ({ actionId: HASH, actor: actor.walletAddress, ...input }),
       createPrizeInjection: async (actor, sessionId, input) => ({ actionId: HASH, actor: actor.walletAddress, sessionId, ...input }),
+      reviewWinner: async (actor, sessionId, input) => ({ actor: actor.walletAddress, sessionId, ...input }),
       approvalChallenge: async (_actor, actionId, input) => ({ actionId, ...input, typedData: {} }),
       submitApproval: async (_actor, actionId, input) => ({ actionId, state: 'SECONDARY_SIGNED', ...input }),
       propose: async (_actor, actionId) => ({ actionId, state: 'PENDING_PROPOSAL' }),
@@ -1807,6 +1779,22 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       headers: bearerHeaders,
       body: JSON.stringify({ amountUsdt: '50', idempotencyKey: 'seckill-http-prize-1' }),
     })).status, 201);
+    const winnerReview = await fetch(`${base}/v2/admin/seckill/sessions/${SESSION_ID}/winner-review`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        decision: 'APPROVE',
+        reasonCode: 'ORDER_VALID',
+        evidenceHash: HASH_2,
+        idempotencyKey: 'seckill-http-winner-review-1',
+      }),
+    });
+    assert.equal(winnerReview.status, 200);
+    const reviewedWinner = await winnerReview.json() as Record<string, unknown>;
+    assert.equal(reviewedWinner.actor, wallet.address.toLowerCase());
+    assert.equal(reviewedWinner.sessionId, SESSION_ID);
+    assert.equal(reviewedWinner.decision, 'APPROVE');
+    assert.equal(reviewedWinner.evidenceHash, HASH_2);
     assert.equal((await fetch(`${base}/v2/admin/seckill/breaker/resume`, {
       method: 'POST',
       headers: bearerHeaders,
@@ -3031,24 +3019,27 @@ function readyPolicy(): FrozenPaymentPolicy {
     provinceBps: 60,
     regionBps: 40,
     operationsBps: 400,
+    platformFeeBps: 100,
     oracleWindowSeconds: 1_800,
     oracleMaxDeviationBps: 500,
     oracleMaxAgeSeconds: 600,
     oracleMinimumUsdtLiquidity: 50_000n * 10n ** 18n,
     requiredConfirmations: 15,
     merchantGuaranteeMinimumUsdt: 1_000n * 10n ** 18n,
+    platformServiceFeeSafe: '0x2222222222222222222222222222222222222223',
     usdtCustodySafe: '0x3333333333333333333333333333333333333333',
     nplRewardSafe: '0x4444444444444444444444444444444444444444',
     operationsTreasurySafe: '0x5555555555555555555555555555555555555555',
     circulationPool: '0x6666666666666666666666666666666666666666',
-    concessionDestinationSetHash: HASH_2,
-    concessionDestinations: [
-      { account: '0x7777777777777777777777777777777777777777', weightBps: 4_000 },
-      { account: '0x8888888888888888888888888888888888888888', weightBps: 6_000 },
+    concessionDestinationSetHash: paymentAllocationSetHash(),
+    genesisNodeDestinations: [
+      { account: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', weightBps: 10_000 },
     ],
     operationsDestinations: [
-      { account: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', weightBps: 4_000 },
-      { account: '0xcccccccccccccccccccccccccccccccccccccccc', weightBps: 6_000 },
+      { account: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', weightBps: 2_500 },
+      { account: '0xcccccccccccccccccccccccccccccccccccccccc', weightBps: 2_500 },
+      { account: '0xdddddddddddddddddddddddddddddddddddddddd', weightBps: 2_500 },
+      { account: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', weightBps: 2_500 },
     ],
   };
 }
@@ -3076,13 +3067,9 @@ function quoteRequest(): PaymentQuoteRequest {
     listPriceUsdt: 100n,
     freightUsdt: 0n,
     nplQuoteAmount: 1_000n,
-    merchantBaseReceivableUsdt: 60n,
     merchantConcessionBps: 2_500,
-    otherUsdtAllocations: [
-      { account: '0x9999999999999999999999999999999999999999', amount: 10n, purpose: 'POLICY_ALLOCATION' },
-    ],
     beneficiaries: {
-      genesis: SAFE,
+      genesis: '0x0000000000000000000000000000000000000000',
       directReferral: '0x5555555555555555555555555555555555555555',
       district: '0x6666666666666666666666666666666666666666',
       city: '0x7777777777777777777777777777777777777777',
@@ -3097,27 +3084,21 @@ function governedPaymentPolicy(): PaymentPolicySnapshot {
   const base = readyPolicy();
   return {
     ...base,
+    platformServiceFeeSafe: base.platformServiceFeeSafe!,
     usdtCustodySafe: base.usdtCustodySafe!,
     nplRewardSafe: base.nplRewardSafe!,
     operationsTreasurySafe: base.operationsTreasurySafe!,
     circulationPool: base.circulationPool!,
     concessionDestinationSetHash: base.concessionDestinationSetHash!,
-    concessionDestinations: base.concessionDestinations!,
+    genesisNodeDestinations: base.genesisNodeDestinations!,
     operationsDestinations: base.operationsDestinations!,
-    platformFeeBps: 500,
-    seckillPrizeBps: 300,
+    platformFeeBps: 100,
+    seckillPrizeBps: 0,
     seckillMainDuration: 3_600,
     relayInitial: 60,
     relayIncrement: 30,
     relayCap: 60,
-    genesisCredential: '0xdddddddddddddddddddddddddddddddddddddddd',
-    genesisTokenId: 1n,
-    genesisCredentialStandard: 1,
     decisionEvidenceHash: HASH_2,
-    otherUsdtDestinations: [
-      { account: '0x9999999999999999999999999999999999999999', weightBps: 10_000 },
-    ],
-    seckillPrizePoolAccount: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   };
 }
 
@@ -3145,16 +3126,18 @@ function signingVectorIntent(): CanonicalPaymentIntent {
     nonce: '7',
     listPriceUsdt: '100000000000000000000',
     productUsdtPaymentAmount: '70000000000000000000',
+    platformServiceFeeUsdt: '1000000000000000000',
+    custodyProductUsdt: '69000000000000000000',
     freightUsdt: '0',
     usdtPaymentAmount: '70000000000000000000',
     nplQuoteAmount: '1000000000000000000000',
     nplPaymentAmount: '300000000000000000000',
     nplBurnAmount: '200000000000000000000',
     nplRewardAmount: '100000000000000000000',
-    merchantBaseReceivableUsdt: '60000000000000000000',
+    merchantBaseReceivableUsdt: '69000000000000000000',
     merchantConcessionBps: 2_500,
-    merchantConcessionAmount: '15000000000000000000',
-    merchantNetReceivableUsdt: '45000000000000000000',
+    merchantConcessionAmount: '17250000000000000000',
+    merchantNetReceivableUsdt: '51750000000000000000',
     concessionAllocationHash: hash('4'),
     bnmAmount: '100000000000000000000',
     seckill: false,
@@ -3169,7 +3152,6 @@ function signingVectorIntent(): CanonicalPaymentIntent {
       operations: address('0'),
     },
     merchantConcessionAllocations: [],
-    otherUsdtAllocations: [],
     nplRewardAllocations: [],
     requiredConfirmations: 15,
   };
@@ -3189,6 +3171,7 @@ function completeEnvironment(): Record<string, string> {
     BSC_RPC_URL: 'https://rpc.example.invalid',
     BSC_FALLBACK_RPC_URL: 'https://fallback-rpc.example.invalid',
     PLATFORM_SAFE_ADDRESS: SAFE,
+    PLATFORM_SERVICE_FEE_SAFE_ADDRESS: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     USDT_CUSTODY_SAFE_ADDRESS: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
     NPL_REWARD_SAFE_ADDRESS: '0xcccccccccccccccccccccccccccccccccccccccc',
     OPERATIONS_TREASURY_SAFE_ADDRESS: '0xdddddddddddddddddddddddddddddddddddddddd',

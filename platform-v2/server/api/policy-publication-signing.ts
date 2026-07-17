@@ -8,7 +8,11 @@ import {
   type TypedDataDomain,
   type TypedDataField,
 } from 'ethers';
-import { paymentAllocationSetHash, type PaymentPolicySnapshot } from './payment-policy.ts';
+import {
+  paymentAllocationSetHash,
+  paymentBeneficiarySetHash,
+  type PaymentPolicySnapshot,
+} from './payment-policy.ts';
 import { BSC_CHAIN_ID } from './enums.ts';
 import { CoreError } from './errors.ts';
 import { PAYMENT_POLICY_TUPLE_ABI } from '../chain/payment-sources.ts';
@@ -61,14 +65,14 @@ export function buildPolicyPublication(
   const operationsAccounts = material.policy.operationsDestinations.map((item) => normalizeAddress(item.account));
   const operationsWeights = material.policy.operationsDestinations.map((item) => item.weightBps);
   const operationsHash = policyOperationsHash(material.policy);
-  if (operationsHash !== normalizedHash(material.beneficiarySetHash, 'beneficiary set hash')) {
-    throw new CoreError('InvalidRequest', 'Policy beneficiary set hash does not match Operations routing');
+  const beneficiarySetHash = paymentBeneficiarySetHash(
+    material.policy.genesisNodeDestinations,
+    material.policy.operationsDestinations,
+  );
+  if (beneficiarySetHash !== normalizedHash(material.beneficiarySetHash, 'beneficiary set hash')) {
+    throw new CoreError('InvalidRequest', 'Policy beneficiary set hash does not match node/Operations routing');
   }
-  const allocationHash = paymentAllocationSetHash(
-    material.policy.concessionDestinations,
-    material.policy.otherUsdtDestinations,
-    material.policy.seckillPrizePoolAccount,
-  ).toLowerCase();
+  const allocationHash = paymentAllocationSetHash().toLowerCase();
   if (allocationHash !== material.policy.concessionDestinationSetHash.toLowerCase()) {
     throw new CoreError('InvalidRequest', 'Policy concession destination hash does not match configured routing');
   }
@@ -163,9 +167,6 @@ function policyTuple(material: PolicyPublicationMaterial) {
     normalizeAddress(policy.nplRewardSafe),
     normalizeAddress(policy.operationsTreasurySafe),
     normalizeAddress(policy.circulationPool),
-    normalizeAddress(policy.genesisCredential),
-    policy.genesisTokenId,
-    policy.genesisCredentialStandard,
     normalizedHash(material.beneficiarySetHash, 'beneficiary set hash'),
     normalizedHash(policy.concessionDestinationSetHash, 'concession destination set hash'),
     normalizedHash(policy.decisionEvidenceHash, 'decision evidence hash'),

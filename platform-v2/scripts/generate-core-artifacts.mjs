@@ -418,27 +418,9 @@ const coordinatedManifest = {
     websocket: 'AVAILABLE',
   },
   executableOrderActionNames,
-  decisionBlocked: [
-    'PLATFORM_SERVICE_FEE_BPS',
-    'SECKILL_PRIZE_POOL_BPS',
-    'MERCHANT_STORE_REWARD_BPS',
-    'SECKILL_PRIZE_POOL_ACCOUNT',
-    'MERCHANT_CONCESSION_DESTINATION_WEIGHTS',
-    'FIXED_REMAINDER_ACCOUNTS',
-    'GENESIS_CREDENTIAL_CONTRACT_AND_TOKEN_ID',
-    'PICKUP_TIMEOUT_AND_TAKEOVER_EVIDENCE',
-    'EMPTY_SESSION_INJECTED_PRIZE_ALLOCATION',
-    'MERCHANT_ABNORMAL_ORDER_RATE_TAXONOMY',
-    'PII_RETENTION_POLICY_VERSION',
-    'ADMIN_UID_IDENTITY',
-    'ADMIN_PHONE_SEARCH_AUTHORIZATION',
-    'ADMIN_YELLOW_QUEUE_DEFINITION',
-  ],
+  decisionBlocked: [],
   externalBlocked: [
-    'GOVERNANCE_AND_THREE_SAFE_ADDRESSES',
-    'SECONDARY_POLICY_AND_QUOTE_SIGNERS',
     'TWAP_SOURCE',
-    'BSC_RPC_URL',
     'DEPLOYED_CONTRACT_ADDRESSES',
     'REMOTE_SIGNER',
     'DATABASE_AUDIT_DATABASE_AND_REDIS',
@@ -507,6 +489,7 @@ const coordinatedManifest = {
     'BnmPointsBalance',
     'SeckillSessionProjection',
     'SeckillSessionHistoryPage',
+    'SeckillPrizeSettlementProjection',
     'SeckillGovernanceActionProjection',
     'SeckillGovernanceChallenge',
     'SeckillSessionPlanProjection',
@@ -1742,7 +1725,7 @@ function merchantLifecycleOpenApiSchemas() {
     updatedAt: timestamp,
   };
   return {
-    MerchantLevel: { type: 'string', enum: [...merchantLevels] },
+    MerchantLevel: { type: 'string', enum: [...merchantLevels], deprecated: true },
     MerchantLifecycleStatus: { type: 'string', enum: [...merchantLifecycleStatuses] },
     MerchantReviewAction: { type: 'string', enum: [...merchantReviewActions] },
     MerchantQualificationAccess: { type: 'string', enum: [...merchantQualificationAccess] },
@@ -1752,7 +1735,7 @@ function merchantLifecycleOpenApiSchemas() {
       settlementWallet: ref('Address'),
       settlementWalletMutable: { const: false },
       status: ref('MerchantLifecycleStatus'),
-      level: ref('MerchantLevel'),
+      level: { ...ref('MerchantLevel'), deprecated: true },
       guaranteeStatus: { enum: [...guaranteeStatuses] },
       applicationVersion: { type: 'integer', minimum: 0 },
       qualificationComplete: { type: 'boolean' },
@@ -1783,19 +1766,19 @@ function merchantLifecycleOpenApiSchemas() {
       legalId: { type: 'string', minLength: 6, maxLength: 32 },
       contactPhone: { type: 'string', minLength: 6, maxLength: 32 },
       settlementWallet: ref('Address'),
-      level: ref('MerchantLevel'),
+      level: { ...ref('MerchantLevel'), deprecated: true },
       idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
-    }),
+    }, ['shopName', 'legalName', 'legalId', 'contactPhone', 'settlementWallet', 'idempotencyKey']),
     MerchantApplicationUpdateRequest: object({
       shopName: { type: 'string', minLength: 1, maxLength: 80 },
       legalName: { type: 'string', minLength: 2, maxLength: 80 },
       legalId: { type: 'string', minLength: 6, maxLength: 32 },
       contactPhone: { type: 'string', minLength: 6, maxLength: 32 },
-      level: ref('MerchantLevel'),
+      level: { ...ref('MerchantLevel'), deprecated: true },
       licenseAssetId: nullable(hash),
       expectedVersion: { type: 'integer', minimum: 1 },
       idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
-    }),
+    }, ['shopName', 'legalName', 'legalId', 'contactPhone', 'licenseAssetId', 'expectedVersion', 'idempotencyKey']),
     MerchantReviewChallengeRequest: object({
       action: ref('MerchantReviewAction'),
       reasonCode: { type: 'string', pattern: '^[A-Z0-9_:-]{2,64}$' },
@@ -1898,20 +1881,7 @@ function merchantLifecycleOpenApiSchemas() {
       artifactVersion: { const: artifactVersion },
       merchant: ref('MerchantLifecycleSummary'),
       qualification: ref('MerchantQualification'),
-      levelPolicy: {
-        anyOf: [
-          object({
-            status: { const: 'AVAILABLE' },
-            configVersionId: string,
-            version: { type: 'integer', minimum: 1 },
-            effectiveFrom: timestamp,
-            level: ref('MerchantLevel'),
-            maxProductSettlementUsdt: atomic,
-            monthlySeckillQuota: { type: 'integer', minimum: 0 },
-          }),
-          object({ status: { const: 'DecisionBlocked' }, reason: string }),
-        ],
-      },
+      levelPolicy: { ...object({ status: { const: 'Deprecated' } }), deprecated: true },
       analytics: object({
         orders: ref('MerchantOrderAnalytics'),
         fulfillment: ref('MerchantFulfillmentAnalytics'),
@@ -2605,6 +2575,7 @@ function seckillRuntimeOpenApiSchemas() {
     prizePoolUsdt: atomic,
     lastBuyerWallet: nullable(ref('Address')),
     winnerWallet: nullable(ref('Address')),
+    prizeSettlement: nullable(ref('SeckillPrizeSettlementProjection')),
     snapshot: jsonObject,
     governanceActionId: nullable(ref('Bytes32')),
     rulesContentHash: nullable(ref('Bytes32')),
@@ -2613,6 +2584,36 @@ function seckillRuntimeOpenApiSchemas() {
   });
   return {
     SeckillSessionTimers: timers,
+    SeckillPrizeCandidate: object({
+      orderId: ref('Bytes32'),
+      buyerWallet: ref('Address'),
+      paymentEventKey: { type: 'string', minLength: 1 },
+      evidenceHash: ref('Bytes32'),
+    }),
+    SeckillPrizeReview: object({
+      decision: { enum: ['APPROVED', 'REJECTED'] },
+      reasonCode: { type: 'string', minLength: 2, maxLength: 128 },
+      evidenceHash: ref('Bytes32'),
+      reviewedAt: timestamp,
+    }),
+    SeckillPrizePayout: object({
+      state: { enum: ['AVAILABLE', 'REQUESTED', 'BATCHED', 'SETTLED', 'RETRYABLE', 'QUARANTINED'] },
+      requestId: nullable(ref('Bytes32')),
+      batchId: nullable(ref('Bytes32')),
+      finalSafeTxHash: nullable(ref('Bytes32')),
+      finalExecutionTxHash: nullable(ref('Bytes32')),
+    }),
+    SeckillPrizeSettlementProjection: object({
+      state: { enum: ['REVIEW_PENDING', 'APPROVED', 'ROLLOVER_PENDING', 'ROLLED_OVER', 'QUARANTINED'] },
+      candidate: nullable(ref('SeckillPrizeCandidate')),
+      poolAmountUsdt: atomic,
+      poolSnapshotHash: ref('Bytes32'),
+      review: nullable(ref('SeckillPrizeReview')),
+      awardJournalId: nullable({ type: 'string', minLength: 1 }),
+      rolloverTargetSessionId: nullable(ref('Bytes32')),
+      rolloverJournalId: nullable({ type: 'string', minLength: 1 }),
+      payout: nullable(ref('SeckillPrizePayout')),
+    }),
     SeckillSessionProjection: session,
     SeckillSessionHistoryPage: object({
       items: { type: 'array', items: ref('SeckillSessionProjection') },
@@ -2808,6 +2809,9 @@ function settlementAdminOpenApiPaths(errorResponse) {
     },
     '/v2/admin/seckill/sessions/{sessionId}/prize-injections': {
       post: resourceOperation('createSeckillPrizeInjection', 'sessionId', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 201, 'SeckillPrizeInjectionRequest'),
+    },
+    '/v2/admin/seckill/sessions/{sessionId}/winner-review': {
+      post: resourceOperation('reviewSeckillWinner', 'sessionId', { $ref: '#/components/schemas/SeckillPrizeSettlementProjection' }, 200, 'SeckillWinnerReviewRequest'),
     },
     '/v2/admin/seckill/breaker/resume': {
       post: operation('createSeckillBreakerResume', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 201, 'SeckillBreakerResumeRequest'),
@@ -3291,6 +3295,8 @@ function settlementAdminOpenApiSchemas() {
       orderKind: { enum: ['ORDINARY', 'FALLBACK_RETAIL'] },
       paymentAmounts: object({
         productUsdtPaymentAmount: atomic,
+        platformServiceFeeUsdt: atomic,
+        custodyProductUsdt: atomic,
         freightUsdt: atomic,
         usdtPaymentAmount: atomic,
         nplPaymentAmount: atomic,
@@ -3348,6 +3354,8 @@ function settlementAdminOpenApiSchemas() {
       frozenAmounts: object({
         listPriceUsdt: atomic,
         productUsdtPaymentAmount: atomic,
+        platformServiceFeeUsdt: atomic,
+        custodyProductUsdt: atomic,
         freightUsdt: atomic,
         buyerPaidUsdt: atomic,
         merchantBaseReceivableUsdt: atomic,
@@ -3748,6 +3756,12 @@ function settlementAdminOpenApiSchemas() {
     }),
     SeckillForceCloseRequest: object({ reasonCode: string, idempotencyKey }),
     SeckillPrizeInjectionRequest: object({ amountUsdt: atomic, idempotencyKey }),
+    SeckillWinnerReviewRequest: object({
+      decision: { enum: ['APPROVE', 'REJECT'] },
+      reasonCode: { type: 'string', minLength: 2, maxLength: 128 },
+      evidenceHash: hash,
+      idempotencyKey,
+    }),
     SeckillBreakerResumeRequest: object({ sessionId: hash, idempotencyKey }),
     SeckillGovernanceChallengeRequest: object({ nonce: atomic, deadline: atomic }),
     SeckillGovernanceApprovalRequest: object({
@@ -4445,10 +4459,11 @@ function catalogManagementOpenApiSchemas() {
       },
     },
     MerchantConcessionAllocation: {
-      type: 'object', additionalProperties: false, required: ['account', 'amount'],
+      type: 'object', additionalProperties: false, required: ['pool', 'amount', 'balanceState'],
       properties: {
-        account: { $ref: '#/components/schemas/Address' },
+        pool: { enum: ['SECKILL_PRIZE', 'NODE_REWARD', 'REWARD_RESERVE'] },
         amount: { $ref: '#/components/schemas/AtomicAmount' },
+        balanceState: { const: 'LOCKED' },
       },
     },
     MerchantConcessionPreviewItem: {
@@ -4954,13 +4969,15 @@ function fulfillmentOpenApiSchemas() {
       type: 'object',
       additionalProperties: false,
       required: [
-        'listPriceUsdt', 'productUsdtPaymentAmount', 'freightUsdt', 'usdtPaymentAmount',
+        'listPriceUsdt', 'productUsdtPaymentAmount', 'platformServiceFeeUsdt',
+        'custodyProductUsdt', 'freightUsdt', 'usdtPaymentAmount',
         'nplQuoteAmount', 'nplPaymentAmount',
         'nplBurnAmount', 'nplRewardAmount', 'merchantBaseReceivableUsdt',
         'merchantConcessionAmount', 'merchantNetReceivableUsdt', 'bnmAmount',
       ],
       properties: Object.fromEntries([
-        'listPriceUsdt', 'productUsdtPaymentAmount', 'freightUsdt', 'usdtPaymentAmount',
+        'listPriceUsdt', 'productUsdtPaymentAmount', 'platformServiceFeeUsdt',
+        'custodyProductUsdt', 'freightUsdt', 'usdtPaymentAmount',
         'nplQuoteAmount', 'nplPaymentAmount',
         'nplBurnAmount', 'nplRewardAmount', 'merchantBaseReceivableUsdt',
         'merchantConcessionAmount', 'merchantNetReceivableUsdt', 'bnmAmount',
@@ -5498,9 +5515,8 @@ function paymentOpenApiSchemas() {
         'platformFeeBps', 'seckillPrizeBps',
         'oracleWindowSeconds', 'oracleMaxDeviationBps', 'oracleMaxAgeSeconds',
         'oracleMinimumUsdtLiquidity', 'requiredConfirmations', 'merchantGuaranteeMinimumUsdt',
-        'usdtCustodySafe', 'nplRewardSafe', 'operationsTreasurySafe', 'circulationPool',
-        'concessionDestinationSetHash', 'concessionDestinations', 'operationsDestinations',
-        'otherUsdtDestinations', 'seckillPrizePoolAccount',
+        'platformServiceFeeSafe', 'usdtCustodySafe', 'nplRewardSafe', 'operationsTreasurySafe', 'circulationPool',
+        'concessionDestinationSetHash', 'genesisNodeDestinations', 'operationsDestinations',
       ],
       properties: {
         policyVersion: { type: 'integer', minimum: 1 },
@@ -5524,15 +5540,14 @@ function paymentOpenApiSchemas() {
         oracleMinimumUsdtLiquidity: { $ref: '#/components/schemas/AtomicAmount' },
         requiredConfirmations: { const: 15 },
         merchantGuaranteeMinimumUsdt: { $ref: '#/components/schemas/AtomicAmount' },
+        platformServiceFeeSafe: { $ref: '#/components/schemas/Address' },
         usdtCustodySafe: { $ref: '#/components/schemas/Address' },
         nplRewardSafe: { $ref: '#/components/schemas/Address' },
         operationsTreasurySafe: { $ref: '#/components/schemas/Address' },
         circulationPool: { $ref: '#/components/schemas/Address' },
         concessionDestinationSetHash: { $ref: '#/components/schemas/Bytes32' },
-        concessionDestinations: { type: 'array', items: { $ref: '#/components/schemas/WeightedDestination' } },
+        genesisNodeDestinations: { type: 'array', minItems: 1, items: { $ref: '#/components/schemas/WeightedDestination' } },
         operationsDestinations: { type: 'array', items: { $ref: '#/components/schemas/WeightedDestination' } },
-        otherUsdtDestinations: { type: 'array', items: { $ref: '#/components/schemas/WeightedDestination' } },
-        seckillPrizePoolAccount: { $ref: '#/components/schemas/Address' },
       },
     },
     CatalogSeckillInventory: {
@@ -5641,18 +5656,11 @@ function paymentOpenApiSchemas() {
       ),
     },
     MerchantConcessionAllocation: {
-      type: 'object', additionalProperties: false, required: ['account', 'amount'],
+      type: 'object', additionalProperties: false, required: ['pool', 'amount', 'balanceState'],
       properties: {
-        account: { $ref: '#/components/schemas/Address' },
+        pool: { enum: ['SECKILL_PRIZE', 'NODE_REWARD', 'REWARD_RESERVE'] },
         amount: { $ref: '#/components/schemas/AtomicAmount' },
-      },
-    },
-    OtherUsdtAllocation: {
-      type: 'object', additionalProperties: false, required: ['account', 'amount', 'purpose'],
-      properties: {
-        account: { $ref: '#/components/schemas/Address' },
-        amount: { $ref: '#/components/schemas/AtomicAmount' },
-        purpose: { type: 'string', enum: ['POLICY_ALLOCATION', 'SECKILL_PRIZE_LIABILITY'] },
+        balanceState: { const: 'LOCKED' },
       },
     },
     NplRewardAllocation: {
@@ -5668,11 +5676,10 @@ function paymentOpenApiSchemas() {
     AllocationSnapshot: {
       type: 'object',
       additionalProperties: false,
-      required: ['beneficiaries', 'concession', 'otherUsdt', 'nplRewards'],
+      required: ['beneficiaries', 'concession', 'nplRewards'],
       properties: {
         beneficiaries: { $ref: '#/components/schemas/BeneficiarySnapshot' },
         concession: { type: 'array', items: { $ref: '#/components/schemas/MerchantConcessionAllocation' } },
-        otherUsdt: { type: 'array', items: { $ref: '#/components/schemas/OtherUsdtAllocation' } },
         nplRewards: { type: 'array', items: { $ref: '#/components/schemas/NplRewardAllocation' } },
       },
     },
@@ -5682,11 +5689,12 @@ function paymentOpenApiSchemas() {
         'orderId', 'policyVersion', 'oracleVersion', 'buyer', 'merchant', 'productId', 'skuId', 'quantity',
         'fulfillmentMode', 'fulfillmentTargetHash', 'regionCodeHash', 'productPolicyHash', 'reservationId',
         'reservationHash', 'reservationDeadline', 'issuedAt', 'deadline', 'nonce', 'listPriceUsdt',
-        'productUsdtPaymentAmount', 'freightUsdt', 'usdtPaymentAmount', 'nplQuoteAmount',
+        'productUsdtPaymentAmount', 'platformServiceFeeUsdt', 'custodyProductUsdt',
+        'freightUsdt', 'usdtPaymentAmount', 'nplQuoteAmount',
         'nplPaymentAmount', 'nplBurnAmount', 'nplRewardAmount',
         'merchantBaseReceivableUsdt', 'merchantConcessionBps', 'merchantConcessionAmount',
         'merchantNetReceivableUsdt', 'concessionAllocationHash', 'bnmAmount', 'seckill', 'sessionId',
-        'beneficiaries', 'merchantConcessionAllocations', 'otherUsdtAllocations', 'nplRewardAllocations',
+        'beneficiaries', 'merchantConcessionAllocations', 'nplRewardAllocations',
         'requiredConfirmations',
       ],
       properties: {
@@ -5710,6 +5718,8 @@ function paymentOpenApiSchemas() {
         nonce: { $ref: '#/components/schemas/AtomicAmount' },
         listPriceUsdt: { $ref: '#/components/schemas/AtomicAmount' },
         productUsdtPaymentAmount: { $ref: '#/components/schemas/AtomicAmount' },
+        platformServiceFeeUsdt: { $ref: '#/components/schemas/AtomicAmount' },
+        custodyProductUsdt: { $ref: '#/components/schemas/AtomicAmount' },
         freightUsdt: { $ref: '#/components/schemas/AtomicAmount' },
         usdtPaymentAmount: { $ref: '#/components/schemas/AtomicAmount' },
         nplQuoteAmount: { $ref: '#/components/schemas/AtomicAmount' },
@@ -5728,7 +5738,6 @@ function paymentOpenApiSchemas() {
         merchantConcessionAllocations: {
           type: 'array', items: { $ref: '#/components/schemas/MerchantConcessionAllocation' },
         },
-        otherUsdtAllocations: { type: 'array', items: { $ref: '#/components/schemas/OtherUsdtAllocation' } },
         nplRewardAllocations: { type: 'array', items: { $ref: '#/components/schemas/NplRewardAllocation' } },
         requiredConfirmations: { const: 15 },
       },
@@ -5938,7 +5947,6 @@ function paymentOpenApiSchemas() {
   const canonicalIntent = schemas.CanonicalPaymentIntent;
   const offChainFields = new Set([
     'merchantConcessionAllocations',
-    'otherUsdtAllocations',
     'nplRewardAllocations',
     'requiredConfirmations',
   ]);
@@ -6025,7 +6033,6 @@ export type BreakerCauseType = ${union(breakerCauseTypes)};
 export type ReservationState = ${union(reservationStates)};
 export type BalanceState = ${union(balanceStates)};
 export type RewardSubtype = ${union(rewardSubtypes)};
-export type UsdtLiabilityPurpose = 'POLICY_ALLOCATION' | 'SECKILL_PRIZE_LIABILITY';
 export type TakeoverState = ${union(takeoverStates)};
 export type SeckillState = ${union(seckillStates)};
 export type PolicyPublicationState = ${union(policyPublicationStates)};
@@ -6148,6 +6155,7 @@ export interface MerchantLifecycleSummary {
   settlementWallet: Address;
   settlementWalletMutable: false;
   status: MerchantLifecycleStatus;
+  /** @deprecated V1-V5 has no business effect. */
   level: MerchantLevel;
   guaranteeStatus: GuaranteeStatus;
   applicationVersion: number;
@@ -6184,7 +6192,8 @@ export interface MerchantApplicationCreateRequest {
   legalId: string;
   contactPhone: string;
   settlementWallet: Address;
-  level: MerchantLevel;
+  /** @deprecated Ignored by Core. */
+  level?: MerchantLevel;
   idempotencyKey: string;
 }
 
@@ -6193,7 +6202,8 @@ export interface MerchantApplicationUpdateRequest {
   legalName: string;
   legalId: string;
   contactPhone: string;
-  level: MerchantLevel;
+  /** @deprecated Ignored by Core. */
+  level?: MerchantLevel;
   licenseAssetId: Bytes32 | null;
   expectedVersion: number;
   idempotencyKey: string;
@@ -6249,17 +6259,8 @@ export interface MerchantLifecycleDetail {
   artifactVersion: typeof artifactVersion;
   merchant: MerchantLifecycleSummary;
   qualification: MerchantQualification;
-  levelPolicy:
-    | Readonly<{
-        status: 'AVAILABLE';
-        configVersionId: string;
-        version: number;
-        effectiveFrom: Timestamp;
-        level: MerchantLevel;
-        maxProductSettlementUsdt: AtomicAmount;
-        monthlySeckillQuota: number;
-      }>
-    | Readonly<{ status: 'DecisionBlocked'; reason: string }>;
+  /** @deprecated V1-V5 price and quota policy is disabled. */
+  levelPolicy: Readonly<{ status: 'Deprecated' }>;
   analytics: Readonly<{
     orders: {
       totalFinalized: AtomicAmount;
@@ -6529,6 +6530,40 @@ export interface SeckillSessionInventory {
   available: AtomicAmount;
 }
 
+export interface SeckillPrizeCandidate {
+  orderId: Bytes32;
+  buyerWallet: Address;
+  paymentEventKey: string;
+  evidenceHash: Bytes32;
+}
+
+export interface SeckillPrizeReview {
+  decision: 'APPROVED' | 'REJECTED';
+  reasonCode: string;
+  evidenceHash: Bytes32;
+  reviewedAt: string;
+}
+
+export interface SeckillPrizePayout {
+  state: 'AVAILABLE' | 'REQUESTED' | 'BATCHED' | 'SETTLED' | 'RETRYABLE' | 'QUARANTINED';
+  requestId: Bytes32 | null;
+  batchId: Bytes32 | null;
+  finalSafeTxHash: Bytes32 | null;
+  finalExecutionTxHash: Bytes32 | null;
+}
+
+export interface SeckillPrizeSettlementProjection {
+  state: 'REVIEW_PENDING' | 'APPROVED' | 'ROLLOVER_PENDING' | 'ROLLED_OVER' | 'QUARANTINED';
+  candidate: SeckillPrizeCandidate | null;
+  poolAmountUsdt: AtomicAmount;
+  poolSnapshotHash: Bytes32;
+  review: SeckillPrizeReview | null;
+  awardJournalId: string | null;
+  rolloverTargetSessionId: Bytes32 | null;
+  rolloverJournalId: string | null;
+  payout: SeckillPrizePayout | null;
+}
+
 export interface SeckillSessionProjection {
   artifactVersion: typeof artifactVersion;
   sessionId: Bytes32;
@@ -6548,6 +6583,7 @@ export interface SeckillSessionProjection {
   prizePoolUsdt: AtomicAmount;
   lastBuyerWallet: Address | null;
   winnerWallet: Address | null;
+  prizeSettlement: SeckillPrizeSettlementProjection | null;
   snapshot: JsonObject;
   governanceActionId: Bytes32 | null;
   rulesContentHash: Bytes32 | null;
@@ -6578,6 +6614,12 @@ export interface SeckillSessionCreateRequest {
 
 export interface SeckillForceCloseRequest { reasonCode: string; idempotencyKey: string }
 export interface SeckillPrizeInjectionRequest { amountUsdt: AtomicAmount; idempotencyKey: string }
+export interface SeckillWinnerReviewRequest {
+  decision: 'APPROVE' | 'REJECT';
+  reasonCode: string;
+  evidenceHash: Bytes32;
+  idempotencyKey: string;
+}
 export interface SeckillBreakerResumeRequest { sessionId: Bytes32; idempotencyKey: string }
 export interface SeckillGovernanceChallengeRequest { nonce: AtomicAmount; deadline: AtomicAmount }
 export interface SeckillGovernanceApprovalRequest extends SeckillGovernanceChallengeRequest { signature: string }
@@ -6831,6 +6873,8 @@ export interface BuyerShoppingStatement {
   orderKind: Exclude<OrderKind, 'SECKILL'>;
   paymentAmounts: {
     productUsdtPaymentAmount: AtomicAmount;
+    platformServiceFeeUsdt: AtomicAmount;
+    custodyProductUsdt: AtomicAmount;
     freightUsdt: AtomicAmount;
     usdtPaymentAmount: AtomicAmount;
     nplPaymentAmount: AtomicAmount;
@@ -6897,6 +6941,8 @@ export interface MerchantReceivableStatement {
   frozenAmounts: {
     listPriceUsdt: AtomicAmount;
     productUsdtPaymentAmount: AtomicAmount;
+    platformServiceFeeUsdt: AtomicAmount;
+    custodyProductUsdt: AtomicAmount;
     freightUsdt: AtomicAmount;
     buyerPaidUsdt: AtomicAmount;
     merchantBaseReceivableUsdt: AtomicAmount;
@@ -7925,15 +7971,14 @@ export interface ProductPolicy {
   oracleMinimumUsdtLiquidity: AtomicAmount;
   requiredConfirmations: 15;
   merchantGuaranteeMinimumUsdt: AtomicAmount;
+  platformServiceFeeSafe: Address;
   usdtCustodySafe: Address;
   nplRewardSafe: Address;
   operationsTreasurySafe: Address;
   circulationPool: Address;
   concessionDestinationSetHash: Bytes32;
-  concessionDestinations: readonly WeightedDestination[];
+  genesisNodeDestinations: readonly WeightedDestination[];
   operationsDestinations: readonly WeightedDestination[];
-  otherUsdtDestinations: readonly WeightedDestination[];
-  seckillPrizePoolAccount: Address;
 }
 
 export interface WeightedDestination {
@@ -8091,8 +8136,9 @@ export interface ProductSlotProjection {
 }
 
 export interface MerchantConcessionAllocation {
-  account: Address;
+  pool: 'SECKILL_PRIZE' | 'NODE_REWARD' | 'REWARD_RESERVE';
   amount: AtomicAmount;
+  balanceState: 'LOCKED';
 }
 
 export interface MerchantConcessionPreviewItem {
@@ -8325,6 +8371,8 @@ export type FulfillmentTarget =
 export interface FulfillmentExactAmounts {
   listPriceUsdt: AtomicAmount;
   productUsdtPaymentAmount: AtomicAmount;
+  platformServiceFeeUsdt: AtomicAmount;
+  custodyProductUsdt: AtomicAmount;
   freightUsdt: AtomicAmount;
   usdtPaymentAmount: AtomicAmount;
   nplQuoteAmount: AtomicAmount;
@@ -8711,12 +8759,9 @@ export interface BeneficiarySnapshot {
 }
 
 export interface MerchantConcessionAllocation {
-  account: Address;
+  pool: 'SECKILL_PRIZE' | 'NODE_REWARD' | 'REWARD_RESERVE';
   amount: AtomicAmount;
-}
-
-export interface OtherUsdtAllocation extends MerchantConcessionAllocation {
-  purpose: UsdtLiabilityPurpose;
+  balanceState: 'LOCKED';
 }
 
 export type NplRewardRole = 'genesis' | 'directReferral' | 'district' | 'city' | 'province' | 'region' | 'operations' | 'roundingRemainder';
@@ -8728,7 +8773,6 @@ export interface NplRewardAllocation extends MerchantConcessionAllocation {
 export interface AllocationSnapshot {
   beneficiaries: BeneficiarySnapshot;
   concession: readonly MerchantConcessionAllocation[];
-  otherUsdt: readonly OtherUsdtAllocation[];
   nplRewards: readonly NplRewardAllocation[];
 }
 
@@ -8753,6 +8797,8 @@ export interface PaymentRouterIntent {
   nonce: AtomicAmount;
   listPriceUsdt: AtomicAmount;
   productUsdtPaymentAmount: AtomicAmount;
+  platformServiceFeeUsdt: AtomicAmount;
+  custodyProductUsdt: AtomicAmount;
   freightUsdt: AtomicAmount;
   usdtPaymentAmount: AtomicAmount;
   nplQuoteAmount: AtomicAmount;
@@ -8773,7 +8819,6 @@ export interface PaymentRouterIntent {
 export interface CanonicalPaymentIntent extends Omit<PaymentRouterIntent, 'fulfillmentMode'> {
   fulfillmentMode: FulfillmentMode;
   merchantConcessionAllocations: readonly MerchantConcessionAllocation[];
-  otherUsdtAllocations: readonly OtherUsdtAllocation[];
   nplRewardAllocations: readonly NplRewardAllocation[];
   requiredConfirmations: 15;
 }

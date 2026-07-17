@@ -591,12 +591,16 @@
   "riskSignalTypes": [
     "HIGH_GAS",
     "WALLET_CONTEXT",
-    "ORDER_CANCELLATION"
+    "ORDER_CANCELLATION",
+    "ADDRESS_CHANGE",
+    "PICKUP_STORE_CHANGE"
   ],
   "riskSourceTypes": [
     "CHAIN_MONITOR",
     "EDGE_AUTH",
-    "ORDER_SERVICE"
+    "ORDER_SERVICE",
+    "ACCOUNT_SERVICE",
+    "FULFILLMENT_TARGET_SERVICE"
   ],
   "riskSubjectTypes": [
     "WALLET",

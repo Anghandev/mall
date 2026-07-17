@@ -2,7 +2,7 @@
 pragma solidity 0.8.26;
 
 import {TestBase} from "./TestBase.sol";
-import {CallbackERC20, Mock1271Wallet, MockCredential, MockTwapSource} from "./Mocks.sol";
+import {CallbackERC20, Mock1271Wallet, MockTwapSource} from "./Mocks.sol";
 import {BeneficiaryRegistryV2} from "../../contracts/BeneficiaryRegistryV2.sol";
 import {PaymentRouterV2} from "../../contracts/PaymentRouterV2.sol";
 import {PolicyRegistryV2} from "../../contracts/PolicyRegistryV2.sol";
@@ -30,16 +30,18 @@ abstract contract CoreFixture is TestBase {
     address internal region = address(0x5007);
     address internal operationsOne = address(0x6001);
     address internal operationsTwo = address(0x6002);
+    address internal operationsThree = address(0x6003);
+    address internal operationsFour = address(0x6004);
+    address internal platformServiceFeeSafe = address(0x7000);
     address internal usdtCustodySafe = address(0x7001);
     address internal nplRewardSafe = address(0x7002);
     address internal operationsTreasurySafe = address(0x7003);
     address internal circulationPool = address(0x7004);
     bytes32 internal regionCodeHash = keccak256("210211");
-    bytes32 internal concessionAllocationHash = keccak256("test-concession-allocation");
+    bytes32 internal concessionAllocationHash;
 
     CallbackERC20 internal usdt;
     CallbackERC20 internal npl;
-    MockCredential internal credential;
     MockTwapSource internal twapSource;
     PolicyRegistryV2 internal policyRegistry;
     BeneficiaryRegistryV2 internal beneficiaryRegistry;
@@ -53,6 +55,7 @@ abstract contract CoreFixture is TestBase {
         secondarySigner = vm.addr(SECONDARY_KEY);
         quoteSigner = vm.addr(QUOTE_KEY);
         buyer = vm.addr(BUYER_KEY);
+        concessionAllocationHash = _paymentAllocationSetHash();
 
         CallbackERC20 usdtImplementation = new CallbackERC20("Mock USDT", "USDT");
         CallbackERC20 nplImplementation = new CallbackERC20("Mock NPL", "NPL");
@@ -60,8 +63,6 @@ abstract contract CoreFixture is TestBase {
         vm.etch(V2Types.NPL, address(nplImplementation).code);
         usdt = CallbackERC20(V2Types.USDT);
         npl = CallbackERC20(V2Types.NPL);
-        credential = new MockCredential();
-        credential.mint(buyer);
         twapSource = new MockTwapSource();
         twapSource.setResult(1_000 ether, V2Types.ORACLE_MIN_USDT_LIQUIDITY, uint64(block.timestamp));
 
@@ -90,6 +91,7 @@ abstract contract CoreFixture is TestBase {
             IPolicyRegistryV2(address(policyRegistry)),
             IBeneficiaryRegistryV2(address(beneficiaryRegistry)),
             ITwapOracleV2(address(oracle)),
+            platformServiceFeeSafe,
             usdtCustodySafe,
             nplRewardSafe,
             operationsTreasurySafe,
@@ -106,12 +108,16 @@ abstract contract CoreFixture is TestBase {
     }
 
     function _publishLaunchPolicy() internal {
-        address[] memory operationsAccounts = new address[](2);
+        address[] memory operationsAccounts = new address[](4);
         operationsAccounts[0] = operationsOne;
         operationsAccounts[1] = operationsTwo;
-        uint16[] memory operationsWeights = new uint16[](2);
-        operationsWeights[0] = 6_000;
-        operationsWeights[1] = 4_000;
+        operationsAccounts[2] = operationsThree;
+        operationsAccounts[3] = operationsFour;
+        uint16[] memory operationsWeights = new uint16[](4);
+        operationsWeights[0] = 2_500;
+        operationsWeights[1] = 2_500;
+        operationsWeights[2] = 2_500;
+        operationsWeights[3] = 2_500;
         V2Types.Policy memory policy = V2Types.Policy({
             version: 1,
             usdtPaymentBps: V2Types.LAUNCH_USDT_PAYMENT_BPS,
@@ -125,8 +131,8 @@ abstract contract CoreFixture is TestBase {
             provinceBps: 60,
             regionBps: 40,
             operationsBps: 400,
-            platformFeeBps: 500,
-            seckillPrizeBps: 1_000,
+            platformFeeBps: V2Types.PLATFORM_SERVICE_FEE_LIST_PRICE_BPS,
+            seckillPrizeBps: 0,
             seckillMainDuration: 60 minutes,
             relayInitial: 60 seconds,
             relayIncrement: 30 seconds,
@@ -139,10 +145,9 @@ abstract contract CoreFixture is TestBase {
             nplRewardSafe: nplRewardSafe,
             operationsTreasurySafe: operationsTreasurySafe,
             circulationPool: circulationPool,
-            genesisCredential: address(credential),
-            genesisTokenId: 1,
-            genesisCredentialStandard: V2Types.CredentialStandard.ERC721,
-            beneficiarySetHash: keccak256(abi.encode(operationsAccounts, operationsWeights)),
+            beneficiarySetHash: keccak256(
+                abi.encode(_singleAddress(genesis), _singleWeight(10_000), operationsAccounts, operationsWeights)
+            ),
             concessionDestinationSetHash: concessionAllocationHash,
             decisionEvidenceHash: keccak256("test-policy-decision-evidence"),
             rulesContentHash: keccak256("frozen-seckill-rules")
@@ -161,7 +166,7 @@ abstract contract CoreFixture is TestBase {
         returns (V2Types.PaymentIntent memory intent)
     {
         V2Types.BeneficiarySnapshot memory beneficiaries = V2Types.BeneficiarySnapshot({
-            genesis: paymentBuyer == buyer ? buyer : address(0),
+            genesis: address(0),
             directReferral: paymentBuyer == buyer ? directReferral : address(0),
             district: paymentBuyer == buyer ? district : address(0),
             city: paymentBuyer == buyer ? city : address(0),
@@ -189,16 +194,18 @@ abstract contract CoreFixture is TestBase {
             nonce: nonce,
             listPriceUsdt: 100 ether,
             productUsdtPaymentAmount: 70 ether,
+            platformServiceFeeUsdt: 1 ether,
+            custodyProductUsdt: 69 ether,
             freightUsdt: 0,
             usdtPaymentAmount: 70 ether,
             nplQuoteAmount: 1_000 ether,
             nplPaymentAmount: 300 ether,
             nplBurnAmount: 200 ether,
             nplRewardAmount: 100 ether,
-            merchantBaseReceivableUsdt: 60 ether,
+            merchantBaseReceivableUsdt: 69 ether,
             merchantConcessionBps: 2_500,
-            merchantConcessionAmount: 15 ether,
-            merchantNetReceivableUsdt: 45 ether,
+            merchantConcessionAmount: 17.25 ether,
+            merchantNetReceivableUsdt: 51.75 ether,
             concessionAllocationHash: concessionAllocationHash,
             bnmAmount: 100 ether,
             seckill: seckill,
@@ -216,12 +223,14 @@ abstract contract CoreFixture is TestBase {
     ) internal pure returns (V2Types.PaymentIntent memory) {
         intent.listPriceUsdt = listPriceUsdt;
         intent.productUsdtPaymentAmount = listPriceUsdt * 7_000 / 10_000;
+        intent.platformServiceFeeUsdt = listPriceUsdt * 100 / 10_000;
+        intent.custodyProductUsdt = intent.productUsdtPaymentAmount - intent.platformServiceFeeUsdt;
         intent.usdtPaymentAmount = intent.productUsdtPaymentAmount + intent.freightUsdt;
         intent.nplQuoteAmount = nplQuoteAmount;
         intent.nplPaymentAmount = nplQuoteAmount * 3_000 / 10_000;
         intent.nplBurnAmount = nplQuoteAmount * 2_000 / 10_000;
         intent.nplRewardAmount = intent.nplPaymentAmount - intent.nplBurnAmount;
-        intent.merchantBaseReceivableUsdt = intent.productUsdtPaymentAmount * 8_000 / 10_000;
+        intent.merchantBaseReceivableUsdt = intent.custodyProductUsdt;
         intent.merchantConcessionBps = concessionBps;
         intent.merchantConcessionAmount = intent.merchantBaseReceivableUsdt * concessionBps / 10_000;
         intent.merchantNetReceivableUsdt = intent.merchantBaseReceivableUsdt - intent.merchantConcessionAmount;
@@ -232,6 +241,28 @@ abstract contract CoreFixture is TestBase {
     function _pay(V2Types.PaymentIntent memory intent, uint256 buyerKey) internal {
         bytes32 digest = router.hashPayment(intent);
         router.pay(intent, _sign(QUOTE_KEY, digest), _sign(buyerKey, digest));
+    }
+
+    function _paymentAllocationSetHash() private pure returns (bytes32) {
+        bytes32[] memory pools = new bytes32[](3);
+        pools[0] = keccak256("SECKILL_PRIZE");
+        pools[1] = keccak256("NODE_REWARD");
+        pools[2] = keccak256("REWARD_RESERVE");
+        uint16[] memory weights = new uint16[](3);
+        weights[0] = 4_500;
+        weights[1] = 4_500;
+        weights[2] = 1_000;
+        return keccak256(abi.encode(pools, weights));
+    }
+
+    function _singleAddress(address account) private pure returns (address[] memory accounts) {
+        accounts = new address[](1);
+        accounts[0] = account;
+    }
+
+    function _singleWeight(uint16 weight) private pure returns (uint16[] memory weights) {
+        weights = new uint16[](1);
+        weights[0] = weight;
     }
 
     function _sign(uint256 key, bytes32 digest) internal returns (bytes memory) {

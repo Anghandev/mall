@@ -3,7 +3,11 @@ import type { WalletMessageSignatureVerifier } from '../api/auth.ts';
 import type { WalletDigestSignatureVerifier } from '../api/settlement-signing.ts';
 import { CORE_ARTIFACT_VERSION, NPL_ADDRESS, NPL_USDT_PAIR_ADDRESS, USDT_ADDRESS } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
-import { paymentAllocationSetHash, type PaymentPolicySnapshot } from '../api/payment-policy.ts';
+import {
+  paymentAllocationSetHash,
+  paymentBeneficiarySetHash,
+  type PaymentPolicySnapshot,
+} from '../api/payment-policy.ts';
 import type {
   BeneficiarySnapshotSource,
   PaymentOracleQuoteSource,
@@ -18,9 +22,8 @@ const SOURCE_ABI = [
 const BENEFICIARY_ABI = [
   'function referrerOf(address member) view returns (address)',
   'function regionBeneficiaries(uint64 policyVersion,bytes32 regionCodeHash) view returns (address district,address city,address province,address region)',
-  'function isGenesisEligible(uint64 policyVersion,address account) view returns (bool)',
 ];
-export const PAYMENT_POLICY_TUPLE_ABI = 'tuple(uint64 version,uint16 usdtPaymentBps,uint16 nplPaymentBps,uint16 nplBurnListPriceBps,uint16 nplRewardListPriceBps,uint16 genesisBps,uint16 directReferralBps,uint16 districtBps,uint16 cityBps,uint16 provinceBps,uint16 regionBps,uint16 operationsBps,uint16 platformFeeBps,uint16 seckillPrizeBps,uint32 seckillMainDuration,uint32 relayInitial,uint32 relayIncrement,uint32 relayCap,bytes32 oracleVersion,uint64 oracleMaxAge,uint128 oracleMinLiquidity,uint128 merchantGuaranteeMinimum,address usdtCustodySafe,address nplRewardSafe,address operationsTreasurySafe,address circulationPool,address genesisCredential,uint256 genesisTokenId,uint8 genesisCredentialStandard,bytes32 beneficiarySetHash,bytes32 concessionDestinationSetHash,bytes32 decisionEvidenceHash,bytes32 rulesContentHash)';
+export const PAYMENT_POLICY_TUPLE_ABI = 'tuple(uint64 version,uint16 usdtPaymentBps,uint16 nplPaymentBps,uint16 nplBurnListPriceBps,uint16 nplRewardListPriceBps,uint16 genesisBps,uint16 directReferralBps,uint16 districtBps,uint16 cityBps,uint16 provinceBps,uint16 regionBps,uint16 operationsBps,uint16 platformFeeBps,uint16 seckillPrizeBps,uint32 seckillMainDuration,uint32 relayInitial,uint32 relayIncrement,uint32 relayCap,bytes32 oracleVersion,uint64 oracleMaxAge,uint128 oracleMinLiquidity,uint128 merchantGuaranteeMinimum,address usdtCustodySafe,address nplRewardSafe,address operationsTreasurySafe,address circulationPool,bytes32 beneficiarySetHash,bytes32 concessionDestinationSetHash,bytes32 decisionEvidenceHash,bytes32 rulesContentHash)';
 const POLICY_REGISTRY_ABI = [
   `function getPolicy(uint64 version) view returns (${PAYMENT_POLICY_TUPLE_ABI} policy)`,
   'function getOperations(uint64 version) view returns (address[] accounts,uint16[] weights)',
@@ -144,7 +147,7 @@ export class RpcBeneficiarySnapshotSource implements BeneficiarySnapshotSource {
     if (!isHash(input.regionCodeHash) || !Number.isSafeInteger(input.policyVersion) || input.policyVersion <= 0) {
       throw new CoreError('InvalidRequest', 'Invalid beneficiary snapshot request');
     }
-    const [referrerValue, regionValue, genesisValue] = await Promise.all([
+    const [referrerValue, regionValue] = await Promise.all([
       this.#reader.call(this.#registryAddress, BENEFICIARY_ABI, 'referrerOf', [buyer]),
       this.#reader.call(
         this.#registryAddress,
@@ -152,7 +155,6 @@ export class RpcBeneficiarySnapshotSource implements BeneficiarySnapshotSource {
         'regionBeneficiaries',
         [input.policyVersion, input.regionCodeHash],
       ),
-      this.#reader.call(this.#registryAddress, BENEFICIARY_ABI, 'isGenesisEligible', [input.policyVersion, buyer]),
     ]);
     const referrer = address(String(referrerValue), 'direct referrer');
     if (referrer.toLowerCase() === buyer.toLowerCase()) {
@@ -160,7 +162,7 @@ export class RpcBeneficiarySnapshotSource implements BeneficiarySnapshotSource {
     }
     const region = regionValue as readonly [string, string, string, string];
     return Object.freeze({
-      genesis: Boolean(genesisValue) ? buyer.toLowerCase() : ZERO_ADDRESS,
+      genesis: ZERO_ADDRESS,
       directReferral: referrer.toLowerCase(),
       district: address(String(region[0]), 'district beneficiary').toLowerCase(),
       city: address(String(region[1]), 'city beneficiary').toLowerCase(),
@@ -202,14 +204,10 @@ export class RpcPaymentPolicyAttestationSource implements PaymentPolicyAttestati
     const operations = rawOperations as readonly [readonly string[], readonly bigint[]];
     const operationAccounts = [...operations[0]].map((value) => address(String(value), 'operations beneficiary').toLowerCase());
     const operationWeights = [...operations[1]].map((value) => Number(value));
-    const operationsHash = keccak256(AbiCoder.defaultAbiCoder().encode(
-      ['address[]', 'uint16[]'],
-      [operationAccounts, operationWeights],
-    ));
-    const destinationHash = paymentAllocationSetHash(
-      input.policy.concessionDestinations,
-      input.policy.otherUsdtDestinations,
-      input.policy.seckillPrizePoolAccount,
+    const destinationHash = paymentAllocationSetHash();
+    const beneficiarySetHash = paymentBeneficiarySetHash(
+      input.policy.genesisNodeDestinations,
+      input.policy.operationsDestinations,
     );
     const comparisons: Array<[string, unknown, unknown]> = [
       ['policyHash', policyHash.toLowerCase(), input.policyHash.toLowerCase()],
@@ -240,15 +238,12 @@ export class RpcPaymentPolicyAttestationSource implements PaymentPolicyAttestati
       ['nplRewardSafe', String(chain[23]).toLowerCase(), input.policy.nplRewardSafe.toLowerCase()],
       ['operationsTreasurySafe', String(chain[24]).toLowerCase(), input.policy.operationsTreasurySafe.toLowerCase()],
       ['circulationPool', String(chain[25]).toLowerCase(), input.policy.circulationPool.toLowerCase()],
-      ['genesisCredential', String(chain[26]).toLowerCase(), input.policy.genesisCredential.toLowerCase()],
-      ['genesisTokenId', BigInt(String(chain[27])), input.policy.genesisTokenId],
-      ['genesisCredentialStandard', Number(chain[28]), input.policy.genesisCredentialStandard],
-      ['beneficiarySetHash', String(chain[29]).toLowerCase(), input.beneficiarySetHash.toLowerCase()],
-      ['operationsHash', operationsHash.toLowerCase(), input.beneficiarySetHash.toLowerCase()],
-      ['concessionDestinationSetHash', String(chain[30]).toLowerCase(), input.policy.concessionDestinationSetHash.toLowerCase()],
+      ['beneficiarySetHash', String(chain[26]).toLowerCase(), input.beneficiarySetHash.toLowerCase()],
+      ['configuredBeneficiarySetHash', beneficiarySetHash.toLowerCase(), input.beneficiarySetHash.toLowerCase()],
+      ['concessionDestinationSetHash', String(chain[27]).toLowerCase(), input.policy.concessionDestinationSetHash.toLowerCase()],
       ['destinationHash', destinationHash.toLowerCase(), input.policy.concessionDestinationSetHash.toLowerCase()],
-      ['decisionEvidenceHash', String(chain[31]).toLowerCase(), input.policy.decisionEvidenceHash.toLowerCase()],
-      ['rulesContentHash', String(chain[32]).toLowerCase(), input.rulesContentHash.toLowerCase()],
+      ['decisionEvidenceHash', String(chain[28]).toLowerCase(), input.policy.decisionEvidenceHash.toLowerCase()],
+      ['rulesContentHash', String(chain[29]).toLowerCase(), input.rulesContentHash.toLowerCase()],
       ['operationAccounts', JSON.stringify(operationAccounts), JSON.stringify(input.policy.operationsDestinations.map((item) => item.account))],
       ['operationWeights', JSON.stringify(operationWeights), JSON.stringify(input.policy.operationsDestinations.map((item) => item.weightBps))],
     ];
@@ -286,7 +281,7 @@ export class RpcWalletMessageSignatureVerifier implements WalletMessageSignature
 }
 
 function policyValues(value: unknown) {
-  if (!Array.isArray(value) || value.length !== 33) {
+  if (!Array.isArray(value) || value.length !== 30) {
     throw new CoreError('InvalidFinality', 'PolicyRegistry returned an invalid policy tuple', 409);
   }
   return value;

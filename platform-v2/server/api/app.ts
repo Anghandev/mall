@@ -171,6 +171,13 @@ export interface SeckillOperationsApiService {
     idempotencyKey: string;
     correlationId: string;
   }): Promise<unknown>;
+  reviewWinner(actor: FulfillmentActor, sessionId: string, input: {
+    decision: 'APPROVE' | 'REJECT';
+    reasonCode: string;
+    evidenceHash: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<unknown>;
   approvalChallenge(actor: FulfillmentActor, actionId: string, input: {
     nonce: string;
     deadline: string;
@@ -653,7 +660,7 @@ export interface MerchantLifecycleApiService {
     legalId: string;
     contactPhone: string;
     settlementWallet: string;
-    level: 'V1' | 'V2' | 'V3' | 'V4' | 'V5';
+    level?: 'V1' | 'V2' | 'V3' | 'V4' | 'V5';
     idempotencyKey: string;
     correlationId: string;
   }): Promise<unknown>;
@@ -662,7 +669,7 @@ export interface MerchantLifecycleApiService {
     legalName: string;
     legalId: string;
     contactPhone: string;
-    level: 'V1' | 'V2' | 'V3' | 'V4' | 'V5';
+    level?: 'V1' | 'V2' | 'V3' | 'V4' | 'V5';
     licenseAssetId: string | null;
     expectedVersion: number;
     idempotencyKey: string;
@@ -2470,7 +2477,7 @@ async function routeAdminServices(
         legalId: requiredString(body, 'legalId'),
         contactPhone: requiredString(body, 'contactPhone'),
         settlementWallet: requiredString(body, 'settlementWallet'),
-        level: merchantLifecycleLevel(body.level),
+        ...(body.level === undefined ? {} : { level: merchantLifecycleLevel(body.level) }),
         idempotencyKey: requiredString(body, 'idempotencyKey'),
         correlationId,
       }), correlationId);
@@ -2493,7 +2500,7 @@ async function routeAdminServices(
         legalName: requiredString(body, 'legalName'),
         legalId: requiredString(body, 'legalId'),
         contactPhone: requiredString(body, 'contactPhone'),
-        level: merchantLifecycleLevel(body.level),
+        ...(body.level === undefined ? {} : { level: merchantLifecycleLevel(body.level) }),
         licenseAssetId: nullableString(body, 'licenseAssetId'),
         expectedVersion: requiredPositiveInteger(body, 'expectedVersion'),
         idempotencyKey: requiredString(body, 'idempotencyKey'),
@@ -2570,12 +2577,31 @@ async function routeAdminServices(
     return true;
   }
   const seckillSessionAction = url.pathname.match(
-    /^\/v2\/admin\/seckill\/sessions\/(0x[0-9a-fA-F]{64})\/(force-close|prize-injections)$/,
+    /^\/v2\/admin\/seckill\/sessions\/(0x[0-9a-fA-F]{64})\/(force-close|prize-injections|winner-review)$/,
   );
   if (request.method === 'POST' && seckillSessionAction) {
     const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN']);
     const body = await readJson(request);
     const sessionId = seckillSessionAction[1]!.toLowerCase();
+    if (seckillSessionAction[2] === 'winner-review') {
+      assertOnlyKeys(body, ['decision', 'reasonCode', 'evidenceHash', 'idempotencyKey']);
+      const decision = requiredString(body, 'decision');
+      if (decision !== 'APPROVE' && decision !== 'REJECT') {
+        throw new CoreError('InvalidRequest', 'Winner review decision must be APPROVE or REJECT');
+      }
+      sendJson(response, 200, await dependencies.seckillOperationsService.reviewWinner(
+        fulfillmentActor(claims),
+        sessionId,
+        {
+          decision,
+          reasonCode: requiredString(body, 'reasonCode'),
+          evidenceHash: requiredString(body, 'evidenceHash'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+          correlationId,
+        },
+      ), correlationId);
+      return true;
+    }
     if (seckillSessionAction[2] === 'force-close') {
       assertOnlyKeys(body, ['reasonCode', 'idempotencyKey']);
       sendJson(response, 201, await dependencies.seckillOperationsService.createForceClose(
@@ -4113,11 +4139,11 @@ function merchantLifecycleStatus(value: string | null): NonNullable<Parameters<M
   return value as NonNullable<Parameters<MerchantLifecycleApiService['list']>[1]['status']>;
 }
 
-function merchantLifecycleLevel(value: unknown): Parameters<MerchantLifecycleApiService['createApplication']>[1]['level'] {
+function merchantLifecycleLevel(value: unknown): typeof merchantLevels[number] {
   if (!merchantLevels.includes(value as typeof merchantLevels[number])) {
     throw new CoreError('InvalidRequest', 'Unsupported merchant level');
   }
-  return value as Parameters<MerchantLifecycleApiService['createApplication']>[1]['level'];
+  return value as typeof merchantLevels[number];
 }
 
 function merchantReviewAction(value: unknown): Parameters<MerchantLifecycleApiService['createReviewChallenge']>[2]['action'] {
