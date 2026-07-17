@@ -35,11 +35,18 @@ Status: frozen authority for the function-first V2 rewrite from
   price in USDT and 30% of the same price as Oracle-equivalent NPL. Without an
   explicitly funded NPL subsidy, no later policy may set the buyer NPL leg
   below 30%.
+- The product USDT leg is split atomically inside the payment transaction.
+  `platformServiceFeeUsdt = floor(listPriceUsdt * 100 / 10,000)` goes directly
+  to the dedicated Platform Service Fee Safe. The remainder of the exact buyer
+  USDT leg, `buyerProductUsdt - platformServiceFeeUsdt` (nominally 69% of list),
+  goes to the USDT Custody Safe. The fee is global and never category-specific.
 - Delivery adds the product snapshot's flat `defaultFreightUsdt` once per order
   as pure USDT; pickup freight is zero. This freight is outside the product
-  70/30 base and never changes NPL payment, Burn, reward, BNM, merchant
-  concession or seckill-prize calculations. The signed intent binds product
-  USDT, freight USDT and their total separately.
+  70/30 base, goes only to the USDT Custody Safe and never changes the service
+  fee, NPL payment, Burn, reward, BNM, merchant concession or seckill-prize
+  calculations. The signed intent binds the buyer product USDT, service-fee
+  USDT, Custody product USDT, freight USDT, total USDT and NPL amounts
+  separately.
 - Quotes use integer token units and canonical decimal strings. They bind
   `policyVersion`, Oracle observation, reservation, product/SKU/quantity,
   fulfillment mode, beneficiary snapshot, nonce, deadline and exact Router
@@ -55,19 +62,23 @@ Status: frozen authority for the function-first V2 rewrite from
   EIP-712 quotes, enforces nonce/deadline/replay protection, supports ERC-1271,
   atomically transfers both payment assets, classifies seckill boundary orders,
   emits indexed payment events and exposes the new-payment breaker.
-- For a successful launch payment, the Router transfers the 70% USDT buyer leg
-  directly to the USDT Custody Safe, transfers NPL equal to 20% of the total
-  USDT list price directly to
+- For a successful launch payment, the Router transfers the exact 1%-of-list
+  USDT service fee directly to the Platform Service Fee Safe, transfers the
+  remainder of the buyer's product-USDT leg plus delivery freight directly to
+  the USDT Custody Safe, transfers NPL equal to 20% of the total USDT list price directly to
   `0x000000000000000000000000000000000000dEaD`, and transfers NPL equal to 10%
   of the same list price directly to the NPL Reward Safe.
-- The USDT Custody Safe backs buyer-paid USDT liabilities and their authorized
-  settlements. The NPL Reward Safe backs NPL reward liabilities. The Operations
+- The Platform Service Fee Safe receives only the direct 1% fee and is not a
+  Custody-backed merchant or reward ledger. The USDT Custody Safe backs merchant
+  product/freight receivables, seckill prize, node-reward and reward-reserve
+  liabilities. The NPL Reward Safe backs NPL reward liabilities. The Operations
   Treasury Safe funds explicitly posted platform advances and operational
-  obligations; it never substitutes for a shortfall in either custody Safe.
+  obligations; it never substitutes for a shortfall in any payment Safe.
 - The Router never manages logistics, arbitration, BNM, merchant balances,
   settlement requests or arbitrary withdrawals. A normal successful call
   leaves zero USDT and zero NPL in the Router.
-- Every transfer is balance-delta checked. Fee-on-transfer behavior, missing
+- Every transfer to both USDT Safes, the NPL Burn address and Reward Safe is
+  balance-delta checked. Fee-on-transfer behavior, missing
   allowance, stale quote, replay, mismatched snapshot or partial transfer
   reverts the entire payment and does not consume inventory.
 
@@ -75,16 +86,19 @@ Status: frozen authority for the function-first V2 rewrite from
 
 - The NPL Reward Safe receives exactly 10% of the order's total USDT list price
   converted by the signed Oracle snapshot.
-- The payment snapshot allocates that 10% as: genesis 2%, direct referral 1%,
+- The payment snapshot allocates that 10% as: genesis-node pool 2%, direct-shop referral 1%,
   district 1.2%, city 0.8%, province 0.6%, region 0.4% and operations 4%.
+- Genesis-node rewards use no NFT, ERC-721, ERC-1155, contract or token-ID
+  qualification. The 2% first credits a dedicated NPL Reward-Safe-backed ledger
+  pool, then the published node wallet list and weights govern Safe settlement.
+- The operations 4% is split equally across four configured operations wallets.
 - Missing beneficiaries, integer rounding remainders and unallocated amounts
-  are credited to the circulation reward pool. Allocation entries balance
+  are credited to the NPL Reward-Safe-backed circulation ledger pool. Allocation entries balance
   exactly to the amount transferred to the Reward Safe.
-- Genesis eligibility supports the configured ERC-721 or ERC-1155 credential.
-  Credential ownership, referral relationships, all four administrative codes
-  and beneficiaries are snapshotted at payment. Later credential transfer does
-  not alter an order. Self-referral and referral cycles are forbidden.
-- Ordinary customers do not see the genesis module.
+- The published node list, referral relationships, all four administrative
+  codes and beneficiaries are snapshotted at payment. Self-referral and referral
+  cycles are forbidden. Ordinary customers do not see a genesis credential or
+  NFT module.
 
 ## Merchant Concession And Receivable
 
@@ -95,17 +109,24 @@ Status: frozen authority for the function-first V2 rewrite from
   creating a new application; V2 has no wallet migration or recovery path.
 - Merchant concession does not reduce buyer payment and never changes the
   70/30 buyer legs.
-- `concessionAmount = merchantBaseReceivable * merchantConcessionBps / 10,000`,
-  using exact integer rules published by Core. The merchant may enter 0-100%.
-- Merchant net receivable equals base receivable minus concession. The
-  concession is credited in the USDT ledger to versioned platform, prize-pool,
-  node or other configured accounts. No frontend invents allocation weights.
+- Merchant base receivable is the exact buyer product-USDT leg remaining after
+  the 1%-of-list service fee (nominally 69% of list). The merchant may enter a
+  0-100% concession and
+  `concessionAmount = floor(merchantBaseReceivable * merchantConcessionBps / 10,000)`.
+- Merchant net receivable equals that post-fee base minus concession. The
+  concession credits fixed USDT Custody-backed ledger pools: platform 0%,
+  seckill prize 45%, node rewards 45% and reward reserve 10%. The reward reserve
+  remains Locked until a future published reward policy and Safe approval; it
+  has no separate Safe. The merchant receives no extra seckill revenue.
 - Delivery freight becomes a separate `MERCHANT_FREIGHT_RECEIVABLE` backed by
   the USDT Custody Safe. It follows the order's fulfillment lifecycle and is
   settled with product proceeds through the existing `MERCHANT_USDT` rail;
   it is never concessioned or included in product revenue formulas.
 - Product maintenance shows the signed Core preview of base receivable,
   concession, net receivable and each configured destination before submit.
+- V1-V5 merchant levels, per-level price ceilings and per-level monthly seckill
+  quotas are retired. Historical database/API fields are compatibility-deprecated
+  only; no new quote, catalog, seckill or UI behavior may depend on them.
 
 ## Append-Only Double-Entry Ledger
 
@@ -189,6 +210,15 @@ Status: frozen authority for the function-first V2 rewrite from
   inclusion after it atomically uses the fallback price and ordinary inventory
   and does not enter or win the prize pool. Failure of either required fallback
   condition reverts the whole payment.
+- Each session has at most one winner: the last valid order that reaches
+  canonical chain finality by the session cutoff. The winner receives the whole
+  payable USDT pool for that session. Human review may reject cheating or an
+  invalid order but cannot replace the winner; approval enters the ordinary
+  Safe-batch payment lifecycle.
+- An empty session creates no new prize contribution. Existing rollover and
+  governed Operations-Treasury injection remain Locked and roll into the next
+  session instead of being cleared or returned. Force-close applies the same
+  winner-or-rollover rule.
 
 ## Oracle
 
@@ -212,14 +242,28 @@ Status: frozen authority for the function-first V2 rewrite from
   not a high-risk action that Safe approval can override.
 - High-Gas anomalies restrict the address for 24 hours. More than five wallets
   on the same IP or device within one minute blacklists that IP/device. Three
-  cancellations within five minutes or frequent address/store changes restrict
-  new payment for two hours. Evidence, expiry, appeal and overrides are audited.
+  cancellations within five minutes restrict new payment for two hours. Ten
+  address changes or ten pickup-store changes by the same buyer within 20
+  minutes create reminder and audit evidence only; they never debit funds,
+  blacklist, close the account or restrict payment. Low stock below 100 and an
+  abnormal-order ratio above 30% are also reminder-only. Evidence, expiry,
+  appeal and overrides for independent restrictive rules remain audited.
 - Category or tag deletion/disable is denied while it contains a seckill
   product or an order with Locked funds. Products with history are logically
   delisted only. Funds, policies, batches, chain evidence and audit records are
   never deleted.
 - Authorization never uses `tx.origin`; it uses EIP-712, nonce, deadline,
   ERC-1271, RBAC, secondary signatures and Safe authority as appropriate.
+
+## Privacy And Retention
+
+- Buyer name, phone and detailed address remain encrypted for 60 days after
+  order completion. From day 30, Admin defaults to masked values; at day 60,
+  plaintext is deleted.
+- Order ID, UID, wallet, TxHash, product and amount snapshots, ledger entries,
+  Safe batches, fulfillment/arbitration results, risk evidence and audit logs
+  are retained permanently. Every authorized PII read, export and decrypt is
+  RBAC-scoped and audited.
 
 ## Coverage And Circuit Breakers
 
@@ -236,22 +280,23 @@ Status: frozen authority for the function-first V2 rewrite from
 
 ## Production And External Inputs
 
-- Still `DecisionBlocked`: platform service-fee proportion, seckill prize-pool
-  proportion, merchant-store reward proportion, merchant-concession
-  destination weights, fixed circulation/remainder accounts and any policy
-  beneficiary not frozen above, and production buyer PII retention/deletion
-  policy. No default may be inferred.
-- `ExternalBlocked`: USDT Custody, NPL Reward and Operations Treasury Safe
-  addresses and Owners, role wallets, production RPC/fallback RPC,
-  domains/HTTPS/WSS, the existing BNM backend project's API/schema/credentials
-  and monotonic-state conformance evidence,
+- The service fee, concession destinations, lack of extra merchant seckill
+  revenue, genesis-node mechanism, prize winner/payout/rollover, merchant-level
+  retirement and PII retention are confirmed, not `DecisionBlocked`.
+- Primary and fallback BSC RPC both report chain 56. Five locally configured
+  Safe addresses have runtime code and respond to the required Safe read
+  interfaces. Their addresses are secret-safe operational data, while owners
+  and thresholds remain user-managed; none are printed or copied here.
+- `ExternalBlocked`: production TWAP pair/code/liquidity attestation,
+  domains/HTTPS/WSS, production databases and queues, the existing BNM backend project's API/schema/credentials and monotonic-state conformance evidence,
   provider accounts and credentials, approved merchant/admin wallets, encrypted
   backup storage, printers and physical mobile-device evidence.
 - Provider absence may return `ConfigurationRequired`, but adapters,
   validation, typed errors and the local business path must still exist.
 - Current ignored `.env` wallets are limited to local, fork and separately
-  approved micro-tests. Production Safe availability requires a fresh
-  production Router deployment; the test Router is never reused.
+  approved micro-tests. No deployment or mainnet transaction is authorized
+  until bytecode/configuration checks, complete local gates and an exact bounded
+  transaction package receive separate user approval.
 
 ## Coordinated Core Publications
 

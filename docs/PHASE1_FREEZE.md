@@ -23,6 +23,19 @@ Each neighboring `SOURCE.md` records provenance. Original PRDs remain
 unchanged; conflicts are retained as evidence and marked `Overridden` in the
 matrices.
 
+## Confirmed Rule Supplement
+
+The following later business authority overrides only the rules it states
+explicitly; every other canonical PRD requirement and frozen decision remains
+unchanged.
+
+| Effective date | Canonical source | SHA-256 |
+|---|---|---|
+| 2026-07-17 | `/Users/ronnie/Desktop/24K商城V2已确认规则与待补资料清单.txt` | `049a20a1b2d7d60f12e043527b0204bf1bf1b6e49df6c8a365543090ee8db100` |
+
+Secrets, private keys, Safe addresses, owners and thresholds are intentionally
+not copied into repository documentation.
+
 ## Frozen Traceability
 
 - Mall matrix: `../mall-v2/docs/requirements/REQUIREMENTS_MATRIX.md`.
