@@ -21,7 +21,11 @@ export function HelpPage() {
         if (!current) return;
         setRulesState({
           phase: 'ready',
-          value: items.filter((item) => item.contentType === 'SECKILL_RULES' && item.locale === 'zh-CN'),
+          value: items.filter((item) => (
+            item.contentType === 'SECKILL_RULES'
+            && item.locale === 'zh-CN'
+            && item.policyVersion !== null
+          )),
         });
       },
       (error) => {

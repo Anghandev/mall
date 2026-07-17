@@ -4,7 +4,6 @@ import {
   CircleDollarSign,
   Coins,
   ExternalLink,
-  Gift,
   Landmark,
   LoaderCircle,
   LockKeyhole,
@@ -334,13 +333,6 @@ export function AssetsPage() {
         <p className="section-intro">
           每笔订单的冻结金额、当前余额、账本生命周期和 Safe 结算引用均直接来自 Core；本页不重算净应收或结算金额。
         </p>
-        <div className="decision-notice receivable-decision" role="status">
-          <AlertTriangle aria-hidden="true" size={17} />
-          <div>
-            <strong>秒杀额外分成 DecisionBlocked</strong>
-            <span>秒杀订单仅展示已冻结的基础应收、让利和净应收。奖池与门店额外收益比例尚未冻结，本页不推算额外分成。</span>
-          </div>
-        </div>
         <ProjectionState state={receivableStatementsState}>
           {receivableStatements?.statements.length ? (
             <div className="receivable-statement-list">
@@ -530,10 +522,6 @@ export function AssetsPage() {
       </section>
 
       <div className="reward-grid">
-        <section className="section-block reward-section" aria-labelledby="seckill-reward-title">
-          <div className="section-heading"><div><p className="eyebrow">USDT</p><h2 id="seckill-reward-title">秒杀收益明细</h2></div><Gift aria-hidden="true" size={19} /></div>
-          <EmptyState blocked description="最终场次结算与收益比例仍为 DecisionBlocked。" title="收益投影不可用" />
-        </section>
         <section className="section-block reward-section" aria-labelledby="npl-title">
           <div className="section-heading"><div><p className="eyebrow">NPL / Reward Safe</p><h2 id="npl-title">NPL 收益子类</h2></div><Coins aria-hidden="true" size={19} /></div>
           <ProjectionState state={settlementsState} compact>
@@ -581,6 +569,8 @@ function MerchantReceivableStatementRow({ statement }: { statement: MerchantRece
           <dl className="receivable-amount-grid">
             <div><dt>商品总价</dt><dd>{statement.frozenAmounts.listPriceUsdt}</dd></div>
             <div><dt>商品 USDT</dt><dd>{statement.frozenAmounts.productUsdtPaymentAmount}</dd></div>
+            <div><dt>平台技术服务费</dt><dd>{statement.frozenAmounts.platformServiceFeeUsdt}</dd></div>
+            <div><dt>Custody 商品 USDT</dt><dd>{statement.frozenAmounts.custodyProductUsdt}</dd></div>
             <div><dt>运费 USDT</dt><dd>{statement.frozenAmounts.freightUsdt}</dd></div>
             <div><dt>买家实付 USDT</dt><dd>{statement.frozenAmounts.buyerPaidUsdt}</dd></div>
             <div><dt>基础应收</dt><dd>{statement.frozenAmounts.merchantBaseReceivableUsdt}</dd></div>

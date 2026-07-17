@@ -75,6 +75,7 @@ import {
   type MediaResourceType,
   type MediaUploadIntentProjection,
   type MerchantConcessionPreview,
+  type MerchantConcessionAllocation,
   type MerchantFinanceProjection,
   type MerchantBusinessDashboard,
   type MerchantAuditExport,
@@ -163,6 +164,7 @@ const waybillProviderSet = new Set<string>(waybillProviders);
 const waybillRequestStateSet = new Set<string>(waybillRequestStates);
 const waybillCarrierSet = new Set<string>(logisticsCarrierCodes);
 const merchantLevelSet = new Set<string>(['V1', 'V2', 'V3', 'V4', 'V5']);
+const merchantConcessionPoolSet = new Set<string>(['SECKILL_PRIZE', 'NODE_REWARD', 'REWARD_RESERVE']);
 const orderKindSet = new Set<string>(['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] satisfies readonly OrderKind[]);
 const merchantStoreActionSet = new Set<string>(['UPDATE_PROFILE', 'ACTIVATE', 'CLOSE'] satisfies readonly MerchantStoreAction[]);
 const merchantStoreActionReasonSet = new Set<string>([
@@ -1287,9 +1289,16 @@ function parseMerchantConcessionPreview(
     const concessionAmount = atomicAmount(item.merchantConcessionAmount, 'preview item.merchantConcessionAmount');
     const allocations = array(item.allocations, 'preview item.allocations').map((allocationInput) => {
       const allocation = record(allocationInput, 'concession allocation');
+      exactObjectKeys(allocation, ['pool', 'amount', 'balanceState'], 'concession allocation');
+      exact(allocation.balanceState, 'LOCKED', 'concession allocation.balanceState');
       return {
-        account: address(allocation.account, 'concession allocation.account'),
+        pool: enumValue<MerchantConcessionAllocation['pool']>(
+          allocation.pool,
+          merchantConcessionPoolSet,
+          'concession allocation.pool',
+        ),
         amount: atomicAmount(allocation.amount, 'concession allocation.amount'),
+        balanceState: 'LOCKED' as const,
       };
     });
     if (allocations.reduce((total, allocation) => total + BigInt(allocation.amount), 0n) !== BigInt(concessionAmount)) {
@@ -1768,6 +1777,8 @@ function parseFulfillmentExactAmounts(input: unknown): FulfillmentExactAmounts {
   return {
     listPriceUsdt: atomicAmount(value.listPriceUsdt, 'exactAmounts.listPriceUsdt'),
     productUsdtPaymentAmount: atomicAmount(value.productUsdtPaymentAmount, 'exactAmounts.productUsdtPaymentAmount'),
+    platformServiceFeeUsdt: atomicAmount(value.platformServiceFeeUsdt, 'exactAmounts.platformServiceFeeUsdt'),
+    custodyProductUsdt: atomicAmount(value.custodyProductUsdt, 'exactAmounts.custodyProductUsdt'),
     freightUsdt: atomicAmount(value.freightUsdt, 'exactAmounts.freightUsdt'),
     usdtPaymentAmount: atomicAmount(value.usdtPaymentAmount, 'exactAmounts.usdtPaymentAmount'),
     nplQuoteAmount: atomicAmount(value.nplQuoteAmount, 'exactAmounts.nplQuoteAmount'),
@@ -2604,8 +2615,9 @@ function parseMerchantReceivableStatement(input: unknown): MerchantReceivableSta
   ], 'merchant receivable statement');
   const frozenAmounts = record(value.frozenAmounts, 'merchant receivable frozen amounts');
   exactObjectKeys(frozenAmounts, [
-    'listPriceUsdt', 'productUsdtPaymentAmount', 'freightUsdt', 'buyerPaidUsdt', 'merchantBaseReceivableUsdt',
-    'merchantConcessionAmount', 'merchantNetReceivableUsdt',
+    'listPriceUsdt', 'productUsdtPaymentAmount', 'platformServiceFeeUsdt', 'custodyProductUsdt',
+    'freightUsdt', 'buyerPaidUsdt', 'merchantBaseReceivableUsdt', 'merchantConcessionAmount',
+    'merchantNetReceivableUsdt',
   ], 'merchant receivable frozen amounts');
   return {
     orderId: bytes32(value.orderId, 'merchant receivable orderId'),
@@ -2623,6 +2635,14 @@ function parseMerchantReceivableStatement(input: unknown): MerchantReceivableSta
       productUsdtPaymentAmount: atomicAmount(
         frozenAmounts.productUsdtPaymentAmount,
         'merchant receivable productUsdtPaymentAmount',
+      ),
+      platformServiceFeeUsdt: atomicAmount(
+        frozenAmounts.platformServiceFeeUsdt,
+        'merchant receivable platformServiceFeeUsdt',
+      ),
+      custodyProductUsdt: atomicAmount(
+        frozenAmounts.custodyProductUsdt,
+        'merchant receivable custodyProductUsdt',
       ),
       freightUsdt: atomicAmount(frozenAmounts.freightUsdt, 'merchant receivable freightUsdt'),
       buyerPaidUsdt: atomicAmount(frozenAmounts.buyerPaidUsdt, 'merchant receivable buyerPaidUsdt'),

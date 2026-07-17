@@ -619,7 +619,7 @@ describe('02 one-product form', () => {
 
     expect(await screen.findByRole('heading', { name: '单品提报' })).toBeTruthy();
     expect((await screen.findByLabelText('商品标题') as HTMLInputElement).value).toBe('24K 足金金片');
-    expect((screen.getByLabelText('商家基础应收（USDT 原子值）') as HTMLInputElement).value).toBe('600');
+    expect((screen.getByLabelText('商家基础应收（USDT 原子值）') as HTMLInputElement).value).toBe('690');
     expect((screen.getByLabelText('总库存') as HTMLInputElement).value).toBe('20');
     expect(screen.getByText(/product-history-1/)).toBeTruthy();
     expect(await screen.findByAltText('商品主图 1')).toBeTruthy();
@@ -672,7 +672,7 @@ describe('02 one-product form', () => {
         skus: [expect.objectContaining({
           skuId: managedProduct.skus[0]!.skuId,
           listPriceUsdt: '1000',
-          merchantBaseReceivableUsdt: '600',
+          merchantBaseReceivableUsdt: '690',
           stockTotal: 20,
           proposedSeckillInventory: 10,
         })],
@@ -683,7 +683,10 @@ describe('02 one-product form', () => {
 
     await user.click(screen.getByRole('button', { name: '生成签名预览' }));
     expect(await screen.findByRole('heading', { name: '商家让利预览' })).toBeTruthy();
-    expect(screen.getByRole('cell', { name: '450' })).toBeTruthy();
+    expect(screen.getByText('秒杀奖池 45% / LOCKED')).toBeTruthy();
+    expect(screen.getByText('节点奖励池 45% / LOCKED')).toBeTruthy();
+    expect(screen.getByText('奖励预留池 10% / LOCKED')).toBeTruthy();
+    expect(screen.getByRole('cell', { name: '518' })).toBeTruthy();
     expect(screen.getByText(/digest: 0x/)).toBeTruthy();
     expect(createMerchantConcessionPreview).toHaveBeenCalledWith(
       managedProduct.productId,
@@ -1664,7 +1667,7 @@ describe('05 asset rails', () => {
     expect(screen.getByText(/2026-07-14T16:00:00.000Z 至 2026-07-15T16:00:00.000Z/)).toBeTruthy();
     expect(screen.getByLabelText('USDT 商家货款五状态余额')).toBeTruthy();
     expect(screen.getByRole('heading', { name: '逐单应收账单' })).toBeTruthy();
-    expect(screen.getByText('秒杀额外分成 DecisionBlocked')).toBeTruthy();
+    expect(screen.queryByText(/秒杀额外分成|DecisionBlocked/)).toBeNull();
     const nplRewards = screen.getByLabelText('NPL 奖励收益子类');
     for (const subtype of rewardSubtypes) expect(within(nplRewards).getByText(subtype)).toBeTruthy();
     expect(within(nplRewards).getByText('2108')).toBeTruthy();
@@ -1695,6 +1698,8 @@ describe('05 asset rails', () => {
     const firstStatement = firstOrderIds[0]!.closest('details')!;
     await user.click(firstOrderIds[0]!);
     expect(within(firstStatement).getByText('冻结金额快照')).toBeTruthy();
+    expect(within(firstStatement).getByText('平台技术服务费').parentElement?.textContent).toBe('平台技术服务费120');
+    expect(within(firstStatement).getByText('Custody 商品 USDT').parentElement?.textContent).toBe('Custody 商品 USDT8280');
     expect(within(firstStatement).getAllByText('journal:a:lifecycle')).toHaveLength(2);
     expect(within(firstStatement).getByText('journal:a:requested')).toBeTruthy();
     expect(within(firstStatement).getByRole('link', { name: new RegExp(`0x${'b'.repeat(64)}`) }).getAttribute('href'))
@@ -2004,6 +2009,10 @@ describe('06 audit and 07 rules', () => {
     expect(listPublicCms).toHaveBeenCalledWith('test-session');
     expect(screen.getByText('Policy 8')).toBeTruthy();
     expect(screen.getByText(/Locked 进入 Available/)).toBeTruthy();
+    expect(screen.getByText(/1% USDT 进入技术服务费 Safe/)).toBeTruthy();
+    expect(screen.getByText(/商家不获得额外秒杀收益/)).toBeTruthy();
+    expect(screen.getByText(/创世节点 2% NPL 不使用 NFT/)).toBeTruthy();
+    expect(screen.getByText(/人工只审核有效性且不得更换获奖人/)).toBeTruthy();
     expect(screen.getByRole('heading', { name: '7 天未发货进入平台接管' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '商家不能直接确认签收' })).toBeTruthy();
     expect(screen.getByText(/保证金 → 冻结应收 → 未来货款/)).toBeTruthy();
