@@ -1168,11 +1168,14 @@ function parseSeckillPrizeSettlement(value: unknown, winnerWallet: unknown) {
     'ROLLED_OVER',
     'QUARANTINED',
   ] as const);
+  isoValue(settlement.cutoffAt);
   const candidate = settlement.candidate === null ? null : objectValue(settlement.candidate);
   if (candidate) {
     bytes32Value(candidate.orderId);
     addressValue(candidate.buyerWallet);
     stringValue(candidate.paymentEventKey);
+    atomicValue(candidate.blockNumber);
+    atomicValue(candidate.logIndex);
     bytes32Value(candidate.evidenceHash);
   }
   atomicValue(settlement.poolAmountUsdt);
@@ -1182,6 +1185,7 @@ function parseSeckillPrizeSettlement(value: unknown, winnerWallet: unknown) {
     enumValue(review.decision, ['APPROVED', 'REJECTED'] as const);
     stringValue(review.reasonCode);
     bytes32Value(review.evidenceHash);
+    addressValue(review.reviewedBy);
     isoValue(review.reviewedAt);
   }
   if (settlement.awardJournalId !== null) stringValue(settlement.awardJournalId);

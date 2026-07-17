@@ -16,14 +16,18 @@ export const seckillCandidateOrderId = `0x${'2'.repeat(64)}`;
 export const seckillCandidateEvidenceHash = `0x${'d'.repeat(64)}`;
 export const seckillPoolSnapshotHash = `0x${'e'.repeat(64)}`;
 export const seckillPrizeSafeTxHash = `0x${'f'.repeat(64)}`;
+export const seckillReviewer = `0x${'a'.repeat(40)}`;
 
 export function reviewPendingPrizeSettlement(): SeckillPrizeSettlementProjection {
   return {
     state: 'REVIEW_PENDING',
+    cutoffAt: '2033-05-18T05:01:00.000Z',
     candidate: {
       orderId: seckillCandidateOrderId,
       buyerWallet: seckillBuyer,
       paymentEventKey: 'payment:seckill-final',
+      blockNumber: '32000000',
+      logIndex: '4',
       evidenceHash: seckillCandidateEvidenceHash,
     },
     poolAmountUsdt: '240000000000000000000',
@@ -47,6 +51,7 @@ export function approvedPrizeSettlement(
       decision: 'APPROVED',
       reasonCode: 'ORDER_VALID',
       evidenceHash: `0x${'7'.repeat(64)}`,
+      reviewedBy: seckillReviewer,
       reviewedAt: '2033-05-18T05:07:00.000Z',
     },
     awardJournalId: 'journal:seckill-prize-award',
@@ -65,6 +70,7 @@ export function approvedPrizeSettlement(
 export function rolledOverPrizeSettlement(): SeckillPrizeSettlementProjection {
   return {
     state: 'ROLLED_OVER',
+    cutoffAt: '2033-05-18T05:01:00.000Z',
     candidate: null,
     poolAmountUsdt: '240000000000000000000',
     poolSnapshotHash: seckillPoolSnapshotHash,

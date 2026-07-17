@@ -1512,14 +1512,17 @@ function SeckillPrizeOutcome({
       {candidateIsViewer && prize.state === 'REVIEW_PENDING' ? <p className="field-help">当前钱包是唯一冻结候选人，正在等待有效性审核。</p> : null}
       {winnerIsViewer ? <p className="field-help">当前钱包是已审核通过的唯一赢家。</p> : null}
       <dl className="seckill-publication" aria-label="秒杀大奖结算证据">
+        <div><dt>候选截止时间</dt><dd><time dateTime={prize.cutoffAt}>{prize.cutoffAt}</time></dd></div>
         <div><dt>奖池快照</dt><dd>{prize.poolAmountUsdt} USDT 原子单位</dd></div>
         <div><dt>快照哈希</dt><dd><code>{prize.poolSnapshotHash}</code></dd></div>
         {prize.candidate ? <>
           <div><dt>候选订单</dt><dd><code>{prize.candidate.orderId}</code></dd></div>
           <div><dt>候选钱包</dt><dd>{shortAddress(prize.candidate.buyerWallet)}</dd></div>
+          <div><dt>候选链上位置</dt><dd>区块 {prize.candidate.blockNumber} · Log {prize.candidate.logIndex}</dd></div>
         </> : null}
         {prize.review ? <>
           <div><dt>有效性审核</dt><dd>{prize.review.decision === 'APPROVED' ? '已通过' : '已驳回'} · {prize.review.reasonCode}</dd></div>
+          <div><dt>审核钱包</dt><dd>{shortAddress(prize.review.reviewedBy)}</dd></div>
           <div><dt>审核时间</dt><dd><time dateTime={prize.review.reviewedAt}>{prize.review.reviewedAt}</time></dd></div>
         </> : null}
         {prize.rolloverTargetSessionId ? <div><dt>滚入场次</dt><dd><code>{prize.rolloverTargetSessionId}</code></dd></div> : null}

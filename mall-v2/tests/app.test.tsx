@@ -739,6 +739,7 @@ describe('Mall V2 payment consumer', () => {
       decision: 'REJECTED',
       reasonCode: 'ORDER_INVALID',
       evidenceHash: `0x${'6'.repeat(64)}`,
+      reviewedBy: `0x${'a'.repeat(40)}`,
       reviewedAt: '2033-05-18T05:08:00.000Z',
     };
     history.push(seckillSession({
@@ -755,6 +756,7 @@ describe('Mall V2 payment consumer', () => {
 
     expect(await screen.findByText('候选审核中')).toBeTruthy();
     expect(screen.getByText(seckillCandidateOrderId)).toBeTruthy();
+    expect(screen.getByText('区块 32000000 · Log 4')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '历史战报' }));
     for (const label of ['Available', 'Requested', 'Batched', 'Settled', '已滚入下一场', '已隔离']) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
