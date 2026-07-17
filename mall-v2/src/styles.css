@@ -883,6 +883,22 @@ a {
   line-height: 1.45;
 }
 
+.seckill-prize-outcome {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.seckill-prize-outcome .seckill-publication {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.seckill-prize-outcome--compact {
+  margin-top: 4px;
+}
+
 .winner-callout {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);

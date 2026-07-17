@@ -65,6 +65,36 @@ export const settlementIntent: SettlementIntentProjection = {
   createdAt: '2033-05-18T05:00:00.000Z',
 };
 
+const prizeSettlementIntentValue = {
+  ...settlementIntentValue,
+  intentId: hash('6'),
+  rail: 'PRIZE_USDT' as const,
+  asset: chainIdentity.usdtAddress,
+  amount: '60',
+  itemsHash: hash('2'),
+  nonce: '4',
+};
+
+export const prizeSettlementIntent: SettlementIntentProjection = {
+  intent: prizeSettlementIntentValue,
+  digest: TypedDataEncoder.hash(settlementDomain, settlementRequestTypes, prizeSettlementIntentValue),
+  typedData: {
+    domain: settlementDomain,
+    types: settlementRequestTypes,
+    primaryType: 'SettlementRequest',
+    message: prizeSettlementIntentValue,
+  },
+  items: [{
+    itemIndex: 0,
+    orderId: hash('2'),
+    accountId: 'seckill-prize:session-1:usdt',
+    backingSafeAddress: settlementSafe,
+    amount: '60',
+    itemHash: hash('3'),
+  }],
+  createdAt: '2033-05-18T05:08:00.000Z',
+};
+
 export const requestedSettlement: SettlementRequestProjection = {
   request_id: 'settlement-request-1',
   intent_id: settlementIntent.intent.intentId,

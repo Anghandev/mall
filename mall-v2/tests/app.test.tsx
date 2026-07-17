@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import {
   allowedActionNames,
   artifactVersion,
+  chainIdentity,
   executableOrderActionNames,
   type NotificationInboxItem,
   type PaymentQuoteResponse,
@@ -48,8 +49,13 @@ import {
 } from './fulfillment-fixtures';
 import { paymentQuote, product, seckillQuote } from './payment-fixtures';
 import {
+  approvedPrizeSettlement,
   relayEvent,
+  reviewPendingPrizeSettlement,
+  rolledOverPrizeSettlement,
+  seckillCandidateOrderId,
   seckillGovernanceActionId,
+  seckillPrizeSafeTxHash,
   seckillPublicationTxHash,
   seckillRulesContentHash,
   seckillSession,
@@ -58,6 +64,7 @@ import {
 import {
   finalSafeTxHash,
   notificationItem,
+  prizeSettlementIntent,
   publicCmsItem,
   requestedSettlement,
   settlementIntent,
@@ -434,6 +441,8 @@ describe('Mall V2 payment consumer', () => {
 
     await user.click(screen.getByRole('link', { name: /核对报价/ }));
     expect(screen.getByText(quote.intent.productUsdtPaymentAmount)).toBeTruthy();
+    expect(screen.getByText(quote.intent.platformServiceFeeUsdt)).toBeTruthy();
+    expect(screen.getByText(quote.intent.custodyProductUsdt)).toBeTruthy();
     expect(screen.getByText(quote.intent.freightUsdt)).toBeTruthy();
     expect(screen.getByText(quote.intent.usdtPaymentAmount)).toBeTruthy();
     expect(screen.getByText(quote.intent.nplPaymentAmount)).toBeTruthy();
@@ -624,13 +633,13 @@ describe('Mall V2 payment consumer', () => {
       phase,
       storedPhase: phase,
       ...(phase === 'PREHEAT' ? { startsAt: '2033-05-18T05:10:00.000Z' } : {}),
-      ...(phase === 'SETTLED' ? { winnerWallet: BUYER } : {}),
+      ...(phase === 'SETTLED' ? { winnerWallet: BUYER, prizeSettlement: approvedPrizeSettlement() } : {}),
     });
     renderAt('/seckill', readyServices({ getCurrentSeckillSession: vi.fn().mockResolvedValue(current) }));
 
     expect(await screen.findByText(new RegExp(expected))).toBeTruthy();
     expect(screen.getAllByText(current.product.seckillListPriceUsdt, { exact: false }).length).toBeGreaterThan(0);
-    expect(screen.getByText(current.prizePoolUsdt, { exact: false })).toBeTruthy();
+    expect(screen.getAllByText(current.prizePoolUsdt, { exact: false }).length).toBeGreaterThan(0);
     if (phase === 'LIVE') {
       expect(screen.getByText('00:59:00')).toBeTruthy();
       expect(screen.getByText('00:01:00')).toBeTruthy();
@@ -672,7 +681,12 @@ describe('Mall V2 payment consumer', () => {
 
   it('renders history and final-only relay wall from the coordinated realtime consumer', async () => {
     const current = seckillSession();
-    const history = seckillSession({ phase: 'SETTLED', storedPhase: 'SETTLED', winnerWallet: BUYER });
+    const history = seckillSession({
+      phase: 'SETTLED',
+      storedPhase: 'SETTLED',
+      winnerWallet: BUYER,
+      prizeSettlement: approvedPrizeSettlement('SETTLED'),
+    });
     const event = relayEvent();
     const services = readyServices({
       getCurrentSeckillSession: vi.fn().mockResolvedValue(current),
@@ -695,6 +709,57 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText('实时')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '历史战报' }));
     expect(screen.getByText(`赢家 0x1111…1111`)).toBeTruthy();
+    expect(screen.getByText(seckillPrizeSafeTxHash)).toBeTruthy();
+  });
+
+  it('renders candidate review, rollover, quarantine and every prize payout state from Core', async () => {
+    const pending = seckillSession({
+      phase: 'SETTLING',
+      storedPhase: 'SETTLING',
+      prizeSettlement: reviewPendingPrizeSettlement(),
+    });
+    const payoutStates = ['AVAILABLE', 'REQUESTED', 'BATCHED', 'SETTLED'] as const;
+    const history = payoutStates.map((state, index) => seckillSession({
+      sessionId: `0x${String(index + 1).repeat(64)}`,
+      phase: 'SETTLED',
+      storedPhase: 'SETTLED',
+      winnerWallet: BUYER,
+      prizeSettlement: approvedPrizeSettlement(state),
+    }));
+    history.push(seckillSession({
+      sessionId: `0x${'5'.repeat(64)}`,
+      phase: 'SETTLED',
+      storedPhase: 'SETTLED',
+      prizePoolUsdt: '0',
+      prizeSettlement: rolledOverPrizeSettlement(),
+    }));
+    const quarantined = reviewPendingPrizeSettlement();
+    quarantined.state = 'QUARANTINED';
+    quarantined.review = {
+      decision: 'REJECTED',
+      reasonCode: 'ORDER_INVALID',
+      evidenceHash: `0x${'6'.repeat(64)}`,
+      reviewedAt: '2033-05-18T05:08:00.000Z',
+    };
+    history.push(seckillSession({
+      sessionId: `0x${'6'.repeat(64)}`,
+      phase: 'SETTLED',
+      storedPhase: 'SETTLED',
+      prizeSettlement: quarantined,
+    }));
+    const user = userEvent.setup();
+    renderAt('/seckill', readyServices({
+      getCurrentSeckillSession: vi.fn().mockResolvedValue(pending),
+      listSeckillSessionHistory: vi.fn().mockResolvedValue({ items: history, nextCursor: null }),
+    }));
+
+    expect(await screen.findByText('候选审核中')).toBeTruthy();
+    expect(screen.getByText(seckillCandidateOrderId)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '历史战报' }));
+    for (const label of ['Available', 'Requested', 'Batched', 'Settled', '已滚入下一场', '已隔离']) {
+      expect(screen.getAllByText(label).length).toBeGreaterThan(0);
+    }
+    expect(screen.getByText(seckillPrizeSafeTxHash)).toBeTruthy();
   });
 
   it('binds the current Core session to the existing dual-quote checkout', async () => {
@@ -1095,12 +1160,12 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.queryByLabelText(/证据$/)).toBeNull();
   });
 
-  it('keeps seckill activity DecisionBlocked and shopping records buyer-authenticated', async () => {
+  it('keeps empty seckill activity truthful and shopping records buyer-authenticated', async () => {
     const user = userEvent.setup();
     const listBuyerShoppingStatements = vi.fn<CoreClient['listBuyerShoppingStatements']>();
     renderAt('/assets/activity', readyServices({ listBuyerShoppingStatements }));
 
-    expect(screen.getByText(/DecisionBlocked：秒杀奖项记录未发布/)).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '暂无奖项结算记录' })).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/中奖金额|提取奖金|第\s*\d+\s*期/);
     await user.click(screen.getByRole('tab', { name: '消费购物' }));
     expect(screen.getByRole('heading', { name: '连接买家钱包后查看' })).toBeTruthy();
@@ -1117,6 +1182,8 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     expect(await screen.findByText(ordinaryShoppingStatement.paymentTxHash)).toBeTruthy();
     expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.productUsdtPaymentAmount} 原子单位`)).toBeTruthy();
+    expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.platformServiceFeeUsdt} 原子单位`)).toBeTruthy();
+    expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.custodyProductUsdt} 原子单位`)).toBeTruthy();
     expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.freightUsdt} 原子单位`)).toBeTruthy();
     expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.usdtPaymentAmount} 原子单位`)).toBeTruthy();
     expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.nplPaymentAmount} 原子单位`)).toBeTruthy();
@@ -1158,6 +1225,34 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     expect(await screen.findByText(forbidden.message, { selector: '.activity-error p' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '重新同步' })).toBeTruthy();
+  });
+
+  it('tracks the Core winner candidate and rollover result instead of a blocked placeholder', async () => {
+    const pending = seckillSession({
+      phase: 'SETTLING',
+      storedPhase: 'SETTLING',
+      prizeSettlement: reviewPendingPrizeSettlement(),
+    });
+    const rolled = seckillSession({
+      sessionId: `0x${'4'.repeat(64)}`,
+      phase: 'SETTLED',
+      storedPhase: 'SETTLED',
+      prizePoolUsdt: '0',
+      prizeSettlement: rolledOverPrizeSettlement(),
+    });
+    const user = userEvent.setup();
+    renderAt('/assets/activity', readyServices({
+      getCurrentSeckillSession: vi.fn().mockResolvedValue(pending),
+      listSeckillSessionHistory: vi.fn().mockResolvedValue({ items: [rolled], nextCursor: null }),
+    }));
+
+    const records = await screen.findByLabelText('秒杀奖项记录');
+    expect(within(records).getByText('候选审核中')).toBeTruthy();
+    expect(within(records).getByText(seckillCandidateOrderId)).toBeTruthy();
+    expect(within(records).getByText('已滚入下一场')).toBeTruthy();
+    expect(within(records).queryByText(/DecisionBlocked：秒杀奖项记录未发布/)).toBeNull();
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await waitFor(() => expect(within(records).getByText(/当前钱包是唯一冻结候选人/)).toBeTruthy());
   });
 
   it('loads anonymous CMS without identity input and reloads authenticated CMS with the session token', async () => {
@@ -1207,6 +1302,67 @@ describe('Mall V2 payment consumer', () => {
       signature: '0xsettlement-signature',
     });
     expect(document.body.textContent).not.toMatch(/申请退款|强制退款|无理由退款/i);
+  });
+
+  it('uses the existing PRIZE_USDT signed request for the published winner and exposes no action to a non-winner', async () => {
+    const prizeProjection = {
+      ...settlementProjection,
+      balances: settlementProjection.balances.filter((balance) => balance.asset === 'USDT'),
+      points: [],
+      requests: [],
+    };
+    const createSettlementIntent = vi.fn<CoreClient['createSettlementIntent']>().mockResolvedValue(prizeSettlementIntent);
+    const submitSettlementRequest = vi.fn<CoreClient['submitSettlementRequest']>().mockResolvedValue({
+      ...requestedSettlement,
+      rail: 'PRIZE_USDT',
+      asset: 'USDT',
+      asset_address: chainIdentity.usdtAddress,
+      amount: '60',
+    });
+    const winnerSession = seckillSession({
+      phase: 'SETTLED',
+      storedPhase: 'SETTLED',
+      winnerWallet: BUYER,
+      prizeSettlement: approvedPrizeSettlement(),
+    });
+    const user = userEvent.setup();
+    const winnerView = renderAt('/assets/rewards', readyServices({
+      getCurrentSeckillSession: vi.fn().mockResolvedValue(winnerSession),
+      listSettlements: vi.fn().mockResolvedValue(prizeProjection),
+      createSettlementIntent,
+      submitSettlementRequest,
+    }));
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await user.click(await screen.findByRole('button', { name: '签名申请结算 60' }));
+    await waitFor(() => expect(createSettlementIntent).toHaveBeenCalledWith('buyer-session', {
+      rail: 'PRIZE_USDT',
+      amount: '60',
+      idempotencyKey: 'mall-test-idempotency',
+    }));
+
+    winnerView.unmount();
+    const otherWinner = '0x2222222222222222222222222222222222222222';
+    const nonWinnerSession = seckillSession({
+      phase: 'SETTLED',
+      storedPhase: 'SETTLED',
+      winnerWallet: otherWinner,
+      prizeSettlement: {
+        ...approvedPrizeSettlement(),
+        candidate: { ...approvedPrizeSettlement().candidate!, buyerWallet: otherWinner },
+      },
+    });
+    renderAt('/assets/rewards', readyServices({
+      getCurrentSeckillSession: vi.fn().mockResolvedValue(nonWinnerSession),
+      listSettlements: vi.fn().mockResolvedValue({
+        ...settlementProjection,
+        balances: settlementProjection.balances.filter((balance) => balance.asset !== 'USDT'),
+        requests: settlementProjection.requests.filter((request) => request.rail !== 'PRIZE_USDT'),
+      }),
+    }));
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await screen.findByRole('heading', { name: 'NPL 收益' });
+    expect(screen.queryByRole('heading', { name: '秒杀 USDT 奖金' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /签名申请结算 60/ })).toBeNull();
   });
 
   it('hides genesis attribution when Core does not project genesis eligibility', async () => {

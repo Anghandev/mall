@@ -55,6 +55,7 @@ import type {
   PaymentRouterIntent,
   RealtimeEventEnvelope,
   RewardSubtype,
+  SeckillPrizeSettlementProjection,
   SeckillSessionProjection,
   SettlementBalance,
   SettlementRail,
@@ -230,6 +231,7 @@ function SeckillSessionDashboard({ session }: { session: PublishedSeckillSession
           ? <div className="winner-callout"><BadgeCheck aria-hidden="true" size={20} /><span>本场赢家</span><strong>{shortAddress(session.winnerWallet)}</strong></div>
           : <p className="field-help">本场已最终结算，Core 未发布赢家钱包。</p>
       ) : null}
+      <SeckillPrizeOutcome session={session} />
     </section>
   );
 }
@@ -245,6 +247,7 @@ function SeckillHistory({ sessions }: { sessions: readonly PublishedSeckillSessi
               <div><strong>{session.product.title}</strong><SeckillPhasePill phase={session.phase} /></div>
               <p>奖池 {session.prizePoolUsdt} USDT 原子单位 · 已售 {session.inventory.sold}</p>
               <p>{session.winnerWallet ? `赢家 ${shortAddress(session.winnerWallet)}` : '无已发布赢家'}</p>
+              <SeckillPrizeOutcome session={session} compact />
               <p>发布证据 {shortHash(session.publicationTxHash)}</p>
             </article>
           ))}
@@ -1214,6 +1217,8 @@ function OrderRow({
         <div><dt>数量</dt><dd>{order.quantity}</dd></div>
         <div><dt>创建时间</dt><dd>{formatIso(order.createdAt)}</dd></div>
         <div><dt>商品 USDT</dt><dd>{order.exactAmounts.productUsdtPaymentAmount}</dd></div>
+        <div><dt>平台技术服务费 USDT</dt><dd>{order.exactAmounts.platformServiceFeeUsdt}</dd></div>
+        <div><dt>Custody 商品 USDT</dt><dd>{order.exactAmounts.custodyProductUsdt}</dd></div>
         <div><dt>运费 USDT</dt><dd>{order.exactAmounts.freightUsdt}</dd></div>
         <div><dt>USDT 实付</dt><dd>{order.exactAmounts.usdtPaymentAmount}</dd></div>
         <div><dt>NPL 支付</dt><dd>{order.exactAmounts.nplPaymentAmount}</dd></div>
@@ -1445,11 +1450,88 @@ export function ActivityScreen() {
       </div>
 
       {active === 'seckill' ? (
-        <StatusNotice title="DecisionBlocked：秒杀奖项记录未发布" tone="warning">
-          Core 尚无与中奖人绑定的奖池账本分录。本页不猜测场次、中奖结果、奖金金额或领取状态。
-        </StatusNotice>
+        <SeckillActivityContent runtime={runtime} />
       ) : <ShoppingStatementContent runtime={runtime} />}
     </div>
+  );
+}
+
+function SeckillActivityContent({ runtime }: { runtime: MallRuntimeValue }) {
+  const sessions = [runtime.seckillSession, ...runtime.seckillHistory]
+    .filter((session): session is PublishedSeckillSessionProjection => Boolean(session))
+    .filter((session, index, items) => items.findIndex((item) => item.sessionId === session.sessionId) === index);
+  if (runtime.seckillSessionState === 'loading' && sessions.length === 0) {
+    return <p className="loading-copy" role="status">正在同步秒杀奖项记录…</p>;
+  }
+  if (runtime.seckillSessionState === 'error' && sessions.length === 0) {
+    return <StatusNotice title="秒杀奖项同步失败" tone="warning">不展示缓存的候选人、奖金或 Safe 状态。</StatusNotice>;
+  }
+  const prizeSessions = sessions.filter((session) => session.prizeSettlement !== null);
+  if (prizeSessions.length === 0) {
+    return <EmptyState title="暂无奖项结算记录">Core 尚未为当前场次或历史场次发布候选审核、滚池或付款结果。</EmptyState>;
+  }
+  return (
+    <div className="shopping-statement-list" aria-label="秒杀奖项记录">
+      {prizeSessions.map((session) => (
+        <article className="shopping-statement" key={session.sessionId}>
+          <header className="shopping-statement__header">
+            <div><p className="eyebrow">{session.product.title}</p><h2>{shortHash(session.sessionId)}</h2></div>
+            <SeckillPhasePill phase={session.phase} />
+          </header>
+          <SeckillPrizeOutcome
+            session={session}
+            {...(runtime.session ? { viewerWallet: runtime.session.walletAddress } : {})}
+          />
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function SeckillPrizeOutcome({
+  session,
+  viewerWallet,
+  compact = false,
+}: {
+  session: PublishedSeckillSessionProjection;
+  viewerWallet?: string;
+  compact?: boolean;
+}) {
+  const prize = session.prizeSettlement;
+  if (!prize) return null;
+  const candidateIsViewer = Boolean(viewerWallet && prize.candidate
+    && prize.candidate.buyerWallet.toLowerCase() === viewerWallet.toLowerCase());
+  const winnerIsViewer = Boolean(viewerWallet && session.winnerWallet
+    && session.winnerWallet.toLowerCase() === viewerWallet.toLowerCase());
+  return (
+    <section className={`seckill-prize-outcome${compact ? ' seckill-prize-outcome--compact' : ''}`}>
+      <div className="section-heading section-heading--compact">
+        <h3>大奖结算</h3>
+        <span className="status-pill">{seckillPrizeStateLabel(prize.state)}</span>
+      </div>
+      {candidateIsViewer && prize.state === 'REVIEW_PENDING' ? <p className="field-help">当前钱包是唯一冻结候选人，正在等待有效性审核。</p> : null}
+      {winnerIsViewer ? <p className="field-help">当前钱包是已审核通过的唯一赢家。</p> : null}
+      <dl className="seckill-publication" aria-label="秒杀大奖结算证据">
+        <div><dt>奖池快照</dt><dd>{prize.poolAmountUsdt} USDT 原子单位</dd></div>
+        <div><dt>快照哈希</dt><dd><code>{prize.poolSnapshotHash}</code></dd></div>
+        {prize.candidate ? <>
+          <div><dt>候选订单</dt><dd><code>{prize.candidate.orderId}</code></dd></div>
+          <div><dt>候选钱包</dt><dd>{shortAddress(prize.candidate.buyerWallet)}</dd></div>
+        </> : null}
+        {prize.review ? <>
+          <div><dt>有效性审核</dt><dd>{prize.review.decision === 'APPROVED' ? '已通过' : '已驳回'} · {prize.review.reasonCode}</dd></div>
+          <div><dt>审核时间</dt><dd><time dateTime={prize.review.reviewedAt}>{prize.review.reviewedAt}</time></dd></div>
+        </> : null}
+        {prize.rolloverTargetSessionId ? <div><dt>滚入场次</dt><dd><code>{prize.rolloverTargetSessionId}</code></dd></div> : null}
+        {prize.rolloverJournalId ? <div><dt>滚池分录</dt><dd><code>{prize.rolloverJournalId}</code></dd></div> : null}
+        {prize.payout ? <>
+          <div><dt>Safe 付款</dt><dd>{settlementStateLabel(prize.payout.state)}</dd></div>
+          {prize.payout.requestId ? <div><dt>结算申请</dt><dd><code>{prize.payout.requestId}</code></dd></div> : null}
+          {prize.payout.batchId ? <div><dt>Safe 批次</dt><dd><code>{prize.payout.batchId}</code></dd></div> : null}
+          {prize.payout.finalSafeTxHash ? <div><dt>Final Safe TxHash</dt><dd><code>{prize.payout.finalSafeTxHash}</code></dd></div> : null}
+        </> : null}
+      </dl>
+    </section>
   );
 }
 
@@ -1526,6 +1608,8 @@ function ShoppingStatementRow({ statement }: { statement: MallRuntimeValue['shop
         <div><dt>数量</dt><dd>{statement.quantity}</dd></div>
         <div><dt>BNM 状态</dt><dd>{statement.bnm.state === 'LOCKED' ? '已锁定' : '可用'}</dd></div>
         <div><dt>商品 USDT</dt><dd>{statement.paymentAmounts.productUsdtPaymentAmount} 原子单位</dd></div>
+        <div><dt>平台技术服务费 USDT</dt><dd>{statement.paymentAmounts.platformServiceFeeUsdt} 原子单位</dd></div>
+        <div><dt>Custody 商品 USDT</dt><dd>{statement.paymentAmounts.custodyProductUsdt} 原子单位</dd></div>
         <div><dt>运费 USDT</dt><dd>{statement.paymentAmounts.freightUsdt} 原子单位</dd></div>
         <div><dt>USDT 实付</dt><dd>{statement.paymentAmounts.usdtPaymentAmount} 原子单位</dd></div>
         <div><dt>NPL 实付</dt><dd>{statement.paymentAmounts.nplPaymentAmount} 原子单位</dd></div>
@@ -2145,6 +2229,8 @@ export function ReviewScreen() {
           <div className="section-heading"><h2 id="payment-intent-title">精确支付意图</h2><WalletCards aria-hidden="true" size={19} /></div>
           <dl>
             <div><dt>商品 USDT</dt><dd>{intent?.productUsdtPaymentAmount}</dd></div>
+            <div><dt>平台技术服务费 USDT</dt><dd>{intent?.platformServiceFeeUsdt}</dd></div>
+            <div><dt>Custody 商品 USDT</dt><dd>{intent?.custodyProductUsdt}</dd></div>
             <div><dt>运费 USDT</dt><dd>{intent?.freightUsdt}</dd></div>
             <div><dt>USDT 实付</dt><dd>{intent?.usdtPaymentAmount}</dd></div>
             <div><dt>NPL 支付</dt><dd>{intent?.nplPaymentAmount}</dd></div>
@@ -2174,8 +2260,8 @@ export function ReviewScreen() {
         <section className="dual-quote" aria-labelledby="dual-quote-title">
           <div className="section-heading"><h2 id="dual-quote-title">秒杀与日常备用报价</h2><Zap aria-hidden="true" size={19} /></div>
           <div className="dual-quote__grid">
-            <div><strong>区块时间在场内</strong><span>商品 {quote.routerCall.intent.seckillPayment.listPriceUsdt}</span><span>运费 {quote.routerCall.intent.seckillPayment.freightUsdt}</span><span>USDT 实付 {quote.routerCall.intent.seckillPayment.usdtPaymentAmount}</span><span>NPL {quote.routerCall.intent.seckillPayment.nplPaymentAmount}</span></div>
-            <div><strong>区块时间已过截止</strong><span>商品 {quote.routerCall.intent.fallbackPayment.listPriceUsdt}</span><span>运费 {quote.routerCall.intent.fallbackPayment.freightUsdt}</span><span>USDT 实付 {quote.routerCall.intent.fallbackPayment.usdtPaymentAmount}</span><span>NPL {quote.routerCall.intent.fallbackPayment.nplPaymentAmount}</span></div>
+            <div><strong>区块时间在场内</strong><span>商品 {quote.routerCall.intent.seckillPayment.listPriceUsdt}</span><span>服务费 {quote.routerCall.intent.seckillPayment.platformServiceFeeUsdt}</span><span>Custody 商品 {quote.routerCall.intent.seckillPayment.custodyProductUsdt}</span><span>运费 {quote.routerCall.intent.seckillPayment.freightUsdt}</span><span>USDT 实付 {quote.routerCall.intent.seckillPayment.usdtPaymentAmount}</span><span>NPL {quote.routerCall.intent.seckillPayment.nplPaymentAmount}</span></div>
+            <div><strong>区块时间已过截止</strong><span>商品 {quote.routerCall.intent.fallbackPayment.listPriceUsdt}</span><span>服务费 {quote.routerCall.intent.fallbackPayment.platformServiceFeeUsdt}</span><span>Custody 商品 {quote.routerCall.intent.fallbackPayment.custodyProductUsdt}</span><span>运费 {quote.routerCall.intent.fallbackPayment.freightUsdt}</span><span>USDT 实付 {quote.routerCall.intent.fallbackPayment.usdtPaymentAmount}</span><span>NPL {quote.routerCall.intent.fallbackPayment.nplPaymentAmount}</span></div>
           </div>
           <p className="field-help">分类只由 PaymentRouter 的链上区块时间决定；截止后原子使用日常报价和独立库存预留。</p>
           <label className="check-field approval-check">
@@ -2346,9 +2432,23 @@ function seckillPhaseCopy(session: PublishedSeckillSessionProjection) {
     PREHEAT: `预热中，Core 发布开始时间 ${formatIso(session.startsAt)}。`,
     LIVE: '主场和接力均以 Core 时间锚与已发布截止时间显示，页面不改变阶段。',
     SETTLING: `大奖结算窗口 ${formatIso(session.settlementEarliestAt)} 至 ${formatIso(session.settlementDeadline)}。`,
-    SETTLED: session.winnerWallet ? '大奖已完成最终结算，赢家由 Core 最终投影发布。' : '场次已最终结算。',
+    SETTLED: session.winnerWallet
+      ? '大奖赢家已冻结，奖金按 Core 投影进入 Safe 结算生命周期。'
+      : session.prizeSettlement?.state === 'ROLLED_OVER'
+        ? '本场无有效赢家，已有奖池已按 Core 分录滚入下一场。'
+        : '场次已最终结算。',
     FORCE_CLOSED: '场次已由治理流程强制关闭，不再接受秒杀报价。',
   } as const)[session.phase];
+}
+
+function seckillPrizeStateLabel(state: SeckillPrizeSettlementProjection['state']) {
+  return ({
+    REVIEW_PENDING: '候选审核中',
+    APPROVED: '审核通过',
+    ROLLOVER_PENDING: '等待滚入',
+    ROLLED_OVER: '已滚入下一场',
+    QUARANTINED: '已隔离',
+  } as const)[state];
 }
 
 function seckillActionReason(runtime: MallRuntimeValue, session: PublishedSeckillSessionProjection, productAvailable: boolean) {

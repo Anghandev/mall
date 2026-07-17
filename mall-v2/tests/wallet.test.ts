@@ -9,7 +9,7 @@ import {
   validateSettlementIntentForWallet,
 } from '../src/wallet';
 import { paymentQuote, seckillQuote } from './payment-fixtures';
-import { settlementBuyer, settlementIntent } from './settlement-fixtures';
+import { prizeSettlementIntent, settlementBuyer, settlementIntent } from './settlement-fixtures';
 
 describe('published PaymentRouter wallet call', () => {
   it('encodes the ABI-shaped routerCall without a copied Router fragment', async () => {
@@ -74,6 +74,9 @@ describe('published PaymentRouter wallet call', () => {
   it('binds settlement signatures to the current wallet, Safe, asset and published digest', async () => {
     await expect(validateSettlementIntentForWallet(settlementIntent, settlementBuyer)).resolves.toMatchObject({
       message: settlementIntent.intent,
+    });
+    await expect(validateSettlementIntentForWallet(prizeSettlementIntent, settlementBuyer)).resolves.toMatchObject({
+      message: prizeSettlementIntent.intent,
     });
 
     const wrongWallet = structuredClone(settlementIntent);

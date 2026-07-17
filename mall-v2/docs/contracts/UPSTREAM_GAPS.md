@@ -7,8 +7,9 @@ Mall consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.15`. Catalog, SIWE,
 payments, stores, checkout targets, order/fulfillment projections and the
 fulfillment action catalog are published and consumed. Settlement balances,
 signed requests, Safe finality, public CMS and notifications are also consumed.
-Seckill session/history/event reads, final-only WebSocket replay, reward
-subtypes and BNM account totals are consumed from the same coordinated version.
+Seckill session/history/event reads, winner-bound prize settlement, final-only
+WebSocket replay, reward subtypes and BNM account totals are consumed from the
+same coordinated version.
 Public categories/tags, product associations, SKU seckill overlays, stable
 order pages, buyer shopping statements and short-lived product/category media
 reads are also consumed.
@@ -30,7 +31,7 @@ has no merchant export, clearing or takeover-assignment parser, UI or fixture.
 | GAP-MAL-004 | Deployment-authorized execution of the published ordinary/seckill Router calls | Both signed quote shapes are consumed; no local classification or alternate calldata |
 | GAP-MAL-005 | Resolved by `2.0.0-settlement-admin.9` seckill session and realtime publication | Mall accepts only sessions with matching snapshot/rules hash plus FINAL governance action and publication TxHash, renders those proofs, authoritative phases/timers/history/prize/winner, HTTP replay and final-only `/v2/ws` cursor recovery |
 | GAP-MAL-006 | `.9` evidence actions cover `REQUEST_EXCHANGE`, `REQUEST_DELAY`, `CONFIRM_RECEIPT` and `OPEN_ARBITRATION`; `OPEN_TAKEOVER` is absent and `VERIFY_PICKUP` evidence is not buyer-authorized | The four published buyer actions execute only when row-level `allowedActions.enabled`; takeover and buyer pickup stay disabled with the exact contract/authority reason |
-| GAP-MAL-007 | Winner-bound seckill prize journals and payable lifecycle | `.15` ordinary/fallback shopping statements are consumed; the seckill tab remains explicitly `DecisionBlocked` and renders no guessed session, winner or prize data |
+| GAP-MAL-007 | Resolved by `.15` winner-bound seckill prize projection and `PRIZE_USDT` settlement rail | Mall validates and renders the frozen candidate, review/rollover evidence, payout lifecycle and final Safe TxHash; only a wallet with a Core-published Available prize balance sees the existing signed request action |
 | GAP-MAL-008 | Resolved by `.9` buyer-scoped takeover timeline | Mall shows only `COMPLETE` / `PARTIAL_LEGACY` and public transitions; internal evidence hashes are rejected |
 | GAP-MAL-009 | Resolved by `2.0.0-settlement-admin.9` reward subtype and BNM totals publication | Mall renders only Core-projected wallet subtypes and Locked/Available BNM points; BNM remains non-transferable |
 | GAP-MAL-010 | Production GPS/device evidence and native AMap/Baidu navigation bridge beyond published stores | Browser distance is calculated only after permission; denial and native navigation remain ExternalBlocked |

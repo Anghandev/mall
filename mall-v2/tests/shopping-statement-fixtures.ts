@@ -22,6 +22,8 @@ export const ordinaryShoppingStatement = {
   orderKind: 'ORDINARY',
   paymentAmounts: {
     productUsdtPaymentAmount: '14000000000000000000',
+    platformServiceFeeUsdt: '200000000000000000',
+    custodyProductUsdt: '13800000000000000000',
     freightUsdt: '1000000000000000000',
     usdtPaymentAmount: '15000000000000000000',
     nplPaymentAmount: '600000000000000000000',
@@ -47,6 +49,8 @@ export const fallbackShoppingStatement = {
   orderKind: 'FALLBACK_RETAIL',
   paymentAmounts: {
     productUsdtPaymentAmount: '7000000000000000000',
+    platformServiceFeeUsdt: '100000000000000000',
+    custodyProductUsdt: '6900000000000000000',
     freightUsdt: '0',
     usdtPaymentAmount: '7000000000000000000',
     nplPaymentAmount: '300000000000000000000',

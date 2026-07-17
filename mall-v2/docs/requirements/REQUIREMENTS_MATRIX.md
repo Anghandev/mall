@@ -13,7 +13,7 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
 | MAL-SRC-001 | 1 | PRD title/version identity | - | Local source hash equals SOURCE record | Frozen | - |
 | MAL-OVR-001 | 4 | Payment lock, prize timing, 7-day receipt request, 7-day no-shipment handling and source withdrawal wording | D-V2-004, D-V2-005, D-V2-006, D-V2-007, D-V2-008 | No refund action exists; no-shipment creates takeover; merchant force-receipt is request-only; transferable assets use gasless signed settlement requests after frozen finality; BNM remains backend points | Overridden | GAP-MAL-006, GAP-MAL-008 |
 | MAL-SHELL-001 | 5-10 | Embedded mobile DApp; persistent Seckill/Mall/Stores/Assets tabs; each listed tab capability | - | Four tabs remain reachable and preserve view state | Frozen | GAP-MAL-002 |
-| MAL-SEK-001 | 11-17 | PREHEAT, LIVE, SETTLING 5-10 min, SETTLED; countdown, dashboard, rule/history/payment buttons, pool, 30s modal, winner/non-winner variants, daily-buy transition | D-V2-007, D-V2-013, D-V2-032 | Every phase has distinct copy/actions; the last valid chain-final order by cutoff is the sole winner; review may reject invalidity but never replace the winner; the whole payable pool enters the Safe-batch lifecycle only after final session settlement | Frozen | GAP-MAL-004, GAP-MAL-015 |
+| MAL-SEK-001 | 11-17 | PREHEAT, LIVE, SETTLING 5-10 min, SETTLED; countdown, dashboard, rule/history/payment buttons, pool, 30s modal, winner/non-winner variants, daily-buy transition | D-V2-007, D-V2-013, D-V2-032 | Every phase has distinct copy/actions; the last valid chain-final order by cutoff is the sole winner; review may reject invalidity but never replace the winner; the whole payable pool enters the Safe-batch lifecycle only after final session settlement | Verified | - |
 | MAL-SEK-002 | 18-21 | Large/bold SlideUpFade wall, exact +30s event copy, WebSocket event insertion | D-V2-013 | Ordered/deduped event stream, reconnect/cursor recovery, reduced-motion fallback | Verified | - |
 | MAL-SEK-003 | 22-24 | Main and relay timers; 60-minute main; source 60-minute relay; +30s after final TxHash | D-V2-013 | Main 60 min; relay initial/cap 60 sec; +30 sec per final purchase; never past main deadline | Verified | - |
 | MAL-SEK-004 | 25-34 | Rules button/modal/acknowledgement; chain timestamp; fallback retail classification; dual approval wording; 70% USDT + 30% NPL and 1:1 backend-BNM wording | D-V2-002, D-V2-008, D-V2-011, D-V2-012, D-V2-017 | Modal shows both five-minute signed quotes, Router classification rule and exact payment intents; BNM is backend points shown as Locked until fulfillment and never as a token payout | Overridden | GAP-MAL-003, GAP-MAL-004 |
@@ -22,7 +22,7 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
 | MAL-CHK-001 | 43-49 | Confirmation prerequisite; SKU matrix/manual selection; +/- quantity; delivery/pickup; default full address fields; empty-address guidance; nearest store/address/hours/detail | D-V2-002, D-V2-012, D-V2-021, D-V2-031 | No confirmation without valid SKU, quantity, mode and authoritative address/store; exact product 70/30 legs, flat delivery freight or zero pickup freight, Oracle snapshot, five-minute expiry and totals come only from the signed Core quote | Verified | - |
 | MAL-STORE-001 | 50-53 | Country/city/district selectors; GPS 1.2km display; Call and Navigation buttons; JSBridge AMap/Baidu launch | - | Browser/local tests cover permission, loading, denial, unavailable, deep-link generation and fallback states; real-device proof is tracked only by MAL-GOAL-004 | Verified | - |
 | MAL-ASSET-001 | 54-64 | Assets shell; avatar, nickname, account ID, address entry; four order groups/counts; View All | - | Profile and canonical counts render from Core projection | Verified | - |
-| MAL-ASSET-002 | 65-70 | Seckill/shopping tabs; session number; exact 70% product-USDT leg split into service fee and Custody product amounts, separate freight, 30% NPL, Locked BNM and winner/prize states | D-V2-002, D-V2-003, D-V2-007, D-V2-008, D-V2-031, D-V2-032 | Exact service-fee USDT, Custody product USDT, freight USDT, total USDT and NPL amounts render from Core; the published winner's whole payable prize exposes Locked/Available/Requested/Batched/Settled and final Safe TxHash; BNM exposes only Locked/Available | Frozen | GAP-MAL-007, GAP-MAL-015 |
+| MAL-ASSET-002 | 65-70 | Seckill/shopping tabs; session number; exact 70% product-USDT leg split into service fee and Custody product amounts, separate freight, 30% NPL, Locked BNM and winner/prize states | D-V2-002, D-V2-003, D-V2-007, D-V2-008, D-V2-031, D-V2-032 | Exact service-fee USDT, Custody product USDT, freight USDT, total USDT and NPL amounts render from Core; the published winner's whole payable prize exposes Locked/Available/Requested/Batched/Settled and final Safe TxHash; BNM exposes only Locked/Available | Verified | - |
 | MAL-ASSET-003 | 71-74 | Source BNM totals, provenance link and withdrawal control | D-V2-008 | BNM is existing backend points with only Locked and Available totals plus order/fulfillment provenance; no token address, mint, Safe transfer or on-chain withdrawal action is rendered | Verified | - |
 | MAL-ASSET-004 | 76-78 | Genesis-node 2% NPL, lifecycle totals, Core-projected node-wallet visibility and source withdrawal control | D-V2-007, D-V2-009, D-V2-010, D-V2-023 | No credential or NFT check/entry exists in Mall; ordinary users see no module; the published node-wallet snapshot, payment snapshot and fulfillment finality govern visibility and availability; settlement tracks Requested/Batched/Settled plus Safe TxHash | Verified | - |
 | MAL-ASSET-005 | 80-82 | Regional NPL totals, receipt/arbitration explanation and source withdrawal control | D-V2-006, D-V2-007, D-V2-009, D-V2-023 | Four regional roles use the signed snapshot; arbitration remains Disputed/Locked; available NPL follows signed request, Safe batch and 15-confirmation settlement | Verified | - |
@@ -31,7 +31,7 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
 | MAL-ADDR-001 | 93-101 | Paste textarea; name/phone/province-city-district/detail parsing; 11-digit phone; review modal exact fields/copy; missing-field red error; edit/delete/default | - | PII-safe parser and CRUD; incomplete parse cannot silently save | Verified | - |
 | MAL-ORDER-001 | 102-107 | Pending Payment/Shipment/Receipt/After-sale groups; seckill badge; inline carrier/latest logistics; Support/Exchange and Confirm Receipt buttons | - | Actions render only from allowedActions; loading/empty/error states covered | Verified | - |
 | MAL-AFTER-001 | 108-111 | No no-reason action; Exchange or Delay only; arbitration state and linked reward lock | D-V2-004, D-V2-006, D-V2-007 | No business-refund entry point; arbitration is Disputed and retains payment, BNM and every transferable reward as Locked, with no settlement request action | Verified | - |
-| MAL-TRACK-001 | 112-118 | Seckill product/session/input/result; source USDT prize withdrawal; Locked BNM amount | D-V2-007, D-V2-008, D-V2-013, D-V2-023, D-V2-032 | The last valid chain-final order by cutoff is the sole winner and receives the whole payable pool; review cannot substitute a winner; after final session settlement the prize follows signed request and Safe-batch states while BNM remains Locked/Available backend points | Overridden | GAP-MAL-007, GAP-MAL-015 |
+| MAL-TRACK-001 | 112-118 | Seckill product/session/input/result; source USDT prize withdrawal; Locked BNM amount | D-V2-007, D-V2-008, D-V2-013, D-V2-023, D-V2-032 | The last valid chain-final order by cutoff is the sole winner and receives the whole payable pool; review cannot substitute a winner; after final session settlement the prize follows signed request and Safe-batch states while BNM remains Locked/Available backend points | Verified | - |
 | MAL-TRACK-002 | 119-122 | Ordinary shopping rows; `+ BNM` pending release; released state | D-V2-006, D-V2-008 | BNM changes only from Locked to Available after authoritative fulfillment finality; no token payout or transferable-asset state is implied | Verified | - |
 | MAL-RWD-001 | 123-127 | Reward-center layout and lifecycle metrics | D-V2-007, D-V2-008, D-V2-023 | Each transferable rail exposes exact Locked/Available/Requested/Batched/Settled amounts and final Safe TxHash; BNM exposes only Locked/Available backend-point totals | Verified | - |
 | MAL-RWD-002 | 128-130 | BNM source, Locked/Available rule, source withdrawal control and provenance TxHash/timestamp | D-V2-008 | Order-linked backend BNM exposes Locked/Available and payment/fulfillment provenance only; V2 renders no ERC-20, mint, Safe payout or on-chain withdrawal action | Verified | - |
@@ -103,17 +103,24 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
   path at the required widths without production fixtures. This row remains
   `Frozen` until Core runs the combined local API/indexer/payment E2E.
 
-## Settlement/Admin .9 Verification Evidence
+## Settlement/Admin .15 Verification Evidence
+
+- `MAL-SEK-001`, `MAL-ASSET-002` and `MAL-TRACK-001`: Mall validates the
+  generated winner candidate, review, rollover and payout projection, renders
+  `REVIEW_PENDING`, `ROLLED_OVER`, `QUARANTINED`,
+  `Available/Requested/Batched/Settled` and the final Safe TxHash. The winner
+  reuses the existing wallet-bound `PRIZE_USDT` signed settlement request;
+  non-winners receive no Core prize balance and therefore no request action.
+  Focused client/UI/wallet tests cover the projection and signed request.
 
 - `MAL-TRACK-002` and the shopping half of `MAL-ASSET-002`: `.15` consumes
   `GET /v2/buyer/shopping-statements` through the coordinated OpenAPI and
   generated `BuyerShoppingStatementPage`. The buyer wallet is checked against
   the SIWE session; paired `(createdAt, orderId)` cursors append stable pages;
-  rows render exact USDT/NPL payment atoms, BNM Locked/Available state, order,
+  rows render the exact service-fee, Custody-product, freight, total USDT and
+  NPL payment atoms, BNM Locked/Available state, order,
   payment and fulfillment times, and every BNM journal ID. No browser total or
-  product/session title is inferred. `MAL-ASSET-002` remains `Frozen` because
-  the winner-bound seckill prize journal and lifecycle required by `D-V2-032`
-  have not yet been delivered.
+  product/session title is inferred.
 
 - `MAL-ASSET-001`: authenticated profile reads/writes display the permanent
   Core-generated numeric `accountId`, display canonical overview counts and

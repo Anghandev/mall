@@ -1014,9 +1014,12 @@ function parseBuyerShoppingStatement(value: unknown): BuyerShoppingStatement {
 
   const paymentAmounts = objectValue(statement.paymentAmounts);
   assertOnlyKeys(paymentAmounts, [
-    'productUsdtPaymentAmount', 'freightUsdt', 'usdtPaymentAmount', 'nplPaymentAmount',
+    'productUsdtPaymentAmount', 'platformServiceFeeUsdt', 'custodyProductUsdt',
+    'freightUsdt', 'usdtPaymentAmount', 'nplPaymentAmount',
   ], '购物记录付款金额包含未发布字段');
   atomicValue(paymentAmounts.productUsdtPaymentAmount);
+  atomicValue(paymentAmounts.platformServiceFeeUsdt);
+  atomicValue(paymentAmounts.custodyProductUsdt);
   atomicValue(paymentAmounts.freightUsdt);
   atomicValue(paymentAmounts.usdtPaymentAmount);
   atomicValue(paymentAmounts.nplPaymentAmount);
@@ -1140,6 +1143,7 @@ function parseSeckillSession(value: unknown): PublishedSeckillSessionProjection 
   atomicValue(response.prizePoolUsdt);
   if (response.lastBuyerWallet !== null) addressValue(response.lastBuyerWallet);
   if (response.winnerWallet !== null) addressValue(response.winnerWallet);
+  parseSeckillPrizeSettlement(response.prizeSettlement, response.winnerWallet);
   const snapshot = objectValue(response.snapshot);
   bytes32Value(response.governanceActionId);
   const rulesContentHash = bytes32Value(response.rulesContentHash);
@@ -1149,6 +1153,83 @@ function parseSeckillSession(value: unknown): PublishedSeckillSessionProjection 
   }
   stringArray(response.allowedActions);
   return value as PublishedSeckillSessionProjection;
+}
+
+function parseSeckillPrizeSettlement(value: unknown, winnerWallet: unknown) {
+  if (value === null) {
+    if (winnerWallet !== null) throw new CoreClientError('InvalidResponse', '秒杀赢家缺少奖金结算证据');
+    return;
+  }
+  const settlement = objectValue(value);
+  const state = enumValue(settlement.state, [
+    'REVIEW_PENDING',
+    'APPROVED',
+    'ROLLOVER_PENDING',
+    'ROLLED_OVER',
+    'QUARANTINED',
+  ] as const);
+  const candidate = settlement.candidate === null ? null : objectValue(settlement.candidate);
+  if (candidate) {
+    bytes32Value(candidate.orderId);
+    addressValue(candidate.buyerWallet);
+    stringValue(candidate.paymentEventKey);
+    bytes32Value(candidate.evidenceHash);
+  }
+  atomicValue(settlement.poolAmountUsdt);
+  bytes32Value(settlement.poolSnapshotHash);
+  const review = settlement.review === null ? null : objectValue(settlement.review);
+  if (review) {
+    enumValue(review.decision, ['APPROVED', 'REJECTED'] as const);
+    stringValue(review.reasonCode);
+    bytes32Value(review.evidenceHash);
+    isoValue(review.reviewedAt);
+  }
+  if (settlement.awardJournalId !== null) stringValue(settlement.awardJournalId);
+  if (settlement.rolloverTargetSessionId !== null) bytes32Value(settlement.rolloverTargetSessionId);
+  if (settlement.rolloverJournalId !== null) stringValue(settlement.rolloverJournalId);
+
+  const payout = settlement.payout === null ? null : objectValue(settlement.payout);
+  if (payout) {
+    const payoutState = enumValue(payout.state, [
+      'AVAILABLE',
+      'REQUESTED',
+      'BATCHED',
+      'SETTLED',
+      'RETRYABLE',
+      'QUARANTINED',
+    ] as const);
+    optionalBytes32Value(payout.requestId);
+    optionalBytes32Value(payout.batchId);
+    optionalBytes32Value(payout.finalSafeTxHash);
+    optionalBytes32Value(payout.finalExecutionTxHash);
+    if (payoutState === 'REQUESTED' && payout.requestId === null) {
+      throw new CoreClientError('InvalidResponse', '秒杀奖金申请缺少请求证据');
+    }
+    if (['BATCHED', 'SETTLED'].includes(payoutState) && (payout.requestId === null || payout.batchId === null)) {
+      throw new CoreClientError('InvalidResponse', '秒杀奖金批次证据不完整');
+    }
+    if (payoutState === 'SETTLED' && payout.finalSafeTxHash === null) {
+      throw new CoreClientError('InvalidResponse', '秒杀奖金缺少最终 Safe TxHash');
+    }
+  }
+
+  if (state === 'REVIEW_PENDING' && (!candidate || review || payout || winnerWallet !== null)) {
+    throw new CoreClientError('InvalidResponse', '秒杀候选审核状态不一致');
+  }
+  if (state === 'APPROVED') {
+    if (!candidate || review?.decision !== 'APPROVED' || !payout || winnerWallet === null
+      || addressValue(winnerWallet).toLowerCase() !== addressValue(candidate.buyerWallet).toLowerCase()) {
+      throw new CoreClientError('InvalidResponse', '秒杀赢家与审核候选人不一致');
+    }
+  }
+  if (state === 'ROLLED_OVER' && (
+    candidate
+    || review
+    || payout
+    || winnerWallet !== null
+    || settlement.rolloverTargetSessionId === null
+    || settlement.rolloverJournalId === null
+  )) throw new CoreClientError('InvalidResponse', '秒杀奖池滚入证据不完整');
 }
 
 function parseRealtimeEventPage(value: unknown, sessionId: string): RealtimeEventPage {
@@ -1935,7 +2016,8 @@ function parseFulfillmentOrder(value: unknown): FulfillmentOrder {
   enumValue(order.finalityStatus, ['NOT_SUBMITTED', 'PENDING', 'CONFIRMED', 'REPLACED', 'REORGED', 'FINAL'] as const);
   const amounts = objectValue(order.exactAmounts);
   for (const field of [
-    'listPriceUsdt', 'productUsdtPaymentAmount', 'freightUsdt', 'usdtPaymentAmount',
+    'listPriceUsdt', 'productUsdtPaymentAmount', 'platformServiceFeeUsdt',
+    'custodyProductUsdt', 'freightUsdt', 'usdtPaymentAmount',
     'nplQuoteAmount', 'nplPaymentAmount',
     'nplBurnAmount', 'nplRewardAmount', 'merchantBaseReceivableUsdt',
     'merchantConcessionAmount', 'merchantNetReceivableUsdt', 'bnmAmount',
