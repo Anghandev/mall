@@ -36,8 +36,9 @@ The published boundary currently covers:
 - wallet settlement balances and requests, signed EIP-712 settlement intents,
   Safe batching state and final Safe TxHash;
 - seckill current/history/session projections, authoritative timer anchors,
-  prize/winner state, FINAL governance/rules/publication evidence and
-  final-event numeric cursor replay;
+  frozen winner candidate, review/rollover evidence, prize payout state/final
+  Safe TxHash, FINAL governance/rules/publication evidence and final-event
+  numeric cursor replay;
 - public `/v2/ws` delivery bound to artifact version, session channel and last
   accepted cursor;
 - NPL reward subtype attribution and wallet-level BNM Locked/Available totals;
@@ -55,7 +56,6 @@ projections.
 
 The following Mall capabilities remain incomplete:
 
-- winner-bound seckill prize journal statements and their payable lifecycle;
 - an `OPEN_TAKEOVER` evidence action matching the published takeover command;
 - buyer authority for `VERIFY_PICKUP` evidence, if buyer-side pickup execution
   is ever intended; current Core authority is merchant/platform only;

@@ -1,6 +1,8 @@
 import {
   artifactVersion,
   type RealtimeEventEnvelope,
+  type SeckillPrizePayout,
+  type SeckillPrizeSettlementProjection,
 } from '@abu24k/core-artifacts';
 import type { PublishedSeckillSessionProjection } from '../src/core-client';
 import { product } from './payment-fixtures';
@@ -10,6 +12,75 @@ export const seckillBuyer = `0x${'1'.repeat(40)}`;
 export const seckillGovernanceActionId = `0x${'a'.repeat(64)}`;
 export const seckillRulesContentHash = `0x${'b'.repeat(64)}`;
 export const seckillPublicationTxHash = `0x${'c'.repeat(64)}`;
+export const seckillCandidateOrderId = `0x${'2'.repeat(64)}`;
+export const seckillCandidateEvidenceHash = `0x${'d'.repeat(64)}`;
+export const seckillPoolSnapshotHash = `0x${'e'.repeat(64)}`;
+export const seckillPrizeSafeTxHash = `0x${'f'.repeat(64)}`;
+export const seckillReviewer = `0x${'a'.repeat(40)}`;
+
+export function reviewPendingPrizeSettlement(): SeckillPrizeSettlementProjection {
+  return {
+    state: 'REVIEW_PENDING',
+    cutoffAt: '2033-05-18T05:01:00.000Z',
+    candidate: {
+      orderId: seckillCandidateOrderId,
+      buyerWallet: seckillBuyer,
+      paymentEventKey: 'payment:seckill-final',
+      blockNumber: '32000000',
+      logIndex: '4',
+      evidenceHash: seckillCandidateEvidenceHash,
+    },
+    poolAmountUsdt: '240000000000000000000',
+    poolSnapshotHash: seckillPoolSnapshotHash,
+    review: null,
+    awardJournalId: null,
+    rolloverTargetSessionId: null,
+    rolloverJournalId: null,
+    payout: null,
+  };
+}
+
+export function approvedPrizeSettlement(
+  payoutState: SeckillPrizePayout['state'] = 'AVAILABLE',
+): SeckillPrizeSettlementProjection {
+  const pending = reviewPendingPrizeSettlement();
+  return {
+    ...pending,
+    state: 'APPROVED',
+    review: {
+      decision: 'APPROVED',
+      reasonCode: 'ORDER_VALID',
+      evidenceHash: `0x${'7'.repeat(64)}`,
+      reviewedBy: seckillReviewer,
+      reviewedAt: '2033-05-18T05:07:00.000Z',
+    },
+    awardJournalId: 'journal:seckill-prize-award',
+    payout: {
+      state: payoutState,
+      requestId: payoutState === 'AVAILABLE' ? null : `0x${'5'.repeat(64)}`,
+      batchId: ['BATCHED', 'SETTLED', 'RETRYABLE', 'QUARANTINED'].includes(payoutState)
+        ? `0x${'6'.repeat(64)}`
+        : null,
+      finalSafeTxHash: payoutState === 'SETTLED' ? seckillPrizeSafeTxHash : null,
+      finalExecutionTxHash: payoutState === 'SETTLED' ? `0x${'8'.repeat(64)}` : null,
+    },
+  };
+}
+
+export function rolledOverPrizeSettlement(): SeckillPrizeSettlementProjection {
+  return {
+    state: 'ROLLED_OVER',
+    cutoffAt: '2033-05-18T05:01:00.000Z',
+    candidate: null,
+    poolAmountUsdt: '240000000000000000000',
+    poolSnapshotHash: seckillPoolSnapshotHash,
+    review: null,
+    awardJournalId: null,
+    rolloverTargetSessionId: `0x${'4'.repeat(64)}`,
+    rolloverJournalId: 'journal:seckill-prize-rollover',
+    payout: null,
+  };
+}
 
 export function seckillSession(
   overrides: Partial<PublishedSeckillSessionProjection> = {},
@@ -45,6 +116,7 @@ export function seckillSession(
     prizePoolUsdt: '240000000000000000000',
     lastBuyerWallet: seckillBuyer,
     winnerWallet: null,
+    prizeSettlement: null,
     snapshot: { rulesContentHash: seckillRulesContentHash },
     governanceActionId: seckillGovernanceActionId,
     rulesContentHash: seckillRulesContentHash,

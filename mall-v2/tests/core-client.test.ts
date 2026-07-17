@@ -51,8 +51,12 @@ import {
 } from './evidence-fixtures';
 import { paymentQuote, product, seckillQuote } from './payment-fixtures';
 import {
+  approvedPrizeSettlement,
   relayEvent,
+  reviewPendingPrizeSettlement,
+  rolledOverPrizeSettlement,
   seckillGovernanceActionId,
+  seckillPrizeSafeTxHash,
   seckillPublicationTxHash,
   seckillRulesContentHash,
   seckillSession,
@@ -657,7 +661,12 @@ describe('coordinated Core HTTP client', () => {
 
   it('consumes authoritative seckill current/history/session/events operations', async () => {
     const live = seckillSession();
-    const settled = seckillSession({ phase: 'SETTLED', storedPhase: 'SETTLED', winnerWallet: live.lastBuyerWallet });
+    const settled = seckillSession({
+      phase: 'SETTLED',
+      storedPhase: 'SETTLED',
+      winnerWallet: live.lastBuyerWallet,
+      prizeSettlement: approvedPrizeSettlement('SETTLED'),
+    });
     const event = relayEvent();
     const calls: string[] = [];
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
@@ -679,10 +688,50 @@ describe('coordinated Core HTTP client', () => {
       rulesContentHash: seckillRulesContentHash,
       publicationTxHash: seckillPublicationTxHash,
     });
-    expect((await client.listSeckillSessionHistory()).items[0]?.winnerWallet).toBe(live.lastBuyerWallet);
+    const history = (await client.listSeckillSessionHistory()).items[0];
+    expect(history?.winnerWallet).toBe(live.lastBuyerWallet);
+    expect(history?.prizeSettlement?.payout?.finalSafeTxHash).toBe(seckillPrizeSafeTxHash);
     expect((await client.getSeckillSession(seckillSessionId)).timers.relayIncrementSeconds).toBe(30);
     expect((await client.listSeckillSessionEvents(seckillSessionId)).items).toEqual([event]);
     expect(calls).toHaveLength(4);
+  });
+
+  it.each([
+    ['REVIEW_PENDING', reviewPendingPrizeSettlement()],
+    ['ROLLED_OVER', rolledOverPrizeSettlement()],
+  ] as const)('accepts a coherent %s seckill prize projection', async (_state, prizeSettlement) => {
+    const projection = seckillSession({
+      phase: 'SETTLED',
+      storedPhase: 'SETTLED',
+      prizeSettlement,
+      prizePoolUsdt: prizeSettlement.state === 'ROLLED_OVER' ? '0' : prizeSettlement.poolAmountUsdt,
+    });
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json(projection)),
+    }).getCurrentSeckillSession()).resolves.toMatchObject({ prizeSettlement: { state: prizeSettlement.state } });
+  });
+
+  it('rejects prize projections whose winner or payout evidence is inconsistent', async () => {
+    const wrongWinner = seckillSession({
+      phase: 'SETTLED',
+      storedPhase: 'SETTLED',
+      winnerWallet: '0x2222222222222222222222222222222222222222',
+      prizeSettlement: approvedPrizeSettlement(),
+    });
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json(wrongWinner)),
+    }).getCurrentSeckillSession()).rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    const malformedPayout = approvedPrizeSettlement('BATCHED');
+    malformedPayout.payout!.requestId = null;
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json(seckillSession({
+        phase: 'SETTLED',
+        storedPhase: 'SETTLED',
+        winnerWallet: seckillSession().lastBuyerWallet,
+        prizeSettlement: malformedPayout,
+      }))),
+    }).getCurrentSeckillSession()).rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
   it.each(['governanceActionId', 'rulesContentHash', 'publicationTxHash'] as const)(
