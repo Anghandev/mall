@@ -1,10 +1,10 @@
 import { CoreError } from './errors.ts';
 
 const BPS = 10_000n;
+const PLATFORM_SERVICE_FEE_BPS = 100;
 const QUOTE_VALIDITY_SECONDS = 5 * 60;
 const REQUIRED_CONFIRMATIONS = 15;
 const SNAPSHOT_REWARD_ROLES = [
-  ['genesis', 'genesisBps'],
   ['directReferral', 'directReferralBps'],
   ['district', 'districtBps'],
   ['city', 'cityBps'],
@@ -17,13 +17,7 @@ export interface WeightedDestination {
   weightBps: number;
 }
 
-export type UsdtLiabilityPurpose = 'POLICY_ALLOCATION' | 'SECKILL_PRIZE_LIABILITY';
-
-export interface ExactUsdtAllocation {
-  account: string;
-  amount: bigint;
-  purpose: UsdtLiabilityPurpose;
-}
+export type MerchantConcessionPool = 'SECKILL_PRIZE' | 'NODE_REWARD' | 'REWARD_RESERVE';
 
 export interface FrozenPaymentPolicy {
   policyVersion: number;
@@ -39,18 +33,20 @@ export interface FrozenPaymentPolicy {
   provinceBps: number;
   regionBps: number;
   operationsBps: number;
+  platformFeeBps: number;
   oracleWindowSeconds: number;
   oracleMaxDeviationBps: number;
   oracleMaxAgeSeconds: number;
   oracleMinimumUsdtLiquidity: bigint;
   requiredConfirmations: number;
   merchantGuaranteeMinimumUsdt: bigint;
+  platformServiceFeeSafe?: string;
   usdtCustodySafe?: string;
   nplRewardSafe?: string;
   operationsTreasurySafe?: string;
   circulationPool?: string;
   concessionDestinationSetHash?: string;
-  concessionDestinations?: readonly WeightedDestination[];
+  genesisNodeDestinations?: readonly WeightedDestination[];
   operationsDestinations?: readonly WeightedDestination[];
 }
 
@@ -75,9 +71,7 @@ export interface PaymentQuoteRequest {
   listPriceUsdt: bigint;
   freightUsdt: bigint;
   nplQuoteAmount: bigint;
-  merchantBaseReceivableUsdt: bigint;
   merchantConcessionBps: number;
-  otherUsdtAllocations: readonly ExactUsdtAllocation[];
   sessionId?: string;
   beneficiaries: Readonly<Record<string, string>>;
 }
@@ -103,6 +97,8 @@ export interface CanonicalPaymentIntent {
   nonce: string;
   listPriceUsdt: string;
   productUsdtPaymentAmount: string;
+  platformServiceFeeUsdt: string;
+  custodyProductUsdt: string;
   freightUsdt: string;
   usdtPaymentAmount: string;
   nplQuoteAmount: string;
@@ -118,8 +114,11 @@ export interface CanonicalPaymentIntent {
   seckill: boolean;
   sessionId: string;
   beneficiaries: Readonly<Record<string, string>>;
-  merchantConcessionAllocations: readonly { account: string; amount: string }[];
-  otherUsdtAllocations: readonly { account: string; amount: string; purpose: UsdtLiabilityPurpose }[];
+  merchantConcessionAllocations: readonly {
+    pool: MerchantConcessionPool;
+    amount: string;
+    balanceState: 'LOCKED';
+  }[];
   nplRewardAllocations: readonly { role: string; account: string; amount: string }[];
   requiredConfirmations: 15;
 }
@@ -137,6 +136,8 @@ export function buildPaymentIntent(
   validateRequest(request, now);
 
   const productUsdtPayment = mulBps(request.listPriceUsdt, policy.usdtPaymentBps);
+  const platformServiceFeeUsdt = mulBps(request.listPriceUsdt, PLATFORM_SERVICE_FEE_BPS);
+  const custodyProductUsdt = productUsdtPayment - platformServiceFeeUsdt;
   const usdtPayment = productUsdtPayment + request.freightUsdt;
   const nplPayment = mulBps(request.nplQuoteAmount, policy.nplPaymentBps);
   const nplBurn = mulBps(request.nplQuoteAmount, policy.nplBurnListPriceBps);
@@ -151,20 +152,16 @@ export function buildPaymentIntent(
   if (nplReward !== mulBps(request.nplQuoteAmount, policy.nplRewardListPriceBps) && request.nplQuoteAmount % BPS === 0n) {
     throw new CoreError('InvalidRequest', 'NPL reward allocation is inconsistent');
   }
-  if (request.merchantBaseReceivableUsdt > productUsdtPayment) {
-    throw new CoreError('InvalidRequest', 'Merchant base receivable exceeds buyer USDT payment');
-  }
-  const concessionAmount = mulBps(request.merchantBaseReceivableUsdt, request.merchantConcessionBps);
-  const merchantNet = request.merchantBaseReceivableUsdt - concessionAmount;
-  const concessionAllocations = allocateWeighted(concessionAmount, policy.concessionDestinations!);
-  const otherAllocations = canonicalExactAllocations(request.otherUsdtAllocations);
-  const otherTotal = otherAllocations.reduce((sum, item) => sum + item.amount, 0n);
-  if (merchantNet + concessionAmount + otherTotal !== productUsdtPayment) {
-    throw new CoreError('DecisionBlocked', 'USDT custody liabilities do not equal the signed buyer payment', 409);
+  const concessionAmount = mulBps(custodyProductUsdt, request.merchantConcessionBps);
+  const merchantNet = custodyProductUsdt - concessionAmount;
+  const concessionAllocations = allocateMerchantConcession(concessionAmount);
+  if (merchantNet + concessionAmount !== custodyProductUsdt) {
+    throw new CoreError('InvalidRequest', 'USDT Custody liabilities do not equal the signed Custody amount');
   }
   const nplAllocations = allocateNplRewards(
     nplReward,
     request.beneficiaries,
+    policy.genesisNodeDestinations!,
     policy.operationsDestinations!,
     policy.circulationPool!,
     policy,
@@ -191,13 +188,15 @@ export function buildPaymentIntent(
     nonce: request.nonce.toString(),
     listPriceUsdt: request.listPriceUsdt.toString(),
     productUsdtPaymentAmount: productUsdtPayment.toString(),
+    platformServiceFeeUsdt: platformServiceFeeUsdt.toString(),
+    custodyProductUsdt: custodyProductUsdt.toString(),
     freightUsdt: request.freightUsdt.toString(),
     usdtPaymentAmount: usdtPayment.toString(),
     nplQuoteAmount: request.nplQuoteAmount.toString(),
     nplPaymentAmount: nplPayment.toString(),
     nplBurnAmount: nplBurn.toString(),
     nplRewardAmount: nplReward.toString(),
-    merchantBaseReceivableUsdt: request.merchantBaseReceivableUsdt.toString(),
+    merchantBaseReceivableUsdt: custodyProductUsdt.toString(),
     merchantConcessionBps: request.merchantConcessionBps,
     merchantConcessionAmount: concessionAmount.toString(),
     merchantNetReceivableUsdt: merchantNet.toString(),
@@ -207,10 +206,11 @@ export function buildPaymentIntent(
     sessionId: classification === 'SECKILL' ? (request.sessionId ?? '') : `0x${'0'.repeat(64)}`,
     beneficiaries: Object.freeze(normalizeBeneficiaries(request.beneficiaries)),
     merchantConcessionAllocations: Object.freeze(
-      concessionAllocations.map((item) => Object.freeze({ account: item.account, amount: item.amount.toString() })),
-    ),
-    otherUsdtAllocations: Object.freeze(
-      otherAllocations.map((item) => Object.freeze({ ...item, amount: item.amount.toString() })),
+      concessionAllocations.map((item) => Object.freeze({
+        pool: item.pool,
+        amount: item.amount.toString(),
+        balanceState: 'LOCKED' as const,
+      })),
     ),
     nplRewardAllocations: Object.freeze(
       nplAllocations.map((item) => Object.freeze({ ...item, amount: item.amount.toString() })),
@@ -257,7 +257,6 @@ function validateDualRequests(seckill: PaymentQuoteRequest, fallback: PaymentQuo
     'deadline',
     'nonce',
     'freightUsdt',
-    'merchantBaseReceivableUsdt',
     'merchantConcessionBps',
   ] as const;
   if (
@@ -269,12 +268,13 @@ function validateDualRequests(seckill: PaymentQuoteRequest, fallback: PaymentQuo
 
 export function assertPolicyReady(policy: FrozenPaymentPolicy) {
   const missing = [
+    ['platformServiceFeeSafe', policy.platformServiceFeeSafe],
     ['usdtCustodySafe', policy.usdtCustodySafe],
     ['nplRewardSafe', policy.nplRewardSafe],
     ['operationsTreasurySafe', policy.operationsTreasurySafe],
     ['circulationPool', policy.circulationPool],
     ['concessionDestinationSetHash', policy.concessionDestinationSetHash],
-    ['concessionDestinations', policy.concessionDestinations],
+    ['genesisNodeDestinations', policy.genesisNodeDestinations],
     ['operationsDestinations', policy.operationsDestinations],
   ].filter(([, value]) => value === undefined);
   if (missing.length > 0) {
@@ -285,6 +285,7 @@ export function assertPolicyReady(policy: FrozenPaymentPolicy) {
   if (
     policy.usdtPaymentBps !== 7_000 ||
     policy.nplPaymentBps !== 3_000 ||
+    policy.platformFeeBps !== PLATFORM_SERVICE_FEE_BPS ||
     policy.nplBurnListPriceBps + policy.nplRewardListPriceBps !== policy.nplPaymentBps ||
     policy.oracleWindowSeconds !== 30 * 60 ||
     policy.oracleMaxDeviationBps !== 500 ||
@@ -310,6 +311,7 @@ export function assertPolicyReady(policy: FrozenPaymentPolicy) {
       )
   ) throw new CoreError('InvalidRequest', 'Launch reward policy is invalid');
   for (const address of [
+    policy.platformServiceFeeSafe!,
     policy.usdtCustodySafe!,
     policy.nplRewardSafe!,
     policy.operationsTreasurySafe!,
@@ -317,8 +319,8 @@ export function assertPolicyReady(policy: FrozenPaymentPolicy) {
   ]) {
     if (!isAddress(address)) throw new CoreError('InvalidRequest', 'Policy contains an invalid address');
   }
-  validateDestinations(policy.concessionDestinations!);
   validateDestinations(policy.operationsDestinations!);
+  validateDestinations(policy.genesisNodeDestinations!);
   if (!isBytes32(policy.concessionDestinationSetHash!)) {
     throw new CoreError('InvalidRequest', 'Concession destination hash must be bytes32');
   }
@@ -372,7 +374,6 @@ function allocateWeighted(amount: bigint, destinations: readonly WeightedDestina
 export function buildMerchantConcessionPreview(
   merchantBaseReceivableUsdt: bigint,
   merchantConcessionBps: number,
-  destinations: readonly WeightedDestination[],
 ) {
   if (merchantBaseReceivableUsdt < 0n) {
     throw new CoreError('InvalidRequest', 'Merchant base receivable cannot be negative');
@@ -388,11 +389,22 @@ export function buildMerchantConcessionPreview(
     merchantConcessionBps,
     merchantConcessionAmount: concessionAmount.toString(),
     merchantNetReceivableUsdt: (merchantBaseReceivableUsdt - concessionAmount).toString(),
-    allocations: Object.freeze(allocateWeighted(concessionAmount, destinations).map((allocation) => Object.freeze({
-      account: allocation.account,
+    allocations: Object.freeze(allocateMerchantConcession(concessionAmount).map((allocation) => Object.freeze({
+      pool: allocation.pool,
       amount: allocation.amount.toString(),
+      balanceState: 'LOCKED' as const,
     }))),
   });
+}
+
+function allocateMerchantConcession(amount: bigint) {
+  const seckillPrize = mulBps(amount, 4_500);
+  const nodeReward = mulBps(amount, 4_500);
+  return [
+    { pool: 'SECKILL_PRIZE' as const, amount: seckillPrize },
+    { pool: 'NODE_REWARD' as const, amount: nodeReward },
+    { pool: 'REWARD_RESERVE' as const, amount: amount - seckillPrize - nodeReward },
+  ];
 }
 
 function validateDestinations(destinations: readonly WeightedDestination[]) {
@@ -410,26 +422,10 @@ function validateDestinations(destinations: readonly WeightedDestination[]) {
   if (total !== 10_000) throw new CoreError('InvalidRequest', 'Concession destination weights must sum to 100%');
 }
 
-function canonicalExactAllocations(allocations: readonly ExactUsdtAllocation[]) {
-  let previous = '';
-  return allocations.map((allocation) => {
-    const account = allocation.account.toLowerCase();
-    if (
-      !isAddress(account)
-      || account <= previous
-      || allocation.amount < 0n
-      || !['POLICY_ALLOCATION', 'SECKILL_PRIZE_LIABILITY'].includes(allocation.purpose)
-    ) {
-      throw new CoreError('InvalidRequest', 'USDT allocations must be unique, sorted and non-negative');
-    }
-    previous = account;
-    return { account, amount: allocation.amount, purpose: allocation.purpose };
-  });
-}
-
 function allocateNplRewards(
   rewardAmount: bigint,
   beneficiaries: Readonly<Record<string, string>>,
+  genesisNodeDestinations: readonly WeightedDestination[],
   operationsDestinations: readonly WeightedDestination[],
   circulationPool: string,
   policy: FrozenPaymentPolicy,
@@ -438,6 +434,11 @@ function allocateNplRewards(
   const normalized = normalizeBeneficiaries(beneficiaries);
   let allocated = 0n;
   const entries: { role: string; account: string; amount: bigint }[] = [];
+  const genesisAmount = proportionalAmount(rewardAmount, policy.genesisBps, policy.nplRewardListPriceBps);
+  for (const allocation of allocateWeighted(genesisAmount, genesisNodeDestinations)) {
+    entries.push({ role: 'genesis', account: allocation.account, amount: allocation.amount });
+  }
+  allocated += genesisAmount;
   for (const [role, policyField] of SNAPSHOT_REWARD_ROLES) {
     const amount = proportionalAmount(rewardAmount, policy[policyField], policy.nplRewardListPriceBps);
     allocated += amount;
@@ -460,7 +461,11 @@ function allocateNplRewards(
 }
 
 function normalizeBeneficiaries(beneficiaries: Readonly<Record<string, string>>) {
-  const normalized: Record<string, string> = {};
+  const genesis = beneficiaries.genesis ?? zeroAddress();
+  if (!isAddress(genesis) || genesis.toLowerCase() !== zeroAddress()) {
+    throw new CoreError('InvalidRequest', 'Legacy Genesis beneficiary must be zero');
+  }
+  const normalized: Record<string, string> = { genesis: zeroAddress() };
   for (const [role] of SNAPSHOT_REWARD_ROLES) {
     const value = beneficiaries[role] ?? zeroAddress();
     if (!isAddress(value)) throw new CoreError('InvalidRequest', `Invalid ${role} beneficiary`);

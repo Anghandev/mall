@@ -31,7 +31,7 @@ test('settlement admin .15 checkpoint has one identity, resolvable exports and e
   assert.equal(openapi['x-artifactVersion'], artifactVersion);
   assert.equal(manifest.publicationStatus, 'COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT');
   assert.equal(contractManifest.publicationStatus, 'coordinated-settlement-admin-checkpoint');
-  assert.ok(manifest.decisionBlocked.includes('SECKILL_PRIZE_POOL_ACCOUNT'));
+  assert.equal(manifest.decisionBlocked.includes('SECKILL_PRIZE_POOL_ACCOUNT'), false);
   assert.deepEqual(
     manifest.consumerTests.map((item: { path: string }) => item.path),
     ['platform-v2/server/api/api.test.ts', 'platform-v2/test/consumer/core-artifacts.test.ts'],
@@ -190,6 +190,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'POST /v2/admin/seckill/sessions',
     'POST /v2/admin/seckill/sessions/{sessionId}/force-close',
     'POST /v2/admin/seckill/sessions/{sessionId}/prize-injections',
+    'POST /v2/admin/seckill/sessions/{sessionId}/winner-review',
     'POST /v2/admin/settlement-intents',
     'POST /v2/admin/system-config/versions',
     'POST /v2/admin/system-config/versions/{configVersionId}/approval-challenge',
@@ -300,12 +301,10 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
   assert.equal(openapi.components.schemas.CanonicalPaymentIntent.properties.requiredConfirmations.const, 15);
   assert.equal(openapi.components.schemas.ApprovalRequirement.properties.approvalMode.const, 'ONLY_IF_ALLOWANCE_BELOW_REQUIRED');
   assert.equal(openapi.components.schemas.ApprovalRequirement.properties.risk.const, 'UNLIMITED_TOKEN_ALLOWANCE');
-  assert.deepEqual(openapi.components.schemas.OtherUsdtAllocation.properties.purpose.enum, [
-    'POLICY_ALLOCATION',
-    'SECKILL_PRIZE_LIABILITY',
-  ]);
+  assert.equal(openapi.components.schemas.OtherUsdtAllocation, undefined);
   assert.ok(openapi.components.schemas.ProductPolicy.required.includes('seckillPrizeBps'));
-  assert.ok(openapi.components.schemas.ProductPolicy.required.includes('seckillPrizePoolAccount'));
+  assert.ok(openapi.components.schemas.ProductPolicy.required.includes('platformServiceFeeSafe'));
+  assert.ok(openapi.components.schemas.ProductPolicy.required.includes('genesisNodeDestinations'));
   assert.deepEqual(openapi.components.schemas.MediaUploadIntentRequest.properties.purpose.enum, [
     'PRODUCT_IMAGE',
     'PRODUCT_VIDEO',
@@ -360,7 +359,6 @@ test('generated payment DTOs match the PaymentRouter tuple and current response 
     'merchantNetReceivableUsdt',
     'concessionAllocationHash',
     'merchantConcessionAllocations',
-    'otherUsdtAllocations',
     'nplRewardAllocations',
     'approvalRequirements',
     'classificationAuthority',
@@ -375,7 +373,7 @@ test('generated payment DTOs match the PaymentRouter tuple and current response 
     'TAKEOVER_USDT',
     'OPERATIONS_REIMBURSEMENT_USDT',
   ]);
-  assert.match(declarations, /export type UsdtLiabilityPurpose = 'POLICY_ALLOCATION' \| 'SECKILL_PRIZE_LIABILITY'/);
+  assert.match(declarations, /pool: 'SECKILL_PRIZE' \| 'NODE_REWARD' \| 'REWARD_RESERVE'/);
 });
 
 test('generated fulfillment DTOs expose exact amounts, immutable evidence and command results', () => {
@@ -436,6 +434,7 @@ test('generated fulfillment DTOs expose exact amounts, immutable evidence and co
   assert.equal(openapi.components.schemas.MerchantReceivableJournalEvidence.properties.delta.pattern, '^-?[1-9][0-9]*$');
   assert.deepEqual(Object.keys(openapi.components.schemas.FulfillmentExactAmounts.properties).sort(), [
     'bnmAmount',
+    'custodyProductUsdt',
     'freightUsdt',
     'listPriceUsdt',
     'merchantBaseReceivableUsdt',
@@ -445,6 +444,7 @@ test('generated fulfillment DTOs expose exact amounts, immutable evidence and co
     'nplPaymentAmount',
     'nplQuoteAmount',
     'nplRewardAmount',
+    'platformServiceFeeUsdt',
     'productUsdtPaymentAmount',
     'usdtPaymentAmount',
   ]);
@@ -578,19 +578,20 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
   assert.equal('phone' in openapi.components.schemas.AdminResourceSummary.properties, false);
   assert.equal(manifest.decisionBlocked.includes('ADMIN_OR_QUERY_SEMANTICS'), false);
   assert.equal(manifest.decisionBlocked.includes('ADMIN_FUZZY_WALLET_SEARCH_POLICY'), false);
-  assert.ok(manifest.decisionBlocked.includes('ADMIN_YELLOW_QUEUE_DEFINITION'));
+  assert.equal(manifest.decisionBlocked.includes('ADMIN_YELLOW_QUEUE_DEFINITION'), false);
   assert.deepEqual(
     openapi.components.schemas.MerchantFulfillmentAnalytics.properties.fastShip48h.anyOf.map(
       (schema: { properties: { status: { const: string } } }) => schema.properties.status.const,
     ),
     ['AVAILABLE', 'UNAVAILABLE'],
   );
-  assert.deepEqual(
-    openapi.components.schemas.MerchantLifecycleDetail.properties.levelPolicy.anyOf.map(
-      (schema: { properties: { status: { const: string } } }) => schema.properties.status.const,
-    ),
-    ['AVAILABLE', 'DecisionBlocked'],
+  assert.equal(
+    openapi.components.schemas.MerchantLifecycleDetail.properties.levelPolicy.properties.status.const,
+    'Deprecated',
   );
+  assert.equal(openapi.components.schemas.MerchantLifecycleDetail.properties.levelPolicy.deprecated, true);
+  assert.equal(openapi.components.schemas.MerchantApplicationCreateRequest.required.includes('level'), false);
+  assert.equal(openapi.components.schemas.MerchantApplicationCreateRequest.properties.level.deprecated, true);
   assert.equal('proposedSettlementWallet' in openapi.components.schemas.MerchantReviewChallengeRequest.properties, false);
   assert.deepEqual(
     Object.keys(openapi.components.schemas.MerchantOrderAnalytics.properties.cumulative.properties),
@@ -634,7 +635,7 @@ test('published wallet calls encode with the ABI and published EIP-712 messages 
     verifyingContract: '0x9999999999999999999999999999999999999999',
   };
   const paymentMessage = {
-    paymentHash: '0xc125633288a4ba4ccb0602dae00c885dbe1adb7a0a77cc842f34d3d425d9279f',
+    paymentHash: '0x99ccfc957ff13dd932246ab4f65c3636c3557d7bfdd00369ee9a4c4a597c90b9',
     orderId: paymentIntent.orderId,
     buyer: paymentIntent.buyer,
     merchant: paymentIntent.merchant,
@@ -650,13 +651,13 @@ test('published wallet calls encode with the ABI and published EIP-712 messages 
   const quoteSignature = `0x${'11'.repeat(65)}`;
   const buyerSignature = `0x${'22'.repeat(65)}`;
   const ordinaryResponse = {
-    authorizationDigest: '0x3b991a7728e91bdf283431b553258f94dffe4b516b6283ad3c34a588f7cd21a0',
+    authorizationDigest: '0x8d92356ce3efbaa3271f6c99d9166b7bb90787905fd35308c9b0b6bb094ff033',
     buyerAuthorization: {
       domain,
       types: paymentTypes,
       primaryType: 'PaymentAuthorization',
       message: paymentMessage,
-      digest: '0x3b991a7728e91bdf283431b553258f94dffe4b516b6283ad3c34a588f7cd21a0',
+      digest: '0x8d92356ce3efbaa3271f6c99d9166b7bb90787905fd35308c9b0b6bb094ff033',
     },
     routerCall: { functionName: 'pay', intent: paymentIntent, quoteSignature },
   };
@@ -702,7 +703,7 @@ test('published wallet calls encode with the ABI and published EIP-712 messages 
     ],
   };
   const seckillMessage = {
-    seckillHash: '0x292fee156f4df5e8469fcff24055093e8820768b91784e417559b0fabd4d1bce',
+    seckillHash: '0xf222066b7b08d6c1cec6fd2121354ff180c25df10879612465567ec53447536b',
     orderId: seckillPayment.orderId,
     buyer: seckillPayment.buyer,
     merchant: seckillPayment.merchant,
@@ -719,13 +720,13 @@ test('published wallet calls encode with the ABI and published EIP-712 messages 
     deadline: seckillPayment.deadline,
   };
   const seckillResponse = {
-    authorizationDigest: '0x8fd49d5723d836b830cc81647eaaad6b4e5e996f560a9bd034402549241e8246',
+    authorizationDigest: '0x19d2d96a413026200dce3a6b06fffe55ee6a9dffba237ed48ca03f92eb09d4fd',
     buyerAuthorization: {
       domain,
       types: seckillTypes,
       primaryType: 'SeckillAuthorization',
       message: seckillMessage,
-      digest: '0x8fd49d5723d836b830cc81647eaaad6b4e5e996f560a9bd034402549241e8246',
+      digest: '0x19d2d96a413026200dce3a6b06fffe55ee6a9dffba237ed48ca03f92eb09d4fd',
     },
     routerCall: {
       functionName: 'paySeckill',
@@ -909,10 +910,11 @@ test('catalog, settlement/admin and seckill realtime capabilities are published 
   ];
   assert.deepEqual([...executableOrderActionNames], fulfillmentActions);
   assert.deepEqual(manifest.executableOrderActionNames, fulfillmentActions);
-  assert.ok(manifest.externalBlocked.includes('GOVERNANCE_AND_THREE_SAFE_ADDRESSES'));
+  assert.equal(manifest.externalBlocked.includes('GOVERNANCE_AND_THREE_SAFE_ADDRESSES'), false);
   assert.ok(manifest.externalBlocked.includes('PROVIDER_ACCOUNTS_AND_CREDENTIALS'));
   assert.ok(manifest.externalBlocked.includes('BNM_MONOTONIC_CONFORMANCE_EVIDENCE'));
-  assert.ok(manifest.decisionBlocked.includes('PICKUP_TIMEOUT_AND_TAKEOVER_EVIDENCE'));
+  assert.equal(manifest.decisionBlocked.includes('PICKUP_TIMEOUT_AND_TAKEOVER_EVIDENCE'), false);
+  assert.deepEqual(manifest.decisionBlocked, []);
   assert.equal(manifest.decisionBlocked.includes('REQUIRED_CONFIRMATIONS'), false);
 });
 
@@ -974,16 +976,18 @@ function signingVectorRouterIntent() {
     nonce: '7',
     listPriceUsdt: '100000000000000000000',
     productUsdtPaymentAmount: '70000000000000000000',
+    platformServiceFeeUsdt: '1000000000000000000',
+    custodyProductUsdt: '69000000000000000000',
     freightUsdt: '0',
     usdtPaymentAmount: '70000000000000000000',
     nplQuoteAmount: '1000000000000000000000',
     nplPaymentAmount: '300000000000000000000',
     nplBurnAmount: '200000000000000000000',
     nplRewardAmount: '100000000000000000000',
-    merchantBaseReceivableUsdt: '60000000000000000000',
+    merchantBaseReceivableUsdt: '69000000000000000000',
     merchantConcessionBps: 2_500,
-    merchantConcessionAmount: '15000000000000000000',
-    merchantNetReceivableUsdt: '45000000000000000000',
+    merchantConcessionAmount: '17250000000000000000',
+    merchantNetReceivableUsdt: '51750000000000000000',
     concessionAllocationHash: hash('4'),
     bnmAmount: '100000000000000000000',
     seckill: false,

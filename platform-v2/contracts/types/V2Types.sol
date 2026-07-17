@@ -5,6 +5,7 @@ library V2Types {
     uint16 internal constant BPS = 10_000;
     uint16 internal constant LAUNCH_USDT_PAYMENT_BPS = 7_000;
     uint16 internal constant LAUNCH_NPL_PAYMENT_BPS = 3_000;
+    uint16 internal constant PLATFORM_SERVICE_FEE_LIST_PRICE_BPS = 100;
     uint16 internal constant NPL_BURN_LIST_PRICE_BPS = 2_000;
     uint16 internal constant NPL_REWARD_LIST_PRICE_BPS = 1_000;
     uint32 internal constant ORACLE_WINDOW = 30 minutes;
@@ -19,12 +20,6 @@ library V2Types {
     address internal constant NPL = 0x4E8277AB31e4956b2CD48449793a57656DfC03D2;
     address internal constant NPL_USDT_PAIR = 0x2955e33bb120714aBf11ACE2766E614E6E5955B2;
     address internal constant NPL_BURN_ADDRESS = 0x000000000000000000000000000000000000dEaD;
-
-    enum CredentialStandard {
-        None,
-        ERC721,
-        ERC1155
-    }
 
     enum FulfillmentMode {
         Delivery,
@@ -64,9 +59,6 @@ library V2Types {
         address nplRewardSafe;
         address operationsTreasurySafe;
         address circulationPool;
-        address genesisCredential;
-        uint256 genesisTokenId;
-        CredentialStandard genesisCredentialStandard;
         bytes32 beneficiarySetHash;
         bytes32 concessionDestinationSetHash;
         bytes32 decisionEvidenceHash;
@@ -103,6 +95,8 @@ library V2Types {
         uint256 nonce;
         uint256 listPriceUsdt;
         uint256 productUsdtPaymentAmount;
+        uint256 platformServiceFeeUsdt;
+        uint256 custodyProductUsdt;
         uint256 freightUsdt;
         uint256 usdtPaymentAmount;
         uint256 nplQuoteAmount;

@@ -3,11 +3,10 @@ import { keccak256 } from 'ethers';
 import { normalizeAddress } from '../api/auth.ts';
 import { CORE_ARTIFACT_VERSION } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
-import { parsePaymentPolicySnapshot } from '../api/payment-policy.ts';
+import { parsePaymentPolicySnapshot, paymentBeneficiarySetHash } from '../api/payment-policy.ts';
 import {
   buildPolicyPublication,
   encodePolicyPublicationCalldata,
-  policyOperationsHash,
   verifyPolicyPublicationSignature,
 } from '../api/policy-publication-signing.ts';
 import {
@@ -636,9 +635,15 @@ async function validateDraft(
   let policy;
   try {
     policy = parsePaymentPolicySnapshot(policyVersion, payload.oracleVersion, payload.policy);
-    const operationsHash = policyOperationsHash(policy);
     buildPolicyPublication(
-      { policy, rulesContentHash: payload.rulesContentHash, beneficiarySetHash: operationsHash },
+      {
+        policy,
+        rulesContentHash: payload.rulesContentHash,
+        beneficiarySetHash: paymentBeneficiarySetHash(
+          policy.genesisNodeDestinations,
+          policy.operationsDestinations,
+        ),
+      },
       0n,
       1n,
       '0x0000000000000000000000000000000000000001',
@@ -671,7 +676,10 @@ async function publicationMaterial(executor: SqlExecutor, row: PolicyDraftRow) {
   return {
     policy: validation.policy,
     rulesContentHash: row.payload.rulesContentHash.toLowerCase(),
-    beneficiarySetHash: policyOperationsHash(validation.policy),
+    beneficiarySetHash: paymentBeneficiarySetHash(
+      validation.policy.genesisNodeDestinations,
+      validation.policy.operationsDestinations,
+    ),
   };
 }
 

@@ -10,8 +10,6 @@ contract PolicyRegistryV2 is AccessControl, EIP712 {
     bytes32 public constant POLICY_PUBLISHER_ROLE = keccak256("POLICY_PUBLISHER_ROLE");
     bytes32 public constant PUBLICATION_TYPEHASH =
         keccak256("PolicyPublication(bytes32 policyHash,bytes32 operationsHash,uint256 nonce,uint64 deadline)");
-    uint256 public constant MAX_OPERATIONS_ACCOUNTS = 32;
-
     address public immutable safe;
     address public immutable secondarySigner;
     uint64 public latestVersion;
@@ -64,7 +62,7 @@ contract PolicyRegistryV2 is AccessControl, EIP712 {
         if (usedPublicationNonce[nonce]) revert PublicationReplay();
 
         _validatePolicy(policy);
-        bytes32 operationsHash = _validateOperations(operationsAccounts, operationsWeights, policy.beneficiarySetHash);
+        bytes32 operationsHash = _validateOperations(operationsAccounts, operationsWeights);
         bytes32 policyHash = keccak256(abi.encode(policy));
         bytes32 digest =
             _hashTypedDataV4(keccak256(abi.encode(PUBLICATION_TYPEHASH, policyHash, operationsHash, nonce, deadline)));
@@ -117,21 +115,21 @@ contract PolicyRegistryV2 is AccessControl, EIP712 {
         if (
             policy.usdtCustodySafe == address(0) || policy.nplRewardSafe == address(0)
                 || policy.operationsTreasurySafe == address(0) || policy.circulationPool == address(0)
-                || policy.genesisCredential == address(0)
-                || policy.genesisCredentialStandard == V2Types.CredentialStandard.None
                 || policy.usdtCustodySafe == policy.nplRewardSafe
                 || policy.usdtCustodySafe == policy.operationsTreasurySafe
                 || policy.nplRewardSafe == policy.operationsTreasurySafe || policy.relayInitial == 0
                 || policy.relayIncrement == 0 || policy.relayCap == 0 || policy.seckillMainDuration == 0
                 || policy.relayInitial > policy.relayCap || policy.relayCap > policy.seckillMainDuration
                 || policy.oracleVersion == bytes32(0) || policy.rulesContentHash == bytes32(0)
-                || policy.concessionDestinationSetHash == bytes32(0)
+                || policy.beneficiarySetHash == bytes32(0) || policy.concessionDestinationSetHash == bytes32(0)
         ) revert InvalidPolicy();
 
         uint256 rewardsBps = uint256(policy.genesisBps) + policy.directReferralBps + policy.districtBps + policy.cityBps
             + policy.provinceBps + policy.regionBps + policy.operationsBps;
         if (rewardsBps != policy.nplRewardListPriceBps) revert InvalidPolicy();
-        if (uint256(policy.platformFeeBps) + policy.seckillPrizeBps > V2Types.BPS) revert InvalidPolicy();
+        if (policy.platformFeeBps != V2Types.PLATFORM_SERVICE_FEE_LIST_PRICE_BPS || policy.seckillPrizeBps != 0) {
+            revert InvalidPolicy();
+        }
         if (
             policy.oracleMaxAge != V2Types.ORACLE_MAX_AGE
                 || policy.oracleMinLiquidity != V2Types.ORACLE_MIN_USDT_LIQUIDITY
@@ -151,21 +149,19 @@ contract PolicyRegistryV2 is AccessControl, EIP712 {
         }
     }
 
-    function _validateOperations(address[] calldata accounts, uint16[] calldata weights, bytes32 expectedHash)
+    function _validateOperations(address[] calldata accounts, uint16[] calldata weights)
         private
         pure
         returns (bytes32 operationsHash)
     {
-        if (accounts.length == 0 || accounts.length > MAX_OPERATIONS_ACCOUNTS || accounts.length != weights.length) revert InvalidOperations();
-        uint256 totalWeight;
+        if (accounts.length != 4 || weights.length != 4) revert InvalidOperations();
         address previous;
         for (uint256 i; i < accounts.length; ++i) {
-            if (accounts[i] == address(0) || accounts[i] <= previous || weights[i] == 0) revert InvalidOperations();
+            if (accounts[i] == address(0) || accounts[i] <= previous || weights[i] != 2_500) {
+                revert InvalidOperations();
+            }
             previous = accounts[i];
-            totalWeight += weights[i];
         }
-        if (totalWeight != V2Types.BPS) revert InvalidOperations();
         operationsHash = keccak256(abi.encode(accounts, weights));
-        if (expectedHash == bytes32(0) || expectedHash != operationsHash) revert InvalidOperations();
     }
 }

@@ -294,6 +294,8 @@ function buyerStatement(row: OrderRow, balances: BalanceRow[]) {
     orderKind: row.classification as Exclude<OrderKind, 'SECKILL'>,
     paymentAmounts: {
       productUsdtPaymentAmount: amounts.productUsdtPaymentAmount,
+      platformServiceFeeUsdt: amounts.platformServiceFeeUsdt,
+      custodyProductUsdt: amounts.custodyProductUsdt,
       freightUsdt: amounts.freightUsdt,
       usdtPaymentAmount: amounts.usdtPaymentAmount,
       nplPaymentAmount: amounts.nplPaymentAmount,
@@ -323,6 +325,8 @@ function merchantStatement(
     frozenAmounts: {
       listPriceUsdt: amounts.listPriceUsdt,
       productUsdtPaymentAmount: amounts.productUsdtPaymentAmount,
+      platformServiceFeeUsdt: amounts.platformServiceFeeUsdt,
+      custodyProductUsdt: amounts.custodyProductUsdt,
       freightUsdt: amounts.freightUsdt,
       buyerPaidUsdt: amounts.usdtPaymentAmount,
       merchantBaseReceivableUsdt: amounts.merchantBaseReceivableUsdt,
@@ -385,6 +389,8 @@ function exactAmounts(value: Record<string, unknown>) {
   return {
     listPriceUsdt: atomic(value.listPriceUsdt, 'listPriceUsdt'),
     productUsdtPaymentAmount: atomic(value.productUsdtPaymentAmount, 'productUsdtPaymentAmount'),
+    platformServiceFeeUsdt: atomic(value.platformServiceFeeUsdt, 'platformServiceFeeUsdt'),
+    custodyProductUsdt: atomic(value.custodyProductUsdt, 'custodyProductUsdt'),
     freightUsdt: atomic(value.freightUsdt, 'freightUsdt'),
     usdtPaymentAmount: atomic(value.usdtPaymentAmount, 'usdtPaymentAmount'),
     nplPaymentAmount: atomic(value.nplPaymentAmount, 'nplPaymentAmount'),

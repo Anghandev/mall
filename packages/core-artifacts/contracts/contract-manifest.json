@@ -18,7 +18,7 @@
     "viaIR": true,
     "evmVersion": "cancun"
   },
-  "sourceDigestSha256": "b76012eacb575b571f6423fdba5f266543592975b06da2ad82844807cfca915a",
+  "sourceDigestSha256": "d3a23bd39bbc44391d11dee2345b9a7f5c11bb4e69f0b8c1e05125705f81b4ce",
   "deploymentStatus": "ExternalBlocked",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
@@ -64,8 +64,8 @@
           "internalType": "address"
         }
       ],
-      "bytecodeSha256": "f625cdd294714b67cc8806d74b3cfdccf2c4dbe4a6dda24fa1805a8ad3779ecc",
-      "deployedBytecodeSha256": "c374495eb1a707e03929d142662e5c0ddbfaf8ab99d001c9cfa8e0f7aa86d0a7",
+      "bytecodeSha256": "cc34f5087695183846857c22d4fab315843b8b2f6927b4dd7e7f6051e2aaa2b0",
+      "deployedBytecodeSha256": "e4ddc0cb2a95d160994db7917751342dd00fc632807b0078bab23f1d976bac0c",
       "deployedCodeHash": null
     },
     {
@@ -81,8 +81,8 @@
           "internalType": "contract IPolicyRegistryV2"
         }
       ],
-      "bytecodeSha256": "3a3ecf680e1864bcd83069f4a18b70a046ca5fcc38d7191b3e303e8200049d54",
-      "deployedBytecodeSha256": "c1c54a5ad3655d2b74d6aeb79cb9f8305108889b91f67ed9b7cf9f3d10f19067",
+      "bytecodeSha256": "1b06f73496aa1d25e5c32baa7d8528e2f84cfa85a21b866fad3ee3a0a19993a0",
+      "deployedBytecodeSha256": "68449dc4c464bd1f11af16ed4be20bb4b0a25cb71175380de086f64576df07d3",
       "deployedCodeHash": null
     },
     {
@@ -103,8 +103,8 @@
           "internalType": "bytes32"
         }
       ],
-      "bytecodeSha256": "75e72f18a03a21e8071e9d4c29eaa4a4d93781661cd449aebd1d7d2ede122f16",
-      "deployedBytecodeSha256": "4329150cb9e04c2ac94ae35a8b4689e9537c0745cdb046dcfe21f9ab03953226",
+      "bytecodeSha256": "293714fd633800a96993656d30e6931c471004ad82167fca73408dd09226b502",
+      "deployedBytecodeSha256": "8a78ef78636c56e01490609822c8f0e7e1ef2e3abb211d515680c6f640ac132f",
       "deployedCodeHash": null
     },
     {
@@ -140,6 +140,11 @@
           "internalType": "contract ITwapOracleV2"
         },
         {
+          "name": "platformServiceFeeSafe_",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
           "name": "usdtCustodySafe_",
           "type": "address",
           "internalType": "address"
@@ -160,8 +165,8 @@
           "internalType": "address"
         }
       ],
-      "bytecodeSha256": "f55644319f8831df407586bf7515c8b7c04c1f31624e0e122a9a369bb56b4d70",
-      "deployedBytecodeSha256": "e1cf17d2011c505d5b87cbec5ce3eec522b0ed68c3d89bfc29ca99562bb604b0",
+      "bytecodeSha256": "93e41825e35fa54df628b87a24596480a5682c044f099a69dd30d36198ad0563",
+      "deployedBytecodeSha256": "28bd459fe43f5c49e525249546eadd0d0f55da079adc51dacf422ce3ed8e2ff6",
       "deployedCodeHash": null
     }
   ],

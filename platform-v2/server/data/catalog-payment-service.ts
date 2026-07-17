@@ -7,7 +7,7 @@ import {
 } from '../api/checkout.ts';
 import { CORE_ARTIFACT_VERSION, NPL_ADDRESS, USDT_ADDRESS } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
-import { buildOtherUsdtAllocations, parsePaymentPolicySnapshot } from '../api/payment-policy.ts';
+import { parsePaymentPolicySnapshot } from '../api/payment-policy.ts';
 import type { PaymentPolicySnapshot } from '../api/payment-policy.ts';
 import {
   paymentAuthorizationDigest,
@@ -273,7 +273,6 @@ export class CatalogPaymentService {
     const reservationDeadline = now + 10 * 60;
     const listPriceUsdt = BigInt(prepared.catalog.list_price_usdt) * BigInt(input.quantity);
     const freightUsdt = input.fulfillmentMode === 'DELIVERY' ? BigInt(prepared.catalog.default_freight_usdt) : 0n;
-    const merchantBaseReceivableUsdt = BigInt(prepared.catalog.merchant_cost_usdt) * BigInt(input.quantity);
     const oracle = await this.#oracle.quote({
       listPriceUsdt,
       policyVersion: policy.policyVersion,
@@ -313,9 +312,7 @@ export class CatalogPaymentService {
       listPriceUsdt,
       freightUsdt,
       nplQuoteAmount: oracle.nplQuoteAmount,
-      merchantBaseReceivableUsdt,
       merchantConcessionBps: Number(prepared.catalog.merchant_concession_bps),
-      otherUsdtAllocations: buildOtherUsdtAllocations(listPriceUsdt, merchantBaseReceivableUsdt, policy, 'ORDINARY'),
       beneficiaries,
     }, policy, 'ORDINARY', now);
     const snapshotHash = paymentIntentHash(intent);
@@ -391,7 +388,6 @@ export class CatalogPaymentService {
     const fallbackReservationId = this.#bytes32();
     const deadline = now + 5 * 60;
     const reservationDeadline = now + 10 * 60;
-    const merchantBaseReceivableUsdt = BigInt(prepared.catalog.merchant_cost_usdt) * BigInt(input.quantity);
     const freightUsdt = input.fulfillmentMode === 'DELIVERY' ? BigInt(prepared.catalog.default_freight_usdt) : 0n;
     const seckillListPriceUsdt = BigInt(prepared.session.seckill_list_price_usdt) * BigInt(input.quantity);
     const fallbackListPriceUsdt = BigInt(prepared.catalog.list_price_usdt) * BigInt(input.quantity);
@@ -436,7 +432,6 @@ export class CatalogPaymentService {
       deadline,
       nonce,
       freightUsdt,
-      merchantBaseReceivableUsdt,
       merchantConcessionBps: Number(prepared.catalog.merchant_concession_bps),
       beneficiaries,
     };
@@ -462,12 +457,6 @@ export class CatalogPaymentService {
         reservationHash: seckillReservationHash,
         listPriceUsdt: seckillListPriceUsdt,
         nplQuoteAmount: seckillOracle.nplQuoteAmount,
-        otherUsdtAllocations: buildOtherUsdtAllocations(
-          seckillListPriceUsdt,
-          merchantBaseReceivableUsdt,
-          policy,
-          'SECKILL',
-        ),
       },
       {
         ...shared,
@@ -475,12 +464,6 @@ export class CatalogPaymentService {
         reservationHash: fallbackReservationHash,
         listPriceUsdt: fallbackListPriceUsdt,
         nplQuoteAmount: fallbackOracle.nplQuoteAmount,
-        otherUsdtAllocations: buildOtherUsdtAllocations(
-          fallbackListPriceUsdt,
-          merchantBaseReceivableUsdt,
-          policy,
-          'FALLBACK_RETAIL',
-        ),
       },
       policy,
       now,
@@ -776,9 +759,21 @@ async function insertQuote(
   );
   await executor.query(
     `INSERT INTO core.payment_quote_legs (
-       order_id, classification, reservation_id, snapshot_hash, intent
-     ) VALUES ($1,'ORDINARY',$2,$3,$4)`,
-    [input.intent.orderId, input.intent.reservationId, input.snapshotHash, JSON.stringify(input.intent)],
+       order_id, classification, reservation_id, snapshot_hash, intent,
+       product_usdt_payment_amount, platform_service_fee_usdt,
+       custody_product_usdt, freight_usdt, usdt_payment_amount
+     ) VALUES ($1,'ORDINARY',$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [
+      input.intent.orderId,
+      input.intent.reservationId,
+      input.snapshotHash,
+      JSON.stringify(input.intent),
+      input.intent.productUsdtPaymentAmount,
+      input.intent.platformServiceFeeUsdt,
+      input.intent.custodyProductUsdt,
+      input.intent.freightUsdt,
+      input.intent.usdtPaymentAmount,
+    ],
   );
 }
 
@@ -835,9 +830,22 @@ async function insertSeckillQuote(
   ] as const) {
     await executor.query(
       `INSERT INTO core.payment_quote_legs (
-         order_id, classification, reservation_id, snapshot_hash, intent
-       ) VALUES ($1,$2,$3,$4,$5)`,
-      [intent.orderId, classification, intent.reservationId, paymentIntentHash(intent), JSON.stringify(intent)],
+         order_id, classification, reservation_id, snapshot_hash, intent,
+         product_usdt_payment_amount, platform_service_fee_usdt,
+         custody_product_usdt, freight_usdt, usdt_payment_amount
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [
+        intent.orderId,
+        classification,
+        intent.reservationId,
+        paymentIntentHash(intent),
+        JSON.stringify(intent),
+        intent.productUsdtPaymentAmount,
+        intent.platformServiceFeeUsdt,
+        intent.custodyProductUsdt,
+        intent.freightUsdt,
+        intent.usdtPaymentAmount,
+      ],
     );
   }
 }

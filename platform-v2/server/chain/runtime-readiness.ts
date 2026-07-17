@@ -14,6 +14,7 @@ const ROUTER_ABI = [
   'function beneficiaryRegistry() view returns (address)',
   'function oracle() view returns (address)',
   'function governanceSafe() view returns (address)',
+  'function platformServiceFeeSafe() view returns (address)',
   'function usdtCustodySafe() view returns (address)',
   'function nplRewardSafe() view returns (address)',
   'function operationsTreasurySafe() view returns (address)',
@@ -63,6 +64,7 @@ export class RpcPaymentRuntimeAttestor {
     oracle: string;
     twapSource: string;
     governanceSafe: string;
+    platformServiceFeeSafe: string;
     usdtCustodySafe: string;
     nplRewardSafe: string;
     operationsTreasurySafe: string;
@@ -81,6 +83,7 @@ export class RpcPaymentRuntimeAttestor {
     twapSource: string;
     twapSourceCodeHash: string;
     governanceSafe: string;
+    platformServiceFeeSafe: string;
     usdtCustodySafe: string;
     nplRewardSafe: string;
     operationsTreasurySafe: string;
@@ -101,6 +104,7 @@ export class RpcPaymentRuntimeAttestor {
       oracle: normalizedAddress(input.oracle),
       twapSource: normalizedAddress(input.twapSource),
       governanceSafe: normalizedAddress(input.governanceSafe),
+      platformServiceFeeSafe: normalizedAddress(input.platformServiceFeeSafe),
       usdtCustodySafe: normalizedAddress(input.usdtCustodySafe),
       nplRewardSafe: normalizedAddress(input.nplRewardSafe),
       operationsTreasurySafe: normalizedAddress(input.operationsTreasurySafe),
@@ -129,6 +133,7 @@ export class RpcPaymentRuntimeAttestor {
       routerBeneficiary,
       routerOracle,
       routerGovernanceSafe,
+      routerPlatformServiceFeeSafe,
       routerUsdtSafe,
       routerNplSafe,
       routerOperationsSafe,
@@ -145,6 +150,7 @@ export class RpcPaymentRuntimeAttestor {
       callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'beneficiaryRegistry'),
       callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'oracle'),
       callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'governanceSafe'),
+      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'platformServiceFeeSafe'),
       callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'usdtCustodySafe'),
       callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'nplRewardSafe'),
       callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'operationsTreasurySafe'),
@@ -158,6 +164,7 @@ export class RpcPaymentRuntimeAttestor {
 
     const safeAdminVerified = routerGovernanceSafe === this.#addresses.governanceSafe
       && policySafe === this.#addresses.governanceSafe
+      && routerPlatformServiceFeeSafe === this.#addresses.platformServiceFeeSafe
       && routerUsdtSafe === this.#addresses.usdtCustodySafe
       && routerNplSafe === this.#addresses.nplRewardSafe
       && routerOperationsSafe === this.#addresses.operationsTreasurySafe;
