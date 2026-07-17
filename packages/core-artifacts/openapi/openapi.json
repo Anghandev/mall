@@ -25667,6 +25667,8 @@
           "orderId",
           "buyerWallet",
           "paymentEventKey",
+          "blockNumber",
+          "logIndex",
           "evidenceHash"
         ],
         "properties": {
@@ -25680,6 +25682,12 @@
             "type": "string",
             "minLength": 1
           },
+          "blockNumber": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "logIndex": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
           "evidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
           }
@@ -25692,6 +25700,7 @@
           "decision",
           "reasonCode",
           "evidenceHash",
+          "reviewedBy",
           "reviewedAt"
         ],
         "properties": {
@@ -25708,6 +25717,9 @@
           },
           "evidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
+          },
+          "reviewedBy": {
+            "$ref": "#/components/schemas/Address"
           },
           "reviewedAt": {
             "type": "string",
@@ -25783,6 +25795,7 @@
         "additionalProperties": false,
         "required": [
           "state",
+          "cutoffAt",
           "candidate",
           "poolAmountUsdt",
           "poolSnapshotHash",
@@ -25801,6 +25814,10 @@
               "ROLLED_OVER",
               "QUARANTINED"
             ]
+          },
+          "cutoffAt": {
+            "type": "string",
+            "format": "date-time"
           },
           "candidate": {
             "anyOf": [

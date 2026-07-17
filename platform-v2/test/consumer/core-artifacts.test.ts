@@ -571,14 +571,19 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
   assert.ok(openapi.components.schemas.SettlementBalance.required.includes('rewardSubtype'));
   assert.equal(openapi.components.schemas.BnmPointsBalance.properties.transferable.const, false);
   assert.equal(openapi.components.schemas.RealtimeEventEnvelope.properties.finality.const, 'FINAL');
+  assert.ok(openapi.components.schemas.SeckillPrizeCandidate.required.includes('blockNumber'));
+  assert.ok(openapi.components.schemas.SeckillPrizeCandidate.required.includes('logIndex'));
+  assert.ok(openapi.components.schemas.SeckillPrizeReview.required.includes('reviewedBy'));
+  assert.ok(openapi.components.schemas.SeckillPrizeSettlementProjection.required.includes('cutoffAt'));
   assert.equal(openapi.components.schemas.MerchantLifecycleSummary.properties.settlementWalletMutable.const, false);
   assert.deepEqual(openapi.components.schemas.AdminGlobalSearchResponse.properties.relation, { enum: ['AND', 'OR'] });
   assert.ok(openapi.paths['/v2/admin/catalog/products/batch-lifecycle']);
   assert.equal('wallet' in openapi.components.schemas.AdminResourceSummary.properties, false);
   assert.equal('phone' in openapi.components.schemas.AdminResourceSummary.properties, false);
-  assert.equal(manifest.decisionBlocked.includes('ADMIN_OR_QUERY_SEMANTICS'), false);
-  assert.equal(manifest.decisionBlocked.includes('ADMIN_FUZZY_WALLET_SEARCH_POLICY'), false);
-  assert.equal(manifest.decisionBlocked.includes('ADMIN_YELLOW_QUEUE_DEFINITION'), false);
+  const decisionBlocked: readonly string[] = manifest.decisionBlocked;
+  assert.equal(decisionBlocked.includes('ADMIN_OR_QUERY_SEMANTICS'), false);
+  assert.equal(decisionBlocked.includes('ADMIN_FUZZY_WALLET_SEARCH_POLICY'), false);
+  assert.equal(decisionBlocked.includes('ADMIN_YELLOW_QUEUE_DEFINITION'), false);
   assert.deepEqual(
     openapi.components.schemas.MerchantFulfillmentAnalytics.properties.fastShip48h.anyOf.map(
       (schema: { properties: { status: { const: string } } }) => schema.properties.status.const,
