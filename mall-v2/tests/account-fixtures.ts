@@ -21,8 +21,7 @@ export const avatarContentHash = hash('c');
 export const buyerProfile: BuyerProfile = {
   artifactVersion,
   wallet: deliveryOrder.buyerWallet,
-  accountId: null,
-  accountIdStatus: 'DecisionBlocked',
+  accountId: '10001',
   nickname: '阿步会员',
   avatarAssetId: null,
   version: 2,

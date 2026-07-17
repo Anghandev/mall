@@ -22,6 +22,7 @@ import {
   EyeOff,
   FileSpreadsheet,
   KeyRound,
+  PackagePlus,
   RefreshCw,
   RotateCcw,
   Search,
@@ -32,6 +33,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   batchAddAdminProductTags,
   batchApplyAdminProductLifecycle,
@@ -63,12 +65,20 @@ type SearchForm = {
   productId: string;
   merchantId: string;
   txHash: string;
+  uid: string;
   wallet: string;
   walletMatch: 'EXACT' | 'FUZZY';
   from: string;
   to: string;
   pendingReview: PendingReviewFilter;
 };
+
+type LogisticsSelection = Readonly<{
+  enabled: boolean;
+  merchantId: string | null;
+  orderIds: readonly string[];
+  reason: string;
+}>;
 
 const emptySearchForm: SearchForm = {
   resourceTypes: [...adminResourceTypes],
@@ -77,6 +87,7 @@ const emptySearchForm: SearchForm = {
   productId: '',
   merchantId: '',
   txHash: '',
+  uid: '',
   wallet: '',
   walletMatch: 'EXACT',
   from: '',
@@ -325,8 +336,8 @@ export function GlobalOperationsPage() {
 
       <section className="global-unavailable" aria-labelledby="global-unavailable-title">
         <Ban aria-hidden="true" />
-        <div><strong id="global-unavailable-title">Unavailable / DecisionBlocked</strong><p>UID、手机号和 Yellow queue 没有冻结定义，界面不发送这些条件，也不执行本地猜测。</p></div>
-        <span>UID · PHONE · YELLOW</span>
+        <div><strong id="global-unavailable-title">Unavailable / DecisionBlocked</strong><p>手机号和 Yellow queue 仍保持现有权限与状态边界，界面不执行本地猜测。</p></div>
+        <span>PHONE · YELLOW</span>
       </section>
     </>
   );
@@ -371,7 +382,7 @@ function GlobalResourceSearch({ enabled, loading, onSearch, onReset }: {
       <form className="search-form" onSubmit={submit}>
         <div className="global-search-meta">
           <fieldset className="global-resource-types"><legend>资源类型</legend>{adminResourceTypes.map((type) => <label key={type}><input type="checkbox" checked={form.resourceTypes.includes(type)} onChange={() => toggleResourceType(type)} disabled={!enabled} />{resourceTypeLabel(type)}</label>)}</fieldset>
-          <fieldset className="segmented-field"><legend>条件关系</legend><div className="segmented">{(['AND', 'OR'] as const).map((relation) => <button key={relation} className={form.relation === relation ? 'is-active' : undefined} type="button" aria-pressed={form.relation === relation} disabled={!enabled} onClick={() => set('relation', relation)}>{relation}</button>)}</div></fieldset>
+          <fieldset className="segmented-field"><legend>条件关系</legend><div className="segmented">{(['AND', 'OR'] as const).map((relation) => <button key={relation} className={form.relation === relation ? 'is-active' : undefined} type="button" aria-pressed={form.relation === relation} disabled={!enabled || (relation === 'OR' && Boolean(form.uid.trim()))} onClick={() => set('relation', relation)}>{relation}</button>)}</div></fieldset>
         </div>
         <div className="search-grid">
           <label>订单号<input value={form.orderId} onChange={(event) => set('orderId', event.target.value)} disabled={!enabled} maxLength={256} autoComplete="off" placeholder="精确匹配" /></label>
@@ -382,10 +393,10 @@ function GlobalResourceSearch({ enabled, loading, onSearch, onReset }: {
           <label>审核投影<select value={form.pendingReview} onChange={(event) => set('pendingReview', event.target.value as PendingReviewFilter)} disabled={!enabled}><option value="">全部</option><option value="true">待审核</option><option value="false">非待审核</option></select></label>
           <label>开始时间<input value={form.from} onChange={(event) => { setQuickRange(null); set('from', event.target.value); }} disabled={!enabled} type="datetime-local" /></label>
           <label>结束时间<input value={form.to} onChange={(event) => { setQuickRange(null); set('to', event.target.value); }} disabled={!enabled} type="datetime-local" /></label>
-          <label>用户 UID<input disabled placeholder="DecisionBlocked" /></label>
+          <label>用户 UID<input value={form.uid} onChange={(event) => setForm((current) => ({ ...current, uid: event.target.value, relation: 'AND', walletMatch: 'EXACT' }))} disabled={!enabled} inputMode="numeric" pattern="[1-9][0-9]{0,18}" autoComplete="off" placeholder="精确 UID" /></label>
           <label>绑定手机号<input disabled placeholder="DecisionBlocked / PII" /></label>
           <label>Yellow queue<input disabled placeholder="Unavailable" /></label>
-          <fieldset className="global-wallet-match"><legend>钱包匹配</legend><div className="segmented">{(['EXACT', 'FUZZY'] as const).map((mode) => <button key={mode} className={form.walletMatch === mode ? 'is-active' : undefined} type="button" aria-pressed={form.walletMatch === mode} disabled={!enabled} onClick={() => set('walletMatch', mode)}>{mode === 'EXACT' ? '精确' : '模糊'}</button>)}</div></fieldset>
+          <fieldset className="global-wallet-match"><legend>钱包匹配</legend><div className="segmented">{(['EXACT', 'FUZZY'] as const).map((mode) => <button key={mode} className={form.walletMatch === mode ? 'is-active' : undefined} type="button" aria-pressed={form.walletMatch === mode} disabled={!enabled || (mode === 'FUZZY' && Boolean(form.uid.trim()))} onClick={() => set('walletMatch', mode)}>{mode === 'EXACT' ? '精确' : '模糊'}</button>)}</div></fieldset>
         </div>
         <div className="search-footer">
           <div className="quick-ranges" aria-label="快捷时间范围"><CalendarDays aria-hidden="true" />{quickRanges.map((range) => <button key={range} type="button" className={quickRange === range ? 'is-active' : ''} aria-pressed={quickRange === range} disabled={!enabled} onClick={() => selectQuickRange(range)}>{range}</button>)}</div>
@@ -460,7 +471,9 @@ function GlobalBatchActions(props: {
   onSelectedTagIdsChange(value: readonly string[]): void;
   onTagIdempotencyChange(value: string): void;
 }) {
+  const navigate = useNavigate();
   const allProducts = props.selectedCount > 0 && props.selectedResources.every((resource) => resource.resourceType === 'PRODUCT');
+  const logisticsSelection = qualifyLogisticsSelection(props.selectedResources, props.canWrite);
   const tagBlock = !props.canWrite ? 'AUDITOR 只读：Forbidden'
     : !allProducts ? '仅支持全部选择为商品'
       : !props.canAddTags ? batchTagBlockReason(props.selectedResources)
@@ -477,6 +490,12 @@ function GlobalBatchActions(props: {
   const toggleTag = (tagId: string) => props.onSelectedTagIdsChange(
     props.selectedTagIds.includes(tagId) ? props.selectedTagIds.filter((id) => id !== tagId) : [...props.selectedTagIds, tagId],
   );
+  const openLogistics = () => {
+    if (!logisticsSelection.enabled || !logisticsSelection.merchantId) return;
+    const query = new URLSearchParams({ view: 'OPERATIONS', merchantId: logisticsSelection.merchantId });
+    logisticsSelection.orderIds.forEach((orderId) => query.append('orderIds', orderId));
+    navigate(`/logistics?${query.toString()}`);
+  };
   return (
     <section className="batch-bar global-batch-bar" aria-labelledby="global-batch-title">
       <div><p className="section-kicker" id="global-batch-title">授权批处理</p><strong className="tabular">已选择 {props.selectedCount} 项</strong></div>
@@ -487,6 +506,10 @@ function GlobalBatchActions(props: {
       <div className="global-batch-fields">
         <label>导出 idempotency key<input value={props.exportIdempotencyKey} onChange={(event) => props.onExportIdempotencyChange(event.target.value)} minLength={8} maxLength={128} /></label>
         <div><span>导出权限</span><strong>{props.selectedCount < 1 ? '请选择资源' : props.canExportCsv && props.canExportExcel ? 'CSV / Excel allowed' : 'Core row capability denied'}</strong></div>
+      </div>
+      <div className="global-logistics-command">
+        <div className="global-tag-heading"><span><PackagePlus aria-hidden="true" /><strong>订单面单</strong></span><small id="global-logistics-reason">{logisticsSelection.reason}</small></div>
+        <button className="button button-quiet" type="button" disabled={!logisticsSelection.enabled} aria-describedby="global-logistics-reason" onClick={openLogistics}><PackagePlus aria-hidden="true" />进入面单与打印</button>
       </div>
       <div className="global-tag-command">
         <div className="global-tag-heading"><span><Tags aria-hidden="true" /><strong>批量增加商品标签</strong></span><small>{tagBlock ?? '每行 ADD_PRODUCT_TAGS allowed'}</small></div>
@@ -545,6 +568,7 @@ function toFilters(form: SearchForm): AdminGlobalSearchFilters {
     ...(trim(form.productId) ? { productId: trim(form.productId) } : {}),
     ...(trim(form.merchantId) ? { merchantId: trim(form.merchantId) } : {}),
     ...(trim(form.txHash) ? { txHash: trim(form.txHash) } : {}),
+    ...(trim(form.uid) ? { uid: trim(form.uid) } : {}),
     ...(trim(form.wallet) ? { wallet: trim(form.wallet) } : {}),
     ...(form.from ? { from: form.from } : {}),
     ...(form.to ? { to: form.to } : {}),
@@ -573,6 +597,21 @@ function lifecycleBlockReason(resources: readonly AdminResourceSummary[], capabi
   const blocked = resources.flatMap((resource) => resource.allowedBatchActions)
     .find((item) => item.action === capability && !item.enabled);
   return blocked?.reasonCode ?? `Core 未授权 ${capability}`;
+}
+
+function qualifyLogisticsSelection(resources: readonly AdminResourceSummary[], canWrite: boolean): LogisticsSelection {
+  if (!canWrite) return { enabled: false, merchantId: null, orderIds: [], reason: 'AUDITOR 只读：Forbidden' };
+  if (resources.length < 1) return { enabled: false, merchantId: null, orderIds: [], reason: '请选择订单' };
+  if (resources.some((resource) => resource.resourceType !== 'ORDER')) return { enabled: false, merchantId: null, orderIds: [], reason: '仅支持全部选择为订单' };
+  const merchantIds = resources.map((resource) => resource.merchantId?.trim() ?? '');
+  if (merchantIds.some((merchantId) => !merchantId)) return { enabled: false, merchantId: null, orderIds: [], reason: '所选订单缺少商家归属' };
+  if (merchantIds.some((merchantId) => merchantId !== merchantIds[0])) return { enabled: false, merchantId: null, orderIds: [], reason: '所选订单必须属于同一商家' };
+  return {
+    enabled: true,
+    merchantId: merchantIds[0]!,
+    orderIds: resources.map((resource) => resource.resourceId),
+    reason: `${resources.length} 个同商家订单可进入面单与打印`,
+  };
 }
 
 function resourceKey(resource: Pick<AdminResourceSummary, 'resourceType' | 'resourceId'>) {

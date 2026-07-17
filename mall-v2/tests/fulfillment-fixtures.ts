@@ -88,7 +88,9 @@ export const deliveryOrder: FulfillmentOrder = {
   finalityStatus: 'FINAL',
   exactAmounts: {
     listPriceUsdt: '120000000000000000000',
-    usdtPaymentAmount: '84000000000000000000',
+    productUsdtPaymentAmount: '84000000000000000000',
+    freightUsdt: '10000000000000000000',
+    usdtPaymentAmount: '94000000000000000000',
     nplQuoteAmount: '240000000000000000000',
     nplPaymentAmount: '72000000000000000000',
     nplBurnAmount: '48000000000000000000',
@@ -138,6 +140,11 @@ export const pickupOrder: FulfillmentOrder = {
   orderId: hash('b'),
   fulfillmentMode: 'PICKUP',
   state: 'DELIVERED',
+  exactAmounts: {
+    ...deliveryOrder.exactAmounts,
+    freightUsdt: '0',
+    usdtPaymentAmount: deliveryOrder.exactAmounts.productUsdtPaymentAmount,
+  },
   shippedAt: null,
   deliveredAt: '2033-05-18T06:00:00.000Z',
   shipments: [],

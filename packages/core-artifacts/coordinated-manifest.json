@@ -18,23 +18,23 @@
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "c103d7052965157ff1819c891500ce42002e0a8bf0db628ed165957910d3fbd4"
+      "sha256": "c1a319b20afc0bc254d022690c320db49f4df60b240275e9a2a9239f3cc6cddc"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "75e9c6639885c23f4120760df40ba3d99dd2e257f347de62fb5ac1972f94e6fe"
+      "sha256": "e70117d3b028a6dec3be2ecb924bc34b01958aeed063d41ce77f69f5e84d56e5"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "a75ab919096229355771129a03b7010bced5bb3827a783ed7d808cf242b6da7d"
+      "sha256": "8bf719b0bbb96e44555b0af92522aa4784f1c19cbe13eb021d2e49b8b2608feb"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "f51703c3a9d8429850a0068cb2397d6f9c9e687fd77ab112db2c143961d65418"
+      "sha256": "6e439ab01fee37d69700426e3f85d4e3be4737381b103c1c7005797c24ede3df"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "e088cb8e028a074b9609aba5fce7e1784ef3e62c47195303b8eff714c45d9be8"
+      "sha256": "cd684a2ce04e42ab636a82660d9ffeaa52eb018a84a16ca803b1da83992f7f01"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
@@ -42,15 +42,15 @@
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "4a2a8cbf45e442f5e0237f0da644c3c70d736ce0911765eeef4ccca9a6afd020"
+      "sha256": "9ece0cfc04f5fb7016f083d1644322b2c634e3229abd97c04e1493a591bb61bb"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "6a4b6bc6652357138d306eb1c98d990e78d58971ee2c13252aacd9abc51aa00c"
+      "sha256": "d09f61c98429ce01bf06e4cfe48825d7b70bbb794e2bbe7c86479ec5f8d02e7f"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "48bd7c4cbe9f6b70fcdfec010f62f9010ac728e6abe8a30ad160c7762fe7d5c2"
+      "sha256": "1307d1ec9dc61decd719d41f69f2526d5b0c66c1bb322a5e1fe7f38955adab5f"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
@@ -60,11 +60,11 @@
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "46fa36f4bc18bbf7206786c3b6e036226b337c487c5895d477c76ef522d77306"
+      "sha256": "c8ba1807b6373de267f2c895258ab881ea2e47834e6acca47ab10e25fffb4e2a"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "2b7420337e13124b1b807bec1742fad8cd454f7e0c3ad1f3043a4a2b8e61c322"
+      "sha256": "b632ed41107f71faece2afe018151f661398260ce3da7b967bf469e1da52eedb"
     }
   ],
   "httpSurface": [
@@ -185,6 +185,7 @@
     "POST /v2/admin/seckill/sessions/{sessionId}/prize-injections",
     "POST /v2/admin/settlement-intents",
     "POST /v2/admin/system-config/versions",
+    "POST /v2/admin/system-config/versions/{configVersionId}/approval-challenge",
     "POST /v2/admin/system-config/versions/{configVersionId}/publish",
     "POST /v2/admin/takeover-cases/{caseId}/assignments",
     "POST /v2/admin/takeover-funding",

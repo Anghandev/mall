@@ -1059,12 +1059,14 @@ describe('settlement-admin.15 Core HTTP consumer', () => {
     expect(firstPage.statements[0]).toMatchObject({
       orderKind: 'SECKILL',
       frozenAmounts: {
+        productUsdtPaymentAmount: '8400',
+        freightUsdt: '500',
         merchantBaseReceivableUsdt: '10000',
         merchantConcessionAmount: '1000',
         merchantNetReceivableUsdt: '9000',
       },
       currentReceivableUsdt: '0',
-      removedFromReceivableUsdt: '9000',
+      removedFromReceivableUsdt: '9500',
     });
     expect(firstPage.statements[0]?.journalEvidence[0]?.journalId).toBe('journal:a:lifecycle');
     expect(firstPage.statements[0]?.settlementRefs[0]?.finalSafeTxHash).toBe(`0x${'b'.repeat(64)}`);

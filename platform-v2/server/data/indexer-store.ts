@@ -298,6 +298,8 @@ function canonicalPaymentEvent(
     merchant: requiredValue(event.values, 'merchant'),
     policyVersion: safeInteger(event.values, 'policyVersion'),
     listPriceUsdt: decimalValue(event.values, 'listPriceUsdt'),
+    productUsdtPaid: decimalValue(event.values, 'productUsdtPaid'),
+    freightUsdt: decimalValue(event.values, 'freightUsdt'),
     usdtPaid: decimalValue(event.values, 'usdtPaid'),
     nplPaid: decimalValue(event.values, 'nplPaid'),
     nplBurned: decimalValue(event.values, 'nplBurned'),

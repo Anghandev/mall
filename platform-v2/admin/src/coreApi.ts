@@ -691,6 +691,8 @@ function isCanonicalIntent(value: unknown) {
     && Number.isSafeInteger(value.reservationDeadline)
     && Number.isSafeInteger(value.quantity)
     && atomicAmountPattern.test(String(value.listPriceUsdt))
+    && atomicAmountPattern.test(String(value.productUsdtPaymentAmount))
+    && atomicAmountPattern.test(String(value.freightUsdt))
     && atomicAmountPattern.test(String(value.usdtPaymentAmount))
     && atomicAmountPattern.test(String(value.nplPaymentAmount))
     && atomicAmountPattern.test(String(value.nplBurnAmount))
@@ -853,6 +855,8 @@ function isFulfillmentExactAmounts(value: unknown) {
   if (!isRecord(value)) return false;
   return [
     'listPriceUsdt',
+    'productUsdtPaymentAmount',
+    'freightUsdt',
     'usdtPaymentAmount',
     'nplQuoteAmount',
     'nplPaymentAmount',

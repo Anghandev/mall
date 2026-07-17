@@ -339,6 +339,8 @@ function paymentIntent(input: {
     deadline: input.issuedAt + 300,
     nonce: '1',
     listPriceUsdt: amount(100n),
+    productUsdtPaymentAmount: amount(70n),
+    freightUsdt: '0',
     usdtPaymentAmount: amount(70n),
     nplQuoteAmount: amount(1_000n),
     nplPaymentAmount: amount(300n),

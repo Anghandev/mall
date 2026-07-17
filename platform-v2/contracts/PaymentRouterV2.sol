@@ -72,6 +72,8 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
         V2Types.PaymentClassification classification,
         uint64 policyVersion,
         uint256 listPriceUsdt,
+        uint256 productUsdtPaid,
+        uint256 freightUsdt,
         uint256 usdtPaid,
         uint256 nplPaid,
         uint256 nplBurned,
@@ -299,6 +301,8 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
             classification,
             intent.policyVersion,
             intent.listPriceUsdt,
+            intent.productUsdtPaymentAmount,
+            intent.freightUsdt,
             intent.usdtPaymentAmount,
             intent.nplPaymentAmount,
             intent.nplBurnAmount,
@@ -357,19 +361,23 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
         if (intent.listPriceUsdt == 0 || intent.nplQuoteAmount == 0 || intent.merchantConcessionBps > V2Types.BPS) {
             revert InvalidAmounts();
         }
-        uint256 expectedUsdt = Math.mulDiv(intent.listPriceUsdt, policy.usdtPaymentBps, V2Types.BPS);
+        uint256 expectedProductUsdt = Math.mulDiv(intent.listPriceUsdt, policy.usdtPaymentBps, V2Types.BPS);
+        uint256 expectedUsdt = expectedProductUsdt + intent.freightUsdt;
         uint256 expectedNplPayment = Math.mulDiv(intent.nplQuoteAmount, policy.nplPaymentBps, V2Types.BPS);
         uint256 expectedBurn = Math.mulDiv(intent.nplQuoteAmount, policy.nplBurnListPriceBps, V2Types.BPS);
         uint256 expectedReward = expectedNplPayment - expectedBurn;
         uint256 expectedConcession =
             Math.mulDiv(intent.merchantBaseReceivableUsdt, intent.merchantConcessionBps, V2Types.BPS);
         if (
-            expectedUsdt == 0 || expectedNplPayment == 0 || (policy.nplBurnListPriceBps != 0 && expectedBurn == 0)
+            expectedProductUsdt == 0 || expectedNplPayment == 0
+                || (policy.nplBurnListPriceBps != 0 && expectedBurn == 0)
                 || (policy.nplRewardListPriceBps != 0 && expectedReward == 0)
-                || intent.usdtPaymentAmount != expectedUsdt || intent.nplPaymentAmount != expectedNplPayment
-                || intent.nplBurnAmount != expectedBurn || intent.nplRewardAmount != expectedReward
+                || intent.productUsdtPaymentAmount != expectedProductUsdt || intent.usdtPaymentAmount != expectedUsdt
+                || (intent.fulfillmentMode == V2Types.FulfillmentMode.Pickup && intent.freightUsdt != 0)
+                || intent.nplPaymentAmount != expectedNplPayment || intent.nplBurnAmount != expectedBurn
+                || intent.nplRewardAmount != expectedReward
                 || intent.nplBurnAmount + intent.nplRewardAmount != intent.nplPaymentAmount
-                || intent.merchantBaseReceivableUsdt > intent.usdtPaymentAmount
+                || intent.merchantBaseReceivableUsdt > intent.productUsdtPaymentAmount
                 || intent.merchantConcessionAmount != expectedConcession
                 || intent.merchantNetReceivableUsdt != intent.merchantBaseReceivableUsdt - expectedConcession
                 || intent.bnmAmount != intent.listPriceUsdt
@@ -394,7 +402,7 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
                 || seckill.productPolicyHash != fallbackPayment.productPolicyHash
                 || seckill.reservationDeadline != fallbackPayment.reservationDeadline
                 || seckill.issuedAt != fallbackPayment.issuedAt || seckill.deadline != fallbackPayment.deadline
-                || seckill.nonce != fallbackPayment.nonce
+                || seckill.nonce != fallbackPayment.nonce || seckill.freightUsdt != fallbackPayment.freightUsdt
                 || seckill.merchantBaseReceivableUsdt != fallbackPayment.merchantBaseReceivableUsdt
                 || seckill.merchantConcessionBps != fallbackPayment.merchantConcessionBps
                 || seckill.concessionAllocationHash != fallbackPayment.concessionAllocationHash

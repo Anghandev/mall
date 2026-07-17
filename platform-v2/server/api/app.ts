@@ -535,12 +535,13 @@ export interface NotificationApiService {
 
 export interface SystemConfigApiService {
   createVersion(actor: FulfillmentActor, input: {
-    configKey: 'BUSINESS' | 'FREIGHT' | 'RPC' | 'ORACLE' | 'GAS' | 'CHAIN' | 'INTEGRATIONS';
+    configKey: 'BUSINESS' | 'RPC' | 'ORACLE' | 'GAS' | 'CHAIN' | 'INTEGRATIONS' | 'MERCHANT_LEVELS';
     payload: unknown;
     effectiveFrom: string;
     idempotencyKey: string;
     correlationId: string;
   }): Promise<unknown>;
+  approvalChallenge(actor: FulfillmentActor, configVersionId: string, input: { nonce: string; deadline: string }): Promise<unknown>;
   publish(actor: FulfillmentActor, configVersionId: string, approval: ConfigApprovalInput): Promise<unknown>;
   list(actor: FulfillmentActor): Promise<unknown>;
 }
@@ -565,6 +566,7 @@ export interface BusinessAnalyticsApiService {
 }
 
 export interface AccountApiService {
+  ensureBuyerUid(walletAddress: string): Promise<string>;
   getBuyerProfile(actor: FulfillmentActor): Promise<unknown>;
   updateBuyerProfile(actor: FulfillmentActor, input: BuyerProfileUpdate): Promise<unknown>;
   parseBuyerAddress(actor: FulfillmentActor, rawText: string): Promise<unknown>;
@@ -667,9 +669,8 @@ export interface MerchantLifecycleApiService {
     correlationId: string;
   }): Promise<unknown>;
   createReviewChallenge(actor: FulfillmentActor, merchantId: string, input: {
-    action: 'APPROVE' | 'REJECT' | 'BLACKLIST' | 'CHANGE_SETTLEMENT_WALLET';
+    action: 'APPROVE' | 'REJECT' | 'BLACKLIST';
     reasonCode: string;
-    proposedSettlementWallet?: string;
     idempotencyKey: string;
     correlationId: string;
   }): Promise<unknown>;
@@ -852,6 +853,7 @@ async function route(
       dependencies.config.jwtSecret,
       dependencies.clock(),
     );
+    if (binding.roles.includes('BUYER')) await dependencies.accountService.ensureBuyerUid(verified.walletAddress);
     sendJson(response, 200, {
       token,
       walletAddress: verified.walletAddress,
@@ -2377,7 +2379,7 @@ async function routeAdminServices(
       ['ADMIN', 'OPERATOR', 'AUDITOR'],
     );
     assertOnlySearchParams(url, [
-      'resourceType', 'orderId', 'productId', 'merchantId', 'txHash', 'wallet',
+      'resourceType', 'orderId', 'productId', 'merchantId', 'txHash', 'uid', 'wallet',
       'relation', 'walletMatch', 'from', 'to', 'pendingReview', 'limit',
     ], ['resourceType']);
     sendJson(response, 200, await dependencies.adminGlobalOperationsService.search(
@@ -2504,16 +2506,13 @@ async function routeAdminServices(
   if (request.method === 'POST' && merchantReviewChallengePath) {
     const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN']);
     const body = await readJson(request);
-    assertOnlyKeys(body, ['action', 'reasonCode', 'proposedSettlementWallet', 'idempotencyKey']);
+    assertOnlyKeys(body, ['action', 'reasonCode', 'idempotencyKey']);
     sendJson(response, 201, await dependencies.merchantLifecycleService.createReviewChallenge(
       fulfillmentActor(claims),
       decodedPathPart(merchantReviewChallengePath[1]!),
       {
         action: merchantReviewAction(body.action),
         reasonCode: requiredString(body, 'reasonCode'),
-        ...(body.proposedSettlementWallet === undefined
-          ? {}
-          : { proposedSettlementWallet: requiredString(body, 'proposedSettlementWallet') }),
         idempotencyKey: requiredString(body, 'idempotencyKey'),
         correlationId,
       },
@@ -3141,6 +3140,17 @@ async function routeAdminServices(
     return true;
   }
   const configPath = matchResourceAction(url.pathname, '/v2/admin/system-config/versions/');
+  if (request.method === 'POST' && configPath?.action === 'approval-challenge') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN']);
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['nonce', 'deadline']);
+    sendJson(response, 200, await dependencies.systemConfigService.approvalChallenge(
+      fulfillmentActor(claims),
+      configPath.resourceId,
+      { nonce: requiredString(body, 'nonce'), deadline: requiredString(body, 'deadline') },
+    ), correlationId);
+    return true;
+  }
   if (request.method === 'POST' && configPath?.action === 'publish') {
     const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN']);
     const body = await readJson(request);
@@ -3527,6 +3537,7 @@ function adminGlobalSearchQuery(url: URL): AdminGlobalSearchQuery {
     ...(url.searchParams.get('productId') ? { productId: url.searchParams.get('productId')! } : {}),
     ...(url.searchParams.get('merchantId') ? { merchantId: url.searchParams.get('merchantId')! } : {}),
     ...(url.searchParams.get('txHash') ? { txHash: url.searchParams.get('txHash')! } : {}),
+    ...(url.searchParams.get('uid') ? { uid: url.searchParams.get('uid')! } : {}),
     ...(url.searchParams.get('wallet') ? { wallet: url.searchParams.get('wallet')! } : {}),
     ...(url.searchParams.get('walletMatch')
       ? { walletMatch: adminWalletMatch(url.searchParams.get('walletMatch')!) }

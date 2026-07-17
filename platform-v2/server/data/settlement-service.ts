@@ -1685,19 +1685,23 @@ function settlementAuditDomain(safeAddress: string) {
 
 function railDefinition(rail: SettlementRail) {
   if (rail === 'REWARD_NPL') {
-    return { asset: 'NPL' as const, assetAddress: NPL_ADDRESS, purpose: 'REWARD_LIABILITY' };
+    return { asset: 'NPL' as const, assetAddress: NPL_ADDRESS, purposes: ['REWARD_LIABILITY'] as const };
   }
   if (rail === 'PRIZE_USDT') {
-    return { asset: 'USDT' as const, assetAddress: USDT_ADDRESS, purpose: 'SECKILL_PRIZE_LIABILITY' };
+    return { asset: 'USDT' as const, assetAddress: USDT_ADDRESS, purposes: ['SECKILL_PRIZE_LIABILITY'] as const };
   }
   if (rail === 'MERCHANT_USDT') {
-    return { asset: 'USDT' as const, assetAddress: USDT_ADDRESS, purpose: 'MERCHANT_RECEIVABLE' };
+    return {
+      asset: 'USDT' as const,
+      assetAddress: USDT_ADDRESS,
+      purposes: ['MERCHANT_RECEIVABLE', 'MERCHANT_FREIGHT_RECEIVABLE'] as const,
+    };
   }
   if (rail === 'TAKEOVER_USDT') {
-    return { asset: 'USDT' as const, assetAddress: USDT_ADDRESS, purpose: 'TAKEOVER_PAYABLE' };
+    return { asset: 'USDT' as const, assetAddress: USDT_ADDRESS, purposes: ['TAKEOVER_PAYABLE'] as const };
   }
   if (rail === 'OPERATIONS_REIMBURSEMENT_USDT') {
-    return { asset: 'USDT' as const, assetAddress: USDT_ADDRESS, purpose: 'OPERATIONS_REIMBURSEMENT' };
+    return { asset: 'USDT' as const, assetAddress: USDT_ADDRESS, purposes: ['OPERATIONS_REIMBURSEMENT'] as const };
   }
   throw new CoreError('InvalidRequest', 'Settlement rail is invalid');
 }
@@ -1765,13 +1769,13 @@ async function availableSources(
      JOIN core.ledger_journals journal ON journal.journal_id = line.journal_id
      JOIN core.ledger_accounts account ON account.account_id = line.account_id
      JOIN core.orders orders ON orders.order_id = journal.order_id
-     WHERE account.owner_id = $1 AND account.asset = $2 AND account.purpose = $3
+     WHERE account.owner_id = $1 AND account.asset = $2 AND account.purpose = ANY($3::text[])
        AND line.balance_state = 'AVAILABLE' AND line.backing_safe_address IS NOT NULL
        AND ($4::text IS NULL OR orders.merchant_id = $4)
      GROUP BY journal.order_id, line.account_id, line.backing_safe_address
      HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) > 0
      ORDER BY min(orders.created_at), journal.order_id, line.account_id`,
-    [wallet, definition.asset, definition.purpose, rail === 'MERCHANT_USDT' ? merchantId ?? null : null],
+    [wallet, definition.asset, [...definition.purposes], rail === 'MERCHANT_USDT' ? merchantId ?? null : null],
   )).rows;
 }
 
@@ -2336,14 +2340,14 @@ async function assertAvailableSource(
      JOIN core.ledger_accounts account ON account.account_id = line.account_id
      WHERE journal.order_id = $1 AND line.account_id = $2
        AND line.balance_state = 'AVAILABLE' AND line.backing_safe_address = $3
-       AND account.owner_id = $4 AND account.asset = $5 AND account.purpose = $6`,
+       AND account.owner_id = $4 AND account.asset = $5 AND account.purpose = ANY($6::text[])`,
     [
       item.order_id,
       item.account_id,
       intent.safe_address,
       intent.wallet_address,
       definition.asset,
-      definition.purpose,
+      [...definition.purposes],
     ],
   );
   if (BigInt(result.rows[0]?.amount ?? '0') < BigInt(item.amount)) {

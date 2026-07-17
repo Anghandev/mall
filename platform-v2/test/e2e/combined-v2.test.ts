@@ -459,6 +459,7 @@ function quoteRequest(): PaymentQuoteRequest {
     nonce: 1n,
     deadline: issuedAt + 300,
     listPriceUsdt: 100n,
+    freightUsdt: 0n,
     nplQuoteAmount: 1_000n,
     merchantBaseReceivableUsdt: 60n,
     merchantConcessionBps: 2_500,

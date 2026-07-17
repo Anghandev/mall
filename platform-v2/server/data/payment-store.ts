@@ -12,7 +12,7 @@ const USDT = 'USDT';
 const NPL = 'NPL';
 const BNM = 'BNM_POINTS';
 const PAYMENT_COMPLETED_EVENT_SIGNATURE_HASH = id(
-  'PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)',
+  'PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)',
 ).toLowerCase();
 
 interface PaymentEventRow {
@@ -63,6 +63,7 @@ interface LedgerAccount {
     | 'PAYMENT_CLEARING'
     | 'BURN'
     | 'MERCHANT_RECEIVABLE'
+    | 'MERCHANT_FREIGHT_RECEIVABLE'
     | 'CONCESSION'
     | 'POLICY_ALLOCATION'
     | 'SECKILL_PRIZE_LIABILITY'
@@ -109,6 +110,8 @@ export interface CanonicalPaymentEvent {
   merchant: string;
   policyVersion: number;
   listPriceUsdt: string;
+  productUsdtPaid: string;
+  freightUsdt: string;
   usdtPaid: string;
   nplPaid: string;
   nplBurned: string;
@@ -182,6 +185,7 @@ export async function recordPaymentProjection(executor: SqlExecutor, input: Reco
       deadline: intent.deadline,
       nonce: BigInt(intent.nonce),
       listPriceUsdt: unitListPrice * BigInt(intent.quantity),
+      freightUsdt: quote.freightUsdt,
       nplQuoteAmount: BigInt(intent.nplQuoteAmount),
       merchantBaseReceivableUsdt: quote.merchantCostUsdt * BigInt(intent.quantity),
       merchantConcessionBps: quote.merchantConcessionBps,
@@ -328,7 +332,12 @@ export async function recordPaymentProjection(executor: SqlExecutor, input: Reco
     contentHash,
     sourceTxHash: input.event.transactionHash,
     sourceBlockHash: input.event.blockHash,
-    payload: { classification: input.event.classification, snapshotHash: input.event.snapshotHash },
+    payload: {
+      classification: input.event.classification,
+      snapshotHash: input.event.snapshotHash,
+      productUsdtPaymentAmount: intent.productUsdtPaymentAmount,
+      freightUsdt: intent.freightUsdt,
+    },
     lines,
   });
 
@@ -1063,6 +1072,7 @@ interface QuoteRow {
   product_policy_hash: string;
   list_price_usdt: string;
   seckill_list_price_usdt: string | null;
+  freight_usdt: string;
   merchant_cost_usdt: string;
   merchant_concession_bps: number;
   policy_version: string;
@@ -1110,6 +1120,8 @@ async function loadQuoteContext(executor: SqlExecutor, event: CanonicalPaymentEv
       || intent.merchant.toLowerCase() !== event.merchant.toLowerCase()
       || intent.policyVersion !== event.policyVersion
       || intent.listPriceUsdt !== event.listPriceUsdt
+      || intent.productUsdtPaymentAmount !== event.productUsdtPaid
+      || intent.freightUsdt !== event.freightUsdt
       || intent.usdtPaymentAmount !== event.usdtPaid
       || intent.nplPaymentAmount !== event.nplPaid
       || intent.nplBurnAmount !== event.nplBurned
@@ -1145,6 +1157,7 @@ async function loadQuoteContext(executor: SqlExecutor, event: CanonicalPaymentEv
     chainSkuId: quote.chain_sku_id,
     productPolicyHash: quote.product_policy_hash,
     merchantConcessionBps: Number(quote.merchant_concession_bps),
+    freightUsdt: BigInt(quote.freight_usdt),
     listPriceUsdt: BigInt(quote.list_price_usdt),
     seckillListPriceUsdt: quote.seckill_list_price_usdt === null
       ? undefined
@@ -1178,6 +1191,7 @@ function paymentJournal(
   };
   add(safeAccount('usdt-custody', safes.usdtCustodySafe, USDT), 'DEBIT', intent.usdtPaymentAmount, 'POSTED', safes.usdtCustodySafe);
   add(account(`merchant:${intent.merchant}:usdt`, 'MERCHANT', intent.merchant, USDT, 'MERCHANT_RECEIVABLE'), 'CREDIT', intent.merchantNetReceivableUsdt, 'LOCKED', safes.usdtCustodySafe);
+  add(account(`merchant:${intent.merchant}:freight:usdt`, 'MERCHANT', intent.merchant, USDT, 'MERCHANT_FREIGHT_RECEIVABLE'), 'CREDIT', intent.freightUsdt, 'LOCKED', safes.usdtCustodySafe);
   for (const allocation of intent.merchantConcessionAllocations) {
     add(account(`concession:${allocation.account}:usdt`, 'BENEFICIARY', allocation.account, USDT, 'CONCESSION'), 'CREDIT', allocation.amount, 'LOCKED', safes.usdtCustodySafe);
   }
@@ -1352,6 +1366,8 @@ function validatePaymentInput(input: RecordPaymentInput) {
   const event = input.event;
   const amounts = [
     event.listPriceUsdt,
+    event.productUsdtPaid,
+    event.freightUsdt,
     event.usdtPaid,
     event.nplPaid,
     event.nplBurned,
@@ -1377,11 +1393,16 @@ function validatePaymentInput(input: RecordPaymentInput) {
   if (BigInt(event.nplBurned) + BigInt(event.nplRewarded) !== BigInt(event.nplPaid)) {
     throw new CoreError('InvalidRequest', 'NPL payment is not conserved');
   }
+  if (BigInt(event.productUsdtPaid) + BigInt(event.freightUsdt) !== BigInt(event.usdtPaid)) {
+    throw new CoreError('InvalidRequest', 'USDT payment is not conserved');
+  }
 }
 
 function exactAmounts(intent: CanonicalPaymentIntent) {
   return {
     listPriceUsdt: intent.listPriceUsdt,
+    productUsdtPaymentAmount: intent.productUsdtPaymentAmount,
+    freightUsdt: intent.freightUsdt,
     usdtPaymentAmount: intent.usdtPaymentAmount,
     nplQuoteAmount: intent.nplQuoteAmount,
     nplPaymentAmount: intent.nplPaymentAmount,

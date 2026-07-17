@@ -13,7 +13,7 @@ import { vi } from 'vitest';
 import { MallApp, mallRuntimeBoundary } from '../src/App';
 import { isCoreOrderActionExecutable, productBaseline } from '../src/bootstrap';
 import { CoreClientError, type CoreClient, type CorePaymentAvailability } from '../src/core-client';
-import { MallRuntimeProvider, useMallRuntime, type MallServices, type PendingSubmission } from '../src/mall-runtime';
+import { MallRuntimeProvider, useMallRuntime, validateSupportUrl, type MallServices, type PendingSubmission } from '../src/mall-runtime';
 import type { WalletGateway } from '../src/wallet';
 import { catalogCategories, catalogTags, publicMediaAccess } from './catalog-fixtures';
 import {
@@ -95,7 +95,7 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/mall');
 
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.14');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.15');
     expect(productBaseline.manifestsAligned).toBe(true);
     expect(productBaseline.knownOrderActions).toBe(allowedActionNames);
     expect(productBaseline.executableOrderActions).toBe(executableOrderActionNames);
@@ -104,7 +104,7 @@ describe('Mall V2 payment consumer', () => {
     expect(isCoreOrderActionExecutable('CONFIRM_RECEIPT')).toBe(true);
     expect(isCoreOrderActionExecutable('PAY_ORDER')).toBe(false);
     expect(mallRuntimeBoundary).toMatchObject({
-      artifactStatus: '2.0.0-settlement-admin.14',
+      artifactStatus: '2.0.0-settlement-admin.15',
       executableOrderActions: executableOrderActionNames,
       deploymentAuthorized: false,
       settlementAdminCapabilities: {
@@ -215,7 +215,7 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByRole('heading', { name: '常规商城' })).toBeTruthy();
   });
 
-  it('renders the real buyer profile, DecisionBlocked UID and canonical overview counts', async () => {
+  it('renders the real buyer profile, UID and canonical overview counts', async () => {
     const user = userEvent.setup();
     renderAt('/assets', readyServices({
       getBuyerProfile: vi.fn().mockResolvedValue(buyerProfile),
@@ -224,13 +224,43 @@ describe('Mall V2 payment consumer', () => {
 
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     expect(await screen.findByRole('heading', { name: buyerProfile.nickname! })).toBeTruthy();
-    expect(screen.getByText('买家 UID：DecisionBlocked')).toBeTruthy();
+    expect(screen.getByText('买家 UID：10001')).toBeTruthy();
     expect(screen.getByText('DecisionBlocked', { selector: '.order-status-item strong' })).toBeTruthy();
     expect(screen.getByText('2', { selector: '.order-status-item strong' })).toBeTruthy();
     expect(screen.getByText('3', { selector: '.order-status-item strong' })).toBeTruthy();
     expect(screen.getByText('1', { selector: '.order-status-item strong' })).toBeTruthy();
     expect(document.body.textContent).not.toContain(deliveryOrder.buyerWallet);
   });
+
+  it('labels seckill and shopping counts as loaded-page statistics without placeholders', async () => {
+    const user = userEvent.setup();
+    const seckillOrder = { ...deliveryOrder, orderId: `0x${'e'.repeat(64)}`, orderKind: 'SECKILL' as const };
+    renderAt('/assets', readyServices({
+      getBuyerOverview: vi.fn().mockResolvedValue(buyerOverview),
+      listOrders: vi.fn().mockResolvedValue({ orders: [deliveryOrder, seckillOrder], nextCursor: null }),
+      getOrderTarget: vi.fn().mockResolvedValue(deliveryOrderTarget),
+    }));
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    const tracking = (await screen.findByRole('heading', { name: '行为追踪' })).closest('section')!;
+    expect(within(tracking).queryByText('--')).toBeNull();
+    expect(within(tracking).getAllByText('1')).toHaveLength(2);
+    expect(within(tracking).getAllByText('已加载')).toHaveLength(2);
+  });
+
+  it.each(['DecisionBlocked', 'ExternalBlocked', 'ConfigurationRequired'] as const)(
+    'renders only the Core %s payment readiness reason',
+    async (blockCode) => {
+      const user = userEvent.setup();
+      renderAt('/mall', readyServices({
+        getBootstrap: vi.fn().mockResolvedValue({ artifactVersion, writesEnabled: false, blockCode }),
+      }));
+
+      await screen.findByRole('heading', { name: product.title });
+      await openProductCheckout(user);
+      expect(screen.getByText(`${blockCode}：Core 当前阻止新支付，不创建新报价。`)).toBeTruthy();
+    },
+  );
 
   it('updates nickname only after a provider-sealed BUYER_AVATAR upload', async () => {
     const user = userEvent.setup();
@@ -403,6 +433,8 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText(`${quote.intent.listPriceUsdt} USDT 原子单位`)).toBeTruthy();
 
     await user.click(screen.getByRole('link', { name: /核对报价/ }));
+    expect(screen.getByText(quote.intent.productUsdtPaymentAmount)).toBeTruthy();
+    expect(screen.getByText(quote.intent.freightUsdt)).toBeTruthy();
     expect(screen.getByText(quote.intent.usdtPaymentAmount)).toBeTruthy();
     expect(screen.getByText(quote.intent.nplPaymentAmount)).toBeTruthy();
     expect(screen.getByText(/pay · BSC 56/)).toBeTruthy();
@@ -569,9 +601,15 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/seckill');
 
     await user.click(screen.getByText('规则说明'));
+    expect(screen.getByRole('dialog', { name: '秒杀规则' }).getAttribute('aria-modal')).toBe('true');
     expect(screen.getByText(/主场固定 60 分钟/)).toBeTruthy();
     expect(screen.getByText(/增加 30 秒/)).toBeTruthy();
     expect(screen.getByText(/区块时间决定订单归类/)).toBeTruthy();
+    expect(screen.getByText(/70% USDT \+ 30% Oracle 等值 NPL/)).toBeTruthy();
+    expect(screen.getByText(/USDT 标价 1:1.*后台积分/)).toBeTruthy();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '规则说明' }));
     expect(await screen.findByText('暂无已发布场次')).toBeTruthy();
     expect(screen.getByRole('button', { name: '配置秒杀订单' }).hasAttribute('disabled')).toBe(true);
   });
@@ -670,7 +708,11 @@ describe('Mall V2 payment consumer', () => {
     const user = userEvent.setup();
     renderAt('/seckill', services);
 
-    await user.click(await screen.findByRole('button', { name: '配置秒杀订单' }));
+    const configure = await screen.findByRole('button', { name: '配置秒杀订单' });
+    await user.click(configure);
+    expect(screen.queryByRole('heading', { name: '秒杀订单配置' })).toBeNull();
+    expect(screen.getByRole('dialog', { name: '进入配置前确认规则' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '我已阅读并确认规则' }));
     expect(screen.getByRole('heading', { name: '秒杀订单配置' })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     await prepareDeliveryTarget(user);
@@ -683,29 +725,91 @@ describe('Mall V2 payment consumer', () => {
     }));
   });
 
-  it('renders Core stores, browser distance and keeps native navigation ExternalBlocked', async () => {
+  it('keeps checkout closed when the confirmed LIVE session mismatches the catalog overlay', async () => {
+    const user = userEvent.setup();
+    const mismatchedProduct = {
+      ...product,
+      skus: product.skus.map((sku) => sku.seckill ? {
+        ...sku,
+        seckill: { ...sku.seckill, sessionId: `0x${'d'.repeat(64)}` },
+      } : sku),
+    };
+    renderAt('/seckill', readyServices({
+      getCurrentSeckillSession: vi.fn().mockResolvedValue(seckillSession()),
+      listCatalog: vi.fn().mockResolvedValue([mismatchedProduct]),
+    }));
+
+    await user.click(await screen.findByRole('button', { name: '配置秒杀订单' }));
+    await user.click(screen.getByRole('button', { name: '我已阅读并确认规则' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('overlay 不一致');
+    expect(screen.queryByRole('heading', { name: '秒杀订单配置' })).toBeNull();
+  });
+
+  it('filters Core store codes, sorts by Haversine distance and falls back when map popups are blocked', async () => {
     const user = userEvent.setup();
     const createPublicMediaReadAccess = vi.fn((assetId: string) => Promise.resolve(publicMediaAccess(assetId)));
-    const services = readyServices({ createPublicMediaReadAccess });
+    const fartherStore = {
+      ...store,
+      storeId: 'store-dalian-002',
+      name: '大连远程自提店',
+      regionCode: '210203',
+      latitude: store.latitude + 0.4,
+      imageAssetIds: [],
+    };
+    const otherCityStore = {
+      ...store,
+      storeId: 'store-beijing-001',
+      name: '北京自提店',
+      regionCode: '110101',
+      longitude: 116.4074,
+      latitude: 39.9042,
+      imageAssetIds: [],
+    };
+    const services = readyServices({
+      createPublicMediaReadAccess,
+      listStores: vi.fn().mockResolvedValue([fartherStore, otherCityStore, store]),
+    });
+    const open = vi.spyOn(globalThis, 'open').mockReturnValue(null);
     renderAt('/stores', services);
 
-    await screen.findByRole('heading', { name: store.name });
-    expect(screen.getByText(store.businessHours)).toBeTruthy();
+    const storeHeading = await screen.findByRole('heading', { name: store.name });
+    const storeArticle = storeHeading.closest('article')!;
+    expect(screen.getByLabelText('国家')).toHaveProperty('value', 'CN');
+    await user.selectOptions(screen.getByLabelText('城市'), '210200');
+    expect(screen.queryByRole('heading', { name: otherCityStore.name })).toBeNull();
+    expect(within(screen.getByLabelText('区县')).getByRole('option', { name: '区县代码 210202' })).toBeTruthy();
+    await user.selectOptions(screen.getByLabelText('区县'), store.regionCode);
+    expect(screen.queryByRole('heading', { name: fartherStore.name })).toBeNull();
+    await user.selectOptions(screen.getByLabelText('区县'), '');
+    expect(screen.getAllByText(store.businessHours).length).toBeGreaterThan(0);
     const storeImages = await screen.findAllByRole('img', { name: new RegExp(`${store.name} 门店图片`) });
     expect(storeImages).toHaveLength(storeImageAssetIds.length);
     for (const [index, assetId] of storeImageAssetIds.entries()) {
       expect(storeImages[index]?.getAttribute('src')).toBe(publicMediaAccess(assetId).readUrl);
       expect(createPublicMediaReadAccess).toHaveBeenCalledWith(assetId.toLowerCase());
     }
-    expect(screen.getByText('定位后显示')).toBeTruthy();
+    expect(screen.getAllByText('定位后显示')).toHaveLength(2);
     await user.click(screen.getByRole('button', { name: '获取距离' }));
     await screen.findByText('0.0 km');
+    const sortedHeadings = within(screen.getByLabelText('可用自提门店')).getAllByRole('heading', { level: 2 });
+    expect(sortedHeadings[0]?.textContent).toBe(store.name);
+    expect(sortedHeadings[1]?.textContent).toBe(fartherStore.name);
+    expect(screen.getByText('最近')).toBeTruthy();
     expect(screen.getByRole('link', { name: `拨打 ${store.name} 电话` }).getAttribute('href')).toBe(`tel:${store.phone}`);
-    expect(screen.getByRole('button', { name: '导航' }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByText(/原生地图桥接.*ExternalBlocked/)).toBeTruthy();
+    await user.click(within(storeArticle).getByRole('button', { name: '高德导航' }));
+    const amap = new URL(String(open.mock.calls[0]?.[0]));
+    expect(amap.origin).toBe('https://uri.amap.com');
+    expect(amap.searchParams.get('to')).toBe(`${store.longitude},${store.latitude},${store.name}`);
+    expect(screen.getByText(/浏览器拦截了地图弹窗/)).toBeTruthy();
+    const baiduFallback = within(storeArticle).getByRole('link', { name: '当前页打开百度' });
+    const baidu = new URL(baiduFallback.getAttribute('href')!);
+    expect(baidu.origin).toBe('https://api.map.baidu.com');
+    expect(baidu.searchParams.get('location')).toBe(`${store.latitude},${store.longitude}`);
+    open.mockRestore();
   });
 
-  it('clears stale public stores when a filtered reload fails', async () => {
+  it('clears stale public stores when a reload fails', async () => {
     const user = userEvent.setup();
     const listStores = vi.fn<CoreClient['listStores']>()
       .mockResolvedValueOnce([store])
@@ -713,8 +817,7 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/stores', readyServices({ listStores }));
 
     await screen.findByRole('heading', { name: store.name });
-    await user.type(screen.getByLabelText('六位行政区代码'), store.regionCode);
-    await user.click(screen.getByRole('button', { name: '筛选门店' }));
+    await user.click(screen.getByRole('button', { name: '重新同步门店' }));
 
     expect(await screen.findByText('门店同步失败')).toBeTruthy();
     expect(screen.queryByRole('heading', { name: store.name })).toBeNull();
@@ -738,7 +841,11 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: '到店自提' }));
     expect(await screen.findByText(`营业时间：${store.businessHours}`)).toBeTruthy();
     expect(await screen.findAllByRole('img', { name: new RegExp(`${store.name} 门店图片`) })).toHaveLength(storeImageAssetIds.length);
-    await user.click(await screen.findByRole('button', { name: new RegExp(store.name) }));
+    await user.click(screen.getByRole('button', { name: '定位最近门店' }));
+    const nearestSelection = await screen.findByRole('button', { name: `选择 ${store.name}` });
+    await waitFor(() => expect(document.activeElement).toBe(nearestSelection));
+    expect(createPickupTarget).not.toHaveBeenCalled();
+    await user.click(nearestSelection);
 
     expect(createPickupTarget).toHaveBeenCalledWith('buyer-session', {
       idempotencyKey: 'mall-test-idempotency',
@@ -865,8 +972,31 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText('数量').nextElementSibling?.textContent).toBe(deliveryOrder.quantity);
     await user.click(screen.getByRole('button', { name: '加载更多订单' }));
     await screen.findByText('秒杀 · 快递订单');
+    expect(screen.getByText('秒杀', { selector: '.order-kind-badge' })).toBeTruthy();
     expect(listOrders).toHaveBeenLastCalledWith('buyer-session', cursor);
     expect(services.core.getOrderAllowedActions).not.toHaveBeenCalled();
+  });
+
+  it('uses only a validated Mall support URL and fails closed when it is missing', async () => {
+    const user = userEvent.setup();
+    const services = readyServices({
+      listOrders: vi.fn().mockResolvedValue({ orders: [deliveryOrder], nextCursor: null }),
+      getOrderTarget: vi.fn().mockResolvedValue(deliveryOrderTarget),
+    });
+    services.supportUrl = 'https://support.mall.test/help';
+    const view = renderAt('/assets/orders', services);
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    const support = await screen.findByRole('link', { name: '联系客服' });
+    expect(support.getAttribute('href')).toBe('https://support.mall.test/help');
+    expect(support.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(support.getAttribute('href')).not.toContain(deliveryOrder.orderId);
+    expect(validateSupportUrl('javascript:alert(1)').url).toBeNull();
+
+    view.unmount();
+    renderAt('/assets/orders', readyServices());
+    expect(screen.getByText('ConfigurationRequired：客服入口未配置')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: '联系客服' })).toBeNull();
   });
 
   it.each([
@@ -986,6 +1116,8 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('tab', { name: '消费购物' }));
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     expect(await screen.findByText(ordinaryShoppingStatement.paymentTxHash)).toBeTruthy();
+    expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.productUsdtPaymentAmount} 原子单位`)).toBeTruthy();
+    expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.freightUsdt} 原子单位`)).toBeTruthy();
     expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.usdtPaymentAmount} 原子单位`)).toBeTruthy();
     expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.nplPaymentAmount} 原子单位`)).toBeTruthy();
     expect(screen.getByText(`${ordinaryShoppingStatement.bnm.amount} 原子单位`)).toBeTruthy();
@@ -1058,7 +1190,7 @@ describe('Mall V2 payment consumer', () => {
     }
     expect(screen.getByText(finalSafeTxHash)).toBeTruthy();
     for (const label of ['创世', '直推', '区县', '城市', '省', '大区', '运维', '取整余数']) {
-      expect(screen.getByText(label)).toBeTruthy();
+      expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
     expect(screen.getByLabelText('BNM 账户总额').textContent).toContain('700');
     expect(screen.getByLabelText('BNM 账户总额').textContent).toContain('300');
@@ -1258,7 +1390,7 @@ function servicesWith(overrides: Partial<CoreClient>): MallServices {
     completeMediaUpload: vi.fn().mockRejectedValue(new Error('not configured')),
     authenticate: vi.fn().mockResolvedValue({ token: 'buyer-session', walletAddress: BUYER, roles: ['BUYER'] }),
     getBuyerProfile: vi.fn().mockResolvedValue({
-      artifactVersion, wallet: BUYER, accountId: null, accountIdStatus: 'DecisionBlocked',
+      artifactVersion, wallet: BUYER, accountId: '10001',
       nickname: null, avatarAssetId: null, version: 0, updatedAt: null,
     }),
     updateBuyerProfile: vi.fn().mockRejectedValue(new Error('not configured')),

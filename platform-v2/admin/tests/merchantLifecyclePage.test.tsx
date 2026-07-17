@@ -10,7 +10,12 @@ afterEach(() => { vi.unstubAllGlobals(); delete window.ethereum; });
 describe('merchant lifecycle page', () => {
   it('stays closed before SIWE and gives AUDITOR only the redacted drilldown', async () => {
     const wallet = address('1');
-    const redacted = merchantDetail({ qualification: { ...qualification(), access: 'REDACTED', legalName: '阿步***公司', legalId: 'LIC***001', contactPhone: '138****8000', licenseAssetId: hash('a') } });
+    const base = merchantDetail();
+    const redacted = merchantDetail({
+      qualification: { ...qualification(), access: 'REDACTED', legalName: '阿步***公司', legalId: 'LIC***001', contactPhone: '138****8000', licenseAssetId: hash('a') },
+      levelPolicy: { status: 'DecisionBlocked', reason: 'Merchant level policy is not published' },
+      analytics: { ...base.analytics, fulfillment: { ...base.analytics.fulfillment, fastShip48h: { status: 'UNAVAILABLE', numerator: '0', denominator: '0', bps: null, reason: 'NO_ELIGIBLE_DELIVERY_ORDERS' } } },
+    });
     window.ethereum = walletProvider(wallet);
     const fetchMock = merchantFetch(wallet, 'AUDITOR', () => redacted);
     vi.stubGlobal('fetch', fetchMock);
@@ -28,6 +33,10 @@ describe('merchant lifecycle page', () => {
     expect(screen.queryByRole('heading', { name: '更新资质版本' })).toBeNull();
     expect(screen.queryByRole('heading', { name: '商家审核发布' })).toBeNull();
     expect(screen.queryByRole('button', { name: '获取受控地址' })).toBeNull();
+    expect(screen.getByText('Merchant level policy is not published')).toBeTruthy();
+    expect(screen.getByText(/NO_ELIGIBLE_DELIVERY_ORDERS/)).toBeTruthy();
+    expect(screen.getByText('不可用', { selector: 'dd' })).toBeTruthy();
+    expect(screen.queryByText('0%')).toBeNull();
   });
 
   it('lets OPERATOR create qualification, upload a verified license and save a new version', async () => {
@@ -69,6 +78,7 @@ describe('merchant lifecycle page', () => {
 
     expect(await screen.findByText(/已创建 merchant-1 的加密资质申请/)).toBeTruthy();
     const updateForm = await screen.findByRole('heading', { name: '更新资质版本' }).then((heading) => heading.closest('form')!);
+    expect(within(updateForm).queryByLabelText(/结算钱包/)).toBeNull();
     await user.upload(within(updateForm).getByLabelText('营业执照 / 资质文件'), new File(['license'], 'license.pdf', { type: 'application/pdf' }));
     await user.type(within(updateForm).getByLabelText('上传 Idempotency key'), 'license-upload-1');
     await user.click(within(updateForm).getByRole('button', { name: '上传并验证证照' }));
@@ -111,7 +121,29 @@ describe('merchant lifecycle page', () => {
     expect(screen.getAllByText('已通过').length).toBeGreaterThan(0);
     expect(screen.getByText('7', { selector: 'dd' })).toBeTruthy();
     expect(screen.getByText('8', { selector: 'dd' })).toBeTruthy();
-    expect(screen.getAllByText('DecisionBlocked').length).toBeGreaterThanOrEqual(3);
+    expect(screen.getByText('5000', { selector: 'dd' })).toBeTruthy();
+    expect(screen.getByText('12', { selector: 'dd' })).toBeTruthy();
+    expect(screen.getByText('7500 bps', { selector: 'dd' })).toBeTruthy();
+    expect(screen.getByText('NPL Burn · FINAL')).toBeTruthy();
+    expect(screen.getByText('BNM Available · 已履约')).toBeTruthy();
+    expect(screen.getAllByText('DecisionBlocked')).toHaveLength(1);
+  });
+
+  it('never offers an approved settlement wallet change to ADMIN', async () => {
+    const wallet = address('1');
+    const current = merchantDetail({ merchant: { ...merchantDetail().merchant, status: 'APPROVED', qualificationComplete: true }, qualification: { ...qualification(), licenseAssetId: hash('a') } });
+    const provider = walletProvider(wallet);
+    window.ethereum = provider;
+    const fetchMock = merchantFetch(wallet, 'ADMIN', () => current);
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    renderMerchantPage();
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    const review = await screen.findByRole('heading', { name: '商家审核发布' }).then((heading) => heading.closest('section')!);
+    expect(within(review).queryByLabelText('新结算钱包')).toBeNull();
+    expect(within(review).getAllByRole('option').map((option) => option.getAttribute('value'))).toEqual(['BLACKLIST']);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/review-challenges'))).toBe(false);
   });
 
   it('does not ask the wallet to sign when the challenge signer is not independent', async () => {
@@ -151,10 +183,10 @@ function merchantDetail(overrides: Partial<MerchantLifecycleDetail> = {}): Merch
     artifactVersion,
     merchant: { merchantId: 'merchant-1', shopName: '阿步金店', settlementWallet: address('3'), settlementWalletMutable: false, status: 'PENDING', level: 'V1', guaranteeStatus: 'READY', applicationVersion: 1, qualificationComplete: false, reviewedAt: null, reviewedBy: null, createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T00:00:00.000Z' },
     qualification: qualification(),
-    levelPolicy: { status: 'DecisionBlocked', reason: 'Price and quota semantics are not frozen' },
+    levelPolicy: { status: 'AVAILABLE', configVersionId: 'system-config:merchant-levels:1', version: 1, effectiveFrom: '2026-07-01T00:00:00.000Z', level: 'V1', maxProductSettlementUsdt: '5000', monthlySeckillQuota: 12 },
     analytics: {
       orders: { totalFinalized: '3', ordinaryFinalized: '2', seckillFinalized: '1', cumulative: amounts('100', '70', '60', '55'), today: amounts('20', '14', '12', '11'), timezone: 'Asia/Shanghai', window: { start: '2026-07-15T16:00:00.000Z', end: '2026-07-16T16:00:00.000Z' } },
-      fulfillment: { pendingShipment: '1', inTransit: '1', completed: '1', pickupCompleted: '0', fastShip48h: { status: 'DecisionBlocked', numerator: null, denominator: null, bps: null, reason: 'Eligible denominator is not frozen' } },
+      fulfillment: { pendingShipment: '1', inTransit: '1', completed: '1', pickupCompleted: '0', fastShip48h: { status: 'AVAILABLE', numerator: '3', denominator: '4', bps: 7500, reason: null } },
       risk: { takeoverCases: '1', guaranteeUsedUsdt: '2', frozenReceivableUsedUsdt: '3', futureProceedsUsedUsdt: '4', platformAdvanceUsdt: '5', outstandingDebtUsdt: '6', abnormalOrderRateBps: null, unavailableReason: 'DecisionBlocked' },
       contributions: { finalizedNplBurnAmount: '7', fulfillmentAvailableBnmAmount: '8', ledgerReconciled: true },
     },

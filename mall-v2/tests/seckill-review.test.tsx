@@ -84,6 +84,8 @@ describe('seckill signed quote review', () => {
       busy: false,
       error: null,
       walletWritesAuthorized: true,
+      supportUrl: null,
+      supportConfigurationError: 'ConfigurationRequired：客服入口未配置',
       connectWallet: vi.fn(),
       reloadCatalog: vi.fn(),
       reloadTaxonomy: vi.fn(),

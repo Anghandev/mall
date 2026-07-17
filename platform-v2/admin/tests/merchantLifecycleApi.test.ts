@@ -24,7 +24,11 @@ describe('merchant lifecycle admin API', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(listMerchantLifecycle({ status: 'PENDING', search: '24K', limit: 25 }, 'jwt')).resolves.toMatchObject({ merchants: [{ merchantId: 'merchant-1' }] });
-    await expect(getMerchantLifecycle('merchant-1', 'jwt')).resolves.toMatchObject({ merchant: { settlementWalletMutable: false } });
+    await expect(getMerchantLifecycle('merchant-1', 'jwt')).resolves.toMatchObject({
+      merchant: { settlementWalletMutable: false },
+      levelPolicy: { status: 'AVAILABLE', level: 'V1', maxProductSettlementUsdt: '5000', monthlySeckillQuota: 12 },
+      analytics: { fulfillment: { fastShip48h: { status: 'AVAILABLE', numerator: '3', denominator: '4', bps: 7500 } } },
+    });
 
     const listUrl = new URL(String(fetchMock.mock.calls[0]?.[0]), 'https://admin.example');
     expect(Object.fromEntries(listUrl.searchParams)).toEqual({ status: 'PENDING', search: '24K', limit: '25' });
@@ -73,6 +77,34 @@ describe('merchant lifecycle admin API', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({ signature: '0x1234' });
   });
 
+  it('rejects settlement wallet changes before any challenge or Safe publish request', async () => {
+    const current = merchantDetail({ merchant: { ...merchantDetail().merchant, status: 'APPROVED' } });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(createMerchantReviewChallenge(current, {
+      action: 'CHANGE_SETTLEMENT_WALLET' as never, reasonCode: 'WALLET_ROTATION', idempotencyKey: 'wallet-change-1',
+    }, address('1'), 'jwt')).rejects.toMatchObject({ status: 400 });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('accepts a DecisionBlocked level policy and zero-denominator unavailable 48H rate without inventing zero percent', async () => {
+    const detail = merchantDetail();
+    const unavailable = merchantDetail({
+      levelPolicy: { status: 'DecisionBlocked', reason: 'Merchant level policy is not published' },
+      analytics: {
+        ...detail.analytics,
+        fulfillment: { ...detail.analytics.fulfillment, fastShip48h: { status: 'UNAVAILABLE', numerator: '0', denominator: '0', bps: null, reason: 'NO_ELIGIBLE_DELIVERY_ORDERS' } },
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(unavailable)));
+
+    await expect(getMerchantLifecycle('merchant-1', 'jwt')).resolves.toMatchObject({
+      levelPolicy: { status: 'DecisionBlocked' },
+      analytics: { fulfillment: { fastShip48h: { status: 'UNAVAILABLE', denominator: '0', bps: null } } },
+    });
+  });
+
   it('fails closed before signing when Core returns the actor as secondary signer', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ ...reviewChallenge(), secondarySigner: address('1') }, 201)));
     await expect(createMerchantReviewChallenge(merchantDetail(), { action: 'APPROVE', reasonCode: 'QUALIFICATION_APPROVED', idempotencyKey: 'review-approve-1' }, address('1'), 'jwt')).rejects.toMatchObject({ status: 403 });
@@ -115,10 +147,10 @@ function merchantDetail(overrides: Partial<MerchantLifecycleDetail> = {}): Merch
     artifactVersion,
     merchant: { merchantId: 'merchant-1', shopName: '阿步金店', settlementWallet: address('3'), settlementWalletMutable: false, status: 'PENDING', level: 'V1', guaranteeStatus: 'READY', applicationVersion: 1, qualificationComplete: false, reviewedAt: null, reviewedBy: null, createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T00:00:00.000Z' },
     qualification: fullQualification(),
-    levelPolicy: { status: 'DecisionBlocked', reason: 'Price and quota semantics are not frozen' },
+    levelPolicy: { status: 'AVAILABLE', configVersionId: 'system-config:merchant-levels:1', version: 1, effectiveFrom: '2026-07-01T00:00:00.000Z', level: 'V1', maxProductSettlementUsdt: '5000', monthlySeckillQuota: 12 },
     analytics: {
       orders: { totalFinalized: '3', ordinaryFinalized: '2', seckillFinalized: '1', cumulative: amounts('100', '70', '60', '55'), today: amounts('20', '14', '12', '11'), timezone: 'Asia/Shanghai', window: { start: '2026-07-15T16:00:00.000Z', end: '2026-07-16T16:00:00.000Z' } },
-      fulfillment: { pendingShipment: '1', inTransit: '1', completed: '1', pickupCompleted: '0', fastShip48h: { status: 'DecisionBlocked', numerator: null, denominator: null, bps: null, reason: 'Eligible denominator is not frozen' } },
+      fulfillment: { pendingShipment: '1', inTransit: '1', completed: '1', pickupCompleted: '0', fastShip48h: { status: 'AVAILABLE', numerator: '3', denominator: '4', bps: 7500, reason: null } },
       risk: { takeoverCases: '1', guaranteeUsedUsdt: '2', frozenReceivableUsedUsdt: '3', futureProceedsUsedUsdt: '4', platformAdvanceUsdt: '5', outstandingDebtUsdt: '6', abnormalOrderRateBps: null, unavailableReason: 'DecisionBlocked' },
       contributions: { finalizedNplBurnAmount: '7', fulfillmentAvailableBnmAmount: '8', ledgerReconciled: true },
     },

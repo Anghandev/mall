@@ -134,6 +134,8 @@ test('business and audit migrations apply from empty databases', async () => {
       '025_takeover_assignments.sql',
       '026_admin_product_lifecycle_batches.sql',
       '027_merchant_governance_completion.sql',
+      '028_buyer_uid.sql',
+      '029_usdt_freight.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -517,6 +519,13 @@ test('buyer account data is encrypted, tenant scoped and creates targets only fr
       clock: () => now,
     });
     const buyer = { walletAddress: BUYER, roles: ['BUYER'] as const };
+    const uid = await service.ensureBuyerUid(BUYER);
+    assert.equal(await service.ensureBuyerUid(BUYER), uid);
+    assert.notEqual(await service.ensureBuyerUid('0x3333333333333333333333333333333333333333'), uid);
+    await assert.rejects(
+      db.query('UPDATE core.buyer_accounts SET created_at = created_at + interval \'1 second\' WHERE buyer_wallet = $1', [BUYER]),
+      /ImmutableRecord/,
+    );
     const profile = await service.updateBuyerProfile(buyer, {
       nickname: 'Private Nickname',
       avatarAssetId: null,
@@ -524,6 +533,7 @@ test('buyer account data is encrypted, tenant scoped and creates targets only fr
       idempotencyKey: 'buyer-profile-update-1',
     });
     assert.equal(profile.nickname, 'Private Nickname');
+    assert.equal(profile.accountId, uid);
     const profileStorage = await db.query<{ encrypted: string }>(
       "SELECT encode(encrypted_nickname, 'hex') AS encrypted FROM core.buyer_profiles WHERE buyer_wallet = $1",
       [BUYER],
@@ -670,7 +680,7 @@ test('merchant profile keeps settlement wallet immutable and merchant audit neve
       business.query(
         "UPDATE core.merchants SET settlement_wallet = '0x4444444444444444444444444444444444444444' WHERE merchant_id = 'merchant-1'",
       ),
-      /GovernedWalletMigrationRequired/,
+      /ImmutableSettlementWallet/,
     );
     await business.query("UPDATE core.merchants SET status = 'APPROVED' WHERE merchant_id = 'merchant-1'");
     await assert.rejects(
@@ -965,35 +975,46 @@ test('merchant lifecycle encrypts qualification and governs exact review transit
     assert.equal(safeCalls, 2);
     await assert.rejects(
       db.query("UPDATE core.merchants SET settlement_wallet = $2 WHERE merchant_id = $1", [merchantId, Wallet.createRandom().address]),
-      /GovernedWalletMigrationRequired/,
+      /ImmutableSettlementWallet/,
     );
+    const safeCallsBeforeRejectedWalletChange = safeCalls;
     assert.throws(
       () => service.createReviewChallenge(adminActor, merchantId, {
-        action: 'CHANGE_SETTLEMENT_WALLET', reasonCode: 'WALLET_ROTATION',
+        action: 'CHANGE_SETTLEMENT_WALLET' as never, reasonCode: 'WALLET_ROTATION',
         idempotencyKey: 'merchant-wallet-change-missing', correlationId: 'merchant-wallet-change-missing',
       }),
-      /Proposed settlement wallet is required/,
+      /review action is invalid/,
     );
-    const nextSettlementWallet = Wallet.createRandom().address;
-    const walletChange = await service.createReviewChallenge(adminActor, merchantId, {
-      action: 'CHANGE_SETTLEMENT_WALLET', reasonCode: 'WALLET_ROTATION',
-      proposedSettlementWallet: nextSettlementWallet,
-      idempotencyKey: 'merchant-wallet-change-1', correlationId: 'merchant-wallet-change-correlation',
+    assert.equal(safeCalls, safeCallsBeforeRejectedWalletChange);
+
+    const wrongAddressApplication = await service.createApplication(operatorActor, {
+      ...applicationInput,
+      settlementWallet: Wallet.createRandom().address,
+      idempotencyKey: 'merchant-application-wrong-address-1',
+      correlationId: 'merchant-application-wrong-address-correlation',
     });
-    const walletChangeSignature = await secondary.signTypedData(
-      walletChange.typedData.domain, walletChange.typedData.types, walletChange.typedData.message,
+    const rejectWrongAddress = await service.createReviewChallenge(adminActor, wrongAddressApplication.merchant.merchantId, {
+      action: 'REJECT', reasonCode: 'INCORRECT_SETTLEMENT_WALLET',
+      idempotencyKey: 'merchant-reject-wrong-address-1', correlationId: 'merchant-reject-wrong-address-correlation',
+    });
+    const rejectWrongAddressSignature = await secondary.signTypedData(
+      rejectWrongAddress.typedData.domain, rejectWrongAddress.typedData.types, rejectWrongAddress.typedData.message,
     );
-    const changed = await service.publishReview(adminActor, merchantId, walletChange.actionId, walletChangeSignature);
-    assert.equal(changed.merchant.settlementWallet, nextSettlementWallet.toLowerCase());
-    assert.deepEqual((await db.query<{ wallet_address: string; status: string }>(
-      `SELECT wallet_address, status FROM core.wallet_role_bindings
-       WHERE role = 'MERCHANT' AND merchant_id = $1 ORDER BY wallet_address`,
-      [merchantId],
-    )).rows, [
-      { wallet_address: settlementWallet.toLowerCase(), status: 'REVOKED' },
-      { wallet_address: nextSettlementWallet.toLowerCase(), status: 'ACTIVE' },
-    ].sort((left, right) => left.wallet_address.localeCompare(right.wallet_address)));
-    assert.equal((await service.publishReview(adminActor, merchantId, walletChange.actionId, walletChangeSignature)).merchant.settlementWallet, nextSettlementWallet.toLowerCase());
+    assert.equal((await service.publishReview(
+      adminActor,
+      wrongAddressApplication.merchant.merchantId,
+      rejectWrongAddress.actionId,
+      rejectWrongAddressSignature,
+    )).merchant.status, 'REJECTED');
+    const correctedAddress = Wallet.createRandom().address;
+    const correctedApplication = await service.createApplication(operatorActor, {
+      ...applicationInput,
+      settlementWallet: correctedAddress,
+      idempotencyKey: 'merchant-application-corrected-address-1',
+      correlationId: 'merchant-application-corrected-address-correlation',
+    });
+    assert.equal(correctedApplication.merchant.settlementWallet, correctedAddress.toLowerCase());
+    assert.equal(correctedApplication.merchant.status, 'PENDING');
 
     const blacklist = await service.createReviewChallenge(adminActor, merchantId, {
       action: 'BLACKLIST', reasonCode: 'CONFIRMED_ABUSE',
@@ -1006,7 +1027,7 @@ test('merchant lifecycle encrypts qualification and governs exact review transit
     assert.equal(blacklisted.merchant.status, 'BLACKLISTED');
     assert.equal((await db.query<{ status: string }>(
       "SELECT status FROM core.wallet_role_bindings WHERE wallet_address = $1 AND role = 'MERCHANT'",
-      [nextSettlementWallet.toLowerCase()],
+      [settlementWallet.toLowerCase()],
     )).rows[0]?.status, 'SUSPENDED');
     const publishedActions = await db.query<{ action_kind: string; state: string }>(
       'SELECT action_kind, state FROM core.merchant_review_actions WHERE merchant_id = $1 ORDER BY action_kind',
@@ -1015,7 +1036,6 @@ test('merchant lifecycle encrypts qualification and governs exact review transit
     assert.deepEqual(publishedActions.rows, [
       { action_kind: 'APPROVE', state: 'PUBLISHED' },
       { action_kind: 'BLACKLIST', state: 'PUBLISHED' },
-      { action_kind: 'CHANGE_SETTLEMENT_WALLET', state: 'PUBLISHED' },
     ]);
 
     const staleSettlement = Wallet.createRandom().address;
@@ -2035,11 +2055,13 @@ test('catalog payment service builds an authoritative idempotent quote and recor
     await db.query("UPDATE core.seckill_sessions SET phase = 'FORCE_CLOSED' WHERE session_id = $1", [sessionId]);
 
     const quote = await service.createOrdinaryQuote(BUYER, request);
-    assert.equal(quote.intent.usdtPaymentAmount, '70');
+    assert.equal(quote.intent.productUsdtPaymentAmount, '70');
+    assert.equal(quote.intent.freightUsdt, '5');
+    assert.equal(quote.intent.usdtPaymentAmount, '75');
     assert.equal(quote.intent.nplPaymentAmount, '300');
     assert.equal(quote.intent.productId, `0x${'b'.repeat(64)}`);
     assert.equal(quote.snapshotHash, paymentIntentHash(quote.intent));
-    assert.equal(quote.approvalRequirements[0]?.requiredAmount, '70');
+    assert.equal(quote.approvalRequirements[0]?.requiredAmount, '75');
     assert.equal(quote.approvalRequirements[0]?.approvalMode, 'ONLY_IF_ALLOWANCE_BELOW_REQUIRED');
     assert.equal(quote.approvalRequirements[0]?.revocation.method, 'ERC20_APPROVE_ZERO');
     assert.equal((await service.createOrdinaryQuote(BUYER, request)).orderId, quote.orderId);
@@ -2117,6 +2139,10 @@ test('business analytics uses canonical Asia Shanghai finality windows and fail-
       [MERCHANT, admin, HASH],
     );
     const now = new Date((intent.issuedAt + 120) * 1_000);
+    await db.query(
+      'INSERT INTO core.buyer_accounts (buyer_wallet, created_at) VALUES ($1,$2)',
+      [BUYER, now],
+    );
     const service = new BusinessAnalyticsService({ transactions: transactionAdapter(db), clock: () => now });
     const merchant = await service.merchantDashboard({
       walletAddress: MERCHANT,
@@ -2142,6 +2168,7 @@ test('business analytics uses canonical Asia Shanghai finality windows and fail-
     assert.equal(platform.orders.listPriceUsdt, '100');
     assert.equal(platform.orders.pendingShipment, '1');
     assert.equal(platform.merchants.total, '1');
+    assert.deepEqual(platform.buyers, { total: '1', newToday: '1' });
     assert.equal(platform.products.total, '1');
     assert.deepEqual(platform.risk, {
       abnormalObservationsToday: '0',
@@ -2149,7 +2176,7 @@ test('business analytics uses canonical Asia Shanghai finality windows and fail-
       activeRestrictions: '0',
       pendingAppeals: '0',
     });
-    assert.equal(platform.unavailable.find((metric) => metric.metric === 'NEW_UID_USERS')?.reasonCode, 'DecisionBlocked');
+    assert.equal(platform.unavailable.some((metric) => metric.metric === 'NEW_UID_USERS'), false);
     assert.equal(platform.unavailable.some((metric) => metric.metric === 'ABNORMAL_ORDERS'), false);
     assert.equal(platform.unavailable.some((metric) => metric.metric === 'BLACKLIST_BLOCKS'), false);
     assert.deepEqual(platform.breakers, [
@@ -3051,7 +3078,7 @@ test('seckill quote locks both inventories and final classification releases the
     assert.equal(quote.dual.fallback.listPriceUsdt, '100');
     assert.deepEqual(
       quote.approvalRequirements.map((item) => item.requiredAmount),
-      ['70', '300'],
+      ['75', '300'],
     );
     const repeated = await service.createSeckillQuote(BUYER, request);
     assert.equal(repeated.orderId, quote.orderId);
@@ -3193,7 +3220,8 @@ test('seckill quote locks both inventories and final classification releases the
     );
     assert.equal(relayAfterReplay.rows[0]!.relay_deadline.getTime(), relayAfterFinality.rows[0]!.relay_deadline.getTime());
     assert.equal(relayAfterReplay.rows[0]!.events, '1');
-    await assertLedgerBalanced(db, 1, { usdt: 63n, nplReward: 90n, bnm: 90n });
+    await assertLedgerBalanced(db, 1, { usdt: 68n, nplReward: 90n, bnm: 90n });
+    assert.deepEqual(await purposeBalances(db, quote.orderId, 'MERCHANT_FREIGHT_RECEIVABLE'), { LOCKED: '5' });
 
     const fulfillment = new FulfillmentService({
       transactions: transactionAdapter(db),
@@ -3228,7 +3256,7 @@ test('seckill quote locks both inventories and final classification releases the
     assert.deepEqual(await liabilityStates(db, quote.orderId, 'AVAILABLE'), {
       BNM_POINTS: '90',
       NPL: '90',
-      USDT: '61',
+      USDT: '66',
     });
     assert.deepEqual(await liabilityStates(db, quote.orderId, 'LOCKED'), { USDT: '2' });
 
@@ -4298,6 +4326,10 @@ test('order pages use stable scoped cursors and shipment batches are canonical, 
       clock: () => now,
       bytes32: () => `0x${'d'.repeat(64)}`,
     });
+    const buyerUid = (await db.query<{ uid: string }>(
+      'INSERT INTO core.buyer_accounts (buyer_wallet, created_at) VALUES ($1,$2) RETURNING uid::text AS uid',
+      [BUYER, now],
+    )).rows[0]!.uid;
     const globalPage = await globalOperations.search(platform, { limit: 10 });
     assert.equal(globalPage.relation, 'AND');
     assert.deepEqual(new Set(globalPage.resources.map((resource) => resource.resourceType)), new Set([
@@ -4306,6 +4338,18 @@ test('order pages use stable scoped cursors and shipment batches are canonical, 
     assert.deepEqual((await globalOperations.search(platform, { wallet: BUYER })).resources.map((resource) => (
       resource.resourceType
     )), ['ORDER', 'ORDER']);
+    const uidPage = await globalOperations.search(platform, { uid: buyerUid });
+    assert.deepEqual(uidPage.resources.map((resource) => resource.resourceType), ['ORDER', 'ORDER']);
+    assert.deepEqual(uidPage.unavailableFilters, ['PHONE', 'YELLOW_QUEUE']);
+    assert.deepEqual((await globalOperations.search(platform, { uid: '999999999' })).resources, []);
+    assert.throws(
+      () => globalOperations.search(platform, { uid: '9223372036854775808' }),
+      /Buyer UID is invalid/,
+    );
+    assert.throws(
+      () => globalOperations.search(platform, { uid: buyerUid, relation: 'OR' }),
+      /requires exact AND search/,
+    );
     assert.deepEqual((await globalOperations.search(platform, {
       productId: 'product-1',
     })).resources.map((resource) => resource.resourceType), ['PRODUCT', 'ORDER', 'ORDER']);
@@ -5723,7 +5767,7 @@ test('policy drafts remain editable while published policy and historical catalo
       db.query(
         "UPDATE core.merchants SET settlement_wallet = '0x3333333333333333333333333333333333333333' WHERE merchant_id = 'merchant-1'",
       ),
-      /GovernedWalletMigrationRequired/,
+      /ImmutableSettlementWallet/,
     );
     await assert.rejects(db.query("DELETE FROM core.products WHERE product_id = 'product-1'"), /ImmutableRecord/);
   } finally {
@@ -6603,6 +6647,44 @@ test('system config keeps secrets as references and publishes exact old/new vers
     assert.equal(first.version, 1);
     assert.equal(first.payload.primaryRpcSecretRef, 'secret://rpc/primary-v1');
     assert.equal(JSON.stringify(first).includes('https://'), false);
+    const challenge = await service.approvalChallenge(actor, first.configVersionId, {
+      nonce: '101',
+      deadline: String(Math.floor(now.getTime() / 1_000) + 300),
+    });
+    assert.equal(challenge.signer, secondary.address.toLowerCase());
+    assert.notEqual(challenge.signer, admin.address.toLowerCase());
+    assert.equal(challenge.oldValueHash, `0x${'0'.repeat(64)}`);
+    assert.equal(challenge.newValueHash, first.payloadHash);
+    assert.equal(challenge.typedData.message.resourceId, first.configVersionId);
+    assert.equal(challenge.typedData.message.nonce, '101');
+    assert.throws(
+      () => service.approvalChallenge({ walletAddress: admin.address, roles: ['OPERATOR'] }, first.configVersionId, {
+        nonce: '102', deadline: challenge.deadline,
+      }),
+      /Wallet session cannot manage system config/,
+    );
+    assert.throws(
+      () => service.approvalChallenge({ walletAddress: admin.address, roles: ['AUDITOR'] }, first.configVersionId, {
+        nonce: '103', deadline: challenge.deadline,
+      }),
+      /Wallet session cannot manage system config/,
+    );
+    assert.throws(
+      () => service.approvalChallenge(actor, first.configVersionId, {
+        nonce: '104', deadline: String(Math.floor(now.getTime() / 1_000) - 1),
+      }),
+      /System config approval expired/,
+    );
+    assert.throws(
+      () => service.createVersion(actor, {
+        configKey: 'FREIGHT',
+        payload: {},
+        effectiveFrom: '2020-01-01T00:00:00.000Z',
+        idempotencyKey: 'system-freight-retired',
+        correlationId: 'system-freight-retired',
+      }),
+      /Freight is configured per product/,
+    );
     const intent: SensitiveActionIntent = {
       action: 'PUBLISH_SYSTEM_CONFIG',
       resourceType: 'SYSTEM_CONFIG',
@@ -6661,6 +6743,12 @@ test('system config keeps secrets as references and publishes exact old/new vers
       nonce: 102n,
       deadline: BigInt(Math.floor(now.getTime() / 1_000) + 300),
     };
+    const secondChallenge = await service.approvalChallenge(actor, second.configVersionId, {
+      nonce: secondIntent.nonce.toString(),
+      deadline: secondIntent.deadline.toString(),
+    });
+    assert.equal(secondChallenge.oldValueHash, first.payloadHash);
+    assert.equal(secondChallenge.newValueHash, second.payloadHash);
     const secondApproval = {
       action: secondIntent.action,
       resourceType: secondIntent.resourceType,
@@ -7408,6 +7496,8 @@ test('buyer shopping and merchant receivable statements preserve tenant-scoped o
       orderId: prepared.intent.orderId,
       orderKind: 'ORDINARY',
       paymentAmounts: {
+        productUsdtPaymentAmount: prepared.intent.productUsdtPaymentAmount,
+        freightUsdt: prepared.intent.freightUsdt,
         usdtPaymentAmount: prepared.intent.usdtPaymentAmount,
         nplPaymentAmount: prepared.intent.nplPaymentAmount,
       },
@@ -7440,6 +7530,8 @@ test('buyer shopping and merchant receivable statements preserve tenant-scoped o
     assert.equal(merchantStatements.merchantId, 'merchant-1');
     assert.equal(merchantStatements.settlementWallet, prepared.merchantWallet.address.toLowerCase());
     assert.equal(statement.orderId, prepared.intent.orderId);
+    assert.equal(statement.frozenAmounts.productUsdtPaymentAmount, prepared.intent.productUsdtPaymentAmount);
+    assert.equal(statement.frozenAmounts.freightUsdt, prepared.intent.freightUsdt);
     assert.equal(statement.frozenAmounts.merchantNetReceivableUsdt, prepared.intent.merchantNetReceivableUsdt);
     assert.equal(statement.currentReceivableUsdt, prepared.intent.merchantNetReceivableUsdt);
     assert.equal(statement.removedFromReceivableUsdt, '0');
@@ -9690,7 +9782,7 @@ test('takeover funding consumes final guarantee first and records Operations adv
     assert.equal(debtReorgAudit.rows[0]?.payload.reversedDebtRecoveries, 1);
     assert.equal(debtReorgAudit.rows[0]?.transaction_evidence.txHash, futurePayment.event.transactionHash);
     assert.equal(debtReorgAudit.rows[0]?.transaction_evidence.eventSignatureHash, id(
-      'PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)',
+      'PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)',
     ));
     assert.equal(debtReorgAudit.rows[0]?.transaction_evidence.logIndex, futurePayment.event.logIndex);
     await assertLedgerBalanced(db, 1);
@@ -11014,6 +11106,8 @@ function paymentIntent(): CanonicalPaymentIntent {
     deadline: now + 300,
     nonce: '1',
     listPriceUsdt: '100',
+    productUsdtPaymentAmount: '70',
+    freightUsdt: '0',
     usdtPaymentAmount: '70',
     nplQuoteAmount: '1000',
     nplPaymentAmount: '300',
@@ -11077,6 +11171,8 @@ function paymentInput(
       merchant: intent.merchant,
       policyVersion: intent.policyVersion,
       listPriceUsdt: intent.listPriceUsdt,
+      productUsdtPaid: intent.productUsdtPaymentAmount,
+      freightUsdt: intent.freightUsdt,
       usdtPaid: intent.usdtPaymentAmount,
       nplPaid: intent.nplPaymentAmount,
       nplBurned: intent.nplBurnAmount,
@@ -11136,7 +11232,7 @@ function decodedPaymentEvent(intent: CanonicalPaymentIntent, canonicalBlockHash:
     artifactVersion: CORE_ARTIFACT_VERSION,
     contract: 'PaymentRouterV2',
     eventName: 'PaymentCompleted',
-    eventSignature: 'PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)',
+    eventSignature: 'PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)',
     resourceId: intent.orderId,
     contractAddress: '0x9999999999999999999999999999999999999999',
     eventHash: HASH,
@@ -11151,6 +11247,8 @@ function decodedPaymentEvent(intent: CanonicalPaymentIntent, canonicalBlockHash:
       classification: '0',
       policyVersion: String(intent.policyVersion),
       listPriceUsdt: intent.listPriceUsdt,
+      productUsdtPaid: intent.productUsdtPaymentAmount,
+      freightUsdt: intent.freightUsdt,
       usdtPaid: intent.usdtPaymentAmount,
       nplPaid: intent.nplPaymentAmount,
       nplBurned: intent.nplBurnAmount,

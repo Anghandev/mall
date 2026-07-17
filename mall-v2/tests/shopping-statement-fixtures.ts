@@ -21,7 +21,9 @@ export const ordinaryShoppingStatement = {
   createdAt: '2026-07-16T09:55:00.000Z',
   orderKind: 'ORDINARY',
   paymentAmounts: {
-    usdtPaymentAmount: '14000000000000000000',
+    productUsdtPaymentAmount: '14000000000000000000',
+    freightUsdt: '1000000000000000000',
+    usdtPaymentAmount: '15000000000000000000',
     nplPaymentAmount: '600000000000000000000',
   },
   bnm: {
@@ -44,6 +46,8 @@ export const fallbackShoppingStatement = {
   createdAt: '2026-07-15T12:00:00.000Z',
   orderKind: 'FALLBACK_RETAIL',
   paymentAmounts: {
+    productUsdtPaymentAmount: '7000000000000000000',
+    freightUsdt: '0',
     usdtPaymentAmount: '7000000000000000000',
     nplPaymentAmount: '300000000000000000000',
   },

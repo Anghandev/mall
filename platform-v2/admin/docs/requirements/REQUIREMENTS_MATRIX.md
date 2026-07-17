@@ -14,20 +14,20 @@ are never soft-deletable.
 | ADM-GLOBAL-001 | 4-8 | AND/OR search; exact order ID/product ID/TxHash; fuzzy/exact wallet; exact UID/phone; start/end and Today/Yesterday/7d/30d; PendingReview/Yellow/BreakerRed status | - | Shared list shell serializes filters server-side and preserves PII authorization | Frozen | GAP-ADM-003 |
 | ADM-GLOBAL-002 | 9-11 | List batch engine; Export Excel/CSV; batch electronic-waybill/pickup printing | - | Resource capability and selected rows come from allowedActions; exports/prints are audited | Frozen | GAP-ADM-003, GAP-ADM-012 |
 | ADM-GLOBAL-003 | 12 | Batch modify/list/delist/review approve-reject/soft delete | D-V2-017, D-V2-021 | Soft delete only for ordinary resources explicitly authorized; funds/chain/audit never delete | Overridden | GAP-ADM-003 |
-| ADM-DASH-001 | 14-17 | Today orders, GMV USDT, ship rate, seckill sessions, new UID users and merchants | - | Authoritative timezone and canonical values; unavailable is not zero | Frozen | GAP-ADM-005 |
+| ADM-DASH-001 | 14-17 | Today orders, GMV USDT, ship rate, seckill sessions, new UID users and merchants | D-V2-030 | Authoritative timezone and canonical values; unavailable is not zero | Verified | - |
 | ADM-DASH-002 | 18-19 | Pending merchant/product reviews, after-sale cases and low-stock products | D-V2-004 | After-sale excludes business refunds and includes exchange/delay/arbitration/takeover queues | Overridden | GAP-ADM-005 |
 | ADM-DASH-003 | 20-21 | Today signed settlement requests and Safe-settled USDT; chain failures; abnormal orders; blacklist blocks; per-asset Safe-assets/unsettled-liabilities coverage and breaker state | D-V2-007, D-V2-016, D-V2-024 | Coverage uses verified Safe assets and append-only liabilities; below 100% pauses new payments and new settlement batches without reporting healthy | Overridden | GAP-ADM-005, GAP-ADM-011, GAP-ADM-017 |
 | ADM-DASH-004 | 22-24 | RPC latency ms, Oracle deviation %, high-Gas blocks, bot orders, CPU, memory, Redis hit, MQ backlog and block height | D-V2-012 | Readiness never reports healthy without real probes | Frozen | GAP-ADM-005, GAP-ADM-018 |
-| ADM-MER-001 | 26-31 | Pending/Approved/Rejected/Blacklist menus; shop, license image, legal name/ID, phone, settlement wallet; approved wallet immutability | D-V2-014, D-V2-015 | PII access is RBAC scoped; wallet changes use governed intent | Frozen | GAP-ADM-006 |
-| ADM-MER-002 | 32-33 | V1-V5 levels; per-product max USDT settlement price; monthly seckill quota | - | Validation and version history are authoritative and audited | Frozen | GAP-ADM-006 |
-| ADM-MER-003 | 34-36 | Ordinary/seckill cumulative orders, cumulative USDT flow, today sales; pending/transit/signed/pickup counts and 48H fast-ship rate | - | Drilldown reconciles dashboard totals | Frozen | GAP-ADM-006 |
+| ADM-MER-001 | 26-31 | Pending/Approved/Rejected/Blacklist menus; shop, license image, legal name/ID, phone, settlement wallet; approved wallet immutability | D-V2-014, D-V2-015, D-V2-029 | PII access is RBAC scoped; approved settlement wallets are permanently immutable with no Admin or Safe override | Verified | - |
+| ADM-MER-002 | 32-33 | V1-V5 levels; per-product max USDT settlement price; monthly seckill quota | - | Validation and version history are authoritative and audited | Verified | - |
+| ADM-MER-003 | 34-36 | Ordinary/seckill cumulative orders, cumulative USDT flow, today sales; pending/transit/signed/pickup counts and 48H fast-ship rate | - | Drilldown reconciles dashboard totals | Verified | - |
 | ADM-MER-004 | 37 | Source forced-refund count, USDT penalties and abnormal-order rate | D-V2-004, D-V2-005, D-V2-018, D-V2-020 | Replace with takeover cases, 1,000-USDT guarantee status, frozen-receivable/future-proceeds deductions, merchant debt and abnormal-order rate; no business-refund or risk-reserve metric | Overridden | GAP-ADM-006, GAP-ADM-010, GAP-ADM-017 |
-| ADM-MER-005 | 38 | Historical NPL Burn and successfully Available BNM totals | D-V2-003, D-V2-008 | Totals reconcile indexed final events and order snapshots | Frozen | GAP-ADM-006 |
+| ADM-MER-005 | 38 | Historical NPL Burn and successfully Available BNM totals | D-V2-003, D-V2-008 | Totals reconcile indexed final events and order snapshots | Verified | - |
 | ADM-MER-006 | 39 | Source Locked/PendingSettlement/Available/Claimed withdrawal view, TxHash and Gas | D-V2-007, D-V2-023 | USDT proceeds use Locked/Available/Requested/Batched/Settled, signed gasless requests and final Safe TxHash; merchant never broadcasts or pays settlement Gas | Overridden | GAP-ADM-006, GAP-ADM-017 |
 | ADM-CAT-001 | 41-43 | Three-level category tree; name/icon/sort/enabled/service-fee fields | D-V2-014, D-V2-018 | Fee is DecisionBlocked until versioned; other edits audited | DecisionBlocked | GAP-ADM-007, GAP-ADM-008 |
 | ADM-CAT-002 | 44 | Tag library, examples, batch tagging and frontend feed | - | Versioned tags and placement state; no production fixture | Frozen | GAP-ADM-003 (cross-resource batch only) |
 | ADM-CAT-003 | 45 | Category/tag delete-disable lock while a seckill product or order with Locked funds exists | D-V2-017, D-V2-025 | Core and UI deny delete/disable with the exact blocking resource; historical products only delist, and funds/policies/batches/chain/audit evidence never delete | Overridden | - |
-| ADM-CAT-004 | 46-50 | Create/proxy-list; title/subtitle/main images/video/rich detail/default freight; settlement merchant allowlist; multi-SKU attributes/stock/USDT cost | D-V2-002 | Exact amounts, signed uploads and merchant eligibility required | Frozen | - |
+| ADM-CAT-004 | 46-50 | Create/proxy-list; title/subtitle/main images/video/rich detail/flat default delivery freight; settlement merchant allowlist; multi-SKU attributes/stock/USDT cost | D-V2-002, D-V2-031 | Exact amounts, signed uploads and merchant eligibility required; pickup freight is always zero | Frozen | - |
 | ADM-CAT-005 | 51 | Platform inventory +/- and USDT cost edit | D-V2-014, D-V2-017 | Cannot mutate active order/session snapshot; new policy/version only | Overridden | - |
 | ADM-CAT-006 | 52 | Historical product cannot physically delete; delist/hide only | D-V2-017 | Chain/order evidence remains queryable forever | Frozen | - |
 | ADM-POL-001 | 54-57 | Product/session financial-policy panel; merchant base receivable, concession, net receivable and USDT settlement destinations | D-V2-002, D-V2-014, D-V2-022 | Signed Core preview validates exact base/concession/net values, configured destinations, future-only scope and governed publish | Overridden | GAP-ADM-008, GAP-ADM-017 |
@@ -51,7 +51,7 @@ are never soft-deletable.
 | ADM-LOG-002 | 91 | Cainiao/Kuaidi100 PartnerID secret reference, monthly waybill account and real tracking-number adapter | D-V2-019 | Adapter validates secret-reference completeness, callback/error handling and typed ConfigurationRequired without storing/rendering secrets; real account acceptance is ADM-GOAL-003 | Verified | - |
 | ADM-LOG-003 | 92-93 | Platform/partner warehouse shipping-address library | - | RBAC writes and audit; exact address fields validated | Verified | - |
 | ADM-LOG-004 | 94 | Source forced-refund return warehouse | D-V2-004 | No refund destination is emitted; exchange/takeover logistics use their own allowedActions | Overridden | - |
-| ADM-LOG-005 | 95 | Per-count/per-weight freight; Dalian pickup free; remote no-delivery rule | D-V2-002, D-V2-022 | DecisionBlocked until freight charging, weight basis and the effects on buyer 70/30 payment, merchant receivable and concession are frozen; frontend must not calculate a substitute | DecisionBlocked | GAP-ADM-012 |
+| ADM-LOG-005 | 95 | Source per-count/per-weight/remote freight model | D-V2-002, D-V2-022, D-V2-031 | Replaced by one product-level flat `defaultFreightUsdt` for delivery and zero for pickup; Core binds product USDT, freight and total separately, with freight excluded from NPL/BNM/concession/prize formulas | Overridden | - |
 | ADM-TAKE-001 | 97-99 | Source forced-refund center and action | D-V2-004, D-V2-005 | Renamed Merchant Takeover Fulfillment Center; 7-day no-evidence case opens automatically | Overridden | GAP-ADM-010 |
 | ADM-TAKE-002 | 100-101 | Source USDT return and Locked BNM burn | D-V2-004, D-V2-005 | Customer payment and rewards remain Locked; platform/replacement merchant fulfills order | Overridden | GAP-ADM-010 |
 | ADM-TAKE-003 | 102 | Source merchant pending/guarantee deduction | D-V2-005, D-V2-018, D-V2-020, D-V2-023 | Major loss posts balanced deductions in order from guarantee, frozen receivables and future proceeds; platform advance records merchant debt; no risk-reserve fallback | Overridden | GAP-ADM-010, GAP-ADM-017 |
@@ -160,9 +160,9 @@ parallel API or local financial calculation:
 - `ADM-SEK-005`: the session draft binds the published CMS rules content hash
   and policy version. The UI never edits the fixed 3600s / 60s / +30s / cap
   60s timers and does not construct calldata or calculate prize allocations.
-- `ADM-MER-005`: wallet-scoped BNM points are now visible, but merchant-wide
-  historical Burn and Available-BNM aggregates remain `GAP-ADM-006` and this
-  row is not reported complete.
+- `ADM-MER-005`: that earlier checkpoint exposed wallet-scoped BNM points; the
+  `.15` evidence below supersedes its missing merchant-wide Burn and
+  Available-BNM aggregates.
 
 All test records stay under `tests/**`; no production fixture is shipped.
 
@@ -218,9 +218,35 @@ wallet, Safe, RPC, domain and device evidence remains `ExternalBlocked` under
   serialization, role denial, nullable category parent and read-only batch
   preview have consumer tests. Production source and bundle contain no fixture.
 
-## Settlement/Admin `.14` Notification Campaign Evidence
+## Settlement/Admin `.15` Merchant Governance Evidence
 
 The current Admin consumer is pinned to
+`@abu24k/core-artifacts@2.0.0-settlement-admin.15` and reuses the existing
+merchant lifecycle API and review workspace:
+
+- `ADM-MER-001`: qualification PII remains FULL/REDACTED/UNAVAILABLE by Core
+  RBAC. The initial application accepts a settlement wallet, but approval makes
+  it permanently immutable. Admin review exposes no wallet-change action and
+  Safe approval cannot override the database guard. An incorrect address is
+  handled only by rejecting the pending application and creating a new one;
+  ordinary profile updates expose no wallet field.
+- `ADM-MER-002`: AVAILABLE level policy displays the config ID, version,
+  effective time, current level, USDT-atomic per-product settlement maximum and
+  monthly seckill quota. A missing published policy remains `DecisionBlocked`.
+- `ADM-MER-003`: named order and fulfillment aggregates retain Core values.
+  AVAILABLE 48H evidence displays numerator, denominator and bps; a zero
+  denominator displays `NO_ELIGIBLE_DELIVERY_ORDERS` and never a synthetic 0%.
+- `ADM-MER-005`: finalized NPL Burn and fulfilled Available BNM totals remain
+  read-only and ledger-reconciled. Abnormal-order rate remains the sole local
+  merchant metric shown as `DecisionBlocked`.
+
+Focused API/page tests cover both metric unions, wallet-change request and Safe
+result binding, profile-field isolation, PII role behavior and Burn/BNM reads.
+All fixtures remain under `tests/**`.
+
+## Settlement/Admin `.14` Notification Campaign Evidence
+
+The `.14` Admin checkpoint was pinned to
 `@abu24k/core-artifacts@2.0.0-settlement-admin.14` and consumes the generated
 notification campaign contracts without a parallel endpoint or provider
 fixture:
@@ -250,8 +276,9 @@ search and product-lifecycle contracts:
   exact EVM-address matching or a 6-40 hex-character wallet fragment, exact
   order/product/merchant IDs and TxHash, PendingReview, start/end and
   Today/Yesterday/7d/30d ranges. The response relation and wallet mode must
-  match the request. UID, phone and Yellow queue remain visibly fail-closed,
-  so the full source row is not reported complete.
+  match the request. At `.13`, UID, phone and Yellow queue remained visibly
+  fail-closed. `D-V2-030` now closes exact UID search; phone and Yellow queue
+  remain unavailable, so the full source row is not reported complete.
 - `ADM-GLOBAL-002`: a cross-resource selection consumes each row's
   `allowedBatchActions`; Core creates the audited CSV/Excel bytes and the
   browser never synthesizes export rows. Electronic-waybill and pickup-print
@@ -280,9 +307,8 @@ financial calculation or production fixture:
 
 - `ADM-DASH-001`: renders the exact `Asia/Shanghai` `[start,end)` window,
   15-confirmation finalized-order cohort, immutable list-price GMV,
-  buyer-paid USDT, and nullable shipment-rate numerator/denominator/bps. New
-  UID identity remains `DecisionBlocked`, so the full row is not reported
-  complete.
+  buyer-paid USDT, nullable shipment-rate numerator/denominator/bps, merchant
+  counts, seckill counts and immutable total/today-new buyer UID counts.
 - `ADM-DASH-002`: renders pending merchant/product review and the current
   exchange, delay, arbitration, forced-receipt and takeover queues. Low-stock
   threshold remains `DecisionBlocked`, so the full row is not reported
@@ -340,9 +366,9 @@ publish or copy a parallel API:
 - Cross-merchant merchant-filtered waybill batches, waybill lists, print-job
   lists and idempotent retry are consumed with exact request bodies. This does
   not complete the broader export/pickup-print scope in `ADM-GLOBAL-002`.
-- `ADM-LOG-005` remains `DecisionBlocked`: no frontend freight calculator is
-  introduced before freight charge, weight basis and its effects on buyer
-  70/30, merchant receivable and concession are frozen.
+- `ADM-LOG-005`: the original count/weight/remote model is overridden. Product
+  management writes the existing flat `defaultFreightUsdt`; payment trace reads
+  Core's product USDT, freight and total fields. Admin performs no calculation.
 
 Real Kuaidi100/Cainiao accounts, provider acceptance and physical printer/device
 evidence remain `ExternalBlocked`. All fixtures stay under `tests/**`; none is

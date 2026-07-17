@@ -99,7 +99,7 @@ CREATE OR REPLACE FUNCTION core.protect_approved_settlement_wallet() RETURNS tri
 LANGUAGE plpgsql AS $$
 BEGIN
     IF NEW.settlement_wallet IS DISTINCT FROM OLD.settlement_wallet THEN
-        RAISE EXCEPTION 'GovernedWalletMigrationRequired' USING ERRCODE = 'P0001';
+        RAISE EXCEPTION 'ImmutableSettlementWallet' USING ERRCODE = 'P0001';
     END IF;
     RETURN NEW;
 END;

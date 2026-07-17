@@ -19,6 +19,24 @@ afterEach(() => {
 });
 
 describe('Admin global operations page', () => {
+  it('submits an exact UID filter and locks relation and wallet matching to exact AND', async () => {
+    const wallet = address('7');
+    window.ethereum = walletProvider(wallet);
+    const fetchMock = globalOperationsFetch(wallet, 'ADMIN', globalSearchResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<MemoryRouter initialEntries={['/global-operations']}><App /></MemoryRouter>);
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    await user.type(await screen.findByLabelText('用户 UID'), '42');
+    expect(screen.getByRole('button', { name: 'OR' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '模糊' }).hasAttribute('disabled')).toBe(true);
+    await user.click(screen.getByRole('button', { name: '查询' }));
+
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('uid=42')
+      && String(input).includes('relation=AND') && String(input).includes('walletMatch=EXACT'))).toBe(true);
+  });
+
   it('searches, selects, downloads CSV and writes tags only with row authorization', async () => {
     const wallet = address('1');
     window.ethereum = walletProvider(wallet);
@@ -85,13 +103,58 @@ describe('Admin global operations page', () => {
     await user.click(await screen.findByRole('button', { name: '查询' }));
     await user.click(await screen.findByRole('checkbox', { name: '选择 PRODUCT product-1' }));
 
-    expect(screen.getAllByText('AUDITOR 只读：Forbidden')).toHaveLength(2);
+    expect(screen.getAllByText('AUDITOR 只读：Forbidden')).toHaveLength(3);
+    expect(screen.getByRole('button', { name: '进入面单与打印' }).hasAttribute('disabled')).toBe(true);
     expect(screen.getByRole('button', { name: '批量加标签' }).hasAttribute('disabled')).toBe(true);
     expect(screen.getByRole('button', { name: '隐藏商品' }).hasAttribute('disabled')).toBe(true);
     expect(screen.getByRole('button', { name: '导出 CSV' }).hasAttribute('disabled')).toBe(false);
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/v2/admin/catalog/tags'))).toBe(false);
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/v2/admin/catalog/products/batch-tags'))).toBe(false);
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/v2/admin/catalog/products/batch-lifecycle'))).toBe(false);
+  });
+
+  it('opens logistics operations with same-merchant order IDs prefilled', async () => {
+    const wallet = address('5');
+    window.ethereum = walletProvider(wallet);
+    const response = globalSearchResponse({
+      resources: [orderResource('order-1', 'merchant-1'), orderResource('order-2', 'merchant-1')],
+    });
+    vi.stubGlobal('fetch', globalOperationsFetch(wallet, 'ADMIN', response));
+    const user = userEvent.setup();
+    render(<MemoryRouter initialEntries={['/global-operations']}><App /></MemoryRouter>);
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    await user.click(await screen.findByRole('button', { name: '查询' }));
+    await user.click(await screen.findByRole('checkbox', { name: '选择 ORDER order-1' }));
+    await user.click(screen.getByRole('checkbox', { name: '选择 ORDER order-2' }));
+
+    const command = screen.getByRole('button', { name: '进入面单与打印' });
+    expect(command.hasAttribute('disabled')).toBe(false);
+    expect(screen.getByText('2 个同商家订单可进入面单与打印')).toBeTruthy();
+    await user.click(command);
+
+    expect((await screen.findByRole('tab', { name: '面单与打印' })).getAttribute('aria-selected')).toBe('true');
+    expect((await screen.findByLabelText('商家 ID') as HTMLInputElement).value).toBe('merchant-1');
+    expect((screen.getByLabelText('订单 ID · 每行或逗号分隔') as HTMLTextAreaElement).value).toBe('order-1\norder-2');
+  });
+
+  it('blocks cross-merchant order selections from the logistics command', async () => {
+    const wallet = address('6');
+    window.ethereum = walletProvider(wallet);
+    const response = globalSearchResponse({
+      resources: [orderResource('order-1', 'merchant-1'), orderResource('order-2', 'merchant-2')],
+    });
+    vi.stubGlobal('fetch', globalOperationsFetch(wallet, 'ADMIN', response));
+    const user = userEvent.setup();
+    render(<MemoryRouter initialEntries={['/global-operations']}><App /></MemoryRouter>);
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    await user.click(await screen.findByRole('button', { name: '查询' }));
+    await user.click(await screen.findByRole('checkbox', { name: '选择 ORDER order-1' }));
+    await user.click(screen.getByRole('checkbox', { name: '选择 ORDER order-2' }));
+
+    expect(screen.getByText('所选订单必须属于同一商家')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '进入面单与打印' }).hasAttribute('disabled')).toBe(true);
   });
 
   it('keeps the lifecycle idempotency key after failure and retries the same atomic request', async () => {
@@ -169,6 +232,11 @@ function globalOperationsFetch(wallet: string, role: UserRole, response: AdminGl
       if (failFirstLifecycle && lifecycleAttempts === 1) return jsonResponse({ error: { code: 'ExternalBlocked', message: 'Lifecycle service unavailable', correlationId: 'lifecycle-retry' } }, 503);
       return jsonResponse(lifecycleResult());
     }
+    if (url.endsWith('/v2/admin/logistics/carriers') && !init?.method) return jsonResponse({ artifactVersion, configVersionId: hash('1'), version: 1, defaultCarrierCode: 'SF', readiness: 'READY', carriers: ['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS'].map((carrierCode) => ({ carrierCode, enabled: true })), createdBy: wallet, createdAt: '2026-07-15T00:00:00.000Z' });
+    if (url.endsWith('/v2/admin/logistics/providers') && !init?.method) return jsonResponse({ artifactVersion, providers: [] });
+    if (url.endsWith('/v2/admin/logistics/warehouses') && !init?.method) return jsonResponse({ artifactVersion, warehouses: [] });
+    if (url.includes('/v2/admin/logistics/waybills?') && !init?.method) return jsonResponse({ artifactVersion, waybills: [] });
+    if (url.includes('/v2/admin/logistics/print-jobs?') && !init?.method) return jsonResponse({ artifactVersion, printJobs: [] });
     return jsonResponse({ error: { code: 'InvalidRequest', message: `Unexpected request ${url}` } }, 400);
   });
 }
@@ -180,7 +248,7 @@ function globalSearchResponse(overrides: Partial<AdminGlobalSearchResponse> = {}
     walletMatch: 'EXACT',
     resources: [productResource()],
     truncated: false,
-    unavailableFilters: ['UID', 'PHONE', 'YELLOW_QUEUE'],
+    unavailableFilters: ['PHONE', 'YELLOW_QUEUE'],
     ...overrides,
   };
 }
@@ -204,6 +272,23 @@ function productResource(allowedBatchActions: AdminGlobalSearchResponse['resourc
     productId: 'product-1',
     tagIds: [],
     allowedBatchActions,
+    createdAt: '2026-07-15T00:00:00.000Z',
+  };
+}
+
+function orderResource(resourceId: string, merchantId: string | null) {
+  return {
+    resourceType: 'ORDER' as const,
+    resourceId,
+    title: `订单 ${resourceId}`,
+    status: 'PAID',
+    merchantId,
+    productId: 'product-1',
+    tagIds: [],
+    allowedBatchActions: [
+      { action: 'EXPORT_CSV' as const, enabled: true },
+      { action: 'EXPORT_EXCEL' as const, enabled: true },
+    ],
     createdAt: '2026-07-15T00:00:00.000Z',
   };
 }

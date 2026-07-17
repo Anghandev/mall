@@ -105,7 +105,7 @@ export function MerchantFinancePage() {
     <>
       <header className="page-header">
         <div className="page-icon"><Building2 aria-hidden="true" /></div>
-        <div><p className="eyebrow">MERCHANT LIFECYCLE</p><h1>商家准入与经营穿透</h1><p>资质版本、审核签名、Safe 证据、履约贡献和五态应收均直接消费 Core；结算钱包保持不可变。</p></div>
+        <div><p className="eyebrow">MERCHANT LIFECYCLE</p><h1>商家准入与经营穿透</h1><p>资质版本、等级政策、履约指标和五态应收均直接消费 Core；结算钱包审核通过后永久不可变更。</p></div>
         <div className="requirement-list"><code>ADM-MER-001</code><code>ADM-MER-003..006</code></div>
       </header>
 
@@ -190,7 +190,7 @@ function CreateApplication({ token, onCreated }: { token: string; onCreated(deta
           <label>主体名称<input value={input.legalName} onChange={(event) => setInput({ ...input, legalName: event.target.value })} minLength={2} maxLength={80} required /></label>
           <label>证件编号<input value={input.legalId} onChange={(event) => setInput({ ...input, legalId: event.target.value })} minLength={6} maxLength={32} required /></label>
           <label>联系电话<input value={input.contactPhone} onChange={(event) => setInput({ ...input, contactPhone: event.target.value })} minLength={6} maxLength={32} required /></label>
-          <label>结算钱包<input value={input.settlementWallet} onChange={(event) => setInput({ ...input, settlementWallet: event.target.value })} pattern="0x[0-9a-fA-F]{40}" required /><small>创建后不可在本批修改</small></label>
+          <label>结算钱包<input value={input.settlementWallet} onChange={(event) => setInput({ ...input, settlementWallet: event.target.value })} pattern="0x[0-9a-fA-F]{40}" required /><small>审核通过后永久不可变更；填错时请拒绝旧申请后重新申请</small></label>
           <label>商家等级<select value={input.level} onChange={(event) => setInput({ ...input, level: event.target.value as MerchantApplicationCreateRequest['level'] })}>{merchantLevels.map((level) => <option key={level}>{level}</option>)}</select></label>
           <label>Idempotency key<input value={input.idempotencyKey} onChange={(event) => setInput({ ...input, idempotencyKey: event.target.value })} minLength={8} maxLength={128} required /></label>
         </div>
@@ -211,11 +211,12 @@ function MerchantDetail(props: {
     <div className="merchant-detail">
       <div className="panel-heading merchant-detail-heading"><div><p className="section-kicker">GET /v2/admin/merchants/{'{merchantId}'}</p><h2>{detail.merchant.shopName ?? detail.merchant.merchantId}</h2><code>{detail.merchant.merchantId}</code></div><StatusBadge status={detail.merchant.status} /></div>
       <dl className="merchant-facts">
-        <Fact label="结算钱包" value={detail.merchant.settlementWallet} note="immutable" code />
-        <Fact label="等级" value={detail.merchant.level} note="限额语义待冻结" />
+        <Fact label="结算钱包" value={detail.merchant.settlementWallet} note="RBAC + secondary EIP-712 + Safe" code />
+        <Fact label="等级" value={detail.merchant.level} note={detail.levelPolicy.status === 'AVAILABLE' ? `policy v${detail.levelPolicy.version}` : 'DecisionBlocked'} />
         <Fact label="资质版本" value={`v${detail.merchant.applicationVersion}`} note={detail.merchant.qualificationComplete ? '完整' : '缺少已验证证照'} />
         <Fact label="保证金状态" value={detail.merchant.guaranteeStatus} note="Core 投影" />
       </dl>
+      {detail.levelPolicy.status === 'AVAILABLE' ? <LevelPolicy policy={detail.levelPolicy} /> : null}
 
       <section className="merchant-section" aria-labelledby="merchant-qualification-title">
         <div className="merchant-section-heading"><div><p className="section-kicker">ENCRYPTED QUALIFICATION</p><h3 id="merchant-qualification-title">资质与联系人</h3></div><span className="status-chip">{q.access}</span></div>
@@ -303,12 +304,16 @@ function ReviewWorkspace(props: { detail: MerchantLifecycleDetail; sessionWallet
   const [reasonCode, setReasonCode] = useState('');
   const [idempotencyKey, setIdempotencyKey] = useState('');
   const [busy, setBusy] = useState(false);
-  useEffect(() => { setAction(actions[0] ?? ''); setReasonCode(''); setIdempotencyKey(''); }, [props.detail.merchant.status]);
+  useEffect(() => { setAction(actions[0] ?? ''); setReasonCode(''); setIdempotencyKey(''); }, [props.detail.merchant.merchantId, props.detail.merchant.status]);
   if (actions.length === 0) return null;
   const publish = async (event: FormEvent) => {
     event.preventDefault(); if (!action) return; setBusy(true); props.onError(null);
     try {
-      const challenge = await createMerchantReviewChallenge(props.detail, { action, reasonCode, idempotencyKey }, props.sessionWallet, props.token);
+      const challenge = await createMerchantReviewChallenge(props.detail, {
+        action,
+        reasonCode,
+        idempotencyKey,
+      }, props.sessionWallet, props.token);
       if (!window.ethereum) throw new CoreApiError({ code: 'ConfigurationRequired', message: '未检测到支持 EIP-1193 的二次签名钱包', status: 503 });
       const signature = await window.ethereum.request({ method: 'eth_signTypedData_v4', params: [challenge.secondarySigner, JSON.stringify(challenge.typedData)] });
       if (typeof signature !== 'string') throw new CoreApiError({ code: 'InvalidResponse', message: '钱包没有返回签名', status: 502 });
@@ -331,9 +336,8 @@ function ReviewWorkspace(props: { detail: MerchantLifecycleDetail; sessionWallet
 }
 
 function DecisionBlocks({ detail }: { detail: MerchantLifecycleDetail }) {
-  return <section className="merchant-decision-grid" aria-label="未冻结经营指标">
-    <DecisionNotice label="等级价格 / 配额" reason={detail.levelPolicy.reason} />
-    <DecisionNotice label="48H 发货率" reason={detail.analytics.fulfillment.fastShip48h.reason} />
+  return <section className="merchant-decision-grid" aria-label="不可用经营指标">
+    {detail.levelPolicy.status === 'DecisionBlocked' ? <DecisionNotice label="等级价格 / 配额" reason={detail.levelPolicy.reason} /> : null}
     <DecisionNotice label="异常订单率" reason="异常订单分类与分母尚未冻结，Core 返回 bps=null。" />
   </section>;
 }
@@ -346,6 +350,7 @@ function Analytics({ detail }: { detail: MerchantLifecycleDetail }) {
       <Fact label="终局订单" value={analytics.orders.totalFinalized} note={`普通 ${analytics.orders.ordinaryFinalized} / 秒杀 ${analytics.orders.seckillFinalized}`} />
       <Fact label="待发货" value={analytics.fulfillment.pendingShipment} note={`运输中 ${analytics.fulfillment.inTransit}`} />
       <Fact label="已履约" value={analytics.fulfillment.completed} note={`自提 ${analytics.fulfillment.pickupCompleted}`} />
+      <Fact label="48H 发货率" value={analytics.fulfillment.fastShip48h.status === 'AVAILABLE' ? `${analytics.fulfillment.fastShip48h.bps} bps` : '不可用'} note={fastShipNote(analytics.fulfillment.fastShip48h)} />
       <Fact label="接管案件" value={analytics.risk.takeoverCases} note={`未偿债务 ${analytics.risk.outstandingDebtUsdt}`} />
     </div>
     <div className="table-scroll"><table className="data-table merchant-amount-table"><thead><tr><th>命名金额 · USDT atomic</th><th>累计</th><th>今日</th></tr></thead><tbody>
@@ -382,6 +387,19 @@ function LicenseAccess({ merchantId, assetId, token }: { merchantId: string; ass
   return <div className="merchant-license-access"><span><FileCheck2 aria-hidden="true" /><strong>已验证证照</strong><code>{assetId}</code></span>{access ? <a className="button button-quiet" href={access.readUrl} target="_blank" rel="noreferrer">受控查看<ExternalLink aria-hidden="true" /></a> : <button className="button button-quiet" type="button" onClick={() => void load()} disabled={loading}>{loading ? <LoaderCircle className="spin" aria-hidden="true" /> : <FileCheck2 aria-hidden="true" />}{loading ? '授权中' : '获取受控地址'}</button>}{error ? <CoreErrorState error={error} /> : null}</div>;
 }
 
+function LevelPolicy({ policy }: { policy: Extract<MerchantLifecycleDetail['levelPolicy'], { status: 'AVAILABLE' }> }) {
+  return <section className="merchant-level-policy" aria-label="当前商家等级政策">
+    <div className="merchant-section-heading"><div><p className="section-kicker">VERSIONED LEVEL POLICY</p><h3>当前等级限额与秒杀配额</h3></div><span className="status-chip status-ready">AVAILABLE</span></div>
+    <dl>
+      <Fact label="Config version" value={policy.configVersionId} note={`v${policy.version}`} code />
+      <Fact label="生效时间" value={formatDate(policy.effectiveFrom)} />
+      <Fact label="当前等级" value={policy.level} />
+      <Fact label="单品结算上限" value={policy.maxProductSettlementUsdt} note="USDT atomic" />
+      <Fact label="每月秒杀配额" value={String(policy.monthlySeckillQuota)} note="sessions" />
+    </dl>
+  </section>;
+}
+
 function DecisionNotice({ label, reason }: { label: string; reason: string }) { return <article className="merchant-decision"><AlertTriangle aria-hidden="true" /><div><strong>{label}</strong><p>{reason}</p></div><span>DecisionBlocked</span></article>; }
 function CoreErrorState({ error }: { error: CoreApiError }) { return <div className="resource-state resource-state-error merchant-error" role="alert"><Ban aria-hidden="true" /><div><strong>{error.code}</strong><p>{error.message}</p>{error.correlationId ? <code>{error.correlationId}</code> : null}</div></div>; }
 function LoadingRows() { return <div className="table-skeleton merchant-loading" aria-label="正在加载" role="status"><span /><span /><span /></div>; }
@@ -391,6 +409,7 @@ function Fact({ label, value, note, code = false }: { label: string; value: stri
 function allowedReviewActions(status: MerchantLifecycleStatus): readonly MerchantReviewAction[] { if (status === 'PENDING') return ['APPROVE', 'REJECT']; if (status === 'APPROVED') return ['BLACKLIST']; return []; }
 function statusLabel(status: StatusFilter) { return status === 'ALL' ? '全部' : status === 'PENDING' ? '待审核' : status === 'APPROVED' ? '已通过' : status === 'REJECTED' ? '已拒绝' : status === 'SUSPENDED' ? '已暂停' : '黑名单'; }
 function actionLabel(action: MerchantReviewAction) { return action === 'APPROVE' ? '通过资质' : action === 'REJECT' ? '拒绝资质' : '加入黑名单'; }
+function fastShipNote(metric: MerchantLifecycleDetail['analytics']['fulfillment']['fastShip48h']) { return metric.status === 'AVAILABLE' ? `numerator ${metric.numerator} / denominator ${metric.denominator}` : `${metric.reason} · numerator ${metric.numerator} / denominator ${metric.denominator}`; }
 function amountRows(orders: MerchantLifecycleDetail['analytics']['orders']) { return [
   { label: '商品标价', cumulative: orders.cumulative.listPriceUsdt, today: orders.today.listPriceUsdt },
   { label: '买家实付 USDT', cumulative: orders.cumulative.buyerPaidUsdt, today: orders.today.buyerPaidUsdt },
