@@ -434,9 +434,14 @@ function readyPolicy(): FrozenPaymentPolicy {
     operationsTreasurySafe: '0x5555555555555555555555555555555555555555',
     circulationPool: '0x6666666666666666666666666666666666666666',
     concessionDestinationSetHash: paymentAllocationSetHash(),
+    genesisNodeDestinations: [
+      { account: '0x7777777777777777777777777777777777777777', weightBps: 10_000 },
+    ],
     operationsDestinations: [
-      { account: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', weightBps: 4_000 },
-      { account: '0xcccccccccccccccccccccccccccccccccccccccc', weightBps: 6_000 },
+      { account: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', weightBps: 2_500 },
+      { account: '0xcccccccccccccccccccccccccccccccccccccccc', weightBps: 2_500 },
+      { account: '0xdddddddddddddddddddddddddddddddddddddddd', weightBps: 2_500 },
+      { account: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', weightBps: 2_500 },
     ],
   };
 }
@@ -466,7 +471,7 @@ function quoteRequest(): PaymentQuoteRequest {
     nplQuoteAmount: 1_000n,
     merchantConcessionBps: 2_500,
     beneficiaries: {
-      genesis: CONTRACT,
+      genesis: '0x0000000000000000000000000000000000000000',
       directReferral: '0x5555555555555555555555555555555555555555',
       district: '0x6666666666666666666666666666666666666666',
       city: '0x7777777777777777777777777777777777777777',
