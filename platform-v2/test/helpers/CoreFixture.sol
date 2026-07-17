@@ -188,6 +188,8 @@ abstract contract CoreFixture is TestBase {
             deadline: uint64(block.timestamp + V2Types.QUOTE_VALIDITY),
             nonce: nonce,
             listPriceUsdt: 100 ether,
+            productUsdtPaymentAmount: 70 ether,
+            freightUsdt: 0,
             usdtPaymentAmount: 70 ether,
             nplQuoteAmount: 1_000 ether,
             nplPaymentAmount: 300 ether,
@@ -213,12 +215,13 @@ abstract contract CoreFixture is TestBase {
         uint16 concessionBps
     ) internal pure returns (V2Types.PaymentIntent memory) {
         intent.listPriceUsdt = listPriceUsdt;
-        intent.usdtPaymentAmount = listPriceUsdt * 7_000 / 10_000;
+        intent.productUsdtPaymentAmount = listPriceUsdt * 7_000 / 10_000;
+        intent.usdtPaymentAmount = intent.productUsdtPaymentAmount + intent.freightUsdt;
         intent.nplQuoteAmount = nplQuoteAmount;
         intent.nplPaymentAmount = nplQuoteAmount * 3_000 / 10_000;
         intent.nplBurnAmount = nplQuoteAmount * 2_000 / 10_000;
         intent.nplRewardAmount = intent.nplPaymentAmount - intent.nplBurnAmount;
-        intent.merchantBaseReceivableUsdt = intent.usdtPaymentAmount * 8_000 / 10_000;
+        intent.merchantBaseReceivableUsdt = intent.productUsdtPaymentAmount * 8_000 / 10_000;
         intent.merchantConcessionBps = concessionBps;
         intent.merchantConcessionAmount = intent.merchantBaseReceivableUsdt * concessionBps / 10_000;
         intent.merchantNetReceivableUsdt = intent.merchantBaseReceivableUsdt - intent.merchantConcessionAmount;

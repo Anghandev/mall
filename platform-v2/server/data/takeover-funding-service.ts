@@ -714,15 +714,29 @@ export async function captureMerchantFutureProceeds(
      JOIN core.ledger_journals journal ON journal.journal_id = line.journal_id
      JOIN core.ledger_accounts account ON account.account_id = line.account_id
      WHERE journal.order_id = $1 AND account.owner_id = $2
-       AND account.purpose = 'MERCHANT_RECEIVABLE' AND account.asset = 'USDT'
+       AND account.purpose IN ('MERCHANT_RECEIVABLE','MERCHANT_FREIGHT_RECEIVABLE')
+       AND account.asset = 'USDT'
        AND line.balance_state = 'AVAILABLE' AND line.backing_safe_address IS NOT NULL
      GROUP BY line.account_id, line.backing_safe_address
-     HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) > 0`,
+     HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) > 0
+     ORDER BY line.account_id`,
     [input.orderId, orderRow.merchant_wallet],
   );
-  const source = available.rows[0];
-  if (!source) return { capturedUsdt: '0', idempotent: false };
-  const captured = minimum(outstanding, BigInt(source.amount));
+  const sources = available.rows;
+  if (sources.length === 0) return { capturedUsdt: '0', idempotent: false };
+  const backingSafe = sources[0]!.backing_safe_address;
+  if (sources.some((source) => source.backing_safe_address !== backingSafe)) {
+    throw new CoreError('InvalidFinality', 'Merchant proceeds span different Custody Safes', 409);
+  }
+  const captured = minimum(outstanding, sources.reduce((sum, source) => sum + BigInt(source.amount), 0n));
+  let sourceRemaining = captured;
+  const sourceDebits: Array<{ accountId: string; amount: string }> = [];
+  for (const source of sources) {
+    if (sourceRemaining === 0n) break;
+    const amount = minimum(sourceRemaining, BigInt(source.amount));
+    sourceDebits.push({ accountId: source.account_id, amount: amount.toString() });
+    sourceRemaining -= amount;
+  }
   const cases = await executor.query<{
     case_id: string;
     platform_advance_safe_address: string;
@@ -776,23 +790,23 @@ export async function captureMerchantFutureProceeds(
     });
   }
   await lockAccounts(executor, [
-    source.account_id,
+    ...sourceDebits.map((source) => source.accountId),
     ...allocations.map((allocation) => allocation.reimbursementAccount),
   ]);
   const lines: LedgerLine[] = [
-    {
-      account_id: source.account_id,
+    ...sourceDebits.map((source) => ({
+      account_id: source.accountId,
       side: 'DEBIT',
-      amount: captured.toString(),
+      amount: source.amount,
       balance_state: 'AVAILABLE',
-      backing_safe_address: source.backing_safe_address,
-    },
+      backing_safe_address: backingSafe,
+    } as const)),
     ...allocations.map((allocation) => ({
       account_id: allocation.reimbursementAccount,
       side: 'CREDIT',
       amount: allocation.amount,
       balance_state: 'AVAILABLE',
-      backing_safe_address: source.backing_safe_address,
+      backing_safe_address: backingSafe,
     })),
   ];
   const journalId = `journal:future-proceeds:${input.orderId}`;
@@ -841,7 +855,7 @@ export async function captureMerchantFutureProceeds(
         input.orderId,
         allocation.amount,
         allocation.operationsSafe,
-        source.backing_safe_address,
+        backingSafe,
         journalId,
         input.evidenceHash,
         input.capturedAt,
@@ -1040,7 +1054,8 @@ async function availableReceivables(executor: SqlExecutor, settlementWallet: str
      FROM core.ledger_lines line
      JOIN core.ledger_journals journal ON journal.journal_id = line.journal_id
      JOIN core.ledger_accounts account ON account.account_id = line.account_id
-     WHERE account.owner_id = $1 AND account.purpose = 'MERCHANT_RECEIVABLE'
+     WHERE account.owner_id = $1
+       AND account.purpose IN ('MERCHANT_RECEIVABLE','MERCHANT_FREIGHT_RECEIVABLE')
        AND account.asset = 'USDT' AND line.balance_state = 'AVAILABLE'
        AND line.backing_safe_address IS NOT NULL
      GROUP BY journal.order_id, line.account_id, line.backing_safe_address

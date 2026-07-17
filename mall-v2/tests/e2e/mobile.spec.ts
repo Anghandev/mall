@@ -142,7 +142,7 @@ test('buyer account and address review fit the mobile frame and remain keyboard 
   await page.goto('/assets');
   await page.getByRole('button', { name: '连接钱包' }).click();
   await expect(page.getByRole('heading', { name: buyerProfile.nickname! })).toBeVisible();
-  await expect(page.getByText('买家 UID：DecisionBlocked')).toBeVisible();
+  await expect(page.getByText('买家 UID：10001')).toBeVisible();
   await page.getByRole('link', { name: '打开我的收货地址' }).click();
   const rawText = page.getByLabel('地址文本');
   await rawText.fill('张三 13800138000 辽宁省大连市中山区示例路 24 号');

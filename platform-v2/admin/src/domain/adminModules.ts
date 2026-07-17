@@ -56,7 +56,7 @@ export const adminModules: readonly AdminModule[] = [
     description: '跨订单、商品与商家执行服务端 AND 精确检索、审计导出和授权商品批量标签。',
     icon: SearchCheck,
     requirements: ['ADM-GLOBAL-001', 'ADM-GLOBAL-002'],
-    gap: 'OR / fuzzy wallet / UID / phone / Yellow queue remain unavailable',
+    gap: 'OR / fuzzy wallet / phone / Yellow queue remain unavailable',
     fields: ['订单 / 商品 / 商家', '精确 ID / TxHash / wallet', '时间与待审核', 'CSV / Excel', '商品标签'],
     evidence: ['server-side AND', 'row allowedBatchActions', 'export content hash', 'product version result'],
     immutable: true,

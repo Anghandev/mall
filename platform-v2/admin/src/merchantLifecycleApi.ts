@@ -111,15 +111,6 @@ export async function createMerchantReviewChallenge(
   requireReason(input.reasonCode);
   requireIdempotencyKey(input.idempotencyKey);
   requireAddress(actorWallet, 'actorWallet');
-  if (input.action === 'CHANGE_SETTLEMENT_WALLET') {
-    if (input.proposedSettlementWallet === undefined) throw invalid('proposedSettlementWallet is required', 400);
-    requireAddress(input.proposedSettlementWallet, 'proposedSettlementWallet');
-    if (input.proposedSettlementWallet.toLowerCase() === merchant.merchant.settlementWallet.toLowerCase()) {
-      throw invalid('proposedSettlementWallet must differ from the current wallet', 400);
-    }
-  } else if (input.proposedSettlementWallet !== undefined) {
-    throw invalid('proposedSettlementWallet is valid only for a wallet change', 400);
-  }
   const expected = reviewTransition(merchant.merchant.status, input.action);
   const body = await authenticatedWrite(
     `/v2/admin/merchants/${encodeURIComponent(resourceId(merchant.merchant.merchantId))}/review-challenges`,
@@ -140,18 +131,11 @@ export async function publishMerchantReview(
   challenge: MerchantReviewChallenge,
   signature: string,
   token: string,
-  proposedSettlementWallet?: string,
 ): Promise<MerchantLifecycleDetail> {
   if (challenge.state !== 'DRAFT' || Date.parse(challenge.expiresAt) <= Date.now()) {
     throw invalid('Merchant review challenge is expired', 401);
   }
   if (!signaturePattern.test(signature)) throw invalid('Merchant review signature is invalid', 400);
-  if (challenge.action === 'CHANGE_SETTLEMENT_WALLET') {
-    if (proposedSettlementWallet === undefined) throw invalid('Expected settlement wallet is required', 400);
-    requireAddress(proposedSettlementWallet, 'proposedSettlementWallet');
-  } else if (proposedSettlementWallet !== undefined) {
-    throw invalid('Expected settlement wallet is valid only for a wallet change', 400);
-  }
   const body = await authenticatedWrite(
     `/v2/admin/merchants/${encodeURIComponent(resourceId(challenge.merchantId))}/review-actions/${challenge.actionId.toLowerCase()}/publish`,
     'POST',
@@ -163,8 +147,6 @@ export async function publishMerchantReview(
       || body.merchant.merchantId !== challenge.merchantId
       || body.merchant.status !== challenge.toStatus
       || body.merchant.applicationVersion !== challenge.applicationVersion
-      || (challenge.action === 'CHANGE_SETTLEMENT_WALLET'
-        && body.merchant.settlementWallet.toLowerCase() !== proposedSettlementWallet?.toLowerCase())
       || !body.reviews.some((review) => review.actionId.toLowerCase() === challenge.actionId.toLowerCase()
         && review.state === 'PUBLISHED'
         && review.safeTxHash !== null)
@@ -423,7 +405,6 @@ function reviewTransition(status: MerchantLifecycleStatus, action: MerchantRevie
   if (status === 'PENDING' && action === 'APPROVE') return 'APPROVED';
   if (status === 'PENDING' && action === 'REJECT') return 'REJECTED';
   if (status === 'APPROVED' && action === 'BLACKLIST') return 'BLACKLISTED';
-  if (status === 'APPROVED' && action === 'CHANGE_SETTLEMENT_WALLET') return 'APPROVED';
   throw invalid(`Merchant ${status} cannot apply ${action}`, 409);
 }
 

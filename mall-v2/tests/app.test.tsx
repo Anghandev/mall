@@ -215,7 +215,7 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByRole('heading', { name: '常规商城' })).toBeTruthy();
   });
 
-  it('renders the real buyer profile, DecisionBlocked UID and canonical overview counts', async () => {
+  it('renders the real buyer profile, UID and canonical overview counts', async () => {
     const user = userEvent.setup();
     renderAt('/assets', readyServices({
       getBuyerProfile: vi.fn().mockResolvedValue(buyerProfile),
@@ -224,7 +224,7 @@ describe('Mall V2 payment consumer', () => {
 
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     expect(await screen.findByRole('heading', { name: buyerProfile.nickname! })).toBeTruthy();
-    expect(screen.getByText('买家 UID：DecisionBlocked')).toBeTruthy();
+    expect(screen.getByText('买家 UID：10001')).toBeTruthy();
     expect(screen.getByText('DecisionBlocked', { selector: '.order-status-item strong' })).toBeTruthy();
     expect(screen.getByText('2', { selector: '.order-status-item strong' })).toBeTruthy();
     expect(screen.getByText('3', { selector: '.order-status-item strong' })).toBeTruthy();
@@ -433,6 +433,8 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText(`${quote.intent.listPriceUsdt} USDT 原子单位`)).toBeTruthy();
 
     await user.click(screen.getByRole('link', { name: /核对报价/ }));
+    expect(screen.getByText(quote.intent.productUsdtPaymentAmount)).toBeTruthy();
+    expect(screen.getByText(quote.intent.freightUsdt)).toBeTruthy();
     expect(screen.getByText(quote.intent.usdtPaymentAmount)).toBeTruthy();
     expect(screen.getByText(quote.intent.nplPaymentAmount)).toBeTruthy();
     expect(screen.getByText(/pay · BSC 56/)).toBeTruthy();
@@ -1114,6 +1116,8 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('tab', { name: '消费购物' }));
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     expect(await screen.findByText(ordinaryShoppingStatement.paymentTxHash)).toBeTruthy();
+    expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.productUsdtPaymentAmount} 原子单位`)).toBeTruthy();
+    expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.freightUsdt} 原子单位`)).toBeTruthy();
     expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.usdtPaymentAmount} 原子单位`)).toBeTruthy();
     expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.nplPaymentAmount} 原子单位`)).toBeTruthy();
     expect(screen.getByText(`${ordinaryShoppingStatement.bnm.amount} 原子单位`)).toBeTruthy();
@@ -1386,7 +1390,7 @@ function servicesWith(overrides: Partial<CoreClient>): MallServices {
     completeMediaUpload: vi.fn().mockRejectedValue(new Error('not configured')),
     authenticate: vi.fn().mockResolvedValue({ token: 'buyer-session', walletAddress: BUYER, roles: ['BUYER'] }),
     getBuyerProfile: vi.fn().mockResolvedValue({
-      artifactVersion, wallet: BUYER, accountId: null, accountIdStatus: 'DecisionBlocked',
+      artifactVersion, wallet: BUYER, accountId: '10001',
       nickname: null, avatarAssetId: null, version: 0, updatedAt: null,
     }),
     updateBuyerProfile: vi.fn().mockRejectedValue(new Error('not configured')),

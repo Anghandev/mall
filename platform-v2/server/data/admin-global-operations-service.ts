@@ -28,6 +28,7 @@ export interface AdminGlobalSearchQuery {
   productId?: string;
   merchantId?: string;
   txHash?: string;
+  uid?: string;
   wallet?: string;
   walletMatch?: 'EXACT' | 'FUZZY';
   from?: Date;
@@ -83,14 +84,33 @@ export class AdminGlobalOperationsService {
     const query = searchQuery(input);
     return this.#transactions.transaction(async (executor) => {
       const role = await requireCurrentPlatformRole(executor, actor, true);
+      let effectiveQuery = query;
+      if (query.uid) {
+        const identity = await executor.query<{ buyer_wallet: string }>(
+          'SELECT buyer_wallet FROM core.buyer_accounts WHERE uid = $1::bigint',
+          [query.uid],
+        );
+        const buyerWallet = identity.rows[0]?.buyer_wallet;
+        if (!buyerWallet || (query.wallet && query.wallet !== buyerWallet)) {
+          return {
+            artifactVersion: CORE_ARTIFACT_VERSION,
+            relation: query.relation,
+            walletMatch: query.walletMatch,
+            resources: [],
+            truncated: false,
+            unavailableFilters: ['PHONE', 'YELLOW_QUEUE'] as const,
+          };
+        }
+        effectiveQuery = { ...query, wallet: buyerWallet, walletMatch: 'EXACT' as const };
+      }
       const rows: ResourceRow[] = [];
-      if (query.resourceTypes.includes('ORDER')) rows.push(...await searchOrders(executor, query));
-      if (query.resourceTypes.includes('PRODUCT')) rows.push(...await searchProducts(executor, query));
-      if (query.resourceTypes.includes('MERCHANT')) rows.push(...await searchMerchants(executor, query));
+      if (effectiveQuery.resourceTypes.includes('ORDER')) rows.push(...await searchOrders(executor, effectiveQuery));
+      if (effectiveQuery.resourceTypes.includes('PRODUCT')) rows.push(...await searchProducts(executor, effectiveQuery));
+      if (effectiveQuery.resourceTypes.includes('MERCHANT')) rows.push(...await searchMerchants(executor, effectiveQuery));
       rows.sort(compareResourceRows);
-      const truncated = rows.length > query.limit;
+      const truncated = rows.length > effectiveQuery.limit;
       const resources = [];
-      for (const row of rows.slice(0, query.limit)) {
+      for (const row of rows.slice(0, effectiveQuery.limit)) {
         const actions = await allowedBatchActions(executor, row, role, this.#clock());
         resources.push(resourceProjection(row, actions));
       }
@@ -100,7 +120,7 @@ export class AdminGlobalOperationsService {
         walletMatch: query.walletMatch,
         resources,
         truncated,
-        unavailableFilters: ['UID', 'PHONE', 'YELLOW_QUEUE'] as const,
+        unavailableFilters: ['PHONE', 'YELLOW_QUEUE'] as const,
       };
     });
   }
@@ -428,6 +448,10 @@ function searchQuery(input: AdminGlobalSearchQuery) {
   }
   const txHash = input.txHash?.toLowerCase();
   if (txHash && !/^0x[0-9a-f]{64}$/.test(txHash)) throw new CoreError('InvalidRequest', 'txHash is invalid');
+  const uid = input.uid?.trim();
+  if (uid && (!/^[1-9][0-9]{0,18}$/.test(uid) || (uid.length === 19 && uid > '9223372036854775807'))) {
+    throw new CoreError('InvalidRequest', 'Buyer UID is invalid');
+  }
   const wallet = input.wallet
     ? walletMatch === 'EXACT' ? normalizedWallet(input.wallet) : fuzzyWalletFragment(input.wallet)
     : undefined;
@@ -435,9 +459,12 @@ function searchQuery(input: AdminGlobalSearchQuery) {
   const limit = input.limit ?? 50;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new CoreError('InvalidRequest', 'Search limit must be 1-100');
   const hasCriteria = Boolean(
-    input.orderId || input.productId || input.merchantId || txHash || wallet || input.from || input.to
+    input.orderId || input.productId || input.merchantId || txHash || uid || wallet || input.from || input.to
       || input.pendingReview !== undefined,
   );
+  if (uid && (relation !== 'AND' || walletMatch !== 'EXACT')) {
+    throw new CoreError('InvalidRequest', 'Buyer UID requires exact AND search');
+  }
   return {
     resourceTypes,
     relation,
@@ -447,6 +474,7 @@ function searchQuery(input: AdminGlobalSearchQuery) {
     ...(input.productId ? { productId: input.productId } : {}),
     ...(input.merchantId ? { merchantId: input.merchantId } : {}),
     ...(txHash ? { txHash } : {}),
+    ...(uid ? { uid } : {}),
     ...(wallet ? { wallet } : {}),
     ...(input.from ? { from: input.from } : {}),
     ...(input.to ? { to: input.to } : {}),

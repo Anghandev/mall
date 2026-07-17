@@ -859,9 +859,7 @@ function parseBuyerProfile(value: unknown): BuyerProfile {
   const profile = objectValue(value);
   assertArtifactVersion(stringValue(profile.artifactVersion));
   addressValue(profile.wallet);
-  if (profile.accountId !== null || profile.accountIdStatus !== 'DecisionBlocked') {
-    throw new CoreClientError('InvalidResponse', '买家账号未按冻结状态返回');
-  }
+  if (atomicValue(profile.accountId) === '0') throw new CoreClientError('InvalidResponse', '买家 UID 无效');
   if (profile.nickname !== null) boundedNonEmptyStringValue(profile.nickname, 40);
   optionalBytes32Value(profile.avatarAssetId);
   nonNegativeIntegerValue(profile.version);
@@ -1015,7 +1013,11 @@ function parseBuyerShoppingStatement(value: unknown): BuyerShoppingStatement {
   enumValue(statement.orderKind, ['ORDINARY', 'FALLBACK_RETAIL'] as const);
 
   const paymentAmounts = objectValue(statement.paymentAmounts);
-  assertOnlyKeys(paymentAmounts, ['usdtPaymentAmount', 'nplPaymentAmount'], '购物记录付款金额包含未发布字段');
+  assertOnlyKeys(paymentAmounts, [
+    'productUsdtPaymentAmount', 'freightUsdt', 'usdtPaymentAmount', 'nplPaymentAmount',
+  ], '购物记录付款金额包含未发布字段');
+  atomicValue(paymentAmounts.productUsdtPaymentAmount);
+  atomicValue(paymentAmounts.freightUsdt);
   atomicValue(paymentAmounts.usdtPaymentAmount);
   atomicValue(paymentAmounts.nplPaymentAmount);
 
@@ -1933,7 +1935,8 @@ function parseFulfillmentOrder(value: unknown): FulfillmentOrder {
   enumValue(order.finalityStatus, ['NOT_SUBMITTED', 'PENDING', 'CONFIRMED', 'REPLACED', 'REORGED', 'FINAL'] as const);
   const amounts = objectValue(order.exactAmounts);
   for (const field of [
-    'listPriceUsdt', 'usdtPaymentAmount', 'nplQuoteAmount', 'nplPaymentAmount',
+    'listPriceUsdt', 'productUsdtPaymentAmount', 'freightUsdt', 'usdtPaymentAmount',
+    'nplQuoteAmount', 'nplPaymentAmount',
     'nplBurnAmount', 'nplRewardAmount', 'merchantBaseReceivableUsdt',
     'merchantConcessionAmount', 'merchantNetReceivableUsdt', 'bnmAmount',
   ] as const) atomicValue(amounts[field]);

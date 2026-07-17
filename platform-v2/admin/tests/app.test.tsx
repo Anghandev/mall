@@ -229,7 +229,7 @@ describe('platform admin fail-closed experience', () => {
     const pendingAppealMetric = screen.getByText('待处理风险申诉').closest('div')!;
     expect(within(abnormalRiskMetric).getByText('11')).toBeTruthy();
     expect(within(pendingAppealMetric).getByText('14')).toBeTruthy();
-    expect(screen.getAllByText('Buyer UID identity is not frozen')).toHaveLength(2);
+    expect(within(screen.getByText('今日新增 UID').closest('div')!).getByText('2')).toBeTruthy();
     expect(screen.getByText('0x4444444444444444444444444444444444444444')).toBeTruthy();
     expect(screen.getAllByText('paused = true')).toHaveLength(2);
     expect(screen.getByLabelText('Approval nonce').hasAttribute('disabled')).toBe(true);
@@ -671,6 +671,7 @@ describe('platform admin fail-closed experience', () => {
 
   it('uses the Core policy challenge for typed-data signing before a Safe proposal', async () => {
     const wallet = '0x1111111111111111111111111111111111111111';
+    const secondarySigner = '0x3333333333333333333333333333333333333333';
     const providerRequest = vi.fn(async ({ method }: { method: string }) => {
       if (method === 'eth_requestAccounts') return [wallet];
       if (method === 'personal_sign') return '0xsiwe';
@@ -683,9 +684,9 @@ describe('platform admin fail-closed experience', () => {
       if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
       if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['ADMIN'] });
       if (url.endsWith('/v2/admin/policy-drafts') && !init?.method) return jsonResponse([policyDraft()]);
-      if (url.endsWith('/approval-challenge')) return jsonResponse({ draftId: 'draft-1', policyVersion: 2, signer: wallet, typedData: { domain: { name: 'Abu24KPolicyRegistry' }, types: { PolicyPublication: [] }, primaryType: 'PolicyPublication', message: { policyHash: hash('1') } }, digest: hash('2') });
-      if (url.endsWith('/secondary-signature')) return jsonResponse(policyDraft({ state: 'SECONDARY_SIGNED', secondarySigner: wallet, secondarySignatureHash: hash('3') }));
-      if (url.endsWith('/safe-proposal')) return jsonResponse(policyDraft({ state: 'SAFE_PROPOSED', secondarySigner: wallet, secondarySignatureHash: hash('3'), safeAddress: '0x2222222222222222222222222222222222222222', safeCalldataHash: hash('4'), safeTxHash: hash('5'), safeProposalHash: hash('6') }), 202);
+      if (url.endsWith('/approval-challenge')) return jsonResponse({ draftId: 'draft-1', policyVersion: 2, signer: secondarySigner, typedData: { domain: { name: 'Abu24KPolicyRegistry' }, types: { PolicyPublication: [] }, primaryType: 'PolicyPublication', message: { policyHash: hash('1') } }, digest: hash('2') });
+      if (url.endsWith('/secondary-signature')) return jsonResponse(policyDraft({ state: 'SECONDARY_SIGNED', secondarySigner, secondarySignatureHash: hash('3') }));
+      if (url.endsWith('/safe-proposal')) return jsonResponse(policyDraft({ state: 'SAFE_PROPOSED', secondarySigner, secondarySignatureHash: hash('3'), safeAddress: '0x2222222222222222222222222222222222222222', safeCalldataHash: hash('4'), safeTxHash: hash('5'), safeProposalHash: hash('6') }), 202);
       return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected request', correlationId: 'policy-test' } }, 400);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -694,12 +695,13 @@ describe('platform admin fail-closed experience', () => {
 
     await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
     expect(await screen.findByRole('button', { name: 'draft-1' })).toBeTruthy();
-    await user.type(screen.getByLabelText('二次签名 nonce'), '7');
-    await user.type(screen.getByLabelText('签名 deadline · Unix 秒'), '1800000000');
     await user.click(screen.getByRole('button', { name: '请求并提交二次签名' }));
 
     expect(await screen.findByText(/二次签名已由 Core 验证/)).toBeTruthy();
-    expect(providerRequest).toHaveBeenCalledWith(expect.objectContaining({ method: 'eth_signTypedData_v4' }));
+    expect(providerRequest).toHaveBeenCalledWith(expect.objectContaining({ method: 'eth_signTypedData_v4', params: [secondarySigner, expect.any(String)] }));
+    const challengeBody = JSON.parse(String(fetchMock.mock.calls.find(([input]) => String(input).endsWith('/approval-challenge'))?.[1]?.body));
+    const signatureBody = JSON.parse(String(fetchMock.mock.calls.find(([input]) => String(input).endsWith('/secondary-signature'))?.[1]?.body));
+    expect(signatureBody).toMatchObject({ nonce: challengeBody.nonce, deadline: challengeBody.deadline, signature: '0xsecondary' });
     const safeButton = screen.getByRole('button', { name: '提交 Safe 多签提案' });
     expect(safeButton.hasAttribute('disabled')).toBe(false);
     await user.click(safeButton);
@@ -863,6 +865,8 @@ describe('platform admin fail-closed experience', () => {
 
     expect(await screen.findByText('SUBMITTED')).toBeTruthy();
     expect(screen.getByText('70000000')).toBeTruthy();
+    expect(screen.getByText('5000000')).toBeTruthy();
+    expect(screen.getByText('75000000')).toBeTruthy();
     expect(screen.getByText('30000000')).toBeTruthy();
     expect(screen.getByText('12 / 15')).toBeTruthy();
     expect(screen.getByText('pay')).toBeTruthy();
@@ -973,6 +977,7 @@ function adminDashboardResponse() {
       pendingShipment: '4', shipped: '5', delivered: '6', fulfilled: '7',
       shipmentRate: { numerator: '0', denominator: '0', bps: null },
     },
+    buyers: { total: '10', newToday: '2' },
     merchants: { total: '8', newToday: '1', pending: '2', approved: '5', suspended: '1' },
     products: { total: '9', pendingReview: '3', soldOut: '2' },
     seckill: { createdToday: '1', active: '1', settling: '0' },
@@ -986,7 +991,6 @@ function adminDashboardResponse() {
       { scope: 'NEW_SETTLEMENT_BATCH', paused: true },
     ],
     unavailable: [
-      { metric: 'NEW_UID_USERS', reasonCode: 'DecisionBlocked', detail: 'Buyer UID identity is not frozen' },
       { metric: 'LOW_STOCK_PRODUCTS', reasonCode: 'DecisionBlocked', detail: 'Low-stock threshold is not frozen' },
     ],
   };
@@ -1091,7 +1095,9 @@ function paymentProjection() {
       reservationDeadline: 1_800_000_000,
       quantity: 1,
       listPriceUsdt: '100000000',
-      usdtPaymentAmount: '70000000',
+      productUsdtPaymentAmount: '70000000',
+      freightUsdt: '5000000',
+      usdtPaymentAmount: '75000000',
       nplPaymentAmount: '30000000',
       nplBurnAmount: '20000000',
       nplRewardAmount: '10000000',
@@ -1130,7 +1136,9 @@ function fulfillmentOrder(overrides: Record<string, unknown> = {}) {
     finalityStatus: 'FINAL',
     exactAmounts: {
       listPriceUsdt: '100000000',
-      usdtPaymentAmount: '70000000',
+      productUsdtPaymentAmount: '70000000',
+      freightUsdt: '5000000',
+      usdtPaymentAmount: '75000000',
       nplQuoteAmount: '30000000',
       nplPaymentAmount: '30000000',
       nplBurnAmount: '20000000',
@@ -1173,7 +1181,18 @@ function policyDraft(overrides: Record<string, unknown> = {}) {
     nextPolicyVersion: '2',
     basePolicyVersion: '1',
     artifactVersion,
-    payload: {},
+    payload: {
+      oracleVersion: '',
+      rulesContentHash: '',
+      policy: {
+        usdtPaymentBps: 7000, nplPaymentBps: 3000, nplBurnListPriceBps: 2000, nplRewardListPriceBps: 1000,
+        genesisBps: 200, directReferralBps: 100, districtBps: 120, cityBps: 80, provinceBps: 60, regionBps: 40, operationsBps: 400,
+        seckillMainDuration: 3600, relayInitial: 60, relayIncrement: 30, relayCap: 60,
+        oracleWindowSeconds: 1800, oracleMaxDeviationBps: 500, oracleMaxAgeSeconds: 600,
+        oracleMinimumUsdtLiquidity: '50000000000000000000000', requiredConfirmations: 15,
+        merchantGuaranteeMinimumUsdt: '1000000000000000000000',
+      },
+    },
     validationErrors: [],
     state: 'DRAFT',
     policyHash: hash('1'),

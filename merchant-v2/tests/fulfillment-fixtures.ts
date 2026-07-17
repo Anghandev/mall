@@ -13,7 +13,9 @@ export const paymentTxHash = `0x${'9'.repeat(64)}`;
 
 const exactAmounts = {
   listPriceUsdt: '100000000000000000000',
-  usdtPaymentAmount: '70000000000000000000',
+  productUsdtPaymentAmount: '70000000000000000000',
+  freightUsdt: '5000000000000000000',
+  usdtPaymentAmount: '75000000000000000000',
   nplQuoteAmount: '30000000000000000000',
   nplPaymentAmount: '30000000000000000000',
   nplBurnAmount: '20000000000000000000',
@@ -75,6 +77,11 @@ export const pickupOrder: FulfillmentOrder = {
   skuId: 'sku-pickup',
   fulfillmentMode: 'PICKUP',
   state: 'PAID',
+  exactAmounts: {
+    ...deliveryOrder.exactAmounts,
+    freightUsdt: '0',
+    usdtPaymentAmount: deliveryOrder.exactAmounts.productUsdtPaymentAmount,
+  },
   shippedAt: null,
   deliveredAt: null,
   shipments: [],

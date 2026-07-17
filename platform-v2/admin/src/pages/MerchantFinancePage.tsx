@@ -105,7 +105,7 @@ export function MerchantFinancePage() {
     <>
       <header className="page-header">
         <div className="page-icon"><Building2 aria-hidden="true" /></div>
-        <div><p className="eyebrow">MERCHANT LIFECYCLE</p><h1>商家准入与经营穿透</h1><p>资质版本、等级政策、履约指标和五态应收均直接消费 Core；结算钱包变更必须经过二次签名与 Safe。</p></div>
+        <div><p className="eyebrow">MERCHANT LIFECYCLE</p><h1>商家准入与经营穿透</h1><p>资质版本、等级政策、履约指标和五态应收均直接消费 Core；结算钱包审核通过后永久不可变更。</p></div>
         <div className="requirement-list"><code>ADM-MER-001</code><code>ADM-MER-003..006</code></div>
       </header>
 
@@ -190,7 +190,7 @@ function CreateApplication({ token, onCreated }: { token: string; onCreated(deta
           <label>主体名称<input value={input.legalName} onChange={(event) => setInput({ ...input, legalName: event.target.value })} minLength={2} maxLength={80} required /></label>
           <label>证件编号<input value={input.legalId} onChange={(event) => setInput({ ...input, legalId: event.target.value })} minLength={6} maxLength={32} required /></label>
           <label>联系电话<input value={input.contactPhone} onChange={(event) => setInput({ ...input, contactPhone: event.target.value })} minLength={6} maxLength={32} required /></label>
-          <label>结算钱包<input value={input.settlementWallet} onChange={(event) => setInput({ ...input, settlementWallet: event.target.value })} pattern="0x[0-9a-fA-F]{40}" required /><small>创建后只能通过治理审核变更</small></label>
+          <label>结算钱包<input value={input.settlementWallet} onChange={(event) => setInput({ ...input, settlementWallet: event.target.value })} pattern="0x[0-9a-fA-F]{40}" required /><small>审核通过后永久不可变更；填错时请拒绝旧申请后重新申请</small></label>
           <label>商家等级<select value={input.level} onChange={(event) => setInput({ ...input, level: event.target.value as MerchantApplicationCreateRequest['level'] })}>{merchantLevels.map((level) => <option key={level}>{level}</option>)}</select></label>
           <label>Idempotency key<input value={input.idempotencyKey} onChange={(event) => setInput({ ...input, idempotencyKey: event.target.value })} minLength={8} maxLength={128} required /></label>
         </div>
@@ -302,10 +302,9 @@ function ReviewWorkspace(props: { detail: MerchantLifecycleDetail; sessionWallet
   const actions = allowedReviewActions(props.detail.merchant.status);
   const [action, setAction] = useState<MerchantReviewAction | ''>(actions[0] ?? '');
   const [reasonCode, setReasonCode] = useState('');
-  const [proposedSettlementWallet, setProposedSettlementWallet] = useState('');
   const [idempotencyKey, setIdempotencyKey] = useState('');
   const [busy, setBusy] = useState(false);
-  useEffect(() => { setAction(actions[0] ?? ''); setReasonCode(''); setProposedSettlementWallet(''); setIdempotencyKey(''); }, [props.detail.merchant.merchantId, props.detail.merchant.status]);
+  useEffect(() => { setAction(actions[0] ?? ''); setReasonCode(''); setIdempotencyKey(''); }, [props.detail.merchant.merchantId, props.detail.merchant.status]);
   if (actions.length === 0) return null;
   const publish = async (event: FormEvent) => {
     event.preventDefault(); if (!action) return; setBusy(true); props.onError(null);
@@ -313,13 +312,12 @@ function ReviewWorkspace(props: { detail: MerchantLifecycleDetail; sessionWallet
       const challenge = await createMerchantReviewChallenge(props.detail, {
         action,
         reasonCode,
-        ...(action === 'CHANGE_SETTLEMENT_WALLET' ? { proposedSettlementWallet } : {}),
         idempotencyKey,
       }, props.sessionWallet, props.token);
       if (!window.ethereum) throw new CoreApiError({ code: 'ConfigurationRequired', message: '未检测到支持 EIP-1193 的二次签名钱包', status: 503 });
       const signature = await window.ethereum.request({ method: 'eth_signTypedData_v4', params: [challenge.secondarySigner, JSON.stringify(challenge.typedData)] });
       if (typeof signature !== 'string') throw new CoreApiError({ code: 'InvalidResponse', message: '钱包没有返回签名', status: 502 });
-      const next = await publishMerchantReview(challenge, signature, props.token, action === 'CHANGE_SETTLEMENT_WALLET' ? proposedSettlementWallet : undefined);
+      const next = await publishMerchantReview(challenge, signature, props.token);
       const review = next.reviews.find((item) => item.actionId.toLowerCase() === challenge.actionId.toLowerCase());
       props.onChanged(next, `${actionLabel(action)}已发布，Safe TxHash ${review?.safeTxHash ?? '不可用'}`);
     } catch (cause) { props.onError(asCoreError(cause, '商家审核发布失败')); }
@@ -328,8 +326,7 @@ function ReviewWorkspace(props: { detail: MerchantLifecycleDetail; sessionWallet
   return <section className="merchant-section merchant-review" aria-labelledby="merchant-review-title">
     <div className="merchant-section-heading"><div><p className="section-kicker">SECONDARY EIP-712 + SAFE</p><h3 id="merchant-review-title">商家审核发布</h3></div><ShieldCheck aria-hidden="true" /></div>
     <form className="merchant-review-form" onSubmit={publish}>
-      <label>审核动作<select value={action} onChange={(event) => { setAction(event.target.value as MerchantReviewAction); setProposedSettlementWallet(''); }}>{actions.map((item) => <option key={item} value={item}>{actionLabel(item)}</option>)}</select></label>
-      {action === 'CHANGE_SETTLEMENT_WALLET' ? <label className="merchant-wallet-change">新结算钱包<input value={proposedSettlementWallet} onChange={(event) => setProposedSettlementWallet(event.target.value)} pattern="0x[0-9a-fA-F]{40}" required /><small>必须与当前钱包不同，仅在 Safe 发布成功后生效。</small></label> : null}
+      <label>审核动作<select value={action} onChange={(event) => setAction(event.target.value as MerchantReviewAction)}>{actions.map((item) => <option key={item} value={item}>{actionLabel(item)}</option>)}</select></label>
       <label>原因代码<input value={reasonCode} onChange={(event) => setReasonCode(event.target.value.toUpperCase())} pattern="[A-Z0-9_:-]{2,64}" maxLength={64} placeholder="QUALIFICATION_APPROVED" required /></label>
       <label>Idempotency key<input value={idempotencyKey} onChange={(event) => setIdempotencyKey(event.target.value)} minLength={8} maxLength={128} required /></label>
       <button className={action === 'BLACKLIST' || action === 'REJECT' ? 'button button-danger' : 'button button-primary'} type="submit" disabled={busy}>{busy ? <LoaderCircle className="spin" aria-hidden="true" /> : <KeyRound aria-hidden="true" />}{busy ? '等待签名与 Safe 验证' : '二次签名并发布'}</button>
@@ -409,9 +406,9 @@ function LoadingRows() { return <div className="table-skeleton merchant-loading"
 function StatusBadge({ status }: { status: MerchantLifecycleStatus }) { return <span className={`merchant-status merchant-status-${status.toLowerCase()}`}>{statusLabel(status)}</span>; }
 function Fact({ label, value, note, code = false }: { label: string; value: string; note?: string; code?: boolean }) { return <div><dt>{label}</dt><dd>{code ? <code>{value}</code> : value}{note ? <small>{note}</small> : null}</dd></div>; }
 
-function allowedReviewActions(status: MerchantLifecycleStatus): readonly MerchantReviewAction[] { if (status === 'PENDING') return ['APPROVE', 'REJECT']; if (status === 'APPROVED') return ['BLACKLIST', 'CHANGE_SETTLEMENT_WALLET']; return []; }
+function allowedReviewActions(status: MerchantLifecycleStatus): readonly MerchantReviewAction[] { if (status === 'PENDING') return ['APPROVE', 'REJECT']; if (status === 'APPROVED') return ['BLACKLIST']; return []; }
 function statusLabel(status: StatusFilter) { return status === 'ALL' ? '全部' : status === 'PENDING' ? '待审核' : status === 'APPROVED' ? '已通过' : status === 'REJECTED' ? '已拒绝' : status === 'SUSPENDED' ? '已暂停' : '黑名单'; }
-function actionLabel(action: MerchantReviewAction) { return action === 'APPROVE' ? '通过资质' : action === 'REJECT' ? '拒绝资质' : action === 'BLACKLIST' ? '加入黑名单' : '变更结算钱包'; }
+function actionLabel(action: MerchantReviewAction) { return action === 'APPROVE' ? '通过资质' : action === 'REJECT' ? '拒绝资质' : '加入黑名单'; }
 function fastShipNote(metric: MerchantLifecycleDetail['analytics']['fulfillment']['fastShip48h']) { return metric.status === 'AVAILABLE' ? `numerator ${metric.numerator} / denominator ${metric.denominator}` : `${metric.reason} · numerator ${metric.numerator} / denominator ${metric.denominator}`; }
 function amountRows(orders: MerchantLifecycleDetail['analytics']['orders']) { return [
   { label: '商品标价', cumulative: orders.cumulative.listPriceUsdt, today: orders.today.listPriceUsdt },

@@ -282,8 +282,7 @@
   "merchantReviewActions": [
     "APPROVE",
     "REJECT",
-    "BLACKLIST",
-    "CHANGE_SETTLEMENT_WALLET"
+    "BLACKLIST"
   ],
   "fulfillmentAssets": [
     "USDT",

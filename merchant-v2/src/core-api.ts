@@ -1767,6 +1767,8 @@ function parseFulfillmentExactAmounts(input: unknown): FulfillmentExactAmounts {
   const value = record(input, 'order.exactAmounts');
   return {
     listPriceUsdt: atomicAmount(value.listPriceUsdt, 'exactAmounts.listPriceUsdt'),
+    productUsdtPaymentAmount: atomicAmount(value.productUsdtPaymentAmount, 'exactAmounts.productUsdtPaymentAmount'),
+    freightUsdt: atomicAmount(value.freightUsdt, 'exactAmounts.freightUsdt'),
     usdtPaymentAmount: atomicAmount(value.usdtPaymentAmount, 'exactAmounts.usdtPaymentAmount'),
     nplQuoteAmount: atomicAmount(value.nplQuoteAmount, 'exactAmounts.nplQuoteAmount'),
     nplPaymentAmount: atomicAmount(value.nplPaymentAmount, 'exactAmounts.nplPaymentAmount'),
@@ -2602,7 +2604,7 @@ function parseMerchantReceivableStatement(input: unknown): MerchantReceivableSta
   ], 'merchant receivable statement');
   const frozenAmounts = record(value.frozenAmounts, 'merchant receivable frozen amounts');
   exactObjectKeys(frozenAmounts, [
-    'listPriceUsdt', 'buyerPaidUsdt', 'merchantBaseReceivableUsdt',
+    'listPriceUsdt', 'productUsdtPaymentAmount', 'freightUsdt', 'buyerPaidUsdt', 'merchantBaseReceivableUsdt',
     'merchantConcessionAmount', 'merchantNetReceivableUsdt',
   ], 'merchant receivable frozen amounts');
   return {
@@ -2618,6 +2620,11 @@ function parseMerchantReceivableStatement(input: unknown): MerchantReceivableSta
     orderKind: enumValue(value.orderKind, orderKindSet, 'merchant receivable orderKind'),
     frozenAmounts: {
       listPriceUsdt: atomicAmount(frozenAmounts.listPriceUsdt, 'merchant receivable listPriceUsdt'),
+      productUsdtPaymentAmount: atomicAmount(
+        frozenAmounts.productUsdtPaymentAmount,
+        'merchant receivable productUsdtPaymentAmount',
+      ),
+      freightUsdt: atomicAmount(frozenAmounts.freightUsdt, 'merchant receivable freightUsdt'),
       buyerPaidUsdt: atomicAmount(frozenAmounts.buyerPaidUsdt, 'merchant receivable buyerPaidUsdt'),
       merchantBaseReceivableUsdt: atomicAmount(
         frozenAmounts.merchantBaseReceivableUsdt,

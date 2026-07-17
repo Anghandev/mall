@@ -26,7 +26,7 @@ const walletFragmentPattern = /^(?:0x)?[0-9a-fA-F]{6,40}$/;
 const amountPattern = /^(0|[1-9][0-9]*)$/;
 const reasonCodePattern = /^[A-Z][A-Z0-9_]{1,63}$/;
 const base64Pattern = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
-const unavailableFilters = ['UID', 'PHONE', 'YELLOW_QUEUE'] as const;
+const unavailableFilters = ['PHONE', 'YELLOW_QUEUE'] as const;
 
 export type AdminGlobalSearchFilters = Readonly<{
   resourceTypes?: readonly AdminResourceType[];
@@ -35,6 +35,7 @@ export type AdminGlobalSearchFilters = Readonly<{
   productId?: string;
   merchantId?: string;
   txHash?: string;
+  uid?: string;
   wallet?: string;
   walletMatch?: 'EXACT' | 'FUZZY';
   from?: string;
@@ -145,6 +146,16 @@ function globalSearchQuery(filters: AdminGlobalSearchFilters & Required<Pick<Adm
     const txHash = filters.txHash.trim().toLowerCase();
     if (!bytes32Pattern.test(txHash)) throw invalidRequest('TxHash must be bytes32');
     query.set('txHash', txHash);
+  }
+  if (filters.uid !== undefined) {
+    const uid = filters.uid.trim();
+    if (!/^[1-9][0-9]{0,18}$/.test(uid) || (uid.length === 19 && uid > '9223372036854775807')) {
+      throw invalidRequest('Buyer UID must be a positive bigint');
+    }
+    if (filters.relation !== 'AND' || filters.walletMatch !== 'EXACT') {
+      throw invalidRequest('Buyer UID requires exact AND search');
+    }
+    query.set('uid', uid);
   }
   if (filters.wallet !== undefined) {
     const wallet = filters.wallet.trim().toLowerCase();

@@ -129,21 +129,12 @@ describe('merchant lifecycle page', () => {
     expect(screen.getAllByText('DecisionBlocked')).toHaveLength(1);
   });
 
-  it('lets ADMIN rotate an approved settlement wallet only through secondary signature and Safe publish', async () => {
+  it('never offers an approved settlement wallet change to ADMIN', async () => {
     const wallet = address('1');
-    const nextWallet = address('9');
-    const secondarySigner = address('2');
-    let current = merchantDetail({ merchant: { ...merchantDetail().merchant, status: 'APPROVED', qualificationComplete: true }, qualification: { ...qualification(), licenseAssetId: hash('a') } });
-    const challenge = walletChangeChallenge(secondarySigner);
+    const current = merchantDetail({ merchant: { ...merchantDetail().merchant, status: 'APPROVED', qualificationComplete: true }, qualification: { ...qualification(), licenseAssetId: hash('a') } });
     const provider = walletProvider(wallet);
     window.ethereum = provider;
-    const fetchMock = merchantFetch(wallet, 'ADMIN', () => current, async (url, init) => {
-      if (url.endsWith('/review-challenges')) return jsonResponse(challenge, 201);
-      if (url.endsWith(`/review-actions/${challenge.actionId}/publish`)) {
-        current = walletChangedDetail(current, challenge, nextWallet); return jsonResponse(current);
-      }
-      return undefined;
-    });
+    const fetchMock = merchantFetch(wallet, 'ADMIN', () => current);
     vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
 
@@ -151,19 +142,8 @@ describe('merchant lifecycle page', () => {
     await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
     const review = await screen.findByRole('heading', { name: '商家审核发布' }).then((heading) => heading.closest('section')!);
     expect(within(review).queryByLabelText('新结算钱包')).toBeNull();
-    await user.selectOptions(within(review).getByLabelText('审核动作'), 'CHANGE_SETTLEMENT_WALLET');
-    await user.type(within(review).getByLabelText(/新结算钱包/), nextWallet);
-    await user.type(within(review).getByLabelText('原因代码'), 'WALLET_ROTATION');
-    await user.type(within(review).getByLabelText('Idempotency key'), 'wallet-change-1');
-    await user.click(within(review).getByRole('button', { name: '二次签名并发布' }));
-
-    await waitFor(() => expect(provider.request).toHaveBeenCalledWith({ method: 'eth_signTypedData_v4', params: [secondarySigner, JSON.stringify(challenge.typedData)] }));
-    expect(await screen.findByText(/变更结算钱包已发布/)).toBeTruthy();
-    expect(screen.getAllByText(nextWallet).length).toBeGreaterThan(0);
-    const challengeCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/review-challenges'));
-    expect(JSON.parse(String(challengeCall?.[1]?.body))).toEqual({
-      action: 'CHANGE_SETTLEMENT_WALLET', reasonCode: 'WALLET_ROTATION', proposedSettlementWallet: nextWallet, idempotencyKey: 'wallet-change-1',
-    });
+    expect(within(review).getAllByRole('option').map((option) => option.getAttribute('value'))).toEqual(['BLACKLIST']);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/review-challenges'))).toBe(false);
   });
 
   it('does not ask the wallet to sign when the challenge signer is not independent', async () => {
@@ -218,9 +198,7 @@ function merchantDetail(overrides: Partial<MerchantLifecycleDetail> = {}): Merch
 }
 function qualification() { return { access: 'FULL' as const, legalName: '阿步黄金有限公司', legalId: 'LICENSE-001', contactPhone: '13800138000', licenseAssetId: null, payloadHash: hash('1'), retentionPolicyVersion: 'pii-v1', version: 1, updatedAt: '2026-07-16T00:00:00.000Z' }; }
 function reviewChallenge(signer: string) { const expiresAt = '2099-01-01T00:00:00.000Z'; return { artifactVersion, actionId: hash('7'), merchantId: 'merchant-1', action: 'APPROVE' as const, fromStatus: 'PENDING' as const, toStatus: 'APPROVED' as const, applicationVersion: 1, reasonCode: 'QUALIFICATION_APPROVED', state: 'DRAFT' as const, secondarySigner: signer, expiresAt, typedData: { domain: { name: 'Abu24KV2Core' }, types: { SensitiveAction: [] }, primaryType: 'SensitiveAction', message: { action: 'APPROVE_MERCHANT', resourceType: 'MERCHANT', resourceId: 'merchant-1', policyVersion: '2', oldValueHash: hash('2'), newValueHash: hash('3'), safeAddress: address('4'), nonce: '7', deadline: String(Math.floor(Date.parse(expiresAt) / 1_000)) } }, digest: hash('6') }; }
-function walletChangeChallenge(signer: string) { const challenge = reviewChallenge(signer); return { ...challenge, action: 'CHANGE_SETTLEMENT_WALLET' as const, fromStatus: 'APPROVED' as const, toStatus: 'APPROVED' as const, reasonCode: 'WALLET_ROTATION', typedData: { ...challenge.typedData, message: { ...challenge.typedData.message, action: 'CHANGE_SETTLEMENT_WALLET_MERCHANT' } } }; }
 function publishedDetail(current: MerchantLifecycleDetail, challenge: ReturnType<typeof reviewChallenge>): MerchantLifecycleDetail { return { ...current, merchant: { ...current.merchant, status: 'APPROVED', reviewedAt: '2026-07-16T01:00:00.000Z', reviewedBy: address('1') }, reviews: [{ actionId: challenge.actionId, action: 'APPROVE', fromStatus: 'PENDING', toStatus: 'APPROVED', applicationVersion: 1, reasonCode: challenge.reasonCode, state: 'PUBLISHED', secondarySigner: challenge.secondarySigner, actionDigest: challenge.digest, safeTxHash: hash('f'), createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T01:00:00.000Z' }] }; }
-function walletChangedDetail(current: MerchantLifecycleDetail, challenge: ReturnType<typeof walletChangeChallenge>, settlementWallet: string): MerchantLifecycleDetail { return { ...current, merchant: { ...current.merchant, settlementWallet, reviewedAt: '2026-07-16T01:00:00.000Z', reviewedBy: address('1') }, reviews: [{ actionId: challenge.actionId, action: challenge.action, fromStatus: challenge.fromStatus, toStatus: challenge.toStatus, applicationVersion: 1, reasonCode: challenge.reasonCode, state: 'PUBLISHED', secondarySigner: challenge.secondarySigner, actionDigest: challenge.digest, safeTxHash: hash('f'), createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T01:00:00.000Z' }] }; }
 function uploadIntent(request: Record<string, unknown>, wallet: string) { return { artifactVersion, uploadIntentId: hash('8'), ownerWallet: wallet, purpose: 'MERCHANT_LICENSE', resourceType: 'MERCHANT', resourceId: 'merchant-1', contentType: request.contentType, sizeBytes: String(request.sizeBytes), contentSha256: request.contentSha256, state: 'UPLOADED', expiresAt: '2099-01-01T00:00:00.000Z', method: 'PUT', uploadUrl: 'https://storage.example/license', headers: {}, providerReferenceHash: hash('9'), writeOnce: true }; }
 function mediaAsset(wallet: string, request: Record<string, unknown>) { return { artifactVersion, assetId: hash('a'), uploadIntentId: hash('8'), ownerWallet: wallet, purpose: 'MERCHANT_LICENSE', resourceType: 'MERCHANT', resourceId: 'merchant-1', contentType: request.contentType, sizeBytes: String(request.sizeBytes), contentSha256: request.contentSha256, providerEvidenceHash: hash('b'), objectVersionHash: hash('c'), createdAt: '2026-07-16T00:00:00.000Z' }; }
 function walletProvider(wallet: string) { return { request: vi.fn(async ({ method }: { method: string }) => method === 'eth_requestAccounts' ? [wallet] : method === 'personal_sign' ? '0xsigned' : method === 'eth_signTypedData_v4' ? '0x1234' : Promise.reject(new Error(`Unexpected wallet method ${method}`))) }; }

@@ -45,7 +45,8 @@ order snapshots are never recalculated from current configuration.
   other's inventory. Session activation and ordinary quote issuance take the
   same SKU row lock; activation rejects any unexpired submittable ordinary
   quote for that SKU.
-- `core.payment_quotes` records one immutable ordinary or seckill quote identity.
+- `core.payment_quotes` records one immutable ordinary or seckill quote identity,
+  including the order's snapshotted flat `freight_usdt`.
   `core.payment_quote_legs` records the exact ordinary, seckill and fallback
   intent snapshots and distinct reservations.
 
@@ -103,6 +104,10 @@ The coordinated checkpoints publish these journal events:
 - `PAYMENT_LOCKED` records Custody Safe assets, merchant and policy USDT
   liabilities, Reward Safe assets and beneficiary NPL liabilities, Burn, and
   Locked BNM points;
+- product net proceeds use `MERCHANT_RECEIVABLE`; delivery freight uses the
+  separate `MERCHANT_FREIGHT_RECEIVABLE`. Both are backed by the Custody Safe,
+  follow the same order finality and fulfillment states, and are consumed by
+  the existing `MERCHANT_USDT` settlement rail without merging their snapshots;
 - `PAYMENT_REORG_REVERSAL` reverses the exact original lines and links the
   original journal.
 - fulfillment completion moves eligible order liabilities from `Locked` to
@@ -169,9 +174,11 @@ overwrite a later reorg `LOCKED` state.
 
 ## Account And Tenant Audit Storage
 
+- `core.buyer_accounts` assigns one database-generated numeric UID to the buyer
+  wallet on its first successful BUYER SIWE. The wallet, UID and creation time
+  are immutable; UID is off-chain display/search identity only.
 - `core.buyer_profiles` stores AES-256-GCM encrypted nicknames and optional
-  provider-sealed avatar identity. Buyer account ID remains explicitly
-  `DecisionBlocked` rather than being synthesized from a wallet.
+  provider-sealed avatar identity.
 - `core.buyer_saved_addresses` stores encrypted address payloads, AMap region
   evidence, logical deletion, optimistic versions and one active transactional
   default per wallet. Raw parser text is never stored. A saved row is not a
@@ -185,6 +192,10 @@ overwrite a later reorg `LOCKED` state.
   resolved from the settlement wallet or immutable order. Multi-merchant Safe
   batches append separate tenant audit entries with merchant-only counts and
   amounts; they never expose another merchant's order, request or recipient.
+- `core.merchants.settlement_wallet` is permanently immutable after approval.
+  Review actions contain no wallet-change kind, and the database trigger has no
+  Admin, signer or Safe exception. Rejected pre-approval applications may be
+  replaced by a new application with the correct address.
 - `core.takeover_case_transitions` records future state changes append-only.
   Existing pre-migration cases are labeled partial; buyer projection omits
   guarantee sources, debt, Safe internals and internal evidence hashes.
@@ -243,5 +254,5 @@ not a substitute for production PostgreSQL backup and restore evidence.
 Production PostgreSQL, Redis, encrypted backup storage, Safe addresses, RPCs,
 signer services and providers remain `ExternalBlocked`. Missing commercial
 allocation inputs remain `DecisionBlocked`. There is no fixture-backed success
-path and no business-refund or Claim table/API in V2. Buyer account-ID policy
-and production PII retention/deletion policy also remain `DecisionBlocked`.
+path and no business-refund or Claim table/API in V2. Production PII
+retention/deletion policy also remains `DecisionBlocked`.

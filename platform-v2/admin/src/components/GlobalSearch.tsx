@@ -95,7 +95,7 @@ export function GlobalSearch({ enabled = false, loading = false, onSearch }: Pro
               <select aria-label="钱包地址匹配方式" value="精确" disabled><option>精确</option></select>
             </span>
           </label>
-          <label>用户 UID<input disabled autoComplete="off" placeholder="Core 未发布" /></label>
+          <label>用户 UID<input disabled autoComplete="off" placeholder="请在全局操作中精确查询" /></label>
           <label>绑定手机号<input disabled type="tel" autoComplete="off" placeholder="Core 未发布 PII 查询" /></label>
           <label>开始时间<input value={form.start} onChange={(event) => { setQuickRange(null); set('start', event.target.value); }} disabled={!enabled} type="datetime-local" /></label>
           <label>结束时间<input value={form.end} onChange={(event) => { setQuickRange(null); set('end', event.target.value); }} disabled={!enabled} type="datetime-local" /></label>
@@ -126,7 +126,7 @@ export function GlobalSearch({ enabled = false, loading = false, onSearch }: Pro
             <button className="button button-primary" type="submit" disabled={!enabled || loading}><Search aria-hidden="true" /> {loading ? '查询中' : '查询'}</button>
           </div>
         </div>
-        <p className="inline-notice" id="search-capability">{enabled ? '查询条件由 Core 服务端按 AND 执行。模糊钱包、OR、UID、手机号和 Yellow queue 未发布，保持 fail-closed。' : '连接 ADMIN / OPERATOR / AUDITOR 会话后启用精确订单检索。'}</p>
+        <p className="inline-notice" id="search-capability">{enabled ? '订单检索条件由 Core 服务端按 AND 执行。精确 UID、模糊钱包和 OR 请使用全局操作；手机号和 Yellow queue 仍保持 fail-closed。' : '连接 ADMIN / OPERATOR / AUDITOR 会话后启用精确订单检索。'}</p>
       </form>
     </details>
   );

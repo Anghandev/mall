@@ -19,10 +19,10 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
 | MAL-SEK-004 | 25-34 | Rules button/modal/acknowledgement; chain timestamp; fallback retail classification; dual approval wording; 70% USDT + 30% NPL and 1:1 backend-BNM wording | D-V2-002, D-V2-008, D-V2-011, D-V2-012, D-V2-017 | Modal shows both five-minute signed quotes, Router classification rule and exact payment intents; BNM is backend points shown as Locked until fulfillment and never as a token payout | Overridden | GAP-MAL-003, GAP-MAL-004 |
 | MAL-CAT-001 | 35-39 | Horizontal multilevel categories, product waterfall, BNM badge, seckill overlay and route | - | Category filtering works; active seckill blocks ordinary checkout | Verified | - |
 | MAL-CAT-002 | 40-42 | Product detail, sticky Buy action, seckill-disabled state, SlideUp configuration sheet | - | Action remains reachable and follows authoritative product state | Verified | - |
-| MAL-CHK-001 | 43-49 | Confirmation prerequisite; SKU matrix/manual selection; +/- quantity; delivery/pickup; default full address fields; empty-address guidance; nearest store/address/hours/detail | D-V2-002, D-V2-012, D-V2-021 | No confirmation without valid SKU, quantity, mode and authoritative address/store; exact 70/30 legs, Oracle snapshot, five-minute expiry and totals come only from the signed Core quote | Verified | - |
+| MAL-CHK-001 | 43-49 | Confirmation prerequisite; SKU matrix/manual selection; +/- quantity; delivery/pickup; default full address fields; empty-address guidance; nearest store/address/hours/detail | D-V2-002, D-V2-012, D-V2-021, D-V2-031 | No confirmation without valid SKU, quantity, mode and authoritative address/store; exact product 70/30 legs, flat delivery freight or zero pickup freight, Oracle snapshot, five-minute expiry and totals come only from the signed Core quote | Verified | - |
 | MAL-STORE-001 | 50-53 | Country/city/district selectors; GPS 1.2km display; Call and Navigation buttons; JSBridge AMap/Baidu launch | - | Browser/local tests cover permission, loading, denial, unavailable, deep-link generation and fallback states; real-device proof is tracked only by MAL-GOAL-004 | Verified | - |
 | MAL-ASSET-001 | 54-64 | Assets shell; avatar, nickname, account ID, address entry; four order groups/counts; View All | - | Profile and canonical counts render from Core projection | Verified | - |
-| MAL-ASSET-002 | 65-70 | Seckill/shopping tabs; session number; exact 70% USDT + 30% NPL payment; Locked BNM; winner/prize and non-winner states | D-V2-002, D-V2-007, D-V2-008 | Exact integer/canonical payment amounts render from Core; prize exposes Locked/Available/Requested/Batched/Settled and final Safe TxHash; BNM exposes only Locked/Available | Frozen | GAP-MAL-007, GAP-MAL-015 |
+| MAL-ASSET-002 | 65-70 | Seckill/shopping tabs; session number; exact 70% USDT + 30% NPL product payment plus separate freight; Locked BNM; winner/prize and non-winner states | D-V2-002, D-V2-007, D-V2-008, D-V2-031 | Exact product USDT, freight USDT, total USDT and NPL amounts render from Core; prize exposes Locked/Available/Requested/Batched/Settled and final Safe TxHash; BNM exposes only Locked/Available | Frozen | GAP-MAL-007, GAP-MAL-015 |
 | MAL-ASSET-003 | 71-74 | Source BNM totals, provenance link and withdrawal control | D-V2-008 | BNM is existing backend points with only Locked and Available totals plus order/fulfillment provenance; no token address, mint, Safe transfer or on-chain withdrawal action is rendered | Verified | - |
 | MAL-ASSET-004 | 76-78 | Genesis 2% NPL, lifecycle totals, credential visibility and source withdrawal control | D-V2-007, D-V2-009, D-V2-010, D-V2-023 | Hidden for ordinary users; signed payment snapshot and fulfillment finality govern availability; wallet signs a settlement request and UI tracks Requested/Batched/Settled plus Safe TxHash | Verified | - |
 | MAL-ASSET-005 | 80-82 | Regional NPL totals, receipt/arbitration explanation and source withdrawal control | D-V2-006, D-V2-007, D-V2-009, D-V2-023 | Four regional roles use the signed snapshot; arbitration remains Disputed/Locked; available NPL follows signed request, Safe batch and 15-confirmation settlement | Verified | - |
@@ -42,7 +42,7 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
 | MAL-STOCK-001 | 145-148 | Pay-before inventory check; SKU/quantity; exact sold-out error message | D-V2-017 | Signed reservation, not a read-only check, prevents oversell; error is actionable | Overridden | GAP-MAL-003 |
 | MAL-REVIEW-001 | 149-157 | Full-screen final review; product/SKU, quantity/total, fulfillment, full delivery fields or store/address/notice, immutable-region warning, Confirm Address/Specs and Pay/Broadcast buttons | D-V2-002, D-V2-017 | Five factors bind the reservation and signed quotes; no local recomputation | Verified | - |
 | MAL-REGION-001 | 158-159 | Pickup store province/city/district binding and regional beneficiary attribution | D-V2-010, D-V2-017 | Signed store region is immutable in the order snapshot | Verified | - |
-| MAL-WALLET-001 | 160-164 | Pay/Broadcast button; exact 70% USDT then 30% NPL Router payment; unlimited first approval; allowance recheck/revocation fallback | D-V2-001, D-V2-002, D-V2-003, D-V2-012 | UI verifies chain 56, published Router spender and five-minute signed intent; each insufficient allowance defaults to MaxUint256 only after risk/revocation disclosure, while sufficient allowance is not repeated | Overridden | GAP-MAL-001, GAP-MAL-004 |
+| MAL-WALLET-001 | 160-164 | Pay/Broadcast button; exact product 70% USDT plus pure-USDT freight then 30% NPL Router payment; unlimited first approval; allowance recheck/revocation fallback | D-V2-001, D-V2-002, D-V2-003, D-V2-012, D-V2-031 | UI verifies chain 56, published Router spender and five-minute signed intent; USDT approval covers product plus freight; each insufficient allowance defaults to MaxUint256 only after risk/revocation disclosure, while sufficient allowance is not repeated | Overridden | GAP-MAL-001, GAP-MAL-004 |
 | MAL-TX-001 | 165-169 | Seckill/ordinary/boundary result modal; +30s copy; backend-BNM copy; WebSocket broadcast; full payment TxHash block | D-V2-003, D-V2-008, D-V2-011, D-V2-013, D-V2-017 | Submitted is not final; Router event and canonical block classify the order; +30s appears only after chain-final purchase; BNM is Locked backend points; full selectable payment explorer hash is distinct from later Safe settlement TxHash | Overridden | GAP-MAL-004, GAP-MAL-015 |
 | MAL-SEC-001 | 170-174 | Reentrancy guard; atomic dual-asset payment; no business refund; source immediate/session/next-block distribution timing | D-V2-003, D-V2-004, D-V2-007, D-V2-015, D-V2-016, D-V2-023 | Frontend consumes signed intents only; PaymentRouter leaves zero balance and partial transfer reverts; rewards remain ledger Locked until finality; settlement requires signed request and Safe batch, never direct withdrawal calldata | Overridden | GAP-MAL-001, GAP-MAL-014 |
 | MAL-FLOW-001 | 175-180 | Detail entry; sticky Buy; SKU/quantity; delivery/default address; pickup/nearest store; Confirm Order | - | Flow is ordered, resumable and preserves configuration | Verified | - |
@@ -70,6 +70,10 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
   fulfillment and region hashes. Empty/error states lead to the address book.
   Pickup consumes only an `ACTIVE` Core store and shows its address, business
   hours and media before `createPickupTarget`.
+- `MAL-CHK-001`, `MAL-REVIEW-001` and `MAL-ASSET-002`: delivery renders Core's
+  separate product USDT, flat freight USDT and total USDT fields; pickup renders
+  zero freight. The Mall neither multiplies `defaultFreightUsdt` nor includes it
+  in NPL, Burn, reward or BNM calculations.
 - `MAL-REVIEW-001` and `MAL-REGION-001`: the final review renders product ID,
   SKU ID/attributes, quantity, the exact signed Core payment intent and the
   complete selected address or store snapshot. Delivery shows recipient,
@@ -107,11 +111,11 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
   product/session title is inferred. `MAL-ASSET-002` remains `Frozen` because
   the winner-bound seckill prize journal and lifecycle are `DecisionBlocked`.
 
-- `MAL-ASSET-001`: authenticated profile reads/writes preserve the frozen
-  `accountIdStatus=DecisionBlocked`, display canonical overview counts and bind
-  avatar updates only after the `BUYER_AVATAR` / `BUYER` write-once upload is
-  provider-verified. Media identity, owner wallet and content hashes are checked
-  before rendering or binding.
+- `MAL-ASSET-001`: authenticated profile reads/writes display the permanent
+  Core-generated numeric `accountId`, display canonical overview counts and
+  bind avatar updates only after the `BUYER_AVATAR` / `BUYER` write-once upload
+  is provider-verified. Media identity, owner wallet and content hashes are
+  checked before rendering or binding.
 - `MAL-ADDR-001`: raw pasted text is sent only to the Core parser, every parsed
   field must be reviewed before create, and saved addresses support list,
   update, delete and default writes with optimistic versions. Checkout hashes

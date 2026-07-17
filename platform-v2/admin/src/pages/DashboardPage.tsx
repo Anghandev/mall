@@ -320,7 +320,8 @@ function dashboardMetricGroups(dashboard: AdminBusinessDashboard): readonly Metr
         metric('已发货', dashboard.orders.shipped, '当前状态'),
         metric('已送达', dashboard.orders.delivered, '当前状态'),
         metric('已履约', dashboard.orders.fulfilled, '当前状态'),
-        blocked('NEW_UID_USERS'),
+        metric('买家 UID 总数', dashboard.buyers.total, 'Core buyer_accounts'),
+        metric('今日新增 UID', dashboard.buyers.newToday, dashboard.timezone),
       ],
     },
     {
@@ -369,10 +370,7 @@ function metric(label: string, value: string, detail: string, blocked = false): 
 }
 
 function metricLabel(metricName: string) {
-  return ({
-    NEW_UID_USERS: '新增 UID',
-    LOW_STOCK_PRODUCTS: '库存预警',
-  } as const)[metricName as 'NEW_UID_USERS'] ?? metricName;
+  return metricName === 'LOW_STOCK_PRODUCTS' ? '库存预警' : metricName;
 }
 
 function ErrorView({ error }: { error: CoreApiError }) {

@@ -40,15 +40,19 @@ return `ExternalBlocked` or `ConfigurationRequired`.
 For a signed launch quote:
 
 ```text
-buyer USDT payment = 70% of USDT list price
+product USDT leg   = 70% of USDT list price
+delivery freight  = product defaultFreightUsdt; pickup freight = 0
+buyer USDT payment = product USDT leg + freight
 buyer NPL payment  = 30% of the Oracle-equivalent NPL quote
 NPL Burn           = 20% of the same Oracle-equivalent quote
 NPL Reward Safe    = 10% of the same Oracle-equivalent quote
 BNM Locked         = USDT list price, as backend points only
 ```
 
-Merchant concession never changes buyer payment. Core returns merchant base
-receivable, concession, net receivable and exact versioned allocation entries.
+Freight is pure USDT outside the product 70/30 base. It never changes NPL,
+Burn, reward, BNM, concession or prize amounts. Merchant concession never
+changes buyer payment. Core returns merchant base receivable, concession, net
+receivable, freight receivable and exact versioned allocation entries.
 The NPL reward allocation balances exactly to the Reward Safe amount; missing
 beneficiaries and rounding remainder use the frozen circulation pool.
 For a seckill quote, governed `seckillPrizePoolAccount` and `seckillPrizeBps`
@@ -57,7 +61,8 @@ quotes never create that entry. The prize account is included in the
 Safe-published allocation-set hash and is never inferred from array position or
 destination weight.
 
-An ordinary quote contains the exact `CanonicalPaymentIntent`, Router address,
+An ordinary quote contains the exact `CanonicalPaymentIntent`, including
+`productUsdtPaymentAmount`, `freightUsdt` and total `usdtPaymentAmount`, Router address,
 snapshot hash, EIP-712 authorization digest, quote signature and two approval
 requirements. Each requirement includes the exact amount, MaxUint256 approval
 policy, `ONLY_IF_ALLOWANCE_BELOW_REQUIRED`, unlimited-allowance risk and an
@@ -75,7 +80,7 @@ the two possible branches. `PaymentRouterV2` uses block timestamp to select the
 branch atomically; products never select it.
 
 Public catalog products expose typed subtitle, category/tag assignments,
-structured rich detail, default freight display value, fulfillment modes and a
+structured rich detail, flat default delivery freight, fulfillment modes and a
 nullable SKU-level seckill overlay. `PREHEAT`, `LIVE` and `SETTLING` overlays
 set `ordinaryCheckoutAllowed: false`. Core independently rejects an ordinary
 quote for the same product/SKU in those effective phases; the overlay is not a
@@ -149,8 +154,9 @@ audit. Saving requires complete name, mainland mobile number, address and
 coordinates plus a current AMap six-digit region result. Nickname and address
 PII use AES-256-GCM; one active default address is enforced transactionally.
 A saved address creates a fresh 30-minute fulfillment target and never rewrites
-the target snapshot of an existing quote or order. Buyer UID/account-ID policy
-and production PII retention remain `DecisionBlocked`.
+the target snapshot of an existing quote or order. The first successful BUYER
+SIWE creates one permanent numeric UID for the wallet; buyer profile returns it
+as `accountId`. Production PII retention remains `DecisionBlocked`.
 
 Merchant profile and audit routes:
 
@@ -160,7 +166,9 @@ Merchant profile and audit routes:
 
 Merchant profile updates accept only shop name and an owned provider-sealed
 Logo asset. The settlement wallet is returned read-only and is never an
-ordinary profile-update field. Merchant audit requires a current active wallet
+ordinary profile-update field. After approval it is permanently immutable and
+is not exposed as an Admin review action; a wrong pre-approval address requires
+rejecting that application and creating a new one. Merchant audit requires a current active wallet
 binding and filters by explicit `merchant_id`; actor-wallet filtering cannot
 cross that boundary. Responses expose bounded summaries and proof references,
 not raw payloads. CSV export requires a time range of at most 31 days, returns
@@ -279,9 +287,10 @@ amounts include an order only when its canonical payment reaches 15-confirmation
 finality inside that window. Amounts come from immutable `exactAmounts`; current
 order queues remain separate from the finality-window cohort. Shipment rates
 return numerator, denominator and nullable basis points, so an empty cohort is
-not reported as zero percent. Metrics whose identity or threshold is not frozen
-(buyer UID and low stock) are explicit `DecisionBlocked` entries rather than
-synthetic zeroes. Risk observations, blacklist blocks, active restrictions and
+not reported as zero percent. The Admin dashboard returns total and today-new
+buyer UID counts from immutable buyer-account rows. The unfrozen low-stock
+threshold remains an explicit `DecisionBlocked` entry rather than a synthetic
+zero. Risk observations, blacklist blocks, active restrictions and
 pending appeals are derived from append-only risk records and are not inferred
 from operations monitoring alerts.
 Safe coverage is included only when the latest snapshot has a fresh canonical

@@ -65,6 +65,7 @@ type SearchForm = {
   productId: string;
   merchantId: string;
   txHash: string;
+  uid: string;
   wallet: string;
   walletMatch: 'EXACT' | 'FUZZY';
   from: string;
@@ -86,6 +87,7 @@ const emptySearchForm: SearchForm = {
   productId: '',
   merchantId: '',
   txHash: '',
+  uid: '',
   wallet: '',
   walletMatch: 'EXACT',
   from: '',
@@ -334,8 +336,8 @@ export function GlobalOperationsPage() {
 
       <section className="global-unavailable" aria-labelledby="global-unavailable-title">
         <Ban aria-hidden="true" />
-        <div><strong id="global-unavailable-title">Unavailable / DecisionBlocked</strong><p>UID、手机号和 Yellow queue 没有冻结定义，界面不发送这些条件，也不执行本地猜测。</p></div>
-        <span>UID · PHONE · YELLOW</span>
+        <div><strong id="global-unavailable-title">Unavailable / DecisionBlocked</strong><p>手机号和 Yellow queue 仍保持现有权限与状态边界，界面不执行本地猜测。</p></div>
+        <span>PHONE · YELLOW</span>
       </section>
     </>
   );
@@ -380,7 +382,7 @@ function GlobalResourceSearch({ enabled, loading, onSearch, onReset }: {
       <form className="search-form" onSubmit={submit}>
         <div className="global-search-meta">
           <fieldset className="global-resource-types"><legend>资源类型</legend>{adminResourceTypes.map((type) => <label key={type}><input type="checkbox" checked={form.resourceTypes.includes(type)} onChange={() => toggleResourceType(type)} disabled={!enabled} />{resourceTypeLabel(type)}</label>)}</fieldset>
-          <fieldset className="segmented-field"><legend>条件关系</legend><div className="segmented">{(['AND', 'OR'] as const).map((relation) => <button key={relation} className={form.relation === relation ? 'is-active' : undefined} type="button" aria-pressed={form.relation === relation} disabled={!enabled} onClick={() => set('relation', relation)}>{relation}</button>)}</div></fieldset>
+          <fieldset className="segmented-field"><legend>条件关系</legend><div className="segmented">{(['AND', 'OR'] as const).map((relation) => <button key={relation} className={form.relation === relation ? 'is-active' : undefined} type="button" aria-pressed={form.relation === relation} disabled={!enabled || (relation === 'OR' && Boolean(form.uid.trim()))} onClick={() => set('relation', relation)}>{relation}</button>)}</div></fieldset>
         </div>
         <div className="search-grid">
           <label>订单号<input value={form.orderId} onChange={(event) => set('orderId', event.target.value)} disabled={!enabled} maxLength={256} autoComplete="off" placeholder="精确匹配" /></label>
@@ -391,10 +393,10 @@ function GlobalResourceSearch({ enabled, loading, onSearch, onReset }: {
           <label>审核投影<select value={form.pendingReview} onChange={(event) => set('pendingReview', event.target.value as PendingReviewFilter)} disabled={!enabled}><option value="">全部</option><option value="true">待审核</option><option value="false">非待审核</option></select></label>
           <label>开始时间<input value={form.from} onChange={(event) => { setQuickRange(null); set('from', event.target.value); }} disabled={!enabled} type="datetime-local" /></label>
           <label>结束时间<input value={form.to} onChange={(event) => { setQuickRange(null); set('to', event.target.value); }} disabled={!enabled} type="datetime-local" /></label>
-          <label>用户 UID<input disabled placeholder="DecisionBlocked" /></label>
+          <label>用户 UID<input value={form.uid} onChange={(event) => setForm((current) => ({ ...current, uid: event.target.value, relation: 'AND', walletMatch: 'EXACT' }))} disabled={!enabled} inputMode="numeric" pattern="[1-9][0-9]{0,18}" autoComplete="off" placeholder="精确 UID" /></label>
           <label>绑定手机号<input disabled placeholder="DecisionBlocked / PII" /></label>
           <label>Yellow queue<input disabled placeholder="Unavailable" /></label>
-          <fieldset className="global-wallet-match"><legend>钱包匹配</legend><div className="segmented">{(['EXACT', 'FUZZY'] as const).map((mode) => <button key={mode} className={form.walletMatch === mode ? 'is-active' : undefined} type="button" aria-pressed={form.walletMatch === mode} disabled={!enabled} onClick={() => set('walletMatch', mode)}>{mode === 'EXACT' ? '精确' : '模糊'}</button>)}</div></fieldset>
+          <fieldset className="global-wallet-match"><legend>钱包匹配</legend><div className="segmented">{(['EXACT', 'FUZZY'] as const).map((mode) => <button key={mode} className={form.walletMatch === mode ? 'is-active' : undefined} type="button" aria-pressed={form.walletMatch === mode} disabled={!enabled || (mode === 'FUZZY' && Boolean(form.uid.trim()))} onClick={() => set('walletMatch', mode)}>{mode === 'EXACT' ? '精确' : '模糊'}</button>)}</div></fieldset>
         </div>
         <div className="search-footer">
           <div className="quick-ranges" aria-label="快捷时间范围"><CalendarDays aria-hidden="true" />{quickRanges.map((range) => <button key={range} type="button" className={quickRange === range ? 'is-active' : ''} aria-pressed={quickRange === range} disabled={!enabled} onClick={() => selectQuickRange(range)}>{range}</button>)}</div>
@@ -566,6 +568,7 @@ function toFilters(form: SearchForm): AdminGlobalSearchFilters {
     ...(trim(form.productId) ? { productId: trim(form.productId) } : {}),
     ...(trim(form.merchantId) ? { merchantId: trim(form.merchantId) } : {}),
     ...(trim(form.txHash) ? { txHash: trim(form.txHash) } : {}),
+    ...(trim(form.uid) ? { uid: trim(form.uid) } : {}),
     ...(trim(form.wallet) ? { wallet: trim(form.wallet) } : {}),
     ...(form.from ? { from: form.from } : {}),
     ...(form.to ? { to: form.to } : {}),
