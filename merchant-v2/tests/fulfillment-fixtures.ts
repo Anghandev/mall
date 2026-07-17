@@ -14,15 +14,17 @@ export const paymentTxHash = `0x${'9'.repeat(64)}`;
 const exactAmounts = {
   listPriceUsdt: '100000000000000000000',
   productUsdtPaymentAmount: '70000000000000000000',
+  platformServiceFeeUsdt: '1000000000000000000',
+  custodyProductUsdt: '69000000000000000000',
   freightUsdt: '5000000000000000000',
   usdtPaymentAmount: '75000000000000000000',
   nplQuoteAmount: '30000000000000000000',
   nplPaymentAmount: '30000000000000000000',
   nplBurnAmount: '20000000000000000000',
   nplRewardAmount: '10000000000000000000',
-  merchantBaseReceivableUsdt: '80000000000000000000',
-  merchantConcessionAmount: '8000000000000000000',
-  merchantNetReceivableUsdt: '72000000000000000000',
+  merchantBaseReceivableUsdt: '69000000000000000000',
+  merchantConcessionAmount: '6900000000000000000',
+  merchantNetReceivableUsdt: '62100000000000000000',
   bnmAmount: '100000000000000000000',
 } as const;
 
@@ -65,7 +67,7 @@ export const deliveryOrder: FulfillmentOrder = {
     occurredAt: '2026-07-03T08:00:00.000Z',
   }],
   balances: [
-    { asset: 'USDT', state: 'LOCKED', amount: '72000000000000000000' },
+    { asset: 'USDT', state: 'LOCKED', amount: '62100000000000000000' },
     { asset: 'BNM_POINTS', state: 'LOCKED', amount: '100000000000000000000' },
   ],
   allowedActions: [{ action: 'REQUEST_FORCED_RECEIPT', enabled: true }],

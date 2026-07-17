@@ -9,7 +9,6 @@ import {
   RefreshCw,
   Save,
   Send,
-  ShieldCheck,
   Trash2,
   Video,
 } from 'lucide-react';
@@ -23,6 +22,7 @@ import type {
   ManagedCatalogProduct,
   MediaPurpose,
   MediaReadAccessProjection,
+  MerchantConcessionAllocation,
   MerchantConcessionPreview,
   MerchantStore,
   ProductSlotInput,
@@ -105,6 +105,12 @@ const actionLabels: Record<CatalogProductAction, string> = {
   ADJUST_INVENTORY: '调整库存',
   HIDE: '隐藏',
   DELIST: '下架',
+};
+
+const concessionPoolLabels: Record<MerchantConcessionAllocation['pool'], string> = {
+  SECKILL_PRIZE: '秒杀奖池 45%',
+  NODE_REWARD: '节点奖励池 45%',
+  REWARD_RESERVE: '奖励预留池 10%',
 };
 
 export function ProductPage() {
@@ -392,13 +398,6 @@ export function ProductPage() {
   const selectedStore = workspace.phase === 'ready'
     ? workspace.stores.find((store) => store.storeId === selectedStoreId)
     : undefined;
-  const decisionBlocked = bootstrap.phase === 'ready'
-    ? bootstrap.value.readiness.decisionBlocked.filter((decision) => [
-        'MERCHANT_STORE_REWARD_BPS',
-        'MERCHANT_CONCESSION_DESTINATION_WEIGHTS',
-      ].includes(decision))
-    : [];
-
   return (
     <div className="page-stack">
       <PageHeader
@@ -416,13 +415,6 @@ export function ProductPage() {
         eyebrow="02 / 商品与库存"
         title="单品提报"
       />
-
-      {decisionBlocked.length > 0 ? (
-        <div className="decision-notice" role="status">
-          <ShieldCheck aria-hidden="true" size={18} />
-          <div><strong>治理参数尚未冻结</strong><span>{decisionBlocked.join(' / ')} 继续由 Core 返回 DecisionBlocked，本页不填充默认比例。</span></div>
-        </div>
-      ) : null}
 
       <section className="section-block product-context" aria-labelledby="product-context-title">
         <div className="section-heading">
@@ -792,7 +784,7 @@ function ConcessionPreview({ value }: { value: MerchantConcessionPreview }) {
       </div>
       <div className="table-wrap">
         <table>
-          <thead><tr><th scope="col">SKU</th><th scope="col">基础应收</th><th scope="col">让利</th><th scope="col">净应收</th><th scope="col">受益目的地</th></tr></thead>
+          <thead><tr><th scope="col">SKU</th><th scope="col">扣除 1% 服务费后基础应收</th><th scope="col">让利</th><th scope="col">净应收</th><th scope="col">固定让利池</th></tr></thead>
           <tbody>
             {value.payload.items.map((item) => (
               <tr key={item.skuId}>
@@ -800,7 +792,7 @@ function ConcessionPreview({ value }: { value: MerchantConcessionPreview }) {
                 <td className="numeric-cell">{item.merchantBaseReceivableUsdt}</td>
                 <td className="numeric-cell">{item.merchantConcessionAmount}</td>
                 <td className="numeric-cell">{item.merchantNetReceivableUsdt}</td>
-                <td>{item.allocations.length > 0 ? item.allocations.map((allocation) => <span className="allocation-line" key={allocation.account}><code>{shortAddress(allocation.account)}</code><strong>{allocation.amount}</strong></span>) : <span>无让利分配</span>}</td>
+                <td>{item.allocations.length > 0 ? item.allocations.map((allocation) => <span className="allocation-line" key={allocation.pool}><code>{concessionPoolLabels[allocation.pool]} / {allocation.balanceState}</code><strong>{allocation.amount}</strong></span>) : <span>无让利分配</span>}</td>
               </tr>
             ))}
           </tbody>

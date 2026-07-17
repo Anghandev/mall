@@ -693,7 +693,7 @@ describe('settlement-admin.15 Core HTTP consumer', () => {
     expect((await api.createMerchantConcessionPreview(productId, {
       merchantConcessionBps: 2500,
       idempotencyKey: 'merchant-preview-1',
-    }, 'merchant-session')).payload.items[0]?.merchantNetReceivableUsdt).toBe('450');
+    }, 'merchant-session')).payload.items[0]?.merchantNetReceivableUsdt).toBe('518');
     expect((await api.submitMerchantProductReview(productId, {
       previewId: concessionPreview.previewId,
       idempotencyKey: 'merchant-review-1',
@@ -1060,13 +1060,15 @@ describe('settlement-admin.15 Core HTTP consumer', () => {
       orderKind: 'SECKILL',
       frozenAmounts: {
         productUsdtPaymentAmount: '8400',
+        platformServiceFeeUsdt: '120',
+        custodyProductUsdt: '8280',
         freightUsdt: '500',
-        merchantBaseReceivableUsdt: '10000',
-        merchantConcessionAmount: '1000',
-        merchantNetReceivableUsdt: '9000',
+        merchantBaseReceivableUsdt: '8280',
+        merchantConcessionAmount: '828',
+        merchantNetReceivableUsdt: '7452',
       },
       currentReceivableUsdt: '0',
-      removedFromReceivableUsdt: '9500',
+      removedFromReceivableUsdt: '7952',
     });
     expect(firstPage.statements[0]?.journalEvidence[0]?.journalId).toBe('journal:a:lifecycle');
     expect(firstPage.statements[0]?.settlementRefs[0]?.finalSafeTxHash).toBe(`0x${'b'.repeat(64)}`);
