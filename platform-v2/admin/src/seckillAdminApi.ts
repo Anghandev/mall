@@ -12,9 +12,11 @@ import {
   type SeckillGovernanceChallenge,
   type SeckillGovernanceChallengeRequest,
   type SeckillPrizeInjectionRequest,
+  type SeckillPrizeSettlementProjection,
   type SeckillSessionCreateRequest,
   type SeckillSessionHistoryPage,
   type SeckillSessionProjection,
+  type SeckillWinnerReviewRequest,
 } from '@abu24k/core-artifacts';
 import websocketProtocol from '@abu24k/core-artifacts/websocket';
 import { CoreApiError, requestCoreJson } from './coreApi';
@@ -132,6 +134,35 @@ export async function createSeckillBreakerResume(
   return writeAction('/v2/admin/seckill/breaker/resume', input, token, {
     actionKind: 'RESUME_PURCHASES', sessionId: input.sessionId,
   });
+}
+
+export async function reviewSeckillWinner(
+  session: SeckillSessionProjection,
+  input: SeckillWinnerReviewRequest,
+  token: string,
+): Promise<SeckillPrizeSettlementProjection> {
+  const settlement = session.prizeSettlement;
+  if (settlement?.state !== 'REVIEW_PENDING' || settlement.candidate === null) {
+    throw invalid('Seckill winner is not awaiting review', 409);
+  }
+  if (!['APPROVE', 'REJECT'].includes(input.decision)) throw invalid('Winner review decision must be APPROVE or REJECT', 400);
+  requireBoundedText(input.reasonCode, 'reasonCode', 2, 128);
+  requireHash(input.evidenceHash, 'evidenceHash');
+  requireIdempotencyKey(input.idempotencyKey);
+  const body = await authenticatedWrite(
+    `/v2/admin/seckill/sessions/${encodeURIComponent(session.sessionId)}/winner-review`, input, token,
+  );
+  if (!isSeckillPrizeSettlement(body) || !samePrizeSnapshot(body, settlement)) {
+    throw invalid('Winner review result does not preserve the frozen candidate and pool snapshot');
+  }
+  const expectedDecision = input.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED';
+  const validState = input.decision === 'APPROVE'
+    ? body.state === 'APPROVED'
+    : ['ROLLOVER_PENDING', 'ROLLED_OVER'].includes(body.state);
+  if (!validState || body.review?.decision !== expectedDecision || body.review.evidenceHash.toLowerCase() !== input.evidenceHash.toLowerCase()) {
+    throw invalid('Winner review result does not match the submitted decision and evidence');
+  }
+  return body;
 }
 
 export async function createSeckillGovernanceChallenge(
@@ -487,9 +518,15 @@ function queryString(query: SeckillPageQuery) {
 }
 
 function isSeckillSession(value: unknown): value is SeckillSessionProjection {
-  if (!isRecord(value) || value.artifactVersion !== artifactVersion || !bytes32Pattern.test(String(value.sessionId))) return false;
+  if (!isRecord(value) || !hasExactKeys(value, [
+    'artifactVersion', 'sessionId', 'policyVersion', 'merchantId', 'product', 'phase', 'storedPhase',
+    'serverTime', 'startsAt', 'mainDeadline', 'relayDeadline', 'settlementEarliestAt', 'settlementDeadline',
+    'timers', 'inventory', 'prizePoolUsdt', 'lastBuyerWallet', 'winnerWallet', 'prizeSettlement',
+    'snapshot', 'governanceActionId', 'rulesContentHash', 'publicationTxHash', 'allowedActions',
+  ]) || value.artifactVersion !== artifactVersion || !bytes32Pattern.test(String(value.sessionId))) return false;
   if (!amountPattern.test(String(value.policyVersion)) || typeof value.merchantId !== 'string' || !value.merchantId) return false;
   if (!isRecord(value.product)
+    || !hasExactKeys(value.product, ['productId', 'skuId', 'title', 'metadata', 'attributes', 'seckillListPriceUsdt'])
     || !nonEmpty(value.product, ['productId', 'skuId', 'title'])
     || !isRecord(value.product.metadata)
     || !isRecord(value.product.attributes)
@@ -499,16 +536,85 @@ function isSeckillSession(value: unknown): value is SeckillSessionProjection {
   const timers = value.timers;
   const inventory = value.inventory;
   if (!isFixedTimers(timers)) return false;
-  if (!isRecord(inventory) || !['total', 'sold', 'reserved', 'available'].every((field) => amountPattern.test(String(inventory[field])))) return false;
+  if (!isRecord(inventory)
+    || !hasExactKeys(inventory, ['total', 'sold', 'reserved', 'available'])
+    || !['total', 'sold', 'reserved', 'available'].every((field) => amountPattern.test(String(inventory[field])))) return false;
   return amountPattern.test(String(value.prizePoolUsdt))
     && (value.lastBuyerWallet === null || addressPattern.test(String(value.lastBuyerWallet)))
     && (value.winnerWallet === null || addressPattern.test(String(value.winnerWallet)))
+    && (value.prizeSettlement === null || isSeckillPrizeSettlement(value.prizeSettlement))
     && isRecord(value.snapshot)
     && isNullableHash(value.governanceActionId)
     && isNullableHash(value.rulesContentHash)
     && isNullableHash(value.publicationTxHash)
     && Array.isArray(value.allowedActions)
     && value.allowedActions.every((item) => typeof item === 'string' && item.length > 0);
+}
+
+function isSeckillPrizeSettlement(value: unknown): value is SeckillPrizeSettlementProjection {
+  if (!isRecord(value) || !hasExactKeys(value, [
+    'state', 'cutoffAt', 'candidate', 'poolAmountUsdt', 'poolSnapshotHash', 'review', 'awardJournalId',
+    'rolloverTargetSessionId', 'rolloverJournalId', 'payout',
+  ])) return false;
+  return ['REVIEW_PENDING', 'APPROVED', 'ROLLOVER_PENDING', 'ROLLED_OVER', 'QUARANTINED'].includes(String(value.state))
+    && isDateTime(value.cutoffAt)
+    && (value.candidate === null || isSeckillPrizeCandidate(value.candidate))
+    && amountPattern.test(String(value.poolAmountUsdt))
+    && bytes32Pattern.test(String(value.poolSnapshotHash))
+    && (value.review === null || isSeckillPrizeReview(value.review))
+    && isNullableNonEmptyText(value.awardJournalId)
+    && isNullableHash(value.rolloverTargetSessionId)
+    && isNullableNonEmptyText(value.rolloverJournalId)
+    && (value.payout === null || isSeckillPrizePayout(value.payout));
+}
+
+function isSeckillPrizeCandidate(value: unknown) {
+  return isRecord(value)
+    && hasExactKeys(value, ['orderId', 'buyerWallet', 'paymentEventKey', 'blockNumber', 'logIndex', 'evidenceHash'])
+    && bytes32Pattern.test(String(value.orderId))
+    && addressPattern.test(String(value.buyerWallet))
+    && nonEmpty(value, ['paymentEventKey'])
+    && amountPattern.test(String(value.blockNumber))
+    && amountPattern.test(String(value.logIndex))
+    && bytes32Pattern.test(String(value.evidenceHash));
+}
+
+function isSeckillPrizeReview(value: unknown) {
+  return isRecord(value)
+    && hasExactKeys(value, ['decision', 'reasonCode', 'evidenceHash', 'reviewedBy', 'reviewedAt'])
+    && ['APPROVED', 'REJECTED'].includes(String(value.decision))
+    && typeof value.reasonCode === 'string'
+    && value.reasonCode.length >= 2
+    && value.reasonCode.length <= 128
+    && bytes32Pattern.test(String(value.evidenceHash))
+    && addressPattern.test(String(value.reviewedBy))
+    && isDateTime(value.reviewedAt);
+}
+
+function isSeckillPrizePayout(value: unknown) {
+  return isRecord(value)
+    && hasExactKeys(value, ['state', 'requestId', 'batchId', 'finalSafeTxHash', 'finalExecutionTxHash'])
+    && ['AVAILABLE', 'REQUESTED', 'BATCHED', 'SETTLED', 'RETRYABLE', 'QUARANTINED'].includes(String(value.state))
+    && isNullableHash(value.requestId)
+    && isNullableHash(value.batchId)
+    && isNullableHash(value.finalSafeTxHash)
+    && isNullableHash(value.finalExecutionTxHash);
+}
+
+function samePrizeSnapshot(value: SeckillPrizeSettlementProjection, expected: SeckillPrizeSettlementProjection) {
+  const candidate = value.candidate;
+  const frozen = expected.candidate;
+  return value.poolAmountUsdt === expected.poolAmountUsdt
+    && value.cutoffAt === expected.cutoffAt
+    && value.poolSnapshotHash.toLowerCase() === expected.poolSnapshotHash.toLowerCase()
+    && candidate !== null
+    && frozen !== null
+    && candidate.orderId.toLowerCase() === frozen.orderId.toLowerCase()
+    && candidate.buyerWallet.toLowerCase() === frozen.buyerWallet.toLowerCase()
+    && candidate.paymentEventKey === frozen.paymentEventKey
+    && candidate.blockNumber === frozen.blockNumber
+    && candidate.logIndex === frozen.logIndex
+    && candidate.evidenceHash.toLowerCase() === frozen.evidenceHash.toLowerCase();
 }
 
 function isRealtimeEvent(value: unknown, sessionId: string): value is RealtimeEventEnvelope {
@@ -583,6 +689,10 @@ function isNullableAmount(value: unknown) {
 
 function isNullableDateTime(value: unknown) {
   return value === null || isDateTime(value);
+}
+
+function isNullableNonEmptyText(value: unknown) {
+  return value === null || (typeof value === 'string' && value.length > 0);
 }
 
 function isDateTime(value: unknown) {

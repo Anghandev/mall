@@ -185,7 +185,7 @@ function preview() {
   return {
     artifactVersion, previewId: hash('a'), productId: 'product-1', productVersion: '1', merchantId: 'merchant-1', policyVersion: '2', merchantConcessionBps: 2500,
     catalogFingerprint: hash('b'), destinationSetHash: hash('c'), previewHash: hash('d'),
-    payload: { artifactVersion, productId: 'product-1', productVersion: 1, merchantId: 'merchant-1', policyVersion: 2, merchantConcessionBps: 2500, destinationSetHash: hash('c'), catalogFingerprint: hash('b'), items: [{ skuId: 'sku-1', merchantBaseReceivableUsdt: '7000000000', merchantConcessionBps: 2500, merchantConcessionAmount: '1750000000', merchantNetReceivableUsdt: '5250000000', allocations: [{ account: address('1'), amount: '1750000000' }] }], expiresAt: '2026-07-15T00:05:00.000Z' },
+    payload: { artifactVersion, productId: 'product-1', productVersion: 1, merchantId: 'merchant-1', policyVersion: 2, merchantConcessionBps: 2500, destinationSetHash: hash('c'), catalogFingerprint: hash('b'), items: [{ skuId: 'sku-1', merchantBaseReceivableUsdt: '7000000000', merchantConcessionBps: 2500, merchantConcessionAmount: '1750000000', merchantNetReceivableUsdt: '5250000000', allocations: [{ pool: 'SECKILL_PRIZE', amount: '1750000000', balanceState: 'LOCKED' }] }], expiresAt: '2026-07-15T00:05:00.000Z' },
     authorization: { domain: { name: 'Abu24KCatalog' }, types: { MerchantConcessionPreview: [] }, primaryType: 'MerchantConcessionPreview', message: { previewId: hash('a') }, digest: hash('e'), signature: '0xsigned', signer: address('2') },
     expiresAt: '2026-07-15T00:05:00.000Z', createdAt: '2026-07-15T00:00:00.000Z',
   };

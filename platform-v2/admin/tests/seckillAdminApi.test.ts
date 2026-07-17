@@ -1,4 +1,4 @@
-import { artifactVersion, type SeckillGovernanceActionProjection, type SeckillSessionPlanProjection } from '@abu24k/core-artifacts';
+import { artifactVersion, type SeckillGovernanceActionProjection, type SeckillSessionPlanProjection, type SeckillSessionProjection } from '@abu24k/core-artifacts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   cancelSeckillGovernanceAction,
@@ -14,6 +14,7 @@ import {
   fetchSeckillSessionHistory,
   parseRealtimeEvent,
   proposeSeckillGovernanceAction,
+  reviewSeckillWinner,
   seckillWebSocketUrl,
   submitSeckillGovernanceApproval,
   subscribeSeckillEvents,
@@ -130,6 +131,46 @@ describe('seckill admin coordinated Core client', () => {
     ]);
   });
 
+  it('submits only the frozen winner review decision and rejects candidate substitution', async () => {
+    const session = seckillSession({ prizeSettlement: reviewPendingPrize() });
+    const approved = {
+      ...reviewPendingPrize(),
+      state: 'APPROVED' as const,
+      review: { decision: 'APPROVED' as const, reasonCode: 'ORDER_VALID', evidenceHash: hash('8'), reviewedBy: address('1'), reviewedAt: '2026-07-16T01:00:00.000Z' },
+      awardJournalId: 'journal:prize:1',
+      payout: { state: 'AVAILABLE' as const, requestId: null, batchId: null, finalSafeTxHash: null, finalExecutionTxHash: null },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(approved));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(reviewSeckillWinner(session, {
+      decision: 'APPROVE', reasonCode: 'ORDER_VALID', evidenceHash: hash('8'), idempotencyKey: 'winner-review-1',
+    }, 'jwt')).resolves.toMatchObject({ state: 'APPROVED', candidate: { orderId: hash('4') } });
+    expect(fetchMock).toHaveBeenCalledWith(`/v2/admin/seckill/sessions/${session.sessionId}/winner-review`, expect.objectContaining({
+      method: 'POST', headers: { authorization: 'Bearer jwt', 'content-type': 'application/json' },
+    }));
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      decision: 'APPROVE', reasonCode: 'ORDER_VALID', evidenceHash: hash('8'), idempotencyKey: 'winner-review-1',
+    });
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      ...approved, candidate: { ...approved.candidate!, buyerWallet: address('9') },
+    })));
+    await expect(reviewSeckillWinner(session, {
+      decision: 'APPROVE', reasonCode: 'ORDER_VALID', evidenceHash: hash('8'), idempotencyKey: 'winner-review-2',
+    }, 'jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
+  });
+
+  it('strictly rejects missing and extra prize-settlement fields', async () => {
+    const settlement = reviewPendingPrize();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(seckillSession({ prizeSettlement: { ...settlement, unexpected: true } as never }))));
+    await expect(fetchCurrentSeckillSession()).rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    const { poolSnapshotHash: _missing, ...incomplete } = settlement;
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(seckillSession({ prizeSettlement: incomplete as never }))));
+    await expect(fetchCurrentSeckillSession()).rejects.toMatchObject({ code: 'InvalidResponse' });
+  });
+
   it('binds secondary-wallet EIP-712 approval, Safe proposal and cancellation to one action', async () => {
     const action = governanceAction();
     const input = { nonce: '7', deadline: '1800000000' };
@@ -171,7 +212,7 @@ describe('seckill admin coordinated Core client', () => {
 
 function jsonResponse(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }); }
 function hash(digit: string) { return `0x${digit.repeat(64)}`; }
-function seckillSession() { return { artifactVersion, sessionId: hash('a'), policyVersion: '2', merchantId: 'merchant-1', product: { productId: 'product-1', skuId: 'sku-1', title: '24K session', metadata: {}, attributes: {}, seckillListPriceUsdt: '88' }, phase: 'LIVE', storedPhase: 'LIVE', serverTime: '2026-07-15T05:00:00.000Z', startsAt: '2026-07-15T05:00:00.000Z', mainDeadline: '2026-07-15T06:00:00.000Z', relayDeadline: '2026-07-15T05:01:00.000Z', settlementEarliestAt: '2026-07-15T05:06:00.000Z', settlementDeadline: '2026-07-15T05:11:00.000Z', timers: { mainDurationSeconds: 3600, relayInitialSeconds: 60, relayIncrementSeconds: 30, relayCapSeconds: 60 }, inventory: { total: '100', sold: '5', reserved: '2', available: '93' }, prizePoolUsdt: '9', lastBuyerWallet: null, winnerWallet: null, snapshot: {}, governanceActionId: hash('1'), rulesContentHash: hash('2'), publicationTxHash: hash('3'), allowedActions: [] }; }
+function seckillSession(overrides: Partial<SeckillSessionProjection> = {}): SeckillSessionProjection { return { artifactVersion, sessionId: hash('a'), policyVersion: '2', merchantId: 'merchant-1', product: { productId: 'product-1', skuId: 'sku-1', title: '24K session', metadata: {}, attributes: {}, seckillListPriceUsdt: '88' }, phase: 'LIVE', storedPhase: 'LIVE', serverTime: '2026-07-15T05:00:00.000Z', startsAt: '2026-07-15T05:00:00.000Z', mainDeadline: '2026-07-15T06:00:00.000Z', relayDeadline: '2026-07-15T05:01:00.000Z', settlementEarliestAt: '2026-07-15T05:06:00.000Z', settlementDeadline: '2026-07-15T05:11:00.000Z', timers: { mainDurationSeconds: 3600, relayInitialSeconds: 60, relayIncrementSeconds: 30, relayCapSeconds: 60 }, inventory: { total: '100', sold: '5', reserved: '2', available: '93' }, prizePoolUsdt: '9', lastBuyerWallet: null, winnerWallet: null, prizeSettlement: null, snapshot: {}, governanceActionId: hash('1'), rulesContentHash: hash('2'), publicationTxHash: hash('3'), allowedActions: [], ...overrides }; }
 function realtimeEvent(sessionId: string) { return { artifactVersion, protocolVersion: 1, eventId: 'event-1', channel: `seckill:${sessionId}`, cursor: '8', eventType: 'SeckillRelayExtended', resourceType: 'SECKILL_SESSION', resourceId: sessionId, occurredAt: '2026-07-15T05:00:30.000Z', finality: 'FINAL', payload: {} }; }
 
 function governanceAction(overrides: Partial<SeckillGovernanceActionProjection> = {}): SeckillGovernanceActionProjection {
@@ -196,6 +237,16 @@ function sessionPlan(): SeckillSessionPlanProjection {
 
 function prizeInjection() {
   return { injectionId: hash('a'), amountUsdt: '50', operationsSafeAddress: address('6'), custodySafeAddress: address('7'), tokenAddress: address('8'), finalJournalId: null, reversalJournalId: null };
+}
+
+function reviewPendingPrize() {
+  return {
+    state: 'REVIEW_PENDING' as const,
+    cutoffAt: '2026-07-16T01:00:00.000Z',
+    candidate: { orderId: hash('4'), buyerWallet: address('5'), paymentEventKey: 'payment:1', blockNumber: '100', logIndex: '2', evidenceHash: hash('6') },
+    poolAmountUsdt: '9', poolSnapshotHash: hash('7'), review: null, awardJournalId: null,
+    rolloverTargetSessionId: null, rolloverJournalId: null, payout: null,
+  };
 }
 
 function governanceChallenge(action: ReturnType<typeof governanceAction>, nonce: string, deadline: string) {

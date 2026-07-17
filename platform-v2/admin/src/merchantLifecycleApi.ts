@@ -228,7 +228,6 @@ function validateApplication(input: MerchantApplicationCreateRequest | MerchantA
   boundedText(input.legalName, 'legalName', 80, 2);
   boundedText(input.legalId, 'legalId', 32, 6);
   boundedText(input.contactPhone, 'contactPhone', 32, 6);
-  if (!merchantLevels.includes(input.level)) throw invalid('Merchant level is invalid', 400);
   requireIdempotencyKey(input.idempotencyKey);
   if (create) requireAddress((input as MerchantApplicationCreateRequest).settlementWallet, 'settlementWallet');
   else {
@@ -261,7 +260,7 @@ function isMerchantSummary(value: unknown): value is MerchantLifecycleDetail['me
 
 function isMerchantLifecycleDetail(value: unknown): value is MerchantLifecycleDetail {
   if (!isRecord(value) || value.artifactVersion !== artifactVersion || !isMerchantSummary(value.merchant) || !isQualification(value.qualification)) return false;
-  if (!isLevelPolicy(value.levelPolicy, value.merchant.level)) return false;
+  if (!isLevelPolicy(value.levelPolicy)) return false;
   if (!isRecord(value.analytics) || !isOrderAnalytics(value.analytics.orders) || !isFulfillmentAnalytics(value.analytics.fulfillment)
     || !isRiskAnalytics(value.analytics.risk) || !isContributionAnalytics(value.analytics.contributions)) return false;
   if (!Array.isArray(value.balances) || value.balances.length !== 5 || !value.balances.every((item) => isRecord(item)
@@ -271,17 +270,8 @@ function isMerchantLifecycleDetail(value: unknown): value is MerchantLifecycleDe
   return Array.isArray(value.reviews) && value.reviews.every(isReviewEvidence);
 }
 
-function isLevelPolicy(value: unknown, merchantLevel: MerchantLifecycleDetail['merchant']['level']) {
-  if (!isRecord(value)) return false;
-  if (value.status === 'DecisionBlocked') return typeof value.reason === 'string' && value.reason.length > 0;
-  return value.status === 'AVAILABLE'
-    && validResourceId(value.configVersionId)
-    && Number.isSafeInteger(value.version) && Number(value.version) >= 1
-    && validDate(value.effectiveFrom)
-    && merchantLevels.includes(value.level as never)
-    && value.level === merchantLevel
-    && amountPattern.test(String(value.maxProductSettlementUsdt))
-    && Number.isSafeInteger(value.monthlySeckillQuota) && Number(value.monthlySeckillQuota) >= 0;
+function isLevelPolicy(value: unknown) {
+  return isRecord(value) && Object.keys(value).length === 1 && value.status === 'Deprecated';
 }
 
 function isQualification(value: unknown) {
