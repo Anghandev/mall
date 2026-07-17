@@ -3,27 +3,39 @@
 Status: `DRAFT`, `NOT AUTHORIZED` and `NON-EXECUTABLE`.
 
 This draft is bound to local settlement/admin artifact
-`2.0.0-settlement-admin.9`. It does not
-authorize deployment, approval, token transfer or any transaction. No `.env` or
-private key is read for this plan. `pnpm micro:preflight` must not be run until
-the full local release gate passes and the project-specific preflight described
-below is implemented.
+`2.0.0-settlement-admin.15`. It does not authorize deployment, approval, token
+transfer or any transaction. The completed redacted readiness check read local
+configuration without printing addresses or private keys. The generic
+`pnpm micro:preflight` remains insufficient because it prints wallet addresses
+and does not attest this project's contracts, TWAP source or transaction packet.
+
+## Proven Readiness
+
+- the full local `pnpm verify`, combined E2E, backup/restore, breaker drills and
+  one bounded funds/permissions review passed;
+- the coordinated manifest has no `DecisionBlocked` entries;
+- both configured RPC providers return BSC chain ID `56`;
+- all five configured Safes have runtime code and respond to the required Safe
+  read interfaces;
+- the deployment key, configured technical wallet and local technical roles
+  match without exposing their values;
+- the node weight is 100% and the four operations weights are 25% each;
+- the deployer native balance exceeds the configured micro-test BNB budget at
+  the observed Gas price.
 
 ## Current Blockers
 
 Execution remains prohibited while any of these is true:
 
 - the coordinated manifest has `deploymentAuthorized: false`;
-- any `DecisionBlocked` payment allocation, including the seckill prize-pool
-  account, remains;
-- governance, USDT Custody, NPL Reward or Operations Treasury Safe addresses
-  and owners are unavailable;
-- secondary policy signer, quote signer, primary/fallback RPC, production
-  domains or isolated signer service are unavailable;
-- all three complete product consumers,
-  combined E2E, security review, backup/restore and breaker drills are incomplete;
-- deployed bytecode, roles, immutable addresses and verified source do not match
-  the final coordinated artifact;
+- the production `ITwapSourceV2` address, oracle version, audited source and
+  deployed runtime-code hash are not frozen;
+- the four payment contracts are not deployed, source-verified or bound to the
+  final artifact by deployment block and runtime-code hash;
+- the project-specific dry-run packet has not produced exact CREATE nonces,
+  constructor calldata, Gas estimates and post-deployment attestations;
+- production domains, isolated signer service, databases, Redis, BNM backend
+  and external providers remain unavailable or unverified;
 - the user has not approved one exact bounded transaction packet.
 
 The current generic preflight checks only environment, chain, wallet and budget.
@@ -41,8 +53,10 @@ The payment contract order is:
 Before approval, a project-specific dry run must prove constructor arguments,
 CREATE addresses, runtime-code hashes, source verification inputs, Safe-held
 roles, policy secondary signature, fixed token/pair addresses and Router zero
-retention on a BSC fork. Test deployments are never promoted to production when
-production Safe inputs change.
+retention on a BSC fork. `TwapOracleAdapterV2` may be planned only after the
+production `ITwapSourceV2` implementation and its runtime hash are independently
+approved. Test deployments are never promoted to production when production
+inputs change.
 
 The final manifest must bind each deployment block, each actual runtime code
 hash and the independently approved TWAP source code hash. Runtime readiness
@@ -88,8 +102,10 @@ cover:
    Safe execution;
 3. configure one dedicated merchant, SKU, beneficiary and region snapshot;
 4. fund only the approved buyer USDT/NPL and micro operational amounts;
-5. execute one ordinary payment and prove 70% USDT to Custody Safe, 20% NPL to
-   Burn, 10% NPL to Reward Safe and zero Router retention;
+5. execute one ordinary payment and prove 1%-of-list USDT to the Platform
+   Service Fee Safe, the remaining 69%-of-list product USDT plus independent
+   freight USDT to the Custody Safe, 20% NPL to Burn, 10% NPL to the Reward Safe
+   and zero Router retention;
 6. execute one seckill payment and one deadline fallback using independent
    reservations and prove the 60-minute/60-second/+30-second rules;
 7. wait for 15 canonical confirmations and prove event indexing, balanced Locked
@@ -105,6 +121,8 @@ cover:
     ledger liability, event and audit record.
 
 There is no business-refund or on-chain Claim fallback.
+The 1,000 USDT merchant guarantee remains a local/fork test and is not reduced
+or represented as a mainnet micro amount.
 
 ## Stop Conditions
 
