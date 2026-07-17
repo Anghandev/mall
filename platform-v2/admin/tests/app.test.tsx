@@ -722,7 +722,7 @@ describe('platform admin fail-closed experience', () => {
     renderAt('/core-status');
 
     expect((await screen.findAllByText('Fail closed')).length).toBeGreaterThan(0);
-    expect(screen.getByText('FIXED_REMAINDER_ACCOUNTS')).toBeTruthy();
+    expect(screen.getByText('Core 返回无阻断项')).toBeTruthy();
     expect(screen.getByText('PAYMENT_ROUTER_ADDRESS_MANIFEST')).toBeTruthy();
     expect(screen.getByText('buyerShoppingStatementHttp').closest('li')?.className).toBe('capability-available');
     expect(screen.getByText('merchantReceivableStatementHttp').closest('li')?.className).toBe('capability-available');
@@ -957,9 +957,9 @@ function bootstrapResponse() {
         npl: '0x4e8277ab31e4956b2cd48449793a57656dfc03d2',
         nplUsdtPair: '0x2955e33bb120714abf11ace2766e614e6e5955b2',
       },
-      decisionBlocked: ['PLATFORM_SERVICE_FEE_BPS'],
+      decisionBlocked: [],
       externalBlocked: ['PAYMENT_ROUTER_ADDRESS_MANIFEST'],
-      paymentDecisionBlocked: ['FIXED_REMAINDER_ACCOUNTS'],
+      paymentDecisionBlocked: [],
       paymentExternalBlocked: ['PAYMENT_ROUTER_ADDRESS_MANIFEST'],
       providers: { RPC_PRIMARY: 'CONFIGURATION_REQUIRED' },
       writesEnabled: false,
