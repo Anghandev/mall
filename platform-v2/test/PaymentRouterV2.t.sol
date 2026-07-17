@@ -13,10 +13,10 @@ contract PaymentRouterV2Test is CoreFixture {
     function testPaymentEncodingMatchesCoreSigningVector() public pure {
         V2Types.PaymentIntent memory intent = _signingVectorIntent();
         bytes32 paymentHash = keccak256(abi.encode(intent));
-        assertEq(paymentHash, 0xb62baf1a1ca33005a377c88d3945fd917e755ed50422b569fa20dd7f3e2f45a2);
+        assertEq(paymentHash, 0x99ccfc957ff13dd932246ab4f65c3636c3557d7bfdd00369ee9a4c4a597c90b9);
         assertEq(
             _paymentAuthorizationDigest(intent, paymentHash),
-            0x2e6c9e58ee5c29ece2ca985969d75228df81663d98a12fb4556ecc11049c9a74
+            0x8d92356ce3efbaa3271f6c99d9166b7bb90787905fd35308c9b0b6bb094ff033
         );
     }
 
@@ -33,10 +33,10 @@ contract PaymentRouterV2Test is CoreFixture {
             sessionId: seckillPayment.sessionId, seckillPayment: seckillPayment, fallbackPayment: fallbackPayment
         });
         bytes32 seckillHash = keccak256(abi.encode(intent));
-        assertEq(seckillHash, 0x8d85308df953fedd0ead161d722a6106bcc1032d8fec00f045c29971f1667f5c);
+        assertEq(seckillHash, 0xf222066b7b08d6c1cec6fd2121354ff180c25df10879612465567ec53447536b);
         assertEq(
             _seckillAuthorizationDigest(intent, seckillHash),
-            0x68fd9c29eb7472528bbd2e646334f3af78fab8e3f6767580609cbc74f8e43823
+            0x19d2d96a413026200dce3a6b06fffe55ee6a9dffba237ed48ca03f92eb09d4fd
         );
     }
 
@@ -62,16 +62,18 @@ contract PaymentRouterV2Test is CoreFixture {
             nonce: 7,
             listPriceUsdt: 100 ether,
             productUsdtPaymentAmount: 70 ether,
+            platformServiceFeeUsdt: 1 ether,
+            custodyProductUsdt: 69 ether,
             freightUsdt: 0,
             usdtPaymentAmount: 70 ether,
             nplQuoteAmount: 1_000 ether,
             nplPaymentAmount: 300 ether,
             nplBurnAmount: 200 ether,
             nplRewardAmount: 100 ether,
-            merchantBaseReceivableUsdt: 60 ether,
+            merchantBaseReceivableUsdt: 69 ether,
             merchantConcessionBps: 2_500,
-            merchantConcessionAmount: 15 ether,
-            merchantNetReceivableUsdt: 45 ether,
+            merchantConcessionAmount: 17.25 ether,
+            merchantNetReceivableUsdt: 51.75 ether,
             concessionAllocationHash: bytes32(
                 uint256(0x4444444444444444444444444444444444444444444444444444444444444444)
             ),
@@ -169,6 +171,7 @@ contract PaymentRouterV2Test is CoreFixture {
             IPolicyRegistryV2(address(0)),
             IBeneficiaryRegistryV2(address(beneficiaryRegistry)),
             ITwapOracleV2(address(oracle)),
+            platformServiceFeeSafe,
             usdtCustodySafe,
             nplRewardSafe,
             operationsTreasurySafe,
@@ -176,7 +179,7 @@ contract PaymentRouterV2Test is CoreFixture {
         );
     }
 
-    function testPaymentAtomicallySendsSeventyTwentyTenAndRouterRetainsZero() public {
+    function testPaymentAtomicallySplitsServiceFeeCustodyBurnRewardAndRouterRetainsZero() public {
         V2Types.PaymentIntent memory intent =
             _makePayment(keccak256("order-1"), buyer, 1, false, keccak256("reservation-1"));
         uint256 buyerUsdtBefore = usdt.balanceOf(buyer);
@@ -186,7 +189,8 @@ contract PaymentRouterV2Test is CoreFixture {
 
         assertEq(buyerUsdtBefore - usdt.balanceOf(buyer), 70 ether);
         assertEq(buyerNplBefore - npl.balanceOf(buyer), 300 ether);
-        assertEq(usdt.balanceOf(usdtCustodySafe), 70 ether);
+        assertEq(usdt.balanceOf(platformServiceFeeSafe), 1 ether);
+        assertEq(usdt.balanceOf(usdtCustodySafe), 69 ether);
         assertEq(npl.balanceOf(V2Types.NPL_BURN_ADDRESS), 200 ether);
         assertEq(npl.balanceOf(nplRewardSafe), 100 ether);
         assertEq(usdt.balanceOf(address(router)), 0);
@@ -204,7 +208,7 @@ contract PaymentRouterV2Test is CoreFixture {
 
         _pay(delivery, BUYER_KEY);
 
-        assertEq(usdt.balanceOf(usdtCustodySafe) - custodyBefore, 75 ether);
+        assertEq(usdt.balanceOf(usdtCustodySafe) - custodyBefore, 74 ether);
         assertEq(npl.balanceOf(V2Types.NPL_BURN_ADDRESS) - burnBefore, 200 ether);
         assertEq(npl.balanceOf(nplRewardSafe) - rewardBefore, 100 ether);
         assertEq(delivery.bnmAmount, delivery.listPriceUsdt);
@@ -305,15 +309,16 @@ contract PaymentRouterV2Test is CoreFixture {
             _makePayment(keccak256("erc1271"), address(wallet), 9, false, keccak256("reservation-9"));
         bytes32 digest = router.hashPayment(intent);
         router.pay(intent, _sign(QUOTE_KEY, digest), _sign(ownerKey, digest));
-        assertEq(usdt.balanceOf(usdtCustodySafe), 70 ether);
+        assertEq(usdt.balanceOf(platformServiceFeeSafe), 1 ether);
+        assertEq(usdt.balanceOf(usdtCustodySafe), 69 ether);
     }
 
-    function testQuoteSignerCannotRedirectBuyerGenesisReward() public {
+    function testQuoteSignerCannotInjectLegacyGenesisBeneficiary() public {
         V2Types.PaymentIntent memory intent =
             _makePayment(keccak256("genesis-diversion"), buyer, 18, false, keccak256("reservation-18"));
         intent.beneficiaries.genesis = genesis;
         bytes32 digest = router.hashPayment(intent);
-        vm.expectRevert(BeneficiaryRegistryV2.InvalidGenesisCredential.selector);
+        vm.expectRevert(BeneficiaryRegistryV2.BeneficiaryMismatch.selector);
         router.pay(intent, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest));
     }
 
@@ -375,12 +380,16 @@ contract PaymentRouterV2Test is CoreFixture {
         policy.relayIncrement = 10 seconds;
         policy.relayCap = 20 seconds;
         policy.decisionEvidenceHash = keccak256("policy-2-timers");
-        address[] memory accounts = new address[](2);
+        address[] memory accounts = new address[](4);
         accounts[0] = operationsOne;
         accounts[1] = operationsTwo;
-        uint16[] memory weights = new uint16[](2);
-        weights[0] = 6_000;
-        weights[1] = 4_000;
+        accounts[2] = operationsThree;
+        accounts[3] = operationsFour;
+        uint16[] memory weights = new uint16[](4);
+        weights[0] = 2_500;
+        weights[1] = 2_500;
+        weights[2] = 2_500;
+        weights[3] = 2_500;
         uint64 deadline = uint64(block.timestamp + 1 hours);
         BeneficiaryRegistryV2.RegionBeneficiaries memory nextRegion =
             BeneficiaryRegistryV2.RegionBeneficiaries(district, city, province, region);

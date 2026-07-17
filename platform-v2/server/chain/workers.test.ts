@@ -3,7 +3,11 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { AbiCoder, Interface, Wallet, keccak256, toUtf8Bytes, type InterfaceAbi } from 'ethers';
 import { CORE_ARTIFACT_VERSION, USDT_ADDRESS } from '../api/enums.ts';
-import { paymentAllocationSetHash, type PaymentPolicySnapshot } from '../api/payment-policy.ts';
+import {
+  paymentAllocationSetHash,
+  paymentBeneficiarySetHash,
+  type PaymentPolicySnapshot,
+} from '../api/payment-policy.ts';
 import { AbiEventDecoder, type DecodedDomainEvent, type IndexedLog } from './abi-decoder.ts';
 import { BnmAvailabilityWorker, HttpBnmAvailabilityAdapter } from './bnm-availability-worker.ts';
 import { FulfillmentSchedulerWorker } from './fulfillment-scheduler-worker.ts';
@@ -126,6 +130,8 @@ test('Indexer decodes the frozen ABI, is idempotent and fails closed on reorg', 
     1,
     100,
     70,
+    1,
+    69,
     0,
     70,
     300,
@@ -158,6 +164,8 @@ test('Indexer decodes the frozen ABI, is idempotent and fails closed on reorg', 
   assert.equal(store.events[0]?.eventHash, encoded.topics[0]);
   assert.equal(store.events[0]?.values.classification, '1');
   assert.equal(store.events[0]?.values.productUsdtPaid, '70');
+  assert.equal(store.events[0]?.values.platformServiceFeeUsdt, '1');
+  assert.equal(store.events[0]?.values.custodyProductUsdt, '69');
   assert.equal(store.events[0]?.values.freightUsdt, '0');
   assert.equal(store.events[0]?.values.usdtPaid, '70');
   assert.equal(store.events[0]?.values.nplPaid, '300');
@@ -206,7 +214,7 @@ test('polling payment worker persists empty blocks, recovers a common-ancestor r
   const paymentEvent = contractInterface.getEvent('PaymentCompleted');
   assert.ok(paymentEvent);
   const encoded = contractInterface.encodeEventLog(paymentEvent, [
-    ORDER_ID, BUYER, MERCHANT, 0, 1, 100, 70, 0, 70, 300, 200, 100, 100, HASH_2, HASH_3,
+    ORDER_ID, BUYER, MERCHANT, 0, 1, 100, 70, 1, 69, 0, 70, 300, 200, 100, 100, HASH_2, HASH_3,
   ]);
   const block99: ChainBlock = { number: 99, hash: blockHash(99), parentHash: blockHash(98), timestamp: 1_800_000_000 };
   const block100: ChainBlock = { number: 100, hash: blockHash(100), parentHash: block99.hash, timestamp: 1_800_000_001 };
@@ -930,7 +938,6 @@ test('payment RPC sources enforce the frozen Oracle and beneficiary snapshot rul
       '0x5555555555555555555555555555555555555555',
       '0x6666666666666666666666666666666666666666',
     ],
-    isGenesisEligible: true,
   });
   const oracle = new RpcPaymentOracleQuoteSource({
     reader,
@@ -948,7 +955,7 @@ test('payment RPC sources enforce the frozen Oracle and beneficiary snapshot rul
     regionCodeHash: HASH_1,
     policyVersion: 1,
   }), {
-    genesis: BUYER,
+    genesis: '0x0000000000000000000000000000000000000000',
     directReferral: MERCHANT,
     district: '0x3333333333333333333333333333333333333333',
     city: '0x4444444444444444444444444444444444444444',
@@ -970,14 +977,14 @@ test('payment RPC sources enforce the frozen Oracle and beneficiary snapshot rul
   );
 });
 
-test('payment policy attestation binds all 33 Registry fields and latest-version semantics', async () => {
+test('payment policy attestation binds all 30 Registry fields and latest-version semantics', async () => {
   const policy = paymentPolicySnapshot();
   const operationAccounts = policy.operationsDestinations.map((item) => item.account);
   const operationWeights = policy.operationsDestinations.map((item) => BigInt(item.weightBps));
-  const beneficiarySetHash = keccak256(AbiCoder.defaultAbiCoder().encode(
-    ['address[]', 'uint16[]'],
-    [operationAccounts, operationWeights],
-  ));
+  const beneficiarySetHash = paymentBeneficiarySetHash(
+    policy.genesisNodeDestinations,
+    policy.operationsDestinations,
+  );
   const rulesContentHash = HASH_3;
   const tuple = paymentPolicyTuple(policy, beneficiarySetHash, rulesContentHash);
   const policyHash = keccak256(AbiCoder.defaultAbiCoder().encode([PAYMENT_POLICY_TUPLE_ABI], [tuple]));
@@ -1008,8 +1015,8 @@ test('payment policy attestation binds all 33 Registry fields and latest-version
 
   for (const [name, index, value] of [
     ['usdtCustodySafe', 22, '0x9999999999999999999999999999999999999999'],
-    ['concessionDestinationSetHash', 30, HASH_2],
-    ['rulesContentHash', 32, HASH_2],
+    ['concessionDestinationSetHash', 27, HASH_2],
+    ['rulesContentHash', 29, HASH_2],
   ] as const) {
     const changed = [...tuple];
     changed[index] = value;
@@ -1026,7 +1033,7 @@ test('payment policy attestation binds all 33 Registry fields and latest-version
   }
   await assert.rejects(
     policySource(tuple, [operationAccounts, [5_000n, 5_000n]], 1n).assertPublished(input),
-    /operationsHash/,
+    /operationAccounts|operationWeights/,
   );
 });
 
@@ -1066,6 +1073,7 @@ test('runtime readiness attests deployed code, bindings, roles, Oracle source an
     [`${router}:beneficiaryRegistry`]: beneficiaryRegistry,
     [`${router}:oracle`]: oracle,
     [`${router}:governanceSafe`]: governanceSafe,
+    [`${router}:platformServiceFeeSafe`]: '0x7000000000000000000000000000000000000000',
     [`${router}:usdtCustodySafe`]: usdtSafe,
     [`${router}:nplRewardSafe`]: nplSafe,
     [`${router}:operationsTreasurySafe`]: operationsSafe,
@@ -1093,6 +1101,7 @@ test('runtime readiness attests deployed code, bindings, roles, Oracle source an
     twapSource,
     twapSourceCodeHash: runtimeCodeHash,
     governanceSafe,
+    platformServiceFeeSafe: '0x7000000000000000000000000000000000000000',
     usdtCustodySafe: usdtSafe,
     nplRewardSafe: nplSafe,
     operationsTreasurySafe: operationsSafe,
@@ -1994,13 +2003,6 @@ function jsonResponse(body: unknown) {
 }
 
 function paymentPolicySnapshot(): PaymentPolicySnapshot {
-  const concessionDestinations = [
-    { account: '0x7000000000000000000000000000000000000001', weightBps: 4_000 },
-    { account: '0x7000000000000000000000000000000000000002', weightBps: 6_000 },
-  ];
-  const otherUsdtDestinations = [
-    { account: '0x7000000000000000000000000000000000000003', weightBps: 10_000 },
-  ];
   return {
     policyVersion: 1,
     oracleVersion: HASH_1,
@@ -2015,8 +2017,8 @@ function paymentPolicySnapshot(): PaymentPolicySnapshot {
     provinceBps: 60,
     regionBps: 40,
     operationsBps: 400,
-    platformFeeBps: 500,
-    seckillPrizeBps: 300,
+    platformFeeBps: 100,
+    seckillPrizeBps: 0,
     seckillMainDuration: 3_600,
     relayInitial: 60,
     relayIncrement: 30,
@@ -2027,26 +2029,22 @@ function paymentPolicySnapshot(): PaymentPolicySnapshot {
     oracleMinimumUsdtLiquidity: 50_000n * 10n ** 18n,
     requiredConfirmations: 15,
     merchantGuaranteeMinimumUsdt: 1_000n * 10n ** 18n,
+    platformServiceFeeSafe: '0x2222222222222222222222222222222222222223',
     usdtCustodySafe: '0x3333333333333333333333333333333333333333',
     nplRewardSafe: '0x4444444444444444444444444444444444444444',
     operationsTreasurySafe: '0x5555555555555555555555555555555555555555',
     circulationPool: '0x6000000000000000000000000000000000000001',
-    genesisCredential: '0x6000000000000000000000000000000000000002',
-    genesisTokenId: 1n,
-    genesisCredentialStandard: 1,
-    concessionDestinationSetHash: paymentAllocationSetHash(
-      concessionDestinations,
-      otherUsdtDestinations,
-      '0x7000000000000000000000000000000000000004',
-    ),
+    concessionDestinationSetHash: paymentAllocationSetHash(),
     decisionEvidenceHash: HASH_2,
-    concessionDestinations,
-    operationsDestinations: [
-      { account: '0x5000000000000000000000000000000000000007', weightBps: 4_000 },
-      { account: '0x5000000000000000000000000000000000000008', weightBps: 6_000 },
+    genesisNodeDestinations: [
+      { account: '0x5000000000000000000000000000000000000006', weightBps: 10_000 },
     ],
-    otherUsdtDestinations,
-    seckillPrizePoolAccount: '0x7000000000000000000000000000000000000004',
+    operationsDestinations: [
+      { account: '0x5000000000000000000000000000000000000007', weightBps: 2_500 },
+      { account: '0x5000000000000000000000000000000000000008', weightBps: 2_500 },
+      { account: '0x5000000000000000000000000000000000000009', weightBps: 2_500 },
+      { account: '0x5000000000000000000000000000000000000010', weightBps: 2_500 },
+    ],
   };
 }
 
@@ -2082,9 +2080,6 @@ function paymentPolicyTuple(
     policy.nplRewardSafe,
     policy.operationsTreasurySafe,
     policy.circulationPool,
-    policy.genesisCredential,
-    policy.genesisTokenId,
-    policy.genesisCredentialStandard,
     beneficiarySetHash,
     policy.concessionDestinationSetHash,
     policy.decisionEvidenceHash,

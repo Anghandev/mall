@@ -120,10 +120,11 @@ contract PolicyRegistryV2Test is CoreFixture {
         policyRegistry.publishPolicy(policy, accounts, weights, 20, deadline, _sign(SECONDARY_KEY, policyDigest));
 
         V2Types.BeneficiarySnapshot memory oldSnapshot =
-            V2Types.BeneficiarySnapshot(buyer, directReferral, district, city, province, region);
+            V2Types.BeneficiarySnapshot(address(0), directReferral, district, city, province, region);
         beneficiaryRegistry.validateSnapshot(1, buyer, merchant, regionCodeHash, oldSnapshot);
-        V2Types.BeneficiarySnapshot memory nextSnapshot =
-            V2Types.BeneficiarySnapshot(buyer, directReferral, next.district, next.city, next.province, next.region);
+        V2Types.BeneficiarySnapshot memory nextSnapshot = V2Types.BeneficiarySnapshot(
+            address(0), directReferral, next.district, next.city, next.province, next.region
+        );
         beneficiaryRegistry.validateSnapshot(2, buyer, merchant, regionCodeHash, nextSnapshot);
         vm.expectRevert(BeneficiaryRegistryV2.BeneficiaryMismatch.selector);
         beneficiaryRegistry.validateSnapshot(2, buyer, merchant, regionCodeHash, oldSnapshot);
@@ -143,11 +144,15 @@ contract PolicyRegistryV2Test is CoreFixture {
         policy = policyRegistry.getPolicy(1);
         policy.version = 2;
         policy.decisionEvidenceHash = keccak256("policy-2-evidence");
-        accounts = new address[](2);
+        accounts = new address[](4);
         accounts[0] = operationsOne;
         accounts[1] = operationsTwo;
-        weights = new uint16[](2);
-        weights[0] = 6_000;
-        weights[1] = 4_000;
+        accounts[2] = operationsThree;
+        accounts[3] = operationsFour;
+        weights = new uint16[](4);
+        weights[0] = 2_500;
+        weights[1] = 2_500;
+        weights[2] = 2_500;
+        weights[3] = 2_500;
     }
 }

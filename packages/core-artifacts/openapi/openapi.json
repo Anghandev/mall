@@ -2546,6 +2546,73 @@
         ]
       }
     },
+    "/v2/admin/seckill/sessions/{sessionId}/winner-review": {
+      "post": {
+        "operationId": "reviewSeckillWinner",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeckillWinnerReviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeckillPrizeSettlementProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
     "/v2/admin/seckill/breaker/resume": {
       "post": {
         "operationId": "createSeckillBreakerResume",
@@ -12772,6 +12839,8 @@
         "required": [
           "listPriceUsdt",
           "productUsdtPaymentAmount",
+          "platformServiceFeeUsdt",
+          "custodyProductUsdt",
           "freightUsdt",
           "usdtPaymentAmount",
           "nplQuoteAmount",
@@ -12788,6 +12857,12 @@
             "$ref": "#/components/schemas/AtomicAmount"
           },
           "productUsdtPaymentAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "platformServiceFeeUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "custodyProductUsdt": {
             "$ref": "#/components/schemas/AtomicAmount"
           },
           "freightUsdt": {
@@ -14536,15 +14611,14 @@
           "oracleMinimumUsdtLiquidity",
           "requiredConfirmations",
           "merchantGuaranteeMinimumUsdt",
+          "platformServiceFeeSafe",
           "usdtCustodySafe",
           "nplRewardSafe",
           "operationsTreasurySafe",
           "circulationPool",
           "concessionDestinationSetHash",
-          "concessionDestinations",
-          "operationsDestinations",
-          "otherUsdtDestinations",
-          "seckillPrizePoolAccount"
+          "genesisNodeDestinations",
+          "operationsDestinations"
         ],
         "properties": {
           "policyVersion": {
@@ -14637,6 +14711,9 @@
           "merchantGuaranteeMinimumUsdt": {
             "$ref": "#/components/schemas/AtomicAmount"
           },
+          "platformServiceFeeSafe": {
+            "$ref": "#/components/schemas/Address"
+          },
           "usdtCustodySafe": {
             "$ref": "#/components/schemas/Address"
           },
@@ -14652,8 +14729,9 @@
           "concessionDestinationSetHash": {
             "$ref": "#/components/schemas/Bytes32"
           },
-          "concessionDestinations": {
+          "genesisNodeDestinations": {
             "type": "array",
+            "minItems": 1,
             "items": {
               "$ref": "#/components/schemas/WeightedDestination"
             }
@@ -14663,15 +14741,6 @@
             "items": {
               "$ref": "#/components/schemas/WeightedDestination"
             }
-          },
-          "otherUsdtDestinations": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WeightedDestination"
-            }
-          },
-          "seckillPrizePoolAccount": {
-            "$ref": "#/components/schemas/Address"
           }
         }
       },
@@ -15078,39 +15147,23 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "account",
-          "amount"
-        ],
-        "properties": {
-          "account": {
-            "$ref": "#/components/schemas/Address"
-          },
-          "amount": {
-            "$ref": "#/components/schemas/AtomicAmount"
-          }
-        }
-      },
-      "OtherUsdtAllocation": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "account",
+          "pool",
           "amount",
-          "purpose"
+          "balanceState"
         ],
         "properties": {
-          "account": {
-            "$ref": "#/components/schemas/Address"
+          "pool": {
+            "enum": [
+              "SECKILL_PRIZE",
+              "NODE_REWARD",
+              "REWARD_RESERVE"
+            ]
           },
           "amount": {
             "$ref": "#/components/schemas/AtomicAmount"
           },
-          "purpose": {
-            "type": "string",
-            "enum": [
-              "POLICY_ALLOCATION",
-              "SECKILL_PRIZE_LIABILITY"
-            ]
+          "balanceState": {
+            "const": "LOCKED"
           }
         }
       },
@@ -15149,7 +15202,6 @@
         "required": [
           "beneficiaries",
           "concession",
-          "otherUsdt",
           "nplRewards"
         ],
         "properties": {
@@ -15160,12 +15212,6 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/MerchantConcessionAllocation"
-            }
-          },
-          "otherUsdt": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OtherUsdtAllocation"
             }
           },
           "nplRewards": {
@@ -15200,6 +15246,8 @@
           "nonce",
           "listPriceUsdt",
           "productUsdtPaymentAmount",
+          "platformServiceFeeUsdt",
+          "custodyProductUsdt",
           "freightUsdt",
           "usdtPaymentAmount",
           "nplQuoteAmount",
@@ -15216,7 +15264,6 @@
           "sessionId",
           "beneficiaries",
           "merchantConcessionAllocations",
-          "otherUsdtAllocations",
           "nplRewardAllocations",
           "requiredConfirmations"
         ],
@@ -15289,6 +15336,12 @@
           "productUsdtPaymentAmount": {
             "$ref": "#/components/schemas/AtomicAmount"
           },
+          "platformServiceFeeUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "custodyProductUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
           "freightUsdt": {
             "$ref": "#/components/schemas/AtomicAmount"
           },
@@ -15340,12 +15393,6 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/MerchantConcessionAllocation"
-            }
-          },
-          "otherUsdtAllocations": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OtherUsdtAllocation"
             }
           },
           "nplRewardAllocations": {
@@ -16089,6 +16136,8 @@
           "nonce",
           "listPriceUsdt",
           "productUsdtPaymentAmount",
+          "platformServiceFeeUsdt",
+          "custodyProductUsdt",
           "freightUsdt",
           "usdtPaymentAmount",
           "nplQuoteAmount",
@@ -16172,6 +16221,12 @@
             "$ref": "#/components/schemas/AtomicAmount"
           },
           "productUsdtPaymentAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "platformServiceFeeUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "custodyProductUsdt": {
             "$ref": "#/components/schemas/AtomicAmount"
           },
           "freightUsdt": {
@@ -18795,12 +18850,20 @@
             "additionalProperties": false,
             "required": [
               "productUsdtPaymentAmount",
+              "platformServiceFeeUsdt",
+              "custodyProductUsdt",
               "freightUsdt",
               "usdtPaymentAmount",
               "nplPaymentAmount"
             ],
             "properties": {
               "productUsdtPaymentAmount": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "platformServiceFeeUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "custodyProductUsdt": {
                 "$ref": "#/components/schemas/AtomicAmount"
               },
               "freightUsdt": {
@@ -19173,6 +19236,8 @@
             "required": [
               "listPriceUsdt",
               "productUsdtPaymentAmount",
+              "platformServiceFeeUsdt",
+              "custodyProductUsdt",
               "freightUsdt",
               "buyerPaidUsdt",
               "merchantBaseReceivableUsdt",
@@ -19184,6 +19249,12 @@
                 "$ref": "#/components/schemas/AtomicAmount"
               },
               "productUsdtPaymentAmount": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "platformServiceFeeUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "custodyProductUsdt": {
                 "$ref": "#/components/schemas/AtomicAmount"
               },
               "freightUsdt": {
@@ -22117,6 +22188,35 @@
         "properties": {
           "amountUsdt": {
             "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "idempotencyKey": {
+            "$ref": "#/components/schemas/IdempotencyKey"
+          }
+        }
+      },
+      "SeckillWinnerReviewRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "decision",
+          "reasonCode",
+          "evidenceHash",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "decision": {
+            "enum": [
+              "APPROVE",
+              "REJECT"
+            ]
+          },
+          "reasonCode": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 128
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
           },
           "idempotencyKey": {
             "$ref": "#/components/schemas/IdempotencyKey"
@@ -25560,6 +25660,218 @@
           }
         }
       },
+      "SeckillPrizeCandidate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "buyerWallet",
+          "paymentEventKey",
+          "evidenceHash"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "buyerWallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "paymentEventKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "SeckillPrizeReview": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "decision",
+          "reasonCode",
+          "evidenceHash",
+          "reviewedAt"
+        ],
+        "properties": {
+          "decision": {
+            "enum": [
+              "APPROVED",
+              "REJECTED"
+            ]
+          },
+          "reasonCode": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 128
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "reviewedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SeckillPrizePayout": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state",
+          "requestId",
+          "batchId",
+          "finalSafeTxHash",
+          "finalExecutionTxHash"
+        ],
+        "properties": {
+          "state": {
+            "enum": [
+              "AVAILABLE",
+              "REQUESTED",
+              "BATCHED",
+              "SETTLED",
+              "RETRYABLE",
+              "QUARANTINED"
+            ]
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "batchId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finalSafeTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finalExecutionTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "SeckillPrizeSettlementProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state",
+          "candidate",
+          "poolAmountUsdt",
+          "poolSnapshotHash",
+          "review",
+          "awardJournalId",
+          "rolloverTargetSessionId",
+          "rolloverJournalId",
+          "payout"
+        ],
+        "properties": {
+          "state": {
+            "enum": [
+              "REVIEW_PENDING",
+              "APPROVED",
+              "ROLLOVER_PENDING",
+              "ROLLED_OVER",
+              "QUARANTINED"
+            ]
+          },
+          "candidate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeckillPrizeCandidate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "poolAmountUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "poolSnapshotHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeckillPrizeReview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "awardJournalId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rolloverTargetSessionId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rolloverJournalId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payout": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeckillPrizePayout"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "SeckillSessionProjection": {
         "type": "object",
         "additionalProperties": false,
@@ -25582,6 +25894,7 @@
           "prizePoolUsdt",
           "lastBuyerWallet",
           "winnerWallet",
+          "prizeSettlement",
           "snapshot",
           "governanceActionId",
           "rulesContentHash",
@@ -25725,6 +26038,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prizeSettlement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeckillPrizeSettlementProjection"
               },
               {
                 "type": "null"
@@ -27165,14 +27488,18 @@
             "enum": [
               "HIGH_GAS",
               "WALLET_CONTEXT",
-              "ORDER_CANCELLATION"
+              "ORDER_CANCELLATION",
+              "ADDRESS_CHANGE",
+              "PICKUP_STORE_CHANGE"
             ]
           },
           "sourceType": {
             "enum": [
               "CHAIN_MONITOR",
               "EDGE_AUTH",
-              "ORDER_SERVICE"
+              "ORDER_SERVICE",
+              "ACCOUNT_SERVICE",
+              "FULFILLMENT_TARGET_SERVICE"
             ]
           },
           "walletAddress": {
@@ -27229,14 +27556,18 @@
             "enum": [
               "HIGH_GAS",
               "WALLET_CONTEXT",
-              "ORDER_CANCELLATION"
+              "ORDER_CANCELLATION",
+              "ADDRESS_CHANGE",
+              "PICKUP_STORE_CHANGE"
             ]
           },
           "sourceType": {
             "enum": [
               "CHAIN_MONITOR",
               "EDGE_AUTH",
-              "ORDER_SERVICE"
+              "ORDER_SERVICE",
+              "ACCOUNT_SERVICE",
+              "FULFILLMENT_TARGET_SERVICE"
             ]
           },
           "walletAddress": {
@@ -28958,7 +29289,8 @@
           "V3",
           "V4",
           "V5"
-        ]
+        ],
+        "deprecated": true
       },
       "MerchantLifecycleStatus": {
         "type": "string",
@@ -29030,7 +29362,8 @@
             "$ref": "#/components/schemas/MerchantLifecycleStatus"
           },
           "level": {
-            "$ref": "#/components/schemas/MerchantLevel"
+            "$ref": "#/components/schemas/MerchantLevel",
+            "deprecated": true
           },
           "guaranteeStatus": {
             "enum": [
@@ -29326,7 +29659,6 @@
           "legalId",
           "contactPhone",
           "settlementWallet",
-          "level",
           "idempotencyKey"
         ],
         "properties": {
@@ -29354,7 +29686,8 @@
             "$ref": "#/components/schemas/Address"
           },
           "level": {
-            "$ref": "#/components/schemas/MerchantLevel"
+            "$ref": "#/components/schemas/MerchantLevel",
+            "deprecated": true
           },
           "idempotencyKey": {
             "type": "string",
@@ -29371,7 +29704,6 @@
           "legalName",
           "legalId",
           "contactPhone",
-          "level",
           "licenseAssetId",
           "expectedVersion",
           "idempotencyKey"
@@ -29398,7 +29730,8 @@
             "maxLength": 32
           },
           "level": {
-            "$ref": "#/components/schemas/MerchantLevel"
+            "$ref": "#/components/schemas/MerchantLevel",
+            "deprecated": true
           },
           "licenseAssetId": {
             "anyOf": [
@@ -29958,65 +30291,17 @@
             "$ref": "#/components/schemas/MerchantQualification"
           },
           "levelPolicy": {
-            "anyOf": [
-              {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "status",
-                  "configVersionId",
-                  "version",
-                  "effectiveFrom",
-                  "level",
-                  "maxProductSettlementUsdt",
-                  "monthlySeckillQuota"
-                ],
-                "properties": {
-                  "status": {
-                    "const": "AVAILABLE"
-                  },
-                  "configVersionId": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "version": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "effectiveFrom": {
-                    "type": "string",
-                    "format": "date-time"
-                  },
-                  "level": {
-                    "$ref": "#/components/schemas/MerchantLevel"
-                  },
-                  "maxProductSettlementUsdt": {
-                    "$ref": "#/components/schemas/AtomicAmount"
-                  },
-                  "monthlySeckillQuota": {
-                    "type": "integer",
-                    "minimum": 0
-                  }
-                }
-              },
-              {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "status",
-                  "reason"
-                ],
-                "properties": {
-                  "status": {
-                    "const": "DecisionBlocked"
-                  },
-                  "reason": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "const": "Deprecated"
               }
-            ]
+            },
+            "deprecated": true
           },
           "analytics": {
             "type": "object",

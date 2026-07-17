@@ -1772,10 +1772,22 @@ async function availableSources(
      WHERE account.owner_id = $1 AND account.asset = $2 AND account.purpose = ANY($3::text[])
        AND line.balance_state = 'AVAILABLE' AND line.backing_safe_address IS NOT NULL
        AND ($4::text IS NULL OR orders.merchant_id = $4)
+       AND ($5::text <> 'PRIZE_USDT' OR EXISTS (
+         SELECT 1 FROM core.seckill_prize_settlements prize
+         WHERE prize.award_account_id = line.account_id
+           AND prize.candidate_order_id = journal.order_id
+           AND prize.state = 'APPROVED'
+       ))
      GROUP BY journal.order_id, line.account_id, line.backing_safe_address
      HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) > 0
      ORDER BY min(orders.created_at), journal.order_id, line.account_id`,
-    [wallet, definition.asset, [...definition.purposes], rail === 'MERCHANT_USDT' ? merchantId ?? null : null],
+    [
+      wallet,
+      definition.asset,
+      [...definition.purposes],
+      rail === 'MERCHANT_USDT' ? merchantId ?? null : null,
+      rail,
+    ],
   )).rows;
 }
 
@@ -2340,7 +2352,13 @@ async function assertAvailableSource(
      JOIN core.ledger_accounts account ON account.account_id = line.account_id
      WHERE journal.order_id = $1 AND line.account_id = $2
        AND line.balance_state = 'AVAILABLE' AND line.backing_safe_address = $3
-       AND account.owner_id = $4 AND account.asset = $5 AND account.purpose = ANY($6::text[])`,
+       AND account.owner_id = $4 AND account.asset = $5 AND account.purpose = ANY($6::text[])
+       AND ($7::text <> 'PRIZE_USDT' OR EXISTS (
+         SELECT 1 FROM core.seckill_prize_settlements prize
+         WHERE prize.award_account_id = line.account_id
+           AND prize.candidate_order_id = journal.order_id
+           AND prize.state = 'APPROVED'
+       ))`,
     [
       item.order_id,
       item.account_id,
@@ -2348,6 +2366,7 @@ async function assertAvailableSource(
       intent.wallet_address,
       definition.asset,
       [...definition.purposes],
+      intent.rail,
     ],
   );
   if (BigInt(result.rows[0]?.amount ?? '0') < BigInt(item.amount)) {

@@ -22,6 +22,8 @@ contract PaymentHandler {
     bytes32 public immutable oracleVersion;
     bytes32 public immutable concessionAllocationHash;
     uint256 public totalUsdtPaid;
+    uint256 public totalServiceFeeUsdt;
+    uint256 public totalCustodyUsdt;
     uint256 public totalNplPaid;
     uint256 private _nonce;
 
@@ -81,16 +83,18 @@ contract PaymentHandler {
             nonce: nonce,
             listPriceUsdt: 100 ether,
             productUsdtPaymentAmount: 70 ether,
+            platformServiceFeeUsdt: 1 ether,
+            custodyProductUsdt: 69 ether,
             freightUsdt: 0,
             usdtPaymentAmount: 70 ether,
             nplQuoteAmount: 1_000 ether,
             nplPaymentAmount: 300 ether,
             nplBurnAmount: 200 ether,
             nplRewardAmount: 100 ether,
-            merchantBaseReceivableUsdt: 60 ether,
+            merchantBaseReceivableUsdt: 69 ether,
             merchantConcessionBps: 2_500,
-            merchantConcessionAmount: 15 ether,
-            merchantNetReceivableUsdt: 45 ether,
+            merchantConcessionAmount: 17.25 ether,
+            merchantNetReceivableUsdt: 51.75 ether,
             concessionAllocationHash: concessionAllocationHash,
             bnmAmount: 100 ether,
             seckill: false,
@@ -102,6 +106,8 @@ contract PaymentHandler {
         bytes32 digest = router.hashPayment(intent);
         router.pay(intent, _sign(quoteKey, digest), _sign(buyerKey, digest));
         totalUsdtPaid += 70 ether;
+        totalServiceFeeUsdt += 1 ether;
+        totalCustodyUsdt += 69 ether;
         totalNplPaid += 300 ether;
     }
 
@@ -155,7 +161,9 @@ contract PaymentRouterInvariantTest is CoreFixture {
     function invariant_RouterNeverCustodiesAndSafeTransfersConserve() public view {
         assertEq(usdt.balanceOf(address(router)), 0);
         assertEq(npl.balanceOf(address(router)), 0);
-        assertEq(usdt.balanceOf(usdtCustodySafe), handler.totalUsdtPaid());
+        assertEq(usdt.balanceOf(platformServiceFeeSafe) + usdt.balanceOf(usdtCustodySafe), handler.totalUsdtPaid());
+        assertEq(usdt.balanceOf(platformServiceFeeSafe), handler.totalServiceFeeUsdt());
+        assertEq(usdt.balanceOf(usdtCustodySafe), handler.totalCustodyUsdt());
         assertEq(npl.balanceOf(V2Types.NPL_BURN_ADDRESS) + npl.balanceOf(nplRewardSafe), handler.totalNplPaid());
     }
 }

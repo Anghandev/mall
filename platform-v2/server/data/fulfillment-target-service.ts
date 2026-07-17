@@ -10,6 +10,7 @@ import { CoreError } from '../api/errors.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { FulfillmentActor, OrderKind } from './fulfillment-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
+import { recordFrequentChangeAlert } from './risk-service.ts';
 
 const TARGET_TTL_MS = 30 * 60 * 1000;
 
@@ -242,6 +243,12 @@ export class FulfillmentTargetService {
         if (!existing.store_id) throw new CoreError('IdempotencyConflict', 'Pickup target mode changed', 409);
         return { ...targetSummary(existing), store: storeProjection(await loadStore(executor, existing.store_id)) };
       }
+      const previousPickup = await executor.query<{ store_id: string }>(
+        `SELECT store_id FROM core.fulfillment_targets
+         WHERE buyer_wallet = $1 AND fulfillment_mode = 'PICKUP'
+         ORDER BY created_at DESC, target_id DESC LIMIT 1`,
+        [buyer],
+      );
       const store = await loadStore(executor, input.storeId);
       if (store.status !== 'ACTIVE') throw new CoreError('InvalidRequest', 'Pickup store is unavailable', 409);
       const now = this.#clock();
@@ -279,6 +286,39 @@ export class FulfillmentTargetService {
           now,
         ],
       );
+      await enqueueAudit(executor, {
+        sourceEventId: auditSourceId('audit:buyer-pickup-target', { targetId, requestHash }),
+        streamName: 'operational',
+        evidenceProfile: 'AUTHORIZATION',
+        eventType: previousPickup.rows[0] && previousPickup.rows[0].store_id !== store.store_id
+          ? 'BuyerPickupStoreTargetChanged'
+          : 'BuyerPickupStoreTargetSelected',
+        resourceType: 'FULFILLMENT_TARGET',
+        resourceId: targetId,
+        actorWallet: buyer,
+        actorRole: 'BUYER',
+        correlationId: input.idempotencyKey,
+        requestHash: requestHash.slice(2),
+        payload: { storeId: store.store_id, storeVersion: Number(store.version) },
+        authorizationEvidence: {
+          scheme: 'SESSION_RESOURCE_OWNERSHIP',
+          subject: buyer,
+          roles: ['BUYER'],
+          evidenceHash: hashJson({ buyer, targetId, storeId: store.store_id }),
+          checkedAt: now.toISOString(),
+        },
+        createdAt: now,
+      });
+      if (previousPickup.rows[0] && previousPickup.rows[0].store_id !== store.store_id) {
+        await recordFrequentChangeAlert(executor, {
+          signalType: 'PICKUP_STORE_CHANGE',
+          walletAddress: buyer,
+          resourceId: targetId,
+          requestHash,
+          correlationId: input.idempotencyKey,
+          observedAt: now,
+        });
+      }
       return {
         targetId,
         targetHash,

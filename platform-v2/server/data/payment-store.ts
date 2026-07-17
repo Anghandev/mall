@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { id } from 'ethers';
 import { buildPaymentIntent, type CanonicalPaymentIntent } from '../api/checkout.ts';
 import { CoreError } from '../api/errors.ts';
-import { buildOtherUsdtAllocations, parsePaymentPolicySnapshot } from '../api/payment-policy.ts';
+import { parsePaymentPolicySnapshot } from '../api/payment-policy.ts';
 import { paymentIntentHash } from '../api/payment-signing.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
@@ -12,7 +12,7 @@ const USDT = 'USDT';
 const NPL = 'NPL';
 const BNM = 'BNM_POINTS';
 const PAYMENT_COMPLETED_EVENT_SIGNATURE_HASH = id(
-  'PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)',
+  'PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)',
 ).toLowerCase();
 
 interface PaymentEventRow {
@@ -64,9 +64,12 @@ interface LedgerAccount {
     | 'BURN'
     | 'MERCHANT_RECEIVABLE'
     | 'MERCHANT_FREIGHT_RECEIVABLE'
+    | 'PLATFORM_SERVICE_FEE_REVENUE'
     | 'CONCESSION'
     | 'POLICY_ALLOCATION'
     | 'SECKILL_PRIZE_LIABILITY'
+    | 'NODE_REWARD_POOL'
+    | 'REWARD_RESERVE_POOL'
     | 'REWARD_LIABILITY'
     | 'BNM_ISSUANCE'
     | 'BNM_LIABILITY';
@@ -111,6 +114,8 @@ export interface CanonicalPaymentEvent {
   policyVersion: number;
   listPriceUsdt: string;
   productUsdtPaid: string;
+  platformServiceFeeUsdt: string;
+  custodyProductUsdt: string;
   freightUsdt: string;
   usdtPaid: string;
   nplPaid: string;
@@ -187,14 +192,7 @@ export async function recordPaymentProjection(executor: SqlExecutor, input: Reco
       listPriceUsdt: unitListPrice * BigInt(intent.quantity),
       freightUsdt: quote.freightUsdt,
       nplQuoteAmount: BigInt(intent.nplQuoteAmount),
-      merchantBaseReceivableUsdt: quote.merchantCostUsdt * BigInt(intent.quantity),
       merchantConcessionBps: quote.merchantConcessionBps,
-      otherUsdtAllocations: buildOtherUsdtAllocations(
-        unitListPrice * BigInt(intent.quantity),
-        quote.merchantCostUsdt * BigInt(intent.quantity),
-        policy,
-        input.event.classification,
-      ),
       ...(intent.seckill ? { sessionId: intent.sessionId } : {}),
       beneficiaries: intent.beneficiaries,
     },
@@ -296,7 +294,6 @@ export async function recordPaymentProjection(executor: SqlExecutor, input: Reco
         JSON.stringify({
           beneficiaries: intent.beneficiaries,
           concession: intent.merchantConcessionAllocations,
-          otherUsdt: intent.otherUsdtAllocations,
           nplRewards: intent.nplRewardAllocations,
         }),
         intent.seckill ? JSON.stringify({ sessionId: intent.sessionId, classification: input.event.classification }) : null,
@@ -318,7 +315,11 @@ export async function recordPaymentProjection(executor: SqlExecutor, input: Reco
     );
   }
 
-  const safes = { usdtCustodySafe: policy.usdtCustodySafe!, nplRewardSafe: policy.nplRewardSafe! };
+  const safes = {
+    platformServiceFeeSafe: policy.platformServiceFeeSafe,
+    usdtCustodySafe: policy.usdtCustodySafe,
+    nplRewardSafe: policy.nplRewardSafe,
+  };
   const { accounts, lines } = paymentJournal(intent, safes);
   for (const account of accounts) await ensureAccount(executor, account);
   const journalId = `payment:${intent.orderId}:${eventKey}`;
@@ -360,6 +361,25 @@ export async function recordPaymentProjection(executor: SqlExecutor, input: Reco
       input.event.blockTimestamp,
     ],
   );
+  if (intent.seckill) {
+    const contribution = intent.merchantConcessionAllocations.find((allocation) => allocation.pool === 'SECKILL_PRIZE');
+    if (contribution && BigInt(contribution.amount) > 0n) {
+      const accountId = `seckill-prize:${intent.sessionId}:usdt`;
+      await executor.query(
+        `INSERT INTO core.seckill_prize_contributions (
+           order_id, session_id, payment_event_key, account_id, amount_usdt, created_at
+         ) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [intent.orderId, intent.sessionId, eventKey, accountId, contribution.amount, input.event.blockTimestamp],
+      );
+      const updated = await executor.query<{ session_id: string }>(
+        `UPDATE core.seckill_sessions
+         SET prize_pool_usdt = prize_pool_usdt + $2, updated_at = clock_timestamp()
+         WHERE session_id = $1 RETURNING session_id`,
+        [intent.sessionId, contribution.amount],
+      );
+      if (!updated.rows[0]) throw new CoreError('InvalidFinality', 'Seckill prize session is unavailable', 409);
+    }
+  }
   await executor.query(
     `INSERT INTO core.transaction_finality (
        transaction_id, resource_type, resource_id, chain_id, contract_address,
@@ -484,6 +504,37 @@ export async function reversePaymentProjection(executor: SqlExecutor, eventKey: 
     payload: { replacedEventKey: eventKey },
     lines: reversalLines,
   });
+  const contribution = await executor.query<{
+    session_id: string;
+    amount_usdt: string;
+    reversed_at: Date | null;
+  }>(
+    `SELECT session_id, amount_usdt::text, reversed_at
+     FROM core.seckill_prize_contributions WHERE payment_event_key = $1 FOR UPDATE`,
+    [eventKey],
+  );
+  const prizeContribution = contribution.rows[0];
+  if (prizeContribution && !prizeContribution.reversed_at) {
+    const updated = await executor.query<{ session_id: string }>(
+      `UPDATE core.seckill_sessions
+       SET prize_pool_usdt = prize_pool_usdt - $2, updated_at = clock_timestamp()
+       WHERE session_id = $1 AND prize_pool_usdt >= $2 RETURNING session_id`,
+      [prizeContribution.session_id, prizeContribution.amount_usdt],
+    );
+    if (!updated.rows[0]) throw new CoreError('UnknownState', 'Seckill prize pool cannot reverse the payment contribution', 409);
+    await executor.query(
+      `UPDATE core.seckill_prize_contributions
+       SET reversed_at = clock_timestamp(), reversal_event_key = $2
+       WHERE payment_event_key = $1`,
+      [eventKey, reversalEventKey],
+    );
+    await quarantineSeckillPrizeOutcome(
+      executor,
+      prizeContribution.session_id,
+      replacementBlockHash.toLowerCase(),
+      row.order_id,
+    );
+  }
   await quarantineReorgedSettlements(executor, {
     paymentEventKey: eventKey,
     orderId: row.order_id,
@@ -805,6 +856,51 @@ async function quarantineReorgedSettlements(
   }
 }
 
+async function quarantineSeckillPrizeOutcome(
+  executor: SqlExecutor,
+  sessionId: string,
+  evidenceHash: string,
+  orderId: string,
+) {
+  const outcome = await executor.query<{ state: string }>(
+    `SELECT state FROM core.seckill_prize_settlements
+     WHERE session_id = $1 FOR UPDATE`,
+    [sessionId],
+  );
+  if (!outcome.rows[0]) return;
+  await executor.query(
+    `UPDATE core.seckill_prize_settlements
+     SET state = 'QUARANTINED', updated_at = clock_timestamp()
+     WHERE session_id = $1 AND state <> 'QUARANTINED'`,
+    [sessionId],
+  );
+  const eventId = hashJson({ sessionId, evidenceHash, orderId, eventType: 'QUARANTINED' });
+  await executor.query(
+    `INSERT INTO core.seckill_prize_settlement_events (
+       event_id, session_id, event_type, evidence_hash, payload, created_at
+     ) VALUES ($1,$2,'QUARANTINED',$3,$4,clock_timestamp())
+     ON CONFLICT (event_id) DO NOTHING`,
+    [eventId, sessionId, evidenceHash, JSON.stringify({ orderId, reasonCode: 'PAYMENT_REORG' })],
+  );
+  const causeId = `seckill-prize-reorg:${sessionId}`;
+  await executor.query(
+    `INSERT INTO core.breaker_causes (
+       scope, cause_type, cause_id, active, evidence_hash, updated_at
+     ) VALUES ('NEW_SETTLEMENT_BATCH','SECURITY',$1,true,$2,clock_timestamp())
+     ON CONFLICT (scope, cause_type, cause_id) DO UPDATE
+       SET active = true, evidence_hash = EXCLUDED.evidence_hash, updated_at = EXCLUDED.updated_at`,
+    [causeId, evidenceHash],
+  );
+  await executor.query(
+    `INSERT INTO core.circuit_breakers (
+       scope, paused, evidence_hash, policy_version, changed_by, changed_at
+     ) VALUES ('NEW_SETTLEMENT_BATCH',true,$1,NULL,'SECKILL_PRIZE_REORG',clock_timestamp())
+     ON CONFLICT (scope) DO UPDATE SET paused = true, evidence_hash = EXCLUDED.evidence_hash,
+       policy_version = NULL, changed_by = EXCLUDED.changed_by, changed_at = EXCLUDED.changed_at`,
+    [evidenceHash],
+  );
+}
+
 async function quarantineDeepReorgPayment(
   executor: SqlExecutor,
   event: CanonicalPaymentEvent,
@@ -1121,6 +1217,8 @@ async function loadQuoteContext(executor: SqlExecutor, event: CanonicalPaymentEv
       || intent.policyVersion !== event.policyVersion
       || intent.listPriceUsdt !== event.listPriceUsdt
       || intent.productUsdtPaymentAmount !== event.productUsdtPaid
+      || intent.platformServiceFeeUsdt !== event.platformServiceFeeUsdt
+      || intent.custodyProductUsdt !== event.custodyProductUsdt
       || intent.freightUsdt !== event.freightUsdt
       || intent.usdtPaymentAmount !== event.usdtPaid
       || intent.nplPaymentAmount !== event.nplPaid
@@ -1168,7 +1266,7 @@ async function loadQuoteContext(executor: SqlExecutor, event: CanonicalPaymentEv
 
 function paymentJournal(
   intent: CanonicalPaymentIntent,
-  safes: { usdtCustodySafe: string; nplRewardSafe: string },
+  safes: { platformServiceFeeSafe: string; usdtCustodySafe: string; nplRewardSafe: string },
 ) {
   const accounts = new Map<string, LedgerAccount>();
   const lines: LedgerLine[] = [];
@@ -1189,22 +1287,28 @@ function paymentJournal(
       ...(backingSafeAddress ? { backingSafeAddress: backingSafeAddress.toLowerCase() } : {}),
     });
   };
-  add(safeAccount('usdt-custody', safes.usdtCustodySafe, USDT), 'DEBIT', intent.usdtPaymentAmount, 'POSTED', safes.usdtCustodySafe);
+  add(
+    safeAccount('platform-service-fee', safes.platformServiceFeeSafe, USDT),
+    'DEBIT',
+    intent.platformServiceFeeUsdt,
+    'POSTED',
+    safes.platformServiceFeeSafe,
+  );
+  add(
+    account('platform:service-fee:usdt', 'SYSTEM', 'platform-service-fee', USDT, 'PLATFORM_SERVICE_FEE_REVENUE'),
+    'CREDIT',
+    intent.platformServiceFeeUsdt,
+    'POSTED',
+    safes.platformServiceFeeSafe,
+  );
+  const custodyUsdt = (BigInt(intent.custodyProductUsdt) + BigInt(intent.freightUsdt)).toString();
+  add(safeAccount('usdt-custody', safes.usdtCustodySafe, USDT), 'DEBIT', custodyUsdt, 'POSTED', safes.usdtCustodySafe);
   add(account(`merchant:${intent.merchant}:usdt`, 'MERCHANT', intent.merchant, USDT, 'MERCHANT_RECEIVABLE'), 'CREDIT', intent.merchantNetReceivableUsdt, 'LOCKED', safes.usdtCustodySafe);
   add(account(`merchant:${intent.merchant}:freight:usdt`, 'MERCHANT', intent.merchant, USDT, 'MERCHANT_FREIGHT_RECEIVABLE'), 'CREDIT', intent.freightUsdt, 'LOCKED', safes.usdtCustodySafe);
   for (const allocation of intent.merchantConcessionAllocations) {
-    add(account(`concession:${allocation.account}:usdt`, 'BENEFICIARY', allocation.account, USDT, 'CONCESSION'), 'CREDIT', allocation.amount, 'LOCKED', safes.usdtCustodySafe);
-  }
-  for (const allocation of intent.otherUsdtAllocations) {
-    const prize = allocation.purpose === 'SECKILL_PRIZE_LIABILITY';
+    const pool = concessionPoolAccount(allocation.pool, intent);
     add(
-      account(
-        prize ? `seckill-prize:${allocation.account}:usdt` : `policy:${allocation.account}:usdt`,
-        'BENEFICIARY',
-        allocation.account,
-        USDT,
-        allocation.purpose,
-      ),
+      account(pool.accountId, pool.ownerType, pool.ownerId, USDT, pool.purpose),
       'CREDIT',
       allocation.amount,
       'LOCKED',
@@ -1236,8 +1340,44 @@ function paymentJournal(
   return { accounts: [...accounts.values()], lines };
 }
 
+function concessionPoolAccount(
+  pool: CanonicalPaymentIntent['merchantConcessionAllocations'][number]['pool'],
+  intent: CanonicalPaymentIntent,
+) {
+  if (pool === 'SECKILL_PRIZE') {
+    if (intent.seckill) {
+      return {
+        accountId: `seckill-prize:${intent.sessionId}:usdt`,
+        ownerType: 'BENEFICIARY' as const,
+        ownerId: intent.sessionId,
+        purpose: 'SECKILL_PRIZE_LIABILITY' as const,
+      };
+    }
+    return {
+      accountId: 'pool:seckill-prize:usdt',
+      ownerType: 'SYSTEM' as const,
+      ownerId: 'seckill-prize',
+      purpose: 'SECKILL_PRIZE_LIABILITY' as const,
+    };
+  }
+  if (pool === 'NODE_REWARD') {
+    return {
+      accountId: 'pool:node-reward:usdt',
+      ownerType: 'SYSTEM' as const,
+      ownerId: 'node-reward',
+      purpose: 'NODE_REWARD_POOL' as const,
+    };
+  }
+  return {
+    accountId: 'pool:reward-reserve:usdt',
+    ownerType: 'SYSTEM' as const,
+    ownerId: 'reward-reserve',
+    purpose: 'REWARD_RESERVE_POOL' as const,
+  };
+}
+
 function safeAccount(
-  name: 'usdt-custody' | 'npl-reward',
+  name: 'platform-service-fee' | 'usdt-custody' | 'npl-reward',
   safeAddress: string,
   asset: typeof USDT | typeof NPL,
 ): LedgerAccount {
@@ -1367,6 +1507,8 @@ function validatePaymentInput(input: RecordPaymentInput) {
   const amounts = [
     event.listPriceUsdt,
     event.productUsdtPaid,
+    event.platformServiceFeeUsdt,
+    event.custodyProductUsdt,
     event.freightUsdt,
     event.usdtPaid,
     event.nplPaid,
@@ -1396,12 +1538,17 @@ function validatePaymentInput(input: RecordPaymentInput) {
   if (BigInt(event.productUsdtPaid) + BigInt(event.freightUsdt) !== BigInt(event.usdtPaid)) {
     throw new CoreError('InvalidRequest', 'USDT payment is not conserved');
   }
+  if (BigInt(event.platformServiceFeeUsdt) + BigInt(event.custodyProductUsdt) !== BigInt(event.productUsdtPaid)) {
+    throw new CoreError('InvalidRequest', 'Product USDT split is not conserved');
+  }
 }
 
 function exactAmounts(intent: CanonicalPaymentIntent) {
   return {
     listPriceUsdt: intent.listPriceUsdt,
     productUsdtPaymentAmount: intent.productUsdtPaymentAmount,
+    platformServiceFeeUsdt: intent.platformServiceFeeUsdt,
+    custodyProductUsdt: intent.custodyProductUsdt,
     freightUsdt: intent.freightUsdt,
     usdtPaymentAmount: intent.usdtPaymentAmount,
     nplQuoteAmount: intent.nplQuoteAmount,

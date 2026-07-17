@@ -2,8 +2,6 @@
 pragma solidity 0.8.26;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 import {IPolicyRegistryV2} from "./interfaces/IV2Core.sol";
@@ -36,7 +34,6 @@ contract BeneficiaryRegistryV2 is AccessControl, EIP712 {
     error ReferralDepthExceeded();
     error BeneficiaryMismatch();
     error InvalidRegion();
-    error InvalidGenesisCredential();
     error InvalidSecondarySignature();
     error PublicationExpired();
     error PublicationReplay();
@@ -146,32 +143,6 @@ contract BeneficiaryRegistryV2 is AccessControl, EIP712 {
                 || snapshot.province != expected.province || snapshot.region != expected.region
         ) revert BeneficiaryMismatch();
 
-        bool buyerGenesisEligible = _isGenesisEligible(policyVersion, buyer);
-        if (
-            (buyerGenesisEligible && snapshot.genesis != buyer)
-                || (!buyerGenesisEligible && snapshot.genesis != address(0))
-        ) {
-            revert InvalidGenesisCredential();
-        }
-    }
-
-    function isGenesisEligible(uint64 policyVersion, address account) external view returns (bool) {
-        return _isGenesisEligible(policyVersion, account);
-    }
-
-    function _isGenesisEligible(uint64 policyVersion, address account) private view returns (bool) {
-        if (account == address(0)) return false;
-        V2Types.Policy memory policy = policyRegistry.getPolicy(policyVersion);
-        if (policy.genesisCredentialStandard == V2Types.CredentialStandard.ERC721) {
-            try IERC721(policy.genesisCredential).ownerOf(policy.genesisTokenId) returns (address owner) {
-                return owner == account;
-            } catch {
-                return false;
-            }
-        }
-        if (policy.genesisCredentialStandard == V2Types.CredentialStandard.ERC1155) {
-            return IERC1155(policy.genesisCredential).balanceOf(account, policy.genesisTokenId) > 0;
-        }
-        return false;
+        if (snapshot.genesis != address(0)) revert BeneficiaryMismatch();
     }
 }

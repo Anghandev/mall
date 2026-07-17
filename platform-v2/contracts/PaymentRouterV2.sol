@@ -39,6 +39,7 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
     IBeneficiaryRegistryV2 public immutable beneficiaryRegistry;
     ITwapOracleV2 public immutable oracle;
     address public immutable governanceSafe;
+    address public immutable platformServiceFeeSafe;
     address public immutable usdtCustodySafe;
     address public immutable nplRewardSafe;
     address public immutable operationsTreasurySafe;
@@ -73,6 +74,8 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
         uint64 policyVersion,
         uint256 listPriceUsdt,
         uint256 productUsdtPaid,
+        uint256 platformServiceFeeUsdt,
+        uint256 custodyProductUsdt,
         uint256 freightUsdt,
         uint256 usdtPaid,
         uint256 nplPaid,
@@ -107,6 +110,7 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
         IPolicyRegistryV2 policyRegistry_,
         IBeneficiaryRegistryV2 beneficiaryRegistry_,
         ITwapOracleV2 oracle_,
+        address platformServiceFeeSafe_,
         address usdtCustodySafe_,
         address nplRewardSafe_,
         address operationsTreasurySafe_,
@@ -117,10 +121,14 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
         if (
             block.chainid != V2Types.BSC_CHAIN_ID || address(usdt_) != V2Types.USDT || address(npl_) != V2Types.NPL
                 || address(beneficiaryRegistry_) == address(0) || address(oracle_) == address(0)
-                || governanceSafe_ == address(0) || usdtCustodySafe_ == address(0) || nplRewardSafe_ == address(0)
+                || governanceSafe_ == address(0) || platformServiceFeeSafe_ == address(0)
+                || usdtCustodySafe_ == address(0) || nplRewardSafe_ == address(0)
                 || operationsTreasurySafe_ == address(0) || quoteSigner_ == address(0)
-                || usdtCustodySafe_ == nplRewardSafe_ || usdtCustodySafe_ == operationsTreasurySafe_
-                || nplRewardSafe_ == operationsTreasurySafe_
+                || platformServiceFeeSafe_ == governanceSafe_ || usdtCustodySafe_ == governanceSafe_
+                || nplRewardSafe_ == governanceSafe_ || operationsTreasurySafe_ == governanceSafe_
+                || platformServiceFeeSafe_ == usdtCustodySafe_ || platformServiceFeeSafe_ == nplRewardSafe_
+                || platformServiceFeeSafe_ == operationsTreasurySafe_ || usdtCustodySafe_ == nplRewardSafe_
+                || usdtCustodySafe_ == operationsTreasurySafe_ || nplRewardSafe_ == operationsTreasurySafe_
         ) revert InvalidAddress();
         usdt = usdt_;
         npl = npl_;
@@ -128,6 +136,7 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
         beneficiaryRegistry = beneficiaryRegistry_;
         oracle = oracle_;
         governanceSafe = governanceSafe_;
+        platformServiceFeeSafe = platformServiceFeeSafe_;
         usdtCustodySafe = usdtCustodySafe_;
         nplRewardSafe = nplRewardSafe_;
         operationsTreasurySafe = operationsTreasurySafe_;
@@ -276,11 +285,16 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
         uint256 routerNplBefore = npl.balanceOf(address(this));
         uint256 buyerUsdtBefore = usdt.balanceOf(intent.buyer);
         uint256 buyerNplBefore = npl.balanceOf(intent.buyer);
+        uint256 platformServiceFeeBefore = usdt.balanceOf(platformServiceFeeSafe);
         uint256 custodyBefore = usdt.balanceOf(usdtCustodySafe);
         uint256 burnBefore = npl.balanceOf(V2Types.NPL_BURN_ADDRESS);
         uint256 rewardBefore = npl.balanceOf(nplRewardSafe);
 
-        usdt.safeTransferFrom(intent.buyer, usdtCustodySafe, intent.usdtPaymentAmount);
+        if (intent.platformServiceFeeUsdt != 0) {
+            usdt.safeTransferFrom(intent.buyer, platformServiceFeeSafe, intent.platformServiceFeeUsdt);
+        }
+        uint256 custodyUsdt = intent.custodyProductUsdt + intent.freightUsdt;
+        if (custodyUsdt != 0) usdt.safeTransferFrom(intent.buyer, usdtCustodySafe, custodyUsdt);
         npl.safeTransferFrom(intent.buyer, V2Types.NPL_BURN_ADDRESS, intent.nplBurnAmount);
         npl.safeTransferFrom(intent.buyer, nplRewardSafe, intent.nplRewardAmount);
 
@@ -288,7 +302,8 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
             usdt.balanceOf(address(this)) != routerUsdtBefore || npl.balanceOf(address(this)) != routerNplBefore
                 || buyerUsdtBefore - usdt.balanceOf(intent.buyer) != intent.usdtPaymentAmount
                 || buyerNplBefore - npl.balanceOf(intent.buyer) != intent.nplPaymentAmount
-                || usdt.balanceOf(usdtCustodySafe) - custodyBefore != intent.usdtPaymentAmount
+                || usdt.balanceOf(platformServiceFeeSafe) - platformServiceFeeBefore != intent.platformServiceFeeUsdt
+                || usdt.balanceOf(usdtCustodySafe) - custodyBefore != custodyUsdt
                 || npl.balanceOf(V2Types.NPL_BURN_ADDRESS) - burnBefore != intent.nplBurnAmount
                 || npl.balanceOf(nplRewardSafe) - rewardBefore != intent.nplRewardAmount
         ) revert InexactTransfer();
@@ -302,6 +317,8 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
             intent.policyVersion,
             intent.listPriceUsdt,
             intent.productUsdtPaymentAmount,
+            intent.platformServiceFeeUsdt,
+            intent.custodyProductUsdt,
             intent.freightUsdt,
             intent.usdtPaymentAmount,
             intent.nplPaymentAmount,
@@ -362,6 +379,9 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
             revert InvalidAmounts();
         }
         uint256 expectedProductUsdt = Math.mulDiv(intent.listPriceUsdt, policy.usdtPaymentBps, V2Types.BPS);
+        uint256 expectedServiceFee =
+            Math.mulDiv(intent.listPriceUsdt, V2Types.PLATFORM_SERVICE_FEE_LIST_PRICE_BPS, V2Types.BPS);
+        uint256 expectedCustodyProductUsdt = expectedProductUsdt - expectedServiceFee;
         uint256 expectedUsdt = expectedProductUsdt + intent.freightUsdt;
         uint256 expectedNplPayment = Math.mulDiv(intent.nplQuoteAmount, policy.nplPaymentBps, V2Types.BPS);
         uint256 expectedBurn = Math.mulDiv(intent.nplQuoteAmount, policy.nplBurnListPriceBps, V2Types.BPS);
@@ -372,12 +392,17 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
             expectedProductUsdt == 0 || expectedNplPayment == 0
                 || (policy.nplBurnListPriceBps != 0 && expectedBurn == 0)
                 || (policy.nplRewardListPriceBps != 0 && expectedReward == 0)
-                || intent.productUsdtPaymentAmount != expectedProductUsdt || intent.usdtPaymentAmount != expectedUsdt
+                || policy.platformFeeBps != V2Types.PLATFORM_SERVICE_FEE_LIST_PRICE_BPS
+                || intent.productUsdtPaymentAmount != expectedProductUsdt
+                || intent.platformServiceFeeUsdt != expectedServiceFee
+                || intent.custodyProductUsdt != expectedCustodyProductUsdt
+                || intent.platformServiceFeeUsdt + intent.custodyProductUsdt != intent.productUsdtPaymentAmount
+                || intent.usdtPaymentAmount != expectedUsdt
                 || (intent.fulfillmentMode == V2Types.FulfillmentMode.Pickup && intent.freightUsdt != 0)
                 || intent.nplPaymentAmount != expectedNplPayment || intent.nplBurnAmount != expectedBurn
                 || intent.nplRewardAmount != expectedReward
                 || intent.nplBurnAmount + intent.nplRewardAmount != intent.nplPaymentAmount
-                || intent.merchantBaseReceivableUsdt > intent.productUsdtPaymentAmount
+                || intent.merchantBaseReceivableUsdt != intent.custodyProductUsdt
                 || intent.merchantConcessionAmount != expectedConcession
                 || intent.merchantNetReceivableUsdt != intent.merchantBaseReceivableUsdt - expectedConcession
                 || intent.bnmAmount != intent.listPriceUsdt
@@ -403,7 +428,6 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
                 || seckill.reservationDeadline != fallbackPayment.reservationDeadline
                 || seckill.issuedAt != fallbackPayment.issuedAt || seckill.deadline != fallbackPayment.deadline
                 || seckill.nonce != fallbackPayment.nonce || seckill.freightUsdt != fallbackPayment.freightUsdt
-                || seckill.merchantBaseReceivableUsdt != fallbackPayment.merchantBaseReceivableUsdt
                 || seckill.merchantConcessionBps != fallbackPayment.merchantConcessionBps
                 || seckill.concessionAllocationHash != fallbackPayment.concessionAllocationHash
                 || keccak256(abi.encode(seckill.beneficiaries)) != keccak256(abi.encode(fallbackPayment.beneficiaries))
