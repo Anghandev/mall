@@ -106,8 +106,9 @@ test('global search and product lifecycle batches are one coordinated Admin-only
   assert.deepEqual(searchParameters.find((parameter) => parameter.name === 'walletMatch')?.schema.enum, ['EXACT', 'FUZZY']);
   assert.equal(coordinatedManifest.capabilityStatus.adminGlobalResourceSearchHttp, 'AVAILABLE');
   assert.equal(coordinatedManifest.capabilityStatus.adminProductLifecycleBatchHttp, 'AVAILABLE');
-  assert.equal(coordinatedManifest.decisionBlocked.includes('ADMIN_OR_QUERY_SEMANTICS'), false);
-  assert.equal(coordinatedManifest.decisionBlocked.includes('ADMIN_FUZZY_WALLET_SEARCH_POLICY'), false);
+  const decisionBlocked: readonly string[] = coordinatedManifest.decisionBlocked;
+  assert.equal(decisionBlocked.includes('ADMIN_OR_QUERY_SEMANTICS'), false);
+  assert.equal(decisionBlocked.includes('ADMIN_FUZZY_WALLET_SEARCH_POLICY'), false);
   assert.equal(adminBaseline.adminCapabilities.adminGlobalResourceSearch, true);
   assert.equal(adminBaseline.adminCapabilities.adminProductLifecycleBatch, true);
   assert.equal('adminProductLifecycleBatch' in mallBaseline, false);

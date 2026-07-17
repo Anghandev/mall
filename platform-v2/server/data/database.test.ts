@@ -3413,7 +3413,16 @@ test('seckill prize freezes the final canonical order and only the reviewed winn
     assert.equal(pending.winnerWallet, null);
     assert.equal(pending.prizeSettlement?.state, 'REVIEW_PENDING');
     assert.equal(pending.prizeSettlement?.candidate?.orderId, quote.orderId);
+    assert.equal(pending.prizeSettlement?.candidate?.blockNumber, String(payment.event.blockNumber));
+    assert.equal(pending.prizeSettlement?.candidate?.logIndex, String(payment.event.logIndex));
     assert.equal(pending.prizeSettlement?.poolAmountUsdt, prizeAmount);
+    assert.equal(
+      pending.prizeSettlement?.cutoffAt,
+      (await db.query<{ cutoff_at: Date }>(
+        'SELECT cutoff_at FROM core.seckill_prize_settlements WHERE session_id = $1',
+        [sessionId],
+      )).rows[0]?.cutoff_at.toISOString(),
+    );
 
     await db.query(
       `INSERT INTO core.wallet_role_bindings (
@@ -3444,6 +3453,7 @@ test('seckill prize freezes the final canonical order and only the reviewed winn
     );
     assert.equal(approved.state, 'APPROVED');
     assert.equal(approved.candidate?.buyerWallet, BUYER);
+    assert.equal(approved.review?.reviewedBy, admin.address.toLowerCase());
     assert.equal(approved.payout?.state, 'AVAILABLE');
     assert.equal((await operations.reviewWinner(
       { walletAddress: admin.address, roles: ['ADMIN'] },
@@ -3477,6 +3487,7 @@ test('seckill prize freezes the final canonical order and only the reviewed winn
     const finalProjection = await seckill.get(sessionId);
     assert.equal(finalProjection.phase, 'SETTLED');
     assert.equal(finalProjection.winnerWallet, BUYER);
+    assert.equal(finalProjection.prizeSettlement?.review?.reviewedBy, admin.address.toLowerCase());
     assert.equal(finalProjection.prizeSettlement?.payout?.state, 'AVAILABLE');
   } finally {
     await db.close();

@@ -2588,12 +2588,15 @@ function seckillRuntimeOpenApiSchemas() {
       orderId: ref('Bytes32'),
       buyerWallet: ref('Address'),
       paymentEventKey: { type: 'string', minLength: 1 },
+      blockNumber: atomic,
+      logIndex: atomic,
       evidenceHash: ref('Bytes32'),
     }),
     SeckillPrizeReview: object({
       decision: { enum: ['APPROVED', 'REJECTED'] },
       reasonCode: { type: 'string', minLength: 2, maxLength: 128 },
       evidenceHash: ref('Bytes32'),
+      reviewedBy: ref('Address'),
       reviewedAt: timestamp,
     }),
     SeckillPrizePayout: object({
@@ -2605,6 +2608,7 @@ function seckillRuntimeOpenApiSchemas() {
     }),
     SeckillPrizeSettlementProjection: object({
       state: { enum: ['REVIEW_PENDING', 'APPROVED', 'ROLLOVER_PENDING', 'ROLLED_OVER', 'QUARANTINED'] },
+      cutoffAt: timestamp,
       candidate: nullable(ref('SeckillPrizeCandidate')),
       poolAmountUsdt: atomic,
       poolSnapshotHash: ref('Bytes32'),
@@ -6534,6 +6538,8 @@ export interface SeckillPrizeCandidate {
   orderId: Bytes32;
   buyerWallet: Address;
   paymentEventKey: string;
+  blockNumber: AtomicAmount;
+  logIndex: AtomicAmount;
   evidenceHash: Bytes32;
 }
 
@@ -6541,6 +6547,7 @@ export interface SeckillPrizeReview {
   decision: 'APPROVED' | 'REJECTED';
   reasonCode: string;
   evidenceHash: Bytes32;
+  reviewedBy: Address;
   reviewedAt: string;
 }
 
@@ -6554,6 +6561,7 @@ export interface SeckillPrizePayout {
 
 export interface SeckillPrizeSettlementProjection {
   state: 'REVIEW_PENDING' | 'APPROVED' | 'ROLLOVER_PENDING' | 'ROLLED_OVER' | 'QUARANTINED';
+  cutoffAt: string;
   candidate: SeckillPrizeCandidate | null;
   poolAmountUsdt: AtomicAmount;
   poolSnapshotHash: Bytes32;

@@ -557,6 +557,8 @@ export interface SeckillPrizeCandidate {
   orderId: Bytes32;
   buyerWallet: Address;
   paymentEventKey: string;
+  blockNumber: AtomicAmount;
+  logIndex: AtomicAmount;
   evidenceHash: Bytes32;
 }
 
@@ -564,6 +566,7 @@ export interface SeckillPrizeReview {
   decision: 'APPROVED' | 'REJECTED';
   reasonCode: string;
   evidenceHash: Bytes32;
+  reviewedBy: Address;
   reviewedAt: string;
 }
 
@@ -577,6 +580,7 @@ export interface SeckillPrizePayout {
 
 export interface SeckillPrizeSettlementProjection {
   state: 'REVIEW_PENDING' | 'APPROVED' | 'ROLLOVER_PENDING' | 'ROLLED_OVER' | 'QUARANTINED';
+  cutoffAt: string;
   candidate: SeckillPrizeCandidate | null;
   poolAmountUsdt: AtomicAmount;
   poolSnapshotHash: Bytes32;
