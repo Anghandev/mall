@@ -32,15 +32,19 @@ interface SessionRow {
   relay_cap: string | number;
   main_duration: string | number;
   prize_settlement_state: string | null;
+  prize_cutoff_at: Date | null;
   candidate_order_id: string | null;
   candidate_buyer_wallet: string | null;
   candidate_payment_event_key: string | null;
+  candidate_block_number: string | number | null;
+  candidate_log_index: string | number | null;
   candidate_evidence_hash: string | null;
   pool_snapshot_amount_usdt: string | null;
   pool_snapshot_hash: string | null;
   review_decision: string | null;
   review_reason_code: string | null;
   review_evidence_hash: string | null;
+  reviewed_by: string | null;
   reviewed_at: Date | null;
   award_journal_id: string | null;
   rollover_target_session_id: string | null;
@@ -194,12 +198,13 @@ function sessionSelect() {
     policy.payload ->> 'relayIncrement' AS relay_increment,
     policy.payload ->> 'relayCap' AS relay_cap,
     policy.payload ->> 'seckillMainDuration' AS main_duration,
-    prize.state AS prize_settlement_state,
+    prize.state AS prize_settlement_state, prize.cutoff_at AS prize_cutoff_at,
     prize.candidate_order_id, prize.candidate_buyer_wallet,
-    prize.candidate_payment_event_key, prize.candidate_evidence_hash,
+    prize.candidate_payment_event_key, prize.candidate_block_number,
+    prize.candidate_log_index, prize.candidate_evidence_hash,
     prize.pool_amount_usdt::text AS pool_snapshot_amount_usdt,
     prize.pool_snapshot_hash, prize.review_decision, prize.review_reason_code,
-    prize.review_evidence_hash, prize.reviewed_at, prize.award_journal_id,
+    prize.review_evidence_hash, prize.reviewed_by, prize.reviewed_at, prize.award_journal_id,
     prize.rollover_target_session_id, prize.rollover_journal_id,
     payout.state AS payout_state, payout.request_id AS payout_request_id,
     payout.batch_id AS payout_batch_id,
@@ -266,10 +271,13 @@ function sessionProjection(row: SessionRow, now: Date) {
     winnerWallet: row.review_decision === 'APPROVED' ? row.candidate_buyer_wallet : null,
     prizeSettlement: row.prize_settlement_state ? {
       state: row.prize_settlement_state,
+      cutoffAt: iso(row.prize_cutoff_at!),
       candidate: row.candidate_order_id ? {
         orderId: row.candidate_order_id,
         buyerWallet: row.candidate_buyer_wallet,
         paymentEventKey: row.candidate_payment_event_key,
+        blockNumber: String(row.candidate_block_number),
+        logIndex: String(row.candidate_log_index),
         evidenceHash: row.candidate_evidence_hash,
       } : null,
       poolAmountUsdt: row.pool_snapshot_amount_usdt,
@@ -278,6 +286,7 @@ function sessionProjection(row: SessionRow, now: Date) {
         decision: row.review_decision,
         reasonCode: row.review_reason_code,
         evidenceHash: row.review_evidence_hash,
+        reviewedBy: row.reviewed_by,
         reviewedAt: row.reviewed_at ? iso(row.reviewed_at) : null,
       } : null,
       awardJournalId: row.award_journal_id,
