@@ -13,7 +13,6 @@ describe('merchant lifecycle page', () => {
     const base = merchantDetail();
     const redacted = merchantDetail({
       qualification: { ...qualification(), access: 'REDACTED', legalName: '阿步***公司', legalId: 'LIC***001', contactPhone: '138****8000', licenseAssetId: hash('a') },
-      levelPolicy: { status: 'DecisionBlocked', reason: 'Merchant level policy is not published' },
       analytics: { ...base.analytics, fulfillment: { ...base.analytics.fulfillment, fastShip48h: { status: 'UNAVAILABLE', numerator: '0', denominator: '0', bps: null, reason: 'NO_ELIGIBLE_DELIVERY_ORDERS' } } },
     });
     window.ethereum = walletProvider(wallet);
@@ -33,7 +32,6 @@ describe('merchant lifecycle page', () => {
     expect(screen.queryByRole('heading', { name: '更新资质版本' })).toBeNull();
     expect(screen.queryByRole('heading', { name: '商家审核发布' })).toBeNull();
     expect(screen.queryByRole('button', { name: '获取受控地址' })).toBeNull();
-    expect(screen.getByText('Merchant level policy is not published')).toBeTruthy();
     expect(screen.getByText(/NO_ELIGIBLE_DELIVERY_ORDERS/)).toBeTruthy();
     expect(screen.getByText('不可用', { selector: 'dd' })).toBeTruthy();
     expect(screen.queryByText('0%')).toBeNull();
@@ -68,6 +66,7 @@ describe('merchant lifecycle page', () => {
     await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
     await user.click(await screen.findByRole('button', { name: '创建申请' }));
     const createForm = screen.getByRole('heading', { name: '新建商家资质' }).closest('section')!;
+    expect(within(createForm).queryByLabelText('商家等级')).toBeNull();
     await user.type(within(createForm).getByLabelText('店铺名称'), '阿步金店');
     await user.type(within(createForm).getByLabelText('主体名称'), '阿步黄金有限公司');
     await user.type(within(createForm).getByLabelText('证件编号'), 'LICENSE-001');
@@ -79,6 +78,7 @@ describe('merchant lifecycle page', () => {
     expect(await screen.findByText(/已创建 merchant-1 的加密资质申请/)).toBeTruthy();
     const updateForm = await screen.findByRole('heading', { name: '更新资质版本' }).then((heading) => heading.closest('form')!);
     expect(within(updateForm).queryByLabelText(/结算钱包/)).toBeNull();
+    expect(within(updateForm).queryByLabelText('商家等级')).toBeNull();
     await user.upload(within(updateForm).getByLabelText('营业执照 / 资质文件'), new File(['license'], 'license.pdf', { type: 'application/pdf' }));
     await user.type(within(updateForm).getByLabelText('上传 Idempotency key'), 'license-upload-1');
     await user.click(within(updateForm).getByRole('button', { name: '上传并验证证照' }));
@@ -121,8 +121,6 @@ describe('merchant lifecycle page', () => {
     expect(screen.getAllByText('已通过').length).toBeGreaterThan(0);
     expect(screen.getByText('7', { selector: 'dd' })).toBeTruthy();
     expect(screen.getByText('8', { selector: 'dd' })).toBeTruthy();
-    expect(screen.getByText('5000', { selector: 'dd' })).toBeTruthy();
-    expect(screen.getByText('12', { selector: 'dd' })).toBeTruthy();
     expect(screen.getByText('7500 bps', { selector: 'dd' })).toBeTruthy();
     expect(screen.getByText('NPL Burn · FINAL')).toBeTruthy();
     expect(screen.getByText('BNM Available · 已履约')).toBeTruthy();
@@ -183,7 +181,7 @@ function merchantDetail(overrides: Partial<MerchantLifecycleDetail> = {}): Merch
     artifactVersion,
     merchant: { merchantId: 'merchant-1', shopName: '阿步金店', settlementWallet: address('3'), settlementWalletMutable: false, status: 'PENDING', level: 'V1', guaranteeStatus: 'READY', applicationVersion: 1, qualificationComplete: false, reviewedAt: null, reviewedBy: null, createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T00:00:00.000Z' },
     qualification: qualification(),
-    levelPolicy: { status: 'AVAILABLE', configVersionId: 'system-config:merchant-levels:1', version: 1, effectiveFrom: '2026-07-01T00:00:00.000Z', level: 'V1', maxProductSettlementUsdt: '5000', monthlySeckillQuota: 12 },
+    levelPolicy: { status: 'Deprecated' },
     analytics: {
       orders: { totalFinalized: '3', ordinaryFinalized: '2', seckillFinalized: '1', cumulative: amounts('100', '70', '60', '55'), today: amounts('20', '14', '12', '11'), timezone: 'Asia/Shanghai', window: { start: '2026-07-15T16:00:00.000Z', end: '2026-07-16T16:00:00.000Z' } },
       fulfillment: { pendingShipment: '1', inTransit: '1', completed: '1', pickupCompleted: '0', fastShip48h: { status: 'AVAILABLE', numerator: '3', denominator: '4', bps: 7500, reason: null } },

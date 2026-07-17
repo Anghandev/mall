@@ -26,7 +26,7 @@ describe('merchant lifecycle admin API', () => {
     await expect(listMerchantLifecycle({ status: 'PENDING', search: '24K', limit: 25 }, 'jwt')).resolves.toMatchObject({ merchants: [{ merchantId: 'merchant-1' }] });
     await expect(getMerchantLifecycle('merchant-1', 'jwt')).resolves.toMatchObject({
       merchant: { settlementWalletMutable: false },
-      levelPolicy: { status: 'AVAILABLE', level: 'V1', maxProductSettlementUsdt: '5000', monthlySeckillQuota: 12 },
+      levelPolicy: { status: 'Deprecated' },
       analytics: { fulfillment: { fastShip48h: { status: 'AVAILABLE', numerator: '3', denominator: '4', bps: 7500 } } },
     });
 
@@ -49,11 +49,11 @@ describe('merchant lifecycle admin API', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await createMerchantApplication({ shopName: '阿步金店', legalName: '阿步黄金有限公司', legalId: 'LICENSE-001', contactPhone: '13800138000', settlementWallet: address('3'), level: 'V1', idempotencyKey: 'merchant-create-1' }, 'jwt');
-    await updateMerchantApplication('merchant-1', { shopName: '阿步金店', legalName: '阿步黄金有限公司', legalId: 'LICENSE-001', contactPhone: '13800138000', level: 'V2', licenseAssetId: hash('a'), expectedVersion: 1, idempotencyKey: 'merchant-update-1' }, 'jwt');
+    await createMerchantApplication({ shopName: '阿步金店', legalName: '阿步黄金有限公司', legalId: 'LICENSE-001', contactPhone: '13800138000', settlementWallet: address('3'), idempotencyKey: 'merchant-create-1' }, 'jwt');
+    await updateMerchantApplication('merchant-1', { shopName: '阿步金店', legalName: '阿步黄金有限公司', legalId: 'LICENSE-001', contactPhone: '13800138000', licenseAssetId: hash('a'), expectedVersion: 1, idempotencyKey: 'merchant-update-1' }, 'jwt');
 
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ shopName: '阿步金店', legalName: '阿步黄金有限公司', legalId: 'LICENSE-001', contactPhone: '13800138000', settlementWallet: address('3'), level: 'V1', idempotencyKey: 'merchant-create-1' });
-    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({ expectedVersion: 1, licenseAssetId: hash('a'), level: 'V2' });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ shopName: '阿步金店', legalName: '阿步黄金有限公司', legalId: 'LICENSE-001', contactPhone: '13800138000', settlementWallet: address('3'), idempotencyKey: 'merchant-create-1' });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({ expectedVersion: 1, licenseAssetId: hash('a') });
   });
 
   it('binds the secondary EIP-712 challenge and requires published Safe evidence', async () => {
@@ -88,10 +88,9 @@ describe('merchant lifecycle admin API', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('accepts a DecisionBlocked level policy and zero-denominator unavailable 48H rate without inventing zero percent', async () => {
+  it('accepts the deprecated level marker and zero-denominator unavailable 48H rate without inventing zero percent', async () => {
     const detail = merchantDetail();
     const unavailable = merchantDetail({
-      levelPolicy: { status: 'DecisionBlocked', reason: 'Merchant level policy is not published' },
       analytics: {
         ...detail.analytics,
         fulfillment: { ...detail.analytics.fulfillment, fastShip48h: { status: 'UNAVAILABLE', numerator: '0', denominator: '0', bps: null, reason: 'NO_ELIGIBLE_DELIVERY_ORDERS' } },
@@ -100,7 +99,7 @@ describe('merchant lifecycle admin API', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(unavailable)));
 
     await expect(getMerchantLifecycle('merchant-1', 'jwt')).resolves.toMatchObject({
-      levelPolicy: { status: 'DecisionBlocked' },
+      levelPolicy: { status: 'Deprecated' },
       analytics: { fulfillment: { fastShip48h: { status: 'UNAVAILABLE', denominator: '0', bps: null } } },
     });
   });
@@ -147,7 +146,7 @@ function merchantDetail(overrides: Partial<MerchantLifecycleDetail> = {}): Merch
     artifactVersion,
     merchant: { merchantId: 'merchant-1', shopName: '阿步金店', settlementWallet: address('3'), settlementWalletMutable: false, status: 'PENDING', level: 'V1', guaranteeStatus: 'READY', applicationVersion: 1, qualificationComplete: false, reviewedAt: null, reviewedBy: null, createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T00:00:00.000Z' },
     qualification: fullQualification(),
-    levelPolicy: { status: 'AVAILABLE', configVersionId: 'system-config:merchant-levels:1', version: 1, effectiveFrom: '2026-07-01T00:00:00.000Z', level: 'V1', maxProductSettlementUsdt: '5000', monthlySeckillQuota: 12 },
+    levelPolicy: { status: 'Deprecated' },
     analytics: {
       orders: { totalFinalized: '3', ordinaryFinalized: '2', seckillFinalized: '1', cumulative: amounts('100', '70', '60', '55'), today: amounts('20', '14', '12', '11'), timezone: 'Asia/Shanghai', window: { start: '2026-07-15T16:00:00.000Z', end: '2026-07-16T16:00:00.000Z' } },
       fulfillment: { pendingShipment: '1', inTransit: '1', completed: '1', pickupCompleted: '0', fastShip48h: { status: 'AVAILABLE', numerator: '3', denominator: '4', bps: 7500, reason: null } },

@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Send,
   ShieldCheck,
+  Scale,
   TimerReset,
   WalletCards,
   XCircle,
@@ -32,6 +33,7 @@ import {
   fetchSeckillGovernanceAction,
   fetchSeckillGovernanceActions,
   proposeSeckillGovernanceAction,
+  reviewSeckillWinner,
   submitSeckillGovernanceApproval,
 } from '../seckillAdminApi';
 
@@ -65,6 +67,10 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
   const [resumeKey, setResumeKey] = useState('');
   const [nonce, setNonce] = useState('');
   const [deadline, setDeadline] = useState('');
+  const [winnerDecision, setWinnerDecision] = useState<'APPROVE' | 'REJECT'>('APPROVE');
+  const [winnerReason, setWinnerReason] = useState('');
+  const [winnerEvidenceHash, setWinnerEvidenceHash] = useState('');
+  const [winnerReviewKey, setWinnerReviewKey] = useState('');
 
   const canRead = session?.roles.some((role) => ['ADMIN', 'OPERATOR', 'AUDITOR'].includes(role)) ?? false;
   const canCreate = session?.roles.some((role) => ['ADMIN', 'OPERATOR'].includes(role)) ?? false;
@@ -202,6 +208,24 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
     void run('cancel', () => cancelSeckillGovernanceAction(selected, session.token), '动作已取消，当前 {state}；未提案开场库存由 Core 释放。');
   };
 
+  const submitWinnerReview = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!session || !isAdmin || !current || current.prizeSettlement?.state !== 'REVIEW_PENDING' || pendingAction) return;
+    setPendingAction('winner-review'); setError(null); setNotice('');
+    try {
+      const updated = await reviewSeckillWinner(current, {
+        decision: winnerDecision,
+        reasonCode: winnerReason,
+        evidenceHash: winnerEvidenceHash,
+        idempotencyKey: winnerReviewKey,
+      }, session.token);
+      setNotice(`中奖候选审核已提交，Core 状态 ${updated.state}；候选订单与钱包保持不可变。`);
+      setWinnerReason(''); setWinnerEvidenceHash(''); setWinnerReviewKey('');
+      onRefresh();
+    } catch (cause) { setError(asCoreError(cause)); }
+    finally { setPendingAction(''); }
+  };
+
   const currentAction = useMemo(() => selected ?? actions.find((item) => item.actionId === selectedId) ?? null, [actions, selected, selectedId]);
 
   return (
@@ -217,6 +241,9 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
 
       {session && canRead ? (
         <>
+          {isAdmin && current?.prizeSettlement?.state === 'REVIEW_PENDING'
+            ? <WinnerReviewForm session={current} decision={winnerDecision} setDecision={setWinnerDecision} reasonCode={winnerReason} setReasonCode={setWinnerReason} evidenceHash={winnerEvidenceHash} setEvidenceHash={setWinnerEvidenceHash} idempotencyKey={winnerReviewKey} setIdempotencyKey={setWinnerReviewKey} pending={pendingAction === 'winner-review'} onSubmit={submitWinnerReview} />
+            : null}
           <div className="seckill-governance-layout">
             <article className="panel seckill-action-list">
               <div className="panel-heading"><div><p className="section-kicker">GET /v2/admin/seckill/actions</p><h2>治理动作</h2></div><span className="status-chip">{actions.length} actions</span></div>
@@ -248,6 +275,20 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
       ) : null}
     </section>
   );
+}
+
+function WinnerReviewForm({ session, decision, setDecision, reasonCode, setReasonCode, evidenceHash, setEvidenceHash, idempotencyKey, setIdempotencyKey, pending, onSubmit }: {
+  session: SeckillSessionProjection;
+  decision: 'APPROVE' | 'REJECT';
+  setDecision(value: 'APPROVE' | 'REJECT'): void;
+  reasonCode: string; setReasonCode(value: string): void;
+  evidenceHash: string; setEvidenceHash(value: string): void;
+  idempotencyKey: string; setIdempotencyKey(value: string): void;
+  pending: boolean;
+  onSubmit(event: FormEvent): void;
+}) {
+  const candidate = session.prizeSettlement!.candidate!;
+  return <form className="panel seckill-winner-review" onSubmit={onSubmit}><div className="panel-heading"><div><p className="section-kicker">POST /v2/admin/seckill/sessions/:id/winner-review</p><h2>不可变中奖候选审核</h2></div><Scale aria-hidden="true" /></div><dl className="definition-grid seckill-winner-review-candidate"><div><dt>Candidate order</dt><dd><code>{candidate.orderId}</code></dd></div><div><dt>Candidate wallet</dt><dd><code>{candidate.buyerWallet}</code></dd></div></dl><div className="seckill-winner-review-fields"><label>审核决定<select value={decision} onChange={(event) => setDecision(event.target.value as 'APPROVE' | 'REJECT')} disabled={pending}><option value="APPROVE">APPROVE · 有效</option><option value="REJECT">REJECT · 作弊或无效</option></select></label><label>Reason code<input minLength={2} maxLength={128} value={reasonCode} onChange={(event) => setReasonCode(event.target.value.toUpperCase())} disabled={pending} required /></label><label>Evidence hash<input pattern="0x[0-9a-fA-F]{64}" value={evidenceHash} onChange={(event) => setEvidenceHash(event.target.value)} disabled={pending} required /></label><IdempotencyInput value={idempotencyKey} setValue={setIdempotencyKey} pending={pending} /></div><button className={decision === 'REJECT' ? 'button button-danger' : 'button button-primary'} type="submit" disabled={pending}>{pending ? '提交中' : `提交 ${decision}`}</button><p className="button-explanation">只能批准或拒绝 Core 冻结的候选；表单不接受 winner、order 或 wallet 修改。拒绝后由 Core 执行 rollover，不选择替代中奖人。</p></form>;
 }
 
 function RoleBoundary({ isAdmin, canCreate }: { isAdmin: boolean; canCreate: boolean }) {

@@ -1233,6 +1233,7 @@ function seckillSession() {
     prizePoolUsdt: '9000000',
     lastBuyerWallet: '0x1111111111111111111111111111111111111111',
     winnerWallet: null,
+    prizeSettlement: null,
     snapshot: {},
     governanceActionId: hash('1'),
     rulesContentHash: hash('2'),

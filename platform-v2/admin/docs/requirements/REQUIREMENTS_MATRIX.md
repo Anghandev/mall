@@ -158,8 +158,9 @@ parallel API or local financial calculation:
   force-close, prize injection and seckill-purchase breaker recovery. Each
   action follows Core `allowedActions` through independent secondary-wallet
   EIP-712 signing, Safe proposal and 15-confirmation finality; `REORGED` and
-  `FAILED` never render as effective. This prior evidence does not prove the
-  later final-order winner, whole-pool payout or empty-session rollover rules.
+  `FAILED` never render as effective. The current projection also renders the
+  immutable final-order candidate, cutoff/block/log evidence, whole-pool
+  snapshot, review, rollover journals and Safe payout lifecycle.
 - `ADM-SEK-005`: the session draft binds the published CMS rules content hash
   and policy version. The UI never edits the fixed 3600s / 60s / +30s / cap
   60s timers and does not construct calldata or calculate prize allocations.
@@ -344,9 +345,10 @@ financial calculation or production fixture:
   ADMIN/OPERATOR may create an opening draft; OPERATOR may cancel only an
   unproposed opening. ADMIN owns force-close, prize injection, breaker recovery,
   challenge/signature and Safe proposal. ConfigurationRequired, pending Safe
-  finality, `REORGED`, `FAILED` and `CANCELLED` remain explicit UI states. The
-  new automatic winner, non-substitution review and rollover lifecycle is a
-  Core gap and is not claimed by these controls.
+  finality, `REORGED`, `FAILED` and `CANCELLED` remain explicit UI states.
+  Winner review is available only to ADMIN in `REVIEW_PENDING`, submits only
+  decision/reason/evidence/idempotency and rejects any changed candidate or
+  pool snapshot; rejected and empty sessions consume Core rollover evidence.
 
 All unavailable entries preserve Core `DecisionBlocked` / `ExternalBlocked`
 reason codes and details. An empty coverage projection is never shown as zero
@@ -452,9 +454,9 @@ does not publish or handwrite a parallel shared contract:
   consumes the Core-issued EIP-712 challenge, an independent wallet signature,
   the secondary-signature response and the Safe-proposal command. Cancellation
   remains restricted to Core `allowedActions`; OPERATOR can cancel only an
-  unproposed opening action and AUDITOR is read-only. Those controls do not yet
-  prove final-order winner selection, whole-pool payout or empty-session
-  rollover.
+  unproposed opening action and AUDITOR is read-only. Admin now consumes the
+  immutable final-order candidate and whole-pool snapshot, exposes no winner
+  replacement input, and renders review, rollover and Safe payout evidence.
 - `ADM-SEK-005`: the draft form fetches `SECKILL_RULES` through the existing CMS
   version endpoint, requires a published projection with a bound policyVersion,
   and copies its contentHash and policyVersion into read-only fields. The UI

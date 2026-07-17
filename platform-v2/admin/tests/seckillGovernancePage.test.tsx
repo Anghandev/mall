@@ -1,4 +1,4 @@
-import { artifactVersion, type SeckillGovernanceActionProjection, type SeckillSessionPlanProjection, type UserRole } from '@abu24k/core-artifacts';
+import { artifactVersion, type SeckillGovernanceActionProjection, type SeckillSessionPlanProjection, type SeckillSessionProjection, type UserRole } from '@abu24k/core-artifacts';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
@@ -217,6 +217,52 @@ describe('seckill governance workspace', () => {
     expect(bodyFor(writes, '/breaker/resume')).toEqual({ sessionId, idempotencyKey: 'seckill-resume-1' });
   });
 
+  it('shows the immutable prize evidence and allows ADMIN review only while REVIEW_PENDING', async () => {
+    const wallet = address('1');
+    window.ethereum = walletProvider(wallet);
+    let current = seckillSession({ phase: 'SETTLING', storedPhase: 'SETTLING', prizeSettlement: reviewPendingPrize() });
+    const fetchMock = governanceFetch(wallet, 'ADMIN', [], async (url) => {
+      if (url.endsWith('/v2/seckill/sessions/current')) return jsonResponse(current);
+      if (url.includes('/v2/seckill/sessions/') && url.includes('/events')) return jsonResponse({ items: [], nextCursor: '0' });
+      if (url.endsWith('/winner-review')) {
+        const reviewed = {
+          ...reviewPendingPrize(), state: 'ROLLED_OVER' as const,
+          review: { decision: 'REJECTED' as const, reasonCode: 'ORDER_INVALID', evidenceHash: hash('8'), reviewedBy: wallet, reviewedAt: '2026-07-16T01:00:00.000Z' },
+          rolloverTargetSessionId: hash('9'), rolloverJournalId: 'journal:rollover:1',
+        };
+        current = seckillSession({ phase: 'SETTLED', storedPhase: 'SETTLED', prizeSettlement: reviewed });
+        return jsonResponse(reviewed);
+      }
+      return undefined;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderSeckill();
+
+    expect(await screen.findByRole('heading', { name: '大奖候选与结算证据' })).toBeTruthy();
+    expect(screen.getAllByText(hash('4')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(address('5')).length).toBeGreaterThan(0);
+    expect(screen.getByText('payment:1')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: '不可变中奖候选审核' })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    const form = (await screen.findByRole('heading', { name: '不可变中奖候选审核' })).closest('form')!;
+    await user.selectOptions(within(form).getByLabelText('审核决定'), 'REJECT');
+    await user.type(within(form).getByLabelText('Reason code'), 'order_invalid');
+    await user.type(within(form).getByLabelText('Evidence hash'), hash('8'));
+    await user.type(within(form).getByLabelText('Idempotency key'), 'winner-review-1');
+    await user.click(within(form).getByRole('button', { name: '提交 REJECT' }));
+
+    expect(await screen.findByText(/Core 状态 ROLLED_OVER/)).toBeTruthy();
+    expect(bodyFor(fetchMock.mock.calls, '/winner-review')).toEqual({
+      decision: 'REJECT', reasonCode: 'ORDER_INVALID', evidenceHash: hash('8'), idempotencyKey: 'winner-review-1',
+    });
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '不可变中奖候选审核' })).toBeNull());
+    expect(await screen.findByText('ROLLED_OVER')).toBeTruthy();
+    expect(screen.getByText(hash('9'))).toBeTruthy();
+    expect(screen.getByText('journal:rollover:1')).toBeTruthy();
+  });
+
   it('renders 14 confirmations, REORGED and FAILED without claiming finality', async () => {
     const wallet = address('1');
     window.ethereum = walletProvider(wallet);
@@ -305,8 +351,18 @@ function cmsRulesVersion() {
   return { entryId: 'cms-rules', versionId: 'cms-rules-v2', version: 2, slug: 'seckill-rules', contentType: 'SECKILL_RULES', placement: 'seckill', locale: 'zh-CN', contentFormat: 'STRUCTURED_RICH_TEXT', content: {}, contentHash: hash('2'), audience: {}, startsAt: null, endsAt: null, frequencyCap: null, policyVersion: '2', published: true, publicationType: 'PUBLISHED', createdBy: address('1'), createdAt: '2026-07-16T00:00:00.000Z' };
 }
 
-function seckillSession() {
-  return { artifactVersion, sessionId: hash('b'), policyVersion: '2', merchantId: 'merchant-1', product: { productId: 'product-1', skuId: 'sku-1', title: '24K session', metadata: {}, attributes: {}, seckillListPriceUsdt: '80' }, phase: 'LIVE', storedPhase: 'LIVE', serverTime: '2026-07-16T00:00:00.000Z', startsAt: '2026-07-16T00:00:00.000Z', mainDeadline: '2026-07-16T01:00:00.000Z', relayDeadline: '2026-07-16T00:01:00.000Z', settlementEarliestAt: '2026-07-16T01:05:00.000Z', settlementDeadline: '2026-07-16T01:10:00.000Z', timers: { mainDurationSeconds: 3600, relayInitialSeconds: 60, relayIncrementSeconds: 30, relayCapSeconds: 60 }, inventory: { total: '4', sold: '0', reserved: '0', available: '4' }, prizePoolUsdt: '0', lastBuyerWallet: null, winnerWallet: null, snapshot: {}, governanceActionId: hash('a'), rulesContentHash: hash('2'), publicationTxHash: hash('3'), allowedActions: [] };
+function seckillSession(overrides: Partial<SeckillSessionProjection> = {}): SeckillSessionProjection {
+  return { artifactVersion, sessionId: hash('b'), policyVersion: '2', merchantId: 'merchant-1', product: { productId: 'product-1', skuId: 'sku-1', title: '24K session', metadata: {}, attributes: {}, seckillListPriceUsdt: '80' }, phase: 'LIVE', storedPhase: 'LIVE', serverTime: '2026-07-16T00:00:00.000Z', startsAt: '2026-07-16T00:00:00.000Z', mainDeadline: '2026-07-16T01:00:00.000Z', relayDeadline: '2026-07-16T00:01:00.000Z', settlementEarliestAt: '2026-07-16T01:05:00.000Z', settlementDeadline: '2026-07-16T01:10:00.000Z', timers: { mainDurationSeconds: 3600, relayInitialSeconds: 60, relayIncrementSeconds: 30, relayCapSeconds: 60 }, inventory: { total: '4', sold: '0', reserved: '0', available: '4' }, prizePoolUsdt: '0', lastBuyerWallet: null, winnerWallet: null, prizeSettlement: null, snapshot: {}, governanceActionId: hash('a'), rulesContentHash: hash('2'), publicationTxHash: hash('3'), allowedActions: [], ...overrides };
+}
+
+function reviewPendingPrize() {
+  return {
+    state: 'REVIEW_PENDING' as const,
+    cutoffAt: '2026-07-16T01:00:00.000Z',
+    candidate: { orderId: hash('4'), buyerWallet: address('5'), paymentEventKey: 'payment:1', blockNumber: '100', logIndex: '2', evidenceHash: hash('6') },
+    poolAmountUsdt: '90', poolSnapshotHash: hash('7'), review: null, awardJournalId: null,
+    rolloverTargetSessionId: null, rolloverJournalId: null, payout: null,
+  };
 }
 
 function governanceChallenge(action: SeckillGovernanceActionProjection, signer: string, nonce: string, deadline: string) {

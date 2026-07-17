@@ -370,8 +370,9 @@ function isConcessionPreview(value: unknown): value is MerchantConcessionPreview
       && amountPattern.test(String(item.merchantNetReceivableUsdt))
       && Array.isArray(item.allocations)
       && item.allocations.every((allocation) => isRecord(allocation)
-        && addressPattern.test(String(allocation.account))
-        && amountPattern.test(String(allocation.amount))))
+        && ['SECKILL_PRIZE', 'NODE_REWARD', 'REWARD_RESERVE'].includes(String(allocation.pool))
+        && amountPattern.test(String(allocation.amount))
+        && allocation.balanceState === 'LOCKED'))
     && authorization.primaryType === 'MerchantConcessionPreview'
     && bytes32Pattern.test(String(authorization.digest))
     && typeof authorization.signature === 'string'
