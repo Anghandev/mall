@@ -102,6 +102,8 @@ library V2Types {
         uint64 deadline;
         uint256 nonce;
         uint256 listPriceUsdt;
+        uint256 productUsdtPaymentAmount;
+        uint256 freightUsdt;
         uint256 usdtPaymentAmount;
         uint256 nplQuoteAmount;
         uint256 nplPaymentAmount;

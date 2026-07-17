@@ -90,6 +90,9 @@ export class SystemConfigService {
     requireSessionRole(actor, 'ADMIN', 'OPERATOR');
     const wallet = normalizeAddress(actor.walletAddress);
     if (!CONFIG_KEYS.includes(input.configKey)) throw new CoreError('InvalidRequest', 'System config key is invalid');
+    if (input.configKey === 'FREIGHT') {
+      throw new CoreError('InvalidRequest', 'Freight is configured per product through defaultFreightUsdt');
+    }
     if (!/^[A-Za-z0-9:_-]{8,128}$/.test(input.idempotencyKey)) throw new CoreError('InvalidRequest', 'System config idempotency key is invalid');
     const payload = validateConfigPayload(input.configKey, input.payload);
     const effectiveFrom = new Date(input.effectiveFrom);
@@ -131,6 +134,50 @@ export class SystemConfigService {
         now,
       });
       return configProjection((await executor.query<ConfigRow>('SELECT * FROM core.system_config_versions WHERE config_version_id = $1', [configVersionId])).rows[0]!, false);
+    });
+  }
+
+  approvalChallenge(
+    actor: FulfillmentActor,
+    configVersionId: string,
+    input: { nonce: string; deadline: string },
+  ) {
+    requireSessionRole(actor, 'ADMIN');
+    const wallet = normalizeAddress(actor.walletAddress);
+    const nonce = unsignedBigInt(input.nonce, 'system config approval nonce');
+    const deadline = unsignedBigInt(input.deadline, 'system config approval deadline');
+    if (deadline < BigInt(Math.floor(this.#clock().getTime() / 1_000))) {
+      throw new CoreError('NonceExpired', 'System config approval expired', 401);
+    }
+    return this.#transactions.transaction(async (executor) => {
+      await requireCurrentRole(executor, wallet, ['ADMIN']);
+      const row = await lockedConfig(executor, configVersionId);
+      const current = await currentConfig(executor, row.config_key);
+      const policyVersion = BigInt(await latestPolicyVersion(executor));
+      const intent: SensitiveActionIntent = {
+        action: 'PUBLISH_SYSTEM_CONFIG',
+        resourceType: 'SYSTEM_CONFIG',
+        resourceId: configVersionId,
+        policyVersion,
+        oldValueHash: current?.payload_hash ?? ZERO_HASH,
+        newValueHash: row.payload_hash,
+        safeAddress: this.#governanceSafe,
+        nonce,
+        deadline,
+      };
+      const typedData = {
+        domain: sensitiveActionDomain(this.#verifyingContract),
+        types: sensitiveActionTypes,
+        primaryType: 'SensitiveAction' as const,
+        message: serializableIntent(intent),
+      };
+      return Object.freeze({
+        configVersionId,
+        signer: this.#secondarySigner,
+        ...serializableIntent(intent),
+        typedData,
+        digest: TypedDataEncoder.hash(typedData.domain, typedData.types, intent).toLowerCase(),
+      });
     });
   }
 
@@ -368,6 +415,20 @@ function approvalIntent(input: ConfigApprovalInput): SensitiveActionIntent {
     nonce: unsignedBigInt(input.nonce, 'nonce'),
     deadline: unsignedBigInt(input.deadline, 'deadline'),
   };
+}
+
+function serializableIntent(intent: SensitiveActionIntent) {
+  return Object.freeze({
+    action: intent.action,
+    resourceType: intent.resourceType,
+    resourceId: intent.resourceId,
+    policyVersion: intent.policyVersion.toString(),
+    oldValueHash: intent.oldValueHash.toLowerCase(),
+    newValueHash: intent.newValueHash.toLowerCase(),
+    safeAddress: normalizeAddress(intent.safeAddress),
+    nonce: intent.nonce.toString(),
+    deadline: intent.deadline.toString(),
+  });
 }
 
 async function latestPolicyVersion(executor: SqlExecutor) {

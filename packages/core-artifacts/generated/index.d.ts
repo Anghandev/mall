@@ -14,7 +14,7 @@ export type TransactionFinalityState = "SUBMITTED" | "MINED" | "REPLACED" | "REO
 export type UserRole = "BUYER" | "MERCHANT" | "ADMIN" | "OPERATOR" | "ARBITRATOR" | "AUDITOR";
 export type MerchantLevel = "V1" | "V2" | "V3" | "V4" | "V5";
 export type MerchantLifecycleStatus = "PENDING" | "APPROVED" | "REJECTED" | "SUSPENDED" | "BLACKLISTED";
-export type MerchantReviewAction = "APPROVE" | "REJECT" | "BLACKLIST" | "CHANGE_SETTLEMENT_WALLET";
+export type MerchantReviewAction = "APPROVE" | "REJECT" | "BLACKLIST";
 export type MerchantQualificationAccess = "FULL" | "REDACTED" | "UNAVAILABLE";
 export type BreakerScope = "NEW_PAYMENT" | "SECKILL_PURCHASE" | "NEW_SETTLEMENT_BATCH";
 export type CatalogProductAction = "SAVE_DRAFT" | "CREATE_CONCESSION_PREVIEW" | "SUBMIT_REVIEW" | "APPROVE" | "REJECT" | "PUBLISH" | "ADJUST_INVENTORY" | "HIDE" | "DELIST";
@@ -233,7 +233,6 @@ export interface MerchantApplicationUpdateRequest {
 export interface MerchantReviewChallengeRequest {
   action: MerchantReviewAction;
   reasonCode: string;
-  proposedSettlementWallet?: Address;
   idempotencyKey: string;
 }
 
@@ -862,6 +861,8 @@ export interface BuyerShoppingStatement {
   createdAt: string;
   orderKind: Exclude<OrderKind, 'SECKILL'>;
   paymentAmounts: {
+    productUsdtPaymentAmount: AtomicAmount;
+    freightUsdt: AtomicAmount;
     usdtPaymentAmount: AtomicAmount;
     nplPaymentAmount: AtomicAmount;
   };
@@ -926,6 +927,8 @@ export interface MerchantReceivableStatement {
   orderKind: OrderKind;
   frozenAmounts: {
     listPriceUsdt: AtomicAmount;
+    productUsdtPaymentAmount: AtomicAmount;
+    freightUsdt: AtomicAmount;
     buyerPaidUsdt: AtomicAmount;
     merchantBaseReceivableUsdt: AtomicAmount;
     merchantConcessionAmount: AtomicAmount;
@@ -1667,10 +1670,22 @@ export interface NotificationCampaignRetryResult {
 }
 
 export interface SystemConfigCreateRequest {
-  configKey: SystemConfigKey;
+  configKey: Exclude<SystemConfigKey, 'FREIGHT'>;
   payload: JsonObject;
   effectiveFrom: string;
   idempotencyKey: string;
+}
+
+export interface SystemConfigApprovalChallengeRequest {
+  nonce: AtomicAmount;
+  deadline: AtomicAmount;
+}
+
+export interface SystemConfigApprovalChallenge extends Omit<SensitiveApproval, 'signature'> {
+  configVersionId: string;
+  signer: Address;
+  typedData: Eip712TypedData;
+  digest: Bytes32;
 }
 
 export interface SystemConfigProjection {
@@ -1793,6 +1808,7 @@ export interface AdminBusinessDashboard {
     pendingShipment: AtomicAmount; shipped: AtomicAmount; delivered: AtomicAmount;
     fulfilled: AtomicAmount; shipmentRate: BusinessRatio;
   };
+  buyers: { total: AtomicAmount; newToday: AtomicAmount };
   merchants: { total: AtomicAmount; newToday: AtomicAmount; pending: AtomicAmount; approved: AtomicAmount; suspended: AtomicAmount };
   products: { total: AtomicAmount; pendingReview: AtomicAmount; soldOut: AtomicAmount };
   seckill: { createdToday: AtomicAmount; active: AtomicAmount; settling: AtomicAmount };
@@ -2339,6 +2355,8 @@ export type FulfillmentTarget =
 
 export interface FulfillmentExactAmounts {
   listPriceUsdt: AtomicAmount;
+  productUsdtPaymentAmount: AtomicAmount;
+  freightUsdt: AtomicAmount;
   usdtPaymentAmount: AtomicAmount;
   nplQuoteAmount: AtomicAmount;
   nplPaymentAmount: AtomicAmount;
@@ -2450,7 +2468,7 @@ export interface AdminGlobalSearchResponse {
   walletMatch: 'EXACT' | 'FUZZY';
   resources: readonly AdminResourceSummary[];
   truncated: boolean;
-  unavailableFilters: readonly ('UID' | 'PHONE' | 'YELLOW_QUEUE')[];
+  unavailableFilters: readonly ('PHONE' | 'YELLOW_QUEUE')[];
 }
 
 export interface AdminResourceSelection {
@@ -2765,6 +2783,8 @@ export interface PaymentRouterIntent {
   deadline: number;
   nonce: AtomicAmount;
   listPriceUsdt: AtomicAmount;
+  productUsdtPaymentAmount: AtomicAmount;
+  freightUsdt: AtomicAmount;
   usdtPaymentAmount: AtomicAmount;
   nplQuoteAmount: AtomicAmount;
   nplPaymentAmount: AtomicAmount;
@@ -2929,8 +2949,7 @@ export interface AllowedAction {
 export interface BuyerProfile {
   artifactVersion: typeof artifactVersion;
   wallet: Address;
-  accountId: null;
-  accountIdStatus: 'DecisionBlocked';
+  accountId: AtomicAmount;
   nickname: string | null;
   avatarAssetId: Bytes32 | null;
   version: number;

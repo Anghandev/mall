@@ -143,7 +143,7 @@ function paymentProjection() {
   return {
     artifactVersion, orderId: hash('1'), state: 'SUBMITTED', paymentRouterAddress: address('3'), submittedTxHash: hash('2'),
     routerCall: { functionName: 'pay', intent: {}, quoteSignature: '0x12' },
-    intent: { orderId: hash('1'), policyVersion: 7, reservationId: hash('3'), reservationDeadline: 1_800_000_000, quantity: 1, listPriceUsdt: '100', usdtPaymentAmount: '70', nplPaymentAmount: '30', nplBurnAmount: '20', nplRewardAmount: '10', merchantNetReceivableUsdt: '60' },
+    intent: { orderId: hash('1'), policyVersion: 7, reservationId: hash('3'), reservationDeadline: 1_800_000_000, quantity: 1, listPriceUsdt: '100', productUsdtPaymentAmount: '70', freightUsdt: '5', usdtPaymentAmount: '75', nplPaymentAmount: '30', nplBurnAmount: '20', nplRewardAmount: '10', merchantNetReceivableUsdt: '60' },
     finality: { transactionHash: hash('2'), replacementForTxHash: null, blockNumber: 42, blockHash: hash('4'), confirmations: 14, requiredConfirmations: 15, receiptStatus: 1, state: 'MINED', canonicalBlock: true, classification: 'ORDINARY' },
   };
 }

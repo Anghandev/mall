@@ -125,9 +125,10 @@ export class BusinessAnalyticsService {
     const window = businessDay(now);
     return this.#transactions.transaction(async (executor) => {
       await requirePlatformScope(executor, actor);
-      const [payments, states, merchants, products, sessions, requests, takeovers, settlements, coverage, breakers, risk] = await Promise.all([
+      const [payments, states, buyers, merchants, products, sessions, requests, takeovers, settlements, coverage, breakers, risk] = await Promise.all([
         paymentAggregate(executor, window),
         orderStateCounts(executor),
+        buyerUidCounts(executor, window),
         merchantCounts(executor, window),
         productCounts(executor),
         seckillCounts(executor, window, now),
@@ -154,6 +155,7 @@ export class BusinessAnalyticsService {
           fulfilled: stateCounts.get('FULFILLED') ?? '0',
           shipmentRate: ratio(payments.shipped_count, payments.order_count),
         },
+        buyers,
         merchants,
         products,
         seckill: sessions,
@@ -169,13 +171,22 @@ export class BusinessAnalyticsService {
         breakers,
         risk,
         unavailable: [
-          { metric: 'NEW_UID_USERS', reasonCode: 'DecisionBlocked', detail: 'Buyer UID identity is not frozen' },
           { metric: 'LOW_STOCK_PRODUCTS', reasonCode: 'DecisionBlocked', detail: 'Low-stock threshold is not frozen' },
           ...(coverage.unavailable ? [coverage.unavailable] : []),
         ],
       };
     });
   }
+}
+
+async function buyerUidCounts(executor: SqlExecutor, window: ReturnType<typeof businessDay>) {
+  const result = await executor.query<{ total: string; new_today: string }>(
+    `SELECT count(*)::text AS total,
+       count(*) FILTER (WHERE created_at >= $1 AND created_at < $2)::text AS new_today
+     FROM core.buyer_accounts`,
+    [window.start, window.end],
+  );
+  return { total: result.rows[0]?.total ?? '0', newToday: result.rows[0]?.new_today ?? '0' };
 }
 
 function validNow(now: Date) {

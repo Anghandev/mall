@@ -348,7 +348,8 @@ function fulfillmentOrder(overrides: Record<string, unknown> = {}) {
     state: 'PAID',
     finalityStatus: 'FINAL',
     exactAmounts: {
-      listPriceUsdt: '100', usdtPaymentAmount: '70', nplQuoteAmount: '30', nplPaymentAmount: '30', nplBurnAmount: '20',
+      listPriceUsdt: '100', productUsdtPaymentAmount: '70', freightUsdt: '5', usdtPaymentAmount: '75',
+      nplQuoteAmount: '30', nplPaymentAmount: '30', nplBurnAmount: '20',
       nplRewardAmount: '10', merchantBaseReceivableUsdt: '70', merchantConcessionAmount: '5', merchantNetReceivableUsdt: '65', bnmAmount: '100',
     },
     paidAt: '2026-07-14T12:00:00.000Z', paymentFinalizedAt: '2026-07-14T12:03:00.000Z', shippedAt: null,

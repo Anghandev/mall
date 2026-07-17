@@ -5049,6 +5049,73 @@
         }
       }
     },
+    "/v2/admin/system-config/versions/{configVersionId}/approval-challenge": {
+      "post": {
+        "operationId": "createSystemConfigApprovalChallenge",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemConfigApprovalChallengeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemConfigApprovalChallenge"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "configVersionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
     "/v2/admin/system-config/versions/{configVersionId}/publish": {
       "post": {
         "operationId": "publishSystemConfigVersion",
@@ -8790,6 +8857,14 @@
             "in": "query",
             "schema": {
               "$ref": "#/components/schemas/Bytes32"
+            }
+          },
+          {
+            "name": "uid",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
             }
           },
           {
@@ -12696,6 +12771,8 @@
         "additionalProperties": false,
         "required": [
           "listPriceUsdt",
+          "productUsdtPaymentAmount",
+          "freightUsdt",
           "usdtPaymentAmount",
           "nplQuoteAmount",
           "nplPaymentAmount",
@@ -12708,6 +12785,12 @@
         ],
         "properties": {
           "listPriceUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "productUsdtPaymentAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "freightUsdt": {
             "$ref": "#/components/schemas/AtomicAmount"
           },
           "usdtPaymentAmount": {
@@ -13228,7 +13311,6 @@
             "uniqueItems": true,
             "items": {
               "enum": [
-                "UID",
                 "PHONE",
                 "YELLOW_QUEUE"
               ]
@@ -15117,6 +15199,8 @@
           "deadline",
           "nonce",
           "listPriceUsdt",
+          "productUsdtPaymentAmount",
+          "freightUsdt",
           "usdtPaymentAmount",
           "nplQuoteAmount",
           "nplPaymentAmount",
@@ -15200,6 +15284,12 @@
             "$ref": "#/components/schemas/AtomicAmount"
           },
           "listPriceUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "productUsdtPaymentAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "freightUsdt": {
             "$ref": "#/components/schemas/AtomicAmount"
           },
           "usdtPaymentAmount": {
@@ -15998,6 +16088,8 @@
           "deadline",
           "nonce",
           "listPriceUsdt",
+          "productUsdtPaymentAmount",
+          "freightUsdt",
           "usdtPaymentAmount",
           "nplQuoteAmount",
           "nplPaymentAmount",
@@ -16077,6 +16169,12 @@
             "$ref": "#/components/schemas/AtomicAmount"
           },
           "listPriceUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "productUsdtPaymentAmount": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "freightUsdt": {
             "$ref": "#/components/schemas/AtomicAmount"
           },
           "usdtPaymentAmount": {
@@ -18696,10 +18794,18 @@
             "type": "object",
             "additionalProperties": false,
             "required": [
+              "productUsdtPaymentAmount",
+              "freightUsdt",
               "usdtPaymentAmount",
               "nplPaymentAmount"
             ],
             "properties": {
+              "productUsdtPaymentAmount": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "freightUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
               "usdtPaymentAmount": {
                 "$ref": "#/components/schemas/AtomicAmount"
               },
@@ -19066,6 +19172,8 @@
             "additionalProperties": false,
             "required": [
               "listPriceUsdt",
+              "productUsdtPaymentAmount",
+              "freightUsdt",
               "buyerPaidUsdt",
               "merchantBaseReceivableUsdt",
               "merchantConcessionAmount",
@@ -19073,6 +19181,12 @@
             ],
             "properties": {
               "listPriceUsdt": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "productUsdtPaymentAmount": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "freightUsdt": {
                 "$ref": "#/components/schemas/AtomicAmount"
               },
               "buyerPaidUsdt": {
@@ -24149,7 +24263,6 @@
           "configKey": {
             "enum": [
               "BUSINESS",
-              "FREIGHT",
               "RPC",
               "ORACLE",
               "GAS",
@@ -24168,6 +24281,111 @@
           },
           "idempotencyKey": {
             "$ref": "#/components/schemas/IdempotencyKey"
+          }
+        }
+      },
+      "SystemConfigApprovalChallengeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "nonce",
+          "deadline"
+        ],
+        "properties": {
+          "nonce": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "deadline": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          }
+        }
+      },
+      "SystemConfigApprovalChallenge": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "configVersionId",
+          "signer",
+          "action",
+          "resourceType",
+          "resourceId",
+          "policyVersion",
+          "oldValueHash",
+          "newValueHash",
+          "safeAddress",
+          "nonce",
+          "deadline",
+          "typedData",
+          "digest"
+        ],
+        "properties": {
+          "configVersionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "signer": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "action": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resourceType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resourceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "policyVersion": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "oldValueHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "newValueHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "safeAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "nonce": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "deadline": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "typedData": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "domain",
+              "types",
+              "primaryType",
+              "message"
+            ],
+            "properties": {
+              "domain": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "types": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "primaryType": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "digest": {
+            "$ref": "#/components/schemas/Bytes32"
           }
         }
       },
@@ -24988,6 +25206,7 @@
           "timezone",
           "window",
           "orders",
+          "buyers",
           "merchants",
           "products",
           "seckill",
@@ -25045,6 +25264,22 @@
               },
               "shipmentRate": {
                 "$ref": "#/components/schemas/BusinessRatio"
+              }
+            }
+          },
+          "buyers": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "total",
+              "newToday"
+            ],
+            "properties": {
+              "total": {
+                "$ref": "#/components/schemas/AtomicAmount"
+              },
+              "newToday": {
+                "$ref": "#/components/schemas/AtomicAmount"
               }
             }
           },
@@ -25650,7 +25885,6 @@
           "artifactVersion",
           "wallet",
           "accountId",
-          "accountIdStatus",
           "nickname",
           "avatarAssetId",
           "version",
@@ -25664,10 +25898,7 @@
             "$ref": "#/components/schemas/Address"
           },
           "accountId": {
-            "type": "null"
-          },
-          "accountIdStatus": {
-            "const": "DecisionBlocked"
+            "$ref": "#/components/schemas/AtomicAmount"
           },
           "nickname": {
             "anyOf": [
@@ -28744,8 +28975,7 @@
         "enum": [
           "APPROVE",
           "REJECT",
-          "BLACKLIST",
-          "CHANGE_SETTLEMENT_WALLET"
+          "BLACKLIST"
         ]
       },
       "MerchantQualificationAccess": {
@@ -29206,9 +29436,6 @@
           "reasonCode": {
             "type": "string",
             "pattern": "^[A-Z0-9_:-]{2,64}$"
-          },
-          "proposedSettlementWallet": {
-            "$ref": "#/components/schemas/Address"
           },
           "idempotencyKey": {
             "type": "string",

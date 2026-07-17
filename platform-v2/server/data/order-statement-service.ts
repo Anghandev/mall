@@ -80,7 +80,7 @@ export class OrderStatementService {
       const page = result.rows.slice(0, query.limit);
       const orderIds = page.map((row) => row.order_id);
       const balances = await loadBalances(executor, orderIds, {
-        ownerType: 'BUYER', ownerId: wallet, asset: 'BNM_POINTS', purpose: 'BNM_LIABILITY',
+        ownerType: 'BUYER', ownerId: wallet, asset: 'BNM_POINTS', purposes: ['BNM_LIABILITY'],
       });
       return {
         artifactVersion: CORE_ARTIFACT_VERSION,
@@ -109,7 +109,12 @@ export class OrderStatementService {
       const result = await loadOrders(executor, { ...query, merchantId });
       const page = result.rows.slice(0, query.limit);
       const orderIds = page.map((row) => row.order_id);
-      const owner = { ownerType: 'MERCHANT', ownerId: wallet, asset: 'USDT', purpose: 'MERCHANT_RECEIVABLE' } as const;
+      const owner = {
+        ownerType: 'MERCHANT',
+        ownerId: wallet,
+        asset: 'USDT',
+        purposes: ['MERCHANT_RECEIVABLE', 'MERCHANT_FREIGHT_RECEIVABLE'],
+      } as const;
       const [balances, journals, settlements] = await Promise.all([
         loadBalances(executor, orderIds, owner),
         loadJournals(executor, orderIds, owner),
@@ -201,7 +206,7 @@ async function loadOrders(
 async function loadBalances(
   executor: SqlExecutor,
   orderIds: string[],
-  owner: { ownerType: string; ownerId: string; asset: string; purpose: string },
+  owner: { ownerType: string; ownerId: string; asset: string; purposes: readonly string[] },
 ) {
   const grouped = new Map<string, BalanceRow[]>();
   if (orderIds.length === 0) return grouped;
@@ -215,14 +220,14 @@ async function loadBalances(
      JOIN core.ledger_lines line ON line.journal_id = journal.journal_id
      JOIN core.ledger_accounts account ON account.account_id = line.account_id
      WHERE journal.order_id = ANY($1::text[]) AND account.owner_type = $2
-       AND account.asset = $3 AND account.purpose = $4 AND lower(account.owner_id) = $5
+       AND account.asset = $3 AND account.purpose = ANY($4::text[]) AND lower(account.owner_id) = $5
        AND line.balance_state <> 'POSTED'
      GROUP BY journal.order_id,
        CASE WHEN line.balance_state = 'DISPUTED' AND $3 = 'BNM_POINTS'
          THEN 'LOCKED' ELSE line.balance_state END
      HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) > 0
      ORDER BY journal.order_id, balance_state`,
-    [orderIds, owner.ownerType, owner.asset, owner.purpose, owner.ownerId],
+    [orderIds, owner.ownerType, owner.asset, [...owner.purposes], owner.ownerId],
   );
   for (const row of result.rows) append(grouped, row.order_id, row);
   return grouped;
@@ -231,7 +236,7 @@ async function loadBalances(
 async function loadJournals(
   executor: SqlExecutor,
   orderIds: string[],
-  owner: { ownerType: string; ownerId: string; asset: string; purpose: string },
+  owner: { ownerType: string; ownerId: string; asset: string; purposes: readonly string[] },
 ) {
   const grouped = new Map<string, JournalRow[]>();
   if (orderIds.length === 0) return grouped;
@@ -244,13 +249,13 @@ async function loadJournals(
      JOIN core.ledger_lines line ON line.journal_id = journal.journal_id
      JOIN core.ledger_accounts account ON account.account_id = line.account_id
      WHERE journal.order_id = ANY($1::text[]) AND account.owner_type = $2
-       AND account.asset = $3 AND account.purpose = $4 AND lower(account.owner_id) = $5
+       AND account.asset = $3 AND account.purpose = ANY($4::text[]) AND lower(account.owner_id) = $5
        AND line.balance_state <> 'POSTED'
      GROUP BY journal.order_id, journal.journal_id, journal.event_type,
        line.balance_state, journal.source_kind, journal.source_reference_hash, journal.created_at
      HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) <> 0
      ORDER BY journal.order_id, journal.created_at, journal.journal_id, line.balance_state`,
-    [orderIds, owner.ownerType, owner.asset, owner.purpose, owner.ownerId],
+    [orderIds, owner.ownerType, owner.asset, [...owner.purposes], owner.ownerId],
   );
   for (const row of result.rows) append(grouped, row.order_id, row);
   return grouped;
@@ -268,7 +273,8 @@ async function loadSettlements(executor: SqlExecutor, orderIds: string[], wallet
      JOIN core.settlement_requests request ON request.request_id = item.request_id
      JOIN core.ledger_accounts account ON account.account_id = item.account_id
      WHERE item.order_id = ANY($1::text[]) AND request.wallet_address = $2
-       AND request.rail = 'MERCHANT_USDT' AND account.purpose = 'MERCHANT_RECEIVABLE'
+       AND request.rail = 'MERCHANT_USDT'
+       AND account.purpose IN ('MERCHANT_RECEIVABLE','MERCHANT_FREIGHT_RECEIVABLE')
      ORDER BY item.order_id, request.requested_at, request.request_id`,
     [orderIds, wallet],
   );
@@ -287,6 +293,8 @@ function buyerStatement(row: OrderRow, balances: BalanceRow[]) {
     ...baseStatement(row),
     orderKind: row.classification as Exclude<OrderKind, 'SECKILL'>,
     paymentAmounts: {
+      productUsdtPaymentAmount: amounts.productUsdtPaymentAmount,
+      freightUsdt: amounts.freightUsdt,
       usdtPaymentAmount: amounts.usdtPaymentAmount,
       nplPaymentAmount: amounts.nplPaymentAmount,
     },
@@ -307,13 +315,15 @@ function merchantStatement(
 ) {
   const amounts = exactAmounts(row.exact_amounts);
   const current = balances.reduce((sum, balance) => sum + BigInt(balance.amount), 0n);
-  const snapshot = BigInt(amounts.merchantNetReceivableUsdt);
+  const snapshot = BigInt(amounts.merchantNetReceivableUsdt) + BigInt(amounts.freightUsdt);
   if (current > snapshot) throw new CoreError('UnknownState', 'Merchant receivable exceeds the frozen order snapshot', 409);
   return {
     ...baseStatement(row),
     orderKind: row.classification,
     frozenAmounts: {
       listPriceUsdt: amounts.listPriceUsdt,
+      productUsdtPaymentAmount: amounts.productUsdtPaymentAmount,
+      freightUsdt: amounts.freightUsdt,
       buyerPaidUsdt: amounts.usdtPaymentAmount,
       merchantBaseReceivableUsdt: amounts.merchantBaseReceivableUsdt,
       merchantConcessionAmount: amounts.merchantConcessionAmount,
@@ -374,6 +384,8 @@ function baseStatement(row: OrderRow) {
 function exactAmounts(value: Record<string, unknown>) {
   return {
     listPriceUsdt: atomic(value.listPriceUsdt, 'listPriceUsdt'),
+    productUsdtPaymentAmount: atomic(value.productUsdtPaymentAmount, 'productUsdtPaymentAmount'),
+    freightUsdt: atomic(value.freightUsdt, 'freightUsdt'),
     usdtPaymentAmount: atomic(value.usdtPaymentAmount, 'usdtPaymentAmount'),
     nplPaymentAmount: atomic(value.nplPaymentAmount, 'nplPaymentAmount'),
     merchantBaseReceivableUsdt: atomic(value.merchantBaseReceivableUsdt, 'merchantBaseReceivableUsdt'),

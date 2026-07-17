@@ -27,6 +27,7 @@ describe('Admin global operations API consumer', () => {
       productId: 'product-1',
       merchantId: 'merchant-1',
       txHash: hash('a'),
+      uid: '42',
       wallet: address('B'),
       from: '2026-07-15T00:00:00.000Z',
       to: '2026-07-16T00:00:00.000Z',
@@ -35,7 +36,7 @@ describe('Admin global operations API consumer', () => {
     }, 'jwt')).resolves.toMatchObject({ relation: 'AND', truncated: false });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `/v2/admin/global/resources?resourceType=ORDER&resourceType=PRODUCT&relation=AND&productId=product-1&merchantId=merchant-1&txHash=${hash('a')}&wallet=${address('b')}&walletMatch=EXACT&from=2026-07-15T00%3A00%3A00.000Z&to=2026-07-16T00%3A00%3A00.000Z&pendingReview=true&limit=100`,
+      `/v2/admin/global/resources?resourceType=ORDER&resourceType=PRODUCT&relation=AND&productId=product-1&merchantId=merchant-1&txHash=${hash('a')}&uid=42&wallet=${address('b')}&walletMatch=EXACT&from=2026-07-15T00%3A00%3A00.000Z&to=2026-07-16T00%3A00%3A00.000Z&pendingReview=true&limit=100`,
       expect.objectContaining({ headers: { authorization: 'Bearer jwt' } }),
     );
   });
@@ -123,6 +124,9 @@ describe('Admin global operations API consumer', () => {
 
     await expect(searchAdminGlobalResources({ wallet: '0x1234' }, 'jwt')).rejects.toMatchObject({ code: 'InvalidRequest' });
     await expect(searchAdminGlobalResources({ wallet: '12345', walletMatch: 'FUZZY' }, 'jwt')).rejects.toMatchObject({ code: 'InvalidRequest' });
+    await expect(searchAdminGlobalResources({ uid: '0' }, 'jwt')).rejects.toMatchObject({ code: 'InvalidRequest' });
+    await expect(searchAdminGlobalResources({ uid: '9223372036854775808' }, 'jwt')).rejects.toMatchObject({ code: 'InvalidRequest' });
+    await expect(searchAdminGlobalResources({ uid: '42', relation: 'OR' }, 'jwt')).rejects.toMatchObject({ code: 'InvalidRequest' });
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ ...batchTagResult(), changedCount: 0 })));
     await expect(batchAddAdminProductTags({
@@ -160,7 +164,7 @@ function globalSearchResponse(overrides: Partial<AdminGlobalSearchResponse> = {}
       createdAt: '2026-07-15T00:00:00.000Z',
     }],
     truncated: false,
-    unavailableFilters: ['UID', 'PHONE', 'YELLOW_QUEUE'],
+    unavailableFilters: ['PHONE', 'YELLOW_QUEUE'],
     ...overrides,
   };
 }

@@ -123,6 +123,19 @@ export class AccountService {
     this.#clock = input.clock ?? (() => new Date());
   }
 
+  ensureBuyerUid(walletAddress: string) {
+    const wallet = normalizedWallet(walletAddress);
+    return this.#transactions.transaction(async (executor) => {
+      const now = this.#clock();
+      await executor.query(
+        `INSERT INTO core.buyer_accounts (buyer_wallet, created_at)
+         VALUES ($1,$2) ON CONFLICT (buyer_wallet) DO NOTHING`,
+        [wallet, now],
+      );
+      return loadBuyerUid(executor, wallet);
+    });
+  }
+
   getBuyerProfile(actor: FulfillmentActor) {
     const wallet = buyerWallet(actor);
     return this.#transactions.transaction(async (executor) => {
@@ -130,7 +143,7 @@ export class AccountService {
         'SELECT * FROM core.buyer_profiles WHERE buyer_wallet = $1',
         [wallet],
       );
-      return buyerProfileProjection(result.rows[0], wallet, this.#key);
+      return buyerProfileProjection(result.rows[0], wallet, await loadBuyerUid(executor, wallet), this.#key);
     });
   }
 
@@ -148,7 +161,12 @@ export class AccountService {
       const duplicate = await accountCommand(executor, wallet, input.idempotencyKey, requestHash);
       if (duplicate) {
         assertCommand(duplicate, 'BUYER_PROFILE_UPDATE', wallet);
-        return buyerProfileProjection(await loadBuyerProfile(executor, wallet), wallet, this.#key);
+        return buyerProfileProjection(
+          await loadBuyerProfile(executor, wallet),
+          wallet,
+          await loadBuyerUid(executor, wallet),
+          this.#key,
+        );
       }
       const current = await loadBuyerProfile(executor, wallet, true);
       const currentVersion = current ? Number(current.version) : 0;
@@ -205,7 +223,12 @@ export class AccountService {
         payload: { version, nicknameConfigured: input.nickname !== null, avatarConfigured: input.avatarAssetId !== null },
         createdAt: now,
       });
-      return buyerProfileProjection(await loadBuyerProfile(executor, wallet), wallet, this.#key);
+      return buyerProfileProjection(
+        await loadBuyerProfile(executor, wallet),
+        wallet,
+        await loadBuyerUid(executor, wallet),
+        this.#key,
+      );
     });
   }
 
@@ -808,15 +831,14 @@ export class AccountService {
   }
 }
 
-function buyerProfileProjection(row: BuyerProfileRow | undefined, wallet: string, key: Buffer | undefined) {
+function buyerProfileProjection(row: BuyerProfileRow | undefined, wallet: string, uid: string, key: Buffer | undefined) {
   const nickname = row?.encrypted_nickname
     ? requiredPayloadString(decryptJson(row, requireEncryptionKey(key), `buyer-profile:${wallet}`), 'nickname')
     : null;
   return {
     artifactVersion: CORE_ARTIFACT_VERSION,
     wallet,
-    accountId: null,
-    accountIdStatus: 'DecisionBlocked' as const,
+    accountId: uid,
     nickname,
     avatarAssetId: row?.avatar_asset_id ?? null,
     version: row ? Number(row.version) : 0,
@@ -888,6 +910,15 @@ async function loadBuyerProfile(executor: SqlExecutor, wallet: string, lock = fa
     [wallet],
   );
   return result.rows[0];
+}
+
+async function loadBuyerUid(executor: SqlExecutor, wallet: string) {
+  const result = await executor.query<{ uid: string }>(
+    'SELECT uid::text AS uid FROM core.buyer_accounts WHERE buyer_wallet = $1',
+    [wallet],
+  );
+  if (!result.rows[0]) throw new CoreError('UnknownState', 'Buyer UID is unavailable', 409);
+  return result.rows[0].uid;
 }
 
 async function loadBuyerAddress(executor: SqlExecutor, wallet: string, addressId: string, lock = false) {

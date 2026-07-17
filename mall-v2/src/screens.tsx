@@ -64,6 +64,7 @@ import type {
 import {
   DisabledAction,
   EmptyState,
+  RulesDialog,
   RulesDisclosure,
   ScreenHeader,
   StatusNotice,
@@ -75,6 +76,7 @@ export function SeckillScreen() {
   const runtime = useMallRuntime();
   const navigate = useNavigate();
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [rulesDialogMode, setRulesDialogMode] = useState<'read' | 'confirm' | null>(null);
   const session = runtime.seckillSession;
   const mainTarget = session?.phase === 'PREHEAT' ? session.startsAt : session?.mainDeadline;
   const mainCountdown = useAuthoritativeCountdown(session?.serverTime, mainTarget);
@@ -132,7 +134,7 @@ export function SeckillScreen() {
       </div>
 
       <div className="action-row">
-        <RulesDisclosure />
+        <RulesDisclosure onOpen={() => setRulesDialogMode('read')} />
         <button
           className="button button--secondary"
           type="button"
@@ -184,14 +186,21 @@ export function SeckillScreen() {
         className="button button--primary"
         type="button"
         disabled={!canConfigure || runtime.busy}
-        onClick={() => {
-          runtime.selectSeckillSession();
-          navigate('/checkout');
-        }}
+        onClick={() => setRulesDialogMode('confirm')}
       >
         <WalletCards aria-hidden="true" size={18} /> 配置秒杀订单
       </button>
       {!canConfigure && session ? <p className="control-reason">{seckillActionReason(runtime, session, productAvailable)}</p> : null}
+      <RulesDialog
+        open={rulesDialogMode !== null}
+        confirmationRequired={rulesDialogMode === 'confirm'}
+        onClose={() => setRulesDialogMode(null)}
+        onConfirm={() => {
+          if (!runtime.selectSeckillSession()) return;
+          setRulesDialogMode(null);
+          navigate('/checkout');
+        }}
+      />
     </div>
   );
 }
@@ -505,7 +514,15 @@ export function ProductDetailScreen({ productId }: { productId: string }) {
 
 export function StoresScreen() {
   const runtime = useMallRuntime();
-  const [regionCode, setRegionCode] = useState('');
+  const [cityCode, setCityCode] = useState('');
+  const [districtCode, setDistrictCode] = useState('');
+  const cityCodes = useMemo(() => regionCityCodes(runtime.stores), [runtime.stores]);
+  const districtCodes = useMemo(() => regionDistrictCodes(runtime.stores, cityCode), [runtime.stores, cityCode]);
+  const visibleStores = sortStoresByDistance(runtime.stores.filter((store) => (
+    (!cityCode || cityCodeFor(store.regionCode) === cityCode)
+      && (!districtCode || store.regionCode === districtCode)
+  )), runtime.location);
+  const nearestStoreId = runtime.location ? visibleStores[0]?.storeId ?? null : null;
 
   return (
     <div className="screen screen--stores">
@@ -517,33 +534,47 @@ export function StoresScreen() {
 
       <img className="store-hero" src="/brand/store-front.png" alt="阿步 24K 线下门店空间" />
 
-      <form
-        className="store-tools"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void runtime.reloadStores(regionCode || undefined);
-        }}
-      >
-        <label className="field">
-          六位行政区代码
-          <input
-            value={regionCode}
-            onChange={(event) => setRegionCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
-            inputMode="numeric"
-            pattern="[0-9]{6}"
-            placeholder="全部地区"
-          />
-        </label>
+      <div className="store-tools">
+        <fieldset className="location-filter">
+          <legend>行政区筛选</legend>
+          <label>
+            国家
+            <select value="CN" disabled aria-label="国家">
+              <option value="CN">中国</option>
+            </select>
+          </label>
+          <label>
+            城市
+            <select
+              value={cityCode}
+              aria-label="城市"
+              onChange={(event) => {
+                setCityCode(event.target.value);
+                setDistrictCode('');
+              }}
+            >
+              <option value="">全部城市代码</option>
+              {cityCodes.map((code) => <option key={code} value={code}>城市代码 {code}</option>)}
+            </select>
+          </label>
+          <label>
+            区县
+            <select value={districtCode} aria-label="区县" disabled={!cityCode} onChange={(event) => setDistrictCode(event.target.value)}>
+              <option value="">全部区县代码</option>
+              {districtCodes.map((code) => <option key={code} value={code}>区县代码 {code}</option>)}
+            </select>
+          </label>
+        </fieldset>
         <div className="split-actions">
-          <button className="button button--secondary" type="submit" disabled={runtime.busy || Boolean(regionCode && regionCode.length !== 6)}>
-            <RefreshCw aria-hidden="true" size={18} /> 筛选门店
+          <button className="button button--secondary" type="button" onClick={() => void runtime.reloadStores()} disabled={runtime.busy}>
+            <RefreshCw aria-hidden="true" size={18} /> 重新同步门店
           </button>
           <button className="button button--secondary" type="button" onClick={() => void runtime.requestLocation()} disabled={runtime.busy}>
             <LocateFixed aria-hidden="true" size={18} />
             {runtime.locationState === 'loading' ? '定位中' : '获取距离'}
           </button>
         </div>
-      </form>
+      </div>
 
       {runtime.locationState !== 'ready' ? (
         <StatusNotice title="设备定位尚未验证" tone="warning">
@@ -555,18 +586,16 @@ export function StoresScreen() {
       {runtime.storesState === 'error' ? (
         <StatusNotice title="门店同步失败" tone="warning">当前不展示缓存门店或示例地址。</StatusNotice>
       ) : null}
-      {runtime.storesState === 'empty' ? (
-        <EmptyState title="当前地区暂无门店">Core 已返回空门店列表，可清除行政区筛选后重试。</EmptyState>
+      {runtime.storesState === 'empty' || (runtime.storesState === 'ready' && visibleStores.length === 0) ? (
+        <EmptyState title="当前地区暂无门店">当前 Core 门店投影中没有匹配的六位行政区代码。</EmptyState>
       ) : null}
-      {runtime.storesState === 'ready' ? (
+      {runtime.storesState === 'ready' && visibleStores.length > 0 ? (
         <div className="store-list" aria-label="可用自提门店">
-          {runtime.stores.map((store) => (
-            <StoreRow key={store.storeId} store={store} location={runtime.location} />
+          {visibleStores.map((store) => (
+            <StoreRow key={store.storeId} store={store} location={runtime.location} nearest={store.storeId === nearestStoreId} />
           ))}
         </div>
       ) : null}
-
-      <p id="native-navigation-blocked" className="control-reason">原生地图桥接与真实设备导航证据仍为 ExternalBlocked，导航入口保持关闭。</p>
     </div>
   );
 }
@@ -579,7 +608,7 @@ function StoreListSkeleton() {
   );
 }
 
-function StoreRow({ store, location }: { store: MerchantStore; location: BrowserPosition | null }) {
+function StoreRow({ store, location, nearest }: { store: MerchantStore; location: BrowserPosition | null; nearest: boolean }) {
   const distance = location ? distanceKm(location, store) : null;
   return (
     <article className="store-row">
@@ -588,9 +617,12 @@ function StoreRow({ store, location }: { store: MerchantStore; location: Browser
           <h2>{store.name}</h2>
           <p>{store.address}</p>
         </div>
-        <span className={store.status === 'ACTIVE' ? 'status-pill status-pill--success' : 'status-pill status-pill--muted'}>
-          {store.status === 'ACTIVE' ? '营业中' : store.status}
-        </span>
+        <div className="store-row__badges">
+          {nearest ? <span className="status-pill status-pill--locked"><LocateFixed aria-hidden="true" size={13} />最近</span> : null}
+          <span className={store.status === 'ACTIVE' ? 'status-pill status-pill--success' : 'status-pill status-pill--muted'}>
+            {store.status === 'ACTIVE' ? '营业中' : store.status}
+          </span>
+        </div>
       </div>
       <StoreMediaGallery store={store} />
       <dl className="store-row__facts">
@@ -599,15 +631,47 @@ function StoreRow({ store, location }: { store: MerchantStore; location: Browser
         <div><dt>营业时间</dt><dd>{store.businessHours}</dd></div>
         <div><dt>版本</dt><dd>v{store.version}</dd></div>
       </dl>
-      <div className="split-actions">
+      <div className="store-row__actions">
         <a className="button button--secondary" href={`tel:${store.phone}`} aria-label={`拨打 ${store.name} 电话`}>
           <Phone aria-hidden="true" size={18} /> 拨号
         </a>
-        <button className="button button--secondary" type="button" disabled aria-describedby="native-navigation-blocked">
-          <Navigation aria-hidden="true" size={18} /> 导航
-        </button>
+        <StoreNavigation store={store} />
       </div>
     </article>
+  );
+}
+
+function StoreNavigation({ store }: { store: MerchantStore }) {
+  const [popupBlocked, setPopupBlocked] = useState(false);
+  const urls = mapNavigationUrls(store);
+
+  function openNavigation(url: string) {
+    let popup: Window | null = null;
+    try {
+      popup = globalThis.open(url, '_blank');
+      if (popup) popup.opener = null;
+    } catch {
+      popup = null;
+    }
+    setPopupBlocked(!popup);
+  }
+
+  return (
+    <div className="store-navigation">
+      <button className="button button--secondary" type="button" onClick={() => openNavigation(urls.amap)}>
+        <Navigation aria-hidden="true" size={18} /> 高德导航
+      </button>
+      <button className="button button--secondary" type="button" onClick={() => openNavigation(urls.baidu)}>
+        <Navigation aria-hidden="true" size={18} /> 百度导航
+      </button>
+      {popupBlocked ? (
+        <div className="navigation-fallback" role="status">
+          <p>浏览器拦截了地图弹窗，请改用当前页打开。</p>
+          <a href={urls.amap}>当前页打开高德</a>
+          <a href={urls.baidu}>当前页打开百度</a>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -635,6 +699,9 @@ function StoreMediaGallery({ store, compact = false }: { store: MerchantStore; c
 export function AssetsScreen() {
   const runtime = useMallRuntime();
   const [editingProfile, setEditingProfile] = useState(false);
+  const loadedActivityReady = runtime.session && ['ready', 'empty'].includes(runtime.ordersState);
+  const loadedSeckillCount = runtime.orders.filter((order) => order.orderKind === 'SECKILL').length;
+  const loadedShoppingCount = runtime.orders.length - loadedSeckillCount;
   const orderItems = [
     { label: '待付款', icon: Clock3, count: runtime.buyerOverview?.orderCounts.pendingPayment.status ?? null },
     { label: '待发货', icon: PackageOpen, count: runtime.buyerOverview?.orderCounts.pendingShipment.count ?? null },
@@ -654,7 +721,7 @@ export function AssetsScreen() {
         </div>
         <div className="profile-strip__copy">
           <h2 id="profile-title">{runtime.buyerProfile?.nickname ?? (runtime.session ? '未设置昵称' : '未连接钱包')}</h2>
-          <p>买家 UID：{runtime.buyerProfile?.accountIdStatus ?? (runtime.session ? '正在同步' : 'DecisionBlocked')}</p>
+          <p>买家 UID：{runtime.buyerProfile?.accountId ?? (runtime.session ? '正在同步' : '请先登录')}</p>
         </div>
         <div className="profile-strip__actions">
           <button
@@ -724,8 +791,18 @@ export function AssetsScreen() {
           </Link>
         </div>
         <div className="track-preview">
-          <div><Zap aria-hidden="true" size={19} /><span>秒杀参与</span><strong>--</strong></div>
-          <div><ShoppingBag aria-hidden="true" size={19} /><span>消费购物</span><strong>--</strong></div>
+          <div>
+            <Zap aria-hidden="true" size={19} />
+            <span>秒杀参与</span>
+            <strong>{loadedActivityReady ? loadedSeckillCount : activityCountState(runtime.ordersState, Boolean(runtime.session))}</strong>
+            {loadedActivityReady ? <small>已加载</small> : null}
+          </div>
+          <div>
+            <ShoppingBag aria-hidden="true" size={19} />
+            <span>消费购物</span>
+            <strong>{loadedActivityReady ? loadedShoppingCount : activityCountState(runtime.ordersState, Boolean(runtime.session))}</strong>
+            {loadedActivityReady ? <small>已加载</small> : null}
+          </div>
         </div>
       </section>
 
@@ -1075,6 +1152,15 @@ export function OrdersScreen() {
         <div>
           <h2 id="support-title">交付支持</h2>
           <p>支持商品换货、延迟签收申请与仲裁进度查询。关联收益在履约最终确认前保持锁定。</p>
+          {runtime.supportUrl ? (
+            <a
+              className="button button--secondary support-policy__action"
+              href={runtime.supportUrl}
+              {...(runtime.supportUrl.startsWith('https:') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+            >
+              <Headphones aria-hidden="true" size={17} /> 联系客服
+            </a>
+          ) : <p className="field-error">{runtime.supportConfigurationError}</p>}
         </div>
       </section>
     </div>
@@ -1114,6 +1200,7 @@ function OrderRow({
         <div>
           <p className="eyebrow">{orderKindLabel(order.orderKind)} · {order.fulfillmentMode === 'DELIVERY' ? '快递订单' : '到店自提'}</p>
           <h2>{shortHash(order.orderId)}</h2>
+          {order.orderKind === 'SECKILL' ? <span className="status-pill order-kind-badge"><Zap aria-hidden="true" size={13} />秒杀</span> : null}
         </div>
         <div className="order-row__state">
           <span className="status-pill">{orderStateLabel(order.state)}</span>
@@ -1126,7 +1213,9 @@ function OrderRow({
         <div><dt>规格</dt><dd>{order.skuId}</dd></div>
         <div><dt>数量</dt><dd>{order.quantity}</dd></div>
         <div><dt>创建时间</dt><dd>{formatIso(order.createdAt)}</dd></div>
-        <div><dt>USDT 支付</dt><dd>{order.exactAmounts.usdtPaymentAmount}</dd></div>
+        <div><dt>商品 USDT</dt><dd>{order.exactAmounts.productUsdtPaymentAmount}</dd></div>
+        <div><dt>运费 USDT</dt><dd>{order.exactAmounts.freightUsdt}</dd></div>
+        <div><dt>USDT 实付</dt><dd>{order.exactAmounts.usdtPaymentAmount}</dd></div>
         <div><dt>NPL 支付</dt><dd>{order.exactAmounts.nplPaymentAmount}</dd></div>
         <div className="order-row__tx"><dt>付款 TxHash</dt><dd>{order.paymentTxHash ? <code>{order.paymentTxHash}</code> : '尚未提交'}</dd></div>
         <div><dt>付款记录</dt><dd>{order.paidAt ? formatIso(order.paidAt) : '待付款'}</dd></div>
@@ -1436,6 +1525,8 @@ function ShoppingStatementRow({ statement }: { statement: MallRuntimeValue['shop
         <div><dt>规格</dt><dd>{statement.skuId}</dd></div>
         <div><dt>数量</dt><dd>{statement.quantity}</dd></div>
         <div><dt>BNM 状态</dt><dd>{statement.bnm.state === 'LOCKED' ? '已锁定' : '可用'}</dd></div>
+        <div><dt>商品 USDT</dt><dd>{statement.paymentAmounts.productUsdtPaymentAmount} 原子单位</dd></div>
+        <div><dt>运费 USDT</dt><dd>{statement.paymentAmounts.freightUsdt} 原子单位</dd></div>
         <div><dt>USDT 实付</dt><dd>{statement.paymentAmounts.usdtPaymentAmount} 原子单位</dd></div>
         <div><dt>NPL 实付</dt><dd>{statement.paymentAmounts.nplPaymentAmount} 原子单位</dd></div>
         <div><dt>BNM 后台积分</dt><dd>{statement.bnm.amount} 原子单位</dd></div>
@@ -1777,9 +1868,7 @@ export function CheckoutScreen() {
       ) : null}
       {product && runtime.bootstrap && !runtime.bootstrap.writesEnabled ? (
         <StatusNotice title="新支付当前已安全停用" tone="warning">
-          {runtime.bootstrap.blockCode === 'DecisionBlocked'
-            ? '支付政策尚有未决项，不创建新报价。'
-            : '支付部署、Safe、RPC 或运行就绪证据尚不完整，不创建新报价。'}
+          {runtime.bootstrap.blockCode ?? 'ConfigurationRequired'}：Core 当前阻止新支付，不创建新报价。
         </StatusNotice>
       ) : null}
 
@@ -1887,6 +1976,15 @@ export function CheckoutScreen() {
 function CheckoutTargetSelector() {
   const runtime = useMallRuntime();
   const addresses = [...runtime.buyerAddresses].sort((left, right) => Number(right.isDefault) - Number(left.isDefault));
+  const pickupStores = sortStoresByDistance(runtime.stores, runtime.location);
+  const nearestStoreId = runtime.location ? pickupStores[0]?.storeId ?? null : null;
+  const nearestStoreButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (runtime.fulfillmentMode === 'PICKUP' && runtime.locationState === 'ready') {
+      nearestStoreButtonRef.current?.focus();
+    }
+  }, [nearestStoreId, runtime.fulfillmentMode, runtime.locationState]);
 
   return (
     <section className="checkout-target" aria-labelledby="checkout-target-title">
@@ -1933,19 +2031,27 @@ function CheckoutTargetSelector() {
         </div>
       ) : (
         <div className="pickup-options">
+          <div className="pickup-location-tools">
+            <button className="button button--secondary" type="button" onClick={() => void runtime.requestLocation()} disabled={runtime.busy}>
+              <LocateFixed aria-hidden="true" size={18} /> {runtime.locationState === 'loading' ? '定位中' : '定位最近门店'}
+            </button>
+            <p>{runtime.locationState === 'ready' ? '已按真实距离排序，焦点已移至最近门店；选择前不会创建 Core 自提目标。' : '定位后才排序和标记最近门店。'}</p>
+          </div>
           {runtime.storesState === 'loading' ? <StoreListSkeleton /> : null}
           {runtime.storesState === 'empty' ? <p className="section-copy">当前没有可用自提门店。</p> : null}
           {runtime.storesState === 'error' ? <p className="field-error">门店列表不可用，无法创建自提目标。</p> : null}
-          {runtime.stores.map((store) => (
-            <article className="pickup-option" key={store.storeId}>
+          {pickupStores.map((store) => (
+            <article className={store.storeId === nearestStoreId ? 'pickup-option is-nearest' : 'pickup-option'} key={store.storeId}>
               <StoreMediaGallery store={store} compact />
               <div className="pickup-option__selection">
                 <span>
-                  <strong>{store.name}</strong>
+                  <strong>{store.name} {store.storeId === nearestStoreId ? <span className="status-pill status-pill--locked">最近</span> : null}</strong>
                   <small>{store.address}</small>
                   <small>营业时间：{store.businessHours}</small>
+                  {runtime.location ? <small>距离：{distanceKm(runtime.location, store).toFixed(1)} km</small> : null}
                 </span>
                 <button
+                  ref={store.storeId === nearestStoreId ? nearestStoreButtonRef : undefined}
                   type="button"
                   className="button button--secondary"
                   aria-label={`选择 ${store.name}`}
@@ -2038,7 +2144,9 @@ export function ReviewScreen() {
         <section className="payment-intent" aria-labelledby="payment-intent-title">
           <div className="section-heading"><h2 id="payment-intent-title">精确支付意图</h2><WalletCards aria-hidden="true" size={19} /></div>
           <dl>
-            <div><dt>USDT 支付</dt><dd>{intent?.usdtPaymentAmount}</dd></div>
+            <div><dt>商品 USDT</dt><dd>{intent?.productUsdtPaymentAmount}</dd></div>
+            <div><dt>运费 USDT</dt><dd>{intent?.freightUsdt}</dd></div>
+            <div><dt>USDT 实付</dt><dd>{intent?.usdtPaymentAmount}</dd></div>
             <div><dt>NPL 支付</dt><dd>{intent?.nplPaymentAmount}</dd></div>
             <div><dt>NPL Burn</dt><dd>{intent?.nplBurnAmount}</dd></div>
             <div><dt>NPL Reward Safe</dt><dd>{intent?.nplRewardAmount}</dd></div>
@@ -2066,8 +2174,8 @@ export function ReviewScreen() {
         <section className="dual-quote" aria-labelledby="dual-quote-title">
           <div className="section-heading"><h2 id="dual-quote-title">秒杀与日常备用报价</h2><Zap aria-hidden="true" size={19} /></div>
           <div className="dual-quote__grid">
-            <div><strong>区块时间在场内</strong><span>总价 {quote.routerCall.intent.seckillPayment.listPriceUsdt}</span><span>USDT {quote.routerCall.intent.seckillPayment.usdtPaymentAmount}</span><span>NPL {quote.routerCall.intent.seckillPayment.nplPaymentAmount}</span></div>
-            <div><strong>区块时间已过截止</strong><span>总价 {quote.routerCall.intent.fallbackPayment.listPriceUsdt}</span><span>USDT {quote.routerCall.intent.fallbackPayment.usdtPaymentAmount}</span><span>NPL {quote.routerCall.intent.fallbackPayment.nplPaymentAmount}</span></div>
+            <div><strong>区块时间在场内</strong><span>商品 {quote.routerCall.intent.seckillPayment.listPriceUsdt}</span><span>运费 {quote.routerCall.intent.seckillPayment.freightUsdt}</span><span>USDT 实付 {quote.routerCall.intent.seckillPayment.usdtPaymentAmount}</span><span>NPL {quote.routerCall.intent.seckillPayment.nplPaymentAmount}</span></div>
+            <div><strong>区块时间已过截止</strong><span>商品 {quote.routerCall.intent.fallbackPayment.listPriceUsdt}</span><span>运费 {quote.routerCall.intent.fallbackPayment.freightUsdt}</span><span>USDT 实付 {quote.routerCall.intent.fallbackPayment.usdtPaymentAmount}</span><span>NPL {quote.routerCall.intent.fallbackPayment.nplPaymentAmount}</span></div>
           </div>
           <p className="field-help">分类只由 PaymentRouter 的链上区块时间决定；截止后原子使用日常报价和独立库存预留。</p>
           <label className="check-field approval-check">
@@ -2521,6 +2629,51 @@ function unsupportedBuyerActionReason(action: AllowedActionName) {
   if (action === 'OPEN_TAKEOVER') return 'Core 尚未发布 OPEN_TAKEOVER 的订单证据动作';
   if (action === 'VERIFY_PICKUP') return '自提核销证据仅授权门店或平台角色';
   return '当前 Mall 买家证据流程不支持该操作';
+}
+
+function cityCodeFor(regionCode: string) {
+  return `${regionCode.slice(0, 4)}00`;
+}
+
+function regionCityCodes(stores: readonly MerchantStore[]) {
+  return [...new Set(stores.map((store) => cityCodeFor(store.regionCode)))].sort();
+}
+
+function regionDistrictCodes(stores: readonly MerchantStore[], cityCode: string) {
+  if (!cityCode) return [];
+  return [...new Set(stores
+    .filter((store) => cityCodeFor(store.regionCode) === cityCode)
+    .map((store) => store.regionCode))].sort();
+}
+
+function sortStoresByDistance(stores: readonly MerchantStore[], location: BrowserPosition | null) {
+  if (!location) return [...stores];
+  return [...stores].sort((left, right) => distanceKm(location, left) - distanceKm(location, right));
+}
+
+function mapNavigationUrls(store: MerchantStore) {
+  const amap = new URL('https://uri.amap.com/navigation');
+  amap.search = new URLSearchParams({
+    to: `${store.longitude},${store.latitude},${store.name}`,
+    mode: 'walk',
+    policy: '1',
+    src: 'abu24k-mall',
+  }).toString();
+  const baidu = new URL('https://api.map.baidu.com/marker');
+  baidu.search = new URLSearchParams({
+    location: `${store.latitude},${store.longitude}`,
+    title: store.name,
+    content: store.address,
+    output: 'html',
+    src: 'abu24k-mall',
+  }).toString();
+  return { amap: amap.href, baidu: baidu.href };
+}
+
+function activityCountState(state: MallRuntimeValue['ordersState'], authenticated: boolean) {
+  if (!authenticated) return '未登录';
+  if (state === 'loading' || state === 'idle') return '同步中';
+  return '同步失败';
 }
 
 function distanceKm(location: BrowserPosition, store: MerchantStore) {

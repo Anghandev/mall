@@ -9,7 +9,7 @@
         {
           "name": "001_core_schema.sql",
           "path": "schema/business/001_core_schema.sql",
-          "sha256": "477dd5f26e4500f5337a8edfc07692beaea615897c09d440f8a17b895332eadb"
+          "sha256": "6b3ca7b189dc3f63dd9aae7428d99cfbc0452f2439b4add861c1fb9810ce9e75"
         },
         {
           "name": "002_inventory_and_queue.sql",
@@ -74,7 +74,7 @@
         {
           "name": "014_accounts_and_profiles.sql",
           "path": "schema/business/014_accounts_and_profiles.sql",
-          "sha256": "9fd83e1bce904d5acc4e925959797467c42574399bdf06765159980806a39707"
+          "sha256": "0123929316f91d49577a4038f660d05496d5e8c41d77c8b409b598aec67e88a7"
         },
         {
           "name": "015_coverage_breaker_governance.sql",
@@ -139,7 +139,17 @@
         {
           "name": "027_merchant_governance_completion.sql",
           "path": "schema/business/027_merchant_governance_completion.sql",
-          "sha256": "7f2174e1d67ca20caf3b87cdb176096e7d3b2bf6dacf825b640edcbe86ce6208"
+          "sha256": "a022b18f8f55a42dbf3a3e8c668d178d3e8cce6d67bf8f9c910089f93f75a5e8"
+        },
+        {
+          "name": "028_buyer_uid.sql",
+          "path": "schema/business/028_buyer_uid.sql",
+          "sha256": "32d7622a0ca03a46c69531ad4593b542b5bca6428dd75e89d848282423242e35"
+        },
+        {
+          "name": "029_usdt_freight.sql",
+          "path": "schema/business/029_usdt_freight.sql",
+          "sha256": "f1cbddf879720fe72b84e6d812704d2ac9fd82624eac87d574ef1571fc3596e5"
         }
       ]
     },

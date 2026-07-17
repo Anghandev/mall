@@ -54,7 +54,8 @@ test('settlement admin .15 checkpoint has one identity, resolvable exports and e
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 27);
+  assert.equal(schemaManifest.schemas.core.migrations.length, 29);
+  assert.equal(schemaManifest.schemas.core.migrations.at(-1)?.path, 'schema/business/029_usdt_freight.sql');
   assert.equal(schemaManifest.schemas.audit.migrations.length, 4);
   for (const migration of [
     ...schemaManifest.schemas.core.migrations,
@@ -191,6 +192,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'POST /v2/admin/seckill/sessions/{sessionId}/prize-injections',
     'POST /v2/admin/settlement-intents',
     'POST /v2/admin/system-config/versions',
+    'POST /v2/admin/system-config/versions/{configVersionId}/approval-challenge',
     'POST /v2/admin/system-config/versions/{configVersionId}/publish',
     'POST /v2/admin/takeover-cases/{caseId}/assignments',
     'POST /v2/admin/takeover-funding',
@@ -434,6 +436,7 @@ test('generated fulfillment DTOs expose exact amounts, immutable evidence and co
   assert.equal(openapi.components.schemas.MerchantReceivableJournalEvidence.properties.delta.pattern, '^-?[1-9][0-9]*$');
   assert.deepEqual(Object.keys(openapi.components.schemas.FulfillmentExactAmounts.properties).sort(), [
     'bnmAmount',
+    'freightUsdt',
     'listPriceUsdt',
     'merchantBaseReceivableUsdt',
     'merchantConcessionAmount',
@@ -442,6 +445,7 @@ test('generated fulfillment DTOs expose exact amounts, immutable evidence and co
     'nplPaymentAmount',
     'nplQuoteAmount',
     'nplRewardAmount',
+    'productUsdtPaymentAmount',
     'usdtPaymentAmount',
   ]);
   assert.deepEqual(enums.logisticsProviders, ['KUAIDI100', 'CAINIAO']);
@@ -517,7 +521,7 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
     'PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED', 'BLACKLISTED',
   ]);
   assert.deepEqual(enums.merchantReviewActions, [
-    'APPROVE', 'REJECT', 'BLACKLIST', 'CHANGE_SETTLEMENT_WALLET',
+    'APPROVE', 'REJECT', 'BLACKLIST',
   ]);
   assert.deepEqual(enums.merchantQualificationAccess, ['FULL', 'REDACTED', 'UNAVAILABLE']);
   assert.deepEqual(enums.logisticsCarrierCodes, ['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS']);
@@ -587,11 +591,7 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
     ),
     ['AVAILABLE', 'DecisionBlocked'],
   );
-  assert.ok(openapi.components.schemas.MerchantReviewChallengeRequest.properties.proposedSettlementWallet);
-  assert.equal(
-    openapi.components.schemas.MerchantReviewChallengeRequest.required.includes('proposedSettlementWallet'),
-    false,
-  );
+  assert.equal('proposedSettlementWallet' in openapi.components.schemas.MerchantReviewChallengeRequest.properties, false);
   assert.deepEqual(
     Object.keys(openapi.components.schemas.MerchantOrderAnalytics.properties.cumulative.properties),
     ['listPriceUsdt', 'buyerPaidUsdt', 'merchantBaseReceivableUsdt', 'merchantNetReceivableUsdt'],
@@ -973,6 +973,8 @@ function signingVectorRouterIntent() {
     deadline: 1_800_000_300,
     nonce: '7',
     listPriceUsdt: '100000000000000000000',
+    productUsdtPaymentAmount: '70000000000000000000',
+    freightUsdt: '0',
     usdtPaymentAmount: '70000000000000000000',
     nplQuoteAmount: '1000000000000000000000',
     nplPaymentAmount: '300000000000000000000',

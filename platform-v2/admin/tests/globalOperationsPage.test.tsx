@@ -19,6 +19,24 @@ afterEach(() => {
 });
 
 describe('Admin global operations page', () => {
+  it('submits an exact UID filter and locks relation and wallet matching to exact AND', async () => {
+    const wallet = address('7');
+    window.ethereum = walletProvider(wallet);
+    const fetchMock = globalOperationsFetch(wallet, 'ADMIN', globalSearchResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<MemoryRouter initialEntries={['/global-operations']}><App /></MemoryRouter>);
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    await user.type(await screen.findByLabelText('用户 UID'), '42');
+    expect(screen.getByRole('button', { name: 'OR' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '模糊' }).hasAttribute('disabled')).toBe(true);
+    await user.click(screen.getByRole('button', { name: '查询' }));
+
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('uid=42')
+      && String(input).includes('relation=AND') && String(input).includes('walletMatch=EXACT'))).toBe(true);
+  });
+
   it('searches, selects, downloads CSV and writes tags only with row authorization', async () => {
     const wallet = address('1');
     window.ethereum = walletProvider(wallet);
@@ -230,7 +248,7 @@ function globalSearchResponse(overrides: Partial<AdminGlobalSearchResponse> = {}
     walletMatch: 'EXACT',
     resources: [productResource()],
     truncated: false,
-    unavailableFilters: ['UID', 'PHONE', 'YELLOW_QUEUE'],
+    unavailableFilters: ['PHONE', 'YELLOW_QUEUE'],
     ...overrides,
   };
 }

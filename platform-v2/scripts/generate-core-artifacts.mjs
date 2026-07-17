@@ -131,6 +131,8 @@ const schemaSources = [
       '025_takeover_assignments.sql',
       '026_admin_product_lifecycle_batches.sql',
       '027_merchant_governance_completion.sql',
+      '028_buyer_uid.sql',
+      '029_usdt_freight.sql',
     ],
   },
   {
@@ -1797,7 +1799,6 @@ function merchantLifecycleOpenApiSchemas() {
     MerchantReviewChallengeRequest: object({
       action: ref('MerchantReviewAction'),
       reasonCode: { type: 'string', pattern: '^[A-Z0-9_:-]{2,64}$' },
-      proposedSettlementWallet: ref('Address'),
       idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
     }, ['action', 'reasonCode', 'idempotencyKey']),
     MerchantReviewPublishRequest: object({
@@ -1941,6 +1942,7 @@ function adminGlobalOperationsOpenApiPaths(errorResponse) {
           { name: 'productId', in: 'query', schema: { type: 'string', minLength: 1, maxLength: 256 } },
           { name: 'merchantId', in: 'query', schema: { type: 'string', minLength: 1, maxLength: 256 } },
           { name: 'txHash', in: 'query', schema: { $ref: '#/components/schemas/Bytes32' } },
+          { name: 'uid', in: 'query', schema: { type: 'string', pattern: '^[1-9][0-9]{0,18}$' } },
           { name: 'relation', in: 'query', schema: { enum: ['AND', 'OR'], default: 'AND' } },
           {
             name: 'wallet', in: 'query',
@@ -2385,8 +2387,7 @@ function accountOpenApiSchemas() {
     BuyerProfile: object({
       artifactVersion: { const: artifactVersion },
       wallet: ref('Address'),
-      accountId: { type: 'null' },
-      accountIdStatus: { const: 'DecisionBlocked' },
+      accountId: ref('AtomicAmount'),
       nickname: nullable(string),
       avatarAssetId: nullable(ref('Bytes32')),
       version,
@@ -2960,6 +2961,9 @@ function settlementAdminOpenApiPaths(errorResponse) {
       get: operation('listSystemConfigVersions', { type: 'array', items: { $ref: '#/components/schemas/SystemConfigProjection' } }),
       post: operation('createSystemConfigVersion', { $ref: '#/components/schemas/SystemConfigProjection' }, 201, 'SystemConfigCreateRequest'),
     },
+    '/v2/admin/system-config/versions/{configVersionId}/approval-challenge': {
+      post: resourceOperation('createSystemConfigApprovalChallenge', 'configVersionId', { $ref: '#/components/schemas/SystemConfigApprovalChallenge' }, 200, 'SystemConfigApprovalChallengeRequest'),
+    },
     '/v2/admin/system-config/versions/{configVersionId}/publish': {
       post: resourceOperation('publishSystemConfigVersion', 'configVersionId', { $ref: '#/components/schemas/SystemConfigProjection' }, 200, 'SystemConfigPublishRequest'),
     },
@@ -3285,7 +3289,12 @@ function settlementAdminOpenApiSchemas() {
       fulfilledAt: nullableTimestamp,
       createdAt: timestamp,
       orderKind: { enum: ['ORDINARY', 'FALLBACK_RETAIL'] },
-      paymentAmounts: object({ usdtPaymentAmount: atomic, nplPaymentAmount: atomic }),
+      paymentAmounts: object({
+        productUsdtPaymentAmount: atomic,
+        freightUsdt: atomic,
+        usdtPaymentAmount: atomic,
+        nplPaymentAmount: atomic,
+      }),
       bnm: object({
         amount: atomic,
         state: { enum: ['LOCKED', 'AVAILABLE'] },
@@ -3338,6 +3347,8 @@ function settlementAdminOpenApiSchemas() {
       orderKind: { enum: ['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] },
       frozenAmounts: object({
         listPriceUsdt: atomic,
+        productUsdtPaymentAmount: atomic,
+        freightUsdt: atomic,
         buyerPaidUsdt: atomic,
         merchantBaseReceivableUsdt: atomic,
         merchantConcessionAmount: atomic,
@@ -3973,11 +3984,23 @@ function settlementAdminOpenApiSchemas() {
       retriedDeliveries: { type: 'integer', minimum: 1 },
     }),
     SystemConfigCreateRequest: object({
-      configKey: { enum: [...systemConfigKeys] },
+      configKey: { enum: systemConfigKeys.filter((key) => key !== 'FREIGHT') },
       payload: jsonObject,
       effectiveFrom: timestamp,
       idempotencyKey,
     }),
+    SystemConfigApprovalChallengeRequest: object({ nonce: atomic, deadline: atomic }),
+    SystemConfigApprovalChallenge: object({
+      configVersionId: string,
+      signer: address,
+      ...Object.fromEntries(Object.entries(sensitiveApprovalProperties).filter(([key]) => key !== 'signature')),
+      typedData: eip712TypedData,
+      digest: hash,
+    }, [
+      'configVersionId', 'signer', 'action', 'resourceType', 'resourceId',
+      'policyVersion', 'oldValueHash', 'newValueHash', 'safeAddress', 'nonce',
+      'deadline', 'typedData', 'digest',
+    ]),
     SystemConfigPublishRequest: object({ approval: ref('SensitiveApproval') }),
     SystemConfigProjection: object(configProjectionProperties),
     AuditEntry: object({
@@ -4077,6 +4100,7 @@ function settlementAdminOpenApiSchemas() {
         pendingShipment: atomic, shipped: atomic, delivered: atomic, fulfilled: atomic,
         shipmentRate: ref('BusinessRatio'),
       }),
+      buyers: object({ total: atomic, newToday: atomic }),
       merchants: object({ total: atomic, newToday: atomic, pending: atomic, approved: atomic, suspended: atomic }),
       products: object({ total: atomic, pendingReview: atomic, soldOut: atomic }),
       seckill: object({ createdToday: atomic, active: atomic, settling: atomic }),
@@ -4930,12 +4954,14 @@ function fulfillmentOpenApiSchemas() {
       type: 'object',
       additionalProperties: false,
       required: [
-        'listPriceUsdt', 'usdtPaymentAmount', 'nplQuoteAmount', 'nplPaymentAmount',
+        'listPriceUsdt', 'productUsdtPaymentAmount', 'freightUsdt', 'usdtPaymentAmount',
+        'nplQuoteAmount', 'nplPaymentAmount',
         'nplBurnAmount', 'nplRewardAmount', 'merchantBaseReceivableUsdt',
         'merchantConcessionAmount', 'merchantNetReceivableUsdt', 'bnmAmount',
       ],
       properties: Object.fromEntries([
-        'listPriceUsdt', 'usdtPaymentAmount', 'nplQuoteAmount', 'nplPaymentAmount',
+        'listPriceUsdt', 'productUsdtPaymentAmount', 'freightUsdt', 'usdtPaymentAmount',
+        'nplQuoteAmount', 'nplPaymentAmount',
         'nplBurnAmount', 'nplRewardAmount', 'merchantBaseReceivableUsdt',
         'merchantConcessionAmount', 'merchantNetReceivableUsdt', 'bnmAmount',
       ].map((name) => [name, { $ref: '#/components/schemas/AtomicAmount' }])),
@@ -5057,7 +5083,7 @@ function fulfillmentOpenApiSchemas() {
         truncated: { type: 'boolean' },
         unavailableFilters: {
           type: 'array', uniqueItems: true,
-          items: { enum: ['UID', 'PHONE', 'YELLOW_QUEUE'] },
+          items: { enum: ['PHONE', 'YELLOW_QUEUE'] },
         },
       },
     },
@@ -5656,7 +5682,8 @@ function paymentOpenApiSchemas() {
         'orderId', 'policyVersion', 'oracleVersion', 'buyer', 'merchant', 'productId', 'skuId', 'quantity',
         'fulfillmentMode', 'fulfillmentTargetHash', 'regionCodeHash', 'productPolicyHash', 'reservationId',
         'reservationHash', 'reservationDeadline', 'issuedAt', 'deadline', 'nonce', 'listPriceUsdt',
-        'usdtPaymentAmount', 'nplQuoteAmount', 'nplPaymentAmount', 'nplBurnAmount', 'nplRewardAmount',
+        'productUsdtPaymentAmount', 'freightUsdt', 'usdtPaymentAmount', 'nplQuoteAmount',
+        'nplPaymentAmount', 'nplBurnAmount', 'nplRewardAmount',
         'merchantBaseReceivableUsdt', 'merchantConcessionBps', 'merchantConcessionAmount',
         'merchantNetReceivableUsdt', 'concessionAllocationHash', 'bnmAmount', 'seckill', 'sessionId',
         'beneficiaries', 'merchantConcessionAllocations', 'otherUsdtAllocations', 'nplRewardAllocations',
@@ -5682,6 +5709,8 @@ function paymentOpenApiSchemas() {
         deadline: { type: 'integer', minimum: 1 },
         nonce: { $ref: '#/components/schemas/AtomicAmount' },
         listPriceUsdt: { $ref: '#/components/schemas/AtomicAmount' },
+        productUsdtPaymentAmount: { $ref: '#/components/schemas/AtomicAmount' },
+        freightUsdt: { $ref: '#/components/schemas/AtomicAmount' },
         usdtPaymentAmount: { $ref: '#/components/schemas/AtomicAmount' },
         nplQuoteAmount: { $ref: '#/components/schemas/AtomicAmount' },
         nplPaymentAmount: { $ref: '#/components/schemas/AtomicAmount' },
@@ -6173,7 +6202,6 @@ export interface MerchantApplicationUpdateRequest {
 export interface MerchantReviewChallengeRequest {
   action: MerchantReviewAction;
   reasonCode: string;
-  proposedSettlementWallet?: Address;
   idempotencyKey: string;
 }
 
@@ -6802,6 +6830,8 @@ export interface BuyerShoppingStatement {
   createdAt: string;
   orderKind: Exclude<OrderKind, 'SECKILL'>;
   paymentAmounts: {
+    productUsdtPaymentAmount: AtomicAmount;
+    freightUsdt: AtomicAmount;
     usdtPaymentAmount: AtomicAmount;
     nplPaymentAmount: AtomicAmount;
   };
@@ -6866,6 +6896,8 @@ export interface MerchantReceivableStatement {
   orderKind: OrderKind;
   frozenAmounts: {
     listPriceUsdt: AtomicAmount;
+    productUsdtPaymentAmount: AtomicAmount;
+    freightUsdt: AtomicAmount;
     buyerPaidUsdt: AtomicAmount;
     merchantBaseReceivableUsdt: AtomicAmount;
     merchantConcessionAmount: AtomicAmount;
@@ -7607,10 +7639,22 @@ export interface NotificationCampaignRetryResult {
 }
 
 export interface SystemConfigCreateRequest {
-  configKey: SystemConfigKey;
+  configKey: Exclude<SystemConfigKey, 'FREIGHT'>;
   payload: JsonObject;
   effectiveFrom: string;
   idempotencyKey: string;
+}
+
+export interface SystemConfigApprovalChallengeRequest {
+  nonce: AtomicAmount;
+  deadline: AtomicAmount;
+}
+
+export interface SystemConfigApprovalChallenge extends Omit<SensitiveApproval, 'signature'> {
+  configVersionId: string;
+  signer: Address;
+  typedData: Eip712TypedData;
+  digest: Bytes32;
 }
 
 export interface SystemConfigProjection {
@@ -7733,6 +7777,7 @@ export interface AdminBusinessDashboard {
     pendingShipment: AtomicAmount; shipped: AtomicAmount; delivered: AtomicAmount;
     fulfilled: AtomicAmount; shipmentRate: BusinessRatio;
   };
+  buyers: { total: AtomicAmount; newToday: AtomicAmount };
   merchants: { total: AtomicAmount; newToday: AtomicAmount; pending: AtomicAmount; approved: AtomicAmount; suspended: AtomicAmount };
   products: { total: AtomicAmount; pendingReview: AtomicAmount; soldOut: AtomicAmount };
   seckill: { createdToday: AtomicAmount; active: AtomicAmount; settling: AtomicAmount };
@@ -8279,6 +8324,8 @@ export type FulfillmentTarget =
 
 export interface FulfillmentExactAmounts {
   listPriceUsdt: AtomicAmount;
+  productUsdtPaymentAmount: AtomicAmount;
+  freightUsdt: AtomicAmount;
   usdtPaymentAmount: AtomicAmount;
   nplQuoteAmount: AtomicAmount;
   nplPaymentAmount: AtomicAmount;
@@ -8390,7 +8437,7 @@ export interface AdminGlobalSearchResponse {
   walletMatch: 'EXACT' | 'FUZZY';
   resources: readonly AdminResourceSummary[];
   truncated: boolean;
-  unavailableFilters: readonly ('UID' | 'PHONE' | 'YELLOW_QUEUE')[];
+  unavailableFilters: readonly ('PHONE' | 'YELLOW_QUEUE')[];
 }
 
 export interface AdminResourceSelection {
@@ -8705,6 +8752,8 @@ export interface PaymentRouterIntent {
   deadline: number;
   nonce: AtomicAmount;
   listPriceUsdt: AtomicAmount;
+  productUsdtPaymentAmount: AtomicAmount;
+  freightUsdt: AtomicAmount;
   usdtPaymentAmount: AtomicAmount;
   nplQuoteAmount: AtomicAmount;
   nplPaymentAmount: AtomicAmount;
@@ -8869,8 +8918,7 @@ export interface AllowedAction {
 export interface BuyerProfile {
   artifactVersion: typeof artifactVersion;
   wallet: Address;
-  accountId: null;
-  accountIdStatus: 'DecisionBlocked';
+  accountId: AtomicAmount;
   nickname: string | null;
   avatarAssetId: Bytes32 | null;
   version: number;

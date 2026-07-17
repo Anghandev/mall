@@ -77,30 +77,15 @@ describe('merchant lifecycle admin API', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({ signature: '0x1234' });
   });
 
-  it('binds an approved merchant wallet change through the existing challenge and Safe publish', async () => {
-    const nextWallet = address('9');
+  it('rejects settlement wallet changes before any challenge or Safe publish request', async () => {
     const current = merchantDetail({ merchant: { ...merchantDetail().merchant, status: 'APPROVED' } });
-    const challenge = walletChangeChallenge();
-    const published = merchantDetail({
-      merchant: { ...current.merchant, settlementWallet: nextWallet, status: 'APPROVED', reviewedAt: '2026-07-16T01:00:00.000Z', reviewedBy: address('1') },
-      reviews: [{ actionId: challenge.actionId, action: challenge.action, fromStatus: 'APPROVED', toStatus: 'APPROVED', applicationVersion: 1, reasonCode: challenge.reasonCode, state: 'PUBLISHED', secondarySigner: challenge.secondarySigner, actionDigest: challenge.digest, safeTxHash: hash('f'), createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T01:00:00.000Z' }],
-    });
-    const fetchMock = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
-      const url = String(input);
-      if (url.endsWith('/review-challenges')) return jsonResponse(challenge, 201);
-      if (url.endsWith(`/review-actions/${challenge.actionId}/publish`)) return jsonResponse(published);
-      return jsonResponse({}, 404);
-    });
+    const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    const bound = await createMerchantReviewChallenge(current, {
-      action: 'CHANGE_SETTLEMENT_WALLET', reasonCode: 'WALLET_ROTATION', proposedSettlementWallet: nextWallet, idempotencyKey: 'wallet-change-1',
-    }, address('1'), 'jwt');
-    await expect(publishMerchantReview(bound, '0x1234', 'jwt', nextWallet)).resolves.toMatchObject({ merchant: { settlementWallet: nextWallet, status: 'APPROVED' } });
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
-      action: 'CHANGE_SETTLEMENT_WALLET', reasonCode: 'WALLET_ROTATION', proposedSettlementWallet: nextWallet, idempotencyKey: 'wallet-change-1',
-    });
-    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({ signature: '0x1234' });
+    await expect(createMerchantReviewChallenge(current, {
+      action: 'CHANGE_SETTLEMENT_WALLET' as never, reasonCode: 'WALLET_ROTATION', idempotencyKey: 'wallet-change-1',
+    }, address('1'), 'jwt')).rejects.toMatchObject({ status: 400 });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('accepts a DecisionBlocked level policy and zero-denominator unavailable 48H rate without inventing zero percent', async () => {
@@ -188,18 +173,6 @@ function reviewChallenge() {
     typedData: { domain: { name: 'Abu24KV2Core' }, types: { SensitiveAction: [] }, primaryType: 'SensitiveAction', message: { action: 'APPROVE_MERCHANT', resourceType: 'MERCHANT', resourceId: 'merchant-1', policyVersion: '2', oldValueHash: hash('2'), newValueHash: hash('3'), safeAddress: address('4'), nonce: '7', deadline: String(Math.floor(Date.parse(expiresAt) / 1_000)) } },
     digest: hash('6'),
   } as const;
-}
-
-function walletChangeChallenge() {
-  const challenge = reviewChallenge();
-  return {
-    ...challenge,
-    action: 'CHANGE_SETTLEMENT_WALLET' as const,
-    fromStatus: 'APPROVED' as const,
-    toStatus: 'APPROVED' as const,
-    reasonCode: 'WALLET_ROTATION',
-    typedData: { ...challenge.typedData, message: { ...challenge.typedData.message, action: 'CHANGE_SETTLEMENT_WALLET_MERCHANT' } },
-  };
 }
 
 function amounts(listPriceUsdt: string, buyerPaidUsdt: string, merchantBaseReceivableUsdt: string, merchantNetReceivableUsdt: string) { return { listPriceUsdt, buyerPaidUsdt, merchantBaseReceivableUsdt, merchantNetReceivableUsdt }; }

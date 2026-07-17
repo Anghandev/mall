@@ -63,7 +63,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('settlement-admin.14 Core HTTP consumer', () => {
+describe('settlement-admin.15 Core HTTP consumer', () => {
   it('does not expose Admin global operations, notifications or clearing commands', () => {
     const api = createCoreApi('https://core.example.test');
     const adminOnlyOperationIds = [
@@ -537,7 +537,7 @@ describe('settlement-admin.14 Core HTTP consumer', () => {
         body: JSON.stringify(input),
         headers: expect.objectContaining({
           authorization: 'Bearer merchant-session',
-          'x-abu-artifact-version': '2.0.0-settlement-admin.14',
+          'x-abu-artifact-version': '2.0.0-settlement-admin.15',
         }),
       }),
     );
@@ -637,7 +637,7 @@ describe('settlement-admin.14 Core HTTP consumer', () => {
       'https://core.example.test/v2/catalog/products',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.14' }),
+        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.15' }),
       }),
     );
   });
@@ -1059,12 +1059,14 @@ describe('settlement-admin.14 Core HTTP consumer', () => {
     expect(firstPage.statements[0]).toMatchObject({
       orderKind: 'SECKILL',
       frozenAmounts: {
+        productUsdtPaymentAmount: '8400',
+        freightUsdt: '500',
         merchantBaseReceivableUsdt: '10000',
         merchantConcessionAmount: '1000',
         merchantNetReceivableUsdt: '9000',
       },
       currentReceivableUsdt: '0',
-      removedFromReceivableUsdt: '9000',
+      removedFromReceivableUsdt: '9500',
     });
     expect(firstPage.statements[0]?.journalEvidence[0]?.journalId).toBe('journal:a:lifecycle');
     expect(firstPage.statements[0]?.settlementRefs[0]?.finalSafeTxHash).toBe(`0x${'b'.repeat(64)}`);

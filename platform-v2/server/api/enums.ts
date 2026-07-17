@@ -53,7 +53,7 @@ export type MerchantLevel = (typeof merchantLevels)[number];
 export const merchantLifecycleStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED', 'BLACKLISTED'] as const;
 export type MerchantLifecycleStatus = (typeof merchantLifecycleStatuses)[number];
 
-export const merchantReviewActions = ['APPROVE', 'REJECT', 'BLACKLIST', 'CHANGE_SETTLEMENT_WALLET'] as const;
+export const merchantReviewActions = ['APPROVE', 'REJECT', 'BLACKLIST'] as const;
 export type MerchantReviewAction = (typeof merchantReviewActions)[number];
 
 export const merchantQualificationAccess = ['FULL', 'REDACTED', 'UNAVAILABLE'] as const;

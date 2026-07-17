@@ -126,6 +126,8 @@ test('Indexer decodes the frozen ABI, is idempotent and fails closed on reorg', 
     1,
     100,
     70,
+    0,
+    70,
     300,
     200,
     100,
@@ -155,6 +157,8 @@ test('Indexer decodes the frozen ABI, is idempotent and fails closed on reorg', 
   assert.equal(store.events[0]?.contractAddress, CONTRACT);
   assert.equal(store.events[0]?.eventHash, encoded.topics[0]);
   assert.equal(store.events[0]?.values.classification, '1');
+  assert.equal(store.events[0]?.values.productUsdtPaid, '70');
+  assert.equal(store.events[0]?.values.freightUsdt, '0');
   assert.equal(store.events[0]?.values.usdtPaid, '70');
   assert.equal(store.events[0]?.values.nplPaid, '300');
   assert.deepEqual(await indexer.ingest(block, []), { status: 'IDEMPOTENT', events: 0 });
@@ -202,7 +206,7 @@ test('polling payment worker persists empty blocks, recovers a common-ancestor r
   const paymentEvent = contractInterface.getEvent('PaymentCompleted');
   assert.ok(paymentEvent);
   const encoded = contractInterface.encodeEventLog(paymentEvent, [
-    ORDER_ID, BUYER, MERCHANT, 0, 1, 100, 70, 300, 200, 100, 100, HASH_2, HASH_3,
+    ORDER_ID, BUYER, MERCHANT, 0, 1, 100, 70, 0, 70, 300, 200, 100, 100, HASH_2, HASH_3,
   ]);
   const block99: ChainBlock = { number: 99, hash: blockHash(99), parentHash: blockHash(98), timestamp: 1_800_000_000 };
   const block100: ChainBlock = { number: 100, hash: blockHash(100), parentHash: block99.hash, timestamp: 1_800_000_001 };

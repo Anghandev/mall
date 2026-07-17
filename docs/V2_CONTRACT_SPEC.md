@@ -33,8 +33,8 @@ The signed `PaymentIntent` binds:
 - buyer, merchant, product, SKU, quantity and fulfillment mode;
 - fulfillment target, region and product-policy hashes;
 - reservation ID/hash/deadline, issue time, quote deadline and buyer nonce;
-- exact list price, USDT and NPL payment, Burn, Reward Safe, merchant concession
-  and BNM-points amounts;
+- exact list price, product USDT leg, freight USDT, total USDT debit, NPL
+  payment, Burn, Reward Safe, merchant concession and BNM-points amounts;
 - concession allocation hash, session identity and six beneficiary addresses.
   The governed allocation-set hash also binds the explicit seckill prize-pool
   account and `SECKILL_PRIZE_LIABILITY_V1` purpose domain; no consumer infers
@@ -49,7 +49,9 @@ Oracle and beneficiary validation are checked against the signed snapshots.
 For the frozen launch policy:
 
 ```text
-USDT buyer debit = 70% of USDT list price -> USDT Custody Safe
+product USDT leg = 70% of USDT list price
+delivery freight = product defaultFreightUsdt; pickup freight = 0
+USDT buyer debit = product USDT leg + freight -> USDT Custody Safe
 NPL buyer debit  = 30% of Oracle-equivalent list price
 NPL Burn         = 20% of Oracle-equivalent list price -> dead address
 NPL rewards      = 10% of Oracle-equivalent list price -> NPL Reward Safe
@@ -61,8 +63,9 @@ reverts the whole call. A successful call leaves the Router's prior USDT and NPL
 balances unchanged. There is no arbitrary withdrawal, business refund or
 on-chain Claim function.
 
-`PaymentCompleted` records classification, exact paid/Burn/reward amounts, BNM
-Locked points, reservation and immutable snapshot hash.
+`PaymentCompleted` records classification, product USDT, freight USDT, total
+USDT paid, exact NPL paid/Burn/reward amounts, BNM Locked points, reservation
+and immutable snapshot hash.
 `MerchantReceivableSnapshotted` records merchant base receivable, concession,
 net receivable and allocation hash. These events are evidence for the canonical
 off-chain double-entry ledger; they are not settlement authorization.
