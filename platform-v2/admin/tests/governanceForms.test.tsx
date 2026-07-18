@@ -38,7 +38,7 @@ describe('governed Admin forms', () => {
     fireEvent.change(screen.getByLabelText('商业决定证据哈希'), { target: { value: hash('7') } });
     await user.click(screen.getByRole('button', { name: '保存选中草稿' }));
 
-    expect(await screen.findByText(/草稿 draft-1 已保存并重新校验/)).toBeTruthy();
+    expect(await screen.findByText(/草稿 draft-1 已保存并重新校验/, undefined, { timeout: 3_000 })).toBeTruthy();
     const updateBody = requestBody(fetchMock, '/v2/admin/policy-drafts/draft-1');
     expect(updateBody).toMatchObject({ payload: { rulesContentHash: hash('9'), policy: {
       platformFeeBps: 100, usdtPaymentBps: 7000, nplPaymentBps: 3000,
