@@ -139,7 +139,7 @@ export async function authorizeCoverageBreakerResume(
       || body.snapshotId.toLowerCase() !== challenge.snapshotId.toLowerCase()
       || body.evidenceHash.toLowerCase() !== challenge.evidenceHash.toLowerCase()
       || body.policyVersion !== challenge.policyVersion
-      || body.governanceSafeAddress.toLowerCase() !== challenge.safeAddress.toLowerCase()
+      || body.governanceWalletAddress.toLowerCase() !== challenge.executorWallet.toLowerCase()
       || body.routerAddress.toLowerCase() !== challenge.routerAddress.toLowerCase()
       || body.actorWallet?.toLowerCase() !== actorWallet.toLowerCase()
       || body.secondarySigner?.toLowerCase() !== challenge.signer.toLowerCase()
@@ -237,9 +237,9 @@ export async function submitPolicySecondarySignature(draftId: string, input: Pol
   return body;
 }
 
-export async function proposePolicyToSafe(draftId: string, token: string): Promise<PolicyDraftProjection> {
-  const body = await authenticatedWrite(`${resourcePath('/v2/admin/policy-drafts/', draftId)}/safe-proposal`, 'POST', {}, token);
-  if (!isPolicyDraft(body)) throw invalid('Policy Safe proposal does not match the coordinated generated type');
+export async function executePolicyDraft(draftId: string, token: string): Promise<PolicyDraftProjection> {
+  const body = await authenticatedWrite(`${resourcePath('/v2/admin/policy-drafts/', draftId)}/execute`, 'POST', {}, token);
+  if (!isPolicyDraft(body)) throw invalid('Policy execution does not match the coordinated generated type');
   return body;
 }
 
@@ -421,7 +421,8 @@ function isSettlementList(value: unknown): value is SettlementListProjection {
       && settlementRequestStates.includes(item.state as never)
       && amountPattern.test(String(item.amount))
       && addressPattern.test(String(item.recipient_address))
-      && (item.final_safe_tx_hash === null || bytes32Pattern.test(String(item.final_safe_tx_hash))));
+      && Array.isArray(item.final_execution_tx_hashes)
+      && item.final_execution_tx_hashes.every((hash) => bytes32Pattern.test(String(hash))));
 }
 
 function isMerchantFinance(value: unknown): value is MerchantFinanceProjection {
@@ -467,7 +468,8 @@ function isPolicyDraft(value: unknown): value is PolicyDraftProjection {
     && Array.isArray(value.validationErrors)
     && value.validationErrors.every((item) => isRecord(item) && typeof item.code === 'string' && typeof item.field === 'string')
     && policyDraftStates.includes(value.state as never)
-    && nullableHashes(value, ['policyHash', 'operationsHash', 'publicationDigest', 'secondarySignatureHash', 'safeCalldataHash', 'safeTxHash', 'safeProposalHash'])
+    && nullableHashes(value, ['policyHash', 'operationsHash', 'publicationDigest', 'secondarySignatureHash', 'executionCalldataHash', 'executionTxHash', 'executionEvidenceHash'])
+    && (value.governanceWallet === null || addressPattern.test(String(value.governanceWallet)))
     && addressPattern.test(String(value.createdBy))
     && isDateTime(value.createdAt)
     && isDateTime(value.updatedAt);
@@ -536,7 +538,7 @@ function isSystemConfigApprovalChallenge(
     && String(message.policyVersion) === value.policyVersion
     && String(message.oldValueHash).toLowerCase() === String(value.oldValueHash).toLowerCase()
     && String(message.newValueHash).toLowerCase() === String(value.newValueHash).toLowerCase()
-    && String(message.safeAddress).toLowerCase() === String(value.safeAddress).toLowerCase()
+    && String(message.executorWallet).toLowerCase() === String(value.executorWallet).toLowerCase()
     && String(message.nonce) === value.nonce
     && String(message.deadline) === value.deadline;
 }
@@ -570,7 +572,7 @@ function isMonitoringDashboard(value: unknown): value is MonitoringDashboard {
     && Array.isArray(value.coverage)
     && value.coverage.every((item) => isRecord(item)
       && ['USDT', 'NPL'].includes(String(item.asset))
-      && addressPattern.test(String(item.safe_address))
+      && addressPattern.test(String(item.wallet_address))
       && amountPattern.test(String(item.assets))
       && amountPattern.test(String(item.unsettled_liabilities))
       && typeof item.covered === 'boolean');
@@ -632,7 +634,7 @@ function isDashboardCoverage(value: unknown) {
     && amountPattern.test(String(value.blockNumber))
     && isDateTime(value.recordedAt)
     && ['USDT', 'NPL'].includes(String(value.asset))
-    && addressPattern.test(String(value.safeAddress))
+    && addressPattern.test(String(value.walletAddress))
     && amountPattern.test(String(value.verifiedAssets))
     && amountPattern.test(String(value.unsettledLiabilities))
     && typeof value.covered === 'boolean';
@@ -640,12 +642,12 @@ function isDashboardCoverage(value: unknown) {
 
 const coverageChallengeKeys = [
   'artifactVersion', 'snapshotId', 'evidenceHash', 'policyVersion', 'signer',
-  'safeAddress', 'routerAddress', 'typedData', 'digest',
+  'executorWallet', 'routerAddress', 'typedData', 'digest',
 ] as const satisfies readonly (keyof CoverageBreakerResumeChallenge)[];
 const coverageActionKeys = [
   'artifactVersion', 'actionId', 'snapshotId', 'policyVersion', 'action',
-  'targetPaused', 'evidenceHash', 'governanceSafeAddress', 'routerAddress',
-  'calldataHash', 'state', 'safeNonce', 'safeTxHash', 'proposalHash', 'executionTxHash',
+  'targetPaused', 'evidenceHash', 'governanceWalletAddress', 'routerAddress',
+  'calldataHash', 'state', 'executorNonce', 'submittedTxHash', 'executionEvidenceHash', 'executionTxHash',
   'confirmations', 'actorWallet', 'secondarySigner', 'secondarySignatureHash',
   'approvalNonce', 'approvalDeadline', 'createdAt', 'updatedAt',
 ] as const satisfies readonly (keyof CoverageBreakerActionProjection)[];
@@ -656,7 +658,7 @@ const sensitiveActionFields = [
   ['policyVersion', 'uint64'],
   ['oldValueHash', 'bytes32'],
   ['newValueHash', 'bytes32'],
-  ['safeAddress', 'address'],
+  ['executorWallet', 'address'],
   ['nonce', 'uint256'],
   ['deadline', 'uint64'],
 ] as const;
@@ -673,7 +675,7 @@ function isCoverageBreakerResumeChallenge(
       || !bytes32Pattern.test(String(value.evidenceHash))
       || !amountPattern.test(String(value.policyVersion))
       || !addressPattern.test(String(value.signer))
-      || !addressPattern.test(String(value.safeAddress))
+      || !addressPattern.test(String(value.executorWallet))
       || !addressPattern.test(String(value.routerAddress))
       || !bytes32Pattern.test(String(value.digest))
       || !isRecord(value.typedData)
@@ -705,8 +707,8 @@ function isCoverageBreakerResumeChallenge(
     && String(message.policyVersion) === String(value.policyVersion)
     && bytes32Pattern.test(String(message.oldValueHash))
     && bytes32Pattern.test(String(message.newValueHash))
-    && addressPattern.test(String(message.safeAddress))
-    && String(message.safeAddress).toLowerCase() === String(value.safeAddress).toLowerCase()
+    && addressPattern.test(String(message.executorWallet))
+    && String(message.executorWallet).toLowerCase() === String(value.executorWallet).toLowerCase()
     && String(message.nonce) === request.nonce
     && String(message.deadline) === request.deadline;
 }
@@ -721,13 +723,13 @@ function isCoverageBreakerAction(value: unknown): value is CoverageBreakerAction
     && typeof value.targetPaused === 'boolean'
     && value.targetPaused === (value.action === 'PAUSE')
     && bytes32Pattern.test(String(value.evidenceHash))
-    && addressPattern.test(String(value.governanceSafeAddress))
+    && addressPattern.test(String(value.governanceWalletAddress))
     && addressPattern.test(String(value.routerAddress))
     && bytes32Pattern.test(String(value.calldataHash))
-    && ['PENDING_PROPOSAL', 'SAFE_PROPOSED', 'MINED', 'FINAL', 'REORGED', 'FAILED', 'SUPERSEDED'].includes(String(value.state))
-    && (value.safeNonce === null || amountPattern.test(String(value.safeNonce)))
-    && nullableHash(value.safeTxHash)
-    && nullableHash(value.proposalHash)
+    && ['PENDING_EXECUTION', 'SUBMITTED', 'MINED', 'FINAL', 'REORGED', 'FAILED', 'SUPERSEDED'].includes(String(value.state))
+    && (value.executorNonce === null || amountPattern.test(String(value.executorNonce)))
+    && nullableHash(value.submittedTxHash)
+    && nullableHash(value.executionEvidenceHash)
     && nullableHash(value.executionTxHash)
     && Number.isSafeInteger(value.confirmations)
     && Number(value.confirmations) >= 0
@@ -853,11 +855,11 @@ function isTypedData(value: unknown): value is Eip712TypedData {
 
 function isSensitiveApproval(value: unknown): value is SensitiveApproval {
   return isRecord(value)
-    && nonEmpty(value, ['action', 'resourceType', 'resourceId', 'policyVersion', 'oldValueHash', 'newValueHash', 'safeAddress', 'nonce', 'deadline', 'signature'])
+    && nonEmpty(value, ['action', 'resourceType', 'resourceId', 'policyVersion', 'oldValueHash', 'newValueHash', 'executorWallet', 'nonce', 'deadline', 'signature'])
     && amountPattern.test(String(value.policyVersion))
     && bytes32Pattern.test(String(value.oldValueHash))
     && bytes32Pattern.test(String(value.newValueHash))
-    && addressPattern.test(String(value.safeAddress))
+    && addressPattern.test(String(value.executorWallet))
     && amountPattern.test(String(value.nonce))
     && amountPattern.test(String(value.deadline));
 }

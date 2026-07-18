@@ -246,12 +246,12 @@ describe('platform admin fail-closed experience', () => {
     const deadline = '1800000000';
     const challenge = coverageResumeChallenge(secondarySigner, nonce, deadline);
     const pendingAction = coverageBreakerAction({
-      action: 'RESUME', targetPaused: false, state: 'PENDING_PROPOSAL', snapshotId: challenge.snapshotId,
+      action: 'RESUME', targetPaused: false, state: 'PENDING_EXECUTION', snapshotId: challenge.snapshotId,
       evidenceHash: challenge.evidenceHash, policyVersion: challenge.policyVersion,
-      governanceSafeAddress: challenge.safeAddress, routerAddress: challenge.routerAddress,
+      governanceWalletAddress: challenge.executorWallet, routerAddress: challenge.routerAddress,
       actorWallet: wallet, secondarySigner, secondarySignatureHash: hash('8'), approvalNonce: nonce,
-      approvalDeadline: new Date(Number(deadline) * 1_000).toISOString(), safeTxHash: null,
-      proposalHash: null, executionTxHash: null, confirmations: 0, safeNonce: null,
+      approvalDeadline: new Date(Number(deadline) * 1_000).toISOString(), submittedTxHash: null,
+      executionEvidenceHash: null, executionTxHash: null, confirmations: 0, executorNonce: null,
     });
     const providerRequest = vi.fn(async ({ method }: { method: string }) => {
       if (method === 'eth_requestAccounts') return [wallet];
@@ -285,8 +285,8 @@ describe('platform admin fail-closed experience', () => {
     }));
     const submitCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/v2/admin/coverage-breaker/resume-actions'));
     expect(JSON.parse(String(submitCall?.[1]?.body))).toEqual({ snapshotId: challenge.snapshotId, nonce, deadline, signature: '0x1234' });
-    expect(await screen.findByText(/Safe FINAL 前不视为已恢复/)).toBeTruthy();
-    expect(screen.getAllByText(/PENDING_PROPOSAL · 等待 Safe 提案/).length).toBeGreaterThan(0);
+    expect(await screen.findByText(/链上 FINAL 前不视为已恢复/)).toBeTruthy();
+    expect(screen.getAllByText(/PENDING_EXECUTION · 等待治理钱包执行/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/^恢复已生效/)).toBeNull();
   });
 
@@ -340,7 +340,7 @@ describe('platform admin fail-closed experience', () => {
     expect(await screen.findByText('当前角色仅可读取断路器治理证据。')).toBeTruthy();
     expect(screen.queryByLabelText('Approval nonce')).toBeNull();
     expect(screen.getByText('PAUSE')).toBeTruthy();
-    const safeNonceTable = screen.getByRole('columnheader', { name: 'Safe nonce' }).closest('table')!;
+    const safeNonceTable = screen.getByRole('columnheader', { name: 'Executor nonce' }).closest('table')!;
     expect(within(safeNonceTable).getByText('12')).toBeTruthy();
   });
 
@@ -637,9 +637,9 @@ describe('platform admin fail-closed experience', () => {
     renderAt('/policy');
     expect(screen.getByText('RBAC 授权')).toBeTruthy();
     expect(screen.getByText('二次钱包签名')).toBeTruthy();
-    expect(screen.getByText('Safe 多签')).toBeTruthy();
+    expect(screen.getByText('普通钱包执行')).toBeTruthy();
     expect(screen.getByRole('button', { name: '请求并提交二次签名' }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByRole('button', { name: '提交 Safe 多签提案' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '提交治理钱包执行' }).hasAttribute('disabled')).toBe(true);
   });
 
   it('renders the .2 seckill session, HTTP replay and realtime channel without inventing write actions', async () => {
@@ -686,7 +686,7 @@ describe('platform admin fail-closed experience', () => {
       if (url.endsWith('/v2/admin/policy-drafts') && !init?.method) return jsonResponse([policyDraft()]);
       if (url.endsWith('/approval-challenge')) return jsonResponse({ draftId: 'draft-1', policyVersion: 2, signer: secondarySigner, typedData: { domain: { name: 'Abu24KPolicyRegistry' }, types: { PolicyPublication: [] }, primaryType: 'PolicyPublication', message: { policyHash: hash('1') } }, digest: hash('2') });
       if (url.endsWith('/secondary-signature')) return jsonResponse(policyDraft({ state: 'SECONDARY_SIGNED', secondarySigner, secondarySignatureHash: hash('3') }));
-      if (url.endsWith('/safe-proposal')) return jsonResponse(policyDraft({ state: 'SAFE_PROPOSED', secondarySigner, secondarySignatureHash: hash('3'), safeAddress: '0x2222222222222222222222222222222222222222', safeCalldataHash: hash('4'), safeTxHash: hash('5'), safeProposalHash: hash('6') }), 202);
+      if (url.endsWith('/execute')) return jsonResponse(policyDraft({ state: 'SUBMITTED', secondarySigner, secondarySignatureHash: hash('3'), governanceWallet: '0x2222222222222222222222222222222222222222', executionCalldataHash: hash('4'), executionTxHash: hash('5'), executionEvidenceHash: hash('6') }), 202);
       return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected request', correlationId: 'policy-test' } }, 400);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -702,11 +702,11 @@ describe('platform admin fail-closed experience', () => {
     const challengeBody = JSON.parse(String(fetchMock.mock.calls.find(([input]) => String(input).endsWith('/approval-challenge'))?.[1]?.body));
     const signatureBody = JSON.parse(String(fetchMock.mock.calls.find(([input]) => String(input).endsWith('/secondary-signature'))?.[1]?.body));
     expect(signatureBody).toMatchObject({ nonce: challengeBody.nonce, deadline: challengeBody.deadline, signature: '0xsecondary' });
-    const safeButton = screen.getByRole('button', { name: '提交 Safe 多签提案' });
+    const safeButton = screen.getByRole('button', { name: '提交治理钱包执行' });
     expect(safeButton.hasAttribute('disabled')).toBe(false);
     await user.click(safeButton);
-    expect(await screen.findByText(/Safe 提案已创建/)).toBeTruthy();
-    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/safe-proposal'))).toBe(true);
+    expect(await screen.findByText(/政策执行已提交/)).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/execute'))).toBe(true);
   });
 
   it('supports keyboard navigation between product modules', async () => {
@@ -984,7 +984,7 @@ function adminDashboardResponse() {
     fulfillmentQueues: { exchange: '1', delay: '2', arbitration: '3', forcedReceipt: '4', takeover: '5' },
     settlements: { requestedCount: '6', requestedUsdt: '600000000', settledCount: '4', settledUsdt: '400000000', failedTransactions: '2' },
     risk: { abnormalObservationsToday: '11', blacklistBlocksToday: '12', activeRestrictions: '13', pendingAppeals: '14' },
-    coverage: [{ snapshotId: 'coverage-1', blockNumber: '123', recordedAt: '2026-07-15T04:00:00.000Z', asset: 'USDT', safeAddress: '0x4444444444444444444444444444444444444444', verifiedAssets: '100', unsettledLiabilities: '101', covered: false }],
+    coverage: [{ snapshotId: 'coverage-1', blockNumber: '123', recordedAt: '2026-07-15T04:00:00.000Z', asset: 'USDT', walletAddress: '0x4444444444444444444444444444444444444444', verifiedAssets: '100', unsettledLiabilities: '101', covered: false }],
     breakers: [
       { scope: 'NEW_PAYMENT', paused: true },
       { scope: 'SECKILL_PURCHASE', paused: false },
@@ -1018,7 +1018,7 @@ function coverageDashboardFetch(wallet: string, role: UserRole, challenge?: Retu
 
 function coverageResumeChallenge(signer: string, nonce: string, deadline: string) {
   const snapshotId = hash('1');
-  const safeAddress = '0x4444444444444444444444444444444444444444';
+  const executorWallet = '0x4444444444444444444444444444444444444444';
   const routerAddress = '0x3333333333333333333333333333333333333333';
   return {
     artifactVersion,
@@ -1026,7 +1026,7 @@ function coverageResumeChallenge(signer: string, nonce: string, deadline: string
     evidenceHash: hash('2'),
     policyVersion: '2',
     signer,
-    safeAddress,
+    executorWallet,
     routerAddress,
     typedData: {
       domain: { name: 'Abu24KV2Core', version: '2', chainId: 56, verifyingContract: routerAddress },
@@ -1037,14 +1037,14 @@ function coverageResumeChallenge(signer: string, nonce: string, deadline: string
         { name: 'policyVersion', type: 'uint64' },
         { name: 'oldValueHash', type: 'bytes32' },
         { name: 'newValueHash', type: 'bytes32' },
-        { name: 'safeAddress', type: 'address' },
+        { name: 'executorWallet', type: 'address' },
         { name: 'nonce', type: 'uint256' },
         { name: 'deadline', type: 'uint64' },
       ] },
       primaryType: 'SensitiveAction',
       message: {
         action: 'RESUME_NEW_PAYMENTS', resourceType: 'COVERAGE_BREAKER', resourceId: snapshotId,
-        policyVersion: '2', oldValueHash: hash('3'), newValueHash: hash('4'), safeAddress, nonce, deadline,
+        policyVersion: '2', oldValueHash: hash('3'), newValueHash: hash('4'), executorWallet, nonce, deadline,
       },
     },
     digest: hash('5'),
@@ -1060,13 +1060,13 @@ function coverageBreakerAction(overrides: Record<string, unknown> = {}) {
     action: 'PAUSE',
     targetPaused: true,
     evidenceHash: hash('2'),
-    governanceSafeAddress: '0x4444444444444444444444444444444444444444',
+    governanceWalletAddress: '0x4444444444444444444444444444444444444444',
     routerAddress: '0x3333333333333333333333333333333333333333',
     calldataHash: hash('7'),
     state: 'FINAL',
-    safeNonce: '12',
-    safeTxHash: hash('8'),
-    proposalHash: hash('9'),
+    executorNonce: '12',
+    submittedTxHash: hash('8'),
+    executionEvidenceHash: hash('9'),
     executionTxHash: hash('a'),
     confirmations: 15,
     actorWallet: null,
@@ -1201,10 +1201,10 @@ function policyDraft(overrides: Record<string, unknown> = {}) {
     publicationDeadline: null,
     secondarySigner: null,
     secondarySignatureHash: null,
-    safeAddress: null,
-    safeCalldataHash: null,
-    safeTxHash: null,
-    safeProposalHash: null,
+    governanceWallet: null,
+    executionCalldataHash: null,
+    executionTxHash: null,
+    executionEvidenceHash: null,
     createdBy: '0x1111111111111111111111111111111111111111',
     createdAt: '2026-07-15T00:00:00.000Z',
     updatedAt: '2026-07-15T00:00:00.000Z',

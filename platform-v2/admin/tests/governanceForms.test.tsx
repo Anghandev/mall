@@ -70,7 +70,7 @@ describe('governed Admin forms', () => {
       }
       if (url.endsWith('/approval-challenge')) {
         const request = JSON.parse(String(init?.body)) as { nonce: string; deadline: string };
-        const message = { action: 'PUBLISH_SYSTEM_CONFIG', resourceType: 'SYSTEM_CONFIG', resourceId: 'config-new', policyVersion: '2', oldValueHash: hash('0'), newValueHash: hash('5'), safeAddress: address('3'), ...request };
+        const message = { action: 'PUBLISH_SYSTEM_CONFIG', resourceType: 'SYSTEM_CONFIG', resourceId: 'config-new', policyVersion: '2', oldValueHash: hash('0'), newValueHash: hash('5'), executorWallet: address('3'), ...request };
         return jsonResponse({ configVersionId: 'config-new', signer: secondarySigner, ...message, typedData: { domain: { name: 'Abu24KV2Core', version: '2', chainId: 56, verifyingContract: address('5') }, types: { SensitiveAction: [] }, primaryType: 'SensitiveAction', message }, digest: hash('6') });
       }
       if (url.endsWith('/publish')) return jsonResponse({ ...systemConfig('config-new', { configKey: 'NPL_QUOTE', payload: nplQuoteConfig() }), published: true });
@@ -157,7 +157,7 @@ function requestBody(fetchMock: ReturnType<typeof vi.fn>, suffix: string) {
   const call = fetchMock.mock.calls.find(([input, init]) => String(input).endsWith(suffix) && init?.method && init.method !== 'GET');
   return JSON.parse(String(call?.[1]?.body)) as Record<string, unknown>;
 }
-function policyDraft(overrides: Record<string, unknown> = {}) { return { draftId: 'draft-1', nextPolicyVersion: '2', basePolicyVersion: '1', artifactVersion, payload: policyPayload(), validationErrors: [], state: 'DRAFT', policyHash: hash('1'), operationsHash: hash('2'), publicationDigest: null, publicationNonce: null, publicationDeadline: null, secondarySigner: null, secondarySignatureHash: null, safeAddress: null, safeCalldataHash: null, safeTxHash: null, safeProposalHash: null, createdBy: address('1'), createdAt: '2026-07-17T00:00:00.000Z', updatedAt: '2026-07-17T00:00:00.000Z', ...overrides }; }
+function policyDraft(overrides: Record<string, unknown> = {}) { return { draftId: 'draft-1', nextPolicyVersion: '2', basePolicyVersion: '1', artifactVersion, payload: policyPayload(), validationErrors: [], state: 'DRAFT', policyHash: hash('1'), operationsHash: hash('2'), publicationDigest: null, publicationNonce: null, publicationDeadline: null, secondarySigner: null, secondarySignatureHash: null, governanceWallet: null, executionCalldataHash: null, executionTxHash: null, executionEvidenceHash: null, createdBy: address('1'), createdAt: '2026-07-17T00:00:00.000Z', updatedAt: '2026-07-17T00:00:00.000Z', ...overrides }; }
 function policyPayload() { return { rulesContentHash: hash('9'), policy: {
   usdtPaymentBps: 7000, nplPaymentBps: 3000, nplBurnListPriceBps: 2000, nplRewardListPriceBps: 1000,
   platformFeeBps: 100, seckillPrizeBps: 0, genesisBps: 200, directReferralBps: 100, districtBps: 120,

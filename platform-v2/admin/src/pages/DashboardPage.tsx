@@ -118,8 +118,8 @@ export function DashboardPage() {
       }, challenge, session.walletAddress, session.token);
       setCoverageActions((current) => [action, ...(current ?? []).filter((item) => item.actionId !== action.actionId)]);
       setResumeNotice(action.state === 'FINAL'
-        ? 'Safe 恢复动作已达 FINAL，正在刷新 Dashboard 断路器状态。'
-        : `恢复治理动作已提交，当前 ${action.state}；Safe FINAL 前不视为已恢复。`);
+        ? '治理钱包恢复动作已达 FINAL，正在刷新 Dashboard 断路器状态。'
+        : `恢复治理动作已提交，当前 ${action.state}；链上 FINAL 前不视为已恢复。`);
       setReload((value) => value + 1);
     } catch (cause) {
       setResumeError(asCoverageResumeError(cause));
@@ -197,15 +197,15 @@ export function DashboardPage() {
 
           <section className="dashboard-evidence-grid">
             <article className="panel dashboard-evidence-panel">
-              <div className="panel-heading"><div><p className="section-kicker">SAFE COVERAGE</p><h2>逐资产覆盖证据</h2></div><WalletCards aria-hidden="true" /></div>
+              <div className="panel-heading"><div><p className="section-kicker">WALLET COVERAGE</p><h2>逐资产覆盖证据</h2></div><WalletCards aria-hidden="true" /></div>
               {dashboard.coverage.length > 0 ? (
-                <div className="coverage-grid" aria-label="Safe assets / unsettled liabilities coverage">
+                <div className="coverage-grid" aria-label="Wallet assets / unsettled liabilities coverage">
                   {dashboard.coverage.map((item) => (
-                    <article className={item.covered ? 'coverage-card is-covered' : 'coverage-card is-breached'} key={`${item.snapshotId}:${item.asset}:${item.safeAddress}`}>
-                      <span>{item.asset} · Safe assets / unsettled liabilities coverage</span>
+                    <article className={item.covered ? 'coverage-card is-covered' : 'coverage-card is-breached'} key={`${item.snapshotId}:${item.asset}:${item.walletAddress}`}>
+                      <span>{item.asset} · Wallet assets / unsettled liabilities coverage</span>
                       <strong>{item.covered ? 'COVERED' : 'BELOW 100%'}</strong>
                       <dl><div><dt>Verified assets</dt><dd>{item.verifiedAssets}</dd></div><div><dt>Unsettled liabilities</dt><dd>{item.unsettledLiabilities}</dd></div></dl>
-                      <code>{item.safeAddress}</code><small>Block {item.blockNumber} · {item.recordedAt}</small>
+                      <code>{item.walletAddress}</code><small>Block {item.blockNumber} · {item.recordedAt}</small>
                     </article>
                   ))}
                 </div>
@@ -238,8 +238,8 @@ export function DashboardPage() {
           </section>
 
           <section className="panel dashboard-blockers coverage-action-panel">
-            <div className="panel-heading"><div><p className="section-kicker">SAFE GOVERNANCE FINALITY</p><h2>覆盖断路器动作</h2></div><button className="icon-button light-icon-button" type="button" aria-label="刷新断路器动作" onClick={() => setReload((value) => value + 1)} disabled={coverageActionsLoading}><RefreshCw aria-hidden="true" /></button></div>
-            {coverageActionsLoading ? <div className="resource-state" role="status"><RefreshCw className="spin" aria-hidden="true" /><div><strong>正在读取 Safe 治理动作</strong><p>恢复状态以 Core 终局证据为准。</p></div></div> : null}
+            <div className="panel-heading"><div><p className="section-kicker">EOA GOVERNANCE FINALITY</p><h2>覆盖断路器动作</h2></div><button className="icon-button light-icon-button" type="button" aria-label="刷新断路器动作" onClick={() => setReload((value) => value + 1)} disabled={coverageActionsLoading}><RefreshCw aria-hidden="true" /></button></div>
+            {coverageActionsLoading ? <div className="resource-state" role="status"><RefreshCw className="spin" aria-hidden="true" /><div><strong>正在读取治理钱包动作</strong><p>恢复状态以 Core 终局证据为准。</p></div></div> : null}
             {coverageActionsError ? <ErrorView error={coverageActionsError} /> : null}
             {coverageActions ? <CoverageBreakerActionTable actions={coverageActions} /> : null}
           </section>
@@ -269,13 +269,13 @@ function CoverageBreakerActionTable({ actions }: { actions: readonly CoverageBre
   return (
     <div className="table-scroll">
       <table className="data-table coverage-action-table">
-        <thead><tr><th>动作</th><th>状态</th><th>Safe nonce</th><th>Safe Tx</th><th>执行 Tx</th><th>确认数</th><th>更新时间</th></tr></thead>
+        <thead><tr><th>动作</th><th>状态</th><th>Executor nonce</th><th>Submitted Tx</th><th>执行 Tx</th><th>确认数</th><th>更新时间</th></tr></thead>
         <tbody>{actions.map((action) => (
           <tr key={action.actionId}>
             <td><strong>{action.action}</strong><small>{action.targetPaused ? '目标：暂停' : '目标：恢复'}</small></td>
             <td><span className={action.state === 'FINAL' ? 'status-chip status-ready' : 'status-chip status-blocked'}>{coverageActionState(action)}</span></td>
-            <td><code>{action.safeNonce ?? '待分配'}</code></td>
-            <td><code>{action.safeTxHash ?? '未发布'}</code></td>
+            <td><code>{action.executorNonce ?? '待分配'}</code></td>
+            <td><code>{action.submittedTxHash ?? '未提交'}</code></td>
             <td><code>{action.executionTxHash ?? '未执行'}</code></td>
             <td>{action.confirmations}</td>
             <td>{action.updatedAt}</td>
@@ -290,15 +290,15 @@ function coverageActionState(action: CoverageBreakerActionProjection) {
   if (action.state === 'FINAL') return action.action === 'RESUME' ? '恢复已生效 · FINAL' : '暂停已生效 · FINAL';
   if (action.state === 'SUPERSEDED') return action.action === 'RESUME' ? '已被更新 PAUSE 废止 · 未生效' : 'SUPERSEDED · 未生效';
   if (action.state === 'MINED') return `MINED · 等待 15 确认 (${action.confirmations})`;
-  if (action.state === 'SAFE_PROPOSED') return 'SAFE_PROPOSED · 等待 Safe 执行';
-  if (action.state === 'PENDING_PROPOSAL') return 'PENDING_PROPOSAL · 等待 Safe 提案';
+  if (action.state === 'SUBMITTED') return 'SUBMITTED · 等待链上确认';
+  if (action.state === 'PENDING_EXECUTION') return 'PENDING_EXECUTION · 等待治理钱包执行';
   return `${action.state} · 未生效`;
 }
 
 function coverageRecoveryReason(newPaymentPaused: boolean, coverageHealthy: boolean) {
   if (!newPaymentPaused) return 'NEW_PAYMENT 未暂停，不创建恢复动作。';
   if (!coverageHealthy) return '覆盖证据为空或未全部达到 100%，恢复保持关闭。';
-  return '需要独立二次钱包签名和 Safe FINAL；提交不等于已恢复。';
+  return '需要独立二次钱包签名和链上 FINAL；提交不等于已恢复。';
 }
 
 function dashboardMetricGroups(dashboard: AdminBusinessDashboard): readonly MetricGroup[] {
@@ -353,8 +353,8 @@ function dashboardMetricGroups(dashboard: AdminBusinessDashboard): readonly Metr
       title: '签名结算与交易证据', icon: ShieldAlert, metrics: [
         metric('今日结算申请', dashboard.settlements.requestedCount, '签名请求'),
         metric('申请 · USDT atomic', dashboard.settlements.requestedUsdt, '今日窗口'),
-        metric('今日已结算', dashboard.settlements.settledCount, 'Safe finality'),
-        metric('已结算 · USDT atomic', dashboard.settlements.settledUsdt, 'Safe finality'),
+        metric('今日已结算', dashboard.settlements.settledCount, 'EOA transaction finality'),
+        metric('已结算 · USDT atomic', dashboard.settlements.settledUsdt, 'EOA transaction finality'),
         metric('链上失败交易', dashboard.settlements.failedTransactions, '今日结算窗口'),
         metric('今日异常观察', dashboard.risk.abnormalObservationsToday, 'Core risk observations'),
         metric('今日黑名单拦截', dashboard.risk.blacklistBlocksToday, 'Core BLACKLIST enforcement'),

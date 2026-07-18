@@ -149,8 +149,8 @@ export async function publishMerchantReview(
       || body.merchant.applicationVersion !== challenge.applicationVersion
       || !body.reviews.some((review) => review.actionId.toLowerCase() === challenge.actionId.toLowerCase()
         && review.state === 'PUBLISHED'
-        && review.safeTxHash !== null)
-  ) throw invalid('Published merchant review lacks bound Safe evidence');
+        && review.approvalSignatureHash !== null)
+  ) throw invalid('Published merchant review lacks bound secondary-signature evidence');
   return body;
 }
 
@@ -326,7 +326,8 @@ function isContributionAnalytics(value: unknown) {
 function isSettlement(value: unknown) {
   return isRecord(value) && bytes32Pattern.test(String(value.requestId)) && ['USDT', 'NPL'].includes(String(value.asset))
     && amountPattern.test(String(value.amount)) && settlementRequestStates.includes(value.state as never)
-    && validDate(value.requestedAt) && (value.safeTxHash === null || bytes32Pattern.test(String(value.safeTxHash)))
+    && validDate(value.requestedAt) && Array.isArray(value.finalExecutionTxHashes)
+    && value.finalExecutionTxHashes.every((item) => bytes32Pattern.test(String(item)))
     && (value.settledAt === null || validDate(value.settledAt));
 }
 
@@ -337,7 +338,7 @@ function isReviewEvidence(value: unknown) {
     && ['DRAFT', 'PUBLISHED', 'EXPIRED'].includes(String(value.state))
     && (value.secondarySigner === null || addressPattern.test(String(value.secondarySigner)))
     && (value.actionDigest === null || bytes32Pattern.test(String(value.actionDigest)))
-    && (value.safeTxHash === null || bytes32Pattern.test(String(value.safeTxHash)))
+    && (value.approvalSignatureHash === null || bytes32Pattern.test(String(value.approvalSignatureHash)))
     && validDate(value.createdAt) && validDate(value.updatedAt);
 }
 

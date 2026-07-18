@@ -80,7 +80,7 @@ describe('seckill governance workspace', () => {
     await user.click(within(form).getByRole('button', { name: '创建并锁定活动库存' }));
 
     expect(await screen.findByText(/场次草稿已创建/)).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: '取消未提案动作' }));
+    await user.click(screen.getByRole('button', { name: '取消未执行动作' }));
     expect(await screen.findByText(/动作已取消/)).toBeTruthy();
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/cancel'))).toBe(true);
     expect(bodyFor(fetchMock.mock.calls, '/cancel')).toEqual({});
@@ -108,12 +108,12 @@ describe('seckill governance workspace', () => {
       }
       if (url.endsWith('/approval-challenge')) return jsonResponse(challenge);
       if (url.endsWith('/secondary-signature')) {
-        detail = governanceAction({ ...action, state: 'SECONDARY_SIGNED', secondarySigner: signer, approvalNonce: '7', approvalDeadline: new Date(1_800_000_000 * 1_000).toISOString(), allowedActions: ['PROPOSE_SAFE', 'CANCEL'] });
+        detail = governanceAction({ ...action, state: 'SECONDARY_SIGNED', secondarySigner: signer, approvalNonce: '7', approvalDeadline: new Date(1_800_000_000 * 1_000).toISOString(), allowedActions: ['EXECUTE', 'CANCEL'] });
         actions = [detail, listed];
         return jsonResponse(detail);
       }
-      if (url.endsWith('/safe-proposal')) {
-        detail = governanceAction({ ...detail, state: 'PENDING_PROPOSAL', allowedActions: [] });
+      if (url.endsWith('/execute')) {
+        detail = governanceAction({ ...detail, state: 'PENDING_EXECUTION', allowedActions: [] });
         actions = [detail, listed];
         return jsonResponse(detail, 202);
       }
@@ -154,10 +154,10 @@ describe('seckill governance workspace', () => {
     await waitFor(() => expect(provider.request).toHaveBeenCalledWith({
       method: 'eth_signTypedData_v4', params: [signer, JSON.stringify(challenge.typedData)],
     }));
-    expect(await screen.findByText(/尚未提交 Safe/)).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: '提交 Safe 提案' }));
-    expect(await screen.findByText(/Safe 提案请求已提交/)).toBeTruthy();
-    expect(screen.getAllByText('PENDING_PROPOSAL').length).toBeGreaterThan(0);
+    expect(await screen.findByText(/尚未提交治理钱包执行/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '提交治理钱包执行' }));
+    expect(await screen.findByText(/治理钱包执行请求已提交/)).toBeTruthy();
+    expect(screen.getAllByText('PENDING_EXECUTION').length).toBeGreaterThan(0);
     expect(screen.queryByText(/FINAL · 已终局/)).toBeNull();
 
     const writes = fetchMock.mock.calls.filter(([input, init]) => init?.method === 'POST' && String(input).includes('/v2/admin/seckill/'));
@@ -165,7 +165,7 @@ describe('seckill governance workspace', () => {
       '/v2/admin/seckill/sessions',
       `/v2/admin/seckill/actions/${action.actionId}/approval-challenge`,
       `/v2/admin/seckill/actions/${action.actionId}/secondary-signature`,
-      `/v2/admin/seckill/actions/${action.actionId}/safe-proposal`,
+      `/v2/admin/seckill/actions/${action.actionId}/execute`,
     ]));
     expect(bodyFor(writes, '/v2/admin/seckill/sessions')).toEqual({
       policyVersion: '2', rulesContentHash: hash('2'), productId: 'product-1', skuId: 'sku-1', inventory: 4,
@@ -173,7 +173,7 @@ describe('seckill governance workspace', () => {
     });
     expect(bodyFor(writes, '/approval-challenge')).toEqual({ nonce: '7', deadline: '1800000000' });
     expect(bodyFor(writes, '/secondary-signature')).toEqual({ nonce: '7', deadline: '1800000000', signature: '0x1234' });
-    expect(bodyFor(writes, '/safe-proposal')).toEqual({});
+    expect(bodyFor(writes, '/execute')).toEqual({});
     for (const [, init] of writes) expect(init?.headers).toMatchObject({ authorization: 'Bearer jwt' });
   });
 
@@ -266,8 +266,8 @@ describe('seckill governance workspace', () => {
   it('renders 14 confirmations, REORGED and FAILED without claiming finality', async () => {
     const wallet = address('1');
     window.ethereum = walletProvider(wallet);
-    const mined = governanceAction({ actionId: hash('e'), state: 'MINED', confirmations: 14, allowedActions: [], safeNonce: '3', safeTxHash: hash('3'), proposalHash: hash('4'), executionTxHash: hash('5'), blockNumber: '100', blockHash: hash('6'), canonical: true });
-    const reorged = governanceAction({ state: 'REORGED', allowedActions: [], safeNonce: '3', safeTxHash: hash('3'), proposalHash: hash('4'), executionTxHash: hash('5'), blockNumber: '100', blockHash: hash('6'), canonical: false });
+    const mined = governanceAction({ actionId: hash('e'), state: 'MINED', confirmations: 14, allowedActions: [], executorNonce: '3', submittedTxHash: hash('3'), executionEvidenceHash: hash('4'), executionTxHash: hash('5'), blockNumber: '100', blockHash: hash('6'), canonical: true });
+    const reorged = governanceAction({ state: 'REORGED', allowedActions: [], executorNonce: '3', submittedTxHash: hash('3'), executionEvidenceHash: hash('4'), executionTxHash: hash('5'), blockNumber: '100', blockHash: hash('6'), canonical: false });
     const failed = governanceAction({ actionId: hash('f'), state: 'FAILED', allowedActions: [] });
     vi.stubGlobal('fetch', governanceFetch(wallet, 'ADMIN', [mined, reorged, failed]));
     const user = userEvent.setup();
@@ -332,7 +332,7 @@ function governanceFetch(wallet: string, role: UserRole, initialActions: readonl
 function governanceAction(overrides: Partial<SeckillGovernanceActionProjection> = {}): SeckillGovernanceActionProjection {
   return {
     artifactVersion, actionId: hash('a'), sessionId: hash('b'), policyVersion: '2', actionKind: 'OPEN_SESSION', state: 'DRAFT', evidenceHash: hash('c'),
-    safeAddress: address('4'), targetAddress: address('5'), calldataHash: hash('d'), safeNonce: null, safeTxHash: null, proposalHash: null,
+    executorWallet: address('4'), targetAddress: address('5'), calldataHash: hash('d'), executorNonce: null, submittedTxHash: null, executionEvidenceHash: null,
     executionTxHash: null, blockNumber: null, blockHash: null, confirmations: 0, canonical: null, actorWallet: address('1'), secondarySigner: null,
     approvalNonce: null, approvalDeadline: null, createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T00:00:00.000Z',
     sessionPlan: sessionPlan(), prizeInjection: null, allowedActions: ['APPROVE_SECONDARY', 'CANCEL'], ...overrides,
@@ -344,7 +344,7 @@ function sessionPlan(): SeckillSessionPlanProjection {
 }
 
 function prizeInjection() {
-  return { injectionId: hash('a'), amountUsdt: '50', operationsSafeAddress: address('6'), custodySafeAddress: address('7'), tokenAddress: address('8'), finalJournalId: null, reversalJournalId: null };
+  return { injectionId: hash('a'), amountUsdt: '50', operationsWalletAddress: address('6'), settlementWalletAddress: address('7'), tokenAddress: address('8'), finalJournalId: null, reversalJournalId: null };
 }
 
 function cmsRulesVersion() {
@@ -366,7 +366,7 @@ function reviewPendingPrize() {
 }
 
 function governanceChallenge(action: SeckillGovernanceActionProjection, signer: string, nonce: string, deadline: string) {
-  return { artifactVersion, actionId: action.actionId, sessionId: action.sessionId, actionKind: action.actionKind, signer, safeAddress: action.safeAddress, typedData: { domain: { name: 'Abu24KV2Core', version: '2', chainId: 56, verifyingContract: action.targetAddress }, types: { SensitiveAction: [{ name: 'action', type: 'string' }, { name: 'resourceType', type: 'string' }, { name: 'resourceId', type: 'string' }, { name: 'policyVersion', type: 'uint64' }, { name: 'oldValueHash', type: 'bytes32' }, { name: 'newValueHash', type: 'bytes32' }, { name: 'safeAddress', type: 'address' }, { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint64' }] }, primaryType: 'SensitiveAction', message: { action: `SECKILL_${action.actionKind}`, resourceType: 'SECKILL_SESSION', resourceId: action.sessionId, policyVersion: action.policyVersion, oldValueHash: hash('e'), newValueHash: hash('f'), safeAddress: action.safeAddress, nonce, deadline } }, digest: hash('9') };
+  return { artifactVersion, actionId: action.actionId, sessionId: action.sessionId, actionKind: action.actionKind, signer, executorWallet: action.executorWallet, typedData: { domain: { name: 'Abu24KV2Core', version: '2', chainId: 56, verifyingContract: action.targetAddress }, types: { SensitiveAction: [{ name: 'action', type: 'string' }, { name: 'resourceType', type: 'string' }, { name: 'resourceId', type: 'string' }, { name: 'policyVersion', type: 'uint64' }, { name: 'oldValueHash', type: 'bytes32' }, { name: 'newValueHash', type: 'bytes32' }, { name: 'executorWallet', type: 'address' }, { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint64' }] }, primaryType: 'SensitiveAction', message: { action: `SECKILL_${action.actionKind}`, resourceType: 'SECKILL_SESSION', resourceId: action.sessionId, policyVersion: action.policyVersion, oldValueHash: hash('e'), newValueHash: hash('f'), executorWallet: action.executorWallet, nonce, deadline } }, digest: hash('9') };
 }
 
 function walletProvider(wallet: string, _challenge?: unknown) {

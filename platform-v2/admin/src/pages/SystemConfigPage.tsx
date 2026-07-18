@@ -100,7 +100,7 @@ export function SystemConfigPage() {
       const approval: SensitiveApproval = {
         action: challenge.action, resourceType: challenge.resourceType, resourceId: challenge.resourceId,
         policyVersion: challenge.policyVersion, oldValueHash: challenge.oldValueHash, newValueHash: challenge.newValueHash,
-        safeAddress: challenge.safeAddress, nonce: challenge.nonce, deadline: challenge.deadline, signature,
+        executorWallet: challenge.executorWallet, nonce: challenge.nonce, deadline: challenge.deadline, signature,
       };
       const result = await publishSystemConfigVersion(selectedId, approval, session.token);
       setItems((current) => current.map((item) => item.configVersionId === result.configVersionId ? result : item));
