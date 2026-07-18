@@ -31,8 +31,6 @@ const externalVariables = [
   'SECONDARY_SIGNER_ADDRESS',
   'QUOTE_SIGNER_ADDRESS',
   'FINALITY_SIGNER_ADDRESS',
-  'TWAP_SOURCE_ADDRESS',
-  'TWAP_SOURCE_CODEHASH',
   'SIGNER_SERVICE_URL',
   'SIGNER_SERVICE_TOKEN',
   'SETTLEMENT_EXECUTOR_URL',
@@ -93,8 +91,6 @@ const paymentExternalVariables = [
   'JWT_SECRET',
   'AUTH_DOMAIN',
   'AUTH_URI',
-  'DELIVERY_DATA_ENCRYPTION_KEY',
-  'AMAP_WEB_SERVICE_KEY',
   'BSC_RPC_URL',
   'BSC_FALLBACK_RPC_URL',
   'PLATFORM_SAFE_ADDRESS',
@@ -104,8 +100,6 @@ const paymentExternalVariables = [
   'OPERATIONS_TREASURY_SAFE_ADDRESS',
   'SECONDARY_SIGNER_ADDRESS',
   'QUOTE_SIGNER_ADDRESS',
-  'TWAP_SOURCE_ADDRESS',
-  'TWAP_SOURCE_CODEHASH',
   'SIGNER_SERVICE_URL',
   'SIGNER_SERVICE_TOKEN',
 ] as const;
@@ -173,7 +167,6 @@ export interface CoreConfig {
   paymentRouterDeploymentBlock: number | undefined;
   policyRegistryAddress: string | undefined;
   beneficiaryRegistryAddress: string | undefined;
-  twapOracleAddress: string | undefined;
   safeAddress: string | undefined;
   platformServiceFeeSafeAddress: string | undefined;
   usdtCustodySafeAddress: string | undefined;
@@ -182,8 +175,6 @@ export interface CoreConfig {
   secondarySignerAddress: string | undefined;
   quoteSignerAddress: string | undefined;
   finalitySignerAddress: string | undefined;
-  twapSourceAddress: string | undefined;
-  twapSourceCodeHash: string | undefined;
   signerServiceUrl: string | undefined;
   signerServiceToken: string | undefined;
   executorUrl: string | undefined;
@@ -224,7 +215,7 @@ export interface RuntimeReadinessSnapshot {
   roleGrantsVerified: boolean;
   safeAdminVerified: boolean;
   signerBindingsVerified: boolean;
-  oracleDeploymentVerified: boolean;
+  nplQuoteSourceHealthy: boolean;
   indexerHealthy: boolean;
   databaseHealthy: boolean;
   redisHealthy: boolean;
@@ -250,7 +241,6 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
   const paymentRouterDeploymentBlock = paymentRouterDeployment?.deploymentBlock;
   const policyRegistryAddress = manifestContractAddress('PolicyRegistryV2');
   const beneficiaryRegistryAddress = manifestContractAddress('BeneficiaryRegistryV2');
-  const twapOracleAddress = manifestContractAddress('TwapOracleAdapterV2');
   const externalBlocked = [
     ...externalVariables.filter((name) => !env[name]),
     ...(!deploymentReady ? ['COORDINATED_DEPLOYMENT_AUTHORIZATION'] : []),
@@ -258,7 +248,6 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     ...(paymentRouterDeploymentBlock === undefined ? ['PAYMENT_ROUTER_DEPLOYMENT_BLOCK_MANIFEST'] : []),
     ...(!policyRegistryAddress ? ['POLICY_REGISTRY_ADDRESS_MANIFEST'] : []),
     ...(!beneficiaryRegistryAddress ? ['BENEFICIARY_REGISTRY_ADDRESS_MANIFEST'] : []),
-    ...(!twapOracleAddress ? ['TWAP_ORACLE_ADDRESS_MANIFEST'] : []),
   ];
   const paymentExternalBlocked = [
     ...paymentExternalVariables.filter((name) => !env[name]),
@@ -267,7 +256,6 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     ...(paymentRouterDeploymentBlock === undefined ? ['PAYMENT_ROUTER_DEPLOYMENT_BLOCK_MANIFEST'] : []),
     ...(!policyRegistryAddress ? ['POLICY_REGISTRY_ADDRESS_MANIFEST'] : []),
     ...(!beneficiaryRegistryAddress ? ['BENEFICIARY_REGISTRY_ADDRESS_MANIFEST'] : []),
-    ...(!twapOracleAddress ? ['TWAP_ORACLE_ADDRESS_MANIFEST'] : []),
   ];
   validateProductionEndpoints(env);
   if (env.SAFE_INTERNAL_MTLS_ENABLED && env.SAFE_INTERNAL_MTLS_ENABLED !== 'true') {
@@ -315,7 +303,6 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     paymentRouterDeploymentBlock,
     policyRegistryAddress,
     beneficiaryRegistryAddress,
-    twapOracleAddress,
     safeAddress: normalizeOptionalAddress(env.PLATFORM_SAFE_ADDRESS),
     platformServiceFeeSafeAddress: normalizeOptionalAddress(env.PLATFORM_SERVICE_FEE_SAFE_ADDRESS),
     usdtCustodySafeAddress: normalizeOptionalAddress(env.USDT_CUSTODY_SAFE_ADDRESS),
@@ -324,8 +311,6 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     secondarySignerAddress: normalizeOptionalAddress(env.SECONDARY_SIGNER_ADDRESS),
     quoteSignerAddress: normalizeOptionalAddress(env.QUOTE_SIGNER_ADDRESS),
     finalitySignerAddress: normalizeOptionalAddress(env.FINALITY_SIGNER_ADDRESS),
-    twapSourceAddress: normalizeOptionalAddress(env.TWAP_SOURCE_ADDRESS),
-    twapSourceCodeHash: normalizeOptionalHash(env.TWAP_SOURCE_CODEHASH, 'TWAP_SOURCE_CODEHASH'),
     signerServiceUrl: env.SIGNER_SERVICE_URL,
     signerServiceToken: env.SIGNER_SERVICE_TOKEN,
     executorUrl: env.SETTLEMENT_EXECUTOR_URL,
@@ -468,7 +453,7 @@ function runtimeReadinessValid(snapshot: RuntimeReadinessSnapshot | undefined, n
     snapshot.roleGrantsVerified,
     snapshot.safeAdminVerified,
     snapshot.signerBindingsVerified,
-    snapshot.oracleDeploymentVerified,
+    snapshot.nplQuoteSourceHealthy,
     snapshot.indexerHealthy,
     snapshot.databaseHealthy,
     snapshot.redisHealthy,
@@ -617,8 +602,6 @@ function safeExpectation(
 function validateFrozenOverrides(env: Readonly<Record<string, string | undefined>>) {
   const exact = [
     ['REQUIRED_CONFIRMATIONS', '15'],
-    ['ORACLE_MAX_AGE_SECONDS', '600'],
-    ['ORACLE_MINIMUM_LIQUIDITY', String(50_000n * 10n ** 18n)],
     ['MERCHANT_GUARANTEE_MINIMUM_USDT', String(1_000n * 10n ** 18n)],
   ] as const;
   for (const [name, expected] of exact) {

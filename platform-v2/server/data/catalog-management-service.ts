@@ -1231,10 +1231,9 @@ async function assertSubmittedPreviewCurrent(executor: SqlExecutor, product: Pro
 async function latestPaymentPolicy(executor: SqlExecutor, now: Date) {
   const result = await executor.query<{
     policy_version: string | number;
-    oracle_version: string;
     payload: unknown;
   }>(
-    `SELECT policy_version, oracle_version, payload
+    `SELECT policy_version, payload
      FROM core.canonical_policy_publications
      WHERE publication_status = 'PUBLISHED' AND (effective_from IS NULL OR effective_from <= $1)
      ORDER BY policy_version DESC LIMIT 1`,
@@ -1242,7 +1241,7 @@ async function latestPaymentPolicy(executor: SqlExecutor, now: Date) {
   );
   const row = result.rows[0];
   if (!row) throw new CoreError('DecisionBlocked', 'No canonical policy is available for concession preview', 409);
-  return { row, policy: parsePaymentPolicySnapshot(Number(row.policy_version), row.oracle_version, row.payload) };
+  return { row, policy: parsePaymentPolicySnapshot(Number(row.policy_version), row.payload) };
 }
 
 async function insertProduct(executor: SqlExecutor, input: {

@@ -20,19 +20,3 @@ interface IBeneficiaryRegistryV2 {
         V2Types.BeneficiarySnapshot calldata snapshot
     ) external view;
 }
-
-interface ITwapOracleV2 {
-    function validateQuote(bytes32 oracleVersion, uint256 usdtListPrice, uint256 signedNplQuoteAmount)
-        external
-        view
-        returns (uint256 twapNplAmount);
-}
-
-interface ITwapSourceV2 {
-    function pair() external view returns (address);
-
-    function consult(address pair_, address baseToken, address quoteToken, uint256 baseAmount, uint32 window)
-        external
-        view
-        returns (uint256 quoteAmount, uint128 usdtLiquidity, uint64 updatedAt);
-}

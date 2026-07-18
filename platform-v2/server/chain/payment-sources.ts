@@ -10,20 +10,21 @@ import {
 } from '../api/payment-policy.ts';
 import type {
   BeneficiarySnapshotSource,
-  PaymentOracleQuoteSource,
+  PaymentNplQuoteSource,
   PaymentPolicyAttestationSource,
 } from '../data/catalog-payment-service.ts';
 
 const ZERO_ADDRESS = `0x${'0'.repeat(40)}`;
-const SOURCE_ABI = [
-  'function pair() view returns (address)',
-  'function consult(address pair,address baseToken,address quoteToken,uint256 baseAmount,uint32 window) view returns (uint256 quoteAmount,uint128 usdtLiquidity,uint64 updatedAt)',
+const PAIR_ABI = [
+  'function token0() view returns (address)',
+  'function token1() view returns (address)',
+  'function getReserves() view returns (uint112 reserve0,uint112 reserve1,uint32 blockTimestampLast)',
 ];
 const BENEFICIARY_ABI = [
   'function referrerOf(address member) view returns (address)',
   'function regionBeneficiaries(uint64 policyVersion,bytes32 regionCodeHash) view returns (address district,address city,address province,address region)',
 ];
-export const PAYMENT_POLICY_TUPLE_ABI = 'tuple(uint64 version,uint16 usdtPaymentBps,uint16 nplPaymentBps,uint16 nplBurnListPriceBps,uint16 nplRewardListPriceBps,uint16 genesisBps,uint16 directReferralBps,uint16 districtBps,uint16 cityBps,uint16 provinceBps,uint16 regionBps,uint16 operationsBps,uint16 platformFeeBps,uint16 seckillPrizeBps,uint32 seckillMainDuration,uint32 relayInitial,uint32 relayIncrement,uint32 relayCap,bytes32 oracleVersion,uint64 oracleMaxAge,uint128 oracleMinLiquidity,uint128 merchantGuaranteeMinimum,address usdtCustodySafe,address nplRewardSafe,address operationsTreasurySafe,address circulationPool,bytes32 beneficiarySetHash,bytes32 concessionDestinationSetHash,bytes32 decisionEvidenceHash,bytes32 rulesContentHash)';
+export const PAYMENT_POLICY_TUPLE_ABI = 'tuple(uint64 version,uint16 usdtPaymentBps,uint16 nplPaymentBps,uint16 nplBurnListPriceBps,uint16 nplRewardListPriceBps,uint16 genesisBps,uint16 directReferralBps,uint16 districtBps,uint16 cityBps,uint16 provinceBps,uint16 regionBps,uint16 operationsBps,uint16 platformFeeBps,uint16 seckillPrizeBps,uint32 seckillMainDuration,uint32 relayInitial,uint32 relayIncrement,uint32 relayCap,uint128 merchantGuaranteeMinimum,address usdtCustodySafe,address nplRewardSafe,address operationsTreasurySafe,address circulationPool,bytes32 beneficiarySetHash,bytes32 concessionDestinationSetHash,bytes32 decisionEvidenceHash,bytes32 rulesContentHash)';
 const POLICY_REGISTRY_ABI = [
   `function getPolicy(uint64 version) view returns (${PAYMENT_POLICY_TUPLE_ABI} policy)`,
   'function getOperations(uint64 version) view returns (address[] accounts,uint16[] weights)',
@@ -36,7 +37,19 @@ export interface ContractReader {
   call(address: string, abi: InterfaceAbi, method: string, args: readonly unknown[]): Promise<unknown>;
 }
 
-export class ResilientBscContractReader implements ContractReader {
+export interface PairReserveSnapshot {
+  blockNumber: number;
+  token0: string;
+  token1: string;
+  reserve0: bigint;
+  reserve1: bigint;
+}
+
+export interface PairReserveReader extends ContractReader {
+  pairReserves(address: string): Promise<PairReserveSnapshot>;
+}
+
+export class ResilientBscContractReader implements PairReserveReader {
   readonly #providers: JsonRpcProvider[];
 
   constructor(primaryRpcUrl?: string, fallbackRpcUrl?: string) {
@@ -70,6 +83,44 @@ export class ResilientBscContractReader implements ContractReader {
     return keccak256(code).toLowerCase();
   }
 
+  async pairReserves(pairAddress: string): Promise<PairReserveSnapshot> {
+    try {
+      const heads = await Promise.all(this.#providers.map(async (provider) => {
+        const network = await provider.getNetwork();
+        if (network.chainId !== 56n) throw new CoreError('ExternalBlocked', 'RPC is not BSC chain 56', 503);
+        return provider.getBlockNumber();
+      }));
+      const blockNumber = Math.min(...heads);
+      if (!Number.isSafeInteger(blockNumber) || blockNumber <= 0) {
+        throw new CoreError('ExternalBlocked', 'BSC RPC common block is unavailable', 503);
+      }
+      const snapshots = await Promise.all(this.#providers.map(async (provider) => {
+        const pair = new Contract(pairAddress, PAIR_ABI, provider);
+        const [token0, token1, reserves] = await Promise.all([
+          pair.getFunction('token0')({ blockTag: blockNumber }),
+          pair.getFunction('token1')({ blockTag: blockNumber }),
+          pair.getFunction('getReserves')({ blockTag: blockNumber }),
+        ]);
+        return {
+          blockNumber,
+          token0: getAddress(String(token0)),
+          token1: getAddress(String(token1)),
+          reserve0: BigInt(reserves[0]),
+          reserve1: BigInt(reserves[1]),
+        };
+      }));
+      if (stableRpcValue(snapshots[0]) !== stableRpcValue(snapshots[1])) {
+        throw new CoreError('InvalidFinality', 'BSC RPC providers returned inconsistent pair reserves', 409);
+      }
+      return snapshots[0]!;
+    } catch (error) {
+      if (error instanceof CoreError) throw error;
+      throw new CoreError('ExternalBlocked', 'Both BSC RPC providers must return matching pair reserves', 503, {
+        reason: error instanceof Error ? error.name : 'UnknownRpcFailure',
+      });
+    }
+  }
+
   async #withProvider<Result>(operation: (provider: JsonRpcProvider) => Promise<Result>) {
     try {
       const results = await Promise.all(this.#providers.map(async (provider) => {
@@ -90,45 +141,34 @@ export class ResilientBscContractReader implements ContractReader {
   }
 }
 
-export class RpcPaymentOracleQuoteSource implements PaymentOracleQuoteSource {
-  readonly #reader: ContractReader;
-  readonly #sourceAddress: string;
-  readonly #clock: () => Date;
+export class RpcPaymentNplQuoteSource implements PaymentNplQuoteSource {
+  readonly #reader: PairReserveReader;
 
-  constructor(input: { reader: ContractReader; sourceAddress?: string; clock?: () => Date }) {
+  constructor(input: { reader: PairReserveReader }) {
     this.#reader = input.reader;
-    this.#sourceAddress = address(input.sourceAddress, 'TWAP source');
-    this.#clock = input.clock ?? (() => new Date());
   }
 
-  async quote(input: { listPriceUsdt: bigint; policyVersion: number; oracleVersion: string }) {
-    if (input.listPriceUsdt <= 0n || input.policyVersion <= 0 || !isHash(input.oracleVersion)) {
-      throw new CoreError('InvalidRequest', 'Invalid Oracle quote request');
+  async quote(input: { listPriceUsdt: bigint; policyVersion: number }) {
+    if (input.listPriceUsdt <= 0n || input.policyVersion <= 0) {
+      throw new CoreError('InvalidRequest', 'Invalid NPL quote request');
     }
-    const pair = String(await this.#reader.call(this.#sourceAddress, SOURCE_ABI, 'pair', []));
-    if (pair.toLowerCase() !== NPL_USDT_PAIR_ADDRESS) {
-      throw new CoreError('InvalidFinality', 'TWAP source uses the wrong NPL/USDT pair', 409);
+    const snapshot = await this.#reader.pairReserves(NPL_USDT_PAIR_ADDRESS);
+    const token0 = snapshot.token0.toLowerCase();
+    const token1 = snapshot.token1.toLowerCase();
+    const validOrder = (token0 === USDT_ADDRESS && token1 === NPL_ADDRESS)
+      || (token0 === NPL_ADDRESS && token1 === USDT_ADDRESS);
+    if (!validOrder) throw new CoreError('InvalidFinality', 'Configured pair does not contain NPL and USDT', 409);
+    const usdtLiquidity = token0 === USDT_ADDRESS ? snapshot.reserve0 : snapshot.reserve1;
+    const nplLiquidity = token0 === NPL_ADDRESS ? snapshot.reserve0 : snapshot.reserve1;
+    if (usdtLiquidity <= 0n || nplLiquidity <= 0n) {
+      throw new CoreError('InvalidFinality', 'NPL/USDT pair reserves are empty', 409);
     }
-    const raw = await this.#reader.call(this.#sourceAddress, SOURCE_ABI, 'consult', [
-      NPL_USDT_PAIR_ADDRESS,
-      USDT_ADDRESS,
-      NPL_ADDRESS,
-      input.listPriceUsdt,
-      1_800,
-    ]);
-    const result = raw as readonly [bigint, bigint, bigint];
-    const nplQuoteAmount = BigInt(result[0]);
-    const usdtLiquidity = BigInt(result[1]);
-    const updatedAt = Number(result[2]);
-    const now = Math.floor(this.#clock().getTime() / 1000);
-    if (nplQuoteAmount <= 0n || !Number.isSafeInteger(updatedAt) || updatedAt > now) {
-      throw new CoreError('InvalidFinality', 'TWAP source returned an invalid observation', 409);
-    }
-    if (now - updatedAt > 10 * 60) throw new CoreError('QuoteExpired', 'TWAP observation is stale', 409);
     if (usdtLiquidity < 50_000n * 10n ** 18n) {
-      throw new CoreError('InventoryUnavailable', 'TWAP USDT liquidity is below the frozen minimum', 409);
+      throw new CoreError('InventoryUnavailable', 'NPL quote USDT liquidity is below the frozen minimum', 409);
     }
-    return { nplQuoteAmount, oracleVersion: input.oracleVersion };
+    const nplQuoteAmount = input.listPriceUsdt * nplLiquidity / usdtLiquidity;
+    if (nplQuoteAmount <= 0n) throw new CoreError('InvalidFinality', 'NPL quote rounds to zero', 409);
+    return { nplQuoteAmount };
   }
 }
 
@@ -230,20 +270,17 @@ export class RpcPaymentPolicyAttestationSource implements PaymentPolicyAttestati
       ['relayInitial', Number(chain[15]), input.policy.relayInitial],
       ['relayIncrement', Number(chain[16]), input.policy.relayIncrement],
       ['relayCap', Number(chain[17]), input.policy.relayCap],
-      ['oracleVersion', String(chain[18]).toLowerCase(), input.policy.oracleVersion.toLowerCase()],
-      ['oracleMaxAge', Number(chain[19]), input.policy.oracleMaxAgeSeconds],
-      ['oracleMinLiquidity', BigInt(String(chain[20])), input.policy.oracleMinimumUsdtLiquidity],
-      ['merchantGuaranteeMinimum', BigInt(String(chain[21])), input.policy.merchantGuaranteeMinimumUsdt],
-      ['usdtCustodySafe', String(chain[22]).toLowerCase(), input.policy.usdtCustodySafe.toLowerCase()],
-      ['nplRewardSafe', String(chain[23]).toLowerCase(), input.policy.nplRewardSafe.toLowerCase()],
-      ['operationsTreasurySafe', String(chain[24]).toLowerCase(), input.policy.operationsTreasurySafe.toLowerCase()],
-      ['circulationPool', String(chain[25]).toLowerCase(), input.policy.circulationPool.toLowerCase()],
-      ['beneficiarySetHash', String(chain[26]).toLowerCase(), input.beneficiarySetHash.toLowerCase()],
+      ['merchantGuaranteeMinimum', BigInt(String(chain[18])), input.policy.merchantGuaranteeMinimumUsdt],
+      ['usdtCustodySafe', String(chain[19]).toLowerCase(), input.policy.usdtCustodySafe.toLowerCase()],
+      ['nplRewardSafe', String(chain[20]).toLowerCase(), input.policy.nplRewardSafe.toLowerCase()],
+      ['operationsTreasurySafe', String(chain[21]).toLowerCase(), input.policy.operationsTreasurySafe.toLowerCase()],
+      ['circulationPool', String(chain[22]).toLowerCase(), input.policy.circulationPool.toLowerCase()],
+      ['beneficiarySetHash', String(chain[23]).toLowerCase(), input.beneficiarySetHash.toLowerCase()],
       ['configuredBeneficiarySetHash', beneficiarySetHash.toLowerCase(), input.beneficiarySetHash.toLowerCase()],
-      ['concessionDestinationSetHash', String(chain[27]).toLowerCase(), input.policy.concessionDestinationSetHash.toLowerCase()],
+      ['concessionDestinationSetHash', String(chain[24]).toLowerCase(), input.policy.concessionDestinationSetHash.toLowerCase()],
       ['destinationHash', destinationHash.toLowerCase(), input.policy.concessionDestinationSetHash.toLowerCase()],
-      ['decisionEvidenceHash', String(chain[28]).toLowerCase(), input.policy.decisionEvidenceHash.toLowerCase()],
-      ['rulesContentHash', String(chain[29]).toLowerCase(), input.rulesContentHash.toLowerCase()],
+      ['decisionEvidenceHash', String(chain[25]).toLowerCase(), input.policy.decisionEvidenceHash.toLowerCase()],
+      ['rulesContentHash', String(chain[26]).toLowerCase(), input.rulesContentHash.toLowerCase()],
       ['operationAccounts', JSON.stringify(operationAccounts), JSON.stringify(input.policy.operationsDestinations.map((item) => item.account))],
       ['operationWeights', JSON.stringify(operationWeights), JSON.stringify(input.policy.operationsDestinations.map((item) => item.weightBps))],
     ];
@@ -281,7 +318,7 @@ export class RpcWalletMessageSignatureVerifier implements WalletMessageSignature
 }
 
 function policyValues(value: unknown) {
-  if (!Array.isArray(value) || value.length !== 30) {
+  if (!Array.isArray(value) || value.length !== 27) {
     throw new CoreError('InvalidFinality', 'PolicyRegistry returned an invalid policy tuple', 409);
   }
   return value;

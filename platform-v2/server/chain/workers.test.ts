@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { AbiCoder, Interface, Wallet, keccak256, toUtf8Bytes, type InterfaceAbi } from 'ethers';
-import { CORE_ARTIFACT_VERSION, USDT_ADDRESS } from '../api/enums.ts';
+import { CORE_ARTIFACT_VERSION, NPL_ADDRESS, USDT_ADDRESS } from '../api/enums.ts';
 import {
   paymentAllocationSetHash,
   paymentBeneficiarySetHash,
@@ -17,7 +17,7 @@ import { HttpTakeoverFundingSafeApprover } from './takeover-funding-governance.t
 import { RemoteExecutorClient } from './executor.ts';
 import {
   RpcBeneficiarySnapshotSource,
-  RpcPaymentOracleQuoteSource,
+  RpcPaymentNplQuoteSource,
   RpcPaymentPolicyAttestationSource,
   RpcWalletMessageSignatureVerifier,
   PAYMENT_POLICY_TUPLE_ABI,
@@ -926,11 +926,15 @@ test('seckill Safe proposer and dual-RPC finality bind session open, breaker and
   );
 });
 
-test('payment RPC sources enforce the frozen Oracle and beneficiary snapshot rules', async () => {
-  const now = 1_800_000_000;
+test('payment RPC sources compute exact NPL amounts from the fixed pair and beneficiary snapshot', async () => {
   const reader = new StubContractReader({
-    pair: '0x2955e33bb120714abf11ace2766e614e6e5955b2',
-    consult: [1_000n, 50_000n * 10n ** 18n, BigInt(now)],
+    pairReserves: {
+      blockNumber: 40_000_000,
+      token0: USDT_ADDRESS,
+      token1: NPL_ADDRESS,
+      reserve0: 50_000n * 10n ** 18n,
+      reserve1: 500_000n * 10n ** 18n,
+    },
     referrerOf: MERCHANT,
     regionBeneficiaries: [
       '0x3333333333333333333333333333333333333333',
@@ -939,14 +943,9 @@ test('payment RPC sources enforce the frozen Oracle and beneficiary snapshot rul
       '0x6666666666666666666666666666666666666666',
     ],
   });
-  const oracle = new RpcPaymentOracleQuoteSource({
-    reader,
-    sourceAddress: CONTRACT,
-    clock: () => new Date(now * 1000),
-  });
-  assert.deepEqual(await oracle.quote({ listPriceUsdt: 100n, policyVersion: 1, oracleVersion: HASH_1 }), {
+  const nplQuotes = new RpcPaymentNplQuoteSource({ reader });
+  assert.deepEqual(await nplQuotes.quote({ listPriceUsdt: 100n, policyVersion: 1 }), {
     nplQuoteAmount: 1_000n,
-    oracleVersion: HASH_1,
   });
   const beneficiaries = new RpcBeneficiarySnapshotSource({ reader, beneficiaryRegistryAddress: CONTRACT });
   assert.deepEqual(await beneficiaries.resolve({
@@ -963,21 +962,24 @@ test('payment RPC sources enforce the frozen Oracle and beneficiary snapshot rul
     region: '0x6666666666666666666666666666666666666666',
   });
 
-  const stale = new RpcPaymentOracleQuoteSource({
+  const lowLiquidity = new RpcPaymentNplQuoteSource({
     reader: new StubContractReader({
-      pair: '0x2955e33bb120714abf11ace2766e614e6e5955b2',
-      consult: [1_000n, 50_000n * 10n ** 18n, BigInt(now - 601)],
+      pairReserves: {
+        blockNumber: 40_000_000,
+        token0: NPL_ADDRESS,
+        token1: USDT_ADDRESS,
+        reserve0: 500_000n * 10n ** 18n,
+        reserve1: 50_000n * 10n ** 18n - 1n,
+      },
     }),
-    sourceAddress: CONTRACT,
-    clock: () => new Date(now * 1000),
   });
   await assert.rejects(
-    stale.quote({ listPriceUsdt: 100n, policyVersion: 1, oracleVersion: HASH_1 }),
-    /stale/,
+    lowLiquidity.quote({ listPriceUsdt: 100n, policyVersion: 1 }),
+    /below the frozen minimum/,
   );
 });
 
-test('payment policy attestation binds all 30 Registry fields and latest-version semantics', async () => {
+test('payment policy attestation binds all 27 Registry fields and latest-version semantics', async () => {
   const policy = paymentPolicySnapshot();
   const operationAccounts = policy.operationsDestinations.map((item) => item.account);
   const operationWeights = policy.operationsDestinations.map((item) => BigInt(item.weightBps));
@@ -1014,9 +1016,9 @@ test('payment policy attestation binds all 30 Registry fields and latest-version
   });
 
   for (const [name, index, value] of [
-    ['usdtCustodySafe', 22, '0x9999999999999999999999999999999999999999'],
-    ['concessionDestinationSetHash', 27, HASH_2],
-    ['rulesContentHash', 29, HASH_2],
+    ['usdtCustodySafe', 19, '0x9999999999999999999999999999999999999999'],
+    ['concessionDestinationSetHash', 24, HASH_2],
+    ['rulesContentHash', 26, HASH_2],
   ] as const) {
     const changed = [...tuple];
     changed[index] = value;
@@ -1052,12 +1054,10 @@ test('ERC-1271 verifier accepts only the contract-wallet magic value and fails c
   );
 });
 
-test('runtime readiness attests deployed code, bindings, roles, Oracle source and live infrastructure', async () => {
+test('runtime readiness attests deployed code, bindings, roles, NPL quote source and live infrastructure', async () => {
   const router = '0x1000000000000000000000000000000000000001';
   const policyRegistry = '0x1000000000000000000000000000000000000002';
   const beneficiaryRegistry = '0x1000000000000000000000000000000000000003';
-  const oracle = '0x1000000000000000000000000000000000000004';
-  const twapSource = '0x1000000000000000000000000000000000000005';
   const governanceSafe = '0x1000000000000000000000000000000000000006';
   const usdtSafe = '0x1000000000000000000000000000000000000007';
   const nplSafe = '0x1000000000000000000000000000000000000008';
@@ -1071,7 +1071,6 @@ test('runtime readiness attests deployed code, bindings, roles, Oracle source an
     [`${router}:npl`]: '0x4e8277ab31e4956b2cd48449793a57656dfc03d2',
     [`${router}:policyRegistry`]: policyRegistry,
     [`${router}:beneficiaryRegistry`]: beneficiaryRegistry,
-    [`${router}:oracle`]: oracle,
     [`${router}:governanceSafe`]: governanceSafe,
     [`${router}:platformServiceFeeSafe`]: '0x7000000000000000000000000000000000000000',
     [`${router}:usdtCustodySafe`]: usdtSafe,
@@ -1081,12 +1080,17 @@ test('runtime readiness attests deployed code, bindings, roles, Oracle source an
     [`${policyRegistry}:safe`]: governanceSafe,
     [`${policyRegistry}:secondarySigner`]: secondarySigner,
     [`${beneficiaryRegistry}:policyRegistry`]: policyRegistry,
-    [`${oracle}:source`]: twapSource,
-    [`${twapSource}:pair`]: '0x2955e33bb120714abf11ace2766e614e6e5955b2',
+    pairReserves: {
+      blockNumber: 40_000_000,
+      token0: USDT_ADDRESS,
+      token1: NPL_ADDRESS,
+      reserve0: 50_000n * 10n ** 18n,
+      reserve1: 500_000n * 10n ** 18n,
+    },
     hasRole: true,
   };
   const reader = new StubRuntimeReader(values, runtimeCode);
-  const deployments = [router, policyRegistry, beneficiaryRegistry, oracle].map((address, index) => ({
+  const deployments = [router, policyRegistry, beneficiaryRegistry].map((address, index) => ({
     name: `Contract${index}`,
     address,
     deployedCodeHash: runtimeCodeHash,
@@ -1097,9 +1101,6 @@ test('runtime readiness attests deployed code, bindings, roles, Oracle source an
     router,
     policyRegistry,
     beneficiaryRegistry,
-    oracle,
-    twapSource,
-    twapSourceCodeHash: runtimeCodeHash,
     governanceSafe,
     platformServiceFeeSafe: '0x7000000000000000000000000000000000000000',
     usdtCustodySafe: usdtSafe,
@@ -1113,7 +1114,7 @@ test('runtime readiness attests deployed code, bindings, roles, Oracle source an
     roleGrantsVerified: true,
     safeAdminVerified: true,
     signerBindingsVerified: true,
-    oracleDeploymentVerified: true,
+    nplQuoteSourceHealthy: true,
     rpcChain56Healthy: true,
   });
 
@@ -1532,6 +1533,13 @@ class StubContractReader implements ContractReader {
     if (!(method in this.#values)) throw new Error(`Unexpected method ${method}`);
     return this.#values[method];
   }
+
+  async pairReserves(_address: string) {
+    if (!this.#values.pairReserves) throw new Error('Unexpected pair reserves request');
+    return this.#values.pairReserves as {
+      blockNumber: number; token0: string; token1: string; reserve0: bigint; reserve1: bigint;
+    };
+  }
 }
 
 class StubRuntimeReader implements RuntimeCodeReader {
@@ -1556,6 +1564,12 @@ class StubRuntimeReader implements RuntimeCodeReader {
 
   async code() {
     return this.#code;
+  }
+
+  async pairReserves(_address: string) {
+    return this.#values.pairReserves as {
+      blockNumber: number; token0: string; token1: string; reserve0: bigint; reserve1: bigint;
+    };
   }
 }
 
@@ -2005,7 +2019,6 @@ function jsonResponse(body: unknown) {
 function paymentPolicySnapshot(): PaymentPolicySnapshot {
   return {
     policyVersion: 1,
-    oracleVersion: HASH_1,
     usdtPaymentBps: 7_000,
     nplPaymentBps: 3_000,
     nplBurnListPriceBps: 2_000,
@@ -2023,10 +2036,6 @@ function paymentPolicySnapshot(): PaymentPolicySnapshot {
     relayInitial: 60,
     relayIncrement: 30,
     relayCap: 60,
-    oracleWindowSeconds: 1_800,
-    oracleMaxDeviationBps: 500,
-    oracleMaxAgeSeconds: 600,
-    oracleMinimumUsdtLiquidity: 50_000n * 10n ** 18n,
     requiredConfirmations: 15,
     merchantGuaranteeMinimumUsdt: 1_000n * 10n ** 18n,
     platformServiceFeeSafe: '0x2222222222222222222222222222222222222223',
@@ -2072,9 +2081,6 @@ function paymentPolicyTuple(
     policy.relayInitial,
     policy.relayIncrement,
     policy.relayCap,
-    policy.oracleVersion,
-    policy.oracleMaxAgeSeconds,
-    policy.oracleMinimumUsdtLiquidity,
     policy.merchantGuaranteeMinimumUsdt,
     policy.usdtCustodySafe,
     policy.nplRewardSafe,

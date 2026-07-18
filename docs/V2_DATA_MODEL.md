@@ -59,7 +59,7 @@ confirmations.
 
 A canonical `PaymentRouterV2.PaymentCompleted` event creates or restores:
 
-- `core.orders`, including artifact/policy/Oracle versions, buyer, merchant,
+- `core.orders`, including artifact/policy version, buyer, merchant,
   product/SKU, fulfillment hashes, nonce, exact quote and allocation snapshots;
 - `core.payment_events`, including transaction/log/block identity,
   classification, snapshot hash, confirmations and canonical status;

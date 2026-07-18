@@ -43,9 +43,9 @@ For a signed launch quote:
 product USDT leg   = 70% of USDT list price
 delivery freight  = product defaultFreightUsdt; pickup freight = 0
 buyer USDT payment = product USDT leg + freight
-buyer NPL payment  = 30% of the Oracle-equivalent NPL quote
-NPL Burn           = 20% of the same Oracle-equivalent quote
-NPL Reward Safe    = 10% of the same Oracle-equivalent quote
+buyer NPL payment  = 30% of the exact Core-quoted NPL equivalent
+NPL Burn           = 20% of the same Core quote
+NPL Reward Safe    = 10% of the same Core quote
 BNM Locked         = USDT list price, as backend points only
 ```
 

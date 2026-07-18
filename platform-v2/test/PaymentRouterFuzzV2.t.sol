@@ -14,7 +14,6 @@ contract PaymentRouterFuzzV2Test is CoreFixture {
         uint256 listPrice = bound(uint256(rawListPrice), 10, 1_000_000 ether);
         uint256 nplQuote = bound(uint256(rawNplQuote), 10, 10_000_000 ether);
         uint16 concessionBps = uint16(bound(rawConcession, 0, 10_000));
-        twapSource.setResult(nplQuote, 50_000 ether, uint64(block.timestamp));
         V2Types.PaymentIntent memory intent = _makePayment(
             keccak256(abi.encode("fuzz-order", rawListPrice, rawNplQuote, rawConcession)),
             buyer,

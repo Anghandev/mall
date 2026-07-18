@@ -2,21 +2,20 @@
 pragma solidity 0.8.26;
 
 import {CoreFixture} from "./helpers/CoreFixture.sol";
-import {Mock1271Wallet, MockTwapSource} from "./helpers/Mocks.sol";
+import {Mock1271Wallet} from "./helpers/Mocks.sol";
 import {BeneficiaryRegistryV2} from "../contracts/BeneficiaryRegistryV2.sol";
 import {PaymentRouterV2} from "../contracts/PaymentRouterV2.sol";
-import {TwapOracleAdapterV2} from "../contracts/TwapOracleAdapterV2.sol";
-import {IBeneficiaryRegistryV2, IPolicyRegistryV2, ITwapOracleV2} from "../contracts/interfaces/IV2Core.sol";
+import {IBeneficiaryRegistryV2, IPolicyRegistryV2} from "../contracts/interfaces/IV2Core.sol";
 import {V2Types} from "../contracts/types/V2Types.sol";
 
 contract PaymentRouterV2Test is CoreFixture {
     function testPaymentEncodingMatchesCoreSigningVector() public pure {
         V2Types.PaymentIntent memory intent = _signingVectorIntent();
         bytes32 paymentHash = keccak256(abi.encode(intent));
-        assertEq(paymentHash, 0x99ccfc957ff13dd932246ab4f65c3636c3557d7bfdd00369ee9a4c4a597c90b9);
+        assertEq(paymentHash, 0x5e4de10e2ad0e6a4523921877b4dd61cfc3b8eb3788ccb6d682170caa36c81e7);
         assertEq(
             _paymentAuthorizationDigest(intent, paymentHash),
-            0x8d92356ce3efbaa3271f6c99d9166b7bb90787905fd35308c9b0b6bb094ff033
+            0xa2f194fafcb357f74f04b79697a228e5bb86a5933b42c03b56082131a548406b
         );
     }
 
@@ -33,10 +32,10 @@ contract PaymentRouterV2Test is CoreFixture {
             sessionId: seckillPayment.sessionId, seckillPayment: seckillPayment, fallbackPayment: fallbackPayment
         });
         bytes32 seckillHash = keccak256(abi.encode(intent));
-        assertEq(seckillHash, 0xf222066b7b08d6c1cec6fd2121354ff180c25df10879612465567ec53447536b);
+        assertEq(seckillHash, 0x9c0b86b12a6cb8613c46b162f487fc798d4ff4205cd77213b151306cbc40c2b1);
         assertEq(
             _seckillAuthorizationDigest(intent, seckillHash),
-            0x19d2d96a413026200dce3a6b06fffe55ee6a9dffba237ed48ca03f92eb09d4fd
+            0x30365fa7329679f0bb416e5a5b512a0d8c68c26d6352fe7ce7055647b3618cfc
         );
     }
 
@@ -44,7 +43,6 @@ contract PaymentRouterV2Test is CoreFixture {
         return V2Types.PaymentIntent({
             orderId: bytes32(uint256(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)),
             policyVersion: 1,
-            oracleVersion: bytes32(uint256(0x1111111111111111111111111111111111111111111111111111111111111111)),
             buyer: 0x1111111111111111111111111111111111111111,
             merchant: 0x2222222222222222222222222222222222222222,
             productId: bytes32(uint256(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)),
@@ -170,7 +168,6 @@ contract PaymentRouterV2Test is CoreFixture {
             npl,
             IPolicyRegistryV2(address(0)),
             IBeneficiaryRegistryV2(address(beneficiaryRegistry)),
-            ITwapOracleV2(address(oracle)),
             platformServiceFeeSafe,
             usdtCustodySafe,
             nplRewardSafe,
@@ -265,6 +262,39 @@ contract PaymentRouterV2Test is CoreFixture {
         digest = router.hashPayment(intent);
         vm.expectRevert(PaymentRouterV2.InvalidIntent.selector);
         router.pay(intent, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest));
+    }
+
+    function testQuoteSignatureBindsAmountsIdentityReservationPolicyDeadlineAndNonce() public {
+        V2Types.PaymentIntent memory original =
+            _makePayment(keccak256("bound-fields"), buyer, 19, false, keccak256("reservation-19"));
+        bytes32 digest = router.hashPayment(original);
+        bytes memory quoteSignature = _sign(QUOTE_KEY, digest);
+        bytes memory buyerSignature = _sign(BUYER_KEY, digest);
+        V2Types.PaymentIntent memory changed = original;
+
+        changed.nplQuoteAmount += 1;
+        _expectInvalidOldSignatures(changed, quoteSignature, buyerSignature);
+        changed = original;
+        changed.orderId = keccak256("other-order");
+        _expectInvalidOldSignatures(changed, quoteSignature, buyerSignature);
+        changed = original;
+        changed.productId = keccak256("other-product");
+        _expectInvalidOldSignatures(changed, quoteSignature, buyerSignature);
+        changed = original;
+        changed.reservationHash = keccak256("other-reservation");
+        _expectInvalidOldSignatures(changed, quoteSignature, buyerSignature);
+        changed = original;
+        changed.merchant = address(0xBEEF);
+        _expectInvalidOldSignatures(changed, quoteSignature, buyerSignature);
+        changed = original;
+        changed.policyVersion += 1;
+        _expectInvalidOldSignatures(changed, quoteSignature, buyerSignature);
+        changed = original;
+        changed.deadline -= 1;
+        _expectInvalidOldSignatures(changed, quoteSignature, buyerSignature);
+        changed = original;
+        changed.nonce += 1;
+        _expectInvalidOldSignatures(changed, quoteSignature, buyerSignature);
     }
 
     function testSubBpsPaymentCannotCreateZeroCostBnmLiability() public {
@@ -421,26 +451,13 @@ contract PaymentRouterV2Test is CoreFixture {
         assertEq(session.relayDeadline, block.timestamp + 20 seconds);
     }
 
-    function testOraclePairStalenessLiquidityAndDeviationFailClosed() public {
-        MockTwapSource wrongPairSource = new MockTwapSource();
-        wrongPairSource.setPair(address(0x1234));
-        vm.expectRevert(TwapOracleAdapterV2.InvalidAddress.selector);
-        new TwapOracleAdapterV2(wrongPairSource, ORACLE_VERSION);
-
-        V2Types.PaymentIntent memory intent =
-            _makePayment(keccak256("stale"), buyer, 13, false, keccak256("reservation-13"));
-        twapSource.setResult(1_000 ether, 50_000 ether, uint64(block.timestamp - 10 minutes - 1));
-        bytes32 digest = router.hashPayment(intent);
-        vm.expectRevert(TwapOracleAdapterV2.StaleOracle.selector);
-        router.pay(intent, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest));
-
-        twapSource.setResult(1_000 ether, 50_000 ether - 1, uint64(block.timestamp));
-        vm.expectRevert(TwapOracleAdapterV2.InsufficientLiquidity.selector);
-        router.pay(intent, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest));
-
-        twapSource.setResult(1_100 ether, 50_000 ether, uint64(block.timestamp));
-        vm.expectRevert();
-        router.pay(intent, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest));
+    function _expectInvalidOldSignatures(
+        V2Types.PaymentIntent memory intent,
+        bytes memory quoteSignature,
+        bytes memory buyerSignature
+    ) private {
+        vm.expectRevert(PaymentRouterV2.InvalidSignature.selector);
+        router.pay(intent, quoteSignature, buyerSignature);
     }
 
     function _dualIntent(uint256 nonce) private view returns (V2Types.SeckillIntent memory dual) {

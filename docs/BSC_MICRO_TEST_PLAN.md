@@ -3,11 +3,11 @@
 Status: `DRAFT`, `NOT AUTHORIZED` and `NON-EXECUTABLE`.
 
 This draft is bound to local settlement/admin artifact
-`2.0.0-settlement-admin.15`. It does not authorize deployment, approval, token
+`2.0.0-settlement-admin.16`. It does not authorize deployment, approval, token
 transfer or any transaction. The completed redacted readiness check read local
 configuration without printing addresses or private keys. The generic
 `pnpm micro:preflight` remains insufficient because it prints wallet addresses
-and does not attest this project's contracts, TWAP source or transaction packet.
+and does not attest this project's contracts or exact transaction packet.
 
 ## Proven Readiness
 
@@ -28,18 +28,19 @@ and does not attest this project's contracts, TWAP source or transaction packet.
 Execution remains prohibited while any of these is true:
 
 - the coordinated manifest has `deploymentAuthorized: false`;
-- the production `ITwapSourceV2` address, oracle version, audited source and
-  deployed runtime-code hash are not frozen;
-- the four payment contracts are not deployed, source-verified or bound to the
+- the three payment contracts are not deployed, source-verified or bound to the
   final artifact by deployment block and runtime-code hash;
 - the project-specific dry-run packet has not produced exact CREATE nonces,
   constructor calldata, Gas estimates and post-deployment attestations;
-- production domains, isolated signer service, databases, Redis, BNM backend
-  and external providers remain unavailable or unverified;
+- the fixed-pair dual-RPC reserve quote, isolated signer and Router bindings
+  have not passed the project-specific fork checks;
 - the user has not approved one exact bounded transaction packet.
 
 The current generic preflight checks only environment, chain, wallet and budget.
 It is insufficient for this project and cannot authorize a run.
+Map, logistics, printing, notification, media and BNM provider configuration is
+not a deployment or payment-micro-test blocker; those features remain honestly
+`ConfigurationRequired` until their production acceptance is performed.
 
 ## Future Deployment Evidence
 
@@ -47,21 +48,18 @@ The payment contract order is:
 
 1. `PolicyRegistryV2`
 2. `BeneficiaryRegistryV2`
-3. `TwapOracleAdapterV2`
-4. `PaymentRouterV2`
+3. `PaymentRouterV2`
 
 Before approval, a project-specific dry run must prove constructor arguments,
 CREATE addresses, runtime-code hashes, source verification inputs, Safe-held
 roles, policy secondary signature, fixed token/pair addresses and Router zero
-retention on a BSC fork. `TwapOracleAdapterV2` may be planned only after the
-production `ITwapSourceV2` implementation and its runtime hash are independently
-approved. Test deployments are never promoted to production when production
-inputs change.
+retention on a BSC fork. Core must read matching fixed-pair reserves from both
+RPC providers at one common block and sign the exact NPL amount. Test
+deployments are never promoted to production when production inputs change.
 
-The final manifest must bind each deployment block, each actual runtime code
-hash and the independently approved TWAP source code hash. Runtime readiness
-must reproduce those values from both configured RPC providers before new
-quotes are enabled.
+The final manifest must bind each deployment block and actual runtime code hash.
+Runtime readiness must reproduce those values and a matching fixed-pair reserve
+snapshot from both configured RPC providers before new quotes are enabled.
 
 After explicit approval, the non-secret evidence is recorded in
 `platform-v2/deployments/bsc-payment-v2.json` with the bounded release-evidence
@@ -97,7 +95,7 @@ drift, replacement mismatch or a changed Safe nonce invalidates the approval.
 Only after the complete release gate and separate approval, the bounded run may
 cover:
 
-1. deploy and verify the four contracts and Safe-held roles;
+1. deploy and verify the three contracts and Safe-held roles;
 2. publish one approved payment policy through RBAC, secondary signature and
    Safe execution;
 3. configure one dedicated merchant, SKU, beneficiary and region snapshot;
@@ -127,8 +125,8 @@ or represented as a mainnet micro amount.
 ## Stop Conditions
 
 Stop before the next broadcast on any failed assertion, receipt status other
-than 1, reorg, replacement mismatch, chain mismatch, stale or low-liquidity
-Oracle, quote expiry, finality shortfall, unexpected event/balance/liability,
+than 1, reorg, replacement mismatch, chain mismatch, inconsistent, empty or
+low-liquidity pair reserves, quote expiry, finality shortfall, unexpected event/balance/liability,
 Router retained balance, role drift, Safe nonce drift, provider failure, audit
 failure or budget excess.
 

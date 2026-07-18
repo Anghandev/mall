@@ -169,7 +169,7 @@ export async function recordPaymentProjection(executor: SqlExecutor, input: Reco
     ? quote.seckillListPriceUsdt
     : quote.listPriceUsdt;
   if (unitListPrice === undefined) throw new CoreError('InvalidFinality', 'Seckill price snapshot is unavailable', 409);
-  const policy = parsePaymentPolicySnapshot(quote.policyVersion, quote.oracleVersion, quote.policyPayload);
+  const policy = parsePaymentPolicySnapshot(quote.policyVersion, quote.policyPayload);
   const rebuilt = buildPaymentIntent(
     {
       orderId: input.event.orderId,
@@ -265,20 +265,19 @@ export async function recordPaymentProjection(executor: SqlExecutor, input: Reco
   if (!priorOrder.rows[0]) {
     await executor.query(
       `INSERT INTO core.orders (
-         order_id, artifact_version, policy_version, oracle_version, buyer_wallet,
+         order_id, artifact_version, policy_version, buyer_wallet,
          merchant_id, merchant_wallet, product_id, sku_id, quantity, fulfillment_mode,
          fulfillment_target_hash, region_code_hash, product_policy_hash, reservation_id,
          quote_snapshot, allocation_snapshot, seckill_snapshot, exact_amounts, buyer_nonce,
          quote_deadline, state, finality_status, payment_tx_hash, payment_block_hash, paid_at
        ) VALUES (
-         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
-         $16,$17,$18,$19,$20,$21,'PAID',$22,$23,$24,$25
+         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
+         $15,$16,$17,$18,$19,$20,'PAID',$21,$22,$23,$24
        )`,
       [
         intent.orderId,
         input.event.artifactVersion,
         intent.policyVersion,
-        intent.oracleVersion,
         intent.buyer,
         quote.merchantId,
         intent.merchant,
@@ -1234,8 +1233,8 @@ async function loadQuoteContext(executor: SqlExecutor, event: CanonicalPaymentEv
       || (quote.quote_kind === 'SECKILL' && event.classification === 'ORDINARY')
   ) throw new CoreError('InvalidFinality', 'Payment event values do not match the signed quote', 409);
 
-  const policyResult = await executor.query<{ oracle_version: string; payload: unknown }>(
-    `SELECT oracle_version, payload FROM core.policy_snapshots
+  const policyResult = await executor.query<{ payload: unknown }>(
+    `SELECT payload FROM core.policy_snapshots
      WHERE policy_version = $1 AND artifact_version = $2 AND publication_status = 'PUBLISHED'`,
     [quote.policy_version, quote.artifact_version],
   );
@@ -1244,7 +1243,6 @@ async function loadQuoteContext(executor: SqlExecutor, event: CanonicalPaymentEv
   return {
     intent,
     policyVersion: Number(quote.policy_version),
-    oracleVersion: policy.oracle_version,
     policyPayload: policy.payload,
     buyerWallet: quote.buyer_wallet,
     merchantId: quote.merchant_id,

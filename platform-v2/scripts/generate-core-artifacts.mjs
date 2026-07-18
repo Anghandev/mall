@@ -420,7 +420,6 @@ const coordinatedManifest = {
   executableOrderActionNames,
   decisionBlocked: [],
   externalBlocked: [
-    'TWAP_SOURCE',
     'DEPLOYED_CONTRACT_ADDRESSES',
     'REMOTE_SIGNER',
     'DATABASE_AUDIT_DATABASE_AND_REDIS',
@@ -5513,18 +5512,16 @@ function paymentOpenApiSchemas() {
       type: 'object',
       additionalProperties: false,
       required: [
-        'policyVersion', 'oracleVersion', 'usdtPaymentBps', 'nplPaymentBps',
+        'policyVersion', 'usdtPaymentBps', 'nplPaymentBps',
         'nplBurnListPriceBps', 'nplRewardListPriceBps', 'genesisBps', 'directReferralBps',
         'districtBps', 'cityBps', 'provinceBps', 'regionBps', 'operationsBps',
         'platformFeeBps', 'seckillPrizeBps',
-        'oracleWindowSeconds', 'oracleMaxDeviationBps', 'oracleMaxAgeSeconds',
-        'oracleMinimumUsdtLiquidity', 'requiredConfirmations', 'merchantGuaranteeMinimumUsdt',
+        'requiredConfirmations', 'merchantGuaranteeMinimumUsdt',
         'platformServiceFeeSafe', 'usdtCustodySafe', 'nplRewardSafe', 'operationsTreasurySafe', 'circulationPool',
         'concessionDestinationSetHash', 'genesisNodeDestinations', 'operationsDestinations',
       ],
       properties: {
         policyVersion: { type: 'integer', minimum: 1 },
-        oracleVersion: { $ref: '#/components/schemas/Bytes32' },
         usdtPaymentBps: { type: 'integer', minimum: 0, maximum: 10000 },
         nplPaymentBps: { type: 'integer', minimum: 0, maximum: 10000 },
         nplBurnListPriceBps: { type: 'integer', minimum: 0, maximum: 10000 },
@@ -5538,10 +5535,6 @@ function paymentOpenApiSchemas() {
         operationsBps: { type: 'integer', minimum: 0, maximum: 10000 },
         platformFeeBps: { type: 'integer', minimum: 0, maximum: 10000 },
         seckillPrizeBps: { type: 'integer', minimum: 0, maximum: 10000 },
-        oracleWindowSeconds: { const: 1800 },
-        oracleMaxDeviationBps: { const: 500 },
-        oracleMaxAgeSeconds: { const: 600 },
-        oracleMinimumUsdtLiquidity: { $ref: '#/components/schemas/AtomicAmount' },
         requiredConfirmations: { const: 15 },
         merchantGuaranteeMinimumUsdt: { $ref: '#/components/schemas/AtomicAmount' },
         platformServiceFeeSafe: { $ref: '#/components/schemas/Address' },
@@ -5690,7 +5683,7 @@ function paymentOpenApiSchemas() {
     CanonicalPaymentIntent: {
       type: 'object', additionalProperties: false,
       required: [
-        'orderId', 'policyVersion', 'oracleVersion', 'buyer', 'merchant', 'productId', 'skuId', 'quantity',
+        'orderId', 'policyVersion', 'buyer', 'merchant', 'productId', 'skuId', 'quantity',
         'fulfillmentMode', 'fulfillmentTargetHash', 'regionCodeHash', 'productPolicyHash', 'reservationId',
         'reservationHash', 'reservationDeadline', 'issuedAt', 'deadline', 'nonce', 'listPriceUsdt',
         'productUsdtPaymentAmount', 'platformServiceFeeUsdt', 'custodyProductUsdt',
@@ -5704,7 +5697,6 @@ function paymentOpenApiSchemas() {
       properties: {
         orderId: { $ref: '#/components/schemas/Bytes32' },
         policyVersion: { type: 'integer', minimum: 1 },
-        oracleVersion: { $ref: '#/components/schemas/Bytes32' },
         buyer: { $ref: '#/components/schemas/Address' },
         merchant: { $ref: '#/components/schemas/Address' },
         productId: { $ref: '#/components/schemas/Bytes32' },
@@ -7959,7 +7951,6 @@ export interface RiskAppealDecisionRequest {
 
 export interface ProductPolicy {
   policyVersion: number;
-  oracleVersion: Bytes32;
   usdtPaymentBps: number;
   nplPaymentBps: number;
   nplBurnListPriceBps: number;
@@ -7973,10 +7964,6 @@ export interface ProductPolicy {
   operationsBps: number;
   platformFeeBps: number;
   seckillPrizeBps: number;
-  oracleWindowSeconds: 1800;
-  oracleMaxDeviationBps: 500;
-  oracleMaxAgeSeconds: 600;
-  oracleMinimumUsdtLiquidity: AtomicAmount;
   requiredConfirmations: 15;
   merchantGuaranteeMinimumUsdt: AtomicAmount;
   platformServiceFeeSafe: Address;
@@ -8787,7 +8774,6 @@ export interface AllocationSnapshot {
 export interface PaymentRouterIntent {
   orderId: Bytes32;
   policyVersion: number;
-  oracleVersion: Bytes32;
   buyer: Address;
   merchant: Address;
   productId: Bytes32;

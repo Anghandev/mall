@@ -8,7 +8,7 @@ import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {IBeneficiaryRegistryV2, IPolicyRegistryV2, ITwapOracleV2} from "./interfaces/IV2Core.sol";
+import {IBeneficiaryRegistryV2, IPolicyRegistryV2} from "./interfaces/IV2Core.sol";
 import {V2Types} from "./types/V2Types.sol";
 
 contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
@@ -37,7 +37,6 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
     IERC20 public immutable npl;
     IPolicyRegistryV2 public immutable policyRegistry;
     IBeneficiaryRegistryV2 public immutable beneficiaryRegistry;
-    ITwapOracleV2 public immutable oracle;
     address public immutable governanceSafe;
     address public immutable platformServiceFeeSafe;
     address public immutable usdtCustodySafe;
@@ -109,7 +108,6 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
         IERC20 npl_,
         IPolicyRegistryV2 policyRegistry_,
         IBeneficiaryRegistryV2 beneficiaryRegistry_,
-        ITwapOracleV2 oracle_,
         address platformServiceFeeSafe_,
         address usdtCustodySafe_,
         address nplRewardSafe_,
@@ -120,10 +118,9 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
         address governanceSafe_ = policyRegistry_.safe();
         if (
             block.chainid != V2Types.BSC_CHAIN_ID || address(usdt_) != V2Types.USDT || address(npl_) != V2Types.NPL
-                || address(beneficiaryRegistry_) == address(0) || address(oracle_) == address(0)
-                || governanceSafe_ == address(0) || platformServiceFeeSafe_ == address(0)
-                || usdtCustodySafe_ == address(0) || nplRewardSafe_ == address(0)
-                || operationsTreasurySafe_ == address(0) || quoteSigner_ == address(0)
+                || address(beneficiaryRegistry_) == address(0) || governanceSafe_ == address(0)
+                || platformServiceFeeSafe_ == address(0) || usdtCustodySafe_ == address(0)
+                || nplRewardSafe_ == address(0) || operationsTreasurySafe_ == address(0) || quoteSigner_ == address(0)
                 || platformServiceFeeSafe_ == governanceSafe_ || usdtCustodySafe_ == governanceSafe_
                 || nplRewardSafe_ == governanceSafe_ || operationsTreasurySafe_ == governanceSafe_
                 || platformServiceFeeSafe_ == usdtCustodySafe_ || platformServiceFeeSafe_ == nplRewardSafe_
@@ -134,7 +131,6 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
         npl = npl_;
         policyRegistry = policyRegistry_;
         beneficiaryRegistry = beneficiaryRegistry_;
-        oracle = oracle_;
         governanceSafe = governanceSafe_;
         platformServiceFeeSafe = platformServiceFeeSafe_;
         usdtCustodySafe = usdtCustodySafe_;
@@ -363,15 +359,14 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
 
         V2Types.Policy memory policy = policyRegistry.getPolicy(intent.policyVersion);
         if (
-            intent.oracleVersion != policy.oracleVersion || policy.usdtCustodySafe != usdtCustodySafe
-                || policy.nplRewardSafe != nplRewardSafe || policy.operationsTreasurySafe != operationsTreasurySafe
+            policy.usdtCustodySafe != usdtCustodySafe || policy.nplRewardSafe != nplRewardSafe
+                || policy.operationsTreasurySafe != operationsTreasurySafe
                 || intent.concessionAllocationHash != policy.concessionDestinationSetHash
         ) revert InvalidIntent();
         _validateAmounts(intent, policy);
         beneficiaryRegistry.validateSnapshot(
             intent.policyVersion, intent.buyer, intent.merchant, intent.regionCodeHash, intent.beneficiaries
         );
-        oracle.validateQuote(intent.oracleVersion, intent.listPriceUsdt, intent.nplQuoteAmount);
     }
 
     function _validateAmounts(V2Types.PaymentIntent calldata intent, V2Types.Policy memory policy) private pure {
@@ -423,7 +418,6 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
                 || seckill.fulfillmentMode != fallbackPayment.fulfillmentMode
                 || seckill.fulfillmentTargetHash != fallbackPayment.fulfillmentTargetHash
                 || seckill.regionCodeHash != fallbackPayment.regionCodeHash
-                || seckill.oracleVersion != fallbackPayment.oracleVersion
                 || seckill.productPolicyHash != fallbackPayment.productPolicyHash
                 || seckill.reservationDeadline != fallbackPayment.reservationDeadline
                 || seckill.issuedAt != fallbackPayment.issuedAt || seckill.deadline != fallbackPayment.deadline

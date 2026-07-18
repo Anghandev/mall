@@ -13,7 +13,6 @@ const artifactVersion = CORE_ARTIFACT_VERSION;
 const contracts = [
   'PolicyRegistryV2',
   'BeneficiaryRegistryV2',
-  'TwapOracleAdapterV2',
   'PaymentRouterV2',
 ];
 const deploymentEvidencePath = join(coreRoot, 'deployments', 'bsc-payment-v2.json');
@@ -103,16 +102,9 @@ const manifest = {
     'OPERATIONS_TREASURY_SAFE_ADDRESS',
     'SECONDARY_SIGNER',
     'QUOTE_SIGNER',
-    'TWAP_SOURCE',
     'BSC_RPC_URL',
   ],
-  decisionBlocked: [
-    'platform service fee proportion',
-    'seckill prize-pool proportion',
-    'merchant concession destination weights',
-    'fixed circulation and remainder accounts',
-    'genesis credential contract and token ID',
-  ],
+  decisionBlocked: [],
   deploymentOrder: contracts,
   contracts: contractEntries,
   postDeploymentRoleGrants: roleGrants.map(([contract, role, grantee]) => ({ contract, role, grantee })),

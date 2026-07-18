@@ -5,14 +5,13 @@ import { keccak256, toUtf8Bytes, type InterfaceAbi } from 'ethers';
 import type { RuntimeReadinessSnapshot } from '../api/config.ts';
 import { CORE_ARTIFACT_VERSION, NPL_ADDRESS, NPL_USDT_PAIR_ADDRESS, USDT_ADDRESS } from '../api/enums.ts';
 import type { PaymentIndexerStatus } from './payment-indexer-worker.ts';
-import type { ContractReader } from './payment-sources.ts';
+import type { ContractReader, PairReserveReader } from './payment-sources.ts';
 
 const ROUTER_ABI = [
   'function usdt() view returns (address)',
   'function npl() view returns (address)',
   'function policyRegistry() view returns (address)',
   'function beneficiaryRegistry() view returns (address)',
-  'function oracle() view returns (address)',
   'function governanceSafe() view returns (address)',
   'function platformServiceFeeSafe() view returns (address)',
   'function usdtCustodySafe() view returns (address)',
@@ -30,11 +29,9 @@ const BENEFICIARY_ABI = [
   'function policyRegistry() view returns (address)',
   'function hasRole(bytes32 role,address account) view returns (bool)',
 ];
-const ORACLE_ABI = ['function source() view returns (address)'];
-const SOURCE_ABI = ['function pair() view returns (address)'];
 const DEFAULT_ADMIN_ROLE = `0x${'0'.repeat(64)}`;
 
-export interface RuntimeCodeReader extends ContractReader {
+export interface RuntimeCodeReader extends PairReserveReader {
   chainId(): Promise<number>;
   code(address: string): Promise<string>;
 }
@@ -50,7 +47,7 @@ export interface PaymentRuntimeAttestation {
   roleGrantsVerified: boolean;
   safeAdminVerified: boolean;
   signerBindingsVerified: boolean;
-  oracleDeploymentVerified: boolean;
+  nplQuoteSourceHealthy: boolean;
   rpcChain56Healthy: boolean;
 }
 
@@ -61,8 +58,6 @@ export class RpcPaymentRuntimeAttestor {
     router: string;
     policyRegistry: string;
     beneficiaryRegistry: string;
-    oracle: string;
-    twapSource: string;
     governanceSafe: string;
     platformServiceFeeSafe: string;
     usdtCustodySafe: string;
@@ -71,7 +66,6 @@ export class RpcPaymentRuntimeAttestor {
     secondarySigner: string;
     quoteSigner: string;
   };
-  readonly #twapSourceCodeHash: string;
 
   constructor(input: {
     reader: RuntimeCodeReader;
@@ -79,9 +73,6 @@ export class RpcPaymentRuntimeAttestor {
     router: string;
     policyRegistry: string;
     beneficiaryRegistry: string;
-    oracle: string;
-    twapSource: string;
-    twapSourceCodeHash: string;
     governanceSafe: string;
     platformServiceFeeSafe: string;
     usdtCustodySafe: string;
@@ -101,8 +92,6 @@ export class RpcPaymentRuntimeAttestor {
       router: normalizedAddress(input.router),
       policyRegistry: normalizedAddress(input.policyRegistry),
       beneficiaryRegistry: normalizedAddress(input.beneficiaryRegistry),
-      oracle: normalizedAddress(input.oracle),
-      twapSource: normalizedAddress(input.twapSource),
       governanceSafe: normalizedAddress(input.governanceSafe),
       platformServiceFeeSafe: normalizedAddress(input.platformServiceFeeSafe),
       usdtCustodySafe: normalizedAddress(input.usdtCustodySafe),
@@ -111,7 +100,6 @@ export class RpcPaymentRuntimeAttestor {
       secondarySigner: normalizedAddress(input.secondarySigner),
       quoteSigner: normalizedAddress(input.quoteSigner),
     };
-    this.#twapSourceCodeHash = normalizedHash(input.twapSourceCodeHash);
   }
 
   async attest(): Promise<PaymentRuntimeAttestation> {
@@ -123,15 +111,11 @@ export class RpcPaymentRuntimeAttestor {
     const deployedRuntimeCodeVerified = codeEntries.every(
       (deployment) => deployment.actual === deployment.deployedCodeHash,
     );
-    const sourceCodeVerified = codeHash(await this.#reader.code(this.#addresses.twapSource))
-      === this.#twapSourceCodeHash;
-
     const [
       routerUsdt,
       routerNpl,
       routerPolicy,
       routerBeneficiary,
-      routerOracle,
       routerGovernanceSafe,
       routerPlatformServiceFeeSafe,
       routerUsdtSafe,
@@ -141,14 +125,11 @@ export class RpcPaymentRuntimeAttestor {
       policySafe,
       policySecondarySigner,
       beneficiaryPolicy,
-      oracleSource,
-      sourcePair,
     ] = await Promise.all([
       callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'usdt'),
       callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'npl'),
       callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'policyRegistry'),
       callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'beneficiaryRegistry'),
-      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'oracle'),
       callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'governanceSafe'),
       callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'platformServiceFeeSafe'),
       callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'usdtCustodySafe'),
@@ -158,9 +139,16 @@ export class RpcPaymentRuntimeAttestor {
       callAddress(this.#reader, this.#addresses.policyRegistry, POLICY_ABI, 'safe'),
       callAddress(this.#reader, this.#addresses.policyRegistry, POLICY_ABI, 'secondarySigner'),
       callAddress(this.#reader, this.#addresses.beneficiaryRegistry, BENEFICIARY_ABI, 'policyRegistry'),
-      callAddress(this.#reader, this.#addresses.oracle, ORACLE_ABI, 'source'),
-      callAddress(this.#reader, this.#addresses.twapSource, SOURCE_ABI, 'pair'),
     ]);
+
+    const pair = await this.#reader.pairReserves(NPL_USDT_PAIR_ADDRESS);
+    const token0 = pair.token0.toLowerCase();
+    const token1 = pair.token1.toLowerCase();
+    const pairMatches = (token0 === USDT_ADDRESS && token1 === NPL_ADDRESS)
+      || (token0 === NPL_ADDRESS && token1 === USDT_ADDRESS);
+    const usdtLiquidity = token0 === USDT_ADDRESS ? pair.reserve0 : pair.reserve1;
+    const nplQuoteSourceHealthy = pairMatches && pair.reserve0 > 0n && pair.reserve1 > 0n
+      && usdtLiquidity >= 50_000n * 10n ** 18n;
 
     const safeAdminVerified = routerGovernanceSafe === this.#addresses.governanceSafe
       && policySafe === this.#addresses.governanceSafe
@@ -170,10 +158,6 @@ export class RpcPaymentRuntimeAttestor {
       && routerOperationsSafe === this.#addresses.operationsTreasurySafe;
     const signerBindingsVerified = routerQuoteSigner === this.#addresses.quoteSigner
       && policySecondarySigner === this.#addresses.secondarySigner;
-    const oracleDeploymentVerified = sourceCodeVerified
-      && routerOracle === this.#addresses.oracle
-      && oracleSource === this.#addresses.twapSource
-      && sourcePair === NPL_USDT_PAIR_ADDRESS;
     const contractBindingsVerified = routerUsdt === USDT_ADDRESS
       && routerNpl === NPL_ADDRESS
       && routerPolicy === this.#addresses.policyRegistry
@@ -195,7 +179,7 @@ export class RpcPaymentRuntimeAttestor {
       roleGrantsVerified: roleChecks.every(Boolean),
       safeAdminVerified,
       signerBindingsVerified,
-      oracleDeploymentVerified,
+      nplQuoteSourceHealthy,
       rpcChain56Healthy,
     };
   }
@@ -302,7 +286,7 @@ function failedAttestation(): PaymentRuntimeAttestation {
     roleGrantsVerified: false,
     safeAdminVerified: false,
     signerBindingsVerified: false,
-    oracleDeploymentVerified: false,
+    nplQuoteSourceHealthy: false,
     rpcChain56Healthy: false,
   };
 }

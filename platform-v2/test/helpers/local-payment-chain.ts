@@ -106,7 +106,6 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
   } as const;
   const regionCodeHash = keccak256(toUtf8Bytes('210211'));
   const concessionAllocationHash = paymentAllocationSetHash();
-  const oracleVersion = keccak256(toUtf8Bytes('pancake-v2-npl-usdt-30m-v1'));
 
   const tokenArtifact = artifact('Mocks.sol/CallbackERC20.json');
   const tokenImplementation = await deploy(tokenArtifact, safe, ['Mock Token', 'MOCK']);
@@ -116,7 +115,6 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
   const usdt = new Contract(USDT_ADDRESS, tokenArtifact.abi, safe);
   const npl = new Contract(NPL_ADDRESS, tokenArtifact.abi, safe);
 
-  const twapSource = await deploy(artifact('Mocks.sol/MockTwapSource.json'), safe);
   const policyRegistry = await deploy(
     artifact('PolicyRegistryV2.sol/PolicyRegistryV2.json'),
     safe,
@@ -171,9 +169,6 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
     relayInitial: 60,
     relayIncrement: 30,
     relayCap: 60,
-    oracleVersion,
-    oracleMaxAge: 600,
-    oracleMinLiquidity: 50_000n * ONE_TOKEN,
     merchantGuaranteeMinimum: 1_000n * ONE_TOKEN,
     usdtCustodySafe: usdtCustody,
     nplRewardSafe: nplReward,
@@ -192,12 +187,6 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
     rawSignature(secondaryWallet, policyDigest),
   ]);
 
-  await transact(twapSource, 'setResult', [1_000n * ONE_TOKEN, 50_000n * ONE_TOKEN, latest.timestamp]);
-  const oracle = await deploy(
-    artifact('TwapOracleAdapterV2.sol/TwapOracleAdapterV2.json'),
-    safe,
-    [await twapSource.getAddress(), oracleVersion],
-  );
   const router = await deploy(
     artifact('PaymentRouterV2.sol/PaymentRouterV2.json'),
     safe,
@@ -206,7 +195,6 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
       NPL_ADDRESS,
       await policyRegistry.getAddress(),
       await beneficiaryRegistry.getAddress(),
-      await oracle.getAddress(),
       platformServiceFee,
       usdtCustody,
       nplReward,
@@ -229,7 +217,6 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
     buyer: buyerAddress,
     merchant: merchantAddress,
     issuedAt: head.timestamp,
-    oracleVersion,
     regionCodeHash,
     concessionAllocationHash,
     beneficiaries: beneficiaryAddresses,
@@ -317,7 +304,6 @@ function paymentIntent(input: {
   buyer: string;
   merchant: string;
   issuedAt: number;
-  oracleVersion: string;
   regionCodeHash: string;
   concessionAllocationHash: string;
   beneficiaries: {
@@ -335,7 +321,6 @@ function paymentIntent(input: {
   return {
     orderId: keccak256(toUtf8Bytes(`local-payment:${input.issuedAt}`)),
     policyVersion: 1,
-    oracleVersion: input.oracleVersion,
     buyer: input.buyer,
     merchant: input.merchant,
     productId: PRODUCT_ID,

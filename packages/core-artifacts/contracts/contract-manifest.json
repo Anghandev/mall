@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.15",
+  "artifactVersion": "2.0.0-settlement-admin.16",
   "publicationStatus": "coordinated-settlement-admin-checkpoint",
   "chain": {
     "name": "BSC Mainnet",
@@ -18,7 +18,7 @@
     "viaIR": true,
     "evmVersion": "cancun"
   },
-  "sourceDigestSha256": "d3a23bd39bbc44391d11dee2345b9a7f5c11bb4e69f0b8c1e05125705f81b4ce",
+  "sourceDigestSha256": "de61d8adc8061ca32c03c7119210d1d5b79b2e385e5cd24fef23e60ad5939a75",
   "deploymentStatus": "ExternalBlocked",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
@@ -29,20 +29,12 @@
     "OPERATIONS_TREASURY_SAFE_ADDRESS",
     "SECONDARY_SIGNER",
     "QUOTE_SIGNER",
-    "TWAP_SOURCE",
     "BSC_RPC_URL"
   ],
-  "decisionBlocked": [
-    "platform service fee proportion",
-    "seckill prize-pool proportion",
-    "merchant concession destination weights",
-    "fixed circulation and remainder accounts",
-    "genesis credential contract and token ID"
-  ],
+  "decisionBlocked": [],
   "deploymentOrder": [
     "PolicyRegistryV2",
     "BeneficiaryRegistryV2",
-    "TwapOracleAdapterV2",
     "PaymentRouterV2"
   ],
   "contracts": [
@@ -64,8 +56,8 @@
           "internalType": "address"
         }
       ],
-      "bytecodeSha256": "cc34f5087695183846857c22d4fab315843b8b2f6927b4dd7e7f6051e2aaa2b0",
-      "deployedBytecodeSha256": "e4ddc0cb2a95d160994db7917751342dd00fc632807b0078bab23f1d976bac0c",
+      "bytecodeSha256": "82dacea883faa04d2525dbc6eb62ae87710c3ea4bf53b07c8647b7e9061ed1b1",
+      "deployedBytecodeSha256": "cef0eb8f5ded13d49fd2cb93fed82c71e248f8fbc314cadbfe86c162fa7ab81a",
       "deployedCodeHash": null
     },
     {
@@ -81,30 +73,8 @@
           "internalType": "contract IPolicyRegistryV2"
         }
       ],
-      "bytecodeSha256": "1b06f73496aa1d25e5c32baa7d8528e2f84cfa85a21b866fad3ee3a0a19993a0",
-      "deployedBytecodeSha256": "68449dc4c464bd1f11af16ed4be20bb4b0a25cb71175380de086f64576df07d3",
-      "deployedCodeHash": null
-    },
-    {
-      "name": "TwapOracleAdapterV2",
-      "source": "platform-v2/contracts/TwapOracleAdapterV2.sol",
-      "address": null,
-      "deploymentBlock": null,
-      "status": "ExternalBlocked",
-      "constructorInputs": [
-        {
-          "name": "source_",
-          "type": "address",
-          "internalType": "contract ITwapSourceV2"
-        },
-        {
-          "name": "oracleVersion_",
-          "type": "bytes32",
-          "internalType": "bytes32"
-        }
-      ],
-      "bytecodeSha256": "293714fd633800a96993656d30e6931c471004ad82167fca73408dd09226b502",
-      "deployedBytecodeSha256": "8a78ef78636c56e01490609822c8f0e7e1ef2e3abb211d515680c6f640ac132f",
+      "bytecodeSha256": "a2fa5c3d3c86d59d6b55cffc791d2798414bc0c79336497f6acbaa08961b5431",
+      "deployedBytecodeSha256": "9b4ce9aa4d1a6f442fc53ceaa9a57f1f24fd0eb9d1ee52c0e8e2d98fb237411e",
       "deployedCodeHash": null
     },
     {
@@ -135,11 +105,6 @@
           "internalType": "contract IBeneficiaryRegistryV2"
         },
         {
-          "name": "oracle_",
-          "type": "address",
-          "internalType": "contract ITwapOracleV2"
-        },
-        {
           "name": "platformServiceFeeSafe_",
           "type": "address",
           "internalType": "address"
@@ -165,8 +130,8 @@
           "internalType": "address"
         }
       ],
-      "bytecodeSha256": "93e41825e35fa54df628b87a24596480a5682c044f099a69dd30d36198ad0563",
-      "deployedBytecodeSha256": "28bd459fe43f5c49e525249546eadd0d0f55da079adc51dacf422ce3ed8e2ff6",
+      "bytecodeSha256": "68f7ffbdf50226beabba2cfd18c91daab399cbcfc4c2620fca4f2d179cdb06d0",
+      "deployedBytecodeSha256": "83125b863d70fafae08cce704f7b9278f693f4ab551702bbe73446bb9f6e5a09",
       "deployedCodeHash": null
     }
   ],

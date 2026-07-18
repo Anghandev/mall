@@ -19,7 +19,6 @@ import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 
 interface DraftPayload {
-  oracleVersion: string;
   rulesContentHash: string;
   policy: Record<string, unknown>;
 }
@@ -550,7 +549,6 @@ export class PolicyService {
       );
       const existing = await executor.query<{
         policy_hash: string;
-        oracle_version: string;
         rules_content_hash: string;
         beneficiary_set_hash: string;
         payload: Record<string, unknown>;
@@ -558,7 +556,6 @@ export class PolicyService {
       if (existing.rows[0]) {
         if (
           existing.rows[0].policy_hash.toLowerCase() !== publication.policyHash
-          || existing.rows[0].oracle_version.toLowerCase() !== material.policy.oracleVersion.toLowerCase()
           || existing.rows[0].rules_content_hash.toLowerCase() !== material.rulesContentHash.toLowerCase()
           || existing.rows[0].beneficiary_set_hash.toLowerCase() !== material.beneficiarySetHash.toLowerCase()
           || canonicalJson(existing.rows[0].payload) !== canonicalJson(row.payload.policy)
@@ -566,15 +563,14 @@ export class PolicyService {
       } else {
         await executor.query(
           `INSERT INTO core.policy_snapshots (
-             policy_version, artifact_version, policy_hash, oracle_version,
+             policy_version, artifact_version, policy_hash,
              rules_content_hash, beneficiary_set_hash, payload, publication_status,
              safe_tx_hash, effective_from, created_at
-           ) VALUES ($1,$2,$3,$4,$5,$6,$7,'PUBLISHED',$8,$9,$9)`,
+           ) VALUES ($1,$2,$3,$4,$5,$6,'PUBLISHED',$7,$8,$8)`,
           [
             row.next_policy_version,
             CORE_ARTIFACT_VERSION,
             publication.policyHash,
-            material.policy.oracleVersion.toLowerCase(),
             material.rulesContentHash.toLowerCase(),
             material.beneficiarySetHash.toLowerCase(),
             JSON.stringify(row.payload.policy),
@@ -634,7 +630,7 @@ async function validateDraft(
   const errors = decisionBlocked.map((item) => ({ code: 'DecisionBlocked', field: item }));
   let policy;
   try {
-    policy = parsePaymentPolicySnapshot(policyVersion, payload.oracleVersion, payload.policy);
+    policy = parsePaymentPolicySnapshot(policyVersion, payload.policy);
     buildPolicyPublication(
       {
         policy,
@@ -860,17 +856,16 @@ function draftPayload(value: unknown): DraftPayload {
     throw new CoreError('InvalidRequest', 'Policy draft payload must be an object');
   }
   const input = value as Record<string, unknown>;
-  if (Object.keys(input).some((key) => !['oracleVersion', 'rulesContentHash', 'policy'].includes(key))) {
+  if (Object.keys(input).some((key) => !['rulesContentHash', 'policy'].includes(key))) {
     throw new CoreError('InvalidRequest', 'Policy draft payload contains unknown fields');
   }
-  if (!isHash(input.oracleVersion) || !isHash(input.rulesContentHash)) {
-    throw new CoreError('InvalidRequest', 'Policy draft Oracle or rules hash is invalid');
+  if (!isHash(input.rulesContentHash)) {
+    throw new CoreError('InvalidRequest', 'Policy draft rules hash is invalid');
   }
   if (!input.policy || typeof input.policy !== 'object' || Array.isArray(input.policy)) {
     throw new CoreError('DecisionBlocked', 'Policy draft is missing policy fields', 409);
   }
   return {
-    oracleVersion: input.oracleVersion.toLowerCase(),
     rulesContentHash: input.rulesContentHash.toLowerCase(),
     policy: input.policy as Record<string, unknown>,
   };

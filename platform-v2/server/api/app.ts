@@ -542,7 +542,7 @@ export interface NotificationApiService {
 
 export interface SystemConfigApiService {
   createVersion(actor: FulfillmentActor, input: {
-    configKey: 'BUSINESS' | 'RPC' | 'ORACLE' | 'GAS' | 'CHAIN' | 'INTEGRATIONS' | 'MERCHANT_LEVELS';
+    configKey: 'BUSINESS' | 'RPC' | 'NPL_QUOTE' | 'GAS' | 'CHAIN' | 'INTEGRATIONS' | 'MERCHANT_LEVELS';
     payload: unknown;
     effectiveFrom: string;
     idempotencyKey: string;

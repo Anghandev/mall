@@ -26,7 +26,7 @@ import {
 import {
   ResilientBscContractReader,
   RpcBeneficiarySnapshotSource,
-  RpcPaymentOracleQuoteSource,
+  RpcPaymentNplQuoteSource,
   RpcPaymentPolicyAttestationSource,
   RpcWalletMessageSignatureVerifier,
 } from './chain/payment-sources.ts';
@@ -150,10 +150,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   const paymentService = new CatalogPaymentService({
     transactions,
     signer,
-    oracle: new RpcPaymentOracleQuoteSource({
-      reader,
-      sourceAddress: required(config.twapSourceAddress, 'TWAP_SOURCE_ADDRESS'),
-    }),
+    nplQuotes: new RpcPaymentNplQuoteSource({ reader }),
     beneficiaries: new RpcBeneficiarySnapshotSource({
       reader,
       beneficiaryRegistryAddress: required(config.beneficiaryRegistryAddress, 'BENEFICIARY_REGISTRY_ADDRESS_MANIFEST'),
@@ -582,9 +579,6 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     router: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),
     policyRegistry: required(config.policyRegistryAddress, 'POLICY_REGISTRY_ADDRESS_MANIFEST'),
     beneficiaryRegistry: required(config.beneficiaryRegistryAddress, 'BENEFICIARY_REGISTRY_ADDRESS_MANIFEST'),
-    oracle: required(config.twapOracleAddress, 'TWAP_ORACLE_ADDRESS_MANIFEST'),
-    twapSource: required(config.twapSourceAddress, 'TWAP_SOURCE_ADDRESS'),
-    twapSourceCodeHash: required(config.twapSourceCodeHash, 'TWAP_SOURCE_CODEHASH'),
     governanceSafe: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
     platformServiceFeeSafe: required(
       config.platformServiceFeeSafeAddress,

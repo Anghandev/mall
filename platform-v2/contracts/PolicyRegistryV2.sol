@@ -120,8 +120,8 @@ contract PolicyRegistryV2 is AccessControl, EIP712 {
                 || policy.nplRewardSafe == policy.operationsTreasurySafe || policy.relayInitial == 0
                 || policy.relayIncrement == 0 || policy.relayCap == 0 || policy.seckillMainDuration == 0
                 || policy.relayInitial > policy.relayCap || policy.relayCap > policy.seckillMainDuration
-                || policy.oracleVersion == bytes32(0) || policy.rulesContentHash == bytes32(0)
-                || policy.beneficiarySetHash == bytes32(0) || policy.concessionDestinationSetHash == bytes32(0)
+                || policy.rulesContentHash == bytes32(0) || policy.beneficiarySetHash == bytes32(0)
+                || policy.concessionDestinationSetHash == bytes32(0)
         ) revert InvalidPolicy();
 
         uint256 rewardsBps = uint256(policy.genesisBps) + policy.directReferralBps + policy.districtBps + policy.cityBps
@@ -130,11 +130,7 @@ contract PolicyRegistryV2 is AccessControl, EIP712 {
         if (policy.platformFeeBps != V2Types.PLATFORM_SERVICE_FEE_LIST_PRICE_BPS || policy.seckillPrizeBps != 0) {
             revert InvalidPolicy();
         }
-        if (
-            policy.oracleMaxAge != V2Types.ORACLE_MAX_AGE
-                || policy.oracleMinLiquidity != V2Types.ORACLE_MIN_USDT_LIQUIDITY
-                || policy.merchantGuaranteeMinimum < V2Types.MERCHANT_GUARANTEE_MINIMUM
-        ) revert InvalidPolicy();
+        if (policy.merchantGuaranteeMinimum < V2Types.MERCHANT_GUARANTEE_MINIMUM) revert InvalidPolicy();
 
         if (policy.version == 1) {
             if (

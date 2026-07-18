@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.15",
+  "artifactVersion": "2.0.0-settlement-admin.16",
   "adminResourceTypes": [
     "ORDER",
     "PRODUCT",
@@ -493,7 +493,7 @@
     "BUSINESS",
     "FREIGHT",
     "RPC",
-    "ORACLE",
+    "NPL_QUOTE",
     "GAS",
     "CHAIN",
     "INTEGRATIONS",
