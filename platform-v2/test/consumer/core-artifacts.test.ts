@@ -905,22 +905,28 @@ test('catalog, settlement/admin and seckill realtime capabilities publish the at
   for (const [capability, status] of Object.entries(manifest.capabilityStatus)) {
     assert.equal(status, available.has(capability) ? 'AVAILABLE' : 'NOT_PUBLISHED_FAIL_CLOSED', capability);
   }
-  assert.equal(manifest.deploymentAuthorized, false);
-  assert.equal(manifest.deploymentAuthorizationEvidenceHash, null);
-  assert.equal(contractManifest.deploymentAuthorized, false);
+  assert.equal(manifest.deploymentAuthorized, true);
+  assert.match(manifest.deploymentAuthorizationEvidenceHash!, /^0x[0-9a-f]{64}$/);
+  assert.equal(contractManifest.deploymentAuthorized, true);
   assert.equal(
     contractManifest.deploymentAuthorizationEvidenceHash,
     manifest.deploymentAuthorizationEvidenceHash,
   );
+  assert.deepEqual(contractManifest.contracts.map((contract: { name: string }) => contract.name).sort(), [
+    'BeneficiaryRegistryV2',
+    'PaymentRouterV2',
+    'PolicyRegistryV2',
+  ]);
   assert.ok(contractManifest.contracts.every((contract: {
     status: string;
     address: string | null;
     deploymentBlock: number | null;
     deployedCodeHash: string | null;
-  }) => contract.status === 'PENDING'
-      && contract.address === null
-      && contract.deploymentBlock === null
-      && contract.deployedCodeHash === null));
+  }) => contract.status === 'DEPLOYED'
+      && /^0x[0-9a-f]{40}$/.test(contract.address ?? '')
+      && Number.isSafeInteger(contract.deploymentBlock)
+      && Number(contract.deploymentBlock) > 0
+      && /^0x[0-9a-f]{64}$/.test(contract.deployedCodeHash ?? '')));
   const fulfillmentActions = [
     'REQUEST_EXCHANGE',
     'REQUEST_DELAY',

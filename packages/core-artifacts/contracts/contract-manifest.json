@@ -21,12 +21,10 @@
     "cborMetadata": false
   },
   "sourceDigestSha256": "713ab33de73d34855c3c707e2af837e7b49d59a6783dbf89b247e6eb5e9ae9e5",
-  "deploymentStatus": "PENDING",
-  "deploymentAuthorized": false,
-  "deploymentAuthorizationEvidenceHash": null,
-  "externalBlocked": [
-    "EOA_CONTRACT_REDEPLOYMENT_REQUIRED"
-  ],
+  "deploymentStatus": "DEPLOYED",
+  "deploymentAuthorized": true,
+  "deploymentAuthorizationEvidenceHash": "0x9d260a962e4cefe886ddf1382b1c6efb4ff06fef6fbac17bf7014b3b3e78c3eb",
+  "externalBlocked": [],
   "decisionBlocked": [],
   "deploymentOrder": [
     "PolicyRegistryV2",
@@ -37,9 +35,9 @@
     {
       "name": "PolicyRegistryV2",
       "source": "platform-v2/contracts/PolicyRegistryV2.sol",
-      "address": null,
-      "deploymentBlock": null,
-      "status": "PENDING",
+      "address": "0x217df9b9de12dc790e2e18db8bd80ad87661d201",
+      "deploymentBlock": 110724913,
+      "status": "DEPLOYED",
       "constructorInputs": [
         {
           "name": "governanceWallet_",
@@ -49,14 +47,14 @@
       ],
       "bytecodeSha256": "edf7d9da016d49dc75250f8381282b5fac61ba29c887c0dd6f158683aaeabe0c",
       "deployedBytecodeSha256": "598e1b04e0b493f2025edb1b01bc5322cfc5e5e6179fe5e8e184313a28007081",
-      "deployedCodeHash": null
+      "deployedCodeHash": "0xf65d22cc6e0813fd62b8256cef1fef42bd6ffe88c9e397f36c57be506de592a3"
     },
     {
       "name": "BeneficiaryRegistryV2",
       "source": "platform-v2/contracts/BeneficiaryRegistryV2.sol",
-      "address": null,
-      "deploymentBlock": null,
-      "status": "PENDING",
+      "address": "0xc821c7a29cba3eb452e8ec76dee0b905cedbc956",
+      "deploymentBlock": 110724928,
+      "status": "DEPLOYED",
       "constructorInputs": [
         {
           "name": "policyRegistry_",
@@ -66,14 +64,14 @@
       ],
       "bytecodeSha256": "fbd751fd18d1f1727d2919cda5a6df166a4268e02cabd27560882b0727b49d0c",
       "deployedBytecodeSha256": "602bc34b05fd53dc77807c5417192022ebdefe46a2101faa578ea580ad85fbe8",
-      "deployedCodeHash": null
+      "deployedCodeHash": "0x5a9eada2e8f89239be8c85cfa08f3a4d11ae5e2442051891b554aa73cc67b618"
     },
     {
       "name": "PaymentRouterV2",
       "source": "platform-v2/contracts/PaymentRouterV2.sol",
-      "address": null,
-      "deploymentBlock": null,
-      "status": "PENDING",
+      "address": "0x6cc78118fe053f0836d653de3e64666bb591632b",
+      "deploymentBlock": 110724943,
+      "status": "DEPLOYED",
       "constructorInputs": [
         {
           "name": "usdt_",
@@ -118,7 +116,7 @@
       ],
       "bytecodeSha256": "28cc1fc8c2a4bc733111ba4412d493b6b3f9e5b06ec9eeb6e0a854c32963d07c",
       "deployedBytecodeSha256": "42b749372f8692ea48bd6b7f2a825275759d91ad528d3e9cd6f745ab4854eb74",
-      "deployedCodeHash": null
+      "deployedCodeHash": "0xdf184242d96d300a1d6c1f26b1b3bfd516349fe582b1b8a5698bd0d8841f0720"
     }
   ],
   "postDeploymentRoleGrants": [],

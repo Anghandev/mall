@@ -1,7 +1,7 @@
 # BSC Mainnet EOA Deployment And Micro-Test Plan
 
-Status: `LOCAL_GATES_PASSED`; five-role EOA deployment `PENDING`;
-mainnet broadcast `NOT_AUTHORIZED`.
+Status: `EOA_DEPLOYED`; approved setup packet `PARTIAL_12_OF_15`;
+recovery packet `NOT_AUTHORIZED`.
 
 This plan is bound to settlement/admin artifact
 `2.0.0-settlement-admin.16` and the five-role EOA architecture in
@@ -20,6 +20,12 @@ This plan is bound to settlement/admin artifact
 - Both configured read-only RPC endpoints report BSC chain ID `56`.
 - The five EOA role addresses are derived from ignored local key configuration;
   no private key or complete role address is stored in this document.
+- The EOA-bound `PolicyRegistryV2`, `BeneficiaryRegistryV2` and
+  `PaymentRouterV2` reached more than 15 canonical confirmations on both RPCs,
+  their runtime/immutable bindings and zero contract token balances matched,
+  and BscScan shows `Exact Match` source verification.
+- Policy V1, the required region snapshot and the test referral snapshot were
+  published by the Platform Governance EOA.
 
 ## Deployment State
 
@@ -35,15 +41,19 @@ The active deployment manifest is
 
 ```text
 architecture = FIVE_ROLE_EOA_V2
-deploymentStatus = PENDING
-deploymentAuthorized = false
-contracts = empty
+deploymentStatus = DEPLOYED
+deploymentAuthorized = true
+contracts = three EOA-bound payment contracts
 ```
 
-No EOA-bound `PolicyRegistryV2`, `BeneficiaryRegistryV2` or
-`PaymentRouterV2` deployment has been broadcast. No EOA policy publication,
-token approval, payment, seckill, guarantee or settlement transaction has been
-broadcast.
+The approved setup packet SHA-256
+`a4ae37208136f90810f49a673de35850ea198b7cdca5e5694057dafbb4278328`
+executed sequences 1-12. This covered all three deployments, region and Policy
+V1 publication, referral binding, minimum role Gas and the USDT funding swap.
+Sequence 13 was stopped before broadcast because the NPL token's approximately
+5% net transfer deduction made the approved 95%-of-old-quote `amountOutMin`
+slightly higher than the current net output. Sequences 14-15 were not broadcast.
+No payment, seckill, guarantee or settlement transaction has been broadcast.
 
 ## Exact Packet Gate
 
@@ -71,17 +81,25 @@ amount, Gas ceiling or total budget invalidates the packet and requires a new
 SHA-256 approval. Complete role addresses remain only in the ignored packet
 and local evidence, never in tracked documentation or chat output.
 
+The remaining three setup actions are frozen in the ignored mode-600 recovery
+packet with SHA-256
+`77b1fc3fbcc12c602b76f128017783bca10eb821703ab33cec9a61bf0cf5d4ac`.
+It uses the current counterparty nonce, a 94%-of-live-gross NPL minimum and the
+same Router approvals. It remains `broadcastAuthorized=false` until explicitly
+approved. Its maximum native outflow including Gas is `0.00005447145 BNB`.
+
 ## Intended Sequence
 
-1. Deploy `PolicyRegistryV2` from the Platform Governance EOA.
-2. Deploy `BeneficiaryRegistryV2` bound to the new Policy Registry.
-3. Deploy `PaymentRouterV2` bound to BSC USDT/NPL, both new registries and the
+1. Completed: deploy `PolicyRegistryV2` from the Platform Governance EOA.
+2. Completed: deploy `BeneficiaryRegistryV2` bound to the new Policy Registry.
+3. Completed: deploy `PaymentRouterV2` bound to BSC USDT/NPL, both new registries and the
    four distinct funding EOAs.
-4. Wait for 15 canonical confirmations and verify runtime code, constructor
+4. Completed: wait for 15 canonical confirmations and verify runtime code, constructor
    bindings, roles, zero native value and zero USDT/NPL balances.
-5. Publish policy V1 and required beneficiary snapshots through the Platform
+5. Completed: publish policy V1 and required beneficiary snapshots through the Platform
    Governance EOA with the exact secondary EIP-712 signature.
-6. Fund only the minimum Gas and token amounts fixed by the approved packet.
+6. Partially completed: fund minimum Gas and USDT; finish the approved NPL swap
+   and the two Router approvals through the recovery packet.
 7. Execute one ordinary payment and prove the exact service-fee, Custody,
    freight, NPL Burn and NPL Reward deltas with zero Router retention.
 8. Execute the bounded seckill/boundary flow and prove reservation,
