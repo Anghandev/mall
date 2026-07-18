@@ -1584,7 +1584,7 @@ function parseMerchantAuditEntry(input: unknown): MerchantAuditList['entries'][n
     'module',
     'detail',
     'signatureHash',
-    'safeOrChainTxHash',
+    'chainTxHash',
     'entryHash',
   ], 'merchant audit entry');
   const entryHash = string(value.entryHash, 'merchant audit entryHash');
@@ -1596,7 +1596,7 @@ function parseMerchantAuditEntry(input: unknown): MerchantAuditList['entries'][n
     module: string(value.module, 'merchant audit module'),
     detail: string(value.detail, 'merchant audit detail'),
     signatureHash: nullableBytes32(value.signatureHash, 'merchant audit signatureHash'),
-    safeOrChainTxHash: nullableBytes32(value.safeOrChainTxHash, 'merchant audit safeOrChainTxHash'),
+    chainTxHash: nullableBytes32(value.chainTxHash, 'merchant audit chainTxHash'),
     entryHash,
   };
 }

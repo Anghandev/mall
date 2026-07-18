@@ -29,7 +29,7 @@ export const merchantAudit: MerchantAuditList = {
       module: 'SETTLEMENT_REQUEST',
       detail: 'SettlementRequestAuthorized / SETTLEMENT_REQUEST / settlement-2',
       signatureHash: `0x${'4'.repeat(64)}`,
-      safeOrChainTxHash: `0x${'5'.repeat(64)}`,
+      chainTxHash: `0x${'5'.repeat(64)}`,
       entryHash: '6'.repeat(64),
     },
     {
@@ -39,7 +39,7 @@ export const merchantAudit: MerchantAuditList = {
       module: 'MERCHANT_PROFILE',
       detail: 'MerchantProfileUpdated / MERCHANT_PROFILE / merchant-1',
       signatureHash: null,
-      safeOrChainTxHash: null,
+      chainTxHash: null,
       entryHash: '7'.repeat(64),
     },
   ],

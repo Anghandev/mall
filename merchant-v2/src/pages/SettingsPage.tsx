@@ -431,7 +431,7 @@ export function SettingsPage() {
                       <td>{entry.module}</td>
                       <td className="audit-detail"><span>{entry.detail}</span><small>条目哈希 {shortHash(entry.entryHash)}</small></td>
                       <td><HashValue value={entry.signatureHash} /></td>
-                      <td>{entry.safeOrChainTxHash ? <a className="hash-link" href={`https://bscscan.com/tx/${entry.safeOrChainTxHash}`} rel="noreferrer" target="_blank">{shortHash(entry.safeOrChainTxHash)}</a> : <span className="muted-value">无</span>}</td>
+                      <td>{entry.chainTxHash ? <a className="hash-link" href={`https://bscscan.com/tx/${entry.chainTxHash}`} rel="noreferrer" target="_blank">{shortHash(entry.chainTxHash)}</a> : <span className="muted-value">无</span>}</td>
                     </tr>
                   ))}
                 </tbody>
