@@ -1689,7 +1689,7 @@ function merchantLifecycleOpenApiPaths(errorResponse) {
         parameters: [merchantId, actionId],
         requestBody: body({ $ref: '#/components/schemas/MerchantReviewPublishRequest' }),
         responses: {
-          200: response('Secondary-signed and Safe-approved merchant status', { $ref: '#/components/schemas/MerchantLifecycleDetail' }),
+          200: response('Secondary-signed and governance-EOA-executed merchant status', { $ref: '#/components/schemas/MerchantLifecycleDetail' }),
           default: errorResponse,
         },
       },

@@ -209,7 +209,7 @@ function MerchantDetail(props: {
     <div className="merchant-detail">
       <div className="panel-heading merchant-detail-heading"><div><p className="section-kicker">GET /v2/admin/merchants/{'{merchantId}'}</p><h2>{detail.merchant.shopName ?? detail.merchant.merchantId}</h2><code>{detail.merchant.merchantId}</code></div><StatusBadge status={detail.merchant.status} /></div>
       <dl className="merchant-facts">
-        <Fact label="结算钱包" value={detail.merchant.settlementWallet} note="RBAC + secondary EIP-712 + Safe" code />
+        <Fact label="结算钱包" value={detail.merchant.settlementWallet} note="审核通过后永久不可更换" code />
         <Fact label="资质版本" value={`v${detail.merchant.applicationVersion}`} note={detail.merchant.qualificationComplete ? '完整' : '缺少已验证证照'} />
         <Fact label="保证金状态" value={detail.merchant.guaranteeStatus} note="Core 投影" />
       </dl>

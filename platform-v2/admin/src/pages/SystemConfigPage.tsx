@@ -37,9 +37,9 @@ const configFields: Record<Exclude<WritableConfigKey, 'MERCHANT_LEVELS'>, readon
     { name: 'paymentRouterAddress', label: 'PaymentRouter 地址' },
     { name: 'policyRegistryAddress', label: 'PolicyRegistry 地址' },
     { name: 'beneficiaryRegistryAddress', label: 'BeneficiaryRegistry 地址' },
-    { name: 'usdtCustodySafe', label: 'USDT Custody Safe' },
-    { name: 'nplRewardSafe', label: 'NPL Reward Safe' },
-    { name: 'operationsTreasurySafe', label: 'Operations Treasury Safe' },
+    { name: 'usdtCustodySafe', label: 'USDT Custody / Settlement EOA' },
+    { name: 'nplRewardSafe', label: 'NPL Reward / Distribution EOA' },
+    { name: 'operationsTreasurySafe', label: 'Operations / Guarantee EOA' },
   ],
   INTEGRATIONS: [
     { name: 'ossCredentialRef', label: 'OSS credential secret ref' },

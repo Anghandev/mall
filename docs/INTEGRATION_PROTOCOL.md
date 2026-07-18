@@ -36,7 +36,7 @@ small change:
 2. fulfillment: shipment, logistics, pickup, exchange, delay, arbitration,
    takeover, administrative region and BNM Locked/Available;
 3. settlement/admin: double-entry ledger, guarantee/debt, reward and settlement
-   request, Safe MultiSend, policy, CMS, notifications, audit and monitoring.
+   request, per-transfer EOA execution, policy, CMS, notifications, audit and monitoring.
 
 Each checkpoint contains the same-version OpenAPI, Schema, generated types,
 required ABI/deployment manifest, state/error enums, WebSocket protocol and the
@@ -78,11 +78,11 @@ the same Core artifact version.
 
 ```text
 signed policy and reservation
-  -> PaymentRouter atomic Safe transfers
+  -> PaymentRouter atomic transfers to the configured funding EOAs
   -> receipt plus expected event identity
   -> payment indexer and balanced Locked journal entries
   -> fulfillment / arbitration and Available entries
-  -> signed settlement request and immutable Safe MultiSend batch
+  -> signed settlement request and immutable per-payable EOA transfer intent
   -> 15-confirmation receipt plus reorg/replacement handling
   -> API projection plus allowedActions
   -> Mall / Merchant / Platform UI
@@ -96,7 +96,7 @@ end.
 
 The combined gate covers checkout, boundary classification, takeover
 fulfillment, receipt/pickup/arbitration, BNM points, signed settlement requests,
-Safe batches, seckill, audit/finality, provider failures, permissions and every
+EOA transfer execution, seckill, audit/finality, provider failures, permissions and every
 Circuit Breaker.
 
 A failed consumer or combined test reopens the originating Requirement ID.

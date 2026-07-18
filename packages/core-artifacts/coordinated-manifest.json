@@ -18,7 +18,7 @@
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "8bf3409c938fee2d228345078c033c4694982f17ff4c14b4ac024a093ae77c14"
+      "sha256": "6461fc4e38d5112d159e81edd0aaf6960cfa1363d80e5ec1bf4850323eb612bf"
     },
     "generatedRuntime": {
       "path": "generated/index.js",

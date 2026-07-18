@@ -8828,7 +8828,7 @@
         },
         "responses": {
           "200": {
-            "description": "Secondary-signed and Safe-approved merchant status",
+            "description": "Secondary-signed and governance-EOA-executed merchant status",
             "headers": {
               "x-correlation-id": {
                 "schema": {
