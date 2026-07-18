@@ -818,7 +818,7 @@ test('publication contains no Claim, BNM token payout, old escrow or old allocat
   assert.equal([...settlementRails].includes('BNM' as never), false);
 });
 
-test('catalog, settlement/admin and seckill realtime capabilities are published while deployment stays fail closed', () => {
+test('catalog, settlement/admin and seckill realtime capabilities publish the attested deployment', () => {
   assert.equal(websocket.endpoint, '/v2/ws');
   assert.equal(websocket.channels.length, 1);
   assert.equal(websocket.channels[0].pattern, 'seckill:{sessionId}');
@@ -891,12 +891,17 @@ test('catalog, settlement/admin and seckill realtime capabilities are published 
   for (const [capability, status] of Object.entries(manifest.capabilityStatus)) {
     assert.equal(status, available.has(capability) ? 'AVAILABLE' : 'NOT_PUBLISHED_FAIL_CLOSED', capability);
   }
-  assert.equal(manifest.deploymentAuthorized, false);
-  assert.equal(manifest.deploymentAuthorizationEvidenceHash, null);
-  assert.equal(contractManifest.deploymentAuthorized, false);
-  assert.equal(contractManifest.deploymentAuthorizationEvidenceHash, null);
-  assert.ok(contractManifest.contracts.every((contract: { deploymentBlock: null; deployedCodeHash: null }) =>
-    contract.deploymentBlock === null && contract.deployedCodeHash === null));
+  assert.equal(manifest.deploymentAuthorized, true);
+  assert.match(manifest.deploymentAuthorizationEvidenceHash, /^0x[0-9a-f]{64}$/);
+  assert.equal(contractManifest.deploymentAuthorized, true);
+  assert.equal(
+    contractManifest.deploymentAuthorizationEvidenceHash,
+    manifest.deploymentAuthorizationEvidenceHash,
+  );
+  assert.ok(contractManifest.contracts.every((contract: { deploymentBlock: number; deployedCodeHash: string }) =>
+    Number.isSafeInteger(contract.deploymentBlock)
+      && contract.deploymentBlock > 0
+      && /^0x[0-9a-f]{64}$/.test(contract.deployedCodeHash)));
   const fulfillmentActions = [
     'REQUEST_EXCHANGE',
     'REQUEST_DELAY',

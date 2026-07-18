@@ -1,8 +1,8 @@
 {
   "artifactVersion": "2.0.0-settlement-admin.16",
   "publicationStatus": "COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT",
-  "deploymentAuthorized": false,
-  "deploymentAuthorizationEvidenceHash": null,
+  "deploymentAuthorized": true,
+  "deploymentAuthorizationEvidenceHash": "0x50c917d5c51f57d89e8d01e2be325715438ab50a17551ab3cdfd3f9d0ff8e8ea",
   "chain": {
     "name": "BSC Mainnet",
     "chainId": 56
@@ -46,7 +46,7 @@
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "8daaa2851eedec1e14b07ca435b55ad9449e47de9116e77e93ad9504872637ee"
+      "sha256": "f232e96cbdedf8c28d26618a4b570ead4b1bf4c032bb9c08076fa8d0eade71eb"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
@@ -60,11 +60,11 @@
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "748577b75908f1188656ae8175e0ad8f0fa7184617a4e71822498ac4ff69d96b"
+      "sha256": "ba93b461267fec38cb25727764c1941e0b368b8486e92f8eac6001e08a1702f2"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "336cbcc48c7294ca9345dd325aa61c2f307c7b85b7a41d6cea63fb6a23072afa"
+      "sha256": "ed36ea9e330ddcb59898b837653875161764460258d1205ebb9f6801199b0f02"
     }
   ],
   "httpSurface": [

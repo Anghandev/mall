@@ -89,7 +89,7 @@ test('typed config reports blocked inputs without exposing secret values', () =>
   const ready = loadConfig(completeEnvironment());
   const serialized = JSON.stringify(publicReadiness(ready));
   assert.equal(publicReadiness(ready).writesEnabled, false);
-  assert.ok(ready.externalBlocked.includes('COORDINATED_DEPLOYMENT_AUTHORIZATION'));
+  assert.equal(ready.externalBlocked.includes('COORDINATED_DEPLOYMENT_AUTHORIZATION'), false);
   assert.equal(serialized.includes('test-jwt-secret'), false);
   assert.equal(serialized.includes('provider-secret'), false);
   assert.equal(ready.providerReadiness.BNM, 'READY');

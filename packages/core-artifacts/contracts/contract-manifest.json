@@ -21,18 +21,10 @@
     "cborMetadata": false
   },
   "sourceDigestSha256": "49b2d23827fbfdad9ee6c092c50b61d2dc9e98ab5443f4daf55f257436fa9698",
-  "deploymentStatus": "ExternalBlocked",
-  "deploymentAuthorized": false,
-  "deploymentAuthorizationEvidenceHash": null,
-  "externalBlocked": [
-    "GOVERNANCE_SAFE_ADDRESS",
-    "USDT_CUSTODY_SAFE_ADDRESS",
-    "NPL_REWARD_SAFE_ADDRESS",
-    "OPERATIONS_TREASURY_SAFE_ADDRESS",
-    "SECONDARY_SIGNER",
-    "QUOTE_SIGNER",
-    "BSC_RPC_URL"
-  ],
+  "deploymentStatus": "DEPLOYED",
+  "deploymentAuthorized": true,
+  "deploymentAuthorizationEvidenceHash": "0x50c917d5c51f57d89e8d01e2be325715438ab50a17551ab3cdfd3f9d0ff8e8ea",
+  "externalBlocked": [],
   "decisionBlocked": [],
   "deploymentOrder": [
     "PolicyRegistryV2",
@@ -43,9 +35,9 @@
     {
       "name": "PolicyRegistryV2",
       "source": "platform-v2/contracts/PolicyRegistryV2.sol",
-      "address": null,
-      "deploymentBlock": null,
-      "status": "ExternalBlocked",
+      "address": "0xeea4ca927980d9b5889c0c6e229ee1253bbd01b5",
+      "deploymentBlock": 110651916,
+      "status": "DEPLOYED",
       "constructorInputs": [
         {
           "name": "safe_",
@@ -60,14 +52,14 @@
       ],
       "bytecodeSha256": "479005c638daea31620f10abd1c376da32a94cbd9bb52ea2d7a8764185fed26a",
       "deployedBytecodeSha256": "e7272c09f8bef94759c6f3fa3308e5028f6a91eb6229fb074ac4c84a7571650a",
-      "deployedCodeHash": null
+      "deployedCodeHash": "0xf3e5ed3393b06692233ffeddf7616b485dfe45925845361684c406983151e9d8"
     },
     {
       "name": "BeneficiaryRegistryV2",
       "source": "platform-v2/contracts/BeneficiaryRegistryV2.sol",
-      "address": null,
-      "deploymentBlock": null,
-      "status": "ExternalBlocked",
+      "address": "0xbb21a65036760e261e57e89a5d182229ca070b83",
+      "deploymentBlock": 110651931,
+      "status": "DEPLOYED",
       "constructorInputs": [
         {
           "name": "policyRegistry_",
@@ -77,14 +69,14 @@
       ],
       "bytecodeSha256": "84f5b350e1e58f74197cebef641eb42d080d7d14671828d5abfa622ffc6f8629",
       "deployedBytecodeSha256": "9795ca6e07925be04b150484cfb1ee17d66edb2e5a20e80b62f68fa928a355b1",
-      "deployedCodeHash": null
+      "deployedCodeHash": "0x2c41a5e509fefd6aba6a2f9b27fad7d829b84d65eebc4cdd67b08b3c279cd71e"
     },
     {
       "name": "PaymentRouterV2",
       "source": "platform-v2/contracts/PaymentRouterV2.sol",
-      "address": null,
-      "deploymentBlock": null,
-      "status": "ExternalBlocked",
+      "address": "0x953ad4a369ac7b843254e445d359bb7595e8e620",
+      "deploymentBlock": 110651944,
+      "status": "DEPLOYED",
       "constructorInputs": [
         {
           "name": "usdt_",
@@ -134,7 +126,7 @@
       ],
       "bytecodeSha256": "1453ba46764a8cb87897c58d53748985332508c5bbff569d420feb56f854943c",
       "deployedBytecodeSha256": "f7cc01c2d0acfd463652bed3146c6cba2a9ad6fa97f06a65bdf472bdccecbcbe",
-      "deployedCodeHash": null
+      "deployedCodeHash": "0x442b211acbc48bd6f2a43e03a7d9b76534adf29d8245976e6371f22d62400134"
     }
   ],
   "postDeploymentRoleGrants": [],

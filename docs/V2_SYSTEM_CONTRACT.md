@@ -295,6 +295,10 @@ Status: frozen authority for the function-first V2 rewrite from
   Safe addresses have runtime code and respond to the required Safe read
   interfaces. Their addresses are secret-safe operational data, while owners
   and thresholds remain user-managed; none are printed or copied here.
+- The three payment contracts are deployed on BSC from the bounded exact packet,
+  source-verified on BscScan and bound to the coordinated manifest by deployment
+  block and runtime code hash. All three deployment receipts reached 15
+  confirmations on both configured RPC providers with zero USDT/NPL movement.
 - Production domains/HTTPS/WSS, production databases and queues, the existing
   BNM backend project's API/schema/credentials and monotonic-state conformance evidence,
   provider accounts and credentials, approved merchant/admin wallets, encrypted
@@ -304,10 +308,11 @@ Status: frozen authority for the function-first V2 rewrite from
   but adapters, validation, typed errors and the local business path must still
   exist. It does not block unrelated local code completion or a separately
   approved chain micro-test.
-- Current ignored `.env` wallets are limited to local, fork and separately
-  approved micro-tests. No deployment or mainnet transaction is authorized
-  until bytecode/configuration checks, complete local gates and an exact bounded
-  transaction package receive separate user approval.
+- Current ignored `.env` wallets are limited to local, fork and bounded
+  micro-tests. Every further mainnet action requires an exact transaction
+  package and all runtime assertions. The current Goal waives a separate
+  confirmation only for transactions whose maximum value plus Gas is at most
+  `3 USDT`; Safe actions still require the real Safe-owner signatures.
 
 ## Coordinated Core Publications
 
