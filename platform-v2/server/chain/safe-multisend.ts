@@ -14,11 +14,11 @@ import {
 import { BSC_CHAIN_ID, NPL_ADDRESS, USDT_ADDRESS } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 
-export const SAFE_VERSION = '1.4.1';
-export const SAFE_L2_SINGLETON_ADDRESS = '0x29fcb43b46531bca003ddc8fcb67ffe91900c762';
-export const SAFE_L2_SINGLETON_CODE_HASH = '0xb1f926978a0f44a2c0ec8fe822418ae969bd8c3f18d61e5103100339894f81ff';
-export const MULTISEND_CALL_ONLY_ADDRESS = '0x9641d764fc13c8b624c04430c7356c1c7c8102e2';
-export const MULTISEND_CALL_ONLY_CODE_HASH = '0xecd5bd14a08c5d2122379900b2f272bdf107a7e92423c10dd5fe3254386c9939';
+export const SAFE_VERSION = '1.3.0';
+export const SAFE_L2_SINGLETON_ADDRESS = '0x3e5c63644e683549055b9be8653de26e0b4cd36e';
+export const SAFE_L2_SINGLETON_CODE_HASH = '0x21842597390c4c6e3c1239e434a682b054bd9548eee5e9b1d6a4482731023c0f';
+export const MULTISEND_CALL_ONLY_ADDRESS = '0x40a2accbd92bca938b02010e17a5b8929b49130d';
+export const MULTISEND_CALL_ONLY_CODE_HASH = '0xa9865ac2d9c7a1591619b188c4d88167b50df6cc0c5327fcbd1c8c75f7c066ad';
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 const TOKEN_INTERFACE = new Interface(['function transfer(address recipient,uint256 amount) returns (bool)']);

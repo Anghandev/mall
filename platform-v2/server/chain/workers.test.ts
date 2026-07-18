@@ -55,6 +55,7 @@ import {
   MULTISEND_CALL_ONLY_CODE_HASH,
   SAFE_L2_SINGLETON_ADDRESS,
   SAFE_L2_SINGLETON_CODE_HASH,
+  SAFE_VERSION,
 } from './safe-multisend.ts';
 import {
   HttpRpcPolicyChainSource,
@@ -445,7 +446,7 @@ test('Safe runtime attestation binds owners, modules, guard, fallback and deploy
       throw new Error('unknown runtime');
     },
     call: async (_address: string, _abi: InterfaceAbi, method: string) => {
-      if (method === 'VERSION') return '1.4.1';
+      if (method === 'VERSION') return SAFE_VERSION;
       if (method === 'masterCopy') return SAFE_L2_SINGLETON_ADDRESS;
       if (method === 'getOwners') return owners;
       if (method === 'getThreshold') return 2n;
