@@ -30,6 +30,13 @@ source conflicts are indexed in `V2_DECISIONS.md`.
 - NPL is `0x4e8277ab31e4956b2cd48449793a57656dfc03d2`.
 - The NPL/USDT pricing pair is the verified PancakeSwap V2 pair
   `0x2955e33bb120714abf11ace2766e614e6e5955b2`.
+- NPL applies a 5% tax when buying from or selling into its DEX pair. This pair
+  tax is not treated as an ordinary ERC-20 transfer tax. Fixed-block fork
+  evidence showed the swap recipient receiving the tax-adjusted net amount,
+  while buyer-to-Router `transferFrom` and Router-to-Burn/Reward transfers
+  arrived exactly. Payment intents therefore bind the buyer's exact post-swap
+  NPL balance; any future ordinary-transfer balance-delta mismatch still
+  reverts and stops the payment instead of weakening Router conservation.
 - Product list price, merchant base receivable, merchant concession and wallet
   liabilities are denominated in USDT.
 - The launch policy requires the buyer to pay exactly 70% of the USDT list

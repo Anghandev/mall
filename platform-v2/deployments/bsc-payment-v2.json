@@ -9,9 +9,11 @@
     "gitCommit": "056fa1860640aec843c5cbdadd56a50538357a3f",
     "packetSha256": "a4ae37208136f90810f49a673de35850ea198b7cdca5e5694057dafbb4278328",
     "receiptsSha256": "e171ba3e649c11b44cc1158bb9c228b7c4fa81a7f6881266b15cba252fff5adf",
+    "recoveryPacketSha256": "77b1fc3fbcc12c602b76f128017783bca10eb821703ab33cec9a61bf0cf5d4ac",
+    "recoveryReceiptsSha256": "aeb92addcfac780b732d2f34e9e973f7ee22a3341f02e7da9fe53e14deec4338",
     "sourceVerificationSha256": "c722a63cd89a528f2e6670d39c9c98bb1afc5239e15ad98a42c2136e151feafa",
     "sourceVerification": "BSCSCAN_EXACT_MATCH",
-    "setupStatus": "PARTIAL_12_OF_15_NPL_SWAP_STOPPED_BEFORE_BROADCAST"
+    "setupStatus": "COMPLETE_15_OF_15"
   },
   "contracts": {
     "PolicyRegistryV2": {

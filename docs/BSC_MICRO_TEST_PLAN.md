@@ -1,7 +1,7 @@
 # BSC Mainnet EOA Deployment And Micro-Test Plan
 
-Status: `EOA_DEPLOYED`; approved setup packet `PARTIAL_12_OF_15`;
-recovery packet `NOT_AUTHORIZED`.
+Status: `EOA_DEPLOYED`; approved setup packet `COMPLETE_15_OF_15`;
+recovery packet `EXECUTED`.
 
 This plan is bound to settlement/admin artifact
 `2.0.0-settlement-admin.16` and the five-role EOA architecture in
@@ -26,6 +26,9 @@ This plan is bound to settlement/admin artifact
   and BscScan shows `Exact Match` source verification.
 - Policy V1, the required region snapshot and the test referral snapshot were
   published by the Platform Governance EOA.
+- The approved recovery packet completed the NPL funding swap and both Router
+  approvals. Its three receipts reached at least 15 confirmations on both RPCs;
+  the NPL net output and both exact allowances matched their assertions.
 
 ## Deployment State
 
@@ -50,10 +53,13 @@ The approved setup packet SHA-256
 `a4ae37208136f90810f49a673de35850ea198b7cdca5e5694057dafbb4278328`
 executed sequences 1-12. This covered all three deployments, region and Policy
 V1 publication, referral binding, minimum role Gas and the USDT funding swap.
-Sequence 13 was stopped before broadcast because the NPL token's approximately
-5% net transfer deduction made the approved 95%-of-old-quote `amountOutMin`
-slightly higher than the current net output. Sequences 14-15 were not broadcast.
-No payment, seckill, guarantee or settlement transaction has been broadcast.
+Sequence 13 was initially stopped before broadcast because the NPL DEX-pair
+buy tax made the approved 95%-of-old-quote `amountOutMin` slightly higher than
+the current tax-adjusted net output. This was not evidence of an ordinary
+ERC-20 transfer tax: fixed-block fork checks showed exact buyer-to-Router
+`transferFrom` and exact Router-to-Burn/Reward delivery. The separately
+approved recovery packet then completed sequences 13-15. No payment, seckill,
+guarantee or settlement transaction has been broadcast.
 
 ## Exact Packet Gate
 
@@ -81,12 +87,14 @@ amount, Gas ceiling or total budget invalidates the packet and requires a new
 SHA-256 approval. Complete role addresses remain only in the ignored packet
 and local evidence, never in tracked documentation or chat output.
 
-The remaining three setup actions are frozen in the ignored mode-600 recovery
+The final three setup actions were executed from the ignored mode-600 recovery
 packet with SHA-256
 `77b1fc3fbcc12c602b76f128017783bca10eb821703ab33cec9a61bf0cf5d4ac`.
-It uses the current counterparty nonce, a 94%-of-live-gross NPL minimum and the
-same Router approvals. It remains `broadcastAuthorized=false` until explicitly
-approved. Its maximum native outflow including Gas is `0.00005447145 BNB`.
+It used the approved counterparty nonce, a 94%-of-live-gross NPL minimum and the
+same Router approvals. The mode-600 receipt evidence has SHA-256
+`aeb92addcfac780b732d2f34e9e973f7ee22a3341f02e7da9fe53e14deec4338`.
+Actual native value plus Gas was `0.0000471636 BNB`, below the approved
+`0.00005447145 BNB` ceiling.
 
 ## Intended Sequence
 
@@ -98,8 +106,8 @@ approved. Its maximum native outflow including Gas is `0.00005447145 BNB`.
    bindings, roles, zero native value and zero USDT/NPL balances.
 5. Completed: publish policy V1 and required beneficiary snapshots through the Platform
    Governance EOA with the exact secondary EIP-712 signature.
-6. Partially completed: fund minimum Gas and USDT; finish the approved NPL swap
-   and the two Router approvals through the recovery packet.
+6. Completed: fund minimum Gas, USDT and tax-adjusted NPL, then grant both
+   Router approvals through the approved recovery packet.
 7. Execute one ordinary payment and prove the exact service-fee, Custody,
    freight, NPL Burn and NPL Reward deltas with zero Router retention.
 8. Execute the bounded seckill/boundary flow and prove reservation,
