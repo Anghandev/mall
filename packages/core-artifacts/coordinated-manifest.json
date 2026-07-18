@@ -42,19 +42,19 @@
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "e5ca137ca3874aca6f942ccfc2d0c222560ab116547a0339f3d9800ef2e5c12d"
+      "sha256": "bd911b78c2178263723bbe4a8bb56431eca3561f37cee3548988bd83d9e8e06a"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "9a445d8273fb5ddddfe7a4af1b32d86ab4c2628bf7aa87cdd5dff805c5ff233e"
+      "sha256": "8daaa2851eedec1e14b07ca435b55ad9449e47de9116e77e93ad9504872637ee"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "70ff983dba9b6a5ced60c1be1e343c6a11ae9fdf1c8b1313d656a1ef1961a36c"
+      "sha256": "c0d133ebf4c353fb23f741cb9dd3385ae3d952bdfd9080070b304a3b790844bf"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
-      "sha256": "ca052db97553c0cd13771929992e3f08d722834276e7232cde5fed819fd61c87"
+      "sha256": "a6b3ef150fac45e33e8a5f10de940f0259b94ea63b3ae50e5d6c00f7a5819869"
     }
   },
   "consumerTests": [

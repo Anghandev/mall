@@ -12,21 +12,6 @@
       "authority": "Safe multisig"
     },
     {
-      "contract": "PaymentRouterV2",
-      "role": "DEFAULT_ADMIN_ROLE",
-      "authority": "Safe multisig"
-    },
-    {
-      "contract": "PaymentRouterV2",
-      "role": "PAUSER_ROLE",
-      "authority": "Safe multisig"
-    },
-    {
-      "contract": "PaymentRouterV2",
-      "role": "SESSION_ADMIN_ROLE",
-      "authority": "Safe multisig"
-    },
-    {
       "contract": "PolicyRegistryV2",
       "role": "DEFAULT_ADMIN_ROLE",
       "authority": "Safe multisig"

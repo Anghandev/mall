@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CoreFixture} from "./helpers/CoreFixture.sol";
 import {V2Types} from "../contracts/types/V2Types.sol";
 
 contract PaymentRouterFuzzV2Test is CoreFixture {
+    function testFuzz_MulBpsMatchesFullPrecision(uint256 amount, uint16 rawBps) public pure {
+        uint16 bps = uint16(uint256(rawBps) % 10_001);
+        assertEq(V2Types.mulBps(amount, bps), Math.mulDiv(amount, bps, V2Types.BPS));
+    }
+
     function testFuzz_PaymentConservesEveryAtomicUnit(
         uint96 rawListPrice,
         uint96 rawNplQuote,

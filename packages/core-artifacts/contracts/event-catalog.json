@@ -152,12 +152,6 @@
     },
     {
       "contract": "PaymentRouterV2",
-      "name": "EIP712DomainChanged",
-      "signature": "EIP712DomainChanged()",
-      "inputs": []
-    },
-    {
-      "contract": "PaymentRouterV2",
       "name": "MerchantReceivableSnapshotted",
       "signature": "MerchantReceivableSnapshotted(bytes32,uint256,uint16,uint256,uint256,bytes32)",
       "inputs": [
@@ -324,81 +318,6 @@
           "type": "bytes32",
           "indexed": true,
           "internalType": "bytes32"
-        }
-      ]
-    },
-    {
-      "contract": "PaymentRouterV2",
-      "name": "RoleAdminChanged",
-      "signature": "RoleAdminChanged(bytes32,bytes32,bytes32)",
-      "inputs": [
-        {
-          "name": "role",
-          "type": "bytes32",
-          "indexed": true,
-          "internalType": "bytes32"
-        },
-        {
-          "name": "previousAdminRole",
-          "type": "bytes32",
-          "indexed": true,
-          "internalType": "bytes32"
-        },
-        {
-          "name": "newAdminRole",
-          "type": "bytes32",
-          "indexed": true,
-          "internalType": "bytes32"
-        }
-      ]
-    },
-    {
-      "contract": "PaymentRouterV2",
-      "name": "RoleGranted",
-      "signature": "RoleGranted(bytes32,address,address)",
-      "inputs": [
-        {
-          "name": "role",
-          "type": "bytes32",
-          "indexed": true,
-          "internalType": "bytes32"
-        },
-        {
-          "name": "account",
-          "type": "address",
-          "indexed": true,
-          "internalType": "address"
-        },
-        {
-          "name": "sender",
-          "type": "address",
-          "indexed": true,
-          "internalType": "address"
-        }
-      ]
-    },
-    {
-      "contract": "PaymentRouterV2",
-      "name": "RoleRevoked",
-      "signature": "RoleRevoked(bytes32,address,address)",
-      "inputs": [
-        {
-          "name": "role",
-          "type": "bytes32",
-          "indexed": true,
-          "internalType": "bytes32"
-        },
-        {
-          "name": "account",
-          "type": "address",
-          "indexed": true,
-          "internalType": "address"
-        },
-        {
-          "name": "sender",
-          "type": "address",
-          "indexed": true,
-          "internalType": "address"
         }
       ]
     },

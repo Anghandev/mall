@@ -77,7 +77,8 @@ off-chain double-entry ledger; they are not settlement authorization.
 ## Seckill Boundary
 
 `openSeckillSession` snapshots policy version, start, 60-minute main deadline
-and 60-second relay deadline. Safe-held `SESSION_ADMIN_ROLE` is required.
+and 60-second relay deadline. Direct execution by the immutable governance Safe
+is required.
 
 A seckill signature binds seckill and retail-fallback payment intents. Identity,
 buyer, merchant, product/SKU, quantity, policy, deadlines, nonce, concession and
@@ -100,8 +101,8 @@ canonical confirmations.
 ## Circuit Breakers
 
 `PaymentRouterV2` has independent `newPaymentsPaused` and
-`seckillPurchasesPaused` flags. Pause and resume require the Safe-held
-`PAUSER_ROLE`, direct governance Safe execution and a nonzero evidence hash.
+`seckillPurchasesPaused` flags. Pause and resume require direct execution by the
+immutable governance Safe and a nonzero evidence hash.
 They stop only new payment writes. Indexing, finality, reorg recovery,
 fulfillment, takeover, reconciliation and audit reads remain outside the Router
 and cannot be stopped by these flags.
@@ -125,6 +126,10 @@ is permitted by this document.
 Every deployed contract manifest entry must record its address, deployment
 block and actual runtime `deployedCodeHash`. Build-artifact hashes alone are not
 accepted as runtime deployment evidence.
+
+The frozen Foundry profile uses optimizer runs `1`, IR compilation and no CBOR
+metadata. `forge build --sizes` is a release gate; no Router artifact at or
+above the EIP-170 runtime limit may be published or deployed.
 
 Deployment evidence is published only through the reviewed
 `platform-v2/deployments/bsc-payment-v2.json` input. Both artifact generators

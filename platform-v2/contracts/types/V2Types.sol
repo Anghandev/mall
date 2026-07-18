@@ -111,4 +111,9 @@ library V2Types {
         PaymentIntent seckillPayment;
         PaymentIntent fallbackPayment;
     }
+
+    function mulBps(uint256 amount, uint16 bps) internal pure returns (uint256) {
+        // Quotient/remainder decomposition preserves floor rounding without overflowing amount * bps.
+        return (amount / BPS) * bps + (amount % BPS) * bps / BPS;
+    }
 }

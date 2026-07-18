@@ -18,7 +18,6 @@ const ROUTER_ABI = [
   'function nplRewardSafe() view returns (address)',
   'function operationsTreasurySafe() view returns (address)',
   'function quoteSigner() view returns (address)',
-  'function hasRole(bytes32 role,address account) view returns (bool)',
 ];
 const POLICY_ABI = [
   'function safe() view returns (address)',
@@ -165,9 +164,6 @@ export class RpcPaymentRuntimeAttestor {
       && beneficiaryPolicy === this.#addresses.policyRegistry;
 
     const roleChecks = await Promise.all([
-      hasRole(this.#reader, this.#addresses.router, ROUTER_ABI, DEFAULT_ADMIN_ROLE, this.#addresses.governanceSafe),
-      hasRole(this.#reader, this.#addresses.router, ROUTER_ABI, role('PAUSER_ROLE'), this.#addresses.governanceSafe),
-      hasRole(this.#reader, this.#addresses.router, ROUTER_ABI, role('SESSION_ADMIN_ROLE'), this.#addresses.governanceSafe),
       hasRole(this.#reader, this.#addresses.policyRegistry, POLICY_ABI, DEFAULT_ADMIN_ROLE, this.#addresses.governanceSafe),
       hasRole(this.#reader, this.#addresses.policyRegistry, POLICY_ABI, role('POLICY_PUBLISHER_ROLE'), this.#addresses.governanceSafe),
       hasRole(this.#reader, this.#addresses.beneficiaryRegistry, BENEFICIARY_ABI, DEFAULT_ADMIN_ROLE, this.#addresses.governanceSafe),

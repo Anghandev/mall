@@ -14,11 +14,13 @@
   "compiler": {
     "version": "0.8.26",
     "optimizer": true,
-    "optimizerRuns": 200,
+    "optimizerRuns": 1,
     "viaIR": true,
-    "evmVersion": "cancun"
+    "evmVersion": "cancun",
+    "bytecodeHash": "none",
+    "cborMetadata": false
   },
-  "sourceDigestSha256": "de61d8adc8061ca32c03c7119210d1d5b79b2e385e5cd24fef23e60ad5939a75",
+  "sourceDigestSha256": "49b2d23827fbfdad9ee6c092c50b61d2dc9e98ab5443f4daf55f257436fa9698",
   "deploymentStatus": "ExternalBlocked",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
@@ -56,8 +58,8 @@
           "internalType": "address"
         }
       ],
-      "bytecodeSha256": "82dacea883faa04d2525dbc6eb62ae87710c3ea4bf53b07c8647b7e9061ed1b1",
-      "deployedBytecodeSha256": "cef0eb8f5ded13d49fd2cb93fed82c71e248f8fbc314cadbfe86c162fa7ab81a",
+      "bytecodeSha256": "479005c638daea31620f10abd1c376da32a94cbd9bb52ea2d7a8764185fed26a",
+      "deployedBytecodeSha256": "e7272c09f8bef94759c6f3fa3308e5028f6a91eb6229fb074ac4c84a7571650a",
       "deployedCodeHash": null
     },
     {
@@ -73,8 +75,8 @@
           "internalType": "contract IPolicyRegistryV2"
         }
       ],
-      "bytecodeSha256": "a2fa5c3d3c86d59d6b55cffc791d2798414bc0c79336497f6acbaa08961b5431",
-      "deployedBytecodeSha256": "9b4ce9aa4d1a6f442fc53ceaa9a57f1f24fd0eb9d1ee52c0e8e2d98fb237411e",
+      "bytecodeSha256": "84f5b350e1e58f74197cebef641eb42d080d7d14671828d5abfa622ffc6f8629",
+      "deployedBytecodeSha256": "9795ca6e07925be04b150484cfb1ee17d66edb2e5a20e80b62f68fa928a355b1",
       "deployedCodeHash": null
     },
     {
@@ -130,8 +132,8 @@
           "internalType": "address"
         }
       ],
-      "bytecodeSha256": "68f7ffbdf50226beabba2cfd18c91daab399cbcfc4c2620fca4f2d179cdb06d0",
-      "deployedBytecodeSha256": "83125b863d70fafae08cce704f7b9278f693f4ab551702bbe73446bb9f6e5a09",
+      "bytecodeSha256": "1453ba46764a8cb87897c58d53748985332508c5bbff569d420feb56f854943c",
+      "deployedBytecodeSha256": "f7cc01c2d0acfd463652bed3146c6cba2a9ad6fa97f06a65bdf472bdccecbcbe",
       "deployedCodeHash": null
     }
   ],

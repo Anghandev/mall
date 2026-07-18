@@ -95,7 +95,8 @@ drift, replacement mismatch or a changed Safe nonce invalidates the approval.
 Only after the complete release gate and separate approval, the bounded run may
 cover:
 
-1. deploy and verify the three contracts and Safe-held roles;
+1. deploy and verify the three contracts, Router governance-Safe binding and
+   Registry Safe-held roles;
 2. publish one approved payment policy through RBAC, secondary signature and
    Safe execution;
 3. configure one dedicated merchant, SKU, beneficiary and region snapshot;
