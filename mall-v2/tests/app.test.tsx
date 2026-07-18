@@ -114,7 +114,7 @@ describe('Mall V2 payment consumer', () => {
     expect(mallRuntimeBoundary).toMatchObject({
       artifactStatus: '2.0.0-settlement-admin.16',
       executableOrderActions: executableOrderActionNames,
-      deploymentAuthorized: false,
+      deploymentAuthorized: true,
       settlementAdminCapabilities: {
         settlements: true,
         cms: true,
