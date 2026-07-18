@@ -1,6 +1,6 @@
 # Core Artifacts
 
-Version `2.0.0-settlement-admin.15` is the coordinated local V2 checkpoint for
+Version `2.0.0-settlement-admin.16` is the coordinated local V2 checkpoint for
 OpenAPI, generated public types, state/error catalogs, the fail-closed
 WebSocket protocol, ABI/event/role bundles, manifests and SHA-256 checksums.
 
@@ -13,6 +13,8 @@ WebSocket events and seckill winner-review, rollover and payout projections.
 
 The payment policy binds the dedicated service-fee Safe, exact Custody amounts
 and fixed seckill-prize, node-reward and Locked reward-reserve allocations.
+Core signs exact five-minute NPL quotes from matching fixed-pair reserves; the
+Router has no external price-contract dependency.
 Pickup verification requires the snapshotted store and invalidates a credential
 after five failed attempts.
 

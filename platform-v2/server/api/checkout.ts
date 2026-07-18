@@ -21,7 +21,6 @@ export type MerchantConcessionPool = 'SECKILL_PRIZE' | 'NODE_REWARD' | 'REWARD_R
 
 export interface FrozenPaymentPolicy {
   policyVersion: number;
-  oracleVersion: string;
   usdtPaymentBps: number;
   nplPaymentBps: number;
   nplBurnListPriceBps: number;
@@ -34,10 +33,6 @@ export interface FrozenPaymentPolicy {
   regionBps: number;
   operationsBps: number;
   platformFeeBps: number;
-  oracleWindowSeconds: number;
-  oracleMaxDeviationBps: number;
-  oracleMaxAgeSeconds: number;
-  oracleMinimumUsdtLiquidity: bigint;
   requiredConfirmations: number;
   merchantGuaranteeMinimumUsdt: bigint;
   platformServiceFeeSafe?: string;
@@ -79,7 +74,6 @@ export interface PaymentQuoteRequest {
 export interface CanonicalPaymentIntent {
   orderId: string;
   policyVersion: number;
-  oracleVersion: string;
   buyer: string;
   merchant: string;
   productId: string;
@@ -170,7 +164,6 @@ export function buildPaymentIntent(
   return Object.freeze({
     orderId: request.orderId,
     policyVersion: policy.policyVersion,
-    oracleVersion: policy.oracleVersion,
     buyer: request.buyer.toLowerCase(),
     merchant: request.merchant.toLowerCase(),
     productId: request.productId,
@@ -287,14 +280,10 @@ export function assertPolicyReady(policy: FrozenPaymentPolicy) {
     policy.nplPaymentBps !== 3_000 ||
     policy.platformFeeBps !== PLATFORM_SERVICE_FEE_BPS ||
     policy.nplBurnListPriceBps + policy.nplRewardListPriceBps !== policy.nplPaymentBps ||
-    policy.oracleWindowSeconds !== 30 * 60 ||
-    policy.oracleMaxDeviationBps !== 500 ||
-    policy.oracleMaxAgeSeconds !== 10 * 60 ||
-    policy.oracleMinimumUsdtLiquidity !== 50_000n * 10n ** 18n ||
     policy.requiredConfirmations !== REQUIRED_CONFIRMATIONS ||
     policy.merchantGuaranteeMinimumUsdt < 1_000n * 10n ** 18n
   ) {
-    throw new CoreError('InvalidRequest', 'Frozen launch payment or safety policy is invalid');
+    throw new CoreError('InvalidRequest', 'Frozen launch payment policy is invalid');
   }
   const rewardBps = policy.genesisBps + policy.directReferralBps + policy.districtBps
     + policy.cityBps + policy.provinceBps + policy.regionBps + policy.operationsBps;

@@ -348,24 +348,18 @@ function validateConfigPayload(key: ConfigKey, value: unknown) {
       explorerApiSecretRef: secretRef(input.explorerApiSecretRef, 'explorer API'),
     };
   }
-  if (key === 'ORACLE') {
-    exactKeys(input, ['pairAddress', 'windowSeconds', 'maxDeviationBps', 'quoteValiditySeconds', 'maxAgeSeconds', 'minimumUsdtLiquidity']);
+  if (key === 'NPL_QUOTE') {
+    exactKeys(input, ['pairAddress', 'quoteValiditySeconds', 'minimumUsdtLiquidity']);
     const result = {
-      pairAddress: normalizeAddress(stringValue(input.pairAddress, 'Oracle pair')),
-      windowSeconds: boundedInteger(input.windowSeconds, 1, 86_400, 'Oracle window'),
-      maxDeviationBps: boundedInteger(input.maxDeviationBps, 1, 10_000, 'Oracle deviation'),
+      pairAddress: normalizeAddress(stringValue(input.pairAddress, 'NPL quote pair')),
       quoteValiditySeconds: boundedInteger(input.quoteValiditySeconds, 1, 3_600, 'quote validity'),
-      maxAgeSeconds: boundedInteger(input.maxAgeSeconds, 1, 3_600, 'Oracle max age'),
-      minimumUsdtLiquidity: unsigned(input.minimumUsdtLiquidity, 'Oracle minimum liquidity'),
+      minimumUsdtLiquidity: unsigned(input.minimumUsdtLiquidity, 'NPL quote minimum liquidity'),
     };
     if (
       result.pairAddress !== NPL_USDT_PAIR_ADDRESS
-      || result.windowSeconds !== 1_800
-      || result.maxDeviationBps !== 500
       || result.quoteValiditySeconds !== 300
-      || result.maxAgeSeconds !== 600
       || result.minimumUsdtLiquidity !== (50_000n * 10n ** 18n).toString()
-    ) throw new CoreError('InvalidRequest', 'Oracle config violates the frozen safety policy');
+    ) throw new CoreError('InvalidRequest', 'NPL quote config violates the frozen policy');
     return result;
   }
   if (key === 'GAS') {
@@ -377,7 +371,7 @@ function validateConfigPayload(key: ConfigKey, value: unknown) {
   if (key === 'CHAIN') {
     exactKeys(input, [
       'chainId', 'usdtAddress', 'nplAddress', 'pairAddress', 'paymentRouterAddress',
-      'policyRegistryAddress', 'beneficiaryRegistryAddress', 'twapOracleAddress',
+      'policyRegistryAddress', 'beneficiaryRegistryAddress',
       'usdtCustodySafe', 'nplRewardSafe', 'operationsTreasurySafe',
     ]);
     if (input.chainId !== 56) throw new CoreError('InvalidRequest', 'Chain config must use BSC 56');

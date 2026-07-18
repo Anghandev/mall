@@ -762,12 +762,11 @@ test('published wallet calls encode with the ABI and published EIP-712 messages 
   ] as const) assertRequiredSchema(schema, response);
 });
 
-test('ABI publication is exactly the four payment contracts and exposes current Router behavior', () => {
+test('ABI publication is exactly the three payment contracts and exposes current Router behavior', () => {
   const expectedContracts = [
     'BeneficiaryRegistryV2',
     'PaymentRouterV2',
     'PolicyRegistryV2',
-    'TwapOracleAdapterV2',
   ];
   assert.deepEqual(Object.keys(abiBundle.contracts).sort(), expectedContracts);
   assert.deepEqual(
@@ -963,7 +962,6 @@ function signingVectorRouterIntent() {
   return {
     orderId: hash('a'),
     policyVersion: 1,
-    oracleVersion: hash('1'),
     buyer: address('1'),
     merchant: address('2'),
     productId: hash('b'),

@@ -4,7 +4,7 @@ import { BSC_CHAIN_ID } from './enums.ts';
 import { CoreError } from './errors.ts';
 
 const PAYMENT_INTENT_ABI =
-  'tuple(bytes32 orderId,uint64 policyVersion,bytes32 oracleVersion,address buyer,address merchant,bytes32 productId,bytes32 skuId,uint32 quantity,uint8 fulfillmentMode,bytes32 fulfillmentTargetHash,bytes32 regionCodeHash,bytes32 productPolicyHash,bytes32 reservationId,bytes32 reservationHash,uint64 reservationDeadline,uint64 issuedAt,uint64 deadline,uint256 nonce,uint256 listPriceUsdt,uint256 productUsdtPaymentAmount,uint256 platformServiceFeeUsdt,uint256 custodyProductUsdt,uint256 freightUsdt,uint256 usdtPaymentAmount,uint256 nplQuoteAmount,uint256 nplPaymentAmount,uint256 nplBurnAmount,uint256 nplRewardAmount,uint256 merchantBaseReceivableUsdt,uint16 merchantConcessionBps,uint256 merchantConcessionAmount,uint256 merchantNetReceivableUsdt,bytes32 concessionAllocationHash,uint256 bnmAmount,bool seckill,bytes32 sessionId,tuple(address genesis,address directReferral,address district,address city,address province,address region) beneficiaries)';
+  'tuple(bytes32 orderId,uint64 policyVersion,address buyer,address merchant,bytes32 productId,bytes32 skuId,uint32 quantity,uint8 fulfillmentMode,bytes32 fulfillmentTargetHash,bytes32 regionCodeHash,bytes32 productPolicyHash,bytes32 reservationId,bytes32 reservationHash,uint64 reservationDeadline,uint64 issuedAt,uint64 deadline,uint256 nonce,uint256 listPriceUsdt,uint256 productUsdtPaymentAmount,uint256 platformServiceFeeUsdt,uint256 custodyProductUsdt,uint256 freightUsdt,uint256 usdtPaymentAmount,uint256 nplQuoteAmount,uint256 nplPaymentAmount,uint256 nplBurnAmount,uint256 nplRewardAmount,uint256 merchantBaseReceivableUsdt,uint16 merchantConcessionBps,uint256 merchantConcessionAmount,uint256 merchantNetReceivableUsdt,bytes32 concessionAllocationHash,uint256 bnmAmount,bool seckill,bytes32 sessionId,tuple(address genesis,address directReferral,address district,address city,address province,address region) beneficiaries)';
 const SECKILL_INTENT_ABI =
   `tuple(bytes32 sessionId,${PAYMENT_INTENT_ABI} seckillPayment,${PAYMENT_INTENT_ABI} fallbackPayment)`;
 
@@ -159,7 +159,6 @@ export function toRouterPaymentIntent(intent: CanonicalPaymentIntent) {
   return {
     orderId: intent.orderId,
     policyVersion: intent.policyVersion,
-    oracleVersion: intent.oracleVersion,
     buyer: intent.buyer,
     merchant: intent.merchant,
     productId: intent.productId,

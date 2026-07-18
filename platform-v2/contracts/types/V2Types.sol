@@ -8,11 +8,7 @@ library V2Types {
     uint16 internal constant PLATFORM_SERVICE_FEE_LIST_PRICE_BPS = 100;
     uint16 internal constant NPL_BURN_LIST_PRICE_BPS = 2_000;
     uint16 internal constant NPL_REWARD_LIST_PRICE_BPS = 1_000;
-    uint32 internal constant ORACLE_WINDOW = 30 minutes;
-    uint16 internal constant ORACLE_MAX_DEVIATION_BPS = 500;
-    uint64 internal constant ORACLE_MAX_AGE = 10 minutes;
     uint64 internal constant QUOTE_VALIDITY = 5 minutes;
-    uint128 internal constant ORACLE_MIN_USDT_LIQUIDITY = 50_000 ether;
     uint128 internal constant MERCHANT_GUARANTEE_MINIMUM = 1_000 ether;
     uint32 internal constant REQUIRED_CONFIRMATIONS = 15;
     uint256 internal constant BSC_CHAIN_ID = 56;
@@ -51,9 +47,6 @@ library V2Types {
         uint32 relayInitial;
         uint32 relayIncrement;
         uint32 relayCap;
-        bytes32 oracleVersion;
-        uint64 oracleMaxAge;
-        uint128 oracleMinLiquidity;
         uint128 merchantGuaranteeMinimum;
         address usdtCustodySafe;
         address nplRewardSafe;
@@ -77,7 +70,6 @@ library V2Types {
     struct PaymentIntent {
         bytes32 orderId;
         uint64 policyVersion;
-        bytes32 oracleVersion;
         address buyer;
         address merchant;
         bytes32 productId;
