@@ -1112,7 +1112,7 @@ async function actionProjection(executor: SqlExecutor, row: SeckillActionRow) {
 
 function allowedActions(row: SeckillActionRow) {
   if (row.state === 'DRAFT') return ['APPROVE_SECONDARY', 'CANCEL'];
-  if (row.state === 'SECONDARY_SIGNED') return ['PROPOSE_SAFE', 'CANCEL'];
+  if (row.state === 'SECONDARY_SIGNED') return ['EXECUTE', 'CANCEL'];
   return [];
 }
 

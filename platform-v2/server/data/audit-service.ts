@@ -296,7 +296,7 @@ function publicMerchantAuditRow(row: AuditRow) {
   const signatureHash = typeof row.signature_evidence.signatureHash === 'string'
     ? row.signature_evidence.signatureHash
     : null;
-  const safeOrChainTxHash = typeof row.transaction_evidence.txHash === 'string'
+  const chainTxHash = typeof row.transaction_evidence.txHash === 'string'
     ? row.transaction_evidence.txHash
     : null;
   return Object.freeze({
@@ -306,7 +306,7 @@ function publicMerchantAuditRow(row: AuditRow) {
     module: row.resource_type,
     detail: `${row.event_type} / ${row.resource_type} / ${row.resource_id}`,
     signatureHash,
-    safeOrChainTxHash,
+    chainTxHash,
     entryHash: row.entry_hash,
   });
 }
@@ -333,7 +333,7 @@ function validateMerchantExportQuery(query: Omit<AuditQuery, 'actorWallet' | 'me
 }
 
 function merchantAuditCsv(entries: ReturnType<typeof publicMerchantAuditRow>[]) {
-  const header = ['operationTime', 'operationType', 'module', 'detail', 'signatureHash', 'safeOrChainTxHash', 'entryHash'];
+  const header = ['operationTime', 'operationType', 'module', 'detail', 'signatureHash', 'chainTxHash', 'entryHash'];
   const rows = entries.map((entry) => header.map((name) => csvCell(entry[name as keyof typeof entry])).join(','));
   return `\uFEFF${header.join(',')}\n${rows.join('\n')}${rows.length > 0 ? '\n' : ''}`;
 }

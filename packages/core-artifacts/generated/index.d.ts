@@ -266,7 +266,7 @@ export interface MerchantReviewEvidence {
   state: 'DRAFT' | 'PUBLISHED' | 'EXPIRED';
   secondarySigner: Address | null;
   actionDigest: Bytes32 | null;
-  safeTxHash: Bytes32 | null;
+  approvalSignatureHash: Bytes32 | null;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -325,11 +325,11 @@ export interface MerchantLifecycleDetail {
     };
   }>;
   balances: readonly Readonly<{
-    state: 'LOCKED' | 'AVAILABLE' | 'REQUESTED' | 'BATCHED' | 'SETTLED'; amount: AtomicAmount;
+    state: 'LOCKED' | 'AVAILABLE' | 'REQUESTED' | 'SUBMITTED' | 'SETTLED'; amount: AtomicAmount;
   }>[];
   settlements: readonly Readonly<{
     requestId: Bytes32; asset: 'USDT' | 'NPL'; amount: AtomicAmount; state: SettlementRequestState;
-    requestedAt: Timestamp; safeTxHash: Bytes32 | null; settledAt: Timestamp | null;
+    requestedAt: Timestamp; finalExecutionTxHashes: readonly Bytes32[]; settledAt: Timestamp | null;
   }>[];
   reviews: readonly MerchantReviewEvidence[];
 }
@@ -571,11 +571,10 @@ export interface SeckillPrizeReview {
 }
 
 export interface SeckillPrizePayout {
-  state: 'AVAILABLE' | 'REQUESTED' | 'BATCHED' | 'SETTLED' | 'RETRYABLE' | 'QUARANTINED';
+  state: 'AVAILABLE' | 'REQUESTED' | 'SUBMITTED' | 'SETTLED' | 'RETRYABLE' | 'QUARANTINED';
   requestId: Bytes32 | null;
-  batchId: Bytes32 | null;
-  finalSafeTxHash: Bytes32 | null;
-  finalExecutionTxHash: Bytes32 | null;
+  transferIds: readonly Bytes32[];
+  finalExecutionTxHashes: readonly Bytes32[];
 }
 
 export interface SeckillPrizeSettlementProjection {
@@ -1226,7 +1225,7 @@ export interface TakeoverFundingPlan {
   orderId: string;
   policyVersion: number;
   requiredUsdt: AtomicAmount;
-  operationsSafe: Address;
+  operationsWallet: Address;
   guaranteeUsedUsdt: AtomicAmount;
   receivables: readonly TakeoverFundingReceivable[];
   frozenReceivablesUsedUsdt: AtomicAmount;
@@ -1764,7 +1763,7 @@ export interface MonitoringAlert {
 
 export interface MonitoringCoverage {
   asset: 'USDT' | 'NPL';
-  safe_address: Address;
+  wallet_address: Address;
   assets: AtomicAmount;
   unsettled_liabilities: AtomicAmount;
   covered: boolean;
@@ -3030,7 +3029,7 @@ export interface MerchantAuditEntry {
   module: string;
   detail: string;
   signatureHash: Bytes32 | null;
-  safeOrChainTxHash: Bytes32 | null;
+  chainTxHash: Bytes32 | null;
   entryHash: string;
 }
 

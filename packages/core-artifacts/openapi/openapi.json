@@ -25502,16 +25502,15 @@
         "required": [
           "state",
           "requestId",
-          "batchId",
-          "finalSafeTxHash",
-          "finalExecutionTxHash"
+          "transferIds",
+          "finalExecutionTxHashes"
         ],
         "properties": {
           "state": {
             "enum": [
               "AVAILABLE",
               "REQUESTED",
-              "BATCHED",
+              "SUBMITTED",
               "SETTLED",
               "RETRYABLE",
               "QUARANTINED"
@@ -25527,35 +25526,17 @@
               }
             ]
           },
-          "batchId": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Bytes32"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "transferIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
           },
-          "finalSafeTxHash": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Bytes32"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "finalExecutionTxHash": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Bytes32"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "finalExecutionTxHashes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
           }
         }
       },
@@ -26808,7 +26789,7 @@
           "module",
           "detail",
           "signatureHash",
-          "safeOrChainTxHash",
+          "chainTxHash",
           "entryHash"
         ],
         "properties": {
@@ -26842,7 +26823,7 @@
               }
             ]
           },
-          "safeOrChainTxHash": {
+          "chainTxHash": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Bytes32"
@@ -29658,7 +29639,7 @@
           "state",
           "secondarySigner",
           "actionDigest",
-          "safeTxHash",
+          "approvalSignatureHash",
           "createdAt",
           "updatedAt"
         ],
@@ -29710,7 +29691,7 @@
               }
             ]
           },
-          "safeTxHash": {
+          "approvalSignatureHash": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Bytes32"
@@ -29983,7 +29964,7 @@
               "LOCKED",
               "AVAILABLE",
               "REQUESTED",
-              "BATCHED",
+              "SUBMITTED",
               "SETTLED"
             ]
           },
@@ -30001,7 +29982,7 @@
           "amount",
           "state",
           "requestedAt",
-          "safeTxHash",
+          "finalExecutionTxHashes",
           "settledAt"
         ],
         "properties": {
@@ -30030,15 +30011,11 @@
             "type": "string",
             "format": "date-time"
           },
-          "safeTxHash": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Bytes32"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "finalExecutionTxHashes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
           },
           "settledAt": {
             "anyOf": [

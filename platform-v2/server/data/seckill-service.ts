@@ -51,8 +51,8 @@ interface SessionRow {
   rollover_journal_id: string | null;
   payout_state: string | null;
   payout_request_id: string | null;
-  payout_transfer_id: string | null;
-  payout_execution_tx_hash: string | null;
+  payout_transfer_ids: string[] | null;
+  payout_execution_tx_hashes: string[] | null;
 }
 
 interface RelayEventRow {
@@ -206,28 +206,28 @@ function sessionSelect() {
     prize.review_evidence_hash, prize.reviewed_by, prize.reviewed_at, prize.award_journal_id,
     prize.rollover_target_session_id, prize.rollover_journal_id,
     payout.state AS payout_state, payout.request_id AS payout_request_id,
-    payout.payout_transfer_id,
-    payout.final_execution_tx_hash AS payout_execution_tx_hash
+    payout.payout_transfer_ids,
+    payout.final_execution_tx_hashes AS payout_execution_tx_hashes
   FROM core.seckill_sessions session
   JOIN core.products product ON product.product_id = session.product_id
   JOIN core.skus sku ON sku.sku_id = session.sku_id
   JOIN core.policy_snapshots policy ON policy.policy_version = session.policy_version
   LEFT JOIN core.seckill_prize_settlements prize ON prize.session_id = session.session_id
   LEFT JOIN LATERAL (
-    SELECT request.request_id, request.state, transfer.transfer_id AS payout_transfer_id,
-      final_attempt.execution_tx_hash AS final_execution_tx_hash
+    SELECT request.request_id, request.state,
+      COALESCE(array_agg(DISTINCT transfer.transfer_id)
+        FILTER (WHERE transfer.transfer_id IS NOT NULL), '{}') AS payout_transfer_ids,
+      COALESCE(array_agg(DISTINCT attempt.execution_tx_hash)
+        FILTER (WHERE attempt.state = 'SETTLED' AND attempt.execution_tx_hash IS NOT NULL), '{}')
+        AS final_execution_tx_hashes
     FROM core.settlement_request_items item
     JOIN core.settlement_requests request ON request.request_id = item.request_id
     LEFT JOIN core.settlement_transfers transfer
       ON transfer.request_id = item.request_id AND transfer.request_item_index = item.item_index
-    LEFT JOIN LATERAL (
-      SELECT attempt.execution_tx_hash
-      FROM core.settlement_transfer_attempts attempt
-      WHERE attempt.transfer_id = transfer.transfer_id AND attempt.state = 'SETTLED'
-      ORDER BY attempt.attempt_number DESC LIMIT 1
-    ) final_attempt ON true
+    LEFT JOIN core.settlement_transfer_attempts attempt ON attempt.transfer_id = transfer.transfer_id
     WHERE item.order_id = prize.candidate_order_id
       AND item.account_id = prize.award_account_id
+    GROUP BY request.request_id, request.state, request.requested_at
     ORDER BY request.requested_at DESC, request.request_id DESC LIMIT 1
   ) payout ON true`;
 }
@@ -301,8 +301,8 @@ function sessionProjection(row: SessionRow, now: Date) {
       payout: row.review_decision === 'APPROVED' ? {
         state: row.payout_state ?? (BigInt(row.pool_snapshot_amount_usdt ?? '0') > 0n ? 'AVAILABLE' : 'SETTLED'),
         requestId: row.payout_request_id,
-        transferId: row.payout_transfer_id,
-        finalExecutionTxHash: row.payout_execution_tx_hash,
+        transferIds: row.payout_transfer_ids ?? [],
+        finalExecutionTxHashes: row.payout_execution_tx_hashes ?? [],
       } : null,
     } : null,
     snapshot: object(row.snapshot),
