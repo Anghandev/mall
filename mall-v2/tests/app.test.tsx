@@ -55,20 +55,21 @@ import {
   rolledOverPrizeSettlement,
   seckillCandidateOrderId,
   seckillGovernanceActionId,
-  seckillPrizeSafeTxHash,
+  seckillPrizeExecutionTxHash,
   seckillPublicationTxHash,
   seckillRulesContentHash,
   seckillSession,
   seckillSessionId,
 } from './seckill-fixtures';
 import {
-  finalSafeTxHash,
+  finalExecutionTxHash,
   notificationItem,
   prizeSettlementIntent,
   publicCmsItem,
   requestedSettlement,
   settlementIntent,
   settlementProjection,
+  settlementTransferId,
 } from './settlement-fixtures';
 import {
   firstShoppingStatementPage,
@@ -710,7 +711,7 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText('实时')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '历史战报' }));
     expect(screen.getByText(`赢家 0x1111…1111`)).toBeTruthy();
-    expect(screen.getByText(seckillPrizeSafeTxHash)).toBeTruthy();
+    expect(screen.getByText(seckillPrizeExecutionTxHash)).toBeTruthy();
   });
 
   it('renders candidate review, rollover, quarantine and every prize payout state from Core', async () => {
@@ -719,7 +720,7 @@ describe('Mall V2 payment consumer', () => {
       storedPhase: 'SETTLING',
       prizeSettlement: reviewPendingPrizeSettlement(),
     });
-    const payoutStates = ['AVAILABLE', 'REQUESTED', 'BATCHED', 'SETTLED'] as const;
+    const payoutStates = ['AVAILABLE', 'REQUESTED', 'SUBMITTED', 'SETTLED'] as const;
     const history = payoutStates.map((state, index) => seckillSession({
       sessionId: `0x${String(index + 1).repeat(64)}`,
       phase: 'SETTLED',
@@ -759,10 +760,10 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText(seckillCandidateOrderId)).toBeTruthy();
     expect(screen.getByText('区块 32000000 · Log 4')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '历史战报' }));
-    for (const label of ['Available', 'Requested', 'Batched', 'Settled', '已滚入下一场', '已隔离']) {
+    for (const label of ['Available', 'Requested', 'Submitted', 'Settled', '已滚入下一场', '已隔离']) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
-    expect(screen.getByText(seckillPrizeSafeTxHash)).toBeTruthy();
+    expect(screen.getByText(seckillPrizeExecutionTxHash)).toBeTruthy();
   });
 
   it('binds the current Core session to the existing dual-quote checkout', async () => {
@@ -1283,10 +1284,11 @@ describe('Mall V2 payment consumer', () => {
 
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     await screen.findByRole('heading', { name: 'NPL 收益' });
-    for (const label of ['Locked', 'Available', 'Requested', 'Batched', 'Settled']) {
+    for (const label of ['Locked', 'Available', 'Requested', 'Submitted', 'Settled']) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
-    expect(screen.getByText(finalSafeTxHash)).toBeTruthy();
+    expect(screen.getByText(new RegExp(`${settlementTransferId.slice(0, 10)}…${settlementTransferId.slice(-8)}`))).toBeTruthy();
+    expect(screen.getByText(finalExecutionTxHash)).toBeTruthy();
     for (const label of ['创世', '直推', '区县', '城市', '省', '大区', '运维', '取整余数']) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
@@ -1428,7 +1430,7 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getAllByText('Locked（锁定）')).toHaveLength(2);
     expect(screen.getAllByText('Available（可用）')).toHaveLength(1);
     expect(screen.getByText('活动参数 · 版本')).toBeTruthy();
-    expect(screen.getByText(finalSafeTxHash)).toBeTruthy();
+    expect(screen.getByText(finalExecutionTxHash)).toBeTruthy();
     expect(screen.getByRole('button', { name: `重新验证或切换钱包，当前 ${BUYER}` })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '启用站内通知' }));
     await waitFor(() => expect(registerNotificationEndpoint).toHaveBeenCalledWith('buyer-session', {
@@ -1499,7 +1501,7 @@ describe('Mall V2 payment consumer', () => {
 
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     expect(await screen.findByRole('heading', { name: '通知同步失败' })).toBeTruthy();
-    expect(screen.queryByText(finalSafeTxHash)).toBeNull();
+    expect(screen.queryByText(finalExecutionTxHash)).toBeNull();
     expect(screen.queryByRole('heading', { name: '结算已完成' })).toBeNull();
   });
 

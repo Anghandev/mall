@@ -13,8 +13,9 @@ const hash = (value: string) => `0x${value.repeat(64)}`;
 const address = (value: string) => `0x${value.repeat(40)}`;
 
 export const settlementBuyer = address('1');
-export const settlementSafe = address('9');
-export const finalSafeTxHash = hash('f');
+export const settlementExecutorWallet = address('9');
+export const settlementTransferId = hash('6');
+export const finalExecutionTxHash = hash('f');
 const settlementRequestTypes = {
   SettlementRequest: [
     { name: 'intentId', type: 'bytes32' },
@@ -23,7 +24,7 @@ const settlementRequestTypes = {
     { name: 'recipient', type: 'address' },
     { name: 'rail', type: 'string' },
     { name: 'asset', type: 'address' },
-    { name: 'safeAddress', type: 'address' },
+    { name: 'executorWallet', type: 'address' },
     { name: 'amount', type: 'uint256' },
     { name: 'itemsHash', type: 'bytes32' },
     { name: 'nonce', type: 'uint256' },
@@ -37,13 +38,13 @@ const settlementIntentValue = {
   recipient: settlementBuyer,
   rail: 'REWARD_NPL' as const,
   asset: chainIdentity.nplAddress,
-  safeAddress: settlementSafe,
+  executorWallet: settlementExecutorWallet,
   amount: '200',
   itemsHash: hash('7'),
   nonce: '3',
   deadline: 2_000_000_000,
 };
-const settlementDomain = { name: 'Abu24KV2Settlement', version: '2', chainId: 56, verifyingContract: settlementSafe };
+const settlementDomain = { name: 'Abu24KV2Settlement', version: '2', chainId: 56, verifyingContract: settlementExecutorWallet };
 
 export const settlementIntent: SettlementIntentProjection = {
   intent: settlementIntentValue,
@@ -58,7 +59,7 @@ export const settlementIntent: SettlementIntentProjection = {
     itemIndex: 0,
     orderId: hash('1'),
     accountId: 'ledger:reward:buyer',
-    backingSafeAddress: settlementSafe,
+    backingWalletAddress: settlementExecutorWallet,
     amount: '200',
     itemHash: hash('5'),
   }],
@@ -88,7 +89,7 @@ export const prizeSettlementIntent: SettlementIntentProjection = {
     itemIndex: 0,
     orderId: hash('2'),
     accountId: 'seckill-prize:session-1:usdt',
-    backingSafeAddress: settlementSafe,
+    backingWalletAddress: settlementExecutorWallet,
     amount: '60',
     itemHash: hash('3'),
   }],
@@ -104,17 +105,16 @@ export const requestedSettlement: SettlementRequestProjection = {
   rail: 'REWARD_NPL',
   asset: 'NPL',
   asset_address: chainIdentity.nplAddress,
-  safe_address: settlementSafe,
+  executor_wallet: settlementExecutorWallet,
   amount: '200',
   items_hash: settlementIntent.intent.itemsHash,
   intent_digest: settlementIntent.digest,
   signature_hash: hash('4'),
   state: 'REQUESTED',
-  batch_id: null,
-  final_safe_tx_hash: null,
-  final_execution_tx_hash: null,
+  transfer_ids: [],
+  final_execution_tx_hashes: [],
   requested_at: '2033-05-18T05:01:00.000Z',
-  batched_at: null,
+  submitted_at: null,
   settled_at: null,
   items: [],
   transitions: [],
@@ -127,7 +127,7 @@ export const settlementProjection: SettlementListProjection = {
     { asset: 'NPL', purpose: 'REWARD_LIABILITY', rewardSubtype: null, state: 'LOCKED', amount: '100' },
     { asset: 'NPL', purpose: 'REWARD_LIABILITY', rewardSubtype: null, state: 'AVAILABLE', amount: '200' },
     { asset: 'NPL', purpose: 'REWARD_LIABILITY', rewardSubtype: null, state: 'REQUESTED', amount: '300' },
-    { asset: 'NPL', purpose: 'REWARD_LIABILITY', rewardSubtype: null, state: 'BATCHED', amount: '400' },
+    { asset: 'NPL', purpose: 'REWARD_LIABILITY', rewardSubtype: null, state: 'SUBMITTED', amount: '400' },
     { asset: 'NPL', purpose: 'REWARD_LIABILITY', rewardSubtype: null, state: 'SETTLED', amount: '500' },
     { asset: 'NPL', purpose: 'REWARD_LIABILITY', rewardSubtype: 'GENESIS', state: 'LOCKED', amount: '20' },
     { asset: 'NPL', purpose: 'REWARD_LIABILITY', rewardSubtype: 'DIRECT_REFERRAL', state: 'AVAILABLE', amount: '10' },
@@ -147,10 +147,9 @@ export const settlementProjection: SettlementListProjection = {
     ...requestedSettlement,
     request_id: 'settlement-request-settled',
     state: 'SETTLED',
-    batch_id: 'settlement-batch-1',
-    final_safe_tx_hash: finalSafeTxHash,
-    final_execution_tx_hash: finalSafeTxHash,
-    batched_at: '2033-05-18T05:02:00.000Z',
+    transfer_ids: [settlementTransferId],
+    final_execution_tx_hashes: [finalExecutionTxHash],
+    submitted_at: '2033-05-18T05:02:00.000Z',
     settled_at: '2033-05-18T05:10:00.000Z',
   }],
 };
@@ -176,7 +175,7 @@ export const notificationItem: NotificationInboxItem = {
   messageId: 'notification-message-1',
   sourceEventType: 'SettlementFinalized',
   topic: 'SETTLEMENT_SETTLED',
-  templateData: { requestId: 'settlement-request-settled', safeTxHash: finalSafeTxHash },
+  templateData: { requestId: 'settlement-request-settled', executionTxHash: finalExecutionTxHash },
   deliveryState: 'DELIVERED',
   createdAt: '2033-05-18T05:10:00.000Z',
 };

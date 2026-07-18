@@ -27,7 +27,7 @@ const settlementRequestFields = [
   { name: 'recipient', type: 'address' },
   { name: 'rail', type: 'string' },
   { name: 'asset', type: 'address' },
-  { name: 'safeAddress', type: 'address' },
+  { name: 'executorWallet', type: 'address' },
   { name: 'amount', type: 'uint256' },
   { name: 'itemsHash', type: 'bytes32' },
   { name: 'nonce', type: 'uint256' },
@@ -254,8 +254,8 @@ export async function validateSettlementIntentForWallet(projection: SettlementIn
     domain.name !== 'Abu24KV2Settlement'
     || domain.version !== '2'
     || Number(domain.chainId) !== chainIdentity.chainId
-    || String(domain.verifyingContract).toLowerCase() !== intent.safeAddress.toLowerCase()
-  ) throw new WalletGatewayError('InvalidIntent', '结算签名的链或 Safe 不一致');
+    || String(domain.verifyingContract).toLowerCase() !== intent.executorWallet.toLowerCase()
+  ) throw new WalletGatewayError('InvalidIntent', '结算签名的链或执行钱包不一致');
 
   const message = typedData.message as Record<string, unknown>;
   for (const [field, value] of Object.entries(intent)) {
