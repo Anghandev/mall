@@ -1,148 +1,120 @@
-# BSC Mainnet Micro-Test Execution Evidence
+# BSC Mainnet EOA Deployment And Micro-Test Plan
 
-Status: payment contracts `DEPLOYED_AND_VERIFIED`; payment micro-test
-`PREPARATION_REQUIRED`.
+Status: `LOCAL_GATES_PASSED`; five-role EOA deployment `PENDING`;
+mainnet broadcast `NOT_AUTHORIZED`.
 
-This evidence is bound to settlement/admin artifact
-`2.0.0-settlement-admin.16`. The three-contract deployment packet completed on
-BSC with 15 canonical confirmations, zero token value and `0.0004482491 BNB`
-actual Gas. All three contracts are source-verified on BscScan. The completed
-redacted checks did not print addresses or private keys. The generic
-`pnpm micro:preflight` remains insufficient because it prints wallet addresses
-and does not attest this project's contracts or exact transaction packet.
+This plan is bound to settlement/admin artifact
+`2.0.0-settlement-admin.16` and the five-role EOA architecture in
+`V2_SYSTEM_CONTRACT.md`. It does not authorize a transaction.
 
-## Proven Readiness
+## Current Evidence
 
-- the full local `pnpm verify`, combined E2E, backup/restore, breaker drills and
-  one bounded funds/permissions review passed;
-- the coordinated manifest has no `DecisionBlocked` entries;
-- both configured RPC providers return BSC chain ID `56`;
-- all five configured Safes have runtime code and respond to the required Safe
-  read interfaces;
-- the deployment key, configured technical wallet and local technical roles
-  match without exposing their values;
-- the node weight is 100% and the four operations weights are 25% each;
-- the deployer native balance exceeds the configured micro-test BNB budget at
-  the observed Gas price.
-- the exact three-CREATE packet passed a fork deployment before broadcast; each
-  transaction's maximum BNB cost was below `0.381 USDT` at the dual-RPC price
-  snapshot and therefore within the current Goal's per-transaction `3 USDT`
-  authorization;
-- every deployment receipt reached 15 confirmations on both RPC providers;
-  CREATE addresses, calldata, runtime hashes, immutable bindings and zero
-  USDT/NPL balance deltas matched the packet;
-- `platform-v2/deployments/bsc-payment-v2.json` binds the authorization,
-  packet, receipts and BscScan-verification evidence hashes.
+- `pnpm verify` passed after all three products consumed the same Core artifact.
+- Contract unit, fuzz and invariant tests passed, including per-asset
+  conservation, replay protection, permissions and payment pause/resume.
+- Database and worker tests passed for append-only settlement transfers,
+  replacement, failed-receipt quarantine, 15-confirmation finality, reorg,
+  guarantee funding and coverage pause/resume.
+- Combined Core and browser E2E passed without a production fixture.
+- Same-version backup/restore and mode-600 production-backup gates passed.
+- Both configured read-only RPC endpoints report BSC chain ID `56`.
+- The five EOA role addresses are derived from ignored local key configuration;
+  no private key or complete role address is stored in this document.
 
-## Current Blockers
+## Deployment State
 
-New payment execution remains prohibited while any of these is true:
+The earlier Safe-bound deployments are historical evidence only:
 
-- launch policy version `1` and required region beneficiaries have not been
-  published through their real Safe and secondary-signature paths;
-- no exact post-deployment packet yet binds the policy/Safe nonce, buyer token
-  approvals, signed quote, ordinary/seckill calldata and per-asset deltas;
-- the dedicated micro buyer lacks the bounded USDT/NPL balances needed by that
-  packet;
-- production database/Redis/indexer/signer readiness cannot reproduce the
-  deployed manifest and fixed-pair dual-RPC quote snapshot;
-- a required Safe action lacks the actual Safe-owner signatures.
+- `platform-v2/deployments/bsc-payment-v2-safe-superseded.json` is
+  `SUPERSEDED`;
+- those contracts had no published policy and no user funds at replacement;
+- they must not receive a policy, payment, settlement or governance action.
 
-The current generic preflight checks only environment, chain, wallet and budget.
-It is insufficient for this project and cannot authorize a run.
-Map, logistics, printing, notification, media and BNM provider configuration is
-not a deployment or payment-micro-test blocker; those features remain honestly
-`ConfigurationRequired` until their production acceptance is performed.
+The active deployment manifest is
+`platform-v2/deployments/bsc-payment-v2.json`. It is currently:
 
-## Deployment Evidence
+```text
+architecture = FIVE_ROLE_EOA_V2
+deploymentStatus = PENDING
+deploymentAuthorized = false
+contracts = empty
+```
 
-The completed payment contract order was:
+No EOA-bound `PolicyRegistryV2`, `BeneficiaryRegistryV2` or
+`PaymentRouterV2` deployment has been broadcast. No EOA policy publication,
+token approval, payment, seckill, guarantee or settlement transaction has been
+broadcast.
 
-1. `PolicyRegistryV2`
-2. `BeneficiaryRegistryV2`
-3. `PaymentRouterV2`
+## Exact Packet Gate
 
-A project-specific dry run proved constructor arguments, CREATE addresses,
-runtime-code hashes, Safe authority and fixed token/pair addresses before the
-same packet was broadcast. Core must still read matching fixed-pair reserves
-from both RPC providers at one common block and sign the exact NPL amount for
-every payment quote.
-
-The final manifest must bind each deployment block and actual runtime code hash.
-Runtime readiness must reproduce those values and a matching fixed-pair reserve
-snapshot from both configured RPC providers before new quotes are enabled.
-
-The non-secret evidence is recorded in
-`platform-v2/deployments/bsc-payment-v2.json` with the bounded release-evidence
-hash. Generated manifests must not be edited directly.
-
-## Required Approval Packet
-
-Every proposed transaction must be listed in execution order with:
+Before any broadcast, one ignored mode-600 packet must bind every transaction
+in execution order. The user approves the packet by its SHA-256. The packet
+must contain:
 
 ```text
 chainId = 56
-transaction sequence number and total count
-from role and expected signer
-to address and verified contract name
-function signature and 4-byte selector
-exact calldata and keccak256 calldata hash
-policyVersion, order/session/reservation IDs
-USDT and NPL integer amounts
-native value
-current allowance and requested allowance
-replacementForTxHash, if any
+artifact version and git commit
+sequence number and total transaction count
+from role and derived signer address
+current account nonce
+target address, contract and function signature
+exact constructor arguments or calldata and calldata hash
+native value and token integer amounts
 eth_estimateGas, gas limit, fee ceiling and maximum BNB cost
-expected events and exact wallet/Safe/Burn/Router balance deltas
-post-transaction assertion and stop condition
+per-transaction and cumulative BNB/USDT/NPL budget
+expected events and exact role-wallet/Burn/Router balance deltas
+post-transaction assertions and stop conditions
 ```
 
-The packet also fixes the per-transaction and cumulative BNB, USDT and NPL
-budgets. Unknown targets, selectors, trailing calldata, amount drift, allowance
-drift, replacement mismatch or a changed Safe nonce invalidates the approval.
+Any change to chain, signer, nonce, target, constructor argument, calldata,
+amount, Gas ceiling or total budget invalidates the packet and requires a new
+SHA-256 approval. Complete role addresses remain only in the ignored packet
+and local evidence, never in tracked documentation or chat output.
 
-## Remaining Micro-Test Sequence
+## Intended Sequence
 
-Every remaining transaction still requires an exact packet. The current Goal
-waives a separate confirmation only when each transaction's maximum value plus
-Gas is at most `3 USDT`; a larger transaction requires explicit approval.
+1. Deploy `PolicyRegistryV2` from the Platform Governance EOA.
+2. Deploy `BeneficiaryRegistryV2` bound to the new Policy Registry.
+3. Deploy `PaymentRouterV2` bound to BSC USDT/NPL, both new registries and the
+   four distinct funding EOAs.
+4. Wait for 15 canonical confirmations and verify runtime code, constructor
+   bindings, roles, zero native value and zero USDT/NPL balances.
+5. Publish policy V1 and required beneficiary snapshots through the Platform
+   Governance EOA with the exact secondary EIP-712 signature.
+6. Fund only the minimum Gas and token amounts fixed by the approved packet.
+7. Execute one ordinary payment and prove the exact service-fee, Custody,
+   freight, NPL Burn and NPL Reward deltas with zero Router retention.
+8. Execute the bounded seckill/boundary flow and prove reservation,
+   classification and prize-liability evidence.
+9. Prove fulfillment/finality and the local/Fork 1,000-USDT guarantee path;
+   the guarantee minimum is never disguised as a mainnet micro amount.
+10. Execute one signed settlement request as individual EOA ERC-20 transfers,
+    wait for 15 confirmations and reconcile every ledger liability and TxHash.
+11. Exercise payment/seckill/settlement pause and recovery while finality,
+    reconciliation and audit reads remain available.
 
-1. Completed: deploy and verify the three contracts, Router governance-Safe
-   binding and Registry Safe-held roles.
-2. publish one approved payment policy through RBAC, secondary signature and
-   Safe execution;
-3. configure one dedicated merchant, SKU, beneficiary and region snapshot;
-4. fund only the approved buyer USDT/NPL and micro operational amounts;
-5. execute one ordinary payment and prove 1%-of-list USDT to the Platform
-   Service Fee Safe, the remaining 69%-of-list product USDT plus independent
-   freight USDT to the Custody Safe, 20% NPL to Burn, 10% NPL to the Reward Safe
-   and zero Router retention;
-6. execute one seckill payment and one deadline fallback using independent
-   reservations and prove the 60-minute/60-second/+30-second rules;
-7. wait for 15 canonical confirmations and prove event indexing, balanced Locked
-   journals, order finality and unused reservation release;
-8. execute the separately approved fulfillment and BNM-points path, prove the
-   BNM backend rejects a delayed lower `stateVersion`, prove the seckill prize
-   liability remains Locked until session settlement, record the evidence hash
-   used by the runtime readiness gate, then execute the published
-   settlement-request and Safe MultiSend micro paths;
-9. exercise payment/seckill/settlement breakers while recovery reads and
-   finality continue;
-10. revoke temporary token allowances and reconcile every wallet, Safe, Burn,
-    ledger liability, event and audit record.
+Safe proposals, owner signatures, `execTransaction`, MultiSend and Safe nonce
+are not part of this sequence.
 
-There is no business-refund or on-chain Claim fallback.
-The 1,000 USDT merchant guarantee remains a local/fork test and is not reduced
-or represented as a mainnet micro amount.
+## Hard Limits And Stop Conditions
 
-## Stop Conditions
+- Each token-value test action remains at or below the project's `3 USDT`
+  equivalent ceiling; the approved packet sets a lower exact amount whenever
+  the contract permits it.
+- Native value is zero except an explicitly listed minimum Gas funding transfer.
+- The packet fixes maximum Gas per transaction and a cumulative BNB ceiling.
+- Stop before the next broadcast on any failed assertion, status-0 receipt,
+  reorg, nonce/replacement drift, chain mismatch, unexpected bytecode or role,
+  quote expiry, finality shortfall, unexpected event/balance/liability, Router
+  retained balance, RPC disagreement, audit failure or budget excess.
+- A failed mined transaction still consumes the packet's Gas budget.
 
-Stop before the next broadcast on any failed assertion, receipt status other
-than 1, reorg, replacement mismatch, chain mismatch, inconsistent, empty or
-low-liquidity pair reserves, quote expiry, finality shortfall, unexpected event/balance/liability,
-Router retained balance, role drift, Safe nonce drift, provider failure, audit
-failure or budget excess.
+## Non-Blocking Production Configuration
 
-Failed mined transactions still consume the bounded Gas budget. Resuming after
-a stop requires a new evidence package; any transaction above `3 USDT` also
-requires explicit user approval.
+Maps, logistics, waybill/printing, SMS/email/Push, OSS/CDN, BNM backend and
+production databases/queues/domains remain `ConfigurationRequired` until their
+real accounts and devices are connected. Their absence does not block EOA
+contract preparation or the bounded chain test, and no adapter may simulate
+success.
+
+There is no business refund, on-chain BNM token or Claim fallback.
