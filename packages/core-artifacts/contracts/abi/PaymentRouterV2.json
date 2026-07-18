@@ -23,32 +23,32 @@
         "internalType": "contract IBeneficiaryRegistryV2"
       },
       {
-        "name": "platformServiceFeeSafe_",
+        "name": "platformServiceFeeWallet_",
         "type": "address",
         "internalType": "address"
       },
       {
-        "name": "usdtCustodySafe_",
+        "name": "usdtCustodyWallet_",
         "type": "address",
         "internalType": "address"
       },
       {
-        "name": "nplRewardSafe_",
+        "name": "nplRewardWallet_",
         "type": "address",
         "internalType": "address"
       },
       {
-        "name": "operationsTreasurySafe_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "quoteSigner_",
+        "name": "operationsWallet_",
         "type": "address",
         "internalType": "address"
       }
     ],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "error",
+    "name": "GovernanceWalletRequired",
+    "inputs": []
   },
   {
     "type": "error",
@@ -115,11 +115,6 @@
         "internalType": "address"
       }
     ]
-  },
-  {
-    "type": "error",
-    "name": "SafeExecutionRequired",
-    "inputs": []
   },
   {
     "type": "error",
@@ -454,7 +449,7 @@
   },
   {
     "type": "function",
-    "name": "governanceSafe",
+    "name": "governanceWallet",
     "inputs": [],
     "outputs": [
       {
@@ -1190,7 +1185,7 @@
   },
   {
     "type": "function",
-    "name": "nplRewardSafe",
+    "name": "nplRewardWallet",
     "inputs": [],
     "outputs": [
       {
@@ -1226,7 +1221,7 @@
   },
   {
     "type": "function",
-    "name": "operationsTreasurySafe",
+    "name": "operationsWallet",
     "inputs": [],
     "outputs": [
       {
@@ -1944,7 +1939,7 @@
   },
   {
     "type": "function",
-    "name": "platformServiceFeeSafe",
+    "name": "platformServiceFeeWallet",
     "inputs": [],
     "outputs": [
       {
@@ -2045,7 +2040,7 @@
   },
   {
     "type": "function",
-    "name": "usdtCustodySafe",
+    "name": "usdtCustodyWallet",
     "inputs": [],
     "outputs": [
       {

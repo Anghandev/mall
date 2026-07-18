@@ -48,9 +48,9 @@ library V2Types {
         uint32 relayIncrement;
         uint32 relayCap;
         uint128 merchantGuaranteeMinimum;
-        address usdtCustodySafe;
-        address nplRewardSafe;
-        address operationsTreasurySafe;
+        address usdtCustodyWallet;
+        address nplRewardWallet;
+        address operationsWallet;
         address circulationPool;
         bytes32 beneficiarySetHash;
         bytes32 concessionDestinationSetHash;

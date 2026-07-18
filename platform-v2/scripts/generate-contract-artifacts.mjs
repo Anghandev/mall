@@ -52,7 +52,7 @@ for (const name of contracts) {
     source: `platform-v2/contracts/${name}.sol`,
     address: deployment?.address ?? null,
     deploymentBlock: deployment?.deploymentBlock ?? null,
-    status: deployment ? 'DEPLOYED' : 'ExternalBlocked',
+    status: deployment ? 'DEPLOYED' : 'PENDING',
     constructorInputs: constructor.inputs,
     bytecodeSha256: sha256(bytecode),
     deployedBytecodeSha256: sha256(deployedBytecode),
@@ -100,18 +100,12 @@ const manifest = {
     cborMetadata: false,
   },
   sourceDigestSha256: sourceDigest,
-  deploymentStatus: deploymentEvidence ? 'DEPLOYED' : 'ExternalBlocked',
+  deploymentStatus: deploymentEvidence?.deploymentStatus ?? 'PENDING',
   deploymentAuthorized: deploymentEvidence?.deploymentAuthorized ?? false,
   deploymentAuthorizationEvidenceHash: deploymentEvidence?.authorizationEvidenceHash ?? null,
-  externalBlocked: deploymentEvidence ? [] : [
-    'GOVERNANCE_SAFE_ADDRESS',
-    'USDT_CUSTODY_SAFE_ADDRESS',
-    'NPL_REWARD_SAFE_ADDRESS',
-    'OPERATIONS_TREASURY_SAFE_ADDRESS',
-    'SECONDARY_SIGNER',
-    'QUOTE_SIGNER',
-    'BSC_RPC_URL',
-  ],
+  externalBlocked: deploymentEvidence?.deploymentStatus === 'DEPLOYED'
+    ? []
+    : ['EOA_CONTRACT_REDEPLOYMENT_REQUIRED'],
   decisionBlocked: [],
   deploymentOrder: contracts,
   contracts: contractEntries,
@@ -164,19 +158,30 @@ function compareAbi(left, right) {
 }
 
 function roleAuthority(contract, role) {
-  if (role === 'DEFAULT_ADMIN_ROLE') return 'Safe multisig';
+  if (role === 'DEFAULT_ADMIN_ROLE') return 'Platform Governance EOA';
   if (
     contract === 'PolicyRegistryV2' && role === 'POLICY_PUBLISHER_ROLE'
   ) {
-    return 'Safe multisig plus secondary signature';
+    return 'Platform Governance EOA plus bound EIP-712 signature';
   }
-  if (role === 'PAUSER_ROLE' || role === 'SESSION_ADMIN_ROLE' || role === 'REGISTRY_EDITOR_ROLE') return 'Safe multisig';
-  return 'Safe-granted Core contract or bounded executor';
+  if (role === 'PAUSER_ROLE' || role === 'SESSION_ADMIN_ROLE' || role === 'REGISTRY_EDITOR_ROLE') {
+    return 'Platform Governance EOA';
+  }
+  return 'Governance-granted Core contract or bounded EOA executor';
 }
 
 function validateDeploymentEvidence(value) {
   if (
+    value?.artifactVersion === artifactVersion && value.chainId === 56
+      && value.architecture === 'FIVE_ROLE_EOA_V2' && value.deploymentStatus === 'PENDING'
+      && value.deploymentAuthorized === false && value.authorizationEvidenceHash === null
+      && value.contracts && Object.keys(value.contracts).length === 0
+  ) {
+    return { deploymentStatus: 'PENDING', deploymentAuthorized: false, contracts: {} };
+  }
+  if (
     !value || value.artifactVersion !== artifactVersion || value.chainId !== 56
+      || value.architecture !== 'FIVE_ROLE_EOA_V2' || value.deploymentStatus !== 'DEPLOYED'
       || value.deploymentAuthorized !== true
       || !/^0x[0-9a-fA-F]{64}$/.test(value.authorizationEvidenceHash ?? '')
       || !value.contracts || typeof value.contracts !== 'object' || Array.isArray(value.contracts)
@@ -204,6 +209,7 @@ function validateDeploymentEvidence(value) {
     };
   }
   return {
+    deploymentStatus: 'DEPLOYED',
     deploymentAuthorized: true,
     authorizationEvidenceHash: value.authorizationEvidenceHash.toLowerCase(),
     contracts: deployments,

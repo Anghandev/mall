@@ -45,7 +45,7 @@ export interface LocalPaymentChainResult {
   routerAddress: string;
   transactionHash: string;
   segment: ChainSegmentBlock[];
-  safes: {
+  wallets: {
     platformServiceFee: string;
     usdtCustody: string;
     nplReward: string;
@@ -72,16 +72,16 @@ export async function executeLocalPaymentChain(): Promise<LocalPaymentChainResul
 }
 
 async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChainResult> {
-  const rawWallets = Array.from({ length: 5 }, (_, index) => (
+  const rawWallets = Array.from({ length: 3 }, (_, index) => (
     HDNodeWallet.fromPhrase(MNEMONIC, undefined, `m/44'/60'/0'/0/${index}`).connect(provider)
   ));
-  const [safeWallet, secondaryWallet, quoteWallet, buyerWallet, merchantWallet] = rawWallets;
-  if (!safeWallet || !secondaryWallet || !quoteWallet || !buyerWallet || !merchantWallet) {
+  const [governanceWallet, buyerWallet, merchantWallet] = rawWallets;
+  if (!governanceWallet || !buyerWallet || !merchantWallet) {
     throw new Error('Local Anvil wallets are unavailable');
   }
-  const safe = new NonceManager(safeWallet);
+  const governance = new NonceManager(governanceWallet);
   const buyer = new NonceManager(buyerWallet);
-  const safeAddress = safeWallet.address.toLowerCase();
+  const governanceAddress = governanceWallet.address.toLowerCase();
   const buyerAddress = buyerWallet.address.toLowerCase();
   const merchantAddress = merchantWallet.address.toLowerCase();
   const platformServiceFee = '0x0000000000000000000000000000000000007000';
@@ -108,21 +108,21 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
   const concessionAllocationHash = paymentAllocationSetHash();
 
   const tokenArtifact = artifact('Mocks.sol/CallbackERC20.json');
-  const tokenImplementation = await deploy(tokenArtifact, safe, ['Mock Token', 'MOCK']);
+  const tokenImplementation = await deploy(tokenArtifact, governance, ['Mock Token', 'MOCK']);
   const tokenRuntime = tokenArtifact.deployedBytecode.object;
   await provider.send('anvil_setCode', [USDT_ADDRESS, tokenRuntime]);
   await provider.send('anvil_setCode', [NPL_ADDRESS, tokenRuntime]);
-  const usdt = new Contract(USDT_ADDRESS, tokenArtifact.abi, safe);
-  const npl = new Contract(NPL_ADDRESS, tokenArtifact.abi, safe);
+  const usdt = new Contract(USDT_ADDRESS, tokenArtifact.abi, governance);
+  const npl = new Contract(NPL_ADDRESS, tokenArtifact.abi, governance);
 
   const policyRegistry = await deploy(
     artifact('PolicyRegistryV2.sol/PolicyRegistryV2.json'),
-    safe,
-    [safeAddress, secondaryWallet.address],
+    governance,
+    [governanceAddress],
   );
   const beneficiaryRegistry = await deploy(
     artifact('BeneficiaryRegistryV2.sol/BeneficiaryRegistryV2.json'),
-    safe,
+    governance,
     [await policyRegistry.getAddress()],
   );
 
@@ -140,7 +140,7 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
   ]);
   await transact(beneficiaryRegistry, 'publishRegionBeneficiaries', [
     1, regionCodeHash, regionBeneficiaries, 1, publicationDeadline,
-    rawSignature(secondaryWallet, regionDigest),
+    rawSignature(governanceWallet, regionDigest),
   ]);
 
   const genesisNodeDestinations = [{ account: beneficiaryAddresses.genesisNode, weightBps: 10_000 }];
@@ -170,9 +170,9 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
     relayIncrement: 30,
     relayCap: 60,
     merchantGuaranteeMinimum: 1_000n * ONE_TOKEN,
-    usdtCustodySafe: usdtCustody,
-    nplRewardSafe: nplReward,
-    operationsTreasurySafe: operationsTreasury,
+    usdtCustodyWallet: usdtCustody,
+    nplRewardWallet: nplReward,
+    operationsWallet: operationsTreasury,
     circulationPool,
     beneficiarySetHash,
     concessionDestinationSetHash: concessionAllocationHash,
@@ -184,12 +184,12 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
   ]);
   await transact(policyRegistry, 'publishPolicy', [
     policy, operationsAccounts, operationsWeights, 1, publicationDeadline,
-    rawSignature(secondaryWallet, policyDigest),
+    rawSignature(governanceWallet, policyDigest),
   ]);
 
   const router = await deploy(
     artifact('PaymentRouterV2.sol/PaymentRouterV2.json'),
-    safe,
+    governance,
     [
       USDT_ADDRESS,
       NPL_ADDRESS,
@@ -199,7 +199,6 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
       usdtCustody,
       nplReward,
       operationsTreasury,
-      quoteWallet.address,
     ],
   );
   const routerAddress = (await router.getAddress()).toLowerCase();
@@ -250,7 +249,7 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
   const digest = await readContract<string>(router, 'hashPayment', [onchainIntent]);
   const buyerRouter = new Contract(routerAddress, artifact('PaymentRouterV2.sol/PaymentRouterV2.json').abi, buyer);
   const receipt = await transact(buyerRouter, 'pay', [
-    onchainIntent, rawSignature(quoteWallet, digest), rawSignature(buyerWallet, digest),
+    onchainIntent, rawSignature(governanceWallet, digest), rawSignature(buyerWallet, digest),
   ]);
   await provider.send('anvil_mine', ['0xe']);
   const lastBlockNumber = receipt.blockNumber + 14;
@@ -288,7 +287,7 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
     routerAddress,
     transactionHash: receipt.hash.toLowerCase(),
     segment,
-    safes: { platformServiceFee, usdtCustody, nplReward, operationsTreasury },
+    wallets: { platformServiceFee, usdtCustody, nplReward, operationsTreasury },
     balances: {
       platformServiceFeeUsdt: String(await readContract<bigint>(usdt, 'balanceOf', [platformServiceFee])),
       custodyUsdt: String(await readContract<bigint>(usdt, 'balanceOf', [usdtCustody])),

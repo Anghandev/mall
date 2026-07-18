@@ -2,8 +2,8 @@
 pragma solidity 0.8.26;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
-import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 import {IPolicyRegistryV2} from "./interfaces/IV2Core.sol";
 import {V2Types} from "./types/V2Types.sol";
 
@@ -37,7 +37,7 @@ contract BeneficiaryRegistryV2 is AccessControl, EIP712 {
     error InvalidSecondarySignature();
     error PublicationExpired();
     error PublicationReplay();
-    error SafeExecutionRequired();
+    error GovernanceWalletRequired();
     error PolicyVersionRequired();
     error RegionAlreadyPublished();
 
@@ -54,9 +54,9 @@ contract BeneficiaryRegistryV2 is AccessControl, EIP712 {
     constructor(IPolicyRegistryV2 policyRegistry_) EIP712("Abu24KBeneficiaryRegistry", "2") {
         if (address(policyRegistry_) == address(0)) revert InvalidAddress();
         policyRegistry = policyRegistry_;
-        address safe_ = policyRegistry_.safe();
-        _grantRole(DEFAULT_ADMIN_ROLE, safe_);
-        _grantRole(REGISTRY_EDITOR_ROLE, safe_);
+        address governanceWallet_ = policyRegistry_.governanceWallet();
+        _grantRole(DEFAULT_ADMIN_ROLE, governanceWallet_);
+        _grantRole(REGISTRY_EDITOR_ROLE, governanceWallet_);
     }
 
     function setReferrer(address member, address referrer) external onlyRole(REGISTRY_EDITOR_ROLE) {
@@ -80,15 +80,15 @@ contract BeneficiaryRegistryV2 is AccessControl, EIP712 {
         uint64 deadline,
         bytes calldata secondarySignature
     ) external onlyRole(REGISTRY_EDITOR_ROLE) {
-        if (msg.sender != policyRegistry.safe()) revert SafeExecutionRequired();
+        if (msg.sender != policyRegistry.governanceWallet()) revert GovernanceWalletRequired();
         if (regionCodeHash == bytes32(0)) revert InvalidRegion();
         if (policyVersion == 0 || policyVersion != policyRegistry.latestVersion() + 1) revert PolicyVersionRequired();
         if (block.timestamp > deadline) revert PublicationExpired();
         if (usedRegionPublicationNonce[nonce]) revert PublicationReplay();
         if (regionPublished[policyVersion][regionCodeHash]) revert RegionAlreadyPublished();
         bytes32 digest = hashRegionPublication(policyVersion, regionCodeHash, beneficiaries, nonce, deadline);
-        if (!SignatureChecker.isValidSignatureNowCalldata(policyRegistry.secondarySigner(), digest, secondarySignature))
-        {
+        (address recovered, ECDSA.RecoverError recoverError,) = ECDSA.tryRecover(digest, secondarySignature);
+        if (recoverError != ECDSA.RecoverError.NoError || recovered != policyRegistry.secondarySigner()) {
             revert InvalidSecondarySignature();
         }
         usedRegionPublicationNonce[nonce] = true;

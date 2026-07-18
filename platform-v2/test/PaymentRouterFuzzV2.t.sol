@@ -29,19 +29,19 @@ contract PaymentRouterFuzzV2Test is CoreFixture {
         );
         intent.freightUsdt = bound(uint256(rawFreight), 0, 100_000 ether);
         intent = _setAmounts(intent, listPrice, nplQuote, concessionBps);
-        uint256 feeBefore = usdt.balanceOf(platformServiceFeeSafe);
-        uint256 custodyBefore = usdt.balanceOf(usdtCustodySafe);
+        uint256 feeBefore = usdt.balanceOf(platformServiceFeeWallet);
+        uint256 custodyBefore = usdt.balanceOf(usdtCustodyWallet);
         uint256 burnBefore = npl.balanceOf(V2Types.NPL_BURN_ADDRESS);
-        uint256 rewardBefore = npl.balanceOf(nplRewardSafe);
+        uint256 rewardBefore = npl.balanceOf(nplRewardWallet);
 
         _pay(intent, BUYER_KEY);
 
-        assertEq(usdt.balanceOf(platformServiceFeeSafe) - feeBefore, intent.platformServiceFeeUsdt);
-        assertEq(usdt.balanceOf(usdtCustodySafe) - custodyBefore, intent.custodyProductUsdt + intent.freightUsdt);
+        assertEq(usdt.balanceOf(platformServiceFeeWallet) - feeBefore, intent.platformServiceFeeUsdt);
+        assertEq(usdt.balanceOf(usdtCustodyWallet) - custodyBefore, intent.custodyProductUsdt + intent.freightUsdt);
         assertEq(intent.platformServiceFeeUsdt + intent.custodyProductUsdt, intent.productUsdtPaymentAmount);
         assertEq(intent.productUsdtPaymentAmount + intent.freightUsdt, intent.usdtPaymentAmount);
         assertEq(npl.balanceOf(V2Types.NPL_BURN_ADDRESS) - burnBefore, intent.nplBurnAmount);
-        assertEq(npl.balanceOf(nplRewardSafe) - rewardBefore, intent.nplRewardAmount);
+        assertEq(npl.balanceOf(nplRewardWallet) - rewardBefore, intent.nplRewardAmount);
         assertEq(intent.nplBurnAmount + intent.nplRewardAmount, intent.nplPaymentAmount);
         assertEq(intent.merchantConcessionAmount + intent.merchantNetReceivableUsdt, intent.merchantBaseReceivableUsdt);
         assertEq(usdt.balanceOf(address(router)), 0);

@@ -1373,10 +1373,10 @@ test('local PaymentRouter receipt reaches 15 confirmations and a balanced Postgr
       merchantCostUsdt: intent.merchantBaseReceivableUsdt,
       policyPayload: {
         ...paymentPolicyPayload(),
-        platformServiceFeeSafe: execution.safes.platformServiceFee,
-        usdtCustodySafe: execution.safes.usdtCustody,
-        nplRewardSafe: execution.safes.nplReward,
-        operationsTreasurySafe: execution.safes.operationsTreasury,
+        platformServiceFeeSafe: execution.wallets.platformServiceFee,
+        usdtCustodySafe: execution.wallets.usdtCustody,
+        nplRewardSafe: execution.wallets.nplReward,
+        operationsTreasurySafe: execution.wallets.operationsTreasury,
         concessionDestinationSetHash: intent.concessionAllocationHash,
         genesisNodeDestinations: intent.nplRewardAllocations
           .filter((allocation) => allocation.role === 'genesis')

@@ -7,16 +7,18 @@ import {PolicyRegistryV2} from "../contracts/PolicyRegistryV2.sol";
 import {V2Types} from "../contracts/types/V2Types.sol";
 
 contract PolicyRegistryV2Test is CoreFixture {
-    function testLaunchPolicyFreezesPaymentSafesAndRewards() public view {
+    function testLaunchPolicyFreezesPaymentWalletsAndRewards() public view {
         V2Types.Policy memory policy = policyRegistry.getPolicy(1);
+        assertEq(policyRegistry.governanceWallet(), governanceWallet);
+        assertEq(policyRegistry.secondarySigner(), governanceWallet);
         assertEq(policy.usdtPaymentBps, 7_000);
         assertEq(policy.nplPaymentBps, 3_000);
         assertEq(policy.nplBurnListPriceBps, 2_000);
         assertEq(policy.nplRewardListPriceBps, 1_000);
         assertEq(policy.merchantGuaranteeMinimum, 1_000 ether);
-        assertEq(policy.usdtCustodySafe, usdtCustodySafe);
-        assertEq(policy.nplRewardSafe, nplRewardSafe);
-        assertEq(policy.operationsTreasurySafe, operationsTreasurySafe);
+        assertEq(policy.usdtCustodyWallet, usdtCustodyWallet);
+        assertEq(policy.nplRewardWallet, nplRewardWallet);
+        assertEq(policy.operationsWallet, operationsWallet);
         assertEq(
             uint256(policy.genesisBps) + policy.directReferralBps + policy.districtBps + policy.cityBps
                 + policy.provinceBps + policy.regionBps + policy.operationsBps,
@@ -24,20 +26,25 @@ contract PolicyRegistryV2Test is CoreFixture {
         );
     }
 
-    function testPolicyPublicationRequiresActualSafeAndSecondarySignature() public {
+    function testPolicyRegistryRejectsContractGovernanceWallet() public {
+        vm.expectRevert(PolicyRegistryV2.InvalidAddress.selector);
+        new PolicyRegistryV2(address(this));
+    }
+
+    function testPolicyPublicationRequiresActualGovernanceWalletAndSecondarySignature() public {
         (V2Types.Policy memory policy, address[] memory accounts, uint16[] memory weights) = _secondPolicy();
         uint64 deadline = uint64(block.timestamp + 1 hours);
         bytes32 digest = policyRegistry.hashPublication(policy, accounts, weights, 2, deadline);
 
         vm.expectRevert();
-        policyRegistry.publishPolicy(policy, accounts, weights, 2, deadline, _sign(SECONDARY_KEY, digest));
+        policyRegistry.publishPolicy(policy, accounts, weights, 2, deadline, _sign(GOVERNANCE_KEY, digest));
 
-        vm.prank(safe);
+        vm.prank(governanceWallet);
         vm.expectRevert(PolicyRegistryV2.InvalidSecondarySignature.selector);
         policyRegistry.publishPolicy(policy, accounts, weights, 2, deadline, _sign(QUOTE_KEY, digest));
 
-        vm.prank(safe);
-        policyRegistry.publishPolicy(policy, accounts, weights, 2, deadline, _sign(SECONDARY_KEY, digest));
+        vm.prank(governanceWallet);
+        policyRegistry.publishPolicy(policy, accounts, weights, 2, deadline, _sign(GOVERNANCE_KEY, digest));
         assertEq(policyRegistry.latestVersion(), 2);
     }
 
@@ -49,8 +56,8 @@ contract PolicyRegistryV2Test is CoreFixture {
         uint64 deadline = uint64(block.timestamp + 1 hours);
         bytes32 digest = policyRegistry.hashPublication(policy, accounts, weights, 7, deadline);
 
-        vm.prank(safe);
-        policyRegistry.publishPolicy(policy, accounts, weights, 7, deadline, _sign(SECONDARY_KEY, digest));
+        vm.prank(governanceWallet);
+        policyRegistry.publishPolicy(policy, accounts, weights, 7, deadline, _sign(GOVERNANCE_KEY, digest));
 
         V2Types.Policy memory published = policyRegistry.getPolicy(2);
         assertEq(published.nplBurnListPriceBps, 1_800);
@@ -64,29 +71,36 @@ contract PolicyRegistryV2Test is CoreFixture {
         policy.nplPaymentBps = 3_001;
         uint64 deadline = uint64(block.timestamp + 1 hours);
         bytes32 digest = policyRegistry.hashPublication(policy, accounts, weights, 3, deadline);
-        vm.prank(safe);
+        vm.prank(governanceWallet);
         vm.expectRevert(PolicyRegistryV2.InvalidPolicy.selector);
-        policyRegistry.publishPolicy(policy, accounts, weights, 3, deadline, _sign(SECONDARY_KEY, digest));
+        policyRegistry.publishPolicy(policy, accounts, weights, 3, deadline, _sign(GOVERNANCE_KEY, digest));
     }
 
-    function testPolicyRejectsIncompleteRewardAllocationAndDuplicateSafes() public {
+    function testPolicyRejectsIncompleteRewardAllocationAndDuplicateWallets() public {
         (V2Types.Policy memory policy, address[] memory accounts, uint16[] memory weights) = _secondPolicy();
         policy.operationsBps = 399;
         uint64 deadline = uint64(block.timestamp + 1 hours);
         bytes32 digest = policyRegistry.hashPublication(policy, accounts, weights, 5, deadline);
-        vm.prank(safe);
+        vm.prank(governanceWallet);
         vm.expectRevert(PolicyRegistryV2.InvalidPolicy.selector);
-        policyRegistry.publishPolicy(policy, accounts, weights, 5, deadline, _sign(SECONDARY_KEY, digest));
+        policyRegistry.publishPolicy(policy, accounts, weights, 5, deadline, _sign(GOVERNANCE_KEY, digest));
 
         (policy, accounts, weights) = _secondPolicy();
-        policy.nplRewardSafe = policy.usdtCustodySafe;
+        policy.nplRewardWallet = policy.usdtCustodyWallet;
         digest = policyRegistry.hashPublication(policy, accounts, weights, 6, deadline);
-        vm.prank(safe);
+        vm.prank(governanceWallet);
         vm.expectRevert(PolicyRegistryV2.InvalidPolicy.selector);
-        policyRegistry.publishPolicy(policy, accounts, weights, 6, deadline, _sign(SECONDARY_KEY, digest));
+        policyRegistry.publishPolicy(policy, accounts, weights, 6, deadline, _sign(GOVERNANCE_KEY, digest));
+
+        (policy, accounts, weights) = _secondPolicy();
+        policy.usdtCustodyWallet = address(this);
+        digest = policyRegistry.hashPublication(policy, accounts, weights, 9, deadline);
+        vm.prank(governanceWallet);
+        vm.expectRevert(PolicyRegistryV2.InvalidPolicy.selector);
+        policyRegistry.publishPolicy(policy, accounts, weights, 9, deadline, _sign(GOVERNANCE_KEY, digest));
     }
 
-    function testRegionRoutingRequiresVersionedSafeAndSecondaryApproval() public {
+    function testRegionRoutingRequiresVersionedGovernanceWalletAndSecondaryApproval() public {
         (V2Types.Policy memory policy, address[] memory accounts, uint16[] memory weights) = _secondPolicy();
         uint64 deadline = uint64(block.timestamp + 1 hours);
         BeneficiaryRegistryV2.RegionBeneficiaries memory next = BeneficiaryRegistryV2.RegionBeneficiaries(
@@ -96,19 +110,19 @@ contract PolicyRegistryV2Test is CoreFixture {
 
         vm.expectRevert();
         beneficiaryRegistry.publishRegionBeneficiaries(
-            2, regionCodeHash, next, 2, deadline, _sign(SECONDARY_KEY, digest)
+            2, regionCodeHash, next, 2, deadline, _sign(GOVERNANCE_KEY, digest)
         );
-        vm.prank(safe);
+        vm.prank(governanceWallet);
         vm.expectRevert(BeneficiaryRegistryV2.InvalidSecondarySignature.selector);
         beneficiaryRegistry.publishRegionBeneficiaries(2, regionCodeHash, next, 2, deadline, _sign(QUOTE_KEY, digest));
-        vm.prank(safe);
+        vm.prank(governanceWallet);
         beneficiaryRegistry.publishRegionBeneficiaries(
-            2, regionCodeHash, next, 2, deadline, _sign(SECONDARY_KEY, digest)
+            2, regionCodeHash, next, 2, deadline, _sign(GOVERNANCE_KEY, digest)
         );
 
         bytes32 policyDigest = policyRegistry.hashPublication(policy, accounts, weights, 20, deadline);
-        vm.prank(safe);
-        policyRegistry.publishPolicy(policy, accounts, weights, 20, deadline, _sign(SECONDARY_KEY, policyDigest));
+        vm.prank(governanceWallet);
+        policyRegistry.publishPolicy(policy, accounts, weights, 20, deadline, _sign(GOVERNANCE_KEY, policyDigest));
 
         V2Types.BeneficiarySnapshot memory oldSnapshot =
             V2Types.BeneficiarySnapshot(address(0), directReferral, district, city, province, region);
@@ -120,10 +134,10 @@ contract PolicyRegistryV2Test is CoreFixture {
         vm.expectRevert(BeneficiaryRegistryV2.BeneficiaryMismatch.selector);
         beneficiaryRegistry.validateSnapshot(2, buyer, merchant, regionCodeHash, oldSnapshot);
 
-        vm.prank(safe);
+        vm.prank(governanceWallet);
         vm.expectRevert(BeneficiaryRegistryV2.PolicyVersionRequired.selector);
         beneficiaryRegistry.publishRegionBeneficiaries(
-            2, regionCodeHash, next, 3, deadline, _sign(SECONDARY_KEY, digest)
+            2, regionCodeHash, next, 3, deadline, _sign(GOVERNANCE_KEY, digest)
         );
     }
 

@@ -38,6 +38,11 @@
   },
   {
     "type": "error",
+    "name": "GovernanceWalletRequired",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InvalidAddress",
     "inputs": []
   },
@@ -89,11 +94,6 @@
   {
     "type": "error",
     "name": "RegionAlreadyPublished",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "SafeExecutionRequired",
     "inputs": []
   },
   {

@@ -1,36 +1,9 @@
 {
   "artifactVersion": "2.0.0-settlement-admin.16",
   "chainId": 56,
-  "deploymentAuthorized": true,
-  "authorizationEvidenceHash": "0x50c917d5c51f57d89e8d01e2be325715438ab50a17551ab3cdfd3f9d0ff8e8ea",
-  "authorizationEvidence": {
-    "goalSha256": "bfbe7a240217e89afcaf21c074fc30a31fa9a9324d25df992d15930ceb85913c",
-    "packetSha256": "33445103ece40281b35614e49f7bfbe37fdfe7872fce00279600d473d920495f",
-    "receiptsSha256": "4476d267a1ee270c5c8153993f7ce3b86f786d5c7b189dbd54af9ecc44b60c51",
-    "sourceVerificationSha256": "9e29ecc8561d62eb105390bbfcdf228b26bfa0f7256c4894fb4a9122c2a7b448",
-    "sourceVerification": "BSCSCAN_VERIFIED"
-  },
-  "contracts": {
-    "PolicyRegistryV2": {
-      "address": "0xEEA4ca927980d9B5889c0c6e229eE1253BBD01B5",
-      "deploymentBlock": 110651916,
-      "deployedCodeHash": "0xf3e5ed3393b06692233ffeddf7616b485dfe45925845361684c406983151e9d8",
-      "deploymentTxHash": "0x6e5f8db95b5092bedb0d3bc38a7596c21b5cf3d9b4458f5ffbaaa9ae118cb4ab",
-      "sourceVerified": true
-    },
-    "BeneficiaryRegistryV2": {
-      "address": "0xbb21A65036760e261e57e89A5d182229cA070B83",
-      "deploymentBlock": 110651931,
-      "deployedCodeHash": "0x2c41a5e509fefd6aba6a2f9b27fad7d829b84d65eebc4cdd67b08b3c279cd71e",
-      "deploymentTxHash": "0xf20c3f2a1f6924ad85bc81dcc7f5513ee6aef1a670574a6079fe98c58e913d12",
-      "sourceVerified": true
-    },
-    "PaymentRouterV2": {
-      "address": "0x953ad4A369Ac7b843254e445d359bB7595E8E620",
-      "deploymentBlock": 110651944,
-      "deployedCodeHash": "0x442b211acbc48bd6f2a43e03a7d9b76534adf29d8245976e6371f22d62400134",
-      "deploymentTxHash": "0xb1e37a80664775f3e9cf8e678352556c022f12276e04823d27d9670577a4e045",
-      "sourceVerified": true
-    }
-  }
+  "architecture": "FIVE_ROLE_EOA_V2",
+  "deploymentStatus": "PENDING",
+  "deploymentAuthorized": false,
+  "authorizationEvidenceHash": null,
+  "contracts": {}
 }

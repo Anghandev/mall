@@ -2,15 +2,15 @@
 pragma solidity 0.8.26;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
-import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 import {V2Types} from "./types/V2Types.sol";
 
 contract PolicyRegistryV2 is AccessControl, EIP712 {
     bytes32 public constant POLICY_PUBLISHER_ROLE = keccak256("POLICY_PUBLISHER_ROLE");
     bytes32 public constant PUBLICATION_TYPEHASH =
         keccak256("PolicyPublication(bytes32 policyHash,bytes32 operationsHash,uint256 nonce,uint64 deadline)");
-    address public immutable safe;
+    address public immutable governanceWallet;
     address public immutable secondarySigner;
     uint64 public latestVersion;
 
@@ -27,7 +27,7 @@ contract PolicyRegistryV2 is AccessControl, EIP712 {
     error InvalidSecondarySignature();
     error PublicationExpired();
     error PublicationReplay();
-    error SafeExecutionRequired();
+    error GovernanceWalletRequired();
     error UnknownPolicy(uint64 version);
 
     event PolicyPublished(
@@ -35,18 +35,16 @@ contract PolicyRegistryV2 is AccessControl, EIP712 {
         bytes32 indexed policyHash,
         bytes32 indexed operationsHash,
         bytes32 decisionEvidenceHash,
-        address safeExecutor
+        address governanceExecutor
     );
 
-    constructor(address safe_, address secondarySigner_) EIP712("Abu24KPolicyRegistry", "2") {
+    constructor(address governanceWallet_) EIP712("Abu24KPolicyRegistry", "2") {
         if (block.chainid != V2Types.BSC_CHAIN_ID) revert InvalidChain();
-        if (safe_ == address(0) || secondarySigner_ == address(0) || safe_ == secondarySigner_) {
-            revert InvalidAddress();
-        }
-        safe = safe_;
-        secondarySigner = secondarySigner_;
-        _grantRole(DEFAULT_ADMIN_ROLE, safe_);
-        _grantRole(POLICY_PUBLISHER_ROLE, safe_);
+        if (governanceWallet_ == address(0) || governanceWallet_.code.length != 0) revert InvalidAddress();
+        governanceWallet = governanceWallet_;
+        secondarySigner = governanceWallet_;
+        _grantRole(DEFAULT_ADMIN_ROLE, governanceWallet_);
+        _grantRole(POLICY_PUBLISHER_ROLE, governanceWallet_);
     }
 
     function publishPolicy(
@@ -57,7 +55,7 @@ contract PolicyRegistryV2 is AccessControl, EIP712 {
         uint64 deadline,
         bytes calldata secondarySignature
     ) external onlyRole(POLICY_PUBLISHER_ROLE) {
-        if (msg.sender != safe) revert SafeExecutionRequired();
+        if (msg.sender != governanceWallet) revert GovernanceWalletRequired();
         if (block.timestamp > deadline) revert PublicationExpired();
         if (usedPublicationNonce[nonce]) revert PublicationReplay();
 
@@ -66,7 +64,8 @@ contract PolicyRegistryV2 is AccessControl, EIP712 {
         bytes32 policyHash = keccak256(abi.encode(policy));
         bytes32 digest =
             _hashTypedDataV4(keccak256(abi.encode(PUBLICATION_TYPEHASH, policyHash, operationsHash, nonce, deadline)));
-        if (!SignatureChecker.isValidSignatureNowCalldata(secondarySigner, digest, secondarySignature)) {
+        (address recovered, ECDSA.RecoverError recoverError,) = ECDSA.tryRecover(digest, secondarySignature);
+        if (recoverError != ECDSA.RecoverError.NoError || recovered != secondarySigner) {
             revert InvalidSecondarySignature();
         }
 
@@ -113,11 +112,12 @@ contract PolicyRegistryV2 is AccessControl, EIP712 {
                 || policy.nplBurnListPriceBps + policy.nplRewardListPriceBps != policy.nplPaymentBps
         ) revert InvalidPolicy();
         if (
-            policy.usdtCustodySafe == address(0) || policy.nplRewardSafe == address(0)
-                || policy.operationsTreasurySafe == address(0) || policy.circulationPool == address(0)
-                || policy.usdtCustodySafe == policy.nplRewardSafe
-                || policy.usdtCustodySafe == policy.operationsTreasurySafe
-                || policy.nplRewardSafe == policy.operationsTreasurySafe || policy.relayInitial == 0
+            policy.usdtCustodyWallet == address(0) || policy.nplRewardWallet == address(0)
+                || policy.operationsWallet == address(0) || policy.circulationPool == address(0)
+                || policy.usdtCustodyWallet.code.length != 0 || policy.nplRewardWallet.code.length != 0
+                || policy.operationsWallet.code.length != 0 || policy.usdtCustodyWallet == policy.nplRewardWallet
+                || policy.usdtCustodyWallet == policy.operationsWallet
+                || policy.nplRewardWallet == policy.operationsWallet || policy.relayInitial == 0
                 || policy.relayIncrement == 0 || policy.relayCap == 0 || policy.seckillMainDuration == 0
                 || policy.relayInitial > policy.relayCap || policy.relayCap > policy.seckillMainDuration
                 || policy.rulesContentHash == bytes32(0) || policy.beneficiarySetHash == bytes32(0)

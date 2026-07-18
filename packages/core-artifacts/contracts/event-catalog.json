@@ -438,7 +438,7 @@
           "internalType": "bytes32"
         },
         {
-          "name": "safeExecutor",
+          "name": "governanceExecutor",
           "type": "address",
           "indexed": false,
           "internalType": "address"
