@@ -1657,7 +1657,7 @@ describe('04 store controls', () => {
 });
 
 describe('05 asset rails', () => {
-  it('renders Core five-state balances, Safe finality, guarantee reorg and takeover debt without local netting', async () => {
+  it('renders Core five-state balances, EOA transfer finality, guarantee reorg and takeover debt without local netting', async () => {
     await enterAssets(createMockCoreApi());
 
     expect(await screen.findByRole('heading', { name: 'USDT 商家货款' })).toBeTruthy();
@@ -1677,7 +1677,7 @@ describe('05 asset rails', () => {
     expect(screen.getByText(/BNM 是不可转移的后台积分/)).toBeTruthy();
     expect(within(bnmPoints).queryByRole('button')).toBeNull();
     expect(screen.getByText('45000000000000000000')).toBeTruthy();
-    expect(screen.getByText('safe-batch-7')).toBeTruthy();
+    expect(screen.getAllByText(`0x${'7'.repeat(64)}`).length).toBeGreaterThan(0);
     expect(screen.getByRole('link', { name: new RegExp(`0x${'9'.repeat(64)}`) }).getAttribute('href'))
       .toBe(`https://bscscan.com/tx/0x${'9'.repeat(64)}`);
     expect(screen.getByText('REORGED')).toBeTruthy();
@@ -2009,7 +2009,7 @@ describe('06 audit and 07 rules', () => {
     expect(listPublicCms).toHaveBeenCalledWith('test-session');
     expect(screen.getByText('Policy 8')).toBeTruthy();
     expect(screen.getByText(/Locked 进入 Available/)).toBeTruthy();
-    expect(screen.getByText(/1% USDT 进入技术服务费 Safe/)).toBeTruthy();
+    expect(screen.getByText(/1% USDT 进入技术服务费钱包/)).toBeTruthy();
     expect(screen.getByText(/商家不获得额外秒杀收益/)).toBeTruthy();
     expect(screen.getByText(/创世节点 2% NPL 不使用 NFT/)).toBeTruthy();
     expect(screen.getByText(/人工只审核有效性且不得更换获奖人/)).toBeTruthy();

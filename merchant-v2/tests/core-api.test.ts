@@ -70,8 +70,8 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
       'createGovernedSettlementIntent',
       'listAdminSettlementRequests',
       'getAdminSettlementRequest',
-      'listAdminSettlementBatches',
-      'getAdminSettlementBatch',
+      'listAdminSettlementTransfers',
+      'getAdminSettlementTransfer',
       'listCoverageBreakerActions',
       'createCoverageBreakerResumeChallenge',
       'authorizeCoverageBreakerResume',
@@ -1010,7 +1010,9 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
 
     expect((await api.getMerchantFinance('merchant-session')).merchant.guarantee_status).toBe('READY');
     const settlements = await api.listSettlements('merchant-session');
-    expect(settlements.requests[2]?.final_safe_tx_hash).toBe(settlementList.requests[2]?.final_safe_tx_hash);
+    expect(settlements.requests[2]?.final_execution_tx_hashes).toEqual(
+      settlementList.requests[2]?.final_execution_tx_hashes,
+    );
     expect(settlements.balances.filter((balance) => balance.asset === 'NPL').map((balance) => balance.rewardSubtype))
       .toEqual(['GENESIS', 'DIRECT_REFERRAL', 'DISTRICT', 'CITY', 'PROVINCE', 'REGION', 'OPERATIONS', 'ROUNDING_REMAINDER']);
     expect(settlements.points).toEqual([
@@ -1071,7 +1073,7 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
       removedFromReceivableUsdt: '7952',
     });
     expect(firstPage.statements[0]?.journalEvidence[0]?.journalId).toBe('journal:a:lifecycle');
-    expect(firstPage.statements[0]?.settlementRefs[0]?.finalSafeTxHash).toBe(`0x${'b'.repeat(64)}`);
+    expect(firstPage.statements[0]?.settlementRefs[0]?.finalExecutionTxHash).toBe(`0x${'b'.repeat(64)}`);
     expect(nextPage.statements[0]?.orderKind).toBe('FALLBACK_RETAIL');
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,

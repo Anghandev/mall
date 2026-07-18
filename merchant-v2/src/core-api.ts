@@ -2463,7 +2463,7 @@ function parseSettlementIntent(input: unknown): SettlementIntentProjection {
   exact(domain.chainId, 56, 'settlement typedData.domain.chainId');
   exact(
     address(domain.verifyingContract, 'settlement typedData.domain.verifyingContract').toLowerCase(),
-    intent.safeAddress.toLowerCase(),
+    intent.executorWallet.toLowerCase(),
     'settlement typedData.domain.verifyingContract',
   );
   exact(primaryType, 'SettlementRequest', 'settlement typedData.primaryType');
@@ -2476,7 +2476,7 @@ function parseSettlementIntent(input: unknown): SettlementIntentProjection {
     ['recipient', 'address'],
     ['rail', 'string'],
     ['asset', 'address'],
-    ['safeAddress', 'address'],
+    ['executorWallet', 'address'],
     ['amount', 'uint256'],
     ['itemsHash', 'bytes32'],
     ['nonce', 'uint256'],
@@ -2509,7 +2509,7 @@ function parseSettlementIntent(input: unknown): SettlementIntentProjection {
         itemIndex: nonNegativeInteger(item.itemIndex, 'settlement intent item.itemIndex'),
         orderId: string(item.orderId, 'settlement intent item.orderId'),
         accountId: string(item.accountId, 'settlement intent item.accountId'),
-        backingSafeAddress: address(item.backingSafeAddress, 'settlement intent item.backingSafeAddress'),
+        backingWalletAddress: address(item.backingWalletAddress, 'settlement intent item.backingWalletAddress'),
         amount: atomicAmount(item.amount, 'settlement intent item.amount'),
         itemHash: bytes32(item.itemHash, 'settlement intent item.itemHash'),
       };
@@ -2528,7 +2528,7 @@ function parseSettlementIntentRecord(input: unknown): SettlementIntentProjection
     recipient: address(value.recipient, 'settlement intent.recipient'),
     rail: enumValue(value.rail, settlementRailSet, 'settlement intent.rail'),
     asset: address(value.asset, 'settlement intent.asset'),
-    safeAddress: address(value.safeAddress, 'settlement intent.safeAddress'),
+    executorWallet: address(value.executorWallet, 'settlement intent.executorWallet'),
     amount: positiveAtomicAmount(value.amount, 'settlement intent.amount'),
     itemsHash: bytes32(value.itemsHash, 'settlement intent.itemsHash'),
     nonce: atomicAmount(value.nonce, 'settlement intent.nonce'),
@@ -2696,31 +2696,27 @@ function parseMerchantReceivableStatement(input: unknown): MerchantReceivableSta
     settlementRefs: array(value.settlementRefs, 'merchant receivable settlement refs').map((entry) => {
       const reference = record(entry, 'merchant receivable settlement ref');
       exactObjectKeys(reference, [
-        'requestId', 'amount', 'state', 'batchId', 'finalSafeTxHash', 'finalExecutionTxHash',
-        'journals', 'requestedAt', 'batchedAt', 'settledAt',
+        'requestId', 'amount', 'state', 'transferId', 'finalExecutionTxHash',
+        'journals', 'requestedAt', 'submittedAt', 'settledAt',
       ], 'merchant receivable settlement ref');
       const journals = record(reference.journals, 'merchant receivable settlement journals');
-      exactObjectKeys(journals, ['requested', 'batched', 'settled'], 'merchant receivable settlement journals');
+      exactObjectKeys(journals, ['requested', 'submitted', 'settled'], 'merchant receivable settlement journals');
       return {
         requestId: bytes32(reference.requestId, 'merchant receivable settlement requestId'),
         amount: positiveAtomicAmount(reference.amount, 'merchant receivable settlement amount'),
         state: enumValue(reference.state, settlementRequestStateSet, 'merchant receivable settlement state'),
-        batchId: nullableBytes32(reference.batchId, 'merchant receivable settlement batchId'),
-        finalSafeTxHash: nullableBytes32(
-          reference.finalSafeTxHash,
-          'merchant receivable settlement finalSafeTxHash',
-        ),
+        transferId: nullableBytes32(reference.transferId, 'merchant receivable settlement transferId'),
         finalExecutionTxHash: nullableBytes32(
           reference.finalExecutionTxHash,
           'merchant receivable settlement finalExecutionTxHash',
         ),
         journals: {
           requested: string(journals.requested, 'merchant receivable settlement requested journal'),
-          batched: nullableString(journals.batched, 'merchant receivable settlement batched journal'),
+          submitted: nullableString(journals.submitted, 'merchant receivable settlement submitted journal'),
           settled: nullableString(journals.settled, 'merchant receivable settlement settled journal'),
         },
         requestedAt: dateTime(reference.requestedAt, 'merchant receivable settlement requestedAt'),
-        batchedAt: nullableDateTime(reference.batchedAt, 'merchant receivable settlement batchedAt'),
+        submittedAt: nullableDateTime(reference.submittedAt, 'merchant receivable settlement submittedAt'),
         settledAt: nullableDateTime(reference.settledAt, 'merchant receivable settlement settledAt'),
       };
     }),
@@ -2739,20 +2735,21 @@ function parseSettlementRequest(input: unknown): SettlementRequestProjection {
     rail: enumValue(value.rail, settlementRailSet, 'settlement request.rail'),
     asset: enumValue(value.asset, settlementAssetSet, 'settlement request.asset'),
     asset_address: address(value.asset_address, 'settlement request.asset_address'),
-    safe_address: address(value.safe_address, 'settlement request.safe_address'),
+    executor_wallet: address(value.executor_wallet, 'settlement request.executor_wallet'),
     amount: positiveAtomicAmount(value.amount, 'settlement request.amount'),
     items_hash: bytes32(value.items_hash, 'settlement request.items_hash'),
     intent_digest: bytes32(value.intent_digest, 'settlement request.intent_digest'),
     signature_hash: bytes32(value.signature_hash, 'settlement request.signature_hash'),
     state: enumValue(value.state, settlementRequestStateSet, 'settlement request.state'),
-    batch_id: nullableString(value.batch_id, 'settlement request.batch_id'),
-    final_safe_tx_hash: nullableBytes32(value.final_safe_tx_hash, 'settlement request.final_safe_tx_hash'),
-    final_execution_tx_hash: nullableBytes32(
-      value.final_execution_tx_hash,
-      'settlement request.final_execution_tx_hash',
-    ),
+    transfer_ids: array(value.transfer_ids, 'settlement request.transfer_ids').map((transferId) => (
+      bytes32(transferId, 'settlement request.transfer_id')
+    )),
+    final_execution_tx_hashes: array(
+      value.final_execution_tx_hashes,
+      'settlement request.final_execution_tx_hashes',
+    ).map((txHash) => bytes32(txHash, 'settlement request.final_execution_tx_hash')),
     requested_at: dateTime(value.requested_at, 'settlement request.requested_at'),
-    batched_at: nullableDateTime(value.batched_at, 'settlement request.batched_at'),
+    submitted_at: nullableDateTime(value.submitted_at, 'settlement request.submitted_at'),
     settled_at: nullableDateTime(value.settled_at, 'settlement request.settled_at'),
     items: array(value.items, 'settlement request.items').map((inputItem) => {
       const item = record(inputItem, 'settlement request item');
@@ -2760,15 +2757,15 @@ function parseSettlementRequest(input: unknown): SettlementRequestProjection {
         item_index: nonNegativeInteger(item.item_index, 'settlement request item.item_index'),
         order_id: string(item.order_id, 'settlement request item.order_id'),
         account_id: string(item.account_id, 'settlement request item.account_id'),
-        backing_safe_address: address(
-          item.backing_safe_address,
-          'settlement request item.backing_safe_address',
+        backing_wallet_address: address(
+          item.backing_wallet_address,
+          'settlement request item.backing_wallet_address',
         ),
         amount: atomicAmount(item.amount, 'settlement request item.amount'),
         requested_journal_id: string(item.requested_journal_id, 'settlement request item.requested_journal_id'),
-        batched_journal_id: nullableString(
-          item.batched_journal_id,
-          'settlement request item.batched_journal_id',
+        submitted_journal_id: nullableString(
+          item.submitted_journal_id,
+          'settlement request item.submitted_journal_id',
         ),
         settled_journal_id: nullableString(
           item.settled_journal_id,
@@ -2784,7 +2781,7 @@ function parseSettlementRequest(input: unknown): SettlementRequestProjection {
           transition.request_item_index,
           'settlement transition.request_item_index',
         ),
-        batch_id: nullableString(transition.batch_id, 'settlement transition.batch_id'),
+        transfer_id: nullableString(transition.transfer_id, 'settlement transition.transfer_id'),
         transition_sequence: atomicAmount(
           transition.transition_sequence,
           'settlement transition.transition_sequence',
@@ -2929,7 +2926,7 @@ function parseGuaranteeDeposit(input: unknown): GuaranteeDepositProjection {
       value.expectedAmountUsdt,
       'guarantee deposit.expectedAmountUsdt',
     ),
-    operationsSafeAddress: address(value.operationsSafeAddress, 'guarantee deposit.operationsSafeAddress'),
+    operationsWalletAddress: address(value.operationsWalletAddress, 'guarantee deposit.operationsWalletAddress'),
     state: enumValue(value.state, guaranteeDepositStateSet, 'guarantee deposit.state'),
     confirmations: nonNegativeInteger(value.confirmations, 'guarantee deposit.confirmations'),
     ...(value.blockNumber === undefined
@@ -2961,7 +2958,7 @@ function parseMerchantFinance(input: unknown): MerchantFinanceProjection {
       settlement_wallet: address(merchant.settlement_wallet, 'merchant finance.settlement_wallet'),
     },
     guarantee: guarantee ? {
-      backing_safe_address: address(guarantee.backing_safe_address, 'merchant guarantee.backing_safe_address'),
+      backing_wallet_address: address(guarantee.backing_wallet_address, 'merchant guarantee.backing_wallet_address'),
       balance_usdt: atomicAmount(guarantee.balance_usdt, 'merchant guarantee.balance_usdt'),
       minimum_usdt: atomicAmount(guarantee.minimum_usdt, 'merchant guarantee.minimum_usdt'),
       source_evidence_hash: bytes32(guarantee.source_evidence_hash, 'merchant guarantee.source_evidence_hash'),
@@ -2973,9 +2970,9 @@ function parseMerchantFinance(input: unknown): MerchantFinanceProjection {
         deposit_id: string(deposit.deposit_id, 'merchant guarantee deposit.deposit_id'),
         policy_version: atomicAmount(deposit.policy_version, 'merchant guarantee deposit.policy_version'),
         token_address: address(deposit.token_address, 'merchant guarantee deposit.token_address'),
-        operations_safe_address: address(
-          deposit.operations_safe_address,
-          'merchant guarantee deposit.operations_safe_address',
+        operations_wallet_address: address(
+          deposit.operations_wallet_address,
+          'merchant guarantee deposit.operations_wallet_address',
         ),
         expected_amount_usdt: atomicAmount(
           deposit.expected_amount_usdt,

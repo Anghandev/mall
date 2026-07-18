@@ -38,7 +38,7 @@ type CommandState =
   | { phase: 'success'; message: string }
   | { phase: 'error'; message: string };
 
-const payableStates = ['LOCKED', 'AVAILABLE', 'REQUESTED', 'BATCHED', 'SETTLED'] as const;
+const payableStates = ['LOCKED', 'AVAILABLE', 'REQUESTED', 'SUBMITTED', 'SETTLED'] as const;
 const bnmPointStates = ['LOCKED', 'AVAILABLE'] as const;
 const positiveAtomicPattern = /^[1-9][0-9]*$/;
 const bytes32Pattern = /^0x[0-9a-fA-F]{64}$/;
@@ -170,8 +170,8 @@ export function AssetsPage() {
     && bytes32Pattern.test(depositTransactionHash);
   const depositSubmitting = depositCommand.phase === 'submitting';
   const canSubmitDeposit = Boolean(session && finance && depositValid && !depositSubmitting);
-  const operationsSafe = finance?.guarantee?.backing_safe_address
-    ?? finance?.guaranteeDeposits[0]?.operations_safe_address;
+  const operationsWallet = finance?.guarantee?.backing_wallet_address
+    ?? finance?.guaranteeDeposits[0]?.operations_wallet_address;
 
   function resetSettlementAttempt() {
     settlementKey.current = undefined;
@@ -281,7 +281,7 @@ export function AssetsPage() {
             <RefreshCw aria-hidden="true" size={16} /> 刷新 Core 证据
           </button>
         )}
-        description="USDT 商家货款、NPL 奖励与 BNM 积分分轨展示；结算签名不广播交易，最终性来自 Core 与 Safe 证据。"
+        description="USDT 商家货款、NPL 奖励与 BNM 积分分轨展示；商家只签结算申请，Core 依据普通执行钱包的链上证据确认最终性。"
         eyebrow="05 / 财务与收益"
         title="资产清算中心"
       />
@@ -331,7 +331,7 @@ export function AssetsPage() {
           <CircleDollarSign aria-hidden="true" size={19} />
         </div>
         <p className="section-intro">
-          每笔订单的冻结金额、当前余额、账本生命周期和 Safe 结算引用均直接来自 Core；本页不重算净应收或结算金额。
+          每笔订单的冻结金额、当前余额、账本生命周期和逐笔结算引用均直接来自 Core；本页不重算净应收或结算金额。
         </p>
         <ProjectionState state={receivableStatementsState}>
           {receivableStatements?.statements.length ? (
@@ -381,7 +381,7 @@ export function AssetsPage() {
               placeholder="例如 1000000000000000000"
               value={settlementAmount}
             />
-            <span className="field-help">可申请来源和精确金额由 Core 校验；钱包仅签名，不承担 Safe Gas。</span>
+            <span className="field-help">可申请来源和精确金额由 Core 校验；商家钱包仅签名，转账 Gas 由对应普通执行钱包承担。</span>
           </div>
           <button className="button primary" disabled={!canRequestSettlement} type="submit">
             {settlementSubmitting ? <LoaderCircle aria-hidden="true" className="spin" size={16} /> : <WalletCards aria-hidden="true" size={16} />}
@@ -398,13 +398,13 @@ export function AssetsPage() {
 
       <section className="section-block finance-section" aria-labelledby="settlement-history-title">
         <div className="section-heading">
-          <div><p className="eyebrow">Safe settlement</p><h2 id="settlement-history-title">结算申请与 Safe 批次</h2></div>
+          <div><p className="eyebrow">EOA settlement</p><h2 id="settlement-history-title">结算申请与逐笔转账</h2></div>
           <Landmark aria-hidden="true" size={19} />
         </div>
         <ProjectionState state={settlementsState}>
           <div className="table-wrap">
             <table>
-              <thead><tr><th scope="col">申请时间</th><th scope="col">轨道 / 资产</th><th scope="col">精确金额</th><th scope="col">状态</th><th scope="col">Safe 批次 ID</th><th scope="col">最终 Safe TxHash</th></tr></thead>
+              <thead><tr><th scope="col">申请时间</th><th scope="col">轨道 / 资产</th><th scope="col">精确金额</th><th scope="col">状态</th><th scope="col">执行钱包 / Transfer ID</th><th scope="col">最终执行 TxHash</th></tr></thead>
               <tbody>
                 {settlements?.requests.length ? settlements.requests.map((request) => (
                   <tr key={request.request_id}>
@@ -412,8 +412,10 @@ export function AssetsPage() {
                     <td><strong>{request.rail}</strong><small>{request.asset}</small></td>
                     <td className="mono-value">{request.amount}</td>
                     <td><StatusText state={request.state} /></td>
-                    <td className="mono-value">{request.batch_id ?? '--'}</td>
-                    <td>{request.final_safe_tx_hash ? <ExplorerHash hash={request.final_safe_tx_hash} /> : '--'}</td>
+                    <td className="mono-value"><strong>{request.executor_wallet}</strong><small>{request.transfer_ids.join(', ') || '--'}</small></td>
+                    <td>{request.final_execution_tx_hashes.length
+                      ? request.final_execution_tx_hashes.map((txHash) => <ExplorerHash hash={txHash} key={txHash} />)
+                      : '--'}</td>
                   </tr>
                 )) : (
                   <tr><td colSpan={6}><EmptyState description="Core 尚未返回该钱包的结算申请。" title="暂无结算记录" /></td></tr>
@@ -426,7 +428,7 @@ export function AssetsPage() {
 
       <section className="section-block finance-section" aria-labelledby="guarantee-title">
         <div className="section-heading">
-          <div><p className="eyebrow">Operations Safe</p><h2 id="guarantee-title">商家保证金与链上最终性</h2></div>
+          <div><p className="eyebrow">Operations wallet</p><h2 id="guarantee-title">商家保证金与链上最终性</h2></div>
           <ShieldCheck aria-hidden="true" size={19} />
         </div>
         <ProjectionState state={financeState}>
@@ -434,7 +436,7 @@ export function AssetsPage() {
             <div><dt>保证金状态</dt><dd>{finance?.merchant.guarantee_status ?? '--'}</dd></div>
             <div><dt>当前余额</dt><dd>{finance?.guarantee?.balance_usdt ?? '--'} <small>USDT atomic</small></dd></div>
             <div><dt>最低要求</dt><dd>{finance?.guarantee?.minimum_usdt ?? '--'} <small>USDT atomic</small></dd></div>
-            <div><dt>Operations Safe</dt><dd className="mono-value">{operationsSafe ?? '--'}</dd></div>
+            <div><dt>运营与保证金钱包</dt><dd className="mono-value">{operationsWallet ?? '--'}</dd></div>
           </dl>
           <form className="finance-command-form guarantee-form" onSubmit={(event) => void submitDeposit(event)}>
             <div className="field">
@@ -523,7 +525,7 @@ export function AssetsPage() {
 
       <div className="reward-grid">
         <section className="section-block reward-section" aria-labelledby="npl-title">
-          <div className="section-heading"><div><p className="eyebrow">NPL / Reward Safe</p><h2 id="npl-title">NPL 收益子类</h2></div><Coins aria-hidden="true" size={19} /></div>
+          <div className="section-heading"><div><p className="eyebrow">NPL reward wallet</p><h2 id="npl-title">NPL 收益子类</h2></div><Coins aria-hidden="true" size={19} /></div>
           <ProjectionState state={settlementsState} compact>
             <RewardSubtypeGrid balances={nplBalances} />
           </ProjectionState>
@@ -619,28 +621,25 @@ function MerchantReceivableStatementRow({ statement }: { statement: MerchantRece
         </section>
 
         <section aria-label={`订单 ${statement.orderId} settlement refs`} className="receivable-evidence-block">
-          <h3>Settlement request / batch / Safe finality</h3>
+          <h3>Settlement request / transfer / EOA finality</h3>
           <div className="table-wrap">
             <table>
-              <thead><tr><th scope="col">Request / 金额</th><th scope="col">状态 / 批次</th><th scope="col">Journal linkage</th><th scope="col">最终 Safe TxHash</th><th scope="col">时间</th></tr></thead>
+              <thead><tr><th scope="col">Request / 金额</th><th scope="col">状态 / Transfer</th><th scope="col">Journal linkage</th><th scope="col">最终执行 TxHash</th><th scope="col">时间</th></tr></thead>
               <tbody>
                 {statement.settlementRefs.length ? statement.settlementRefs.map((reference) => (
                   <tr key={reference.requestId}>
                     <td><strong className="mono-value">{reference.requestId}</strong><small>{reference.amount} USDT atomic</small></td>
-                    <td><StatusText state={reference.state} /><small className="mono-value">{reference.batchId ?? '--'}</small></td>
+                    <td><StatusText state={reference.state} /><small className="mono-value">{reference.transferId ?? '--'}</small></td>
                     <td className="mono-value">
                       <strong>{reference.journals.requested}</strong>
-                      <small>{reference.journals.batched ?? '--'} / {reference.journals.settled ?? '--'}</small>
+                      <small>{reference.journals.submitted ?? '--'} / {reference.journals.settled ?? '--'}</small>
                     </td>
                     <td>
-                      {reference.finalSafeTxHash ? <ExplorerHash hash={reference.finalSafeTxHash} /> : '--'}
-                      {reference.finalExecutionTxHash && reference.finalExecutionTxHash !== reference.finalSafeTxHash
-                        ? <small><ExplorerHash hash={reference.finalExecutionTxHash} /></small>
-                        : null}
+                      {reference.finalExecutionTxHash ? <ExplorerHash hash={reference.finalExecutionTxHash} /> : '--'}
                     </td>
                     <td>
                       <time dateTime={reference.requestedAt}>{reference.requestedAt}</time>
-                      <small>{reference.batchedAt ?? '--'} / {reference.settledAt ?? '--'}</small>
+                      <small>{reference.submittedAt ?? '--'} / {reference.settledAt ?? '--'}</small>
                     </td>
                   </tr>
                 )) : <tr><td colSpan={5}>该订单尚未关联结算申请。</td></tr>}
@@ -715,7 +714,7 @@ function BnmPointsGrid({ points }: { points: readonly BnmPointsBalance[] }) {
           );
         })}
       </div>
-      <p className="bnm-transfer-boundary"><LockKeyhole aria-hidden="true" size={15} />BNM 是不可转移的后台积分，本页不提供结算、Safe 转账或链上 Claim 操作。</p>
+      <p className="bnm-transfer-boundary"><LockKeyhole aria-hidden="true" size={15} />BNM 是不可转移的后台积分，本页不提供结算、钱包转账或链上 Claim 操作。</p>
     </div>
   );
 }
@@ -822,7 +821,7 @@ function stateLabel(state: BalanceState) {
     LOCKED: 'Locked 锁定中',
     AVAILABLE: 'Available 可申请',
     REQUESTED: 'Requested 已申请',
-    BATCHED: 'Batched 已组批',
+    SUBMITTED: 'Submitted 已提交',
     SETTLED: 'Settled 已结算',
   };
   return state in labels ? labels[state as keyof typeof labels] : state;

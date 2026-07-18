@@ -11,8 +11,8 @@ import {
 } from '@abu24k/core-artifacts';
 
 export const merchantWallet = '0x1111111111111111111111111111111111111111';
-export const custodySafe = '0x2222222222222222222222222222222222222222';
-export const operationsSafe = '0x3333333333333333333333333333333333333333';
+export const custodyWallet = '0x2222222222222222222222222222222222222222';
+export const operationsWallet = '0x3333333333333333333333333333333333333333';
 export const usdtAddress = '0x55d398326f99059ff775485246999027b3197955';
 
 const hash = (character: string) => `0x${character.repeat(64)}`;
@@ -23,19 +23,19 @@ export const requestedSettlement = settlementRequest({
   amount: '12000000000000000000',
 });
 
-export const batchedSettlement = settlementRequest({
-  requestId: 'settlement-request-batched',
-  state: 'BATCHED',
+export const submittedSettlement = settlementRequest({
+  requestId: 'settlement-request-submitted',
+  state: 'SUBMITTED',
   amount: '7000000000000000000',
-  batchId: 'safe-batch-7',
+  transferId: hash('7'),
 });
 
 export const settledSettlement = settlementRequest({
   requestId: 'settlement-request-settled',
   state: 'SETTLED',
   amount: '90000000000000000000',
-  batchId: 'safe-batch-6',
-  finalSafeTxHash: hash('9'),
+  transferId: hash('6'),
+  finalExecutionTxHash: hash('9'),
 });
 
 export const settlementList: SettlementListProjection = {
@@ -45,12 +45,12 @@ export const settlementList: SettlementListProjection = {
     { asset: 'USDT', purpose: 'MERCHANT_RECEIVABLE', rewardSubtype: null, state: 'LOCKED', amount: '25000000000000000000' },
     { asset: 'USDT', purpose: 'MERCHANT_RECEIVABLE', rewardSubtype: null, state: 'AVAILABLE', amount: '45000000000000000000' },
     { asset: 'USDT', purpose: 'MERCHANT_RECEIVABLE', rewardSubtype: null, state: 'REQUESTED', amount: '12000000000000000000' },
-    { asset: 'USDT', purpose: 'MERCHANT_RECEIVABLE', rewardSubtype: null, state: 'BATCHED', amount: '7000000000000000000' },
+    { asset: 'USDT', purpose: 'MERCHANT_RECEIVABLE', rewardSubtype: null, state: 'SUBMITTED', amount: '7000000000000000000' },
     { asset: 'USDT', purpose: 'MERCHANT_RECEIVABLE', rewardSubtype: null, state: 'SETTLED', amount: '90000000000000000000' },
     { asset: 'NPL', purpose: 'REWARD_LIABILITY', rewardSubtype: 'GENESIS', state: 'AVAILABLE', amount: '2101' },
     { asset: 'NPL', purpose: 'REWARD_LIABILITY', rewardSubtype: 'DIRECT_REFERRAL', state: 'LOCKED', amount: '2102' },
     { asset: 'NPL', purpose: 'REWARD_LIABILITY', rewardSubtype: 'DISTRICT', state: 'REQUESTED', amount: '2103' },
-    { asset: 'NPL', purpose: 'REWARD_LIABILITY', rewardSubtype: 'CITY', state: 'BATCHED', amount: '2104' },
+    { asset: 'NPL', purpose: 'REWARD_LIABILITY', rewardSubtype: 'CITY', state: 'SUBMITTED', amount: '2104' },
     { asset: 'NPL', purpose: 'REWARD_LIABILITY', rewardSubtype: 'PROVINCE', state: 'SETTLED', amount: '2105' },
     { asset: 'NPL', purpose: 'REWARD_LIABILITY', rewardSubtype: 'REGION', state: 'AVAILABLE', amount: '2106' },
     { asset: 'NPL', purpose: 'REWARD_LIABILITY', rewardSubtype: 'OPERATIONS', state: 'LOCKED', amount: '2107' },
@@ -60,7 +60,7 @@ export const settlementList: SettlementListProjection = {
     { pointsType: 'BNM', purpose: 'BNM_LIABILITY', state: 'LOCKED', amount: '8800', transferable: false },
     { pointsType: 'BNM', purpose: 'BNM_LIABILITY', state: 'AVAILABLE', amount: '3600', transferable: false },
   ],
-  requests: [requestedSettlement, batchedSettlement, settledSettlement],
+  requests: [requestedSettlement, submittedSettlement, settledSettlement],
 };
 
 export const seckillReceivableStatement = receivableStatement({
@@ -71,7 +71,7 @@ export const seckillReceivableStatement = receivableStatement({
   removedFromReceivableUsdt: '7952',
   lifecycleState: 'SETTLED',
   settlementState: 'SETTLED',
-  finalSafeTxHash: hash('b'),
+  finalExecutionTxHash: hash('b'),
 });
 
 export const ordinaryReceivableStatement = receivableStatement({
@@ -119,7 +119,7 @@ export const settlementIntent: SettlementIntentProjection = {
     recipient: merchantWallet,
     rail: 'MERCHANT_USDT',
     asset: usdtAddress,
-    safeAddress: custodySafe,
+    executorWallet: custodyWallet,
     amount: '45000000000000000000',
     itemsHash: hash('d'),
     nonce: '3',
@@ -131,7 +131,7 @@ export const settlementIntent: SettlementIntentProjection = {
       name: 'Abu24KV2Settlement',
       version: '2',
       chainId: 56,
-      verifyingContract: custodySafe,
+      verifyingContract: custodyWallet,
     },
     types: {
       SettlementRequest: [
@@ -141,7 +141,7 @@ export const settlementIntent: SettlementIntentProjection = {
         { name: 'recipient', type: 'address' },
         { name: 'rail', type: 'string' },
         { name: 'asset', type: 'address' },
-        { name: 'safeAddress', type: 'address' },
+        { name: 'executorWallet', type: 'address' },
         { name: 'amount', type: 'uint256' },
         { name: 'itemsHash', type: 'bytes32' },
         { name: 'nonce', type: 'uint256' },
@@ -156,7 +156,7 @@ export const settlementIntent: SettlementIntentProjection = {
       recipient: merchantWallet,
       rail: 'MERCHANT_USDT',
       asset: usdtAddress,
-      safeAddress: custodySafe,
+      executorWallet: custodyWallet,
       amount: '45000000000000000000',
       itemsHash: hash('d'),
       nonce: '3',
@@ -167,7 +167,7 @@ export const settlementIntent: SettlementIntentProjection = {
     itemIndex: 0,
     orderId: hash('1'),
     accountId: 'merchant:merchant-1:usdt',
-    backingSafeAddress: custodySafe,
+    backingWalletAddress: custodyWallet,
     amount: '45000000000000000000',
     itemHash: hash('f'),
   }],
@@ -182,7 +182,7 @@ export const merchantFinance: MerchantFinanceProjection = {
     settlement_wallet: merchantWallet,
   },
   guarantee: {
-    backing_safe_address: operationsSafe,
+    backing_wallet_address: operationsWallet,
     balance_usdt: '1200000000000000000000',
     minimum_usdt: '1000000000000000000000',
     source_evidence_hash: hash('a'),
@@ -193,7 +193,7 @@ export const merchantFinance: MerchantFinanceProjection = {
       deposit_id: 'guarantee-final',
       policy_version: '8',
       token_address: usdtAddress,
-      operations_safe_address: operationsSafe,
+      operations_wallet_address: operationsWallet,
       expected_amount_usdt: '1200000000000000000000',
       transaction_hash: hash('4'),
       state: 'FINAL',
@@ -210,7 +210,7 @@ export const merchantFinance: MerchantFinanceProjection = {
       deposit_id: 'guarantee-reorged',
       policy_version: '7',
       token_address: usdtAddress,
-      operations_safe_address: operationsSafe,
+      operations_wallet_address: operationsWallet,
       expected_amount_usdt: '100000000000000000000',
       transaction_hash: hash('7'),
       state: 'REORGED',
@@ -255,7 +255,7 @@ export const guaranteeDepositResult: GuaranteeDepositProjection = {
   policyVersion: 9,
   transactionHash: hash('0'),
   expectedAmountUsdt: '1000000000000000000000',
-  operationsSafeAddress: operationsSafe,
+  operationsWalletAddress: operationsWallet,
   state: 'SUBMITTED',
   confirmations: 0,
 };
@@ -282,7 +282,7 @@ export const cmsRules: CmsPublicItem = {
       },
       {
         type: 'paragraph',
-        children: [{ type: 'text', text: '商品价按 70% USDT + 30% NPL 支付；1% USDT 进入技术服务费 Safe，其余69% 为商家让利基数，运费独立进入 Custody Safe。', marks: [] }],
+        children: [{ type: 'text', text: '商品价按 70% USDT + 30% NPL 支付；1% USDT 进入技术服务费钱包，其余69% 为商家让利基数，运费独立进入 USDT 资金钱包。', marks: [] }],
       },
       {
         type: 'paragraph',
@@ -310,8 +310,8 @@ function settlementRequest(input: {
   requestId: string;
   state: SettlementRequestProjection['state'];
   amount: string;
-  batchId?: string;
-  finalSafeTxHash?: string;
+  transferId?: string;
+  finalExecutionTxHash?: string;
 }): SettlementRequestProjection {
   return {
     request_id: input.requestId,
@@ -322,32 +322,31 @@ function settlementRequest(input: {
     rail: 'MERCHANT_USDT',
     asset: 'USDT',
     asset_address: usdtAddress,
-    safe_address: custodySafe,
+    executor_wallet: custodyWallet,
     amount: input.amount,
     items_hash: hash('d'),
     intent_digest: hash('e'),
     signature_hash: hash('f'),
     state: input.state,
-    batch_id: input.batchId ?? null,
-    final_safe_tx_hash: input.finalSafeTxHash ?? null,
-    final_execution_tx_hash: input.finalSafeTxHash ?? null,
+    transfer_ids: input.transferId ? [input.transferId] : [],
+    final_execution_tx_hashes: input.finalExecutionTxHash ? [input.finalExecutionTxHash] : [],
     requested_at: '2026-07-15T08:01:00.000Z',
-    batched_at: input.batchId ? '2026-07-15T08:02:00.000Z' : null,
-    settled_at: input.finalSafeTxHash ? '2026-07-15T08:10:00.000Z' : null,
+    submitted_at: input.transferId ? '2026-07-15T08:02:00.000Z' : null,
+    settled_at: input.finalExecutionTxHash ? '2026-07-15T08:10:00.000Z' : null,
     items: [{
       item_index: 0,
       order_id: hash('1'),
       account_id: 'merchant:merchant-1:usdt',
-      backing_safe_address: custodySafe,
+      backing_wallet_address: custodyWallet,
       amount: input.amount,
       requested_journal_id: `journal:${input.requestId}:requested`,
-      batched_journal_id: input.batchId ? `journal:${input.requestId}:batched` : null,
-      settled_journal_id: input.finalSafeTxHash ? `journal:${input.requestId}:settled` : null,
+      submitted_journal_id: input.transferId ? `journal:${input.requestId}:submitted` : null,
+      settled_journal_id: input.finalExecutionTxHash ? `journal:${input.requestId}:settled` : null,
     }],
     transitions: [{
       transition_id: `transition:${input.requestId}`,
       request_item_index: 0,
-      batch_id: input.batchId ?? null,
+      transfer_id: input.transferId ?? null,
       transition_sequence: '1',
       transition_type: input.state,
       journal_id: `journal:${input.requestId}:transition`,
@@ -364,7 +363,7 @@ function receivableStatement(input: {
   removedFromReceivableUsdt: string;
   lifecycleState: MerchantReceivableStatement['receivableLifecycle'][number]['state'];
   settlementState?: MerchantReceivableStatement['settlementRefs'][number]['state'];
-  finalSafeTxHash?: string;
+  finalExecutionTxHash?: string;
 }): MerchantReceivableStatement {
   const orderId = hash(input.hashCharacter);
   const lifecycleJournalId = `journal:${input.hashCharacter}:lifecycle`;
@@ -415,17 +414,16 @@ function receivableStatement(input: {
       requestId: settlementRequestId,
       amount: '7952',
       state: input.settlementState,
-      batchId: hash('6'),
-      finalSafeTxHash: input.finalSafeTxHash ?? null,
-      finalExecutionTxHash: input.finalSafeTxHash ?? null,
+      transferId: hash('6'),
+      finalExecutionTxHash: input.finalExecutionTxHash ?? null,
       journals: {
         requested: `journal:${input.hashCharacter}:requested`,
-        batched: `journal:${input.hashCharacter}:batched`,
-        settled: input.finalSafeTxHash ? `journal:${input.hashCharacter}:settled` : null,
+        submitted: `journal:${input.hashCharacter}:submitted`,
+        settled: input.finalExecutionTxHash ? `journal:${input.hashCharacter}:settled` : null,
       },
       requestedAt: '2026-07-15T09:05:00.000Z',
-      batchedAt: '2026-07-15T09:06:00.000Z',
-      settledAt: input.finalSafeTxHash ? '2026-07-15T09:15:00.000Z' : null,
+      submittedAt: '2026-07-15T09:06:00.000Z',
+      settledAt: input.finalExecutionTxHash ? '2026-07-15T09:15:00.000Z' : null,
     }] : [],
   };
 }

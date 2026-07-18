@@ -883,7 +883,7 @@ function BalancePanel({ order }: { order: FulfillmentOrder }) {
           <tbody>{order.balances.map((balance) => <tr key={`${balance.asset}:${balance.state}`}><td>{balance.asset}</td><td>{balance.state}</td><td className="numeric-cell">{balance.amount}</td></tr>)}</tbody>
         </table>
       </div>
-      <p className="panel-note">BNM 仅展示后台积分 Locked/Available，不提供 Token、Claim 或 Safe 转账。</p>
+      <p className="panel-note">BNM 仅展示后台积分 Locked/Available，不提供 Token、Claim 或钱包转账。</p>
     </section>
   );
 }

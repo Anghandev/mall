@@ -420,7 +420,7 @@ export function SettingsPage() {
             <div className="audit-summary"><span>当前已加载 {audit.value.entries.length} 条</span><span>本页 Core scoped count：{audit.value.chainProof.entries}</span><span>范围：{audit.value.chainProof.merchantId}</span></div>
             <div className="table-wrap audit-table-wrap">
               <table>
-                <thead><tr><th scope="col">操作时间</th><th scope="col">操作类型</th><th scope="col">影响模块</th><th scope="col">操作详情</th><th scope="col">签名哈希</th><th scope="col">Safe / 链上 TxHash</th></tr></thead>
+                <thead><tr><th scope="col">操作时间</th><th scope="col">操作类型</th><th scope="col">影响模块</th><th scope="col">操作详情</th><th scope="col">签名哈希</th><th scope="col">链上 TxHash</th></tr></thead>
                 <tbody>
                   {audit.value.entries.length === 0 ? (
                     <tr><td colSpan={6}><EmptyState description="当前商家范围和筛选条件下没有记录。" title="暂无审计日志" /></td></tr>
