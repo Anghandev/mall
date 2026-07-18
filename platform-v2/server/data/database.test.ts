@@ -6121,11 +6121,23 @@ test('policy publication binds the Registry signature and EOA execution, activat
       executionGasLimit: '500000',
       policyRegistryAddress: registry,
       governanceWallet,
+      platformServiceFeeWallet: policy.platformServiceFeeWallet,
       secondarySigner: secondary.address,
       auditReady: () => true,
       clock: () => now,
     });
     const actor = { walletAddress: admin.address, roles: ['ADMIN'] as const };
+    await assert.rejects(
+      service.createDraft(actor, {
+        payload: {
+          rulesContentHash: rulesHash,
+          policy: { ...policy, platformServiceFeeWallet: '0x9000000000000000000000000000000000000003' },
+        },
+        idempotencyKey: 'policy-wrong-service-fee-wallet',
+        correlationId: 'policy-wrong-service-fee-wallet',
+      }),
+      /platformServiceFeeWallet does not match the attested PaymentRouter binding/,
+    );
     const draft = await service.createDraft(actor, {
       payload: { rulesContentHash: rulesHash, policy },
       idempotencyKey: 'policy-draft-v2',

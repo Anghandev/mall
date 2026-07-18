@@ -296,6 +296,10 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     executionGasLimit: required(config.executorMaxGasLimit, 'EXECUTOR_MAX_GAS_LIMIT').toString(),
     policyRegistryAddress: required(config.policyRegistryAddress, 'POLICY_REGISTRY_ADDRESS_MANIFEST'),
     governanceWallet: required(config.governanceWalletAddress, 'PLATFORM_GOVERNANCE_WALLET_ADDRESS'),
+    platformServiceFeeWallet: required(
+      config.platformServiceFeeWalletAddress,
+      'PLATFORM_SERVICE_FEE_WALLET_ADDRESS',
+    ),
     secondarySigner: required(config.secondarySignerAddress, 'SECONDARY_SIGNER_ADDRESS'),
     decisionBlocked: config.paymentDecisionBlocked,
     auditReady,

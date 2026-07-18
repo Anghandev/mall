@@ -70,6 +70,7 @@ export class PolicyService {
   readonly #executionGasLimit: string;
   readonly #policyRegistryAddress: string;
   readonly #governanceWallet: string;
+  readonly #platformServiceFeeWallet: string;
   readonly #secondarySigner: string;
   readonly #decisionBlocked: readonly string[];
   readonly #auditReady: () => boolean | Promise<boolean>;
@@ -81,6 +82,7 @@ export class PolicyService {
     executionGasLimit: string;
     policyRegistryAddress: string;
     governanceWallet: string;
+    platformServiceFeeWallet: string;
     secondarySigner: string;
     decisionBlocked?: readonly string[];
     auditReady: () => boolean | Promise<boolean>;
@@ -94,6 +96,7 @@ export class PolicyService {
     this.#executionGasLimit = input.executionGasLimit;
     this.#policyRegistryAddress = normalizeAddress(input.policyRegistryAddress);
     this.#governanceWallet = normalizeAddress(input.governanceWallet);
+    this.#platformServiceFeeWallet = normalizeAddress(input.platformServiceFeeWallet);
     this.#secondarySigner = normalizeAddress(input.secondarySigner);
     this.#decisionBlocked = Object.freeze([...(input.decisionBlocked ?? [])]);
     this.#auditReady = input.auditReady;
@@ -125,7 +128,13 @@ export class PolicyService {
       const active = await latestCanonicalPolicy(executor);
       const nextPolicyVersion = (active?.policyVersion ?? 0) + 1;
       const basePolicyVersion = active?.policyVersion ?? null;
-      const validation = await validateDraft(executor, payload, nextPolicyVersion, this.#decisionBlocked);
+      const validation = await validateDraft(
+        executor,
+        payload,
+        nextPolicyVersion,
+        this.#decisionBlocked,
+        this.#platformServiceFeeWallet,
+      );
       const state: DraftState = validation.errors.length > 0 ? 'DECISION_BLOCKED' : 'DRAFT';
       const draftId = `policy-draft:${randomUUID()}`;
       const now = this.#clock();
@@ -182,7 +191,13 @@ export class PolicyService {
         throw new CoreError('InvalidRequest', 'Signed policy draft cannot be edited', 409);
       }
       await assertStillNextVersion(executor, row);
-      const validation = await validateDraft(executor, payload, Number(row.next_policy_version), this.#decisionBlocked);
+      const validation = await validateDraft(
+        executor,
+        payload,
+        Number(row.next_policy_version),
+        this.#decisionBlocked,
+        this.#platformServiceFeeWallet,
+      );
       const nextState: DraftState = validation.errors.length > 0 ? 'DECISION_BLOCKED' : 'DRAFT';
       const requestHash = hashJson({ wallet, payload });
       const now = this.#clock();
@@ -227,9 +242,9 @@ export class PolicyService {
     return this.#transactions.transaction(async (executor) => {
       await requireCurrentRole(executor, wallet, ['ADMIN']);
       const row = await lockedDraft(executor, draftId);
-      await assertSignable(executor, row, this.#decisionBlocked);
+      await assertSignable(executor, row, this.#decisionBlocked, this.#platformServiceFeeWallet);
       validateDeadline(deadline, this.#clock());
-      const material = await publicationMaterial(executor, row);
+      const material = await publicationMaterial(executor, row, this.#platformServiceFeeWallet);
       const publication = buildPolicyPublication(material, nonce, deadline, this.#policyRegistryAddress);
       return Object.freeze({
         draftId,
@@ -270,9 +285,9 @@ export class PolicyService {
     return this.#transactions.transaction(async (executor) => {
       const roles = await requireCurrentRole(executor, wallet, ['ADMIN']);
       const row = await lockedDraft(executor, draftId);
-      await assertSignable(executor, row, this.#decisionBlocked);
+      await assertSignable(executor, row, this.#decisionBlocked, this.#platformServiceFeeWallet);
       validateDeadline(deadline, this.#clock());
-      const material = await publicationMaterial(executor, row);
+      const material = await publicationMaterial(executor, row, this.#platformServiceFeeWallet);
       const publication = buildPolicyPublication(material, nonce, deadline, this.#policyRegistryAddress);
       const signer = verifyPolicyPublicationSignature(publication, input.signature, this.#secondarySigner);
       const calldata = encodePolicyPublicationCalldata(publication, input.signature);
@@ -560,7 +575,7 @@ export class PolicyService {
         return this.getDraftInTransaction(executor, draftId);
       }
       if (observation.confirmations < 15) throw new CoreError('FinalityPending', 'Policy publication has fewer than 15 confirmations', 409);
-      const material = await publicationMaterial(executor, row);
+      const material = await publicationMaterial(executor, row, this.#platformServiceFeeWallet);
       const publication = buildPolicyPublication(
         material,
         BigInt(String(row.publication_nonce)),
@@ -646,11 +661,18 @@ async function validateDraft(
   payload: DraftPayload,
   policyVersion: number,
   decisionBlocked: readonly string[],
+  platformServiceFeeWallet: string,
 ) {
   const errors = decisionBlocked.map((item) => ({ code: 'DecisionBlocked', field: item }));
   let policy;
   try {
     policy = parsePaymentPolicySnapshot(policyVersion, payload.policy);
+    if (normalizeAddress(policy.platformServiceFeeWallet) !== platformServiceFeeWallet) {
+      throw new CoreError(
+        'InvalidRequest',
+        'Policy platformServiceFeeWallet does not match the attested PaymentRouter binding',
+      );
+    }
     buildPolicyPublication(
       {
         policy,
@@ -682,8 +704,18 @@ async function validateDraft(
   return { errors, policy };
 }
 
-async function publicationMaterial(executor: SqlExecutor, row: PolicyDraftRow) {
-  const validation = await validateDraft(executor, row.payload, Number(row.next_policy_version), []);
+async function publicationMaterial(
+  executor: SqlExecutor,
+  row: PolicyDraftRow,
+  platformServiceFeeWallet: string,
+) {
+  const validation = await validateDraft(
+    executor,
+    row.payload,
+    Number(row.next_policy_version),
+    [],
+    platformServiceFeeWallet,
+  );
   if (validation.errors.length > 0 || !validation.policy) {
     throw new CoreError('DecisionBlocked', 'Policy draft still has unresolved publication inputs', 409, {
       validationErrors: validation.errors,
@@ -699,12 +731,23 @@ async function publicationMaterial(executor: SqlExecutor, row: PolicyDraftRow) {
   };
 }
 
-async function assertSignable(executor: SqlExecutor, row: PolicyDraftRow, decisionBlocked: readonly string[]) {
+async function assertSignable(
+  executor: SqlExecutor,
+  row: PolicyDraftRow,
+  decisionBlocked: readonly string[],
+  platformServiceFeeWallet: string,
+) {
   if (!['DRAFT', 'DECISION_BLOCKED'].includes(row.state)) {
     throw new CoreError('InvalidRequest', 'Policy draft is not signable', 409);
   }
   await assertStillNextVersion(executor, row);
-  const validation = await validateDraft(executor, row.payload, Number(row.next_policy_version), decisionBlocked);
+  const validation = await validateDraft(
+    executor,
+    row.payload,
+    Number(row.next_policy_version),
+    decisionBlocked,
+    platformServiceFeeWallet,
+  );
   if (validation.errors.length > 0) {
     throw new CoreError('DecisionBlocked', 'Policy draft has unresolved decisions', 409, {
       validationErrors: validation.errors,

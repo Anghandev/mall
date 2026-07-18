@@ -42,7 +42,8 @@ describe('governed Admin forms', () => {
     const updateBody = requestBody(fetchMock, '/v2/admin/policy-drafts/draft-1');
     expect(updateBody).toMatchObject({ payload: { rulesContentHash: hash('9'), policy: {
       platformFeeBps: 100, usdtPaymentBps: 7000, nplPaymentBps: 3000,
-      platformServiceFeeSafe: address('a'), decisionEvidenceHash: hash('7'),
+      platformServiceFeeWallet: address('a'), usdtSettlementWallet: address('b'),
+      nplRewardWallet: address('c'), operationsWallet: address('d'), decisionEvidenceHash: hash('7'),
       genesisNodeDestinations: [{ account: address('1'), weightBps: 10_000 }],
     } } });
     expect(updateBody.payload).not.toHaveProperty('oracleVersion');
@@ -163,8 +164,8 @@ function policyPayload() { return { rulesContentHash: hash('9'), policy: {
   platformFeeBps: 100, seckillPrizeBps: 0, genesisBps: 200, directReferralBps: 100, districtBps: 120,
   cityBps: 80, provinceBps: 60, regionBps: 40, operationsBps: 400, seckillMainDuration: 3600,
   relayInitial: 60, relayIncrement: 30, relayCap: 60, requiredConfirmations: 15,
-  merchantGuaranteeMinimumUsdt: '1000000000000000000000', platformServiceFeeSafe: address('a'),
-  usdtCustodySafe: address('b'), nplRewardSafe: address('c'), operationsTreasurySafe: address('d'), circulationPool: address('e'),
+  merchantGuaranteeMinimumUsdt: '1000000000000000000000', platformServiceFeeWallet: address('a'),
+  usdtSettlementWallet: address('b'), nplRewardWallet: address('c'), operationsWallet: address('d'), circulationPool: address('e'),
   concessionDestinationSetHash: hash('f'), decisionEvidenceHash: hash('6'),
   genesisNodeDestinations: [{ account: address('1'), weightBps: 10_000 }],
   operationsDestinations: ['2', '3', '4', '5'].map((value) => ({ account: address(value), weightBps: 2_500 })),
