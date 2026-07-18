@@ -253,8 +253,10 @@ not a substitute for production PostgreSQL backup and restore evidence.
 ## Blocked Inputs
 
 Production PostgreSQL, Redis, encrypted backup storage, archive-capable delayed-
-finality RPCs, signer services, BNM conformance and provider accounts remain
-launch-time `ExternalBlocked` or `ConfigurationRequired`. The five EOA roles,
-commercial allocations and PII retention are frozen and are not
-`DecisionBlocked`. There is no fixture-backed success path and no
+finality RPCs, signer services and other provider accounts remain launch-time
+`ExternalBlocked` or `ConfigurationRequired`. The BNM backend schema, HTTPS
+endpoint, ignored credential and monotonic conformance evidence are verified;
+production Core still requires secure runtime injection and worker monitoring.
+The five EOA roles, commercial allocations and PII retention are frozen and are
+not `DecisionBlocked`. There is no fixture-backed success path and no
 business-refund or Claim table/API in V2.

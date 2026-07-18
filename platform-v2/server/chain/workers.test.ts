@@ -874,6 +874,9 @@ test('BNM adapter is idempotency-bound, validates acknowledgements and fails clo
         amount: '100',
         state: 'AVAILABLE',
         stateVersion: '1',
+        effectiveState: 'AVAILABLE',
+        effectiveStateVersion: '1',
+        outcome: 'APPLIED',
         conformanceEvidenceHash: HASH_2,
         syncedAt: '2026-07-14T00:00:00.000Z',
       }), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -897,6 +900,31 @@ test('BNM adapter is idempotency-bound, validates acknowledgements and fails clo
     stateVersion: '1',
     reason: 'CUSTOMER_RECEIPT',
     sourceEvidenceHash: HASH_1,
+  });
+
+  const stale = new HttpBnmAvailabilityAdapter({
+    url: 'https://bnm.example.invalid/v1/order-points/state',
+    token: 'provider-token',
+    projectId: 'abu-24k',
+    conformanceEvidenceHash: HASH_2,
+    fetch: (async () => new Response(JSON.stringify({
+      providerReference: 'bnm-reference-stale',
+      orderId: ORDER_ID,
+      amount: '100',
+      state: 'AVAILABLE',
+      stateVersion: '1',
+      effectiveState: 'LOCKED',
+      effectiveStateVersion: '2',
+      outcome: 'IGNORED_STALE',
+      conformanceEvidenceHash: HASH_2,
+      syncedAt: '2026-07-14T00:00:01.000Z',
+    }), { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch,
+  });
+  assert.deepEqual(await stale.setState(input), {
+    providerReference: 'bnm-reference-stale',
+    syncedAt: '2026-07-14T00:00:01.000Z',
+    state: 'LOCKED',
+    stateVersion: '2',
   });
 
   const invalid = new HttpBnmAvailabilityAdapter({

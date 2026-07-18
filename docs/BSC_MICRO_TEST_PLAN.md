@@ -186,11 +186,13 @@ within the project's 3-USDT-equivalent ceiling.
 
 ## Non-Blocking Production Configuration
 
-Maps, logistics, waybill/printing, SMS/email/Push, OSS/CDN, BNM backend and
-production databases/queues/domains remain `ConfigurationRequired` until their
-real accounts and devices are connected. Their absence does not block EOA
-contract preparation or the bounded chain test, and no adapter may simulate
-success.
+Maps, logistics, waybill/printing, SMS/email/Push, OSS/CDN and production
+databases/queues/domains remain `ConfigurationRequired` until their real
+accounts and devices are connected. Their absence does not block EOA contract
+preparation or the bounded chain test, and no adapter may simulate success. The
+existing BNM backend endpoint and monotonic-state contract are verified through
+the Core HTTP adapter; only secure production Core configuration injection and
+worker monitoring remain rollout work.
 
 The configured public BSC RPCs support chain, block, receipt and block-receipt
 reads but returned `missing trie node` for historical `eth_call`. The bounded

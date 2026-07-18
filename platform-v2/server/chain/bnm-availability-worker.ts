@@ -91,6 +91,9 @@ export class HttpBnmAvailabilityAdapter implements BnmAvailabilityAdapter {
         amount?: unknown;
         state?: unknown;
         stateVersion?: unknown;
+        effectiveState?: unknown;
+        effectiveStateVersion?: unknown;
+        outcome?: unknown;
         conformanceEvidenceHash?: unknown;
         syncedAt?: unknown;
       }
@@ -103,16 +106,29 @@ export class HttpBnmAvailabilityAdapter implements BnmAvailabilityAdapter {
       || body.amount !== input.amount
       || body.state !== input.state
       || body.stateVersion !== input.stateVersion
+      || (body.effectiveState !== 'LOCKED' && body.effectiveState !== 'AVAILABLE')
+      || typeof body.effectiveStateVersion !== 'string'
+      || !/^[1-9][0-9]*$/.test(body.effectiveStateVersion)
+      || (body.outcome !== 'APPLIED' && body.outcome !== 'IDEMPOTENT' && body.outcome !== 'IGNORED_STALE')
       || typeof body.conformanceEvidenceHash !== 'string'
       || body.conformanceEvidenceHash.toLowerCase() !== this.#conformanceEvidenceHash
       || typeof body.syncedAt !== 'string'
       || !Number.isFinite(Date.parse(body.syncedAt))
     ) throw new CoreError('ExternalBlocked', 'BNM backend returned an invalid acknowledgement', 503, { provider: 'BNM' });
+    const effectiveState = body.effectiveState as 'LOCKED' | 'AVAILABLE';
+    const effectiveVersion = BigInt(body.effectiveStateVersion);
+    const requestedVersion = BigInt(input.stateVersion);
+    if (
+      effectiveVersion < requestedVersion
+      || (body.outcome === 'IGNORED_STALE' && effectiveVersion <= requestedVersion)
+      || (body.outcome !== 'IGNORED_STALE'
+        && (effectiveVersion !== requestedVersion || effectiveState !== input.state))
+    ) throw new CoreError('ExternalBlocked', 'BNM backend returned inconsistent effective state', 503, { provider: 'BNM' });
     return {
       providerReference: body.providerReference,
       syncedAt: new Date(body.syncedAt).toISOString(),
-      state: input.state,
-      stateVersion: input.stateVersion,
+      state: effectiveState,
+      stateVersion: body.effectiveStateVersion,
     };
   }
 }
@@ -183,8 +199,8 @@ export class BnmAvailabilityWorker {
               row.amount !== input.amount
               || row.source_evidence_hash.toLowerCase() !== input.sourceEvidenceHash.toLowerCase()
               || row.provider_reference_hash.toLowerCase() !== providerReferenceHash
-              || row.state !== input.state
-              || row.state_version !== input.stateVersion
+              || row.state !== result.state
+              || row.state_version !== result.stateVersion
             ) throw new CoreError('IdempotencyConflict', 'BNM availability acknowledgement changed', 409);
           } else {
             await executor.query(
@@ -199,8 +215,8 @@ export class BnmAvailabilityWorker {
                 input.amount,
                 input.sourceEvidenceHash,
                 providerReferenceHash,
-                input.state,
-                input.stateVersion,
+                result.state,
+                result.stateVersion,
                 new Date(result.syncedAt),
               ],
             );
@@ -223,9 +239,9 @@ export class BnmAvailabilityWorker {
               input.orderId,
               JSON.stringify({
                 orderId: input.orderId,
-                state: input.state,
+                state: result.state,
                 amount: input.amount,
-                stateVersion: input.stateVersion,
+                stateVersion: result.stateVersion,
                 sourceEventId: event.event_id,
               }),
             ],
@@ -390,8 +406,11 @@ function validateBnmAcknowledgement(
     || result.providerReference.length === 0
     || typeof result.syncedAt !== 'string'
     || !Number.isFinite(Date.parse(result.syncedAt))
-    || result.state !== input.state
-    || result.stateVersion !== input.stateVersion
+    || (result.state !== 'LOCKED' && result.state !== 'AVAILABLE')
+    || typeof result.stateVersion !== 'string'
+    || !/^[1-9][0-9]*$/.test(result.stateVersion)
+    || BigInt(result.stateVersion) < BigInt(input.stateVersion)
+    || (result.stateVersion === input.stateVersion && result.state !== input.state)
   ) throw new CoreError('ExternalBlocked', 'BNM backend acknowledgement did not prove monotonic state', 503);
 }
 

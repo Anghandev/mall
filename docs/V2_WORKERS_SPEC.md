@@ -153,6 +153,11 @@ ambiguously, the canceled `AVAILABLE` is never sent again; even a server-side
 late arrival cannot overwrite the newer `LOCKED` state.
 Outer lease or retry-write failures remain visible in worker status and do not
 make `stop()` reject.
+The existing backend has passed the delayed-write conformance suite and a live
+Core HTTP-adapter `LOCKED` version-advance smoke test with zero atomic and legacy
+projection balance deltas. Its endpoint, token and evidence hash remain ignored
+runtime configuration; production Core deployment and worker monitoring are
+still operational rollout work.
 BNM has no token, mint, Claim, EOA transfer or settlement executor path.
 
 Per-payable EOA settlement and EOA-governed administrative workers are published

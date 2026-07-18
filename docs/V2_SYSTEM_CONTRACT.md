@@ -322,11 +322,15 @@ source conflicts are indexed in `V2_DECISIONS.md`.
   funds and are permanently `SUPERSEDED`; their evidence remains append-only.
   New EOA-bound contracts require a separate deployment manifest and may not
   reuse the old addresses or authorization evidence.
-- Production domains/HTTPS/WSS, production databases and queues, the existing
-  BNM backend project's API/schema/credentials and monotonic-state conformance evidence,
-  provider accounts and credentials, approved merchant/admin wallets, encrypted
-  backup storage, printers and physical mobile-device evidence remain
-  launch-time operational configuration.
+- The existing BNM backend HTTPS endpoint, schema, ignored local credential and
+  monotonic-state conformance evidence are configured and verified against the
+  Core HTTP adapter. Production Core deployment must still inject that ignored
+  configuration and monitor the worker; it must not copy credentials into a
+  manifest or repository file.
+- Production domains/HTTPS/WSS, production databases and queues, other provider
+  accounts and credentials, approved merchant/admin wallets, encrypted backup
+  storage, printers and physical mobile-device evidence remain launch-time
+  operational configuration.
 - Provider absence returns `ConfigurationRequired` for the affected feature,
   but adapters, validation, typed errors and the local business path must still
   exist. It does not block unrelated local code completion or a separately
