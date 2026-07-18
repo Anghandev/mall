@@ -16,30 +16,30 @@ are never soft-deletable.
 | ADM-GLOBAL-003 | 12 | Batch modify/list/delist/review approve-reject/soft delete | D-V2-017, D-V2-021 | Soft delete only for ordinary resources explicitly authorized; funds/chain/audit never delete | Overridden | GAP-ADM-003 |
 | ADM-DASH-001 | 14-17 | Today orders, GMV USDT, ship rate, seckill sessions, new UID users and merchants | D-V2-030 | Authoritative timezone and canonical values; unavailable is not zero | Verified | - |
 | ADM-DASH-002 | 18-19 | Pending merchant/product reviews, after-sale cases and low-stock products | D-V2-004, D-V2-026 | After-sale excludes business refunds and includes exchange/delay/arbitration/takeover queues; stock below 100 creates an alert only | Overridden | GAP-ADM-005, GAP-ADM-011 |
-| ADM-DASH-003 | 20-21 | Today signed settlement requests and Safe-settled USDT; chain failures; abnormal orders; blacklist blocks; per-asset Safe-assets/unsettled-liabilities coverage and breaker state | D-V2-007, D-V2-016, D-V2-024 | Coverage uses verified Safe assets and append-only liabilities; below 100% pauses new payments and new settlement batches without reporting healthy | Overridden | GAP-ADM-005, GAP-ADM-011, GAP-ADM-017 |
+| ADM-DASH-003 | 20-21 | Today signed settlement requests and EOA-settled USDT; chain failures; abnormal orders; blacklist blocks; per-asset funding-wallet-assets/unsettled-liabilities coverage and breaker state | D-V2-007, D-V2-016, D-V2-024, D-V2-035 | Coverage uses verified funding-wallet assets and append-only liabilities; below 100% pauses new payments and creation of new settlement transfer intents without reporting healthy | Overridden | GAP-ADM-005, GAP-ADM-011, GAP-ADM-017 |
 | ADM-DASH-004 | 22-24 | RPC latency ms, backend quote-source readiness, high-Gas blocks, bot orders, CPU, memory, Redis hit, MQ backlog and block height | D-V2-012 | Readiness never reports healthy without real probes; quote-source failure blocks only new quote/order creation and never disables fulfillment, arbitration, takeover or audit | Overridden | GAP-ADM-005, GAP-ADM-018 |
-| ADM-MER-001 | 26-31 | Pending/Approved/Rejected/Blacklist menus; shop, license image, legal name/ID, phone, settlement wallet; approved wallet immutability | D-V2-014, D-V2-015, D-V2-029 | PII access is RBAC scoped; approved settlement wallets are permanently immutable with no Admin or Safe override | Verified | - |
+| ADM-MER-001 | 26-31 | Pending/Approved/Rejected/Blacklist menus; shop, license image, legal name/ID, phone, settlement wallet; approved wallet immutability | D-V2-014, D-V2-015, D-V2-029, D-V2-035 | PII access is RBAC scoped; approved settlement wallets are permanently immutable with no Admin, secondary-signature or governance-EOA override | Verified | - |
 | ADM-MER-002 | 32-33 | Source V1-V5 levels, per-product max USDT settlement price and monthly seckill quota | D-V2-033 | V1-V5 behavior and its Admin controls are retired; compatibility fields never gate product price or seckill quota | Overridden | GAP-ADM-006 |
 | ADM-MER-003 | 34-36 | Ordinary/seckill cumulative orders, cumulative USDT flow, today sales; pending/transit/signed/pickup counts and 48H fast-ship rate | - | Drilldown reconciles dashboard totals | Verified | - |
 | ADM-MER-004 | 37 | Source forced-refund count, USDT penalties and abnormal-order rate | D-V2-004, D-V2-005, D-V2-018, D-V2-020 | Replace with takeover cases, 1,000-USDT guarantee status, frozen-receivable/future-proceeds deductions, merchant debt and abnormal-order rate; no business-refund or risk-reserve metric | Overridden | GAP-ADM-006, GAP-ADM-010, GAP-ADM-017 |
 | ADM-MER-005 | 38 | Historical NPL Burn and successfully Available BNM totals | D-V2-003, D-V2-008 | Totals reconcile indexed final events and order snapshots | Verified | - |
-| ADM-MER-006 | 39 | Source Locked/PendingSettlement/Available/Claimed withdrawal view, TxHash and Gas | D-V2-007, D-V2-023 | USDT proceeds use Locked/Available/Requested/Batched/Settled, signed gasless requests and final Safe TxHash; merchant never broadcasts or pays settlement Gas | Overridden | GAP-ADM-006, GAP-ADM-017 |
+| ADM-MER-006 | 39 | Source Locked/PendingSettlement/Available/Claimed withdrawal view, TxHash and Gas | D-V2-007, D-V2-023, D-V2-035 | USDT proceeds use Locked/Available/Requested/Submitted/Settled, signed gasless requests and the final per-transfer EOA TxHash; merchant never broadcasts or pays settlement Gas | Overridden | GAP-ADM-006, GAP-ADM-017 |
 | ADM-CAT-001 | 41-43 | Three-level category tree; name/icon/sort/enabled and source category service-fee field | D-V2-003, D-V2-014, D-V2-018 | Category-specific fee is retired; the fixed 1%-of-list platform fee is global, while remaining category edits are versioned and audited | Overridden | GAP-ADM-007, GAP-ADM-008 |
 | ADM-CAT-002 | 44 | Tag library, examples, batch tagging and frontend feed | - | Versioned tags and placement state; no production fixture | Frozen | GAP-ADM-003 (cross-resource batch only) |
-| ADM-CAT-003 | 45 | Category/tag delete-disable lock while a seckill product or order with Locked funds exists | D-V2-017, D-V2-025 | Core and UI deny delete/disable with the exact blocking resource; historical products only delist, and funds/policies/batches/chain/audit evidence never delete | Overridden | - |
+| ADM-CAT-003 | 45 | Category/tag delete-disable lock while a seckill product or order with Locked funds exists | D-V2-017, D-V2-025, D-V2-035 | Core and UI deny delete/disable with the exact blocking resource; historical products only delist, and funds/policies/transfer-intents/chain/audit evidence never delete | Overridden | - |
 | ADM-CAT-004 | 46-50 | Create/proxy-list; title/subtitle/main images/video/rich detail/flat default delivery freight; settlement merchant allowlist; multi-SKU attributes/stock/USDT cost | D-V2-002, D-V2-031 | Exact amounts, signed uploads and merchant eligibility required; pickup freight is always zero | Frozen | - |
 | ADM-CAT-005 | 51 | Platform inventory +/- and USDT cost edit | D-V2-014, D-V2-017 | Cannot mutate active order/session snapshot; new policy/version only | Overridden | - |
 | ADM-CAT-006 | 52 | Historical product cannot physically delete; delist/hide only | D-V2-017 | Chain/order evidence remains queryable forever | Frozen | - |
 | ADM-POL-001 | 54-57 | Product/session financial-policy panel; merchant post-fee base receivable, concession, net receivable and fixed USDT pool destinations | D-V2-002, D-V2-003, D-V2-014, D-V2-022 | Signed Core preview validates exact post-1%-fee base, concession, net and 0/45/45/10 pool values with future-only governed publication | Overridden | GAP-ADM-008, GAP-ADM-017 |
-| ADM-POL-002 | 58-59 | Source buyer payment weights and NPL Burn/Route control | D-V2-002, D-V2-003, D-V2-014 | Buyer remains 70% USDT plus 30% backend-quoted equivalent NPL; Core signs exact product, freight and NPL amounts in a five-minute intent bound to order, product/SKU, inventory reservation, payer/payee, policyVersion, deadline and one-use nonce; Router atomically sends 1%-of-list USDT to the Service Fee Safe, remaining product USDT plus freight to Custody, 20%-of-list NPL to Burn and 10%-of-list NPL to Reward Safe | Overridden | GAP-ADM-008, GAP-ADM-017 |
+| ADM-POL-002 | 58-59 | Source buyer payment weights and NPL Burn/Route control | D-V2-002, D-V2-003, D-V2-014, D-V2-035 | Buyer remains 70% USDT plus 30% backend-quoted equivalent NPL; Core signs exact product, freight and NPL amounts in a five-minute intent bound to order, product/SKU, inventory reservation, payer/payee, policyVersion, deadline and one-use nonce; Router atomically sends 1%-of-list USDT to the Platform Service Fee EOA, remaining product USDT plus freight to the USDT Custody/Settlement EOA, 20%-of-list NPL to Burn and 10%-of-list NPL to the NPL Reward/Distribution EOA | Overridden | GAP-ADM-008, GAP-ADM-017 |
 | ADM-POL-003 | 60-61 | Platform fee, seckill pool, regional/referral proportions and merchant-concession destination weights | D-V2-003, D-V2-009, D-V2-014, D-V2-018, D-V2-022 | Global service fee is fixed at 1%; concession destinations are platform 0%, seckill 45%, node 45% and Locked reserve 10%; NPL roles remain fixed and publication is future-only | Overridden | GAP-ADM-008, GAP-ADM-017 |
-| ADM-POL-004 | 62 | Multiple NPL reward and USDT concession beneficiary addresses and weights | D-V2-009, D-V2-010, D-V2-014, D-V2-022 | Genesis-node 2% uses a published wallet/weight list with no NFT eligibility; operations 4% uses four 25% wallets; snapshots, no self/cycles, exact balance and Safe approval remain required | Overridden | GAP-ADM-008, GAP-ADM-017 |
-| ADM-POL-005 | 63 | Source address-bound partner/channel no-login Claim link | D-V2-007, D-V2-015, D-V2-023, D-V2-027 | Replace with wallet-bound, one-use, expiring signed settlement request; eligibility, Available balance and Safe batching cannot be bypassed | Overridden | GAP-ADM-008, GAP-ADM-017 |
+| ADM-POL-004 | 62 | Multiple NPL reward and USDT concession beneficiary addresses and weights | D-V2-009, D-V2-010, D-V2-014, D-V2-022, D-V2-035 | Genesis-node 2% uses a published wallet/weight list with no NFT eligibility; operations 4% uses four 25% wallets; snapshots, no self/cycles, exact balance, secondary EIP-712 signature and direct Platform Governance EOA execution remain required | Overridden | GAP-ADM-008, GAP-ADM-017 |
+| ADM-POL-005 | 63 | Source address-bound partner/channel no-login Claim link | D-V2-007, D-V2-015, D-V2-023, D-V2-027, D-V2-035 | Replace with wallet-bound, one-use, expiring signed settlement request; eligibility, Available balance and governed per-transfer EOA execution cannot be bypassed | Overridden | GAP-ADM-008, GAP-ADM-017 |
 | ADM-POL-006 | Final Goal | Merchant concession from 0-100%; post-fee base, concession, net receivable and fixed prize/node/reserve preview | D-V2-022, D-V2-023 | Core signs exact integer values and fixed 0/45/45/10 destinations; UI never changes buyer 70/30 or invents another destination | Overridden | GAP-ADM-008, GAP-ADM-017 |
 | ADM-SEK-001 | 65-67 | Create/publish session, assign product and lock activity inventory | D-V2-014, D-V2-017, D-V2-018, D-V2-020, D-V2-024, D-V2-033 | Publication requires governed policy, signed quotes, atomic inventory, guarantee at least 1,000 USDT and coverage at least 100%; no V1-V5 quota check remains | Overridden | GAP-ADM-009 |
 | ADM-SEK-002 | 68-69 | Main duration, relay initial and per-purchase recharge | D-V2-013, D-V2-014 | Fixed launch 60min/60sec/+30sec/cap60sec/main cap; future policy governance only | Verified | - |
 | ADM-SEK-003 | 70-71 | Manual force-close and seckill-purchase breaker | D-V2-014, D-V2-016, D-V2-032 | Force-close preserves the automatic final-order winner or rolls an empty-session pool forward; human review cannot substitute a winner; breakers remain independent | Overridden | GAP-ADM-009, GAP-ADM-017 |
-| ADM-SEK-004 | 72 | Inject USDT into current prize pool from Operations Treasury Safe | D-V2-014, D-V2-023, D-V2-024, D-V2-032 | Injection is balanced and Locked; unused or empty-session funds roll forward and cannot hide coverage below 100% | Overridden | GAP-ADM-009, GAP-ADM-017 |
+| ADM-SEK-004 | 72 | Inject USDT into current prize pool from the Operations/Guarantee EOA | D-V2-014, D-V2-023, D-V2-024, D-V2-032, D-V2-035 | Injection is balanced and Locked; unused or empty-session funds roll forward and cannot hide coverage below 100% | Overridden | GAP-ADM-009, GAP-ADM-017 |
 | ADM-SEK-005 | 73-74 | Versioned rich-text rules shared by Mall and Merchant | D-V2-013, D-V2-014, D-V2-032 | Published content binds the same policyVersion and states final-order winner, whole payable pool, non-substitution review and rollover rules | Overridden | GAP-ADM-009 |
 | ADM-RISK-001 | 76-78 | High-Gas/front-running monitor and automatic 24-hour address restriction | D-V2-026 | Explainable risk evidence, exact 24-hour expiry, appeal and authorized override are audited | Frozen | GAP-ADM-011 |
 | ADM-RISK-002 | 79 | Source `tx.origin == msg.sender` contract-call ban | D-V2-015 | Never tx.origin; authorization supports ERC-1271; any EOA policy is separate and explicit | Overridden | GAP-ADM-011 |
@@ -59,30 +59,30 @@ are never soft-deletable.
 | ADM-CMS-001 | 105-107 | Banner, recommended product schedule, splash, timed/frequency/location campaign popup | - | Versioned placement, preview, publish/rollback and audience evidence | Frozen | GAP-ADM-013 |
 | ADM-CMS-002 | 108 | Seckill rules, FAQ, service agreement, privacy and About rich text | D-V2-013, D-V2-014 | Sanitized versioned content and approval audit | Frozen | GAP-ADM-013 |
 | ADM-CMS-003 | 109 | Release announcements, forced/hot-update notices and contract-upgrade notices | - | Target/version/time and rollback evidence | Frozen | GAP-ADM-013 |
-| ADM-NOTIFY-001 | 111-115 | User/region/merchant audiences; payment, shipment+tracking, pickup; transferable-asset settlement states; backend BNM Locked/Available; genesis/referral/region; announcements/maintenance/activity | D-V2-007, D-V2-008, D-V2-010, D-V2-023 | Notifications derive from finalized domain/journal/Safe events; BNM has no on-chain Claim and genesis-node copy never refers to NFT eligibility | Overridden | GAP-ADM-014, GAP-ADM-017 |
+| ADM-NOTIFY-001 | 111-115 | User/region/merchant audiences; payment, shipment+tracking, pickup; transferable-asset settlement states; backend BNM Locked/Available; genesis/referral/region; announcements/maintenance/activity | D-V2-007, D-V2-008, D-V2-010, D-V2-023, D-V2-035 | Notifications derive from finalized domain, journal and per-transfer EOA execution events; BNM has no on-chain Claim and genesis-node copy never refers to NFT eligibility | Overridden | GAP-ADM-014, GAP-ADM-017 |
 | ADM-NOTIFY-002 | 116 | Aliyun/Tencent SMS, SMTP and Firebase/JPush gateway secret-reference adapters | D-V2-019 | Adapters validate configuration, typed ConfigurationRequired, delivery errors/retries and local outbox flow without real send; real-provider acceptance is ADM-GOAL-003 | Frozen | GAP-ADM-014 |
 | ADM-SYS-001 | 118-120 | Versioned business config, freight and unpaid-reservation release timeout | D-V2-014 | Changes are typed, validated, audited and future-only | Frozen | GAP-ADM-015 |
 | ADM-SYS-002 | 121 | Main/test RPC secret references, fallback routing and health adapter | D-V2-019 | Typed validation, chain-56 check, fallback/error handling and ConfigurationRequired work locally; real RPC health acceptance is ADM-GOAL-003 | Frozen | GAP-ADM-015 |
 | ADM-SYS-003 | 122 | Fixed PancakeSwap V2 NPL/USDT pair and Core backend quote readiness | D-V2-001, D-V2-012, D-V2-018 | Core reads the fixed pair, derives and signs the exact NPL amount, and fails closed for new quotes on unavailable or invalid source evidence; quotes expire after five minutes and are one-use. Production does not deploy or require an on-chain TWAP Source/Adapter, and Admin never calculates the amount | Overridden | GAP-ADM-015 |
 | ADM-SYS-004 | 123 | Seckill maximum Gas control | - | Quote/intent policy rejects above limit; admin cannot control miner inclusion | Frozen | GAP-ADM-015 |
-| ADM-SYS-005 | 124-125 | Chain 56; USDT/NPL/pair/PaymentRouter manifest and five Safe roles | D-V2-001, D-V2-003, D-V2-008, D-V2-014, D-V2-019, D-V2-023 | Manifest binds Governance, Service Fee, USDT Custody, NPL Reward and Operations Treasury Safes; configured RPC and Safe runtime/read-interface checks are present, while BNM remains backend-only | Overridden | GAP-ADM-015, GAP-ADM-017 |
-| ADM-SYS-006 | 126 | OSS secret reference, CDN switch and AI support prompt adapters | D-V2-019 | Local validation, secret-safe references, typed ConfigurationRequired and failure handling are required; real-provider acceptance is ADM-GOAL-003 | Frozen | GAP-ADM-015 |
+| ADM-SYS-005 | 124-125 | Chain 56; USDT/NPL/pair/PaymentRouter manifest and five EOA roles | D-V2-001, D-V2-003, D-V2-008, D-V2-014, D-V2-019, D-V2-023, D-V2-035 | Manifest binds the Platform Governance, Platform Service Fee, USDT Custody/Settlement, NPL Reward/Distribution and Operations/Guarantee EOAs; configured RPC, distinct-role and EOA-bound contract evidence are required, while BNM remains backend-only | Overridden | GAP-ADM-015, GAP-ADM-017 |
+| ADM-SYS-006 | 126 | OSS secret reference, CDN switch and AI support prompt adapters | D-V2-019 | Local validation, secret references, typed ConfigurationRequired and failure handling are required; real-provider acceptance is ADM-GOAL-003 | Frozen | GAP-ADM-015 |
 | ADM-AUD-001 | 128-129 | Separate append-only read-only audit database in reverse time | D-V2-017 | Hash-chain verification, retention and backup/restore tests; no delete path | Frozen | GAP-ADM-016 |
 | ADM-AUD-002 | 130-133 | Admin operation, wallet login/IP/device, JSON-RPC request/response, database/backend-quote/deadlock error stack logs | D-V2-012 | Typed filters, redaction and correlation IDs; quote failures remain auditable without leaking signer material, secrets or PII | Overridden | GAP-ADM-016 |
 | ADM-AUD-003 | 134 | Claim/payment/shipment/source customer-service-refund logs with wallet signature | D-V2-004, D-V2-005 | Replace refund audit with takeover and emergency-recovery audit; every financial action keeps signature proof | Overridden | GAP-ADM-016 |
-| ADM-CLEAR-001 | 136-138 | Admin signature/message plus PaymentRouter and Safe MultiSend method/Gas/status audit | D-V2-015, D-V2-017, D-V2-023 | Signature, exact calldata/content hash, receipt, event, Safe nonce and ledger evidence reconcile end to end | Overridden | GAP-ADM-017 |
-| ADM-CLEAR-002 | 139 | Safe owner approvals for policy/address changes, guarantee deductions and immutable settlement batches | D-V2-014, D-V2-020, D-V2-023 | Safe proposal/execution binds exact old/new diff or batch content hash and records every required owner approval | Overridden | GAP-ADM-017 |
+| ADM-CLEAR-001 | 136-138 | Admin signature/message plus PaymentRouter and per-transfer EOA method/Gas/status audit | D-V2-015, D-V2-017, D-V2-023, D-V2-035 | Signature, exact transfer-intent/calldata hash, receipt, event, executor nonce, final TxHash and ledger evidence reconcile end to end | Overridden | GAP-ADM-017 |
+| ADM-CLEAR-002 | 139 | Governed policy/address changes, guarantee deductions and immutable settlement transfer intents | D-V2-014, D-V2-020, D-V2-023, D-V2-035 | RBAC, exact secondary EIP-712 signature and Platform Governance EOA execution bind each old/new diff; each settlement intent binds one asset, executor, recipient, amount and calldata hash without owner approvals or batch semantics | Overridden | GAP-ADM-017 |
 | ADM-CLEAR-003 | 140 | Config/proportion/concession change actor, old value and new value | D-V2-003, D-V2-014, D-V2-022, D-V2-025 | policyVersion records the fixed 1% fee and 0/45/45/10 concession pools with governed future-only publication; historical snapshots remain immutable | Overridden | GAP-ADM-017 |
-| ADM-CLEAR-004 | 141 | Signed-settlement reconciliation, Safe transfer versus ledger state, per-asset conservation and breaker snapshot | D-V2-003, D-V2-007, D-V2-016, D-V2-023, D-V2-024 | Per-order evidence balances 1% Service Fee Safe, remaining product USDT plus freight in Custody, NPL Burn/Reward, pool liabilities and Router zero balance | Overridden | GAP-ADM-017 |
-| ADM-CLEAR-005 | Final Goal | PostgreSQL append-only double-entry journals for custody liabilities, receivables, rewards, guarantees, debt and settlement batches | D-V2-022, D-V2-023, D-V2-032 | Asset-specific postings include seckill prize, node reward and Locked reserve pools, balance exactly, remain idempotent/non-negative and use linked reversals only | Overridden | GAP-ADM-017 |
-| ADM-CLEAR-006 | Final Goal | Immutable Safe MultiSend batch with batchId, chain/Safe/nonce, orders, assets, recipients, integer amounts, per-asset totals and content hash | D-V2-007, D-V2-017, D-V2-023 | All-or-revert execution; status-1 receipt reaches 15 confirmations; duplicate/replacement/reorg handling is idempotent and final Safe TxHash remains visible | Frozen | GAP-ADM-017 |
-| ADM-CLEAR-007 | Final Goal | Verified Safe-assets/unsettled-liabilities coverage per asset and below-100% breaker | D-V2-016, D-V2-024 | Below 100% blocks new payments and new settlement batches while seckill purchase remains independently controllable; fulfillment/takeover/arbitration/reconciliation/audit/finality remain available | Frozen | GAP-ADM-005, GAP-ADM-017 |
+| ADM-CLEAR-004 | 141 | Signed-settlement reconciliation, EOA transfer versus ledger state, per-asset conservation and breaker snapshot | D-V2-003, D-V2-007, D-V2-016, D-V2-023, D-V2-024, D-V2-035 | Per-order evidence balances 1% in the Platform Service Fee EOA, remaining product USDT plus freight in the Custody/Settlement EOA, NPL Burn/Reward, pool liabilities and Router zero balance | Overridden | GAP-ADM-017 |
+| ADM-CLEAR-005 | Final Goal | PostgreSQL append-only double-entry journals for custody liabilities, receivables, rewards, guarantees, debt and settlement transfer intents | D-V2-022, D-V2-023, D-V2-032, D-V2-035 | Asset-specific postings include seckill prize, node reward and Locked reserve pools, balance exactly, remain idempotent/non-negative and use linked reversals only | Overridden | GAP-ADM-017 |
+| ADM-CLEAR-006 | Final Goal | Immutable per-payable ERC-20 transfer intent with request/order/policy, chain, executor EOA, token, recipient, integer amount, calldata hash, gas cap and idempotency identity | D-V2-007, D-V2-017, D-V2-023, D-V2-035 | One transaction per intent; status-1 receipt reaches 15 confirmations; duplicate/replacement/reorg handling is idempotent and the final execution TxHash remains visible | Overridden | GAP-ADM-017 |
+| ADM-CLEAR-007 | Final Goal | Verified funding-wallet-assets/unsettled-liabilities coverage per asset and below-100% breaker | D-V2-016, D-V2-024, D-V2-035 | Below 100% blocks new payments and creation of new settlement transfer intents while seckill purchase remains independently controllable; fulfillment/takeover/arbitration/reconciliation/audit/finality remain available | Overridden | GAP-ADM-005, GAP-ADM-017 |
 | ADM-OPS-001 | 143-144 | CPU curve, memory and disk waterline probe adapter | D-V2-019 | Local collector validates units, thresholds and unavailable/error states; real-host evidence is ADM-GOAL-003 | Frozen | GAP-ADM-018 |
 | ADM-OPS-002 | 145 | Redis penetration/hit, MQ backlog and DB-pool active-count probes | D-V2-019 | Local probes, thresholds, timeout/error handling and typed unavailable states are tested; real infrastructure evidence is ADM-GOAL-003 | Frozen | GAP-ADM-018 |
 | ADM-OPS-003 | 146 | TPS, QPS, buy/ship average ms and global error-rate probes | D-V2-019 | Window definitions, aggregation, drilldown and unavailable/error states work locally; real-host evidence is ADM-GOAL-003 | Frozen | GAP-ADM-018 |
 | ADM-OPS-004 | 147 | RPC versus independent explorer height; red alert over 3 blocks | D-V2-019 | Comparison adapter and alert/recovery logic are locally tested; real RPC/explorer evidence is ADM-GOAL-003 | Frozen | GAP-ADM-018 |
 | ADM-GOAL-001 | Final Goal | Desktop operations UI, responsive/mobile fallback, keyboard/focus/labels, complete loading/empty/error/disabled states | - | Type, consumer, accessibility and Playwright tests pass | Frozen | GAP-ADM-001 |
-| ADM-GOAL-002 | Final Goal | RBAC, secondary wallet signature, Safe publish, exact allowedActions and no production fixture | D-V2-014, D-V2-021 | Permission negative tests and production-bundle scan pass | Frozen | GAP-ADM-001, GAP-ADM-002, GAP-ADM-004 |
+| ADM-GOAL-002 | Final Goal | RBAC, secondary wallet signature, direct Platform Governance EOA execution, exact allowedActions and no production fixture | D-V2-014, D-V2-021, D-V2-035 | Permission negative tests and production-bundle scan pass; no multisig proposer, owner approval or batch-transfer dependency is accepted | Overridden | GAP-ADM-001, GAP-ADM-002, GAP-ADM-004 |
 | ADM-GOAL-003 | Final Goal | Production Kuaidi100/Cainiao, SMS/SMTP/Push, OSS/CDN, BNM, authorized roles, hosts, middleware, HTTPS/WSS and device evidence | D-V2-019 | Missing provider accounts or devices remain explicit ConfigurationRequired/production-rollout evidence, but do not block the completed local code Goal; adapters, validation, failure fallback and audit must be real, and no fixture may satisfy production acceptance. On-chain TWAP Source/Adapter attestation is retired | ExternalBlocked | GAP-ADM-002, GAP-ADM-012, GAP-ADM-014, GAP-ADM-015, GAP-ADM-018 |
 
 ## Completion Rule
@@ -96,6 +96,22 @@ missing production providers do not block local functional completion once the
 real adapter, validation, ConfigurationRequired/fallback state and audit path
 are verified.
 
+## D-V2-035 EOA Architecture Override
+
+All earlier checkpoint evidence referring to Safe/multisig publication, owner
+approvals, `SAFE_PROPOSED`, MultiSend or a `BATCHED` settlement state is
+historical only and cannot satisfy a current Requirement. Production uses five distinct
+EOAs: Platform Governance, Platform Service Fee, USDT Custody/Settlement, NPL
+Reward/Distribution and Operations/Guarantee. Policy and high-risk actions use
+RBAC, an exact secondary EIP-712 signature and direct Platform Governance EOA
+execution. Transferable settlements use immutable per-payable ERC-20 transfer
+intents and the states
+`Locked -> Available -> Requested -> Submitted -> Settled`; each intent is one
+transaction. Final TxHash, status-1 receipt, 15
+confirmations, reorg/replacement evidence and the append-only double-entry
+ledger remain mandatory. The prior multisig-bound contracts remain immutable
+`SUPERSEDED` evidence and require no migration transaction.
+
 ## Fulfillment Checkpoint Consumer Evidence
 
 This earlier evidence was recorded against
@@ -103,14 +119,14 @@ This earlier evidence was recorded against
 settlement/admin checkpoint below.
 
 - `ADM-SYS-005`: consumes the coordinated manifest plus live bootstrap chain,
-  fixed-asset and payment-readiness values; missing deployment/Safe evidence is
+  fixed-asset and payment-readiness values; missing EOA-bound deployment evidence is
   shown as `ExternalBlocked` and never inferred.
 - `ADM-CAT-004`: active product, SKU, authoritative price and available-stock
   reads are integrated. Admin creation, merchant binding, media and inventory
   writes remain `GAP-ADM-007`, so the full row is not complete.
 - `ADM-CLEAR-001` and `ADM-CLEAR-004`: the wallet-bound payment projection now
   renders submission, reservation, Router call and indexed finality. Admin-wide
-  RBAC audit, Gas, Safe and ledger evidence remain `GAP-ADM-017`, so these rows
+  RBAC audit, Gas, EOA execution and ledger evidence remain `GAP-ADM-017`, so these rows
   are not complete.
 - `ADM-TAKE-001` and `ADM-TAKE-002`: ADMIN/OPERATOR sessions consume the
   authoritative fulfillment-order list, shipment/logistics/balance evidence,
@@ -132,15 +148,16 @@ parallel API or local financial calculation:
   ordered takeover funding, platform advance and debt projections are rendered
   from Core; the governed funding action signs Core-issued EIP-712 typed data.
 - `ADM-POL-001` through `ADM-POL-006`, `ADM-CLEAR-002` and `ADM-CLEAR-003`:
-  policy draft validation, secondary signature and Safe proposal states are
-  consumed. The later fixed 1% fee, post-fee concession base and 0/45/45/10
+  policy draft validation and secondary-signature evidence were consumed. Any
+  earlier multisig-proposal state is superseded by direct Platform Governance
+  EOA execution. The later fixed 1% fee, post-fee concession base and 0/45/45/10
   pools reopen the financial projections until the next coordinated Core
   artifact; the product must not retain the older configurable destinations.
 - `ADM-CMS-001` through `ADM-CMS-003`: version create/read, evidence-bound
   publish and rollback are connected to Core.
 - `ADM-SYS-001` through `ADM-SYS-006`: typed version list/create/publish is
-  connected. Primary/fallback RPC and all five Safe runtime/read interfaces are
-  now verified; the retired on-chain TWAP Source/Adapter is not a deployment or
+  connected. Primary/fallback RPC and the five distinct EOA role bindings are
+  required; the retired on-chain TWAP Source/Adapter is not a deployment or
   completion dependency. BNM, provider accounts and production infrastructure
   remain production-rollout configuration under `ADM-GOAL-003`.
 - `ADM-AUD-001` through `ADM-AUD-003`: filters, cursor result and per-stream
@@ -148,12 +165,12 @@ parallel API or local financial calculation:
   rendered.
 - `ADM-OPS-001` through `ADM-OPS-004`, `ADM-DASH-003`, `ADM-DASH-004` and
   `ADM-CLEAR-007`: typed unavailable states, alerts, acknowledgement and
-  per-asset Safe coverage are consumed without turning missing probes into
+  per-asset funding-wallet coverage are consumed without turning missing probes into
   zero or healthy states.
 - `ADM-MER-006`, `ADM-CLEAR-004` and `ADM-CLEAR-006`: the wallet-scoped
   settlement projection renders balance states, NPL reward subtype, backend
-  BNM Locked/Available points, immutable request states and the final Safe
-  TxHash. BNM is never presented as transferable or Safe-settled. Admin-wide
+  BNM Locked/Available points, immutable request states and the final per-transfer
+  EOA TxHash. BNM is never presented as transferable or EOA-settled. Admin-wide
   settlement search remains a Core gap.
 - `ADM-SEK-001` through `ADM-SEK-004`: the current/history/session projections,
   canonical timers, inventory, prize liability, numeric-cursor HTTP replay and
@@ -161,10 +178,10 @@ parallel API or local financial calculation:
   consumes action list/detail, role-scoped session draft and inventory lock,
   force-close, prize injection and seckill-purchase breaker recovery. Each
   action follows Core `allowedActions` through independent secondary-wallet
-  EIP-712 signing, Safe proposal and 15-confirmation finality; `REORGED` and
-  `FAILED` never render as effective. The current projection also renders the
+  EIP-712 signing, direct Platform Governance EOA execution and 15-confirmation
+  finality; `REORGED` and `FAILED` never render as effective. The current projection also renders the
   immutable final-order candidate, cutoff/block/log evidence, whole-pool
-  snapshot, review, rollover journals and Safe payout lifecycle.
+  snapshot, review, rollover journals and ordinary per-transfer EOA payout lifecycle.
 - `ADM-SEK-005`: the session draft binds the published CMS rules content hash
   and policy version. The UI never edits the fixed 3600s / 60s / +30s / cap
   60s timers and does not construct calldata or calculate prize allocations.
@@ -238,7 +255,7 @@ merchant lifecycle API and review workspace:
 - `ADM-MER-001`: qualification PII remains FULL/REDACTED/UNAVAILABLE by Core
   RBAC. The initial application accepts a settlement wallet, but approval makes
   it permanently immutable. Admin review exposes no wallet-change action and
-  Safe approval cannot override the database guard. An incorrect address is
+  governance EOA execution cannot override the database guard. An incorrect address is
   handled only by rejecting the pending application and creating a new one;
   ordinary profile updates expose no wallet field.
 - `ADM-MER-002`: `D-V2-033` supersedes this `.15` evidence. V1-V5 controls,
@@ -252,7 +269,7 @@ merchant lifecycle API and review workspace:
   fixed above 30%, but remains reopened until the projection is synchronized.
 
 Focused API/page tests cover metric unions, unconditional wallet-change
-rejection before any Safe request, profile-field isolation, PII role behavior
+rejection before any governance action, profile-field isolation, PII role behavior
 and Burn/BNM reads.
 All fixtures remain under `tests/**`.
 
@@ -326,7 +343,7 @@ financial calculation or production fixture:
   low-stock alert threshold is now fixed below 100, but the old projection does
   not prove that alert path.
 - `ADM-DASH-003` and `ADM-CLEAR-007`: renders signed-settlement request and
-  Safe-final totals, `failedTransactions`, per-asset verified Safe assets,
+  EOA-final totals, `failedTransactions`, per-asset verified funding-wallet assets,
   unsettled liabilities, coverage evidence and all three independent breaker
   scopes, plus authoritative abnormal-observation, blacklist-block,
   active-restriction and pending-appeal counts. Monitoring alerts are not
@@ -348,8 +365,9 @@ financial calculation or production fixture:
   action list/detail projections with strict action/session/artifact binding.
   ADMIN/OPERATOR may create an opening draft; OPERATOR may cancel only an
   unproposed opening. ADMIN owns force-close, prize injection, breaker recovery,
-  challenge/signature and Safe proposal. ConfigurationRequired, pending Safe
-  finality, `REORGED`, `FAILED` and `CANCELLED` remain explicit UI states.
+  challenge/secondary signature and direct Platform Governance EOA execution.
+  `ConfigurationRequired`, pending EOA finality, `REORGED`, `FAILED` and
+  `CANCELLED` remain explicit UI states.
   Winner review is available only to ADMIN in `REVIEW_PENDING`, submits only
   decision/reason/evidence/idempotency and rejects any changed candidate or
   pool snapshot; rejected and empty sessions consume Core rollover evidence.
@@ -404,7 +422,7 @@ Merchant-only operations. This checkpoint completes no Admin Requirement ID:
 - The production-bundle guard rejects the Merchant store-management route
   prefix, including the base GET/POST path.
 
-RPC and five Safe runtime/read interfaces are verified. On-chain TWAP
+RPC and five distinct EOA role bindings are required. On-chain TWAP
 Source/Adapter deployment is retired. Domains, provider credentials, production
 infrastructure, physical devices and deployment remain rollout-only
 `ExternalBlocked` under `ADM-GOAL-003`; they do not block the local code Goal.
@@ -421,20 +439,22 @@ and published OpenAPI paths:
   Router method, immutable intent amounts, submitted TxHash and indexed
   finality are rendered from Core; BUYER remains `403`.
 - `ADM-CLEAR-002`: filtered request and batch detail renders every published
-  Safe owner approval against the immutable Safe TxHash and batch content hash.
-  Policy/address old/new diff evidence remains governed by the existing policy
-  and audit surfaces; this batch does not relabel unresolved commercial policy
-  requirements complete.
+  owner-approval and batch projection from that earlier artifact. `D-V2-035`
+  supersedes that evidence: current acceptance requires the exact secondary
+  EIP-712 signature, direct Platform Governance EOA execution and the resulting
+  TxHash for policy/address old/new diffs, with no owner-approval surface.
 - `ADM-CLEAR-004`, `ADM-CLEAR-005`, `ADM-CLEAR-006` and `ADM-CLEAR-007`: the
-  workspace renders immutable request items and journal transitions, batch
-  orders/recipients/atomic amounts, content and item hashes, chain/Safe/nonce,
-  approvals, execution replacement attempts, Core finality, verified coverage,
-  all independent breaker projections and Core reconciliation movements. It
-  never totals or reconciles money in the browser.
+  earlier workspace rendered request items, journal transitions and immutable
+  batch evidence. Current acceptance replaces that batch with one immutable
+  per-payable transfer intent containing chain, executor EOA, token, recipient,
+  amount, calldata hash, gas cap and idempotency identity, plus execution
+  replacement attempts, Core finality, verified coverage, all independent
+  breaker projections and Core reconciliation movements. The browser never
+  totals or reconciles money.
 - Both list endpoints apply the generated filters on Core and preserve the
   complete two-field cursor. `MINED 14/15` remains visibly non-final;
   `FAILED` and `REORGED` are explicit ineffective states. No manual transfer,
-  batch-build, Safe-submit or balance-edit control exists.
+  transfer-intent construction, direct broadcast or balance-edit control exists.
 - Matrix row classifications above remain unchanged where full PRD scope or
   production evidence is still unresolved. Merchant historical BNM aggregate
   remains unavailable, while deployment, BNM and production service evidence
@@ -459,11 +479,11 @@ does not publish or handwrite a parallel shared contract:
 - `ADM-SEK-003` and `ADM-SEK-004`: ADMIN controls submit exact force-close,
   prize-injection and seckill-breaker-resume bodies. The selected action then
   consumes the Core-issued EIP-712 challenge, an independent wallet signature,
-  the secondary-signature response and the Safe-proposal command. Cancellation
-  remains restricted to Core `allowedActions`; OPERATOR can cancel only an
+  the secondary-signature response and direct Platform Governance EOA
+  execution. Cancellation remains restricted to Core `allowedActions`; OPERATOR can cancel only an
   unproposed opening action and AUDITOR is read-only. Admin now consumes the
   immutable final-order candidate and whole-pool snapshot, exposes no winner
-  replacement input, and renders review, rollover and Safe payout evidence.
+  replacement input, and renders review, rollover and per-transfer EOA payout evidence.
 - `ADM-SEK-005`: the draft form fetches `SECKILL_RULES` through the existing CMS
   version endpoint, requires a published projection with a bound policyVersion,
   and copies its contentHash and policyVersion into read-only fields. The UI
@@ -471,7 +491,7 @@ does not publish or handwrite a parallel shared contract:
 - Core `403` / `409`, `FAILED`, `REORGED`, and `MINED 14/15` remain explicit
   non-success states. A `FINAL` projection with fewer than 15 confirmations or
   non-canonical evidence is rejected by the Admin client.
-- RPC and five Safe runtime/read interfaces are verified. On-chain TWAP
+- RPC and five distinct EOA role bindings are required. On-chain TWAP
   Source/Adapter deployment is retired. WSS/mTLS, governed production content
   and funded Operations execution remain rollout-only `ExternalBlocked` and do
   not block the local code Goal. All fixtures stay under `tests/**`; none is
@@ -492,6 +512,6 @@ completes no Admin Requirement ID:
   contracts.
 - The production-bundle guard rejects both the Merchant route and operation ID.
 
-RPC and five Safe runtime/read interfaces are verified. Domains, provider
+RPC and five distinct EOA role bindings are required. Domains, provider
 credentials, production infrastructure, physical devices and deployment remain
 `ExternalBlocked` under `ADM-GOAL-003`. No production fixture is shipped.
