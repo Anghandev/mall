@@ -63,8 +63,8 @@ test('global clearing reads are authenticated, coordinated and Admin-only', () =
     ['GET', '/v2/admin/payments/{orderId}', 'getAdminPaymentProjection'],
     ['GET', '/v2/admin/settlement-requests', 'listAdminSettlementRequests'],
     ['GET', '/v2/admin/settlement-requests/{requestId}', 'getAdminSettlementRequest'],
-    ['GET', '/v2/admin/settlement-batches', 'listAdminSettlementBatches'],
-    ['GET', '/v2/admin/settlement-batches/{batchId}', 'getAdminSettlementBatch'],
+    ['GET', '/v2/admin/settlement-transfers', 'listAdminSettlementTransfers'],
+    ['GET', '/v2/admin/settlement-transfers/{transferId}', 'getAdminSettlementTransfer'],
   ] as const;
 
   for (const [method, path, operationId] of operations) {
@@ -211,7 +211,7 @@ test('platform seckill governance is one authenticated coordinated Admin surface
     ['GET', '/v2/admin/seckill/actions/{actionId}', 'getSeckillGovernanceAction'],
     ['POST', '/v2/admin/seckill/actions/{actionId}/approval-challenge', 'createSeckillGovernanceChallenge'],
     ['POST', '/v2/admin/seckill/actions/{actionId}/secondary-signature', 'submitSeckillGovernanceApproval'],
-    ['POST', '/v2/admin/seckill/actions/{actionId}/safe-proposal', 'proposeSeckillGovernanceAction'],
+    ['POST', '/v2/admin/seckill/actions/{actionId}/execute', 'executeSeckillGovernanceAction'],
     ['POST', '/v2/admin/seckill/actions/{actionId}/cancel', 'cancelSeckillGovernanceAction'],
     ['POST', '/v2/admin/seckill/sessions', 'createSeckillSessionDraft'],
     ['POST', '/v2/admin/seckill/sessions/{sessionId}/force-close', 'createSeckillForceClose'],
@@ -423,10 +423,10 @@ function readyPolicy(): FrozenPaymentPolicy {
     platformFeeBps: 100,
     requiredConfirmations: 15,
     merchantGuaranteeMinimumUsdt: 1_000n * 10n ** 18n,
-    platformServiceFeeSafe: '0x2222222222222222222222222222222222222223',
-    usdtCustodySafe: '0x3333333333333333333333333333333333333333',
-    nplRewardSafe: '0x4444444444444444444444444444444444444444',
-    operationsTreasurySafe: '0x5555555555555555555555555555555555555555',
+    platformServiceFeeWallet: '0x2222222222222222222222222222222222222223',
+    usdtSettlementWallet: '0x3333333333333333333333333333333333333333',
+    nplRewardWallet: '0x4444444444444444444444444444444444444444',
+    operationsWallet: '0x5555555555555555555555555555555555555555',
     circulationPool: '0x6666666666666666666666666666666666666666',
     concessionDestinationSetHash: paymentAllocationSetHash(),
     genesisNodeDestinations: [

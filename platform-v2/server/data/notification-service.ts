@@ -15,8 +15,7 @@ const SOURCE_EVENT_TYPES = [
   'FulfillmentFinalized',
   'TakeoverOpened',
   'SettlementRequested',
-  'SettlementBatchApprovalRequested',
-  'SettlementBatchFinalized',
+  'SettlementTransferFinalized',
   'SettlementFinalityReorged',
   'BnmStateFinalized',
   'NotificationCampaignPublished',
@@ -525,8 +524,7 @@ function topicForEvent(event: SourceEventRow) {
     FulfillmentFinalized: 'FULFILLMENT_FINALIZED',
     TakeoverOpened: 'TAKEOVER_OPENED',
     SettlementRequested: 'SETTLEMENT_REQUESTED',
-    SettlementBatchApprovalRequested: 'SETTLEMENT_BATCHED',
-    SettlementBatchFinalized: 'SETTLEMENT_SETTLED',
+    SettlementTransferFinalized: 'SETTLEMENT_SETTLED',
     SettlementFinalityReorged: 'SETTLEMENT_REORGED',
   };
   const topic = topics[event.event_type];
@@ -558,10 +556,12 @@ async function eventRecipients(executor: SqlExecutor, event: SourceEventRow) {
     );
     return canonicalWallets(request.rows.map((row) => row.wallet_address));
   }
-  if (event.aggregate_type === 'SETTLEMENT_BATCH') {
+  if (event.aggregate_type === 'SETTLEMENT_TRANSFER') {
     const requests = await executor.query<{ wallet_address: string }>(
-      `SELECT DISTINCT request.wallet_address FROM core.settlement_requests request
-       WHERE request.batch_id = $1 ORDER BY request.wallet_address`,
+      `SELECT DISTINCT request.wallet_address
+       FROM core.settlement_transfers transfer
+       JOIN core.settlement_requests request ON request.request_id = transfer.request_id
+       WHERE transfer.transfer_id = $1 ORDER BY request.wallet_address`,
       [event.aggregate_id],
     );
     return canonicalWallets(requests.rows.map((row) => row.wallet_address));

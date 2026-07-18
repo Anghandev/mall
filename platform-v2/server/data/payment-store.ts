@@ -31,17 +31,17 @@ interface JournalBalanceRow {
   account_id: string;
   net_credit: string;
   balance_state: LedgerLine['balanceState'];
-  backing_safe_address: string | null;
+  backing_wallet_address: string | null;
 }
 
 interface SettlementReorgRow {
   request_id: string;
   item_index: number;
-  batch_id: string | null;
+  transfer_id: string | null;
+  transfer_state: string | null;
   request_state: string;
   asset: 'USDT' | 'NPL';
   amount: string;
-  final_safe_tx_hash: string | null;
   final_execution_tx_hash: string | null;
 }
 
@@ -49,17 +49,17 @@ interface LedgerLine {
   accountId: string;
   side: 'DEBIT' | 'CREDIT';
   amount: string;
-  balanceState: 'POSTED' | 'LOCKED' | 'AVAILABLE' | 'REQUESTED' | 'BATCHED' | 'SETTLED' | 'DISPUTED';
-  backingSafeAddress?: string;
+  balanceState: 'POSTED' | 'LOCKED' | 'AVAILABLE' | 'REQUESTED' | 'SUBMITTED' | 'SETTLED' | 'DISPUTED';
+  backingWalletAddress?: string;
 }
 
 interface LedgerAccount {
   accountId: string;
-  ownerType: 'SYSTEM' | 'SAFE' | 'MERCHANT' | 'BUYER' | 'BENEFICIARY';
+  ownerType: 'SYSTEM' | 'WALLET' | 'MERCHANT' | 'BUYER' | 'BENEFICIARY';
   ownerId: string;
   asset: typeof USDT | typeof NPL | typeof BNM;
   purpose:
-    | 'SAFE_ASSET'
+    | 'WALLET_ASSET'
     | 'PAYMENT_CLEARING'
     | 'BURN'
     | 'MERCHANT_RECEIVABLE'
@@ -73,7 +73,7 @@ interface LedgerAccount {
     | 'REWARD_LIABILITY'
     | 'BNM_ISSUANCE'
     | 'BNM_LIABILITY';
-  safeAddress?: string;
+  walletAddress?: string;
   subtype?: RewardSubtype;
 }
 
@@ -92,7 +92,7 @@ interface LedgerAccountRow {
   owner_id: string;
   asset: LedgerAccount['asset'];
   purpose: LedgerAccount['purpose'];
-  safe_address: string | null;
+  wallet_address: string | null;
   subtype: RewardSubtype | null;
 }
 
@@ -315,9 +315,9 @@ export async function recordPaymentProjection(executor: SqlExecutor, input: Reco
   }
 
   const safes = {
-    platformServiceFeeSafe: policy.platformServiceFeeSafe,
-    usdtCustodySafe: policy.usdtCustodySafe,
-    nplRewardSafe: policy.nplRewardSafe,
+    platformServiceFeeWallet: policy.platformServiceFeeWallet,
+    usdtSettlementWallet: policy.usdtSettlementWallet,
+    nplRewardWallet: policy.nplRewardWallet,
   };
   const { accounts, lines } = paymentJournal(intent, safes);
   for (const account of accounts) await ensureAccount(executor, account);
@@ -439,34 +439,37 @@ export async function reversePaymentProjection(executor: SqlExecutor, eventKey: 
   if (!row.canonical) return { status: 'IDEMPOTENT' as const, orderId: row.order_id };
   await reverseSeckillRelayProjection(executor, row.order_id, replacementBlockHash);
   const settlementItems = await executor.query<SettlementReorgRow>(
-    `SELECT request.request_id, item.item_index, request.batch_id,
-       request.state AS request_state, request.asset, item.amount::text,
-       request.final_safe_tx_hash, request.final_execution_tx_hash
+    `SELECT request.request_id, item.item_index, transfer.transfer_id,
+       transfer.state AS transfer_state, request.state AS request_state,
+       request.asset, item.amount::text,
+       final_attempt.execution_tx_hash AS final_execution_tx_hash
      FROM core.settlement_request_items item
      JOIN core.settlement_requests request ON request.request_id = item.request_id
+     LEFT JOIN core.settlement_transfers transfer
+       ON transfer.request_id = item.request_id AND transfer.request_item_index = item.item_index
+     LEFT JOIN LATERAL (
+       SELECT attempt.execution_tx_hash
+       FROM core.settlement_transfer_attempts attempt
+       WHERE attempt.transfer_id = transfer.transfer_id AND attempt.execution_tx_hash IS NOT NULL
+       ORDER BY attempt.attempt_number DESC LIMIT 1
+     ) final_attempt ON true
      WHERE item.order_id = $1
      ORDER BY request.request_id, item.item_index
      FOR UPDATE OF request, item`,
     [row.order_id],
   );
-  const batchIds = [...new Set(settlementItems.rows.flatMap((item) => item.batch_id ? [item.batch_id] : []))].sort();
-  const batchStates = new Map<string, string>();
-  if (batchIds.length > 0) {
-    const placeholders = batchIds.map((_, index) => `$${index + 1}`).join(',');
-    const batches = await executor.query<{ batch_id: string; state: string }>(
-      `SELECT batch_id, state FROM core.settlement_batches
-       WHERE batch_id IN (${placeholders}) ORDER BY batch_id FOR UPDATE`,
-      batchIds,
-    );
-    for (const batch of batches.rows) batchStates.set(batch.batch_id, batch.state);
-  }
+  const transferStates = new Map(
+    settlementItems.rows.flatMap((item) => item.transfer_id && item.transfer_state
+      ? [[item.transfer_id, item.transfer_state] as const]
+      : []),
+  );
   const currentBalances = await executor.query<JournalBalanceRow>(
-    `SELECT line.account_id, line.balance_state, line.backing_safe_address,
+    `SELECT line.account_id, line.balance_state, line.backing_wallet_address,
        sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS net_credit
      FROM core.ledger_journals journal
      JOIN core.ledger_lines line ON line.journal_id = journal.journal_id
      WHERE journal.order_id = $1
-     GROUP BY line.account_id, line.balance_state, line.backing_safe_address
+     GROUP BY line.account_id, line.balance_state, line.backing_wallet_address
      HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) <> 0
      ORDER BY line.account_id, line.balance_state`,
     [row.order_id],
@@ -476,7 +479,7 @@ export async function reversePaymentProjection(executor: SqlExecutor, eventKey: 
     side: BigInt(line.net_credit) > 0n ? 'DEBIT' : 'CREDIT',
     amount: (BigInt(line.net_credit) < 0n ? -BigInt(line.net_credit) : BigInt(line.net_credit)).toString(),
     balanceState: line.balance_state,
-    ...(line.backing_safe_address ? { backingSafeAddress: line.backing_safe_address } : {}),
+    ...(line.backing_wallet_address ? { backingWalletAddress: line.backing_wallet_address } : {}),
   }));
   const reversalEventKey = `reorg:${eventKey}:${replacementBlockHash.toLowerCase()}`;
   const reversalJournalId = `reversal:${row.journal_id}:${replacementBlockHash.toLowerCase()}`;
@@ -540,7 +543,7 @@ export async function reversePaymentProjection(executor: SqlExecutor, eventKey: 
     replacementBlockHash,
     reversalJournalId,
     items: settlementItems.rows,
-    batchStates,
+    transferStates,
   });
   const debtRecovery = await executor.query<{ merchant_id: string; amount: string }>(
     `SELECT merchant_id, amount_usdt::text AS amount
@@ -722,7 +725,7 @@ async function quarantineReorgedSettlements(
     replacementBlockHash: string;
     reversalJournalId: string;
     items: readonly SettlementReorgRow[];
-    batchStates: ReadonlyMap<string, string>;
+    transferStates: ReadonlyMap<string, string>;
   },
 ) {
   if (input.items.length === 0) return;
@@ -731,10 +734,10 @@ async function quarantineReorgedSettlements(
     await executor.query(
       `INSERT INTO core.settlement_payment_reorg_exposures (
          exposure_id, payment_event_key, order_id, request_id, request_item_index,
-         batch_id, previous_request_state, previous_batch_state, asset, amount,
-         final_safe_tx_hash, final_execution_tx_hash, reversal_journal_id,
+         transfer_id, previous_request_state, previous_transfer_state, asset, amount,
+         final_execution_tx_hash, reversal_journal_id,
          evidence_hash, resolution_state, created_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'OPEN',clock_timestamp())
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'OPEN',clock_timestamp())
        ON CONFLICT (payment_event_key, request_id, request_item_index) DO NOTHING`,
       [
         hashJson({
@@ -746,12 +749,11 @@ async function quarantineReorgedSettlements(
         input.orderId,
         item.request_id,
         item.item_index,
-        item.batch_id,
+        item.transfer_id,
         item.request_state,
-        item.batch_id ? input.batchStates.get(item.batch_id) ?? null : null,
+        item.transfer_id ? input.transferStates.get(item.transfer_id) ?? null : null,
         item.asset,
         item.amount,
-        item.final_safe_tx_hash,
         item.final_execution_tx_hash,
         input.reversalJournalId,
         evidenceHash,
@@ -766,23 +768,18 @@ async function quarantineReorgedSettlements(
       [requestId],
     );
   }
-  const batchIds = [...input.batchStates.keys()].sort();
-  for (const batchId of batchIds) {
+  const transferIds = [...input.transferStates.keys()].sort();
+  for (const transferId of transferIds) {
     await executor.query(
-      `UPDATE core.settlement_batches SET state = 'QUARANTINED'
-       WHERE batch_id = $1 AND state <> 'QUARANTINED'`,
-      [batchId],
+      `UPDATE core.settlement_transfers SET state = 'QUARANTINED'
+       WHERE transfer_id = $1 AND state <> 'QUARANTINED'`,
+      [transferId],
     );
     await executor.query(
-      `UPDATE core.settlement_execution_attempts SET state = 'QUARANTINED',
+      `UPDATE core.settlement_transfer_attempts SET state = 'QUARANTINED',
          updated_at = clock_timestamp()
-       WHERE batch_id = $1 AND state <> 'QUARANTINED'`,
-      [batchId],
-    );
-    await executor.query(
-      `UPDATE core.safe_nonce_reservations SET state = 'QUARANTINED'
-       WHERE batch_id = $1 AND state <> 'QUARANTINED'`,
-      [batchId],
+       WHERE transfer_id = $1 AND state <> 'QUARANTINED'`,
+      [transferId],
     );
   }
   const causeId = `payment-reorg:${input.orderId}`;
@@ -826,7 +823,7 @@ async function quarantineReorgedSettlements(
         paymentEventKey: input.paymentEventKey,
         reversalJournalId: input.reversalJournalId,
         requestIds,
-        batchIds,
+        transferIds,
         evidenceHash,
       }),
     ],
@@ -1264,7 +1261,7 @@ async function loadQuoteContext(executor: SqlExecutor, event: CanonicalPaymentEv
 
 function paymentJournal(
   intent: CanonicalPaymentIntent,
-  safes: { platformServiceFeeSafe: string; usdtCustodySafe: string; nplRewardSafe: string },
+  wallets: { platformServiceFeeWallet: string; usdtSettlementWallet: string; nplRewardWallet: string },
 ) {
   const accounts = new Map<string, LedgerAccount>();
   const lines: LedgerLine[] = [];
@@ -1273,7 +1270,7 @@ function paymentJournal(
     side: LedgerLine['side'],
     amount: string,
     balanceState: LedgerLine['balanceState'],
-    backingSafeAddress?: string,
+    backingWalletAddress?: string,
   ) => {
     if (BigInt(amount) === 0n) return;
     accounts.set(account.accountId, account);
@@ -1282,27 +1279,27 @@ function paymentJournal(
       side,
       amount,
       balanceState,
-      ...(backingSafeAddress ? { backingSafeAddress: backingSafeAddress.toLowerCase() } : {}),
+      ...(backingWalletAddress ? { backingWalletAddress: backingWalletAddress.toLowerCase() } : {}),
     });
   };
   add(
-    safeAccount('platform-service-fee', safes.platformServiceFeeSafe, USDT),
+    walletAccount('platform-service-fee', wallets.platformServiceFeeWallet, USDT),
     'DEBIT',
     intent.platformServiceFeeUsdt,
     'POSTED',
-    safes.platformServiceFeeSafe,
+    wallets.platformServiceFeeWallet,
   );
   add(
     account('platform:service-fee:usdt', 'SYSTEM', 'platform-service-fee', USDT, 'PLATFORM_SERVICE_FEE_REVENUE'),
     'CREDIT',
     intent.platformServiceFeeUsdt,
     'POSTED',
-    safes.platformServiceFeeSafe,
+    wallets.platformServiceFeeWallet,
   );
   const custodyUsdt = (BigInt(intent.custodyProductUsdt) + BigInt(intent.freightUsdt)).toString();
-  add(safeAccount('usdt-custody', safes.usdtCustodySafe, USDT), 'DEBIT', custodyUsdt, 'POSTED', safes.usdtCustodySafe);
-  add(account(`merchant:${intent.merchant}:usdt`, 'MERCHANT', intent.merchant, USDT, 'MERCHANT_RECEIVABLE'), 'CREDIT', intent.merchantNetReceivableUsdt, 'LOCKED', safes.usdtCustodySafe);
-  add(account(`merchant:${intent.merchant}:freight:usdt`, 'MERCHANT', intent.merchant, USDT, 'MERCHANT_FREIGHT_RECEIVABLE'), 'CREDIT', intent.freightUsdt, 'LOCKED', safes.usdtCustodySafe);
+  add(walletAccount('usdt-custody', wallets.usdtSettlementWallet, USDT), 'DEBIT', custodyUsdt, 'POSTED', wallets.usdtSettlementWallet);
+  add(account(`merchant:${intent.merchant}:usdt`, 'MERCHANT', intent.merchant, USDT, 'MERCHANT_RECEIVABLE'), 'CREDIT', intent.merchantNetReceivableUsdt, 'LOCKED', wallets.usdtSettlementWallet);
+  add(account(`merchant:${intent.merchant}:freight:usdt`, 'MERCHANT', intent.merchant, USDT, 'MERCHANT_FREIGHT_RECEIVABLE'), 'CREDIT', intent.freightUsdt, 'LOCKED', wallets.usdtSettlementWallet);
   for (const allocation of intent.merchantConcessionAllocations) {
     const pool = concessionPoolAccount(allocation.pool, intent);
     add(
@@ -1310,12 +1307,12 @@ function paymentJournal(
       'CREDIT',
       allocation.amount,
       'LOCKED',
-      safes.usdtCustodySafe,
+      wallets.usdtSettlementWallet,
     );
   }
   add(account('burn:npl', 'SYSTEM', 'npl-burn', NPL, 'BURN'), 'DEBIT', intent.nplBurnAmount, 'POSTED');
   add(account('clearing:buyer-burn:npl', 'SYSTEM', 'buyer-burn-payment', NPL, 'PAYMENT_CLEARING'), 'CREDIT', intent.nplBurnAmount, 'POSTED');
-  add(safeAccount('npl-reward', safes.nplRewardSafe, NPL), 'DEBIT', intent.nplRewardAmount, 'POSTED', safes.nplRewardSafe);
+  add(walletAccount('npl-reward', wallets.nplRewardWallet, NPL), 'DEBIT', intent.nplRewardAmount, 'POSTED', wallets.nplRewardWallet);
   for (const allocation of intent.nplRewardAllocations) {
     add(
       account(
@@ -1330,7 +1327,7 @@ function paymentJournal(
       'CREDIT',
       allocation.amount,
       'LOCKED',
-      safes.nplRewardSafe,
+      wallets.nplRewardWallet,
     );
   }
   add(account('issuance:bnm', 'SYSTEM', 'bnm-issuance', BNM, 'BNM_ISSUANCE'), 'DEBIT', intent.bnmAmount, 'POSTED');
@@ -1374,19 +1371,19 @@ function concessionPoolAccount(
   };
 }
 
-function safeAccount(
+function walletAccount(
   name: 'platform-service-fee' | 'usdt-custody' | 'npl-reward',
-  safeAddress: string,
+  walletAddress: string,
   asset: typeof USDT | typeof NPL,
 ): LedgerAccount {
-  const normalizedSafe = safeAddress.toLowerCase();
+  const normalizedWallet = walletAddress.toLowerCase();
   return account(
-    `safe:${name}:${normalizedSafe}:${asset.toLowerCase()}`,
-    'SAFE',
-    normalizedSafe,
+    `wallet:${name}:${normalizedWallet}:${asset.toLowerCase()}`,
+    'WALLET',
+    normalizedWallet,
     asset,
-    'SAFE_ASSET',
-    normalizedSafe,
+    'WALLET_ASSET',
+    normalizedWallet,
   );
 }
 
@@ -1396,7 +1393,7 @@ function account(
   ownerId: string,
   asset: LedgerAccount['asset'],
   purpose: LedgerAccount['purpose'],
-  safeAddress?: string,
+  walletAddress?: string,
   subtype?: RewardSubtype,
 ): LedgerAccount {
   return {
@@ -1405,7 +1402,7 @@ function account(
     ownerId,
     asset,
     purpose,
-    ...(safeAddress ? { safeAddress } : {}),
+    ...(walletAddress ? { walletAddress } : {}),
     ...(subtype ? { subtype } : {}),
   };
 }
@@ -1413,7 +1410,7 @@ function account(
 async function ensureAccount(executor: SqlExecutor, value: LedgerAccount) {
   await executor.query(
     `INSERT INTO core.ledger_accounts (
-       account_id, owner_type, owner_id, asset, purpose, safe_address, subtype
+       account_id, owner_type, owner_id, asset, purpose, wallet_address, subtype
      ) VALUES ($1,$2,$3,$4,$5,$6,$7)
      ON CONFLICT (account_id) DO NOTHING`,
     [
@@ -1422,12 +1419,12 @@ async function ensureAccount(executor: SqlExecutor, value: LedgerAccount) {
       value.ownerId,
       value.asset,
       value.purpose,
-      value.safeAddress ?? null,
+      value.walletAddress ?? null,
       value.subtype ?? null,
     ],
   );
   const persisted = await executor.query<LedgerAccountRow>(
-    `SELECT owner_type, owner_id, asset, purpose, safe_address, subtype
+    `SELECT owner_type, owner_id, asset, purpose, wallet_address, subtype
      FROM core.ledger_accounts WHERE account_id = $1`,
     [value.accountId],
   );
@@ -1438,7 +1435,7 @@ async function ensureAccount(executor: SqlExecutor, value: LedgerAccount) {
       || row.owner_id !== value.ownerId
       || row.asset !== value.asset
       || row.purpose !== value.purpose
-      || row.safe_address !== (value.safeAddress ?? null)
+      || row.wallet_address !== (value.walletAddress ?? null)
       || row.subtype !== (value.subtype ?? null)
   ) {
     throw new CoreError('InvalidFinality', 'Ledger account metadata does not match the immutable account identity', 409);
@@ -1494,7 +1491,7 @@ async function postJournal(
         side: line.side,
         amount: line.amount,
         balance_state: line.balanceState,
-        backing_safe_address: line.backingSafeAddress ?? null,
+        backing_wallet_address: line.backingWalletAddress ?? null,
       }))),
     ],
   );

@@ -2,7 +2,7 @@
 pragma solidity 0.8.26;
 
 import {TestBase} from "./TestBase.sol";
-import {CallbackERC20, Mock1271Wallet} from "./Mocks.sol";
+import {CallbackERC20} from "./Mocks.sol";
 import {BeneficiaryRegistryV2} from "../../contracts/BeneficiaryRegistryV2.sol";
 import {PaymentRouterV2} from "../../contracts/PaymentRouterV2.sol";
 import {PolicyRegistryV2} from "../../contracts/PolicyRegistryV2.sol";
@@ -10,14 +10,11 @@ import {IBeneficiaryRegistryV2, IPolicyRegistryV2} from "../../contracts/interfa
 import {V2Types} from "../../contracts/types/V2Types.sol";
 
 abstract contract CoreFixture is TestBase {
-    uint256 internal constant SAFE_KEY = 0xA11CE;
-    uint256 internal constant SECONDARY_KEY = 0xB0B;
+    uint256 internal constant GOVERNANCE_KEY = 0xA11CE;
     uint256 internal constant QUOTE_KEY = 0xC0DE;
     uint256 internal constant BUYER_KEY = 0xBEEF;
 
-    address internal safe;
-    address internal secondarySigner;
-    address internal quoteSigner;
+    address internal governanceWallet;
     address internal buyer;
     address internal merchant = address(0x4001);
     address internal genesis = address(0x5002);
@@ -30,10 +27,10 @@ abstract contract CoreFixture is TestBase {
     address internal operationsTwo = address(0x6002);
     address internal operationsThree = address(0x6003);
     address internal operationsFour = address(0x6004);
-    address internal platformServiceFeeSafe = address(0x7000);
-    address internal usdtCustodySafe = address(0x7001);
-    address internal nplRewardSafe = address(0x7002);
-    address internal operationsTreasurySafe = address(0x7003);
+    address internal platformServiceFeeWallet = address(0x7000);
+    address internal usdtSettlementWallet = address(0x7001);
+    address internal nplRewardWallet = address(0x7002);
+    address internal operationsWallet = address(0x7003);
     address internal circulationPool = address(0x7004);
     bytes32 internal regionCodeHash = keccak256("210211");
     bytes32 internal concessionAllocationHash;
@@ -47,9 +44,7 @@ abstract contract CoreFixture is TestBase {
     function setUp() public virtual {
         vm.chainId(V2Types.BSC_CHAIN_ID);
         vm.warp(1_800_000_000);
-        safe = vm.addr(SAFE_KEY);
-        secondarySigner = vm.addr(SECONDARY_KEY);
-        quoteSigner = vm.addr(QUOTE_KEY);
+        governanceWallet = vm.addr(GOVERNANCE_KEY);
         buyer = vm.addr(BUYER_KEY);
         concessionAllocationHash = _paymentAllocationSetHash();
 
@@ -59,7 +54,7 @@ abstract contract CoreFixture is TestBase {
         vm.etch(V2Types.NPL, address(nplImplementation).code);
         usdt = CallbackERC20(V2Types.USDT);
         npl = CallbackERC20(V2Types.NPL);
-        policyRegistry = new PolicyRegistryV2(safe, secondarySigner);
+        policyRegistry = new PolicyRegistryV2(governanceWallet);
         beneficiaryRegistry = new BeneficiaryRegistryV2(IPolicyRegistryV2(address(policyRegistry)));
         BeneficiaryRegistryV2.RegionBeneficiaries memory regionBeneficiarySet =
             BeneficiaryRegistryV2.RegionBeneficiaries(district, city, province, region);
@@ -67,14 +62,14 @@ abstract contract CoreFixture is TestBase {
         bytes32 regionPublicationDigest = beneficiaryRegistry.hashRegionPublication(
             1, regionCodeHash, regionBeneficiarySet, 1, regionPublicationDeadline
         );
-        vm.prank(safe);
+        vm.prank(governanceWallet);
         beneficiaryRegistry.publishRegionBeneficiaries(
             1,
             regionCodeHash,
             regionBeneficiarySet,
             1,
             regionPublicationDeadline,
-            _sign(SECONDARY_KEY, regionPublicationDigest)
+            _sign(GOVERNANCE_KEY, regionPublicationDigest)
         );
         _publishLaunchPolicy();
         router = new PaymentRouterV2(
@@ -82,13 +77,12 @@ abstract contract CoreFixture is TestBase {
             npl,
             IPolicyRegistryV2(address(policyRegistry)),
             IBeneficiaryRegistryV2(address(beneficiaryRegistry)),
-            platformServiceFeeSafe,
-            usdtCustodySafe,
-            nplRewardSafe,
-            operationsTreasurySafe,
-            quoteSigner
+            platformServiceFeeWallet,
+            usdtSettlementWallet,
+            nplRewardWallet,
+            operationsWallet
         );
-        vm.prank(safe);
+        vm.prank(governanceWallet);
         beneficiaryRegistry.setReferrer(buyer, directReferral);
         usdt.mint(buyer, 1_000_000 ether);
         npl.mint(buyer, 10_000_000 ether);
@@ -129,9 +123,9 @@ abstract contract CoreFixture is TestBase {
             relayIncrement: 30 seconds,
             relayCap: 60 seconds,
             merchantGuaranteeMinimum: V2Types.MERCHANT_GUARANTEE_MINIMUM,
-            usdtCustodySafe: usdtCustodySafe,
-            nplRewardSafe: nplRewardSafe,
-            operationsTreasurySafe: operationsTreasurySafe,
+            usdtSettlementWallet: usdtSettlementWallet,
+            nplRewardWallet: nplRewardWallet,
+            operationsWallet: operationsWallet,
             circulationPool: circulationPool,
             beneficiarySetHash: keccak256(
                 abi.encode(_singleAddress(genesis), _singleWeight(10_000), operationsAccounts, operationsWeights)
@@ -142,9 +136,9 @@ abstract contract CoreFixture is TestBase {
         });
         uint64 deadline = uint64(block.timestamp + 1 hours);
         bytes32 digest = policyRegistry.hashPublication(policy, operationsAccounts, operationsWeights, 1, deadline);
-        vm.prank(safe);
+        vm.prank(governanceWallet);
         policyRegistry.publishPolicy(
-            policy, operationsAccounts, operationsWeights, 1, deadline, _sign(SECONDARY_KEY, digest)
+            policy, operationsAccounts, operationsWeights, 1, deadline, _sign(GOVERNANCE_KEY, digest)
         );
     }
 
@@ -227,7 +221,7 @@ abstract contract CoreFixture is TestBase {
 
     function _pay(V2Types.PaymentIntent memory intent, uint256 buyerKey) internal {
         bytes32 digest = router.hashPayment(intent);
-        router.pay(intent, _sign(QUOTE_KEY, digest), _sign(buyerKey, digest));
+        router.pay(intent, _sign(GOVERNANCE_KEY, digest), _sign(buyerKey, digest));
     }
 
     function _paymentAllocationSetHash() private pure returns (bytes32) {

@@ -23,45 +23,21 @@ const externalVariables = [
   'AMAP_WEB_SERVICE_KEY',
   'BSC_RPC_URL',
   'BSC_FALLBACK_RPC_URL',
-  'PLATFORM_SAFE_ADDRESS',
-  'PLATFORM_SERVICE_FEE_SAFE_ADDRESS',
-  'USDT_CUSTODY_SAFE_ADDRESS',
-  'NPL_REWARD_SAFE_ADDRESS',
-  'OPERATIONS_TREASURY_SAFE_ADDRESS',
-  'SECONDARY_SIGNER_ADDRESS',
-  'QUOTE_SIGNER_ADDRESS',
-  'FINALITY_SIGNER_ADDRESS',
+  'PLATFORM_GOVERNANCE_WALLET_ADDRESS',
+  'PLATFORM_SERVICE_FEE_WALLET_ADDRESS',
+  'USDT_SETTLEMENT_WALLET_ADDRESS',
+  'NPL_REWARD_WALLET_ADDRESS',
+  'OPERATIONS_GUARANTEE_WALLET_ADDRESS',
   'SIGNER_SERVICE_URL',
   'SIGNER_SERVICE_TOKEN',
   'SETTLEMENT_EXECUTOR_URL',
   'SETTLEMENT_EXECUTOR_TOKEN',
-  'SAFE_APPROVAL_VERIFIER_URL',
-  'SAFE_APPROVAL_VERIFIER_TOKEN',
-  'SAFE_INTERNAL_MTLS_ENABLED',
   'EXECUTOR_MAX_GAS_LIMIT',
   'SETTLEMENT_REPLACEMENT_DELAY_MS',
-  'USDT_SAFE_PROXY_CODE_HASH',
-  'USDT_SAFE_OWNER_SET_HASH',
-  'USDT_SAFE_THRESHOLD',
-  'USDT_SAFE_GUARD_ADDRESS',
-  'USDT_SAFE_FALLBACK_HANDLER_ADDRESS',
-  'USDT_SAFE_MODULES_HASH',
   'USDT_TOKEN_CODE_HASH',
   'USDT_TRANSFER_CONFORMANCE_EVIDENCE_HASH',
-  'NPL_SAFE_PROXY_CODE_HASH',
-  'NPL_SAFE_OWNER_SET_HASH',
-  'NPL_SAFE_THRESHOLD',
-  'NPL_SAFE_GUARD_ADDRESS',
-  'NPL_SAFE_FALLBACK_HANDLER_ADDRESS',
-  'NPL_SAFE_MODULES_HASH',
   'NPL_TOKEN_CODE_HASH',
   'NPL_TRANSFER_CONFORMANCE_EVIDENCE_HASH',
-  'OPERATIONS_SAFE_PROXY_CODE_HASH',
-  'OPERATIONS_SAFE_OWNER_SET_HASH',
-  'OPERATIONS_SAFE_THRESHOLD',
-  'OPERATIONS_SAFE_GUARD_ADDRESS',
-  'OPERATIONS_SAFE_FALLBACK_HANDLER_ADDRESS',
-  'OPERATIONS_SAFE_MODULES_HASH',
   'OPERATIONS_TOKEN_CODE_HASH',
   'OPERATIONS_TRANSFER_CONFORMANCE_EVIDENCE_HASH',
   'BACKUP_STORAGE_ENCRYPTED',
@@ -73,12 +49,8 @@ const externalVariables = [
   'MEDIA_STORAGE_SIGNER_TOKEN',
   'MEDIA_UPLOAD_MAX_INTENTS_PER_WALLET_HOUR',
   'MEDIA_UPLOAD_MAX_BYTES_PER_WALLET_HOUR',
-  'POLICY_SAFE_PROPOSER_URL',
-  'POLICY_SAFE_PROPOSER_TOKEN',
-  'POLICY_EXECUTION_LOOKUP_URL',
-  'POLICY_EXECUTION_LOOKUP_TOKEN',
-  'SYSTEM_CONFIG_SAFE_APPROVER_URL',
-  'SYSTEM_CONFIG_SAFE_APPROVER_TOKEN',
+  'GOVERNANCE_EXECUTOR_URL',
+  'GOVERNANCE_EXECUTOR_TOKEN',
   'SECRET_RESOLVER_URL',
   'SECRET_RESOLVER_TOKEN',
   'BSC_EXPLORER_API_URL',
@@ -93,13 +65,11 @@ const paymentExternalVariables = [
   'AUTH_URI',
   'BSC_RPC_URL',
   'BSC_FALLBACK_RPC_URL',
-  'PLATFORM_SAFE_ADDRESS',
-  'PLATFORM_SERVICE_FEE_SAFE_ADDRESS',
-  'USDT_CUSTODY_SAFE_ADDRESS',
-  'NPL_REWARD_SAFE_ADDRESS',
-  'OPERATIONS_TREASURY_SAFE_ADDRESS',
-  'SECONDARY_SIGNER_ADDRESS',
-  'QUOTE_SIGNER_ADDRESS',
+  'PLATFORM_GOVERNANCE_WALLET_ADDRESS',
+  'PLATFORM_SERVICE_FEE_WALLET_ADDRESS',
+  'USDT_SETTLEMENT_WALLET_ADDRESS',
+  'NPL_REWARD_WALLET_ADDRESS',
+  'OPERATIONS_GUARANTEE_WALLET_ADDRESS',
   'SIGNER_SERVICE_URL',
   'SIGNER_SERVICE_TOKEN',
 ] as const;
@@ -167,11 +137,11 @@ export interface CoreConfig {
   paymentRouterDeploymentBlock: number | undefined;
   policyRegistryAddress: string | undefined;
   beneficiaryRegistryAddress: string | undefined;
-  safeAddress: string | undefined;
-  platformServiceFeeSafeAddress: string | undefined;
-  usdtCustodySafeAddress: string | undefined;
-  nplRewardSafeAddress: string | undefined;
-  operationsTreasurySafeAddress: string | undefined;
+  governanceWalletAddress: string | undefined;
+  platformServiceFeeWalletAddress: string | undefined;
+  usdtSettlementWalletAddress: string | undefined;
+  nplRewardWalletAddress: string | undefined;
+  operationsWalletAddress: string | undefined;
   secondarySignerAddress: string | undefined;
   quoteSignerAddress: string | undefined;
   finalitySignerAddress: string | undefined;
@@ -181,17 +151,8 @@ export interface CoreConfig {
   executorToken: string | undefined;
   executorMaxGasLimit: bigint | undefined;
   settlementReplacementDelayMs: number | undefined;
-  safeApprovalVerifierUrl: string | undefined;
-  safeApprovalVerifierToken: string | undefined;
-  safeMutualTls: boolean;
-  safeSettlementExpectations: Readonly<Partial<Record<'USDT' | 'NPL' | 'OPERATIONS_USDT', {
-    safeAddress: string;
-    safeProxyCodeHash: string;
-    ownerSetHash: string;
-    threshold: number;
-    guardAddress: string;
-    fallbackHandlerAddress: string;
-    modulesHash: string;
+  settlementWalletExpectations: Readonly<Partial<Record<'USDT' | 'NPL' | 'OPERATIONS_USDT', {
+    walletAddress: string;
     tokenAddress: string;
     tokenCodeHash: string;
     tokenTransferConformanceEvidenceHash: string;
@@ -213,7 +174,7 @@ export interface RuntimeReadinessSnapshot {
   componentHashesVerified: boolean;
   deployedRuntimeCodeVerified: boolean;
   roleGrantsVerified: boolean;
-  safeAdminVerified: boolean;
+  walletRolesVerified: boolean;
   signerBindingsVerified: boolean;
   nplQuoteSourceHealthy: boolean;
   indexerHealthy: boolean;
@@ -258,9 +219,6 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     ...(!beneficiaryRegistryAddress ? ['BENEFICIARY_REGISTRY_ADDRESS_MANIFEST'] : []),
   ];
   validateProductionEndpoints(env);
-  if (env.SAFE_INTERNAL_MTLS_ENABLED && env.SAFE_INTERNAL_MTLS_ENABLED !== 'true') {
-    throw new CoreError('InvalidRequest', 'SAFE_INTERNAL_MTLS_ENABLED must be true', 500);
-  }
   validateDistinctAuthorities(env);
   const bnmMonotonicConformanceEvidenceHash = normalizeOptionalHash(
     env.BNM_MONOTONIC_CONFORMANCE_EVIDENCE_HASH,
@@ -303,14 +261,14 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     paymentRouterDeploymentBlock,
     policyRegistryAddress,
     beneficiaryRegistryAddress,
-    safeAddress: normalizeOptionalAddress(env.PLATFORM_SAFE_ADDRESS),
-    platformServiceFeeSafeAddress: normalizeOptionalAddress(env.PLATFORM_SERVICE_FEE_SAFE_ADDRESS),
-    usdtCustodySafeAddress: normalizeOptionalAddress(env.USDT_CUSTODY_SAFE_ADDRESS),
-    nplRewardSafeAddress: normalizeOptionalAddress(env.NPL_REWARD_SAFE_ADDRESS),
-    operationsTreasurySafeAddress: normalizeOptionalAddress(env.OPERATIONS_TREASURY_SAFE_ADDRESS),
-    secondarySignerAddress: normalizeOptionalAddress(env.SECONDARY_SIGNER_ADDRESS),
-    quoteSignerAddress: normalizeOptionalAddress(env.QUOTE_SIGNER_ADDRESS),
-    finalitySignerAddress: normalizeOptionalAddress(env.FINALITY_SIGNER_ADDRESS),
+    governanceWalletAddress: normalizeOptionalAddress(env.PLATFORM_GOVERNANCE_WALLET_ADDRESS),
+    platformServiceFeeWalletAddress: normalizeOptionalAddress(env.PLATFORM_SERVICE_FEE_WALLET_ADDRESS),
+    usdtSettlementWalletAddress: normalizeOptionalAddress(env.USDT_SETTLEMENT_WALLET_ADDRESS),
+    nplRewardWalletAddress: normalizeOptionalAddress(env.NPL_REWARD_WALLET_ADDRESS),
+    operationsWalletAddress: normalizeOptionalAddress(env.OPERATIONS_GUARANTEE_WALLET_ADDRESS),
+    secondarySignerAddress: normalizeOptionalAddress(env.PLATFORM_GOVERNANCE_WALLET_ADDRESS),
+    quoteSignerAddress: normalizeOptionalAddress(env.PLATFORM_GOVERNANCE_WALLET_ADDRESS),
+    finalitySignerAddress: normalizeOptionalAddress(env.PLATFORM_GOVERNANCE_WALLET_ADDRESS),
     signerServiceUrl: env.SIGNER_SERVICE_URL,
     signerServiceToken: env.SIGNER_SERVICE_TOKEN,
     executorUrl: env.SETTLEMENT_EXECUTOR_URL,
@@ -320,27 +278,24 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
       env.SETTLEMENT_REPLACEMENT_DELAY_MS,
       'SETTLEMENT_REPLACEMENT_DELAY_MS',
     ),
-    safeApprovalVerifierUrl: env.SAFE_APPROVAL_VERIFIER_URL,
-    safeApprovalVerifierToken: env.SAFE_APPROVAL_VERIFIER_TOKEN,
-    safeMutualTls: env.SAFE_INTERNAL_MTLS_ENABLED === 'true',
-    safeSettlementExpectations: Object.freeze({
-      ...(safeExpectation(env, 'USDT', normalizeOptionalAddress(env.USDT_CUSTODY_SAFE_ADDRESS), USDT_ADDRESS)
-        ? { USDT: safeExpectation(env, 'USDT', normalizeOptionalAddress(env.USDT_CUSTODY_SAFE_ADDRESS), USDT_ADDRESS)! }
+    settlementWalletExpectations: Object.freeze({
+      ...(walletExpectation(env, 'USDT', normalizeOptionalAddress(env.USDT_SETTLEMENT_WALLET_ADDRESS), USDT_ADDRESS)
+        ? { USDT: walletExpectation(env, 'USDT', normalizeOptionalAddress(env.USDT_SETTLEMENT_WALLET_ADDRESS), USDT_ADDRESS)! }
         : {}),
-      ...(safeExpectation(env, 'NPL', normalizeOptionalAddress(env.NPL_REWARD_SAFE_ADDRESS), NPL_ADDRESS)
-        ? { NPL: safeExpectation(env, 'NPL', normalizeOptionalAddress(env.NPL_REWARD_SAFE_ADDRESS), NPL_ADDRESS)! }
+      ...(walletExpectation(env, 'NPL', normalizeOptionalAddress(env.NPL_REWARD_WALLET_ADDRESS), NPL_ADDRESS)
+        ? { NPL: walletExpectation(env, 'NPL', normalizeOptionalAddress(env.NPL_REWARD_WALLET_ADDRESS), NPL_ADDRESS)! }
         : {}),
-      ...(safeExpectation(
+      ...(walletExpectation(
         env,
         'OPERATIONS',
-        normalizeOptionalAddress(env.OPERATIONS_TREASURY_SAFE_ADDRESS),
+        normalizeOptionalAddress(env.OPERATIONS_GUARANTEE_WALLET_ADDRESS),
         USDT_ADDRESS,
       )
         ? {
-          OPERATIONS_USDT: safeExpectation(
+          OPERATIONS_USDT: walletExpectation(
             env,
             'OPERATIONS',
-            normalizeOptionalAddress(env.OPERATIONS_TREASURY_SAFE_ADDRESS),
+            normalizeOptionalAddress(env.OPERATIONS_GUARANTEE_WALLET_ADDRESS),
             USDT_ADDRESS,
           )!,
         }
@@ -451,7 +406,7 @@ function runtimeReadinessValid(snapshot: RuntimeReadinessSnapshot | undefined, n
     snapshot.componentHashesVerified,
     snapshot.deployedRuntimeCodeVerified,
     snapshot.roleGrantsVerified,
-    snapshot.safeAdminVerified,
+    snapshot.walletRolesVerified,
     snapshot.signerBindingsVerified,
     snapshot.nplQuoteSourceHealthy,
     snapshot.indexerHealthy,
@@ -466,12 +421,9 @@ function validateProductionEndpoints(env: Readonly<Record<string, string | undef
   for (const name of [
     'SIGNER_SERVICE_URL',
     'SETTLEMENT_EXECUTOR_URL',
-    'SAFE_APPROVAL_VERIFIER_URL',
     'BNM_AVAILABILITY_URL',
     'MEDIA_STORAGE_SIGNER_URL',
-    'POLICY_SAFE_PROPOSER_URL',
-    'POLICY_EXECUTION_LOOKUP_URL',
-    'SYSTEM_CONFIG_SAFE_APPROVER_URL',
+    'GOVERNANCE_EXECUTOR_URL',
     'SECRET_RESOLVER_URL',
     'BSC_EXPLORER_API_URL',
     'ALIYUN_SMS_GATEWAY_URL',
@@ -508,24 +460,15 @@ function validateAuthOrigin(env: Readonly<Record<string, string | undefined>>) {
 }
 
 function validateDistinctAuthorities(env: Readonly<Record<string, string | undefined>>) {
-  const technicalAuthorities = [
-    'SECONDARY_SIGNER_ADDRESS',
-    'QUOTE_SIGNER_ADDRESS',
-    'FINALITY_SIGNER_ADDRESS',
-  ].map((name) => env[name]?.toLowerCase()).filter((value): value is string => Boolean(value));
-  const safes = [
-    env.PLATFORM_SAFE_ADDRESS,
-    env.PLATFORM_SERVICE_FEE_SAFE_ADDRESS,
-    env.USDT_CUSTODY_SAFE_ADDRESS,
-    env.NPL_REWARD_SAFE_ADDRESS,
-    env.OPERATIONS_TREASURY_SAFE_ADDRESS,
+  const wallets = [
+    env.PLATFORM_GOVERNANCE_WALLET_ADDRESS,
+    env.PLATFORM_SERVICE_FEE_WALLET_ADDRESS,
+    env.USDT_SETTLEMENT_WALLET_ADDRESS,
+    env.NPL_REWARD_WALLET_ADDRESS,
+    env.OPERATIONS_GUARANTEE_WALLET_ADDRESS,
   ].filter((value): value is string => Boolean(value)).map((value) => value.toLowerCase());
-  if (new Set(safes).size !== safes.length) {
-    throw new CoreError('InvalidRequest', 'Governance, fee, custody, reward and operations Safes must be distinct', 500);
-  }
-  const safeSet = new Set(safes);
-  if (technicalAuthorities.some((authority) => safeSet.has(authority))) {
-    throw new CoreError('InvalidRequest', 'Technical signer authorities must not use a Safe address', 500);
+  if (new Set(wallets).size !== wallets.length) {
+    throw new CoreError('InvalidRequest', 'Governance, fee, settlement, reward and operations wallets must be distinct', 500);
   }
 }
 
@@ -561,35 +504,19 @@ function normalizeOptionalHash(value: string | undefined, name: string) {
   return value.toLowerCase();
 }
 
-function safeExpectation(
+function walletExpectation(
   env: Readonly<Record<string, string | undefined>>,
   prefix: 'USDT' | 'NPL' | 'OPERATIONS',
-  safeAddress: string | undefined,
+  walletAddress: string | undefined,
   tokenAddress: string,
 ) {
   const names = {
-    safeProxyCodeHash: `${prefix}_SAFE_PROXY_CODE_HASH`,
-    ownerSetHash: `${prefix}_SAFE_OWNER_SET_HASH`,
-    threshold: `${prefix}_SAFE_THRESHOLD`,
-    guardAddress: `${prefix}_SAFE_GUARD_ADDRESS`,
-    fallbackHandlerAddress: `${prefix}_SAFE_FALLBACK_HANDLER_ADDRESS`,
-    modulesHash: `${prefix}_SAFE_MODULES_HASH`,
     tokenCodeHash: `${prefix}_TOKEN_CODE_HASH`,
     tokenTransferConformanceEvidenceHash: `${prefix}_TRANSFER_CONFORMANCE_EVIDENCE_HASH`,
   } as const;
-  if (!safeAddress || Object.values(names).some((name) => !env[name])) return undefined;
-  const threshold = Number(env[names.threshold]);
-  if (!Number.isSafeInteger(threshold) || threshold <= 0) {
-    throw new CoreError('InvalidRequest', `${names.threshold} must be a positive integer`, 500);
-  }
+  if (!walletAddress || Object.values(names).some((name) => !env[name])) return undefined;
   return {
-    safeAddress,
-    safeProxyCodeHash: normalizeOptionalHash(env[names.safeProxyCodeHash], names.safeProxyCodeHash)!,
-    ownerSetHash: normalizeOptionalHash(env[names.ownerSetHash], names.ownerSetHash)!,
-    threshold,
-    guardAddress: normalizeOptionalAddress(env[names.guardAddress])!,
-    fallbackHandlerAddress: normalizeOptionalAddress(env[names.fallbackHandlerAddress])!,
-    modulesHash: normalizeOptionalHash(env[names.modulesHash], names.modulesHash)!,
+    walletAddress,
     tokenAddress,
     tokenCodeHash: normalizeOptionalHash(env[names.tokenCodeHash], names.tokenCodeHash)!,
     tokenTransferConformanceEvidenceHash: normalizeOptionalHash(

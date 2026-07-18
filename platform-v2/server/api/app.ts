@@ -30,7 +30,7 @@ import {
   notificationChannels,
   notificationProviders,
   orderProjectionStates,
-  settlementBatchStates,
+  settlementTransferStates,
   settlementRails,
   settlementRequestStates,
   systemConfigKeys,
@@ -39,7 +39,7 @@ import {
   type AdminResourceType,
   type BreakerScope,
   type CatalogReviewDecision,
-  type SettlementBatchState,
+  type SettlementTransferState,
   type SettlementRail,
   type SettlementRequestState,
   type TakeoverState,
@@ -77,7 +77,7 @@ import type {
   StoreVersionInput,
 } from '../data/fulfillment-target-service.ts';
 import type {
-  AdminSettlementBatchQuery,
+  AdminSettlementTransferQuery,
   AdminSettlementRequestQuery,
   GovernedSettlementApprovalInput,
   GovernedSettlementRail,
@@ -188,7 +188,7 @@ export interface SeckillOperationsApiService {
     signature: string;
     correlationId: string;
   }): Promise<unknown>;
-  propose(actor: FulfillmentActor, actionId: string, correlationId: string): Promise<unknown>;
+  execute(actor: FulfillmentActor, actionId: string, correlationId: string): Promise<unknown>;
   cancel(actor: FulfillmentActor, actionId: string, input: { correlationId: string }): Promise<unknown>;
 }
 
@@ -424,8 +424,8 @@ export interface SettlementApiService {
   list(actor: FulfillmentActor): Promise<unknown>;
   listAdminRequests(actor: FulfillmentActor, input?: AdminSettlementRequestQuery): Promise<unknown>;
   getAdminRequest(actor: FulfillmentActor, requestId: string): Promise<unknown>;
-  listAdminBatches(actor: FulfillmentActor, input?: AdminSettlementBatchQuery): Promise<unknown>;
-  getAdminBatch(actor: FulfillmentActor, batchId: string): Promise<unknown>;
+  listAdminTransfers(actor: FulfillmentActor, input?: AdminSettlementTransferQuery): Promise<unknown>;
+  getAdminTransfer(actor: FulfillmentActor, transferId: string): Promise<unknown>;
 }
 
 export interface TakeoverFundingApiService {
@@ -475,7 +475,7 @@ export interface PolicyApiService {
     draftId: string,
     input: { nonce: string; deadline: string; signature: string; correlationId: string },
   ): Promise<unknown>;
-  proposeToSafe(actor: FulfillmentActor, draftId: string, correlationId: string): Promise<unknown>;
+  execute(actor: FulfillmentActor, draftId: string, correlationId: string): Promise<unknown>;
   getDraft(actor: FulfillmentActor, draftId: string): Promise<unknown>;
   listDrafts(actor: FulfillmentActor): Promise<unknown>;
 }
@@ -847,7 +847,7 @@ async function route(
       signature: requiredString(body, 'signature'),
       expectedDomain: dependencies.authDomain,
       expectedUri: dependencies.authUri,
-    }, dependencies.clock(), dependencies.walletSignatureVerifier);
+    }, dependencies.clock());
     const binding = await dependencies.resolveRoles(verified.walletAddress);
     if (binding.roles.length === 0) throw new CoreError('Forbidden', 'Wallet is not authorized', 403);
     if (!dependencies.config.jwtSecret) throw new CoreError('ConfigurationRequired', 'JWT service is unavailable', 503);
@@ -878,8 +878,8 @@ async function route(
     verifyWebhookHmac(raw, signature, secret);
     const body = parseJsonBody(raw);
     assertOnlyKeys(body, ['eventId', 'orderId', 'status', 'occurredAt', 'locationHash']);
-    const systemWallet = dependencies.config.safeAddress;
-    if (!systemWallet) throw new CoreError('ExternalBlocked', 'Platform Safe identity is unavailable', 503);
+    const systemWallet = dependencies.config.governanceWalletAddress;
+    if (!systemWallet) throw new CoreError('ExternalBlocked', 'Platform governance wallet is unavailable', 503);
     const eventId = requiredString(body, 'eventId');
     const result = await dependencies.fulfillmentService.recordLogisticsUpdate(
       { walletAddress: systemWallet, roles: ['OPERATOR'] },
@@ -1157,7 +1157,7 @@ async function route(
       'policyVersion',
       'oldValueHash',
       'newValueHash',
-      'safeAddress',
+      'executorWallet',
       'nonce',
       'deadline',
       'signature',
@@ -1184,7 +1184,7 @@ async function route(
           policyVersion: requiredString(approval, 'policyVersion'),
           oldValueHash: requiredString(approval, 'oldValueHash'),
           newValueHash: requiredString(approval, 'newValueHash'),
-          safeAddress: requiredString(approval, 'safeAddress'),
+          executorWallet: requiredString(approval, 'executorWallet'),
           nonce: requiredString(approval, 'nonce'),
           deadline: requiredString(approval, 'deadline'),
           signature: requiredString(approval, 'signature'),
@@ -2341,7 +2341,7 @@ async function routeAdminServices(
     );
     return true;
   }
-  if (request.method === 'GET' && url.pathname === '/v2/admin/settlement-batches') {
+  if (request.method === 'GET' && url.pathname === '/v2/admin/settlement-transfers') {
     const claims = authorizeRoles(
       request,
       dependencies.config,
@@ -2351,16 +2351,16 @@ async function routeAdminServices(
     sendJson(
       response,
       200,
-      await dependencies.settlementService.listAdminBatches(
+      await dependencies.settlementService.listAdminTransfers(
         fulfillmentActor(claims),
-        adminSettlementBatchQuery(url),
+        adminSettlementTransferQuery(url),
       ),
       correlationId,
     );
     return true;
   }
-  const adminSettlementBatchId = pathParameter(url.pathname, '/v2/admin/settlement-batches/');
-  if (request.method === 'GET' && adminSettlementBatchId) {
+  const adminSettlementTransferId = pathParameter(url.pathname, '/v2/admin/settlement-transfers/');
+  if (request.method === 'GET' && adminSettlementTransferId) {
     const claims = authorizeRoles(
       request,
       dependencies.config,
@@ -2370,9 +2370,9 @@ async function routeAdminServices(
     sendJson(
       response,
       200,
-      await dependencies.settlementService.getAdminBatch(
+      await dependencies.settlementService.getAdminTransfer(
         fulfillmentActor(claims),
-        adminSettlementBatchId,
+        adminSettlementTransferId,
       ),
       correlationId,
     );
@@ -2639,7 +2639,7 @@ async function routeAdminServices(
     return true;
   }
   const seckillGovernanceAction = url.pathname.match(
-    /^\/v2\/admin\/seckill\/actions\/(0x[0-9a-fA-F]{64})(?:\/(approval-challenge|secondary-signature|safe-proposal|cancel))?$/,
+    /^\/v2\/admin\/seckill\/actions\/(0x[0-9a-fA-F]{64})(?:\/(approval-challenge|secondary-signature|execute|cancel))?$/,
   );
   if (seckillGovernanceAction) {
     const actionName = seckillGovernanceAction[2];
@@ -2675,10 +2675,10 @@ async function routeAdminServices(
       }), correlationId);
       return true;
     }
-    if (request.method === 'POST' && actionName === 'safe-proposal') {
+    if (request.method === 'POST' && actionName === 'execute') {
       const body = await readJson(request);
       assertOnlyKeys(body, []);
-      sendJson(response, 202, await dependencies.seckillOperationsService.propose(actor, actionId, correlationId), correlationId);
+      sendJson(response, 202, await dependencies.seckillOperationsService.execute(actor, actionId, correlationId), correlationId);
       return true;
     }
     if (request.method === 'POST' && actionName === 'cancel') {
@@ -2999,7 +2999,7 @@ async function routeAdminServices(
       ? ['ADMIN', 'OPERATOR', 'AUDITOR'] as const
       : policyPath.action === 'approval-challenge'
         || policyPath.action === 'secondary-signature'
-        || policyPath.action === 'safe-proposal'
+        || policyPath.action === 'execute'
         ? ['ADMIN'] as const
         : ['ADMIN', 'OPERATOR'] as const;
     const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), allowedRoles);
@@ -3037,13 +3037,13 @@ async function routeAdminServices(
       }), correlationId);
       return true;
     }
-    if (request.method === 'POST' && policyPath.action === 'safe-proposal') {
+    if (request.method === 'POST' && policyPath.action === 'execute') {
       const body = await readJson(request);
       assertOnlyKeys(body, []);
       sendJson(
         response,
         202,
-        await dependencies.policyService.proposeToSafe(actor, policyPath.resourceId, correlationId),
+        await dependencies.policyService.execute(actor, policyPath.resourceId, correlationId),
         correlationId,
       );
       return true;
@@ -3839,7 +3839,7 @@ function merchantAuditQuery(url: URL): Omit<AuditQuery, 'actorWallet' | 'merchan
 
 function adminSettlementRequestQuery(url: URL): AdminSettlementRequestQuery {
   assertOnlySearchParams(url, [
-    'requestId', 'merchantId', 'walletAddress', 'orderId', 'batchId', 'safeTxHash',
+    'requestId', 'merchantId', 'walletAddress', 'orderId', 'transferId', 'executionTxHash',
     'rail', 'asset', 'state', 'from', 'to', 'cursorRequestedAt', 'cursorRequestId', 'limit',
   ]);
   return {
@@ -3847,8 +3847,10 @@ function adminSettlementRequestQuery(url: URL): AdminSettlementRequestQuery {
     ...(url.searchParams.get('merchantId') ? { merchantId: url.searchParams.get('merchantId')! } : {}),
     ...(url.searchParams.get('walletAddress') ? { walletAddress: url.searchParams.get('walletAddress')! } : {}),
     ...(url.searchParams.get('orderId') ? { orderId: url.searchParams.get('orderId')! } : {}),
-    ...(url.searchParams.get('batchId') ? { batchId: url.searchParams.get('batchId')! } : {}),
-    ...(url.searchParams.get('safeTxHash') ? { safeTxHash: url.searchParams.get('safeTxHash')! } : {}),
+    ...(url.searchParams.get('transferId') ? { transferId: url.searchParams.get('transferId')! } : {}),
+    ...(url.searchParams.get('executionTxHash')
+      ? { executionTxHash: url.searchParams.get('executionTxHash')! }
+      : {}),
     ...(url.searchParams.get('rail') ? { rail: adminSettlementRail(url.searchParams.get('rail')) } : {}),
     ...(url.searchParams.get('asset') ? { asset: adminSettlementAsset(url.searchParams.get('asset')) } : {}),
     ...(url.searchParams.get('state')
@@ -3868,28 +3870,32 @@ function adminSettlementRequestQuery(url: URL): AdminSettlementRequestQuery {
   };
 }
 
-function adminSettlementBatchQuery(url: URL): AdminSettlementBatchQuery {
+function adminSettlementTransferQuery(url: URL): AdminSettlementTransferQuery {
   assertOnlySearchParams(url, [
-    'batchId', 'merchantId', 'orderId', 'safeAddress', 'safeTxHash', 'asset', 'state',
-    'from', 'to', 'cursorCreatedAt', 'cursorBatchId', 'limit',
+    'transferId', 'merchantId', 'orderId', 'executorWallet', 'executionTxHash', 'asset', 'state',
+    'from', 'to', 'cursorCreatedAt', 'cursorTransferId', 'limit',
   ]);
   return {
-    ...(url.searchParams.get('batchId') ? { batchId: url.searchParams.get('batchId')! } : {}),
+    ...(url.searchParams.get('transferId') ? { transferId: url.searchParams.get('transferId')! } : {}),
     ...(url.searchParams.get('merchantId') ? { merchantId: url.searchParams.get('merchantId')! } : {}),
     ...(url.searchParams.get('orderId') ? { orderId: url.searchParams.get('orderId')! } : {}),
-    ...(url.searchParams.get('safeAddress') ? { safeAddress: url.searchParams.get('safeAddress')! } : {}),
-    ...(url.searchParams.get('safeTxHash') ? { safeTxHash: url.searchParams.get('safeTxHash')! } : {}),
+    ...(url.searchParams.get('executorWallet')
+      ? { executorWallet: url.searchParams.get('executorWallet')! }
+      : {}),
+    ...(url.searchParams.get('executionTxHash')
+      ? { executionTxHash: url.searchParams.get('executionTxHash')! }
+      : {}),
     ...(url.searchParams.get('asset') ? { asset: adminSettlementAsset(url.searchParams.get('asset')) } : {}),
     ...(url.searchParams.get('state')
-      ? { state: adminSettlementBatchState(url.searchParams.get('state')) }
+      ? { state: adminSettlementTransferState(url.searchParams.get('state')) }
       : {}),
     ...(url.searchParams.get('from') ? { from: dateParameter(url.searchParams.get('from')!, 'from') } : {}),
     ...(url.searchParams.get('to') ? { to: dateParameter(url.searchParams.get('to')!, 'to') } : {}),
     ...(url.searchParams.get('cursorCreatedAt')
       ? { cursorCreatedAt: dateParameter(url.searchParams.get('cursorCreatedAt')!, 'cursorCreatedAt') }
       : {}),
-    ...(url.searchParams.get('cursorBatchId')
-      ? { cursorBatchId: url.searchParams.get('cursorBatchId')! }
+    ...(url.searchParams.get('cursorTransferId')
+      ? { cursorTransferId: url.searchParams.get('cursorTransferId')! }
       : {}),
     ...(url.searchParams.get('limit')
       ? { limit: adminSettlementLimit(url.searchParams.get('limit')) }
@@ -3916,11 +3922,11 @@ function adminSettlementRequestState(value: string | null): SettlementRequestSta
   return value as SettlementRequestState;
 }
 
-function adminSettlementBatchState(value: string | null): SettlementBatchState {
-  if (!settlementBatchStates.includes(value as SettlementBatchState)) {
-    throw new CoreError('InvalidRequest', 'Unsupported settlement batch state');
+function adminSettlementTransferState(value: string | null): SettlementTransferState {
+  if (!settlementTransferStates.includes(value as SettlementTransferState)) {
+    throw new CoreError('InvalidRequest', 'Unsupported settlement transfer state');
   }
-  return value as SettlementBatchState;
+  return value as SettlementTransferState;
 }
 
 function adminSettlementLimit(value: string | null) {
@@ -4194,7 +4200,7 @@ function systemConfigKey(value: unknown): Parameters<SystemConfigApiService['cre
 function sensitiveApproval(body: Record<string, unknown>): ConfigApprovalInput {
   assertOnlyKeys(body, [
     'action', 'resourceType', 'resourceId', 'policyVersion', 'oldValueHash',
-    'newValueHash', 'safeAddress', 'nonce', 'deadline', 'signature',
+    'newValueHash', 'executorWallet', 'nonce', 'deadline', 'signature',
   ]);
   return {
     action: requiredString(body, 'action'),
@@ -4203,7 +4209,7 @@ function sensitiveApproval(body: Record<string, unknown>): ConfigApprovalInput {
     policyVersion: requiredString(body, 'policyVersion'),
     oldValueHash: requiredString(body, 'oldValueHash'),
     newValueHash: requiredString(body, 'newValueHash'),
-    safeAddress: requiredString(body, 'safeAddress'),
+    executorWallet: requiredString(body, 'executorWallet'),
     nonce: requiredString(body, 'nonce'),
     deadline: requiredString(body, 'deadline'),
     signature: requiredString(body, 'signature'),

@@ -24,7 +24,7 @@ const BENEFICIARY_ABI = [
   'function referrerOf(address member) view returns (address)',
   'function regionBeneficiaries(uint64 policyVersion,bytes32 regionCodeHash) view returns (address district,address city,address province,address region)',
 ];
-export const PAYMENT_POLICY_TUPLE_ABI = 'tuple(uint64 version,uint16 usdtPaymentBps,uint16 nplPaymentBps,uint16 nplBurnListPriceBps,uint16 nplRewardListPriceBps,uint16 genesisBps,uint16 directReferralBps,uint16 districtBps,uint16 cityBps,uint16 provinceBps,uint16 regionBps,uint16 operationsBps,uint16 platformFeeBps,uint16 seckillPrizeBps,uint32 seckillMainDuration,uint32 relayInitial,uint32 relayIncrement,uint32 relayCap,uint128 merchantGuaranteeMinimum,address usdtCustodySafe,address nplRewardSafe,address operationsTreasurySafe,address circulationPool,bytes32 beneficiarySetHash,bytes32 concessionDestinationSetHash,bytes32 decisionEvidenceHash,bytes32 rulesContentHash)';
+export const PAYMENT_POLICY_TUPLE_ABI = 'tuple(uint64 version,uint16 usdtPaymentBps,uint16 nplPaymentBps,uint16 nplBurnListPriceBps,uint16 nplRewardListPriceBps,uint16 genesisBps,uint16 directReferralBps,uint16 districtBps,uint16 cityBps,uint16 provinceBps,uint16 regionBps,uint16 operationsBps,uint16 platformFeeBps,uint16 seckillPrizeBps,uint32 seckillMainDuration,uint32 relayInitial,uint32 relayIncrement,uint32 relayCap,uint128 merchantGuaranteeMinimum,address usdtSettlementWallet,address nplRewardWallet,address operationsWallet,address circulationPool,bytes32 beneficiarySetHash,bytes32 concessionDestinationSetHash,bytes32 decisionEvidenceHash,bytes32 rulesContentHash)';
 const POLICY_REGISTRY_ABI = [
   `function getPolicy(uint64 version) view returns (${PAYMENT_POLICY_TUPLE_ABI} policy)`,
   'function getOperations(uint64 version) view returns (address[] accounts,uint16[] weights)',
@@ -81,6 +81,10 @@ export class ResilientBscContractReader implements PairReserveReader {
       throw new CoreError('ExternalBlocked', 'Runtime code is unavailable', 503);
     }
     return keccak256(code).toLowerCase();
+  }
+
+  transactionCount(address: string) {
+    return this.#withProvider((provider) => provider.getTransactionCount(address, 'pending'));
   }
 
   async pairReserves(pairAddress: string): Promise<PairReserveSnapshot> {
@@ -271,9 +275,9 @@ export class RpcPaymentPolicyAttestationSource implements PaymentPolicyAttestati
       ['relayIncrement', Number(chain[16]), input.policy.relayIncrement],
       ['relayCap', Number(chain[17]), input.policy.relayCap],
       ['merchantGuaranteeMinimum', BigInt(String(chain[18])), input.policy.merchantGuaranteeMinimumUsdt],
-      ['usdtCustodySafe', String(chain[19]).toLowerCase(), input.policy.usdtCustodySafe.toLowerCase()],
-      ['nplRewardSafe', String(chain[20]).toLowerCase(), input.policy.nplRewardSafe.toLowerCase()],
-      ['operationsTreasurySafe', String(chain[21]).toLowerCase(), input.policy.operationsTreasurySafe.toLowerCase()],
+      ['usdtSettlementWallet', String(chain[19]).toLowerCase(), input.policy.usdtSettlementWallet.toLowerCase()],
+      ['nplRewardWallet', String(chain[20]).toLowerCase(), input.policy.nplRewardWallet.toLowerCase()],
+      ['operationsWallet', String(chain[21]).toLowerCase(), input.policy.operationsWallet.toLowerCase()],
       ['circulationPool', String(chain[22]).toLowerCase(), input.policy.circulationPool.toLowerCase()],
       ['beneficiarySetHash', String(chain[23]).toLowerCase(), input.beneficiarySetHash.toLowerCase()],
       ['configuredBeneficiarySetHash', beneficiarySetHash.toLowerCase(), input.beneficiarySetHash.toLowerCase()],

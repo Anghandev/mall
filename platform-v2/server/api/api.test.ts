@@ -59,7 +59,6 @@ import {
   settlementRequestTypes,
   verifySettlementRequestSignature,
 } from './settlement-signing.ts';
-import { assertSafeSettlementBatch, buildSafeSettlementBatch } from '../chain/safe-multisend.ts';
 
 const HASH = `0x${'1'.repeat(64)}`;
 const HASH_2 = `0x${'2'.repeat(64)}`;
@@ -80,7 +79,7 @@ test('typed config reports blocked inputs without exposing secret values', () =>
   assert.equal(blocked.requiredConfirmations, 15);
   assert.ok(blocked.externalBlocked.includes('DATABASE_URL'));
   assert.ok(blocked.externalBlocked.includes('PII_RETENTION_POLICY_VERSION'));
-  assert.ok(blocked.paymentExternalBlocked.includes('PLATFORM_SERVICE_FEE_SAFE_ADDRESS'));
+  assert.ok(blocked.paymentExternalBlocked.includes('PLATFORM_SERVICE_FEE_WALLET_ADDRESS'));
   assert.equal(blocked.providerReadiness.KUAIDI100, 'CONFIGURATION_REQUIRED');
   assert.equal(blocked.providerReadiness.BNM, 'CONFIGURATION_REQUIRED');
   assert.equal(publicReadiness(blocked).writesEnabled, false);
@@ -89,7 +88,7 @@ test('typed config reports blocked inputs without exposing secret values', () =>
   const ready = loadConfig(completeEnvironment());
   const serialized = JSON.stringify(publicReadiness(ready));
   assert.equal(publicReadiness(ready).writesEnabled, false);
-  assert.ok(ready.externalBlocked.includes('COORDINATED_DEPLOYMENT_AUTHORIZATION'));
+  assert.equal(ready.externalBlocked.includes('COORDINATED_DEPLOYMENT_AUTHORIZATION'), true);
   assert.equal(serialized.includes('test-jwt-secret'), false);
   assert.equal(serialized.includes('provider-secret'), false);
   assert.equal(ready.providerReadiness.BNM, 'READY');
@@ -117,7 +116,7 @@ test('typed config reports blocked inputs without exposing secret values', () =>
   };
   assert.equal(publicReadiness(paymentReady, paymentRuntimeReadiness(readinessTime, true), readinessTime).writesEnabled, true);
   assert.throws(
-    () => loadConfig({ ...completeEnvironment(), PLATFORM_SERVICE_FEE_SAFE_ADDRESS: 'not-an-address' }),
+    () => loadConfig({ ...completeEnvironment(), PLATFORM_SERVICE_FEE_WALLET_ADDRESS: 'not-an-address' }),
     /address/,
   );
   assert.throws(() => loadConfig({ ...completeEnvironment(), REQUIRED_CONFIRMATIONS: '12' }), /frozen at 15/);
@@ -137,16 +136,6 @@ test('typed config reports blocked inputs without exposing secret values', () =>
     }),
     /must be distinct/,
   );
-  assert.throws(
-    () => loadConfig({ ...completeEnvironment(), QUOTE_SIGNER_ADDRESS: SAFE }),
-    /must not use a Safe address/,
-  );
-  assert.doesNotThrow(() => loadConfig({
-    ...completeEnvironment(),
-    SECONDARY_SIGNER_ADDRESS: '0x5555555555555555555555555555555555555555',
-    QUOTE_SIGNER_ADDRESS: '0x5555555555555555555555555555555555555555',
-    FINALITY_SIGNER_ADDRESS: '0x5555555555555555555555555555555555555555',
-  }));
 });
 
 test('SIWE nonce is domain-bound, one-use and yields an expiring RBAC session', async () => {
@@ -210,40 +199,13 @@ test('SIWE nonce is domain-bound, one-use and yields an expiring RBAC session', 
     /already used/,
   );
 
-  const contractStore = new MemoryNonceStore();
-  const contractChallenge = await createSiweChallenge(
-    contractStore,
-    {
-      walletAddress: CONTRACT,
-      domain: 'mall.abu.test',
-      uri: 'https://mall.abu.test',
-      statement: 'Sign in to Abu 24K V2',
-    },
-    now,
-  );
-  const contractVerified = await verifySiwe(
-    contractStore,
-    {
-      message: contractChallenge.message,
-      signature: '0x1234',
-      expectedDomain: 'mall.abu.test',
-      expectedUri: 'https://mall.abu.test',
-    },
-    now,
-    {
-      isValid: async (walletAddress, message, signature) =>
-        walletAddress === CONTRACT && message === contractChallenge.message && signature === '0x1234',
-    },
-  );
-  assert.equal(contractVerified.walletAddress, CONTRACT);
-
   const secret = 'test-jwt-secret-that-is-at-least-32-bytes';
   const token = issueSessionToken({ walletAddress: wallet.address, roles: ['BUYER'] }, secret, now);
   assert.deepEqual(verifySessionToken(token, secret, new Date(now.getTime() + 60_000)).roles, ['BUYER']);
   assert.throws(() => verifySessionToken(token, secret, new Date(now.getTime() + 16 * 60_000)), /Expired/);
 });
 
-test('sensitive action binds exact resource, old/new hashes, policy, Safe, nonce and deadline', async () => {
+test('sensitive action binds exact resource, old/new hashes, policy, executor, nonce and deadline', async () => {
   const secondary = Wallet.createRandom();
   const intent = {
     action: 'PUBLISH_POLICY',
@@ -252,7 +214,7 @@ test('sensitive action binds exact resource, old/new hashes, policy, Safe, nonce
     policyVersion: 2n,
     oldValueHash: HASH,
     newValueHash: HASH_2,
-    safeAddress: SAFE,
+    executorWallet: SAFE,
     nonce: 1n,
     deadline: 1_800_000_000n,
   };
@@ -280,7 +242,7 @@ test('sensitive action binds exact resource, old/new hashes, policy, Safe, nonce
   );
 });
 
-test('settlement EIP-712 intent and Safe MultiSend bind wallet, items, nonce and exact transfers', async () => {
+test('settlement EIP-712 intent binds wallet, executor, items, nonce and exact amount', async () => {
   const wallet = Wallet.createRandom();
   const intent = {
     intentId: ORDER_ID,
@@ -289,7 +251,7 @@ test('settlement EIP-712 intent and Safe MultiSend bind wallet, items, nonce and
     recipient: wallet.address,
     rail: 'MERCHANT_USDT' as const,
     asset: '0x55d398326f99059ff775485246999027b3197955',
-    safeAddress: SAFE,
+    executorWallet: SAFE,
     amount: '45',
     itemsHash: HASH,
     nonce: '3',
@@ -316,30 +278,6 @@ test('settlement EIP-712 intent and Safe MultiSend bind wallet, items, nonce and
     /signer does not match/,
   );
 
-  const batch = buildSafeSettlementBatch({
-    batchId: HASH_2,
-    safeAddress: SAFE,
-    safeNonce: '7',
-    items: [
-      {
-        orderId: ORDER_ID,
-        requestId: HASH_2,
-        requestItemIndex: 0,
-        accountId: `merchant:${wallet.address.toLowerCase()}:usdt`,
-        tokenAddress: intent.asset,
-        recipientAddress: wallet.address,
-        amount: '45',
-      },
-    ],
-  });
-  assert.equal(batch.safeTransaction.operation, 1);
-  assert.equal(batch.safeTransaction.safeTxGas, '0');
-  assert.equal(batch.items[0]?.transferCalldata.slice(0, 10), '0xa9059cbb');
-  assert.equal(assertSafeSettlementBatch(batch).safeTxHash, batch.safeTxHash);
-  assert.throws(
-    () => assertSafeSettlementBatch({ ...batch, totalAmount: '46' }),
-    /totalAmount/,
-  );
 });
 
 test('catalog concession authorization binds preview identity, product, policy and expiry', () => {
@@ -492,10 +430,10 @@ test('Core quote math conserves both assets and dual quote keeps independent res
     /latest policy/,
   );
   const blockedPolicy = { ...policy };
-  delete blockedPolicy.usdtCustodySafe;
+  delete blockedPolicy.usdtSettlementWallet;
   assert.throws(
     () => buildPaymentIntent(request, blockedPolicy, 'ORDINARY', request.issuedAt),
-    /missing Safe or destination/,
+    /missing wallet or destination/,
   );
 });
 
@@ -1077,7 +1015,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       reviewWinner: async (actor, sessionId, input) => ({ actor: actor.walletAddress, sessionId, ...input }),
       approvalChallenge: async (_actor, actionId, input) => ({ actionId, ...input, typedData: {} }),
       submitApproval: async (_actor, actionId, input) => ({ actionId, state: 'SECONDARY_SIGNED', ...input }),
-      propose: async (_actor, actionId) => ({ actionId, state: 'PENDING_PROPOSAL' }),
+      execute: async (_actor, actionId) => ({ actionId, state: 'PENDING_EXECUTION' }),
       cancel: async (_actor, actionId) => ({ actionId, state: 'CANCELLED' }),
     },
     fulfillmentService: {
@@ -1303,16 +1241,14 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
         items: [],
         transitions: [],
       }),
-      listAdminBatches: async (actor, input) => ({
+      listAdminTransfers: async (actor, input) => ({
         actor: actor.walletAddress,
-        batches: [{ batchId: HASH_2, state: input?.state ?? 'APPROVAL_PENDING' }],
+        transfers: [{ transferId: HASH_2, state: input?.state ?? 'PENDING' }],
         nextCursor: null,
       }),
-      getAdminBatch: async (actor, batchId) => ({
+      getAdminTransfer: async (actor, transferId) => ({
         actor: actor.walletAddress,
-        batch: { batchId, state: 'APPROVAL_PENDING' },
-        items: [],
-        approvals: [],
+        transfer: { transferId, state: 'PENDING' },
         attempts: [],
       }),
     },
@@ -1341,7 +1277,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       updateDraft: async (_actor, draftId, input) => ({ draftId, ...input }),
       approvalChallenge: async (_actor, draftId, input) => ({ draftId, ...input, digest: HASH }),
       submitSecondarySignature: async (_actor, draftId, input) => ({ draftId, ...input, state: 'SECONDARY_SIGNED' }),
-      proposeToSafe: async (_actor, draftId) => ({ draftId, state: 'SAFE_PROPOSED' }),
+      execute: async (_actor, draftId) => ({ draftId, state: 'SUBMITTED' }),
       getDraft: async (_actor, draftId) => ({ draftId, state: 'DRAFT' }),
       listDrafts: async () => [],
     },
@@ -1356,7 +1292,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
         artifactVersion: CORE_ARTIFACT_VERSION,
         actor: actor.walletAddress,
         actionId: HASH,
-        state: 'PENDING_PROPOSAL',
+        state: 'PENDING_EXECUTION',
         ...input,
       }),
       listActions: async (actor) => [{ actor: actor.walletAddress, actionId: HASH, state: 'FINAL' }],
@@ -1598,26 +1534,26 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     });
     assert.equal(adminPayment.status, 200);
     assert.equal(((await adminPayment.json()) as { orderId: string }).orderId, ORDER_ID);
-    const adminRequests = await fetch(`${base}/v2/admin/settlement-requests?state=BATCHED&limit=20`, {
+    const adminRequests = await fetch(`${base}/v2/admin/settlement-requests?state=SUBMITTED&limit=20`, {
       headers: { authorization: `Bearer ${session.token}` },
     });
     assert.equal(adminRequests.status, 200);
-    assert.equal(((await adminRequests.json()) as { requests: Array<{ state: string }> }).requests[0]?.state, 'BATCHED');
+    assert.equal(((await adminRequests.json()) as { requests: Array<{ state: string }> }).requests[0]?.state, 'SUBMITTED');
     assert.equal((await fetch(`${base}/v2/admin/settlement-requests?state=UNKNOWN`, {
       headers: { authorization: `Bearer ${session.token}` },
     })).status, 400);
     assert.equal((await fetch(`${base}/v2/admin/settlement-requests/${HASH}`, {
       headers: { authorization: `Bearer ${session.token}` },
     })).status, 200);
-    const adminBatches = await fetch(`${base}/v2/admin/settlement-batches?state=APPROVAL_PENDING&limit=20`, {
+    const adminBatches = await fetch(`${base}/v2/admin/settlement-transfers?state=PENDING&limit=20`, {
       headers: { authorization: `Bearer ${session.token}` },
     });
     assert.equal(adminBatches.status, 200);
-    assert.equal(((await adminBatches.json()) as { batches: Array<{ state: string }> }).batches[0]?.state, 'APPROVAL_PENDING');
-    assert.equal((await fetch(`${base}/v2/admin/settlement-batches/${HASH_2}`, {
+    assert.equal(((await adminBatches.json()) as { transfers: Array<{ state: string }> }).transfers[0]?.state, 'PENDING');
+    assert.equal((await fetch(`${base}/v2/admin/settlement-transfers/${HASH_2}`, {
       headers: { authorization: `Bearer ${session.token}` },
     })).status, 200);
-    assert.equal((await fetch(`${base}/v2/admin/settlement-batches?limit=101`, {
+    assert.equal((await fetch(`${base}/v2/admin/settlement-transfers?limit=101`, {
       headers: { authorization: `Bearer ${session.token}` },
     })).status, 400);
     assert.equal((await fetch(`${base}/v2/admin/takeover-cases`, {
@@ -1770,7 +1706,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       headers: bearerHeaders,
       body: JSON.stringify({ nonce: '1', deadline: '1783990200', signature: '0x1234' }),
     })).status, 200);
-    assert.equal((await fetch(`${base}/v2/admin/seckill/actions/${HASH}/safe-proposal`, {
+    assert.equal((await fetch(`${base}/v2/admin/seckill/actions/${HASH}/execute`, {
       method: 'POST',
       headers: bearerHeaders,
       body: '{}',
@@ -2332,7 +2268,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
           policyVersion: '1',
           oldValueHash: HASH,
           newValueHash: HASH_2,
-          safeAddress: SAFE,
+          executorWallet: SAFE,
           nonce: '1',
           deadline: '1800000000',
           signature: '0x1234',
@@ -2387,7 +2323,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
           policyVersion: '1',
           oldValueHash: HASH,
           newValueHash: HASH_2,
-          safeAddress: SAFE,
+          executorWallet: SAFE,
           nonce: '1',
           deadline: '1800000000',
           signature: '0x1234',
@@ -2452,7 +2388,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       headers: bearerHeaders,
       body: JSON.stringify({ nonce: '1', deadline: '1800000000', signature: '0x1234' }),
     })).status, 200);
-    assert.equal((await fetch(`${base}/v2/admin/policy-drafts/policy-draft-1/safe-proposal`, {
+    assert.equal((await fetch(`${base}/v2/admin/policy-drafts/policy-draft-1/execute`, {
       method: 'POST',
       headers: bearerHeaders,
       body: '{}',
@@ -2570,7 +2506,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
           policyVersion: '1',
           oldValueHash: HASH,
           newValueHash: HASH_2,
-          safeAddress: SAFE,
+          executorWallet: SAFE,
           nonce: '1',
           deadline: '1800000000',
           signature: '0x1234',
@@ -3027,10 +2963,10 @@ function readyPolicy(): FrozenPaymentPolicy {
     platformFeeBps: 100,
     requiredConfirmations: 15,
     merchantGuaranteeMinimumUsdt: 1_000n * 10n ** 18n,
-    platformServiceFeeSafe: '0x2222222222222222222222222222222222222223',
-    usdtCustodySafe: '0x3333333333333333333333333333333333333333',
-    nplRewardSafe: '0x4444444444444444444444444444444444444444',
-    operationsTreasurySafe: '0x5555555555555555555555555555555555555555',
+    platformServiceFeeWallet: '0x2222222222222222222222222222222222222223',
+    usdtSettlementWallet: '0x3333333333333333333333333333333333333333',
+    nplRewardWallet: '0x4444444444444444444444444444444444444444',
+    operationsWallet: '0x5555555555555555555555555555555555555555',
     circulationPool: '0x6666666666666666666666666666666666666666',
     concessionDestinationSetHash: paymentAllocationSetHash(),
     genesisNodeDestinations: [
@@ -3085,10 +3021,10 @@ function governedPaymentPolicy(): PaymentPolicySnapshot {
   const base = readyPolicy();
   return {
     ...base,
-    platformServiceFeeSafe: base.platformServiceFeeSafe!,
-    usdtCustodySafe: base.usdtCustodySafe!,
-    nplRewardSafe: base.nplRewardSafe!,
-    operationsTreasurySafe: base.operationsTreasurySafe!,
+    platformServiceFeeWallet: base.platformServiceFeeWallet!,
+    usdtSettlementWallet: base.usdtSettlementWallet!,
+    nplRewardWallet: base.nplRewardWallet!,
+    operationsWallet: base.operationsWallet!,
     circulationPool: base.circulationPool!,
     concessionDestinationSetHash: base.concessionDestinationSetHash!,
     genesisNodeDestinations: base.genesisNodeDestinations!,
@@ -3170,47 +3106,23 @@ function completeEnvironment(): Record<string, string> {
     PII_RETENTION_POLICY_VERSION: 'pii-v1',
     BSC_RPC_URL: 'https://rpc.example.invalid',
     BSC_FALLBACK_RPC_URL: 'https://fallback-rpc.example.invalid',
-    PLATFORM_SAFE_ADDRESS: SAFE,
-    PLATFORM_SERVICE_FEE_SAFE_ADDRESS: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-    USDT_CUSTODY_SAFE_ADDRESS: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-    NPL_REWARD_SAFE_ADDRESS: '0xcccccccccccccccccccccccccccccccccccccccc',
-    OPERATIONS_TREASURY_SAFE_ADDRESS: '0xdddddddddddddddddddddddddddddddddddddddd',
-    SECONDARY_SIGNER_ADDRESS: '0x5555555555555555555555555555555555555555',
-    QUOTE_SIGNER_ADDRESS: '0x6666666666666666666666666666666666666666',
-    FINALITY_SIGNER_ADDRESS: '0x7777777777777777777777777777777777777777',
-    TWAP_SOURCE_ADDRESS: '0x8888888888888888888888888888888888888888',
-    TWAP_SOURCE_CODEHASH: HASH,
+    PLATFORM_GOVERNANCE_WALLET_ADDRESS: SAFE,
+    PLATFORM_SERVICE_FEE_WALLET_ADDRESS: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    USDT_SETTLEMENT_WALLET_ADDRESS: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    NPL_REWARD_WALLET_ADDRESS: '0xcccccccccccccccccccccccccccccccccccccccc',
+    OPERATIONS_GUARANTEE_WALLET_ADDRESS: '0xdddddddddddddddddddddddddddddddddddddddd',
     SIGNER_SERVICE_URL: 'https://signer.example.invalid',
     SIGNER_SERVICE_TOKEN: 'provider-secret',
     SETTLEMENT_EXECUTOR_URL: 'https://executor.example.invalid',
     SETTLEMENT_EXECUTOR_TOKEN: 'provider-secret',
     EXECUTOR_MAX_GAS_LIMIT: '1000000',
     SETTLEMENT_REPLACEMENT_DELAY_MS: '300000',
-    SAFE_APPROVAL_VERIFIER_URL: 'https://safe-approvals.example.invalid',
-    SAFE_APPROVAL_VERIFIER_TOKEN: 'provider-secret',
-    SAFE_INTERNAL_MTLS_ENABLED: 'true',
-    USDT_SAFE_PROXY_CODE_HASH: HASH,
-    USDT_SAFE_OWNER_SET_HASH: HASH_2,
-    USDT_SAFE_THRESHOLD: '2',
-    USDT_SAFE_GUARD_ADDRESS: '0x0000000000000000000000000000000000000000',
-    USDT_SAFE_FALLBACK_HANDLER_ADDRESS: '0x0000000000000000000000000000000000000000',
-    USDT_SAFE_MODULES_HASH: HASH_2,
+    GOVERNANCE_EXECUTOR_URL: 'https://governance-executor.example.invalid',
+    GOVERNANCE_EXECUTOR_TOKEN: 'provider-secret',
     USDT_TOKEN_CODE_HASH: HASH,
     USDT_TRANSFER_CONFORMANCE_EVIDENCE_HASH: HASH_2,
-    NPL_SAFE_PROXY_CODE_HASH: HASH,
-    NPL_SAFE_OWNER_SET_HASH: HASH_2,
-    NPL_SAFE_THRESHOLD: '2',
-    NPL_SAFE_GUARD_ADDRESS: '0x0000000000000000000000000000000000000000',
-    NPL_SAFE_FALLBACK_HANDLER_ADDRESS: '0x0000000000000000000000000000000000000000',
-    NPL_SAFE_MODULES_HASH: HASH_2,
     NPL_TOKEN_CODE_HASH: HASH,
     NPL_TRANSFER_CONFORMANCE_EVIDENCE_HASH: HASH_2,
-    OPERATIONS_SAFE_PROXY_CODE_HASH: HASH,
-    OPERATIONS_SAFE_OWNER_SET_HASH: HASH_2,
-    OPERATIONS_SAFE_THRESHOLD: '2',
-    OPERATIONS_SAFE_GUARD_ADDRESS: '0x0000000000000000000000000000000000000000',
-    OPERATIONS_SAFE_FALLBACK_HANDLER_ADDRESS: '0x0000000000000000000000000000000000000000',
-    OPERATIONS_SAFE_MODULES_HASH: HASH_2,
     OPERATIONS_TOKEN_CODE_HASH: HASH,
     OPERATIONS_TRANSFER_CONFORMANCE_EVIDENCE_HASH: HASH_2,
     REQUIRED_CONFIRMATIONS: '15',
@@ -3251,7 +3163,7 @@ function paymentRuntimeReadiness(now: Date, indexerHealthy: boolean) {
     componentHashesVerified: true,
     deployedRuntimeCodeVerified: true,
     roleGrantsVerified: true,
-    safeAdminVerified: true,
+    walletRolesVerified: true,
     signerBindingsVerified: true,
     nplQuoteSourceHealthy: true,
     indexerHealthy,

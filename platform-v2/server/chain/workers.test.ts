@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { AbiCoder, Interface, Wallet, keccak256, toUtf8Bytes, type InterfaceAbi } from 'ethers';
+import { AbiCoder, Interface, Wallet, keccak256, type InterfaceAbi } from 'ethers';
 import { CORE_ARTIFACT_VERSION, NPL_ADDRESS, USDT_ADDRESS } from '../api/enums.ts';
 import {
   paymentAllocationSetHash,
@@ -13,7 +13,6 @@ import { BnmAvailabilityWorker, HttpBnmAvailabilityAdapter } from './bnm-availab
 import { FulfillmentSchedulerWorker } from './fulfillment-scheduler-worker.ts';
 import { ResilientBscGuaranteeDepositSource } from './guarantee-deposit-worker.ts';
 import type { GuaranteeDepositFinalityItem } from '../data/guarantee-deposit-service.ts';
-import { HttpTakeoverFundingSafeApprover } from './takeover-funding-governance.ts';
 import { RemoteExecutorClient } from './executor.ts';
 import {
   RpcBeneficiarySnapshotSource,
@@ -39,40 +38,6 @@ import {
 import { scheduleFulfillmentJobs } from './scheduler.ts';
 import { RemoteSignerClient } from './signer.ts';
 import type { SqlExecutor, SqlTransactionRunner } from '../data/migrations.ts';
-import {
-  HttpSafeApprovalVerifier,
-  HttpSafeSettlementBroadcaster,
-  ResilientBscSafeSettlementChainSource,
-  reconcileTransactionBalanceDeltas,
-} from './safe-settlement-adapters.ts';
-import {
-  RpcSafeRuntimeAttestor,
-  emptySafeModulesHash,
-  zeroSafeAddress,
-} from './safe-runtime-attestor.ts';
-import {
-  MULTISEND_CALL_ONLY_ADDRESS,
-  MULTISEND_CALL_ONLY_CODE_HASH,
-  SAFE_L2_SINGLETON_ADDRESS,
-  SAFE_L2_SINGLETON_CODE_HASH,
-} from './safe-multisend.ts';
-import {
-  HttpRpcPolicyChainSource,
-  type PolicyFinalityCandidate,
-} from './policy-publication-worker.ts';
-import {
-  coverageBreakerSafeTxHash,
-  HttpCoverageBreakerSafeProposer,
-  ResilientCoverageBreakerChainSource,
-  type CoverageBreakerFinalityCandidate,
-} from './coverage-breaker-governance.ts';
-import {
-  HttpSeckillSafeProposer,
-  ResilientSeckillChainSource,
-  seckillSafeTxHash,
-  type SeckillFinalityCandidate,
-  type SeckillSafeProposal,
-} from './seckill-governance.ts';
 import { LogisticsPrintWorker } from './logistics-print-worker.ts';
 
 const CONTRACT = '0x3333333333333333333333333333333333333333';
@@ -428,504 +393,6 @@ test('remote executor enforces chain, zero native value, gas cap and replacement
   );
 });
 
-test('Safe runtime attestation binds owners, modules, guard, fallback and deployment code hashes', async () => {
-  const owners = [
-    '0x1000000000000000000000000000000000000002',
-    '0x1000000000000000000000000000000000000001',
-  ];
-  const ownerSetHash = keccak256(toUtf8Bytes(JSON.stringify({ owners: owners.slice().sort(), threshold: 2 })));
-  const reader = {
-    chainId: async () => 56,
-    codeHash: async (address: string) => {
-      const normalized = address.toLowerCase();
-      if (normalized === CONTRACT) return HASH_1;
-      if (normalized === SAFE_L2_SINGLETON_ADDRESS) return SAFE_L2_SINGLETON_CODE_HASH;
-      if (normalized === MULTISEND_CALL_ONLY_ADDRESS) return MULTISEND_CALL_ONLY_CODE_HASH;
-      if (normalized === MERCHANT) return HASH_2;
-      throw new Error('unknown runtime');
-    },
-    call: async (_address: string, _abi: InterfaceAbi, method: string) => {
-      if (method === 'VERSION') return '1.4.1';
-      if (method === 'masterCopy') return SAFE_L2_SINGLETON_ADDRESS;
-      if (method === 'getOwners') return owners;
-      if (method === 'getThreshold') return 2n;
-      if (method === 'nonce') return 7n;
-      if (method === 'getModulesPaginated') return [[], '0x0000000000000000000000000000000000000001'];
-      if (method === 'getStorageAt') return `0x${'0'.repeat(64)}`;
-      throw new Error(`unexpected ${method}`);
-    },
-  };
-  const expected = {
-    safeAddress: CONTRACT,
-    safeProxyCodeHash: HASH_1,
-    ownerSetHash,
-    threshold: 2,
-    guardAddress: zeroSafeAddress,
-    fallbackHandlerAddress: zeroSafeAddress,
-    modulesHash: emptySafeModulesHash,
-    tokenAddress: MERCHANT,
-    tokenCodeHash: HASH_2,
-    tokenTransferConformanceEvidenceHash: HASH_3,
-  };
-  const attested = await new RpcSafeRuntimeAttestor({ reader, expected }).attest();
-  assert.equal(attested.safeNonce, '7');
-  assert.equal(attested.ownerSetHash, ownerSetHash);
-  assert.equal(attested.multisendCodeHash, MULTISEND_CALL_ONLY_CODE_HASH);
-  await assert.rejects(
-    new RpcSafeRuntimeAttestor({ reader, expected: { ...expected, ownerSetHash: HASH_3 } }).attest(),
-    /does not match governed expectations/,
-  );
-});
-
-test('Safe approval and broadcaster adapters require HTTPS mTLS and echo-bound envelopes', async () => {
-  assert.throws(
-    () => new HttpSafeApprovalVerifier({ url: 'http://unsafe.invalid', token: 'token', mutualTls: true }),
-    /requires HTTPS/,
-  );
-  assert.throws(
-    () => new ResilientBscSafeSettlementChainSource({ primaryRpcUrl: 'https://rpc.invalid' }),
-    /Two BSC RPC/,
-  );
-  assert.throws(
-    () => new ResilientBscSafeSettlementChainSource({
-      primaryRpcUrl: 'https://rpc.invalid',
-      fallbackRpcUrl: 'https://rpc.invalid',
-    }),
-    /independent BSC RPC/,
-  );
-  assert.throws(
-    () => new ResilientBscSafeSettlementChainSource({
-      primaryRpcUrl: 'http://primary.invalid',
-      fallbackRpcUrl: 'wss://fallback.invalid',
-    }),
-    /require HTTPS/,
-  );
-  const approval = new HttpSafeApprovalVerifier({
-    url: 'https://approvals.example.invalid/v1/verify',
-    token: 'approval-token',
-    mutualTls: true,
-    fetch: async () => new Response(JSON.stringify({
-      safeAddress: CONTRACT,
-      safeTxHash: HASH_1,
-      ownerSetHash: HASH_2,
-      threshold: 2,
-      proposalReferenceHash: HASH_2,
-      approvalEvidenceHash: HASH_3,
-      packedSignatures: '0x1122',
-      approvals: [
-        { ownerAddress: BUYER, signature: '0x11' },
-        { ownerAddress: MERCHANT, signature: '0x22' },
-      ],
-    }), { status: 200 }),
-  });
-  assert.equal((await approval.verify({
-    batchId: ORDER_ID,
-    safeAddress: CONTRACT,
-    safeTxHash: HASH_1,
-    signingData: '0x1901',
-    ownerSetHash: HASH_2,
-    threshold: 2,
-  })).approvals.length, 2);
-
-  let requestBody: Record<string, unknown> | undefined;
-  const broadcaster = new HttpSafeSettlementBroadcaster({
-    url: 'https://executor.example.invalid/v1/safe',
-    token: 'executor-token',
-    mutualTls: true,
-    maxOuterGasLimit: 1_000_000n,
-    fetch: async (_url, init) => {
-      requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      return new Response(JSON.stringify({
-        executionTxHash: HASH_3,
-        outerSender: BUYER,
-        outerNonce: '9',
-        requestDigest: requestBody.requestDigest,
-        ...(requestBody.replacementForExecutionTxHash
-          ? { replacementForExecutionTxHash: requestBody.replacementForExecutionTxHash }
-          : {}),
-      }), { status: 200 });
-    },
-  });
-  const submitted = await broadcaster.submit({
-    chainId: 56,
-    batchId: ORDER_ID,
-    safeAddress: CONTRACT,
-    safeNonce: '7',
-    safeTxHash: HASH_1,
-    contentHash: HASH_2,
-    execTransactionCalldata: '0x11223344',
-    requestDigest: HASH_3,
-    idempotencyKey: 'settlement-attempt:1',
-    outerGasLimit: '1000000',
-  });
-  assert.equal(submitted.executionTxHash, HASH_3);
-  assert.equal(requestBody?.safeTxHash, HASH_1);
-  const replacement = await broadcaster.replace({
-    chainId: 56,
-    batchId: ORDER_ID,
-    safeAddress: CONTRACT,
-    safeNonce: '7',
-    safeTxHash: HASH_1,
-    contentHash: HASH_2,
-    execTransactionCalldata: '0x11223344',
-    requestDigest: HASH_3,
-    idempotencyKey: 'settlement-attempt:2',
-    outerGasLimit: '1000000',
-    replacementForAttemptId: 'settlement-attempt:1',
-    replacementForExecutionTxHash: HASH_2,
-    outerSender: BUYER,
-    outerNonce: '9',
-  });
-  assert.equal(replacement.replacementForExecutionTxHash, HASH_2);
-  assert.equal(requestBody?.outerNonce, '9');
-  await assert.rejects(
-    broadcaster.replace({
-      chainId: 56,
-      batchId: ORDER_ID,
-      safeAddress: CONTRACT,
-      safeNonce: '7',
-      safeTxHash: HASH_1,
-      contentHash: HASH_2,
-      execTransactionCalldata: '0x11223344',
-      requestDigest: HASH_3,
-      idempotencyKey: 'settlement-attempt:3',
-      outerGasLimit: '1000000',
-      replacementForAttemptId: 'settlement-attempt:2',
-      replacementForExecutionTxHash: HASH_3,
-      outerSender: BUYER,
-      outerNonce: '10',
-    }),
-    /did not bind/,
-  );
-});
-
-test('Safe settlement balance evidence excludes unrelated same-block token transfers', () => {
-  const token = USDT_ADDRESS.toLowerCase();
-  const safe = CONTRACT.toLowerCase();
-  const recipient = BUYER.toLowerCase();
-  const attacker = MERCHANT.toLowerCase();
-  assert.deepEqual(reconcileTransactionBalanceDeltas([
-    { tokenAddress: token, account: safe, delta: -99n },
-    { tokenAddress: token, account: recipient, delta: 101n },
-  ], [
-    { tokenAddress: token, from: attacker, to: safe, amount: '1' },
-    { tokenAddress: token, from: attacker, to: recipient, amount: '1' },
-  ]), [
-    { tokenAddress: token, account: safe, delta: '-100' },
-    { tokenAddress: token, account: recipient, delta: '100' },
-  ]);
-});
-
-test('takeover Safe approver rejects malformed owner evidence with a controlled finality error', async () => {
-  const input = {
-    caseId: 'takeover-case-1',
-    policyVersion: 1,
-    governanceSafeAddress: CONTRACT,
-    operationsSafeAddress: '0x5555555555555555555555555555555555555555',
-    actionDigest: HASH_1,
-    oldValueHash: HASH_2,
-    newValueHash: HASH_3,
-  };
-  const approver = new HttpTakeoverFundingSafeApprover({
-    url: 'https://takeover-safe.example.invalid/verify',
-    token: 'takeover-safe-token',
-    mutualTls: true,
-    fetchImpl: async () => jsonResponse({
-      ...input,
-      safeTxHash: HASH_1,
-      proposalReferenceHash: HASH_2,
-      approvalEvidenceHash: HASH_3,
-      ownerSetHash: HASH_1,
-      threshold: 1,
-      approvals: [{ ownerAddress: 'not-an-address', signature: '0x11' }],
-    }),
-  });
-  await assert.rejects(approver.verify(input), /Safe owner approval is malformed/);
-});
-
-test('policy RPC finality binds BSC, semantic receipts, canonical blocks and 14/15 confirmations', async () => {
-  const harness = policyRpcHarness();
-  const source = policyChainSource(harness.fetch);
-  harness.state.head = 113;
-  const mined = await source.observe(policyFinalityCandidate());
-  assert.equal(mined.state, 'MINED');
-  if (mined.state !== 'MINED') throw new Error('ExpectedMinedPolicy');
-  assert.equal(mined.confirmations, 14);
-  assert.equal(mined.executionTxHash, harness.executionTxHash);
-
-  harness.state.head = 114;
-  const finalized = await source.observe(policyFinalityCandidate());
-  assert.equal(finalized.state, 'FINAL');
-  if (finalized.state !== 'FINAL') throw new Error('ExpectedFinalPolicy');
-  assert.equal(finalized.confirmations, 15);
-  assert.equal(finalized.blockHash, harness.minedBlockHash);
-});
-
-test('policy RPC finality fails closed on chain, receipt, transaction and provider disagreement', async () => {
-  const cases: Array<[string, (harness: ReturnType<typeof policyRpcHarness>) => void]> = [
-    ['wrong chain', (harness) => { harness.state.primaryChainId = 1; }],
-    ['one missing receipt', (harness) => { harness.state.fallbackReceiptMissing = true; }],
-    ['wrong transaction', (harness) => { harness.state.fallbackTransactionHash = HASH_2; }],
-    ['failed transaction', (harness) => { harness.state.receiptStatus = '0x0'; }],
-    ['receipt block disagreement', (harness) => { harness.state.fallbackReceiptBlockHash = HASH_2; }],
-    ['canonical provider disagreement', (harness) => { harness.state.fallbackCanonicalBlockHash = HASH_2; }],
-  ];
-  for (const [name, mutate] of cases) {
-    const harness = policyRpcHarness();
-    mutate(harness);
-    await assert.rejects(policyChainSource(harness.fetch).observe(policyFinalityCandidate()), () => true, name);
-  }
-});
-
-test('policy RPC finality distinguishes pending execution from a proven deep reorg', async () => {
-  const harness = policyRpcHarness();
-  harness.state.primaryReceiptMissing = true;
-  harness.state.fallbackReceiptMissing = true;
-  const source = policyChainSource(harness.fetch);
-  assert.deepEqual(await source.observe(policyFinalityCandidate()), { state: 'NOT_FOUND' });
-
-  const previous = {
-    executionTxHash: harness.executionTxHash,
-    blockNumber: 100,
-    blockHash: harness.minedBlockHash,
-  };
-  harness.state.primaryCanonicalBlockHash = harness.replacementBlockHash;
-  harness.state.fallbackCanonicalBlockHash = harness.replacementBlockHash;
-  const reorged = await source.observe({
-    ...policyFinalityCandidate(),
-    priorState: 'PUBLISHED',
-    priorFinality: previous,
-  });
-  assert.equal(reorged.state, 'REORGED');
-  if (reorged.state !== 'REORGED') throw new Error('ExpectedReorgedPolicy');
-  assert.equal(reorged.blockHash, harness.minedBlockHash);
-  assert.equal(reorged.canonicalBlockHash, harness.replacementBlockHash);
-
-  assert.deepEqual(await source.observe({
-    ...policyFinalityCandidate(),
-    priorState: 'REORGED',
-    priorFinality: previous,
-  }), { state: 'NOT_FOUND' });
-});
-
-test('coverage breaker proposer and dual-RPC finality bind Safe, Router event, state and 14/15 confirmations', async () => {
-  const candidate = coverageBreakerCandidate();
-  let proposedBody: Record<string, unknown> | undefined;
-  const proposer = new HttpCoverageBreakerSafeProposer({
-    url: 'https://safe-proposer.example.invalid/coverage-breaker',
-    token: 'safe-token',
-    mutualTls: true,
-    fetchImpl: async (_input, init) => {
-      proposedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      const safeNonce = '7';
-      return jsonResponse({
-        safeNonce,
-        safeTxHash: coverageBreakerSafeTxHash(candidate, safeNonce),
-        proposalHash: HASH_3,
-        dataHash: candidate.calldataHash,
-        resourceId: candidate.actionId,
-        targetPaused: true,
-        evidenceHash: candidate.evidenceHash,
-        policyVersion: 1,
-        minimumSafeNonce: candidate.minimumSafeNonce,
-      });
-    },
-  });
-  assert.deepEqual(await proposer.propose(candidate), {
-    safeNonce: '7',
-    safeTxHash: coverageBreakerSafeTxHash(candidate, '7'),
-    proposalHash: HASH_3,
-  });
-  assert.equal(proposedBody?.to, candidate.routerAddress);
-  assert.equal(proposedBody?.safeAddress, candidate.safeAddress);
-  assert.equal(proposedBody?.minimumSafeNonce, candidate.minimumSafeNonce);
-
-  await assert.rejects(
-    new HttpCoverageBreakerSafeProposer({
-      url: 'https://safe-proposer.example.invalid/coverage-breaker',
-      token: 'safe-token',
-      mutualTls: true,
-      fetchImpl: async () => jsonResponse({
-        safeNonce: '7',
-        safeTxHash: HASH_2,
-        proposalHash: HASH_3,
-        dataHash: candidate.calldataHash,
-        resourceId: candidate.actionId,
-        targetPaused: true,
-        evidenceHash: candidate.evidenceHash,
-        policyVersion: 1,
-        minimumSafeNonce: candidate.minimumSafeNonce,
-      }),
-    }).propose(candidate),
-    /hash does not match its nonce/,
-  );
-
-  const harness = coverageBreakerRpcHarness();
-  const source = coverageBreakerChainSource(harness.fetch);
-  harness.state.head = 113;
-  const mined = await source.observe(candidate);
-  assert.equal(mined.state, 'MINED');
-  if (mined.state !== 'MINED') throw new Error('ExpectedMinedCoverageBreaker');
-  assert.equal(mined.confirmations, 14);
-
-  harness.state.head = 114;
-  const finalized = await source.observe(candidate);
-  assert.equal(finalized.state, 'FINAL');
-  if (finalized.state !== 'FINAL') throw new Error('ExpectedFinalCoverageBreaker');
-  assert.equal(finalized.confirmations, 15);
-  assert.equal(finalized.targetPaused, true);
-
-  harness.state.receiptStatus = '0x0';
-  const failed = await source.observe(candidate);
-  assert.equal(failed.state, 'FAILED');
-});
-
-test('coverage breaker finality fails closed on wrong authority, event, Router state and provider disagreement', async () => {
-  const cases: Array<[string, (harness: ReturnType<typeof coverageBreakerRpcHarness>) => void]> = [
-    ['wrong chain', (harness) => { harness.state.primaryChainId = 1; }],
-    ['wrong Safe', (harness) => { harness.state.transactionTo = MERCHANT; }],
-    ['wrong event evidence', (harness) => { harness.state.eventEvidenceHash = HASH_2; }],
-    ['wrong Router state', (harness) => { harness.state.routerPaused = false; }],
-    ['receipt disagreement', (harness) => { harness.state.fallbackReceiptBlockHash = HASH_2; }],
-    ['canonical disagreement', (harness) => { harness.state.fallbackCanonicalBlockHash = HASH_2; }],
-  ];
-  for (const [name, mutate] of cases) {
-    const harness = coverageBreakerRpcHarness();
-    mutate(harness);
-    await assert.rejects(
-      coverageBreakerChainSource(harness.fetch).observe(coverageBreakerCandidate()),
-      () => true,
-      name,
-    );
-  }
-});
-
-test('coverage breaker network adapters time out black-hole proposal, lookup and RPC requests', async () => {
-  const blackHole: typeof fetch = async () => new Promise<Response>(() => undefined);
-  const candidate = coverageBreakerCandidate();
-  await assert.rejects(
-    new HttpCoverageBreakerSafeProposer({
-      url: 'https://safe-proposer.example.invalid/coverage-breaker',
-      token: 'safe-token',
-      mutualTls: true,
-      fetchImpl: blackHole,
-      requestTimeoutMs: 5,
-    }).propose(candidate),
-    /timed out/,
-  );
-  const blackHoleBody: typeof fetch = async () => new Response(
-    new ReadableStream({ start() { /* Response headers arrive, body never completes. */ } }),
-    { status: 200, headers: { 'content-type': 'application/json' } },
-  );
-  await assert.rejects(
-    new HttpCoverageBreakerSafeProposer({
-      url: 'https://safe-proposer.example.invalid/coverage-breaker',
-      token: 'safe-token',
-      mutualTls: true,
-      fetchImpl: blackHoleBody,
-      requestTimeoutMs: 5,
-    }).propose(candidate),
-    /timed out/,
-  );
-  await assert.rejects(
-    new ResilientCoverageBreakerChainSource({
-      lookupUrl: 'https://safe-lookup.example.invalid/coverage-breaker',
-      lookupToken: 'lookup-token',
-      primaryRpcUrl: 'https://coverage-primary-rpc.example.invalid',
-      fallbackRpcUrl: 'https://coverage-fallback-rpc.example.invalid',
-      fetchImpl: blackHole,
-      requestTimeoutMs: 5,
-    }).observe(candidate),
-    /timed out/,
-  );
-  const rpcBlackHole: typeof fetch = async (input) => {
-    if (String(input).startsWith('https://safe-lookup.example.invalid')) {
-      return jsonResponse({
-        safeTxHash: candidate.safeTxHash,
-        resourceId: candidate.actionId,
-        executionTxHash: HASH_3,
-      });
-    }
-    return new Promise<Response>(() => undefined);
-  };
-  await assert.rejects(
-    new ResilientCoverageBreakerChainSource({
-      lookupUrl: 'https://safe-lookup.example.invalid/coverage-breaker',
-      lookupToken: 'lookup-token',
-      primaryRpcUrl: 'https://coverage-primary-rpc.example.invalid',
-      fallbackRpcUrl: 'https://coverage-fallback-rpc.example.invalid',
-      fetchImpl: rpcBlackHole,
-      requestTimeoutMs: 5,
-    }).observe(candidate),
-    /timed out/,
-  );
-});
-
-test('seckill Safe proposer and dual-RPC finality bind session open, breaker and prize transfer evidence', async () => {
-  const open = seckillCandidate('OPEN_SESSION');
-  let proposedBody: Record<string, unknown> | undefined;
-  const proposer = new HttpSeckillSafeProposer({
-    url: 'https://safe-proposer.example.invalid/seckill',
-    token: 'safe-token',
-    mutualTls: true,
-    fetchImpl: async (_input, init) => {
-      proposedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      const safeNonce = '9';
-      return jsonResponse({
-        safeNonce,
-        safeTxHash: seckillSafeTxHash(open, safeNonce),
-        proposalHash: HASH_3,
-        dataHash: open.calldataHash,
-        resourceId: open.actionId,
-        sessionId: open.sessionId,
-        actionKind: open.actionKind,
-        policyVersion: open.policyVersion,
-        evidenceHash: open.evidenceHash,
-        minimumSafeNonce: open.minimumSafeNonce,
-      });
-    },
-  });
-  assert.deepEqual(await proposer.propose(open), {
-    safeNonce: '9',
-    safeTxHash: seckillSafeTxHash(open, '9'),
-    proposalHash: HASH_3,
-  });
-  assert.equal(proposedBody?.to, open.targetAddress);
-  assert.equal(proposedBody?.sessionId, open.sessionId);
-  assert.equal(proposedBody?.actionKind, 'OPEN_SESSION');
-
-  for (const kind of ['OPEN_SESSION', 'FORCE_CLOSE', 'PRIZE_INJECTION'] as const) {
-    const candidate = seckillCandidate(kind);
-    const harness = seckillRpcHarness(candidate);
-    const source = new ResilientSeckillChainSource({
-      lookupUrl: 'https://safe-lookup.example.invalid/seckill',
-      lookupToken: 'lookup-token',
-      primaryRpcUrl: 'https://seckill-primary-rpc.example.invalid',
-      fallbackRpcUrl: 'https://seckill-fallback-rpc.example.invalid',
-      fetchImpl: harness.fetch,
-    });
-    const finalized = await source.observe(candidate);
-    assert.equal(finalized.state, 'FINAL', kind);
-    if (finalized.state !== 'FINAL') throw new Error(`ExpectedFinalSeckill${kind}`);
-    assert.equal(finalized.confirmations, 15);
-    assert.equal(finalized.actionKind, kind);
-  }
-
-  const wrongPrize = seckillCandidate('PRIZE_INJECTION');
-  const wrongPrizeHarness = seckillRpcHarness(wrongPrize);
-  wrongPrizeHarness.state.prizeAmount = '51';
-  await assert.rejects(
-    new ResilientSeckillChainSource({
-      lookupUrl: 'https://safe-lookup.example.invalid/seckill',
-      lookupToken: 'lookup-token',
-      primaryRpcUrl: 'https://seckill-primary-rpc.example.invalid',
-      fallbackRpcUrl: 'https://seckill-fallback-rpc.example.invalid',
-      fetchImpl: wrongPrizeHarness.fetch,
-    }).observe(wrongPrize),
-    /exactly one matching USDT Transfer/,
-  );
-});
-
 test('payment RPC sources compute exact NPL amounts from the fixed pair and beneficiary snapshot', async () => {
   const reader = new StubContractReader({
     pairReserves: {
@@ -1016,7 +483,7 @@ test('payment policy attestation binds all 27 Registry fields and latest-version
   });
 
   for (const [name, index, value] of [
-    ['usdtCustodySafe', 19, '0x9999999999999999999999999999999999999999'],
+    ['usdtSettlementWallet', 19, '0x9999999999999999999999999999999999999999'],
     ['concessionDestinationSetHash', 24, HASH_2],
     ['rulesContentHash', 26, HASH_2],
   ] as const) {
@@ -1058,12 +525,12 @@ test('runtime readiness attests deployed code, bindings, roles, NPL quote source
   const router = '0x1000000000000000000000000000000000000001';
   const policyRegistry = '0x1000000000000000000000000000000000000002';
   const beneficiaryRegistry = '0x1000000000000000000000000000000000000003';
-  const governanceSafe = '0x1000000000000000000000000000000000000006';
+  const governanceWallet = '0x1000000000000000000000000000000000000006';
   const usdtSafe = '0x1000000000000000000000000000000000000007';
   const nplSafe = '0x1000000000000000000000000000000000000008';
   const operationsSafe = '0x1000000000000000000000000000000000000009';
-  const secondarySigner = '0x1000000000000000000000000000000000000010';
-  const quoteSigner = '0x1000000000000000000000000000000000000011';
+  const secondarySigner = governanceWallet;
+  const quoteSigner = governanceWallet;
   const runtimeCode = '0x6001600055';
   const runtimeCodeHash = keccak256(runtimeCode);
   const values: Record<string, unknown> = {
@@ -1071,15 +538,20 @@ test('runtime readiness attests deployed code, bindings, roles, NPL quote source
     [`${router}:npl`]: '0x4e8277ab31e4956b2cd48449793a57656dfc03d2',
     [`${router}:policyRegistry`]: policyRegistry,
     [`${router}:beneficiaryRegistry`]: beneficiaryRegistry,
-    [`${router}:governanceSafe`]: governanceSafe,
-    [`${router}:platformServiceFeeSafe`]: '0x7000000000000000000000000000000000000000',
-    [`${router}:usdtCustodySafe`]: usdtSafe,
-    [`${router}:nplRewardSafe`]: nplSafe,
-    [`${router}:operationsTreasurySafe`]: operationsSafe,
+    [`${router}:governanceWallet`]: governanceWallet,
+    [`${router}:platformServiceFeeWallet`]: '0x7000000000000000000000000000000000000000',
+    [`${router}:usdtSettlementWallet`]: usdtSafe,
+    [`${router}:nplRewardWallet`]: nplSafe,
+    [`${router}:operationsWallet`]: operationsSafe,
     [`${router}:quoteSigner`]: quoteSigner,
-    [`${policyRegistry}:safe`]: governanceSafe,
+    [`${policyRegistry}:governanceWallet`]: governanceWallet,
     [`${policyRegistry}:secondarySigner`]: secondarySigner,
     [`${beneficiaryRegistry}:policyRegistry`]: policyRegistry,
+    [`${governanceWallet}:code`]: '0x',
+    ['0x7000000000000000000000000000000000000000:code']: '0x',
+    [`${usdtSafe}:code`]: '0x',
+    [`${nplSafe}:code`]: '0x',
+    [`${operationsSafe}:code`]: '0x',
     pairReserves: {
       blockNumber: 40_000_000,
       token0: USDT_ADDRESS,
@@ -1101,18 +573,16 @@ test('runtime readiness attests deployed code, bindings, roles, NPL quote source
     router,
     policyRegistry,
     beneficiaryRegistry,
-    governanceSafe,
-    platformServiceFeeSafe: '0x7000000000000000000000000000000000000000',
-    usdtCustodySafe: usdtSafe,
-    nplRewardSafe: nplSafe,
-    operationsTreasurySafe: operationsSafe,
-    secondarySigner,
-    quoteSigner,
+    governanceWallet,
+    platformServiceFeeWallet: '0x7000000000000000000000000000000000000000',
+    usdtSettlementWallet: usdtSafe,
+    nplRewardWallet: nplSafe,
+    operationsWallet: operationsSafe,
   });
   assert.deepEqual(await attestor.attest(), {
     deployedRuntimeCodeVerified: true,
     roleGrantsVerified: true,
-    safeAdminVerified: true,
+    walletRolesVerified: true,
     signerBindingsVerified: true,
     nplQuoteSourceHealthy: true,
     rpcChain56Healthy: true,
@@ -1252,7 +722,7 @@ test('guarantee RPC source binds exact BSC USDT transfer and 14/15 confirmation 
   if (mined.state !== 'MINED') throw new Error('ExpectedMinedGuarantee');
   assert.equal(mined.confirmations, 14);
   assert.equal(mined.from, MERCHANT);
-  assert.equal(mined.to, guaranteeFinalityItem().operationsSafeAddress);
+  assert.equal(mined.to, guaranteeFinalityItem().operationsWalletAddress);
   assert.equal(mined.amount, guaranteeFinalityItem().expectedAmountUsdt);
   assert.equal(mined.logIndex, 3);
   assert.match(mined.transferEvidenceHash, /^0x[0-9a-f]{64}$/);
@@ -1294,7 +764,7 @@ test('guarantee RPC source fails closed on chain, receipt, transfer and canonica
 
   harness.state.transferRecipient = BUYER;
   await assert.rejects(source.observe(guaranteeFinalityItem()), /one exact USDT Transfer/);
-  harness.state.transferRecipient = guaranteeFinalityItem().operationsSafeAddress;
+  harness.state.transferRecipient = guaranteeFinalityItem().operationsWalletAddress;
 
   harness.state.transferData = '0x01';
   await assert.rejects(source.observe(guaranteeFinalityItem()), /one exact USDT Transfer/);
@@ -1562,8 +1032,8 @@ class StubRuntimeReader implements RuntimeCodeReader {
     return 56;
   }
 
-  async code() {
-    return this.#code;
+  async code(address: string) {
+    return String(this.#values[`${address.toLowerCase()}:code`] ?? this.#code);
   }
 
   async pairReserves(_address: string) {
@@ -1591,7 +1061,7 @@ function guaranteeFinalityItem(): GuaranteeDepositFinalityItem {
     merchantWallet: MERCHANT,
     policyVersion: 1,
     tokenAddress: USDT_ADDRESS,
-    operationsSafeAddress: '0x5555555555555555555555555555555555555555',
+    operationsWalletAddress: '0x5555555555555555555555555555555555555555',
     expectedAmountUsdt: (1_000n * 10n ** 18n).toString(),
     transactionHash: HASH_2,
     state: 'SUBMITTED',
@@ -1626,7 +1096,7 @@ function guaranteeRpcHarness() {
     primaryCanonicalBlockHash: minedBlockHash,
     fallbackCanonicalBlockHash: minedBlockHash,
     transferAmount: guaranteeFinalityItem().expectedAmountUsdt,
-    transferRecipient: guaranteeFinalityItem().operationsSafeAddress,
+    transferRecipient: guaranteeFinalityItem().operationsWalletAddress,
     transferData: null as string | null,
   };
   const fetchImpl: typeof fetch = async (input, init) => {
@@ -1679,336 +1149,6 @@ function guaranteeRpcHarness() {
   return { state, fetch: fetchImpl, minedBlockHash, replacementBlockHash };
 }
 
-function policyFinalityCandidate(): PolicyFinalityCandidate {
-  return {
-    draftId: 'policy-draft-1',
-    policyVersion: 2,
-    safeTxHash: `0x${'5'.repeat(64)}`,
-    policyRegistryAddress: CONTRACT,
-    policyHash: HASH_1,
-    operationsHash: HASH_2,
-    decisionEvidenceHash: HASH_3,
-    safeAddress: BUYER,
-    priorState: 'SAFE_PROPOSED',
-  };
-}
-
-function policyChainSource(fetchImpl: typeof fetch) {
-  return new HttpRpcPolicyChainSource({
-    lookupUrl: 'https://safe-lookup.example.invalid/policy',
-    lookupToken: 'lookup-token',
-    primaryRpcUrl: 'https://primary-rpc.example.invalid',
-    fallbackRpcUrl: 'https://fallback-rpc.example.invalid',
-    fetchImpl,
-  });
-}
-
-function policyRpcHarness() {
-  const executionTxHash = `0x${'4'.repeat(64)}`;
-  const minedBlockHash = `0x${'6'.repeat(64)}`;
-  const replacementBlockHash = `0x${'7'.repeat(64)}`;
-  const iface = new Interface([
-    'event PolicyPublished(uint64 indexed version,bytes32 indexed policyHash,bytes32 indexed operationsHash,bytes32 decisionEvidenceHash,address safeExecutor)',
-  ]);
-  const event = iface.getEvent('PolicyPublished');
-  if (!event) throw new Error('MissingPolicyPublishedEvent');
-  const encoded = iface.encodeEventLog(event, [2, HASH_1, HASH_2, HASH_3, BUYER]);
-  const state = {
-    primaryChainId: 56,
-    fallbackChainId: 56,
-    head: 114,
-    primaryReceiptMissing: false,
-    fallbackReceiptMissing: false,
-    receiptStatus: '0x1',
-    fallbackTransactionHash: executionTxHash,
-    fallbackReceiptBlockHash: minedBlockHash,
-    primaryCanonicalBlockHash: minedBlockHash,
-    fallbackCanonicalBlockHash: minedBlockHash,
-  };
-  const log = { address: CONTRACT, topics: encoded.topics, data: encoded.data };
-  const fetchImpl: typeof fetch = async (input, init) => {
-    const url = String(input);
-    if (url.startsWith('https://safe-lookup.example.invalid')) {
-      return jsonResponse({
-        safeTxHash: policyFinalityCandidate().safeTxHash,
-        resourceId: policyFinalityCandidate().draftId,
-        executionTxHash,
-      });
-    }
-    const primary = url.startsWith('https://primary-rpc.example.invalid');
-    const request = JSON.parse(String(init?.body)) as { method: string; params: unknown[] };
-    let result: unknown;
-    if (request.method === 'eth_chainId') {
-      result = `0x${(primary ? state.primaryChainId : state.fallbackChainId).toString(16)}`;
-    } else if (request.method === 'eth_blockNumber') {
-      result = `0x${state.head.toString(16)}`;
-    } else if (request.method === 'eth_getBlockByNumber') {
-      result = { hash: primary ? state.primaryCanonicalBlockHash : state.fallbackCanonicalBlockHash };
-    } else if (request.method === 'eth_getTransactionReceipt') {
-      const missing = primary ? state.primaryReceiptMissing : state.fallbackReceiptMissing;
-      result = missing
-        ? null
-        : primary
-          ? {
-            transactionHash: executionTxHash,
-            status: state.receiptStatus,
-            blockHash: minedBlockHash,
-            blockNumber: '0x64',
-            logs: [log],
-            providerExtension: 'primary-only',
-          }
-          : {
-            logs: [{ data: log.data, topics: log.topics, address: log.address }],
-            blockNumber: '0x64',
-            blockHash: state.fallbackReceiptBlockHash,
-            status: state.receiptStatus,
-            transactionHash: state.fallbackTransactionHash,
-            providerExtension: 'fallback-only',
-          };
-    } else {
-      throw new Error(`UnexpectedPolicyRpcMethod:${request.method}`);
-    }
-    return jsonResponse({ jsonrpc: '2.0', id: 1, result });
-  };
-  return { state, fetch: fetchImpl, executionTxHash, minedBlockHash, replacementBlockHash };
-}
-
-function coverageBreakerCandidate(): CoverageBreakerFinalityCandidate {
-  const iface = new Interface(['function setNewPaymentsPaused(bool paused,bytes32 evidenceHash)']);
-  const calldata = iface.encodeFunctionData('setNewPaymentsPaused', [true, HASH_1]).toLowerCase();
-  const proposal = {
-    actionId: ORDER_ID,
-    safeAddress: BUYER,
-    routerAddress: CONTRACT,
-    calldata,
-    calldataHash: keccak256(calldata).toLowerCase(),
-    targetPaused: true,
-    evidenceHash: HASH_1,
-    policyVersion: 1,
-    minimumSafeNonce: '7',
-  };
-  return {
-    ...proposal,
-    safeTxHash: coverageBreakerSafeTxHash(proposal, '7'),
-    priorState: 'SAFE_PROPOSED',
-  };
-}
-
-function coverageBreakerChainSource(fetchImpl: typeof fetch) {
-  return new ResilientCoverageBreakerChainSource({
-    lookupUrl: 'https://safe-lookup.example.invalid/coverage-breaker',
-    lookupToken: 'lookup-token',
-    primaryRpcUrl: 'https://coverage-primary-rpc.example.invalid',
-    fallbackRpcUrl: 'https://coverage-fallback-rpc.example.invalid',
-    fetchImpl,
-  });
-}
-
-function coverageBreakerRpcHarness() {
-  const executionTxHash = HASH_3;
-  const minedBlockHash = `0x${'6'.repeat(64)}`;
-  const iface = new Interface([
-    'event PaymentPauseChanged(bool paused,bytes32 indexed evidenceHash)',
-    'function newPaymentsPaused() view returns (bool)',
-  ]);
-  const event = iface.getEvent('PaymentPauseChanged');
-  if (!event) throw new Error('MissingPaymentPauseChangedEvent');
-  const state = {
-    primaryChainId: 56,
-    fallbackChainId: 56,
-    head: 114,
-    receiptStatus: '0x1',
-    transactionTo: BUYER,
-    eventEvidenceHash: HASH_1,
-    eventPaused: true,
-    routerPaused: true,
-    fallbackReceiptBlockHash: minedBlockHash,
-    primaryCanonicalBlockHash: minedBlockHash,
-    fallbackCanonicalBlockHash: minedBlockHash,
-  };
-  const fetchImpl: typeof fetch = async (input, init) => {
-    const url = String(input);
-    if (url.startsWith('https://safe-lookup.example.invalid')) {
-      return jsonResponse({
-        safeTxHash: coverageBreakerCandidate().safeTxHash,
-        resourceId: coverageBreakerCandidate().actionId,
-        executionTxHash,
-      });
-    }
-    const primary = url.startsWith('https://coverage-primary-rpc.example.invalid');
-    const request = JSON.parse(String(init?.body)) as { method: string; params: unknown[] };
-    let result: unknown;
-    if (request.method === 'eth_chainId') {
-      result = `0x${(primary ? state.primaryChainId : state.fallbackChainId).toString(16)}`;
-    } else if (request.method === 'eth_blockNumber') {
-      result = `0x${state.head.toString(16)}`;
-    } else if (request.method === 'eth_getBlockByNumber') {
-      result = { hash: primary ? state.primaryCanonicalBlockHash : state.fallbackCanonicalBlockHash };
-    } else if (request.method === 'eth_getTransactionByHash') {
-      result = { hash: executionTxHash, to: state.transactionTo };
-    } else if (request.method === 'eth_call') {
-      result = iface.encodeFunctionResult('newPaymentsPaused', [state.routerPaused]);
-    } else if (request.method === 'eth_getTransactionReceipt') {
-      const encoded = iface.encodeEventLog(event, [state.eventPaused, state.eventEvidenceHash]);
-      result = {
-        transactionHash: executionTxHash,
-        status: state.receiptStatus,
-        blockHash: primary ? minedBlockHash : state.fallbackReceiptBlockHash,
-        blockNumber: '0x64',
-        logs: [{ address: CONTRACT, topics: encoded.topics, data: encoded.data }],
-      };
-    } else {
-      throw new Error(`UnexpectedCoverageBreakerRpcMethod:${request.method}`);
-    }
-    return jsonResponse({ jsonrpc: '2.0', id: 1, result });
-  };
-  return { state, fetch: fetchImpl, executionTxHash, minedBlockHash };
-}
-
-function seckillCandidate(kind: 'OPEN_SESSION' | 'FORCE_CLOSE' | 'PRIZE_INJECTION'): SeckillFinalityCandidate {
-  const router = new Interface([
-    'function openSeckillSession(bytes32 sessionId,uint64 policyVersion,uint64 startsAt)',
-    'function setSeckillPurchasesPaused(bool paused,bytes32 evidenceHash)',
-  ]);
-  const token = new Interface(['function transfer(address recipient,uint256 amount) returns (bool)']);
-  let proposal: SeckillSafeProposal;
-  if (kind === 'OPEN_SESSION') {
-    const calldata = router.encodeFunctionData('openSeckillSession', [ORDER_ID, 1, 1_800_000_000]).toLowerCase();
-    proposal = {
-      actionId: HASH_2,
-      sessionId: ORDER_ID,
-      actionKind: kind,
-      policyVersion: 1,
-      evidenceHash: HASH_1,
-      safeAddress: BUYER,
-      targetAddress: CONTRACT,
-      calldata,
-      calldataHash: keccak256(calldata).toLowerCase(),
-      minimumSafeNonce: '7',
-      expected: {
-        kind,
-        startsAt: 1_800_000_000,
-        mainDeadline: 1_800_003_600,
-        relayDeadline: 1_800_000_060,
-      },
-    };
-  } else if (kind === 'FORCE_CLOSE') {
-    const calldata = router.encodeFunctionData('setSeckillPurchasesPaused', [true, HASH_1]).toLowerCase();
-    proposal = {
-      actionId: HASH_2,
-      sessionId: ORDER_ID,
-      actionKind: kind,
-      policyVersion: 1,
-      evidenceHash: HASH_1,
-      safeAddress: BUYER,
-      targetAddress: CONTRACT,
-      calldata,
-      calldataHash: keccak256(calldata).toLowerCase(),
-      minimumSafeNonce: '7',
-      expected: { kind, targetPaused: true },
-    };
-  } else {
-    const calldata = token.encodeFunctionData('transfer', [MERCHANT, 50]).toLowerCase();
-    proposal = {
-      actionId: HASH_2,
-      sessionId: ORDER_ID,
-      actionKind: kind,
-      policyVersion: 1,
-      evidenceHash: HASH_1,
-      safeAddress: BUYER,
-      targetAddress: USDT_ADDRESS,
-      calldata,
-      calldataHash: keccak256(calldata).toLowerCase(),
-      minimumSafeNonce: '7',
-      expected: {
-        kind,
-        amountUsdt: '50',
-        operationsSafeAddress: BUYER,
-        custodySafeAddress: MERCHANT,
-        tokenAddress: USDT_ADDRESS,
-      },
-    };
-  }
-  return {
-    ...proposal,
-    safeTxHash: seckillSafeTxHash(proposal, '7'),
-    priorState: 'SAFE_PROPOSED',
-  };
-}
-
-function seckillRpcHarness(candidate: SeckillFinalityCandidate) {
-  const executionTxHash = HASH_3;
-  const minedBlockHash = `0x${'6'.repeat(64)}`;
-  const router = new Interface([
-    'event SeckillSessionOpened(bytes32 indexed sessionId,uint64 indexed policyVersion,uint64 startsAt,uint64 mainDeadline,uint64 relayDeadline)',
-    'event SeckillPurchasePauseChanged(bool paused,bytes32 indexed evidenceHash)',
-    'function seckillPurchasesPaused() view returns (bool)',
-  ]);
-  const token = new Interface(['event Transfer(address indexed from,address indexed to,uint256 value)']);
-  const state = {
-    head: 114,
-    transactionTo: candidate.safeAddress,
-    canonicalBlockHash: minedBlockHash,
-    routerPaused: true,
-    prizeAmount: '50',
-  };
-  const eventLog = () => {
-    if (candidate.expected.kind === 'OPEN_SESSION') {
-      const event = router.getEvent('SeckillSessionOpened')!;
-      const encoded = router.encodeEventLog(event, [
-        candidate.sessionId,
-        candidate.policyVersion,
-        candidate.expected.startsAt,
-        candidate.expected.mainDeadline,
-        candidate.expected.relayDeadline,
-      ]);
-      return { address: candidate.targetAddress, topics: encoded.topics, data: encoded.data };
-    }
-    if (candidate.expected.kind === 'FORCE_CLOSE' || candidate.expected.kind === 'RESUME_PURCHASES') {
-      const event = router.getEvent('SeckillPurchasePauseChanged')!;
-      const encoded = router.encodeEventLog(event, [candidate.expected.targetPaused, candidate.evidenceHash]);
-      return { address: candidate.targetAddress, topics: encoded.topics, data: encoded.data };
-    }
-    if (candidate.expected.kind !== 'PRIZE_INJECTION') throw new Error('MissingPrizeExpectation');
-    const event = token.getEvent('Transfer')!;
-    const encoded = token.encodeEventLog(event, [
-      candidate.expected.operationsSafeAddress,
-      candidate.expected.custodySafeAddress,
-      state.prizeAmount,
-    ]);
-    return { address: candidate.expected.tokenAddress, topics: encoded.topics, data: encoded.data };
-  };
-  const fetchImpl: typeof fetch = async (input, init) => {
-    const url = String(input);
-    if (url.startsWith('https://safe-lookup.example.invalid')) {
-      return jsonResponse({
-        safeTxHash: candidate.safeTxHash,
-        resourceId: candidate.actionId,
-        executionTxHash,
-      });
-    }
-    const request = JSON.parse(String(init?.body)) as { method: string };
-    let result: unknown;
-    if (request.method === 'eth_chainId') result = '0x38';
-    else if (request.method === 'eth_blockNumber') result = `0x${state.head.toString(16)}`;
-    else if (request.method === 'eth_getBlockByNumber') result = { hash: state.canonicalBlockHash };
-    else if (request.method === 'eth_getTransactionByHash') result = { hash: executionTxHash, to: state.transactionTo };
-    else if (request.method === 'eth_call') {
-      result = router.encodeFunctionResult('seckillPurchasesPaused', [state.routerPaused]);
-    } else if (request.method === 'eth_getTransactionReceipt') {
-      result = {
-        transactionHash: executionTxHash,
-        status: '0x1',
-        blockHash: minedBlockHash,
-        blockNumber: '0x64',
-        logs: [eventLog()],
-      };
-    } else throw new Error(`UnexpectedSeckillRpcMethod:${request.method}`);
-    return jsonResponse({ jsonrpc: '2.0', id: 1, result });
-  };
-  return { state, fetch: fetchImpl };
-}
-
 function jsonResponse(body: unknown) {
   return new Response(JSON.stringify(body), {
     status: 200,
@@ -2038,10 +1178,10 @@ function paymentPolicySnapshot(): PaymentPolicySnapshot {
     relayCap: 60,
     requiredConfirmations: 15,
     merchantGuaranteeMinimumUsdt: 1_000n * 10n ** 18n,
-    platformServiceFeeSafe: '0x2222222222222222222222222222222222222223',
-    usdtCustodySafe: '0x3333333333333333333333333333333333333333',
-    nplRewardSafe: '0x4444444444444444444444444444444444444444',
-    operationsTreasurySafe: '0x5555555555555555555555555555555555555555',
+    platformServiceFeeWallet: '0x2222222222222222222222222222222222222223',
+    usdtSettlementWallet: '0x3333333333333333333333333333333333333333',
+    nplRewardWallet: '0x4444444444444444444444444444444444444444',
+    operationsWallet: '0x5555555555555555555555555555555555555555',
     circulationPool: '0x6000000000000000000000000000000000000001',
     concessionDestinationSetHash: paymentAllocationSetHash(),
     decisionEvidenceHash: HASH_2,
@@ -2082,9 +1222,9 @@ function paymentPolicyTuple(
     policy.relayIncrement,
     policy.relayCap,
     policy.merchantGuaranteeMinimumUsdt,
-    policy.usdtCustodySafe,
-    policy.nplRewardSafe,
-    policy.operationsTreasurySafe,
+    policy.usdtSettlementWallet,
+    policy.nplRewardWallet,
+    policy.operationsWallet,
     policy.circulationPool,
     beneficiarySetHash,
     policy.concessionDestinationSetHash,

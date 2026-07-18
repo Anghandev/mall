@@ -308,15 +308,14 @@
   ],
   "settlementRequestStates": [
     "REQUESTED",
-    "BATCHED",
+    "SUBMITTED",
     "SETTLED",
     "RETRYABLE",
     "QUARANTINED"
   ],
-  "settlementBatchStates": [
-    "APPROVAL_PENDING",
-    "APPROVED",
-    "SUBMITTING",
+  "settlementTransferStates": [
+    "PENDING",
+    "LEASED",
     "SUBMITTED",
     "MINED",
     "SETTLED",
@@ -368,7 +367,7 @@
     "LOCKED",
     "AVAILABLE",
     "REQUESTED",
-    "BATCHED",
+    "SUBMITTED",
     "SETTLED",
     "DISPUTED"
   ],
@@ -424,7 +423,7 @@
     "DRAFT",
     "DECISION_BLOCKED",
     "SECONDARY_SIGNED",
-    "SAFE_PROPOSED",
+    "SUBMITTED",
     "FINALITY_PENDING",
     "REORGED",
     "REJECTED",

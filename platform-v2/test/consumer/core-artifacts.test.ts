@@ -23,8 +23,8 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('settlement admin .15 checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-settlement-admin.15');
+test('settlement admin .16 checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-settlement-admin.16');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
@@ -101,10 +101,10 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'GET /v2/admin/risk/overview',
     'GET /v2/admin/seckill/actions',
     'GET /v2/admin/seckill/actions/{actionId}',
-    'GET /v2/admin/settlement-batches',
-    'GET /v2/admin/settlement-batches/{batchId}',
     'GET /v2/admin/settlement-requests',
     'GET /v2/admin/settlement-requests/{requestId}',
+    'GET /v2/admin/settlement-transfers',
+    'GET /v2/admin/settlement-transfers/{transferId}',
     'GET /v2/admin/system-config/versions',
     'GET /v2/admin/takeover-cases',
     'GET /v2/admin/takeover-cases/{caseId}',
@@ -176,7 +176,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'POST /v2/admin/orders/batch-actions/preview',
     'POST /v2/admin/policy-drafts',
     'POST /v2/admin/policy-drafts/{draftId}/approval-challenge',
-    'POST /v2/admin/policy-drafts/{draftId}/safe-proposal',
+    'POST /v2/admin/policy-drafts/{draftId}/execute',
     'POST /v2/admin/policy-drafts/{draftId}/secondary-signature',
     'POST /v2/admin/risk/appeals',
     'POST /v2/admin/risk/appeals/{appealId}/decision',
@@ -184,7 +184,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'POST /v2/admin/risk/restrictions/{restrictionId}/override',
     'POST /v2/admin/seckill/actions/{actionId}/approval-challenge',
     'POST /v2/admin/seckill/actions/{actionId}/cancel',
-    'POST /v2/admin/seckill/actions/{actionId}/safe-proposal',
+    'POST /v2/admin/seckill/actions/{actionId}/execute',
     'POST /v2/admin/seckill/actions/{actionId}/secondary-signature',
     'POST /v2/admin/seckill/breaker/resume',
     'POST /v2/admin/seckill/sessions',
@@ -303,7 +303,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
   assert.equal(openapi.components.schemas.ApprovalRequirement.properties.risk.const, 'UNLIMITED_TOKEN_ALLOWANCE');
   assert.equal(openapi.components.schemas.OtherUsdtAllocation, undefined);
   assert.ok(openapi.components.schemas.ProductPolicy.required.includes('seckillPrizeBps'));
-  assert.ok(openapi.components.schemas.ProductPolicy.required.includes('platformServiceFeeSafe'));
+  assert.ok(openapi.components.schemas.ProductPolicy.required.includes('platformServiceFeeWallet'));
   assert.ok(openapi.components.schemas.ProductPolicy.required.includes('genesisNodeDestinations'));
   assert.deepEqual(openapi.components.schemas.MediaUploadIntentRequest.properties.purpose.enum, [
     'PRODUCT_IMAGE',
@@ -429,7 +429,7 @@ test('generated fulfillment DTOs expose exact amounts, immutable evidence and co
     'ORDINARY', 'FALLBACK_RETAIL',
   ]);
   assert.deepEqual(openapi.components.schemas.MerchantReceivableLifecycle.properties.state.enum, [
-    'LOCKED', 'AVAILABLE', 'REQUESTED', 'BATCHED', 'SETTLED', 'DISPUTED',
+    'LOCKED', 'AVAILABLE', 'REQUESTED', 'SUBMITTED', 'SETTLED', 'DISPUTED',
   ]);
   assert.equal(openapi.components.schemas.MerchantReceivableJournalEvidence.properties.delta.pattern, '^-?[1-9][0-9]*$');
   assert.deepEqual(Object.keys(openapi.components.schemas.FulfillmentExactAmounts.properties).sort(), [
@@ -476,8 +476,8 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
     'SettlementListProjection',
     'AdminSettlementRequestList',
     'AdminSettlementRequestDetail',
-    'AdminSettlementBatchList',
-    'AdminSettlementBatchDetail',
+    'AdminSettlementTransferList',
+    'AdminSettlementTransferDetail',
     'BnmPointsBalance',
     'SeckillSessionProjection',
     'SeckillSessionHistoryPage',
@@ -541,19 +541,19 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
   ]);
   assert.deepEqual(enums.seckillStates, ['PREHEAT', 'LIVE', 'SETTLING', 'SETTLED', 'FORCE_CLOSED']);
   assert.deepEqual(enums.policyDraftStates, [
-    'DRAFT', 'DECISION_BLOCKED', 'SECONDARY_SIGNED', 'SAFE_PROPOSED',
+    'DRAFT', 'DECISION_BLOCKED', 'SECONDARY_SIGNED', 'SUBMITTED',
     'FINALITY_PENDING', 'REORGED', 'REJECTED', 'PUBLISHED',
   ]);
   assert.ok(enums.adapterProviders.includes('TENCENT_SMS'));
   assert.ok(enums.adapterProviders.includes('FIREBASE'));
   assert.deepEqual(Object.keys(openapi.components.schemas.SettlementRequestProjection.properties).sort(), [
-    'amount', 'artifact_version', 'asset', 'asset_address', 'batch_id', 'batched_at',
-    'final_execution_tx_hash', 'final_safe_tx_hash', 'intent_digest', 'intent_id', 'items',
-    'items_hash', 'rail', 'recipient_address', 'request_id', 'requested_at', 'safe_address',
-    'settled_at', 'signature_hash', 'state', 'transitions', 'wallet_address',
+    'amount', 'artifact_version', 'asset', 'asset_address', 'executor_wallet',
+    'final_execution_tx_hashes', 'intent_digest', 'intent_id', 'items', 'items_hash',
+    'rail', 'recipient_address', 'request_id', 'requested_at', 'settled_at',
+    'signature_hash', 'state', 'submitted_at', 'transfer_ids', 'transitions', 'wallet_address',
   ]);
   assert.deepEqual(Object.keys(openapi.components.schemas.MonitoringCoverage.properties).sort(), [
-    'asset', 'assets', 'covered', 'observed_at', 'safe_address', 'unsettled_liabilities',
+    'asset', 'assets', 'covered', 'observed_at', 'unsettled_liabilities', 'wallet_address',
   ]);
   assert.equal(openapi.paths['/v2/cms/public'].get.responses['200'].content['application/json'].schema.type, 'array');
   assert.equal(openapi.paths['/v2/notifications'].get.responses['200'].content['application/json'].schema.type, 'array');
@@ -564,10 +564,10 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
   assert.equal(openapi.paths['/v2/admin/system-config/versions'].get.responses['200'].content['application/json'].schema.type, 'array');
   assert.ok(openapi.components.schemas.SettlementListProjection.required.includes('points'));
   assert.equal(openapi.paths['/v2/admin/payments/{orderId}'].get.operationId, 'getAdminPaymentProjection');
-  assert.equal(openapi.paths['/v2/admin/settlement-batches/{batchId}'].get.operationId, 'getAdminSettlementBatch');
-  assert.equal(openapi.components.schemas.AdminSettlementBatchEnvelope.properties.chainId.const, 56);
+  assert.equal(openapi.paths['/v2/admin/settlement-transfers/{transferId}'].get.operationId, 'getAdminSettlementTransfer');
+  assert.equal(openapi.components.schemas.AdminSettlementTransferEnvelope.properties.chainId.const, 56);
   assert.equal(openapi.components.schemas.AdminSettlementFinality.properties.requiredConfirmations.const, 15);
-  assert.equal(openapi.components.schemas.AdminSettlementBatchDetail.properties.reconciliation.$ref, '#/components/schemas/AdminSettlementReconciliation');
+  assert.equal(openapi.components.schemas.AdminSettlementTransferDetail.properties.reconciliation.$ref, '#/components/schemas/AdminSettlementReconciliation');
   assert.ok(openapi.components.schemas.SettlementBalance.required.includes('rewardSubtype'));
   assert.equal(openapi.components.schemas.BnmPointsBalance.properties.transferable.const, false);
   assert.equal(openapi.components.schemas.RealtimeEventEnvelope.properties.finality.const, 'FINAL');
@@ -818,7 +818,7 @@ test('publication contains no Claim, BNM token payout, old escrow or old allocat
   assert.equal([...settlementRails].includes('BNM' as never), false);
 });
 
-test('catalog, settlement/admin and seckill realtime capabilities are published while deployment stays fail closed', () => {
+test('catalog, settlement/admin and seckill realtime capabilities publish the attested deployment', () => {
   assert.equal(websocket.endpoint, '/v2/ws');
   assert.equal(websocket.channels.length, 1);
   assert.equal(websocket.channels[0].pattern, 'seckill:{sessionId}');
@@ -859,7 +859,7 @@ test('catalog, settlement/admin and seckill realtime capabilities are published 
     'fulfillmentScheduler',
     'bnmAvailabilityWorker',
     'settlementHttp',
-    'settlementSafeBatching',
+    'settlementEoaTransfers',
     'buyerShoppingStatementHttp',
     'merchantReceivableStatementHttp',
     'guaranteeDepositHttp',
@@ -894,9 +894,19 @@ test('catalog, settlement/admin and seckill realtime capabilities are published 
   assert.equal(manifest.deploymentAuthorized, false);
   assert.equal(manifest.deploymentAuthorizationEvidenceHash, null);
   assert.equal(contractManifest.deploymentAuthorized, false);
-  assert.equal(contractManifest.deploymentAuthorizationEvidenceHash, null);
-  assert.ok(contractManifest.contracts.every((contract: { deploymentBlock: null; deployedCodeHash: null }) =>
-    contract.deploymentBlock === null && contract.deployedCodeHash === null));
+  assert.equal(
+    contractManifest.deploymentAuthorizationEvidenceHash,
+    manifest.deploymentAuthorizationEvidenceHash,
+  );
+  assert.ok(contractManifest.contracts.every((contract: {
+    status: string;
+    address: string | null;
+    deploymentBlock: number | null;
+    deployedCodeHash: string | null;
+  }) => contract.status === 'PENDING'
+      && contract.address === null
+      && contract.deploymentBlock === null
+      && contract.deployedCodeHash === null));
   const fulfillmentActions = [
     'REQUEST_EXCHANGE',
     'REQUEST_DELAY',

@@ -16,10 +16,10 @@ export interface PaymentPolicySnapshot extends FrozenPaymentPolicy {
   relayInitial: number;
   relayIncrement: number;
   relayCap: number;
-  platformServiceFeeSafe: string;
-  usdtCustodySafe: string;
-  nplRewardSafe: string;
-  operationsTreasurySafe: string;
+  platformServiceFeeWallet: string;
+  usdtSettlementWallet: string;
+  nplRewardWallet: string;
+  operationsWallet: string;
   circulationPool: string;
   concessionDestinationSetHash: string;
   decisionEvidenceHash: string;
@@ -53,10 +53,10 @@ export function parsePaymentPolicySnapshot(
     relayCap: integer(value.relayCap, 'relayCap'),
     requiredConfirmations: integer(value.requiredConfirmations, 'requiredConfirmations'),
     merchantGuaranteeMinimumUsdt: unsigned(value.merchantGuaranteeMinimumUsdt, 'merchantGuaranteeMinimumUsdt'),
-    platformServiceFeeSafe: text(value.platformServiceFeeSafe, 'platformServiceFeeSafe'),
-    usdtCustodySafe: text(value.usdtCustodySafe, 'usdtCustodySafe'),
-    nplRewardSafe: text(value.nplRewardSafe, 'nplRewardSafe'),
-    operationsTreasurySafe: text(value.operationsTreasurySafe, 'operationsTreasurySafe'),
+    platformServiceFeeWallet: text(value.platformServiceFeeWallet, 'platformServiceFeeWallet'),
+    usdtSettlementWallet: text(value.usdtSettlementWallet, 'usdtSettlementWallet'),
+    nplRewardWallet: text(value.nplRewardWallet, 'nplRewardWallet'),
+    operationsWallet: text(value.operationsWallet, 'operationsWallet'),
     circulationPool: text(value.circulationPool, 'circulationPool'),
     concessionDestinationSetHash: text(value.concessionDestinationSetHash, 'concessionDestinationSetHash'),
     decisionEvidenceHash: text(value.decisionEvidenceHash, 'decisionEvidenceHash'),

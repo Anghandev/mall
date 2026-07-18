@@ -52,14 +52,13 @@ interface SettlementRow {
   request_id: string;
   amount: string;
   state: string;
-  batch_id: string | null;
-  final_safe_tx_hash: string | null;
+  transfer_id: string | null;
   final_execution_tx_hash: string | null;
   requested_journal_id: string;
-  batched_journal_id: string | null;
+  submitted_journal_id: string | null;
   settled_journal_id: string | null;
   requested_at: Date | string;
-  batched_at: Date | string | null;
+  submitted_at: Date | string | null;
   settled_at: Date | string | null;
 }
 
@@ -266,12 +265,20 @@ async function loadSettlements(executor: SqlExecutor, orderIds: string[], wallet
   if (orderIds.length === 0) return grouped;
   const result = await executor.query<SettlementRow>(
     `SELECT item.order_id, request.request_id, item.amount::text, request.state,
-       request.batch_id, request.final_safe_tx_hash, request.final_execution_tx_hash,
-       item.requested_journal_id, item.batched_journal_id, item.settled_journal_id,
-       request.requested_at, request.batched_at, request.settled_at
+       transfer.transfer_id, final_attempt.execution_tx_hash AS final_execution_tx_hash,
+       item.requested_journal_id, item.submitted_journal_id, item.settled_journal_id,
+       request.requested_at, request.submitted_at, request.settled_at
      FROM core.settlement_request_items item
      JOIN core.settlement_requests request ON request.request_id = item.request_id
      JOIN core.ledger_accounts account ON account.account_id = item.account_id
+     LEFT JOIN core.settlement_transfers transfer
+       ON transfer.request_id = item.request_id AND transfer.request_item_index = item.item_index
+     LEFT JOIN LATERAL (
+       SELECT attempt.execution_tx_hash
+       FROM core.settlement_transfer_attempts attempt
+       WHERE attempt.transfer_id = transfer.transfer_id AND attempt.state = 'SETTLED'
+       ORDER BY attempt.attempt_number DESC LIMIT 1
+     ) final_attempt ON true
      WHERE item.order_id = ANY($1::text[]) AND request.wallet_address = $2
        AND request.rail = 'MERCHANT_USDT'
        AND account.purpose IN ('MERCHANT_RECEIVABLE','MERCHANT_FREIGHT_RECEIVABLE')
@@ -353,16 +360,15 @@ function merchantStatement(
       requestId: settlement.request_id,
       amount: settlement.amount,
       state: settlement.state,
-      batchId: settlement.batch_id,
-      finalSafeTxHash: settlement.final_safe_tx_hash,
+      transferId: settlement.transfer_id,
       finalExecutionTxHash: settlement.final_execution_tx_hash,
       journals: {
         requested: settlement.requested_journal_id,
-        batched: settlement.batched_journal_id,
+        submitted: settlement.submitted_journal_id,
         settled: settlement.settled_journal_id,
       },
       requestedAt: iso(settlement.requested_at),
-      batchedAt: nullableIso(settlement.batched_at),
+      submittedAt: nullableIso(settlement.submitted_at),
       settledAt: nullableIso(settlement.settled_at),
     })),
   };

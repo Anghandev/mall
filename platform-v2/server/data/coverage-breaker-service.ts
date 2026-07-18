@@ -20,13 +20,13 @@ interface ActionRow {
   action: 'PAUSE' | 'RESUME';
   target_paused: boolean;
   evidence_hash: string;
-  governance_safe_address: string;
+  governance_wallet_address: string;
   router_address: string;
   calldata_hash: string;
-  state: 'PENDING_PROPOSAL' | 'SAFE_PROPOSED' | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'SUPERSEDED';
-  safe_nonce: string | number | null;
-  safe_tx_hash: string | null;
-  proposal_hash: string | null;
+  state: 'PENDING_EXECUTION' | 'SUBMITTED' | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'SUPERSEDED';
+  executor_nonce: string | number | null;
+  submitted_tx_hash: string | null;
+  execution_evidence_hash: string | null;
   execution_tx_hash: string | null;
   confirmations: number;
   actor_wallet: string | null;
@@ -49,20 +49,20 @@ interface ResumeContext {
 
 export class CoverageBreakerService {
   readonly #transactions: SqlTransactionRunner;
-  readonly #governanceSafe: string;
+  readonly #governanceWallet: string;
   readonly #paymentRouter: string;
   readonly #secondarySigner: string;
   readonly #clock: () => Date;
 
   constructor(input: {
     transactions: SqlTransactionRunner;
-    governanceSafeAddress: string;
+    governanceWalletAddress: string;
     paymentRouterAddress: string;
     secondarySignerAddress: string;
     clock?: () => Date;
   }) {
     this.#transactions = input.transactions;
-    this.#governanceSafe = address(input.governanceSafeAddress, 'coverage governance Safe');
+    this.#governanceWallet = address(input.governanceWalletAddress, 'coverage governance wallet');
     this.#paymentRouter = address(input.paymentRouterAddress, 'PaymentRouter');
     this.#secondarySigner = address(input.secondarySignerAddress, 'coverage secondary signer');
     this.#clock = input.clock ?? (() => new Date());
@@ -74,7 +74,7 @@ export class CoverageBreakerService {
     validateDeadline(deadline, this.#clock());
     return this.#transactions.transaction(async (executor) => {
       const context = await this.#resumeContext(executor, actor);
-      const intent = resumeIntent(context, nonce, deadline, this.#governanceSafe);
+      const intent = resumeIntent(context, nonce, deadline, this.#governanceWallet);
       const domain = sensitiveActionDomain(this.#paymentRouter);
       return Object.freeze({
         artifactVersion: CORE_ARTIFACT_VERSION,
@@ -82,7 +82,7 @@ export class CoverageBreakerService {
         evidenceHash: context.evidenceHash,
         policyVersion: context.policyVersion.toString(),
         signer: this.#secondarySigner,
-        safeAddress: this.#governanceSafe,
+        executorWallet: this.#governanceWallet,
         routerAddress: this.#paymentRouter,
         typedData: {
           domain,
@@ -106,9 +106,6 @@ export class CoverageBreakerService {
     validateDeadline(deadline, this.#clock());
     return this.#transactions.transaction(async (executor) => {
       const actorWallet = await requireCurrentRole(executor, actor, ['ADMIN']);
-      if (actorWallet === this.#secondarySigner) {
-        throw new CoreError('Forbidden', 'Coverage resume requires an independent secondary wallet', 403);
-      }
       const prior = await executor.query<ActionRow>(
         `SELECT * FROM core.coverage_breaker_actions
          WHERE action = 'RESUME' AND secondary_signer = $1 AND approval_nonce = $2
@@ -126,18 +123,15 @@ export class CoverageBreakerService {
         return actionProjection(row);
       }
       const context = await this.#resumeContext(executor, actor, actorWallet, input.snapshotId.toLowerCase());
-      const intent = resumeIntent(context, nonce, deadline, this.#governanceSafe);
+      const intent = resumeIntent(context, nonce, deadline, this.#governanceWallet);
       const approval = verifySensitiveActionApproval(
         intent,
         input.signature,
         this.#secondarySigner,
-        this.#governanceSafe,
+        this.#governanceWallet,
         this.#paymentRouter,
         this.#clock(),
       );
-      if (approval.signer === actorWallet) {
-        throw new CoreError('Forbidden', 'Coverage resume requires an independent secondary wallet', 403);
-      }
       const calldata = ROUTER.encodeFunctionData(
         'setNewPaymentsPaused',
         [false, context.evidenceHash],
@@ -154,16 +148,16 @@ export class CoverageBreakerService {
       await executor.query(
         `INSERT INTO core.coverage_breaker_actions (
            action_id, snapshot_id, policy_version, action, target_paused, evidence_hash,
-           governance_safe_address, router_address, calldata, calldata_hash,
+           governance_wallet_address, router_address, calldata, calldata_hash,
            state, actor_wallet, secondary_signer, secondary_signature_hash,
            approval_nonce, approval_deadline, created_at, updated_at
-         ) VALUES ($1,$2,$3,'RESUME',false,$4,$5,$6,$7,$8,'PENDING_PROPOSAL',$9,$10,$11,$12,$13,$14,$14)`,
+         ) VALUES ($1,$2,$3,'RESUME',false,$4,$5,$6,$7,$8,'PENDING_EXECUTION',$9,$10,$11,$12,$13,$14,$14)`,
         [
           actionId,
           context.snapshotId,
           context.policyVersion.toString(),
           context.evidenceHash,
-          this.#governanceSafe,
+          this.#governanceWallet,
           this.#paymentRouter,
           calldata,
           keccak256(calldata).toLowerCase(),
@@ -178,9 +172,9 @@ export class CoverageBreakerService {
       await executor.query(
         `INSERT INTO core.coverage_breaker_action_transitions (
            transition_id, action_id, from_state, to_state, evidence, recorded_at
-         ) VALUES ($1,$2,NULL,'PENDING_PROPOSAL',$3,$4)`,
+         ) VALUES ($1,$2,NULL,'PENDING_EXECUTION',$3,$4)`,
         [
-          hashJson({ actionId, state: 'PENDING_PROPOSAL' }),
+          hashJson({ actionId, state: 'PENDING_EXECUTION' }),
           actionId,
           JSON.stringify({ snapshotId: context.snapshotId, digest, signatureHash }),
           now,
@@ -201,7 +195,7 @@ export class CoverageBreakerService {
           snapshotId: context.snapshotId,
           evidenceHash: context.evidenceHash,
           policyVersion: context.policyVersion.toString(),
-          safeAddress: this.#governanceSafe,
+          executorWallet: this.#governanceWallet,
           routerAddress: this.#paymentRouter,
         },
         signatureEvidence: {
@@ -236,12 +230,9 @@ export class CoverageBreakerService {
     requestedSnapshotId?: string,
   ): Promise<ResumeContext> {
     const actorWallet = knownWallet ?? await requireCurrentRole(executor, actor, ['ADMIN']);
-    if (actorWallet === this.#secondarySigner) {
-      throw new CoreError('Forbidden', 'Coverage resume requires an independent secondary wallet', 403);
-    }
     const latestAction = await executor.query<ActionRow>(
       `SELECT * FROM core.coverage_breaker_actions
-       WHERE state IN ('PENDING_PROPOSAL','SAFE_PROPOSED','MINED','FINAL')
+       WHERE state IN ('PENDING_EXECUTION','SUBMITTED','MINED','FINAL')
        ORDER BY created_at DESC, action_id DESC LIMIT 1`,
     );
     const pause = latestAction.rows[0];
@@ -346,7 +337,7 @@ function resumeIntent(
   context: ResumeContext,
   nonce: bigint,
   deadline: bigint,
-  safeAddress: string,
+  executorWallet: string,
 ): SensitiveActionIntent {
   return {
     action: 'RESUME_NEW_PAYMENTS',
@@ -355,7 +346,7 @@ function resumeIntent(
     policyVersion: context.policyVersion,
     oldValueHash: context.oldValueHash,
     newValueHash: context.newValueHash,
-    safeAddress,
+    executorWallet,
     nonce,
     deadline,
   };
@@ -402,13 +393,13 @@ function actionProjection(row: ActionRow) {
     action: row.action,
     targetPaused: row.target_paused,
     evidenceHash: row.evidence_hash,
-    governanceSafeAddress: row.governance_safe_address,
+    governanceWalletAddress: row.governance_wallet_address,
     routerAddress: row.router_address,
     calldataHash: row.calldata_hash,
     state: row.state,
-    safeNonce: row.safe_nonce === null ? null : String(row.safe_nonce),
-    safeTxHash: row.safe_tx_hash,
-    proposalHash: row.proposal_hash,
+    executorNonce: row.executor_nonce === null ? null : String(row.executor_nonce),
+    submittedTxHash: row.submitted_tx_hash,
+    executionEvidenceHash: row.execution_evidence_hash,
     executionTxHash: row.execution_tx_hash,
     confirmations: row.confirmations,
     actorWallet: row.actor_wallet,

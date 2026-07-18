@@ -48,13 +48,13 @@ export async function settleMaturedSeckillPrizes(executor: SqlExecutor, now: Dat
     cutoff_at: Date;
     policy_version: string | number;
     prize_pool_usdt: string;
-    custody_safe_address: string;
+    settlement_wallet_address: string;
     force_close_block_number: string | number | null;
   }>(
     `SELECT session.session_id, session.phase, session.starts_at,
        LEAST(session.main_deadline, session.relay_deadline) AS cutoff_at,
        session.policy_version, session.prize_pool_usdt::text,
-       lower(policy.payload ->> 'usdtCustodySafe') AS custody_safe_address,
+       lower(policy.payload ->> 'usdtSettlementWallet') AS settlement_wallet_address,
        force_action.block_number AS force_close_block_number
      FROM core.seckill_sessions session
      JOIN core.policy_snapshots policy ON policy.policy_version = session.policy_version
@@ -87,7 +87,7 @@ export async function settleMaturedSeckillPrizes(executor: SqlExecutor, now: Dat
   for (const session of sessions.rows) {
     const winner = await selectWinner(executor, session.session_id, session.cutoff_at, session.force_close_block_number);
     const accountId = `seckill-prize:${session.session_id}:usdt`;
-    const ledgerAmount = await lockedPrizeBalance(executor, accountId, session.custody_safe_address);
+    const ledgerAmount = await lockedPrizeBalance(executor, accountId, session.settlement_wallet_address);
     if (ledgerAmount !== BigInt(session.prize_pool_usdt)) {
       throw new CoreError('InvalidFinality', 'Seckill prize projection does not match its Custody ledger', 409);
     }
@@ -96,7 +96,7 @@ export async function settleMaturedSeckillPrizes(executor: SqlExecutor, now: Dat
       cutoffAt: session.cutoff_at.toISOString(),
       poolAmountUsdt: ledgerAmount.toString(),
       accountId,
-      custodySafeAddress: session.custody_safe_address,
+      settlementWalletAddress: session.settlement_wallet_address,
       candidateOrderId: winner?.order_id ?? null,
       candidatePaymentEventKey: winner?.event_key ?? null,
     });
@@ -192,13 +192,13 @@ export async function reviewSeckillPrize(
     let awardJournalId: string | null = null;
     if (BigInt(row.pool_amount_usdt) > 0n) {
       const sourceAccountId = `seckill-prize:${row.session_id}:usdt`;
-      const backingSafe = await prizeBackingSafe(executor, sourceAccountId, row.pool_amount_usdt);
+      const backingWallet = await prizeBackingWallet(executor, sourceAccountId, row.pool_amount_usdt);
       awardAccountId = `buyer:${row.candidate_buyer_wallet}:prize:usdt`;
       await ensurePrizeAccount(executor, {
         accountId: awardAccountId,
         ownerType: 'BUYER',
         ownerId: row.candidate_buyer_wallet,
-        safeAddress: null,
+        walletAddress: null,
       });
       awardJournalId = `journal:seckill-prize-award:${row.session_id}`;
       const contentHash = hashJson({
@@ -236,14 +236,14 @@ export async function reviewSeckillPrize(
               side: 'DEBIT',
               amount: row.pool_amount_usdt,
               balance_state: 'LOCKED',
-              backing_safe_address: backingSafe,
+              backing_wallet_address: backingWallet,
             },
             {
               account_id: awardAccountId,
               side: 'CREDIT',
               amount: row.pool_amount_usdt,
               balance_state: 'AVAILABLE',
-              backing_safe_address: backingSafe,
+              backing_wallet_address: backingWallet,
             },
           ]),
         ],
@@ -340,15 +340,22 @@ export async function prizeSettlementProjection(executor: SqlExecutor, row: Priz
     ? (await executor.query<{
       request_id: string;
       state: string;
-      batch_id: string | null;
-      final_safe_tx_hash: string | null;
-      final_execution_tx_hash: string | null;
+      transfer_ids: string[];
+      final_execution_tx_hashes: string[];
     }>(
-      `SELECT request.request_id, request.state, request.batch_id,
-         request.final_safe_tx_hash, request.final_execution_tx_hash
+      `SELECT request.request_id, request.state,
+         COALESCE(array_agg(DISTINCT transfer.transfer_id)
+           FILTER (WHERE transfer.transfer_id IS NOT NULL), '{}') AS transfer_ids,
+         COALESCE(array_agg(DISTINCT attempt.execution_tx_hash)
+           FILTER (WHERE attempt.state = 'SETTLED' AND attempt.execution_tx_hash IS NOT NULL), '{}')
+           AS final_execution_tx_hashes
        FROM core.settlement_request_items item
        JOIN core.settlement_requests request ON request.request_id = item.request_id
+       LEFT JOIN core.settlement_transfers transfer
+         ON transfer.request_id = item.request_id AND transfer.request_item_index = item.item_index
+       LEFT JOIN core.settlement_transfer_attempts attempt ON attempt.transfer_id = transfer.transfer_id
        WHERE item.order_id = $1 AND item.account_id = $2
+       GROUP BY request.request_id
        ORDER BY request.requested_at DESC, request.request_id DESC LIMIT 1`,
       [row.candidate_order_id, row.award_account_id],
     )).rows[0]
@@ -379,9 +386,8 @@ export async function prizeSettlementProjection(executor: SqlExecutor, row: Priz
     payout: row.state === 'APPROVED' ? Object.freeze({
       state: request?.state ?? (BigInt(row.pool_amount_usdt) > 0n ? 'AVAILABLE' : 'SETTLED'),
       requestId: request?.request_id ?? null,
-      batchId: request?.batch_id ?? null,
-      finalSafeTxHash: request?.final_safe_tx_hash ?? null,
-      finalExecutionTxHash: request?.final_execution_tx_hash ?? null,
+      transferIds: request?.transfer_ids ?? [],
+      finalExecutionTxHashes: request?.final_execution_tx_hashes ?? [],
     }) : null,
   });
 }
@@ -392,9 +398,9 @@ async function rollPendingSeckillPrize(
   at: Date,
   explicitTargetSessionId?: string,
 ) {
-  const source = await executor.query<PrizeSettlementRow & { starts_at: Date; custody_safe_address: string }>(
+  const source = await executor.query<PrizeSettlementRow & { starts_at: Date; settlement_wallet_address: string }>(
     `SELECT prize.*, session.starts_at,
-       lower(policy.payload ->> 'usdtCustodySafe') AS custody_safe_address
+       lower(policy.payload ->> 'usdtSettlementWallet') AS settlement_wallet_address
      FROM core.seckill_prize_settlements prize
      JOIN core.seckill_sessions session ON session.session_id = prize.session_id
      JOIN core.policy_snapshots policy ON policy.policy_version = session.policy_version
@@ -410,13 +416,13 @@ async function rollPendingSeckillPrize(
     );
     return;
   }
-  const target = await executor.query<{ session_id: string; custody_safe_address: string }>(
+  const target = await executor.query<{ session_id: string; settlement_wallet_address: string }>(
     explicitTargetSessionId
-      ? `SELECT session.session_id, lower(policy.payload ->> 'usdtCustodySafe') AS custody_safe_address
+      ? `SELECT session.session_id, lower(policy.payload ->> 'usdtSettlementWallet') AS settlement_wallet_address
          FROM core.seckill_sessions session
          JOIN core.policy_snapshots policy ON policy.policy_version = session.policy_version
          WHERE session.session_id = $1 AND session.starts_at > $2`
-      : `SELECT session.session_id, lower(policy.payload ->> 'usdtCustodySafe') AS custody_safe_address
+      : `SELECT session.session_id, lower(policy.payload ->> 'usdtSettlementWallet') AS settlement_wallet_address
          FROM core.seckill_sessions session
          JOIN core.policy_snapshots policy ON policy.policy_version = session.policy_version
          WHERE session.starts_at > $1 AND session.phase <> 'FORCE_CLOSED'
@@ -425,17 +431,17 @@ async function rollPendingSeckillPrize(
   );
   const next = target.rows[0];
   if (!next) return;
-  if (next.custody_safe_address !== row.custody_safe_address) {
-    throw new CoreError('InvalidFinality', 'Seckill rollover cannot cross Custody Safe snapshots', 409);
+  if (next.settlement_wallet_address !== row.settlement_wallet_address) {
+    throw new CoreError('InvalidFinality', 'Seckill rollover cannot cross settlement wallet snapshots', 409);
   }
   const sourceAccountId = `seckill-prize:${sourceSessionId}:usdt`;
   const targetAccountId = `seckill-prize:${next.session_id}:usdt`;
-  await prizeBackingSafe(executor, sourceAccountId, row.pool_amount_usdt);
+  await prizeBackingWallet(executor, sourceAccountId, row.pool_amount_usdt);
   await ensurePrizeAccount(executor, {
     accountId: targetAccountId,
     ownerType: 'BENEFICIARY',
     ownerId: next.session_id,
-    safeAddress: null,
+    walletAddress: null,
   });
   const journalId = `journal:seckill-prize-rollover:${sourceSessionId}`;
   const contentHash = hashJson({
@@ -467,14 +473,14 @@ async function rollPendingSeckillPrize(
           side: 'DEBIT',
           amount: row.pool_amount_usdt,
           balance_state: 'LOCKED',
-          backing_safe_address: row.custody_safe_address,
+          backing_wallet_address: row.settlement_wallet_address,
         },
         {
           account_id: targetAccountId,
           side: 'CREDIT',
           amount: row.pool_amount_usdt,
           balance_state: 'LOCKED',
-          backing_safe_address: row.custody_safe_address,
+          backing_wallet_address: row.settlement_wallet_address,
         },
       ]),
     ],
@@ -536,35 +542,35 @@ async function selectWinner(
   return result.rows[0];
 }
 
-async function lockedPrizeBalance(executor: SqlExecutor, accountId: string, safeAddress: string) {
-  if (!/^0x[0-9a-f]{40}$/.test(safeAddress)) {
-    throw new CoreError('ConfigurationRequired', 'Seckill Custody Safe snapshot is unavailable', 503);
+async function lockedPrizeBalance(executor: SqlExecutor, accountId: string, walletAddress: string) {
+  if (!/^0x[0-9a-f]{40}$/.test(walletAddress)) {
+    throw new CoreError('ConfigurationRequired', 'Seckill settlement wallet snapshot is unavailable', 503);
   }
   const result = await executor.query<{ amount: string }>(
     `SELECT COALESCE(sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END),0)::text AS amount
      FROM core.ledger_lines line
      WHERE line.account_id = $1 AND line.balance_state = 'LOCKED'
-       AND line.backing_safe_address = $2`,
-    [accountId, safeAddress],
+       AND line.backing_wallet_address = $2`,
+    [accountId, walletAddress],
   );
   return BigInt(result.rows[0]?.amount ?? '0');
 }
 
-async function prizeBackingSafe(executor: SqlExecutor, accountId: string, amount: string) {
-  const result = await executor.query<{ backing_safe_address: string; amount: string }>(
-    `SELECT line.backing_safe_address,
+async function prizeBackingWallet(executor: SqlExecutor, accountId: string, amount: string) {
+  const result = await executor.query<{ backing_wallet_address: string; amount: string }>(
+    `SELECT line.backing_wallet_address,
        sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS amount
      FROM core.ledger_lines line
      WHERE line.account_id = $1 AND line.balance_state = 'LOCKED'
-       AND line.backing_safe_address IS NOT NULL
-     GROUP BY line.backing_safe_address
+       AND line.backing_wallet_address IS NOT NULL
+     GROUP BY line.backing_wallet_address
      HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) > 0`,
     [accountId],
   );
   if (result.rows.length !== 1 || BigInt(result.rows[0]!.amount) < BigInt(amount)) {
-    throw new CoreError('InvalidFinality', 'Seckill prize is not fully backed by one Custody Safe', 409);
+    throw new CoreError('InvalidFinality', 'Seckill prize is not fully backed by one settlement wallet', 409);
   }
-  return result.rows[0]!.backing_safe_address;
+  return result.rows[0]!.backing_wallet_address;
 }
 
 async function ensurePrizeAccount(
@@ -573,31 +579,31 @@ async function ensurePrizeAccount(
     accountId: string;
     ownerType: 'BUYER' | 'BENEFICIARY';
     ownerId: string;
-    safeAddress: string | null;
+    walletAddress: string | null;
   },
 ) {
   await executor.query(
     `INSERT INTO core.ledger_accounts (
-       account_id, owner_type, owner_id, asset, purpose, safe_address
+       account_id, owner_type, owner_id, asset, purpose, wallet_address
      ) VALUES ($1,$2,$3,'USDT','SECKILL_PRIZE_LIABILITY',$4)
      ON CONFLICT (account_id) DO NOTHING`,
-    [input.accountId, input.ownerType, input.ownerId, input.safeAddress],
+    [input.accountId, input.ownerType, input.ownerId, input.walletAddress],
   );
   const row = (await executor.query<{
     owner_type: string;
     owner_id: string;
     asset: string;
     purpose: string;
-    safe_address: string | null;
+    wallet_address: string | null;
   }>(
-    `SELECT owner_type, owner_id, asset, purpose, safe_address
+    `SELECT owner_type, owner_id, asset, purpose, wallet_address
      FROM core.ledger_accounts WHERE account_id = $1`,
     [input.accountId],
   )).rows[0];
   if (
     !row || row.owner_type !== input.ownerType || row.owner_id !== input.ownerId
       || row.asset !== 'USDT' || row.purpose !== 'SECKILL_PRIZE_LIABILITY'
-      || row.safe_address !== input.safeAddress
+      || row.wallet_address !== input.walletAddress
   ) throw new CoreError('InvalidFinality', 'Seckill prize account identity mismatch', 409);
 }
 

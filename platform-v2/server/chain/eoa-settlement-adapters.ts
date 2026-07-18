@@ -7,142 +7,94 @@ import {
 } from 'ethers';
 import { CoreError } from '../api/errors.ts';
 import type {
-  SafeApprovalVerifier,
-  SafeSettlementBroadcaster,
-  SafeSettlementChainSource,
-  SafeSettlementReceipt,
-  VerifiedSafeApprovals,
+  EoaSettlementBroadcaster,
+  EoaSettlementChainSource,
+  EoaSettlementReceipt,
 } from './settlement-worker.ts';
 
-const SAFE_EVENTS = new Interface([
-  'event ExecutionSuccess(bytes32 txHash,uint256 payment)',
-  'event ExecutionFailure(bytes32 txHash,uint256 payment)',
-]);
 const TRANSFER_EVENT = new Interface([
   'event Transfer(address indexed from,address indexed to,uint256 amount)',
 ]);
 const TRANSFER_TOPIC = TRANSFER_EVENT.getEvent('Transfer')!.topicHash.toLowerCase();
-const SAFE_READ = new Interface(['function nonce() view returns (uint256)']);
 const ERC20_READ = new Interface(['function balanceOf(address account) view returns (uint256)']);
 
-export class HttpSafeApprovalVerifier implements SafeApprovalVerifier {
+export class HttpEoaSettlementBroadcaster implements EoaSettlementBroadcaster {
   readonly #url: string;
   readonly #token: string;
-  readonly #fetch: typeof fetch;
-
-  constructor(input: { url?: string; token?: string; mutualTls: boolean; fetch?: typeof fetch }) {
-    this.#url = secureEndpoint(input.url, input.token, input.mutualTls, 'Safe approval verifier').url;
-    this.#token = input.token!;
-    this.#fetch = input.fetch ?? fetch;
-  }
-
-  async verify(input: Parameters<SafeApprovalVerifier['verify']>[0]) {
-    const response = await this.#fetch(this.#url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${this.#token}` },
-      body: JSON.stringify(input),
-    });
-    if (!response.ok) throw new CoreError('ExternalBlocked', 'Safe approval verification failed', 503);
-    const value = await response.json() as Partial<VerifiedSafeApprovals>;
-    if (
-      typeof value.safeAddress !== 'string'
-      || typeof value.safeTxHash !== 'string'
-      || typeof value.ownerSetHash !== 'string'
-      || typeof value.threshold !== 'number'
-      || typeof value.proposalReferenceHash !== 'string'
-      || typeof value.approvalEvidenceHash !== 'string'
-      || typeof value.packedSignatures !== 'string'
-      || !Array.isArray(value.approvals)
-      || value.approvals.some((approval) =>
-        !approval || typeof approval.ownerAddress !== 'string' || typeof approval.signature !== 'string')
-    ) throw new CoreError('InvalidFinality', 'Safe approval verifier returned malformed evidence', 502);
-    return value as VerifiedSafeApprovals;
-  }
-}
-
-export class HttpSafeSettlementBroadcaster implements SafeSettlementBroadcaster {
-  readonly #url: string;
-  readonly #token: string;
-  readonly #maxOuterGasLimit: bigint;
+  readonly #maxGasLimit: bigint;
   readonly #fetch: typeof fetch;
 
   constructor(input: {
     url?: string;
     token?: string;
-    mutualTls: boolean;
-    maxOuterGasLimit: bigint;
+    maxGasLimit: bigint;
     fetch?: typeof fetch;
   }) {
-    this.#url = secureEndpoint(input.url, input.token, input.mutualTls, 'Safe broadcaster').url;
+    this.#url = secureEndpoint(input.url, input.token, 'EOA settlement executor').url;
     this.#token = input.token!;
-    this.#maxOuterGasLimit = input.maxOuterGasLimit;
+    this.#maxGasLimit = input.maxGasLimit;
     this.#fetch = input.fetch ?? fetch;
   }
 
-  async submit(input: Parameters<SafeSettlementBroadcaster['submit']>[0]) {
+  submit(input: Parameters<EoaSettlementBroadcaster['submit']>[0]) {
     return this.#broadcast(input);
   }
 
-  async replace(input: Parameters<SafeSettlementBroadcaster['replace']>[0]) {
-    if (
-      !/^[A-Za-z0-9:_-]{1,256}$/.test(input.replacementForAttemptId)
-      || !isHash(input.replacementForExecutionTxHash)
-      || !isAddress(input.outerSender)
-      || !/^(0|[1-9][0-9]*)$/.test(input.outerNonce)
-    ) throw new CoreError('InvalidRequest', 'Safe replacement evidence is invalid');
-    const body = await this.#broadcast(input, true);
-    if (
-      body.replacementForExecutionTxHash !== input.replacementForExecutionTxHash.toLowerCase()
-      || body.outerSender !== getAddress(input.outerSender).toLowerCase()
-      || body.outerNonce !== input.outerNonce
-    ) {
-      throw new CoreError('InvalidFinality', 'Safe broadcaster did not bind the replaced transaction', 502);
+  async replace(input: Parameters<EoaSettlementBroadcaster['replace']>[0]) {
+    if (!isHash(input.replacementForExecutionTxHash) || !validIdentifier(input.replacementForAttemptId)) {
+      throw new CoreError('InvalidRequest', 'EOA replacement evidence is invalid');
     }
-    return body as Awaited<ReturnType<SafeSettlementBroadcaster['replace']>>;
+    const body = await this.#broadcast(input, true);
+    if (body.replacementForExecutionTxHash !== input.replacementForExecutionTxHash.toLowerCase()) {
+      throw new CoreError('InvalidFinality', 'EOA executor did not bind the replaced transaction', 502);
+    }
+    return body as Awaited<ReturnType<EoaSettlementBroadcaster['replace']>>;
   }
 
   async #broadcast(
-    input: Parameters<SafeSettlementBroadcaster['submit']>[0]
-      | Parameters<SafeSettlementBroadcaster['replace']>[0],
+    input: Parameters<EoaSettlementBroadcaster['submit']>[0]
+      | Parameters<EoaSettlementBroadcaster['replace']>[0],
     replacement = false,
   ) {
     if (
       input.chainId !== 56
-      || !isHash(input.batchId)
-      || !isAddress(input.safeAddress)
-      || !/^(0|[1-9][0-9]*)$/.test(input.safeNonce)
-      || !isHash(input.safeTxHash)
+      || !isHash(input.transferId)
+      || !isAddress(input.executorWallet)
+      || !/^(0|[1-9][0-9]*)$/.test(input.executorNonce)
+      || !isAddress(input.tokenAddress)
+      || !isAddress(input.recipientAddress)
+      || !/^[1-9][0-9]*$/.test(input.amount)
+      || !/^0x(?:[0-9a-fA-F]{2})+$/.test(input.transferCalldata)
       || !isHash(input.contentHash)
       || !isHash(input.requestDigest)
-      || !/^0x(?:[0-9a-fA-F]{2})+$/.test(input.execTransactionCalldata)
-      || !/^[A-Za-z0-9:_-]{1,256}$/.test(input.idempotencyKey)
-      || !/^[1-9][0-9]*$/.test(input.outerGasLimit)
-      || BigInt(input.outerGasLimit) > this.#maxOuterGasLimit
-    ) throw new CoreError('InvalidRequest', 'Safe execution envelope is invalid');
+      || !validIdentifier(input.idempotencyKey)
+      || !/^[1-9][0-9]*$/.test(input.gasLimit)
+      || BigInt(input.gasLimit) > this.#maxGasLimit
+    ) throw new CoreError('InvalidRequest', 'EOA settlement execution envelope is invalid');
     const response = await this.#fetch(this.#url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${this.#token}` },
       body: JSON.stringify(input),
     });
-    if (!response.ok) throw new CoreError('ExternalBlocked', 'Safe broadcaster rejected the envelope', 503);
+    if (!response.ok) throw new CoreError('ExternalBlocked', 'EOA settlement executor rejected the envelope', 503);
     const body = await response.json() as Record<string, unknown>;
     if (
       typeof body.executionTxHash !== 'string'
       || !isHash(body.executionTxHash)
-      || typeof body.outerSender !== 'string'
-      || !isAddress(body.outerSender)
-      || typeof body.outerNonce !== 'string'
-      || !/^(0|[1-9][0-9]*)$/.test(body.outerNonce)
+      || typeof body.executorWallet !== 'string'
+      || !isAddress(body.executorWallet)
+      || typeof body.executorNonce !== 'string'
+      || !/^(0|[1-9][0-9]*)$/.test(body.executorNonce)
       || body.requestDigest !== input.requestDigest
       || (replacement && (
         typeof body.replacementForExecutionTxHash !== 'string'
         || !isHash(body.replacementForExecutionTxHash)
       ))
-    ) throw new CoreError('InvalidFinality', 'Safe broadcaster response is not envelope-bound', 502);
+    ) throw new CoreError('InvalidFinality', 'EOA settlement executor returned malformed evidence', 502);
     return {
       executionTxHash: body.executionTxHash.toLowerCase(),
-      outerSender: getAddress(body.outerSender).toLowerCase(),
-      outerNonce: body.outerNonce,
+      executorWallet: getAddress(body.executorWallet).toLowerCase(),
+      executorNonce: body.executorNonce,
       requestDigest: body.requestDigest,
       ...(replacement
         ? { replacementForExecutionTxHash: String(body.replacementForExecutionTxHash).toLowerCase() }
@@ -151,20 +103,18 @@ export class HttpSafeSettlementBroadcaster implements SafeSettlementBroadcaster 
   }
 }
 
-export class ResilientBscSafeSettlementChainSource implements SafeSettlementChainSource {
+export class ResilientBscEoaSettlementChainSource implements EoaSettlementChainSource {
   readonly #providers: readonly JsonRpcProvider[];
 
   constructor(input: { primaryRpcUrl?: string; fallbackRpcUrl?: string }) {
     if (!input.primaryRpcUrl || !input.fallbackRpcUrl) {
-      throw new CoreError('ExternalBlocked', 'Two BSC RPC endpoints are required for Safe finality', 503);
+      throw new CoreError('ExternalBlocked', 'Two BSC RPC endpoints are required for settlement finality', 503);
     }
     const urls = [input.primaryRpcUrl, input.fallbackRpcUrl].map(settlementRpcUrl);
     if (urls[0] === urls[1]) {
-      throw new CoreError('ExternalBlocked', 'Safe finality requires two independent BSC RPC endpoints', 503);
+      throw new CoreError('ExternalBlocked', 'Settlement finality requires two independent BSC RPC endpoints', 503);
     }
-    this.#providers = urls.map(
-      (url) => new JsonRpcProvider(url, 56, { staticNetwork: true }),
-    );
+    this.#providers = urls.map((url) => new JsonRpcProvider(url, 56, { staticNetwork: true }));
   }
 
   async receipt(executionTxHash: string) {
@@ -172,16 +122,16 @@ export class ResilientBscSafeSettlementChainSource implements SafeSettlementChai
     const observations = await Promise.all(this.#providers.map((provider) => observe(provider, executionTxHash)));
     if (observations.every((item) => item === undefined)) return undefined;
     if (observations.some((item) => item === undefined)) {
-      throw new CoreError('ExternalBlocked', 'BSC RPC sources disagree on Safe receipt availability', 503);
+      throw new CoreError('ExternalBlocked', 'BSC RPC sources disagree on settlement receipt availability', 503);
     }
     const [primary, fallback] = observations as [ObservedReceipt, ObservedReceipt];
     const primaryComparable = comparable(primary);
     const fallbackComparable = comparable(fallback);
     if (stableJson(primaryComparable) !== stableJson(fallbackComparable)) {
-      throw new CoreError('InvalidFinality', 'BSC RPC sources disagree on Safe canonical evidence', 409);
+      throw new CoreError('InvalidFinality', 'BSC RPC sources disagree on settlement evidence', 409);
     }
     const confirmations = Math.min(primary.confirmations, fallback.confirmations);
-    const result: SafeSettlementReceipt = {
+    const result: EoaSettlementReceipt = {
       ...primaryComparable,
       confirmations,
       evidenceHash: hashJson({ primary: primaryComparable, fallback: fallbackComparable, confirmations }),
@@ -196,27 +146,26 @@ export class ResilientBscSafeSettlementChainSource implements SafeSettlementChai
     await Promise.all(this.#providers.map(assertBscProvider));
     const blocks = await Promise.all(this.#providers.map((provider) => provider.getBlock(input.blockNumber)));
     if (blocks.some((block) => !block?.hash || !isHash(block.hash))) {
-      throw new CoreError('ExternalBlocked', 'BSC RPC cannot prove the settlement block identity', 503);
+      throw new CoreError('ExternalBlocked', 'BSC RPC cannot prove settlement block identity', 503);
     }
     const primaryHash = blocks[0]!.hash!.toLowerCase();
     const fallbackHash = blocks[1]!.hash!.toLowerCase();
     if (primaryHash !== fallbackHash) {
-      throw new CoreError('InvalidFinality', 'BSC RPC sources disagree on the canonical settlement block', 409);
+      throw new CoreError('InvalidFinality', 'BSC RPC sources disagree on canonical settlement block', 409);
     }
-    const observedBlockHash = primaryHash;
     return {
-      canonical: observedBlockHash === input.blockHash.toLowerCase(),
-      observedBlockHash,
+      canonical: primaryHash === input.blockHash.toLowerCase(),
+      observedBlockHash: primaryHash,
       evidenceHash: hashJson({
         blockNumber: input.blockNumber,
         expectedBlockHash: input.blockHash.toLowerCase(),
-        observedBlockHash,
+        observedBlockHash: primaryHash,
       }),
     };
   }
 }
 
-interface ObservedReceipt extends Omit<SafeSettlementReceipt, 'evidenceHash'> {
+interface ObservedReceipt extends Omit<EoaSettlementReceipt, 'evidenceHash'> {
   evidenceHash?: never;
 }
 
@@ -229,24 +178,12 @@ async function observe(provider: JsonRpcProvider, txHash: string): Promise<Obser
   ]);
   if (!receipt) return undefined;
   if (!transaction || !transaction.to || receipt.status === null) {
-    throw new CoreError('InvalidFinality', 'Safe transaction or receipt is incomplete', 409);
+    throw new CoreError('InvalidFinality', 'Settlement transaction or receipt is incomplete', 409);
   }
   const canonical = await provider.getBlock(receipt.blockNumber);
   const canonicalBlock = canonical?.hash?.toLowerCase() === receipt.blockHash.toLowerCase();
-  const safeAddress = getAddress(transaction.to).toLowerCase();
-  let executionSuccessSafeTxHash: string | undefined;
-  let executionFailureSafeTxHash: string | undefined;
   const transfers: Array<{ tokenAddress: string; from: string; to: string; amount: string }> = [];
   for (const log of receipt.logs) {
-    if (log.address.toLowerCase() === safeAddress) {
-      try {
-        const event = SAFE_EVENTS.parseLog({ topics: [...log.topics], data: log.data });
-        if (event?.name === 'ExecutionSuccess') executionSuccessSafeTxHash = String(event.args.txHash).toLowerCase();
-        if (event?.name === 'ExecutionFailure') executionFailureSafeTxHash = String(event.args.txHash).toLowerCase();
-      } catch {
-        // Not a Safe execution event.
-      }
-    }
     try {
       const event = TRANSFER_EVENT.parseLog({ topics: [...log.topics], data: log.data });
       if (event?.name === 'Transfer') {
@@ -267,26 +204,18 @@ async function observe(provider: JsonRpcProvider, txHash: string): Promise<Obser
     txHash.toLowerCase(),
     transfers,
   );
-  const nonceResult = await provider.send('eth_call', [{
-    to: safeAddress,
-    data: SAFE_READ.encodeFunctionData('nonce'),
-  }, `0x${receipt.blockNumber.toString(16)}`]);
-  const safeNonceAfter = String(SAFE_READ.decodeFunctionResult('nonce', nonceResult)[0]);
   return {
     chainId: 56,
     executionTxHash: txHash.toLowerCase(),
-    transactionTo: safeAddress,
-    transactionCalldata: transaction.data,
-    outerSender: getAddress(transaction.from).toLowerCase(),
-    outerNonce: String(transaction.nonce),
+    transactionTo: getAddress(transaction.to).toLowerCase(),
+    transactionCalldata: transaction.data.toLowerCase(),
+    executorWallet: getAddress(transaction.from).toLowerCase(),
+    executorNonce: String(transaction.nonce),
     receiptStatus: receipt.status === 1 ? 1 : 0,
     blockNumber: receipt.blockNumber,
     blockHash: receipt.blockHash.toLowerCase(),
     confirmations: Math.max(0, head - receipt.blockNumber + 1),
     canonicalBlock,
-    ...(executionSuccessSafeTxHash ? { executionSuccessSafeTxHash } : {}),
-    ...(executionFailureSafeTxHash ? { executionFailureSafeTxHash } : {}),
-    safeNonceAfter,
     transfers,
     transactionDeltas,
   };
@@ -319,12 +248,14 @@ async function readTransactionBalanceDeltas(
       return { tokenAddress, account, delta: after - before };
     }));
     const tokenAddresses = [...new Set(sortedPairs.map((item) => item.tokenAddress))];
-    const blockLogs = await provider.getLogs({
-      fromBlock: blockNumber,
-      toBlock: blockNumber,
-      address: tokenAddresses,
-      topics: [TRANSFER_TOPIC],
-    });
+    const blockLogs = tokenAddresses.length === 0
+      ? []
+      : await provider.getLogs({
+        fromBlock: blockNumber,
+        toBlock: blockNumber,
+        address: tokenAddresses,
+        topics: [TRANSFER_TOPIC],
+      });
     const unrelatedTransfers = blockLogs
       .filter((log) => log.transactionHash.toLowerCase() !== executionTxHash)
       .map((log) => {
@@ -387,23 +318,26 @@ function settlementRpcUrl(value: string) {
   try {
     url = new URL(value);
   } catch {
-    throw new CoreError('ExternalBlocked', 'Safe finality RPC endpoint is invalid', 503);
+    throw new CoreError('ExternalBlocked', 'Settlement RPC endpoint is invalid', 503);
   }
   if (url.protocol !== 'https:' || url.username || url.password) {
-    throw new CoreError('ExternalBlocked', 'Safe finality RPC endpoints require HTTPS without embedded credentials', 503);
+    throw new CoreError('ExternalBlocked', 'Settlement RPC endpoints require HTTPS without embedded credentials', 503);
   }
   return url.href;
 }
 
-function secureEndpoint(urlValue: string | undefined, token: string | undefined, mutualTls: boolean, name: string) {
-  if (!urlValue || !token || !mutualTls) throw new CoreError('ExternalBlocked', `${name} is unavailable`, 503);
+function secureEndpoint(urlValue: string | undefined, token: string | undefined, name: string) {
+  if (!urlValue || !token) throw new CoreError('ExternalBlocked', `${name} is unavailable`, 503);
   let url: URL;
   try {
     url = new URL(urlValue);
   } catch {
     throw new CoreError('ExternalBlocked', `${name} URL is invalid`, 503);
   }
-  if (url.protocol !== 'https:') throw new CoreError('ExternalBlocked', `${name} requires HTTPS and mutual TLS`, 503);
+  const loopback = ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
+  if (url.protocol !== 'https:' && !(loopback && url.protocol === 'http:')) {
+    throw new CoreError('ExternalBlocked', `${name} requires HTTPS outside loopback`, 503);
+  }
   return { url: url.toString() };
 }
 
@@ -428,4 +362,8 @@ function isHash(value: string) {
 
 function isAddress(value: string) {
   return /^0x[0-9a-fA-F]{40}$/.test(value);
+}
+
+function validIdentifier(value: string) {
+  return /^[A-Za-z0-9:_-]{1,256}$/.test(value);
 }

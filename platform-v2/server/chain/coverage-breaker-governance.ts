@@ -1,9 +1,8 @@
-import { Interface, TypedDataEncoder, getAddress, keccak256, toUtf8Bytes } from 'ethers';
-import { BSC_CHAIN_ID, CORE_ARTIFACT_VERSION } from '../api/enums.ts';
+import { Interface, getAddress, keccak256, toUtf8Bytes } from 'ethers';
+import { CORE_ARTIFACT_VERSION } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import { auditSourceId, enqueueAudit } from '../data/audit-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from '../data/migrations.ts';
-import { ZERO_ADDRESS, safeTransactionTypes } from './safe-multisend.ts';
 
 const ROUTER = new Interface([
   'event PaymentPauseChanged(bool paused,bytes32 indexed evidenceHash)',
@@ -12,7 +11,7 @@ const ROUTER = new Interface([
 const PAYMENT_PAUSE_TOPIC = ROUTER.getEvent('PaymentPauseChanged')!.topicHash.toLowerCase();
 
 type ActionState =
-  | 'PENDING_PROPOSAL' | 'SAFE_PROPOSED' | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'SUPERSEDED';
+  | 'PENDING_EXECUTION' | 'SUBMITTED' | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'SUPERSEDED';
 
 interface CoverageBreakerActionRow {
   action_id: string;
@@ -21,14 +20,14 @@ interface CoverageBreakerActionRow {
   action: 'PAUSE' | 'RESUME';
   target_paused: boolean;
   evidence_hash: string;
-  governance_safe_address: string;
+  governance_wallet_address: string;
   router_address: string;
   calldata: string;
   calldata_hash: string;
   state: ActionState;
-  safe_nonce: string | number | null;
-  safe_tx_hash: string | null;
-  proposal_hash: string | null;
+  executor_nonce: string | number | null;
+  submitted_tx_hash: string | null;
+  execution_evidence_hash: string | null;
   execution_tx_hash: string | null;
   block_number: string | number | null;
   block_hash: string | null;
@@ -44,29 +43,30 @@ interface CoverageBreakerActionRow {
   updated_at: Date;
 }
 
-export interface CoverageBreakerSafeProposal {
+export interface CoverageBreakerExecution {
   actionId: string;
-  safeAddress: string;
+  governanceWallet: string;
   routerAddress: string;
   calldata: string;
   calldataHash: string;
   targetPaused: boolean;
   evidenceHash: string;
   policyVersion: number;
-  minimumSafeNonce: string;
+  minimumExecutorNonce: string;
 }
 
-export interface CoverageBreakerSafeProposer {
-  propose(input: CoverageBreakerSafeProposal): Promise<{
-    safeNonce: string;
-    safeTxHash: string;
-    proposalHash: string;
+export interface CoverageBreakerEoaExecutor {
+  execute(input: CoverageBreakerExecution): Promise<{
+    executorWallet: string;
+    executorNonce: string;
+    submittedTxHash: string;
+    executionEvidenceHash: string;
   }>;
 }
 
-export interface CoverageBreakerFinalityCandidate extends CoverageBreakerSafeProposal {
-  safeTxHash: string;
-  priorState: 'SAFE_PROPOSED' | 'MINED' | 'FINAL';
+export interface CoverageBreakerFinalityCandidate extends CoverageBreakerExecution {
+  submittedTxHash: string;
+  priorState: 'SUBMITTED' | 'MINED' | 'FINAL';
   priorFinality?: { executionTxHash: string; blockNumber: number; blockHash: string };
 }
 
@@ -74,7 +74,7 @@ export type CoverageBreakerObservation =
   | { state: 'NOT_FOUND' }
   | {
       state: 'MINED' | 'FINAL';
-      safeTxHash: string;
+      submittedTxHash: string;
       executionTxHash: string;
       blockNumber: number;
       blockHash: string;
@@ -86,7 +86,7 @@ export type CoverageBreakerObservation =
     }
   | {
       state: 'REORGED';
-      safeTxHash: string;
+      submittedTxHash: string;
       executionTxHash?: string;
       blockNumber?: number;
       blockHash?: string;
@@ -99,7 +99,7 @@ export type CoverageBreakerObservation =
     }
   | {
       state: 'FAILED';
-      safeTxHash: string;
+      submittedTxHash: string;
       executionTxHash: string;
       blockNumber: number;
       blockHash: string;
@@ -115,43 +115,37 @@ export interface CoverageBreakerChainSource {
   observe(input: CoverageBreakerFinalityCandidate): Promise<CoverageBreakerObservation>;
 }
 
-export class HttpCoverageBreakerSafeProposer implements CoverageBreakerSafeProposer {
+export class HttpCoverageBreakerEoaExecutor implements CoverageBreakerEoaExecutor {
   readonly #url: string | undefined;
   readonly #token: string | undefined;
-  readonly #mutualTls: boolean;
   readonly #fetch: typeof fetch;
 
   constructor(input: {
     url?: string;
     token?: string;
-    mutualTls?: boolean;
     fetchImpl?: typeof fetch;
     requestTimeoutMs?: number;
   }) {
     this.#url = input.url;
     this.#token = input.token;
-    this.#mutualTls = input.mutualTls === true;
     this.#fetch = fetchWithDeadline(input.fetchImpl ?? fetch, input.requestTimeoutMs);
   }
 
-  async propose(input: CoverageBreakerSafeProposal) {
+  async execute(input: CoverageBreakerExecution) {
     if (!this.#url || !this.#token) {
-      throw new CoreError('ConfigurationRequired', 'Safe coverage-breaker proposal service is not configured', 503);
+      throw new CoreError('ConfigurationRequired', 'Coverage-breaker EOA executor is not configured', 503);
     }
-    const url = secureUrl(this.#url, 'Safe coverage-breaker proposal service');
-    if (!this.#mutualTls) {
-      throw new CoreError('ExternalBlocked', 'Safe coverage-breaker proposal transport requires mTLS', 503);
-    }
+    const url = secureUrl(this.#url, 'coverage-breaker EOA executor');
+    const requestDigest = coverageBreakerExecutionRequestDigest(input);
     const response = await this.#fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${this.#token}` },
       body: JSON.stringify({
         artifactVersion: CORE_ARTIFACT_VERSION,
         chainId: 56,
-        safeAddress: input.safeAddress,
+        from: input.governanceWallet,
         to: input.routerAddress,
         value: '0',
-        operation: 0,
         data: input.calldata,
         dataHash: input.calldataHash,
         resourceType: 'COVERAGE_BREAKER',
@@ -159,73 +153,60 @@ export class HttpCoverageBreakerSafeProposer implements CoverageBreakerSafePropo
         targetPaused: input.targetPaused,
         evidenceHash: input.evidenceHash,
         policyVersion: input.policyVersion,
-        minimumSafeNonce: input.minimumSafeNonce,
+        minimumExecutorNonce: input.minimumExecutorNonce,
+        requestDigest,
       }),
     });
-    if (!response.ok) throw new CoreError('ExternalBlocked', 'Safe coverage-breaker proposal was rejected', 503);
+    if (!response.ok) throw new CoreError('ExternalBlocked', 'Coverage-breaker EOA executor rejected the request', 503);
     const body = await responseJson(response) as Record<string, unknown>;
     if (
-      !isCanonicalSafeNonce(body.safeNonce)
-      || BigInt(body.safeNonce) < BigInt(input.minimumSafeNonce)
-      || !isHash(body.safeTxHash)
-      || !isHash(body.proposalHash)
+      !isCanonicalNonce(body.executorNonce)
+      || BigInt(body.executorNonce) < BigInt(input.minimumExecutorNonce)
+      || !isAddress(body.executorWallet)
+      || !isHash(body.submittedTxHash)
+      || !isHash(body.executionEvidenceHash)
       || body.dataHash !== input.calldataHash
       || body.resourceId !== input.actionId
       || body.targetPaused !== input.targetPaused
       || body.evidenceHash !== input.evidenceHash
       || Number(body.policyVersion) !== input.policyVersion
-      || body.minimumSafeNonce !== input.minimumSafeNonce
-    ) throw new CoreError('InvalidFinality', 'Safe coverage-breaker proposal response is not echo-bound', 502);
-    const safeNonce = body.safeNonce;
-    const safeTxHash = coverageBreakerSafeTxHash(input, safeNonce);
-    if (body.safeTxHash.toLowerCase() !== safeTxHash) {
-      throw new CoreError('InvalidFinality', 'Safe coverage-breaker proposal hash does not match its nonce', 502);
+      || body.minimumExecutorNonce !== input.minimumExecutorNonce
+      || body.requestDigest !== requestDigest
+    ) throw new CoreError('InvalidFinality', 'Coverage-breaker EOA executor response is not request-bound', 502);
+    const executorWallet = getAddress(body.executorWallet).toLowerCase();
+    if (executorWallet !== getAddress(input.governanceWallet).toLowerCase()) {
+      throw new CoreError('InvalidFinality', 'Coverage-breaker execution used the wrong EOA', 502);
     }
-    return { safeNonce, safeTxHash, proposalHash: body.proposalHash.toLowerCase() };
+    return {
+      executorWallet,
+      executorNonce: body.executorNonce,
+      submittedTxHash: body.submittedTxHash.toLowerCase(),
+      executionEvidenceHash: body.executionEvidenceHash.toLowerCase(),
+    };
   }
 }
 
 export class ResilientCoverageBreakerChainSource implements CoverageBreakerChainSource {
-  readonly #lookupUrl: string | undefined;
-  readonly #lookupToken: string | undefined;
   readonly #primaryRpcUrl: string | undefined;
   readonly #fallbackRpcUrl: string | undefined;
   readonly #fetch: typeof fetch;
 
   constructor(input: {
-    lookupUrl?: string;
-    lookupToken?: string;
     primaryRpcUrl?: string;
     fallbackRpcUrl?: string;
     fetchImpl?: typeof fetch;
     requestTimeoutMs?: number;
   }) {
-    this.#lookupUrl = input.lookupUrl;
-    this.#lookupToken = input.lookupToken;
     this.#primaryRpcUrl = input.primaryRpcUrl;
     this.#fallbackRpcUrl = input.fallbackRpcUrl;
     this.#fetch = fetchWithDeadline(input.fetchImpl ?? fetch, input.requestTimeoutMs);
   }
 
   async observe(input: CoverageBreakerFinalityCandidate): Promise<CoverageBreakerObservation> {
-    if (!this.#lookupUrl || !this.#lookupToken || !this.#primaryRpcUrl || !this.#fallbackRpcUrl) {
+    if (!this.#primaryRpcUrl || !this.#fallbackRpcUrl) {
       throw new CoreError('ConfigurationRequired', 'Coverage-breaker finality source is not configured', 503);
     }
-    const lookup = await this.#fetch(secureUrl(this.#lookupUrl, 'Coverage-breaker execution lookup'), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${this.#lookupToken}` },
-      body: JSON.stringify({ safeTxHash: input.safeTxHash, resourceId: input.actionId }),
-    });
-    if (!lookup.ok) throw new CoreError('ExternalBlocked', 'Coverage-breaker execution lookup failed', 503);
-    const lookupBody = await responseJson(lookup) as Record<string, unknown>;
-    if (lookupBody.safeTxHash !== input.safeTxHash || lookupBody.resourceId !== input.actionId) {
-      throw new CoreError('InvalidFinality', 'Coverage-breaker execution lookup is not Safe-hash-bound', 502);
-    }
-    if (lookupBody.executionTxHash === null) return { state: 'NOT_FOUND' };
-    if (!isHash(lookupBody.executionTxHash)) {
-      throw new CoreError('InvalidFinality', 'Coverage-breaker execution transaction hash is invalid', 502);
-    }
-    const executionTxHash = lookupBody.executionTxHash.toLowerCase();
+    const executionTxHash = input.submittedTxHash.toLowerCase();
     const primary = secureUrl(this.#primaryRpcUrl, 'primary coverage-breaker RPC').toString();
     const fallback = secureUrl(this.#fallbackRpcUrl, 'fallback coverage-breaker RPC').toString();
     if (normalizedUrl(primary) === normalizedUrl(fallback)) {
@@ -268,8 +249,14 @@ export class ResilientCoverageBreakerChainSource implements CoverageBreakerChain
     if (stableJson(receipt) !== stableJson(fallbackEvidence) || stableJson(transaction) !== stableJson(fallbackTransaction)) {
       throw new CoreError('InvalidFinality', 'Coverage-breaker execution differs across RPC providers', 409);
     }
-    if (transaction.to !== input.safeAddress) {
-      throw new CoreError('InvalidFinality', 'Coverage-breaker execution did not target the governance Safe', 409);
+    if (
+      transaction.from !== getAddress(input.governanceWallet).toLowerCase()
+      || transaction.to !== getAddress(input.routerAddress).toLowerCase()
+      || transaction.input !== input.calldata.toLowerCase()
+      || transaction.nonce !== input.minimumExecutorNonce
+      || transaction.value !== '0'
+    ) {
+      throw new CoreError('InvalidFinality', 'Coverage-breaker transaction drifted from its frozen EOA execution', 409);
     }
     const blockNumber = Number(BigInt(receipt.blockNumber));
     const canonicalBlockHash = await canonicalBlockHashAt(this.#fetch, primary, fallback, blockNumber);
@@ -281,7 +268,7 @@ export class ResilientCoverageBreakerChainSource implements CoverageBreakerChain
       Math.min(hexNumber(primaryHead, 'primary head'), hexNumber(fallbackHead, 'fallback head')) - blockNumber + 1,
     );
     const baseEvidence = {
-      safeTxHash: input.safeTxHash,
+      submittedTxHash: input.submittedTxHash,
       executionTxHash,
       blockNumber,
       blockHash: receipt.blockHash,
@@ -316,7 +303,7 @@ export class ResilientCoverageBreakerChainSource implements CoverageBreakerChain
     const primaryPaused = Boolean(ROUTER.decodeFunctionResult('newPaymentsPaused', stringValue(primaryState, 'router state'))[0]);
     const fallbackPaused = Boolean(ROUTER.decodeFunctionResult('newPaymentsPaused', stringValue(fallbackState, 'router state'))[0]);
     if (primaryPaused !== input.targetPaused || fallbackPaused !== input.targetPaused) {
-      throw new CoreError('InvalidFinality', 'Router pause state does not match the finalized Safe action', 409);
+      throw new CoreError('InvalidFinality', 'Router pause state does not match the finalized EOA action', 409);
     }
     return {
       state: confirmations >= 15 ? 'FINAL' : 'MINED',
@@ -328,7 +315,7 @@ export class ResilientCoverageBreakerChainSource implements CoverageBreakerChain
 
 export class CoverageBreakerGovernanceWorker {
   readonly #transactions: SqlTransactionRunner;
-  readonly #proposer: CoverageBreakerSafeProposer;
+  readonly #executor: CoverageBreakerEoaExecutor;
   readonly #chain: CoverageBreakerChainSource;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #running: Promise<void> | undefined;
@@ -336,26 +323,26 @@ export class CoverageBreakerGovernanceWorker {
 
   constructor(input: {
     transactions: SqlTransactionRunner;
-    proposer: CoverageBreakerSafeProposer;
+    executor: CoverageBreakerEoaExecutor;
     chain: CoverageBreakerChainSource;
   }) {
     this.#transactions = input.transactions;
-    this.#proposer = input.proposer;
+    this.#executor = input.executor;
     this.#chain = input.chain;
   }
 
   async pollOnce() {
     let pollErrorCode: string | undefined;
-    const proposals = await this.#pendingProposals(10);
-    for (const action of proposals) {
+    const executions = await this.#pendingExecutions(10);
+    for (const action of executions) {
       try {
         if (!action.target_paused && await this.#hasSupersedingPause(action)) {
           await this.#supersedeResume(action.action_id);
           continue;
         }
-        const proposal = await this.#proposalFor(action);
-        const result = await this.#proposer.propose(proposal);
-        await this.#recordProposal(action.action_id, result);
+        const execution = await this.#executionFor(action);
+        const result = await this.#executor.execute(execution);
+        await this.#recordExecution(action.action_id, result);
       } catch (error) {
         pollErrorCode ??= errorCode(error);
       }
@@ -370,7 +357,7 @@ export class CoverageBreakerGovernanceWorker {
       }
     }
     this.#lastErrorCode = pollErrorCode;
-    return { proposals: proposals.length, finality: finality.length };
+    return { executions: executions.length, finality: finality.length };
   }
 
   start(intervalMs = 5_000) {
@@ -397,11 +384,11 @@ export class CoverageBreakerGovernanceWorker {
     return Object.freeze({ healthy: this.#lastErrorCode === undefined, errorCode: this.#lastErrorCode });
   }
 
-  #pendingProposals(limit: number) {
+  #pendingExecutions(limit: number) {
     return this.#transactions.transaction(async (executor) => (
       await executor.query<CoverageBreakerActionRow>(
         `SELECT * FROM core.coverage_breaker_actions
-         WHERE state = 'PENDING_PROPOSAL' ORDER BY created_at, action_id LIMIT $1`,
+         WHERE state = 'PENDING_EXECUTION' ORDER BY created_at, action_id LIMIT $1`,
         [limit],
       )
     ).rows);
@@ -411,34 +398,34 @@ export class CoverageBreakerGovernanceWorker {
     return this.#transactions.transaction(async (executor) => (
       await executor.query<CoverageBreakerActionRow>(
         `SELECT * FROM core.coverage_breaker_actions
-         WHERE state IN ('SAFE_PROPOSED','MINED','FINAL')
+         WHERE state IN ('SUBMITTED','MINED','FINAL')
          ORDER BY CASE WHEN state = 'FINAL' THEN 1 ELSE 0 END, updated_at, action_id LIMIT $1`,
         [limit],
       )
     ).rows);
   }
 
-  #proposalFor(action: CoverageBreakerActionRow) {
+  #executionFor(action: CoverageBreakerActionRow) {
     return this.#transactions.transaction(async (executor) => {
-      const prior = await executor.query<{ max_safe_nonce: string | null; earlier_pending: boolean }>(
+      const prior = await executor.query<{ max_executor_nonce: string | null; earlier_pending: boolean }>(
         `SELECT
-           (SELECT max(safe_nonce)::text FROM core.coverage_breaker_actions
-            WHERE governance_safe_address = $1 AND safe_nonce IS NOT NULL) AS max_safe_nonce,
+           (SELECT max(executor_nonce)::text FROM core.coverage_breaker_actions
+            WHERE governance_wallet_address = $1 AND executor_nonce IS NOT NULL) AS max_executor_nonce,
            EXISTS (
              SELECT 1 FROM core.coverage_breaker_actions earlier
-             WHERE earlier.governance_safe_address = $1
-               AND earlier.state = 'PENDING_PROPOSAL'
+             WHERE earlier.governance_wallet_address = $1
+               AND earlier.state = 'PENDING_EXECUTION'
                AND (earlier.created_at, earlier.action_id) < ($2, $3)
            ) AS earlier_pending`,
-        [action.governance_safe_address, action.created_at, action.action_id],
+        [action.governance_wallet_address, action.created_at, action.action_id],
       );
       if (prior.rows[0]?.earlier_pending) {
-        throw new CoreError('FinalityPending', 'Earlier coverage-breaker action is awaiting a Safe nonce', 409);
+        throw new CoreError('FinalityPending', 'Earlier coverage-breaker action is awaiting an EOA nonce', 409);
       }
-      const minimumSafeNonce = prior.rows[0]?.max_safe_nonce === null
+      const minimumExecutorNonce = prior.rows[0]?.max_executor_nonce === null
         ? '0'
-        : (BigInt(prior.rows[0]!.max_safe_nonce) + 1n).toString();
-      return proposalFromRow(action, minimumSafeNonce);
+        : (BigInt(prior.rows[0]!.max_executor_nonce) + 1n).toString();
+      return executionFromRow(action, minimumExecutorNonce);
     });
   }
 
@@ -452,7 +439,7 @@ export class CoverageBreakerGovernanceWorker {
            JOIN core.coverage_snapshots resume_snapshot
              ON resume_snapshot.snapshot_id = $1
            WHERE pause_action.target_paused
-             AND pause_action.state IN ('PENDING_PROPOSAL','SAFE_PROPOSED','MINED','FINAL')
+             AND pause_action.state IN ('PENDING_EXECUTION','SUBMITTED','MINED','FINAL')
              AND (
                pause_snapshot.block_number > resume_snapshot.block_number
                OR pause_action.created_at > $2
@@ -466,7 +453,7 @@ export class CoverageBreakerGovernanceWorker {
   #supersedeResume(actionId: string) {
     return this.#transactions.transaction(async (executor) => {
       const action = await lockedAction(executor, actionId);
-      if (action.state !== 'PENDING_PROPOSAL' || action.target_paused) return;
+      if (action.state !== 'PENDING_EXECUTION' || action.target_paused) return;
       const now = new Date();
       await executor.query(
         `UPDATE core.coverage_breaker_actions SET state = 'SUPERSEDED', updated_at = $2
@@ -485,52 +472,62 @@ export class CoverageBreakerGovernanceWorker {
     });
   }
 
-  #recordProposal(actionId: string, proposal: { safeNonce: string; safeTxHash: string; proposalHash: string }) {
-    if (!isCanonicalSafeNonce(proposal.safeNonce) || !isHash(proposal.safeTxHash) || !isHash(proposal.proposalHash)) {
-      throw new CoreError('InvalidFinality', 'Coverage-breaker Safe proposal evidence is invalid', 502);
+  #recordExecution(actionId: string, execution: {
+    executorWallet: string;
+    executorNonce: string;
+    submittedTxHash: string;
+    executionEvidenceHash: string;
+  }) {
+    if (
+      !isAddress(execution.executorWallet)
+      || !isCanonicalNonce(execution.executorNonce)
+      || !isHash(execution.submittedTxHash)
+      || !isHash(execution.executionEvidenceHash)
+    ) {
+      throw new CoreError('InvalidFinality', 'Coverage-breaker EOA execution evidence is invalid', 502);
     }
     return this.#transactions.transaction(async (executor) => {
       const action = await lockedAction(executor, actionId);
-      if (action.state !== 'PENDING_PROPOSAL') {
+      if (action.state !== 'PENDING_EXECUTION') {
         if (
-          String(action.safe_nonce) === proposal.safeNonce
-          && action.safe_tx_hash === proposal.safeTxHash.toLowerCase()
+          String(action.executor_nonce) === execution.executorNonce
+          && action.submitted_tx_hash === execution.submittedTxHash.toLowerCase()
         ) return;
-        throw new CoreError('IdempotencyConflict', 'Coverage-breaker action changed during Safe proposal', 409);
+        throw new CoreError('IdempotencyConflict', 'Coverage-breaker action changed during EOA execution', 409);
       }
-      const prior = await executor.query<{ max_safe_nonce: string | null; earlier_pending: boolean }>(
+      if (getAddress(execution.executorWallet).toLowerCase() !== getAddress(action.governance_wallet_address).toLowerCase()) {
+        throw new CoreError('InvalidFinality', 'Coverage-breaker execution used the wrong EOA', 409);
+      }
+      const prior = await executor.query<{ max_executor_nonce: string | null; earlier_pending: boolean }>(
         `SELECT
-           (SELECT max(safe_nonce)::text FROM core.coverage_breaker_actions
-            WHERE governance_safe_address = $1 AND safe_nonce IS NOT NULL) AS max_safe_nonce,
+           (SELECT max(executor_nonce)::text FROM core.coverage_breaker_actions
+            WHERE governance_wallet_address = $1 AND executor_nonce IS NOT NULL) AS max_executor_nonce,
            EXISTS (
              SELECT 1 FROM core.coverage_breaker_actions earlier
-             WHERE earlier.governance_safe_address = $1
-               AND earlier.state = 'PENDING_PROPOSAL'
+             WHERE earlier.governance_wallet_address = $1
+               AND earlier.state = 'PENDING_EXECUTION'
                AND (earlier.created_at, earlier.action_id) < ($2, $3)
            ) AS earlier_pending`,
-        [action.governance_safe_address, action.created_at, action.action_id],
+        [action.governance_wallet_address, action.created_at, action.action_id],
       );
       if (
         prior.rows[0]?.earlier_pending
-        || (prior.rows[0]?.max_safe_nonce !== null
-          && BigInt(proposal.safeNonce) <= BigInt(prior.rows[0]!.max_safe_nonce))
-      ) throw new CoreError('InvalidFinality', 'Coverage-breaker Safe nonce does not preserve action order', 409);
-      const expectedSafeTxHash = coverageBreakerSafeTxHash(proposalFromRow(action, proposal.safeNonce), proposal.safeNonce);
-      if (proposal.safeTxHash.toLowerCase() !== expectedSafeTxHash) {
-        throw new CoreError('InvalidFinality', 'Coverage-breaker Safe hash does not match the frozen action nonce', 409);
-      }
+        || (prior.rows[0]?.max_executor_nonce !== null
+          && BigInt(execution.executorNonce) <= BigInt(prior.rows[0]!.max_executor_nonce))
+      ) throw new CoreError('InvalidFinality', 'Coverage-breaker EOA nonce does not preserve action order', 409);
       const now = new Date();
       await executor.query(
         `UPDATE core.coverage_breaker_actions
-         SET state = 'SAFE_PROPOSED', safe_nonce = $2, safe_tx_hash = $3, proposal_hash = $4, updated_at = $5
+         SET state = 'SUBMITTED', executor_nonce = $2, submitted_tx_hash = $3, execution_evidence_hash = $4, updated_at = $5
          WHERE action_id = $1`,
-        [actionId, proposal.safeNonce, proposal.safeTxHash.toLowerCase(), proposal.proposalHash.toLowerCase(), now],
+        [actionId, execution.executorNonce, execution.submittedTxHash.toLowerCase(), execution.executionEvidenceHash.toLowerCase(), now],
       );
-      await appendTransition(executor, action, 'SAFE_PROPOSED', proposal, now);
-      await enqueueActionAudit(executor, action, 'CoverageBreakerSafeProposed', 'SYSTEM', {
-        safeNonce: proposal.safeNonce,
-        safeTxHash: proposal.safeTxHash.toLowerCase(),
-        proposalHash: proposal.proposalHash.toLowerCase(),
+      await appendTransition(executor, action, 'SUBMITTED', execution, now);
+      await enqueueActionAudit(executor, action, 'CoverageBreakerEoaSubmitted', 'SYSTEM', {
+        executorWallet: getAddress(execution.executorWallet).toLowerCase(),
+        executorNonce: execution.executorNonce,
+        submittedTxHash: execution.submittedTxHash.toLowerCase(),
+        executionEvidenceHash: execution.executionEvidenceHash.toLowerCase(),
       }, now);
     });
   }
@@ -590,27 +587,27 @@ export class CoverageBreakerGovernanceWorker {
   }
 }
 
-function proposalFromRow(row: CoverageBreakerActionRow, minimumSafeNonce: string): CoverageBreakerSafeProposal {
+function executionFromRow(row: CoverageBreakerActionRow, minimumExecutorNonce: string): CoverageBreakerExecution {
   return {
     actionId: row.action_id,
-    safeAddress: row.governance_safe_address,
+    governanceWallet: row.governance_wallet_address,
     routerAddress: row.router_address,
     calldata: row.calldata,
     calldataHash: row.calldata_hash,
     targetPaused: row.target_paused,
     evidenceHash: row.evidence_hash,
     policyVersion: Number(row.policy_version),
-    minimumSafeNonce,
+    minimumExecutorNonce,
   };
 }
 
 function finalityCandidate(row: CoverageBreakerActionRow): CoverageBreakerFinalityCandidate {
-  if (row.safe_nonce === null || !row.safe_tx_hash) {
-    throw new CoreError('InvalidFinality', 'Coverage-breaker Safe nonce or hash is unavailable', 409);
+  if (row.executor_nonce === null || !row.submitted_tx_hash) {
+    throw new CoreError('InvalidFinality', 'Coverage-breaker EOA nonce or transaction hash is unavailable', 409);
   }
   return {
-    ...proposalFromRow(row, String(row.safe_nonce)),
-    safeTxHash: row.safe_tx_hash,
+    ...executionFromRow(row, String(row.executor_nonce)),
+    submittedTxHash: row.submitted_tx_hash,
     priorState: row.state as CoverageBreakerFinalityCandidate['priorState'],
     ...(row.execution_tx_hash && row.block_number !== null && row.block_hash
       ? {
@@ -624,32 +621,25 @@ function finalityCandidate(row: CoverageBreakerActionRow): CoverageBreakerFinali
   };
 }
 
-export function coverageBreakerSafeTxHash(input: CoverageBreakerSafeProposal, safeNonce: string) {
-  if (!isCanonicalSafeNonce(safeNonce)) {
-    throw new CoreError('InvalidFinality', 'Coverage-breaker Safe nonce is invalid', 409);
-  }
+export function coverageBreakerExecutionRequestDigest(input: CoverageBreakerExecution) {
+  if (
+    !input.actionId
+    || !isAddress(input.governanceWallet)
+    || !isAddress(input.routerAddress)
+    || !/^0x(?:[0-9a-fA-F]{2})+$/.test(input.calldata)
+    || !isHash(input.calldataHash)
+    || !isHash(input.evidenceHash)
+    || !Number.isSafeInteger(input.policyVersion)
+    || input.policyVersion < 1
+    || !isCanonicalNonce(input.minimumExecutorNonce)
+  ) throw new CoreError('InvalidRequest', 'Coverage-breaker EOA execution request is invalid');
   if (keccak256(input.calldata).toLowerCase() !== input.calldataHash.toLowerCase()) {
-    throw new CoreError('InvalidFinality', 'Coverage-breaker calldata hash does not match the frozen action', 409);
+    throw new CoreError('InvalidRequest', 'Coverage-breaker calldata hash does not match the frozen action');
   }
-  return TypedDataEncoder.hash(
-    { chainId: BSC_CHAIN_ID, verifyingContract: getAddress(input.safeAddress) },
-    safeTransactionTypes,
-    {
-      to: getAddress(input.routerAddress),
-      value: '0',
-      data: input.calldata,
-      operation: 0,
-      safeTxGas: '0',
-      baseGas: '0',
-      gasPrice: '0',
-      gasToken: ZERO_ADDRESS,
-      refundReceiver: ZERO_ADDRESS,
-      nonce: safeNonce,
-    },
-  ).toLowerCase();
+  return hashJson({ artifactVersion: CORE_ARTIFACT_VERSION, chainId: 56, ...input });
 }
 
-function isCanonicalSafeNonce(value: unknown): value is string {
+function isCanonicalNonce(value: unknown): value is string {
   if (typeof value !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value)) return false;
   try {
     return BigInt(value) < (1n << 256n);
@@ -698,8 +688,8 @@ async function enqueueActionAudit(
     eventType,
     resourceType: 'COVERAGE_BREAKER_ACTION',
     resourceId: action.action_id,
-    actorWallet: action.governance_safe_address,
-    actorRole: 'SAFE',
+    actorWallet: action.governance_wallet_address,
+    actorRole: 'GOVERNANCE_EOA',
     correlationId: action.action_id,
     requestHash: action.calldata_hash.slice(2),
     payload: {
@@ -741,10 +731,10 @@ async function insertReplacement(
   await executor.query(
     `INSERT INTO core.coverage_breaker_actions (
        action_id, snapshot_id, policy_version, action, target_paused, evidence_hash,
-       governance_safe_address, router_address, calldata, calldata_hash,
+       governance_wallet_address, router_address, calldata, calldata_hash,
        state, replaces_action_id, actor_wallet, secondary_signer,
        secondary_signature_hash, approval_nonce, approval_deadline, created_at, updated_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'PENDING_PROPOSAL',$11,$12,$13,$14,$15,$16,$17,$17)
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'PENDING_EXECUTION',$11,$12,$13,$14,$15,$16,$17,$17)
      ON CONFLICT (action_id) DO NOTHING`,
     [
       actionId,
@@ -753,7 +743,7 @@ async function insertReplacement(
       action.action,
       action.target_paused,
       action.evidence_hash,
-      action.governance_safe_address,
+      action.governance_wallet_address,
       action.router_address,
       action.calldata,
       action.calldata_hash,
@@ -767,7 +757,7 @@ async function insertReplacement(
     ],
   );
   const replacement = await lockedAction(executor, actionId);
-  await appendTransition(executor, { ...replacement, state: 'PENDING_PROPOSAL' }, 'PENDING_PROPOSAL', {
+  await appendTransition(executor, { ...replacement, state: 'PENDING_EXECUTION' }, 'PENDING_EXECUTION', {
     replacesActionId: action.action_id,
     observationEvidenceHash: observation.observationEvidenceHash,
   }, at);
@@ -852,7 +842,7 @@ function validateObservation(
   observation: Exclude<CoverageBreakerObservation, { state: 'NOT_FOUND' }>,
 ) {
   if (
-    observation.safeTxHash !== action.safe_tx_hash
+    observation.submittedTxHash !== action.submitted_tx_hash
     || observation.targetPaused !== action.target_paused
     || observation.evidenceHash !== action.evidence_hash
     || !isHash(observation.observationEvidenceHash)
@@ -871,7 +861,7 @@ function reorged(
   canonicalBlockHash: string,
 ): CoverageBreakerObservation {
   const evidence = {
-    safeTxHash: input.safeTxHash,
+    submittedTxHash: input.submittedTxHash,
     executionTxHash: prior.executionTxHash,
     blockNumber: prior.blockNumber,
     blockHash: prior.blockHash,
@@ -947,10 +937,26 @@ function normalizedReceipt(value: unknown, executionTxHash: string) {
 
 function normalizedTransaction(value: unknown, executionTxHash: string) {
   const transaction = recordValue(value, 'coverage-breaker transaction');
-  if (!isHash(transaction.hash) || transaction.hash.toLowerCase() !== executionTxHash || !isAddress(transaction.to)) {
+  if (
+    !isHash(transaction.hash)
+    || transaction.hash.toLowerCase() !== executionTxHash
+    || !isAddress(transaction.from)
+    || !isAddress(transaction.to)
+    || typeof transaction.input !== 'string'
+    || !/^0x[0-9a-fA-F]*$/.test(transaction.input)
+    || !isHexQuantity(transaction.nonce)
+    || !isHexQuantity(transaction.value)
+  ) {
     throw new CoreError('InvalidFinality', 'Coverage-breaker transaction is malformed', 409);
   }
-  return { hash: executionTxHash, to: getAddress(transaction.to).toLowerCase() };
+  return {
+    hash: executionTxHash,
+    from: getAddress(transaction.from).toLowerCase(),
+    to: getAddress(transaction.to).toLowerCase(),
+    input: transaction.input.toLowerCase(),
+    nonce: BigInt(transaction.nonce).toString(),
+    value: BigInt(transaction.value).toString(),
+  };
 }
 
 async function rpc(fetchImpl: typeof fetch, url: string, method: string, params: unknown[]) {

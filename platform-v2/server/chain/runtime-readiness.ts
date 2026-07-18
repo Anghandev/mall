@@ -12,16 +12,15 @@ const ROUTER_ABI = [
   'function npl() view returns (address)',
   'function policyRegistry() view returns (address)',
   'function beneficiaryRegistry() view returns (address)',
-  'function governanceSafe() view returns (address)',
-  'function platformServiceFeeSafe() view returns (address)',
-  'function usdtCustodySafe() view returns (address)',
-  'function nplRewardSafe() view returns (address)',
-  'function operationsTreasurySafe() view returns (address)',
+  'function governanceWallet() view returns (address)',
+  'function platformServiceFeeWallet() view returns (address)',
+  'function usdtSettlementWallet() view returns (address)',
+  'function nplRewardWallet() view returns (address)',
+  'function operationsWallet() view returns (address)',
   'function quoteSigner() view returns (address)',
-  'function hasRole(bytes32 role,address account) view returns (bool)',
 ];
 const POLICY_ABI = [
-  'function safe() view returns (address)',
+  'function governanceWallet() view returns (address)',
   'function secondarySigner() view returns (address)',
   'function hasRole(bytes32 role,address account) view returns (bool)',
 ];
@@ -45,7 +44,7 @@ export interface RuntimeDeploymentExpectation {
 export interface PaymentRuntimeAttestation {
   deployedRuntimeCodeVerified: boolean;
   roleGrantsVerified: boolean;
-  safeAdminVerified: boolean;
+  walletRolesVerified: boolean;
   signerBindingsVerified: boolean;
   nplQuoteSourceHealthy: boolean;
   rpcChain56Healthy: boolean;
@@ -58,13 +57,11 @@ export class RpcPaymentRuntimeAttestor {
     router: string;
     policyRegistry: string;
     beneficiaryRegistry: string;
-    governanceSafe: string;
-    platformServiceFeeSafe: string;
-    usdtCustodySafe: string;
-    nplRewardSafe: string;
-    operationsTreasurySafe: string;
-    secondarySigner: string;
-    quoteSigner: string;
+    governanceWallet: string;
+    platformServiceFeeWallet: string;
+    usdtSettlementWallet: string;
+    nplRewardWallet: string;
+    operationsWallet: string;
   };
 
   constructor(input: {
@@ -73,13 +70,11 @@ export class RpcPaymentRuntimeAttestor {
     router: string;
     policyRegistry: string;
     beneficiaryRegistry: string;
-    governanceSafe: string;
-    platformServiceFeeSafe: string;
-    usdtCustodySafe: string;
-    nplRewardSafe: string;
-    operationsTreasurySafe: string;
-    secondarySigner: string;
-    quoteSigner: string;
+    governanceWallet: string;
+    platformServiceFeeWallet: string;
+    usdtSettlementWallet: string;
+    nplRewardWallet: string;
+    operationsWallet: string;
   }) {
     this.#reader = input.reader;
     this.#deployments = input.deployments.map((deployment) => ({
@@ -92,13 +87,11 @@ export class RpcPaymentRuntimeAttestor {
       router: normalizedAddress(input.router),
       policyRegistry: normalizedAddress(input.policyRegistry),
       beneficiaryRegistry: normalizedAddress(input.beneficiaryRegistry),
-      governanceSafe: normalizedAddress(input.governanceSafe),
-      platformServiceFeeSafe: normalizedAddress(input.platformServiceFeeSafe),
-      usdtCustodySafe: normalizedAddress(input.usdtCustodySafe),
-      nplRewardSafe: normalizedAddress(input.nplRewardSafe),
-      operationsTreasurySafe: normalizedAddress(input.operationsTreasurySafe),
-      secondarySigner: normalizedAddress(input.secondarySigner),
-      quoteSigner: normalizedAddress(input.quoteSigner),
+      governanceWallet: normalizedAddress(input.governanceWallet),
+      platformServiceFeeWallet: normalizedAddress(input.platformServiceFeeWallet),
+      usdtSettlementWallet: normalizedAddress(input.usdtSettlementWallet),
+      nplRewardWallet: normalizedAddress(input.nplRewardWallet),
+      operationsWallet: normalizedAddress(input.operationsWallet),
     };
   }
 
@@ -116,13 +109,13 @@ export class RpcPaymentRuntimeAttestor {
       routerNpl,
       routerPolicy,
       routerBeneficiary,
-      routerGovernanceSafe,
-      routerPlatformServiceFeeSafe,
-      routerUsdtSafe,
-      routerNplSafe,
-      routerOperationsSafe,
+      routerGovernanceWallet,
+      routerPlatformServiceFeeWallet,
+      routerUsdtWallet,
+      routerNplWallet,
+      routerOperationsWallet,
       routerQuoteSigner,
-      policySafe,
+      policyGovernanceWallet,
       policySecondarySigner,
       beneficiaryPolicy,
     ] = await Promise.all([
@@ -130,13 +123,13 @@ export class RpcPaymentRuntimeAttestor {
       callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'npl'),
       callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'policyRegistry'),
       callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'beneficiaryRegistry'),
-      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'governanceSafe'),
-      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'platformServiceFeeSafe'),
-      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'usdtCustodySafe'),
-      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'nplRewardSafe'),
-      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'operationsTreasurySafe'),
+      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'governanceWallet'),
+      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'platformServiceFeeWallet'),
+      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'usdtSettlementWallet'),
+      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'nplRewardWallet'),
+      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'operationsWallet'),
       callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'quoteSigner'),
-      callAddress(this.#reader, this.#addresses.policyRegistry, POLICY_ABI, 'safe'),
+      callAddress(this.#reader, this.#addresses.policyRegistry, POLICY_ABI, 'governanceWallet'),
       callAddress(this.#reader, this.#addresses.policyRegistry, POLICY_ABI, 'secondarySigner'),
       callAddress(this.#reader, this.#addresses.beneficiaryRegistry, BENEFICIARY_ABI, 'policyRegistry'),
     ]);
@@ -150,14 +143,23 @@ export class RpcPaymentRuntimeAttestor {
     const nplQuoteSourceHealthy = pairMatches && pair.reserve0 > 0n && pair.reserve1 > 0n
       && usdtLiquidity >= 50_000n * 10n ** 18n;
 
-    const safeAdminVerified = routerGovernanceSafe === this.#addresses.governanceSafe
-      && policySafe === this.#addresses.governanceSafe
-      && routerPlatformServiceFeeSafe === this.#addresses.platformServiceFeeSafe
-      && routerUsdtSafe === this.#addresses.usdtCustodySafe
-      && routerNplSafe === this.#addresses.nplRewardSafe
-      && routerOperationsSafe === this.#addresses.operationsTreasurySafe;
-    const signerBindingsVerified = routerQuoteSigner === this.#addresses.quoteSigner
-      && policySecondarySigner === this.#addresses.secondarySigner;
+    const roleAddresses = [
+      this.#addresses.governanceWallet,
+      this.#addresses.platformServiceFeeWallet,
+      this.#addresses.usdtSettlementWallet,
+      this.#addresses.nplRewardWallet,
+      this.#addresses.operationsWallet,
+    ];
+    const roleCodes = await Promise.all(roleAddresses.map((address) => this.#reader.code(address)));
+    const walletRolesVerified = roleCodes.every((code) => code === '0x')
+      && routerGovernanceWallet === this.#addresses.governanceWallet
+      && policyGovernanceWallet === this.#addresses.governanceWallet
+      && routerPlatformServiceFeeWallet === this.#addresses.platformServiceFeeWallet
+      && routerUsdtWallet === this.#addresses.usdtSettlementWallet
+      && routerNplWallet === this.#addresses.nplRewardWallet
+      && routerOperationsWallet === this.#addresses.operationsWallet;
+    const signerBindingsVerified = routerQuoteSigner === this.#addresses.governanceWallet
+      && policySecondarySigner === this.#addresses.governanceWallet;
     const contractBindingsVerified = routerUsdt === USDT_ADDRESS
       && routerNpl === NPL_ADDRESS
       && routerPolicy === this.#addresses.policyRegistry
@@ -165,19 +167,16 @@ export class RpcPaymentRuntimeAttestor {
       && beneficiaryPolicy === this.#addresses.policyRegistry;
 
     const roleChecks = await Promise.all([
-      hasRole(this.#reader, this.#addresses.router, ROUTER_ABI, DEFAULT_ADMIN_ROLE, this.#addresses.governanceSafe),
-      hasRole(this.#reader, this.#addresses.router, ROUTER_ABI, role('PAUSER_ROLE'), this.#addresses.governanceSafe),
-      hasRole(this.#reader, this.#addresses.router, ROUTER_ABI, role('SESSION_ADMIN_ROLE'), this.#addresses.governanceSafe),
-      hasRole(this.#reader, this.#addresses.policyRegistry, POLICY_ABI, DEFAULT_ADMIN_ROLE, this.#addresses.governanceSafe),
-      hasRole(this.#reader, this.#addresses.policyRegistry, POLICY_ABI, role('POLICY_PUBLISHER_ROLE'), this.#addresses.governanceSafe),
-      hasRole(this.#reader, this.#addresses.beneficiaryRegistry, BENEFICIARY_ABI, DEFAULT_ADMIN_ROLE, this.#addresses.governanceSafe),
-      hasRole(this.#reader, this.#addresses.beneficiaryRegistry, BENEFICIARY_ABI, role('REGISTRY_EDITOR_ROLE'), this.#addresses.governanceSafe),
+      hasRole(this.#reader, this.#addresses.policyRegistry, POLICY_ABI, DEFAULT_ADMIN_ROLE, this.#addresses.governanceWallet),
+      hasRole(this.#reader, this.#addresses.policyRegistry, POLICY_ABI, role('POLICY_PUBLISHER_ROLE'), this.#addresses.governanceWallet),
+      hasRole(this.#reader, this.#addresses.beneficiaryRegistry, BENEFICIARY_ABI, DEFAULT_ADMIN_ROLE, this.#addresses.governanceWallet),
+      hasRole(this.#reader, this.#addresses.beneficiaryRegistry, BENEFICIARY_ABI, role('REGISTRY_EDITOR_ROLE'), this.#addresses.governanceWallet),
     ]);
 
     return {
       deployedRuntimeCodeVerified: deployedRuntimeCodeVerified && contractBindingsVerified,
       roleGrantsVerified: roleChecks.every(Boolean),
-      safeAdminVerified,
+      walletRolesVerified,
       signerBindingsVerified,
       nplQuoteSourceHealthy,
       rpcChain56Healthy,
@@ -284,7 +283,7 @@ function failedAttestation(): PaymentRuntimeAttestation {
   return {
     deployedRuntimeCodeVerified: false,
     roleGrantsVerified: false,
-    safeAdminVerified: false,
+    walletRolesVerified: false,
     signerBindingsVerified: false,
     nplQuoteSourceHealthy: false,
     rpcChain56Healthy: false,

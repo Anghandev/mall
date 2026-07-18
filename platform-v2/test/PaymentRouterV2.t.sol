@@ -168,12 +168,16 @@ contract PaymentRouterV2Test is CoreFixture {
             npl,
             IPolicyRegistryV2(address(0)),
             IBeneficiaryRegistryV2(address(beneficiaryRegistry)),
-            platformServiceFeeSafe,
-            usdtCustodySafe,
-            nplRewardSafe,
-            operationsTreasurySafe,
-            quoteSigner
+            platformServiceFeeWallet,
+            usdtSettlementWallet,
+            nplRewardWallet,
+            operationsWallet
         );
+    }
+
+    function testRouterBindsPlatformTechnicalWalletAsGovernanceAndQuoteSigner() public view {
+        assertEq(router.governanceWallet(), governanceWallet);
+        assertEq(router.quoteSigner(), governanceWallet);
     }
 
     function testPaymentAtomicallySplitsServiceFeeCustodyBurnRewardAndRouterRetainsZero() public {
@@ -186,10 +190,10 @@ contract PaymentRouterV2Test is CoreFixture {
 
         assertEq(buyerUsdtBefore - usdt.balanceOf(buyer), 70 ether);
         assertEq(buyerNplBefore - npl.balanceOf(buyer), 300 ether);
-        assertEq(usdt.balanceOf(platformServiceFeeSafe), 1 ether);
-        assertEq(usdt.balanceOf(usdtCustodySafe), 69 ether);
+        assertEq(usdt.balanceOf(platformServiceFeeWallet), 1 ether);
+        assertEq(usdt.balanceOf(usdtSettlementWallet), 69 ether);
         assertEq(npl.balanceOf(V2Types.NPL_BURN_ADDRESS), 200 ether);
-        assertEq(npl.balanceOf(nplRewardSafe), 100 ether);
+        assertEq(npl.balanceOf(nplRewardWallet), 100 ether);
         assertEq(usdt.balanceOf(address(router)), 0);
         assertEq(npl.balanceOf(address(router)), 0);
     }
@@ -199,15 +203,15 @@ contract PaymentRouterV2Test is CoreFixture {
             _makePayment(keccak256("delivery-freight"), buyer, 19, false, keccak256("reservation-19"));
         delivery.freightUsdt = 5 ether;
         delivery.usdtPaymentAmount = delivery.productUsdtPaymentAmount + delivery.freightUsdt;
-        uint256 custodyBefore = usdt.balanceOf(usdtCustodySafe);
+        uint256 custodyBefore = usdt.balanceOf(usdtSettlementWallet);
         uint256 burnBefore = npl.balanceOf(V2Types.NPL_BURN_ADDRESS);
-        uint256 rewardBefore = npl.balanceOf(nplRewardSafe);
+        uint256 rewardBefore = npl.balanceOf(nplRewardWallet);
 
         _pay(delivery, BUYER_KEY);
 
-        assertEq(usdt.balanceOf(usdtCustodySafe) - custodyBefore, 74 ether);
+        assertEq(usdt.balanceOf(usdtSettlementWallet) - custodyBefore, 74 ether);
         assertEq(npl.balanceOf(V2Types.NPL_BURN_ADDRESS) - burnBefore, 200 ether);
-        assertEq(npl.balanceOf(nplRewardSafe) - rewardBefore, 100 ether);
+        assertEq(npl.balanceOf(nplRewardWallet) - rewardBefore, 100 ether);
         assertEq(delivery.bnmAmount, delivery.listPriceUsdt);
 
         V2Types.PaymentIntent memory pickup =
@@ -217,7 +221,7 @@ contract PaymentRouterV2Test is CoreFixture {
         pickup.usdtPaymentAmount = pickup.productUsdtPaymentAmount + pickup.freightUsdt;
         bytes32 digest = router.hashPayment(pickup);
         vm.expectRevert(PaymentRouterV2.InvalidAmounts.selector);
-        router.pay(pickup, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest));
+        router.pay(pickup, _sign(GOVERNANCE_KEY, digest), _sign(BUYER_KEY, digest));
     }
 
     function testConcessionNeverChangesBuyerPaymentAndAllowsZeroOrFull() public {
@@ -242,33 +246,33 @@ contract PaymentRouterV2Test is CoreFixture {
         _pay(intent, BUYER_KEY);
         bytes32 digest = router.hashPayment(intent);
         vm.expectRevert(PaymentRouterV2.Replay.selector);
-        router.pay(intent, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest));
+        router.pay(intent, _sign(GOVERNANCE_KEY, digest), _sign(BUYER_KEY, digest));
 
         intent = _makePayment(keccak256("bad-amount"), buyer, 5, false, keccak256("reservation-5"));
         intent.nplRewardAmount += 1;
         digest = router.hashPayment(intent);
         vm.expectRevert(PaymentRouterV2.InvalidAmounts.selector);
-        router.pay(intent, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest));
+        router.pay(intent, _sign(GOVERNANCE_KEY, digest), _sign(BUYER_KEY, digest));
 
         intent = _makePayment(keccak256("long-quote"), buyer, 6, false, keccak256("reservation-6"));
         intent.deadline = intent.issuedAt + 5 minutes + 1;
         intent.reservationDeadline = intent.deadline + 1;
         digest = router.hashPayment(intent);
         vm.expectRevert(PaymentRouterV2.QuoteExpired.selector);
-        router.pay(intent, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest));
+        router.pay(intent, _sign(GOVERNANCE_KEY, digest), _sign(BUYER_KEY, digest));
 
         intent = _makePayment(keccak256("wrong-concession-set"), buyer, 14, false, keccak256("reservation-14"));
         intent.concessionAllocationHash = keccak256("unpublished-concession-set");
         digest = router.hashPayment(intent);
         vm.expectRevert(PaymentRouterV2.InvalidIntent.selector);
-        router.pay(intent, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest));
+        router.pay(intent, _sign(GOVERNANCE_KEY, digest), _sign(BUYER_KEY, digest));
     }
 
     function testQuoteSignatureBindsAmountsIdentityReservationPolicyDeadlineAndNonce() public {
         V2Types.PaymentIntent memory original =
             _makePayment(keccak256("bound-fields"), buyer, 19, false, keccak256("reservation-19"));
         bytes32 digest = router.hashPayment(original);
-        bytes memory quoteSignature = _sign(QUOTE_KEY, digest);
+        bytes memory quoteSignature = _sign(GOVERNANCE_KEY, digest);
         bytes memory buyerSignature = _sign(BUYER_KEY, digest);
         V2Types.PaymentIntent memory changed = original;
 
@@ -303,7 +307,7 @@ contract PaymentRouterV2Test is CoreFixture {
         intent = _setAmounts(intent, 1, 1, 0);
         bytes32 digest = router.hashPayment(intent);
         vm.expectRevert(PaymentRouterV2.InvalidAmounts.selector);
-        router.pay(intent, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest));
+        router.pay(intent, _sign(GOVERNANCE_KEY, digest), _sign(BUYER_KEY, digest));
     }
 
     function testFeeOnTransferAndReentrancyCannotBreakConservation() public {
@@ -312,20 +316,21 @@ contract PaymentRouterV2Test is CoreFixture {
         npl.setFeeBps(100);
         bytes32 digest = router.hashPayment(intent);
         vm.expectRevert(PaymentRouterV2.InexactTransfer.selector);
-        router.pay(intent, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest));
+        router.pay(intent, _sign(GOVERNANCE_KEY, digest), _sign(BUYER_KEY, digest));
         npl.setFeeBps(0);
 
         intent = _makePayment(keccak256("reentrant"), buyer, 8, false, keccak256("reservation-8"));
         digest = router.hashPayment(intent);
-        bytes memory callData = abi.encodeCall(router.pay, (intent, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest)));
+        bytes memory callData =
+            abi.encodeCall(router.pay, (intent, _sign(GOVERNANCE_KEY, digest), _sign(BUYER_KEY, digest)));
         usdt.configureCallback(address(router), callData);
-        router.pay(intent, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest));
+        router.pay(intent, _sign(GOVERNANCE_KEY, digest), _sign(BUYER_KEY, digest));
         assertFalse(usdt.callbackSucceeded());
         assertEq(usdt.balanceOf(address(router)), 0);
         assertEq(npl.balanceOf(address(router)), 0);
     }
 
-    function testErc1271BuyerAuthorization() public {
+    function testContractWalletBuyerAuthorizationIsRejected() public {
         uint256 ownerKey = 0x1271;
         address owner = vm.addr(ownerKey);
         Mock1271Wallet wallet = new Mock1271Wallet(owner);
@@ -338,9 +343,8 @@ contract PaymentRouterV2Test is CoreFixture {
         V2Types.PaymentIntent memory intent =
             _makePayment(keccak256("erc1271"), address(wallet), 9, false, keccak256("reservation-9"));
         bytes32 digest = router.hashPayment(intent);
-        router.pay(intent, _sign(QUOTE_KEY, digest), _sign(ownerKey, digest));
-        assertEq(usdt.balanceOf(platformServiceFeeSafe), 1 ether);
-        assertEq(usdt.balanceOf(usdtCustodySafe), 69 ether);
+        vm.expectRevert(PaymentRouterV2.InvalidSignature.selector);
+        router.pay(intent, _sign(GOVERNANCE_KEY, digest), _sign(ownerKey, digest));
     }
 
     function testQuoteSignerCannotInjectLegacyGenesisBeneficiary() public {
@@ -349,60 +353,60 @@ contract PaymentRouterV2Test is CoreFixture {
         intent.beneficiaries.genesis = genesis;
         bytes32 digest = router.hashPayment(intent);
         vm.expectRevert(BeneficiaryRegistryV2.BeneficiaryMismatch.selector);
-        router.pay(intent, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest));
+        router.pay(intent, _sign(GOVERNANCE_KEY, digest), _sign(BUYER_KEY, digest));
     }
 
-    function testPaymentPauseRequiresActualSafeAndCanResume() public {
+    function testPaymentPauseRequiresActualGovernanceWalletAndCanResume() public {
         bytes32 evidence = keccak256("incident");
         vm.expectRevert();
         router.setNewPaymentsPaused(true, evidence);
-        vm.prank(safe);
+        vm.prank(governanceWallet);
         router.setNewPaymentsPaused(true, evidence);
         V2Types.PaymentIntent memory intent =
             _makePayment(keccak256("paused"), buyer, 10, false, keccak256("reservation-10"));
         bytes32 digest = router.hashPayment(intent);
         vm.expectRevert(PaymentRouterV2.NewPaymentsPaused.selector);
-        router.pay(intent, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest));
-        vm.prank(safe);
+        router.pay(intent, _sign(GOVERNANCE_KEY, digest), _sign(BUYER_KEY, digest));
+        vm.prank(governanceWallet);
         router.setNewPaymentsPaused(false, keccak256("resume"));
-        router.pay(intent, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest));
+        router.pay(intent, _sign(GOVERNANCE_KEY, digest), _sign(BUYER_KEY, digest));
     }
 
     function testSeckillLiveExtendsRelayAndExactDeadlineUsesFallback() public {
         bytes32 sessionId = keccak256("session-1");
-        vm.prank(safe);
+        vm.prank(governanceWallet);
         router.openSeckillSession(sessionId, 1, uint64(block.timestamp));
         vm.warp(block.timestamp + 30 seconds);
         V2Types.SeckillIntent memory liveIntent = _dualIntent(11);
         bytes32 digest = router.hashSeckill(liveIntent);
-        router.paySeckill(liveIntent, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest));
+        router.paySeckill(liveIntent, _sign(GOVERNANCE_KEY, digest), _sign(BUYER_KEY, digest));
         PaymentRouterV2.SeckillSession memory session = router.getSession(sessionId);
         assertEq(session.relayDeadline, block.timestamp + 60 seconds);
 
         vm.warp(session.relayDeadline);
         V2Types.SeckillIntent memory fallbackIntent = _dualIntent(12);
         digest = router.hashSeckill(fallbackIntent);
-        router.paySeckill(fallbackIntent, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest));
+        router.paySeckill(fallbackIntent, _sign(GOVERNANCE_KEY, digest), _sign(BUYER_KEY, digest));
         assertTrue(router.usedReservation(fallbackIntent.fallbackPayment.reservationId));
         assertFalse(router.usedReservation(fallbackIntent.seckillPayment.reservationId));
     }
 
     function testSeckillRejectsMismatchedDualQuoteIdentity() public {
         bytes32 sessionId = keccak256("session-1");
-        vm.prank(safe);
+        vm.prank(governanceWallet);
         router.openSeckillSession(sessionId, 1, uint64(block.timestamp));
         V2Types.SeckillIntent memory intent = _dualIntent(15);
         intent.fallbackPayment.nonce += 1;
         bytes32 digest = router.hashSeckill(intent);
         vm.expectRevert(PaymentRouterV2.InvalidIntent.selector);
-        router.paySeckill(intent, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest));
+        router.paySeckill(intent, _sign(GOVERNANCE_KEY, digest), _sign(BUYER_KEY, digest));
     }
 
     function testFutureSessionUsesVersionedRelayIncrementAndCap() public {
         V2Types.PaymentIntent memory versionOneQuote =
             _makePayment(keccak256("version-one-after-region-change"), buyer, 18, false, keccak256("reservation-18"));
         bytes32 versionOneDigest = router.hashPayment(versionOneQuote);
-        bytes memory versionOneQuoteSignature = _sign(QUOTE_KEY, versionOneDigest);
+        bytes memory versionOneQuoteSignature = _sign(GOVERNANCE_KEY, versionOneDigest);
         bytes memory versionOneBuyerSignature = _sign(BUYER_KEY, versionOneDigest);
         V2Types.Policy memory policy = policyRegistry.getPolicy(1);
         policy.version = 2;
@@ -424,17 +428,17 @@ contract PaymentRouterV2Test is CoreFixture {
         BeneficiaryRegistryV2.RegionBeneficiaries memory nextRegion =
             BeneficiaryRegistryV2.RegionBeneficiaries(district, city, province, region);
         bytes32 regionDigest = beneficiaryRegistry.hashRegionPublication(2, regionCodeHash, nextRegion, 8, deadline);
-        vm.prank(safe);
+        vm.prank(governanceWallet);
         beneficiaryRegistry.publishRegionBeneficiaries(
-            2, regionCodeHash, nextRegion, 8, deadline, _sign(SECONDARY_KEY, regionDigest)
+            2, regionCodeHash, nextRegion, 8, deadline, _sign(GOVERNANCE_KEY, regionDigest)
         );
         bytes32 publicationDigest = policyRegistry.hashPublication(policy, accounts, weights, 8, deadline);
-        vm.prank(safe);
-        policyRegistry.publishPolicy(policy, accounts, weights, 8, deadline, _sign(SECONDARY_KEY, publicationDigest));
+        vm.prank(governanceWallet);
+        policyRegistry.publishPolicy(policy, accounts, weights, 8, deadline, _sign(GOVERNANCE_KEY, publicationDigest));
         router.pay(versionOneQuote, versionOneQuoteSignature, versionOneBuyerSignature);
 
         bytes32 sessionId = keccak256("session-v2");
-        vm.prank(safe);
+        vm.prank(governanceWallet);
         router.openSeckillSession(sessionId, 2, uint64(block.timestamp));
         vm.warp(block.timestamp + 5 seconds);
         V2Types.SeckillIntent memory intent = _dualIntent(17);
@@ -443,7 +447,7 @@ contract PaymentRouterV2Test is CoreFixture {
         intent.seckillPayment.policyVersion = 2;
         intent.fallbackPayment.policyVersion = 2;
         bytes32 digest = router.hashSeckill(intent);
-        router.paySeckill(intent, _sign(QUOTE_KEY, digest), _sign(BUYER_KEY, digest));
+        router.paySeckill(intent, _sign(GOVERNANCE_KEY, digest), _sign(BUYER_KEY, digest));
 
         PaymentRouterV2.SeckillSession memory session = router.getSession(sessionId);
         assertEq(session.relayIncrement, 10 seconds);

@@ -47,19 +47,19 @@ export type FulfillmentAsset = "USDT" | "NPL" | "BNM_POINTS";
 export type ArbitrationOutcome = "FULFILL" | "RESUME_FULFILLMENT";
 export type SettlementRail = "MERCHANT_USDT" | "REWARD_NPL" | "PRIZE_USDT" | "TAKEOVER_USDT" | "OPERATIONS_REIMBURSEMENT_USDT";
 export type SettlementIntentState = "ISSUED" | "CONSUMED" | "EXPIRED" | "CANCELLED";
-export type SettlementRequestState = "REQUESTED" | "BATCHED" | "SETTLED" | "RETRYABLE" | "QUARANTINED";
-export type SettlementBatchState = "APPROVAL_PENDING" | "APPROVED" | "SUBMITTING" | "SUBMITTED" | "MINED" | "SETTLED" | "FAILED" | "REORGED" | "RETRYABLE" | "QUARANTINED";
+export type SettlementRequestState = "REQUESTED" | "SUBMITTED" | "SETTLED" | "RETRYABLE" | "QUARANTINED";
+export type SettlementTransferState = "PENDING" | "LEASED" | "SUBMITTED" | "MINED" | "SETTLED" | "FAILED" | "REORGED" | "RETRYABLE" | "QUARANTINED";
 export type MerchantGuaranteeDepositState = "SUBMITTED" | "MINED" | "FINAL" | "REORGED" | "QUARANTINED";
 export type GuaranteeStatus = "DECISION_BLOCKED" | "BELOW_MINIMUM" | "READY" | "FROZEN";
 export type BreakerAction = "PAUSE" | "RESUME";
 export type BreakerCauseType = "COVERAGE" | "GOVERNANCE" | "SECURITY" | "OPERATIONS";
 export type ReservationState = "ACTIVE" | "CONSUMED" | "EXPIRED" | "RELEASED";
-export type BalanceState = "LOCKED" | "AVAILABLE" | "REQUESTED" | "BATCHED" | "SETTLED" | "DISPUTED";
+export type BalanceState = "LOCKED" | "AVAILABLE" | "REQUESTED" | "SUBMITTED" | "SETTLED" | "DISPUTED";
 export type RewardSubtype = "GENESIS" | "DIRECT_REFERRAL" | "DISTRICT" | "CITY" | "PROVINCE" | "REGION" | "OPERATIONS" | "ROUNDING_REMAINDER";
 export type TakeoverState = "OPEN" | "FUNDED" | "FULFILLING" | "FULFILLMENT_PENDING" | "CLOSED" | "DECISION_BLOCKED";
 export type SeckillState = "PREHEAT" | "LIVE" | "SETTLING" | "SETTLED" | "FORCE_CLOSED";
 export type PolicyPublicationState = "DRAFT" | "DECISION_BLOCKED" | "PUBLISHED" | "SUPERSEDED";
-export type PolicyDraftState = "DRAFT" | "DECISION_BLOCKED" | "SECONDARY_SIGNED" | "SAFE_PROPOSED" | "FINALITY_PENDING" | "REORGED" | "REJECTED" | "PUBLISHED";
+export type PolicyDraftState = "DRAFT" | "DECISION_BLOCKED" | "SECONDARY_SIGNED" | "SUBMITTED" | "FINALITY_PENDING" | "REORGED" | "REJECTED" | "PUBLISHED";
 export type CmsContentType = "BANNER" | "RECOMMENDATION" | "SPLASH" | "CAMPAIGN_POPUP" | "SECKILL_RULES" | "FAQ" | "SERVICE_AGREEMENT" | "PRIVACY" | "ABOUT" | "RELEASE_ANNOUNCEMENT" | "UPDATE_NOTICE" | "CONTRACT_NOTICE";
 export type CmsContentFormat = "STRUCTURED_RICH_TEXT" | "STRUCTURED_CAMPAIGN";
 export type CmsPublicationEventType = "PUBLISHED" | "ROLLED_BACK";
@@ -131,7 +131,7 @@ export declare const arbitrationOutcomes: readonly ArbitrationOutcome[];
 export declare const settlementRails: readonly SettlementRail[];
 export declare const settlementIntentStates: readonly SettlementIntentState[];
 export declare const settlementRequestStates: readonly SettlementRequestState[];
-export declare const settlementBatchStates: readonly SettlementBatchState[];
+export declare const settlementTransferStates: readonly SettlementTransferState[];
 export declare const merchantGuaranteeDepositStates: readonly MerchantGuaranteeDepositState[];
 export declare const guaranteeStatuses: readonly GuaranteeStatus[];
 export declare const breakerActions: readonly BreakerAction[];
@@ -625,7 +625,7 @@ export interface SeckillSessionHistoryPage {
 
 export type SeckillGovernanceActionKind = 'OPEN_SESSION' | 'FORCE_CLOSE' | 'RESUME_PURCHASES' | 'PRIZE_INJECTION';
 export type SeckillGovernanceActionState =
-  | 'DRAFT' | 'SECONDARY_SIGNED' | 'PENDING_PROPOSAL' | 'SAFE_PROPOSED'
+  | 'DRAFT' | 'SECONDARY_SIGNED' | 'PENDING_EXECUTION' | 'SUBMITTED'
   | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'CANCELLED';
 
 export interface SeckillSessionCreateRequest {
@@ -657,7 +657,7 @@ export interface SeckillGovernanceChallenge {
   sessionId: Bytes32;
   actionKind: SeckillGovernanceActionKind;
   signer: Address;
-  safeAddress: Address;
+  executorWallet: Address;
   typedData: Eip712TypedData;
   digest: Bytes32;
 }
@@ -682,8 +682,8 @@ export interface SeckillSessionPlanProjection {
 export interface SeckillPrizeInjectionProjection {
   injectionId: Bytes32;
   amountUsdt: AtomicAmount;
-  operationsSafeAddress: Address;
-  custodySafeAddress: Address;
+  operationsWalletAddress: Address;
+  settlementWalletAddress: Address;
   tokenAddress: Address;
   finalJournalId: string | null;
   reversalJournalId: string | null;
@@ -697,12 +697,12 @@ export interface SeckillGovernanceActionProjection {
   actionKind: SeckillGovernanceActionKind;
   state: SeckillGovernanceActionState;
   evidenceHash: Bytes32;
-  safeAddress: Address;
+  executorWallet: Address;
   targetAddress: Address;
   calldataHash: Bytes32;
-  safeNonce: AtomicAmount | null;
-  safeTxHash: Bytes32 | null;
-  proposalHash: Bytes32 | null;
+  executorNonce: AtomicAmount | null;
+  submittedTxHash: Bytes32 | null;
+  executionEvidenceHash: Bytes32 | null;
   executionTxHash: Bytes32 | null;
   blockNumber: AtomicAmount | null;
   blockHash: Bytes32 | null;
@@ -745,7 +745,7 @@ export interface SensitiveApproval {
   policyVersion: AtomicAmount;
   oldValueHash: Bytes32;
   newValueHash: Bytes32;
-  safeAddress: Address;
+  executorWallet: Address;
   nonce: AtomicAmount;
   deadline: AtomicAmount;
   signature: string;
@@ -781,7 +781,7 @@ export interface SettlementRequestIntent {
   recipient: Address;
   rail: SettlementRail;
   asset: Address;
-  safeAddress: Address;
+  executorWallet: Address;
   amount: AtomicAmount;
   itemsHash: Bytes32;
   nonce: AtomicAmount;
@@ -792,7 +792,7 @@ export interface SettlementIntentItem {
   itemIndex: number;
   orderId: string;
   accountId: string;
-  backingSafeAddress: Address;
+  backingWalletAddress: Address;
   amount: AtomicAmount;
   itemHash: Bytes32;
 }
@@ -816,17 +816,17 @@ export interface SettlementRequestItem {
   item_index: number;
   order_id: string;
   account_id: string;
-  backing_safe_address: Address;
+  backing_wallet_address: Address;
   amount: AtomicAmount;
   requested_journal_id: string;
-  batched_journal_id: string | null;
+  submitted_journal_id: string | null;
   settled_journal_id: string | null;
 }
 
 export interface SettlementRequestItemTransition {
   transition_id: string;
   request_item_index: number;
-  batch_id: string | null;
+  transfer_id: string | null;
   transition_sequence: AtomicAmount;
   transition_type: string;
   journal_id: string;
@@ -842,17 +842,16 @@ export interface SettlementRequestProjection {
   rail: SettlementRail;
   asset: 'USDT' | 'NPL';
   asset_address: Address;
-  safe_address: Address;
+  executor_wallet: Address;
   amount: AtomicAmount;
   items_hash: Bytes32;
   intent_digest: Bytes32;
   signature_hash: Bytes32;
   state: SettlementRequestState;
-  batch_id: string | null;
-  final_safe_tx_hash: Bytes32 | null;
-  final_execution_tx_hash: Bytes32 | null;
+  transfer_ids: readonly Bytes32[];
+  final_execution_tx_hashes: readonly Bytes32[];
   requested_at: string;
-  batched_at: string | null;
+  submitted_at: string | null;
   settled_at: string | null;
   items: readonly SettlementRequestItem[];
   transitions: readonly SettlementRequestItemTransition[];
@@ -941,16 +940,15 @@ export interface MerchantReceivableSettlementRef {
   requestId: Bytes32;
   amount: AtomicAmount;
   state: SettlementRequestState;
-  batchId: Bytes32 | null;
-  finalSafeTxHash: Bytes32 | null;
+  transferId: Bytes32 | null;
   finalExecutionTxHash: Bytes32 | null;
   journals: {
     requested: string;
-    batched: string | null;
+    submitted: string | null;
     settled: string | null;
   };
   requestedAt: string;
-  batchedAt: string | null;
+  submittedAt: string | null;
   settledAt: string | null;
 }
 
@@ -998,17 +996,16 @@ export interface AdminSettlementRequest {
   recipientAddress: Address;
   rail: SettlementRail;
   asset: 'USDT' | 'NPL';
-  safeAddress: Address;
+  executorWallet: Address;
   amount: AtomicAmount;
   state: SettlementRequestState;
-  batchId: Bytes32 | null;
+  transferIds: readonly Bytes32[];
   intentDigest: Bytes32;
   signatureHash: Bytes32;
-  finalSafeTxHash: Bytes32 | null;
-  finalExecutionTxHash: Bytes32 | null;
+  finalExecutionTxHashes: readonly Bytes32[];
   itemCount: number;
   requestedAt: string;
-  batchedAt: string | null;
+  submittedAt: string | null;
   settledAt: string | null;
 }
 
@@ -1025,7 +1022,7 @@ export interface AdminSettlementRequestList {
 
 export interface AdminSettlementRequestItemJournals {
   requested: string;
-  batched: string | null;
+  submitted: string | null;
   settled: string | null;
 }
 
@@ -1033,7 +1030,7 @@ export interface AdminSettlementRequestItem {
   itemIndex: number;
   orderId: Bytes32;
   accountId: string;
-  backingSafeAddress: Address;
+  backingWalletAddress: Address;
   amount: AtomicAmount;
   itemHash: Bytes32;
   policyVersion: AtomicAmount;
@@ -1043,9 +1040,9 @@ export interface AdminSettlementRequestItem {
 export interface AdminSettlementRequestTransition {
   transitionId: string;
   requestItemIndex: number;
-  batchId: Bytes32 | null;
+  transferId: Bytes32 | null;
   sequence: number;
-  type: 'REQUESTED' | 'BATCHED' | 'SETTLED' | 'BATCH_REVERSED' | 'FINALITY_REVERSED';
+  type: 'REQUESTED' | 'SUBMITTED' | 'SETTLED' | 'EXECUTION_REVERSED' | 'FINALITY_REVERSED';
   journalId: string;
   createdAt: string;
 }
@@ -1057,86 +1054,58 @@ export interface AdminSettlementRequestDetail {
   transitions: readonly AdminSettlementRequestTransition[];
 }
 
-export interface AdminSettlementBatch {
-  batchId: Bytes32;
+export interface AdminSettlementTransfer {
+  transferId: Bytes32;
   asset: 'USDT' | 'NPL';
-  safeAddress: Address;
-  safeNonce: AtomicAmount;
-  itemCount: number;
-  totalAmount: AtomicAmount;
-  contentHash: Bytes32;
-  safeTxHash: Bytes32;
-  state: SettlementBatchState;
-  approvalThreshold: number;
-  approvalCount: number;
-  createdBy: Address;
-  createdAt: string;
-  approvedAt: string | null;
-  submittedAt: string | null;
-  settledAt: string | null;
-}
-
-export interface AdminSettlementBatchCursor {
-  createdAt: string;
-  batchId: Bytes32;
-}
-
-export interface AdminSettlementBatchList {
-  artifactVersion: typeof artifactVersion;
-  batches: readonly AdminSettlementBatch[];
-  nextCursor: AdminSettlementBatchCursor | null;
-}
-
-export interface AdminSettlementBatchEnvelope extends AdminSettlementBatch {
-  chainId: 56;
-  assetAddress: Address;
-  safeVersion: string;
-  safeSingletonAddress: Address;
-  safeSingletonCodeHash: Bytes32;
-  ownerSetHash: Bytes32;
-  safeRuntimeEvidenceHash: Bytes32;
-  safeRuntimeCheckedAt: string;
-  multisendAddress: Address;
-  multisendCodeHash: Bytes32;
-  tokenCodeHash: Bytes32;
-  tokenTransferConformanceEvidenceHash: Bytes32;
-  itemsHash: Bytes32;
-  multisendTransactions: string;
-  multisendCalldata: string;
-  safeTxData: string;
-  proposalReferenceHash: Bytes32 | null;
-  approvalEvidenceHash: Bytes32 | null;
-}
-
-export interface AdminSettlementBatchItem {
-  itemIndex: number;
+  executorWallet: Address;
+  executorNonce: AtomicAmount;
   requestId: Bytes32;
   requestItemIndex: number;
   orderId: Bytes32;
-  merchantId: string | null;
   accountId: string;
   recipientAddress: Address;
   tokenAddress: Address;
   amount: AtomicAmount;
   transferCalldata: string;
-  itemHash: Bytes32;
+  contentHash: Bytes32;
+  gasCap: AtomicAmount;
+  executionTxHash: Bytes32 | null;
+  state: SettlementTransferState;
+  createdBy: Address;
+  createdAt: string;
+  submittedAt: string | null;
+  settledAt: string | null;
 }
 
-export interface AdminSettlementApproval {
-  ownerAddress: Address;
-  safeTxHash: Bytes32;
-  signatureHash: Bytes32;
-  approvedAt: string;
+export interface AdminSettlementTransferCursor {
+  createdAt: string;
+  transferId: Bytes32;
+}
+
+export interface AdminSettlementTransferList {
+  artifactVersion: typeof artifactVersion;
+  transfers: readonly AdminSettlementTransfer[];
+  nextCursor: AdminSettlementTransferCursor | null;
+}
+
+export interface AdminSettlementTransferEnvelope extends AdminSettlementTransfer {
+  chainId: 56;
+  artifactVersion: typeof artifactVersion;
+  tokenCodeHash: Bytes32;
+  tokenTransferConformanceEvidenceHash: Bytes32;
+  runtimeEvidenceHash: Bytes32;
+  runtimeCheckedAt: string;
 }
 
 export interface AdminSettlementAttempt {
   attemptId: string;
   attemptNumber: number;
   requestDigest: Bytes32;
-  safeTxHash: Bytes32;
   executionTxHash: Bytes32 | null;
-  outerSender: Address | null;
-  outerNonce: AtomicAmount | null;
+  executorWallet: Address;
+  executorNonce: AtomicAmount;
+  transactionTo: Address;
+  transactionCalldata: string;
   replacementForAttemptId: string | null;
   state: 'LEASED' | 'SUBMITTED' | 'MINED' | 'SETTLED' | 'REPLACED' | 'FAILED' | 'REORGED' | 'QUARANTINED';
   createdAt: string;
@@ -1167,7 +1136,7 @@ export interface AdminSettlementCoverage {
   blockHash: Bytes32;
   evidenceHash: Bytes32;
   recordedAt: string;
-  safeAddress: Address;
+  executorWallet: Address;
   asset: 'USDT' | 'NPL';
   verifiedAssets: AtomicAmount;
   unsettledLiabilities: AtomicAmount;
@@ -1200,11 +1169,9 @@ export interface AdminSettlementReconciliation {
   conserved: boolean;
 }
 
-export interface AdminSettlementBatchDetail {
+export interface AdminSettlementTransferDetail {
   artifactVersion: typeof artifactVersion;
-  batch: AdminSettlementBatchEnvelope;
-  items: readonly AdminSettlementBatchItem[];
-  approvals: readonly AdminSettlementApproval[];
+  transfer: AdminSettlementTransferEnvelope;
   attempts: readonly AdminSettlementAttempt[];
   finality: AdminSettlementFinality | null;
   coverage: AdminSettlementCoverage | null;
@@ -1225,7 +1192,7 @@ export interface GuaranteeDepositProjection {
   policyVersion: number;
   transactionHash: Bytes32;
   expectedAmountUsdt: AtomicAmount;
-  operationsSafeAddress: Address;
+  operationsWalletAddress: Address;
   state: MerchantGuaranteeDepositState;
   confirmations: number;
   blockNumber?: number;
@@ -1250,7 +1217,7 @@ export interface TakeoverFundingRequest {
 export interface TakeoverFundingReceivable {
   orderId: string;
   accountId: string;
-  backingSafeAddress: Address;
+  backingWalletAddress: Address;
   amount: AtomicAmount;
 }
 
@@ -1292,7 +1259,7 @@ export interface MerchantFinanceMerchant {
 }
 
 export interface MerchantGuarantee {
-  backing_safe_address: Address;
+  backing_wallet_address: Address;
   balance_usdt: AtomicAmount;
   minimum_usdt: AtomicAmount;
   source_evidence_hash: Bytes32;
@@ -1303,7 +1270,7 @@ export interface MerchantGuaranteeDeposit {
   deposit_id: string;
   policy_version: AtomicAmount;
   token_address: Address;
-  operations_safe_address: Address;
+  operations_wallet_address: Address;
   expected_amount_usdt: AtomicAmount;
   transaction_hash: Bytes32;
   state: MerchantGuaranteeDepositState;
@@ -1373,8 +1340,8 @@ export interface MerchantDebtRecovery {
   recovery_id: string;
   order_id: string;
   amount_usdt: AtomicAmount;
-  operations_safe_address: Address;
-  backing_safe_address: Address;
+  operations_wallet_address: Address;
+  backing_wallet_address: Address;
   journal_id: string;
   evidence_hash: Bytes32;
   recovered_at: string;
@@ -1516,10 +1483,10 @@ export interface PolicyDraftProjection {
   publicationDeadline: string | null;
   secondarySigner: Address | null;
   secondarySignatureHash: Bytes32 | null;
-  safeAddress: Address | null;
-  safeCalldataHash: Bytes32 | null;
-  safeTxHash: Bytes32 | null;
-  safeProposalHash: Bytes32 | null;
+  governanceWallet: Address | null;
+  executionCalldataHash: Bytes32 | null;
+  executionTxHash: Bytes32 | null;
+  executionEvidenceHash: Bytes32 | null;
   createdBy: Address;
   createdAt: string;
   updatedAt: string;
@@ -1558,7 +1525,7 @@ export interface CoverageBreakerResumeChallenge {
   evidenceHash: Bytes32;
   policyVersion: AtomicAmount;
   signer: Address;
-  safeAddress: Address;
+  executorWallet: Address;
   routerAddress: Address;
   typedData: Eip712TypedData;
   digest: Bytes32;
@@ -1572,13 +1539,13 @@ export interface CoverageBreakerActionProjection {
   action: 'PAUSE' | 'RESUME';
   targetPaused: boolean;
   evidenceHash: Bytes32;
-  governanceSafeAddress: Address;
+  governanceWalletAddress: Address;
   routerAddress: Address;
   calldataHash: Bytes32;
-  state: 'PENDING_PROPOSAL' | 'SAFE_PROPOSED' | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'SUPERSEDED';
-  safeNonce: AtomicAmount | null;
-  safeTxHash: Bytes32 | null;
-  proposalHash: Bytes32 | null;
+  state: 'PENDING_EXECUTION' | 'SUBMITTED' | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'SUPERSEDED';
+  executorNonce: AtomicAmount | null;
+  submittedTxHash: Bytes32 | null;
+  executionEvidenceHash: Bytes32 | null;
   executionTxHash: Bytes32 | null;
   confirmations: number;
   actorWallet: Address | null;
@@ -1858,7 +1825,7 @@ export interface AdminBusinessDashboard {
   settlements: { requestedCount: AtomicAmount; requestedUsdt: AtomicAmount; settledCount: AtomicAmount; settledUsdt: AtomicAmount; failedTransactions: AtomicAmount };
   coverage: readonly {
     snapshotId: string; blockNumber: AtomicAmount; recordedAt: string; asset: 'USDT' | 'NPL';
-    safeAddress: Address; verifiedAssets: AtomicAmount; unsettledLiabilities: AtomicAmount; covered: boolean;
+    walletAddress: Address; verifiedAssets: AtomicAmount; unsettledLiabilities: AtomicAmount; covered: boolean;
   }[];
   breakers: readonly { scope: BreakerScope; paused: boolean }[];
   risk: {
@@ -1993,10 +1960,10 @@ export interface ProductPolicy {
   seckillPrizeBps: number;
   requiredConfirmations: 15;
   merchantGuaranteeMinimumUsdt: AtomicAmount;
-  platformServiceFeeSafe: Address;
-  usdtCustodySafe: Address;
-  nplRewardSafe: Address;
-  operationsTreasurySafe: Address;
+  platformServiceFeeWallet: Address;
+  usdtSettlementWallet: Address;
+  nplRewardWallet: Address;
+  operationsWallet: Address;
   circulationPool: Address;
   concessionDestinationSetHash: Bytes32;
   genesisNodeDestinations: readonly WeightedDestination[];

@@ -18,15 +18,15 @@
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "15d3c4b59458b6bee595a6a1c5b513193c6a05d765355801b84b32f3f9b1f353"
+      "sha256": "3e2154a88e93b3cc0f17bfa0905288151cc775fb154f9b097fabcd6d0a51d3a7"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "fb7b6ad43268064ebebb72c1253f79607a469602f52ce7c10fc4e98270232138"
+      "sha256": "fc75e5f8654c9865c401b90bf67d99af276013618f09e77bebfcd53be33bf12f"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "cd3ac592b8e103c0152d99e82a79d922a40531f662b1700abeb3f3ba4e82bb02"
+      "sha256": "6d3a3fe84d657f215916db02d785d525429f4a4bb451453c0e5b8b4d85ef1e16"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
@@ -34,7 +34,7 @@
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "15a084129ccdabf55b7a9356e634b452a0a88fd6a268b3c1ea8a0d9e17e46e0a"
+      "sha256": "f402f9cebc34f2305fc51d7e0507510f018e1adbdb367eaab5f92c17f745e88f"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
@@ -42,29 +42,29 @@
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "e5ca137ca3874aca6f942ccfc2d0c222560ab116547a0339f3d9800ef2e5c12d"
+      "sha256": "b0ca9b62f1b1ce68f42192f310baa0b78d0de5719e619f6002d7d012dae780fe"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "9a445d8273fb5ddddfe7a4af1b32d86ab4c2628bf7aa87cdd5dff805c5ff233e"
+      "sha256": "e8f97ae24431a8c0318fb9ca96b95aee344f8ad398b88b90f03d7ec2cf727989"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "70ff983dba9b6a5ced60c1be1e343c6a11ae9fdf1c8b1313d656a1ef1961a36c"
+      "sha256": "649697713bf506169057ed0f67d1897da7c27cde6cbb8e4d652b5f6213736dbc"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
-      "sha256": "ca052db97553c0cd13771929992e3f08d722834276e7232cde5fed819fd61c87"
+      "sha256": "8a8f3dedee2e44094dc5cb3ab386c92244864f9e9957581895c1367d433b8a71"
     }
   },
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "748577b75908f1188656ae8175e0ad8f0fa7184617a4e71822498ac4ff69d96b"
+      "sha256": "16cbd655d5ed978dce1807f4e8771874febc0d4963c929e81e2e4e0cfa830c2d"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "a5948aaa48c0a4c8e3e8ac1cbbd272d94458d0931f1c3dfe80fe50b287be5e9e"
+      "sha256": "449dc9f1e1067bfc0c4737b7e25f725caff837ac70c893891b33d20e6b90bcf4"
     }
   ],
   "httpSurface": [
@@ -94,10 +94,10 @@
     "GET /v2/admin/risk/overview",
     "GET /v2/admin/seckill/actions",
     "GET /v2/admin/seckill/actions/{actionId}",
-    "GET /v2/admin/settlement-batches",
-    "GET /v2/admin/settlement-batches/{batchId}",
     "GET /v2/admin/settlement-requests",
     "GET /v2/admin/settlement-requests/{requestId}",
+    "GET /v2/admin/settlement-transfers",
+    "GET /v2/admin/settlement-transfers/{transferId}",
     "GET /v2/admin/system-config/versions",
     "GET /v2/admin/takeover-cases",
     "GET /v2/admin/takeover-cases/{caseId}",
@@ -169,7 +169,7 @@
     "POST /v2/admin/orders/batch-actions/preview",
     "POST /v2/admin/policy-drafts",
     "POST /v2/admin/policy-drafts/{draftId}/approval-challenge",
-    "POST /v2/admin/policy-drafts/{draftId}/safe-proposal",
+    "POST /v2/admin/policy-drafts/{draftId}/execute",
     "POST /v2/admin/policy-drafts/{draftId}/secondary-signature",
     "POST /v2/admin/risk/appeals",
     "POST /v2/admin/risk/appeals/{appealId}/decision",
@@ -177,7 +177,7 @@
     "POST /v2/admin/risk/restrictions/{restrictionId}/override",
     "POST /v2/admin/seckill/actions/{actionId}/approval-challenge",
     "POST /v2/admin/seckill/actions/{actionId}/cancel",
-    "POST /v2/admin/seckill/actions/{actionId}/safe-proposal",
+    "POST /v2/admin/seckill/actions/{actionId}/execute",
     "POST /v2/admin/seckill/actions/{actionId}/secondary-signature",
     "POST /v2/admin/seckill/breaker/resume",
     "POST /v2/admin/seckill/sessions",
@@ -265,7 +265,7 @@
     "paymentProjectionHttp": "AVAILABLE",
     "paymentIndexer": "AVAILABLE",
     "settlementHttp": "AVAILABLE",
-    "settlementSafeBatching": "AVAILABLE",
+    "settlementEoaTransfers": "AVAILABLE",
     "buyerShoppingStatementHttp": "AVAILABLE",
     "merchantReceivableStatementHttp": "AVAILABLE",
     "guaranteeDepositHttp": "AVAILABLE",
@@ -395,8 +395,8 @@
     "MerchantReceivableStatementPage",
     "AdminSettlementRequestList",
     "AdminSettlementRequestDetail",
-    "AdminSettlementBatchList",
-    "AdminSettlementBatchDetail",
+    "AdminSettlementTransferList",
+    "AdminSettlementTransferDetail",
     "BnmPointsBalance",
     "SeckillSessionProjection",
     "SeckillSessionHistoryPage",

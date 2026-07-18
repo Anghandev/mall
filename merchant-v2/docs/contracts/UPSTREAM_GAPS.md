@@ -1,6 +1,6 @@
 # Merchant Workbench Core Gaps
 
-The merchant product consumes Core's coordinated `2.0.0-settlement-admin.15` artifact
+The merchant product consumes Core's coordinated `2.0.0-settlement-admin.16` artifact
 workspace package. Bootstrap, SIWE,
 merchant-bound Catalog/SKU/inventory management, immutable media, wallet-scoped fulfillment, merchant finance,
 guarantee-deposit evidence, signed settlement requests and Safe-finality
@@ -8,6 +8,10 @@ history are connected through their published HTTP surfaces. The browser
 validates generated enums and immutable EIP-712 fields, keeps idempotency keys
 stable across retry, and fails closed on wallet, merchant, artifact or unknown
 state mismatches.
+
+The coordinated payment boundary uses Core-signed exact USDT/NPL amounts and
+does not publish an on-chain TWAP dependency. Merchant does not calculate NPL
+quotes, add a payment endpoint or infer an oracle version.
 
 Merchant self-service profile remains limited to shop name and owned Logo.
 Platform qualification decisions and business-license PII are admin-owned and
