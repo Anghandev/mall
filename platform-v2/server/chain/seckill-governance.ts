@@ -1,4 +1,4 @@
-import { Interface, TypedDataEncoder, getAddress, keccak256, toUtf8Bytes } from 'ethers';
+import { Interface, getAddress, keccak256, toUtf8Bytes } from 'ethers';
 import { BSC_CHAIN_ID, CORE_ARTIFACT_VERSION, USDT_ADDRESS } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import { auditSourceId, enqueueAudit } from '../data/audit-service.ts';
@@ -11,7 +11,6 @@ import {
   releaseSeckillPlanInventory,
   type SeckillActionRow,
 } from '../data/seckill-operations-service.ts';
-import { ZERO_ADDRESS, safeTransactionTypes } from './safe-multisend.ts';
 
 const ROUTER = new Interface([
   'event SeckillSessionOpened(bytes32 indexed sessionId,uint64 indexed policyVersion,uint64 startsAt,uint64 mainDeadline,uint64 relayDeadline)',
@@ -43,38 +42,39 @@ interface BreakerExpectation {
 interface PrizeExpectation {
   kind: 'PRIZE_INJECTION';
   amountUsdt: string;
-  operationsSafeAddress: string;
-  custodySafeAddress: string;
+  operationsWalletAddress: string;
+  settlementWalletAddress: string;
   tokenAddress: string;
 }
 
 type SeckillExpectation = OpenExpectation | BreakerExpectation | PrizeExpectation;
 
-export interface SeckillSafeProposal {
+export interface SeckillExecution {
   actionId: string;
   sessionId: string;
   actionKind: ActionKind;
   policyVersion: number;
   evidenceHash: string;
-  safeAddress: string;
+  governanceWallet: string;
   targetAddress: string;
   calldata: string;
   calldataHash: string;
-  minimumSafeNonce: string;
+  minimumExecutorNonce: string;
   expected: SeckillExpectation;
 }
 
-export interface SeckillSafeProposer {
-  propose(input: SeckillSafeProposal): Promise<{
-    safeNonce: string;
-    safeTxHash: string;
-    proposalHash: string;
+export interface SeckillEoaExecutor {
+  execute(input: SeckillExecution): Promise<{
+    executorWallet: string;
+    executorNonce: string;
+    submittedTxHash: string;
+    executionEvidenceHash: string;
   }>;
 }
 
-export interface SeckillFinalityCandidate extends SeckillSafeProposal {
-  safeTxHash: string;
-  priorState: 'SAFE_PROPOSED' | 'MINED' | 'FINAL';
+export interface SeckillFinalityCandidate extends SeckillExecution {
+  submittedTxHash: string;
+  priorState: 'SUBMITTED' | 'MINED' | 'FINAL';
   priorFinality?: { executionTxHash: string; blockNumber: number; blockHash: string };
 }
 
@@ -82,7 +82,7 @@ export type SeckillObservation =
   | { state: 'NOT_FOUND' }
   | {
       state: 'MINED' | 'FINAL';
-      safeTxHash: string;
+      submittedTxHash: string;
       executionTxHash: string;
       blockNumber: number;
       blockHash: string;
@@ -94,7 +94,7 @@ export type SeckillObservation =
     }
   | {
       state: 'REORGED';
-      safeTxHash: string;
+      submittedTxHash: string;
       executionTxHash?: string;
       blockNumber?: number;
       blockHash?: string;
@@ -107,7 +107,7 @@ export type SeckillObservation =
     }
   | {
       state: 'FAILED';
-      safeTxHash: string;
+      submittedTxHash: string;
       executionTxHash: string;
       blockNumber: number;
       blockHash: string;
@@ -121,7 +121,7 @@ export type SeckillObservation =
 
 type CanonicalSeckillObservation = {
   state: 'MINED' | 'FINAL';
-  safeTxHash: string;
+  submittedTxHash: string;
   executionTxHash: string;
   blockNumber: number;
   blockHash: string;
@@ -136,41 +136,37 @@ export interface SeckillChainSource {
   observe(input: SeckillFinalityCandidate): Promise<SeckillObservation>;
 }
 
-export class HttpSeckillSafeProposer implements SeckillSafeProposer {
+export class HttpSeckillEoaExecutor implements SeckillEoaExecutor {
   readonly #url: string | undefined;
   readonly #token: string | undefined;
-  readonly #mutualTls: boolean;
   readonly #fetch: typeof fetch;
 
   constructor(input: {
     url?: string;
     token?: string;
-    mutualTls?: boolean;
     fetchImpl?: typeof fetch;
     requestTimeoutMs?: number;
   }) {
     this.#url = input.url;
     this.#token = input.token;
-    this.#mutualTls = input.mutualTls === true;
     this.#fetch = fetchWithDeadline(input.fetchImpl ?? fetch, input.requestTimeoutMs);
   }
 
-  async propose(input: SeckillSafeProposal) {
+  async execute(input: SeckillExecution) {
     if (!this.#url || !this.#token) {
-      throw new CoreError('ConfigurationRequired', 'Safe seckill proposal service is not configured', 503);
+      throw new CoreError('ConfigurationRequired', 'Seckill EOA executor is not configured', 503);
     }
-    const url = secureUrl(this.#url, 'Safe seckill proposal service');
-    if (!this.#mutualTls) throw new CoreError('ExternalBlocked', 'Safe seckill proposal transport requires mTLS', 503);
+    const url = secureUrl(this.#url, 'seckill EOA executor');
+    const requestDigest = seckillExecutionRequestDigest(input);
     const response = await this.#fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${this.#token}` },
       body: JSON.stringify({
         artifactVersion: CORE_ARTIFACT_VERSION,
         chainId: BSC_CHAIN_ID,
-        safeAddress: input.safeAddress,
+        from: input.governanceWallet,
         to: input.targetAddress,
         value: '0',
-        operation: 0,
         data: input.calldata,
         dataHash: input.calldataHash,
         resourceType: 'SECKILL_GOVERNANCE_ACTION',
@@ -179,78 +175,61 @@ export class HttpSeckillSafeProposer implements SeckillSafeProposer {
         actionKind: input.actionKind,
         policyVersion: input.policyVersion,
         evidenceHash: input.evidenceHash,
-        minimumSafeNonce: input.minimumSafeNonce,
+        minimumExecutorNonce: input.minimumExecutorNonce,
+        requestDigest,
       }),
     });
-    if (!response.ok) throw new CoreError('ExternalBlocked', 'Safe seckill proposal was rejected', 503);
+    if (!response.ok) throw new CoreError('ExternalBlocked', 'Seckill EOA executor rejected the request', 503);
     const body = await responseJson(response) as Record<string, unknown>;
     if (
-      !isCanonicalSafeNonce(body.safeNonce)
-      || BigInt(body.safeNonce) < BigInt(input.minimumSafeNonce)
-      || !isHash(body.safeTxHash)
-      || !isHash(body.proposalHash)
+      !isCanonicalNonce(body.executorNonce)
+      || BigInt(body.executorNonce) < BigInt(input.minimumExecutorNonce)
+      || !isAddress(body.executorWallet)
+      || !isHash(body.submittedTxHash)
+      || !isHash(body.executionEvidenceHash)
       || body.dataHash !== input.calldataHash
       || body.resourceId !== input.actionId
       || body.sessionId !== input.sessionId
       || body.actionKind !== input.actionKind
       || Number(body.policyVersion) !== input.policyVersion
       || body.evidenceHash !== input.evidenceHash
-      || body.minimumSafeNonce !== input.minimumSafeNonce
-    ) throw new CoreError('InvalidFinality', 'Safe seckill proposal response is not echo-bound', 502);
-    const safeNonce = body.safeNonce;
-    const expectedSafeTxHash = seckillSafeTxHash(input, safeNonce);
-    if (body.safeTxHash.toLowerCase() !== expectedSafeTxHash) {
-      throw new CoreError('InvalidFinality', 'Safe seckill proposal hash does not match its nonce', 502);
+      || body.minimumExecutorNonce !== input.minimumExecutorNonce
+      || body.requestDigest !== requestDigest
+    ) throw new CoreError('InvalidFinality', 'Seckill EOA executor response is not request-bound', 502);
+    const executorWallet = getAddress(body.executorWallet).toLowerCase();
+    if (executorWallet !== getAddress(input.governanceWallet).toLowerCase()) {
+      throw new CoreError('InvalidFinality', 'Seckill execution used the wrong EOA', 502);
     }
     return {
-      safeNonce,
-      safeTxHash: expectedSafeTxHash,
-      proposalHash: body.proposalHash.toLowerCase(),
+      executorWallet,
+      executorNonce: body.executorNonce,
+      submittedTxHash: body.submittedTxHash.toLowerCase(),
+      executionEvidenceHash: body.executionEvidenceHash.toLowerCase(),
     };
   }
 }
 
 export class ResilientSeckillChainSource implements SeckillChainSource {
-  readonly #lookupUrl: string | undefined;
-  readonly #lookupToken: string | undefined;
   readonly #primaryRpcUrl: string | undefined;
   readonly #fallbackRpcUrl: string | undefined;
   readonly #fetch: typeof fetch;
 
   constructor(input: {
-    lookupUrl?: string;
-    lookupToken?: string;
     primaryRpcUrl?: string;
     fallbackRpcUrl?: string;
     fetchImpl?: typeof fetch;
     requestTimeoutMs?: number;
   }) {
-    this.#lookupUrl = input.lookupUrl;
-    this.#lookupToken = input.lookupToken;
     this.#primaryRpcUrl = input.primaryRpcUrl;
     this.#fallbackRpcUrl = input.fallbackRpcUrl;
     this.#fetch = fetchWithDeadline(input.fetchImpl ?? fetch, input.requestTimeoutMs);
   }
 
   async observe(input: SeckillFinalityCandidate): Promise<SeckillObservation> {
-    if (!this.#lookupUrl || !this.#lookupToken || !this.#primaryRpcUrl || !this.#fallbackRpcUrl) {
+    if (!this.#primaryRpcUrl || !this.#fallbackRpcUrl) {
       throw new CoreError('ConfigurationRequired', 'Seckill finality source is not configured', 503);
     }
-    const lookup = await this.#fetch(secureUrl(this.#lookupUrl, 'Seckill execution lookup'), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${this.#lookupToken}` },
-      body: JSON.stringify({ safeTxHash: input.safeTxHash, resourceId: input.actionId }),
-    });
-    if (!lookup.ok) throw new CoreError('ExternalBlocked', 'Seckill execution lookup failed', 503);
-    const lookupBody = await responseJson(lookup) as Record<string, unknown>;
-    if (lookupBody.safeTxHash !== input.safeTxHash || lookupBody.resourceId !== input.actionId) {
-      throw new CoreError('InvalidFinality', 'Seckill execution lookup is not Safe-hash-bound', 502);
-    }
-    if (lookupBody.executionTxHash === null) return { state: 'NOT_FOUND' };
-    if (!isHash(lookupBody.executionTxHash)) {
-      throw new CoreError('InvalidFinality', 'Seckill execution transaction hash is invalid', 502);
-    }
-    const executionTxHash = lookupBody.executionTxHash.toLowerCase();
+    const executionTxHash = input.submittedTxHash.toLowerCase();
     const primary = secureUrl(this.#primaryRpcUrl, 'primary seckill RPC').toString();
     const fallback = secureUrl(this.#fallbackRpcUrl, 'fallback seckill RPC').toString();
     if (normalizedUrl(primary) === normalizedUrl(fallback)) {
@@ -293,8 +272,14 @@ export class ResilientSeckillChainSource implements SeckillChainSource {
     if (stableJson(receipt) !== stableJson(fallbackReceiptEvidence) || stableJson(transaction) !== stableJson(fallbackTransaction)) {
       throw new CoreError('InvalidFinality', 'Seckill execution differs across RPC providers', 409);
     }
-    if (transaction.to !== input.safeAddress) {
-      throw new CoreError('InvalidFinality', 'Seckill execution did not target the frozen Safe', 409);
+    if (
+      transaction.from !== getAddress(input.governanceWallet).toLowerCase()
+      || transaction.to !== getAddress(input.targetAddress).toLowerCase()
+      || transaction.input !== input.calldata.toLowerCase()
+      || transaction.nonce !== input.minimumExecutorNonce
+      || transaction.value !== '0'
+    ) {
+      throw new CoreError('InvalidFinality', 'Seckill transaction drifted from its frozen EOA execution', 409);
     }
     const blockNumber = Number(BigInt(receipt.blockNumber));
     const canonicalBlockHash = await canonicalBlockHashAt(this.#fetch, primary, fallback, blockNumber);
@@ -306,7 +291,7 @@ export class ResilientSeckillChainSource implements SeckillChainSource {
       Math.min(hexNumber(primaryHead, 'primary head'), hexNumber(fallbackHead, 'fallback head')) - blockNumber + 1,
     );
     const base = {
-      safeTxHash: input.safeTxHash,
+      submittedTxHash: input.submittedTxHash,
       executionTxHash,
       blockNumber,
       blockHash: receipt.blockHash,
@@ -377,8 +362,8 @@ export class ResilientSeckillChainSource implements SeckillChainSource {
     const matching = receipt.logs.filter((log) => log.address === expected.tokenAddress && log.topics[0] === TRANSFER_TOPIC)
       .map(decodeTransfer)
       .filter((event) =>
-        event.from === expected.operationsSafeAddress
-        && event.to === expected.custodySafeAddress
+        event.from === expected.operationsWalletAddress
+        && event.to === expected.settlementWalletAddress
         && event.value === expected.amountUsdt);
     if (matching.length !== 1) {
       throw new CoreError('InvalidFinality', 'Prize injection must contain exactly one matching USDT Transfer', 409);
@@ -388,7 +373,7 @@ export class ResilientSeckillChainSource implements SeckillChainSource {
 
 export class SeckillGovernanceWorker {
   readonly #transactions: SqlTransactionRunner;
-  readonly #proposer: SeckillSafeProposer;
+  readonly #executor: SeckillEoaExecutor;
   readonly #chain: SeckillChainSource;
   readonly #clock: () => Date;
   #timer: ReturnType<typeof setTimeout> | undefined;
@@ -397,24 +382,24 @@ export class SeckillGovernanceWorker {
 
   constructor(input: {
     transactions: SqlTransactionRunner;
-    proposer: SeckillSafeProposer;
+    executor: SeckillEoaExecutor;
     chain: SeckillChainSource;
     clock?: () => Date;
   }) {
     this.#transactions = input.transactions;
-    this.#proposer = input.proposer;
+    this.#executor = input.executor;
     this.#chain = input.chain;
     this.#clock = input.clock ?? (() => new Date());
   }
 
   async pollOnce() {
     let pollErrorCode: string | undefined;
-    const proposals = await this.#pendingProposals(10);
-    for (const action of proposals) {
+    const executions = await this.#pendingExecutions(10);
+    for (const action of executions) {
       try {
-        const proposal = await this.#proposalFor(action);
-        const result = await this.#proposer.propose(proposal);
-        await this.#recordProposal(action.action_id, result);
+        const execution = await this.#executionFor(action);
+        const result = await this.#executor.execute(execution);
+        await this.#recordExecution(action.action_id, result);
       } catch (error) {
         pollErrorCode ??= errorCode(error);
       }
@@ -435,7 +420,7 @@ export class SeckillGovernanceWorker {
       pollErrorCode ??= errorCode(error);
     }
     this.#lastErrorCode = pollErrorCode;
-    return { proposals: proposals.length, finality: finality.length };
+    return { executions: executions.length, finality: finality.length };
   }
 
   start(intervalMs = 5_000) {
@@ -462,11 +447,11 @@ export class SeckillGovernanceWorker {
     return Object.freeze({ healthy: this.#lastErrorCode === undefined, errorCode: this.#lastErrorCode });
   }
 
-  #pendingProposals(limit: number) {
+  #pendingExecutions(limit: number) {
     return this.#transactions.transaction(async (executor) => (
       await executor.query<SeckillActionRow>(
         `SELECT * FROM core.seckill_governance_actions
-         WHERE state = 'PENDING_PROPOSAL' ORDER BY created_at, action_id LIMIT $1`,
+         WHERE state = 'PENDING_EXECUTION' ORDER BY created_at, action_id LIMIT $1`,
         [limit],
       )
     ).rows);
@@ -476,85 +461,104 @@ export class SeckillGovernanceWorker {
     return this.#transactions.transaction(async (executor) => (
       await executor.query<SeckillActionRow>(
         `SELECT * FROM core.seckill_governance_actions
-         WHERE state IN ('SAFE_PROPOSED','MINED','FINAL')
+         WHERE state IN ('SUBMITTED','MINED','FINAL')
          ORDER BY CASE WHEN state = 'FINAL' THEN 1 ELSE 0 END, updated_at, action_id LIMIT $1`,
         [limit],
       )
     ).rows);
   }
 
-  #proposalFor(action: SeckillActionRow) {
+  #executionFor(action: SeckillActionRow) {
     return this.#transactions.transaction(async (executor) => {
-      const prior = await executor.query<{ max_safe_nonce: string | null; earlier_pending: boolean }>(
+      const prior = await executor.query<{ max_executor_nonce: string | null; earlier_pending: boolean }>(
         `SELECT
-           (SELECT max(safe_nonce)::text FROM core.seckill_governance_actions
-            WHERE governance_safe_address = $1 AND safe_nonce IS NOT NULL) AS max_safe_nonce,
+           (SELECT max(executor_nonce)::text FROM core.seckill_governance_actions
+            WHERE governance_wallet_address = $1 AND executor_nonce IS NOT NULL) AS max_executor_nonce,
            EXISTS (
              SELECT 1 FROM core.seckill_governance_actions earlier
-             WHERE earlier.governance_safe_address = $1 AND earlier.state = 'PENDING_PROPOSAL'
+             WHERE earlier.governance_wallet_address = $1 AND earlier.state = 'PENDING_EXECUTION'
                AND (earlier.created_at, earlier.action_id) < ($2, $3)
            ) AS earlier_pending`,
-        [action.governance_safe_address, action.created_at, action.action_id],
+        [action.governance_wallet_address, action.created_at, action.action_id],
       );
       if (prior.rows[0]?.earlier_pending) {
-        throw new CoreError('FinalityPending', 'Earlier seckill action is awaiting a Safe nonce', 409);
+        throw new CoreError('FinalityPending', 'Earlier seckill action is awaiting an EOA nonce', 409);
       }
-      const minimumSafeNonce = prior.rows[0]?.max_safe_nonce === null
+      const minimumExecutorNonce = prior.rows[0]?.max_executor_nonce === null
         ? '0'
-        : (BigInt(prior.rows[0]!.max_safe_nonce) + 1n).toString();
-      return proposalFromRow(executor, action, minimumSafeNonce);
+        : (BigInt(prior.rows[0]!.max_executor_nonce) + 1n).toString();
+      return executionFromRow(executor, action, minimumExecutorNonce);
     });
   }
 
-  #recordProposal(actionId: string, proposal: { safeNonce: string; safeTxHash: string; proposalHash: string }) {
-    if (!isCanonicalSafeNonce(proposal.safeNonce) || !isHash(proposal.safeTxHash) || !isHash(proposal.proposalHash)) {
-      throw new CoreError('InvalidFinality', 'Seckill Safe proposal evidence is invalid', 502);
+  #recordExecution(actionId: string, execution: {
+    executorWallet: string;
+    executorNonce: string;
+    submittedTxHash: string;
+    executionEvidenceHash: string;
+  }) {
+    if (
+      !isAddress(execution.executorWallet)
+      || !isCanonicalNonce(execution.executorNonce)
+      || !isHash(execution.submittedTxHash)
+      || !isHash(execution.executionEvidenceHash)
+    ) {
+      throw new CoreError('InvalidFinality', 'Seckill EOA execution evidence is invalid', 502);
     }
     return this.#transactions.transaction(async (executor) => {
       const action = await lockedAction(executor, actionId);
-      if (action.state !== 'PENDING_PROPOSAL') {
-        if (String(action.safe_nonce) === proposal.safeNonce && action.safe_tx_hash === proposal.safeTxHash.toLowerCase()) return;
-        throw new CoreError('IdempotencyConflict', 'Seckill action changed during Safe proposal', 409);
+      if (action.state !== 'PENDING_EXECUTION') {
+        if (
+          String(action.executor_nonce) === execution.executorNonce
+          && action.submitted_tx_hash === execution.submittedTxHash.toLowerCase()
+        ) return;
+        throw new CoreError('IdempotencyConflict', 'Seckill action changed during EOA execution', 409);
       }
-      const prior = await executor.query<{ max_safe_nonce: string | null; earlier_pending: boolean }>(
+      if (getAddress(execution.executorWallet).toLowerCase() !== getAddress(action.governance_wallet_address).toLowerCase()) {
+        throw new CoreError('InvalidFinality', 'Seckill execution used the wrong EOA', 409);
+      }
+      const prior = await executor.query<{ max_executor_nonce: string | null; earlier_pending: boolean }>(
         `SELECT
-           (SELECT max(safe_nonce)::text FROM core.seckill_governance_actions
-            WHERE governance_safe_address = $1 AND safe_nonce IS NOT NULL) AS max_safe_nonce,
+           (SELECT max(executor_nonce)::text FROM core.seckill_governance_actions
+            WHERE governance_wallet_address = $1 AND executor_nonce IS NOT NULL) AS max_executor_nonce,
            EXISTS (
              SELECT 1 FROM core.seckill_governance_actions earlier
-             WHERE earlier.governance_safe_address = $1 AND earlier.state = 'PENDING_PROPOSAL'
+             WHERE earlier.governance_wallet_address = $1 AND earlier.state = 'PENDING_EXECUTION'
                AND (earlier.created_at, earlier.action_id) < ($2, $3)
            ) AS earlier_pending`,
-        [action.governance_safe_address, action.created_at, action.action_id],
+        [action.governance_wallet_address, action.created_at, action.action_id],
       );
       if (
         prior.rows[0]?.earlier_pending
-        || (prior.rows[0]?.max_safe_nonce !== null && BigInt(proposal.safeNonce) <= BigInt(prior.rows[0]!.max_safe_nonce))
-      ) throw new CoreError('InvalidFinality', 'Seckill Safe nonce does not preserve action order', 409);
-      const frozen = await proposalFromRow(executor, action, proposal.safeNonce);
-      if (proposal.safeTxHash.toLowerCase() !== seckillSafeTxHash(frozen, proposal.safeNonce)) {
-        throw new CoreError('InvalidFinality', 'Seckill Safe hash does not match the frozen action nonce', 409);
-      }
+        || (prior.rows[0]?.max_executor_nonce !== null
+          && BigInt(execution.executorNonce) <= BigInt(prior.rows[0]!.max_executor_nonce))
+      ) throw new CoreError('InvalidFinality', 'Seckill EOA nonce does not preserve action order', 409);
       const now = this.#clock();
       await executor.query(
         `UPDATE core.seckill_governance_actions
-         SET state = 'SAFE_PROPOSED', safe_nonce = $2, safe_tx_hash = $3,
-           proposal_hash = $4, updated_at = $5 WHERE action_id = $1`,
-        [actionId, proposal.safeNonce, proposal.safeTxHash.toLowerCase(), proposal.proposalHash.toLowerCase(), now],
+         SET state = 'SUBMITTED', executor_nonce = $2, submitted_tx_hash = $3,
+           execution_evidence_hash = $4, updated_at = $5 WHERE action_id = $1`,
+        [
+          actionId,
+          execution.executorNonce,
+          execution.submittedTxHash.toLowerCase(),
+          execution.executionEvidenceHash.toLowerCase(),
+          now,
+        ],
       );
-      await appendTransition(executor, action, 'SAFE_PROPOSED', proposal, now);
-      await enqueueWorkerAudit(executor, action, 'SeckillSafeProposed', 'SYSTEM', proposal, now);
+      await appendTransition(executor, action, 'SUBMITTED', execution, now);
+      await enqueueWorkerAudit(executor, action, 'SeckillEoaSubmitted', 'SYSTEM', execution, now);
     });
   }
 
   #finalityCandidate(action: SeckillActionRow) {
     return this.#transactions.transaction(async (executor) => {
-      if (action.safe_nonce === null || !action.safe_tx_hash) {
-        throw new CoreError('InvalidFinality', 'Seckill Safe nonce or hash is unavailable', 409);
+      if (action.executor_nonce === null || !action.submitted_tx_hash) {
+        throw new CoreError('InvalidFinality', 'Seckill EOA nonce or transaction hash is unavailable', 409);
       }
       return {
-        ...await proposalFromRow(executor, action, String(action.safe_nonce)),
-        safeTxHash: action.safe_tx_hash,
+        ...await executionFromRow(executor, action, String(action.executor_nonce)),
+        submittedTxHash: action.submitted_tx_hash,
         priorState: action.state as SeckillFinalityCandidate['priorState'],
         ...(action.execution_tx_hash && action.block_number !== null && action.block_hash
           ? {
@@ -646,7 +650,11 @@ export class SeckillGovernanceWorker {
   }
 }
 
-async function proposalFromRow(executor: SqlExecutor, row: SeckillActionRow, minimumSafeNonce: string): Promise<SeckillSafeProposal> {
+async function executionFromRow(
+  executor: SqlExecutor,
+  row: SeckillActionRow,
+  minimumExecutorNonce: string,
+): Promise<SeckillExecution> {
   let expected: SeckillExpectation;
   if (row.action_kind === 'OPEN_SESSION') {
     const plan = await executor.query<{ starts_at: Date; main_deadline: Date; relay_deadline: Date }>(
@@ -666,11 +674,11 @@ async function proposalFromRow(executor: SqlExecutor, row: SeckillActionRow, min
   } else {
     const injection = await executor.query<{
       amount_usdt: string;
-      operations_safe_address: string;
-      custody_safe_address: string;
+      operations_wallet_address: string;
+      settlement_wallet_address: string;
       token_address: string;
     }>(
-      `SELECT amount_usdt::text, operations_safe_address, custody_safe_address, token_address
+      `SELECT amount_usdt::text, operations_wallet_address, settlement_wallet_address, token_address
        FROM core.seckill_prize_injections WHERE action_id = $1`,
       [row.action_id],
     );
@@ -679,8 +687,8 @@ async function proposalFromRow(executor: SqlExecutor, row: SeckillActionRow, min
     expected = {
       kind: 'PRIZE_INJECTION',
       amountUsdt: value.amount_usdt,
-      operationsSafeAddress: value.operations_safe_address,
-      custodySafeAddress: value.custody_safe_address,
+      operationsWalletAddress: value.operations_wallet_address,
+      settlementWalletAddress: value.settlement_wallet_address,
       tokenAddress: value.token_address,
     };
   }
@@ -690,11 +698,11 @@ async function proposalFromRow(executor: SqlExecutor, row: SeckillActionRow, min
     actionKind: row.action_kind,
     policyVersion: Number(row.policy_version),
     evidenceHash: row.evidence_hash,
-    safeAddress: row.governance_safe_address,
+    governanceWallet: row.governance_wallet_address,
     targetAddress: row.target_address,
     calldata: row.calldata,
     calldataHash: row.calldata_hash,
-    minimumSafeNonce,
+    minimumExecutorNonce,
     expected,
   };
 }
@@ -861,31 +869,31 @@ async function finalizePrizeInjection(
   await requireFullCoverage(executor);
   const injection = await executor.query<{
     amount_usdt: string;
-    custody_safe_address: string;
+    settlement_wallet_address: string;
     final_journal_id: string | null;
   }>(
-    `SELECT amount_usdt::text, custody_safe_address, final_journal_id
+    `SELECT amount_usdt::text, settlement_wallet_address, final_journal_id
      FROM core.seckill_prize_injections WHERE action_id = $1 FOR UPDATE`,
     [action.action_id],
   );
   const row = injection.rows[0];
   if (!row) throw new CoreError('InvalidFinality', 'Prize injection record is unavailable', 409);
   if (row.final_journal_id) return;
-  const safeAccountId = `safe:usdt-custody:${row.custody_safe_address}:usdt`;
+  const walletAccountId = `wallet:usdt-custody:${row.settlement_wallet_address}:usdt`;
   const liabilityAccountId = `seckill-prize:${action.session_id}:usdt`;
   await ensureLedgerAccount(executor, {
-    accountId: safeAccountId,
-    ownerType: 'SAFE',
-    ownerId: row.custody_safe_address,
-    purpose: 'SAFE_ASSET',
-    safeAddress: row.custody_safe_address,
+    accountId: walletAccountId,
+    ownerType: 'WALLET',
+    ownerId: row.settlement_wallet_address,
+    purpose: 'WALLET_ASSET',
+    walletAddress: row.settlement_wallet_address,
   });
   await ensureLedgerAccount(executor, {
     accountId: liabilityAccountId,
     ownerType: 'BENEFICIARY',
     ownerId: action.session_id,
     purpose: 'SECKILL_PRIZE_LIABILITY',
-    safeAddress: null,
+    walletAddress: null,
   });
   const journalId = `journal:seckill-prize:${action.action_id}`;
   await executor.query(
@@ -907,18 +915,18 @@ async function finalizePrizeInjection(
       JSON.stringify({ actionId: action.action_id, sessionId: action.session_id, amountUsdt: row.amount_usdt }),
       JSON.stringify([
         {
-          account_id: safeAccountId,
+          account_id: walletAccountId,
           side: 'DEBIT',
           amount: row.amount_usdt,
           balance_state: 'POSTED',
-          backing_safe_address: row.custody_safe_address,
+          backing_wallet_address: row.settlement_wallet_address,
         },
         {
           account_id: liabilityAccountId,
           side: 'CREDIT',
           amount: row.amount_usdt,
           balance_state: 'LOCKED',
-          backing_safe_address: row.custody_safe_address,
+          backing_wallet_address: row.settlement_wallet_address,
         },
       ]),
     ],
@@ -943,17 +951,17 @@ async function reversePrizeInjection(
 ) {
   const injection = await executor.query<{
     amount_usdt: string;
-    custody_safe_address: string;
+    settlement_wallet_address: string;
     final_journal_id: string | null;
     reversal_journal_id: string | null;
   }>(
-    `SELECT amount_usdt::text, custody_safe_address, final_journal_id, reversal_journal_id
+    `SELECT amount_usdt::text, settlement_wallet_address, final_journal_id, reversal_journal_id
      FROM core.seckill_prize_injections WHERE action_id = $1 FOR UPDATE`,
     [action.action_id],
   );
   const row = injection.rows[0];
   if (!row?.final_journal_id || row.reversal_journal_id) return;
-  const safeAccountId = `safe:usdt-custody:${row.custody_safe_address}:usdt`;
+  const walletAccountId = `wallet:usdt-custody:${row.settlement_wallet_address}:usdt`;
   const liabilityAccountId = `seckill-prize:${action.session_id}:usdt`;
   const journalId = `journal:seckill-prize-reversal:${action.action_id}`;
   const sourceTxHash = observation.executionTxHash ?? action.execution_tx_hash;
@@ -982,14 +990,14 @@ async function reversePrizeInjection(
           side: 'DEBIT',
           amount: row.amount_usdt,
           balance_state: 'LOCKED',
-          backing_safe_address: row.custody_safe_address,
+          backing_wallet_address: row.settlement_wallet_address,
         },
         {
-          account_id: safeAccountId,
+          account_id: walletAccountId,
           side: 'CREDIT',
           amount: row.amount_usdt,
           balance_state: 'POSTED',
-          backing_safe_address: row.custody_safe_address,
+          backing_wallet_address: row.settlement_wallet_address,
         },
       ]),
     ],
@@ -1011,22 +1019,22 @@ async function ensureLedgerAccount(
   executor: SqlExecutor,
   input: {
     accountId: string;
-    ownerType: 'SAFE' | 'BENEFICIARY';
+    ownerType: 'WALLET' | 'BENEFICIARY';
     ownerId: string;
-    purpose: 'SAFE_ASSET' | 'SECKILL_PRIZE_LIABILITY';
-    safeAddress: string | null;
+    purpose: 'WALLET_ASSET' | 'SECKILL_PRIZE_LIABILITY';
+    walletAddress: string | null;
   },
 ) {
   await executor.query(
     `INSERT INTO core.ledger_accounts (
-       account_id, owner_type, owner_id, asset, purpose, safe_address
+       account_id, owner_type, owner_id, asset, purpose, wallet_address
      ) VALUES ($1,$2,$3,'USDT',$4,$5) ON CONFLICT (account_id) DO NOTHING`,
-    [input.accountId, input.ownerType, input.ownerId, input.purpose, input.safeAddress],
+    [input.accountId, input.ownerType, input.ownerId, input.purpose, input.walletAddress],
   );
   const persisted = await executor.query<{
-    owner_type: string; owner_id: string; asset: string; purpose: string; safe_address: string | null;
+    owner_type: string; owner_id: string; asset: string; purpose: string; wallet_address: string | null;
   }>(
-    'SELECT owner_type, owner_id, asset, purpose, safe_address FROM core.ledger_accounts WHERE account_id = $1',
+    'SELECT owner_type, owner_id, asset, purpose, wallet_address FROM core.ledger_accounts WHERE account_id = $1',
     [input.accountId],
   );
   const row = persisted.rows[0];
@@ -1036,7 +1044,7 @@ async function ensureLedgerAccount(
     || row.owner_id !== input.ownerId
     || row.asset !== 'USDT'
     || row.purpose !== input.purpose
-    || row.safe_address !== input.safeAddress
+    || row.wallet_address !== input.walletAddress
   ) throw new CoreError('InvalidFinality', 'Prize ledger account identity conflicts with immutable metadata', 409);
 }
 
@@ -1061,32 +1069,28 @@ async function requireFullCoverage(executor: SqlExecutor) {
   }
 }
 
-export function seckillSafeTxHash(input: SeckillSafeProposal, safeNonce: string) {
-  if (!isCanonicalSafeNonce(safeNonce)) throw new CoreError('InvalidFinality', 'Seckill Safe nonce is invalid', 409);
+export function seckillExecutionRequestDigest(input: SeckillExecution) {
+  if (
+    !input.actionId
+    || !input.sessionId
+    || !isAddress(input.governanceWallet)
+    || !isAddress(input.targetAddress)
+    || !/^0x(?:[0-9a-fA-F]{2})+$/.test(input.calldata)
+    || !isHash(input.calldataHash)
+    || !isHash(input.evidenceHash)
+    || !Number.isSafeInteger(input.policyVersion)
+    || input.policyVersion < 1
+    || !isCanonicalNonce(input.minimumExecutorNonce)
+  ) throw new CoreError('InvalidRequest', 'Seckill EOA execution request is invalid');
   if (keccak256(input.calldata).toLowerCase() !== input.calldataHash.toLowerCase()) {
-    throw new CoreError('InvalidFinality', 'Seckill calldata hash does not match the frozen action', 409);
+    throw new CoreError('InvalidRequest', 'Seckill calldata hash does not match the frozen action');
   }
-  return TypedDataEncoder.hash(
-    { chainId: BSC_CHAIN_ID, verifyingContract: getAddress(input.safeAddress) },
-    safeTransactionTypes,
-    {
-      to: getAddress(input.targetAddress),
-      value: '0',
-      data: input.calldata,
-      operation: 0,
-      safeTxGas: '0',
-      baseGas: '0',
-      gasPrice: '0',
-      gasToken: ZERO_ADDRESS,
-      refundReceiver: ZERO_ADDRESS,
-      nonce: safeNonce,
-    },
-  ).toLowerCase();
+  return hashJson({ artifactVersion: CORE_ARTIFACT_VERSION, chainId: BSC_CHAIN_ID, ...input });
 }
 
 function validateObservation(action: SeckillActionRow, observation: Exclude<SeckillObservation, { state: 'NOT_FOUND' }>) {
   if (
-    observation.safeTxHash !== action.safe_tx_hash
+    observation.submittedTxHash !== action.submitted_tx_hash
     || observation.actionKind !== action.action_kind
     || observation.evidenceHash !== action.evidence_hash
     || !isHash(observation.observationEvidenceHash)
@@ -1105,7 +1109,7 @@ function reorged(
   canonicalBlockHash: string,
 ): SeckillObservation {
   const evidence = {
-    safeTxHash: input.safeTxHash,
+    submittedTxHash: input.submittedTxHash,
     executionTxHash: prior.executionTxHash,
     blockNumber: prior.blockNumber,
     blockHash: prior.blockHash,
@@ -1198,8 +1202,8 @@ async function enqueueWorkerAudit(
     eventType,
     resourceType: 'SECKILL_GOVERNANCE_ACTION',
     resourceId: action.action_id,
-    actorWallet: action.governance_safe_address,
-    actorRole: 'SAFE',
+    actorWallet: action.governance_wallet_address,
+    actorRole: 'GOVERNANCE_EOA',
     correlationId: action.action_id,
     requestHash: action.calldata_hash.slice(2),
     payload: {
@@ -1227,7 +1231,7 @@ async function enqueueWorkerAudit(
   });
 }
 
-function isCanonicalSafeNonce(value: unknown): value is string {
+function isCanonicalNonce(value: unknown): value is string {
   if (typeof value !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value)) return false;
   try {
     return BigInt(value) < (1n << 256n);
@@ -1289,10 +1293,26 @@ function normalizedReceipt(value: unknown, executionTxHash: string) {
 
 function normalizedTransaction(value: unknown, executionTxHash: string) {
   const transaction = recordValue(value, 'seckill transaction');
-  if (!isHash(transaction.hash) || transaction.hash.toLowerCase() !== executionTxHash || !isAddress(transaction.to)) {
+  if (
+    !isHash(transaction.hash)
+    || transaction.hash.toLowerCase() !== executionTxHash
+    || !isAddress(transaction.from)
+    || !isAddress(transaction.to)
+    || typeof transaction.input !== 'string'
+    || !/^0x[0-9a-fA-F]*$/.test(transaction.input)
+    || !isHexQuantity(transaction.nonce)
+    || !isHexQuantity(transaction.value)
+  ) {
     throw new CoreError('InvalidFinality', 'Seckill transaction is malformed', 409);
   }
-  return { hash: executionTxHash, to: getAddress(transaction.to).toLowerCase() };
+  return {
+    hash: executionTxHash,
+    from: getAddress(transaction.from).toLowerCase(),
+    to: getAddress(transaction.to).toLowerCase(),
+    input: transaction.input.toLowerCase(),
+    nonce: BigInt(transaction.nonce).toString(),
+    value: BigInt(transaction.value).toString(),
+  };
 }
 
 async function rpc(fetchImpl: typeof fetch, url: string, method: string, params: unknown[]) {

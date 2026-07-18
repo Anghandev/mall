@@ -1,9 +1,10 @@
 # Abu 24K V2 Payment Contract Freeze
 
-Status: coordinated local settlement/admin checkpoint
-`2.0.0-settlement-admin.16`. The generated
-manifest contains no deployment addresses and has `deploymentAuthorized:
-false`. This document does not authorize deployment or a transaction.
+Status: coordinated settlement/admin checkpoint
+`2.0.0-settlement-admin.16`. The generated manifest binds the three BSC
+deployment addresses, blocks and runtime code hashes and has
+`deploymentAuthorized: true`. This document does not authorize any additional
+transaction.
 
 ## Contract Set
 
@@ -77,7 +78,8 @@ off-chain double-entry ledger; they are not settlement authorization.
 ## Seckill Boundary
 
 `openSeckillSession` snapshots policy version, start, 60-minute main deadline
-and 60-second relay deadline. Safe-held `SESSION_ADMIN_ROLE` is required.
+and 60-second relay deadline. Direct execution by the immutable governance Safe
+is required.
 
 A seckill signature binds seckill and retail-fallback payment intents. Identity,
 buyer, merchant, product/SKU, quantity, policy, deadlines, nonce, concession and
@@ -100,31 +102,34 @@ canonical confirmations.
 ## Circuit Breakers
 
 `PaymentRouterV2` has independent `newPaymentsPaused` and
-`seckillPurchasesPaused` flags. Pause and resume require the Safe-held
-`PAUSER_ROLE`, direct governance Safe execution and a nonzero evidence hash.
+`seckillPurchasesPaused` flags. Pause and resume require direct execution by the
+immutable governance Safe and a nonzero evidence hash.
 They stop only new payment writes. Indexing, finality, reorg recovery,
 fulfillment, takeover, reconciliation and audit reads remain outside the Router
 and cannot be stopped by these flags.
 
 ## Deployment Boundary
 
-The future deployment order is:
+The completed deployment order was:
 
 1. `PolicyRegistryV2`
 2. `BeneficiaryRegistryV2`
 3. `PaymentRouterV2`
 
-The five configured Safes and primary/fallback RPC have passed read-only runtime
-checks, and the configured technical wallet supplies the local deployment,
-secondary-signing, quote-signing and finality roles. Safe owners and thresholds
-remain user-managed. There are no current business `DecisionBlocked` entries.
-Deployed bytecode, runtime roles and an exact separately approved transaction
-packet remain required before broadcast; no deployment or mainnet transaction
-is permitted by this document.
+The five configured Safes and primary/fallback RPC passed runtime checks. The
+three contracts were deployed from the exact bounded packet, reached 15
+confirmations on both providers and passed BscScan source verification. Safe
+owners and thresholds remain user-managed. There are no current business
+`DecisionBlocked` entries. Policy publication, payments, seckill and every Safe
+action remain separate transactions with their own exact packet and authority.
 
 Every deployed contract manifest entry must record its address, deployment
 block and actual runtime `deployedCodeHash`. Build-artifact hashes alone are not
 accepted as runtime deployment evidence.
+
+The frozen Foundry profile uses optimizer runs `1`, IR compilation and no CBOR
+metadata. `forge build --sizes` is a release gate; no Router artifact at or
+above the EIP-170 runtime limit may be published or deployed.
 
 Deployment evidence is published only through the reviewed
 `platform-v2/deployments/bsc-payment-v2.json` input. Both artifact generators

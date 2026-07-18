@@ -20,7 +20,7 @@ export interface GuaranteeDepositFinalityItem {
   merchantWallet: string;
   policyVersion: number;
   tokenAddress: string;
-  operationsSafeAddress: string;
+  operationsWalletAddress: string;
   expectedAmountUsdt: string;
   transactionHash: string;
   state: 'SUBMITTED' | 'MINED' | 'FINAL' | 'REORGED' | 'QUARANTINED';
@@ -66,7 +66,7 @@ interface DepositRow {
   merchant_wallet: string;
   policy_version: string | number;
   token_address: string;
-  operations_safe_address: string;
+  operations_wallet_address: string;
   expected_amount_usdt: string;
   transaction_hash: string;
   state: GuaranteeDepositFinalityItem['state'];
@@ -82,16 +82,16 @@ interface DepositRow {
 
 export class GuaranteeDepositService {
   readonly #transactions: SqlTransactionRunner;
-  readonly #operationsSafeAddress: string;
+  readonly #operationsWalletAddress: string;
   readonly #clock: () => Date;
 
   constructor(input: {
     transactions: SqlTransactionRunner;
-    operationsSafeAddress: string;
+    operationsWalletAddress: string;
     clock?: () => Date;
   }) {
     this.#transactions = input.transactions;
-    this.#operationsSafeAddress = normalizedAddress(input.operationsSafeAddress, 'Operations Treasury Safe');
+    this.#operationsWalletAddress = normalizedAddress(input.operationsWalletAddress, 'operations wallet');
     this.#clock = input.clock ?? (() => new Date());
   }
 
@@ -146,9 +146,9 @@ export class GuaranteeDepositService {
       if (!policy.rows[0] || policy.rows[0].publication_status !== 'PUBLISHED') {
         throw new CoreError('InvalidRequest', 'Published guarantee policy version was not found', 404);
       }
-      const policySafe = normalizedAddress(String(policy.rows[0].payload.operationsTreasurySafe ?? ''), 'policy Operations Treasury Safe');
-      if (policySafe !== this.#operationsSafeAddress) {
-        throw new CoreError('ExternalBlocked', 'Policy and runtime Operations Treasury Safe do not match', 503);
+      const policyWallet = normalizedAddress(String(policy.rows[0].payload.operationsWallet ?? ''), 'policy operations wallet');
+      if (policyWallet !== this.#operationsWalletAddress) {
+        throw new CoreError('ExternalBlocked', 'Policy and runtime operations wallets do not match', 503);
       }
       const existing = await executor.query<DepositRow>(
         `SELECT * FROM core.merchant_guarantee_deposit_submissions
@@ -173,7 +173,7 @@ export class GuaranteeDepositService {
       await executor.query(
         `INSERT INTO core.merchant_guarantee_deposit_submissions (
            deposit_id, merchant_id, merchant_wallet, policy_version, chain_id,
-           token_address, operations_safe_address, expected_amount_usdt,
+           token_address, operations_wallet_address, expected_amount_usdt,
            transaction_hash, state, idempotency_key, request_hash,
            correlation_id, submitted_by, created_at, updated_at
          ) VALUES ($1,$2,$3,$4,56,$5,$6,$7,$8,'SUBMITTED',$9,$10,$11,$3,$12,$12)`,
@@ -183,7 +183,7 @@ export class GuaranteeDepositService {
           wallet,
           policyVersion,
           USDT_ADDRESS,
-          this.#operationsSafeAddress,
+          this.#operationsWalletAddress,
           input.expectedAmountUsdt,
           transactionHash,
           input.idempotencyKey,
@@ -234,7 +234,7 @@ export class GuaranteeDepositService {
         policyVersion,
         transactionHash,
         expectedAmountUsdt: input.expectedAmountUsdt,
-        operationsSafeAddress: this.#operationsSafeAddress,
+        operationsWalletAddress: this.#operationsWalletAddress,
         state: 'SUBMITTED' as const,
         confirmations: 0,
       };
@@ -307,12 +307,12 @@ export class GuaranteeDepositService {
         await postGuaranteeJournal(executor, deposit, observation, journalId);
         await executor.query(
           `INSERT INTO core.merchant_guarantees (
-             merchant_id, backing_safe_address, balance_usdt, minimum_usdt,
+             merchant_id, backing_wallet_address, balance_usdt, minimum_usdt,
              source_evidence_hash, updated_at
            ) VALUES ($1,$2,$3,$4,$5,$6)
            ON CONFLICT (merchant_id) DO UPDATE SET
              balance_usdt = CASE
-               WHEN core.merchant_guarantees.backing_safe_address = EXCLUDED.backing_safe_address
+               WHEN core.merchant_guarantees.backing_wallet_address = EXCLUDED.backing_wallet_address
                THEN core.merchant_guarantees.balance_usdt + EXCLUDED.balance_usdt
                ELSE core.merchant_guarantees.balance_usdt
              END,
@@ -320,7 +320,7 @@ export class GuaranteeDepositService {
              updated_at = EXCLUDED.updated_at`,
           [
             deposit.merchant_id,
-            deposit.operations_safe_address,
+            deposit.operations_wallet_address,
             deposit.expected_amount_usdt,
             GUARANTEE_MINIMUM_USDT.toString(),
             observation.transferEvidenceHash,
@@ -361,7 +361,7 @@ export class GuaranteeDepositService {
         payload: {
           depositId,
           amountUsdt: deposit.expected_amount_usdt,
-          operationsSafeAddress: deposit.operations_safe_address,
+          operationsWalletAddress: deposit.operations_wallet_address,
           evidenceHash: observation.transferEvidenceHash,
         },
         transactionEvidence: {
@@ -525,24 +525,31 @@ async function postGuaranteeJournal(
   observation: GuaranteeDepositChainObservation,
   journalId: string,
 ) {
-  const safeAccount = `safe:operations:${deposit.operations_safe_address}:usdt`;
-  const liabilityAccount = `guarantee:${deposit.merchant_id}:${deposit.operations_safe_address}:usdt`;
-  await ensureAccount(executor, safeAccount, 'SAFE', deposit.operations_safe_address, 'SAFE_ASSET', deposit.operations_safe_address);
+  const walletAccount = `wallet:operations:${deposit.operations_wallet_address}:usdt`;
+  const liabilityAccount = `guarantee:${deposit.merchant_id}:${deposit.operations_wallet_address}:usdt`;
+  await ensureAccount(
+    executor,
+    walletAccount,
+    'WALLET',
+    deposit.operations_wallet_address,
+    'WALLET_ASSET',
+    deposit.operations_wallet_address,
+  );
   await ensureAccount(executor, liabilityAccount, 'MERCHANT', deposit.merchant_id, 'GUARANTEE_LIABILITY');
   const lines = [
     {
-      account_id: safeAccount,
+      account_id: walletAccount,
       side: 'DEBIT',
       amount: deposit.expected_amount_usdt,
       balance_state: 'POSTED',
-      backing_safe_address: deposit.operations_safe_address,
+      backing_wallet_address: deposit.operations_wallet_address,
     },
     {
       account_id: liabilityAccount,
       side: 'CREDIT',
       amount: deposit.expected_amount_usdt,
       balance_state: 'AVAILABLE',
-      backing_safe_address: deposit.operations_safe_address,
+      backing_wallet_address: deposit.operations_wallet_address,
     },
   ];
   const contentHash = hashJson({
@@ -583,24 +590,24 @@ async function postGuaranteeJournal(
 async function ensureAccount(
   executor: SqlExecutor,
   accountId: string,
-  ownerType: 'SAFE' | 'MERCHANT',
+  ownerType: 'WALLET' | 'MERCHANT',
   ownerId: string,
-  purpose: 'SAFE_ASSET' | 'GUARANTEE_LIABILITY',
-  safeAddress?: string,
+  purpose: 'WALLET_ASSET' | 'GUARANTEE_LIABILITY',
+  walletAddress?: string,
 ) {
   await executor.query(
     `INSERT INTO core.ledger_accounts (
-       account_id, owner_type, owner_id, asset, purpose, safe_address
+       account_id, owner_type, owner_id, asset, purpose, wallet_address
      ) VALUES ($1,$2,$3,'USDT',$4,$5) ON CONFLICT (account_id) DO NOTHING`,
-    [accountId, ownerType, ownerId, purpose, safeAddress ?? null],
+    [accountId, ownerType, ownerId, purpose, walletAddress ?? null],
   );
   const result = await executor.query<{
     owner_type: string;
     owner_id: string;
     asset: string;
     purpose: string;
-    safe_address: string | null;
-  }>('SELECT owner_type, owner_id, asset, purpose, safe_address FROM core.ledger_accounts WHERE account_id = $1', [accountId]);
+    wallet_address: string | null;
+  }>('SELECT owner_type, owner_id, asset, purpose, wallet_address FROM core.ledger_accounts WHERE account_id = $1', [accountId]);
   const row = result.rows[0];
   if (
     !row
@@ -608,7 +615,7 @@ async function ensureAccount(
     || row.owner_id !== ownerId
     || row.asset !== 'USDT'
     || row.purpose !== purpose
-    || row.safe_address !== (safeAddress ?? null)
+    || row.wallet_address !== (walletAddress ?? null)
   ) throw new CoreError('InvalidFinality', 'Guarantee ledger account identity mismatch', 409);
 }
 
@@ -728,7 +735,7 @@ function assertObservationMatchesDeposit(deposit: DepositRow, observation: Guara
     deposit.transaction_hash !== observation.transactionHash.toLowerCase()
     || deposit.token_address !== observation.tokenAddress.toLowerCase()
     || deposit.merchant_wallet !== normalizedAddress(observation.from, 'guarantee transfer sender')
-    || deposit.operations_safe_address !== normalizedAddress(observation.to, 'guarantee transfer recipient')
+    || deposit.operations_wallet_address !== normalizedAddress(observation.to, 'guarantee transfer recipient')
     || deposit.expected_amount_usdt !== observation.amount
   ) throw new CoreError('InvalidFinality', 'Guarantee transfer does not match the frozen submission', 409);
 }
@@ -784,7 +791,7 @@ function finalityProjection(row: DepositRow): GuaranteeDepositFinalityItem {
     merchantWallet: row.merchant_wallet,
     policyVersion: Number(row.policy_version),
     tokenAddress: row.token_address,
-    operationsSafeAddress: row.operations_safe_address,
+    operationsWalletAddress: row.operations_wallet_address,
     expectedAmountUsdt: row.expected_amount_usdt,
     transactionHash: row.transaction_hash,
     state: row.state,
@@ -802,7 +809,7 @@ function depositProjection(row: DepositRow) {
     policyVersion: Number(row.policy_version),
     transactionHash: row.transaction_hash,
     expectedAmountUsdt: row.expected_amount_usdt,
-    operationsSafeAddress: row.operations_safe_address,
+    operationsWalletAddress: row.operations_wallet_address,
     state: row.state,
     confirmations: row.confirmations,
     ...(row.observed_block_number === null ? {} : { blockNumber: Number(row.observed_block_number) }),

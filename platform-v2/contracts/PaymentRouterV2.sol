@@ -1,25 +1,24 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
-import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IBeneficiaryRegistryV2, IPolicyRegistryV2} from "./interfaces/IV2Core.sol";
 import {V2Types} from "./types/V2Types.sol";
 
-contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
+contract PaymentRouterV2 is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
-    bytes32 public constant SESSION_ADMIN_ROLE = keccak256("SESSION_ADMIN_ROLE");
-    bytes32 public constant PAYMENT_TYPEHASH = keccak256(
+    bytes32 private constant EIP712_DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    bytes32 private constant EIP712_NAME_HASH = keccak256("Abu24KPaymentRouter");
+    bytes32 private constant EIP712_VERSION_HASH = keccak256("2");
+    bytes32 private constant PAYMENT_TYPEHASH = keccak256(
         "PaymentAuthorization(bytes32 paymentHash,bytes32 orderId,address buyer,address merchant,bytes32 productId,bytes32 skuId,uint32 quantity,uint8 fulfillmentMode,uint256 listPriceUsdt,uint256 usdtPaymentAmount,uint256 nplPaymentAmount,uint64 deadline)"
     );
-    bytes32 public constant SECKILL_TYPEHASH = keccak256(
+    bytes32 private constant SECKILL_TYPEHASH = keccak256(
         "SeckillAuthorization(bytes32 seckillHash,bytes32 orderId,address buyer,address merchant,bytes32 productId,bytes32 skuId,uint32 quantity,uint8 fulfillmentMode,uint256 seckillListPriceUsdt,uint256 seckillUsdtPaymentAmount,uint256 seckillNplPaymentAmount,uint256 fallbackListPriceUsdt,uint256 fallbackUsdtPaymentAmount,uint256 fallbackNplPaymentAmount,uint64 deadline)"
     );
 
@@ -37,12 +36,13 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
     IERC20 public immutable npl;
     IPolicyRegistryV2 public immutable policyRegistry;
     IBeneficiaryRegistryV2 public immutable beneficiaryRegistry;
-    address public immutable governanceSafe;
-    address public immutable platformServiceFeeSafe;
-    address public immutable usdtCustodySafe;
-    address public immutable nplRewardSafe;
-    address public immutable operationsTreasurySafe;
+    address public immutable governanceWallet;
+    address public immutable platformServiceFeeWallet;
+    address public immutable usdtSettlementWallet;
+    address public immutable nplRewardWallet;
+    address public immutable operationsWallet;
     address public immutable quoteSigner;
+    bytes32 private immutable _domainSeparator;
 
     mapping(bytes32 orderId => bool used) public usedOrderId;
     mapping(address buyer => mapping(uint256 nonce => bool used)) public usedPaymentNonce;
@@ -63,7 +63,7 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
     error SeckillPurchasesPaused();
     error InvalidSession();
     error SessionNotLive();
-    error SafeExecutionRequired();
+    error GovernanceWalletRequired();
 
     event PaymentCompleted(
         bytes32 indexed orderId,
@@ -108,38 +108,45 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
         IERC20 npl_,
         IPolicyRegistryV2 policyRegistry_,
         IBeneficiaryRegistryV2 beneficiaryRegistry_,
-        address platformServiceFeeSafe_,
-        address usdtCustodySafe_,
-        address nplRewardSafe_,
-        address operationsTreasurySafe_,
-        address quoteSigner_
-    ) EIP712("Abu24KPaymentRouter", "2") {
+        address platformServiceFeeWallet_,
+        address usdtSettlementWallet_,
+        address nplRewardWallet_,
+        address operationsWallet_
+    ) {
         if (address(policyRegistry_) == address(0)) revert InvalidAddress();
-        address governanceSafe_ = policyRegistry_.safe();
+        address governanceWallet_ = policyRegistry_.governanceWallet();
         if (
             block.chainid != V2Types.BSC_CHAIN_ID || address(usdt_) != V2Types.USDT || address(npl_) != V2Types.NPL
-                || address(beneficiaryRegistry_) == address(0) || governanceSafe_ == address(0)
-                || platformServiceFeeSafe_ == address(0) || usdtCustodySafe_ == address(0)
-                || nplRewardSafe_ == address(0) || operationsTreasurySafe_ == address(0) || quoteSigner_ == address(0)
-                || platformServiceFeeSafe_ == governanceSafe_ || usdtCustodySafe_ == governanceSafe_
-                || nplRewardSafe_ == governanceSafe_ || operationsTreasurySafe_ == governanceSafe_
-                || platformServiceFeeSafe_ == usdtCustodySafe_ || platformServiceFeeSafe_ == nplRewardSafe_
-                || platformServiceFeeSafe_ == operationsTreasurySafe_ || usdtCustodySafe_ == nplRewardSafe_
-                || usdtCustodySafe_ == operationsTreasurySafe_ || nplRewardSafe_ == operationsTreasurySafe_
+                || address(beneficiaryRegistry_) == address(0) || governanceWallet_ == address(0)
+                || platformServiceFeeWallet_ == address(0) || usdtSettlementWallet_ == address(0)
+                || nplRewardWallet_ == address(0) || operationsWallet_ == address(0)
+                || governanceWallet_.code.length != 0 || platformServiceFeeWallet_.code.length != 0
+                || usdtSettlementWallet_.code.length != 0 || nplRewardWallet_.code.length != 0
+                || operationsWallet_.code.length != 0 || platformServiceFeeWallet_ == governanceWallet_
+                || usdtSettlementWallet_ == governanceWallet_ || nplRewardWallet_ == governanceWallet_
+                || operationsWallet_ == governanceWallet_ || platformServiceFeeWallet_ == usdtSettlementWallet_
+                || platformServiceFeeWallet_ == nplRewardWallet_ || platformServiceFeeWallet_ == operationsWallet_
+                || usdtSettlementWallet_ == nplRewardWallet_ || usdtSettlementWallet_ == operationsWallet_
+                || nplRewardWallet_ == operationsWallet_
         ) revert InvalidAddress();
         usdt = usdt_;
         npl = npl_;
         policyRegistry = policyRegistry_;
         beneficiaryRegistry = beneficiaryRegistry_;
-        governanceSafe = governanceSafe_;
-        platformServiceFeeSafe = platformServiceFeeSafe_;
-        usdtCustodySafe = usdtCustodySafe_;
-        nplRewardSafe = nplRewardSafe_;
-        operationsTreasurySafe = operationsTreasurySafe_;
-        quoteSigner = quoteSigner_;
-        _grantRole(DEFAULT_ADMIN_ROLE, governanceSafe_);
-        _grantRole(PAUSER_ROLE, governanceSafe_);
-        _grantRole(SESSION_ADMIN_ROLE, governanceSafe_);
+        governanceWallet = governanceWallet_;
+        platformServiceFeeWallet = platformServiceFeeWallet_;
+        usdtSettlementWallet = usdtSettlementWallet_;
+        nplRewardWallet = nplRewardWallet_;
+        operationsWallet = operationsWallet_;
+        quoteSigner = governanceWallet_;
+        _domainSeparator = keccak256(
+            abi.encode(EIP712_DOMAIN_TYPEHASH, EIP712_NAME_HASH, EIP712_VERSION_HASH, block.chainid, address(this))
+        );
+    }
+
+    modifier onlyGovernanceWallet() {
+        if (msg.sender != governanceWallet) revert GovernanceWalletRequired();
+        _;
     }
 
     function pay(V2Types.PaymentIntent calldata intent, bytes calldata quoteSignature, bytes calldata buyerSignature)
@@ -180,9 +187,8 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
 
     function openSeckillSession(bytes32 sessionId, uint64 policyVersion, uint64 startsAt)
         external
-        onlyRole(SESSION_ADMIN_ROLE)
+        onlyGovernanceWallet
     {
-        if (msg.sender != governanceSafe) revert SafeExecutionRequired();
         if (sessionId == bytes32(0) || startsAt < block.timestamp || _sessions[sessionId].opened) {
             revert InvalidSession();
         }
@@ -195,15 +201,13 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
         emit SeckillSessionOpened(sessionId, policyVersion, startsAt, mainDeadline, relayDeadline);
     }
 
-    function setNewPaymentsPaused(bool paused, bytes32 evidenceHash) external onlyRole(PAUSER_ROLE) {
-        if (msg.sender != governanceSafe) revert SafeExecutionRequired();
+    function setNewPaymentsPaused(bool paused, bytes32 evidenceHash) external onlyGovernanceWallet {
         if (evidenceHash == bytes32(0)) revert InvalidIntent();
         newPaymentsPaused = paused;
         emit PaymentPauseChanged(paused, evidenceHash);
     }
 
-    function setSeckillPurchasesPaused(bool paused, bytes32 evidenceHash) external onlyRole(PAUSER_ROLE) {
-        if (msg.sender != governanceSafe) revert SafeExecutionRequired();
+    function setSeckillPurchasesPaused(bool paused, bytes32 evidenceHash) external onlyGovernanceWallet {
         if (evidenceHash == bytes32(0)) revert InvalidIntent();
         seckillPurchasesPaused = paused;
         emit SeckillPurchasePauseChanged(paused, evidenceHash);
@@ -258,6 +262,10 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
         );
     }
 
+    function _hashTypedDataV4(bytes32 structHash) private view returns (bytes32) {
+        return keccak256(abi.encodePacked("\x19\x01", _domainSeparator, structHash));
+    }
+
     function getSession(bytes32 sessionId) external view returns (SeckillSession memory) {
         return _sessions[sessionId];
     }
@@ -281,27 +289,27 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
         uint256 routerNplBefore = npl.balanceOf(address(this));
         uint256 buyerUsdtBefore = usdt.balanceOf(intent.buyer);
         uint256 buyerNplBefore = npl.balanceOf(intent.buyer);
-        uint256 platformServiceFeeBefore = usdt.balanceOf(platformServiceFeeSafe);
-        uint256 custodyBefore = usdt.balanceOf(usdtCustodySafe);
+        uint256 platformServiceFeeBefore = usdt.balanceOf(platformServiceFeeWallet);
+        uint256 custodyBefore = usdt.balanceOf(usdtSettlementWallet);
         uint256 burnBefore = npl.balanceOf(V2Types.NPL_BURN_ADDRESS);
-        uint256 rewardBefore = npl.balanceOf(nplRewardSafe);
+        uint256 rewardBefore = npl.balanceOf(nplRewardWallet);
 
         if (intent.platformServiceFeeUsdt != 0) {
-            usdt.safeTransferFrom(intent.buyer, platformServiceFeeSafe, intent.platformServiceFeeUsdt);
+            usdt.safeTransferFrom(intent.buyer, platformServiceFeeWallet, intent.platformServiceFeeUsdt);
         }
         uint256 custodyUsdt = intent.custodyProductUsdt + intent.freightUsdt;
-        if (custodyUsdt != 0) usdt.safeTransferFrom(intent.buyer, usdtCustodySafe, custodyUsdt);
+        if (custodyUsdt != 0) usdt.safeTransferFrom(intent.buyer, usdtSettlementWallet, custodyUsdt);
         npl.safeTransferFrom(intent.buyer, V2Types.NPL_BURN_ADDRESS, intent.nplBurnAmount);
-        npl.safeTransferFrom(intent.buyer, nplRewardSafe, intent.nplRewardAmount);
+        npl.safeTransferFrom(intent.buyer, nplRewardWallet, intent.nplRewardAmount);
 
         if (
             usdt.balanceOf(address(this)) != routerUsdtBefore || npl.balanceOf(address(this)) != routerNplBefore
                 || buyerUsdtBefore - usdt.balanceOf(intent.buyer) != intent.usdtPaymentAmount
                 || buyerNplBefore - npl.balanceOf(intent.buyer) != intent.nplPaymentAmount
-                || usdt.balanceOf(platformServiceFeeSafe) - platformServiceFeeBefore != intent.platformServiceFeeUsdt
-                || usdt.balanceOf(usdtCustodySafe) - custodyBefore != custodyUsdt
+                || usdt.balanceOf(platformServiceFeeWallet) - platformServiceFeeBefore != intent.platformServiceFeeUsdt
+                || usdt.balanceOf(usdtSettlementWallet) - custodyBefore != custodyUsdt
                 || npl.balanceOf(V2Types.NPL_BURN_ADDRESS) - burnBefore != intent.nplBurnAmount
-                || npl.balanceOf(nplRewardSafe) - rewardBefore != intent.nplRewardAmount
+                || npl.balanceOf(nplRewardWallet) - rewardBefore != intent.nplRewardAmount
         ) revert InexactTransfer();
 
         bytes32 snapshotHash = keccak256(abi.encode(intent));
@@ -359,8 +367,8 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
 
         V2Types.Policy memory policy = policyRegistry.getPolicy(intent.policyVersion);
         if (
-            policy.usdtCustodySafe != usdtCustodySafe || policy.nplRewardSafe != nplRewardSafe
-                || policy.operationsTreasurySafe != operationsTreasurySafe
+            policy.usdtSettlementWallet != usdtSettlementWallet || policy.nplRewardWallet != nplRewardWallet
+                || policy.operationsWallet != operationsWallet
                 || intent.concessionAllocationHash != policy.concessionDestinationSetHash
         ) revert InvalidIntent();
         _validateAmounts(intent, policy);
@@ -373,16 +381,14 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
         if (intent.listPriceUsdt == 0 || intent.nplQuoteAmount == 0 || intent.merchantConcessionBps > V2Types.BPS) {
             revert InvalidAmounts();
         }
-        uint256 expectedProductUsdt = Math.mulDiv(intent.listPriceUsdt, policy.usdtPaymentBps, V2Types.BPS);
-        uint256 expectedServiceFee =
-            Math.mulDiv(intent.listPriceUsdt, V2Types.PLATFORM_SERVICE_FEE_LIST_PRICE_BPS, V2Types.BPS);
+        uint256 expectedProductUsdt = V2Types.mulBps(intent.listPriceUsdt, policy.usdtPaymentBps);
+        uint256 expectedServiceFee = V2Types.mulBps(intent.listPriceUsdt, V2Types.PLATFORM_SERVICE_FEE_LIST_PRICE_BPS);
         uint256 expectedCustodyProductUsdt = expectedProductUsdt - expectedServiceFee;
         uint256 expectedUsdt = expectedProductUsdt + intent.freightUsdt;
-        uint256 expectedNplPayment = Math.mulDiv(intent.nplQuoteAmount, policy.nplPaymentBps, V2Types.BPS);
-        uint256 expectedBurn = Math.mulDiv(intent.nplQuoteAmount, policy.nplBurnListPriceBps, V2Types.BPS);
+        uint256 expectedNplPayment = V2Types.mulBps(intent.nplQuoteAmount, policy.nplPaymentBps);
+        uint256 expectedBurn = V2Types.mulBps(intent.nplQuoteAmount, policy.nplBurnListPriceBps);
         uint256 expectedReward = expectedNplPayment - expectedBurn;
-        uint256 expectedConcession =
-            Math.mulDiv(intent.merchantBaseReceivableUsdt, intent.merchantConcessionBps, V2Types.BPS);
+        uint256 expectedConcession = V2Types.mulBps(intent.merchantBaseReceivableUsdt, intent.merchantConcessionBps);
         if (
             expectedProductUsdt == 0 || expectedNplPayment == 0
                 || (policy.nplBurnListPriceBps != 0 && expectedBurn == 0)
@@ -435,9 +441,11 @@ contract PaymentRouterV2 is AccessControl, EIP712, ReentrancyGuard {
         bytes calldata quoteSignature,
         bytes calldata buyerSignature
     ) private view {
+        (address quoteRecovered, ECDSA.RecoverError quoteError,) = ECDSA.tryRecover(digest, quoteSignature);
+        (address buyerRecovered, ECDSA.RecoverError buyerError,) = ECDSA.tryRecover(digest, buyerSignature);
         if (
-            !SignatureChecker.isValidSignatureNowCalldata(quoteSigner, digest, quoteSignature)
-                || !SignatureChecker.isValidSignatureNowCalldata(buyer, digest, buyerSignature)
+            quoteError != ECDSA.RecoverError.NoError || quoteRecovered != quoteSigner
+                || buyerError != ECDSA.RecoverError.NoError || buyerRecovered != buyer
         ) revert InvalidSignature();
     }
 }

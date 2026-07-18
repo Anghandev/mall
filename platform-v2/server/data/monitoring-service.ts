@@ -44,7 +44,7 @@ export class MonitoringService {
         created_at: Date | string;
       }>('SELECT * FROM core.current_operations_alerts ORDER BY alert_key');
       const coverage = await executor.query<Record<string, unknown>>(
-        `SELECT item.asset, item.safe_address,
+        `SELECT item.asset, item.wallet_address,
            item.verified_asset_balance::text AS assets,
            item.unsettled_liability::text AS unsettled_liabilities,
            item.coverage_met AS covered, snapshot.recorded_at AS observed_at
@@ -53,7 +53,7 @@ export class MonitoringService {
          WHERE item.snapshot_id = (
            SELECT snapshot_id FROM core.coverage_snapshots
            WHERE canonical ORDER BY recorded_at DESC, snapshot_id DESC LIMIT 1
-         ) ORDER BY item.asset, item.safe_address`,
+         ) ORDER BY item.asset, item.wallet_address`,
       );
       return Object.freeze({
         metrics: metrics.rows.map((row) => Object.freeze({

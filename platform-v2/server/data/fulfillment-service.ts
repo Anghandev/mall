@@ -162,7 +162,7 @@ interface LedgerStateRow {
   asset: 'USDT' | 'NPL' | 'BNM_POINTS';
   amount: string;
   purpose: string;
-  backing_safe_address: string | null;
+  backing_wallet_address: string | null;
 }
 
 type CommandType =
@@ -1292,13 +1292,13 @@ async function moveLedgerState(
   eventType: 'ARBITRATION_DISPUTED' | 'ARBITRATION_RESOLVED' | 'FULFILLMENT_AVAILABLE',
 ) {
   const balances = await executor.query<LedgerStateRow>(
-    `SELECT line.account_id, account.asset, account.purpose, line.backing_safe_address,
+    `SELECT line.account_id, account.asset, account.purpose, line.backing_wallet_address,
        sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS amount
      FROM core.ledger_journals journal
      JOIN core.ledger_lines line ON line.journal_id = journal.journal_id
      JOIN core.ledger_accounts account ON account.account_id = line.account_id
      WHERE journal.order_id = $1 AND line.balance_state = $2
-     GROUP BY line.account_id, account.asset, account.purpose, line.backing_safe_address
+     GROUP BY line.account_id, account.asset, account.purpose, line.backing_wallet_address
      HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) > 0
      ORDER BY line.account_id`,
     [order.order_id, from],
@@ -1313,14 +1313,14 @@ async function moveLedgerState(
         side: 'DEBIT',
         amount: row.amount,
         balance_state: from,
-        backing_safe_address: row.backing_safe_address,
+        backing_wallet_address: row.backing_wallet_address,
       },
       {
         account_id: row.account_id,
         side: 'CREDIT',
         amount: row.amount,
         balance_state: target,
-        backing_safe_address: row.backing_safe_address,
+        backing_wallet_address: row.backing_wallet_address,
       },
     ];
   });

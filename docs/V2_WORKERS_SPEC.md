@@ -50,7 +50,8 @@ deployed registry. Both RPC providers failing returns `ExternalBlocked`.
 
 New ordinary and seckill quotes require a fresh runtime readiness snapshot.
 Core verifies artifact checksums, chain 56, deployed code hashes for all three
-contracts, immutable bindings, Safe-held roles, quote and secondary signers,
+contracts, the Router's immutable governance-Safe binding, Registry Safe-held
+roles, quote and secondary signers,
 the fixed-pair reserve source, PostgreSQL, Redis, remote signer identity
 and a caught-up Indexer. The manifest must include each deployed address,
 runtime code hash and the Router deployment block.

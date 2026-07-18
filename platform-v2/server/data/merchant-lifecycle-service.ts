@@ -21,7 +21,6 @@ import {
   merchantReviewActions,
 } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
-import type { SystemConfigSafeApprover } from '../chain/system-config-governance.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
@@ -82,8 +81,8 @@ interface ReviewRow {
   secondary_signer: string | null;
   secondary_signature_hash: string | null;
   action_digest: string | null;
-  governance_safe_address: string;
-  safe_tx_hash: string | null;
+  governance_wallet_address: string;
+  approval_signature_hash: string | null;
   approval_evidence_hash: string | null;
   actor_wallet: string;
   idempotency_key: string;
@@ -117,9 +116,8 @@ export interface MerchantApplicationUpdateInput {
 
 export class MerchantLifecycleService {
   readonly #transactions: SqlTransactionRunner;
-  readonly #approver: SystemConfigSafeApprover;
   readonly #secondarySigner: string;
-  readonly #governanceSafe: string;
+  readonly #governanceWallet: string;
   readonly #verifyingContract: string;
   readonly #encryptionKey: Buffer | undefined;
   readonly #retentionPolicyVersion: string | undefined;
@@ -128,9 +126,8 @@ export class MerchantLifecycleService {
 
   constructor(input: {
     transactions: SqlTransactionRunner;
-    approver: SystemConfigSafeApprover;
     secondarySigner: string;
-    governanceSafe: string;
+    governanceWallet: string;
     verifyingContract: string;
     encryptionKey?: string;
     retentionPolicyVersion?: string;
@@ -138,13 +135,9 @@ export class MerchantLifecycleService {
     clock?: () => Date;
   }) {
     this.#transactions = input.transactions;
-    this.#approver = input.approver;
     this.#secondarySigner = normalizeAddress(input.secondarySigner);
-    this.#governanceSafe = normalizeAddress(input.governanceSafe);
+    this.#governanceWallet = normalizeAddress(input.governanceWallet);
     this.#verifyingContract = normalizeAddress(input.verifyingContract);
-    if (this.#secondarySigner === this.#governanceSafe) {
-      throw new CoreError('InvalidRequest', 'Merchant review secondary signer must be independent from the governance Safe', 500);
-    }
     this.#encryptionKey = parseEncryptionKey(input.encryptionKey);
     this.#retentionPolicyVersion = retentionPolicy(input.retentionPolicyVersion);
     this.#auditReady = input.auditReady;
@@ -409,14 +402,14 @@ export class MerchantLifecycleService {
         `INSERT INTO core.merchant_review_actions (
            action_id, merchant_id, action_kind, from_status, to_status,
            application_version, policy_version, reason_code, old_value_hash, new_value_hash,
-           approval_nonce, approval_deadline, state, governance_safe_address,
+           approval_nonce, approval_deadline, state, governance_wallet_address,
            actor_wallet, idempotency_key, request_hash, created_at, updated_at
          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'DRAFT',$13,$14,$15,$16,$17,$17)
          RETURNING *`,
         [
           randomHash(), merchantId, action, merchant.status, toStatus,
           merchant.application_version, policyVersion, reasonCode, oldValueHash, newValueHash,
-          randomNonce().toString(), new Date(now.getTime() + 5 * 60_000), this.#governanceSafe,
+          randomNonce().toString(), new Date(now.getTime() + 5 * 60_000), this.#governanceWallet,
           wallet, input.idempotencyKey, requestHash, now,
         ],
       )).rows[0]!;
@@ -465,7 +458,7 @@ export class MerchantLifecycleService {
         intent,
         signature,
         this.#secondarySigner,
-        this.#governanceSafe,
+        this.#governanceWallet,
         this.#verifyingContract,
         this.#clock(),
       );
@@ -485,15 +478,6 @@ export class MerchantLifecycleService {
     if ('expired' in prepared) {
       throw new CoreError('NonceExpired', 'Merchant review challenge expired', 401);
     }
-    const safe = await this.#approver.verify({
-      configVersionId: prepared.row.action_id,
-      configKey: `MERCHANT_${prepared.row.action_kind}`,
-      version: Number(prepared.row.application_version),
-      safeAddress: this.#governanceSafe,
-      actionDigest: prepared.actionDigest,
-      oldValueHash: prepared.row.old_value_hash,
-      newValueHash: prepared.row.new_value_hash,
-    });
     return this.#transactions.transaction(async (executor) => {
       const roles = await requireCurrentRole(executor, actor, ['ADMIN']);
       const row = await lockedReview(executor, merchantId, actionId.toLowerCase());
@@ -504,7 +488,7 @@ export class MerchantLifecycleService {
         || merchant.status !== row.from_status
         || Number(merchant.application_version) !== Number(row.application_version)
         || merchantStateHash(merchant, merchant.status) !== row.old_value_hash
-      ) throw new CoreError('IdempotencyConflict', 'Merchant review changed during Safe approval', 409);
+      ) throw new CoreError('IdempotencyConflict', 'Merchant review changed during approval', 409);
       const now = this.#clock();
       if (row.action_kind === 'APPROVE') {
         const binding = await executor.query<{ merchant_id: string | null }>(
@@ -533,9 +517,17 @@ export class MerchantLifecycleService {
       }
       await executor.query(
         `UPDATE core.merchant_review_actions SET state = 'PUBLISHED', secondary_signer = $2,
-           secondary_signature_hash = $3, action_digest = $4, safe_tx_hash = $5,
+           secondary_signature_hash = $3, action_digest = $4, approval_signature_hash = $5,
            approval_evidence_hash = $6, updated_at = $7 WHERE action_id = $1`,
-        [row.action_id, prepared.verified.signer, keccak256(signature).toLowerCase(), prepared.actionDigest, safe.safeTxHash, safe.approvalEvidenceHash, now],
+        [
+          row.action_id,
+          prepared.verified.signer,
+          keccak256(signature).toLowerCase(),
+          prepared.actionDigest,
+          keccak256(signature).toLowerCase(),
+          prepared.actionDigest,
+          now,
+        ],
       );
       await executor.query(
         `UPDATE core.merchants SET status = $2, reviewed_at = $3, reviewed_by = $4, updated_at = $3
@@ -557,7 +549,7 @@ export class MerchantLifecycleService {
           fromStatus: row.from_status,
           toStatus: row.to_status,
           applicationVersion: Number(row.application_version),
-          safeTxHash: safe.safeTxHash,
+          governanceWallet: this.#governanceWallet,
           }),
         ],
       );
@@ -567,8 +559,9 @@ export class MerchantLifecycleService {
         payload: {
           actionId: row.action_id, action: row.action_kind, fromStatus: row.from_status,
           toStatus: row.to_status, applicationVersion: Number(row.application_version),
-          secondarySigner: prepared.verified.signer, safeTxHash: safe.safeTxHash,
-          approvalEvidenceHash: safe.approvalEvidenceHash,
+          secondarySigner: prepared.verified.signer,
+          governanceWallet: this.#governanceWallet,
+          approvalEvidenceHash: prepared.actionDigest,
         },
         signature: {
           signatureHash: keccak256(signature).toLowerCase(), signer: prepared.verified.signer,
@@ -691,7 +684,7 @@ function reviewEvidenceProjection(row: ReviewRow) {
     state: row.state,
     secondarySigner: row.secondary_signer,
     actionDigest: row.action_digest,
-    safeTxHash: row.safe_tx_hash,
+    approvalSignatureHash: row.approval_signature_hash,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -705,7 +698,7 @@ function reviewIntent(row: ReviewRow): SensitiveActionIntent {
     policyVersion: BigInt(row.policy_version),
     oldValueHash: row.old_value_hash,
     newValueHash: row.new_value_hash,
-    safeAddress: row.governance_safe_address,
+    executorWallet: row.governance_wallet_address,
     nonce: BigInt(row.approval_nonce),
     deadline: BigInt(Math.floor(row.approval_deadline.getTime() / 1_000)),
   };
@@ -994,19 +987,36 @@ async function merchantBalanceStats(executor: SqlExecutor, merchantId: string) {
     [merchantId],
   );
   const byState = new Map(result.rows.map((row) => [row.balance_state, row.amount]));
-  return ['LOCKED', 'AVAILABLE', 'REQUESTED', 'BATCHED', 'SETTLED'].map((state) => ({ state, amount: byState.get(state) ?? '0' }));
+  return ['LOCKED', 'AVAILABLE', 'REQUESTED', 'SUBMITTED', 'SETTLED'].map((state) => ({
+    state,
+    amount: byState.get(state) ?? '0',
+  }));
 }
 
 async function merchantSettlementHistory(executor: SqlExecutor, merchantId: string) {
   const result = await executor.query<{
-    request_id: string; asset: string; amount: string; state: string; requested_at: Date; final_safe_tx_hash: string | null; settled_at: Date | null;
+    request_id: string;
+    asset: string;
+    amount: string;
+    state: string;
+    requested_at: Date;
+    final_execution_tx_hashes: string[];
+    settled_at: Date | null;
   }>(
-    `SELECT DISTINCT request.request_id, request.asset, request.amount::text, request.state,
-       request.requested_at, request.final_safe_tx_hash, request.settled_at
+    `SELECT request.request_id, request.asset, request.amount::text, request.state,
+       request.requested_at,
+       COALESCE(array_agg(DISTINCT attempt.execution_tx_hash)
+         FILTER (WHERE attempt.state = 'SETTLED' AND attempt.execution_tx_hash IS NOT NULL), '{}')
+         AS final_execution_tx_hashes,
+       request.settled_at
      FROM core.settlement_requests request
      JOIN core.settlement_request_items item ON item.request_id = request.request_id
      JOIN core.orders orders ON orders.order_id = item.order_id
+     LEFT JOIN core.settlement_transfers transfer
+       ON transfer.request_id = item.request_id AND transfer.request_item_index = item.item_index
+     LEFT JOIN core.settlement_transfer_attempts attempt ON attempt.transfer_id = transfer.transfer_id
      WHERE orders.merchant_id = $1
+     GROUP BY request.request_id
      ORDER BY request.requested_at DESC, request.request_id DESC LIMIT 100`,
     [merchantId],
   );
@@ -1016,7 +1026,7 @@ async function merchantSettlementHistory(executor: SqlExecutor, merchantId: stri
     amount: row.amount,
     state: row.state,
     requestedAt: row.requested_at.toISOString(),
-    safeTxHash: row.final_safe_tx_hash,
+    finalExecutionTxHashes: row.final_execution_tx_hashes,
     settledAt: row.settled_at?.toISOString() ?? null,
   }));
 }

@@ -14,22 +14,18 @@
   "compiler": {
     "version": "0.8.26",
     "optimizer": true,
-    "optimizerRuns": 200,
+    "optimizerRuns": 1,
     "viaIR": true,
-    "evmVersion": "cancun"
+    "evmVersion": "cancun",
+    "bytecodeHash": "none",
+    "cborMetadata": false
   },
-  "sourceDigestSha256": "de61d8adc8061ca32c03c7119210d1d5b79b2e385e5cd24fef23e60ad5939a75",
-  "deploymentStatus": "ExternalBlocked",
+  "sourceDigestSha256": "713ab33de73d34855c3c707e2af837e7b49d59a6783dbf89b247e6eb5e9ae9e5",
+  "deploymentStatus": "PENDING",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
   "externalBlocked": [
-    "GOVERNANCE_SAFE_ADDRESS",
-    "USDT_CUSTODY_SAFE_ADDRESS",
-    "NPL_REWARD_SAFE_ADDRESS",
-    "OPERATIONS_TREASURY_SAFE_ADDRESS",
-    "SECONDARY_SIGNER",
-    "QUOTE_SIGNER",
-    "BSC_RPC_URL"
+    "EOA_CONTRACT_REDEPLOYMENT_REQUIRED"
   ],
   "decisionBlocked": [],
   "deploymentOrder": [
@@ -43,21 +39,16 @@
       "source": "platform-v2/contracts/PolicyRegistryV2.sol",
       "address": null,
       "deploymentBlock": null,
-      "status": "ExternalBlocked",
+      "status": "PENDING",
       "constructorInputs": [
         {
-          "name": "safe_",
-          "type": "address",
-          "internalType": "address"
-        },
-        {
-          "name": "secondarySigner_",
+          "name": "governanceWallet_",
           "type": "address",
           "internalType": "address"
         }
       ],
-      "bytecodeSha256": "82dacea883faa04d2525dbc6eb62ae87710c3ea4bf53b07c8647b7e9061ed1b1",
-      "deployedBytecodeSha256": "cef0eb8f5ded13d49fd2cb93fed82c71e248f8fbc314cadbfe86c162fa7ab81a",
+      "bytecodeSha256": "edf7d9da016d49dc75250f8381282b5fac61ba29c887c0dd6f158683aaeabe0c",
+      "deployedBytecodeSha256": "598e1b04e0b493f2025edb1b01bc5322cfc5e5e6179fe5e8e184313a28007081",
       "deployedCodeHash": null
     },
     {
@@ -65,7 +56,7 @@
       "source": "platform-v2/contracts/BeneficiaryRegistryV2.sol",
       "address": null,
       "deploymentBlock": null,
-      "status": "ExternalBlocked",
+      "status": "PENDING",
       "constructorInputs": [
         {
           "name": "policyRegistry_",
@@ -73,8 +64,8 @@
           "internalType": "contract IPolicyRegistryV2"
         }
       ],
-      "bytecodeSha256": "a2fa5c3d3c86d59d6b55cffc791d2798414bc0c79336497f6acbaa08961b5431",
-      "deployedBytecodeSha256": "9b4ce9aa4d1a6f442fc53ceaa9a57f1f24fd0eb9d1ee52c0e8e2d98fb237411e",
+      "bytecodeSha256": "fbd751fd18d1f1727d2919cda5a6df166a4268e02cabd27560882b0727b49d0c",
+      "deployedBytecodeSha256": "602bc34b05fd53dc77807c5417192022ebdefe46a2101faa578ea580ad85fbe8",
       "deployedCodeHash": null
     },
     {
@@ -82,7 +73,7 @@
       "source": "platform-v2/contracts/PaymentRouterV2.sol",
       "address": null,
       "deploymentBlock": null,
-      "status": "ExternalBlocked",
+      "status": "PENDING",
       "constructorInputs": [
         {
           "name": "usdt_",
@@ -105,33 +96,28 @@
           "internalType": "contract IBeneficiaryRegistryV2"
         },
         {
-          "name": "platformServiceFeeSafe_",
+          "name": "platformServiceFeeWallet_",
           "type": "address",
           "internalType": "address"
         },
         {
-          "name": "usdtCustodySafe_",
+          "name": "usdtSettlementWallet_",
           "type": "address",
           "internalType": "address"
         },
         {
-          "name": "nplRewardSafe_",
+          "name": "nplRewardWallet_",
           "type": "address",
           "internalType": "address"
         },
         {
-          "name": "operationsTreasurySafe_",
-          "type": "address",
-          "internalType": "address"
-        },
-        {
-          "name": "quoteSigner_",
+          "name": "operationsWallet_",
           "type": "address",
           "internalType": "address"
         }
       ],
-      "bytecodeSha256": "68f7ffbdf50226beabba2cfd18c91daab399cbcfc4c2620fca4f2d179cdb06d0",
-      "deployedBytecodeSha256": "83125b863d70fafae08cce704f7b9278f693f4ab551702bbe73446bb9f6e5a09",
+      "bytecodeSha256": "28cc1fc8c2a4bc733111ba4412d493b6b3f9e5b06ec9eeb6e0a854c32963d07c",
+      "deployedBytecodeSha256": "42b749372f8692ea48bd6b7f2a825275759d91ad528d3e9cd6f745ab4854eb74",
       "deployedCodeHash": null
     }
   ],

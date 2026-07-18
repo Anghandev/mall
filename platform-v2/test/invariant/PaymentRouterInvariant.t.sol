@@ -130,7 +130,7 @@ contract PaymentRouterInvariantTest is CoreFixture {
 
     function setUp() public override {
         super.setUp();
-        handler = new PaymentHandler(router, usdt, npl, merchant, 0x123456, QUOTE_KEY, concessionAllocationHash);
+        handler = new PaymentHandler(router, usdt, npl, merchant, 0x123456, GOVERNANCE_KEY, concessionAllocationHash);
         _targetContracts.push(address(handler));
     }
 
@@ -148,12 +148,14 @@ contract PaymentRouterInvariantTest is CoreFixture {
     function targetArtifactSelectors() public pure returns (FuzzArtifactSelector[] memory values) {}
     function targetInterfaces() public pure returns (FuzzInterface[] memory values) {}
 
-    function invariant_RouterNeverCustodiesAndSafeTransfersConserve() public view {
+    function invariant_RouterNeverCustodiesAndWalletTransfersConserve() public view {
         assertEq(usdt.balanceOf(address(router)), 0);
         assertEq(npl.balanceOf(address(router)), 0);
-        assertEq(usdt.balanceOf(platformServiceFeeSafe) + usdt.balanceOf(usdtCustodySafe), handler.totalUsdtPaid());
-        assertEq(usdt.balanceOf(platformServiceFeeSafe), handler.totalServiceFeeUsdt());
-        assertEq(usdt.balanceOf(usdtCustodySafe), handler.totalCustodyUsdt());
-        assertEq(npl.balanceOf(V2Types.NPL_BURN_ADDRESS) + npl.balanceOf(nplRewardSafe), handler.totalNplPaid());
+        assertEq(
+            usdt.balanceOf(platformServiceFeeWallet) + usdt.balanceOf(usdtSettlementWallet), handler.totalUsdtPaid()
+        );
+        assertEq(usdt.balanceOf(platformServiceFeeWallet), handler.totalServiceFeeUsdt());
+        assertEq(usdt.balanceOf(usdtSettlementWallet), handler.totalCustodyUsdt());
+        assertEq(npl.balanceOf(V2Types.NPL_BURN_ADDRESS) + npl.balanceOf(nplRewardWallet), handler.totalNplPaid());
     }
 }

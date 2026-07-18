@@ -482,7 +482,7 @@ async function latestCoverage(executor: SqlExecutor, now: Date) {
     recorded_at: Date;
     canonical: boolean | null;
     asset: string | null;
-    safe_address: string | null;
+    wallet_address: string | null;
     verified_asset_balance: string | null;
     unsettled_liability: string | null;
     coverage_met: boolean | null;
@@ -505,24 +505,24 @@ async function latestCoverage(executor: SqlExecutor, now: Date) {
        LIMIT 1
      )
      SELECT latest.snapshot_id, latest.block_number::text, latest.recorded_at,
-       latest.canonical, item.asset, item.safe_address,
+       latest.canonical, item.asset, item.wallet_address,
        item.verified_asset_balance::text, item.unsettled_liability::text,
        item.coverage_met
      FROM latest LEFT JOIN core.coverage_snapshot_items item
        ON item.snapshot_id = latest.snapshot_id
-     ORDER BY item.asset, item.safe_address`,
+     ORDER BY item.asset, item.wallet_address`,
   );
   const latest = result.rows[0];
   const unavailable = {
-    metric: 'SAFE_COVERAGE',
+    metric: 'WALLET_COVERAGE',
     reasonCode: 'ExternalBlocked' as const,
-    detail: 'Fresh canonical Safe coverage evidence is unavailable',
+    detail: 'Fresh canonical wallet coverage evidence is unavailable',
   };
   if (
     !latest
     || !latest.canonical
     || now.getTime() - new Date(latest.recorded_at).getTime() > 5 * 60_000
-    || result.rows.some((row) => !row.asset || !row.safe_address || row.coverage_met === null)
+    || result.rows.some((row) => !row.asset || !row.wallet_address || row.coverage_met === null)
   ) return { items: [], unavailable };
   return {
     items: result.rows.map((row) => ({
@@ -530,7 +530,7 @@ async function latestCoverage(executor: SqlExecutor, now: Date) {
       blockNumber: row.block_number,
       recordedAt: new Date(row.recorded_at).toISOString(),
       asset: row.asset!,
-      safeAddress: row.safe_address!,
+      walletAddress: row.wallet_address!,
       verifiedAssets: row.verified_asset_balance!,
       unsettledLiabilities: row.unsettled_liability!,
       covered: row.coverage_met!,

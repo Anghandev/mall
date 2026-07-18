@@ -8,7 +8,6 @@ import {
 } from '../api/auth.ts';
 import type { UserRole } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
-import type { TakeoverFundingSafeApprover } from '../chain/takeover-funding-governance.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 
@@ -34,7 +33,7 @@ interface TakeoverCaseRow {
 interface AvailableReceivableRow {
   order_id: string;
   account_id: string;
-  backing_safe_address: string;
+  backing_wallet_address: string;
   amount: string;
 }
 
@@ -45,7 +44,7 @@ export interface TakeoverFundingApprovalInput {
   policyVersion: string;
   oldValueHash: string;
   newValueHash: string;
-  safeAddress: string;
+  executorWallet: string;
   nonce: string;
   deadline: string;
   signature: string;
@@ -53,29 +52,26 @@ export interface TakeoverFundingApprovalInput {
 
 export class TakeoverFundingService {
   readonly #transactions: SqlTransactionRunner;
-  readonly #approver: TakeoverFundingSafeApprover | undefined;
   readonly #secondarySigner: string | undefined;
-  readonly #governanceSafe: string | undefined;
+  readonly #governanceWallet: string | undefined;
   readonly #verifyingContract: string | undefined;
   readonly #auditReady: () => boolean | Promise<boolean>;
   readonly #clock: () => Date;
 
   constructor(input: {
     transactions: SqlTransactionRunner;
-    approver?: TakeoverFundingSafeApprover;
     secondarySigner?: string;
-    governanceSafe?: string;
+    governanceWallet?: string;
     verifyingContract?: string;
     auditReady?: () => boolean | Promise<boolean>;
     clock?: () => Date;
   }) {
     this.#transactions = input.transactions;
-    this.#approver = input.approver;
     this.#secondarySigner = input.secondarySigner
       ? normalizedAddress(input.secondarySigner, 'takeover secondary signer')
       : undefined;
-    this.#governanceSafe = input.governanceSafe
-      ? normalizedAddress(input.governanceSafe, 'takeover governance Safe')
+    this.#governanceWallet = input.governanceWallet
+      ? normalizedAddress(input.governanceWallet, 'takeover governance wallet')
       : undefined;
     this.#verifyingContract = input.verifyingContract
       ? normalizedAddress(input.verifyingContract, 'takeover verifying contract')
@@ -89,7 +85,7 @@ export class TakeoverFundingService {
     input: {
       caseId: string;
       requiredUsdt: string;
-      operationsSafeAddress: string;
+      operationsWalletAddress: string;
       nonce: string;
       deadline: string;
     },
@@ -113,7 +109,7 @@ export class TakeoverFundingService {
         policyVersion: BigInt(plan.takeover.policy_version),
         oldValueHash: plan.oldValueHash,
         newValueHash: plan.newValueHash,
-        safeAddress: governance.governanceSafe,
+        executorWallet: governance.governanceWallet,
         nonce,
         deadline,
       };
@@ -134,7 +130,7 @@ export class TakeoverFundingService {
     input: {
       caseId: string;
       requiredUsdt: string;
-      operationsSafeAddress: string;
+      operationsWalletAddress: string;
       idempotencyKey: string;
       correlationId: string;
       approval: TakeoverFundingApprovalInput;
@@ -169,12 +165,12 @@ export class TakeoverFundingService {
         return { existing: existing.rows[0].result } as const;
       }
       const plan = await buildFundingPlan(executor, input, false);
-      assertFundingApproval(intent, plan, governance.governanceSafe);
+      assertFundingApproval(intent, plan, governance.governanceWallet);
       const verified = verifySensitiveActionApproval(
         intent,
         input.approval.signature,
         governance.secondarySigner,
-        governance.governanceSafe,
+        governance.governanceWallet,
         governance.verifyingContract,
         this.#clock(),
       );
@@ -186,15 +182,6 @@ export class TakeoverFundingService {
       return { plan, verified, actionDigest } as const;
     });
     if ('existing' in prepared) return prepared.existing;
-    const safe = await governance.approver.verify({
-      caseId: prepared.plan.takeover.case_id,
-      policyVersion: Number(prepared.plan.takeover.policy_version),
-      governanceSafeAddress: governance.governanceSafe,
-      operationsSafeAddress: prepared.plan.operationsSafe,
-      actionDigest: prepared.actionDigest,
-      oldValueHash: prepared.plan.oldValueHash,
-      newValueHash: prepared.plan.newValueHash,
-    });
     return this.#transactions.transaction(async (executor) => {
       const roles = await requireCurrentRole(executor, wallet, ['ADMIN', 'OPERATOR', 'ARBITRATOR']);
       const existing = await executor.query<{ request_hash: string; result: Record<string, unknown> }>(
@@ -210,7 +197,7 @@ export class TakeoverFundingService {
       }
       const plan = await buildFundingPlan(executor, input, true);
       if (plan.oldValueHash !== prepared.plan.oldValueHash || plan.newValueHash !== prepared.plan.newValueHash) {
-        throw new CoreError('IdempotencyConflict', 'Takeover funding sources changed during Safe approval', 409);
+        throw new CoreError('IdempotencyConflict', 'Takeover funding sources changed during approval', 409);
       }
       const replay = await executor.query<{ command_id: string }>(
         `SELECT command_id FROM core.takeover_funding_commands
@@ -220,8 +207,7 @@ export class TakeoverFundingService {
       if (replay.rows[0]) throw new CoreError('NonceReplay', 'Takeover funding approval was already consumed', 401);
       const fundingEvidenceHash = hashJson({
         actionDigest: prepared.actionDigest,
-        safeTxHash: safe.safeTxHash,
-        approvalEvidenceHash: safe.approvalEvidenceHash,
+        approvalSignatureHash: keccak256(input.approval.signature).toLowerCase(),
       });
       await applyFundingPlan(executor, plan, fundingEvidenceHash);
       const now = this.#clock();
@@ -239,7 +225,7 @@ export class TakeoverFundingService {
         `UPDATE core.takeover_cases SET state = 'FUNDED', required_usdt = $2,
            guarantee_used_usdt = $3, merchant_available_used_usdt = $4,
            future_proceeds_used_usdt = 0, platform_advance_usdt = $5,
-           platform_advance_safe_address = CASE WHEN $5::numeric > 0 THEN $6 ELSE NULL END,
+           platform_advance_wallet_address = CASE WHEN $5::numeric > 0 THEN $6 ELSE NULL END,
            merchant_debt_usdt = $5, updated_at = $7 WHERE case_id = $1`,
         [
           plan.takeover.case_id,
@@ -247,7 +233,7 @@ export class TakeoverFundingService {
           plan.guaranteeUsed.toString(),
           plan.selected.total.toString(),
           plan.platformAdvance.toString(),
-          plan.operationsSafe,
+          plan.operationsWallet,
           now,
         ],
       );
@@ -270,10 +256,10 @@ export class TakeoverFundingService {
            command_id, case_id, actor_wallet, idempotency_key, request_hash,
            evidence_hash, policy_version, old_value_hash, new_value_hash,
            action_digest, secondary_signer, secondary_signature_hash,
-           approval_nonce, approval_deadline, governance_safe_address,
-           safe_tx_hash, safe_approval_evidence_hash, safe_owner_approvals,
+           approval_nonce, approval_deadline, governance_wallet_address,
+           approval_signature_hash, approval_evidence_hash,
            correlation_id, result, created_at
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
         [
           `takeover-funding-command:${randomUUID()}`,
           plan.takeover.case_id,
@@ -289,10 +275,9 @@ export class TakeoverFundingService {
           keccak256(input.approval.signature).toLowerCase(),
           intent.nonce.toString(),
           new Date(Number(intent.deadline) * 1_000),
-          governance.governanceSafe,
-          safe.safeTxHash,
-          safe.approvalEvidenceHash,
-          JSON.stringify(safe.approvals),
+          governance.governanceWallet,
+          keccak256(input.approval.signature).toLowerCase(),
+          prepared.actionDigest,
           input.correlationId,
           JSON.stringify(result),
           now,
@@ -309,10 +294,9 @@ export class TakeoverFundingService {
         sourceEventId: auditSourceId('audit:takeover-funding', {
           caseId: plan.takeover.case_id,
           actionDigest: prepared.actionDigest,
-          safeTxHash: safe.safeTxHash,
         }),
         streamName: 'financial',
-        evidenceProfile: 'SAFE_APPROVED',
+        evidenceProfile: 'SIGNED_OFFCHAIN',
         eventType: 'TakeoverFundingApproved',
         resourceType: 'TAKEOVER_CASE',
         resourceId: plan.takeover.case_id,
@@ -327,14 +311,9 @@ export class TakeoverFundingService {
           oldValueHash: plan.oldValueHash,
           newValueHash: plan.newValueHash,
           actionDigest: prepared.actionDigest,
-          governanceSafe: governance.governanceSafe,
-          operationsSafe: plan.operationsSafe,
-          safeTxHash: safe.safeTxHash,
-          proposalReferenceHash: safe.proposalReferenceHash,
-          approvalEvidenceHash: safe.approvalEvidenceHash,
-          ownerSetHash: safe.ownerSetHash,
-          threshold: safe.threshold,
-          ownerApprovals: safe.approvals,
+          governanceWallet: governance.governanceWallet,
+          operationsWallet: plan.operationsWallet,
+          approvalEvidenceHash: prepared.actionDigest,
           result,
         },
         signatureEvidence: {
@@ -353,13 +332,12 @@ export class TakeoverFundingService {
   }
 
   private governanceDependencies() {
-    if (!this.#approver || !this.#secondarySigner || !this.#governanceSafe || !this.#verifyingContract) {
+    if (!this.#secondarySigner || !this.#governanceWallet || !this.#verifyingContract) {
       throw new CoreError('ExternalBlocked', 'Takeover funding governance is unavailable', 503);
     }
     return {
-      approver: this.#approver,
       secondarySigner: this.#secondarySigner,
-      governanceSafe: this.#governanceSafe,
+      governanceWallet: this.#governanceWallet,
       verifyingContract: this.#verifyingContract,
     };
   }
@@ -397,13 +375,13 @@ export class TakeoverFundingService {
           [targetMerchantId],
         ),
         executor.query<Record<string, unknown>>(
-          `SELECT backing_safe_address, balance_usdt::text, minimum_usdt::text,
+          `SELECT backing_wallet_address, balance_usdt::text, minimum_usdt::text,
              source_evidence_hash, updated_at
            FROM core.merchant_guarantees WHERE merchant_id = $1`,
           [targetMerchantId],
         ),
         executor.query<Record<string, unknown>>(
-          `SELECT deposit_id, policy_version::text, token_address, operations_safe_address,
+          `SELECT deposit_id, policy_version::text, token_address, operations_wallet_address,
              expected_amount_usdt::text, transaction_hash, state,
              observed_block_number::text, observed_block_hash, observed_log_index,
              confirmations, transfer_evidence_hash, created_at, updated_at, finalized_at
@@ -468,8 +446,8 @@ export class TakeoverFundingService {
           [caseId],
         ),
         executor.query<Record<string, unknown>>(
-          `SELECT recovery_id, order_id, amount_usdt::text, operations_safe_address,
-             backing_safe_address, journal_id, evidence_hash,
+          `SELECT recovery_id, order_id, amount_usdt::text, operations_wallet_address,
+             backing_wallet_address, journal_id, evidence_hash,
              recovered_at, reversed_at, reversal_evidence_hash
            FROM core.merchant_debt_recoveries WHERE case_id = $1
            ORDER BY recovered_at, recovery_id`,
@@ -483,9 +461,9 @@ export class TakeoverFundingService {
 
 interface FundingPlan {
   takeover: TakeoverCaseRow;
-  operationsSafe: string;
+  operationsWallet: string;
   requiredUsdt: bigint;
-  guarantee: { backing_safe_address: string; balance_usdt: string } | undefined;
+  guarantee: { backing_wallet_address: string; balance_usdt: string } | undefined;
   guaranteeUsed: bigint;
   available: AvailableReceivableRow[];
   selected: ReturnType<typeof selectReceivables>;
@@ -496,10 +474,10 @@ interface FundingPlan {
 
 async function buildFundingPlan(
   executor: SqlExecutor,
-  input: { caseId: string; requiredUsdt: string; operationsSafeAddress: string },
+  input: { caseId: string; requiredUsdt: string; operationsWalletAddress: string },
   forUpdate: boolean,
 ): Promise<FundingPlan> {
-  const operationsSafe = normalizedAddress(input.operationsSafeAddress, 'Operations Treasury Safe');
+  const operationsWallet = normalizedAddress(input.operationsWalletAddress, 'operations wallet');
   const takeover = await executor.query<TakeoverCaseRow>(
     `SELECT takeover.case_id, takeover.order_id, takeover.merchant_id, takeover.policy_version,
        takeover.state, takeover.required_usdt::text, takeover.evidence_hash,
@@ -515,10 +493,10 @@ async function buildFundingPlan(
     throw new CoreError('UnknownState', 'Takeover case cannot be funded from its current state', 409);
   }
   const guarantee = await executor.query<{
-    backing_safe_address: string;
+    backing_wallet_address: string;
     balance_usdt: string;
   }>(
-    `SELECT backing_safe_address, balance_usdt::text FROM core.merchant_guarantees
+    `SELECT backing_wallet_address, balance_usdt::text FROM core.merchant_guarantees
      WHERE merchant_id = $1
        AND NOT EXISTS (
          SELECT 1 FROM core.merchant_guarantee_reorg_exposures exposure
@@ -552,19 +530,19 @@ async function buildFundingPlan(
     orderId: row.order_id,
     policyVersion: Number(row.policy_version),
     requiredUsdt: input.requiredUsdt,
-    operationsSafe,
+    operationsWallet,
     guaranteeUsedUsdt: guaranteeUsed.toString(),
     receivables: selected.items.map((item) => ({
       orderId: item.order_id,
       accountId: item.account_id,
-      backingSafeAddress: item.backing_safe_address,
+      backingWalletAddress: item.backing_wallet_address,
       amount: item.selectedAmount,
     })),
     platformAdvanceUsdt: platformAdvance.toString(),
   });
   return {
     takeover: row,
-    operationsSafe,
+    operationsWallet,
     requiredUsdt,
     guarantee: guarantee.rows[0],
     guaranteeUsed,
@@ -585,7 +563,7 @@ async function applyFundingPlan(executor: SqlExecutor, plan: FundingPlan, eviden
     await fundFromReceivables(executor, plan.takeover, plan.selected.items, evidenceHash);
   }
   if (plan.platformAdvance > 0n) {
-    await fundPlatformAdvance(executor, plan.takeover, plan.operationsSafe, plan.platformAdvance, evidenceHash);
+    await fundPlatformAdvance(executor, plan.takeover, plan.operationsWallet, plan.platformAdvance, evidenceHash);
   }
   if (plan.guaranteeUsed + plan.selected.total + plan.platformAdvance !== plan.requiredUsdt) {
     throw new CoreError('InvalidFinality', 'Takeover funding plan does not conserve USDT', 409);
@@ -598,12 +576,12 @@ function fundingPlanProjection(plan: FundingPlan) {
     orderId: plan.takeover.order_id,
     policyVersion: Number(plan.takeover.policy_version),
     requiredUsdt: plan.requiredUsdt.toString(),
-    operationsSafe: plan.operationsSafe,
+    operationsWallet: plan.operationsWallet,
     guaranteeUsedUsdt: plan.guaranteeUsed.toString(),
     receivables: plan.selected.items.map((item) => ({
       orderId: item.order_id,
       accountId: item.account_id,
-      backingSafeAddress: item.backing_safe_address,
+      backingWalletAddress: item.backing_wallet_address,
       amount: item.selectedAmount,
     })),
     frozenReceivablesUsedUsdt: plan.selected.total.toString(),
@@ -613,11 +591,11 @@ function fundingPlanProjection(plan: FundingPlan) {
   };
 }
 
-function validateFundingRequest(input: { caseId: string; requiredUsdt: string; operationsSafeAddress: string }) {
+function validateFundingRequest(input: { caseId: string; requiredUsdt: string; operationsWalletAddress: string }) {
   if (!input.caseId || !/^[1-9][0-9]*$/.test(input.requiredUsdt)) {
     throw new CoreError('InvalidRequest', 'Takeover funding request is invalid');
   }
-  normalizedAddress(input.operationsSafeAddress, 'Operations Treasury Safe');
+  normalizedAddress(input.operationsWalletAddress, 'operations wallet');
 }
 
 function fundingApprovalIntent(input: TakeoverFundingApprovalInput): SensitiveActionIntent {
@@ -631,13 +609,13 @@ function fundingApprovalIntent(input: TakeoverFundingApprovalInput): SensitiveAc
     policyVersion: unsignedBigInt(input.policyVersion, 'takeover funding policy version'),
     oldValueHash: requiredHash(input.oldValueHash, 'takeover funding old value hash'),
     newValueHash: requiredHash(input.newValueHash, 'takeover funding new value hash'),
-    safeAddress: normalizedAddress(input.safeAddress, 'takeover funding governance Safe'),
+    executorWallet: normalizedAddress(input.executorWallet, 'takeover funding governance wallet'),
     nonce: unsignedBigInt(input.nonce, 'takeover funding nonce'),
     deadline: unsignedBigInt(input.deadline, 'takeover funding deadline'),
   };
 }
 
-function assertFundingApproval(intent: SensitiveActionIntent, plan: FundingPlan, governanceSafe: string) {
+function assertFundingApproval(intent: SensitiveActionIntent, plan: FundingPlan, governanceWallet: string) {
   if (
     intent.action !== 'FUND_TAKEOVER'
     || intent.resourceType !== 'TAKEOVER_CASE'
@@ -645,7 +623,7 @@ function assertFundingApproval(intent: SensitiveActionIntent, plan: FundingPlan,
     || intent.policyVersion !== BigInt(plan.takeover.policy_version)
     || intent.oldValueHash.toLowerCase() !== plan.oldValueHash
     || intent.newValueHash.toLowerCase() !== plan.newValueHash
-    || normalizedAddress(intent.safeAddress, 'takeover funding governance Safe') !== governanceSafe
+    || normalizedAddress(intent.executorWallet, 'takeover funding governance wallet') !== governanceWallet
   ) throw new CoreError('InvalidSignature', 'Takeover funding approval does not match the exact funding plan', 401);
 }
 
@@ -705,10 +683,10 @@ export async function captureMerchantFutureProceeds(
   if (!orderRow) throw new CoreError('InvalidFinality', 'Debt-capture order is unavailable', 409);
   const available = await executor.query<{
     account_id: string;
-    backing_safe_address: string;
+    backing_wallet_address: string;
     amount: string;
   }>(
-    `SELECT line.account_id, line.backing_safe_address,
+    `SELECT line.account_id, line.backing_wallet_address,
        sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS amount
      FROM core.ledger_lines line
      JOIN core.ledger_journals journal ON journal.journal_id = line.journal_id
@@ -716,17 +694,17 @@ export async function captureMerchantFutureProceeds(
      WHERE journal.order_id = $1 AND account.owner_id = $2
        AND account.purpose IN ('MERCHANT_RECEIVABLE','MERCHANT_FREIGHT_RECEIVABLE')
        AND account.asset = 'USDT'
-       AND line.balance_state = 'AVAILABLE' AND line.backing_safe_address IS NOT NULL
-     GROUP BY line.account_id, line.backing_safe_address
+       AND line.balance_state = 'AVAILABLE' AND line.backing_wallet_address IS NOT NULL
+     GROUP BY line.account_id, line.backing_wallet_address
      HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) > 0
      ORDER BY line.account_id`,
     [input.orderId, orderRow.merchant_wallet],
   );
   const sources = available.rows;
   if (sources.length === 0) return { capturedUsdt: '0', idempotent: false };
-  const backingSafe = sources[0]!.backing_safe_address;
-  if (sources.some((source) => source.backing_safe_address !== backingSafe)) {
-    throw new CoreError('InvalidFinality', 'Merchant proceeds span different Custody Safes', 409);
+  const backingWallet = sources[0]!.backing_wallet_address;
+  if (sources.some((source) => source.backing_wallet_address !== backingWallet)) {
+    throw new CoreError('InvalidFinality', 'Merchant proceeds span different settlement wallets', 409);
   }
   const captured = minimum(outstanding, sources.reduce((sum, source) => sum + BigInt(source.amount), 0n));
   let sourceRemaining = captured;
@@ -739,18 +717,18 @@ export async function captureMerchantFutureProceeds(
   }
   const cases = await executor.query<{
     case_id: string;
-    platform_advance_safe_address: string;
+    platform_advance_wallet_address: string;
     remaining: string;
   }>(
-    `SELECT takeover.case_id, takeover.platform_advance_safe_address,
+    `SELECT takeover.case_id, takeover.platform_advance_wallet_address,
        (takeover.merchant_debt_usdt - COALESCE(sum(recovery.amount_usdt)
          FILTER (WHERE recovery.reversed_at IS NULL), 0))::text AS remaining
      FROM core.takeover_cases takeover
      LEFT JOIN core.merchant_debt_recoveries recovery ON recovery.case_id = takeover.case_id
      WHERE takeover.merchant_id = $1 AND takeover.merchant_debt_usdt > 0
-       AND takeover.platform_advance_safe_address IS NOT NULL
+       AND takeover.platform_advance_wallet_address IS NOT NULL
      GROUP BY takeover.case_id, takeover.merchant_debt_usdt,
-       takeover.platform_advance_safe_address, takeover.opened_at
+       takeover.platform_advance_wallet_address, takeover.opened_at
      HAVING takeover.merchant_debt_usdt - COALESCE(sum(recovery.amount_usdt)
        FILTER (WHERE recovery.reversed_at IS NULL), 0) > 0
      ORDER BY takeover.opened_at, takeover.case_id`,
@@ -760,22 +738,22 @@ export async function captureMerchantFutureProceeds(
   const allocations: Array<{
     recoveryId: string;
     caseId: string;
-    operationsSafe: string;
+    operationsWallet: string;
     reimbursementAccount: string;
     amount: string;
   }> = [];
   for (const debtCase of cases.rows) {
     if (remaining === 0n) break;
     const amount = minimum(remaining, BigInt(debtCase.remaining));
-    const operationsSafe = normalizedAddress(
-      debtCase.platform_advance_safe_address,
-      'frozen Operations Treasury Safe',
+    const operationsWallet = normalizedAddress(
+      debtCase.platform_advance_wallet_address,
+      'frozen operations wallet',
     );
     allocations.push({
       recoveryId: `debt-recovery:${randomUUID()}`,
       caseId: debtCase.case_id,
-      operationsSafe,
-      reimbursementAccount: `operations-reimbursement:${operationsSafe}:usdt`,
+      operationsWallet,
+      reimbursementAccount: `operations-reimbursement:${operationsWallet}:usdt`,
       amount: amount.toString(),
     });
     remaining -= amount;
@@ -785,7 +763,7 @@ export async function captureMerchantFutureProceeds(
     await ensureAccount(executor, {
       accountId: allocation.reimbursementAccount,
       ownerType: 'BENEFICIARY',
-      ownerId: allocation.operationsSafe,
+      ownerId: allocation.operationsWallet,
       purpose: 'OPERATIONS_REIMBURSEMENT',
     });
   }
@@ -799,14 +777,14 @@ export async function captureMerchantFutureProceeds(
       side: 'DEBIT',
       amount: source.amount,
       balance_state: 'AVAILABLE',
-      backing_safe_address: backingSafe,
+      backing_wallet_address: backingWallet,
     } as const)),
     ...allocations.map((allocation) => ({
       account_id: allocation.reimbursementAccount,
       side: 'CREDIT',
       amount: allocation.amount,
       balance_state: 'AVAILABLE',
-      backing_safe_address: backingSafe,
+      backing_wallet_address: backingWallet,
     })),
   ];
   const journalId = `journal:future-proceeds:${input.orderId}`;
@@ -829,7 +807,7 @@ export async function captureMerchantFutureProceeds(
       recipients: allocations.map((allocation) => ({
         recoveryId: allocation.recoveryId,
         caseId: allocation.caseId,
-        operationsSafe: allocation.operationsSafe,
+        operationsWallet: allocation.operationsWallet,
         amount: allocation.amount,
       })),
     },
@@ -845,7 +823,7 @@ export async function captureMerchantFutureProceeds(
     await executor.query(
       `INSERT INTO core.merchant_debt_recoveries (
          recovery_id, merchant_id, case_id, order_id, amount_usdt,
-         operations_safe_address, backing_safe_address,
+         operations_wallet_address, backing_wallet_address,
          journal_id, evidence_hash, recovered_at
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [
@@ -854,8 +832,8 @@ export async function captureMerchantFutureProceeds(
         allocation.caseId,
         input.orderId,
         allocation.amount,
-        allocation.operationsSafe,
-        backingSafe,
+        allocation.operationsWallet,
+        backingWallet,
         journalId,
         input.evidenceHash,
         input.capturedAt,
@@ -873,7 +851,7 @@ export async function captureMerchantFutureProceeds(
       JSON.stringify({
         orderId: input.orderId,
         capturedUsdt: captured.toString(),
-        recipients: allocations.map((allocation) => allocation.operationsSafe),
+        recipients: allocations.map((allocation) => allocation.operationsWallet),
       }),
     ],
   );
@@ -900,7 +878,7 @@ export async function captureMerchantFutureProceeds(
       recoveries: allocations.map((allocation) => ({
         recoveryId: allocation.recoveryId,
         caseId: allocation.caseId,
-        operationsSafe: allocation.operationsSafe,
+        operationsWallet: allocation.operationsWallet,
         amount: allocation.amount,
       })),
     },
@@ -912,14 +890,14 @@ export async function captureMerchantFutureProceeds(
 async function fundFromGuarantee(
   executor: SqlExecutor,
   takeover: TakeoverCaseRow,
-  guarantee: { backing_safe_address: string; balance_usdt: string },
+  guarantee: { backing_wallet_address: string; balance_usdt: string },
   amount: bigint,
   evidenceHash: string,
 ) {
-  const source = `guarantee:${takeover.merchant_id}:${guarantee.backing_safe_address}:usdt`;
-  const target = await ensureTakeoverPayable(executor, takeover.case_id, guarantee.backing_safe_address);
+  const source = `guarantee:${takeover.merchant_id}:${guarantee.backing_wallet_address}:usdt`;
+  const target = await ensureTakeoverPayable(executor, takeover.case_id, guarantee.backing_wallet_address);
   await lockAccounts(executor, [source, target]);
-  const lines = moveBetweenAccounts(source, target, amount, guarantee.backing_safe_address);
+  const lines = moveBetweenAccounts(source, target, amount, guarantee.backing_wallet_address);
   const journalId = `journal:takeover:${takeover.case_id}:guarantee`;
   await postResourceJournal(executor, fundingJournal(
     takeover,
@@ -943,11 +921,13 @@ async function fundFromReceivables(
   items: Array<AvailableReceivableRow & { selectedAmount: string }>,
   evidenceHash: string,
 ) {
-  const bySafe = new Map<string, Array<AvailableReceivableRow & { selectedAmount: string }>>();
-  for (const item of items) bySafe.set(item.backing_safe_address, [...(bySafe.get(item.backing_safe_address) ?? []), item]);
+  const byWallet = new Map<string, Array<AvailableReceivableRow & { selectedAmount: string }>>();
+  for (const item of items) {
+    byWallet.set(item.backing_wallet_address, [...(byWallet.get(item.backing_wallet_address) ?? []), item]);
+  }
   let groupIndex = 0;
-  for (const [safe, group] of bySafe) {
-    const target = await ensureTakeoverPayable(executor, takeover.case_id, safe);
+  for (const [wallet, group] of byWallet) {
+    const target = await ensureTakeoverPayable(executor, takeover.case_id, wallet);
     await lockAccounts(executor, [...group.map((item) => item.account_id), target]);
     const total = group.reduce((sum, item) => sum + BigInt(item.selectedAmount), 0n);
     const lines = [
@@ -956,14 +936,14 @@ async function fundFromReceivables(
         side: 'DEBIT',
         amount: item.selectedAmount,
         balance_state: 'AVAILABLE',
-        backing_safe_address: safe,
+        backing_wallet_address: wallet,
       })),
       {
         account_id: target,
         side: 'CREDIT',
         amount: total.toString(),
         balance_state: 'AVAILABLE',
-        backing_safe_address: safe,
+        backing_wallet_address: wallet,
       },
     ];
     const journalId = `journal:takeover:${takeover.case_id}:receivable:${groupIndex}`;
@@ -983,12 +963,12 @@ async function fundFromReceivables(
 async function fundPlatformAdvance(
   executor: SqlExecutor,
   takeover: TakeoverCaseRow,
-  operationsSafe: string,
+  operationsWallet: string,
   amount: bigint,
   evidenceHash: string,
 ) {
   const debtAccount = `merchant-debt:${takeover.merchant_id}:usdt`;
-  const target = await ensureTakeoverPayable(executor, takeover.case_id, operationsSafe);
+  const target = await ensureTakeoverPayable(executor, takeover.case_id, operationsWallet);
   await ensureAccount(executor, {
     accountId: debtAccount,
     ownerType: 'PLATFORM',
@@ -1002,14 +982,14 @@ async function fundPlatformAdvance(
       side: 'DEBIT',
       amount: amount.toString(),
       balance_state: 'POSTED',
-      backing_safe_address: operationsSafe,
+      backing_wallet_address: operationsWallet,
     },
     {
       account_id: target,
       side: 'CREDIT',
       amount: amount.toString(),
       balance_state: 'AVAILABLE',
-      backing_safe_address: operationsSafe,
+      backing_wallet_address: operationsWallet,
     },
   ];
   const journalId = `journal:takeover:${takeover.case_id}:platform-advance`;
@@ -1019,7 +999,7 @@ async function fundPlatformAdvance(
     'MERCHANT_DEBT_CAPTURED',
     evidenceHash,
     lines,
-    { sourceType: 'PLATFORM_ADVANCE', operationsSafe },
+    { sourceType: 'PLATFORM_ADVANCE', operationsWallet },
   ));
   await executor.query(
     `INSERT INTO core.merchant_debts (
@@ -1036,7 +1016,7 @@ async function fundPlatformAdvance(
   await insertFundingItem(executor, takeover.case_id, 'PLATFORM_ADVANCE', amount, journalId, evidenceHash);
 }
 
-async function ensureTakeoverPayable(executor: SqlExecutor, caseId: string, _safeAddress: string) {
+async function ensureTakeoverPayable(executor: SqlExecutor, caseId: string, _executorWallet: string) {
   const accountId = `takeover:${caseId}:usdt`;
   await ensureAccount(executor, {
     accountId,
@@ -1049,7 +1029,7 @@ async function ensureTakeoverPayable(executor: SqlExecutor, caseId: string, _saf
 
 async function availableReceivables(executor: SqlExecutor, settlementWallet: string, forUpdate = false) {
   const query = () => executor.query<AvailableReceivableRow>(
-    `SELECT journal.order_id, line.account_id, line.backing_safe_address,
+    `SELECT journal.order_id, line.account_id, line.backing_wallet_address,
        sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS amount
      FROM core.ledger_lines line
      JOIN core.ledger_journals journal ON journal.journal_id = line.journal_id
@@ -1057,8 +1037,8 @@ async function availableReceivables(executor: SqlExecutor, settlementWallet: str
      WHERE account.owner_id = $1
        AND account.purpose IN ('MERCHANT_RECEIVABLE','MERCHANT_FREIGHT_RECEIVABLE')
        AND account.asset = 'USDT' AND line.balance_state = 'AVAILABLE'
-       AND line.backing_safe_address IS NOT NULL
-     GROUP BY journal.order_id, line.account_id, line.backing_safe_address
+       AND line.backing_wallet_address IS NOT NULL
+     GROUP BY journal.order_id, line.account_id, line.backing_wallet_address
      HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) > 0
      ORDER BY journal.order_id, line.account_id`,
     [settlementWallet],
@@ -1114,7 +1094,7 @@ interface LedgerLine {
   side: string;
   amount: string;
   balance_state: string;
-  backing_safe_address: string;
+  backing_wallet_address: string;
 }
 
 async function postResourceJournal(
@@ -1161,30 +1141,30 @@ async function ensureAccount(
   executor: SqlExecutor,
   input: {
     accountId: string;
-    ownerType: 'SAFE' | 'MERCHANT' | 'BENEFICIARY' | 'PLATFORM';
+    ownerType: 'WALLET' | 'MERCHANT' | 'BENEFICIARY' | 'PLATFORM';
     ownerId: string;
     purpose:
-      | 'SAFE_ASSET'
+      | 'WALLET_ASSET'
       | 'GUARANTEE_LIABILITY'
       | 'TAKEOVER_PAYABLE'
       | 'MERCHANT_DEBT_RECEIVABLE'
       | 'OPERATIONS_REIMBURSEMENT';
-    safeAddress?: string;
+    executorWallet?: string;
   },
 ) {
   await executor.query(
     `INSERT INTO core.ledger_accounts (
-       account_id, owner_type, owner_id, asset, purpose, safe_address
+       account_id, owner_type, owner_id, asset, purpose, wallet_address
      ) VALUES ($1,$2,$3,'USDT',$4,$5) ON CONFLICT (account_id) DO NOTHING`,
-    [input.accountId, input.ownerType, input.ownerId, input.purpose, input.safeAddress ?? null],
+    [input.accountId, input.ownerType, input.ownerId, input.purpose, input.executorWallet ?? null],
   );
   const result = await executor.query<{
     owner_type: string;
     owner_id: string;
     purpose: string;
-    safe_address: string | null;
+    wallet_address: string | null;
   }>(
-    `SELECT owner_type, owner_id, purpose, safe_address FROM core.ledger_accounts
+    `SELECT owner_type, owner_id, purpose, wallet_address FROM core.ledger_accounts
      WHERE account_id = $1`,
     [input.accountId],
   );
@@ -1194,7 +1174,7 @@ async function ensureAccount(
     || row.owner_type !== input.ownerType
     || row.owner_id !== input.ownerId
     || row.purpose !== input.purpose
-    || row.safe_address !== (input.safeAddress ?? null)
+    || row.wallet_address !== (input.executorWallet ?? null)
   ) throw new CoreError('InvalidFinality', 'Funding ledger account identity mismatch', 409);
 }
 
@@ -1209,21 +1189,21 @@ async function lockAccounts(executor: SqlExecutor, accountIds: string[]) {
   if (result.rows.length !== ids.length) throw new CoreError('InvalidFinality', 'Funding account is unavailable', 409);
 }
 
-function moveBetweenAccounts(source: string, target: string, amount: bigint, safeAddress: string): LedgerLine[] {
+function moveBetweenAccounts(source: string, target: string, amount: bigint, executorWallet: string): LedgerLine[] {
   return [
     {
       account_id: source,
       side: 'DEBIT',
       amount: amount.toString(),
       balance_state: 'AVAILABLE',
-      backing_safe_address: safeAddress,
+      backing_wallet_address: executorWallet,
     },
     {
       account_id: target,
       side: 'CREDIT',
       amount: amount.toString(),
       balance_state: 'AVAILABLE',
-      backing_safe_address: safeAddress,
+      backing_wallet_address: executorWallet,
     },
   ];
 }
@@ -1248,12 +1228,12 @@ async function insertFundingItem(
 async function guaranteeProjection(executor: SqlExecutor, merchantId: string) {
   const result = await executor.query<{
     merchant_id: string;
-    backing_safe_address: string;
+    backing_wallet_address: string;
     balance_usdt: string;
     minimum_usdt: string;
     source_evidence_hash: string;
   }>(
-    `SELECT merchant_id, backing_safe_address, balance_usdt::text,
+    `SELECT merchant_id, backing_wallet_address, balance_usdt::text,
        minimum_usdt::text, source_evidence_hash
      FROM core.merchant_guarantees WHERE merchant_id = $1`,
     [merchantId],

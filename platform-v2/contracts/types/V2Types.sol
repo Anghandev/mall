@@ -48,9 +48,9 @@ library V2Types {
         uint32 relayIncrement;
         uint32 relayCap;
         uint128 merchantGuaranteeMinimum;
-        address usdtCustodySafe;
-        address nplRewardSafe;
-        address operationsTreasurySafe;
+        address usdtSettlementWallet;
+        address nplRewardWallet;
+        address operationsWallet;
         address circulationPool;
         bytes32 beneficiarySetHash;
         bytes32 concessionDestinationSetHash;
@@ -110,5 +110,10 @@ library V2Types {
         bytes32 sessionId;
         PaymentIntent seckillPayment;
         PaymentIntent fallbackPayment;
+    }
+
+    function mulBps(uint256 amount, uint16 bps) internal pure returns (uint256) {
+        // Quotient/remainder decomposition preserves floor rounding without overflowing amount * bps.
+        return (amount / BPS) * bps + (amount % BPS) * bps / BPS;
     }
 }

@@ -5,7 +5,7 @@ Requirement Matrix and consumes only coordinated Core artifacts.
 
 ## Current Runtime Boundary
 
-- Production consumes coordinated Core artifacts `2.0.0-settlement-admin.15` and derives
+- Production consumes coordinated Core artifacts `2.0.0-settlement-admin.16` and derives
   its HTTP paths from the published OpenAPI document.
 - The public catalog consumes active products/SKUs, enabled three-level
   categories, enabled tags, field-level product associations, rich detail,
@@ -18,8 +18,9 @@ Requirement Matrix and consumes only coordinated Core artifacts.
   seckill quotes, atomic reservations, approval requirements, ABI-shaped
   `routerCall`, transaction submission and indexed payment projections.
 - Prices, payment legs, allocation amounts and finality are rendered exactly
-  from Core responses. The Mall does not recalculate them or treat a submitted
-  TxHash as final.
+  from Core responses. Product payment uses the exact five-minute Core-signed
+  70% USDT + 30% equivalent NPL quote; the Mall does not recalculate it or
+  treat a submitted TxHash as final.
 - The Mall consumes published stores, browser-location-backed delivery/pickup
   targets and stable wallet order pages keyed by `(createdAt, orderId)`. Complete
   order rows carry quantity, kind, payment TxHash, logistics, balances and
