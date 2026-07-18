@@ -4,7 +4,7 @@ pragma solidity 0.8.26;
 import {V2Types} from "../types/V2Types.sol";
 
 interface IPolicyRegistryV2 {
-    function safe() external view returns (address);
+    function governanceWallet() external view returns (address);
     function secondarySigner() external view returns (address);
     function latestVersion() external view returns (uint64);
     function getPolicy(uint64 version) external view returns (V2Types.Policy memory);

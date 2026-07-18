@@ -42,11 +42,11 @@ import { CoverageWorker } from './chain/coverage-worker.ts';
 import { ResilientBscCoverageSource } from './chain/coverage-source.ts';
 import {
   CoverageBreakerGovernanceWorker,
-  HttpCoverageBreakerSafeProposer,
+  HttpCoverageBreakerEoaExecutor,
   ResilientCoverageBreakerChainSource,
 } from './chain/coverage-breaker-governance.ts';
 import {
-  HttpSeckillSafeProposer,
+  HttpSeckillEoaExecutor,
   ResilientSeckillChainSource,
   SeckillGovernanceWorker,
 } from './chain/seckill-governance.ts';
@@ -62,22 +62,19 @@ import {
 } from './chain/runtime-readiness.ts';
 import { RemoteSignerClient } from './chain/signer.ts';
 import {
-  HttpSafeApprovalVerifier,
-  HttpSafeSettlementBroadcaster,
-  ResilientBscSafeSettlementChainSource,
-} from './chain/safe-settlement-adapters.ts';
-import { RpcSafeRuntimeAttestor } from './chain/safe-runtime-attestor.ts';
-import { SettlementBatchScheduler, SettlementWorker } from './chain/settlement-worker.ts';
+  HttpEoaSettlementBroadcaster,
+  ResilientBscEoaSettlementChainSource,
+} from './chain/eoa-settlement-adapters.ts';
+import { RpcEoaRuntimeAttestor } from './chain/eoa-runtime-attestor.ts';
+import { SettlementTransferScheduler, SettlementWorker } from './chain/settlement-worker.ts';
 import { AuditOutboxWorker } from './chain/audit-outbox-worker.ts';
 import { NotificationWorker } from './chain/notification-worker.ts';
 import { OperationsMonitoringWorker, RuntimeMetricsRegistry } from './chain/monitoring-worker.ts';
 import {
-  HttpPolicySafeProposer,
-  HttpRpcPolicyChainSource,
+  HttpPolicyEoaExecutor,
   PolicyFinalityWorker,
+  ResilientPolicyChainSource,
 } from './chain/policy-publication-worker.ts';
-import { HttpSystemConfigSafeApprover } from './chain/system-config-governance.ts';
-import { HttpTakeoverFundingSafeApprover } from './chain/takeover-funding-governance.ts';
 import { PostgresNonceStore, RedisNonceRateLimiter } from './data/auth-store.ts';
 import { CatalogPaymentService } from './data/catalog-payment-service.ts';
 import { CatalogManagementService } from './data/catalog-management-service.ts';
@@ -167,9 +164,9 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   const seckillService = new SeckillService({ transactions });
   const seckillOperationsService = new SeckillOperationsService({
     transactions,
-    governanceSafeAddress: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
-    operationsSafeAddress: required(config.operationsTreasurySafeAddress, 'OPERATIONS_TREASURY_SAFE_ADDRESS'),
-    custodySafeAddress: required(config.usdtCustodySafeAddress, 'USDT_CUSTODY_SAFE_ADDRESS'),
+    governanceWalletAddress: required(config.governanceWalletAddress, 'PLATFORM_GOVERNANCE_WALLET_ADDRESS'),
+    operationsWalletAddress: required(config.operationsWalletAddress, 'OPERATIONS_GUARANTEE_WALLET_ADDRESS'),
+    settlementWalletAddress: required(config.usdtSettlementWalletAddress, 'USDT_SETTLEMENT_WALLET_ADDRESS'),
     paymentRouterAddress: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),
     usdtAddress: USDT_ADDRESS,
     secondarySignerAddress: required(config.secondarySignerAddress, 'SECONDARY_SIGNER_ADDRESS'),
@@ -198,7 +195,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   const logisticsPrintingService = new LogisticsPrintingService({
     transactions,
     ...(env.DELIVERY_DATA_ENCRYPTION_KEY ? { encryptionKey: env.DELIVERY_DATA_ENCRYPTION_KEY } : {}),
-    verifyingContract: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    verifyingContract: required(config.governanceWalletAddress, 'PLATFORM_GOVERNANCE_WALLET_ADDRESS'),
     contractWalletVerifier: walletSignatureVerifier,
     evidence: evidenceService,
     fulfillment: fulfillmentService,
@@ -246,9 +243,11 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   const logisticsPrintWorker = new LogisticsPrintWorker({ dispatcher: logisticsPrintingService });
   const settlementService = new SettlementService({
     transactions,
-    contractWalletVerifier: walletSignatureVerifier,
     secondarySignerAddress: required(config.secondarySignerAddress, 'SECONDARY_SIGNER_ADDRESS'),
-    governanceVerifyingContract: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    governanceVerifyingContract: required(
+      config.governanceWalletAddress,
+      'PLATFORM_GOVERNANCE_WALLET_ADDRESS',
+    ),
   });
   const auditReady = async () => {
     try {
@@ -260,14 +259,9 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   };
   const merchantLifecycleService = new MerchantLifecycleService({
     transactions,
-    approver: new HttpSystemConfigSafeApprover({
-      ...(env.SYSTEM_CONFIG_SAFE_APPROVER_URL ? { url: env.SYSTEM_CONFIG_SAFE_APPROVER_URL } : {}),
-      ...(env.SYSTEM_CONFIG_SAFE_APPROVER_TOKEN ? { token: env.SYSTEM_CONFIG_SAFE_APPROVER_TOKEN } : {}),
-      mutualTls: config.safeMutualTls,
-    }),
     secondarySigner: required(config.secondarySignerAddress, 'SECONDARY_SIGNER_ADDRESS'),
-    governanceSafe: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
-    verifyingContract: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    governanceWallet: required(config.governanceWalletAddress, 'PLATFORM_GOVERNANCE_WALLET_ADDRESS'),
+    verifyingContract: required(config.governanceWalletAddress, 'PLATFORM_GOVERNANCE_WALLET_ADDRESS'),
     ...(env.MERCHANT_PII_ENCRYPTION_KEY ? { encryptionKey: env.MERCHANT_PII_ENCRYPTION_KEY } : {}),
     ...(config.piiRetentionPolicyVersion
       ? { retentionPolicyVersion: config.piiRetentionPolicyVersion }
@@ -276,19 +270,14 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   });
   const takeoverFundingService = new TakeoverFundingService({
     transactions,
-    approver: new HttpTakeoverFundingSafeApprover({
-      ...(env.TAKEOVER_FUNDING_SAFE_APPROVER_URL ? { url: env.TAKEOVER_FUNDING_SAFE_APPROVER_URL } : {}),
-      ...(env.TAKEOVER_FUNDING_SAFE_APPROVER_TOKEN ? { token: env.TAKEOVER_FUNDING_SAFE_APPROVER_TOKEN } : {}),
-      mutualTls: config.safeMutualTls,
-    }),
     secondarySigner: required(config.secondarySignerAddress, 'SECONDARY_SIGNER_ADDRESS'),
-    governanceSafe: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
-    verifyingContract: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    governanceWallet: required(config.governanceWalletAddress, 'PLATFORM_GOVERNANCE_WALLET_ADDRESS'),
+    verifyingContract: required(config.governanceWalletAddress, 'PLATFORM_GOVERNANCE_WALLET_ADDRESS'),
     auditReady,
   });
   const guaranteeDepositService = new GuaranteeDepositService({
     transactions,
-    operationsSafeAddress: required(config.operationsTreasurySafeAddress, 'OPERATIONS_TREASURY_SAFE_ADDRESS'),
+    operationsWalletAddress: required(config.operationsWalletAddress, 'OPERATIONS_GUARANTEE_WALLET_ADDRESS'),
   });
   const guaranteeDepositWorker = new GuaranteeDepositWorker({
     service: guaranteeDepositService,
@@ -299,13 +288,14 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   });
   const policyService = new PolicyService({
     transactions,
-    proposer: new HttpPolicySafeProposer({
-      ...(env.POLICY_SAFE_PROPOSER_URL ? { url: env.POLICY_SAFE_PROPOSER_URL } : {}),
-      ...(env.POLICY_SAFE_PROPOSER_TOKEN ? { token: env.POLICY_SAFE_PROPOSER_TOKEN } : {}),
-      mutualTls: config.safeMutualTls,
+    executor: new HttpPolicyEoaExecutor({
+      ...(env.GOVERNANCE_EXECUTOR_URL ? { url: env.GOVERNANCE_EXECUTOR_URL } : {}),
+      ...(env.GOVERNANCE_EXECUTOR_TOKEN ? { token: env.GOVERNANCE_EXECUTOR_TOKEN } : {}),
+      maxGasLimit: required(config.executorMaxGasLimit, 'EXECUTOR_MAX_GAS_LIMIT'),
     }),
+    executionGasLimit: required(config.executorMaxGasLimit, 'EXECUTOR_MAX_GAS_LIMIT').toString(),
     policyRegistryAddress: required(config.policyRegistryAddress, 'POLICY_REGISTRY_ADDRESS_MANIFEST'),
-    governanceSafe: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    governanceWallet: required(config.governanceWalletAddress, 'PLATFORM_GOVERNANCE_WALLET_ADDRESS'),
     secondarySigner: required(config.secondarySignerAddress, 'SECONDARY_SIGNER_ADDRESS'),
     decisionBlocked: config.paymentDecisionBlocked,
     auditReady,
@@ -335,14 +325,9 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   });
   const systemConfigService = new SystemConfigService({
     transactions,
-    approver: new HttpSystemConfigSafeApprover({
-      ...(env.SYSTEM_CONFIG_SAFE_APPROVER_URL ? { url: env.SYSTEM_CONFIG_SAFE_APPROVER_URL } : {}),
-      ...(env.SYSTEM_CONFIG_SAFE_APPROVER_TOKEN ? { token: env.SYSTEM_CONFIG_SAFE_APPROVER_TOKEN } : {}),
-      mutualTls: config.safeMutualTls,
-    }),
     secondarySigner: required(config.secondarySignerAddress, 'SECONDARY_SIGNER_ADDRESS'),
-    governanceSafe: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
-    verifyingContract: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    governanceWallet: required(config.governanceWalletAddress, 'PLATFORM_GOVERNANCE_WALLET_ADDRESS'),
+    verifyingContract: required(config.governanceWalletAddress, 'PLATFORM_GOVERNANCE_WALLET_ADDRESS'),
     auditReady,
   });
   const auditWorker = new AuditOutboxWorker({ business: transactions, audit: auditTransactions });
@@ -369,43 +354,41 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   });
   const policyFinalityWorker = new PolicyFinalityWorker({
     service: policyService,
-    source: new HttpRpcPolicyChainSource({
-      ...(env.POLICY_EXECUTION_LOOKUP_URL ? { lookupUrl: env.POLICY_EXECUTION_LOOKUP_URL } : {}),
-      ...(env.POLICY_EXECUTION_LOOKUP_TOKEN ? { lookupToken: env.POLICY_EXECUTION_LOOKUP_TOKEN } : {}),
+    source: new ResilientPolicyChainSource({
       ...(config.rpcUrl ? { primaryRpcUrl: config.rpcUrl } : {}),
       ...(config.fallbackRpcUrl ? { fallbackRpcUrl: config.fallbackRpcUrl } : {}),
     }),
   });
-  const usdtSafeExpectation = required(
-    config.safeSettlementExpectations.USDT,
-    'USDT_SAFE_RUNTIME_EXPECTATIONS',
+  const usdtWalletExpectation = required(
+    config.settlementWalletExpectations.USDT,
+    'USDT_SETTLEMENT_WALLET_EXPECTATIONS',
   );
-  const nplSafeExpectation = required(
-    config.safeSettlementExpectations.NPL,
-    'NPL_SAFE_RUNTIME_EXPECTATIONS',
+  const nplWalletExpectation = required(
+    config.settlementWalletExpectations.NPL,
+    'NPL_REWARD_WALLET_EXPECTATIONS',
   );
-  const operationsSafeExpectation = required(
-    config.safeSettlementExpectations.OPERATIONS_USDT,
-    'OPERATIONS_SAFE_RUNTIME_EXPECTATIONS',
+  const operationsWalletExpectation = required(
+    config.settlementWalletExpectations.OPERATIONS_USDT,
+    'OPERATIONS_GUARANTEE_WALLET_EXPECTATIONS',
   );
-  const usdtSafeAttestor = new RpcSafeRuntimeAttestor({ reader, expected: usdtSafeExpectation });
-  const nplSafeAttestor = new RpcSafeRuntimeAttestor({ reader, expected: nplSafeExpectation });
-  const operationsSafeAttestor = new RpcSafeRuntimeAttestor({ reader, expected: operationsSafeExpectation });
+  const usdtWalletAttestor = new RpcEoaRuntimeAttestor({ reader, expected: usdtWalletExpectation });
+  const nplWalletAttestor = new RpcEoaRuntimeAttestor({ reader, expected: nplWalletExpectation });
+  const operationsWalletAttestor = new RpcEoaRuntimeAttestor({ reader, expected: operationsWalletExpectation });
   const coverageAssets = [
     {
-      safeAddress: usdtSafeExpectation.safeAddress,
+      walletAddress: usdtWalletExpectation.walletAddress,
       asset: 'USDT' as const,
-      tokenAddress: usdtSafeExpectation.tokenAddress,
+      tokenAddress: usdtWalletExpectation.tokenAddress,
     },
     {
-      safeAddress: nplSafeExpectation.safeAddress,
+      walletAddress: nplWalletExpectation.walletAddress,
       asset: 'NPL' as const,
-      tokenAddress: nplSafeExpectation.tokenAddress,
+      tokenAddress: nplWalletExpectation.tokenAddress,
     },
     {
-      safeAddress: operationsSafeExpectation.safeAddress,
+      walletAddress: operationsWalletExpectation.walletAddress,
       asset: 'USDT' as const,
-      tokenAddress: operationsSafeExpectation.tokenAddress,
+      tokenAddress: operationsWalletExpectation.tokenAddress,
     },
   ];
   const coverageWorker = new CoverageWorker({
@@ -417,76 +400,61 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     }),
     expectedAssets: coverageAssets,
     paymentRouterAddress: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),
-    governanceSafeAddress: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    governanceWalletAddress: required(config.governanceWalletAddress, 'PLATFORM_GOVERNANCE_WALLET_ADDRESS'),
   });
   const coverageBreakerService = new CoverageBreakerService({
     transactions,
     paymentRouterAddress: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),
-    governanceSafeAddress: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    governanceWalletAddress: required(config.governanceWalletAddress, 'PLATFORM_GOVERNANCE_WALLET_ADDRESS'),
     secondarySignerAddress: required(config.secondarySignerAddress, 'SECONDARY_SIGNER_ADDRESS'),
   });
   const coverageBreakerGovernanceWorker = new CoverageBreakerGovernanceWorker({
     transactions,
-    proposer: new HttpCoverageBreakerSafeProposer({
-      ...(env.POLICY_SAFE_PROPOSER_URL ? { url: env.POLICY_SAFE_PROPOSER_URL } : {}),
-      ...(env.POLICY_SAFE_PROPOSER_TOKEN ? { token: env.POLICY_SAFE_PROPOSER_TOKEN } : {}),
-      mutualTls: config.safeMutualTls,
+    executor: new HttpCoverageBreakerEoaExecutor({
+      ...(env.GOVERNANCE_EXECUTOR_URL ? { url: env.GOVERNANCE_EXECUTOR_URL } : {}),
+      ...(env.GOVERNANCE_EXECUTOR_TOKEN ? { token: env.GOVERNANCE_EXECUTOR_TOKEN } : {}),
     }),
     chain: new ResilientCoverageBreakerChainSource({
-      ...(env.POLICY_EXECUTION_LOOKUP_URL ? { lookupUrl: env.POLICY_EXECUTION_LOOKUP_URL } : {}),
-      ...(env.POLICY_EXECUTION_LOOKUP_TOKEN ? { lookupToken: env.POLICY_EXECUTION_LOOKUP_TOKEN } : {}),
       ...(config.rpcUrl ? { primaryRpcUrl: config.rpcUrl } : {}),
       ...(config.fallbackRpcUrl ? { fallbackRpcUrl: config.fallbackRpcUrl } : {}),
     }),
   });
   const seckillGovernanceWorker = new SeckillGovernanceWorker({
     transactions,
-    proposer: new HttpSeckillSafeProposer({
-      ...(env.POLICY_SAFE_PROPOSER_URL ? { url: env.POLICY_SAFE_PROPOSER_URL } : {}),
-      ...(env.POLICY_SAFE_PROPOSER_TOKEN ? { token: env.POLICY_SAFE_PROPOSER_TOKEN } : {}),
-      mutualTls: config.safeMutualTls,
+    executor: new HttpSeckillEoaExecutor({
+      ...(env.GOVERNANCE_EXECUTOR_URL ? { url: env.GOVERNANCE_EXECUTOR_URL } : {}),
+      ...(env.GOVERNANCE_EXECUTOR_TOKEN ? { token: env.GOVERNANCE_EXECUTOR_TOKEN } : {}),
     }),
     chain: new ResilientSeckillChainSource({
-      ...(env.POLICY_EXECUTION_LOOKUP_URL ? { lookupUrl: env.POLICY_EXECUTION_LOOKUP_URL } : {}),
-      ...(env.POLICY_EXECUTION_LOOKUP_TOKEN ? { lookupToken: env.POLICY_EXECUTION_LOOKUP_TOKEN } : {}),
       ...(config.rpcUrl ? { primaryRpcUrl: config.rpcUrl } : {}),
       ...(config.fallbackRpcUrl ? { fallbackRpcUrl: config.fallbackRpcUrl } : {}),
     }),
   });
-  const settlementBatchScheduler = new SettlementBatchScheduler({
+  const executorMaxGasLimit = required(config.executorMaxGasLimit, 'EXECUTOR_MAX_GAS_LIMIT');
+  const settlementTransferScheduler = new SettlementTransferScheduler({
     service: settlementService,
-    platformWallet: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    platformWallet: required(config.governanceWalletAddress, 'PLATFORM_GOVERNANCE_WALLET_ADDRESS'),
     targets: [
-      { asset: 'USDT', attest: () => usdtSafeAttestor.attest() },
-      { asset: 'NPL', attest: () => nplSafeAttestor.attest() },
-      { asset: 'USDT', attest: () => operationsSafeAttestor.attest() },
+      { asset: 'USDT', gasCap: executorMaxGasLimit.toString(), attest: () => usdtWalletAttestor.attest() },
+      { asset: 'NPL', gasCap: executorMaxGasLimit.toString(), attest: () => nplWalletAttestor.attest() },
+      {
+        asset: 'USDT',
+        gasCap: executorMaxGasLimit.toString(),
+        attest: () => operationsWalletAttestor.attest(),
+      },
     ],
   });
-  const executorMaxGasLimit = required(config.executorMaxGasLimit, 'EXECUTOR_MAX_GAS_LIMIT');
   const settlementWorker = new SettlementWorker({
     transactions,
-    approvals: new HttpSafeApprovalVerifier({
-      url: required(config.safeApprovalVerifierUrl, 'SAFE_APPROVAL_VERIFIER_URL'),
-      token: required(config.safeApprovalVerifierToken, 'SAFE_APPROVAL_VERIFIER_TOKEN'),
-      mutualTls: config.safeMutualTls,
-    }),
-    broadcaster: new HttpSafeSettlementBroadcaster({
+    broadcaster: new HttpEoaSettlementBroadcaster({
       url: required(config.executorUrl, 'SETTLEMENT_EXECUTOR_URL'),
       token: required(config.executorToken, 'SETTLEMENT_EXECUTOR_TOKEN'),
-      mutualTls: config.safeMutualTls,
-      maxOuterGasLimit: executorMaxGasLimit,
+      maxGasLimit: executorMaxGasLimit,
     }),
-    chain: new ResilientBscSafeSettlementChainSource({
+    chain: new ResilientBscEoaSettlementChainSource({
       primaryRpcUrl: required(config.rpcUrl, 'BSC_RPC_URL'),
       fallbackRpcUrl: required(config.fallbackRpcUrl, 'BSC_FALLBACK_RPC_URL'),
     }),
-    runtimeAttest: (safeAddress) => {
-      if (safeAddress === usdtSafeExpectation.safeAddress) return usdtSafeAttestor.attest();
-      if (safeAddress === nplSafeExpectation.safeAddress) return nplSafeAttestor.attest();
-      if (safeAddress === operationsSafeExpectation.safeAddress) return operationsSafeAttestor.attest();
-      throw new CoreError('ExternalBlocked', 'Settlement Safe runtime attestor is unavailable', 503);
-    },
-    outerGasLimit: executorMaxGasLimit.toString(),
     replacementDelayMs: required(
       config.settlementReplacementDelayMs,
       'SETTLEMENT_REPLACEMENT_DELAY_MS',
@@ -494,7 +462,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   });
   const fulfillmentScheduler = new FulfillmentSchedulerWorker({
     service: fulfillmentService,
-    platformWallet: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
+    platformWallet: required(config.governanceWalletAddress, 'PLATFORM_GOVERNANCE_WALLET_ADDRESS'),
     transactions,
   });
   const regionResolver = new AmapAdministrativeRegionResolver({
@@ -558,8 +526,8 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   seckillGovernanceWorker.start();
   await guaranteeDepositWorker.pollOnce().catch(() => undefined);
   guaranteeDepositWorker.start();
-  await settlementBatchScheduler.pollOnce().catch(() => undefined);
-  settlementBatchScheduler.start();
+  await settlementTransferScheduler.pollOnce().catch(() => undefined);
+  settlementTransferScheduler.start();
   await settlementWorker.pollOnce().catch(() => undefined);
   settlementWorker.start();
   await auditWorker.pollOnce().catch(() => undefined);
@@ -579,16 +547,14 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     router: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),
     policyRegistry: required(config.policyRegistryAddress, 'POLICY_REGISTRY_ADDRESS_MANIFEST'),
     beneficiaryRegistry: required(config.beneficiaryRegistryAddress, 'BENEFICIARY_REGISTRY_ADDRESS_MANIFEST'),
-    governanceSafe: required(config.safeAddress, 'PLATFORM_SAFE_ADDRESS'),
-    platformServiceFeeSafe: required(
-      config.platformServiceFeeSafeAddress,
-      'PLATFORM_SERVICE_FEE_SAFE_ADDRESS',
+    governanceWallet: required(config.governanceWalletAddress, 'PLATFORM_GOVERNANCE_WALLET_ADDRESS'),
+    platformServiceFeeWallet: required(
+      config.platformServiceFeeWalletAddress,
+      'PLATFORM_SERVICE_FEE_WALLET_ADDRESS',
     ),
-    usdtCustodySafe: required(config.usdtCustodySafeAddress, 'USDT_CUSTODY_SAFE_ADDRESS'),
-    nplRewardSafe: required(config.nplRewardSafeAddress, 'NPL_REWARD_SAFE_ADDRESS'),
-    operationsTreasurySafe: required(config.operationsTreasurySafeAddress, 'OPERATIONS_TREASURY_SAFE_ADDRESS'),
-    secondarySigner: required(config.secondarySignerAddress, 'SECONDARY_SIGNER_ADDRESS'),
-    quoteSigner: required(config.quoteSignerAddress, 'QUOTE_SIGNER_ADDRESS'),
+    usdtSettlementWallet: required(config.usdtSettlementWalletAddress, 'USDT_SETTLEMENT_WALLET_ADDRESS'),
+    nplRewardWallet: required(config.nplRewardWalletAddress, 'NPL_REWARD_WALLET_ADDRESS'),
+    operationsWallet: required(config.operationsWalletAddress, 'OPERATIONS_GUARANTEE_WALLET_ADDRESS'),
   });
   const readinessMonitor = new PaymentRuntimeReadinessMonitor({
     attest: () => runtimeAttestor.attest(),
@@ -643,15 +609,15 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     takeoverFundingService: {
       fundingApprovalChallenge: (actor, input) => takeoverFundingService.fundingApprovalChallenge(actor, {
         ...input,
-        operationsSafeAddress: required(
-          config.operationsTreasurySafeAddress,
+        operationsWalletAddress: required(
+          config.operationsWalletAddress,
           'OPERATIONS_TREASURY_SAFE_ADDRESS',
         ),
       }),
       fundTakeover: (actor, input) => takeoverFundingService.fundTakeover(actor, {
         ...input,
-        operationsSafeAddress: required(
-          config.operationsTreasurySafeAddress,
+        operationsWalletAddress: required(
+          config.operationsWalletAddress,
           'OPERATIONS_TREASURY_SAFE_ADDRESS',
         ),
       }),
@@ -682,7 +648,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
       await paymentIndexer.stop();
       await fulfillmentScheduler.stop();
       await settlementWorker.stop();
-      await settlementBatchScheduler.stop();
+      await settlementTransferScheduler.stop();
       await coverageWorker.stop();
       await coverageBreakerGovernanceWorker.stop();
       await seckillGovernanceWorker.stop();

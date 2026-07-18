@@ -1,0 +1,9 @@
+{
+  "artifactVersion": "2.0.0-settlement-admin.16",
+  "chainId": 56,
+  "architecture": "FIVE_ROLE_EOA_V2",
+  "deploymentStatus": "PENDING",
+  "deploymentAuthorized": false,
+  "authorizationEvidenceHash": null,
+  "contracts": {}
+}

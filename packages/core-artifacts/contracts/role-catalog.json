@@ -4,37 +4,22 @@
     {
       "contract": "BeneficiaryRegistryV2",
       "role": "DEFAULT_ADMIN_ROLE",
-      "authority": "Safe multisig"
+      "authority": "Platform Governance EOA"
     },
     {
       "contract": "BeneficiaryRegistryV2",
       "role": "REGISTRY_EDITOR_ROLE",
-      "authority": "Safe multisig"
-    },
-    {
-      "contract": "PaymentRouterV2",
-      "role": "DEFAULT_ADMIN_ROLE",
-      "authority": "Safe multisig"
-    },
-    {
-      "contract": "PaymentRouterV2",
-      "role": "PAUSER_ROLE",
-      "authority": "Safe multisig"
-    },
-    {
-      "contract": "PaymentRouterV2",
-      "role": "SESSION_ADMIN_ROLE",
-      "authority": "Safe multisig"
+      "authority": "Platform Governance EOA"
     },
     {
       "contract": "PolicyRegistryV2",
       "role": "DEFAULT_ADMIN_ROLE",
-      "authority": "Safe multisig"
+      "authority": "Platform Governance EOA"
     },
     {
       "contract": "PolicyRegistryV2",
       "role": "POLICY_PUBLISHER_ROLE",
-      "authority": "Safe multisig plus secondary signature"
+      "authority": "Platform Governance EOA plus bound EIP-712 signature"
     }
   ],
   "requiredGrants": []

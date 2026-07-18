@@ -64,7 +64,7 @@ describe('platform admin fail-closed experience', () => {
       /^\w+ \/v2\/admin\/(?:merchant-)?stores(?:\/|$)/.test(operation),
     );
 
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.15');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.16');
     expect(coordinatedManifest.capabilityStatus.buyerShoppingStatementHttp).toBe('AVAILABLE');
     expect(coordinatedManifest.capabilityStatus.merchantReceivableStatementHttp).toBe('AVAILABLE');
     expect(storeStatuses).toEqual(['DRAFT', 'ACTIVE', 'SUSPENDED', 'CLOSED']);
@@ -1182,14 +1182,13 @@ function policyDraft(overrides: Record<string, unknown> = {}) {
     basePolicyVersion: '1',
     artifactVersion,
     payload: {
-      oracleVersion: '',
       rulesContentHash: '',
       policy: {
         usdtPaymentBps: 7000, nplPaymentBps: 3000, nplBurnListPriceBps: 2000, nplRewardListPriceBps: 1000,
+        platformFeeBps: 100, seckillPrizeBps: 0,
         genesisBps: 200, directReferralBps: 100, districtBps: 120, cityBps: 80, provinceBps: 60, regionBps: 40, operationsBps: 400,
         seckillMainDuration: 3600, relayInitial: 60, relayIncrement: 30, relayCap: 60,
-        oracleWindowSeconds: 1800, oracleMaxDeviationBps: 500, oracleMaxAgeSeconds: 600,
-        oracleMinimumUsdtLiquidity: '50000000000000000000000', requiredConfirmations: 15,
+        requiredConfirmations: 15,
         merchantGuaranteeMinimumUsdt: '1000000000000000000000',
       },
     },

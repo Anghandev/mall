@@ -3,7 +3,7 @@
 The platform-admin product is a consumer. It cannot add shared endpoints,
 schemas, financial logic, calldata, signers or database behavior.
 
-The coordinated consumer is `@abu24k/core-artifacts@2.0.0-settlement-admin.15`.
+The coordinated consumer is `@abu24k/core-artifacts@2.0.0-settlement-admin.16`.
 Published paths still fail closed when Core returns `DecisionBlocked`,
 `ExternalBlocked` or `ConfigurationRequired`.
 
@@ -23,7 +23,7 @@ Published paths still fail closed when Core returns `DecisionBlocked`,
 | GAP-ADM-012 | Admin consumes six-carrier/default versioning, Kuaidi100/Cainiao secret-reference readiness, encrypted role-scoped warehouses, cross-merchant waybill batches/lists, durable print-job retry and the frozen flat pure-USDT freight fields | Real provider accounts and physical printer/device acceptance remain `ExternalBlocked`; the pickup-print portion of `ADM-GLOBAL-002` remains incomplete |
 | GAP-ADM-013 | CMS create/read/publish/rollback contracts are published and consumed | Real content, audience and production approval evidence must be supplied externally |
 | GAP-ADM-014 | Notification endpoints, inbox, structured campaign create/list/publish, delivery-state counts, Core-owned `allowedActions`, failed-delivery retry and worker states are published and consumed | Real SMS/SMTP/Push accounts remain `ConfigurationRequired` / `ExternalBlocked` |
-| GAP-ADM-015 | Typed versioned system-config create/list/publish is published and consumed; primary/fallback RPC and five Safe runtime/read interfaces are verified | Publish the Service Fee Safe in the Router manifest/readiness path; TWAP, providers and deployment remain external blockers |
+| GAP-ADM-015 | Typed versioned system-config create/list/publish is published and consumed; `NPL_QUOTE` binds the fixed pair, five-minute validity and minimum USDT liquidity; primary/fallback RPC, five Safe runtime/read interfaces and the Router Service Fee Safe manifest path are published | Production providers and deployment evidence remain rollout-only external configuration; the retired on-chain TWAP Source/Adapter is not a blocker |
 | GAP-ADM-016 | Append-only audit query, cursor and per-stream hash-chain proof are published and consumed | Real audit database, retention and backup/restore environment evidence remain external blockers |
 | GAP-ADM-017 | Global Admin payment-by-order, server-side filtered settlement request/batch lists, immutable item/content evidence, Safe nonce and approvals, execution replacements, finality, coverage, breakers, Core reconciliation, fixed-pool allocations and seckill winner/rollover settlement evidence are published and consumed read-only | Production Safe execution and deployment remain `ExternalBlocked` |
 | GAP-ADM-018 | Host/middleware/HTTP/chain metrics, alerts and acknowledgement are published and consumed | Real production probes and independent explorer credentials remain external blockers |

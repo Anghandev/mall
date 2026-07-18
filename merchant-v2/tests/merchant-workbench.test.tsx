@@ -382,8 +382,8 @@ async function enterSettings(client: CoreApi) {
 }
 
 describe('00 wallet gateway', () => {
-  it('consumes settlement-admin.15 without widening the merchant action boundary', () => {
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.15');
+  it('consumes settlement-admin.16 without widening the merchant action boundary', () => {
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.16');
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
     expect(coreBoundary.artifactVersion).toBe(artifactVersion);
     expect(coreBoundary.artifactsAvailable).toBe(true);

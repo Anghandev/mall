@@ -35,10 +35,10 @@ export interface FrozenPaymentPolicy {
   platformFeeBps: number;
   requiredConfirmations: number;
   merchantGuaranteeMinimumUsdt: bigint;
-  platformServiceFeeSafe?: string;
-  usdtCustodySafe?: string;
-  nplRewardSafe?: string;
-  operationsTreasurySafe?: string;
+  platformServiceFeeWallet?: string;
+  usdtSettlementWallet?: string;
+  nplRewardWallet?: string;
+  operationsWallet?: string;
   circulationPool?: string;
   concessionDestinationSetHash?: string;
   genesisNodeDestinations?: readonly WeightedDestination[];
@@ -261,17 +261,17 @@ function validateDualRequests(seckill: PaymentQuoteRequest, fallback: PaymentQuo
 
 export function assertPolicyReady(policy: FrozenPaymentPolicy) {
   const missing = [
-    ['platformServiceFeeSafe', policy.platformServiceFeeSafe],
-    ['usdtCustodySafe', policy.usdtCustodySafe],
-    ['nplRewardSafe', policy.nplRewardSafe],
-    ['operationsTreasurySafe', policy.operationsTreasurySafe],
+    ['platformServiceFeeWallet', policy.platformServiceFeeWallet],
+    ['usdtSettlementWallet', policy.usdtSettlementWallet],
+    ['nplRewardWallet', policy.nplRewardWallet],
+    ['operationsWallet', policy.operationsWallet],
     ['circulationPool', policy.circulationPool],
     ['concessionDestinationSetHash', policy.concessionDestinationSetHash],
     ['genesisNodeDestinations', policy.genesisNodeDestinations],
     ['operationsDestinations', policy.operationsDestinations],
   ].filter(([, value]) => value === undefined);
   if (missing.length > 0) {
-    throw new CoreError('ExternalBlocked', 'Payment policy is missing Safe or destination inputs', 409, {
+    throw new CoreError('ExternalBlocked', 'Payment policy is missing wallet or destination inputs', 409, {
       missing: missing.map(([name]) => name),
     });
   }
@@ -288,7 +288,7 @@ export function assertPolicyReady(policy: FrozenPaymentPolicy) {
   const rewardBps = policy.genesisBps + policy.directReferralBps + policy.districtBps
     + policy.cityBps + policy.provinceBps + policy.regionBps + policy.operationsBps;
   if (rewardBps !== policy.nplRewardListPriceBps) {
-    throw new CoreError('InvalidRequest', 'Reward allocation must equal the versioned Reward Safe share');
+    throw new CoreError('InvalidRequest', 'Reward allocation must equal the versioned reward wallet share');
   }
   if (
     policy.policyVersion === 1
@@ -300,10 +300,10 @@ export function assertPolicyReady(policy: FrozenPaymentPolicy) {
       )
   ) throw new CoreError('InvalidRequest', 'Launch reward policy is invalid');
   for (const address of [
-    policy.platformServiceFeeSafe!,
-    policy.usdtCustodySafe!,
-    policy.nplRewardSafe!,
-    policy.operationsTreasurySafe!,
+    policy.platformServiceFeeWallet!,
+    policy.usdtSettlementWallet!,
+    policy.nplRewardWallet!,
+    policy.operationsWallet!,
     policy.circulationPool!,
   ]) {
     if (!isAddress(address)) throw new CoreError('InvalidRequest', 'Policy contains an invalid address');

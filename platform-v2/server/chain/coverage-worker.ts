@@ -3,7 +3,7 @@ import { CoreError } from '../api/errors.ts';
 import type { SqlExecutor, SqlTransactionRunner } from '../data/migrations.ts';
 
 export interface CoverageAssetObservation {
-  safeAddress: string;
+  walletAddress: string;
   asset: 'USDT' | 'NPL';
   tokenAddress: string;
   balance: string;
@@ -25,7 +25,7 @@ export interface CoverageSource {
 
 type ExpectedCoverageAssets = ReadonlyMap<
   string,
-  { safeAddress: string; asset: 'USDT' | 'NPL'; tokenAddress: string }
+  { walletAddress: string; asset: 'USDT' | 'NPL'; tokenAddress: string }
 >;
 
 export class CoverageWorker {
@@ -33,7 +33,7 @@ export class CoverageWorker {
   readonly #source: CoverageSource;
   readonly #expected: ExpectedCoverageAssets;
   readonly #paymentRouterAddress: string;
-  readonly #governanceSafeAddress: string;
+  readonly #governanceWalletAddress: string;
   #timer: NodeJS.Timeout | undefined;
   #inFlight: Promise<void> | undefined;
   #running = false;
@@ -41,15 +41,15 @@ export class CoverageWorker {
   constructor(input: {
     transactions: SqlTransactionRunner;
     source: CoverageSource;
-    expectedAssets: readonly { safeAddress: string; asset: 'USDT' | 'NPL'; tokenAddress: string }[];
+    expectedAssets: readonly { walletAddress: string; asset: 'USDT' | 'NPL'; tokenAddress: string }[];
     paymentRouterAddress: string;
-    governanceSafeAddress: string;
+    governanceWalletAddress: string;
   }) {
     this.#transactions = input.transactions;
     this.#source = input.source;
     this.#expected = expectedAssets(input.expectedAssets);
     this.#paymentRouterAddress = address(input.paymentRouterAddress, 'PaymentRouter');
-    this.#governanceSafeAddress = address(input.governanceSafeAddress, 'governance Safe');
+    this.#governanceWalletAddress = address(input.governanceWalletAddress, 'governance wallet');
   }
 
   start(intervalMs = 30_000) {
@@ -107,15 +107,15 @@ export class CoverageWorker {
         coverageMet: boolean;
       }> = [];
       for (const asset of observed.assets) {
-        const liability = await unsettledLiability(executor, asset.safeAddress, asset.asset);
+        const liability = await unsettledLiability(executor, asset.walletAddress, asset.asset);
         const assetCoverageMet = BigInt(asset.balance) >= BigInt(liability);
         await executor.query(
           `INSERT INTO core.coverage_snapshot_items (
-             snapshot_id, safe_address, asset, verified_asset_balance,
+             snapshot_id, wallet_address, asset, verified_asset_balance,
              unsettled_liability, coverage_met
            ) VALUES ($1,$2,$3,$4,$5,$6)
-           ON CONFLICT (snapshot_id, safe_address, asset) DO NOTHING`,
-          [snapshotId, asset.safeAddress, asset.asset, asset.balance, liability, assetCoverageMet],
+           ON CONFLICT (snapshot_id, wallet_address, asset) DO NOTHING`,
+          [snapshotId, asset.walletAddress, asset.asset, asset.balance, liability, assetCoverageMet],
         );
         results.push({
           ...asset,
@@ -125,7 +125,7 @@ export class CoverageWorker {
       }
       await appendCanonicality(executor, snapshotId, observed);
       for (const item of results) {
-        const causeId = `coverage:${item.safeAddress}:${item.asset}`;
+        const causeId = `coverage:${item.walletAddress}:${item.asset}`;
         if (!item.coverageMet) {
           await activateCoverageBreaker(executor, causeId, observed.evidenceHash, observed.observedAt);
         } else {
@@ -139,7 +139,7 @@ export class CoverageWorker {
         snapshotId: result.snapshotId,
         evidenceHash: observed.evidenceHash,
         paymentRouterAddress: this.#paymentRouterAddress,
-        governanceSafeAddress: this.#governanceSafeAddress,
+        governanceWalletAddress: this.#governanceWalletAddress,
         at: observed.observedAt,
       }));
     }
@@ -169,15 +169,15 @@ export class CoverageWorker {
         observedAt: input.observedAt,
       });
       if (!input.canonical) {
-        const assets = await executor.query<{ safe_address: string; asset: string }>(
-          `SELECT safe_address, asset FROM core.coverage_snapshot_items
-           WHERE snapshot_id = $1 ORDER BY safe_address, asset`,
+        const assets = await executor.query<{ wallet_address: string; asset: string }>(
+          `SELECT wallet_address, asset FROM core.coverage_snapshot_items
+           WHERE snapshot_id = $1 ORDER BY wallet_address, asset`,
           [input.snapshotId],
         );
         for (const asset of assets.rows) {
           await activateCoverageBreaker(
             executor,
-            `coverage:${asset.safe_address}:${asset.asset}`,
+            `coverage:${asset.wallet_address}:${asset.asset}`,
             input.evidenceHash,
             input.observedAt,
           );
@@ -190,7 +190,7 @@ export class CoverageWorker {
         snapshotId: input.snapshotId,
         evidenceHash: input.evidenceHash,
         paymentRouterAddress: this.#paymentRouterAddress,
-        governanceSafeAddress: this.#governanceSafeAddress,
+        governanceWalletAddress: this.#governanceWalletAddress,
         at: input.observedAt,
       }));
     }
@@ -206,12 +206,12 @@ async function ensurePaymentPauseAction(executor: SqlExecutor, input: {
   snapshotId: string;
   evidenceHash: string;
   paymentRouterAddress: string;
-  governanceSafeAddress: string;
+  governanceWalletAddress: string;
   at: Date;
 }) {
   const existing = await executor.query<{ action_id: string; target_paused: boolean }>(
     `SELECT action_id, target_paused FROM core.coverage_breaker_actions
-     WHERE state IN ('PENDING_PROPOSAL','SAFE_PROPOSED','MINED','FINAL')
+     WHERE state IN ('PENDING_EXECUTION','SUBMITTED','MINED','FINAL')
      ORDER BY created_at DESC, action_id DESC LIMIT 1`,
   );
   if (existing.rows[0]?.target_paused) return existing.rows[0].action_id;
@@ -240,16 +240,16 @@ async function ensurePaymentPauseAction(executor: SqlExecutor, input: {
   await executor.query(
     `INSERT INTO core.coverage_breaker_actions (
        action_id, snapshot_id, policy_version, action, target_paused, evidence_hash,
-       governance_safe_address, router_address, calldata, calldata_hash,
+       governance_wallet_address, router_address, calldata, calldata_hash,
        state, replaces_action_id, created_at, updated_at
-     ) VALUES ($1,$2,$3,'PAUSE',true,$4,$5,$6,$7,$8,'PENDING_PROPOSAL',$9,$10,$10)
+     ) VALUES ($1,$2,$3,'PAUSE',true,$4,$5,$6,$7,$8,'PENDING_EXECUTION',$9,$10,$10)
      ON CONFLICT (action_id) DO NOTHING`,
     [
       actionId,
       input.snapshotId,
       policy.rows[0].policy_version,
       input.evidenceHash,
-      input.governanceSafeAddress,
+      input.governanceWalletAddress,
       input.paymentRouterAddress,
       calldata,
       keccak256(calldata).toLowerCase(),
@@ -257,26 +257,26 @@ async function ensurePaymentPauseAction(executor: SqlExecutor, input: {
       input.at,
     ],
   );
-  const transitionId = hashJson({ actionId, state: 'PENDING_PROPOSAL' });
+  const transitionId = hashJson({ actionId, state: 'PENDING_EXECUTION' });
   await executor.query(
     `INSERT INTO core.coverage_breaker_action_transitions (
        transition_id, action_id, from_state, to_state, evidence, recorded_at
-     ) VALUES ($1,$2,NULL,'PENDING_PROPOSAL',$3,$4)
+     ) VALUES ($1,$2,NULL,'PENDING_EXECUTION',$3,$4)
      ON CONFLICT (transition_id) DO NOTHING`,
     [transitionId, actionId, JSON.stringify({ snapshotId: input.snapshotId, evidenceHash: input.evidenceHash }), input.at],
   );
   return actionId;
 }
 
-function expectedAssets(input: readonly { safeAddress: string; asset: 'USDT' | 'NPL'; tokenAddress: string }[]) {
-  const result = new Map<string, { safeAddress: string; asset: 'USDT' | 'NPL'; tokenAddress: string }>();
+function expectedAssets(input: readonly { walletAddress: string; asset: 'USDT' | 'NPL'; tokenAddress: string }[]) {
+  const result = new Map<string, { walletAddress: string; asset: 'USDT' | 'NPL'; tokenAddress: string }>();
   for (const item of input) {
     const value = {
-      safeAddress: address(item.safeAddress, 'coverage Safe'),
+      walletAddress: address(item.walletAddress, 'coverage wallet'),
       asset: item.asset,
       tokenAddress: address(item.tokenAddress, 'coverage token'),
     };
-    const key = `${value.safeAddress}:${value.asset}`;
+    const key = `${value.walletAddress}:${value.asset}`;
     if (result.has(key)) throw new CoreError('ExternalBlocked', 'Duplicate coverage asset configuration', 503);
     result.set(key, value);
   }
@@ -296,9 +296,9 @@ function validateObservation(value: CoverageObservation, expected: ExpectedCover
   ) throw new CoreError('InvalidFinality', 'Coverage observation is invalid');
   const seen = new Set<string>();
   const assets = value.assets.map((item) => {
-    const safeAddress = address(item.safeAddress, 'coverage Safe');
+    const walletAddress = address(item.walletAddress, 'coverage wallet');
     const tokenAddress = address(item.tokenAddress, 'coverage token');
-    const key = `${safeAddress}:${item.asset}`;
+    const key = `${walletAddress}:${item.asset}`;
     const configured = expected.get(key);
     if (
       !configured
@@ -307,7 +307,7 @@ function validateObservation(value: CoverageObservation, expected: ExpectedCover
       || seen.has(key)
     ) throw new CoreError('InvalidFinality', 'Coverage observation does not match configured assets');
     seen.add(key);
-    return { ...item, safeAddress, tokenAddress };
+    return { ...item, walletAddress, tokenAddress };
   });
   return {
     ...value,
@@ -315,18 +315,18 @@ function validateObservation(value: CoverageObservation, expected: ExpectedCover
     evidenceHash: value.evidenceHash.toLowerCase(),
     observedAt: new Date(value.observedAt),
     assets: assets.sort((left, right) =>
-      left.safeAddress.localeCompare(right.safeAddress) || left.asset.localeCompare(right.asset)),
+      left.walletAddress.localeCompare(right.walletAddress) || left.asset.localeCompare(right.asset)),
   };
 }
 
-async function unsettledLiability(executor: SqlExecutor, safeAddress: string, asset: 'USDT' | 'NPL') {
+async function unsettledLiability(executor: SqlExecutor, walletAddress: string, asset: 'USDT' | 'NPL') {
   const result = await executor.query<{ amount: string }>(
     `SELECT COALESCE(sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END), 0)::text AS amount
      FROM core.ledger_lines line
      JOIN core.ledger_accounts account ON account.account_id = line.account_id
-     WHERE line.backing_safe_address = $1 AND account.asset = $2
-       AND line.balance_state IN ('LOCKED','AVAILABLE','REQUESTED','BATCHED','DISPUTED')`,
-    [safeAddress, asset],
+     WHERE line.backing_wallet_address = $1 AND account.asset = $2
+       AND line.balance_state IN ('LOCKED','AVAILABLE','REQUESTED','SUBMITTED','DISPUTED')`,
+    [walletAddress, asset],
   );
   const amount = result.rows[0]?.amount ?? '0';
   if (BigInt(amount) < 0n) throw new CoreError('InvalidFinality', 'Unsettled liability cannot be negative', 409);

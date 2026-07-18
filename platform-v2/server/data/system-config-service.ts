@@ -14,10 +14,6 @@ import {
   USDT_ADDRESS,
 } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
-import type {
-  SystemConfigSafeApprover,
-  SystemConfigSafeApprovalInput,
-} from '../chain/system-config-governance.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
 import { validateMerchantLevelPayload } from './merchant-level-policy.ts';
@@ -47,7 +43,7 @@ export interface ConfigApprovalInput {
   policyVersion: string;
   oldValueHash: string;
   newValueHash: string;
-  safeAddress: string;
+  executorWallet: string;
   nonce: string;
   deadline: string;
   signature: string;
@@ -55,26 +51,23 @@ export interface ConfigApprovalInput {
 
 export class SystemConfigService {
   readonly #transactions: SqlTransactionRunner;
-  readonly #approver: SystemConfigSafeApprover;
   readonly #secondarySigner: string;
-  readonly #governanceSafe: string;
+  readonly #governanceWallet: string;
   readonly #verifyingContract: string;
   readonly #auditReady: () => boolean | Promise<boolean>;
   readonly #clock: () => Date;
 
   constructor(input: {
     transactions: SqlTransactionRunner;
-    approver: SystemConfigSafeApprover;
     secondarySigner: string;
-    governanceSafe: string;
+    governanceWallet: string;
     verifyingContract: string;
     auditReady: () => boolean | Promise<boolean>;
     clock?: () => Date;
   }) {
     this.#transactions = input.transactions;
-    this.#approver = input.approver;
     this.#secondarySigner = normalizeAddress(input.secondarySigner);
-    this.#governanceSafe = normalizeAddress(input.governanceSafe);
+    this.#governanceWallet = normalizeAddress(input.governanceWallet);
     this.#verifyingContract = normalizeAddress(input.verifyingContract);
     this.#auditReady = input.auditReady;
     this.#clock = input.clock ?? (() => new Date());
@@ -161,7 +154,7 @@ export class SystemConfigService {
         policyVersion,
         oldValueHash: current?.payload_hash ?? ZERO_HASH,
         newValueHash: row.payload_hash,
-        safeAddress: this.#governanceSafe,
+        executorWallet: this.#governanceWallet,
         nonce,
         deadline,
       };
@@ -188,8 +181,9 @@ export class SystemConfigService {
     const prepared = await this.#transactions.transaction(async (executor) => {
       await requireCurrentRole(executor, wallet, ['ADMIN']);
       const row = await lockedConfig(executor, configVersionId);
-      const existingPublication = await executor.query<{ action_digest: string; safe_tx_hash: string }>(
-        'SELECT action_digest, safe_tx_hash FROM core.system_config_publication_events WHERE active_config_version_id = $1',
+      const existingPublication = await executor.query<{ action_digest: string; approval_signature_hash: string }>(
+        `SELECT action_digest, approval_signature_hash
+         FROM core.system_config_publication_events WHERE active_config_version_id = $1`,
         [configVersionId],
       );
       if (existingPublication.rows[0]) return { existing: existingPublication.rows[0], row } as const;
@@ -208,7 +202,7 @@ export class SystemConfigService {
         intent,
         approval.signature,
         this.#secondarySigner,
-        this.#governanceSafe,
+        this.#governanceWallet,
         this.#verifyingContract,
         this.#clock(),
       );
@@ -217,32 +211,24 @@ export class SystemConfigService {
         sensitiveActionTypes,
         intent,
       ).toLowerCase();
-      const safeInput: SystemConfigSafeApprovalInput = {
-        configVersionId,
-        configKey: row.config_key,
-        version: row.version,
-        safeAddress: this.#governanceSafe,
-        actionDigest,
-        oldValueHash: intent.oldValueHash.toLowerCase(),
-        newValueHash: intent.newValueHash.toLowerCase(),
-      };
-      return { row, current, verified, intent, actionDigest, safeInput } as const;
+      return { row, current, verified, intent, actionDigest } as const;
     });
     if ('existing' in prepared) return configProjection(prepared.row, true);
-    const safe = await this.#approver.verify(prepared.safeInput);
     return this.#transactions.transaction(async (executor) => {
       const roles = await requireCurrentRole(executor, wallet, ['ADMIN']);
       const row = await lockedConfig(executor, configVersionId);
-      if (row.payload_hash !== prepared.row.payload_hash) throw new CoreError('IdempotencyConflict', 'System config changed during Safe approval', 409);
+      if (row.payload_hash !== prepared.row.payload_hash) {
+        throw new CoreError('IdempotencyConflict', 'System config changed during signature verification', 409);
+      }
       const current = await currentConfig(executor, row.config_key);
       if ((current?.payload_hash ?? ZERO_HASH).toLowerCase() !== prepared.intent.oldValueHash.toLowerCase()) {
-        throw new CoreError('IdempotencyConflict', 'System config current version changed during Safe approval', 409);
+        throw new CoreError('IdempotencyConflict', 'System config current version changed during approval', 409);
       }
       const now = this.#clock();
       await executor.query(
         `INSERT INTO core.system_config_publication_events (
            event_id, config_key, active_config_version_id, previous_config_version_id,
-           action_digest, secondary_signer, safe_address, safe_tx_hash,
+           action_digest, secondary_signer, governance_wallet_address, approval_signature_hash,
            actor_wallet, created_at
          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
         [
@@ -252,8 +238,8 @@ export class SystemConfigService {
           current?.config_version_id ?? null,
           prepared.actionDigest,
           prepared.verified.signer,
-          this.#governanceSafe,
-          safe.safeTxHash,
+          this.#governanceWallet,
+          keccak256(approval.signature).toLowerCase(),
           wallet,
           now,
         ],
@@ -266,12 +252,17 @@ export class SystemConfigService {
         [
           `outbox:system-config:${configVersionId}`,
           configVersionId,
-          JSON.stringify({ configKey: row.config_key, version: row.version, payloadHash: row.payload_hash, safeTxHash: safe.safeTxHash }),
+          JSON.stringify({
+            configKey: row.config_key,
+            version: row.version,
+            payloadHash: row.payload_hash,
+            governanceWallet: this.#governanceWallet,
+          }),
         ],
       );
       await operationalAudit(executor, {
         eventType: 'SystemConfigPublished',
-        evidenceProfile: 'SAFE_APPROVED',
+        evidenceProfile: 'SIGNED_OFFCHAIN',
         configVersionId,
         actorWallet: wallet,
         roles,
@@ -283,8 +274,8 @@ export class SystemConfigService {
           oldValueHash: prepared.intent.oldValueHash,
           newValueHash: row.payload_hash,
           secondarySigner: prepared.verified.signer,
-          safeTxHash: safe.safeTxHash,
-          approvalEvidenceHash: safe.approvalEvidenceHash,
+          governanceWallet: this.#governanceWallet,
+          approvalSignatureHash: keccak256(approval.signature).toLowerCase(),
         },
         signatureEvidence: {
           scheme: 'EIP712',
@@ -372,7 +363,7 @@ function validateConfigPayload(key: ConfigKey, value: unknown) {
     exactKeys(input, [
       'chainId', 'usdtAddress', 'nplAddress', 'pairAddress', 'paymentRouterAddress',
       'policyRegistryAddress', 'beneficiaryRegistryAddress',
-      'usdtCustodySafe', 'nplRewardSafe', 'operationsTreasurySafe',
+      'usdtSettlementWallet', 'nplRewardWallet', 'operationsWallet',
     ]);
     if (input.chainId !== 56) throw new CoreError('InvalidRequest', 'Chain config must use BSC 56');
     const result = Object.fromEntries(Object.entries(input).map(([name, child]) => [
@@ -382,8 +373,10 @@ function validateConfigPayload(key: ConfigKey, value: unknown) {
     if (result.usdtAddress !== USDT_ADDRESS || result.nplAddress !== NPL_ADDRESS || result.pairAddress !== NPL_USDT_PAIR_ADDRESS) {
       throw new CoreError('InvalidRequest', 'Chain config changes a frozen asset or pair');
     }
-    const safes = [result.usdtCustodySafe, result.nplRewardSafe, result.operationsTreasurySafe];
-    if (new Set(safes).size !== 3) throw new CoreError('InvalidRequest', 'Custody, Reward and Operations Safes must be distinct');
+    const wallets = [result.usdtSettlementWallet, result.nplRewardWallet, result.operationsWallet];
+    if (new Set(wallets).size !== 3) {
+      throw new CoreError('InvalidRequest', 'Settlement, Reward and Operations wallets must be distinct');
+    }
     return result;
   }
   if (key === 'MERCHANT_LEVELS') return validateMerchantLevelPayload(input);
@@ -405,7 +398,7 @@ function approvalIntent(input: ConfigApprovalInput): SensitiveActionIntent {
     policyVersion: unsignedBigInt(input.policyVersion, 'policyVersion'),
     oldValueHash: hash(input.oldValueHash, 'oldValueHash'),
     newValueHash: hash(input.newValueHash, 'newValueHash'),
-    safeAddress: normalizeAddress(input.safeAddress),
+    executorWallet: normalizeAddress(input.executorWallet),
     nonce: unsignedBigInt(input.nonce, 'nonce'),
     deadline: unsignedBigInt(input.deadline, 'deadline'),
   };
@@ -419,7 +412,7 @@ function serializableIntent(intent: SensitiveActionIntent) {
     policyVersion: intent.policyVersion.toString(),
     oldValueHash: intent.oldValueHash.toLowerCase(),
     newValueHash: intent.newValueHash.toLowerCase(),
-    safeAddress: normalizeAddress(intent.safeAddress),
+    executorWallet: normalizeAddress(intent.executorWallet),
     nonce: intent.nonce.toString(),
     deadline: intent.deadline.toString(),
   });
@@ -451,7 +444,7 @@ async function currentConfig(executor: SqlExecutor, key: ConfigKey) {
 
 async function operationalAudit(executor: SqlExecutor, input: {
   eventType: string;
-  evidenceProfile?: 'RBAC' | 'SAFE_APPROVED';
+  evidenceProfile?: 'RBAC' | 'SIGNED_OFFCHAIN';
   configVersionId: string;
   actorWallet: string;
   roles: string[];
