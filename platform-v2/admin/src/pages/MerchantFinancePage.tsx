@@ -313,19 +313,19 @@ function ReviewWorkspace(props: { detail: MerchantLifecycleDetail; sessionWallet
       if (typeof signature !== 'string') throw new CoreApiError({ code: 'InvalidResponse', message: '钱包没有返回签名', status: 502 });
       const next = await publishMerchantReview(challenge, signature, props.token);
       const review = next.reviews.find((item) => item.actionId.toLowerCase() === challenge.actionId.toLowerCase());
-      props.onChanged(next, `${actionLabel(action)}已发布，Safe TxHash ${review?.safeTxHash ?? '不可用'}`);
+      props.onChanged(next, `${actionLabel(action)}已发布，签名证据 ${review?.approvalSignatureHash ?? '不可用'}`);
     } catch (cause) { props.onError(asCoreError(cause, '商家审核发布失败')); }
     finally { setBusy(false); }
   };
   return <section className="merchant-section merchant-review" aria-labelledby="merchant-review-title">
-    <div className="merchant-section-heading"><div><p className="section-kicker">SECONDARY EIP-712 + SAFE</p><h3 id="merchant-review-title">商家审核发布</h3></div><ShieldCheck aria-hidden="true" /></div>
+    <div className="merchant-section-heading"><div><p className="section-kicker">SECONDARY EIP-712</p><h3 id="merchant-review-title">商家审核发布</h3></div><ShieldCheck aria-hidden="true" /></div>
     <form className="merchant-review-form" onSubmit={publish}>
       <label>审核动作<select value={action} onChange={(event) => setAction(event.target.value as MerchantReviewAction)}>{actions.map((item) => <option key={item} value={item}>{actionLabel(item)}</option>)}</select></label>
       <label>原因代码<input value={reasonCode} onChange={(event) => setReasonCode(event.target.value.toUpperCase())} pattern="[A-Z0-9_:-]{2,64}" maxLength={64} placeholder="QUALIFICATION_APPROVED" required /></label>
       <label>Idempotency key<input value={idempotencyKey} onChange={(event) => setIdempotencyKey(event.target.value)} minLength={8} maxLength={128} required /></label>
-      <button className={action === 'BLACKLIST' || action === 'REJECT' ? 'button button-danger' : 'button button-primary'} type="submit" disabled={busy}>{busy ? <LoaderCircle className="spin" aria-hidden="true" /> : <KeyRound aria-hidden="true" />}{busy ? '等待签名与 Safe 验证' : '二次签名并发布'}</button>
+      <button className={action === 'BLACKLIST' || action === 'REJECT' ? 'button button-danger' : 'button button-primary'} type="submit" disabled={busy}>{busy ? <LoaderCircle className="spin" aria-hidden="true" /> : <KeyRound aria-hidden="true" />}{busy ? '等待签名验证' : '二次签名并发布'}</button>
     </form>
-    <p className="merchant-governance-note">Core 固定当前状态、资质版本和独立 secondarySigner；Safe 证据未确认时不会改变商家状态。</p>
+    <p className="merchant-governance-note">Core 固定当前状态、资质版本和独立 secondarySigner；签名证据未确认时不会改变商家状态。</p>
   </section>;
 }
 
@@ -363,11 +363,11 @@ function SettlementEvidence({ detail }: { detail: MerchantLifecycleDetail }) {
   return <section className="merchant-section" aria-labelledby="merchant-settlement-title">
     <div className="merchant-section-heading"><div><p className="section-kicker">APPEND-ONLY LEDGER</p><h3 id="merchant-settlement-title">五态应收与结算历史</h3></div></div>
     <dl className="merchant-balances">{detail.balances.map((balance) => <Fact key={balance.state} label={balance.state} value={balance.amount} note="USDT atomic" />)}</dl>
-    <div className="table-scroll"><table className="data-table merchant-settlement-table"><thead><tr><th>Request</th><th>资产 / 金额</th><th>状态</th><th>Safe TxHash</th><th>时间</th></tr></thead><tbody>
-      {detail.settlements.length ? detail.settlements.map((item) => <tr key={item.requestId}><td><code>{item.requestId}</code></td><td><strong>{item.asset} · {item.amount}</strong></td><td>{item.state}</td><td>{item.safeTxHash ? <code>{item.safeTxHash}</code> : '—'}</td><td>{formatDate(item.settledAt ?? item.requestedAt)}</td></tr>) : <tr><td colSpan={5}>Core 返回真实空结算历史</td></tr>}
+    <div className="table-scroll"><table className="data-table merchant-settlement-table"><thead><tr><th>Request</th><th>资产 / 金额</th><th>状态</th><th>Execution TxHash</th><th>时间</th></tr></thead><tbody>
+      {detail.settlements.length ? detail.settlements.map((item) => <tr key={item.requestId}><td><code>{item.requestId}</code></td><td><strong>{item.asset} · {item.amount}</strong></td><td>{item.state}</td><td>{item.finalExecutionTxHashes[0] ? <code>{item.finalExecutionTxHashes[0]}</code> : '—'}<small>{item.finalExecutionTxHashes.length} final transfers</small></td><td>{formatDate(item.settledAt ?? item.requestedAt)}</td></tr>) : <tr><td colSpan={5}>Core 返回真实空结算历史</td></tr>}
     </tbody></table></div>
-    <div className="table-scroll"><table className="data-table merchant-review-table"><thead><tr><th>审核动作</th><th>状态迁移</th><th>资质版本</th><th>二次签名者</th><th>Safe TxHash</th></tr></thead><tbody>
-      {detail.reviews.length ? detail.reviews.map((review) => <tr key={review.actionId}><td><strong>{review.action} · {review.state}</strong><small>{review.reasonCode}</small></td><td>{review.fromStatus} → {review.toStatus}</td><td>v{review.applicationVersion}</td><td>{review.secondarySigner ? <code>{review.secondarySigner}</code> : '—'}</td><td>{review.safeTxHash ? <code>{review.safeTxHash}</code> : '—'}</td></tr>) : <tr><td colSpan={5}>尚无审核动作</td></tr>}
+    <div className="table-scroll"><table className="data-table merchant-review-table"><thead><tr><th>审核动作</th><th>状态迁移</th><th>资质版本</th><th>二次签名者</th><th>签名证据</th></tr></thead><tbody>
+      {detail.reviews.length ? detail.reviews.map((review) => <tr key={review.actionId}><td><strong>{review.action} · {review.state}</strong><small>{review.reasonCode}</small></td><td>{review.fromStatus} → {review.toStatus}</td><td>v{review.applicationVersion}</td><td>{review.secondarySigner ? <code>{review.secondarySigner}</code> : '—'}</td><td>{review.approvalSignatureHash ? <code>{review.approvalSignatureHash}</code> : '—'}</td></tr>) : <tr><td colSpan={5}>尚无审核动作</td></tr>}
     </tbody></table></div>
   </section>;
 }

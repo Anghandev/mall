@@ -32,7 +32,7 @@ import {
   createSeckillSessionDraft,
   fetchSeckillGovernanceAction,
   fetchSeckillGovernanceActions,
-  proposeSeckillGovernanceAction,
+  executeSeckillGovernanceAction,
   reviewSeckillWinner,
   submitSeckillGovernanceApproval,
 } from '../seckillAdminApi';
@@ -151,17 +151,17 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
 
   const submitForceClose = (event: FormEvent) => {
     event.preventDefault(); if (!session || !isAdmin) return;
-    void run('force-close', () => createSeckillForceClose(targetSessionId, { reasonCode: forceReason, idempotencyKey: forceKey }, session.token), '强制截止治理动作已创建，当前 {state}；Safe FINAL 前未生效。');
+    void run('force-close', () => createSeckillForceClose(targetSessionId, { reasonCode: forceReason, idempotencyKey: forceKey }, session.token), '强制截止治理动作已创建，当前 {state}；链上 FINAL 前未生效。');
   };
 
   const submitPrize = (event: FormEvent) => {
     event.preventDefault(); if (!session || !isAdmin) return;
-    void run('prize', () => createSeckillPrizeInjection(targetSessionId, { amountUsdt: prizeAmount, idempotencyKey: prizeKey }, session.token), '奖池注入动作已创建，当前 {state}；账本仅在 Safe 终局后入账。');
+    void run('prize', () => createSeckillPrizeInjection(targetSessionId, { amountUsdt: prizeAmount, idempotencyKey: prizeKey }, session.token), '奖池注入动作已创建，当前 {state}；账本仅在链上终局后入账。');
   };
 
   const submitResume = (event: FormEvent) => {
     event.preventDefault(); if (!session || !isAdmin) return;
-    void run('resume', () => createSeckillBreakerResume({ sessionId: targetSessionId, idempotencyKey: resumeKey }, session.token), '秒杀购买恢复动作已创建，当前 {state}；Safe FINAL 前 breaker 仍保持。');
+    void run('resume', () => createSeckillBreakerResume({ sessionId: targetSessionId, idempotencyKey: resumeKey }, session.token), '秒杀购买恢复动作已创建，当前 {state}；链上 FINAL 前 breaker 仍保持。');
   };
 
   const signSecondary = async () => {
@@ -193,14 +193,14 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
       );
       setActions((items) => items.map((item) => item.actionId === updated.actionId ? updated : item));
       setSelected(updated);
-      setNotice('二次签名已由 Core 验证；尚未提交 Safe。');
+      setNotice('二次签名已由 Core 验证；尚未提交治理钱包执行。');
     } catch (cause) { setError(asCoreError(cause)); }
     finally { setPendingAction(''); }
   };
 
-  const proposeSafe = () => {
+  const executeAction = () => {
     if (!session || !selected || !isAdmin) return;
-    void run('propose', () => proposeSeckillGovernanceAction(selected, session.token), 'Safe 提案请求已提交，当前 {state}；等待提案、执行和 15 确认。');
+    void run('execute', () => executeSeckillGovernanceAction(selected, session.token), '治理钱包执行请求已提交，当前 {state}；等待交易和 15 确认。');
   };
 
   const cancelAction = () => {
@@ -231,8 +231,8 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
   return (
     <section className="seckill-governance-stack" aria-label="秒杀治理工作台">
       <div className="panel seckill-governance-header">
-        <div className="panel-heading"><div><p className="section-kicker">ADMIN GOVERNANCE · .9</p><h2>场次与 Safe 动作</h2></div>{session && canRead ? <button className="button button-quiet" type="button" onClick={() => setReload((value) => value + 1)} disabled={loading}><RefreshCw aria-hidden="true" />刷新动作</button> : null}</div>
-        {!session ? <div className="session-prompt"><div><strong>连接平台钱包</strong><p>治理读写由 SIWE、实时 RBAC、独立二次钱包和 Safe 共同约束。</p></div><button className="button button-primary" type="button" onClick={() => void connect()} disabled={status === 'CONNECTING'}><KeyRound aria-hidden="true" />{status === 'CONNECTING' ? '等待签名' : 'SIWE 连接'}</button></div>
+        <div className="panel-heading"><div><p className="section-kicker">ADMIN GOVERNANCE · .9</p><h2>场次与治理钱包动作</h2></div>{session && canRead ? <button className="button button-quiet" type="button" onClick={() => setReload((value) => value + 1)} disabled={loading}><RefreshCw aria-hidden="true" />刷新动作</button> : null}</div>
+        {!session ? <div className="session-prompt"><div><strong>连接平台钱包</strong><p>治理读写由 SIWE、实时 RBAC、独立二次钱包和普通治理钱包共同约束。</p></div><button className="button button-primary" type="button" onClick={() => void connect()} disabled={status === 'CONNECTING'}><KeyRound aria-hidden="true" />{status === 'CONNECTING' ? '等待签名' : 'SIWE 连接'}</button></div>
           : !canRead ? <ErrorView error={new CoreApiError({ code: 'Forbidden', message: '当前会话没有秒杀治理读取权限', status: 403 })} />
             : <RoleBoundary isAdmin={isAdmin} canCreate={canCreate} />}
         {error ? <ErrorView error={error} /> : null}
@@ -255,17 +255,17 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
             <article className="panel seckill-action-detail">
               <div className="panel-heading"><div><p className="section-kicker">GET /v2/admin/seckill/actions/:id</p><h2>动作证据</h2></div><ShieldCheck aria-hidden="true" /></div>
               {detailLoading ? <LoadingView label="正在读取动作详情" /> : null}
-              {currentAction ? <ActionDetail action={currentAction} /> : !detailLoading ? <p className="muted-copy">选择动作查看 Safe 与终局证据。</p> : null}
+              {currentAction ? <ActionDetail action={currentAction} /> : !detailLoading ? <p className="muted-copy">选择动作查看钱包执行与终局证据。</p> : null}
             </article>
 
             <aside className="panel seckill-governance-command">
-              <p className="section-kicker">SECONDARY WALLET → SAFE</p><h2>批准与提案</h2>
+              <p className="section-kicker">SECONDARY WALLET → GOVERNANCE WALLET</p><h2>批准与执行</h2>
               <label>Approval nonce<input inputMode="numeric" pattern="0|[1-9][0-9]*" value={nonce} onChange={(event) => setNonce(event.target.value)} disabled={!isAdmin || !currentAction?.allowedActions.includes('APPROVE_SECONDARY') || Boolean(pendingAction)} /></label>
               <label>Deadline · Unix seconds<input inputMode="numeric" pattern="[1-9][0-9]*" value={deadline} onChange={(event) => setDeadline(event.target.value)} disabled={!isAdmin || !currentAction?.allowedActions.includes('APPROVE_SECONDARY') || Boolean(pendingAction)} /></label>
               <button className="button button-primary button-full" type="button" onClick={() => void signSecondary()} disabled={!isAdmin || !currentAction?.allowedActions.includes('APPROVE_SECONDARY') || !nonce || !deadline || Boolean(pendingAction)}><KeyRound aria-hidden="true" />{pendingAction === 'sign' ? '等待二次签名' : '请求二次钱包签名'}</button>
-              <button className="button button-quiet button-full" type="button" onClick={proposeSafe} disabled={!isAdmin || !currentAction?.allowedActions.includes('PROPOSE_SAFE') || Boolean(pendingAction)}><WalletCards aria-hidden="true" />{pendingAction === 'propose' ? '提案中' : '提交 Safe 提案'}</button>
-              <button className="button button-danger button-full" type="button" onClick={cancelAction} disabled={!canCancel || Boolean(pendingAction)}><XCircle aria-hidden="true" />{pendingAction === 'cancel' ? '取消中' : '取消未提案动作'}</button>
-              <p className="button-explanation">DRAFT 可取消；Safe 提案后不提供本地终局按钮。`FINAL` 只来自 Core 15-confirmation 证据。</p>
+              <button className="button button-quiet button-full" type="button" onClick={executeAction} disabled={!isAdmin || !currentAction?.allowedActions.includes('EXECUTE') || Boolean(pendingAction)}><WalletCards aria-hidden="true" />{pendingAction === 'execute' ? '提交中' : '提交治理钱包执行'}</button>
+              <button className="button button-danger button-full" type="button" onClick={cancelAction} disabled={!canCancel || Boolean(pendingAction)}><XCircle aria-hidden="true" />{pendingAction === 'cancel' ? '取消中' : '取消未执行动作'}</button>
+              <p className="button-explanation">DRAFT 可取消；执行提交后不提供本地终局按钮。`FINAL` 只来自 Core 15-confirmation 证据。</p>
             </aside>
           </div>
 
@@ -293,7 +293,7 @@ function WinnerReviewForm({ session, decision, setDecision, reasonCode, setReaso
 
 function RoleBoundary({ isAdmin, canCreate }: { isAdmin: boolean; canCreate: boolean }) {
   const label = isAdmin ? 'ADMIN · 完整治理' : canCreate ? 'OPERATOR · 建场/取消开场草稿' : 'AUDITOR · 只读';
-  return <div className="seckill-role-boundary" role="status"><ShieldCheck aria-hidden="true" /><div><strong>{label}</strong><p>最终写入仍由 Core 重新校验 RBAC、二次钱包、Safe 和链上终局。</p></div></div>;
+  return <div className="seckill-role-boundary" role="status"><ShieldCheck aria-hidden="true" /><div><strong>{label}</strong><p>最终写入仍由 Core 重新校验 RBAC、二次钱包、治理钱包和链上终局。</p></div></div>;
 }
 
 function SessionDraftForm({ input, setInput, rulesVersionId, setRulesVersionId, rulesBinding, pending, onLoadRules, onSubmit }: { input: SeckillSessionCreateRequest; setInput(value: SeckillSessionCreateRequest): void; rulesVersionId: string; setRulesVersionId(value: string): void; rulesBinding: CmsVersionProjection | null; pending: boolean; onLoadRules(): void; onSubmit(event: FormEvent): void }) {
@@ -331,7 +331,7 @@ function IdempotencyInput({ value, setValue, pending }: { value: string; setValu
 }
 
 function ActionDetail({ action }: { action: SeckillGovernanceActionProjection }) {
-  return <><div className="seckill-action-status"><ActionState state={action.state} confirmations={action.confirmations} /><span>{action.canonical === null ? 'canonical 待验证' : `canonical = ${String(action.canonical)}`}</span></div><dl className="definition-grid seckill-governance-facts"><div><dt>Action / Session</dt><dd><code>{action.actionId}</code><small>{action.sessionId}</small></dd></div><div><dt>Policy / Kind</dt><dd>{action.policyVersion} / {action.actionKind}</dd></div><div><dt>Safe / nonce</dt><dd><code>{action.safeAddress}</code><small>{action.safeNonce ?? '待分配'}</small></dd></div><div><dt>Safe Tx / proposal</dt><dd><code>{action.safeTxHash ?? '未提案'}</code><small>{action.proposalHash ?? '—'}</small></dd></div><div><dt>Execution / block</dt><dd><code>{action.executionTxHash ?? '未执行'}</code><small>{action.blockNumber ?? '—'} / {action.blockHash ?? '—'}</small></dd></div><div><dt>Evidence / calldata</dt><dd><code>{action.evidenceHash}</code><small>{action.calldataHash}</small></dd></div><div><dt>Secondary signer</dt><dd><code>{action.secondarySigner ?? '未签名'}</code><small>nonce {action.approvalNonce ?? '—'} / {action.approvalDeadline ?? '—'}</small></dd></div><div><dt>Allowed actions</dt><dd>{action.allowedActions.join(', ') || '无'}</dd></div></dl>{action.sessionPlan ? <PlanEvidence action={action} /> : null}{action.prizeInjection ? <PrizeEvidence action={action} /> : null}{['REORGED', 'FAILED'].includes(action.state) ? <div className="resource-state resource-state-error"><AlertTriangle aria-hidden="true" /><div><strong>{action.state} · 动作未生效</strong><p>{action.state === 'REORGED' ? '链上证据已回滚；等待 Core 修复或新动作。' : 'Safe 执行失败；不改写场次或账本终态。'}</p></div></div> : null}</>;
+  return <><div className="seckill-action-status"><ActionState state={action.state} confirmations={action.confirmations} /><span>{action.canonical === null ? 'canonical 待验证' : `canonical = ${String(action.canonical)}`}</span></div><dl className="definition-grid seckill-governance-facts"><div><dt>Action / Session</dt><dd><code>{action.actionId}</code><small>{action.sessionId}</small></dd></div><div><dt>Policy / Kind</dt><dd>{action.policyVersion} / {action.actionKind}</dd></div><div><dt>Executor / nonce</dt><dd><code>{action.executorWallet}</code><small>{action.executorNonce ?? '待分配'}</small></dd></div><div><dt>Submitted Tx / evidence</dt><dd><code>{action.submittedTxHash ?? '未提交'}</code><small>{action.executionEvidenceHash ?? '—'}</small></dd></div><div><dt>Execution / block</dt><dd><code>{action.executionTxHash ?? '未执行'}</code><small>{action.blockNumber ?? '—'} / {action.blockHash ?? '—'}</small></dd></div><div><dt>Evidence / calldata</dt><dd><code>{action.evidenceHash}</code><small>{action.calldataHash}</small></dd></div><div><dt>Secondary signer</dt><dd><code>{action.secondarySigner ?? '未签名'}</code><small>nonce {action.approvalNonce ?? '—'} / {action.approvalDeadline ?? '—'}</small></dd></div><div><dt>Allowed actions</dt><dd>{action.allowedActions.join(', ') || '无'}</dd></div></dl>{action.sessionPlan ? <PlanEvidence action={action} /> : null}{action.prizeInjection ? <PrizeEvidence action={action} /> : null}{['REORGED', 'FAILED'].includes(action.state) ? <div className="resource-state resource-state-error"><AlertTriangle aria-hidden="true" /><div><strong>{action.state} · 动作未生效</strong><p>{action.state === 'REORGED' ? '链上证据已回滚；等待 Core 修复或新动作。' : '治理钱包执行失败；不改写场次或账本终态。'}</p></div></div> : null}</>;
 }
 
 function PlanEvidence({ action }: { action: SeckillGovernanceActionProjection }) {
@@ -341,7 +341,7 @@ function PlanEvidence({ action }: { action: SeckillGovernanceActionProjection })
 
 function PrizeEvidence({ action }: { action: SeckillGovernanceActionProjection }) {
   const item = action.prizeInjection!;
-  return <div className="seckill-plan-evidence"><h3>奖池注入证据</h3><dl><div><dt>Amount</dt><dd>{item.amountUsdt} USDT atomic</dd></div><div><dt>Operations Safe</dt><dd><code>{item.operationsSafeAddress}</code></dd></div><div><dt>Custody Safe</dt><dd><code>{item.custodySafeAddress}</code></dd></div><div><dt>Journal / reversal</dt><dd>{item.finalJournalId ?? '等待 FINAL'}<small>{item.reversalJournalId ?? '无回滚分录'}</small></dd></div></dl></div>;
+  return <div className="seckill-plan-evidence"><h3>奖池注入证据</h3><dl><div><dt>Amount</dt><dd>{item.amountUsdt} USDT atomic</dd></div><div><dt>Operations wallet</dt><dd><code>{item.operationsWalletAddress}</code></dd></div><div><dt>Settlement wallet</dt><dd><code>{item.settlementWalletAddress}</code></dd></div><div><dt>Journal / reversal</dt><dd>{item.finalJournalId ?? '等待 FINAL'}<small>{item.reversalJournalId ?? '无回滚分录'}</small></dd></div></dl></div>;
 }
 
 function ActionState({ state, confirmations }: Pick<SeckillGovernanceActionProjection, 'state' | 'confirmations'>) {

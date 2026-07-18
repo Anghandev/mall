@@ -13,7 +13,7 @@ import {
   fetchSeckillSessionEvents,
   fetchSeckillSessionHistory,
   parseRealtimeEvent,
-  proposeSeckillGovernanceAction,
+  executeSeckillGovernanceAction,
   reviewSeckillWinner,
   seckillWebSocketUrl,
   submitSeckillGovernanceApproval,
@@ -171,30 +171,30 @@ describe('seckill admin coordinated Core client', () => {
     await expect(fetchCurrentSeckillSession()).rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
-  it('binds secondary-wallet EIP-712 approval, Safe proposal and cancellation to one action', async () => {
+  it('binds secondary-wallet EIP-712 approval, EOA execution and cancellation to one action', async () => {
     const action = governanceAction();
     const input = { nonce: '7', deadline: '1800000000' };
     const challenge = governanceChallenge(action, input.nonce, input.deadline);
-    const signed = governanceAction({ state: 'SECONDARY_SIGNED', secondarySigner: challenge.signer, approvalNonce: input.nonce, approvalDeadline: new Date(Number(input.deadline) * 1_000).toISOString(), allowedActions: ['PROPOSE_SAFE', 'CANCEL'] });
-    const proposed = governanceAction({ ...signed, state: 'PENDING_PROPOSAL', allowedActions: [] });
+    const signed = governanceAction({ state: 'SECONDARY_SIGNED', secondarySigner: challenge.signer, approvalNonce: input.nonce, approvalDeadline: new Date(Number(input.deadline) * 1_000).toISOString(), allowedActions: ['EXECUTE', 'CANCEL'] });
+    const proposed = governanceAction({ ...signed, state: 'PENDING_EXECUTION', allowedActions: [] });
     const cancelled = governanceAction({ state: 'CANCELLED', allowedActions: [], sessionPlan: { ...sessionPlan(), inventoryLockState: 'RELEASED', releasedAt: '2026-07-16T01:00:00.000Z' } });
     const fetchMock = vi.fn(async (inputUrl: string | URL | Request) => {
       const url = String(inputUrl);
       if (url.endsWith('/approval-challenge')) return jsonResponse(challenge);
       if (url.endsWith('/secondary-signature')) return jsonResponse(signed);
-      if (url.endsWith('/safe-proposal')) return jsonResponse(proposed, 202);
+      if (url.endsWith('/execute')) return jsonResponse(proposed, 202);
       return jsonResponse(cancelled);
     });
     vi.stubGlobal('fetch', fetchMock);
 
     const received = await createSeckillGovernanceChallenge(action, input, 'jwt');
     await expect(submitSeckillGovernanceApproval(action, received, { ...input, signature: '0x1234' }, address('1'), 'jwt')).resolves.toMatchObject({ state: 'SECONDARY_SIGNED' });
-    await expect(proposeSeckillGovernanceAction(signed, 'jwt')).resolves.toMatchObject({ state: 'PENDING_PROPOSAL' });
+    await expect(executeSeckillGovernanceAction(signed, 'jwt')).resolves.toMatchObject({ state: 'PENDING_EXECUTION' });
     await expect(cancelSeckillGovernanceAction(action, 'jwt')).resolves.toMatchObject({ state: 'CANCELLED' });
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
       `/v2/admin/seckill/actions/${action.actionId}/approval-challenge`,
       `/v2/admin/seckill/actions/${action.actionId}/secondary-signature`,
-      `/v2/admin/seckill/actions/${action.actionId}/safe-proposal`,
+      `/v2/admin/seckill/actions/${action.actionId}/execute`,
       `/v2/admin/seckill/actions/${action.actionId}/cancel`,
     ]);
   });
@@ -218,8 +218,8 @@ function realtimeEvent(sessionId: string) { return { artifactVersion, protocolVe
 function governanceAction(overrides: Partial<SeckillGovernanceActionProjection> = {}): SeckillGovernanceActionProjection {
   return {
     artifactVersion, actionId: hash('a'), sessionId: hash('b'), policyVersion: '2', actionKind: 'OPEN_SESSION', state: 'DRAFT',
-    evidenceHash: hash('c'), safeAddress: address('4'), targetAddress: address('5'), calldataHash: hash('d'), safeNonce: null,
-    safeTxHash: null, proposalHash: null, executionTxHash: null, blockNumber: null, blockHash: null, confirmations: 0,
+    evidenceHash: hash('c'), executorWallet: address('4'), targetAddress: address('5'), calldataHash: hash('d'), executorNonce: null,
+    submittedTxHash: null, executionEvidenceHash: null, executionTxHash: null, blockNumber: null, blockHash: null, confirmations: 0,
     canonical: null, actorWallet: address('1'), secondarySigner: null, approvalNonce: null, approvalDeadline: null,
     createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T00:00:00.000Z', sessionPlan: sessionPlan(),
     prizeInjection: null, allowedActions: ['APPROVE_SECONDARY', 'CANCEL'], ...overrides,
@@ -236,7 +236,7 @@ function sessionPlan(): SeckillSessionPlanProjection {
 }
 
 function prizeInjection() {
-  return { injectionId: hash('a'), amountUsdt: '50', operationsSafeAddress: address('6'), custodySafeAddress: address('7'), tokenAddress: address('8'), finalJournalId: null, reversalJournalId: null };
+  return { injectionId: hash('a'), amountUsdt: '50', operationsWalletAddress: address('6'), settlementWalletAddress: address('7'), tokenAddress: address('8'), finalJournalId: null, reversalJournalId: null };
 }
 
 function reviewPendingPrize() {
@@ -252,16 +252,16 @@ function reviewPendingPrize() {
 function governanceChallenge(action: ReturnType<typeof governanceAction>, nonce: string, deadline: string) {
   return {
     artifactVersion, actionId: action.actionId, sessionId: action.sessionId, actionKind: action.actionKind,
-    signer: address('2'), safeAddress: action.safeAddress,
+    signer: address('2'), executorWallet: action.executorWallet,
     typedData: {
       domain: { name: 'Abu24KV2Core', version: '2', chainId: 56, verifyingContract: action.targetAddress },
       types: { SensitiveAction: [
         { name: 'action', type: 'string' }, { name: 'resourceType', type: 'string' }, { name: 'resourceId', type: 'string' },
         { name: 'policyVersion', type: 'uint64' }, { name: 'oldValueHash', type: 'bytes32' }, { name: 'newValueHash', type: 'bytes32' },
-        { name: 'safeAddress', type: 'address' }, { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint64' },
+        { name: 'executorWallet', type: 'address' }, { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint64' },
       ] },
       primaryType: 'SensitiveAction',
-      message: { action: `SECKILL_${action.actionKind}`, resourceType: 'SECKILL_SESSION', resourceId: action.sessionId, policyVersion: action.policyVersion, oldValueHash: hash('e'), newValueHash: hash('f'), safeAddress: action.safeAddress, nonce, deadline },
+      message: { action: `SECKILL_${action.actionKind}`, resourceType: 'SECKILL_SESSION', resourceId: action.sessionId, policyVersion: action.policyVersion, oldValueHash: hash('e'), newValueHash: hash('f'), executorWallet: action.executorWallet, nonce, deadline },
     },
     digest: hash('9'),
   };

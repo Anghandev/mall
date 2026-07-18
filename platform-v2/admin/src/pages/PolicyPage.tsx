@@ -7,7 +7,7 @@ import {
   createPolicyApprovalChallenge,
   createPolicyDraft,
   fetchPolicyDrafts,
-  proposePolicyToSafe,
+  executePolicyDraft,
   submitPolicySecondarySignature,
   updatePolicyDraft,
 } from '../settlementAdminApi';
@@ -18,7 +18,7 @@ type PolicyField = { name: string; label: string; kind: 'number' | 'atomic' | 'a
 const governanceSteps = [
   { label: 'RBAC 授权', detail: 'ADMIN 创建批准挑战', icon: ShieldCheck },
   { label: '二次钱包签名', detail: 'Core 指定独立 signer', icon: KeyRound },
-  { label: 'Safe 多签', detail: 'Core 提交不可变 calldata 提案', icon: WalletCards },
+  { label: '普通钱包执行', detail: 'Core 绑定不可变 calldata 并提交执行', icon: WalletCards },
   { label: '发布 policyVersion', detail: '15 confirmations 后仅未来生效', icon: FileDiff },
 ] as const;
 
@@ -128,20 +128,20 @@ export function PolicyPage() {
     });
   };
 
-  const proposeSafe = async () => {
+  const executeDraft = async () => {
     if (!session || !isAdmin || !selected) return;
-    await run(async () => { const updated = await proposePolicyToSafe(selected.draftId, session.token); replaceDraft(updated); setNotice(`Safe 提案已创建，状态 ${updated.state}`); });
+    await run(async () => { const updated = await executePolicyDraft(selected.draftId, session.token); replaceDraft(updated); setNotice(`政策执行已提交，状态 ${updated.state}`); });
   };
 
   const replaceDraft = (updated: PolicyDraftProjection) => setDrafts((current) => current.map((draft) => draft.draftId === updated.draftId ? updated : draft));
   const run = async (action: () => Promise<void>) => { setLoading(true); setError(null); setNotice(''); try { await action(); } catch (cause) { setError(asCoreError(cause)); } finally { setLoading(false); } };
 
   return <>
-    <header className="page-header"><div className="page-icon"><FileDiff aria-hidden="true" /></div><div><p className="eyebrow">版本化资金规则</p><h1>政策治理工作台</h1><p>填写现有政策字段，由 Core 校验、生成签名挑战和 Safe 提案。未确认比例保持空值并显示 DecisionBlocked。</p></div><div className="requirement-list"><code>ADM-POL-001—006</code><code>ADM-CLEAR-002 / 003</code></div></header>
+    <header className="page-header"><div className="page-icon"><FileDiff aria-hidden="true" /></div><div><p className="eyebrow">版本化资金规则</p><h1>政策治理工作台</h1><p>填写现有政策字段，由 Core 校验、生成签名挑战并由治理钱包执行。未确认比例保持空值并显示 DecisionBlocked。</p></div><div className="requirement-list"><code>ADM-POL-001—006</code><code>ADM-CLEAR-002 / 003</code></div></header>
     <section className="policy-layout">
       <article className="panel policy-editor">
         <div className="panel-heading"><div><p className="section-kicker">政策草稿</p><h2>版本与表单</h2></div>{session ? <button className="button button-quiet" type="button" onClick={() => setReload((value) => value + 1)} disabled={loading}><RefreshCw aria-hidden="true" />刷新</button> : null}</div>
-        {!session ? <div className="session-prompt"><div><strong>连接平台治理钱包</strong><p>读取需平台角色；签名挑战和 Safe 提案仅 ADMIN。</p></div><button className="button button-primary" type="button" onClick={() => void connect()} disabled={status === 'CONNECTING'}><KeyRound aria-hidden="true" />SIWE 连接</button></div>
+        {!session ? <div className="session-prompt"><div><strong>连接平台治理钱包</strong><p>读取需平台角色；签名挑战和政策执行仅 ADMIN。</p></div><button className="button button-primary" type="button" onClick={() => void connect()} disabled={status === 'CONNECTING'}><KeyRound aria-hidden="true" />SIWE 连接</button></div>
           : !canRead ? <ErrorView title="Forbidden" message="当前会话没有政策读取权限。" />
             : <><div className="table-scroll"><table className="data-table"><thead><tr><th>草稿</th><th>版本</th><th>状态</th><th>校验</th><th>更新时间</th></tr></thead><tbody>{drafts.map((draft) => <tr key={draft.draftId} className={selectedId === draft.draftId ? 'is-selected' : undefined}><td><button className="table-link" type="button" onClick={() => setSelectedId(draft.draftId)}>{draft.draftId}</button></td><td>{draft.nextPolicyVersion}</td><td>{draft.state}</td><td>{draft.validationErrors.length ? `${draft.validationErrors.length} 项阻断` : '通过'}</td><td>{draft.updatedAt}</td></tr>)}</tbody></table></div>{!drafts.length && !loading ? <p className="muted-copy">Core 返回真实空草稿列表。</p> : null}</>}
         {canEdit ? <form className="governed-form" onSubmit={createDraft}>
@@ -155,9 +155,9 @@ export function PolicyPage() {
       <aside className="panel governance-panel">
         <p className="section-kicker">Publish evidence</p><h2>{selected ? `Draft ${selected.draftId}` : '选择草稿'}</h2>
         <ol className="governance-steps">{governanceSteps.map(({ label, detail, icon: Icon }, index) => <li key={label}><span className="step-index">{index + 1}</span><Icon aria-hidden="true" /><div><strong>{label}</strong><small>{detail}</small></div><span className="step-state">{selected?.state ?? '等待草稿'}</span></li>)}</ol>
-        {selected ? <><dl className="definition-grid"><div><dt>保存草稿 hash</dt><dd><code>{selected.policyHash ?? '待校验'}</code></dd></div><div><dt>Safe TxHash</dt><dd><code>{selected.safeTxHash ?? '待提案'}</code></dd></div></dl>{selected.validationErrors.length ? <ul className="validation-list">{selected.validationErrors.map((item) => <li key={`${item.code}:${item.field}`}><AlertTriangle aria-hidden="true" />{item.field}: {item.code}</li>)}</ul> : null}<div className="value-comparison"><div><span>Core 保存的草稿值</span><code>{canonicalJson(selected.payload)}</code></div><div><span>当前编辑值</span><code>{canonicalJson(editedPayload)}</code></div></div></> : null}
+        {selected ? <><dl className="definition-grid"><div><dt>保存草稿 hash</dt><dd><code>{selected.policyHash ?? '待校验'}</code></dd></div><div><dt>执行 TxHash</dt><dd><code>{selected.executionTxHash ?? '待执行'}</code></dd></div></dl>{selected.validationErrors.length ? <ul className="validation-list">{selected.validationErrors.map((item) => <li key={`${item.code}:${item.field}`}><AlertTriangle aria-hidden="true" />{item.field}: {item.code}</li>)}</ul> : null}<div className="value-comparison"><div><span>Core 保存的草稿值</span><code>{canonicalJson(selected.payload)}</code></div><div><span>当前编辑值</span><code>{canonicalJson(editedPayload)}</code></div></div></> : null}
         <button className="button button-primary button-full" type="button" onClick={() => void signSecondary()} disabled={!isAdmin || !selected || hasUnsavedChanges || selected.validationErrors.length > 0 || loading}><Check aria-hidden="true" />请求并提交二次签名</button>
-        <button className="button button-quiet button-full" type="button" onClick={() => void proposeSafe()} disabled={!isAdmin || selected?.state !== 'SECONDARY_SIGNED' || loading}><WalletCards aria-hidden="true" />提交 Safe 多签提案</button>
+        <button className="button button-quiet button-full" type="button" onClick={() => void executeDraft()} disabled={!isAdmin || selected?.state !== 'SECONDARY_SIGNED' || loading}><WalletCards aria-hidden="true" />提交治理钱包执行</button>
         <p className="button-explanation">签名 nonce 与 5 分钟 deadline 由页面自动生成；钱包地址使用 Core challenge.signer。</p>
       </aside>
     </section>

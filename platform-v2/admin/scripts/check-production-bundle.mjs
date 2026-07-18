@@ -26,7 +26,7 @@ const required = [
   '/v2/admin/catalog/products/batch-lifecycle',
   '/v2/admin/payments/',
   '/v2/admin/settlement-requests',
-  '/v2/admin/settlement-batches',
+  '/v2/admin/settlement-transfers',
 ];
 
 function files(path) {

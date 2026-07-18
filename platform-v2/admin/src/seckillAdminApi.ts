@@ -28,10 +28,10 @@ const signaturePattern = /^0x(?:[0-9a-fA-F]{2})+$/;
 const coreOrigin = (import.meta.env.VITE_CORE_API_ORIGIN ?? '').trim().replace(/\/$/, '');
 const governanceActionKinds = ['OPEN_SESSION', 'FORCE_CLOSE', 'RESUME_PURCHASES', 'PRIZE_INJECTION'] as const satisfies readonly SeckillGovernanceActionKind[];
 const governanceActionStates = [
-  'DRAFT', 'SECONDARY_SIGNED', 'PENDING_PROPOSAL', 'SAFE_PROPOSED', 'MINED',
+  'DRAFT', 'SECONDARY_SIGNED', 'PENDING_EXECUTION', 'SUBMITTED', 'MINED',
   'FINAL', 'REORGED', 'FAILED', 'CANCELLED',
 ] as const satisfies readonly SeckillGovernanceActionState[];
-const governanceAllowedActions = ['APPROVE_SECONDARY', 'PROPOSE_SAFE', 'CANCEL'] as const;
+const governanceAllowedActions = ['APPROVE_SECONDARY', 'EXECUTE', 'CANCEL'] as const;
 
 export type SeckillPageQuery = Readonly<{ cursor?: string; limit?: number }>;
 
@@ -211,16 +211,16 @@ export async function submitSeckillGovernanceApproval(
   return body;
 }
 
-export async function proposeSeckillGovernanceAction(
+export async function executeSeckillGovernanceAction(
   action: SeckillGovernanceActionProjection,
   token: string,
 ): Promise<SeckillGovernanceActionProjection> {
-  if (!action.allowedActions.includes('PROPOSE_SAFE') || action.state !== 'SECONDARY_SIGNED') {
-    throw invalid('Seckill action is not ready for a Safe proposal', 409);
+  if (!action.allowedActions.includes('EXECUTE') || action.state !== 'SECONDARY_SIGNED') {
+    throw invalid('Seckill action is not ready for governance wallet execution', 409);
   }
-  const body = await authenticatedWrite(`/v2/admin/seckill/actions/${encodeURIComponent(action.actionId)}/safe-proposal`, {}, token);
-  if (!isSeckillGovernanceAction(body) || !sameAction(body, action) || body.state !== 'PENDING_PROPOSAL') {
-    throw invalid('Seckill Safe proposal result does not match the selected action');
+  const body = await authenticatedWrite(`/v2/admin/seckill/actions/${encodeURIComponent(action.actionId)}/execute`, {}, token);
+  if (!isSeckillGovernanceAction(body) || !sameAction(body, action) || body.state !== 'PENDING_EXECUTION') {
+    throw invalid('Seckill execution result does not match the selected action');
   }
   return body;
 }
@@ -349,7 +349,7 @@ async function writeAction(
 function isSeckillGovernanceAction(value: unknown): value is SeckillGovernanceActionProjection {
   if (!isRecord(value) || !hasExactKeys(value, [
     'artifactVersion', 'actionId', 'sessionId', 'policyVersion', 'actionKind', 'state', 'evidenceHash',
-    'safeAddress', 'targetAddress', 'calldataHash', 'safeNonce', 'safeTxHash', 'proposalHash',
+    'executorWallet', 'targetAddress', 'calldataHash', 'executorNonce', 'submittedTxHash', 'executionEvidenceHash',
     'executionTxHash', 'blockNumber', 'blockHash', 'confirmations', 'canonical', 'actorWallet',
     'secondarySigner', 'approvalNonce', 'approvalDeadline', 'createdAt', 'updatedAt', 'sessionPlan',
     'prizeInjection', 'allowedActions',
@@ -361,12 +361,12 @@ function isSeckillGovernanceAction(value: unknown): value is SeckillGovernanceAc
     && governanceActionKinds.includes(value.actionKind as never)
     && governanceActionStates.includes(value.state as never)
     && bytes32Pattern.test(String(value.evidenceHash))
-    && addressPattern.test(String(value.safeAddress))
+    && addressPattern.test(String(value.executorWallet))
     && addressPattern.test(String(value.targetAddress))
     && bytes32Pattern.test(String(value.calldataHash))
-    && isNullableAmount(value.safeNonce)
-    && isNullableHash(value.safeTxHash)
-    && isNullableHash(value.proposalHash)
+    && isNullableAmount(value.executorNonce)
+    && isNullableHash(value.submittedTxHash)
+    && isNullableHash(value.executionEvidenceHash)
     && isNullableHash(value.executionTxHash)
     && isNullableAmount(value.blockNumber)
     && isNullableHash(value.blockHash)
@@ -416,13 +416,13 @@ function isSeckillSessionPlan(value: unknown) {
 function isSeckillPrizeInjection(value: unknown) {
   return isRecord(value)
     && hasExactKeys(value, [
-      'injectionId', 'amountUsdt', 'operationsSafeAddress', 'custodySafeAddress', 'tokenAddress',
+      'injectionId', 'amountUsdt', 'operationsWalletAddress', 'settlementWalletAddress', 'tokenAddress',
       'finalJournalId', 'reversalJournalId',
     ])
     && bytes32Pattern.test(String(value.injectionId))
     && amountPattern.test(String(value.amountUsdt))
-    && addressPattern.test(String(value.operationsSafeAddress))
-    && addressPattern.test(String(value.custodySafeAddress))
+    && addressPattern.test(String(value.operationsWalletAddress))
+    && addressPattern.test(String(value.settlementWalletAddress))
     && addressPattern.test(String(value.tokenAddress))
     && (value.finalJournalId === null || nonEmpty(value, ['finalJournalId']))
     && (value.reversalJournalId === null || nonEmpty(value, ['reversalJournalId']));
@@ -434,7 +434,7 @@ function isSeckillGovernanceChallenge(
   input: SeckillGovernanceChallengeRequest,
 ): value is SeckillGovernanceChallenge {
   if (!isRecord(value) || !hasExactKeys(value, [
-    'artifactVersion', 'actionId', 'sessionId', 'actionKind', 'signer', 'safeAddress', 'typedData', 'digest',
+    'artifactVersion', 'actionId', 'sessionId', 'actionKind', 'signer', 'executorWallet', 'typedData', 'digest',
   ])) return false;
   if (
     value.artifactVersion !== artifactVersion
@@ -442,7 +442,7 @@ function isSeckillGovernanceChallenge(
       || String(value.sessionId).toLowerCase() !== action.sessionId.toLowerCase()
       || value.actionKind !== action.actionKind
       || !addressPattern.test(String(value.signer))
-      || String(value.safeAddress).toLowerCase() !== action.safeAddress.toLowerCase()
+      || String(value.executorWallet).toLowerCase() !== action.executorWallet.toLowerCase()
       || !bytes32Pattern.test(String(value.digest))
       || !isRecord(value.typedData)
       || !hasExactKeys(value.typedData, ['domain', 'types', 'primaryType', 'message'])
@@ -467,7 +467,7 @@ function isSeckillGovernanceChallenge(
     && message.policyVersion === action.policyVersion
     && bytes32Pattern.test(String(message.oldValueHash))
     && bytes32Pattern.test(String(message.newValueHash))
-    && String(message.safeAddress).toLowerCase() === action.safeAddress.toLowerCase()
+    && String(message.executorWallet).toLowerCase() === action.executorWallet.toLowerCase()
     && message.nonce === input.nonce
     && message.deadline === input.deadline;
 }
@@ -479,7 +479,7 @@ const sensitiveActionFields = [
   ['policyVersion', 'uint64'],
   ['oldValueHash', 'bytes32'],
   ['newValueHash', 'bytes32'],
-  ['safeAddress', 'address'],
+  ['executorWallet', 'address'],
   ['nonce', 'uint256'],
   ['deadline', 'uint64'],
 ] as const;
@@ -497,7 +497,7 @@ function sameAction(value: SeckillGovernanceActionProjection, expected: SeckillG
     && value.sessionId.toLowerCase() === expected.sessionId.toLowerCase()
     && value.actionKind === expected.actionKind
     && value.policyVersion === expected.policyVersion
-    && value.safeAddress.toLowerCase() === expected.safeAddress.toLowerCase()
+    && value.executorWallet.toLowerCase() === expected.executorWallet.toLowerCase()
     && value.targetAddress.toLowerCase() === expected.targetAddress.toLowerCase()
     && value.calldataHash.toLowerCase() === expected.calldataHash.toLowerCase();
 }

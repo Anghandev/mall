@@ -62,7 +62,7 @@ describe('merchant lifecycle admin API', () => {
     const published = merchantDetail({
       merchant: { ...current.merchant, status: 'APPROVED', reviewedAt: '2026-07-16T01:00:00.000Z', reviewedBy: address('1') },
       qualification: current.qualification,
-      reviews: [{ actionId: challenge.actionId, action: 'APPROVE', fromStatus: 'PENDING', toStatus: 'APPROVED', applicationVersion: 1, reasonCode: 'QUALIFICATION_APPROVED', state: 'PUBLISHED', secondarySigner: address('2'), actionDigest: challenge.digest, safeTxHash: hash('f'), createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T01:00:00.000Z' }],
+      reviews: [{ actionId: challenge.actionId, action: 'APPROVE', fromStatus: 'PENDING', toStatus: 'APPROVED', applicationVersion: 1, reasonCode: 'QUALIFICATION_APPROVED', state: 'PUBLISHED', secondarySigner: address('2'), actionDigest: challenge.digest, approvalSignatureHash: hash('f'), createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T01:00:00.000Z' }],
     });
     const fetchMock = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
       const url = String(input);
@@ -73,7 +73,7 @@ describe('merchant lifecycle admin API', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const bound = await createMerchantReviewChallenge(current, { action: 'APPROVE', reasonCode: 'QUALIFICATION_APPROVED', idempotencyKey: 'review-approve-1' }, address('1'), 'jwt');
-    await expect(publishMerchantReview(bound, '0x1234', 'jwt')).resolves.toMatchObject({ merchant: { status: 'APPROVED' }, reviews: [{ safeTxHash: hash('f') }] });
+    await expect(publishMerchantReview(bound, '0x1234', 'jwt')).resolves.toMatchObject({ merchant: { status: 'APPROVED' }, reviews: [{ approvalSignatureHash: hash('f') }] });
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({ signature: '0x1234' });
   });
 
@@ -154,7 +154,7 @@ function merchantDetail(overrides: Partial<MerchantLifecycleDetail> = {}): Merch
       contributions: { finalizedNplBurnAmount: '7', fulfillmentAvailableBnmAmount: '8', ledgerReconciled: true },
     },
     balances: ['LOCKED', 'AVAILABLE', 'REQUESTED', 'BATCHED', 'SETTLED'].map((state, index) => ({ state: state as MerchantLifecycleDetail['balances'][number]['state'], amount: String(index + 1) })),
-    settlements: [{ requestId: hash('d'), asset: 'USDT', amount: '5', state: 'SETTLED', requestedAt: '2026-07-16T00:00:00.000Z', safeTxHash: hash('e'), settledAt: '2026-07-16T01:00:00.000Z' }],
+    settlements: [{ requestId: hash('d'), asset: 'USDT', amount: '5', state: 'SETTLED', requestedAt: '2026-07-16T00:00:00.000Z', finalExecutionTxHashes: [hash('e')], settledAt: '2026-07-16T01:00:00.000Z' }],
     reviews: [],
   };
   return { ...base, ...overrides };

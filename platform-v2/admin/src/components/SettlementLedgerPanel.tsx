@@ -32,7 +32,7 @@ export function SettlementLedgerPanel() {
   return (
     <section className="panel admin-resource-panel" aria-labelledby="settlement-ledger-title">
       <div className="panel-heading">
-        <div><p className="section-kicker">GET /v2/settlements</p><h2 id="settlement-ledger-title">签名结算与 Safe 最终状态</h2></div>
+        <div><p className="section-kicker">GET /v2/settlements</p><h2 id="settlement-ledger-title">签名结算与普通钱包最终状态</h2></div>
         {session ? <button className="button button-quiet" type="button" onClick={() => setReload((value) => value + 1)} disabled={loading}><RefreshCw aria-hidden="true" />刷新</button> : null}
       </div>
       {!session ? (
@@ -47,7 +47,7 @@ export function SettlementLedgerPanel() {
               {projection.points.map((points) => <article key={`${points.pointsType}:${points.purpose}:${points.state}`}><span>{points.pointsType} backend points</span><strong>{points.amount}</strong><small>{points.state} · NON_TRANSFERABLE</small></article>)}
             </div> : <div className="empty-inline"><WalletCards aria-hidden="true" /><div><strong>当前钱包没有资产或 BNM points 余额</strong><p>这是 Core 返回的真实空投影。</p></div></div>}
             {projection.requests.length ? (
-              <div className="table-scroll"><table className="data-table"><thead><tr><th>申请</th><th>Rail / Asset</th><th>金额</th><th>状态</th><th>Safe TxHash</th></tr></thead><tbody>{projection.requests.map((request) => <tr key={request.request_id}><td><code>{request.request_id}</code><small>{request.requested_at}</small></td><td><strong>{request.rail}</strong><small>{request.asset}</small></td><td><strong>{request.amount}</strong><small>{request.recipient_address}</small></td><td><span className="status-chip status-ready"><CheckCircle2 aria-hidden="true" />{request.state}</span></td><td><code>{request.final_safe_tx_hash ?? '等待最终确认'}</code></td></tr>)}</tbody></table></div>
+              <div className="table-scroll"><table className="data-table"><thead><tr><th>申请</th><th>Rail / Asset</th><th>金额</th><th>状态</th><th>Execution TxHash</th></tr></thead><tbody>{projection.requests.map((request) => <tr key={request.request_id}><td><code>{request.request_id}</code><small>{request.requested_at}</small></td><td><strong>{request.rail}</strong><small>{request.asset}</small></td><td><strong>{request.amount}</strong><small>{request.recipient_address}</small></td><td><span className="status-chip status-ready"><CheckCircle2 aria-hidden="true" />{request.state}</span></td><td><code>{request.final_execution_tx_hashes[0] ?? '等待最终确认'}</code><small>{request.final_execution_tx_hashes.length} final transfers</small></td></tr>)}</tbody></table></div>
             ) : <div className="empty-inline"><WalletCards aria-hidden="true" /><div><strong>当前钱包没有结算申请</strong><p>这是 Core 返回的真实空列表。</p></div></div>}
           </>
         ) : null}

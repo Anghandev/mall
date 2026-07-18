@@ -65,15 +65,17 @@ describe('settlement/admin coordinated Core client', () => {
       snapshotId: challenge.snapshotId,
       evidenceHash: challenge.evidenceHash,
       policyVersion: challenge.policyVersion,
-      governanceSafeAddress: challenge.safeAddress,
+      governanceWalletAddress: challenge.executorWallet,
       routerAddress: challenge.routerAddress,
       actorWallet: address('1'),
       secondarySigner: challenge.signer,
       secondarySignatureHash: hash('8'),
       approvalNonce: nonce,
       approvalDeadline: new Date(Number(deadline) * 1_000).toISOString(),
-      state: 'PENDING_PROPOSAL',
-      safeNonce: null,
+      state: 'PENDING_EXECUTION',
+      executorNonce: null,
+      submittedTxHash: null,
+      executionEvidenceHash: null,
     });
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
@@ -84,14 +86,14 @@ describe('settlement/admin coordinated Core client', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(fetchCoverageBreakerActions('jwt')).resolves.toMatchObject([{ action: 'PAUSE', state: 'FINAL', safeNonce: '12' }]);
+    await expect(fetchCoverageBreakerActions('jwt')).resolves.toMatchObject([{ action: 'PAUSE', state: 'FINAL', executorNonce: '12' }]);
     const received = await createCoverageBreakerResumeChallenge({ nonce, deadline }, 'jwt');
     await expect(authorizeCoverageBreakerResume({
       snapshotId: received.snapshotId,
       nonce,
       deadline,
       signature: '0x1234',
-    }, received, address('1'), 'jwt')).resolves.toMatchObject({ action: 'RESUME', state: 'PENDING_PROPOSAL' });
+    }, received, address('1'), 'jwt')).resolves.toMatchObject({ action: 'RESUME', state: 'PENDING_EXECUTION' });
 
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/v2/admin/coverage-breaker/resume-challenge', expect.objectContaining({
       method: 'POST',
@@ -137,7 +139,7 @@ describe('settlement/admin coordinated Core client', () => {
   });
 
   it('rejects a non-canonical Safe nonce', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([coverageAction({ safeNonce: '01' })])));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([coverageAction({ executorNonce: '01' })])));
 
     await expect(fetchCoverageBreakerActions('jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
   });
@@ -152,7 +154,7 @@ describe('settlement/admin coordinated Core client', () => {
       snapshotId: challenge.snapshotId,
       evidenceHash: challenge.evidenceHash,
       policyVersion: challenge.policyVersion,
-      governanceSafeAddress: challenge.safeAddress,
+      governanceWalletAddress: challenge.executorWallet,
       routerAddress: challenge.routerAddress,
       actorWallet: address('9'),
       secondarySigner: challenge.signer,
@@ -211,18 +213,18 @@ describe('settlement/admin coordinated Core client', () => {
       artifactVersion,
       wallet: address('1'),
       balances: [
-        { asset: 'USDT', purpose: 'MERCHANT_RECEIVABLE', rewardSubtype: null, state: 'BATCHED', amount: '45' },
+        { asset: 'USDT', purpose: 'MERCHANT_RECEIVABLE', rewardSubtype: null, state: 'SUBMITTED', amount: '45' },
         { asset: 'NPL', purpose: 'REWARD', rewardSubtype: 'GENESIS', state: 'AVAILABLE', amount: '8' },
       ],
       points: [{ pointsType: 'BNM', purpose: 'BNM_LIABILITY', state: 'AVAILABLE', amount: '100', transferable: false }],
-      requests: [{ rail: 'MERCHANT_USDT', state: 'SETTLED', amount: '45', recipient_address: address('1'), final_safe_tx_hash: hash('2') }],
+      requests: [{ rail: 'MERCHANT_USDT', state: 'SETTLED', amount: '45', recipient_address: address('1'), final_execution_tx_hashes: [hash('2')] }],
     })));
 
     await expect(fetchSettlementLedger('jwt')).resolves.toMatchObject({
       artifactVersion,
       balances: [{ rewardSubtype: null }, { rewardSubtype: 'GENESIS' }],
       points: [{ pointsType: 'BNM', state: 'AVAILABLE', transferable: false }],
-      requests: [{ state: 'SETTLED', final_safe_tx_hash: hash('2') }],
+      requests: [{ state: 'SETTLED', final_execution_tx_hashes: [hash('2')] }],
     });
   });
 
@@ -292,7 +294,7 @@ describe('settlement/admin coordinated Core client', () => {
       : jsonResponse({ ...systemConfig(), published: true }));
     vi.stubGlobal('fetch', fetchMock);
     const received = await createSystemConfigApprovalChallenge('config-1', { nonce: '9', deadline: '1800000000' }, 'jwt');
-    const approval = { action: received.action, resourceType: received.resourceType, resourceId: received.resourceId, policyVersion: received.policyVersion, oldValueHash: received.oldValueHash, newValueHash: received.newValueHash, safeAddress: received.safeAddress, nonce: received.nonce, deadline: received.deadline, signature: '0xsecondary' };
+    const approval = { action: received.action, resourceType: received.resourceType, resourceId: received.resourceId, policyVersion: received.policyVersion, oldValueHash: received.oldValueHash, newValueHash: received.newValueHash, executorWallet: received.executorWallet, nonce: received.nonce, deadline: received.deadline, signature: '0xsecondary' };
 
     await expect(publishSystemConfigVersion('config-1', approval, 'jwt')).resolves.toMatchObject({ published: true });
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/v2/admin/system-config/versions/config-1/approval-challenge', expect.objectContaining({
@@ -311,7 +313,7 @@ describe('settlement/admin coordinated Core client', () => {
       : jsonResponse({
         metrics: [{ snapshotId: 'snap-1', component: 'RPC_PRIMARY', metricName: 'heightLag', unit: 'BLOCK', value: null, status: 'CONFIGURATION_REQUIRED', windowStartedAt: '2026-07-15T00:00:00.000Z', windowEndedAt: '2026-07-15T00:01:00.000Z', evidence: {}, observedAt: '2026-07-15T00:01:00.000Z' }],
         alerts: [{ alertEventId: 'alert-1', alertKey: 'rpc-height', state: 'OPENED', severity: 'CRITICAL', snapshotId: 'snap-1', actorWallet: null, createdAt: '2026-07-15T00:01:00.000Z' }],
-        coverage: [{ asset: 'USDT', safe_address: address('4'), assets: '100', unsettled_liabilities: '101', covered: false, observed_at: '2026-07-15T00:01:00.000Z' }],
+        coverage: [{ asset: 'USDT', wallet_address: address('4'), assets: '100', unsettled_liabilities: '101', covered: false, observed_at: '2026-07-15T00:01:00.000Z' }],
       }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -387,7 +389,7 @@ function notificationCampaign() {
 }
 function coverageResumeChallenge(nonce: string, deadline: string) {
   const snapshotId = hash('1');
-  const safeAddress = address('4');
+  const executorWallet = address('4');
   const routerAddress = address('3');
   return {
     artifactVersion,
@@ -395,7 +397,7 @@ function coverageResumeChallenge(nonce: string, deadline: string) {
     evidenceHash: hash('2'),
     policyVersion: '2',
     signer: address('2'),
-    safeAddress,
+    executorWallet,
     routerAddress,
     typedData: {
       domain: { name: 'Abu24KV2Core', version: '2', chainId: 56, verifyingContract: routerAddress },
@@ -406,14 +408,14 @@ function coverageResumeChallenge(nonce: string, deadline: string) {
         { name: 'policyVersion', type: 'uint64' },
         { name: 'oldValueHash', type: 'bytes32' },
         { name: 'newValueHash', type: 'bytes32' },
-        { name: 'safeAddress', type: 'address' },
+        { name: 'executorWallet', type: 'address' },
         { name: 'nonce', type: 'uint256' },
         { name: 'deadline', type: 'uint64' },
       ] },
       primaryType: 'SensitiveAction',
       message: {
         action: 'RESUME_NEW_PAYMENTS', resourceType: 'COVERAGE_BREAKER', resourceId: snapshotId,
-        policyVersion: '2', oldValueHash: hash('3'), newValueHash: hash('4'), safeAddress, nonce, deadline,
+        policyVersion: '2', oldValueHash: hash('3'), newValueHash: hash('4'), executorWallet, nonce, deadline,
       },
     },
     digest: hash('5'),
@@ -428,13 +430,13 @@ function coverageAction(overrides: Record<string, unknown> = {}) {
     action: 'PAUSE',
     targetPaused: true,
     evidenceHash: hash('2'),
-    governanceSafeAddress: address('4'),
+    governanceWalletAddress: address('4'),
     routerAddress: address('3'),
     calldataHash: hash('7'),
     state: 'FINAL',
-    safeNonce: '12',
-    safeTxHash: hash('8'),
-    proposalHash: hash('9'),
+    executorNonce: '12',
+    submittedTxHash: hash('8'),
+    executionEvidenceHash: hash('9'),
     executionTxHash: hash('a'),
     confirmations: 15,
     actorWallet: null,
@@ -468,7 +470,7 @@ function adminBusinessDashboard() {
     fulfillmentQueues: { exchange: '1', delay: '2', arbitration: '3', forcedReceipt: '4', takeover: '5' },
     settlements: { requestedCount: '6', requestedUsdt: '600000000', settledCount: '4', settledUsdt: '400000000', failedTransactions: '2' },
     risk: { abnormalObservationsToday: '11', blacklistBlocksToday: '12', activeRestrictions: '13', pendingAppeals: '14' },
-    coverage: [{ snapshotId: 'coverage-1', blockNumber: '123', recordedAt: '2026-07-15T04:00:00.000Z', asset: 'USDT', safeAddress: address('4'), verifiedAssets: '100', unsettledLiabilities: '101', covered: false }],
+    coverage: [{ snapshotId: 'coverage-1', blockNumber: '123', recordedAt: '2026-07-15T04:00:00.000Z', asset: 'USDT', walletAddress: address('4'), verifiedAssets: '100', unsettledLiabilities: '101', covered: false }],
     breakers: [
       { scope: 'NEW_PAYMENT', paused: true },
       { scope: 'SECKILL_PURCHASE', paused: false },
@@ -479,10 +481,10 @@ function adminBusinessDashboard() {
     ],
   };
 }
-function policyDraft() { return { draftId: 'draft-1', nextPolicyVersion: '2', basePolicyVersion: '1', artifactVersion, payload: {}, validationErrors: [], state: 'DRAFT', policyHash: null, operationsHash: null, publicationDigest: null, publicationNonce: null, publicationDeadline: null, secondarySigner: null, secondarySignatureHash: null, safeAddress: null, safeCalldataHash: null, safeTxHash: null, safeProposalHash: null, createdBy: address('1'), createdAt: '2026-07-15T00:00:00.000Z', updatedAt: '2026-07-15T00:00:00.000Z' }; }
+function policyDraft() { return { draftId: 'draft-1', nextPolicyVersion: '2', basePolicyVersion: '1', artifactVersion, payload: {}, validationErrors: [], state: 'DRAFT', policyHash: null, operationsHash: null, publicationDigest: null, publicationNonce: null, publicationDeadline: null, secondarySigner: null, secondarySignatureHash: null, governanceWallet: null, executionCalldataHash: null, executionTxHash: null, executionEvidenceHash: null, createdBy: address('1'), createdAt: '2026-07-15T00:00:00.000Z', updatedAt: '2026-07-15T00:00:00.000Z' }; }
 function cmsVersion() { return { entryId: 'entry-1', versionId: 'version-1', version: 1, slug: 'rules', contentType: 'SECKILL_RULES', placement: 'seckill', locale: 'zh-CN', contentFormat: 'STRUCTURED_RICH_TEXT', content: {}, contentHash: hash('4'), audience: {}, startsAt: null, endsAt: null, frequencyCap: null, policyVersion: '2', published: false, publicationType: null, createdBy: address('1'), createdAt: '2026-07-15T00:00:00.000Z' }; }
 function systemConfig() { return { configVersionId: 'config-1', configKey: 'RPC', version: 1, payload: {}, payloadHash: hash('5'), effectiveFrom: '2026-07-16T00:00:00.000Z', published: false, createdBy: address('1'), createdAt: '2026-07-15T00:00:00.000Z' }; }
 function systemConfigChallenge() {
-  const message = { action: 'PUBLISH_SYSTEM_CONFIG', resourceType: 'SYSTEM_CONFIG', resourceId: 'config-1', policyVersion: '2', oldValueHash: hash('1'), newValueHash: hash('2'), safeAddress: address('3'), nonce: '9', deadline: '1800000000' };
+  const message = { action: 'PUBLISH_SYSTEM_CONFIG', resourceType: 'SYSTEM_CONFIG', resourceId: 'config-1', policyVersion: '2', oldValueHash: hash('1'), newValueHash: hash('2'), executorWallet: address('3'), nonce: '9', deadline: '1800000000' };
   return { configVersionId: 'config-1', signer: address('4'), ...message, typedData: { domain: { name: 'Abu24KV2Core', version: '2', chainId: 56, verifyingContract: address('5') }, types: { SensitiveAction: [] }, primaryType: 'SensitiveAction', message }, digest: hash('6') };
 }

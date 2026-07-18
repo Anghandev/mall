@@ -26,10 +26,10 @@ export function TakeoverFundingPanel() {
 }
 
 function approvalFromChallenge(message: Readonly<Record<string, unknown>>, signature: string): SensitiveApproval {
-  const fields = ['action', 'resourceType', 'resourceId', 'policyVersion', 'oldValueHash', 'newValueHash', 'safeAddress', 'nonce', 'deadline'] as const;
+  const fields = ['action', 'resourceType', 'resourceId', 'policyVersion', 'oldValueHash', 'newValueHash', 'executorWallet', 'nonce', 'deadline'] as const;
   const values = Object.fromEntries(fields.map((field) => [field, message[field]]));
   if (!fields.every((field) => typeof values[field] === 'string' || typeof values[field] === 'number' || typeof values[field] === 'bigint')) throw invalid('Core challenge missing governed approval fields');
-  return { action: String(values.action), resourceType: String(values.resourceType), resourceId: String(values.resourceId), policyVersion: String(values.policyVersion), oldValueHash: String(values.oldValueHash), newValueHash: String(values.newValueHash), safeAddress: String(values.safeAddress), nonce: String(values.nonce), deadline: String(values.deadline), signature };
+  return { action: String(values.action), resourceType: String(values.resourceType), resourceId: String(values.resourceId), policyVersion: String(values.policyVersion), oldValueHash: String(values.oldValueHash), newValueHash: String(values.newValueHash), executorWallet: String(values.executorWallet), nonce: String(values.nonce), deadline: String(values.deadline), signature };
 }
 function invalid(message: string) { return new CoreApiError({ code: 'InvalidResponse', message, status: 400 }); }
 function asCoreError(cause: unknown) { return cause instanceof CoreApiError ? cause : new CoreApiError({ code: 'ExternalBlocked', message: '接管筹资 Core 能力不可用', status: 503 }); }

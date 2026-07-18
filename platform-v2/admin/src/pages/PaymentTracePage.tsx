@@ -1,13 +1,13 @@
 import type {
-  AdminSettlementBatchDetail,
-  AdminSettlementBatchList,
   AdminSettlementRequestDetail,
   AdminSettlementRequestList,
+  AdminSettlementTransferDetail,
+  AdminSettlementTransferList,
   CanonicalPaymentIntent,
   PaymentProjection,
-  SettlementBatchState,
   SettlementRequestState,
   SettlementRail,
+  SettlementTransferState,
 } from '@abu24k/core-artifacts';
 import {
   AlertTriangle,
@@ -28,20 +28,20 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { CoreApiError } from '../coreApi';
 import { useCoreSession } from '../coreSession';
 import {
-  fetchAdminSettlementBatch,
-  fetchAdminSettlementBatches,
   fetchAdminSettlementRequest,
   fetchAdminSettlementRequests,
+  fetchAdminSettlementTransfer,
+  fetchAdminSettlementTransfers,
   fetchGlobalPaymentTrace,
-  settlementBatchStates,
   settlementRails,
   settlementRequestStates,
-  type AdminSettlementBatchFilters,
+  settlementTransferStates,
   type AdminSettlementRequestFilters,
+  type AdminSettlementTransferFilters,
   type SettlementAsset,
 } from '../settlementClearingApi';
 
-type View = 'PAYMENT' | 'REQUESTS' | 'BATCHES';
+type View = 'PAYMENT' | 'REQUESTS' | 'TRANSFERS';
 const readableRoles = ['ADMIN', 'OPERATOR', 'AUDITOR'];
 
 export function PaymentTracePage() {
@@ -56,7 +56,7 @@ export function PaymentTracePage() {
         <div>
           <p className="eyebrow">GLOBAL CLEARING EVIDENCE</p>
           <h1>全局清算审计</h1>
-          <p>按订单、签名结算申请和不可变 Safe 批次追踪 Core 证据。金额、守恒、权限与终态均不在浏览器计算。</p>
+          <p>按订单、签名结算申请和普通钱包逐笔转账追踪 Core 证据。金额、守恒、权限与终态均不在浏览器计算。</p>
         </div>
         <div className="requirement-list"><code>ADM-CLEAR-001 / 002 / 004</code><code>ADM-CLEAR-005 / 006 / 007</code></div>
       </header>
@@ -76,13 +76,13 @@ export function PaymentTracePage() {
             <div className="merchant-status-tabs" role="tablist" aria-label="清算视图">
               <ViewTab active={view === 'PAYMENT'} onClick={() => setView('PAYMENT')}>支付穿透</ViewTab>
               <ViewTab active={view === 'REQUESTS'} onClick={() => setView('REQUESTS')}>结算申请</ViewTab>
-              <ViewTab active={view === 'BATCHES'} onClick={() => setView('BATCHES')}>Safe 批次</ViewTab>
+              <ViewTab active={view === 'TRANSFERS'} onClick={() => setView('TRANSFERS')}>结算转账</ViewTab>
             </div>
             <span className="status-chip status-ready"><ShieldCheck aria-hidden="true" />{session.roles.join(' / ')} · READ ONLY</span>
           </section>
           {view === 'PAYMENT' ? <PaymentWorkspace token={session.token} /> : null}
           {view === 'REQUESTS' ? <RequestWorkspace token={session.token} /> : null}
-          {view === 'BATCHES' ? <BatchWorkspace token={session.token} /> : null}
+          {view === 'TRANSFERS' ? <TransferWorkspace token={session.token} /> : null}
         </>
       )}
       {sessionError ? <p className="inline-notice" role="alert">{sessionError}</p> : null}
@@ -162,8 +162,8 @@ function RequestWorkspace({ token }: { token: string }) {
         <TextFilter label="Merchant ID" value={draft.merchantId} setValue={(value) => setDraft({ ...draft, merchantId: value })} />
         <TextFilter label="Wallet address" value={draft.walletAddress} setValue={(value) => setDraft({ ...draft, walletAddress: value })} />
         <TextFilter label="Order ID" value={draft.orderId} setValue={(value) => setDraft({ ...draft, orderId: value })} />
-        <TextFilter label="Batch ID" value={draft.batchId} setValue={(value) => setDraft({ ...draft, batchId: value })} />
-        <TextFilter label="Safe TxHash" value={draft.safeTxHash} setValue={(value) => setDraft({ ...draft, safeTxHash: value })} />
+        <TextFilter label="Transfer ID" value={draft.transferId} setValue={(value) => setDraft({ ...draft, transferId: value })} />
+        <TextFilter label="Execution TxHash" value={draft.executionTxHash} setValue={(value) => setDraft({ ...draft, executionTxHash: value })} />
         <label>Rail<select value={draft.rail ?? ''} onChange={(event) => setDraft({ ...draft, rail: (event.target.value || undefined) as SettlementRail | undefined })}><option value="">全部</option>{settlementRails.map((value) => <option key={value}>{value}</option>)}</select></label>
         <label>Asset<select value={draft.asset ?? ''} onChange={(event) => setDraft({ ...draft, asset: (event.target.value || undefined) as SettlementAsset | undefined })}><option value="">全部</option><option>USDT</option><option>NPL</option></select></label>
         <label>State<select value={draft.state ?? ''} onChange={(event) => setDraft({ ...draft, state: (event.target.value || undefined) as SettlementRequestState | undefined })}><option value="">全部</option>{settlementRequestStates.map((value) => <option key={value}>{value}</option>)}</select></label>
@@ -188,52 +188,52 @@ function RequestWorkspace({ token }: { token: string }) {
   </section>;
 }
 
-const emptyBatchFilters: AdminSettlementBatchFilters = { limit: 25 };
+const emptyTransferFilters: AdminSettlementTransferFilters = { limit: 25 };
 
-function BatchWorkspace({ token }: { token: string }) {
-  const [draft, setDraft] = useState<AdminSettlementBatchFilters>(emptyBatchFilters);
-  const [applied, setApplied] = useState<AdminSettlementBatchFilters>(emptyBatchFilters);
-  const [result, setResult] = useState<AdminSettlementBatchList | null>(null);
-  const [detail, setDetail] = useState<AdminSettlementBatchDetail | null>(null);
+function TransferWorkspace({ token }: { token: string }) {
+  const [draft, setDraft] = useState<AdminSettlementTransferFilters>(emptyTransferFilters);
+  const [applied, setApplied] = useState<AdminSettlementTransferFilters>(emptyTransferFilters);
+  const [result, setResult] = useState<AdminSettlementTransferList | null>(null);
+  const [detail, setDetail] = useState<AdminSettlementTransferDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<CoreApiError | null>(null);
 
-  const load = async (filters: AdminSettlementBatchFilters, append = false) => {
+  const load = async (filters: AdminSettlementTransferFilters, append = false) => {
     setLoading(true); setError(null);
     try {
-      const next = await fetchAdminSettlementBatches(filters, token);
-      setResult((current) => append && current ? { ...next, batches: [...current.batches, ...next.batches] } : next);
+      const next = await fetchAdminSettlementTransfers(filters, token);
+      setResult((current) => append && current ? { ...next, transfers: [...current.transfers, ...next.transfers] } : next);
       setApplied(filters);
-    } catch (cause) { setError(asCoreError(cause, 'Safe 结算批次列表不可用')); }
+    } catch (cause) { setError(asCoreError(cause, '结算转账列表不可用')); }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { void load(emptyBatchFilters); }, [token]);
+  useEffect(() => { void load(emptyTransferFilters); }, [token]);
 
-  const select = async (batchId: string) => {
+  const select = async (transferId: string) => {
     setDetailLoading(true); setError(null); setDetail(null);
-    try { setDetail(await fetchAdminSettlementBatch(batchId, token)); }
-    catch (cause) { setError(asCoreError(cause, 'Safe 结算批次详情不可用')); }
+    try { setDetail(await fetchAdminSettlementTransfer(transferId, token)); }
+    catch (cause) { setError(asCoreError(cause, '结算转账详情不可用')); }
     finally { setDetailLoading(false); }
   };
 
   const more = () => {
     if (!result?.nextCursor) return;
-    void load({ ...applied, cursorCreatedAt: result.nextCursor.createdAt, cursorBatchId: result.nextCursor.batchId }, true);
+    void load({ ...applied, cursorCreatedAt: result.nextCursor.createdAt, cursorTransferId: result.nextCursor.transferId }, true);
   };
 
   return <section className="clearing-stack">
     <article className="panel clearing-query">
-      <div className="panel-heading"><div><p className="section-kicker">GET /v2/admin/settlement-batches</p><h2>不可变 Safe MultiSend 批次</h2></div><Landmark aria-hidden="true" /></div>
-      <form className="clearing-filter-grid" onSubmit={(event) => { event.preventDefault(); setDetail(null); void load({ ...draft, cursorCreatedAt: undefined, cursorBatchId: undefined }); }}>
-        <TextFilter label="Batch ID" value={draft.batchId} setValue={(value) => setDraft({ ...draft, batchId: value })} />
+      <div className="panel-heading"><div><p className="section-kicker">GET /v2/admin/settlement-transfers</p><h2>普通钱包逐笔结算转账</h2></div><Landmark aria-hidden="true" /></div>
+      <form className="clearing-filter-grid" onSubmit={(event) => { event.preventDefault(); setDetail(null); void load({ ...draft, cursorCreatedAt: undefined, cursorTransferId: undefined }); }}>
+        <TextFilter label="Transfer ID" value={draft.transferId} setValue={(value) => setDraft({ ...draft, transferId: value })} />
         <TextFilter label="Merchant ID" value={draft.merchantId} setValue={(value) => setDraft({ ...draft, merchantId: value })} />
         <TextFilter label="Order ID" value={draft.orderId} setValue={(value) => setDraft({ ...draft, orderId: value })} />
-        <TextFilter label="Safe address" value={draft.safeAddress} setValue={(value) => setDraft({ ...draft, safeAddress: value })} />
-        <TextFilter label="Safe TxHash" value={draft.safeTxHash} setValue={(value) => setDraft({ ...draft, safeTxHash: value })} />
+        <TextFilter label="Executor wallet" value={draft.executorWallet} setValue={(value) => setDraft({ ...draft, executorWallet: value })} />
+        <TextFilter label="Execution TxHash" value={draft.executionTxHash} setValue={(value) => setDraft({ ...draft, executionTxHash: value })} />
         <label>Asset<select value={draft.asset ?? ''} onChange={(event) => setDraft({ ...draft, asset: (event.target.value || undefined) as SettlementAsset | undefined })}><option value="">全部</option><option>USDT</option><option>NPL</option></select></label>
-        <label>State<select value={draft.state ?? ''} onChange={(event) => setDraft({ ...draft, state: (event.target.value || undefined) as SettlementBatchState | undefined })}><option value="">全部</option>{settlementBatchStates.map((value) => <option key={value}>{value}</option>)}</select></label>
+        <label>State<select value={draft.state ?? ''} onChange={(event) => setDraft({ ...draft, state: (event.target.value || undefined) as SettlementTransferState | undefined })}><option value="">全部</option>{settlementTransferStates.map((value) => <option key={value}>{value}</option>)}</select></label>
         <DateFilter label="Start" setValue={(value) => setDraft({ ...draft, from: value })} />
         <DateFilter label="End" setValue={(value) => setDraft({ ...draft, to: value })} />
         <label>Limit<input type="number" min="1" max="100" value={draft.limit ?? 25} onChange={(event) => setDraft({ ...draft, limit: Number(event.target.value) })} /></label>
@@ -243,13 +243,13 @@ function BatchWorkspace({ token }: { token: string }) {
     {error ? <ErrorView error={error} /> : null}
     <div className="clearing-master-detail clearing-batch-layout">
       <article className="panel clearing-list-panel" aria-busy={loading}>
-        <div className="panel-heading"><div><p className="section-kicker">Batch cursor</p><h2>批次列表</h2></div><span className="status-chip">{result?.batches.length ?? 0} rows</span></div>
-        {loading && !result ? <LoadingState label="正在读取批次列表" /> : null}
-        {result?.batches.length ? <div className="clearing-list">{result.batches.map((item) => <button key={item.batchId} className={detail?.batch.batchId === item.batchId ? 'clearing-list-row is-selected' : 'clearing-list-row'} type="button" onClick={() => void select(item.batchId)}><span><strong>{item.asset} · nonce {item.safeNonce}</strong><small>{item.batchId}</small><small>{item.contentHash}</small></span><span><StateChip state={item.state} /> <small>{item.approvalCount}/{item.approvalThreshold} approvals</small></span></button>)}</div> : !loading ? <EmptyState title="无 Safe 批次" detail="Core 对当前组合筛选返回真实空结果。" /> : null}
+        <div className="panel-heading"><div><p className="section-kicker">Transfer cursor</p><h2>转账列表</h2></div><span className="status-chip">{result?.transfers.length ?? 0} rows</span></div>
+        {loading && !result ? <LoadingState label="正在读取转账列表" /> : null}
+        {result?.transfers.length ? <div className="clearing-list">{result.transfers.map((item) => <button key={item.transferId} className={detail?.transfer.transferId === item.transferId ? 'clearing-list-row is-selected' : 'clearing-list-row'} type="button" onClick={() => void select(item.transferId)}><span><strong>{item.asset} · nonce {item.executorNonce}</strong><small>{item.transferId}</small><small>{item.contentHash}</small></span><span><StateChip state={item.state} /> <small>{item.amount} atomic</small></span></button>)}</div> : !loading ? <EmptyState title="无结算转账" detail="Core 对当前组合筛选返回真实空结果。" /> : null}
         {result?.nextCursor ? <button className="button button-quiet button-full" type="button" onClick={more} disabled={loading}>加载下一页</button> : null}
       </article>
       <article className="panel clearing-detail-panel" aria-live="polite" aria-busy={detailLoading}>
-        {detailLoading ? <LoadingState label="正在读取 Safe、链上和账本证据" /> : detail ? <BatchDetail detail={detail} /> : <EmptyState title="选择一个批次" detail="查看内容哈希、审批、执行替换、最终性、覆盖率与对账。" />}
+        {detailLoading ? <LoadingState label="正在读取钱包、链上和账本证据" /> : detail ? <TransferDetail detail={detail} /> : <EmptyState title="选择一笔转账" detail="查看内容哈希、执行替换、最终性、覆盖率与对账。" />}
       </article>
     </div>
   </section>;
@@ -263,34 +263,33 @@ function RequestDetail({ detail }: { detail: AdminSettlementRequestDetail }) {
       <Fact label="Request ID" value={request.requestId} code />
       <Fact label="Wallet / recipient" value={request.walletAddress} note={request.recipientAddress} code />
       <Fact label="Asset / amount" value={`${request.asset} · ${request.amount}`} note="Core atomic value" />
-      <Fact label="Safe / batch" value={request.safeAddress} note={request.batchId ?? '未组批'} code />
+      <Fact label="Executor wallet" value={request.executorWallet} note={`${request.transferIds.length} transfers`} code />
       <Fact label="Intent digest" value={request.intentDigest} code />
       <Fact label="Signature hash" value={request.signatureHash} code />
-      <Fact label="Final Safe TxHash" value={request.finalSafeTxHash ?? '未终局'} note={request.finalExecutionTxHash ?? '无 execution TxHash'} code />
+      <Fact label="Final execution TxHash" value={request.finalExecutionTxHashes[0] ?? '未终局'} note={`${request.finalExecutionTxHashes.length} final transactions`} code />
       <Fact label="Requested / settled" value={request.requestedAt} note={request.settledAt ?? '未结算'} />
     </dl>
     <EvidenceTable title="不可变申请 items" headers={['Index / order', 'Amount', 'Policy / item hash', 'Journals']}>
-      {detail.items.map((item) => <tr key={item.itemIndex}><td><strong>#{item.itemIndex}</strong><code>{item.orderId}</code></td><td>{item.amount}<small>atomic</small></td><td>{item.policyVersion}<code>{item.itemHash}</code></td><td><code>{item.journals.requested}</code><small>{item.journals.batched ?? '未组批'} / {item.journals.settled ?? '未结算'}</small></td></tr>)}
+      {detail.items.map((item) => <tr key={item.itemIndex}><td><strong>#{item.itemIndex}</strong><code>{item.orderId}</code></td><td>{item.amount}<small>{item.backingWalletAddress}</small></td><td>{item.policyVersion}<code>{item.itemHash}</code></td><td><code>{item.journals.requested}</code><small>{item.journals.submitted ?? '未提交'} / {item.journals.settled ?? '未结算'}</small></td></tr>)}
     </EvidenceTable>
-    <EvidenceTable title="追加式状态迁移" headers={['Sequence', 'Type', 'Batch', 'Journal / time']}>
-      {detail.transitions.map((item) => <tr key={item.transitionId}><td>#{item.sequence}<small>item {item.requestItemIndex}</small></td><td>{item.type}</td><td><code>{item.batchId ?? '无'}</code></td><td><code>{item.journalId}</code><small>{item.createdAt}</small></td></tr>)}
+    <EvidenceTable title="追加式状态迁移" headers={['Sequence', 'Type', 'Transfer', 'Journal / time']}>
+      {detail.transitions.map((item) => <tr key={item.transitionId}><td>#{item.sequence}<small>item {item.requestItemIndex}</small></td><td>{item.type}</td><td><code>{item.transferId ?? '无'}</code></td><td><code>{item.journalId}</code><small>{item.createdAt}</small></td></tr>)}
     </EvidenceTable>
   </div>;
 }
 
-function BatchDetail({ detail }: { detail: AdminSettlementBatchDetail }) {
-  const batch = detail.batch;
+function TransferDetail({ detail }: { detail: AdminSettlementTransferDetail }) {
+  const transfer = detail.transfer;
   return <div className="clearing-detail-stack">
-    <div className="panel-heading"><div><p className="section-kicker">Immutable Safe envelope</p><h2>{batch.asset} · nonce {batch.safeNonce}</h2></div><StateChip state={batch.state} /></div>
+    <div className="panel-heading"><div><p className="section-kicker">Immutable EOA transfer</p><h2>{transfer.asset} · nonce {transfer.executorNonce}</h2></div><StateChip state={transfer.state} /></div>
     <dl className="definition-grid clearing-facts">
-      <Fact label="Batch ID" value={batch.batchId} code />
-      <Fact label="Content hash" value={batch.contentHash} note={`items hash ${batch.itemsHash}`} code />
-      <Fact label="Safe / nonce" value={batch.safeAddress} note={`nonce ${batch.safeNonce} · chain ${batch.chainId}`} code />
-      <Fact label="Total / items" value={`${batch.totalAmount} ${batch.asset} atomic`} note={`${batch.itemCount} items`} />
-      <Fact label="Safe TxHash" value={batch.safeTxHash} note={batch.proposalReferenceHash ?? '无 proposal reference'} code />
-      <Fact label="Approval" value={`${batch.approvalCount} / ${batch.approvalThreshold}`} note={batch.approvalEvidenceHash ?? '无 approval evidence'} code />
-      <Fact label="Safe runtime evidence" value={batch.safeRuntimeEvidenceHash} note={`${batch.safeVersion} · ${batch.safeRuntimeCheckedAt}`} code />
-      <Fact label="MultiSend / token conformance" value={batch.multisendCodeHash} note={batch.tokenTransferConformanceEvidenceHash} code />
+      <Fact label="Transfer ID" value={transfer.transferId} code />
+      <Fact label="Content hash" value={transfer.contentHash} note={`request ${transfer.requestId}`} code />
+      <Fact label="Executor / nonce" value={transfer.executorWallet} note={`nonce ${transfer.executorNonce} · chain ${transfer.chainId}`} code />
+      <Fact label="Recipient / amount" value={transfer.recipientAddress} note={`${transfer.amount} ${transfer.asset} atomic`} code />
+      <Fact label="Execution TxHash" value={transfer.executionTxHash ?? '未提交'} code />
+      <Fact label="Runtime evidence" value={transfer.runtimeEvidenceHash} note={transfer.runtimeCheckedAt} code />
+      <Fact label="Token conformance" value={transfer.tokenCodeHash} note={transfer.tokenTransferConformanceEvidenceHash} code />
     </dl>
     <FinalityEvidence detail={detail} />
     <section className="clearing-evidence-grid" aria-label="覆盖率、熔断与对账">
@@ -298,14 +297,8 @@ function BatchDetail({ detail }: { detail: AdminSettlementBatchDetail }) {
       <article className={detail.breakers.some((item) => item.paused) ? 'clearing-evidence is-alert' : 'clearing-evidence is-ok'}><span>Independent breakers</span><strong>{detail.breakers.some((item) => item.paused) ? 'PAUSED SCOPE' : 'ALL OPEN'}</strong>{detail.breakers.map((item) => <small key={item.scope}>{item.scope}: {item.paused ? 'PAUSED' : 'OPEN'}</small>)}</article>
       <article className={detail.reconciliation.conserved ? 'clearing-evidence is-ok' : 'clearing-evidence is-alert'}><span>Core reconciliation</span><strong>{detail.reconciliation.conserved ? 'CONSERVED' : 'MISMATCH'}</strong><small>{detail.reconciliation.actualItemCount}/{detail.reconciliation.expectedItemCount} items</small><small>{detail.reconciliation.actualTotalAmount}/{detail.reconciliation.expectedTotalAmount} atomic</small></article>
     </section>
-    <EvidenceTable title="批次 transfer items" headers={['Index / request', 'Order / merchant', 'Recipient', 'Amount / item hash']}>
-      {detail.items.map((item) => <tr key={item.itemIndex}><td>#{item.itemIndex}<code>{item.requestId}</code></td><td><code>{item.orderId}</code><small>{item.merchantId ?? '非商家 rail'}</small></td><td><code>{item.recipientAddress}</code></td><td>{item.amount}<code>{item.itemHash}</code></td></tr>)}
-    </EvidenceTable>
-    <EvidenceTable title="Safe owner approvals" headers={['Owner', 'Safe TxHash', 'Signature hash', 'Approved at']}>
-      {detail.approvals.map((item) => <tr key={`${item.ownerAddress}:${item.approvedAt}`}><td><code>{item.ownerAddress}</code></td><td><code>{item.safeTxHash}</code></td><td><code>{item.signatureHash}</code></td><td>{item.approvedAt}</td></tr>)}
-    </EvidenceTable>
     <EvidenceTable title="执行与替换尝试" headers={['Attempt', 'State', 'Execution / sender', 'Replacement / updated']}>
-      {detail.attempts.map((item) => <tr key={item.attemptId}><td>#{item.attemptNumber}<code>{item.attemptId}</code></td><td><StateChip state={item.state} /></td><td><code>{item.executionTxHash ?? '未提交'}</code><small>{item.outerSender ?? '无 outer sender'} · nonce {item.outerNonce ?? '无'}</small></td><td>{item.replacementForAttemptId ?? '原始尝试'}<small>{item.updatedAt}</small></td></tr>)}
+      {detail.attempts.map((item) => <tr key={item.attemptId}><td>#{item.attemptNumber}<code>{item.attemptId}</code></td><td><StateChip state={item.state} /></td><td><code>{item.executionTxHash ?? '未提交'}</code><small>{item.executorWallet} · nonce {item.executorNonce}</small></td><td>{item.replacementForAttemptId ?? '原始尝试'}<small>{item.updatedAt}</small></td></tr>)}
     </EvidenceTable>
     <EvidenceTable title="双录账本对账" headers={['Event', 'Asset', 'Debits', 'Credits / balanced']}>
       {detail.reconciliation.ledgerMovements.map((item, index) => <tr key={`${item.eventType}:${index}`}><td>{item.eventType}</td><td>{item.asset}</td><td>{item.debits}</td><td>{item.credits}<small>{item.balanced ? 'BALANCED' : 'MISMATCH'}</small></td></tr>)}
@@ -313,9 +306,9 @@ function BatchDetail({ detail }: { detail: AdminSettlementBatchDetail }) {
   </div>;
 }
 
-function FinalityEvidence({ detail }: { detail: AdminSettlementBatchDetail }) {
+function FinalityEvidence({ detail }: { detail: AdminSettlementTransferDetail }) {
   const finality = detail.finality;
-  if (!finality) return <div className="resource-state clearing-inline-state"><AlertTriangle aria-hidden="true" /><div><strong>链上最终性尚未提交</strong><p>批次状态为 {detail.batch.state}，Core 未返回 transaction finality。</p></div></div>;
+  if (!finality) return <div className="resource-state clearing-inline-state"><AlertTriangle aria-hidden="true" /><div><strong>链上最终性尚未提交</strong><p>转账状态为 {detail.transfer.state}，Core 未返回 transaction finality。</p></div></div>;
   const failed = ['FAILED', 'REORGED'].includes(finality.state);
   const final = finality.state === 'FINAL' && finality.confirmations >= 15;
   const label = final ? `FINAL · ${finality.confirmations}/15` : finality.state === 'MINED' ? `MINED · ${finality.confirmations}/15 · NOT FINAL` : finality.state;
