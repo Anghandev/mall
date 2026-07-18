@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.15",
+  "artifactVersion": "2.0.0-settlement-admin.16",
   "contracts": {
     "PolicyRegistryV2": [
       {
@@ -416,21 +416,6 @@
                 "internalType": "uint32"
               },
               {
-                "name": "oracleVersion",
-                "type": "bytes32",
-                "internalType": "bytes32"
-              },
-              {
-                "name": "oracleMaxAge",
-                "type": "uint64",
-                "internalType": "uint64"
-              },
-              {
-                "name": "oracleMinLiquidity",
-                "type": "uint128",
-                "internalType": "uint128"
-              },
-              {
                 "name": "merchantGuaranteeMinimum",
                 "type": "uint128",
                 "internalType": "uint128"
@@ -615,21 +600,6 @@
                 "name": "relayCap",
                 "type": "uint32",
                 "internalType": "uint32"
-              },
-              {
-                "name": "oracleVersion",
-                "type": "bytes32",
-                "internalType": "bytes32"
-              },
-              {
-                "name": "oracleMaxAge",
-                "type": "uint64",
-                "internalType": "uint64"
-              },
-              {
-                "name": "oracleMinLiquidity",
-                "type": "uint128",
-                "internalType": "uint128"
               },
               {
                 "name": "merchantGuaranteeMinimum",
@@ -869,21 +839,6 @@
                 "name": "relayCap",
                 "type": "uint32",
                 "internalType": "uint32"
-              },
-              {
-                "name": "oracleVersion",
-                "type": "bytes32",
-                "internalType": "bytes32"
-              },
-              {
-                "name": "oracleMaxAge",
-                "type": "uint64",
-                "internalType": "uint64"
-              },
-              {
-                "name": "oracleMinLiquidity",
-                "type": "uint128",
-                "internalType": "uint128"
               },
               {
                 "name": "merchantGuaranteeMinimum",
@@ -1850,110 +1805,6 @@
         "stateMutability": "view"
       }
     ],
-    "TwapOracleAdapterV2": [
-      {
-        "type": "constructor",
-        "inputs": [
-          {
-            "name": "source_",
-            "type": "address",
-            "internalType": "contract ITwapSourceV2"
-          },
-          {
-            "name": "oracleVersion_",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          }
-        ],
-        "stateMutability": "nonpayable"
-      },
-      {
-        "type": "error",
-        "name": "ExcessiveDeviation",
-        "inputs": [
-          {
-            "name": "actualDeviationBps",
-            "type": "uint256",
-            "internalType": "uint256"
-          }
-        ]
-      },
-      {
-        "type": "error",
-        "name": "InsufficientLiquidity",
-        "inputs": []
-      },
-      {
-        "type": "error",
-        "name": "InvalidAddress",
-        "inputs": []
-      },
-      {
-        "type": "error",
-        "name": "InvalidQuote",
-        "inputs": []
-      },
-      {
-        "type": "error",
-        "name": "StaleOracle",
-        "inputs": []
-      },
-      {
-        "type": "function",
-        "name": "oracleVersion",
-        "inputs": [],
-        "outputs": [
-          {
-            "name": "",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          }
-        ],
-        "stateMutability": "view"
-      },
-      {
-        "type": "function",
-        "name": "source",
-        "inputs": [],
-        "outputs": [
-          {
-            "name": "",
-            "type": "address",
-            "internalType": "contract ITwapSourceV2"
-          }
-        ],
-        "stateMutability": "view"
-      },
-      {
-        "type": "function",
-        "name": "validateQuote",
-        "inputs": [
-          {
-            "name": "requestedOracleVersion",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          },
-          {
-            "name": "usdtListPrice",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "signedNplQuoteAmount",
-            "type": "uint256",
-            "internalType": "uint256"
-          }
-        ],
-        "outputs": [
-          {
-            "name": "twapNplAmount",
-            "type": "uint256",
-            "internalType": "uint256"
-          }
-        ],
-        "stateMutability": "view"
-      }
-    ],
     "PaymentRouterV2": [
       {
         "type": "constructor",
@@ -1977,11 +1828,6 @@
             "name": "beneficiaryRegistry_",
             "type": "address",
             "internalType": "contract IBeneficiaryRegistryV2"
-          },
-          {
-            "name": "oracle_",
-            "type": "address",
-            "internalType": "contract ITwapOracleV2"
           },
           {
             "name": "platformServiceFeeSafe_",
@@ -2657,11 +2503,6 @@
                 "internalType": "uint64"
               },
               {
-                "name": "oracleVersion",
-                "type": "bytes32",
-                "internalType": "bytes32"
-              },
-              {
                 "name": "buyer",
                 "type": "address",
                 "internalType": "address"
@@ -2905,11 +2746,6 @@
                     "internalType": "uint64"
                   },
                   {
-                    "name": "oracleVersion",
-                    "type": "bytes32",
-                    "internalType": "bytes32"
-                  },
-                  {
                     "name": "buyer",
                     "type": "address",
                     "internalType": "address"
@@ -3127,11 +2963,6 @@
                     "name": "policyVersion",
                     "type": "uint64",
                     "internalType": "uint64"
-                  },
-                  {
-                    "name": "oracleVersion",
-                    "type": "bytes32",
-                    "internalType": "bytes32"
                   },
                   {
                     "name": "buyer",
@@ -3450,19 +3281,6 @@
       },
       {
         "type": "function",
-        "name": "oracle",
-        "inputs": [],
-        "outputs": [
-          {
-            "name": "",
-            "type": "address",
-            "internalType": "contract ITwapOracleV2"
-          }
-        ],
-        "stateMutability": "view"
-      },
-      {
-        "type": "function",
         "name": "PAUSER_ROLE",
         "inputs": [],
         "outputs": [
@@ -3492,11 +3310,6 @@
                 "name": "policyVersion",
                 "type": "uint64",
                 "internalType": "uint64"
-              },
-              {
-                "name": "oracleVersion",
-                "type": "bytes32",
-                "internalType": "bytes32"
               },
               {
                 "name": "buyer",
@@ -3759,11 +3572,6 @@
                     "internalType": "uint64"
                   },
                   {
-                    "name": "oracleVersion",
-                    "type": "bytes32",
-                    "internalType": "bytes32"
-                  },
-                  {
                     "name": "buyer",
                     "type": "address",
                     "internalType": "address"
@@ -3981,11 +3789,6 @@
                     "name": "policyVersion",
                     "type": "uint64",
                     "internalType": "uint64"
-                  },
-                  {
-                    "name": "oracleVersion",
-                    "type": "bytes32",
-                    "internalType": "bytes32"
                   },
                   {
                     "name": "buyer",

@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.15",
+  "artifactVersion": "2.0.0-settlement-admin.16",
   "formatVersion": 1,
   "databaseEngine": "postgresql",
   "schemas": {
@@ -9,7 +9,7 @@
         {
           "name": "001_core_schema.sql",
           "path": "schema/business/001_core_schema.sql",
-          "sha256": "6b3ca7b189dc3f63dd9aae7428d99cfbc0452f2439b4add861c1fb9810ce9e75"
+          "sha256": "2ea407c05ac8233a270a588ad2591bd7b193dc9e7e9aa202bde11318f3c742d1"
         },
         {
           "name": "002_inventory_and_queue.sql",
@@ -44,7 +44,7 @@
         {
           "name": "008_admin_services.sql",
           "path": "schema/business/008_admin_services.sql",
-          "sha256": "7c04a80ca3a76b44ab4706fe9dfccb871977d8a39dd2fde2ac5e788eb60f316f"
+          "sha256": "11da26dea07d16547d5c5ba3f724fecc7c35d9e2d3989dcbd9439042ce8d27fd"
         },
         {
           "name": "009_product_surfaces.sql",
@@ -139,7 +139,7 @@
         {
           "name": "027_merchant_governance_completion.sql",
           "path": "schema/business/027_merchant_governance_completion.sql",
-          "sha256": "a022b18f8f55a42dbf3a3e8c668d178d3e8cce6d67bf8f9c910089f93f75a5e8"
+          "sha256": "c2c343afe86fdd2ee49a20c8dcd354a9e37bcf830f0ff753099674bdc5fe2a29"
         },
         {
           "name": "028_buyer_uid.sql",

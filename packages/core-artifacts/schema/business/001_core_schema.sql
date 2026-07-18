@@ -38,7 +38,6 @@ CREATE TABLE core.policy_snapshots (
     policy_version bigint PRIMARY KEY CHECK (policy_version > 0),
     artifact_version text NOT NULL,
     policy_hash text NOT NULL UNIQUE CHECK (policy_hash ~ '^0x[0-9a-fA-F]{64}$'),
-    oracle_version text NOT NULL CHECK (oracle_version ~ '^0x[0-9a-fA-F]{64}$'),
     rules_content_hash text NOT NULL CHECK (rules_content_hash ~ '^0x[0-9a-fA-F]{64}$'),
     beneficiary_set_hash text NOT NULL CHECK (beneficiary_set_hash ~ '^0x[0-9a-fA-F]{64}$'),
     payload jsonb NOT NULL CHECK (jsonb_typeof(payload) = 'object'),
@@ -159,7 +158,6 @@ CREATE TABLE core.orders (
     order_id text PRIMARY KEY,
     artifact_version text NOT NULL,
     policy_version bigint NOT NULL REFERENCES core.policy_snapshots(policy_version),
-    oracle_version text NOT NULL CHECK (oracle_version ~ '^0x[0-9a-fA-F]{64}$'),
     buyer_wallet text NOT NULL CHECK (buyer_wallet ~ '^0x[0-9a-fA-F]{40}$'),
     merchant_id text NOT NULL REFERENCES core.merchants(merchant_id),
     merchant_wallet text NOT NULL CHECK (merchant_wallet ~ '^0x[0-9a-fA-F]{40}$'),
@@ -338,7 +336,6 @@ LANGUAGE plpgsql AS $$
 BEGIN
     IF NEW.artifact_version IS DISTINCT FROM OLD.artifact_version
         OR NEW.policy_version IS DISTINCT FROM OLD.policy_version
-        OR NEW.oracle_version IS DISTINCT FROM OLD.oracle_version
         OR NEW.buyer_wallet IS DISTINCT FROM OLD.buyer_wallet
         OR NEW.merchant_id IS DISTINCT FROM OLD.merchant_id
         OR NEW.merchant_wallet IS DISTINCT FROM OLD.merchant_wallet

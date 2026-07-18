@@ -1,7 +1,7 @@
 # Abu 24K V2 Payment Contract Freeze
 
 Status: coordinated local settlement/admin checkpoint
-`2.0.0-settlement-admin.15`. The generated
+`2.0.0-settlement-admin.16`. The generated
 manifest contains no deployment addresses and has `deploymentAuthorized:
 false`. This document does not authorize deployment or a transaction.
 
@@ -11,14 +11,13 @@ false`. This document does not authorize deployment or a transaction.
 |---|---|---|
 | `PolicyRegistryV2` | Immutable policy versions; Safe/RBAC publication with an exact secondary EIP-712 signature | None |
 | `BeneficiaryRegistryV2` | Referral-cycle prevention and immutable region-beneficiary snapshot validation; the legacy genesis field must be zero | None |
-| `TwapOracleAdapterV2` | Fixed NPL/USDT pair, 30-minute TWAP, 5% deviation, 10-minute age and 50,000 USDT liquidity checks | None |
 | `PaymentRouterV2` | Signed ordinary/seckill payment, replay protection, Safe transfers, boundary classification and payment breakers | Normally zero |
 
 V2 deploys no BNM token, Claim vault, reward ledger, payment escrow, guarantee
 vault or separate seckill funds contract. Fulfillment, arbitration, guarantees,
 transferable rewards and Safe settlement are published PostgreSQL-ledger/Core
 responsibilities; the Router contract set remains limited to payment policy,
-beneficiary validation, Oracle validation and atomic collection.
+beneficiary validation and atomic collection.
 
 ## Payment Intent
 
@@ -29,7 +28,7 @@ ERC-1271 wallets. Authorization never uses `tx.origin`.
 
 The signed `PaymentIntent` binds:
 
-- order, policy and Oracle versions;
+- order and policy version;
 - buyer, merchant, product, SKU, quantity and fulfillment mode;
 - fulfillment target, region and product-policy hashes;
 - reservation ID/hash/deadline, issue time, quote deadline and buyer nonce;
@@ -42,8 +41,9 @@ The signed `PaymentIntent` binds:
   that account from an allocation position or weight.
 
 Order IDs, buyer nonces and reservation IDs are one-use. Quote validity is at
-most five minutes. Reservation validity must cover the quote. Current policy,
-Oracle and beneficiary validation are checked against the signed snapshots.
+most five minutes. Reservation validity must cover the quote. Current policy
+and beneficiary validation are checked against the signed snapshots. The Router
+does not read any external price contract.
 
 ## Funds Conservation
 
@@ -56,9 +56,9 @@ Custody product USDT = product USDT leg - service fee (nominally 69%)
 delivery freight = product defaultFreightUsdt; pickup freight = 0
 USDT buyer debit = product USDT leg + freight
 Custody receipt = Custody product USDT + freight -> USDT Custody Safe
-NPL buyer debit  = 30% of Oracle-equivalent list price
-NPL Burn         = 20% of Oracle-equivalent list price -> dead address
-NPL rewards      = 10% of Oracle-equivalent list price -> NPL Reward Safe
+NPL buyer debit  = 30% of the exact Core-quoted NPL equivalent
+NPL Burn         = 20% of the same Core quote -> dead address
+NPL rewards      = 10% of the same Core quote -> NPL Reward Safe
 ```
 
 The Router checks buyer and destination balance deltas for every transfer. A
@@ -112,21 +112,19 @@ The future deployment order is:
 
 1. `PolicyRegistryV2`
 2. `BeneficiaryRegistryV2`
-3. `TwapOracleAdapterV2`
-4. `PaymentRouterV2`
+3. `PaymentRouterV2`
 
 The five configured Safes and primary/fallback RPC have passed read-only runtime
 checks, and the configured technical wallet supplies the local deployment,
 secondary-signing, quote-signing and finality roles. Safe owners and thresholds
 remain user-managed. There are no current business `DecisionBlocked` entries.
-Production TWAP source/codehash attestation, deployed bytecode, runtime roles,
-production services and an exact separately approved transaction packet remain
-`ExternalBlocked`; no deployment or mainnet transaction is permitted.
+Deployed bytecode, runtime roles and an exact separately approved transaction
+packet remain required before broadcast; no deployment or mainnet transaction
+is permitted by this document.
 
 Every deployed contract manifest entry must record its address, deployment
-block and actual runtime `deployedCodeHash`. The external TWAP source additionally
-requires an independently approved `TWAP_SOURCE_CODEHASH`. Build-artifact hashes
-alone are not accepted as runtime deployment evidence.
+block and actual runtime `deployedCodeHash`. Build-artifact hashes alone are not
+accepted as runtime deployment evidence.
 
 Deployment evidence is published only through the reviewed
 `platform-v2/deployments/bsc-payment-v2.json` input. Both artifact generators

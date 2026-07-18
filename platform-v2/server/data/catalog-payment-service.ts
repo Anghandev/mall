@@ -36,12 +36,11 @@ export interface QuoteSigner {
   sign(request: SignerRequest): Promise<{ signature: string; signer: string }>;
 }
 
-export interface PaymentOracleQuoteSource {
+export interface PaymentNplQuoteSource {
   quote(input: {
     listPriceUsdt: bigint;
     policyVersion: number;
-    oracleVersion: string;
-  }): Promise<{ nplQuoteAmount: bigint; oracleVersion: string }>;
+  }): Promise<{ nplQuoteAmount: bigint }>;
 }
 
 export interface BeneficiarySnapshotSource {
@@ -111,7 +110,6 @@ interface PolicyRow {
   artifact_version: string;
   policy_version: string;
   policy_hash: string;
-  oracle_version: string;
   rules_content_hash: string;
   beneficiary_set_hash: string;
   payload: unknown;
@@ -178,7 +176,7 @@ interface StoredPaymentFinalityRow {
 export class CatalogPaymentService {
   readonly #transactions: SqlTransactionRunner;
   readonly #signer: QuoteSigner;
-  readonly #oracle: PaymentOracleQuoteSource;
+  readonly #nplQuotes: PaymentNplQuoteSource;
   readonly #beneficiaries: BeneficiarySnapshotSource;
   readonly #policies: PaymentPolicyAttestationSource;
   readonly #paymentRouterAddress: string;
@@ -189,7 +187,7 @@ export class CatalogPaymentService {
   constructor(input: {
     transactions: SqlTransactionRunner;
     signer: QuoteSigner;
-    oracle: PaymentOracleQuoteSource;
+    nplQuotes: PaymentNplQuoteSource;
     beneficiaries: BeneficiarySnapshotSource;
     policies: PaymentPolicyAttestationSource;
     paymentRouterAddress: string;
@@ -199,7 +197,7 @@ export class CatalogPaymentService {
   }) {
     this.#transactions = input.transactions;
     this.#signer = input.signer;
-    this.#oracle = input.oracle;
+    this.#nplQuotes = input.nplQuotes;
     this.#beneficiaries = input.beneficiaries;
     this.#policies = input.policies;
     try {
@@ -253,11 +251,7 @@ export class CatalogPaymentService {
     if (existing) return existingQuoteResponse(existing, input, this.#paymentRouterAddress);
 
     const prepared = await this.#transactions.transaction((executor) => loadPreparation(executor, buyer, input, this.#clock()));
-    const policy = parsePaymentPolicySnapshot(
-      Number(prepared.policy.policy_version),
-      prepared.policy.oracle_version,
-      prepared.policy.payload,
-    );
+    const policy = parsePaymentPolicySnapshot(Number(prepared.policy.policy_version), prepared.policy.payload);
     await this.#policies.assertPublished({
       artifactVersion: prepared.policy.artifact_version,
       policyHash: prepared.policy.policy_hash,
@@ -273,14 +267,11 @@ export class CatalogPaymentService {
     const reservationDeadline = now + 10 * 60;
     const listPriceUsdt = BigInt(prepared.catalog.list_price_usdt) * BigInt(input.quantity);
     const freightUsdt = input.fulfillmentMode === 'DELIVERY' ? BigInt(prepared.catalog.default_freight_usdt) : 0n;
-    const oracle = await this.#oracle.quote({
+    const nplQuote = await this.#nplQuotes.quote({
       listPriceUsdt,
       policyVersion: policy.policyVersion,
-      oracleVersion: policy.oracleVersion,
     });
-    if (oracle.oracleVersion.toLowerCase() !== policy.oracleVersion.toLowerCase() || oracle.nplQuoteAmount <= 0n) {
-      throw new CoreError('InvalidRequest', 'Oracle quote does not match the published policy');
-    }
+    if (nplQuote.nplQuoteAmount <= 0n) throw new CoreError('InvalidRequest', 'NPL quote is invalid');
     const beneficiaries = await this.#beneficiaries.resolve({
       buyer,
       merchant: prepared.catalog.settlement_wallet,
@@ -311,7 +302,7 @@ export class CatalogPaymentService {
       nonce: this.#nonce(),
       listPriceUsdt,
       freightUsdt,
-      nplQuoteAmount: oracle.nplQuoteAmount,
+      nplQuoteAmount: nplQuote.nplQuoteAmount,
       merchantConcessionBps: Number(prepared.catalog.merchant_concession_bps),
       beneficiaries,
     }, policy, 'ORDINARY', now);
@@ -369,11 +360,7 @@ export class CatalogPaymentService {
     });
     if (existing) return existingSeckillQuoteResponse(existing, input, this.#paymentRouterAddress);
     const prepared = await this.#transactions.transaction((executor) => loadSeckillPreparation(executor, buyer, input, this.#clock()));
-    const policy = parsePaymentPolicySnapshot(
-      Number(prepared.policy.policy_version),
-      prepared.policy.oracle_version,
-      prepared.policy.payload,
-    );
+    const policy = parsePaymentPolicySnapshot(Number(prepared.policy.policy_version), prepared.policy.payload);
     await this.#policies.assertPublished({
       artifactVersion: prepared.policy.artifact_version,
       policyHash: prepared.policy.policy_hash,
@@ -391,16 +378,14 @@ export class CatalogPaymentService {
     const freightUsdt = input.fulfillmentMode === 'DELIVERY' ? BigInt(prepared.catalog.default_freight_usdt) : 0n;
     const seckillListPriceUsdt = BigInt(prepared.session.seckill_list_price_usdt) * BigInt(input.quantity);
     const fallbackListPriceUsdt = BigInt(prepared.catalog.list_price_usdt) * BigInt(input.quantity);
-    const [seckillOracle, fallbackOracle, beneficiaries] = await Promise.all([
-      this.#oracle.quote({
+    const [seckillNplQuote, fallbackNplQuote, beneficiaries] = await Promise.all([
+      this.#nplQuotes.quote({
         listPriceUsdt: seckillListPriceUsdt,
         policyVersion: policy.policyVersion,
-        oracleVersion: policy.oracleVersion,
       }),
-      this.#oracle.quote({
+      this.#nplQuotes.quote({
         listPriceUsdt: fallbackListPriceUsdt,
         policyVersion: policy.policyVersion,
-        oracleVersion: policy.oracleVersion,
       }),
       this.#beneficiaries.resolve({
         buyer,
@@ -410,10 +395,8 @@ export class CatalogPaymentService {
       }),
     ]);
     if (
-      seckillOracle.oracleVersion.toLowerCase() !== policy.oracleVersion.toLowerCase()
-        || fallbackOracle.oracleVersion.toLowerCase() !== policy.oracleVersion.toLowerCase()
-        || seckillOracle.nplQuoteAmount <= 0n || fallbackOracle.nplQuoteAmount <= 0n
-    ) throw new CoreError('InvalidRequest', 'Oracle quote does not match the seckill policy');
+      seckillNplQuote.nplQuoteAmount <= 0n || fallbackNplQuote.nplQuoteAmount <= 0n
+    ) throw new CoreError('InvalidRequest', 'NPL quote is invalid');
     const nonce = this.#nonce();
     const shared = {
       orderId,
@@ -456,14 +439,14 @@ export class CatalogPaymentService {
         reservationId: seckillReservationId,
         reservationHash: seckillReservationHash,
         listPriceUsdt: seckillListPriceUsdt,
-        nplQuoteAmount: seckillOracle.nplQuoteAmount,
+        nplQuoteAmount: seckillNplQuote.nplQuoteAmount,
       },
       {
         ...shared,
         reservationId: fallbackReservationId,
         reservationHash: fallbackReservationHash,
         listPriceUsdt: fallbackListPriceUsdt,
-        nplQuoteAmount: fallbackOracle.nplQuoteAmount,
+        nplQuoteAmount: fallbackNplQuote.nplQuoteAmount,
       },
       policy,
       now,
@@ -657,7 +640,7 @@ async function loadPreparation(executor: SqlExecutor, buyer: string, input: Crea
     });
   }
   const policyResult = await executor.query<PolicyRow>(
-    `SELECT artifact_version, policy_version, policy_hash, oracle_version,
+    `SELECT artifact_version, policy_version, policy_hash,
        rules_content_hash, beneficiary_set_hash, payload FROM core.canonical_policy_publications
      WHERE publication_status = 'PUBLISHED' AND (effective_from IS NULL OR effective_from <= $1)
      ORDER BY policy_version DESC LIMIT 1`,
@@ -705,7 +688,7 @@ async function loadSeckillPreparation(executor: SqlExecutor, buyer: string, inpu
       || session.product_policy_hash.toLowerCase() !== catalog.product_policy_hash.toLowerCase()
   ) throw new CoreError('InventoryUnavailable', 'Seckill session is not live or has no inventory', 409);
   const policyResult = await executor.query<PolicyRow>(
-    `SELECT artifact_version, policy_version, policy_hash, oracle_version,
+    `SELECT artifact_version, policy_version, policy_hash,
        rules_content_hash, beneficiary_set_hash, payload FROM core.policy_snapshots
      WHERE policy_version = $1 AND publication_status = 'PUBLISHED'`,
     [session.policy_version],
@@ -1256,7 +1239,6 @@ function preparationFingerprint(value: { catalog: CatalogRow; policy: PolicyRow;
     policyVersion: value.policy.policy_version,
     artifactVersion: value.policy.artifact_version,
     policyHash: value.policy.policy_hash,
-    oracleVersion: value.policy.oracle_version,
     rulesContentHash: value.policy.rules_content_hash,
     beneficiarySetHash: value.policy.beneficiary_set_hash,
     policy: value.policy.payload,

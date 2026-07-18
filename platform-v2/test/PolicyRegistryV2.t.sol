@@ -7,14 +7,12 @@ import {PolicyRegistryV2} from "../contracts/PolicyRegistryV2.sol";
 import {V2Types} from "../contracts/types/V2Types.sol";
 
 contract PolicyRegistryV2Test is CoreFixture {
-    function testLaunchPolicyFreezesPaymentOracleSafesAndRewards() public view {
+    function testLaunchPolicyFreezesPaymentSafesAndRewards() public view {
         V2Types.Policy memory policy = policyRegistry.getPolicy(1);
         assertEq(policy.usdtPaymentBps, 7_000);
         assertEq(policy.nplPaymentBps, 3_000);
         assertEq(policy.nplBurnListPriceBps, 2_000);
         assertEq(policy.nplRewardListPriceBps, 1_000);
-        assertEq(policy.oracleMaxAge, 10 minutes);
-        assertEq(policy.oracleMinLiquidity, 50_000 ether);
         assertEq(policy.merchantGuaranteeMinimum, 1_000 ether);
         assertEq(policy.usdtCustodySafe, usdtCustodySafe);
         assertEq(policy.nplRewardSafe, nplRewardSafe);
@@ -60,7 +58,7 @@ contract PolicyRegistryV2Test is CoreFixture {
         assertEq(published.operationsBps, 600);
     }
 
-    function testPolicyRejectsBuyerLegOrOracleSafetyDrift() public {
+    function testPolicyRejectsBuyerLegDrift() public {
         (V2Types.Policy memory policy, address[] memory accounts, uint16[] memory weights) = _secondPolicy();
         policy.usdtPaymentBps = 6_999;
         policy.nplPaymentBps = 3_001;
@@ -69,13 +67,6 @@ contract PolicyRegistryV2Test is CoreFixture {
         vm.prank(safe);
         vm.expectRevert(PolicyRegistryV2.InvalidPolicy.selector);
         policyRegistry.publishPolicy(policy, accounts, weights, 3, deadline, _sign(SECONDARY_KEY, digest));
-
-        (policy, accounts, weights) = _secondPolicy();
-        policy.oracleMaxAge = 11 minutes;
-        digest = policyRegistry.hashPublication(policy, accounts, weights, 4, deadline);
-        vm.prank(safe);
-        vm.expectRevert(PolicyRegistryV2.InvalidPolicy.selector);
-        policyRegistry.publishPolicy(policy, accounts, weights, 4, deadline, _sign(SECONDARY_KEY, digest));
     }
 
     function testPolicyRejectsIncompleteRewardAllocationAndDuplicateSafes() public {

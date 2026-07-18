@@ -276,7 +276,7 @@ test('risk observations create exact restrictions, block new payment and preserv
     const blockedQuoteService = new CatalogPaymentService({
       transactions: transactionAdapter(db),
       signer: { sign: async () => { throw new Error('risk restriction must run before signing'); } },
-      oracle: { quote: async () => { throw new Error('risk restriction must run before oracle access'); } },
+      nplQuotes: { quote: async () => { throw new Error('risk restriction must run before NPL quote access'); } },
       beneficiaries: { resolve: async () => { throw new Error('risk restriction must run before beneficiary lookup'); } },
       policies: { assertPublished: async () => { throw new Error('risk restriction must run before policy lookup'); } },
       paymentRouterAddress: '0x9999999999999999999999999999999999999999',
@@ -810,9 +810,9 @@ test('merchant lifecycle encrypts qualification and governs exact review transit
   try {
     await db.query(
       `INSERT INTO core.policy_snapshots (
-         policy_version, artifact_version, policy_hash, oracle_version,
+         policy_version, artifact_version, policy_hash,
          rules_content_hash, beneficiary_set_hash, payload, publication_status
-       ) VALUES (1,$1,$2,$3,$2,$3,'{}','PUBLISHED')`,
+       ) VALUES (1,$1,$2,$2,$3,'{}','PUBLISHED')`,
       [CORE_ARTIFACT_VERSION, HASH, HASH_2],
     );
     for (const [wallet, role] of [
@@ -1367,7 +1367,6 @@ test('local PaymentRouter receipt reaches 15 confirmations and a balanced Postgr
     const intent = execution.intent;
     await seedCatalog(db, 1, intent.merchant, {
       buyerWallet: intent.buyer,
-      oracleVersion: intent.oracleVersion,
       fulfillmentTargetHash: intent.fulfillmentTargetHash,
       regionCodeHash: intent.regionCodeHash,
       listPriceUsdt: intent.listPriceUsdt,
@@ -1983,8 +1982,8 @@ test('catalog payment service builds an authoritative idempotent quote and recor
           return { signature: `0x${'1'.repeat(130)}`, signer: '0x8888888888888888888888888888888888888888' };
         },
       },
-      oracle: {
-        quote: async ({ oracleVersion }) => ({ nplQuoteAmount: 1_000n, oracleVersion }),
+      nplQuotes: {
+        quote: async () => ({ nplQuoteAmount: 1_000n }),
       },
       beneficiaries: {
         resolve: async () => ({
@@ -2676,7 +2675,7 @@ test('catalog management enforces product scope, signed preview, review locks an
     const publicCatalog = new CatalogPaymentService({
       transactions: transactionAdapter(db),
       signer: { sign: async () => { throw new Error('unused'); } },
-      oracle: { quote: async () => { throw new Error('unused'); } },
+      nplQuotes: { quote: async () => { throw new Error('unused'); } },
       beneficiaries: { resolve: async () => { throw new Error('unused'); } },
       policies: { assertPublished: async () => { throw new Error('unused'); } },
       paymentRouterAddress: '0x9999999999999999999999999999999999999999',
@@ -3053,10 +3052,9 @@ test('seckill quote locks both inventories and final classification releases the
           };
         },
       },
-      oracle: {
-        quote: async ({ listPriceUsdt, oracleVersion }) => ({
+      nplQuotes: {
+        quote: async ({ listPriceUsdt }) => ({
           nplQuoteAmount: listPriceUsdt * 10n,
-          oracleVersion,
         }),
       },
       beneficiaries: {
@@ -3340,10 +3338,9 @@ test('seckill prize freezes the final canonical order and only the reviewed winn
           signer: '0x8888888888888888888888888888888888888888',
         }),
       },
-      oracle: {
-        quote: async ({ listPriceUsdt, oracleVersion }) => ({
+      nplQuotes: {
+        quote: async ({ listPriceUsdt }) => ({
           nplQuoteAmount: listPriceUsdt * 10n,
-          oracleVersion,
         }),
       },
       beneficiaries: {
@@ -6148,14 +6145,14 @@ test('policy publication binds the Registry signature and Safe proposal, activat
     });
     const actor = { walletAddress: admin.address, roles: ['ADMIN'] as const };
     const draft = await service.createDraft(actor, {
-      payload: { oracleVersion: HASH_2, rulesContentHash: rulesHash, policy },
+      payload: { rulesContentHash: rulesHash, policy },
       idempotencyKey: 'policy-draft-v2',
       correlationId: 'policy-draft-v2',
     });
     assert.equal(draft.state, 'DRAFT');
     assert.equal(draft.nextPolicyVersion, '2');
     const replayedDraft = await service.createDraft(actor, {
-      payload: { oracleVersion: HASH_2, rulesContentHash: rulesHash, policy },
+      payload: { rulesContentHash: rulesHash, policy },
       idempotencyKey: 'policy-draft-v2',
       correlationId: 'policy-draft-v2-retry',
     });
@@ -8355,7 +8352,7 @@ test('one Safe batch emits isolated tenant audit entries for every affected merc
     );
     await db.query(
       `INSERT INTO core.orders (
-         order_id, artifact_version, policy_version, oracle_version, buyer_wallet,
+         order_id, artifact_version, policy_version, buyer_wallet,
          merchant_id, merchant_wallet, product_id, sku_id, quantity, fulfillment_mode,
          fulfillment_target_hash, encrypted_delivery_target, region_code_hash,
          product_policy_hash, reservation_id, quote_snapshot, allocation_snapshot,
@@ -8363,7 +8360,7 @@ test('one Safe batch emits isolated tenant audit entries for every affected merc
          finality_status, payment_tx_hash, payment_block_hash, paid_at, fulfilled_at,
          allowed_actions, created_at, updated_at, shipped_at, delivered_at,
          takeover_opened_at, arbitration_opened_at, bnm_state_version
-       ) SELECT $1,artifact_version,policy_version,oracle_version,$2,'merchant-2',$3,
+       ) SELECT $1,artifact_version,policy_version,$2,'merchant-2',$3,
                 product_id,sku_id,quantity,fulfillment_mode,fulfillment_target_hash,
                 encrypted_delivery_target,region_code_hash,product_policy_hash,$4,
                 quote_snapshot,allocation_snapshot,seckill_snapshot,exact_amounts,
@@ -9898,13 +9895,12 @@ test('takeover funding consumes final guarantee first and records Operations adv
     const rotatedOperationsSafe = '0x6666666666666666666666666666666666666666';
     await db.query(
       `INSERT INTO core.policy_snapshots (
-         policy_version, artifact_version, policy_hash, oracle_version,
+         policy_version, artifact_version, policy_hash,
          rules_content_hash, beneficiary_set_hash, payload, publication_status
-       ) VALUES (2, $1, $2, $3, $4, $5, $6, 'PUBLISHED')`,
+       ) VALUES (2, $1, $2, $3, $4, $5, 'PUBLISHED')`,
       [
         CORE_ARTIFACT_VERSION,
         `0x${'8'.repeat(64)}`,
-        HASH_2,
         `0x${'a'.repeat(64)}`,
         `0x${'b'.repeat(64)}`,
         JSON.stringify({ ...paymentPolicyPayload(), operationsTreasurySafe: rotatedOperationsSafe }),
@@ -11472,7 +11468,6 @@ function paymentIntent(): CanonicalPaymentIntent {
   return {
     orderId: `0x${'a'.repeat(64)}`,
     policyVersion: 1,
-    oracleVersion: HASH_2,
     buyer: BUYER,
     merchant: MERCHANT,
     productId: `0x${'b'.repeat(64)}`,
@@ -11810,7 +11805,6 @@ async function seedCatalog(
   settlementWallet = MERCHANT,
   options: {
     buyerWallet?: string;
-    oracleVersion?: string;
     policyPayload?: Record<string, unknown>;
     listPriceUsdt?: string;
     merchantCostUsdt?: string;
@@ -11819,7 +11813,6 @@ async function seedCatalog(
   } = {},
 ) {
   const buyerWallet = options.buyerWallet ?? BUYER;
-  const oracleVersion = options.oracleVersion ?? HASH_2;
   const policyPayload = options.policyPayload ?? paymentPolicyPayload();
   const listPriceUsdt = options.listPriceUsdt ?? '100';
   const merchantCostUsdt = options.merchantCostUsdt ?? '60';
@@ -11827,10 +11820,10 @@ async function seedCatalog(
   const regionCodeHash = options.regionCodeHash ?? HASH;
   await db.query(
     `INSERT INTO core.policy_snapshots (
-       policy_version, artifact_version, policy_hash, oracle_version,
+       policy_version, artifact_version, policy_hash,
        rules_content_hash, beneficiary_set_hash, payload, publication_status
-     ) VALUES (1, '${CORE_ARTIFACT_VERSION}', $1, $2, $1, $2, $3, 'PUBLISHED')`,
-    [HASH, oracleVersion, JSON.stringify(policyPayload)],
+     ) VALUES (1, '${CORE_ARTIFACT_VERSION}', $1, $1, $1, $2, 'PUBLISHED')`,
+    [HASH, JSON.stringify(policyPayload)],
   );
   await db.query(
     `INSERT INTO core.policy_publication_transitions (
@@ -12056,10 +12049,10 @@ async function publishTestPolicy(db: PGlite, policyVersion: number) {
   );
   await db.query(
     `INSERT INTO core.policy_snapshots (
-       policy_version, artifact_version, policy_hash, oracle_version,
+       policy_version, artifact_version, policy_hash,
        rules_content_hash, beneficiary_set_hash, payload, publication_status
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,'PUBLISHED')`,
-    [policyVersion, CORE_ARTIFACT_VERSION, hash(1), hash(2), hash(3), hash(4),
+     ) VALUES ($1,$2,$3,$4,$5,$6,'PUBLISHED')`,
+    [policyVersion, CORE_ARTIFACT_VERSION, hash(1), hash(3), hash(4),
       JSON.stringify(paymentPolicyPayload())],
   );
   await db.query(
@@ -12110,10 +12103,6 @@ function paymentPolicyPayload() {
     relayInitial: 60,
     relayIncrement: 30,
     relayCap: 60,
-    oracleWindowSeconds: 1_800,
-    oracleMaxDeviationBps: 500,
-    oracleMaxAgeSeconds: 600,
-    oracleMinimumUsdtLiquidity: (50_000n * 10n ** 18n).toString(),
     requiredConfirmations: 15,
     merchantGuaranteeMinimumUsdt: (1_000n * 10n ** 18n).toString(),
     platformServiceFeeSafe: '0x2222222222222222222222222222222222222223',
@@ -12235,13 +12224,13 @@ async function insertOrder(
 ) {
   await db.query(
     `INSERT INTO core.orders (
-       order_id, artifact_version, policy_version, oracle_version, buyer_wallet,
+       order_id, artifact_version, policy_version, buyer_wallet,
        merchant_id, merchant_wallet, product_id, sku_id, quantity, fulfillment_mode,
        fulfillment_target_hash, region_code_hash, product_policy_hash, reservation_id,
        quote_snapshot, allocation_snapshot, exact_amounts, buyer_nonce, quote_deadline,
        state, finality_status
      ) VALUES (
-       $1, '${CORE_ARTIFACT_VERSION}', 1, $2, $3, 'merchant-1', $4,
+       $1, '${CORE_ARTIFACT_VERSION}', 1, $3, 'merchant-1', $4,
        'product-1', 'sku-1', 1, 'DELIVERY', $6, $7, $2, $5,
        '{}', '{}', '{"usdt":"50","npl":"500"}', 1,
        clock_timestamp() + interval '1 hour', 'QUOTED', 'NOT_SUBMITTED'

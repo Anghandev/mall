@@ -29,13 +29,11 @@ export interface PaymentPolicySnapshot extends FrozenPaymentPolicy {
 
 export function parsePaymentPolicySnapshot(
   policyVersion: number,
-  oracleVersion: string,
   payload: unknown,
 ): PaymentPolicySnapshot {
   const value = record(payload, 'payment policy');
   const policy: PaymentPolicySnapshot = {
     policyVersion,
-    oracleVersion,
     usdtPaymentBps: integer(value.usdtPaymentBps, 'usdtPaymentBps'),
     nplPaymentBps: integer(value.nplPaymentBps, 'nplPaymentBps'),
     nplBurnListPriceBps: integer(value.nplBurnListPriceBps, 'nplBurnListPriceBps'),
@@ -53,10 +51,6 @@ export function parsePaymentPolicySnapshot(
     relayInitial: integer(value.relayInitial, 'relayInitial'),
     relayIncrement: integer(value.relayIncrement, 'relayIncrement'),
     relayCap: integer(value.relayCap, 'relayCap'),
-    oracleWindowSeconds: integer(value.oracleWindowSeconds, 'oracleWindowSeconds'),
-    oracleMaxDeviationBps: integer(value.oracleMaxDeviationBps, 'oracleMaxDeviationBps'),
-    oracleMaxAgeSeconds: integer(value.oracleMaxAgeSeconds, 'oracleMaxAgeSeconds'),
-    oracleMinimumUsdtLiquidity: unsigned(value.oracleMinimumUsdtLiquidity, 'oracleMinimumUsdtLiquidity'),
     requiredConfirmations: integer(value.requiredConfirmations, 'requiredConfirmations'),
     merchantGuaranteeMinimumUsdt: unsigned(value.merchantGuaranteeMinimumUsdt, 'merchantGuaranteeMinimumUsdt'),
     platformServiceFeeSafe: text(value.platformServiceFeeSafe, 'platformServiceFeeSafe'),

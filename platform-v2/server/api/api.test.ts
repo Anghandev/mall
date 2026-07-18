@@ -512,25 +512,24 @@ test('governed USDT concession uses only the fixed 45/45/10 Custody pools', () =
 
   const payload = {
     ...policy,
-    oracleMinimumUsdtLiquidity: policy.oracleMinimumUsdtLiquidity.toString(),
     merchantGuaranteeMinimumUsdt: policy.merchantGuaranteeMinimumUsdt.toString(),
   };
   assert.throws(
-    () => parsePaymentPolicySnapshot(1, HASH, { ...payload, platformFeeBps: 101 }),
-    /Frozen launch payment or safety policy/,
+    () => parsePaymentPolicySnapshot(1, { ...payload, platformFeeBps: 101 }),
+    /Frozen launch payment policy/,
   );
   assert.throws(
-    () => parsePaymentPolicySnapshot(1, HASH, { ...payload, concessionDestinationSetHash: HASH }),
+    () => parsePaymentPolicySnapshot(1, { ...payload, concessionDestinationSetHash: HASH }),
     /invalid governed fields/,
   );
 });
 
 test('payment snapshot and EIP-712 digest match the frozen Solidity encoding vector', () => {
   const intent = signingVectorIntent();
-  assert.equal(paymentIntentHash(intent), '0x99ccfc957ff13dd932246ab4f65c3636c3557d7bfdd00369ee9a4c4a597c90b9');
+  assert.equal(paymentIntentHash(intent), '0x5e4de10e2ad0e6a4523921877b4dd61cfc3b8eb3788ccb6d682170caa36c81e7');
   assert.equal(
     paymentAuthorizationDigest(intent, '0x9999999999999999999999999999999999999999'),
-    '0x8d92356ce3efbaa3271f6c99d9166b7bb90787905fd35308c9b0b6bb094ff033',
+    '0xa2f194fafcb357f74f04b79697a228e5bb86a5933b42c03b56082131a548406b',
   );
 });
 
@@ -541,10 +540,10 @@ test('seckill snapshot and EIP-712 digest bind both Router payment intents', () 
     seckill: { ...base, seckill: true, sessionId: `0x${'5'.repeat(64)}` },
     fallback: { ...base, reservationId: `0x${'6'.repeat(64)}`, reservationHash: `0x${'7'.repeat(64)}` },
   };
-  assert.equal(seckillIntentHash(dual), '0xf222066b7b08d6c1cec6fd2121354ff180c25df10879612465567ec53447536b');
+  assert.equal(seckillIntentHash(dual), '0x9c0b86b12a6cb8613c46b162f487fc798d4ff4205cd77213b151306cbc40c2b1');
   assert.equal(
     seckillAuthorizationDigest(dual, '0x9999999999999999999999999999999999999999'),
-    '0x19d2d96a413026200dce3a6b06fffe55ee6a9dffba237ed48ca03f92eb09d4fd',
+    '0x30365fa7329679f0bb416e5a5b512a0d8c68c26d6352fe7ce7055647b3618cfc',
   );
 });
 
@@ -3014,7 +3013,6 @@ class MemoryNonceStore implements NonceStore {
 function readyPolicy(): FrozenPaymentPolicy {
   return {
     policyVersion: 1,
-    oracleVersion: HASH,
     usdtPaymentBps: 7_000,
     nplPaymentBps: 3_000,
     nplBurnListPriceBps: 2_000,
@@ -3027,10 +3025,6 @@ function readyPolicy(): FrozenPaymentPolicy {
     regionBps: 40,
     operationsBps: 400,
     platformFeeBps: 100,
-    oracleWindowSeconds: 1_800,
-    oracleMaxDeviationBps: 500,
-    oracleMaxAgeSeconds: 600,
-    oracleMinimumUsdtLiquidity: 50_000n * 10n ** 18n,
     requiredConfirmations: 15,
     merchantGuaranteeMinimumUsdt: 1_000n * 10n ** 18n,
     platformServiceFeeSafe: '0x2222222222222222222222222222222222222223',
@@ -3115,7 +3109,6 @@ function signingVectorIntent(): CanonicalPaymentIntent {
   return {
     orderId: hash('a'),
     policyVersion: 1,
-    oracleVersion: hash('1'),
     buyer: address('1'),
     merchant: address('2'),
     productId: hash('b'),
@@ -3260,7 +3253,7 @@ function paymentRuntimeReadiness(now: Date, indexerHealthy: boolean) {
     roleGrantsVerified: true,
     safeAdminVerified: true,
     signerBindingsVerified: true,
-    oracleDeploymentVerified: true,
+    nplQuoteSourceHealthy: true,
     indexerHealthy,
     databaseHealthy: true,
     redisHealthy: true,

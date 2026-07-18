@@ -409,7 +409,6 @@ test('provider and production decisions stay unavailable without external config
 function readyPolicy(): FrozenPaymentPolicy {
   return {
     policyVersion: 1,
-    oracleVersion: HASH,
     usdtPaymentBps: 7_000,
     nplPaymentBps: 3_000,
     nplBurnListPriceBps: 2_000,
@@ -422,10 +421,6 @@ function readyPolicy(): FrozenPaymentPolicy {
     regionBps: 40,
     operationsBps: 400,
     platformFeeBps: 100,
-    oracleWindowSeconds: 1_800,
-    oracleMaxDeviationBps: 500,
-    oracleMaxAgeSeconds: 600,
-    oracleMinimumUsdtLiquidity: 50_000n * 10n ** 18n,
     requiredConfirmations: 15,
     merchantGuaranteeMinimumUsdt: 1_000n * 10n ** 18n,
     platformServiceFeeSafe: '0x2222222222222222222222222222222222222223',

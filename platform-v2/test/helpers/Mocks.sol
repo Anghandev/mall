@@ -5,7 +5,6 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {IERC1271} from "@openzeppelin/contracts/interfaces/IERC1271.sol";
-import {ITwapSourceV2} from "../../contracts/interfaces/IV2Core.sol";
 
 contract MockERC20 is ERC20 {
     uint16 public feeBps;
@@ -70,33 +69,6 @@ contract MockCredential is ERC721 {
     function mint(address account) external returns (uint256 tokenId) {
         tokenId = _nextId++;
         _mint(account, tokenId);
-    }
-}
-
-contract MockTwapSource is ITwapSourceV2 {
-    address public pair = 0x2955e33bb120714aBf11ACE2766E614E6E5955B2;
-    uint256 public quoteAmount;
-    uint128 public liquidity;
-    uint64 public updatedAt;
-    uint32 public lastWindow;
-
-    function setResult(uint256 quoteAmount_, uint128 liquidity_, uint64 updatedAt_) external {
-        quoteAmount = quoteAmount_;
-        liquidity = liquidity_;
-        updatedAt = updatedAt_;
-    }
-
-    function setPair(address pair_) external {
-        pair = pair_;
-    }
-
-    function consult(address, address, address, uint256, uint32 window)
-        external
-        view
-        returns (uint256, uint128, uint64)
-    {
-        window;
-        return (quoteAmount, liquidity, updatedAt);
     }
 }
 

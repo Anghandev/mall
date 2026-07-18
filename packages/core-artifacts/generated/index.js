@@ -1,4 +1,4 @@
-export const artifactVersion = "2.0.0-settlement-admin.15";
+export const artifactVersion = "2.0.0-settlement-admin.16";
 export const chainIdentity = Object.freeze({"chainId":56,"usdtAddress":"0x55d398326f99059ff775485246999027b3197955","nplAddress":"0x4e8277ab31e4956b2cd48449793a57656dfc03d2"});
 export const adminResourceTypes = Object.freeze(["ORDER","PRODUCT","MERCHANT"]);
 export const adminExportFormats = Object.freeze(["CSV","EXCEL"]);
@@ -65,7 +65,7 @@ export const notificationEndpointStates = Object.freeze(["ACTIVE","PAUSED","REVO
 export const notificationCampaignTopics = Object.freeze(["ANNOUNCEMENT","MAINTENANCE","ACTIVITY"]);
 export const notificationCampaignStates = Object.freeze(["DRAFT","PUBLISHED","CANCELLED"]);
 export const notificationDeliveryStates = Object.freeze(["PENDING","PROCESSING","DELIVERED","RETRY","CONFIGURATION_REQUIRED","DEAD_LETTER"]);
-export const systemConfigKeys = Object.freeze(["BUSINESS","FREIGHT","RPC","ORACLE","GAS","CHAIN","INTEGRATIONS","MERCHANT_LEVELS"]);
+export const systemConfigKeys = Object.freeze(["BUSINESS","FREIGHT","RPC","NPL_QUOTE","GAS","CHAIN","INTEGRATIONS","MERCHANT_LEVELS"]);
 export const auditStreamNames = Object.freeze(["financial","governance","authentication","operational","backup"]);
 export const auditEvidenceProfiles = Object.freeze(["RBAC","AUTHORIZATION","SIGNED_OFFCHAIN","SAFE_APPROVED","CHAIN_OBSERVED","CHAIN_FINAL","SYSTEM"]);
 export const operationsMetricComponents = Object.freeze(["HOST","REDIS","MQ","DATABASE","HTTP","PAYMENT","FULFILLMENT","RPC_PRIMARY","RPC_FALLBACK","EXPLORER"]);

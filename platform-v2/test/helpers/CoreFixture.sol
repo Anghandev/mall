@@ -2,12 +2,11 @@
 pragma solidity 0.8.26;
 
 import {TestBase} from "./TestBase.sol";
-import {CallbackERC20, Mock1271Wallet, MockTwapSource} from "./Mocks.sol";
+import {CallbackERC20, Mock1271Wallet} from "./Mocks.sol";
 import {BeneficiaryRegistryV2} from "../../contracts/BeneficiaryRegistryV2.sol";
 import {PaymentRouterV2} from "../../contracts/PaymentRouterV2.sol";
 import {PolicyRegistryV2} from "../../contracts/PolicyRegistryV2.sol";
-import {TwapOracleAdapterV2} from "../../contracts/TwapOracleAdapterV2.sol";
-import {IBeneficiaryRegistryV2, IPolicyRegistryV2, ITwapOracleV2} from "../../contracts/interfaces/IV2Core.sol";
+import {IBeneficiaryRegistryV2, IPolicyRegistryV2} from "../../contracts/interfaces/IV2Core.sol";
 import {V2Types} from "../../contracts/types/V2Types.sol";
 
 abstract contract CoreFixture is TestBase {
@@ -15,7 +14,6 @@ abstract contract CoreFixture is TestBase {
     uint256 internal constant SECONDARY_KEY = 0xB0B;
     uint256 internal constant QUOTE_KEY = 0xC0DE;
     uint256 internal constant BUYER_KEY = 0xBEEF;
-    bytes32 internal constant ORACLE_VERSION = keccak256("pancake-v2-npl-usdt-30m-v1");
 
     address internal safe;
     address internal secondarySigner;
@@ -42,10 +40,8 @@ abstract contract CoreFixture is TestBase {
 
     CallbackERC20 internal usdt;
     CallbackERC20 internal npl;
-    MockTwapSource internal twapSource;
     PolicyRegistryV2 internal policyRegistry;
     BeneficiaryRegistryV2 internal beneficiaryRegistry;
-    TwapOracleAdapterV2 internal oracle;
     PaymentRouterV2 internal router;
 
     function setUp() public virtual {
@@ -63,9 +59,6 @@ abstract contract CoreFixture is TestBase {
         vm.etch(V2Types.NPL, address(nplImplementation).code);
         usdt = CallbackERC20(V2Types.USDT);
         npl = CallbackERC20(V2Types.NPL);
-        twapSource = new MockTwapSource();
-        twapSource.setResult(1_000 ether, V2Types.ORACLE_MIN_USDT_LIQUIDITY, uint64(block.timestamp));
-
         policyRegistry = new PolicyRegistryV2(safe, secondarySigner);
         beneficiaryRegistry = new BeneficiaryRegistryV2(IPolicyRegistryV2(address(policyRegistry)));
         BeneficiaryRegistryV2.RegionBeneficiaries memory regionBeneficiarySet =
@@ -84,13 +77,11 @@ abstract contract CoreFixture is TestBase {
             _sign(SECONDARY_KEY, regionPublicationDigest)
         );
         _publishLaunchPolicy();
-        oracle = new TwapOracleAdapterV2(twapSource, ORACLE_VERSION);
         router = new PaymentRouterV2(
             usdt,
             npl,
             IPolicyRegistryV2(address(policyRegistry)),
             IBeneficiaryRegistryV2(address(beneficiaryRegistry)),
-            ITwapOracleV2(address(oracle)),
             platformServiceFeeSafe,
             usdtCustodySafe,
             nplRewardSafe,
@@ -137,9 +128,6 @@ abstract contract CoreFixture is TestBase {
             relayInitial: 60 seconds,
             relayIncrement: 30 seconds,
             relayCap: 60 seconds,
-            oracleVersion: ORACLE_VERSION,
-            oracleMaxAge: V2Types.ORACLE_MAX_AGE,
-            oracleMinLiquidity: V2Types.ORACLE_MIN_USDT_LIQUIDITY,
             merchantGuaranteeMinimum: V2Types.MERCHANT_GUARANTEE_MINIMUM,
             usdtCustodySafe: usdtCustodySafe,
             nplRewardSafe: nplRewardSafe,
@@ -176,7 +164,6 @@ abstract contract CoreFixture is TestBase {
         intent = V2Types.PaymentIntent({
             orderId: orderId,
             policyVersion: 1,
-            oracleVersion: ORACLE_VERSION,
             buyer: paymentBuyer,
             merchant: merchant,
             productId: keccak256("product-1"),

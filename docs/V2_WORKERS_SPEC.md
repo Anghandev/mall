@@ -40,17 +40,18 @@ quarantined. Only at 15 confirmations is the unused reservation released.
 ## RPC Sources
 
 The resilient contract reader requires independent primary and fallback BSC
-RPC URLs and verifies chain 56. The Oracle adapter verifies the fixed
-NPL/USDT pair, 30-minute window, age and liquidity. The beneficiary adapter
+RPC URLs and verifies chain 56. Core reads fixed-pair reserves at one common
+block, verifies the NPL/USDT token identity and minimum USDT liquidity, and
+computes the exact integer NPL amount before signing. The beneficiary adapter
 reads referral, four region beneficiaries and genesis eligibility from the
 deployed registry. Both RPC providers failing returns `ExternalBlocked`.
 
 ## Payment Write Readiness
 
 New ordinary and seckill quotes require a fresh runtime readiness snapshot.
-Core verifies artifact checksums, chain 56, deployed code hashes for all four
+Core verifies artifact checksums, chain 56, deployed code hashes for all three
 contracts, immutable bindings, Safe-held roles, quote and secondary signers,
-the TWAP source address/codehash/pair, PostgreSQL, Redis, remote signer identity
+the fixed-pair reserve source, PostgreSQL, Redis, remote signer identity
 and a caught-up Indexer. The manifest must include each deployed address,
 runtime code hash and the Router deployment block.
 

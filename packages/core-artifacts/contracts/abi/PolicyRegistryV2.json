@@ -413,21 +413,6 @@
             "internalType": "uint32"
           },
           {
-            "name": "oracleVersion",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          },
-          {
-            "name": "oracleMaxAge",
-            "type": "uint64",
-            "internalType": "uint64"
-          },
-          {
-            "name": "oracleMinLiquidity",
-            "type": "uint128",
-            "internalType": "uint128"
-          },
-          {
             "name": "merchantGuaranteeMinimum",
             "type": "uint128",
             "internalType": "uint128"
@@ -612,21 +597,6 @@
             "name": "relayCap",
             "type": "uint32",
             "internalType": "uint32"
-          },
-          {
-            "name": "oracleVersion",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          },
-          {
-            "name": "oracleMaxAge",
-            "type": "uint64",
-            "internalType": "uint64"
-          },
-          {
-            "name": "oracleMinLiquidity",
-            "type": "uint128",
-            "internalType": "uint128"
           },
           {
             "name": "merchantGuaranteeMinimum",
@@ -866,21 +836,6 @@
             "name": "relayCap",
             "type": "uint32",
             "internalType": "uint32"
-          },
-          {
-            "name": "oracleVersion",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          },
-          {
-            "name": "oracleMaxAge",
-            "type": "uint64",
-            "internalType": "uint64"
-          },
-          {
-            "name": "oracleMinLiquidity",
-            "type": "uint128",
-            "internalType": "uint128"
           },
           {
             "name": "merchantGuaranteeMinimum",

@@ -27,12 +27,12 @@ Status: frozen authority for the function-first V2 rewrite from
 - BSC chain ID is `56`.
 - USDT is `0x55d398326f99059fF775485246999027B3197955`.
 - NPL is `0x4e8277ab31e4956b2cd48449793a57656dfc03d2`.
-- The NPL/USDT Oracle pair is the verified PancakeSwap V2 pair
+- The NPL/USDT pricing pair is the verified PancakeSwap V2 pair
   `0x2955e33bb120714abf11ace2766e614e6e5955b2`.
 - Product list price, merchant base receivable, merchant concession and Safe
   liabilities are denominated in USDT.
 - The launch policy requires the buyer to pay exactly 70% of the USDT list
-  price in USDT and 30% of the same price as Oracle-equivalent NPL. Without an
+  price in USDT and 30% of the same price as Core-quoted equivalent NPL. Without an
   explicitly funded NPL subsidy, no later policy may set the buyer NPL leg
   below 30%.
 - The product USDT leg is split atomically inside the payment transaction.
@@ -48,7 +48,7 @@ Status: frozen authority for the function-first V2 rewrite from
   USDT, Custody product USDT, freight USDT, total USDT and NPL amounts
   separately.
 - Quotes use integer token units and canonical decimal strings. They bind
-  `policyVersion`, Oracle observation, reservation, product/SKU/quantity,
+  `policyVersion`, the exact Core-computed NPL amount, reservation, product/SKU/quantity,
   fulfillment mode, beneficiary snapshot, nonce, deadline and exact Router
   payment intent. Quote validity is five minutes.
 - First approval for an insufficient allowance defaults to `MaxUint256`. The
@@ -85,7 +85,7 @@ Status: frozen authority for the function-first V2 rewrite from
 ## NPL Reward Allocation
 
 - The NPL Reward Safe receives exactly 10% of the order's total USDT list price
-  converted by the signed Oracle snapshot.
+  converted by the signed Core quote snapshot.
 - The payment snapshot allocates that 10% as: genesis-node pool 2%, direct-shop referral 1%,
   district 1.2%, city 0.8%, province 0.6%, region 0.4% and operations 4%.
 - Genesis-node rewards use no NFT, ERC-721, ERC-1155, contract or token-ID
@@ -220,14 +220,22 @@ Status: frozen authority for the function-first V2 rewrite from
   session instead of being cleared or returned. Force-close applies the same
   winner-or-rollover rule.
 
-## Oracle
+## Backend NPL Quote
 
-- Core uses the specified PancakeSwap V2 pair to calculate a 30-minute
-  NPL/USDT TWAP. Maximum deviation is 5%, the observation may be at most 10
-  minutes old and USDT-side liquidity must be at least 50,000 USDT.
-- Expired quotes, stale observations, excessive deviation or insufficient
-  liquidity pause new payments while fulfillment, takeover, arbitration,
-  reconciliation, audit and finality synchronization remain available.
+- Launch deploys no `ITwapSourceV2` or `TwapOracleAdapterV2`, and the
+  `PaymentRouter` never reads an external TWAP or price contract. Core reads the
+  fixed PancakeSwap V2 pair through the configured primary/fallback BSC RPC,
+  verifies the pair identity and at least 50,000 USDT-side liquidity, computes
+  the exact integer NPL equivalent and signs the complete payment intent.
+- Quote validity is exactly five minutes and the buyer nonce, order and
+  reservation are one-use. The quote and buyer signatures bind the exact USDT
+  and NPL amounts, order, product/SKU/quantity, inventory reservation,
+  payer/payee, fulfillment target, `policyVersion`, deadline and nonce.
+- Quote-source failure, inconsistent or unavailable pair data, insufficient
+  liquidity, expiry or an invalid signature stops only new orders. Existing
+  fulfillment, takeover, exchange, arbitration, reconciliation, audit and
+  finality synchronization remain available. No third-party TWAP order system
+  is introduced.
 
 ## Governance, Risk And Retention
 
@@ -287,12 +295,15 @@ Status: frozen authority for the function-first V2 rewrite from
   Safe addresses have runtime code and respond to the required Safe read
   interfaces. Their addresses are secret-safe operational data, while owners
   and thresholds remain user-managed; none are printed or copied here.
-- `ExternalBlocked`: production TWAP pair/code/liquidity attestation,
-  domains/HTTPS/WSS, production databases and queues, the existing BNM backend project's API/schema/credentials and monotonic-state conformance evidence,
+- Production domains/HTTPS/WSS, production databases and queues, the existing
+  BNM backend project's API/schema/credentials and monotonic-state conformance evidence,
   provider accounts and credentials, approved merchant/admin wallets, encrypted
-  backup storage, printers and physical mobile-device evidence.
-- Provider absence may return `ConfigurationRequired`, but adapters,
-  validation, typed errors and the local business path must still exist.
+  backup storage, printers and physical mobile-device evidence remain
+  launch-time operational configuration.
+- Provider absence returns `ConfigurationRequired` for the affected feature,
+  but adapters, validation, typed errors and the local business path must still
+  exist. It does not block unrelated local code completion or a separately
+  approved chain micro-test.
 - Current ignored `.env` wallets are limited to local, fork and separately
   approved micro-tests. No deployment or mainnet transaction is authorized
   until bytecode/configuration checks, complete local gates and an exact bounded

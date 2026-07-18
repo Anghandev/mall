@@ -281,7 +281,7 @@ CREATE TABLE core.notification_source_consumptions (
 CREATE TABLE core.system_config_versions (
     config_version_id text PRIMARY KEY,
     config_key text NOT NULL CHECK (config_key IN (
-        'BUSINESS', 'FREIGHT', 'RPC', 'ORACLE', 'GAS', 'CHAIN', 'INTEGRATIONS'
+        'BUSINESS', 'FREIGHT', 'RPC', 'NPL_QUOTE', 'GAS', 'CHAIN', 'INTEGRATIONS'
     )),
     version integer NOT NULL CHECK (version > 0),
     payload jsonb NOT NULL CHECK (jsonb_typeof(payload) = 'object'),

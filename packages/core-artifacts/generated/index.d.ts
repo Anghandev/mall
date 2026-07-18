@@ -1,4 +1,4 @@
-export declare const artifactVersion: "2.0.0-settlement-admin.15";
+export declare const artifactVersion: "2.0.0-settlement-admin.16";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
@@ -70,7 +70,7 @@ export type NotificationCampaignTopic = "ANNOUNCEMENT" | "MAINTENANCE" | "ACTIVI
 export type NotificationCampaignState = "DRAFT" | "PUBLISHED" | "CANCELLED";
 export type NotificationDeliveryState = "PENDING" | "PROCESSING" | "DELIVERED" | "RETRY" | "CONFIGURATION_REQUIRED" | "DEAD_LETTER";
 export type NotificationCampaignAction = 'PUBLISH' | 'RETRY_FAILED';
-export type SystemConfigKey = "BUSINESS" | "FREIGHT" | "RPC" | "ORACLE" | "GAS" | "CHAIN" | "INTEGRATIONS" | "MERCHANT_LEVELS";
+export type SystemConfigKey = "BUSINESS" | "FREIGHT" | "RPC" | "NPL_QUOTE" | "GAS" | "CHAIN" | "INTEGRATIONS" | "MERCHANT_LEVELS";
 export type AuditStreamName = "financial" | "governance" | "authentication" | "operational" | "backup";
 export type AuditEvidenceProfile = "RBAC" | "AUTHORIZATION" | "SIGNED_OFFCHAIN" | "SAFE_APPROVED" | "CHAIN_OBSERVED" | "CHAIN_FINAL" | "SYSTEM";
 export type OperationsMetricComponent = "HOST" | "REDIS" | "MQ" | "DATABASE" | "HTTP" | "PAYMENT" | "FULFILLMENT" | "RPC_PRIMARY" | "RPC_FALLBACK" | "EXPLORER";
@@ -1978,7 +1978,6 @@ export interface RiskAppealDecisionRequest {
 
 export interface ProductPolicy {
   policyVersion: number;
-  oracleVersion: Bytes32;
   usdtPaymentBps: number;
   nplPaymentBps: number;
   nplBurnListPriceBps: number;
@@ -1992,10 +1991,6 @@ export interface ProductPolicy {
   operationsBps: number;
   platformFeeBps: number;
   seckillPrizeBps: number;
-  oracleWindowSeconds: 1800;
-  oracleMaxDeviationBps: 500;
-  oracleMaxAgeSeconds: 600;
-  oracleMinimumUsdtLiquidity: AtomicAmount;
   requiredConfirmations: 15;
   merchantGuaranteeMinimumUsdt: AtomicAmount;
   platformServiceFeeSafe: Address;
@@ -2806,7 +2801,6 @@ export interface AllocationSnapshot {
 export interface PaymentRouterIntent {
   orderId: Bytes32;
   policyVersion: number;
-  oracleVersion: Bytes32;
   buyer: Address;
   merchant: Address;
   productId: Bytes32;
