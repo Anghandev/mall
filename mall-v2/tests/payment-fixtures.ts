@@ -62,7 +62,6 @@ export function paymentQuote(fulfillmentMode: 'DELIVERY' | 'PICKUP' = 'DELIVERY'
   const intent = {
     orderId: hash('c'),
     policyVersion: 1,
-    oracleVersion: hash('d'),
     buyer,
     merchant: address('2'),
     productId: product.chainProductId,

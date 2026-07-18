@@ -102,7 +102,7 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/mall');
 
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.15');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.16');
     expect(productBaseline.manifestsAligned).toBe(true);
     expect(productBaseline.knownOrderActions).toBe(allowedActionNames);
     expect(productBaseline.executableOrderActions).toBe(executableOrderActionNames);
@@ -111,7 +111,7 @@ describe('Mall V2 payment consumer', () => {
     expect(isCoreOrderActionExecutable('CONFIRM_RECEIPT')).toBe(true);
     expect(isCoreOrderActionExecutable('PAY_ORDER')).toBe(false);
     expect(mallRuntimeBoundary).toMatchObject({
-      artifactStatus: '2.0.0-settlement-admin.15',
+      artifactStatus: '2.0.0-settlement-admin.16',
       executableOrderActions: executableOrderActionNames,
       deploymentAuthorized: false,
       settlementAdminCapabilities: {
@@ -614,7 +614,8 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText(/主场固定 60 分钟/)).toBeTruthy();
     expect(screen.getByText(/增加 30 秒/)).toBeTruthy();
     expect(screen.getByText(/区块时间决定订单归类/)).toBeTruthy();
-    expect(screen.getByText(/70% USDT \+ 30% Oracle 等值 NPL/)).toBeTruthy();
+    expect(screen.getByText(/70% USDT \+ 30% 等值 NPL/)).toBeTruthy();
+    expect(screen.getByText(/Core 签名的五分钟精确报价/)).toBeTruthy();
     expect(screen.getByText(/USDT 标价 1:1.*后台积分/)).toBeTruthy();
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog')).toBeNull();
