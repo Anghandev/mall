@@ -29,6 +29,10 @@ This plan is bound to settlement/admin artifact
 - The approved recovery packet completed the NPL funding swap and both Router
   approvals. Its three receipts reached at least 15 confirmations on both RPCs;
   the NPL net output and both exact allowances matched their assertions.
+- The bounded payment/seckill packet opened one session, completed one ordinary
+  payment and completed one payment inside the real 60-second relay window.
+  Both payment events had the intended classification; exact buyer, service-fee,
+  Custody, Burn and Reward balance deltas matched with zero Router retention.
 
 ## Deployment State
 
@@ -64,8 +68,10 @@ guarantee or settlement transaction has been broadcast.
 ## Exact Packet Gate
 
 Before any broadcast, one ignored mode-600 packet must bind every transaction
-in execution order. The user approves the packet by its SHA-256. The packet
-must contain:
+in execution order. The user has authorized Core to execute these bounded
+packets without repeating a chat SHA confirmation, provided each token-value
+action remains at or below 3 USDT and the existing Gas/total budgets do not
+change. The packet must contain:
 
 ```text
 chainId = 56
@@ -84,8 +90,9 @@ post-transaction assertions and stop conditions
 
 Any change to chain, signer, nonce, target, constructor argument, calldata,
 amount, Gas ceiling or total budget invalidates the packet and requires a new
-SHA-256 approval. Complete role addresses remain only in the ignored packet
-and local evidence, never in tracked documentation or chat output.
+mode-600 packet plus the same full preflight. Complete role addresses remain
+only in the ignored packet and local evidence, never in tracked documentation
+or chat output.
 
 The final three setup actions were executed from the ignored mode-600 recovery
 packet with SHA-256
@@ -108,9 +115,9 @@ Actual native value plus Gas was `0.0000471636 BNB`, below the approved
    Governance EOA with the exact secondary EIP-712 signature.
 6. Completed: fund minimum Gas, USDT and tax-adjusted NPL, then grant both
    Router approvals through the approved recovery packet.
-7. Execute one ordinary payment and prove the exact service-fee, Custody,
+7. Completed: execute one ordinary payment and prove the exact service-fee, Custody,
    freight, NPL Burn and NPL Reward deltas with zero Router retention.
-8. Execute the bounded seckill/boundary flow and prove reservation,
+8. Completed: execute the bounded live-seckill flow and prove reservation,
    classification and prize-liability evidence.
 9. Prove fulfillment/finality and the local/Fork 1,000-USDT guarantee path;
    the guarantee minimum is never disguised as a mainnet micro amount.
@@ -121,6 +128,14 @@ Actual native value plus Gas was `0.0000471636 BNB`, below the approved
 
 Safe proposals, owner signatures, `execTransaction`, MultiSend and Safe nonce
 are not part of this sequence.
+
+The payment/seckill packet SHA-256 is
+`0827139fded2db88988b02edc368322a63a8a52b4a0be6a941deb6efbb8fc945`.
+Its mode-600 receipt evidence SHA-256 is
+`f32a3405dbfd957fbbcb0986feb1556f751e592dea4460e979b99de8d40aa866`.
+Actual Gas was `0.00003902305 BNB`, below the packet's
+`0.0000585345 BNB` ceiling. The ordinary and seckill list prices were `0.01`
+and `0.005 USDT`; no fallback payment was used.
 
 ## Hard Limits And Stop Conditions
 

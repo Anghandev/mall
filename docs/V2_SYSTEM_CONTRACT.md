@@ -34,9 +34,11 @@ source conflicts are indexed in `V2_DECISIONS.md`.
   tax is not treated as an ordinary ERC-20 transfer tax. Fixed-block fork
   evidence showed the swap recipient receiving the tax-adjusted net amount,
   while buyer-to-Router `transferFrom` and Router-to-Burn/Reward transfers
-  arrived exactly. Payment intents therefore bind the buyer's exact post-swap
-  NPL balance; any future ordinary-transfer balance-delta mismatch still
-  reverts and stops the payment instead of weakening Router conservation.
+  arrived exactly. A later bounded BSC payment and live-seckill micro-test
+  confirmed the same exact ordinary-transfer deltas on mainnet. Payment intents
+  therefore bind the buyer's exact post-swap NPL balance; any future
+  ordinary-transfer balance-delta mismatch still reverts and stops the payment
+  instead of weakening Router conservation.
 - Product list price, merchant base receivable, merchant concession and wallet
   liabilities are denominated in USDT.
 - The launch policy requires the buyer to pay exactly 70% of the USDT list

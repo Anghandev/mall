@@ -11,6 +11,9 @@
     "receiptsSha256": "e171ba3e649c11b44cc1158bb9c228b7c4fa81a7f6881266b15cba252fff5adf",
     "recoveryPacketSha256": "77b1fc3fbcc12c602b76f128017783bca10eb821703ab33cec9a61bf0cf5d4ac",
     "recoveryReceiptsSha256": "aeb92addcfac780b732d2f34e9e973f7ee22a3341f02e7da9fe53e14deec4338",
+    "paymentSeckillPacketSha256": "0827139fded2db88988b02edc368322a63a8a52b4a0be6a941deb6efbb8fc945",
+    "paymentSeckillReceiptsSha256": "f32a3405dbfd957fbbcb0986feb1556f751e592dea4460e979b99de8d40aa866",
+    "microTestStatus": "PAYMENT_AND_SECKILL_COMPLETE",
     "sourceVerificationSha256": "c722a63cd89a528f2e6670d39c9c98bb1afc5239e15ad98a42c2136e151feafa",
     "sourceVerification": "BSCSCAN_EXACT_MATCH",
     "setupStatus": "COMPLETE_15_OF_15"
