@@ -16,7 +16,7 @@ contract PolicyRegistryV2Test is CoreFixture {
         assertEq(policy.nplBurnListPriceBps, 2_000);
         assertEq(policy.nplRewardListPriceBps, 1_000);
         assertEq(policy.merchantGuaranteeMinimum, 1_000 ether);
-        assertEq(policy.usdtCustodyWallet, usdtCustodyWallet);
+        assertEq(policy.usdtSettlementWallet, usdtSettlementWallet);
         assertEq(policy.nplRewardWallet, nplRewardWallet);
         assertEq(policy.operationsWallet, operationsWallet);
         assertEq(
@@ -86,14 +86,14 @@ contract PolicyRegistryV2Test is CoreFixture {
         policyRegistry.publishPolicy(policy, accounts, weights, 5, deadline, _sign(GOVERNANCE_KEY, digest));
 
         (policy, accounts, weights) = _secondPolicy();
-        policy.nplRewardWallet = policy.usdtCustodyWallet;
+        policy.nplRewardWallet = policy.usdtSettlementWallet;
         digest = policyRegistry.hashPublication(policy, accounts, weights, 6, deadline);
         vm.prank(governanceWallet);
         vm.expectRevert(PolicyRegistryV2.InvalidPolicy.selector);
         policyRegistry.publishPolicy(policy, accounts, weights, 6, deadline, _sign(GOVERNANCE_KEY, digest));
 
         (policy, accounts, weights) = _secondPolicy();
-        policy.usdtCustodyWallet = address(this);
+        policy.usdtSettlementWallet = address(this);
         digest = policyRegistry.hashPublication(policy, accounts, weights, 9, deadline);
         vm.prank(governanceWallet);
         vm.expectRevert(PolicyRegistryV2.InvalidPolicy.selector);

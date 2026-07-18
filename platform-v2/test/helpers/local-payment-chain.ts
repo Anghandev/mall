@@ -170,7 +170,7 @@ async function deployAndPay(provider: JsonRpcProvider): Promise<LocalPaymentChai
     relayIncrement: 30,
     relayCap: 60,
     merchantGuaranteeMinimum: 1_000n * ONE_TOKEN,
-    usdtCustodyWallet: usdtCustody,
+    usdtSettlementWallet: usdtCustody,
     nplRewardWallet: nplReward,
     operationsWallet: operationsTreasury,
     circulationPool,

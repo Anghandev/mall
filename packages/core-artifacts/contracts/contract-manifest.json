@@ -20,7 +20,7 @@
     "bytecodeHash": "none",
     "cborMetadata": false
   },
-  "sourceDigestSha256": "fe417164d6ffdc9222a845d6efa3ea8de5411a314d59979a8943c96645f16382",
+  "sourceDigestSha256": "713ab33de73d34855c3c707e2af837e7b49d59a6783dbf89b247e6eb5e9ae9e5",
   "deploymentStatus": "PENDING",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
@@ -101,7 +101,7 @@
           "internalType": "address"
         },
         {
-          "name": "usdtCustodyWallet_",
+          "name": "usdtSettlementWallet_",
           "type": "address",
           "internalType": "address"
         },
@@ -116,8 +116,8 @@
           "internalType": "address"
         }
       ],
-      "bytecodeSha256": "a3f25e6f468a2c22f2ba413157460481a81b7a73b05f0fcd92699f9f9fd3947f",
-      "deployedBytecodeSha256": "88c42bf306e31ffee440c4d0fb9232dcdee3366e8fe8f9ff06a53a64a13de43d",
+      "bytecodeSha256": "28cc1fc8c2a4bc733111ba4412d493b6b3f9e5b06ec9eeb6e0a854c32963d07c",
+      "deployedBytecodeSha256": "42b749372f8692ea48bd6b7f2a825275759d91ad528d3e9cd6f745ab4854eb74",
       "deployedCodeHash": null
     }
   ],

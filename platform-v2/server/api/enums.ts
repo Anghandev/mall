@@ -281,19 +281,18 @@ export type SettlementRail = (typeof settlementRails)[number];
 export const reservationStates = ['ACTIVE', 'CONSUMED', 'EXPIRED', 'RELEASED'] as const;
 export type ReservationState = (typeof reservationStates)[number];
 
-export const balanceStates = ['LOCKED', 'AVAILABLE', 'REQUESTED', 'BATCHED', 'SETTLED', 'DISPUTED'] as const;
+export const balanceStates = ['LOCKED', 'AVAILABLE', 'REQUESTED', 'SUBMITTED', 'SETTLED', 'DISPUTED'] as const;
 export type BalanceState = (typeof balanceStates)[number];
 
 export const settlementIntentStates = ['ISSUED', 'CONSUMED', 'EXPIRED', 'CANCELLED'] as const;
 export type SettlementIntentState = (typeof settlementIntentStates)[number];
 
-export const settlementRequestStates = ['REQUESTED', 'BATCHED', 'SETTLED', 'RETRYABLE', 'QUARANTINED'] as const;
+export const settlementRequestStates = ['REQUESTED', 'SUBMITTED', 'SETTLED', 'RETRYABLE', 'QUARANTINED'] as const;
 export type SettlementRequestState = (typeof settlementRequestStates)[number];
 
-export const settlementBatchStates = [
-  'APPROVAL_PENDING',
-  'APPROVED',
-  'SUBMITTING',
+export const settlementTransferStates = [
+  'PENDING',
+  'LEASED',
   'SUBMITTED',
   'MINED',
   'SETTLED',
@@ -302,7 +301,7 @@ export const settlementBatchStates = [
   'RETRYABLE',
   'QUARANTINED',
 ] as const;
-export type SettlementBatchState = (typeof settlementBatchStates)[number];
+export type SettlementTransferState = (typeof settlementTransferStates)[number];
 
 export const merchantGuaranteeDepositStates = ['SUBMITTED', 'MINED', 'FINAL', 'REORGED', 'QUARANTINED'] as const;
 export type MerchantGuaranteeDepositState = (typeof merchantGuaranteeDepositStates)[number];
@@ -348,7 +347,7 @@ export const policyDraftStates = [
   'DRAFT',
   'DECISION_BLOCKED',
   'SECONDARY_SIGNED',
-  'SAFE_PROPOSED',
+  'SUBMITTED',
   'FINALITY_PENDING',
   'REORGED',
   'REJECTED',

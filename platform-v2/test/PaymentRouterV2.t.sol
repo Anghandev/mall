@@ -169,7 +169,7 @@ contract PaymentRouterV2Test is CoreFixture {
             IPolicyRegistryV2(address(0)),
             IBeneficiaryRegistryV2(address(beneficiaryRegistry)),
             platformServiceFeeWallet,
-            usdtCustodyWallet,
+            usdtSettlementWallet,
             nplRewardWallet,
             operationsWallet
         );
@@ -191,7 +191,7 @@ contract PaymentRouterV2Test is CoreFixture {
         assertEq(buyerUsdtBefore - usdt.balanceOf(buyer), 70 ether);
         assertEq(buyerNplBefore - npl.balanceOf(buyer), 300 ether);
         assertEq(usdt.balanceOf(platformServiceFeeWallet), 1 ether);
-        assertEq(usdt.balanceOf(usdtCustodyWallet), 69 ether);
+        assertEq(usdt.balanceOf(usdtSettlementWallet), 69 ether);
         assertEq(npl.balanceOf(V2Types.NPL_BURN_ADDRESS), 200 ether);
         assertEq(npl.balanceOf(nplRewardWallet), 100 ether);
         assertEq(usdt.balanceOf(address(router)), 0);
@@ -203,13 +203,13 @@ contract PaymentRouterV2Test is CoreFixture {
             _makePayment(keccak256("delivery-freight"), buyer, 19, false, keccak256("reservation-19"));
         delivery.freightUsdt = 5 ether;
         delivery.usdtPaymentAmount = delivery.productUsdtPaymentAmount + delivery.freightUsdt;
-        uint256 custodyBefore = usdt.balanceOf(usdtCustodyWallet);
+        uint256 custodyBefore = usdt.balanceOf(usdtSettlementWallet);
         uint256 burnBefore = npl.balanceOf(V2Types.NPL_BURN_ADDRESS);
         uint256 rewardBefore = npl.balanceOf(nplRewardWallet);
 
         _pay(delivery, BUYER_KEY);
 
-        assertEq(usdt.balanceOf(usdtCustodyWallet) - custodyBefore, 74 ether);
+        assertEq(usdt.balanceOf(usdtSettlementWallet) - custodyBefore, 74 ether);
         assertEq(npl.balanceOf(V2Types.NPL_BURN_ADDRESS) - burnBefore, 200 ether);
         assertEq(npl.balanceOf(nplRewardWallet) - rewardBefore, 100 ether);
         assertEq(delivery.bnmAmount, delivery.listPriceUsdt);

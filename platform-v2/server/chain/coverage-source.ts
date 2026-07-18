@@ -7,7 +7,7 @@ const TOKEN = new Interface(['function balanceOf(address account) view returns (
 export class ResilientBscCoverageSource implements CoverageSource {
   readonly #providers: readonly JsonRpcProvider[];
   readonly #assets: readonly {
-    safeAddress: string;
+    walletAddress: string;
     asset: 'USDT' | 'NPL';
     tokenAddress: string;
   }[];
@@ -16,7 +16,7 @@ export class ResilientBscCoverageSource implements CoverageSource {
   constructor(input: {
     primaryRpcUrl?: string;
     fallbackRpcUrl?: string;
-    assets: readonly { safeAddress: string; asset: 'USDT' | 'NPL'; tokenAddress: string }[];
+    assets: readonly { walletAddress: string; asset: 'USDT' | 'NPL'; tokenAddress: string }[];
     clock?: () => Date;
   }) {
     if (!input.primaryRpcUrl || !input.fallbackRpcUrl) {
@@ -29,16 +29,16 @@ export class ResilientBscCoverageSource implements CoverageSource {
     const seen = new Set<string>();
     this.#assets = input.assets.map((item) => {
       const value = {
-        safeAddress: address(item.safeAddress, 'coverage Safe'),
+        walletAddress: address(item.walletAddress, 'coverage wallet'),
         asset: item.asset,
         tokenAddress: address(item.tokenAddress, 'coverage token'),
       };
-      const key = `${value.safeAddress}:${value.asset}`;
+      const key = `${value.walletAddress}:${value.asset}`;
       if (seen.has(key)) throw new CoreError('ExternalBlocked', 'Duplicate coverage asset', 503);
       seen.add(key);
       return value;
     }).sort((left, right) =>
-      left.safeAddress.localeCompare(right.safeAddress) || left.asset.localeCompare(right.asset));
+      left.walletAddress.localeCompare(right.walletAddress) || left.asset.localeCompare(right.asset));
     this.#clock = input.clock ?? (() => new Date());
   }
 
@@ -73,14 +73,14 @@ export class ResilientBscCoverageSource implements CoverageSource {
 async function observeAt(
   provider: JsonRpcProvider,
   blockNumber: number,
-  assets: readonly { safeAddress: string; asset: 'USDT' | 'NPL'; tokenAddress: string }[],
+  assets: readonly { walletAddress: string; asset: 'USDT' | 'NPL'; tokenAddress: string }[],
 ) {
   const block = await provider.getBlock(blockNumber);
   if (!block?.hash) throw new CoreError('ExternalBlocked', 'Canonical coverage block is unavailable', 503);
   const values = await Promise.all(assets.map(async (asset) => {
     const result = await provider.call({
       to: asset.tokenAddress,
-      data: TOKEN.encodeFunctionData('balanceOf', [asset.safeAddress]),
+      data: TOKEN.encodeFunctionData('balanceOf', [asset.walletAddress]),
       blockTag: blockNumber,
     });
     const balance = String(TOKEN.decodeFunctionResult('balanceOf', result)[0]);

@@ -112,11 +112,11 @@ contract PolicyRegistryV2 is AccessControl, EIP712 {
                 || policy.nplBurnListPriceBps + policy.nplRewardListPriceBps != policy.nplPaymentBps
         ) revert InvalidPolicy();
         if (
-            policy.usdtCustodyWallet == address(0) || policy.nplRewardWallet == address(0)
+            policy.usdtSettlementWallet == address(0) || policy.nplRewardWallet == address(0)
                 || policy.operationsWallet == address(0) || policy.circulationPool == address(0)
-                || policy.usdtCustodyWallet.code.length != 0 || policy.nplRewardWallet.code.length != 0
-                || policy.operationsWallet.code.length != 0 || policy.usdtCustodyWallet == policy.nplRewardWallet
-                || policy.usdtCustodyWallet == policy.operationsWallet
+                || policy.usdtSettlementWallet.code.length != 0 || policy.nplRewardWallet.code.length != 0
+                || policy.operationsWallet.code.length != 0 || policy.usdtSettlementWallet == policy.nplRewardWallet
+                || policy.usdtSettlementWallet == policy.operationsWallet
                 || policy.nplRewardWallet == policy.operationsWallet || policy.relayInitial == 0
                 || policy.relayIncrement == 0 || policy.relayCap == 0 || policy.seckillMainDuration == 0
                 || policy.relayInitial > policy.relayCap || policy.relayCap > policy.seckillMainDuration

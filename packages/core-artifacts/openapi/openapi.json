@@ -1507,7 +1507,7 @@
             }
           },
           {
-            "name": "batchId",
+            "name": "transferId",
             "in": "query",
             "required": false,
             "schema": {
@@ -1515,7 +1515,7 @@
             }
           },
           {
-            "name": "safeTxHash",
+            "name": "executionTxHash",
             "in": "query",
             "required": false,
             "schema": {
@@ -1557,7 +1557,7 @@
               "type": "string",
               "enum": [
                 "REQUESTED",
-                "BATCHED",
+                "SUBMITTED",
                 "SETTLED",
                 "RETRYABLE",
                 "QUARANTINED"
@@ -1668,9 +1668,9 @@
         ]
       }
     },
-    "/v2/admin/settlement-batches": {
+    "/v2/admin/settlement-transfers": {
       "get": {
-        "operationId": "listAdminSettlementBatches",
+        "operationId": "listAdminSettlementTransfers",
         "security": [
           {
             "bearerAuth": []
@@ -1689,7 +1689,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminSettlementBatchList"
+                  "$ref": "#/components/schemas/AdminSettlementTransferList"
                 }
               }
             }
@@ -1714,7 +1714,7 @@
         },
         "parameters": [
           {
-            "name": "batchId",
+            "name": "transferId",
             "in": "query",
             "required": false,
             "schema": {
@@ -1739,7 +1739,7 @@
             }
           },
           {
-            "name": "safeAddress",
+            "name": "executorWallet",
             "in": "query",
             "required": false,
             "schema": {
@@ -1747,7 +1747,7 @@
             }
           },
           {
-            "name": "safeTxHash",
+            "name": "executionTxHash",
             "in": "query",
             "required": false,
             "schema": {
@@ -1773,9 +1773,8 @@
             "schema": {
               "type": "string",
               "enum": [
-                "APPROVAL_PENDING",
-                "APPROVED",
-                "SUBMITTING",
+                "PENDING",
+                "LEASED",
                 "SUBMITTED",
                 "MINED",
                 "SETTLED",
@@ -1814,7 +1813,7 @@
             }
           },
           {
-            "name": "cursorBatchId",
+            "name": "cursorTransferId",
             "in": "query",
             "required": false,
             "schema": {
@@ -1834,9 +1833,9 @@
         ]
       }
     },
-    "/v2/admin/settlement-batches/{batchId}": {
+    "/v2/admin/settlement-transfers/{transferId}": {
       "get": {
-        "operationId": "getAdminSettlementBatch",
+        "operationId": "getAdminSettlementTransfer",
         "security": [
           {
             "bearerAuth": []
@@ -1855,7 +1854,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminSettlementBatchDetail"
+                  "$ref": "#/components/schemas/AdminSettlementTransferDetail"
                 }
               }
             }
@@ -1880,7 +1879,7 @@
         },
         "parameters": [
           {
-            "name": "batchId",
+            "name": "transferId",
             "in": "path",
             "required": true,
             "schema": {
@@ -2222,9 +2221,9 @@
         ]
       }
     },
-    "/v2/admin/seckill/actions/{actionId}/safe-proposal": {
+    "/v2/admin/seckill/actions/{actionId}/execute": {
       "post": {
-        "operationId": "proposeSeckillGovernanceAction",
+        "operationId": "executeSeckillGovernanceAction",
         "security": [
           {
             "bearerAuth": []
@@ -4289,9 +4288,9 @@
         ]
       }
     },
-    "/v2/admin/policy-drafts/{draftId}/safe-proposal": {
+    "/v2/admin/policy-drafts/{draftId}/execute": {
       "post": {
-        "operationId": "proposePolicyToSafe",
+        "operationId": "executePolicy",
         "security": [
           {
             "bearerAuth": []
@@ -12823,7 +12822,7 @@
               "LOCKED",
               "AVAILABLE",
               "REQUESTED",
-              "BATCHED",
+              "SUBMITTED",
               "SETTLED",
               "DISPUTED"
             ]
@@ -14606,10 +14605,10 @@
           "seckillPrizeBps",
           "requiredConfirmations",
           "merchantGuaranteeMinimumUsdt",
-          "platformServiceFeeSafe",
-          "usdtCustodySafe",
-          "nplRewardSafe",
-          "operationsTreasurySafe",
+          "platformServiceFeeWallet",
+          "usdtSettlementWallet",
+          "nplRewardWallet",
+          "operationsWallet",
           "circulationPool",
           "concessionDestinationSetHash",
           "genesisNodeDestinations",
@@ -14691,16 +14690,16 @@
           "merchantGuaranteeMinimumUsdt": {
             "$ref": "#/components/schemas/AtomicAmount"
           },
-          "platformServiceFeeSafe": {
+          "platformServiceFeeWallet": {
             "$ref": "#/components/schemas/Address"
           },
-          "usdtCustodySafe": {
+          "usdtSettlementWallet": {
             "$ref": "#/components/schemas/Address"
           },
-          "nplRewardSafe": {
+          "nplRewardWallet": {
             "$ref": "#/components/schemas/Address"
           },
-          "operationsTreasurySafe": {
+          "operationsWallet": {
             "$ref": "#/components/schemas/Address"
           },
           "circulationPool": {
@@ -17935,7 +17934,7 @@
           "policyVersion",
           "oldValueHash",
           "newValueHash",
-          "safeAddress",
+          "executorWallet",
           "nonce",
           "deadline",
           "signature"
@@ -17962,7 +17961,7 @@
           "newValueHash": {
             "$ref": "#/components/schemas/Bytes32"
           },
-          "safeAddress": {
+          "executorWallet": {
             "$ref": "#/components/schemas/Address"
           },
           "nonce": {
@@ -18089,7 +18088,7 @@
           "recipient",
           "rail",
           "asset",
-          "safeAddress",
+          "executorWallet",
           "amount",
           "itemsHash",
           "nonce",
@@ -18120,7 +18119,7 @@
           "asset": {
             "$ref": "#/components/schemas/Address"
           },
-          "safeAddress": {
+          "executorWallet": {
             "$ref": "#/components/schemas/Address"
           },
           "amount": {
@@ -18145,7 +18144,7 @@
           "itemIndex",
           "orderId",
           "accountId",
-          "backingSafeAddress",
+          "backingWalletAddress",
           "amount",
           "itemHash"
         ],
@@ -18162,7 +18161,7 @@
             "type": "string",
             "minLength": 1
           },
-          "backingSafeAddress": {
+          "backingWalletAddress": {
             "$ref": "#/components/schemas/Address"
           },
           "amount": {
@@ -18237,10 +18236,10 @@
           "item_index",
           "order_id",
           "account_id",
-          "backing_safe_address",
+          "backing_wallet_address",
           "amount",
           "requested_journal_id",
-          "batched_journal_id",
+          "submitted_journal_id",
           "settled_journal_id"
         ],
         "properties": {
@@ -18256,7 +18255,7 @@
             "type": "string",
             "minLength": 1
           },
-          "backing_safe_address": {
+          "backing_wallet_address": {
             "$ref": "#/components/schemas/Address"
           },
           "amount": {
@@ -18266,7 +18265,7 @@
             "type": "string",
             "minLength": 1
           },
-          "batched_journal_id": {
+          "submitted_journal_id": {
             "anyOf": [
               {
                 "type": "string",
@@ -18296,7 +18295,7 @@
         "required": [
           "transition_id",
           "request_item_index",
-          "batch_id",
+          "transfer_id",
           "transition_sequence",
           "transition_type",
           "journal_id",
@@ -18311,7 +18310,7 @@
             "type": "integer",
             "minimum": 0
           },
-          "batch_id": {
+          "transfer_id": {
             "anyOf": [
               {
                 "type": "string",
@@ -18351,17 +18350,16 @@
           "rail",
           "asset",
           "asset_address",
-          "safe_address",
+          "executor_wallet",
           "amount",
           "items_hash",
           "intent_digest",
           "signature_hash",
           "state",
-          "batch_id",
-          "final_safe_tx_hash",
-          "final_execution_tx_hash",
+          "transfer_ids",
+          "final_execution_tx_hashes",
           "requested_at",
-          "batched_at",
+          "submitted_at",
           "settled_at",
           "items",
           "transitions"
@@ -18401,7 +18399,7 @@
           "asset_address": {
             "$ref": "#/components/schemas/Address"
           },
-          "safe_address": {
+          "executor_wallet": {
             "$ref": "#/components/schemas/Address"
           },
           "amount": {
@@ -18419,48 +18417,29 @@
           "state": {
             "enum": [
               "REQUESTED",
-              "BATCHED",
+              "SUBMITTED",
               "SETTLED",
               "RETRYABLE",
               "QUARANTINED"
             ]
           },
-          "batch_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "transfer_ids": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
           },
-          "final_safe_tx_hash": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Bytes32"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "final_execution_tx_hash": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Bytes32"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "final_execution_tx_hashes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
           },
           "requested_at": {
             "type": "string",
             "format": "date-time"
           },
-          "batched_at": {
+          "submitted_at": {
             "anyOf": [
               {
                 "type": "string",
@@ -18491,10 +18470,10 @@
                 "item_index",
                 "order_id",
                 "account_id",
-                "backing_safe_address",
+                "backing_wallet_address",
                 "amount",
                 "requested_journal_id",
-                "batched_journal_id",
+                "submitted_journal_id",
                 "settled_journal_id"
               ],
               "properties": {
@@ -18510,7 +18489,7 @@
                   "type": "string",
                   "minLength": 1
                 },
-                "backing_safe_address": {
+                "backing_wallet_address": {
                   "$ref": "#/components/schemas/Address"
                 },
                 "amount": {
@@ -18520,7 +18499,7 @@
                   "type": "string",
                   "minLength": 1
                 },
-                "batched_journal_id": {
+                "submitted_journal_id": {
                   "anyOf": [
                     {
                       "type": "string",
@@ -18553,7 +18532,7 @@
               "required": [
                 "transition_id",
                 "request_item_index",
-                "batch_id",
+                "transfer_id",
                 "transition_sequence",
                 "transition_type",
                 "journal_id",
@@ -18568,7 +18547,7 @@
                   "type": "integer",
                   "minimum": 0
                 },
-                "batch_id": {
+                "transfer_id": {
                   "anyOf": [
                     {
                       "type": "string",
@@ -18648,7 +18627,7 @@
               "LOCKED",
               "AVAILABLE",
               "REQUESTED",
-              "BATCHED",
+              "SUBMITTED",
               "SETTLED",
               "DISPUTED"
             ]
@@ -18931,7 +18910,7 @@
               "LOCKED",
               "AVAILABLE",
               "REQUESTED",
-              "BATCHED",
+              "SUBMITTED",
               "SETTLED",
               "DISPUTED"
             ]
@@ -18975,7 +18954,7 @@
               "LOCKED",
               "AVAILABLE",
               "REQUESTED",
-              "BATCHED",
+              "SUBMITTED",
               "SETTLED",
               "DISPUTED"
             ]
@@ -19004,12 +18983,11 @@
           "requestId",
           "amount",
           "state",
-          "batchId",
-          "finalSafeTxHash",
+          "transferId",
           "finalExecutionTxHash",
           "journals",
           "requestedAt",
-          "batchedAt",
+          "submittedAt",
           "settledAt"
         ],
         "properties": {
@@ -19022,23 +19000,13 @@
           "state": {
             "enum": [
               "REQUESTED",
-              "BATCHED",
+              "SUBMITTED",
               "SETTLED",
               "RETRYABLE",
               "QUARANTINED"
             ]
           },
-          "batchId": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Bytes32"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "finalSafeTxHash": {
+          "transferId": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Bytes32"
@@ -19063,7 +19031,7 @@
             "additionalProperties": false,
             "required": [
               "requested",
-              "batched",
+              "submitted",
               "settled"
             ],
             "properties": {
@@ -19071,7 +19039,7 @@
                 "type": "string",
                 "minLength": 1
               },
-              "batched": {
+              "submitted": {
                 "anyOf": [
                   {
                     "type": "string",
@@ -19099,7 +19067,7 @@
             "type": "string",
             "format": "date-time"
           },
-          "batchedAt": {
+          "submittedAt": {
             "anyOf": [
               {
                 "type": "string",
@@ -19321,17 +19289,16 @@
           "recipientAddress",
           "rail",
           "asset",
-          "safeAddress",
+          "executorWallet",
           "amount",
           "state",
-          "batchId",
+          "transferIds",
           "intentDigest",
           "signatureHash",
-          "finalSafeTxHash",
-          "finalExecutionTxHash",
+          "finalExecutionTxHashes",
           "itemCount",
           "requestedAt",
-          "batchedAt",
+          "submittedAt",
           "settledAt"
         ],
         "properties": {
@@ -19370,7 +19337,7 @@
               "NPL"
             ]
           },
-          "safeAddress": {
+          "executorWallet": {
             "$ref": "#/components/schemas/Address"
           },
           "amount": {
@@ -19379,21 +19346,17 @@
           "state": {
             "enum": [
               "REQUESTED",
-              "BATCHED",
+              "SUBMITTED",
               "SETTLED",
               "RETRYABLE",
               "QUARANTINED"
             ]
           },
-          "batchId": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Bytes32"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "transferIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
           },
           "intentDigest": {
             "$ref": "#/components/schemas/Bytes32"
@@ -19401,25 +19364,11 @@
           "signatureHash": {
             "$ref": "#/components/schemas/Bytes32"
           },
-          "finalSafeTxHash": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Bytes32"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "finalExecutionTxHash": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Bytes32"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "finalExecutionTxHashes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
           },
           "itemCount": {
             "type": "integer",
@@ -19429,7 +19378,7 @@
             "type": "string",
             "format": "date-time"
           },
-          "batchedAt": {
+          "submittedAt": {
             "anyOf": [
               {
                 "type": "string",
@@ -19505,7 +19454,7 @@
         "additionalProperties": false,
         "required": [
           "requested",
-          "batched",
+          "submitted",
           "settled"
         ],
         "properties": {
@@ -19513,7 +19462,7 @@
             "type": "string",
             "minLength": 1
           },
-          "batched": {
+          "submitted": {
             "anyOf": [
               {
                 "type": "string",
@@ -19544,7 +19493,7 @@
           "itemIndex",
           "orderId",
           "accountId",
-          "backingSafeAddress",
+          "backingWalletAddress",
           "amount",
           "itemHash",
           "policyVersion",
@@ -19562,7 +19511,7 @@
             "type": "string",
             "minLength": 1
           },
-          "backingSafeAddress": {
+          "backingWalletAddress": {
             "$ref": "#/components/schemas/Address"
           },
           "amount": {
@@ -19585,7 +19534,7 @@
         "required": [
           "transitionId",
           "requestItemIndex",
-          "batchId",
+          "transferId",
           "sequence",
           "type",
           "journalId",
@@ -19600,7 +19549,7 @@
             "type": "integer",
             "minimum": 0
           },
-          "batchId": {
+          "transferId": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Bytes32"
@@ -19617,9 +19566,9 @@
           "type": {
             "enum": [
               "REQUESTED",
-              "BATCHED",
+              "SUBMITTED",
               "SETTLED",
-              "BATCH_REVERSED",
+              "EXECUTION_REVERSED",
               "FINALITY_REVERSED"
             ]
           },
@@ -19663,29 +19612,33 @@
           }
         }
       },
-      "AdminSettlementBatch": {
+      "AdminSettlementTransfer": {
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "batchId",
+          "transferId",
           "asset",
-          "safeAddress",
-          "safeNonce",
-          "itemCount",
-          "totalAmount",
+          "executorWallet",
+          "executorNonce",
+          "requestId",
+          "requestItemIndex",
+          "orderId",
+          "accountId",
+          "recipientAddress",
+          "tokenAddress",
+          "amount",
+          "transferCalldata",
           "contentHash",
-          "safeTxHash",
+          "gasCap",
+          "executionTxHash",
           "state",
-          "approvalThreshold",
-          "approvalCount",
           "createdBy",
           "createdAt",
-          "approvedAt",
           "submittedAt",
           "settledAt"
         ],
         "properties": {
-          "batchId": {
+          "transferId": {
             "$ref": "#/components/schemas/Bytes32"
           },
           "asset": {
@@ -19694,31 +19647,59 @@
               "NPL"
             ]
           },
-          "safeAddress": {
+          "executorWallet": {
             "$ref": "#/components/schemas/Address"
           },
-          "safeNonce": {
+          "executorNonce": {
             "$ref": "#/components/schemas/AtomicAmount"
           },
-          "itemCount": {
+          "requestId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "requestItemIndex": {
             "type": "integer",
-            "minimum": 1,
-            "maximum": 256
+            "minimum": 0
           },
-          "totalAmount": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "recipientAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "tokenAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "amount": {
             "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "transferCalldata": {
+            "type": "string",
+            "pattern": "^0x(?:[0-9a-fA-F]{2})+$"
           },
           "contentHash": {
             "$ref": "#/components/schemas/Bytes32"
           },
-          "safeTxHash": {
-            "$ref": "#/components/schemas/Bytes32"
+          "gasCap": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "executionTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "state": {
             "enum": [
-              "APPROVAL_PENDING",
-              "APPROVED",
-              "SUBMITTING",
+              "PENDING",
+              "LEASED",
               "SUBMITTED",
               "MINED",
               "SETTLED",
@@ -19728,31 +19709,12 @@
               "QUARANTINED"
             ]
           },
-          "approvalThreshold": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "approvalCount": {
-            "type": "integer",
-            "minimum": 0
-          },
           "createdBy": {
             "$ref": "#/components/schemas/Address"
           },
           "createdAt": {
             "type": "string",
             "format": "date-time"
-          },
-          "approvedAt": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "submittedAt": {
             "anyOf": [
@@ -19778,45 +19740,45 @@
           }
         }
       },
-      "AdminSettlementBatchCursor": {
+      "AdminSettlementTransferCursor": {
         "type": "object",
         "additionalProperties": false,
         "required": [
           "createdAt",
-          "batchId"
+          "transferId"
         ],
         "properties": {
           "createdAt": {
             "type": "string",
             "format": "date-time"
           },
-          "batchId": {
+          "transferId": {
             "$ref": "#/components/schemas/Bytes32"
           }
         }
       },
-      "AdminSettlementBatchList": {
+      "AdminSettlementTransferList": {
         "type": "object",
         "additionalProperties": false,
         "required": [
           "artifactVersion",
-          "batches",
+          "transfers",
           "nextCursor"
         ],
         "properties": {
           "artifactVersion": {
             "const": "2.0.0-settlement-admin.16"
           },
-          "batches": {
+          "transfers": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/AdminSettlementBatch"
+              "$ref": "#/components/schemas/AdminSettlementTransfer"
             }
           },
           "nextCursor": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/AdminSettlementBatchCursor"
+                "$ref": "#/components/schemas/AdminSettlementTransferCursor"
               },
               {
                 "type": "null"
@@ -19825,47 +19787,39 @@
           }
         }
       },
-      "AdminSettlementBatchEnvelope": {
+      "AdminSettlementTransferEnvelope": {
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "batchId",
+          "transferId",
           "asset",
-          "safeAddress",
-          "safeNonce",
-          "itemCount",
-          "totalAmount",
+          "executorWallet",
+          "executorNonce",
+          "requestId",
+          "requestItemIndex",
+          "orderId",
+          "accountId",
+          "recipientAddress",
+          "tokenAddress",
+          "amount",
+          "transferCalldata",
           "contentHash",
-          "safeTxHash",
+          "gasCap",
+          "executionTxHash",
           "state",
-          "approvalThreshold",
-          "approvalCount",
           "createdBy",
           "createdAt",
-          "approvedAt",
           "submittedAt",
           "settledAt",
           "chainId",
-          "assetAddress",
-          "safeVersion",
-          "safeSingletonAddress",
-          "safeSingletonCodeHash",
-          "ownerSetHash",
-          "safeRuntimeEvidenceHash",
-          "safeRuntimeCheckedAt",
-          "multisendAddress",
-          "multisendCodeHash",
+          "artifactVersion",
           "tokenCodeHash",
           "tokenTransferConformanceEvidenceHash",
-          "itemsHash",
-          "multisendTransactions",
-          "multisendCalldata",
-          "safeTxData",
-          "proposalReferenceHash",
-          "approvalEvidenceHash"
+          "runtimeEvidenceHash",
+          "runtimeCheckedAt"
         ],
         "properties": {
-          "batchId": {
+          "transferId": {
             "$ref": "#/components/schemas/Bytes32"
           },
           "asset": {
@@ -19874,31 +19828,59 @@
               "NPL"
             ]
           },
-          "safeAddress": {
+          "executorWallet": {
             "$ref": "#/components/schemas/Address"
           },
-          "safeNonce": {
+          "executorNonce": {
             "$ref": "#/components/schemas/AtomicAmount"
           },
-          "itemCount": {
+          "requestId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "requestItemIndex": {
             "type": "integer",
-            "minimum": 1,
-            "maximum": 256
+            "minimum": 0
           },
-          "totalAmount": {
+          "orderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "recipientAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "tokenAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "amount": {
             "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "transferCalldata": {
+            "type": "string",
+            "pattern": "^0x(?:[0-9a-fA-F]{2})+$"
           },
           "contentHash": {
             "$ref": "#/components/schemas/Bytes32"
           },
-          "safeTxHash": {
-            "$ref": "#/components/schemas/Bytes32"
+          "gasCap": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "executionTxHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "state": {
             "enum": [
-              "APPROVAL_PENDING",
-              "APPROVED",
-              "SUBMITTING",
+              "PENDING",
+              "LEASED",
               "SUBMITTED",
               "MINED",
               "SETTLED",
@@ -19908,31 +19890,12 @@
               "QUARANTINED"
             ]
           },
-          "approvalThreshold": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "approvalCount": {
-            "type": "integer",
-            "minimum": 0
-          },
           "createdBy": {
             "$ref": "#/components/schemas/Address"
           },
           "createdAt": {
             "type": "string",
             "format": "date-time"
-          },
-          "approvedAt": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "submittedAt": {
             "anyOf": [
@@ -19959,34 +19922,8 @@
           "chainId": {
             "const": 56
           },
-          "assetAddress": {
-            "$ref": "#/components/schemas/Address"
-          },
-          "safeVersion": {
-            "type": "string",
-            "minLength": 1
-          },
-          "safeSingletonAddress": {
-            "$ref": "#/components/schemas/Address"
-          },
-          "safeSingletonCodeHash": {
-            "$ref": "#/components/schemas/Bytes32"
-          },
-          "ownerSetHash": {
-            "$ref": "#/components/schemas/Bytes32"
-          },
-          "safeRuntimeEvidenceHash": {
-            "$ref": "#/components/schemas/Bytes32"
-          },
-          "safeRuntimeCheckedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "multisendAddress": {
-            "$ref": "#/components/schemas/Address"
-          },
-          "multisendCodeHash": {
-            "$ref": "#/components/schemas/Bytes32"
+          "artifactVersion": {
+            "const": "2.0.0-settlement-admin.16"
           },
           "tokenCodeHash": {
             "$ref": "#/components/schemas/Bytes32"
@@ -19994,127 +19931,10 @@
           "tokenTransferConformanceEvidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
           },
-          "itemsHash": {
+          "runtimeEvidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
           },
-          "multisendTransactions": {
-            "type": "string",
-            "pattern": "^0x(?:[0-9a-fA-F]{2})+$"
-          },
-          "multisendCalldata": {
-            "type": "string",
-            "pattern": "^0x(?:[0-9a-fA-F]{2})+$"
-          },
-          "safeTxData": {
-            "type": "string",
-            "pattern": "^0x(?:[0-9a-fA-F]{2})+$"
-          },
-          "proposalReferenceHash": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Bytes32"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "approvalEvidenceHash": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Bytes32"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        }
-      },
-      "AdminSettlementBatchItem": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "itemIndex",
-          "requestId",
-          "requestItemIndex",
-          "orderId",
-          "merchantId",
-          "accountId",
-          "recipientAddress",
-          "tokenAddress",
-          "amount",
-          "transferCalldata",
-          "itemHash"
-        ],
-        "properties": {
-          "itemIndex": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "requestId": {
-            "$ref": "#/components/schemas/Bytes32"
-          },
-          "requestItemIndex": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "orderId": {
-            "$ref": "#/components/schemas/Bytes32"
-          },
-          "merchantId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "accountId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "recipientAddress": {
-            "$ref": "#/components/schemas/Address"
-          },
-          "tokenAddress": {
-            "$ref": "#/components/schemas/Address"
-          },
-          "amount": {
-            "$ref": "#/components/schemas/AtomicAmount"
-          },
-          "transferCalldata": {
-            "type": "string",
-            "pattern": "^0x(?:[0-9a-fA-F]{2})+$"
-          },
-          "itemHash": {
-            "$ref": "#/components/schemas/Bytes32"
-          }
-        }
-      },
-      "AdminSettlementApproval": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "ownerAddress",
-          "safeTxHash",
-          "signatureHash",
-          "approvedAt"
-        ],
-        "properties": {
-          "ownerAddress": {
-            "$ref": "#/components/schemas/Address"
-          },
-          "safeTxHash": {
-            "$ref": "#/components/schemas/Bytes32"
-          },
-          "signatureHash": {
-            "$ref": "#/components/schemas/Bytes32"
-          },
-          "approvedAt": {
+          "runtimeCheckedAt": {
             "type": "string",
             "format": "date-time"
           }
@@ -20127,10 +19947,11 @@
           "attemptId",
           "attemptNumber",
           "requestDigest",
-          "safeTxHash",
           "executionTxHash",
-          "outerSender",
-          "outerNonce",
+          "executorWallet",
+          "executorNonce",
+          "transactionTo",
+          "transactionCalldata",
           "replacementForAttemptId",
           "state",
           "createdAt",
@@ -20149,9 +19970,6 @@
           "requestDigest": {
             "$ref": "#/components/schemas/Bytes32"
           },
-          "safeTxHash": {
-            "$ref": "#/components/schemas/Bytes32"
-          },
           "executionTxHash": {
             "anyOf": [
               {
@@ -20162,25 +19980,18 @@
               }
             ]
           },
-          "outerSender": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Address"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "executorWallet": {
+            "$ref": "#/components/schemas/Address"
           },
-          "outerNonce": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AtomicAmount"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "executorNonce": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "transactionTo": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "transactionCalldata": {
+            "type": "string",
+            "pattern": "^0x(?:[0-9a-fA-F]{2})+$"
           },
           "replacementForAttemptId": {
             "anyOf": [
@@ -20351,7 +20162,7 @@
           "blockHash",
           "evidenceHash",
           "recordedAt",
-          "safeAddress",
+          "executorWallet",
           "asset",
           "verifiedAssets",
           "unsettledLiabilities",
@@ -20375,7 +20186,7 @@
             "type": "string",
             "format": "date-time"
           },
-          "safeAddress": {
+          "executorWallet": {
             "$ref": "#/components/schemas/Address"
           },
           "asset": {
@@ -20509,14 +20320,12 @@
           }
         }
       },
-      "AdminSettlementBatchDetail": {
+      "AdminSettlementTransferDetail": {
         "type": "object",
         "additionalProperties": false,
         "required": [
           "artifactVersion",
-          "batch",
-          "items",
-          "approvals",
+          "transfer",
           "attempts",
           "finality",
           "coverage",
@@ -20527,20 +20336,8 @@
           "artifactVersion": {
             "const": "2.0.0-settlement-admin.16"
           },
-          "batch": {
-            "$ref": "#/components/schemas/AdminSettlementBatchEnvelope"
-          },
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AdminSettlementBatchItem"
-            }
-          },
-          "approvals": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AdminSettlementApproval"
-            }
+          "transfer": {
+            "$ref": "#/components/schemas/AdminSettlementTransferEnvelope"
           },
           "attempts": {
             "type": "array",
@@ -20612,7 +20409,7 @@
           "policyVersion",
           "transactionHash",
           "expectedAmountUsdt",
-          "operationsSafeAddress",
+          "operationsWalletAddress",
           "state",
           "confirmations"
         ],
@@ -20635,7 +20432,7 @@
           "expectedAmountUsdt": {
             "$ref": "#/components/schemas/AtomicAmount"
           },
-          "operationsSafeAddress": {
+          "operationsWalletAddress": {
             "$ref": "#/components/schemas/Address"
           },
           "state": {
@@ -20722,7 +20519,7 @@
           "orderId",
           "policyVersion",
           "requiredUsdt",
-          "operationsSafe",
+          "operationsWallet",
           "guaranteeUsedUsdt",
           "receivables",
           "frozenReceivablesUsedUsdt",
@@ -20746,7 +20543,7 @@
           "requiredUsdt": {
             "$ref": "#/components/schemas/AtomicAmount"
           },
-          "operationsSafe": {
+          "operationsWallet": {
             "$ref": "#/components/schemas/Address"
           },
           "guaranteeUsedUsdt": {
@@ -20760,7 +20557,7 @@
               "required": [
                 "orderId",
                 "accountId",
-                "backingSafeAddress",
+                "backingWalletAddress",
                 "amount"
               ],
               "properties": {
@@ -20772,7 +20569,7 @@
                   "type": "string",
                   "minLength": 1
                 },
-                "backingSafeAddress": {
+                "backingWalletAddress": {
                   "$ref": "#/components/schemas/Address"
                 },
                 "amount": {
@@ -20912,14 +20709,14 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "backing_safe_address",
+          "backing_wallet_address",
           "balance_usdt",
           "minimum_usdt",
           "source_evidence_hash",
           "updated_at"
         ],
         "properties": {
-          "backing_safe_address": {
+          "backing_wallet_address": {
             "$ref": "#/components/schemas/Address"
           },
           "balance_usdt": {
@@ -20944,7 +20741,7 @@
           "deposit_id",
           "policy_version",
           "token_address",
-          "operations_safe_address",
+          "operations_wallet_address",
           "expected_amount_usdt",
           "transaction_hash",
           "state",
@@ -20968,7 +20765,7 @@
           "token_address": {
             "$ref": "#/components/schemas/Address"
           },
-          "operations_safe_address": {
+          "operations_wallet_address": {
             "$ref": "#/components/schemas/Address"
           },
           "expected_amount_usdt": {
@@ -21389,8 +21186,8 @@
           "recovery_id",
           "order_id",
           "amount_usdt",
-          "operations_safe_address",
-          "backing_safe_address",
+          "operations_wallet_address",
+          "backing_wallet_address",
           "journal_id",
           "evidence_hash",
           "recovered_at",
@@ -21409,10 +21206,10 @@
           "amount_usdt": {
             "$ref": "#/components/schemas/AtomicAmount"
           },
-          "operations_safe_address": {
+          "operations_wallet_address": {
             "$ref": "#/components/schemas/Address"
           },
-          "backing_safe_address": {
+          "backing_wallet_address": {
             "$ref": "#/components/schemas/Address"
           },
           "journal_id": {
@@ -22257,7 +22054,7 @@
           "sessionId",
           "actionKind",
           "signer",
-          "safeAddress",
+          "executorWallet",
           "typedData",
           "digest"
         ],
@@ -22282,7 +22079,7 @@
           "signer": {
             "$ref": "#/components/schemas/Address"
           },
-          "safeAddress": {
+          "executorWallet": {
             "$ref": "#/components/schemas/Address"
           },
           "typedData": {
@@ -22406,8 +22203,8 @@
         "required": [
           "injectionId",
           "amountUsdt",
-          "operationsSafeAddress",
-          "custodySafeAddress",
+          "operationsWalletAddress",
+          "settlementWalletAddress",
           "tokenAddress",
           "finalJournalId",
           "reversalJournalId"
@@ -22419,10 +22216,10 @@
           "amountUsdt": {
             "$ref": "#/components/schemas/AtomicAmount"
           },
-          "operationsSafeAddress": {
+          "operationsWalletAddress": {
             "$ref": "#/components/schemas/Address"
           },
-          "custodySafeAddress": {
+          "settlementWalletAddress": {
             "$ref": "#/components/schemas/Address"
           },
           "tokenAddress": {
@@ -22463,12 +22260,12 @@
           "actionKind",
           "state",
           "evidenceHash",
-          "safeAddress",
+          "executorWallet",
           "targetAddress",
           "calldataHash",
-          "safeNonce",
-          "safeTxHash",
-          "proposalHash",
+          "executorNonce",
+          "submittedTxHash",
+          "executionEvidenceHash",
           "executionTxHash",
           "blockNumber",
           "blockHash",
@@ -22509,8 +22306,8 @@
             "enum": [
               "DRAFT",
               "SECONDARY_SIGNED",
-              "PENDING_PROPOSAL",
-              "SAFE_PROPOSED",
+              "PENDING_EXECUTION",
+              "SUBMITTED",
               "MINED",
               "FINAL",
               "REORGED",
@@ -22521,7 +22318,7 @@
           "evidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
           },
-          "safeAddress": {
+          "executorWallet": {
             "$ref": "#/components/schemas/Address"
           },
           "targetAddress": {
@@ -22530,7 +22327,7 @@
           "calldataHash": {
             "$ref": "#/components/schemas/Bytes32"
           },
-          "safeNonce": {
+          "executorNonce": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/AtomicAmount"
@@ -22540,7 +22337,7 @@
               }
             ]
           },
-          "safeTxHash": {
+          "submittedTxHash": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Bytes32"
@@ -22550,7 +22347,7 @@
               }
             ]
           },
-          "proposalHash": {
+          "executionEvidenceHash": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Bytes32"
@@ -22760,10 +22557,10 @@
           "publicationDeadline",
           "secondarySigner",
           "secondarySignatureHash",
-          "safeAddress",
-          "safeCalldataHash",
-          "safeTxHash",
-          "safeProposalHash",
+          "governanceWallet",
+          "executionCalldataHash",
+          "executionTxHash",
+          "executionEvidenceHash",
           "createdBy",
           "createdAt",
           "updatedAt"
@@ -22827,7 +22624,7 @@
               "DRAFT",
               "DECISION_BLOCKED",
               "SECONDARY_SIGNED",
-              "SAFE_PROPOSED",
+              "SUBMITTED",
               "FINALITY_PENDING",
               "REORGED",
               "REJECTED",
@@ -22905,7 +22702,7 @@
               }
             ]
           },
-          "safeAddress": {
+          "governanceWallet": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Address"
@@ -22915,7 +22712,7 @@
               }
             ]
           },
-          "safeCalldataHash": {
+          "executionCalldataHash": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Bytes32"
@@ -22925,7 +22722,7 @@
               }
             ]
           },
-          "safeTxHash": {
+          "executionTxHash": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Bytes32"
@@ -22935,7 +22732,7 @@
               }
             ]
           },
-          "safeProposalHash": {
+          "executionEvidenceHash": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Bytes32"
@@ -22981,7 +22778,7 @@
                   "DRAFT",
                   "DECISION_BLOCKED",
                   "SECONDARY_SIGNED",
-                  "SAFE_PROPOSED",
+                  "SUBMITTED",
                   "FINALITY_PENDING",
                   "REORGED",
                   "REJECTED",
@@ -22998,7 +22795,7 @@
               "DRAFT",
               "DECISION_BLOCKED",
               "SECONDARY_SIGNED",
-              "SAFE_PROPOSED",
+              "SUBMITTED",
               "FINALITY_PENDING",
               "REORGED",
               "REJECTED",
@@ -23035,10 +22832,10 @@
           "publicationDeadline",
           "secondarySigner",
           "secondarySignatureHash",
-          "safeAddress",
-          "safeCalldataHash",
-          "safeTxHash",
-          "safeProposalHash",
+          "governanceWallet",
+          "executionCalldataHash",
+          "executionTxHash",
+          "executionEvidenceHash",
           "createdBy",
           "createdAt",
           "updatedAt",
@@ -23103,7 +22900,7 @@
               "DRAFT",
               "DECISION_BLOCKED",
               "SECONDARY_SIGNED",
-              "SAFE_PROPOSED",
+              "SUBMITTED",
               "FINALITY_PENDING",
               "REORGED",
               "REJECTED",
@@ -23181,7 +22978,7 @@
               }
             ]
           },
-          "safeAddress": {
+          "governanceWallet": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Address"
@@ -23191,7 +22988,7 @@
               }
             ]
           },
-          "safeCalldataHash": {
+          "executionCalldataHash": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Bytes32"
@@ -23201,7 +22998,7 @@
               }
             ]
           },
-          "safeTxHash": {
+          "executionTxHash": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Bytes32"
@@ -23211,7 +23008,7 @@
               }
             ]
           },
-          "safeProposalHash": {
+          "executionEvidenceHash": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Bytes32"
@@ -23345,7 +23142,7 @@
           "evidenceHash",
           "policyVersion",
           "signer",
-          "safeAddress",
+          "executorWallet",
           "routerAddress",
           "typedData",
           "digest"
@@ -23366,7 +23163,7 @@
           "signer": {
             "$ref": "#/components/schemas/Address"
           },
-          "safeAddress": {
+          "executorWallet": {
             "$ref": "#/components/schemas/Address"
           },
           "routerAddress": {
@@ -23416,13 +23213,13 @@
           "action",
           "targetPaused",
           "evidenceHash",
-          "governanceSafeAddress",
+          "governanceWalletAddress",
           "routerAddress",
           "calldataHash",
           "state",
-          "safeNonce",
-          "safeTxHash",
-          "proposalHash",
+          "executorNonce",
+          "submittedTxHash",
+          "executionEvidenceHash",
           "executionTxHash",
           "confirmations",
           "actorWallet",
@@ -23458,7 +23255,7 @@
           "evidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
           },
-          "governanceSafeAddress": {
+          "governanceWalletAddress": {
             "$ref": "#/components/schemas/Address"
           },
           "routerAddress": {
@@ -23469,8 +23266,8 @@
           },
           "state": {
             "enum": [
-              "PENDING_PROPOSAL",
-              "SAFE_PROPOSED",
+              "PENDING_EXECUTION",
+              "SUBMITTED",
               "MINED",
               "FINAL",
               "REORGED",
@@ -23478,7 +23275,7 @@
               "SUPERSEDED"
             ]
           },
-          "safeNonce": {
+          "executorNonce": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/AtomicAmount"
@@ -23488,7 +23285,7 @@
               }
             ]
           },
-          "safeTxHash": {
+          "submittedTxHash": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Bytes32"
@@ -23498,7 +23295,7 @@
               }
             ]
           },
-          "proposalHash": {
+          "executionEvidenceHash": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Bytes32"
@@ -24384,7 +24181,7 @@
           "policyVersion",
           "oldValueHash",
           "newValueHash",
-          "safeAddress",
+          "executorWallet",
           "nonce",
           "deadline",
           "typedData",
@@ -24419,7 +24216,7 @@
           "newValueHash": {
             "$ref": "#/components/schemas/Bytes32"
           },
-          "safeAddress": {
+          "executorWallet": {
             "$ref": "#/components/schemas/Address"
           },
           "nonce": {
@@ -24900,7 +24697,7 @@
         "additionalProperties": false,
         "required": [
           "asset",
-          "safe_address",
+          "wallet_address",
           "assets",
           "unsettled_liabilities",
           "covered",
@@ -24913,7 +24710,7 @@
               "NPL"
             ]
           },
-          "safe_address": {
+          "wallet_address": {
             "$ref": "#/components/schemas/Address"
           },
           "assets": {
@@ -25489,7 +25286,7 @@
                 "blockNumber",
                 "recordedAt",
                 "asset",
-                "safeAddress",
+                "walletAddress",
                 "verifiedAssets",
                 "unsettledLiabilities",
                 "covered"
@@ -25512,7 +25309,7 @@
                     "NPL"
                   ]
                 },
-                "safeAddress": {
+                "walletAddress": {
                   "$ref": "#/components/schemas/Address"
                 },
                 "verifiedAssets": {
@@ -30223,7 +30020,7 @@
           "state": {
             "enum": [
               "REQUESTED",
-              "BATCHED",
+              "SUBMITTED",
               "SETTLED",
               "RETRYABLE",
               "QUARANTINED"

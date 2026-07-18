@@ -28,7 +28,7 @@ abstract contract CoreFixture is TestBase {
     address internal operationsThree = address(0x6003);
     address internal operationsFour = address(0x6004);
     address internal platformServiceFeeWallet = address(0x7000);
-    address internal usdtCustodyWallet = address(0x7001);
+    address internal usdtSettlementWallet = address(0x7001);
     address internal nplRewardWallet = address(0x7002);
     address internal operationsWallet = address(0x7003);
     address internal circulationPool = address(0x7004);
@@ -78,7 +78,7 @@ abstract contract CoreFixture is TestBase {
             IPolicyRegistryV2(address(policyRegistry)),
             IBeneficiaryRegistryV2(address(beneficiaryRegistry)),
             platformServiceFeeWallet,
-            usdtCustodyWallet,
+            usdtSettlementWallet,
             nplRewardWallet,
             operationsWallet
         );
@@ -123,7 +123,7 @@ abstract contract CoreFixture is TestBase {
             relayIncrement: 30 seconds,
             relayCap: 60 seconds,
             merchantGuaranteeMinimum: V2Types.MERCHANT_GUARANTEE_MINIMUM,
-            usdtCustodyWallet: usdtCustodyWallet,
+            usdtSettlementWallet: usdtSettlementWallet,
             nplRewardWallet: nplRewardWallet,
             operationsWallet: operationsWallet,
             circulationPool: circulationPool,

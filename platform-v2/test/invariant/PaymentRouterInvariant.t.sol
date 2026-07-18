@@ -151,9 +151,11 @@ contract PaymentRouterInvariantTest is CoreFixture {
     function invariant_RouterNeverCustodiesAndWalletTransfersConserve() public view {
         assertEq(usdt.balanceOf(address(router)), 0);
         assertEq(npl.balanceOf(address(router)), 0);
-        assertEq(usdt.balanceOf(platformServiceFeeWallet) + usdt.balanceOf(usdtCustodyWallet), handler.totalUsdtPaid());
+        assertEq(
+            usdt.balanceOf(platformServiceFeeWallet) + usdt.balanceOf(usdtSettlementWallet), handler.totalUsdtPaid()
+        );
         assertEq(usdt.balanceOf(platformServiceFeeWallet), handler.totalServiceFeeUsdt());
-        assertEq(usdt.balanceOf(usdtCustodyWallet), handler.totalCustodyUsdt());
+        assertEq(usdt.balanceOf(usdtSettlementWallet), handler.totalCustodyUsdt());
         assertEq(npl.balanceOf(V2Types.NPL_BURN_ADDRESS) + npl.balanceOf(nplRewardWallet), handler.totalNplPaid());
     }
 }

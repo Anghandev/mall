@@ -12,7 +12,7 @@ import {
 import {
   policyCalldataHash,
   type PolicyChainObservation,
-  type PolicySafeProposer,
+  type PolicyEoaExecutor,
 } from '../chain/policy-publication-worker.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
@@ -31,7 +31,7 @@ interface PolicyDraftRow {
   validation_errors: unknown[];
   state: DraftState;
   secondary_signature_hash: string | null;
-  safe_proposal_hash: string | null;
+  execution_evidence_hash: string | null;
   artifact_version: string | null;
   idempotency_key: string | null;
   request_hash: string | null;
@@ -42,10 +42,10 @@ interface PolicyDraftRow {
   publication_deadline: Date | string | null;
   secondary_signer: string | null;
   secondary_signature: string | null;
-  safe_address: string | null;
-  safe_calldata: string | null;
-  safe_calldata_hash: string | null;
-  safe_tx_hash: string | null;
+  governance_wallet_address: string | null;
+  execution_calldata: string | null;
+  execution_calldata_hash: string | null;
+  execution_tx_hash: string | null;
   created_by: string;
   created_at: Date | string;
   updated_at: Date | string;
@@ -58,7 +58,7 @@ type DraftState =
   | 'DRAFT'
   | 'DECISION_BLOCKED'
   | 'SECONDARY_SIGNED'
-  | 'SAFE_PROPOSED'
+  | 'SUBMITTED'
   | 'FINALITY_PENDING'
   | 'REORGED'
   | 'REJECTED'
@@ -66,9 +66,10 @@ type DraftState =
 
 export class PolicyService {
   readonly #transactions: SqlTransactionRunner;
-  readonly #proposer: PolicySafeProposer;
+  readonly #executor: PolicyEoaExecutor;
+  readonly #executionGasLimit: string;
   readonly #policyRegistryAddress: string;
-  readonly #governanceSafe: string;
+  readonly #governanceWallet: string;
   readonly #secondarySigner: string;
   readonly #decisionBlocked: readonly string[];
   readonly #auditReady: () => boolean | Promise<boolean>;
@@ -76,22 +77,24 @@ export class PolicyService {
 
   constructor(input: {
     transactions: SqlTransactionRunner;
-    proposer: PolicySafeProposer;
+    executor: PolicyEoaExecutor;
+    executionGasLimit: string;
     policyRegistryAddress: string;
-    governanceSafe: string;
+    governanceWallet: string;
     secondarySigner: string;
     decisionBlocked?: readonly string[];
     auditReady: () => boolean | Promise<boolean>;
     clock?: () => Date;
   }) {
     this.#transactions = input.transactions;
-    this.#proposer = input.proposer;
-    this.#policyRegistryAddress = normalizeAddress(input.policyRegistryAddress);
-    this.#governanceSafe = normalizeAddress(input.governanceSafe);
-    this.#secondarySigner = normalizeAddress(input.secondarySigner);
-    if (this.#secondarySigner === this.#governanceSafe) {
-      throw new CoreError('InvalidRequest', 'Policy secondary signer must be distinct from governance Safe', 500);
+    this.#executor = input.executor;
+    if (!/^[1-9][0-9]*$/.test(input.executionGasLimit)) {
+      throw new CoreError('InvalidRequest', 'Policy execution Gas limit is invalid', 500);
     }
+    this.#executionGasLimit = input.executionGasLimit;
+    this.#policyRegistryAddress = normalizeAddress(input.policyRegistryAddress);
+    this.#governanceWallet = normalizeAddress(input.governanceWallet);
+    this.#secondarySigner = normalizeAddress(input.secondarySigner);
     this.#decisionBlocked = Object.freeze([...(input.decisionBlocked ?? [])]);
     this.#auditReady = input.auditReady;
     this.#clock = input.clock ?? (() => new Date());
@@ -281,8 +284,8 @@ export class PolicyService {
            policy_hash = $2, operations_hash = $3, publication_digest = $4,
            publication_nonce = $5, publication_deadline = $6,
            secondary_signer = $7, secondary_signature = $8,
-           secondary_signature_hash = $9, safe_address = $10,
-           safe_calldata = $11, safe_calldata_hash = $12, updated_at = $13
+           secondary_signature_hash = $9, governance_wallet_address = $10,
+           execution_calldata = $11, execution_calldata_hash = $12, updated_at = $13
          WHERE draft_id = $1`,
         [
           draftId,
@@ -294,7 +297,7 @@ export class PolicyService {
           signer,
           input.signature,
           signatureHash,
-          this.#governanceSafe,
+          this.#governanceWallet,
           calldata,
           calldataHash,
           now,
@@ -323,7 +326,7 @@ export class PolicyService {
           policyVersion: Number(row.next_policy_version),
           policyHash: publication.policyHash,
           operationsHash: publication.operationsHash,
-          safeAddress: this.#governanceSafe,
+          governanceWallet: this.#governanceWallet,
           calldataHash,
         },
         signatureEvidence: {
@@ -341,7 +344,7 @@ export class PolicyService {
     });
   }
 
-  async proposeToSafe(actor: FulfillmentActor, draftId: string, correlationId: string) {
+  async execute(actor: FulfillmentActor, draftId: string, correlationId: string) {
     const wallet = normalizeAddress(actor.walletAddress);
     requireSessionRole(actor, 'ADMIN');
     if (!await this.#auditReady()) {
@@ -351,7 +354,7 @@ export class PolicyService {
       await requireCurrentRole(executor, wallet, ['ADMIN']);
       const row = await lockedDraft(executor, draftId);
       if (row.state !== 'SECONDARY_SIGNED') {
-        if (['SAFE_PROPOSED', 'FINALITY_PENDING', 'PUBLISHED'].includes(row.state)) return null;
+        if (['SUBMITTED', 'FINALITY_PENDING', 'PUBLISHED'].includes(row.state)) return null;
         throw new CoreError('InvalidRequest', 'Policy draft is not secondary-signed', 409);
       }
       assertSignedFields(row);
@@ -361,46 +364,51 @@ export class PolicyService {
       return {
         draftId,
         policyVersion: Number(row.next_policy_version),
-        safeAddress: row.safe_address!,
+        governanceWallet: row.governance_wallet_address!,
         policyRegistryAddress: this.#policyRegistryAddress,
-        calldata: row.safe_calldata!,
-        calldataHash: row.safe_calldata_hash!,
+        calldata: row.execution_calldata!,
+        calldataHash: row.execution_calldata_hash!,
         policyHash: row.policy_hash!,
         operationsHash: row.operations_hash!,
+        gasLimit: this.#executionGasLimit,
       };
     });
     if (!proposal) return this.getDraft(actor, draftId);
-    const result = await this.#proposer.propose(proposal);
+    const result = await this.#executor.execute(proposal);
     return this.#transactions.transaction(async (executor) => {
       const roles = await requireCurrentRole(executor, wallet, ['ADMIN']);
       const row = await lockedDraft(executor, draftId);
       if (row.state !== 'SECONDARY_SIGNED') {
-        if (row.safe_tx_hash === result.safeTxHash) return this.getDraftInTransaction(executor, draftId);
-        throw new CoreError('IdempotencyConflict', 'Policy draft changed while Safe proposal was in flight', 409);
+        if (row.execution_tx_hash === result.executionTxHash) return this.getDraftInTransaction(executor, draftId);
+        throw new CoreError('IdempotencyConflict', 'Policy draft changed while EOA execution was in flight', 409);
       }
       assertSignedFields(row);
-      if (row.safe_calldata_hash !== proposal.calldataHash) {
-        throw new CoreError('IdempotencyConflict', 'Policy calldata changed while Safe proposal was in flight', 409);
+      if (row.execution_calldata_hash !== proposal.calldataHash) {
+        throw new CoreError('IdempotencyConflict', 'Policy calldata changed while EOA execution was in flight', 409);
       }
       const now = this.#clock();
       await executor.query(
-        `UPDATE core.policy_drafts SET state = 'SAFE_PROPOSED', safe_tx_hash = $2,
-           safe_proposal_hash = $3, updated_at = $4 WHERE draft_id = $1`,
-        [draftId, result.safeTxHash.toLowerCase(), result.proposalHash.toLowerCase(), now],
+        `UPDATE core.policy_drafts SET state = 'SUBMITTED', execution_tx_hash = $2,
+           execution_evidence_hash = $3, updated_at = $4 WHERE draft_id = $1`,
+        [draftId, result.executionTxHash.toLowerCase(), result.executionEvidenceHash.toLowerCase(), now],
       );
       await appendDraftTransition(executor, {
         draftId,
         fromState: 'SECONDARY_SIGNED',
-        toState: 'SAFE_PROPOSED',
+        toState: 'SUBMITTED',
         actorWallet: wallet,
         evidence: result,
         now,
       });
       await enqueueAudit(executor, {
-        sourceEventId: auditSourceId('audit:policy', { draftId, state: 'SAFE_PROPOSED', proposalHash: result.proposalHash }),
+        sourceEventId: auditSourceId('audit:policy', {
+          draftId,
+          state: 'SUBMITTED',
+          executionEvidenceHash: result.executionEvidenceHash,
+        }),
         streamName: 'governance',
-        evidenceProfile: 'SAFE_APPROVED',
-        eventType: 'PolicySafeProposed',
+        evidenceProfile: 'CHAIN_OBSERVED',
+        eventType: 'PolicyExecutionSubmitted',
         resourceType: 'POLICY_DRAFT',
         resourceId: draftId,
         actorWallet: wallet,
@@ -409,12 +417,22 @@ export class PolicyService {
         requestHash: row.publication_digest!.slice(2),
         payload: {
           policyVersion: Number(row.next_policy_version),
-          safeAddress: row.safe_address,
-          safeTxHash: result.safeTxHash,
-          proposalHash: result.proposalHash,
-          calldataHash: row.safe_calldata_hash,
+          governanceWallet: row.governance_wallet_address,
+          executionTxHash: result.executionTxHash,
+          executorNonce: result.executorNonce,
+          executionEvidenceHash: result.executionEvidenceHash,
+          calldataHash: row.execution_calldata_hash,
         },
         signatureEvidence: policySignatureEvidence(row, this.#policyRegistryAddress),
+        transactionEvidence: {
+          txHash: result.executionTxHash,
+          chainId: 56,
+          contractAddress: this.#policyRegistryAddress,
+          selector: row.execution_calldata!.slice(0, 10),
+          calldataHash: row.execution_calldata_hash!,
+          resourceId: draftId,
+          policyVersion: Number(row.next_policy_version),
+        },
         createdAt: now,
       });
       return this.getDraftInTransaction(executor, draftId);
@@ -456,7 +474,7 @@ export class PolicyService {
            ORDER BY transition_sequence DESC
            LIMIT 1
          ) final ON true
-         WHERE draft.state IN ('SAFE_PROPOSED', 'FINALITY_PENDING', 'REORGED', 'PUBLISHED')
+         WHERE draft.state IN ('SUBMITTED', 'FINALITY_PENDING', 'REORGED', 'PUBLISHED')
          ORDER BY CASE WHEN draft.state IN ('PUBLISHED', 'REORGED') THEN 1 ELSE 0 END,
                   draft.updated_at, draft.draft_id
          LIMIT $1`,
@@ -467,13 +485,15 @@ export class PolicyService {
         return Object.freeze({
           draftId: row.draft_id,
           policyVersion: Number(row.next_policy_version),
-          safeTxHash: row.safe_tx_hash!,
+          executionTxHash: row.execution_tx_hash!,
           policyRegistryAddress: this.#policyRegistryAddress,
+          executionCalldata: row.execution_calldata!,
+          executionCalldataHash: row.execution_calldata_hash!,
           policyHash: row.policy_hash!,
           operationsHash: row.operations_hash!,
           decisionEvidenceHash: String(row.payload.policy.decisionEvidenceHash).toLowerCase(),
-          safeAddress: row.safe_address!,
-          priorState: row.state as 'SAFE_PROPOSED' | 'FINALITY_PENDING' | 'REORGED' | 'PUBLISHED',
+          governanceWallet: row.governance_wallet_address!,
+          priorState: row.state as 'SUBMITTED' | 'FINALITY_PENDING' | 'REORGED' | 'PUBLISHED',
           ...(row.last_final_execution_tx_hash && row.last_final_block_number != null && row.last_final_block_hash
             ? {
               priorFinality: {
@@ -493,11 +513,11 @@ export class PolicyService {
     return this.#transactions.transaction(async (executor) => {
       const row = await lockedDraft(executor, draftId);
       assertProposalFields(row);
-      validateObservation(row, observation, this.#governanceSafe);
+      validateObservation(row, observation, this.#governanceWallet);
       const now = this.#clock();
       if (observation.state === 'MINED') {
         if (observation.confirmations >= 15) throw new CoreError('InvalidFinality', 'Mined policy must be reported FINAL at 15 confirmations');
-        if (row.state === 'SAFE_PROPOSED' || row.state === 'REORGED') {
+        if (row.state === 'SUBMITTED' || row.state === 'REORGED') {
           await executor.query(
             "UPDATE core.policy_drafts SET state = 'FINALITY_PENDING', updated_at = $2 WHERE draft_id = $1",
             [draftId, now],
@@ -506,7 +526,7 @@ export class PolicyService {
             draftId,
             fromState: row.state,
             toState: 'FINALITY_PENDING',
-            actorWallet: this.#governanceSafe,
+            actorWallet: this.#governanceWallet,
             evidence: observation,
             now,
           });
@@ -531,7 +551,7 @@ export class PolicyService {
             draftId,
             fromState: row.state,
             toState: 'REORGED',
-            actorWallet: this.#governanceSafe,
+            actorWallet: this.#governanceWallet,
             evidence: observation,
             now,
           });
@@ -565,7 +585,7 @@ export class PolicyService {
           `INSERT INTO core.policy_snapshots (
              policy_version, artifact_version, policy_hash,
              rules_content_hash, beneficiary_set_hash, payload, publication_status,
-             safe_tx_hash, effective_from, created_at
+             publication_tx_hash, effective_from, created_at
            ) VALUES ($1,$2,$3,$4,$5,$6,'PUBLISHED',$7,$8,$8)`,
           [
             row.next_policy_version,
@@ -574,7 +594,7 @@ export class PolicyService {
             material.rulesContentHash.toLowerCase(),
             material.beneficiarySetHash.toLowerCase(),
             JSON.stringify(row.payload.policy),
-            observation.safeTxHash.toLowerCase(),
+            observation.executionTxHash.toLowerCase(),
             now,
           ],
         );
@@ -589,7 +609,7 @@ export class PolicyService {
           draftId,
           fromState: row.state,
           toState: 'PUBLISHED',
-          actorWallet: this.#governanceSafe,
+          actorWallet: this.#governanceWallet,
           evidence: observation,
           now,
         });
@@ -802,13 +822,12 @@ async function enqueuePolicyChainAudit(
     eventType: `Policy${observation.state === 'MINED' ? 'Mined' : observation.state === 'FINAL' ? 'Finalized' : 'Reorged'}`,
     resourceType: 'POLICY_DRAFT',
     resourceId: row.draft_id,
-    actorWallet: row.safe_address!,
-    actorRole: 'GOVERNANCE_SAFE',
+    actorWallet: row.governance_wallet_address!,
+    actorRole: 'GOVERNANCE_EOA',
     correlationId: `policy-finality:${row.draft_id}`,
     requestHash: requestHash.slice(2),
     payload: {
       policyVersion: observation.policyVersion,
-      safeTxHash: observation.safeTxHash,
       executionTxHash: observation.executionTxHash,
       blockNumber: observation.blockNumber,
       blockHash: observation.blockHash,
@@ -824,8 +843,8 @@ async function enqueuePolicyChainAudit(
       txHash: observation.executionTxHash!,
       chainId: 56,
       contractAddress: policyRegistryAddress,
-      selector: row.safe_calldata!.slice(0, 10),
-      calldataHash: row.safe_calldata_hash!,
+      selector: row.execution_calldata!.slice(0, 10),
+      calldataHash: row.execution_calldata_hash!,
       resourceId: row.draft_id,
       policyVersion: observation.policyVersion,
       blockHash: observation.blockHash!,
@@ -887,10 +906,10 @@ function draftProjection(row: PolicyDraftRow) {
     publicationDeadline: row.publication_deadline ? new Date(row.publication_deadline).toISOString() : null,
     secondarySigner: row.secondary_signer,
     secondarySignatureHash: row.secondary_signature_hash,
-    safeAddress: row.safe_address,
-    safeCalldataHash: row.safe_calldata_hash,
-    safeTxHash: row.safe_tx_hash,
-    safeProposalHash: row.safe_proposal_hash,
+    governanceWallet: row.governance_wallet_address,
+    executionCalldataHash: row.execution_calldata_hash,
+    executionTxHash: row.execution_tx_hash,
+    executionEvidenceHash: row.execution_evidence_hash,
     createdBy: row.created_by,
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
@@ -899,26 +918,26 @@ function draftProjection(row: PolicyDraftRow) {
 
 function assertProposalFields(row: PolicyDraftRow) {
   if (
-    !row.safe_tx_hash
-  ) throw new CoreError('InvalidFinality', 'Policy Safe proposal evidence is incomplete', 409);
+    !row.execution_tx_hash
+  ) throw new CoreError('InvalidFinality', 'Policy EOA execution evidence is incomplete', 409);
   assertSignedFields(row);
 }
 
 function assertSignedFields(row: PolicyDraftRow) {
   if (
-    !row.safe_address || !row.safe_calldata || !row.safe_calldata_hash
+    !row.governance_wallet_address || !row.execution_calldata || !row.execution_calldata_hash
     || !row.policy_hash || !row.operations_hash
   ) throw new CoreError('InvalidFinality', 'Policy secondary-signature evidence is incomplete', 409);
 }
 
-function validateObservation(row: PolicyDraftRow, observation: Exclude<PolicyChainObservation, { state: 'NOT_FOUND' }>, safe: string) {
+function validateObservation(row: PolicyDraftRow, observation: Exclude<PolicyChainObservation, { state: 'NOT_FOUND' }>, governanceWallet: string) {
   if (
-    observation.safeTxHash.toLowerCase() !== row.safe_tx_hash?.toLowerCase()
+    observation.executionTxHash.toLowerCase() !== row.execution_tx_hash?.toLowerCase()
     || observation.policyVersion !== Number(row.next_policy_version)
     || observation.policyHash.toLowerCase() !== row.policy_hash?.toLowerCase()
     || observation.operationsHash.toLowerCase() !== row.operations_hash?.toLowerCase()
     || observation.decisionEvidenceHash.toLowerCase() !== String(row.payload.policy.decisionEvidenceHash).toLowerCase()
-    || normalizeAddress(observation.safeExecutor) !== safe
+    || normalizeAddress(observation.governanceExecutor) !== governanceWallet
     || !isHash(observation.decisionEvidenceHash)
     || !Number.isSafeInteger(observation.confirmations)
     || observation.confirmations < 0
@@ -946,7 +965,7 @@ async function insertPublicationTransition(
   const transitionId = `policy-publication:${hashJson({ draftId: row.draft_id, evidenceHash }).slice(2)}`;
   await executor.query(
     `INSERT INTO core.policy_publication_transitions (
-       transition_id, policy_version, draft_id, event_type, safe_tx_hash,
+       transition_id, policy_version, draft_id, event_type, submitted_execution_tx_hash,
        execution_tx_hash, block_number, block_hash, confirmations, canonical,
        evidence_hash, evidence, observed_at
      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
@@ -956,7 +975,7 @@ async function insertPublicationTransition(
       row.next_policy_version,
       row.draft_id,
       observation.state === 'FINAL' ? 'FINAL' : 'REORGED',
-      observation.safeTxHash.toLowerCase(),
+      observation.executionTxHash.toLowerCase(),
       observation.executionTxHash?.toLowerCase() ?? null,
       observation.blockNumber ?? null,
       observation.blockHash?.toLowerCase() ?? null,

@@ -27,7 +27,7 @@ const FIXED_TIMERS = Object.freeze({
 
 type ActionKind = 'OPEN_SESSION' | 'FORCE_CLOSE' | 'RESUME_PURCHASES' | 'PRIZE_INJECTION';
 type ActionState =
-  | 'DRAFT' | 'SECONDARY_SIGNED' | 'PENDING_PROPOSAL' | 'SAFE_PROPOSED'
+  | 'DRAFT' | 'SECONDARY_SIGNED' | 'PENDING_EXECUTION' | 'SUBMITTED'
   | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'CANCELLED';
 
 export interface SeckillActionRow {
@@ -36,16 +36,16 @@ export interface SeckillActionRow {
   policy_version: string | number;
   action_kind: ActionKind;
   evidence_hash: string;
-  governance_safe_address: string;
+  governance_wallet_address: string;
   target_address: string;
   calldata: string;
   calldata_hash: string;
   old_value_hash: string;
   new_value_hash: string;
   state: ActionState;
-  safe_nonce: string | number | null;
-  safe_tx_hash: string | null;
-  proposal_hash: string | null;
+  executor_nonce: string | number | null;
+  submitted_tx_hash: string | null;
+  execution_evidence_hash: string | null;
   execution_tx_hash: string | null;
   block_number: string | number | null;
   block_hash: string | null;
@@ -86,8 +86,8 @@ interface InjectionRow {
   action_id: string;
   session_id: string;
   amount_usdt: string;
-  operations_safe_address: string;
-  custody_safe_address: string;
+  operations_wallet_address: string;
+  settlement_wallet_address: string;
   token_address: string;
   final_journal_id: string | null;
   reversal_journal_id: string | null;
@@ -95,9 +95,9 @@ interface InjectionRow {
 
 export class SeckillOperationsService {
   readonly #transactions: SqlTransactionRunner;
-  readonly #governanceSafe: string;
-  readonly #operationsSafe: string;
-  readonly #custodySafe: string;
+  readonly #governanceWallet: string;
+  readonly #operationsWallet: string;
+  readonly #settlementWallet: string;
   readonly #paymentRouter: string;
   readonly #usdt: string;
   readonly #secondarySigner: string;
@@ -105,24 +105,21 @@ export class SeckillOperationsService {
 
   constructor(input: {
     transactions: SqlTransactionRunner;
-    governanceSafeAddress: string;
-    operationsSafeAddress: string;
-    custodySafeAddress: string;
+    governanceWalletAddress: string;
+    operationsWalletAddress: string;
+    settlementWalletAddress: string;
     paymentRouterAddress: string;
     usdtAddress?: string;
     secondarySignerAddress: string;
     clock?: () => Date;
   }) {
     this.#transactions = input.transactions;
-    this.#governanceSafe = address(input.governanceSafeAddress, 'seckill governance Safe');
-    this.#operationsSafe = address(input.operationsSafeAddress, 'operations Safe');
-    this.#custodySafe = address(input.custodySafeAddress, 'USDT custody Safe');
+    this.#governanceWallet = address(input.governanceWalletAddress, 'seckill governance wallet');
+    this.#operationsWallet = address(input.operationsWalletAddress, 'operations wallet');
+    this.#settlementWallet = address(input.settlementWalletAddress, 'USDT settlement wallet');
     this.#paymentRouter = address(input.paymentRouterAddress, 'PaymentRouter');
     this.#usdt = address(input.usdtAddress ?? USDT_ADDRESS, 'USDT');
     this.#secondarySigner = address(input.secondarySignerAddress, 'seckill secondary signer');
-    if ([this.#governanceSafe, this.#operationsSafe].includes(this.#secondarySigner)) {
-      throw new CoreError('InvalidRequest', 'Seckill secondary signer must be independent from both Safes', 500);
-    }
     this.#clock = input.clock ?? (() => new Date());
   }
 
@@ -207,7 +204,7 @@ export class SeckillOperationsService {
       await executor.query(
         `INSERT INTO core.seckill_governance_actions (
            action_id, session_id, policy_version, action_kind, evidence_hash,
-           governance_safe_address, target_address, calldata, calldata_hash,
+           governance_wallet_address, target_address, calldata, calldata_hash,
            old_value_hash, new_value_hash, state, actor_wallet,
            idempotency_key, request_hash, created_at, updated_at
          ) VALUES ($1,$2,$3,'OPEN_SESSION',$4,$5,$6,$7,$8,$9,$10,'DRAFT',$11,$12,$13,$14,$14)`,
@@ -216,7 +213,7 @@ export class SeckillOperationsService {
           sessionId,
           parsed.policyVersion.toString(),
           evidenceHash,
-          this.#governanceSafe,
+          this.#governanceWallet,
           this.#paymentRouter,
           calldata,
           keccak256(calldata).toLowerCase(),
@@ -302,7 +299,7 @@ export class SeckillOperationsService {
         `SELECT EXISTS (
            SELECT 1 FROM core.seckill_governance_actions
            WHERE action_kind = 'FORCE_CLOSE' AND session_id = $1
-             AND state IN ('DRAFT','SECONDARY_SIGNED','PENDING_PROPOSAL','SAFE_PROPOSED','MINED','FINAL')
+             AND state IN ('DRAFT','SECONDARY_SIGNED','PENDING_EXECUTION','SUBMITTED','MINED','FINAL')
          ) AS exists`,
         [row.session_id],
       );
@@ -318,7 +315,7 @@ export class SeckillOperationsService {
         policyVersion: BigInt(row.policy_version),
         actionKind: 'FORCE_CLOSE',
         evidenceHash,
-        governanceSafe: this.#governanceSafe,
+        governanceWallet: this.#governanceWallet,
         targetAddress: this.#paymentRouter,
         calldata: ROUTER.encodeFunctionData('setSeckillPurchasesPaused', [true, evidenceHash]).toLowerCase(),
         oldValueHash: hashJson({ sessionId: row.session_id, phase: row.phase, paused: false }),
@@ -363,7 +360,7 @@ export class SeckillOperationsService {
         policyVersion: BigInt(closed.rows[0].policy_version),
         actionKind: 'RESUME_PURCHASES',
         evidenceHash,
-        governanceSafe: this.#governanceSafe,
+        governanceWallet: this.#governanceWallet,
         targetAddress: this.#paymentRouter,
         calldata: ROUTER.encodeFunctionData('setSeckillPurchasesPaused', [false, evidenceHash]).toLowerCase(),
         oldValueHash: hashJson({ paused: true, causes: causes.rows }),
@@ -405,8 +402,8 @@ export class SeckillOperationsService {
       const evidenceHash = hashJson({
         sessionId: normalizedSessionId,
         amountUsdt: amount.toString(),
-        operationsSafeAddress: this.#operationsSafe,
-        custodySafeAddress: this.#custodySafe,
+        operationsWalletAddress: this.#operationsWallet,
+        settlementWalletAddress: this.#settlementWallet,
         tokenAddress: this.#usdt,
       });
       const projection = await this.#insertSimpleAction(executor, actor, {
@@ -414,9 +411,9 @@ export class SeckillOperationsService {
         policyVersion: BigInt(row.policy_version),
         actionKind: 'PRIZE_INJECTION',
         evidenceHash,
-        governanceSafe: this.#operationsSafe,
+        governanceWallet: this.#operationsWallet,
         targetAddress: this.#usdt,
-        calldata: ERC20.encodeFunctionData('transfer', [this.#custodySafe, amount]).toLowerCase(),
+        calldata: ERC20.encodeFunctionData('transfer', [this.#settlementWallet, amount]).toLowerCase(),
         oldValueHash: hashJson({ prizePoolUsdt: row.prize_pool_usdt }),
         newValueHash: hashJson({ prizePoolUsdt: (BigInt(row.prize_pool_usdt) + amount).toString() }),
         idempotencyKey: input.idempotencyKey,
@@ -427,10 +424,18 @@ export class SeckillOperationsService {
       const actionId = projection.actionId;
       await executor.query(
         `INSERT INTO core.seckill_prize_injections (
-           injection_id, action_id, session_id, amount_usdt, operations_safe_address,
-           custody_safe_address, token_address, created_at, updated_at
+           injection_id, action_id, session_id, amount_usdt, operations_wallet_address,
+           settlement_wallet_address, token_address, created_at, updated_at
          ) VALUES ($1,$1,$2,$3,$4,$5,$6,$7,$7)`,
-        [actionId, normalizedSessionId, amount.toString(), this.#operationsSafe, this.#custodySafe, this.#usdt, this.#clock()],
+        [
+          actionId,
+          normalizedSessionId,
+          amount.toString(),
+          this.#operationsWallet,
+          this.#settlementWallet,
+          this.#usdt,
+          this.#clock(),
+        ],
       );
       return actionProjection(executor, await loadAction(executor, actionId));
     });
@@ -536,7 +541,7 @@ export class SeckillOperationsService {
         sessionId: action.session_id,
         actionKind: action.action_kind,
         signer: this.#secondarySigner,
-        safeAddress: action.governance_safe_address,
+        executorWallet: action.governance_wallet_address,
         typedData: {
           domain,
           types: sensitiveActionTypes,
@@ -577,7 +582,7 @@ export class SeckillOperationsService {
         intent,
         input.signature,
         this.#secondarySigner,
-        action.governance_safe_address,
+        action.governance_wallet_address,
         action.target_address,
         this.#clock(),
       );
@@ -618,30 +623,30 @@ export class SeckillOperationsService {
     });
   }
 
-  propose(actor: FulfillmentActor, actionId: string, correlationId: string) {
+  execute(actor: FulfillmentActor, actionId: string, correlationId: string) {
     assertHash(actionId, 'seckill action ID');
     return this.#transactions.transaction(async (executor) => {
       const wallet = await requireCurrentRole(executor, actor, ['ADMIN']);
       const action = await lockedAction(executor, actionId.toLowerCase());
-      if (action.state === 'PENDING_PROPOSAL' || ['SAFE_PROPOSED', 'MINED', 'FINAL'].includes(action.state)) {
+      if (action.state === 'PENDING_EXECUTION' || ['SUBMITTED', 'MINED', 'FINAL'].includes(action.state)) {
         return actionProjection(executor, action);
       }
       if (action.state !== 'SECONDARY_SIGNED') {
         throw new CoreError('InvalidRequest', 'Seckill action is not secondary-signed', 409);
       }
       if (!action.approval_deadline || action.approval_deadline <= this.#clock()) {
-        throw new CoreError('NonceExpired', 'Seckill approval expired before Safe proposal', 401);
+        throw new CoreError('NonceExpired', 'Seckill approval expired before EOA execution', 401);
       }
       const now = this.#clock();
       await executor.query(
-        `UPDATE core.seckill_governance_actions SET state = 'PENDING_PROPOSAL', updated_at = $2
+        `UPDATE core.seckill_governance_actions SET state = 'PENDING_EXECUTION', updated_at = $2
          WHERE action_id = $1`,
         [action.action_id, now],
       );
-      await appendTransition(executor, action.action_id, 'SECONDARY_SIGNED', 'PENDING_PROPOSAL', {}, now);
+      await appendTransition(executor, action.action_id, 'SECONDARY_SIGNED', 'PENDING_EXECUTION', {}, now);
       await enqueueActionAudit(executor, {
         actionId: action.action_id,
-        eventType: 'SeckillSafeProposalRequested',
+        eventType: 'SeckillEoaExecutionRequested',
         actorWallet: wallet,
         actorRole: 'ADMIN',
         correlationId,
@@ -659,7 +664,7 @@ export class SeckillOperationsService {
       const wallet = await requireCurrentRole(executor, actor, ['ADMIN', 'OPERATOR']);
       const action = await lockedAction(executor, actionId.toLowerCase());
       if (!['DRAFT', 'SECONDARY_SIGNED'].includes(action.state)) {
-        throw new CoreError('InvalidRequest', 'Only an unproposed seckill action can be cancelled', 409);
+        throw new CoreError('InvalidRequest', 'Only an unsubmitted seckill action can be cancelled', 409);
       }
       if (action.action_kind !== 'OPEN_SESSION' && !actor.roles.includes('ADMIN')) {
         throw new CoreError('Forbidden', 'Only ADMIN can cancel governed seckill controls', 403);
@@ -696,7 +701,7 @@ export class SeckillOperationsService {
       policyVersion: bigint;
       actionKind: Exclude<ActionKind, 'OPEN_SESSION'>;
       evidenceHash: string;
-      governanceSafe: string;
+      governanceWallet: string;
       targetAddress: string;
       calldata: string;
       oldValueHash: string;
@@ -717,7 +722,7 @@ export class SeckillOperationsService {
     await executor.query(
       `INSERT INTO core.seckill_governance_actions (
          action_id, session_id, policy_version, action_kind, evidence_hash,
-         governance_safe_address, target_address, calldata, calldata_hash,
+         governance_wallet_address, target_address, calldata, calldata_hash,
          old_value_hash, new_value_hash, state, actor_wallet,
          idempotency_key, request_hash, created_at, updated_at
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'DRAFT',$12,$13,$14,$15,$15)`,
@@ -727,7 +732,7 @@ export class SeckillOperationsService {
         input.policyVersion.toString(),
         input.actionKind,
         input.evidenceHash,
-        input.governanceSafe,
+        input.governanceWallet,
         input.targetAddress,
         input.calldata,
         keccak256(input.calldata).toLowerCase(),
@@ -935,7 +940,7 @@ async function requireFullCoverage(executor: SqlExecutor) {
     [row.snapshot_id],
   );
   if (coverage.rows[0]?.item_count === '0' || coverage.rows[0]?.item_count !== coverage.rows[0]?.covered_count) {
-    throw new CoreError('BreakerActive', 'Safe assets / unsettled liabilities coverage is below 100%', 409);
+    throw new CoreError('BreakerActive', 'Wallet assets / unsettled liabilities coverage is below 100%', 409);
   }
   return row.snapshot_id;
 }
@@ -1029,7 +1034,7 @@ function actionIntent(action: SeckillActionRow, nonce: bigint, deadline: bigint)
     policyVersion: BigInt(action.policy_version),
     oldValueHash: action.old_value_hash,
     newValueHash: action.new_value_hash,
-    safeAddress: action.governance_safe_address,
+    executorWallet: action.governance_wallet_address,
     nonce,
     deadline,
   };
@@ -1059,12 +1064,12 @@ async function actionProjection(executor: SqlExecutor, row: SeckillActionRow) {
     actionKind: row.action_kind,
     state: row.state,
     evidenceHash: row.evidence_hash,
-    safeAddress: row.governance_safe_address,
+    executorWallet: row.governance_wallet_address,
     targetAddress: row.target_address,
     calldataHash: row.calldata_hash,
-    safeNonce: row.safe_nonce === null ? null : String(row.safe_nonce),
-    safeTxHash: row.safe_tx_hash,
-    proposalHash: row.proposal_hash,
+    executorNonce: row.executor_nonce === null ? null : String(row.executor_nonce),
+    submittedTxHash: row.submitted_tx_hash,
+    executionEvidenceHash: row.execution_evidence_hash,
     executionTxHash: row.execution_tx_hash,
     blockNumber: row.block_number === null ? null : String(row.block_number),
     blockHash: row.block_hash,
@@ -1095,8 +1100,8 @@ async function actionProjection(executor: SqlExecutor, row: SeckillActionRow) {
     prizeInjection: injection ? {
       injectionId: injection.injection_id,
       amountUsdt: injection.amount_usdt,
-      operationsSafeAddress: injection.operations_safe_address,
-      custodySafeAddress: injection.custody_safe_address,
+      operationsWalletAddress: injection.operations_wallet_address,
+      settlementWalletAddress: injection.settlement_wallet_address,
       tokenAddress: injection.token_address,
       finalJournalId: injection.final_journal_id,
       reversalJournalId: injection.reversal_journal_id,

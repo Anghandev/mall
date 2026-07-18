@@ -38,7 +38,7 @@ contract PaymentRouterV2 is ReentrancyGuard {
     IBeneficiaryRegistryV2 public immutable beneficiaryRegistry;
     address public immutable governanceWallet;
     address public immutable platformServiceFeeWallet;
-    address public immutable usdtCustodyWallet;
+    address public immutable usdtSettlementWallet;
     address public immutable nplRewardWallet;
     address public immutable operationsWallet;
     address public immutable quoteSigner;
@@ -109,7 +109,7 @@ contract PaymentRouterV2 is ReentrancyGuard {
         IPolicyRegistryV2 policyRegistry_,
         IBeneficiaryRegistryV2 beneficiaryRegistry_,
         address platformServiceFeeWallet_,
-        address usdtCustodyWallet_,
+        address usdtSettlementWallet_,
         address nplRewardWallet_,
         address operationsWallet_
     ) {
@@ -118,15 +118,15 @@ contract PaymentRouterV2 is ReentrancyGuard {
         if (
             block.chainid != V2Types.BSC_CHAIN_ID || address(usdt_) != V2Types.USDT || address(npl_) != V2Types.NPL
                 || address(beneficiaryRegistry_) == address(0) || governanceWallet_ == address(0)
-                || platformServiceFeeWallet_ == address(0) || usdtCustodyWallet_ == address(0)
+                || platformServiceFeeWallet_ == address(0) || usdtSettlementWallet_ == address(0)
                 || nplRewardWallet_ == address(0) || operationsWallet_ == address(0)
                 || governanceWallet_.code.length != 0 || platformServiceFeeWallet_.code.length != 0
-                || usdtCustodyWallet_.code.length != 0 || nplRewardWallet_.code.length != 0
+                || usdtSettlementWallet_.code.length != 0 || nplRewardWallet_.code.length != 0
                 || operationsWallet_.code.length != 0 || platformServiceFeeWallet_ == governanceWallet_
-                || usdtCustodyWallet_ == governanceWallet_ || nplRewardWallet_ == governanceWallet_
-                || operationsWallet_ == governanceWallet_ || platformServiceFeeWallet_ == usdtCustodyWallet_
+                || usdtSettlementWallet_ == governanceWallet_ || nplRewardWallet_ == governanceWallet_
+                || operationsWallet_ == governanceWallet_ || platformServiceFeeWallet_ == usdtSettlementWallet_
                 || platformServiceFeeWallet_ == nplRewardWallet_ || platformServiceFeeWallet_ == operationsWallet_
-                || usdtCustodyWallet_ == nplRewardWallet_ || usdtCustodyWallet_ == operationsWallet_
+                || usdtSettlementWallet_ == nplRewardWallet_ || usdtSettlementWallet_ == operationsWallet_
                 || nplRewardWallet_ == operationsWallet_
         ) revert InvalidAddress();
         usdt = usdt_;
@@ -135,7 +135,7 @@ contract PaymentRouterV2 is ReentrancyGuard {
         beneficiaryRegistry = beneficiaryRegistry_;
         governanceWallet = governanceWallet_;
         platformServiceFeeWallet = platformServiceFeeWallet_;
-        usdtCustodyWallet = usdtCustodyWallet_;
+        usdtSettlementWallet = usdtSettlementWallet_;
         nplRewardWallet = nplRewardWallet_;
         operationsWallet = operationsWallet_;
         quoteSigner = governanceWallet_;
@@ -290,7 +290,7 @@ contract PaymentRouterV2 is ReentrancyGuard {
         uint256 buyerUsdtBefore = usdt.balanceOf(intent.buyer);
         uint256 buyerNplBefore = npl.balanceOf(intent.buyer);
         uint256 platformServiceFeeBefore = usdt.balanceOf(platformServiceFeeWallet);
-        uint256 custodyBefore = usdt.balanceOf(usdtCustodyWallet);
+        uint256 custodyBefore = usdt.balanceOf(usdtSettlementWallet);
         uint256 burnBefore = npl.balanceOf(V2Types.NPL_BURN_ADDRESS);
         uint256 rewardBefore = npl.balanceOf(nplRewardWallet);
 
@@ -298,7 +298,7 @@ contract PaymentRouterV2 is ReentrancyGuard {
             usdt.safeTransferFrom(intent.buyer, platformServiceFeeWallet, intent.platformServiceFeeUsdt);
         }
         uint256 custodyUsdt = intent.custodyProductUsdt + intent.freightUsdt;
-        if (custodyUsdt != 0) usdt.safeTransferFrom(intent.buyer, usdtCustodyWallet, custodyUsdt);
+        if (custodyUsdt != 0) usdt.safeTransferFrom(intent.buyer, usdtSettlementWallet, custodyUsdt);
         npl.safeTransferFrom(intent.buyer, V2Types.NPL_BURN_ADDRESS, intent.nplBurnAmount);
         npl.safeTransferFrom(intent.buyer, nplRewardWallet, intent.nplRewardAmount);
 
@@ -307,7 +307,7 @@ contract PaymentRouterV2 is ReentrancyGuard {
                 || buyerUsdtBefore - usdt.balanceOf(intent.buyer) != intent.usdtPaymentAmount
                 || buyerNplBefore - npl.balanceOf(intent.buyer) != intent.nplPaymentAmount
                 || usdt.balanceOf(platformServiceFeeWallet) - platformServiceFeeBefore != intent.platformServiceFeeUsdt
-                || usdt.balanceOf(usdtCustodyWallet) - custodyBefore != custodyUsdt
+                || usdt.balanceOf(usdtSettlementWallet) - custodyBefore != custodyUsdt
                 || npl.balanceOf(V2Types.NPL_BURN_ADDRESS) - burnBefore != intent.nplBurnAmount
                 || npl.balanceOf(nplRewardWallet) - rewardBefore != intent.nplRewardAmount
         ) revert InexactTransfer();
@@ -367,7 +367,7 @@ contract PaymentRouterV2 is ReentrancyGuard {
 
         V2Types.Policy memory policy = policyRegistry.getPolicy(intent.policyVersion);
         if (
-            policy.usdtCustodyWallet != usdtCustodyWallet || policy.nplRewardWallet != nplRewardWallet
+            policy.usdtSettlementWallet != usdtSettlementWallet || policy.nplRewardWallet != nplRewardWallet
                 || policy.operationsWallet != operationsWallet
                 || intent.concessionAllocationHash != policy.concessionDestinationSetHash
         ) revert InvalidIntent();

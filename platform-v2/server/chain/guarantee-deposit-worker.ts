@@ -320,7 +320,7 @@ function normalizeReceipt(value: unknown, expectedTransactionHash: string) {
 
 function matchingTransfer(receipt: ReturnType<typeof normalizeReceipt>, item: GuaranteeDepositFinalityItem) {
   const expectedFrom = normalizedAddress(item.merchantWallet, 'expected guarantee sender');
-  const expectedTo = normalizedAddress(item.operationsSafeAddress, 'expected guarantee recipient');
+  const expectedTo = normalizedAddress(item.operationsWalletAddress, 'expected guarantee recipient');
   const matches = receipt.logs.filter((log) => {
     if (
       log.address !== USDT_ADDRESS
@@ -362,7 +362,7 @@ function validateItem(item: GuaranteeDepositFinalityItem) {
     || !isHash(item.transactionHash)
   ) throw new CoreError('InvalidRequest', 'Guarantee finality item is invalid');
   normalizedAddress(item.merchantWallet, 'guarantee merchant wallet');
-  normalizedAddress(item.operationsSafeAddress, 'guarantee Operations Safe');
+  normalizedAddress(item.operationsWalletAddress, 'guarantee operations wallet');
 }
 
 function rpcUrl(value: string, name: string) {

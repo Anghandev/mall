@@ -413,7 +413,7 @@
             "internalType": "uint128"
           },
           {
-            "name": "usdtCustodyWallet",
+            "name": "usdtSettlementWallet",
             "type": "address",
             "internalType": "address"
           },
@@ -612,7 +612,7 @@
             "internalType": "uint128"
           },
           {
-            "name": "usdtCustodyWallet",
+            "name": "usdtSettlementWallet",
             "type": "address",
             "internalType": "address"
           },
@@ -851,7 +851,7 @@
             "internalType": "uint128"
           },
           {
-            "name": "usdtCustodyWallet",
+            "name": "usdtSettlementWallet",
             "type": "address",
             "internalType": "address"
           },

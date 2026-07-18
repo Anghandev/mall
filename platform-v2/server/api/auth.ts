@@ -73,7 +73,6 @@ export async function verifySiwe(
   store: NonceStore,
   input: { message: string; signature: string; expectedDomain: string; expectedUri: string },
   now = new Date(),
-  contractWalletVerifier?: WalletMessageSignatureVerifier,
 ) {
   const parsed = parseSiweMessage(input.message);
   if (
@@ -90,9 +89,6 @@ export async function verifySiwe(
     valid = normalizeAddress(verifyMessage(input.message, input.signature)) === parsed.walletAddress;
   } catch {
     valid = false;
-  }
-  if (!valid && contractWalletVerifier) {
-    valid = await contractWalletVerifier.isValid(parsed.walletAddress, input.message, input.signature);
   }
   if (!valid) throw new CoreError('InvalidSignature', 'Invalid SIWE wallet signature', 401);
   const consumed = await store.consume(parsed.walletAddress, sha256(parsed.nonce), now);
@@ -181,7 +177,7 @@ export interface SensitiveActionIntent {
   policyVersion: bigint;
   oldValueHash: string;
   newValueHash: string;
-  safeAddress: string;
+  executorWallet: string;
   nonce: bigint;
   deadline: bigint;
 }
@@ -194,7 +190,7 @@ const sensitiveActionTypes: Record<string, TypedDataField[]> = {
     { name: 'policyVersion', type: 'uint64' },
     { name: 'oldValueHash', type: 'bytes32' },
     { name: 'newValueHash', type: 'bytes32' },
-    { name: 'safeAddress', type: 'address' },
+    { name: 'executorWallet', type: 'address' },
     { name: 'nonce', type: 'uint256' },
     { name: 'deadline', type: 'uint64' },
   ],
@@ -204,15 +200,15 @@ export function verifySensitiveActionApproval(
   intent: SensitiveActionIntent,
   signature: string,
   expectedSecondarySigner: string,
-  expectedSafe: string,
+  expectedExecutorWallet: string,
   verifyingContract: string,
   now = new Date(),
 ) {
   if (intent.deadline < BigInt(Math.floor(now.getTime() / 1000))) {
     throw new CoreError('NonceExpired', 'Sensitive action approval expired', 401);
   }
-  if (normalizeAddress(intent.safeAddress) !== normalizeAddress(expectedSafe)) {
-    throw new CoreError('InvalidRequest', 'Sensitive action Safe mismatch', 400);
+  if (normalizeAddress(intent.executorWallet) !== normalizeAddress(expectedExecutorWallet)) {
+    throw new CoreError('InvalidRequest', 'Sensitive action executor wallet mismatch', 400);
   }
   const domain: TypedDataDomain = {
     name: 'Abu24KV2Core',
