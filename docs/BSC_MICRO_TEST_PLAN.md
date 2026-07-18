@@ -33,6 +33,10 @@ This plan is bound to settlement/admin artifact
   payment and completed one payment inside the real 60-second relay window.
   Both payment events had the intended classification; exact buyer, service-fee,
   Custody, Burn and Reward balance deltas matched with zero Router retention.
+- The bounded breaker packet paused and resumed new payments, then paused and
+  resumed seckill purchases. Each governance event and state transition matched,
+  both breakers finished unpaused and all receipts reached 15 confirmations on
+  both RPCs.
 
 ## Deployment State
 
@@ -123,8 +127,9 @@ Actual native value plus Gas was `0.0000471636 BNB`, below the approved
    the guarantee minimum is never disguised as a mainnet micro amount.
 10. Execute one signed settlement request as individual EOA ERC-20 transfers,
     wait for 15 confirmations and reconcile every ledger liability and TxHash.
-11. Exercise payment/seckill/settlement pause and recovery while finality,
-    reconciliation and audit reads remain available.
+11. Partially completed: payment and seckill pause/recovery passed on BSC and
+    both ended unpaused. Settlement pause/recovery remains coupled to the
+    pending individual-EOA settlement micro-test.
 
 Safe proposals, owner signatures, `execTransaction`, MultiSend and Safe nonce
 are not part of this sequence.
@@ -136,6 +141,13 @@ Its mode-600 receipt evidence SHA-256 is
 Actual Gas was `0.00003902305 BNB`, below the packet's
 `0.0000585345 BNB` ceiling. The ordinary and seckill list prices were `0.01`
 and `0.005 USDT`; no fallback payment was used.
+
+The payment/seckill breaker packet SHA-256 is
+`fe837a8565035d4f3a414fc4b60b0b86aeadec53c67d2df42e48911c6e7e36e1`.
+Its mode-600 receipt evidence SHA-256 is
+`492ee106b0c7439dc41090ae36881c9b2ba601603b5e400dfadd754ef5d19a91`.
+Actual Gas was `0.0000069242 BNB`, below the packet's
+`0.0000145301 BNB` ceiling; native value and token value were zero.
 
 ## Hard Limits And Stop Conditions
 
