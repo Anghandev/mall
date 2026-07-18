@@ -555,6 +555,20 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
   assert.deepEqual(Object.keys(openapi.components.schemas.MonitoringCoverage.properties).sort(), [
     'asset', 'assets', 'covered', 'observed_at', 'unsettled_liabilities', 'wallet_address',
   ]);
+  assert.deepEqual(Object.keys(openapi.components.schemas.MerchantReviewEvidence.properties).sort(), [
+    'action', 'actionDigest', 'actionId', 'applicationVersion', 'approvalSignatureHash',
+    'createdAt', 'fromStatus', 'reasonCode', 'secondarySigner', 'state', 'toStatus', 'updatedAt',
+  ]);
+  assert.deepEqual(Object.keys(openapi.components.schemas.MerchantLifecycleSettlement.properties).sort(), [
+    'amount', 'asset', 'finalExecutionTxHashes', 'requestId', 'requestedAt', 'settledAt', 'state',
+  ]);
+  assert.deepEqual(Object.keys(openapi.components.schemas.SeckillPrizePayout.properties).sort(), [
+    'finalExecutionTxHashes', 'requestId', 'state', 'transferIds',
+  ]);
+  assert.deepEqual(Object.keys(openapi.components.schemas.MerchantAuditEntry.properties).sort(), [
+    'chainTxHash', 'detail', 'entryHash', 'entryId', 'module', 'operationTime', 'operationType', 'signatureHash',
+  ]);
+  assert.match(declarations, /export interface TakeoverFundingPlan[\s\S]*?operationsWallet: Address;/);
   assert.equal(openapi.paths['/v2/cms/public'].get.responses['200'].content['application/json'].schema.type, 'array');
   assert.equal(openapi.paths['/v2/notifications'].get.responses['200'].content['application/json'].schema.type, 'array');
   assert.equal(openapi.paths['/v2/admin/notification-campaigns'].get.responses['200'].content['application/json'].schema.type, 'array');

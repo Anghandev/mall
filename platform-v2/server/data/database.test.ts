@@ -1758,12 +1758,13 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
         challenge.typedData.types,
         challenge.typedData.message,
       );
-      await service.submitApproval(adminActor, actionId, {
+      const approved = await service.submitApproval(adminActor, actionId, {
         nonce,
         deadline,
         signature,
         correlationId: `seckill-approval-${nonce}`,
       });
+      assert.deepEqual(approved.allowedActions, ['EXECUTE', 'CANCEL']);
       await service.execute(adminActor, actionId, `seckill-execution-${nonce}`);
     };
 
@@ -3459,6 +3460,8 @@ test('seckill prize freezes the final canonical order and only the reviewed winn
     assert.equal(finalProjection.winnerWallet, BUYER);
     assert.equal(finalProjection.prizeSettlement?.review?.reviewedBy, admin.address.toLowerCase());
     assert.equal(finalProjection.prizeSettlement?.payout?.state, 'AVAILABLE');
+    assert.deepEqual(finalProjection.prizeSettlement?.payout?.transferIds, []);
+    assert.deepEqual(finalProjection.prizeSettlement?.payout?.finalExecutionTxHashes, []);
   } finally {
     await db.close();
   }
