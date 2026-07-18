@@ -100,11 +100,13 @@ does not complete or verify a Requirement while its Core capability is missing.
   receivables or an extra seckill share, and test fixtures stay outside the
   production bundle.
 
-## Settlement Admin .15 Consumer Boundary
+## Settlement Admin .16 Consumer Boundary
 
-- `@abu24k/core-artifacts@2.0.0-settlement-admin.15` preserves the existing
+- `@abu24k/core-artifacts@2.0.0-settlement-admin.16` preserves the existing
   Merchant settlement intent, wallet-signed request and tenant-scoped history
-  operations without changing Merchant fulfillment or fund calculations.
+  operations without changing Merchant fulfillment or fund calculations. The
+  exact buyer NPL quote remains Core-signed; Merchant neither consumes an
+  on-chain TWAP field nor calculates a payment amount.
 - Admin-wide settlement reads, governed intents, coverage-breaker recovery and
   global catalog/order lifecycle batches remain Admin-only. Notification feed,
   endpoint registration and Admin campaign operations are also excluded because
