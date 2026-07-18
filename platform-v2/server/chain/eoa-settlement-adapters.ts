@@ -11,6 +11,7 @@ import type {
   EoaSettlementChainSource,
   EoaSettlementReceipt,
 } from './settlement-worker.ts';
+import { readAddressLogs } from './rpc-logs.ts';
 
 const TRANSFER_EVENT = new Interface([
   'event Transfer(address indexed from,address indexed to,uint256 amount)',
@@ -250,11 +251,11 @@ async function readTransactionBalanceDeltas(
     const tokenAddresses = [...new Set(sortedPairs.map((item) => item.tokenAddress))];
     const blockLogs = tokenAddresses.length === 0
       ? []
-      : await provider.getLogs({
+      : await readAddressLogs(provider, {
+        addresses: tokenAddresses,
         fromBlock: blockNumber,
         toBlock: blockNumber,
-        address: tokenAddresses,
-        topics: [TRANSFER_TOPIC],
+        topic0: TRANSFER_TOPIC,
       });
     const unrelatedTransfers = blockLogs
       .filter((log) => log.transactionHash.toLowerCase() !== executionTxHash)

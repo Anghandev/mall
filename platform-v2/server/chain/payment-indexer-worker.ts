@@ -7,6 +7,7 @@ import {
   type ChainSegmentBlock,
   type IndexerStore,
 } from './indexer.ts';
+import { readAddressLogs } from './rpc-logs.ts';
 
 export interface PaymentChainSource {
   head(): Promise<number>;
@@ -62,15 +63,19 @@ export class ResilientBscPaymentChainSource implements PaymentChainSource {
     assertBlockNumber(toBlock);
     if (toBlock < fromBlock) throw new CoreError('InvalidFinality', 'Invalid payment log range');
     return this.#withProvider(async (provider) => {
-      const values = await provider.getLogs({ address: this.#routerAddress, fromBlock, toBlock });
+      const values = await readAddressLogs(provider, {
+        addresses: this.#routerAddress,
+        fromBlock,
+        toBlock,
+      });
       return values.map((value) => ({
-        address: value.address.toLowerCase(),
+        address: value.address,
         topics: [...value.topics],
         data: value.data,
         transactionHash: value.transactionHash,
         blockHash: value.blockHash,
         blockNumber: value.blockNumber,
-        logIndex: value.index,
+        logIndex: value.logIndex,
       }));
     });
   }

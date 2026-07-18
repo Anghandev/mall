@@ -30,6 +30,7 @@ import {
   type IndexerStore,
 } from './indexer.ts';
 import { PollingPaymentIndexer, type PaymentChainSource } from './payment-indexer-worker.ts';
+import { readAddressLogs } from './rpc-logs.ts';
 import {
   PaymentRuntimeReadinessMonitor,
   RpcPaymentRuntimeAttestor,
@@ -52,6 +53,32 @@ const ALLOWED_CALLDATA = EXECUTOR_INTERFACE.encodeFunctionData('settle', [ORDER_
 const BUNDLE_PATH = fileURLToPath(
   new URL('../../../packages/core-artifacts/contracts/abi-bundle.json', import.meta.url),
 );
+
+test('RPC log reader falls back to block receipts without widening the address filter', async () => {
+  const calls: Array<{ method: string; params: unknown[] }> = [];
+  const provider = {
+    getLogs: async () => { throw new Error('limit exceeded'); },
+    send: async (method: string, params: unknown[]) => {
+      calls.push({ method, params });
+      return [{ logs: [
+        rpcReceiptLog({ address: CONTRACT, blockNumber: 100, logIndex: 2 }),
+        rpcReceiptLog({ address: BUYER, blockNumber: 100, logIndex: 3 }),
+        rpcReceiptLog({ address: CONTRACT, blockNumber: 100, logIndex: 4, topic0: HASH_2 }),
+      ] }];
+    },
+  };
+  const logs = await readAddressLogs(provider as Parameters<typeof readAddressLogs>[0], {
+    addresses: CONTRACT,
+    fromBlock: 100,
+    toBlock: 100,
+    topic0: HASH_1,
+  });
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0]?.address, CONTRACT);
+  assert.equal(logs[0]?.blockNumber, 100);
+  assert.equal(logs[0]?.logIndex, 2);
+  assert.deepEqual(calls, [{ method: 'eth_getBlockReceipts', params: ['0x64'] }]);
+});
 
 test('logistics print worker serializes polling and waits for the active dispatch on stop', async () => {
   let calls = 0;
@@ -990,6 +1017,18 @@ class MemoryPaymentChainSource implements PaymentChainSource {
 
 function blockHash(value: number) {
   return `0x${value.toString(16).padStart(64, '0')}`;
+}
+
+function rpcReceiptLog(input: { address: string; blockNumber: number; logIndex: number; topic0?: string }) {
+  return {
+    address: input.address,
+    topics: [input.topic0 ?? HASH_1],
+    data: '0x',
+    transactionHash: HASH_2,
+    blockHash: HASH_3,
+    blockNumber: `0x${input.blockNumber.toString(16)}`,
+    logIndex: `0x${input.logIndex.toString(16)}`,
+  };
 }
 
 class StubContractReader implements ContractReader {

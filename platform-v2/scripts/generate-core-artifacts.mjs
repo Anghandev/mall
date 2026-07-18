@@ -133,6 +133,11 @@ const schemaSources = [
       '027_merchant_governance_completion.sql',
       '028_buyer_uid.sql',
       '029_usdt_freight.sql',
+      '030_platform_service_fee.sql',
+      '031_change_risk_alerts.sql',
+      '032_seckill_prize_settlement.sql',
+      '033_eoa_wallet_execution.sql',
+      '034_reward_account_subtypes.sql',
     ],
   },
   {

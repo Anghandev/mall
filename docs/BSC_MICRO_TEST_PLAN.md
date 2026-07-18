@@ -1,7 +1,7 @@
 # BSC Mainnet EOA Deployment And Micro-Test Plan
 
-Status: `EOA_DEPLOYED`; approved setup packet `COMPLETE_15_OF_15`;
-recovery packet `EXECUTED`.
+Status: `EOA_FULL_CHAIN_COMPLETE`; setup packet `COMPLETE_15_OF_15`;
+recovery, payment, seckill, breaker and dual-settlement packets `EXECUTED`.
 
 This plan is bound to settlement/admin artifact
 `2.0.0-settlement-admin.16` and the five-role EOA architecture in
@@ -37,6 +37,15 @@ This plan is bound to settlement/admin artifact
   resumed seckill purchases. Each governance event and state transition matched,
   both breakers finished unpaused and all receipts reached 15 confirmations on
   both RPCs.
+- The ordinary payment event was consumed by the real PGlite Indexer, projected
+  to a final order and completed through pickup verification. The same order
+  unlocked the merchant USDT payable and one NPL beneficiary payable.
+- Both signed settlement requests passed Coverage, the settlement breaker
+  blocked creation while paused and recovered after resume, and the Scheduler
+  created exactly one `MERCHANT_USDT` and one `REWARD_NPL` transfer. Both EOA
+  transfers succeeded with exact sender/recipient deltas, reached at least 15
+  confirmations, reconciled to their TxHashes and moved both requests and the
+  balanced ledger to `SETTLED`.
 
 ## Deployment State
 
@@ -66,8 +75,9 @@ buy tax made the approved 95%-of-old-quote `amountOutMin` slightly higher than
 the current tax-adjusted net output. This was not evidence of an ordinary
 ERC-20 transfer tax: fixed-block fork checks showed exact buyer-to-Router
 `transferFrom` and exact Router-to-Burn/Reward delivery. The separately
-approved recovery packet then completed sequences 13-15. No payment, seckill,
-guarantee or settlement transaction has been broadcast.
+approved recovery packet then completed sequences 13-15. The later bounded
+payment, seckill, breaker and dual-settlement packets are recorded below; the
+1,000-USDT guarantee transaction was not broadcast.
 
 ## Exact Packet Gate
 
@@ -123,13 +133,14 @@ Actual native value plus Gas was `0.0000471636 BNB`, below the approved
    freight, NPL Burn and NPL Reward deltas with zero Router retention.
 8. Completed: execute the bounded live-seckill flow and prove reservation,
    classification and prize-liability evidence.
-9. Prove fulfillment/finality and the local/Fork 1,000-USDT guarantee path;
-   the guarantee minimum is never disguised as a mainnet micro amount.
-10. Execute one signed settlement request as individual EOA ERC-20 transfers,
-    wait for 15 confirmations and reconcile every ledger liability and TxHash.
-11. Partially completed: payment and seckill pause/recovery passed on BSC and
-    both ended unpaused. Settlement pause/recovery remains coupled to the
-    pending individual-EOA settlement micro-test.
+9. Completed: project the real ordinary payment through the Indexer, finality
+   and pickup fulfillment. The 1,000-USDT guarantee remains an explicit mainnet
+   budget boundary and was not disguised as a micro amount.
+10. Completed: execute one signed `MERCHANT_USDT` request and one signed
+    `REWARD_NPL` request as individual EOA ERC-20 transfers, wait for at least
+    15 confirmations and reconcile both ledger liabilities and TxHashes.
+11. Completed: payment, seckill and settlement pause/recovery all passed; every
+    breaker ended unpaused.
 
 Safe proposals, owner signatures, `execTransaction`, MultiSend and Safe nonce
 are not part of this sequence.
@@ -148,6 +159,17 @@ Its mode-600 receipt evidence SHA-256 is
 `492ee106b0c7439dc41090ae36881c9b2ba601603b5e400dfadd754ef5d19a91`.
 Actual Gas was `0.0000069242 BNB`, below the packet's
 `0.0000145301 BNB` ceiling; native value and token value were zero.
+
+The full-chain evidence SHA-256 is
+`345428449103de8e8f43c21b718fdcead2fe388c8b97d7002ef2c19c679d1d96`.
+The dual-settlement packet SHA-256 is
+`8f7077312dd41b1599484c692dfe39af9eb5da5f5be6910c557b858a1f3ebc18`.
+Its mode-600 receipt evidence SHA-256 is
+`61e3d4291964f07df58d10c19b3a381e697fd36c1004e3c900fbea882fb7608d`.
+The two individual EOA transfers used `0.0000056151 BNB` Gas in total,
+below their `0.000015 BNB` packet ceiling. The USDT transfer was `0.001 USDT`;
+the NPL transfer was the exact available direct-referral payable and remained
+within the project's 3-USDT-equivalent ceiling.
 
 ## Hard Limits And Stop Conditions
 
@@ -169,5 +191,13 @@ production databases/queues/domains remain `ConfigurationRequired` until their
 real accounts and devices are connected. Their absence does not block EOA
 contract preparation or the bounded chain test, and no adapter may simulate
 success.
+
+The configured public BSC RPCs support chain, block, receipt and block-receipt
+reads but returned `missing trie node` for historical `eth_call`. The bounded
+settlement run therefore retained the broadcaster's mode-600 exact balance
+deltas and revalidated both transactions, Transfer events, canonical blocks and
+confirmations through both RPCs. Production delayed finality requires two
+independent archive-capable RPC endpoints; this is a pre-launch configuration requirement, not a reason
+to repeat or enlarge the completed micro-test.
 
 There is no business refund, on-chain BNM token or Claim fallback.

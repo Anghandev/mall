@@ -132,6 +132,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '031_change_risk_alerts.sql',
       '032_seckill_prize_settlement.sql',
       '033_eoa_wallet_execution.sql',
+      '034_reward_account_subtypes.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -3650,6 +3651,51 @@ test('payment event atomically consumes inventory and posts balanced Locked jour
       ),
       /InvalidLedgerLines/,
     );
+  } finally {
+    await db.close();
+  }
+});
+
+test('payment ledger keeps separate reward subtypes when one wallet fills multiple beneficiary roles', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    await seedCatalog(db, 1);
+    const original = paymentIntent();
+    const sharedBeneficiary = original.beneficiaries.directReferral!;
+    const intent: CanonicalPaymentIntent = {
+      ...original,
+      beneficiaries: { ...original.beneficiaries, district: sharedBeneficiary },
+      nplRewardAllocations: original.nplRewardAllocations.map((allocation) =>
+        allocation.role === 'district' ? { ...allocation, account: sharedBeneficiary } : allocation),
+    };
+    await reserveInventory(adapter(db), {
+      reservationId: intent.reservationId,
+      reservationHash: intent.reservationHash,
+      policyVersion: 1,
+      skuId: 'sku-1',
+      buyerWallet: BUYER,
+      quantity: 1,
+      classification: 'ORDINARY',
+      expiresAt: new Date(intent.reservationDeadline * 1000),
+    });
+    await insertPaymentQuote(db, intent);
+    assert.equal((await new PostgresPaymentStore(transactionAdapter(db)).record(paymentInput(intent))).status, 'RECORDED');
+
+    const accounts = await db.query<{ subtype: string; amount: string }>(
+      `SELECT account.subtype,
+         sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS amount
+       FROM core.ledger_accounts account
+       JOIN core.ledger_lines line ON line.account_id = account.account_id
+       WHERE account.owner_type = 'BENEFICIARY' AND account.owner_id = $1
+         AND account.asset = 'NPL' AND account.purpose = 'REWARD_LIABILITY'
+       GROUP BY account.subtype ORDER BY account.subtype`,
+      [sharedBeneficiary],
+    );
+    assert.deepEqual(accounts.rows, [
+      { subtype: 'DIRECT_REFERRAL', amount: '10' },
+      { subtype: 'DISTRICT', amount: '12' },
+    ]);
+    await assertLedgerBalanced(db, 1);
   } finally {
     await db.close();
   }

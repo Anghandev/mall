@@ -150,6 +150,31 @@
           "name": "029_usdt_freight.sql",
           "path": "schema/business/029_usdt_freight.sql",
           "sha256": "f1cbddf879720fe72b84e6d812704d2ac9fd82624eac87d574ef1571fc3596e5"
+        },
+        {
+          "name": "030_platform_service_fee.sql",
+          "path": "schema/business/030_platform_service_fee.sql",
+          "sha256": "c9d1815920b597c228bece89ecfc315181d51ad08f84cd65201ec9c9fedd230a"
+        },
+        {
+          "name": "031_change_risk_alerts.sql",
+          "path": "schema/business/031_change_risk_alerts.sql",
+          "sha256": "6fc9a8a3dca0d713838b704fabeeaeea4b1960bb8a7bc3858a36d9d959e1743a"
+        },
+        {
+          "name": "032_seckill_prize_settlement.sql",
+          "path": "schema/business/032_seckill_prize_settlement.sql",
+          "sha256": "f9e09851e9cca8abe9d663fa1941ec798219f19cc1db09e8bd40b000707e6fb9"
+        },
+        {
+          "name": "033_eoa_wallet_execution.sql",
+          "path": "schema/business/033_eoa_wallet_execution.sql",
+          "sha256": "1caec8ece27265f1a3eb7ad29f139ca4d8e999bf7c45a1fe49617add5f2cf492"
+        },
+        {
+          "name": "034_reward_account_subtypes.sql",
+          "path": "schema/business/034_reward_account_subtypes.sql",
+          "sha256": "2f699a4c2df257fd56d3313f601ef3a1c57e77cd7b7d6469e31d7946284b3260"
         }
       ]
     },
