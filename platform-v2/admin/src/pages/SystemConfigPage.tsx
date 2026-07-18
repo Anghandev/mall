@@ -20,12 +20,9 @@ const configFields: Record<Exclude<WritableConfigKey, 'MERCHANT_LEVELS'>, readon
     { name: 'fallbackRpcSecretRef', label: 'Fallback RPC secret ref' },
     { name: 'explorerApiSecretRef', label: 'Explorer API secret ref' },
   ],
-  ORACLE: [
+  NPL_QUOTE: [
     { name: 'pairAddress', label: 'NPL / USDT Pair', fixed: '0x2955e33bb120714abf11ace2766e614e6e5955b2' },
-    { name: 'windowSeconds', label: 'TWAP 窗口秒数', kind: 'number', fixed: '1800' },
-    { name: 'maxDeviationBps', label: '最大偏差 BPS', kind: 'number', fixed: '500' },
     { name: 'quoteValiditySeconds', label: '报价有效秒数', kind: 'number', fixed: '300' },
-    { name: 'maxAgeSeconds', label: '最大陈旧秒数', kind: 'number', fixed: '600' },
     { name: 'minimumUsdtLiquidity', label: '最小 USDT 流动性 atomic', fixed: '50000000000000000000000' },
   ],
   GAS: [
@@ -40,7 +37,6 @@ const configFields: Record<Exclude<WritableConfigKey, 'MERCHANT_LEVELS'>, readon
     { name: 'paymentRouterAddress', label: 'PaymentRouter 地址' },
     { name: 'policyRegistryAddress', label: 'PolicyRegistry 地址' },
     { name: 'beneficiaryRegistryAddress', label: 'BeneficiaryRegistry 地址' },
-    { name: 'twapOracleAddress', label: 'TWAP Oracle 地址' },
     { name: 'usdtCustodySafe', label: 'USDT Custody Safe' },
     { name: 'nplRewardSafe', label: 'NPL Reward Safe' },
     { name: 'operationsTreasurySafe', label: 'Operations Treasury Safe' },

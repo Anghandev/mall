@@ -28,8 +28,8 @@ const policyGroups: readonly { title: string; fields: readonly PolicyField[] }[]
     { name: 'nplPaymentBps', label: 'NPL 支付 BPS', kind: 'number', locked: true },
     { name: 'nplBurnListPriceBps', label: 'NPL Burn BPS', kind: 'number', locked: true },
     { name: 'nplRewardListPriceBps', label: 'NPL 奖励 BPS', kind: 'number', locked: true },
-    { name: 'platformFeeBps', label: '平台服务费 BPS', kind: 'number' },
-    { name: 'seckillPrizeBps', label: '秒杀奖池 BPS', kind: 'number' },
+    { name: 'platformFeeBps', label: '平台服务费 BPS', kind: 'number', locked: true },
+    { name: 'seckillPrizeBps', label: '额外商家秒杀收益 BPS', kind: 'number', locked: true },
   ] },
   { title: 'NPL 奖励分配', fields: [
     { name: 'genesisBps', label: 'Genesis BPS', kind: 'number', locked: true },
@@ -46,23 +46,16 @@ const policyGroups: readonly { title: string; fields: readonly PolicyField[] }[]
     { name: 'relayIncrement', label: '每单增加秒数', kind: 'number', locked: true },
     { name: 'relayCap', label: '接力上限秒数', kind: 'number', locked: true },
   ] },
-  { title: 'Oracle 与确认', fields: [
-    { name: 'oracleWindowSeconds', label: 'TWAP 窗口秒数', kind: 'number', locked: true },
-    { name: 'oracleMaxDeviationBps', label: '最大偏差 BPS', kind: 'number', locked: true },
-    { name: 'oracleMaxAgeSeconds', label: '最大陈旧秒数', kind: 'number', locked: true },
-    { name: 'oracleMinimumUsdtLiquidity', label: '最小 USDT 流动性 atomic', kind: 'atomic', locked: true },
+  { title: '确认与保证金', fields: [
     { name: 'requiredConfirmations', label: '最终确认数', kind: 'number', locked: true },
     { name: 'merchantGuaranteeMinimumUsdt', label: '商家保证金下限 atomic', kind: 'atomic', locked: true },
   ] },
-  { title: '钱包与凭证', fields: [
+  { title: '钱包与证据', fields: [
+    { name: 'platformServiceFeeSafe', label: 'Platform Service Fee Safe', kind: 'address' },
     { name: 'usdtCustodySafe', label: 'USDT Custody Safe', kind: 'address' },
     { name: 'nplRewardSafe', label: 'NPL Reward Safe', kind: 'address' },
     { name: 'operationsTreasurySafe', label: 'Operations Treasury Safe', kind: 'address' },
     { name: 'circulationPool', label: '流通池账户', kind: 'address' },
-    { name: 'genesisCredential', label: 'Genesis 凭证合约', kind: 'address' },
-    { name: 'genesisTokenId', label: 'Genesis Token ID', kind: 'atomic' },
-    { name: 'genesisCredentialStandard', label: '凭证标准（1=721, 2=1155）', kind: 'number' },
-    { name: 'seckillPrizePoolAccount', label: '秒杀奖池账本账户', kind: 'address' },
     { name: 'concessionDestinationSetHash', label: '让利目的集合哈希', kind: 'hash' },
     { name: 'decisionEvidenceHash', label: '商业决定证据哈希', kind: 'hash' },
   ] },
@@ -71,22 +64,20 @@ const policyGroups: readonly { title: string; fields: readonly PolicyField[] }[]
 const allPolicyFields = policyGroups.flatMap((group) => group.fields);
 const frozenDefaults: Record<string, string> = {
   usdtPaymentBps: '7000', nplPaymentBps: '3000', nplBurnListPriceBps: '2000', nplRewardListPriceBps: '1000',
+  platformFeeBps: '100', seckillPrizeBps: '0',
   genesisBps: '200', directReferralBps: '100', districtBps: '120', cityBps: '80', provinceBps: '60', regionBps: '40', operationsBps: '400',
   seckillMainDuration: '3600', relayInitial: '60', relayIncrement: '30', relayCap: '60',
-  oracleWindowSeconds: '1800', oracleMaxDeviationBps: '500', oracleMaxAgeSeconds: '600',
-  oracleMinimumUsdtLiquidity: '50000000000000000000000', requiredConfirmations: '15', merchantGuaranteeMinimumUsdt: '1000000000000000000000',
+  requiredConfirmations: '15', merchantGuaranteeMinimumUsdt: '1000000000000000000000',
 };
 
 export function PolicyPage() {
   const { connect, session, status } = useCoreSession();
   const [drafts, setDrafts] = useState<readonly PolicyDraftProjection[]>([]);
   const [selectedId, setSelectedId] = useState('');
-  const [oracleVersion, setOracleVersion] = useState('');
   const [rulesContentHash, setRulesContentHash] = useState('');
   const [fields, setFields] = useState<Record<string, string>>(() => initialFields());
-  const [concessionDestinations, setConcessionDestinations] = useState<Destination[]>([]);
+  const [genesisNodeDestinations, setGenesisNodeDestinations] = useState<Destination[]>([]);
   const [operationsDestinations, setOperationsDestinations] = useState<Destination[]>([]);
-  const [otherUsdtDestinations, setOtherUsdtDestinations] = useState<Destination[]>([]);
   const [idempotencyKey, setIdempotencyKey] = useState(() => newKey('policy'));
   const [error, setError] = useState<CoreApiError | null>(null);
   const [notice, setNotice] = useState('');
@@ -96,7 +87,7 @@ export function PolicyPage() {
   const canEdit = session?.roles.some((role) => ['ADMIN', 'OPERATOR'].includes(role)) ?? false;
   const isAdmin = session?.roles.includes('ADMIN') ?? false;
   const selected = useMemo(() => drafts.find((draft) => draft.draftId === selectedId) ?? null, [drafts, selectedId]);
-  const editedPayload = useMemo(() => policyPayload(oracleVersion, rulesContentHash, fields, concessionDestinations, operationsDestinations, otherUsdtDestinations), [oracleVersion, rulesContentHash, fields, concessionDestinations, operationsDestinations, otherUsdtDestinations]);
+  const editedPayload = useMemo(() => policyPayload(rulesContentHash, fields, genesisNodeDestinations, operationsDestinations), [rulesContentHash, fields, genesisNodeDestinations, operationsDestinations]);
   const hasUnsavedChanges = selected ? canonicalJson(selected.payload) !== canonicalJson(editedPayload) : false;
 
   useEffect(() => {
@@ -108,7 +99,7 @@ export function PolicyPage() {
   }, [canRead, reload, session]);
 
   useEffect(() => {
-    if (selected) loadPayload(selected.payload, setOracleVersion, setRulesContentHash, setFields, setConcessionDestinations, setOperationsDestinations, setOtherUsdtDestinations);
+    if (selected) loadPayload(selected.payload, setRulesContentHash, setFields, setGenesisNodeDestinations, setOperationsDestinations);
   }, [selected?.draftId, selected?.updatedAt]);
 
   const createDraft = async (event: FormEvent) => {
@@ -154,11 +145,10 @@ export function PolicyPage() {
           : !canRead ? <ErrorView title="Forbidden" message="当前会话没有政策读取权限。" />
             : <><div className="table-scroll"><table className="data-table"><thead><tr><th>草稿</th><th>版本</th><th>状态</th><th>校验</th><th>更新时间</th></tr></thead><tbody>{drafts.map((draft) => <tr key={draft.draftId} className={selectedId === draft.draftId ? 'is-selected' : undefined}><td><button className="table-link" type="button" onClick={() => setSelectedId(draft.draftId)}>{draft.draftId}</button></td><td>{draft.nextPolicyVersion}</td><td>{draft.state}</td><td>{draft.validationErrors.length ? `${draft.validationErrors.length} 项阻断` : '通过'}</td><td>{draft.updatedAt}</td></tr>)}</tbody></table></div>{!drafts.length && !loading ? <p className="muted-copy">Core 返回真实空草稿列表。</p> : null}</>}
         {canEdit ? <form className="governed-form" onSubmit={createDraft}>
-          <fieldset><legend>版本绑定</legend><div className="form-grid"><label>Oracle version hash<input value={oracleVersion} onChange={(event) => setOracleVersion(event.target.value)} placeholder="0x…" required /></label><label>规则内容 hash<input value={rulesContentHash} onChange={(event) => setRulesContentHash(event.target.value)} placeholder="0x…" required /></label></div></fieldset>
-          {policyGroups.map((group) => <fieldset key={group.title}><legend>{group.title}</legend><div className="governed-field-grid">{group.fields.map((field) => <label key={field.name}>{field.label}{!field.locked && ['platformFeeBps', 'seckillPrizeBps'].includes(field.name) ? <small>未确认时留空</small> : null}<input inputMode={field.kind === 'number' || field.kind === 'atomic' ? 'numeric' : undefined} value={fields[field.name] ?? ''} onChange={(event) => setFields((current) => ({ ...current, [field.name]: event.target.value }))} /></label>)}</div></fieldset>)}
-          <DestinationEditor title="商家让利目的账户" value={concessionDestinations} onChange={setConcessionDestinations} />
+          <fieldset><legend>版本绑定</legend><div className="form-grid"><label>规则内容 hash<input value={rulesContentHash} onChange={(event) => setRulesContentHash(event.target.value)} placeholder="0x…" required /></label></div></fieldset>
+          {policyGroups.map((group) => <fieldset key={group.title}><legend>{group.title}</legend><div className="governed-field-grid">{group.fields.map((field) => <label key={field.name}>{field.label}<input inputMode={field.kind === 'number' || field.kind === 'atomic' ? 'numeric' : undefined} value={fields[field.name] ?? ''} onChange={(event) => setFields((current) => ({ ...current, [field.name]: event.target.value }))} /></label>)}</div></fieldset>)}
+          <DestinationEditor title="Genesis 节点奖励目的账户" value={genesisNodeDestinations} onChange={setGenesisNodeDestinations} />
           <DestinationEditor title="运营目的账户" value={operationsDestinations} onChange={setOperationsDestinations} />
-          <DestinationEditor title="其他 USDT 目的账户" value={otherUsdtDestinations} onChange={setOtherUsdtDestinations} />
           <div className="governed-form-actions"><button className="button button-primary" type="submit" disabled={loading}><Plus aria-hidden="true" />创建新草稿</button><button className="button button-quiet" type="button" onClick={() => void saveDraft()} disabled={!selected || !hasUnsavedChanges || loading}><Save aria-hidden="true" />保存选中草稿</button><span className={hasUnsavedChanges ? 'status-chip status-warning' : 'status-chip status-ready'}>{hasUnsavedChanges ? '存在未保存修改' : '编辑值与草稿一致'}</span></div>
         </form> : null}
       </article>
@@ -181,25 +171,24 @@ function DestinationEditor({ title, value, onChange }: { title: string; value: D
 }
 
 function initialFields() { return Object.fromEntries(allPolicyFields.map((field) => [field.name, frozenDefaults[field.name] ?? ''])); }
-function policyPayload(oracleVersion: string, rulesContentHash: string, fields: Record<string, string>, concessionDestinations: Destination[], operationsDestinations: Destination[], otherUsdtDestinations: Destination[]) {
+function policyPayload(rulesContentHash: string, fields: Record<string, string>, genesisNodeDestinations: Destination[], operationsDestinations: Destination[]) {
   const policy: Record<string, unknown> = {};
   for (const field of allPolicyFields) {
     const value = fields[field.name]?.trim();
     if (!value) continue;
     policy[field.name] = field.kind === 'number' ? integerValue(value) : value;
   }
-  if (concessionDestinations.length) policy.concessionDestinations = destinations(concessionDestinations);
+  if (genesisNodeDestinations.length) policy.genesisNodeDestinations = destinations(genesisNodeDestinations);
   if (operationsDestinations.length) policy.operationsDestinations = destinations(operationsDestinations);
-  if (otherUsdtDestinations.length) policy.otherUsdtDestinations = destinations(otherUsdtDestinations);
-  return { oracleVersion: oracleVersion.trim(), rulesContentHash: rulesContentHash.trim(), policy };
+  return { rulesContentHash: rulesContentHash.trim(), policy };
 }
 function destinations(value: Destination[]) { return value.map((item) => ({ account: item.account.trim(), weightBps: integerValue(item.weightBps) })); }
 function integerValue(value: string) { const parsed = Number(value); return /^(0|[1-9][0-9]*)$/.test(value) && Number.isSafeInteger(parsed) ? parsed : value; }
-function loadPayload(value: Record<string, unknown>, setOracleVersion: (value: string) => void, setRulesContentHash: (value: string) => void, setFields: (value: Record<string, string>) => void, setConcession: (value: Destination[]) => void, setOperations: (value: Destination[]) => void, setOther: (value: Destination[]) => void) {
-  setOracleVersion(String(value.oracleVersion ?? '')); setRulesContentHash(String(value.rulesContentHash ?? ''));
+function loadPayload(value: Record<string, unknown>, setRulesContentHash: (value: string) => void, setFields: (value: Record<string, string>) => void, setGenesisNodes: (value: Destination[]) => void, setOperations: (value: Destination[]) => void) {
+  setRulesContentHash(String(value.rulesContentHash ?? ''));
   const policy = record(value.policy); const next = initialFields();
   for (const field of allPolicyFields) if (policy[field.name] !== undefined) next[field.name] = String(policy[field.name]);
-  setFields(next); setConcession(readDestinations(policy.concessionDestinations)); setOperations(readDestinations(policy.operationsDestinations)); setOther(readDestinations(policy.otherUsdtDestinations));
+  setFields(next); setGenesisNodes(readDestinations(policy.genesisNodeDestinations)); setOperations(readDestinations(policy.operationsDestinations));
 }
 function readDestinations(value: unknown): Destination[] { return Array.isArray(value) ? value.map((item) => { const child = record(item); return { account: String(child.account ?? ''), weightBps: String(child.weightBps ?? '') }; }) : []; }
 function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}; }

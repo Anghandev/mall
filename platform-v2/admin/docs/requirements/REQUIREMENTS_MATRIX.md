@@ -232,7 +232,7 @@ Real production media/providers, domains, infrastructure and devices remain
 ## Settlement/Admin `.15` Merchant Governance Evidence
 
 The current Admin consumer is pinned to
-`@abu24k/core-artifacts@2.0.0-settlement-admin.15` and reuses the existing
+`@abu24k/core-artifacts@2.0.0-settlement-admin.16` and reuses the existing
 merchant lifecycle API and review workspace:
 
 - `ADM-MER-001`: qualification PII remains FULL/REDACTED/UNAVAILABLE by Core
