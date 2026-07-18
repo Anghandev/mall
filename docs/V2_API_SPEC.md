@@ -1,9 +1,9 @@
 # Abu 24K V2 Core API Contract
 
-Status: coordinated local settlement/admin checkpoint `2.0.0-settlement-admin.9`. OpenAPI,
+Status: coordinated settlement/admin checkpoint `2.0.0-settlement-admin.16`. OpenAPI,
 generated types, ABI, manifests, enums, the fail-closed WebSocket protocol and
 consumer tests share this version. This checkpoint does not authorize a
-deployment, production signing or a transaction.
+new deployment or transaction.
 
 ## Authority
 
@@ -17,7 +17,7 @@ infer success from a transaction hash or release balances locally.
 
 Token amounts are unsigned integer decimal strings. IDs used by the Router are
 `bytes32`. BSC finality is fixed at 15 canonical confirmations. Missing policy
-decisions return `DecisionBlocked`; missing Safe, signer, RPC or provider inputs
+decisions return `DecisionBlocked`; missing configured EOA executor, signer, RPC or provider inputs
 return `ExternalBlocked` or `ConfigurationRequired`.
 
 ## Authentication
@@ -41,11 +41,13 @@ For a signed launch quote:
 
 ```text
 product USDT leg   = 70% of USDT list price
+platform fee       = 1% of list price -> Platform Service Fee EOA
+Custody product    = product USDT leg - platform fee -> USDT Custody EOA
 delivery freight  = product defaultFreightUsdt; pickup freight = 0
 buyer USDT payment = product USDT leg + freight
 buyer NPL payment  = 30% of the exact Core-quoted NPL equivalent
 NPL Burn           = 20% of the same Core quote
-NPL Reward Safe    = 10% of the same Core quote
+NPL Reward EOA     = 10% of the same Core quote
 BNM Locked         = USDT list price, as backend points only
 ```
 
@@ -53,12 +55,12 @@ Freight is pure USDT outside the product 70/30 base. It never changes NPL,
 Burn, reward, BNM, concession or prize amounts. Merchant concession never
 changes buyer payment. Core returns merchant base receivable, concession, net
 receivable, freight receivable and exact versioned allocation entries.
-The NPL reward allocation balances exactly to the Reward Safe amount; missing
+The NPL reward allocation balances exactly to the NPL Reward EOA amount; missing
 beneficiaries and rounding remainder use the frozen circulation pool.
 For a seckill quote, governed `seckillPrizePoolAccount` and `seckillPrizeBps`
 create an exact `SECKILL_PRIZE_LIABILITY` entry. Ordinary and fallback-retail
 quotes never create that entry. The prize account is included in the
-Safe-published allocation-set hash and is never inferred from array position or
+policy-published allocation-set hash and is never inferred from array position or
 destination weight.
 
 An ordinary quote contains the exact `CanonicalPaymentIntent`, including
@@ -156,7 +158,9 @@ PII use AES-256-GCM; one active default address is enforced transactionally.
 A saved address creates a fresh 30-minute fulfillment target and never rewrites
 the target snapshot of an existing quote or order. The first successful BUYER
 SIWE creates one permanent numeric UID for the wallet; buyer profile returns it
-as `accountId`. Production PII retention remains `DecisionBlocked`.
+as `accountId`. Buyer name, phone and detailed address remain encrypted for 60
+days after order completion, default to masked Admin display from day 30 and
+have plaintext deleted at day 60.
 
 Merchant profile and audit routes:
 
@@ -227,8 +231,9 @@ and replaced rather than physically deleted or financially rewritten.
 Product review requires 1-5 verified write-once main images and a non-expired
 Core-signed concession preview bound to the latest canonical policy and exact
 product/SKU fingerprint. The preview returns each SKU's integer base,
-concession, net receivable and every configured destination. An unresolved
-destination set returns `DecisionBlocked`; no UI supplies weights.
+concession, net receivable and the frozen Custody-backed destinations: platform
+0%, seckill prize 45%, node rewards 45% and Locked reward reserve 10%. No UI
+supplies or changes those weights.
 
 Provider callbacks:
 
@@ -288,14 +293,15 @@ finality inside that window. Amounts come from immutable `exactAmounts`; current
 order queues remain separate from the finality-window cohort. Shipment rates
 return numerator, denominator and nullable basis points, so an empty cohort is
 not reported as zero percent. The Admin dashboard returns total and today-new
-buyer UID counts from immutable buyer-account rows. The unfrozen low-stock
-threshold remains an explicit `DecisionBlocked` entry rather than a synthetic
-zero. Risk observations, blacklist blocks, active restrictions and
+buyer UID counts from immutable buyer-account rows. The low-stock threshold is
+fixed below 100 and is alert-only. Until Core publishes the actual count, the
+metric returns `ExternalBlocked` rather than a synthetic zero. Risk
+observations, blacklist blocks, active restrictions and
 pending appeals are derived from append-only risk records and are not inferred
 from operations monitoring alerts.
-Safe coverage is included only when the latest snapshot has a fresh canonical
+Funding-wallet coverage is included only when the latest snapshot has a fresh canonical
 observation; missing, stale or reorged evidence is an explicit
-`SAFE_COVERAGE / ExternalBlocked` metric and never reuses an older covered row.
+`WALLET_COVERAGE / ExternalBlocked` metric and never reuses an older covered row.
 Settlement transaction failures count status-0 `SETTLEMENT_BATCH` finality rows
 whose failure evidence was recorded inside the same business-day window; a
 quarantined batch is not automatically labeled as a chain failure.
@@ -309,10 +315,10 @@ order even when it belongs to the same merchant.
 
 The settlement/admin checkpoint includes catalog/media management and all payment and fulfillment
 capabilities plus signed settlement intents and requests, merchant finance and
-guarantee deposits, takeover funding, Safe MultiSend batching and finality,
+guarantee deposits, takeover funding, per-payable EOA transfer execution and finality,
 policy governance, CMS, notifications, versioned system configuration,
 append-only audit queries and operations monitoring. The coordinated OpenAPI
-publishes 122 HTTP operations and the generated types, state/error enums,
+publishes 182 HTTP operations and the generated types, state/error enums,
 Schema and ABI share the same artifact version.
 
 Seckill session reads, numeric-cursor HTTP replay and `/v2/ws` publish only

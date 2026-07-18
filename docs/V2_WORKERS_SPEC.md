@@ -1,7 +1,8 @@
 # Abu 24K V2 Payment And Fulfillment Workers
 
-Status: local settlement/admin checkpoint `2.0.0-settlement-admin.9`. Production RPCs, deployed
-addresses, signer service and credentials remain `ExternalBlocked`.
+Status: settlement/admin checkpoint `2.0.0-settlement-admin.16`. The EOA-bound
+contracts and bounded BSC execution evidence are published; production database,
+archive-RPC, signer and provider operations remain launch-time configuration.
 
 ## Indexer
 
@@ -50,7 +51,7 @@ deployed registry. Both RPC providers failing returns `ExternalBlocked`.
 
 New ordinary and seckill quotes require a fresh runtime readiness snapshot.
 Core verifies artifact checksums, chain 56, deployed code hashes for all three
-contracts, the Router's immutable governance-Safe binding, Registry Safe-held
+contracts, the Router's immutable Platform Governance EOA binding, Registry EOA-held
 roles, quote and secondary signers,
 the fixed-pair reserve source, PostgreSQL, Redis, remote signer identity
 and a caught-up Indexer. The manifest must include each deployed address,
@@ -93,15 +94,15 @@ integer amounts, zero native value, gas cap and replacement evidence. An
 executor response is only `Submitted`; indexed receipt and canonical finality
 remain separate evidence.
 
-The settlement worker reserves the governed Safe nonce, builds an immutable
-MultiSend batch from exact request items, attests the Safe runtime and submits
-only matching calldata. Request, batch and finality transitions are append-only
-and idempotent. A status-1 receipt becomes `Settled` only after 15 canonical
-confirmations; replacements and reorgs preserve the old evidence and reopen the
-affected liabilities without duplicating a payout.
+The settlement worker creates one immutable ERC-20 transfer intent per payable,
+reserves the configured executor EOA nonce and submits only the bound token,
+recipient, amount, calldata and gas cap. Request, transfer and finality
+transitions are append-only and idempotent. A status-1 receipt becomes `Settled`
+only after 15 canonical confirmations; replacements and reorgs preserve the old
+evidence and reopen affected liabilities without duplicating a payout.
 
 Guarantee polling verifies exact ERC-20 Transfer evidence and rotates fairly
-across pending and finalized deposits. Coverage polling reconciles each Safe
+across pending and finalized deposits. Coverage polling reconciles each funding EOA
 asset against unsettled liabilities and controls only the documented breaker.
 Policy publication, notification, audit-outbox and monitoring workers use the
 same bounded command and evidence rules; missing providers remain typed
@@ -152,10 +153,10 @@ ambiguously, the canceled `AVAILABLE` is never sent again; even a server-side
 late arrival cannot overwrite the newer `LOCKED` state.
 Outer lease or retry-write failures remain visible in worker status and do not
 make `stop()` reject.
-BNM has no token, mint, Claim, Safe transfer or settlement executor path.
+BNM has no token, mint, Claim, EOA transfer or settlement executor path.
 
-Safe MultiSend settlement and administrative workers are published in this
-checkpoint. Their production execution remains disabled until same-version
-deployment evidence and external Safe/RPC/signer inputs are present. Payment
-breakers never stop Indexer, finality, reorg recovery, fulfillment,
-reconciliation or audit processing.
+Per-payable EOA settlement and EOA-governed administrative workers are published
+in this checkpoint. Current free RPCs support live execution but not historical
+archive-state reads required for delayed production finality; production must
+configure two archive-capable providers. Payment breakers never stop Indexer,
+finality, reorg recovery, fulfillment, reconciliation or audit processing.

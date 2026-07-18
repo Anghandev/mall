@@ -171,7 +171,7 @@ export class BusinessAnalyticsService {
         breakers,
         risk,
         unavailable: [
-          { metric: 'LOW_STOCK_PRODUCTS', reasonCode: 'DecisionBlocked', detail: 'Low-stock threshold is not frozen' },
+          { metric: 'LOW_STOCK_PRODUCTS', reasonCode: 'ExternalBlocked', detail: 'Below-100 low-stock count is not published by Core' },
           ...(coverage.unavailable ? [coverage.unavailable] : []),
         ],
       };

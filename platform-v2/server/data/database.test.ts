@@ -2172,6 +2172,7 @@ test('business analytics uses canonical Asia Shanghai finality windows and fail-
     assert.equal(platform.unavailable.some((metric) => metric.metric === 'NEW_UID_USERS'), false);
     assert.equal(platform.unavailable.some((metric) => metric.metric === 'ABNORMAL_ORDERS'), false);
     assert.equal(platform.unavailable.some((metric) => metric.metric === 'BLACKLIST_BLOCKS'), false);
+    assert.equal(platform.unavailable.find((metric) => metric.metric === 'LOW_STOCK_PRODUCTS')?.reasonCode, 'ExternalBlocked');
     assert.deepEqual(platform.breakers, [
       { scope: 'NEW_PAYMENT', paused: false },
       { scope: 'SECKILL_PURCHASE', paused: false },

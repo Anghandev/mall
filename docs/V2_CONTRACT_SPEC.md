@@ -10,13 +10,13 @@ transaction.
 
 | Contract | Responsibility | Funds held |
 |---|---|---|
-| `PolicyRegistryV2` | Immutable policy versions; Safe/RBAC publication with an exact secondary EIP-712 signature | None |
+| `PolicyRegistryV2` | Immutable policy versions; RBAC plus an exact secondary EIP-712 signature and Platform Governance EOA execution | None |
 | `BeneficiaryRegistryV2` | Referral-cycle prevention and immutable region-beneficiary snapshot validation; the legacy genesis field must be zero | None |
-| `PaymentRouterV2` | Signed ordinary/seckill payment, replay protection, Safe transfers, boundary classification and payment breakers | Normally zero |
+| `PaymentRouterV2` | Signed ordinary/seckill payment, replay protection, direct EOA-destination transfers, boundary classification and payment breakers | Normally zero |
 
 V2 deploys no BNM token, Claim vault, reward ledger, payment escrow, guarantee
 vault or separate seckill funds contract. Fulfillment, arbitration, guarantees,
-transferable rewards and Safe settlement are published PostgreSQL-ledger/Core
+transferable rewards and per-payable EOA settlement are PostgreSQL-ledger/Core
 responsibilities; the Router contract set remains limited to payment policy,
 beneficiary validation and atomic collection.
 
@@ -33,8 +33,8 @@ The signed `PaymentIntent` binds:
 - buyer, merchant, product, SKU, quantity and fulfillment mode;
 - fulfillment target, region and product-policy hashes;
 - reservation ID/hash/deadline, issue time, quote deadline and buyer nonce;
-- exact list price, product USDT leg, Platform Service Fee Safe amount, Custody
-  product USDT, freight USDT, total USDT debit, NPL payment, Burn, Reward Safe,
+- exact list price, product USDT leg, Platform Service Fee EOA amount, Custody
+  product USDT, freight USDT, total USDT debit, NPL payment, Burn, Reward EOA,
   merchant concession and BNM-points amounts;
 - concession allocation hash, session identity and six beneficiary addresses.
   The governed allocation-set hash also binds the explicit seckill prize-pool
@@ -52,14 +52,14 @@ For the frozen launch policy:
 
 ```text
 product USDT leg = 70% of USDT list price
-platform service fee = 1% of list price -> Platform Service Fee Safe
+platform service fee = 1% of list price -> Platform Service Fee EOA
 Custody product USDT = product USDT leg - service fee (nominally 69%)
 delivery freight = product defaultFreightUsdt; pickup freight = 0
 USDT buyer debit = product USDT leg + freight
-Custody receipt = Custody product USDT + freight -> USDT Custody Safe
+Custody receipt = Custody product USDT + freight -> USDT Custody EOA
 NPL buyer debit  = 30% of the exact Core-quoted NPL equivalent
 NPL Burn         = 20% of the same Core quote -> dead address
-NPL rewards      = 10% of the same Core quote -> NPL Reward Safe
+NPL rewards      = 10% of the same Core quote -> NPL Reward EOA
 ```
 
 The Router checks buyer and destination balance deltas for every transfer. A
@@ -78,7 +78,7 @@ off-chain double-entry ledger; they are not settlement authorization.
 ## Seckill Boundary
 
 `openSeckillSession` snapshots policy version, start, 60-minute main deadline
-and 60-second relay deadline. Direct execution by the immutable governance Safe
+and 60-second relay deadline. Direct execution by the immutable Platform Governance EOA
 is required.
 
 A seckill signature binds seckill and retail-fallback payment intents. Identity,
@@ -103,7 +103,7 @@ canonical confirmations.
 
 `PaymentRouterV2` has independent `newPaymentsPaused` and
 `seckillPurchasesPaused` flags. Pause and resume require direct execution by the
-immutable governance Safe and a nonzero evidence hash.
+immutable Platform Governance EOA and a nonzero evidence hash.
 They stop only new payment writes. Indexing, finality, reorg recovery,
 fulfillment, takeover, reconciliation and audit reads remain outside the Router
 and cannot be stopped by these flags.
@@ -116,12 +116,13 @@ The completed deployment order was:
 2. `BeneficiaryRegistryV2`
 3. `PaymentRouterV2`
 
-The five configured Safes and primary/fallback RPC passed runtime checks. The
-three contracts were deployed from the exact bounded packet, reached 15
-confirmations on both providers and passed BscScan source verification. Safe
-owners and thresholds remain user-managed. There are no current business
-`DecisionBlocked` entries. Policy publication, payments, seckill and every Safe
-action remain separate transactions with their own exact packet and authority.
+The five configured production roles are distinct EOAs. The three EOA-bound
+contracts were deployed from the exact bounded packet, reached 15 confirmations
+on both providers and passed runtime/source verification. Policy V1 is active,
+the Router normally retains zero assets. Pickup-timeout takeover remains the
+only business `DecisionBlocked`; it is off-chain and does not block this
+contract deployment. Policy publication, payments, seckill and each EOA
+governance or settlement action remain separately authorized transactions.
 
 Every deployed contract manifest entry must record its address, deployment
 block and actual runtime `deployedCodeHash`. Build-artifact hashes alone are not

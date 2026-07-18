@@ -1,7 +1,7 @@
 # Abu 24K V2 Data Model
 
 Status: coordinated local settlement/admin checkpoint
-`2.0.0-settlement-admin.9`. This document describes implemented catalog, media, payment,
+`2.0.0-settlement-admin.16`. This document describes implemented catalog, media, payment,
 fulfillment, settlement and administrative storage and does not authorize
 deployment.
 
@@ -95,17 +95,17 @@ newer observation proves a reorg.
 append-only. Every journal is idempotent and balanced independently for USDT,
 NPL and `BNM_POINTS`.
 
-Safe asset account IDs include the normalized Safe address. Existing account
-metadata is verified field by field before posting, so a governed Safe rotation
-cannot silently post new assets into an account bound to an old Safe.
+Funding-asset account IDs include the normalized backing EOA address. Existing
+account metadata is verified field by field before posting, so assets cannot be
+silently posted into an account bound to another wallet.
 
 The coordinated checkpoints publish these journal events:
 
-- `PAYMENT_LOCKED` records Custody Safe assets, merchant and policy USDT
-  liabilities, Reward Safe assets and beneficiary NPL liabilities, Burn, and
+- `PAYMENT_LOCKED` records Custody EOA assets, merchant and policy USDT
+  liabilities, Reward EOA assets and beneficiary NPL liabilities, Burn, and
   Locked BNM points;
 - product net proceeds use `MERCHANT_RECEIVABLE`; delivery freight uses the
-  separate `MERCHANT_FREIGHT_RECEIVABLE`. Both are backed by the Custody Safe,
+  separate `MERCHANT_FREIGHT_RECEIVABLE`. Both are backed by the Custody EOA,
   follow the same order finality and fulfillment states, and are consumed by
   the existing `MERCHANT_USDT` settlement rail without merging their snapshots;
 - `PAYMENT_REORG_REVERSAL` reverses the exact original lines and links the
@@ -119,9 +119,9 @@ The coordinated checkpoints publish these journal events:
 - a deep payment reorg posts linked reversals for every current order balance
   state, including balances already moved by fulfillment.
 
-BNM is a backend-points liability, not an ERC-20, mint or Safe-transfer asset.
+BNM is a backend-points liability, not an ERC-20, mint or EOA-transfer asset.
 BNM publishes only its `Locked -> Available` fulfillment lifecycle.
-`Requested`, `Batched` and `Settled` are implemented only for transferable
+`Requested`, `Submitted` and `Settled` are implemented only for transferable
 assets and never apply to BNM. `core.orders.bnm_state_version`
 is incremented in the same transaction that appends each BNM state command, and
 `core.bnm_state_syncs` records the version acknowledged by the backend. Versions
@@ -184,21 +184,21 @@ overwrite a later reorg `LOCKED` state.
   default per wallet. Raw parser text is never stored. A saved row is not a
   fulfillment snapshot: checkout creates a new expiring `fulfillment_target`.
 - `core.account_write_commands` keeps profile/address write idempotency without
-  storing plaintext PII. The production retention-policy version is required
-  before new nickname or address PII can be persisted.
+  storing plaintext PII. Persisted PII binds the frozen 60-day retention and
+  day-30 masking policy version.
 - `core.buyer_account_locks` serializes account/address writes per buyer wallet,
   including concurrent first-address and default-address selection.
 - Settlement intents and requests retain the authoritative merchant scope
-  resolved from the settlement wallet or immutable order. Multi-merchant Safe
-  batches append separate tenant audit entries with merchant-only counts and
-  amounts; they never expose another merchant's order, request or recipient.
+  resolved from the settlement wallet or immutable order. Per-payable EOA
+  transfer evidence appends separate tenant audit entries and never exposes
+  another merchant's order, request or recipient.
 - `core.merchants.settlement_wallet` is permanently immutable after approval.
   Review actions contain no wallet-change kind, and the database trigger has no
-  Admin, signer or Safe exception. Rejected pre-approval applications may be
+  Admin, signer or governance-EOA exception. Rejected pre-approval applications may be
   replaced by a new application with the correct address.
 - `core.takeover_case_transitions` records future state changes append-only.
   Existing pre-migration cases are labeled partial; buyer projection omits
-  guarantee sources, debt, Safe internals and internal evidence hashes.
+  guarantee sources, debt, funding-wallet internals and internal evidence hashes.
 - `audit.entries.merchant_id` and the matching business outbox field carry an
   explicit tenant scope through delivery. Merchant reads require equality with
   the active merchant binding, hide legacy null-scope rows and expose bounded
@@ -214,18 +214,19 @@ payment-reversal fulfillment action.
 - `core.settlement_intents`, intent items, wallet nonces, requests and request
   items bind the wallet signature, exact asset/amount, available liabilities,
   expiry and idempotency identity.
-- Safe nonce reservations, immutable batches, batch items, approvals and
-  execution attempts bind the complete MultiSend content hash. Final
-  `Settled` state requires a status-1 canonical receipt and 15 confirmations;
-  replacement and reorg exposure remain append-only evidence.
-- Coverage snapshots reconcile verified Safe assets against unsettled
+- Immutable transfer intents, EOA nonce reservations and execution attempts
+  bind executor, token, recipient, amount, calldata hash and gas cap. Final
+  `Settled` state requires a matching status-1 canonical receipt and 15
+  confirmations; replacement and reorg exposure remain append-only evidence.
+- Coverage snapshots reconcile verified funding-wallet assets against unsettled
   liabilities per asset. Breaker events and causes preserve independent new
-  payment, seckill-purchase and new-settlement-batch controls.
+  payment, seckill-purchase and new-settlement-transfer controls.
 - Merchant guarantees, immutable deposit submissions, reorg exposures, debts,
   debt recoveries and takeover-funding items preserve the required funding
   order and never rewrite a prior balance.
 - Policy drafts and publication transitions bind RBAC, the secondary wallet
-  signature, Safe proposal and future-only `policyVersion` activation.
+  signature, Platform Governance EOA execution and future-only `policyVersion`
+  activation.
 - CMS versions/publication events, notification endpoints/campaigns/deliveries,
   system-config versions, the audit outbox, monitoring snapshots and alert
   events are versioned or append-only as appropriate.
@@ -251,8 +252,9 @@ not a substitute for production PostgreSQL backup and restore evidence.
 
 ## Blocked Inputs
 
-Production PostgreSQL, Redis, encrypted backup storage, Safe addresses, RPCs,
-signer services and providers remain `ExternalBlocked`. Missing commercial
-allocation inputs remain `DecisionBlocked`. There is no fixture-backed success
-path and no business-refund or Claim table/API in V2. Production PII
-retention/deletion policy also remains `DecisionBlocked`.
+Production PostgreSQL, Redis, encrypted backup storage, archive-capable delayed-
+finality RPCs, signer services, BNM conformance and provider accounts remain
+launch-time `ExternalBlocked` or `ConfigurationRequired`. The five EOA roles,
+commercial allocations and PII retention are frozen and are not
+`DecisionBlocked`. There is no fixture-backed success path and no
+business-refund or Claim table/API in V2.

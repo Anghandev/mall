@@ -477,7 +477,7 @@ function adminBusinessDashboard() {
       { scope: 'NEW_SETTLEMENT_BATCH', paused: true },
     ],
     unavailable: [
-      { metric: 'LOW_STOCK_PRODUCTS', reasonCode: 'DecisionBlocked', detail: 'Low-stock threshold is not frozen' },
+      { metric: 'LOW_STOCK_PRODUCTS', reasonCode: 'ExternalBlocked', detail: 'Below-100 low-stock count is not published by Core' },
     ],
   };
 }
