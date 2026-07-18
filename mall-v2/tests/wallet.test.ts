@@ -71,7 +71,7 @@ describe('published PaymentRouter wallet call', () => {
     }
   });
 
-  it('binds settlement signatures to the current wallet, Safe, asset and published digest', async () => {
+  it('binds settlement signatures to the current wallet, executor, asset and published digest', async () => {
     await expect(validateSettlementIntentForWallet(settlementIntent, settlementBuyer)).resolves.toMatchObject({
       message: settlementIntent.intent,
     });

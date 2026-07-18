@@ -1178,7 +1178,7 @@ function parseSeckillPrizeSettlement(value: unknown, winnerWallet: unknown) {
     atomicValue(candidate.logIndex);
     bytes32Value(candidate.evidenceHash);
   }
-  atomicValue(settlement.poolAmountUsdt);
+  const poolAmountUsdt = atomicValue(settlement.poolAmountUsdt);
   bytes32Value(settlement.poolSnapshotHash);
   const review = settlement.review === null ? null : objectValue(settlement.review);
   if (review) {
@@ -1197,23 +1197,28 @@ function parseSeckillPrizeSettlement(value: unknown, winnerWallet: unknown) {
     const payoutState = enumValue(payout.state, [
       'AVAILABLE',
       'REQUESTED',
-      'BATCHED',
+      'SUBMITTED',
       'SETTLED',
       'RETRYABLE',
       'QUARANTINED',
     ] as const);
     optionalBytes32Value(payout.requestId);
-    optionalBytes32Value(payout.batchId);
-    optionalBytes32Value(payout.finalSafeTxHash);
-    optionalBytes32Value(payout.finalExecutionTxHash);
+    const transferIds = arrayValue(payout.transferIds);
+    transferIds.forEach(bytes32Value);
+    const finalExecutionTxHashes = arrayValue(payout.finalExecutionTxHashes);
+    finalExecutionTxHashes.forEach(bytes32Value);
     if (payoutState === 'REQUESTED' && payout.requestId === null) {
       throw new CoreClientError('InvalidResponse', '秒杀奖金申请缺少请求证据');
     }
-    if (['BATCHED', 'SETTLED'].includes(payoutState) && (payout.requestId === null || payout.batchId === null)) {
-      throw new CoreClientError('InvalidResponse', '秒杀奖金批次证据不完整');
+    if (payoutState === 'SUBMITTED' && (payout.requestId === null || transferIds.length === 0)) {
+      throw new CoreClientError('InvalidResponse', '秒杀奖金执行证据不完整');
     }
-    if (payoutState === 'SETTLED' && payout.finalSafeTxHash === null) {
-      throw new CoreClientError('InvalidResponse', '秒杀奖金缺少最终 Safe TxHash');
+    if (payoutState === 'SETTLED' && BigInt(poolAmountUsdt) > 0n && (
+      payout.requestId === null
+      || transferIds.length === 0
+      || finalExecutionTxHashes.length !== transferIds.length
+    )) {
+      throw new CoreClientError('InvalidResponse', '秒杀奖金缺少最终执行交易');
     }
   }
 
@@ -1291,7 +1296,7 @@ function parseSettlementIntent(value: unknown): SettlementIntentProjection {
   addressValue(intent.recipient);
   enumValue(intent.rail, ['MERCHANT_USDT', 'REWARD_NPL', 'PRIZE_USDT', 'TAKEOVER_USDT', 'OPERATIONS_REIMBURSEMENT_USDT'] as const);
   addressValue(intent.asset);
-  addressValue(intent.safeAddress);
+  addressValue(intent.executorWallet);
   atomicValue(intent.amount);
   bytes32Value(intent.itemsHash);
   atomicValue(intent.nonce);
@@ -1304,8 +1309,16 @@ function parseSettlementIntent(value: unknown): SettlementIntentProjection {
   objectValue(typedData.types);
   objectValue(typedData.message);
   stringValue(typedData.primaryType);
-  arrayValue(response.items);
-  stringValue(response.createdAt);
+  arrayValue(response.items).forEach((rawItem) => {
+    const item = objectValue(rawItem);
+    nonNegativeIntegerValue(item.itemIndex);
+    stringValue(item.orderId);
+    stringValue(item.accountId);
+    addressValue(item.backingWalletAddress);
+    atomicValue(item.amount);
+    bytes32Value(item.itemHash);
+  });
+  isoValue(response.createdAt);
   return value as SettlementIntentProjection;
 }
 
@@ -1318,13 +1331,40 @@ function parseSettlementRequest(value: unknown): SettlementRequestProjection {
   addressValue(response.recipient_address);
   enumValue(response.rail, ['MERCHANT_USDT', 'REWARD_NPL', 'PRIZE_USDT', 'TAKEOVER_USDT', 'OPERATIONS_REIMBURSEMENT_USDT'] as const);
   enumValue(response.asset, ['USDT', 'NPL'] as const);
+  addressValue(response.asset_address);
+  addressValue(response.executor_wallet);
   atomicValue(response.amount);
+  bytes32Value(response.items_hash);
+  bytes32Value(response.intent_digest);
+  bytes32Value(response.signature_hash);
   enumValue(response.state, settlementRequestStates);
-  optionalBytes32Value(response.final_safe_tx_hash);
-  optionalBytes32Value(response.final_execution_tx_hash);
-  arrayValue(response.items);
-  arrayValue(response.transitions);
-  return value as unknown as SettlementRequestProjection;
+  arrayValue(response.transfer_ids).forEach(bytes32Value);
+  arrayValue(response.final_execution_tx_hashes).forEach(bytes32Value);
+  isoValue(response.requested_at);
+  if (response.submitted_at !== null) isoValue(response.submitted_at);
+  if (response.settled_at !== null) isoValue(response.settled_at);
+  arrayValue(response.items).forEach((rawItem) => {
+    const item = objectValue(rawItem);
+    nonNegativeIntegerValue(item.item_index);
+    stringValue(item.order_id);
+    stringValue(item.account_id);
+    addressValue(item.backing_wallet_address);
+    atomicValue(item.amount);
+    stringValue(item.requested_journal_id);
+    if (item.submitted_journal_id !== null) stringValue(item.submitted_journal_id);
+    if (item.settled_journal_id !== null) stringValue(item.settled_journal_id);
+  });
+  arrayValue(response.transitions).forEach((rawTransition) => {
+    const transition = objectValue(rawTransition);
+    stringValue(transition.transition_id);
+    nonNegativeIntegerValue(transition.request_item_index);
+    if (transition.transfer_id !== null) stringValue(transition.transfer_id);
+    atomicValue(transition.transition_sequence);
+    stringValue(transition.transition_type);
+    stringValue(transition.journal_id);
+    isoValue(transition.created_at);
+  });
+  return value as SettlementRequestProjection;
 }
 
 function parseCmsItems(value: unknown): readonly CmsPublicItem[] {

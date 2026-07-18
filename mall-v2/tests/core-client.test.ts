@@ -56,7 +56,7 @@ import {
   reviewPendingPrizeSettlement,
   rolledOverPrizeSettlement,
   seckillGovernanceActionId,
-  seckillPrizeSafeTxHash,
+  seckillPrizeExecutionTxHash,
   seckillPublicationTxHash,
   seckillRulesContentHash,
   seckillSession,
@@ -110,10 +110,10 @@ describe('Mall Core artifact boundary', () => {
       .toBe('listAdminSettlementRequests');
     expect(coordinatedOpenApi.paths['/v2/admin/settlement-requests/{requestId}']?.get?.operationId)
       .toBe('getAdminSettlementRequest');
-    expect(coordinatedOpenApi.paths['/v2/admin/settlement-batches']?.get?.operationId)
-      .toBe('listAdminSettlementBatches');
-    expect(coordinatedOpenApi.paths['/v2/admin/settlement-batches/{batchId}']?.get?.operationId)
-      .toBe('getAdminSettlementBatch');
+    expect(coordinatedOpenApi.paths['/v2/admin/settlement-transfers']?.get?.operationId)
+      .toBe('listAdminSettlementTransfers');
+    expect(coordinatedOpenApi.paths['/v2/admin/settlement-transfers/{transferId}']?.get?.operationId)
+      .toBe('getAdminSettlementTransfer');
     expect(coordinatedOpenApi.paths['/v2/admin/takeover-cases']?.get?.operationId)
       .toBe('listAdminTakeoverCases');
     expect(coordinatedOpenApi.paths['/v2/admin/takeover-cases/{caseId}/assignments']?.post?.operationId)
@@ -499,6 +499,16 @@ describe('coordinated Core HTTP client', () => {
     await expect(createCoreClient({ fetch: vi.fn().mockResolvedValue(json(malformedSettlement)) }).listSettlements('session'))
       .rejects.toMatchObject({ code: 'InvalidResponse' });
 
+    const legacySettlement = structuredClone(requestedSettlement) as unknown as Record<string, unknown>;
+    delete legacySettlement.transfer_ids;
+    delete legacySettlement.final_execution_tx_hashes;
+    legacySettlement.batch_id = `0x${'6'.repeat(64)}`;
+    legacySettlement.final_safe_tx_hash = `0x${'f'.repeat(64)}`;
+    await expect(createCoreClient({ fetch: vi.fn().mockResolvedValue(json(legacySettlement)) }).submitSettlementRequest(
+      'session',
+      { intentId: settlementIntent.intent.intentId, signature: '0xsigned' },
+    )).rejects.toMatchObject({ code: 'InvalidResponse' });
+
     await expect(createCoreClient({ fetch: vi.fn().mockResolvedValue(json([{ ...publicCmsItem, content: [] }])) }).listPublicCms())
       .rejects.toMatchObject({ code: 'InvalidResponse' });
 
@@ -690,7 +700,7 @@ describe('coordinated Core HTTP client', () => {
     });
     const history = (await client.listSeckillSessionHistory()).items[0];
     expect(history?.winnerWallet).toBe(live.lastBuyerWallet);
-    expect(history?.prizeSettlement?.payout?.finalSafeTxHash).toBe(seckillPrizeSafeTxHash);
+    expect(history?.prizeSettlement?.payout?.finalExecutionTxHashes).toEqual([seckillPrizeExecutionTxHash]);
     expect((await client.getSeckillSession(seckillSessionId)).timers.relayIncrementSeconds).toBe(30);
     expect((await client.listSeckillSessionEvents(seckillSessionId)).items).toEqual([event]);
     expect(calls).toHaveLength(4);
@@ -722,7 +732,7 @@ describe('coordinated Core HTTP client', () => {
       fetch: vi.fn().mockResolvedValue(json(wrongWinner)),
     }).getCurrentSeckillSession()).rejects.toMatchObject({ code: 'InvalidResponse' });
 
-    const malformedPayout = approvedPrizeSettlement('BATCHED');
+    const malformedPayout = approvedPrizeSettlement('SUBMITTED');
     malformedPayout.payout!.requestId = null;
     await expect(createCoreClient({
       fetch: vi.fn().mockResolvedValue(json(seckillSession({
@@ -731,6 +741,21 @@ describe('coordinated Core HTTP client', () => {
         winnerWallet: seckillSession().lastBuyerWallet,
         prizeSettlement: malformedPayout,
       }))),
+    }).getCurrentSeckillSession()).rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    const legacySession = seckillSession({
+      phase: 'SETTLED',
+      storedPhase: 'SETTLED',
+      winnerWallet: seckillSession().lastBuyerWallet,
+      prizeSettlement: approvedPrizeSettlement('SETTLED'),
+    });
+    const legacyPayout = legacySession.prizeSettlement!.payout as unknown as Record<string, unknown>;
+    delete legacyPayout.transferIds;
+    delete legacyPayout.finalExecutionTxHashes;
+    legacyPayout.batchId = `0x${'6'.repeat(64)}`;
+    legacyPayout.finalSafeTxHash = `0x${'f'.repeat(64)}`;
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json(legacySession)),
     }).getCurrentSeckillSession()).rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 

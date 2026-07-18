@@ -1464,7 +1464,7 @@ function SeckillActivityContent({ runtime }: { runtime: MallRuntimeValue }) {
     return <p className="loading-copy" role="status">正在同步秒杀奖项记录…</p>;
   }
   if (runtime.seckillSessionState === 'error' && sessions.length === 0) {
-    return <StatusNotice title="秒杀奖项同步失败" tone="warning">不展示缓存的候选人、奖金或 Safe 状态。</StatusNotice>;
+    return <StatusNotice title="秒杀奖项同步失败" tone="warning">不展示缓存的候选人、奖金或链上付款状态。</StatusNotice>;
   }
   const prizeSessions = sessions.filter((session) => session.prizeSettlement !== null);
   if (prizeSessions.length === 0) {
@@ -1528,10 +1528,14 @@ function SeckillPrizeOutcome({
         {prize.rolloverTargetSessionId ? <div><dt>滚入场次</dt><dd><code>{prize.rolloverTargetSessionId}</code></dd></div> : null}
         {prize.rolloverJournalId ? <div><dt>滚池分录</dt><dd><code>{prize.rolloverJournalId}</code></dd></div> : null}
         {prize.payout ? <>
-          <div><dt>Safe 付款</dt><dd>{settlementStateLabel(prize.payout.state)}</dd></div>
+          <div><dt>链上付款</dt><dd>{seckillPayoutStateLabel(prize.payout.state)}</dd></div>
           {prize.payout.requestId ? <div><dt>结算申请</dt><dd><code>{prize.payout.requestId}</code></dd></div> : null}
-          {prize.payout.batchId ? <div><dt>Safe 批次</dt><dd><code>{prize.payout.batchId}</code></dd></div> : null}
-          {prize.payout.finalSafeTxHash ? <div><dt>Final Safe TxHash</dt><dd><code>{prize.payout.finalSafeTxHash}</code></dd></div> : null}
+          {prize.payout.transferIds.map((transferId) => (
+            <div key={transferId}><dt>转账记录</dt><dd><code>{transferId}</code></dd></div>
+          ))}
+          {prize.payout.finalExecutionTxHashes.map((txHash) => (
+            <div key={txHash}><dt>最终执行交易</dt><dd><code>{txHash}</code></dd></div>
+          ))}
         </> : null}
       </dl>
     </section>
@@ -1654,7 +1658,7 @@ export function RewardsScreen() {
 
   return (
     <div className="screen screen--detail screen--rewards">
-      <ScreenHeader eyebrow="REWARD LEDGER" title="收益对账" description="Core 账本与 Safe 结算状态逐项对账" backTo="/assets" />
+      <ScreenHeader eyebrow="REWARD LEDGER" title="收益对账" description="Core 账本与普通钱包结算状态逐项对账" backTo="/assets" />
 
       <section className="reward-rail" aria-labelledby="bnm-rail-title">
         <div className="reward-rail__header">
@@ -1693,11 +1697,11 @@ export function RewardsScreen() {
             </div>
           </details>
         ) : null}
-        <p className="field-help"><FileClock aria-hidden="true" size={15} /> BNM 仅有 Locked / Available，不是代币，也不进入 Safe 结算。</p>
+        <p className="field-help"><FileClock aria-hidden="true" size={15} /> BNM 仅有 Locked / Available，不是代币，也不进入链上结算。</p>
         <Link className="text-link" to="/assets/orders">查看订单与履约来源 <ChevronRight aria-hidden="true" size={15} /></Link>
       </section>
 
-      {!runtime.session ? <StatusNotice title="请先验证钱包">连接钱包后同步该钱包的收益、申请和 Safe 最终状态。</StatusNotice> : null}
+      {!runtime.session ? <StatusNotice title="请先验证钱包">连接钱包后同步该钱包的收益、申请和链上最终状态。</StatusNotice> : null}
       {runtime.settlementsState === 'loading' ? <p className="loading-copy" role="status">正在同步收益账本…</p> : null}
       {runtime.settlementsState === 'error' ? (
         <div className="catalog-retry">
@@ -1722,7 +1726,7 @@ export function RewardsScreen() {
       ))}
 
       <StatusNotice title="签名申请，不发链上交易">
-        可用收益由钱包签署一次性结算意图，平台 Safe 组批并承担 Gas；只有达到 15 次确认的最终 Safe TxHash 才表示 Settled。
+        可用收益由钱包签署一次性结算意图，平台普通执行钱包逐笔发起转账并承担 Gas；只有达到 15 次确认的执行交易才表示 Settled。
       </StatusNotice>
     </div>
   );
@@ -1744,7 +1748,7 @@ function TransferableRewardRail({
   const railBalances = balances.filter((balance) => railForBalance(balance) === rail);
   const railRequests = requests.filter((request) => request.rail === rail);
   const available = railBalances.find((balance) => balance.state === 'AVAILABLE');
-  const states = ['LOCKED', 'AVAILABLE', 'REQUESTED', 'BATCHED', 'SETTLED'] as const;
+  const states = ['LOCKED', 'AVAILABLE', 'REQUESTED', 'SUBMITTED', 'SETTLED'] as const;
   return (
     <section className="reward-rail" aria-labelledby={`${rail}-title`}>
       <div className="reward-rail__header">
@@ -1772,10 +1776,12 @@ function TransferableRewardRail({
           {railRequests.map((request) => (
             <article key={request.request_id}>
               <div><strong>{settlementStateLabel(request.state)}</strong><span>{request.amount} {request.asset}</span></div>
-              <p>申请 {shortHash(request.request_id)}{request.batch_id ? ` · 批次 ${shortHash(request.batch_id)}` : ''}</p>
-              {request.final_safe_tx_hash ? (
-                <p className="safe-hash"><span>Final Safe TxHash</span><code>{request.final_safe_tx_hash}</code></p>
-              ) : <p>Safe 最终交易尚未达到 15 次确认</p>}
+              <p>申请 {shortHash(request.request_id)}{request.transfer_ids.length > 0
+                ? ` · 转账 ${request.transfer_ids.map(shortHash).join('、')}`
+                : ''}</p>
+              {request.final_execution_tx_hashes.length > 0 ? request.final_execution_tx_hashes.map((txHash) => (
+                <p className="safe-hash" key={txHash}><span>最终执行交易</span><code>{txHash}</code></p>
+              )) : <p>普通钱包执行交易尚未达到 15 次确认</p>}
             </article>
           ))}
         </div>
@@ -1810,7 +1816,7 @@ export function NotificationsScreen() {
   const runtime = useMallRuntime();
   return (
     <div className="screen screen--detail">
-      <ScreenHeader eyebrow="INBOX" title="通知中心" description="订单、BNM 与 Safe 结算消息" backTo="/assets" />
+      <ScreenHeader eyebrow="INBOX" title="通知中心" description="订单、BNM 与链上结算消息" backTo="/assets" />
       {!runtime.session ? <StatusNotice title="请先验证钱包">通知只按当前已验证钱包读取。</StatusNotice> : null}
       {runtime.session ? (
         <section className="notification-settings" aria-labelledby="notification-setting-title">
@@ -2238,7 +2244,7 @@ export function ReviewScreen() {
             <div><dt>USDT 实付</dt><dd>{intent?.usdtPaymentAmount}</dd></div>
             <div><dt>NPL 支付</dt><dd>{intent?.nplPaymentAmount}</dd></div>
             <div><dt>NPL Burn</dt><dd>{intent?.nplBurnAmount}</dd></div>
-            <div><dt>NPL Reward Safe</dt><dd>{intent?.nplRewardAmount}</dd></div>
+            <div><dt>NPL 奖励钱包</dt><dd>{intent?.nplRewardAmount}</dd></div>
             <div><dt>BNM Locked</dt><dd>{intent?.bnmAmount}</dd></div>
           </dl>
           <p className="field-help">以上均为 Core 返回的 canonical 原子单位，页面未重新计算或分配。</p>
@@ -2436,7 +2442,7 @@ function seckillPhaseCopy(session: PublishedSeckillSessionProjection) {
     LIVE: '主场和接力均以 Core 时间锚与已发布截止时间显示，页面不改变阶段。',
     SETTLING: `大奖结算窗口 ${formatIso(session.settlementEarliestAt)} 至 ${formatIso(session.settlementDeadline)}。`,
     SETTLED: session.winnerWallet
-      ? '大奖赢家已冻结，奖金按 Core 投影进入 Safe 结算生命周期。'
+      ? '大奖赢家已冻结，奖金按 Core 投影进入普通钱包结算生命周期。'
       : session.prizeSettlement?.state === 'ROLLED_OVER'
         ? '本场无有效赢家，已有奖池已按 Core 分录滚入下一场。'
         : '场次已最终结算。',
@@ -2450,6 +2456,17 @@ function seckillPrizeStateLabel(state: SeckillPrizeSettlementProjection['state']
     APPROVED: '审核通过',
     ROLLOVER_PENDING: '等待滚入',
     ROLLED_OVER: '已滚入下一场',
+    QUARANTINED: '已隔离',
+  } as const)[state];
+}
+
+function seckillPayoutStateLabel(state: NonNullable<SeckillPrizeSettlementProjection['payout']>['state']) {
+  return ({
+    AVAILABLE: 'Available',
+    REQUESTED: 'Requested',
+    SUBMITTED: 'Submitted',
+    SETTLED: 'Settled',
+    RETRYABLE: '可重试',
     QUARANTINED: '已隔离',
   } as const)[state];
 }
@@ -2842,7 +2859,7 @@ function balanceStateLabel(state: FulfillmentOrder['balances'][number]['state'])
     LOCKED: '锁定',
     AVAILABLE: '可用',
     REQUESTED: '已申请',
-    BATCHED: '已入批次',
+    SUBMITTED: '已提交',
     SETTLED: '已结算',
     DISPUTED: '争议锁定',
   } as const)[state];
@@ -2874,7 +2891,7 @@ function settlementStateLabel(state: SettlementBalance['state'] | SettlementRequ
     LOCKED: 'Locked',
     AVAILABLE: 'Available',
     REQUESTED: 'Requested',
-    BATCHED: 'Batched',
+    SUBMITTED: 'Submitted',
     SETTLED: 'Settled',
     DISPUTED: 'Disputed',
     RETRYABLE: '可重试',
@@ -2922,7 +2939,7 @@ function notificationTitle(item: MallRuntimeValue['notifications'][number]) {
     BNM_LOCKED: 'BNM 已锁定',
     BNM_AVAILABLE: 'BNM 已可用',
     SETTLEMENT_REQUESTED: '结算申请已提交',
-    SETTLEMENT_BATCHED: '结算已进入 Safe 批次',
+    SETTLEMENT_BATCHED: '结算交易已提交',
     SETTLEMENT_SETTLED: '结算已完成',
     SETTLEMENT_REORGED: '结算确认已回滚',
     ANNOUNCEMENT: '系统公告',
@@ -2961,7 +2978,7 @@ function notificationFieldLabel(key: string) {
     occurredAt: '物流更新时间',
     requestId: '结算申请',
     rail: '结算类型',
-    safeTxHash: 'Safe 交易',
+    safeTxHash: '链上交易',
     executionTxHash: '执行交易',
     state: '状态',
     amount: '数量',

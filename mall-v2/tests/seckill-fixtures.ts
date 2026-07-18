@@ -15,7 +15,7 @@ export const seckillPublicationTxHash = `0x${'c'.repeat(64)}`;
 export const seckillCandidateOrderId = `0x${'2'.repeat(64)}`;
 export const seckillCandidateEvidenceHash = `0x${'d'.repeat(64)}`;
 export const seckillPoolSnapshotHash = `0x${'e'.repeat(64)}`;
-export const seckillPrizeSafeTxHash = `0x${'f'.repeat(64)}`;
+export const seckillPrizeExecutionTxHash = `0x${'8'.repeat(64)}`;
 export const seckillReviewer = `0x${'a'.repeat(40)}`;
 
 export function reviewPendingPrizeSettlement(): SeckillPrizeSettlementProjection {
@@ -58,11 +58,10 @@ export function approvedPrizeSettlement(
     payout: {
       state: payoutState,
       requestId: payoutState === 'AVAILABLE' ? null : `0x${'5'.repeat(64)}`,
-      batchId: ['BATCHED', 'SETTLED', 'RETRYABLE', 'QUARANTINED'].includes(payoutState)
-        ? `0x${'6'.repeat(64)}`
-        : null,
-      finalSafeTxHash: payoutState === 'SETTLED' ? seckillPrizeSafeTxHash : null,
-      finalExecutionTxHash: payoutState === 'SETTLED' ? `0x${'8'.repeat(64)}` : null,
+      transferIds: ['SUBMITTED', 'SETTLED', 'RETRYABLE', 'QUARANTINED'].includes(payoutState)
+        ? [`0x${'6'.repeat(64)}`]
+        : [],
+      finalExecutionTxHashes: payoutState === 'SETTLED' ? [seckillPrizeExecutionTxHash] : [],
     },
   };
 }
