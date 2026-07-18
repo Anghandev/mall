@@ -1,8 +1,9 @@
 # Abu 24K V2 System Contract
 
 Status: frozen authority for the function-first V2 rewrite from
-`v2/core@1cab34d`. Decision details and source conflicts are indexed in
-`V2_DECISIONS.md`.
+`v2/core@1cab34d`, including the 2026-07-18 replacement of every Safe/multisig
+production path with five distinct EOA wallet roles. Decision details and
+source conflicts are indexed in `V2_DECISIONS.md`.
 
 ## Authority And Failure Mode
 
@@ -18,7 +19,7 @@ Status: frozen authority for the function-first V2 rewrite from
 - Historical orders and in-progress seckill sessions use immutable snapshots.
   A later policy version never recalculates them.
 - Missing business parameters return `DecisionBlocked`. Missing credentials,
-  accounts, devices, domains, RPC endpoints or Safe addresses return
+  accounts, devices, domains, RPC endpoints or configured wallet addresses return
   `ExternalBlocked` or `ConfigurationRequired`. No production path may
   simulate success with a fixture, empty action or disabled placeholder.
 
@@ -29,7 +30,7 @@ Status: frozen authority for the function-first V2 rewrite from
 - NPL is `0x4e8277ab31e4956b2cd48449793a57656dfc03d2`.
 - The NPL/USDT pricing pair is the verified PancakeSwap V2 pair
   `0x2955e33bb120714abf11ace2766e614e6e5955b2`.
-- Product list price, merchant base receivable, merchant concession and Safe
+- Product list price, merchant base receivable, merchant concession and wallet
   liabilities are denominated in USDT.
 - The launch policy requires the buyer to pay exactly 70% of the USDT list
   price in USDT and 30% of the same price as Core-quoted equivalent NPL. Without an
@@ -37,12 +38,12 @@ Status: frozen authority for the function-first V2 rewrite from
   below 30%.
 - The product USDT leg is split atomically inside the payment transaction.
   `platformServiceFeeUsdt = floor(listPriceUsdt * 100 / 10,000)` goes directly
-  to the dedicated Platform Service Fee Safe. The remainder of the exact buyer
+  to the dedicated Platform Service Fee Wallet. The remainder of the exact buyer
   USDT leg, `buyerProductUsdt - platformServiceFeeUsdt` (nominally 69% of list),
-  goes to the USDT Custody Safe. The fee is global and never category-specific.
+  goes to the USDT Custody/Settlement Wallet. The fee is global and never category-specific.
 - Delivery adds the product snapshot's flat `defaultFreightUsdt` once per order
   as pure USDT; pickup freight is zero. This freight is outside the product
-  70/30 base, goes only to the USDT Custody Safe and never changes the service
+  70/30 base, goes only to the USDT Custody/Settlement Wallet and never changes the service
   fee, NPL payment, Burn, reward, BNM, merchant concession or seckill-prize
   calculations. The signed intent binds the buyer product USDT, service-fee
   USDT, Custody product USDT, freight USDT, total USDT and NPL amounts
@@ -63,38 +64,39 @@ Status: frozen authority for the function-first V2 rewrite from
   atomically transfers both payment assets, classifies seckill boundary orders,
   emits indexed payment events and exposes the new-payment breaker.
 - For a successful launch payment, the Router transfers the exact 1%-of-list
-  USDT service fee directly to the Platform Service Fee Safe, transfers the
+  USDT service fee directly to the Platform Service Fee Wallet, transfers the
   remainder of the buyer's product-USDT leg plus delivery freight directly to
-  the USDT Custody Safe, transfers NPL equal to 20% of the total USDT list price directly to
+  the USDT Custody/Settlement Wallet, transfers NPL equal to 20% of the total USDT list price directly to
   `0x000000000000000000000000000000000000dEaD`, and transfers NPL equal to 10%
-  of the same list price directly to the NPL Reward Safe.
-- The Platform Service Fee Safe receives only the direct 1% fee and is not a
-  Custody-backed merchant or reward ledger. The USDT Custody Safe backs merchant
-  product/freight receivables, seckill prize, node-reward and reward-reserve
-  liabilities. The NPL Reward Safe backs NPL reward liabilities. The Operations
-  Treasury Safe funds explicitly posted platform advances and operational
-  obligations; it never substitutes for a shortfall in any payment Safe.
+  of the same list price directly to the NPL Reward/Distribution Wallet.
+- The Platform Service Fee Wallet receives only the direct 1% fee and is not a
+  Custody-backed merchant or reward ledger. The USDT Custody/Settlement Wallet
+  backs merchant product/freight receivables, seckill prize, node-reward and
+  reward-reserve liabilities. The NPL Reward/Distribution Wallet backs NPL
+  reward liabilities. The Operations/Guarantee Wallet receives merchant
+  guarantees and funds explicitly posted platform advances and operational
+  obligations; it never substitutes for a shortfall in another funding wallet.
 - The Router never manages logistics, arbitration, BNM, merchant balances,
   settlement requests or arbitrary withdrawals. A normal successful call
   leaves zero USDT and zero NPL in the Router.
-- Every transfer to both USDT Safes, the NPL Burn address and Reward Safe is
+- Every transfer to both USDT wallets, the NPL Burn address and NPL Reward Wallet is
   balance-delta checked. Fee-on-transfer behavior, missing
   allowance, stale quote, replay, mismatched snapshot or partial transfer
   reverts the entire payment and does not consume inventory.
 
 ## NPL Reward Allocation
 
-- The NPL Reward Safe receives exactly 10% of the order's total USDT list price
+- The NPL Reward/Distribution Wallet receives exactly 10% of the order's total USDT list price
   converted by the signed Core quote snapshot.
 - The payment snapshot allocates that 10% as: genesis-node pool 2%, direct-shop referral 1%,
   district 1.2%, city 0.8%, province 0.6%, region 0.4% and operations 4%.
 - Genesis-node rewards use no NFT, ERC-721, ERC-1155, contract or token-ID
-  qualification. The 2% first credits a dedicated NPL Reward-Safe-backed ledger
-  pool, then the published node wallet list and weights govern Safe settlement.
+  qualification. The 2% first credits a dedicated NPL Reward-Wallet-backed
+  ledger pool, then the published node wallet list and weights govern EOA settlement.
 - The operations 4% is split equally across four configured operations wallets.
 - Missing beneficiaries, integer rounding remainders and unallocated amounts
-  are credited to the NPL Reward-Safe-backed circulation ledger pool. Allocation entries balance
-  exactly to the amount transferred to the Reward Safe.
+  are credited to the NPL Reward-Wallet-backed circulation ledger pool.
+  Allocation entries balance exactly to the amount transferred to that wallet.
 - The published node list, referral relationships, all four administrative
   codes and beneficiaries are snapshotted at payment. Self-referral and referral
   cycles are forbidden. Ordinary customers do not see a genesis credential or
@@ -104,7 +106,7 @@ Status: frozen authority for the function-first V2 rewrite from
 
 - The settlement wallet submitted with a merchant application becomes
   permanently immutable when that application is approved. No merchant,
-  platform role, secondary signer or Safe approval can change it. An incorrect
+  platform role, secondary signer or governance-wallet execution can change it. An incorrect
   address must be handled before approval by rejecting the application and
   creating a new application; V2 has no wallet migration or recovery path.
 - Merchant concession does not reduce buyer payment and never changes the
@@ -116,10 +118,10 @@ Status: frozen authority for the function-first V2 rewrite from
 - Merchant net receivable equals that post-fee base minus concession. The
   concession credits fixed USDT Custody-backed ledger pools: platform 0%,
   seckill prize 45%, node rewards 45% and reward reserve 10%. The reward reserve
-  remains Locked until a future published reward policy and Safe approval; it
-  has no separate Safe. The merchant receives no extra seckill revenue.
+  remains Locked until a future published reward policy and governed EOA
+  execution; it has no separate wallet. The merchant receives no extra seckill revenue.
 - Delivery freight becomes a separate `MERCHANT_FREIGHT_RECEIVABLE` backed by
-  the USDT Custody Safe. It follows the order's fulfillment lifecycle and is
+  the USDT Custody/Settlement Wallet. It follows the order's fulfillment lifecycle and is
   settled with product proceeds through the existing `MERCHANT_USDT` rail;
   it is never concessioned or included in product revenue formulas.
 - Product maintenance shows the signed Core preview of base receivable,
@@ -137,37 +139,41 @@ Status: frozen authority for the function-first V2 rewrite from
 - Every posting is asset-specific, idempotent and balanced. Corrections use a
   linked reversal plus replacement entry. A posting may never create a
   negative available balance or spend a liability twice.
-- Payable asset states are `Locked -> Available -> Requested -> Batched ->
+- Payable asset states are `Locked -> Available -> Requested -> Submitted ->
   Settled`. Arbitration adds `Disputed` and keeps funds and rewards Locked.
   State transitions retain order, policy, beneficiary and journal evidence.
 - BNM is the existing backend points project, valued 1:1 against the product
   USDT list price. Payment records Locked BNM; fulfillment finality makes it
   Available. V2 deploys no BNM ERC-20, performs no BNM mint and exposes no
-  on-chain BNM Claim. BNM is not a Safe-transfer liability. Every backend state
+  on-chain BNM Claim. BNM is not an EOA-transfer liability. Every backend state
   command carries an order-scoped monotonic version; the BNM backend must
   atomically ignore lower versions and acknowledge the effective version/state.
   Missing proof of that behavior is `ExternalBlocked`.
 
-## Signed Settlement And Safe MultiSend
+## Signed Settlement And EOA Transfers
 
 - Former token/proceeds Claim actions become gasless signed settlement
   requests. Customers, merchants and external beneficiaries never broadcast
   settlement transactions or pay settlement Gas.
 - A request is wallet-bound, asset-bound, amount-bound, nonce-protected,
   expiring and idempotent. An external partner link is address-bound, one-use
-  and time-limited and cannot bypass eligibility, availability or Safe review.
-- Core groups Available requests into a Safe MultiSend batch. Each batch binds
-  `batchId`, chain ID, Safe address and nonce, every order, asset, recipient and
-  integer amount, per-asset totals and a canonical content hash.
-- A batch is immutable after approval. MultiSend succeeds in full or reverts in
-  full. Replacement transactions remain linked to the same batch and Safe
-  nonce; duplicate events cannot settle twice.
-- A payable becomes Settled only after a status-1 Safe receipt reaches 15 BSC
-  confirmations and the indexer verifies chain, Safe, nonce, transaction data,
-  batch hash, events, balances, replacement and canonical block. Reorgs return
-  affected entries to the last proven state without deleting evidence.
-- Mall and Merchant surfaces show `Locked`, `Available`, `Requested`, `Batched`
-  and `Settled` plus the final Safe TxHash for transferable assets. BNM shows
+  and time-limited and cannot bypass eligibility or availability.
+- Core converts each Available request item into one immutable ERC-20 transfer
+  intent for the asset's configured EOA executor. Each intent binds its request,
+  order, policy snapshot, chain, executor wallet, token, recipient, exact integer
+  amount, calldata hash, gas cap and idempotency identity. A settlement run may
+  group evidence for operations, but it does not create atomic batch semantics.
+- The corresponding EOA executor signs and broadcasts exactly one ERC-20
+  `transfer` per intent. V2 deploys no MultiSend or generic batch-transfer
+  contract. A submitted transfer is immutable; replacements retain the same
+  intent identity and cannot settle a liability twice.
+- A payable becomes Settled only after its status-1 transfer receipt reaches 15
+  BSC confirmations and the indexer verifies chain, executor, nonce, token,
+  recipient, amount, calldata, event, balance deltas, replacement and canonical
+  block. Reorgs return affected entries to the last proven state without
+  deleting evidence.
+- Mall and Merchant surfaces show `Locked`, `Available`, `Requested`,
+  `Submitted` and `Settled` plus the final execution TxHash for transferable assets. BNM shows
   only its backend-points lifecycle and is never presented as a token payout.
 
 ## Inventory, Fulfillment And No Business Refunds
@@ -214,7 +220,7 @@ Status: frozen authority for the function-first V2 rewrite from
   canonical chain finality by the session cutoff. The winner receives the whole
   payable USDT pool for that session. Human review may reject cheating or an
   invalid order but cannot replace the winner; approval enters the ordinary
-  Safe-batch payment lifecycle.
+  ordinary EOA-transfer settlement lifecycle.
 - An empty session creates no new prize contribution. Existing rollover and
   governed Operations-Treasury injection remain Locked and roll into the next
   session instead of being cleared or returned. Force-close applies the same
@@ -244,10 +250,13 @@ Status: frozen authority for the function-first V2 rewrite from
   off-chain, display/search only and never participates in payment, settlement,
   signatures or asset ownership.
 - Policy publication and every high-risk change require RBAC, an exact
-  secondary-wallet EIP-712 signature and Safe multisig approval. A new
-  `policyVersion` affects only future quotes, orders and sessions.
+  secondary-wallet EIP-712 signature and direct execution by the configured
+  Platform Governance EOA. Launch config maps governance, deployment, quote,
+  secondary-signature and finality duties to `PLATFORM_TECH_PRIVATE_KEY`; no
+  Safe owner, threshold, proposer or module participates. A new `policyVersion`
+  affects only future quotes, orders and sessions.
 - Merchant settlement-wallet immutability has no governance exception and is
-  not a high-risk action that Safe approval can override.
+  not a high-risk action that governance execution can override.
 - High-Gas anomalies restrict the address for 24 hours. More than five wallets
   on the same IP or device within one minute blacklists that IP/device. Three
   cancellations within five minutes restrict new payment for two hours. Ten
@@ -258,10 +267,11 @@ Status: frozen authority for the function-first V2 rewrite from
   appeal and overrides for independent restrictive rules remain audited.
 - Category or tag deletion/disable is denied while it contains a seckill
   product or an order with Locked funds. Products with history are logically
-  delisted only. Funds, policies, batches, chain evidence and audit records are
+  delisted only. Funds, policies, transfer intents, chain evidence and audit records are
   never deleted.
 - Authorization never uses `tx.origin`; it uses EIP-712, nonce, deadline,
-  ERC-1271, RBAC, secondary signatures and Safe authority as appropriate.
+  ERC-1271 for supported user wallets, RBAC, secondary signatures and the
+  configured EOA authority as appropriate.
 
 ## Privacy And Retention
 
@@ -269,21 +279,21 @@ Status: frozen authority for the function-first V2 rewrite from
   order completion. From day 30, Admin defaults to masked values; at day 60,
   plaintext is deleted.
 - Order ID, UID, wallet, TxHash, product and amount snapshots, ledger entries,
-  Safe batches, fulfillment/arbitration results, risk evidence and audit logs
+  EOA transfer intents/executions, fulfillment/arbitration results, risk evidence and audit logs
   are retained permanently. Every authorized PII read, export and decrypt is
   RBAC-scoped and audited.
 
 ## Coverage And Circuit Breakers
 
-- Core calculates coverage per asset from verified Safe assets divided by
-  unsettled ledger liabilities. The UI label is `Safe assets / unsettled
+- Core calculates coverage per asset from verified funding-wallet assets divided by
+  unsettled ledger liabilities. The UI label is `Wallet assets / unsettled
   liabilities coverage`, never a leverage or liquidation coefficient.
 - Below 100% coverage, Core pauses new payments and creation of new settlement
-  batches. It does not rewrite balances or claim the system is healthy.
-- New payments, seckill purchases and new settlement batches have independent
+  transfer intents. It does not rewrite balances or claim the system is healthy.
+- New payments, seckill purchases and new settlement-transfer creation have independent
   breaker scopes. Fulfillment, takeover, exchange, arbitration, reconciliation,
   audit reads and finality synchronization cannot be paused by those breakers.
-- Pause and resume require RBAC plus Safe authority, emit indexed/audited events
+- Pause and resume require RBAC plus the Platform Governance EOA, emit indexed/audited events
   and retain tests for blocked writes, allowed recovery and permission failure.
 
 ## Production And External Inputs
@@ -291,14 +301,18 @@ Status: frozen authority for the function-first V2 rewrite from
 - The service fee, concession destinations, lack of extra merchant seckill
   revenue, genesis-node mechanism, prize winner/payout/rollover, merchant-level
   retirement and PII retention are confirmed, not `DecisionBlocked`.
-- Primary and fallback BSC RPC both report chain 56. Five locally configured
-  Safe addresses have runtime code and respond to the required Safe read
-  interfaces. Their addresses are secret-safe operational data, while owners
-  and thresholds remain user-managed; none are printed or copied here.
-- The three payment contracts are deployed on BSC from the bounded exact packet,
+- Primary and fallback BSC RPC both report chain 56. The five production roles
+  are distinct EOAs derived only inside ignored local configuration: Platform
+  Governance, Platform Service Fee, USDT Custody/Settlement, NPL
+  Reward/Distribution and Operations/Guarantee. `WALLET_5_PRIVATE_KEY` remains
+  an independent test counterparty/backup and is not a sixth production role.
+  Private keys and complete addresses are never printed or committed.
+- The prior three Safe-bound payment contracts were deployed on BSC from a bounded exact packet,
   source-verified on BscScan and bound to the coordinated manifest by deployment
-  block and runtime code hash. All three deployment receipts reached 15
-  confirmations on both configured RPC providers with zero USDT/NPL movement.
+  block and runtime code hash. They received no policy publication or user
+  funds and are permanently `SUPERSEDED`; their evidence remains append-only.
+  New EOA-bound contracts require a separate deployment manifest and may not
+  reuse the old addresses or authorization evidence.
 - Production domains/HTTPS/WSS, production databases and queues, the existing
   BNM backend project's API/schema/credentials and monotonic-state conformance evidence,
   provider accounts and credentials, approved merchant/admin wallets, encrypted
@@ -309,10 +323,11 @@ Status: frozen authority for the function-first V2 rewrite from
   exist. It does not block unrelated local code completion or a separately
   approved chain micro-test.
 - Current ignored `.env` wallets are limited to local, fork and bounded
-  micro-tests. Every further mainnet action requires an exact transaction
-  package and all runtime assertions. The current Goal waives a separate
-  confirmation only for transactions whose maximum value plus Gas is at most
-  `3 USDT`; Safe actions still require the real Safe-owner signatures.
+  micro-tests until the EOA release gate passes. Every mainnet action retains
+  an exact local transaction/receipt evidence record and all runtime assertions.
+  The current Goal authorizes transactions whose maximum value plus Gas is at
+  most `3 USDT` within the fixed project budget; nonce, target, amount, assertion
+  or budget drift stops execution. No Safe proposal or owner signature exists.
 
 ## Coordinated Core Publications
 
