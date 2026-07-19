@@ -258,7 +258,7 @@ export function TakeoverCaseWorkspace({ connecting, session }: TakeoverCaseWorks
                         const isCurrent = candidate.merchantId === detail.case.currentAssignment?.replacementMerchantId;
                         return <label key={candidate.merchantId} className={isCurrent ? 'is-current' : undefined}>
                           <input type="radio" name="replacementMerchantId" value={candidate.merchantId} checked={replacementMerchantId === candidate.merchantId} onChange={() => setReplacementMerchantId(candidate.merchantId)} disabled={!canAssignByRole || isCurrent || assignmentPending} />
-                          <span><strong>{candidate.shopName}</strong><code>{candidate.merchantId}</code><small>{candidate.level} · application v{candidate.applicationVersion}</small></span>
+                          <span><strong>{candidate.shopName}</strong><code>{candidate.merchantId}</code><small>application v{candidate.applicationVersion}</small></span>
                           <span><CheckCircle2 aria-hidden="true" /><small>{isCurrent ? '当前分配' : '资质完整 · 保证金 READY'}</small></span>
                         </label>;
                       })}</div>}

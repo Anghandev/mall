@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.16",
+  "artifactVersion": "2.0.0-settlement-admin.17",
   "adminResourceTypes": [
     "ORDER",
     "PRODUCT",
@@ -64,6 +64,19 @@
     "OPERATOR",
     "ARBITRATOR",
     "AUDITOR"
+  ],
+  "runtimeBlockers": [
+    "PAYMENT_DECISION_BLOCKED",
+    "PAYMENT_CONFIGURATION_REQUIRED",
+    "RUNTIME_SNAPSHOT_EXPIRED",
+    "DATABASE_UNAVAILABLE",
+    "REDIS_UNAVAILABLE",
+    "SIGNER_UNAVAILABLE",
+    "INDEXER_UNHEALTHY",
+    "INDEXER_LAGGING",
+    "RPC_DIVERGENCE",
+    "QUOTE_SOURCE_UNHEALTHY",
+    "CONTRACT_EVIDENCE_UNVERIFIED"
   ],
   "breakerScopes": [
     "NEW_PAYMENT",
@@ -259,13 +272,6 @@
     "ORDER",
     "BUYER",
     "MERCHANT"
-  ],
-  "merchantLevels": [
-    "V1",
-    "V2",
-    "V3",
-    "V4",
-    "V5"
   ],
   "merchantLifecycleStatuses": [
     "PENDING",
@@ -495,8 +501,7 @@
     "NPL_QUOTE",
     "GAS",
     "CHAIN",
-    "INTEGRATIONS",
-    "MERCHANT_LEVELS"
+    "INTEGRATIONS"
   ],
   "auditStreamNames": [
     "financial",

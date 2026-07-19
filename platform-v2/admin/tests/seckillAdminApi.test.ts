@@ -138,7 +138,7 @@ describe('seckill admin coordinated Core client', () => {
       state: 'APPROVED' as const,
       review: { decision: 'APPROVED' as const, reasonCode: 'ORDER_VALID', evidenceHash: hash('8'), reviewedBy: address('1'), reviewedAt: '2026-07-16T01:00:00.000Z' },
       awardJournalId: 'journal:prize:1',
-      payout: { state: 'AVAILABLE' as const, requestId: null, batchId: null, finalSafeTxHash: null, finalExecutionTxHash: null },
+      payout: { state: 'AVAILABLE' as const, requestId: null, transferIds: [], finalExecutionTxHashes: [] },
     };
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(approved));
     vi.stubGlobal('fetch', fetchMock);
@@ -168,6 +168,33 @@ describe('seckill admin coordinated Core client', () => {
 
     const { poolSnapshotHash: _missing, ...incomplete } = settlement;
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(seckillSession({ prizeSettlement: incomplete as never }))));
+    await expect(fetchCurrentSeckillSession()).rejects.toMatchObject({ code: 'InvalidResponse' });
+  });
+
+  it('accepts the Core EOA prize payout lifecycle and rejects legacy Safe DTO fields', async () => {
+    const session = seckillSession({
+      prizeSettlement: {
+        ...reviewPendingPrize(),
+        state: 'APPROVED',
+        review: { decision: 'APPROVED', reasonCode: 'ORDER_VALID', evidenceHash: hash('8'), reviewedBy: address('1'), reviewedAt: '2026-07-16T01:00:00.000Z' },
+        awardJournalId: 'journal:prize:1',
+        payout: { state: 'SUBMITTED', requestId: hash('9'), transferIds: [hash('a')], finalExecutionTxHashes: [hash('b')] },
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(session)));
+
+    await expect(fetchCurrentSeckillSession()).resolves.toMatchObject({
+      prizeSettlement: {
+        payout: { state: 'SUBMITTED', requestId: hash('9'), transferIds: [hash('a')], finalExecutionTxHashes: [hash('b')] },
+      },
+    });
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(seckillSession({
+      prizeSettlement: {
+        ...session.prizeSettlement!,
+        payout: { state: 'BATCHED', requestId: hash('9'), batchId: hash('a'), finalSafeTxHash: hash('b'), finalExecutionTxHash: hash('c') },
+      } as never,
+    }))));
     await expect(fetchCurrentSeckillSession()).rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 

@@ -77,6 +77,7 @@ import { assertPaymentQuoteIntegrity } from './payment-integrity';
 export interface CorePaymentAvailability {
   artifactVersion: typeof artifactVersion;
   writesEnabled: boolean;
+  runtimeBlockers: readonly string[];
   blockCode: 'DecisionBlocked' | 'ExternalBlocked' | 'ConfigurationRequired' | null;
 }
 
@@ -828,10 +829,12 @@ function parseBootstrap(value: unknown): CorePaymentAvailability {
   const readiness = objectValue(response.readiness);
   const paymentDecisionBlocked = stringArray(readiness.paymentDecisionBlocked);
   const paymentExternalBlocked = stringArray(readiness.paymentExternalBlocked);
+  const runtimeBlockers = stringArray(readiness.runtimeBlockers);
   const writesEnabled = booleanValue(readiness.writesEnabled);
   return {
     artifactVersion,
     writesEnabled,
+    runtimeBlockers,
     blockCode: writesEnabled
       ? null
       : paymentDecisionBlocked.length > 0

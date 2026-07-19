@@ -628,9 +628,41 @@ export class FulfillmentTargetService {
         merchant_id: string;
         replacement_merchant_id: string | null;
         replacement_wallet: string | null;
+        buyer_binding_active: boolean;
+        merchant_binding_active: boolean;
+        replacement_binding_active: boolean;
+        current_platform_roles: string[];
       }>(
         `SELECT target.*, orders.buyer_wallet AS buyer, orders.merchant_wallet AS merchant,
-           orders.merchant_id, assignment.replacement_merchant_id, assignment.replacement_wallet
+           orders.merchant_id, assignment.replacement_merchant_id, assignment.replacement_wallet,
+           EXISTS (
+             SELECT 1 FROM core.wallet_role_bindings binding
+             WHERE lower(binding.wallet_address) = $2
+               AND binding.role = 'BUYER'
+               AND binding.status = 'ACTIVE'
+           ) AS buyer_binding_active,
+           EXISTS (
+             SELECT 1 FROM core.wallet_role_bindings binding
+             WHERE lower(binding.wallet_address) = $2
+               AND binding.role = 'MERCHANT'
+               AND binding.status = 'ACTIVE'
+               AND binding.merchant_id = orders.merchant_id
+           ) AS merchant_binding_active,
+           EXISTS (
+             SELECT 1 FROM core.wallet_role_bindings binding
+             WHERE lower(binding.wallet_address) = $2
+               AND binding.role = 'MERCHANT'
+               AND binding.status = 'ACTIVE'
+               AND binding.merchant_id = assignment.replacement_merchant_id
+               AND lower(binding.wallet_address) = lower(assignment.replacement_wallet)
+           ) AS replacement_binding_active,
+           ARRAY(
+             SELECT binding.role FROM core.wallet_role_bindings binding
+             WHERE lower(binding.wallet_address) = $2
+               AND binding.status = 'ACTIVE'
+               AND binding.role IN ('ADMIN','OPERATOR','ARBITRATOR')
+             ORDER BY binding.role
+           ) AS current_platform_roles
          FROM core.orders orders
          JOIN core.fulfillment_targets target
            ON lower(target.target_hash) = lower(orders.fulfillment_target_hash)
@@ -642,22 +674,51 @@ export class FulfillmentTargetService {
            ORDER BY assignment_version DESC LIMIT 1
          ) assignment ON true
          WHERE orders.order_id = $1`,
-        [orderId],
+        [orderId, wallet],
       );
       const target = result.rows[0];
       if (!target) throw new CoreError('InvalidRequest', 'Order fulfillment target not found', 404);
-      const privileged = actor.roles.some((role) => ['ADMIN', 'OPERATOR', 'ARBITRATOR'].includes(role));
-      if (
-        wallet !== target.buyer.toLowerCase()
-        && wallet !== target.merchant.toLowerCase()
-        && actor.merchantId !== target.merchant_id
-        && (
-          target.replacement_merchant_id === null
-          || actor.merchantId !== target.replacement_merchant_id
-          || wallet !== target.replacement_wallet
-        )
-        && !privileged
-      ) throw new CoreError('Forbidden', 'Fulfillment target is outside the authenticated wallet scope', 403);
+      const access = orderTargetReadAccess(actor, wallet, target);
+      if (!access) throw new CoreError('Forbidden', 'Fulfillment target is outside the authenticated wallet scope', 403);
+      const now = this.#clock();
+      const readId = randomUUID();
+      await enqueueAudit(executor, {
+        sourceEventId: auditSourceId('audit:order-fulfillment-target-read', {
+          orderId,
+          wallet,
+          role: access.actorRole,
+          targetHash: target.target_hash,
+          readId,
+        }),
+        streamName: 'operational',
+        evidenceProfile: 'AUTHORIZATION',
+        eventType: 'OrderFulfillmentTargetRead',
+        resourceType: 'ORDER',
+        resourceId: orderId,
+        merchantId: target.merchant_id,
+        actorWallet: wallet,
+        actorRole: access.actorRole,
+        correlationId: `order-target-read:${orderId}:${readId}`,
+        requestHash: hashJson({ orderId, wallet, role: access.actorRole, readId }).slice(2),
+        payload: {
+          targetHash: target.target_hash,
+          fulfillmentMode: target.fulfillment_mode,
+          authorizationPath: access.authorizationPath,
+        },
+        authorizationEvidence: {
+          scheme: access.scheme,
+          subject: wallet,
+          roles: access.currentRoles,
+          evidenceHash: hashJson({
+            orderId,
+            targetHash: target.target_hash,
+            authorizationPath: access.authorizationPath,
+            actorRole: access.actorRole,
+          }),
+          checkedAt: now.toISOString(),
+        },
+        createdAt: now,
+      });
       return {
         ...targetSummary(target),
         payload: decrypt(target, key),
@@ -761,6 +822,77 @@ function targetSummary(target: TargetRow) {
     ...(target.store_id ? { storeId: target.store_id } : {}),
     expiresAt: new Date(target.expires_at).toISOString(),
   };
+}
+
+function orderTargetReadAccess(
+  actor: FulfillmentActor,
+  wallet: string,
+  target: {
+    buyer: string;
+    merchant_id: string;
+    replacement_merchant_id: string | null;
+    replacement_wallet: string | null;
+    buyer_binding_active: boolean;
+    merchant_binding_active: boolean;
+    replacement_binding_active: boolean;
+    current_platform_roles: unknown;
+  },
+) {
+  if (
+    actor.roles.includes('BUYER')
+    && wallet === target.buyer.toLowerCase()
+    && target.buyer_binding_active === true
+  ) {
+    return {
+      actorRole: 'BUYER',
+      authorizationPath: 'ORDER_BUYER',
+      currentRoles: ['BUYER'],
+      scheme: 'SESSION_RESOURCE_OWNERSHIP' as const,
+    };
+  }
+  if (
+    actor.roles.includes('MERCHANT')
+    && actor.merchantId === target.merchant_id
+    && target.replacement_merchant_id === null
+    && target.merchant_binding_active === true
+  ) {
+    return {
+      actorRole: 'MERCHANT',
+      authorizationPath: 'ORDER_MERCHANT',
+      currentRoles: ['MERCHANT'],
+      scheme: 'RBAC_ROLE_REVALIDATION' as const,
+    };
+  }
+  if (
+    actor.roles.includes('MERCHANT')
+    && target.replacement_merchant_id !== null
+    && actor.merchantId === target.replacement_merchant_id
+    && target.replacement_wallet !== null
+    && wallet === target.replacement_wallet.toLowerCase()
+    && target.replacement_binding_active === true
+  ) {
+    return {
+      actorRole: 'MERCHANT',
+      authorizationPath: 'CURRENT_REPLACEMENT_MERCHANT',
+      currentRoles: ['MERCHANT'],
+      scheme: 'RBAC_ROLE_REVALIDATION' as const,
+    };
+  }
+  const platformRoles = roleArray(target.current_platform_roles)
+    .filter((role) => actor.roles.includes(role as FulfillmentActor['roles'][number]));
+  const role = platformRoles.find((value) => ['ADMIN', 'OPERATOR', 'ARBITRATOR'].includes(value));
+  return role
+    ? {
+      actorRole: role,
+      authorizationPath: 'CURRENT_PLATFORM_ROLE',
+      currentRoles: platformRoles,
+      scheme: 'RBAC_ROLE_REVALIDATION' as const,
+    }
+    : null;
+}
+
+function roleArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((role): role is string => typeof role === 'string') : [];
 }
 
 function storeProjection(store: StoreRow) {

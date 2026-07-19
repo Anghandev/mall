@@ -22,7 +22,6 @@ export const takeoverAssignment: TakeoverAssignment = {
   replacementMerchantId,
   replacementWallet,
   replacementApplicationVersion: 4,
-  replacementLevel: 'V2',
   replacementLicenseAssetId: `0x${'b'.repeat(64)}`,
   supersedesAssignmentId: `0x${'c'.repeat(64)}`,
   reasonCode: 'CAPACITY_REASSIGNMENT',

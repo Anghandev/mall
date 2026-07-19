@@ -21,10 +21,6 @@ export interface SettlementRequestIntent {
   deadline: number;
 }
 
-export interface WalletDigestSignatureVerifier {
-  isValidDigest(walletAddress: string, digest: string, signature: string): Promise<boolean>;
-}
-
 export const settlementRequestTypes: Record<string, TypedDataField[]> = {
   SettlementRequest: [
     { name: 'intentId', type: 'bytes32' },

@@ -163,7 +163,6 @@ const printProviderSet = new Set<string>(printProviders);
 const waybillProviderSet = new Set<string>(waybillProviders);
 const waybillRequestStateSet = new Set<string>(waybillRequestStates);
 const waybillCarrierSet = new Set<string>(logisticsCarrierCodes);
-const merchantLevelSet = new Set<string>(['V1', 'V2', 'V3', 'V4', 'V5']);
 const merchantConcessionPoolSet = new Set<string>(['SECKILL_PRIZE', 'NODE_REWARD', 'REWARD_RESERVE']);
 const orderKindSet = new Set<string>(['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] satisfies readonly OrderKind[]);
 const merchantStoreActionSet = new Set<string>(['UPDATE_PROFILE', 'ACTIVATE', 'CLOSE'] satisfies readonly MerchantStoreAction[]);
@@ -1982,7 +1981,6 @@ function parseTakeoverAssignment(input: unknown): TakeoverAssignment {
     'replacementMerchantId',
     'replacementWallet',
     'replacementApplicationVersion',
-    'replacementLevel',
     'replacementLicenseAssetId',
     'supersedesAssignmentId',
     'reasonCode',
@@ -2005,11 +2003,6 @@ function parseTakeoverAssignment(input: unknown): TakeoverAssignment {
     replacementApplicationVersion: positiveInteger(
       value.replacementApplicationVersion,
       'merchant takeover assignment replacementApplicationVersion',
-    ),
-    replacementLevel: enumValue(
-      value.replacementLevel,
-      merchantLevelSet,
-      'merchant takeover assignment replacementLevel',
     ),
     replacementLicenseAssetId: bytes32(
       value.replacementLicenseAssetId,
@@ -2806,7 +2799,7 @@ function parseMerchantBusinessDashboard(input: unknown): MerchantBusinessDashboa
   const window = record(value.window, 'merchant dashboard window');
   exactObjectKeys(window, ['start', 'end', 'generatedAt'], 'merchant dashboard window');
   const merchant = record(value.merchant, 'merchant dashboard merchant');
-  exactObjectKeys(merchant, ['merchantId', 'status', 'level', 'guaranteeStatus'], 'merchant dashboard merchant');
+  exactObjectKeys(merchant, ['merchantId', 'status', 'guaranteeStatus'], 'merchant dashboard merchant');
   const orders = record(value.orders, 'merchant dashboard orders');
   exactObjectKeys(orders, [
     'finalizedToday', 'pendingShipment', 'shipped', 'delivered', 'fulfilled',
@@ -2868,7 +2861,6 @@ function parseMerchantBusinessDashboard(input: unknown): MerchantBusinessDashboa
     merchant: {
       merchantId: string(merchant.merchantId, 'merchant dashboard merchant.merchantId'),
       status: string(merchant.status, 'merchant dashboard merchant.status'),
-      level: string(merchant.level, 'merchant dashboard merchant.level'),
       guaranteeStatus: enumValue(
         merchant.guaranteeStatus,
         guaranteeStatusSet,

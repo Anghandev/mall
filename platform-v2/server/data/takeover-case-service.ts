@@ -60,7 +60,7 @@ interface AssignmentRow {
   replacement_merchant_id: string;
   replacement_wallet: string;
   replacement_application_version: string | number;
-  replacement_level: string;
+  replacement_level: string | null;
   replacement_license_asset_id: string;
   supersedes_assignment_id: string | null;
   reason_code: string;
@@ -73,7 +73,6 @@ interface AssignmentRow {
 interface CandidateRow {
   merchant_id: string;
   settlement_wallet: string;
-  level: string;
   application_version: string | number;
   license_asset_id: string;
   shop_name: string | null;
@@ -179,7 +178,7 @@ export class TakeoverCaseService {
         [
           assignmentId, caseId, takeover.order_id, version, takeover.merchant_id,
           candidate.merchant_id, candidate.settlement_wallet.toLowerCase(), candidate.application_version,
-          candidate.level, candidate.license_asset_id, current?.assignment_id ?? null,
+          null, candidate.license_asset_id, current?.assignment_id ?? null,
           normalized.reasonCode, normalized.evidenceHash, wallet, normalized.idempotencyKey,
           requestHash, normalized.correlationId, assignedAt,
         ],
@@ -376,7 +375,7 @@ function caseSelect(withAssignment = true) {
 async function eligibleCandidates(executor: SqlExecutor, originalMerchantId: string, merchantId?: string) {
   return executor.query<CandidateRow>(
     `SELECT merchant.merchant_id, lower(merchant.settlement_wallet) AS settlement_wallet,
-       merchant.level, merchant.application_version,
+       merchant.application_version,
        application.license_asset_id, merchant.profile->>'shopName' AS shop_name
      FROM core.merchants merchant
      JOIN core.merchant_application_versions application
@@ -456,7 +455,6 @@ function assignmentProjection(row: AssignmentRow) {
     replacementMerchantId: row.replacement_merchant_id,
     replacementWallet: row.replacement_wallet,
     replacementApplicationVersion: Number(row.replacement_application_version),
-    replacementLevel: row.replacement_level,
     replacementLicenseAssetId: row.replacement_license_asset_id,
     supersedesAssignmentId: row.supersedes_assignment_id,
     reasonCode: row.reason_code,
@@ -472,7 +470,6 @@ function candidateProjection(row: CandidateRow) {
     merchantId: row.merchant_id,
     settlementWallet: row.settlement_wallet,
     shopName: row.shop_name ?? row.merchant_id,
-    level: row.level,
     applicationVersion: Number(row.application_version),
     qualificationComplete: true,
     guaranteeReady: true,

@@ -166,7 +166,8 @@ still operational rollout work.
 BNM has no token, mint, Claim, EOA transfer or settlement executor path.
 
 Per-payable EOA settlement and EOA-governed administrative workers are published
-in this checkpoint. Current free RPCs support live execution but not historical
-archive-state reads required for delayed production finality; production must
-configure two archive-capable providers. Payment breakers never stop Indexer,
+in this checkpoint. Settlement and breaker finality use canonical receipts,
+events and confirmations; coverage uses stable dual-RPC `latest` observations.
+Production requires two distinct Chain-56 RPC endpoints, not Archive state.
+Payment breakers never stop Indexer,
 finality, reorg recovery, fulfillment, reconciliation or audit processing.

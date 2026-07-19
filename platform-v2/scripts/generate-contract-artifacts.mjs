@@ -16,6 +16,9 @@ const contracts = [
   'PaymentRouterV2',
 ];
 const deploymentEvidencePath = join(coreRoot, 'deployments', 'bsc-payment-v2.json');
+const verifiedDeploymentArtifactVersions = new Map([
+  ['2.0.0-settlement-admin.17', new Set(['2.0.0-settlement-admin.16'])],
+]);
 const deploymentEvidence = existsSync(deploymentEvidencePath)
   ? validateDeploymentEvidence(JSON.parse(readFileSync(deploymentEvidencePath, 'utf8')))
   : undefined;
@@ -101,6 +104,7 @@ const manifest = {
   },
   sourceDigestSha256: sourceDigest,
   deploymentStatus: deploymentEvidence?.deploymentStatus ?? 'PENDING',
+  deploymentArtifactVersion: deploymentEvidence?.artifactVersion ?? null,
   deploymentAuthorized: deploymentEvidence?.deploymentAuthorized ?? false,
   deploymentAuthorizationEvidenceHash: deploymentEvidence?.authorizationEvidenceHash ?? null,
   externalBlocked: deploymentEvidence?.deploymentStatus === 'DEPLOYED'
@@ -180,7 +184,7 @@ function validateDeploymentEvidence(value) {
     return { deploymentStatus: 'PENDING', deploymentAuthorized: false, contracts: {} };
   }
   if (
-    !value || value.artifactVersion !== artifactVersion || value.chainId !== 56
+    !value || !compatibleDeploymentArtifactVersion(value.artifactVersion) || value.chainId !== 56
       || value.architecture !== 'FIVE_ROLE_EOA_V2' || value.deploymentStatus !== 'DEPLOYED'
       || value.deploymentAuthorized !== true
       || !/^0x[0-9a-fA-F]{64}$/.test(value.authorizationEvidenceHash ?? '')
@@ -209,11 +213,17 @@ function validateDeploymentEvidence(value) {
     };
   }
   return {
+    artifactVersion: value.artifactVersion,
     deploymentStatus: 'DEPLOYED',
     deploymentAuthorized: true,
     authorizationEvidenceHash: value.authorizationEvidenceHash.toLowerCase(),
     contracts: deployments,
   };
+}
+
+function compatibleDeploymentArtifactVersion(value) {
+  return typeof value === 'string'
+    && (value === artifactVersion || verifiedDeploymentArtifactVersions.get(artifactVersion)?.has(value) === true);
 }
 
 function json(value) {

@@ -15,7 +15,6 @@ import {
 const ROUTER = new Interface([
   'event SeckillSessionOpened(bytes32 indexed sessionId,uint64 indexed policyVersion,uint64 startsAt,uint64 mainDeadline,uint64 relayDeadline)',
   'event SeckillPurchasePauseChanged(bool paused,bytes32 indexed evidenceHash)',
-  'function seckillPurchasesPaused() view returns (bool)',
 ]);
 const ERC20 = new Interface([
   'event Transfer(address indexed from,address indexed to,uint256 value)',
@@ -305,7 +304,7 @@ export class ResilientSeckillChainSource implements SeckillChainSource {
       const failure = { ...base, reasonCode: 'EXECUTION_REVERTED' as const };
       return { state: 'FAILED', ...failure, observationEvidenceHash: hashJson(failure) };
     }
-    await this.#validateExpectedEvent(input, receipt, primary, fallback);
+    await this.#validateExpectedEvent(input, receipt);
     return {
       state: confirmations >= 15 ? 'FINAL' : 'MINED',
       ...base,
@@ -316,8 +315,6 @@ export class ResilientSeckillChainSource implements SeckillChainSource {
   async #validateExpectedEvent(
     input: SeckillFinalityCandidate,
     receipt: ReturnType<typeof normalizedReceipt>,
-    primary: string,
-    fallback: string,
   ) {
     if (input.expected.kind === 'OPEN_SESSION') {
       const matching = receipt.logs.filter((log) =>
@@ -340,16 +337,6 @@ export class ResilientSeckillChainSource implements SeckillChainSource {
       const event = decodeSeckillPause(matching[0]!);
       if (event.paused !== input.expected.targetPaused || event.evidenceHash !== input.evidenceHash) {
         throw new CoreError('InvalidFinality', 'SeckillPurchasePauseChanged does not match the frozen action', 409);
-      }
-      const calldata = ROUTER.encodeFunctionData('seckillPurchasesPaused');
-      const [primaryState, fallbackState] = await Promise.all([
-        rpc(this.#fetch, primary, 'eth_call', [{ to: input.targetAddress, data: calldata }, receipt.blockNumber]),
-        rpc(this.#fetch, fallback, 'eth_call', [{ to: input.targetAddress, data: calldata }, receipt.blockNumber]),
-      ]);
-      const primaryPaused = Boolean(ROUTER.decodeFunctionResult('seckillPurchasesPaused', stringValue(primaryState, 'router state'))[0]);
-      const fallbackPaused = Boolean(ROUTER.decodeFunctionResult('seckillPurchasesPaused', stringValue(fallbackState, 'router state'))[0]);
-      if (primaryPaused !== input.expected.targetPaused || fallbackPaused !== input.expected.targetPaused) {
-        throw new CoreError('InvalidFinality', 'Router seckill breaker state does not match the finalized action', 409);
       }
       return;
     }
@@ -1371,11 +1358,6 @@ async function responseJson(response: Response) {
 function recordValue(value: unknown, name: string) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new CoreError('InvalidFinality', `${name} is invalid`, 409);
   return value as Record<string, unknown>;
-}
-
-function stringValue(value: unknown, name: string) {
-  if (typeof value !== 'string') throw new CoreError('InvalidFinality', `${name} is invalid`, 409);
-  return value;
 }
 
 function hexNumber(value: unknown, name: string) {

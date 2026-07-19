@@ -5,7 +5,7 @@ Requirement Matrix and consumes only coordinated Core artifacts.
 
 ## Current Runtime Boundary
 
-- Production consumes coordinated Core artifacts `2.0.0-settlement-admin.16` and derives
+- Production consumes coordinated Core artifacts `2.0.0-settlement-admin.17` and derives
   its HTTP paths from the published OpenAPI document.
 - The public catalog consumes active products/SKUs, enabled three-level
   categories, enabled tags, field-level product associations, rich detail,
@@ -43,9 +43,10 @@ Requirement Matrix and consumes only coordinated Core artifacts.
   the Mall consumer. Buyer order rows continue to use only the buyer-scoped
   takeover timeline and receipt-confirmation API.
 - Transferable balances now render Core-projected Locked, Available, Requested,
-  Batched and Settled states. Available NPL reward and USDT prize balances use
+  Submitted and Settled states. Available NPL reward and USDT prize balances use
   a wallet-bound EIP-712 settlement intent; the Mall never creates settlement
-  calldata or pays Safe Gas. Settled requests show the final Safe TxHash.
+  calldata or pays executor Gas. Settled requests show the final EOA execution
+  TxHash.
 - Seckill current/history/session/event reads and `/v2/ws` use the same artifact
   version. The consumer performs HTTP replay before WebSocket delivery,
   deduplicates `eventId`, resumes from the last numeric cursor, accepts only

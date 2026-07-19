@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.16",
+  "artifactVersion": "2.0.0-settlement-admin.17",
   "publicationStatus": "COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT",
   "deploymentAuthorized": true,
   "deploymentAuthorizationEvidenceHash": "0x9d260a962e4cefe886ddf1382b1c6efb4ff06fef6fbac17bf7014b3b3e78c3eb",
@@ -14,57 +14,57 @@
   "components": {
     "packageMetadata": {
       "path": "package.json",
-      "sha256": "6585570803dddc8f4805286ae3a2a84683d5578ccd133b19c69f8a02cbdc8506"
+      "sha256": "8d41751cc37c21c05f05c19b2451b08187ba23fda092dfc9ed6601111baa3d8e"
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "6461fc4e38d5112d159e81edd0aaf6960cfa1363d80e5ec1bf4850323eb612bf"
+      "sha256": "e5765d119d6af7b70546412553543e58fc09419dd4b607ec5cdd3fbe3d0d11a3"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "fc75e5f8654c9865c401b90bf67d99af276013618f09e77bebfcd53be33bf12f"
+      "sha256": "13c26c8cd42b50a86a920f76f1440a270a2aeec5d8760ff446fcddaab9ad86dd"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "bed4f34c309e438d6d22349278226fdeb7e0a93c9ba4b013cf2147929984c9ec"
+      "sha256": "47dcffc8f652fa4582886b86eefd6276bd389e36b4910e479809a77fb47fa258"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "6f9b1c42068c49c6985c04d54265cea4ac3379385456ee588fa54796a4da4536"
+      "sha256": "4294b89e0168ec0a6f523046c1f947ab0add9f7ef553cd58a72b85ef07e48520"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "f402f9cebc34f2305fc51d7e0507510f018e1adbdb367eaab5f92c17f745e88f"
+      "sha256": "0309e16d653a9cf366242780f06028130b26fcf7ee87c53515ef3d2b55e8feb7"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
-      "sha256": "813b0901c15a553c2a79edb0f30b61f5e5abfbff8090ccfabe2d7ba8867d5d0b"
+      "sha256": "da9d0d28d7be29c82608925b1a68fa74069ea42d36234f4fc26e5787fb5c803b"
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "b0ca9b62f1b1ce68f42192f310baa0b78d0de5719e619f6002d7d012dae780fe"
+      "sha256": "ae50fdae899b81b2904fbc93b452a5e32f207166dcaeaad2923e256b7773fcf1"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "f452c4c6359744719b1bb10f195b096961770f4782e28a2bdd7e08db1faff7a5"
+      "sha256": "824b603ba775130e898b919dfb8ac76f00249a16863a933ef330ea15edf42a91"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "649697713bf506169057ed0f67d1897da7c27cde6cbb8e4d652b5f6213736dbc"
+      "sha256": "2b945390721a2c8ffeb6cdd4511e3a4e080f7db17b7887652f368bc1554df52e"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
-      "sha256": "8a8f3dedee2e44094dc5cb3ab386c92244864f9e9957581895c1367d433b8a71"
+      "sha256": "190bc07276451e206bd6d03ef381cf48fd0978e34c9778bb8a1a81cfa713ceb4"
     }
   },
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "ec7d24040c65e3f96e6f44d71aec42bf48af131eda3396340d84a73a68658119"
+      "sha256": "b5245403fa13d4470af6bf3f78142fbfdfaf217c55c733fc502a601500746043"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "27f0237dcbca4e94d78271c8e5e9630ebb1349d21882c161eea128ca5c4d3198"
+      "sha256": "1b4aafaab1d9cd58c2e57a0d5d9d94d88e7f5b2f7c0ceb602b1e96cccf013496"
     }
   ],
   "httpSurface": [

@@ -28,14 +28,15 @@ const BLOCK_HASH = `0x${'b'.repeat(64)}`;
 const coverageInterface = new Interface([
   'event PaymentPauseChanged(bool paused,bytes32 indexed evidenceHash)',
   'function setNewPaymentsPaused(bool paused,bytes32 evidenceHash)',
-  'function newPaymentsPaused() view returns (bool)',
 ]);
 const seckillInterface = new Interface([
   'event SeckillSessionOpened(bytes32 indexed sessionId,uint64 indexed policyVersion,uint64 startsAt,uint64 mainDeadline,uint64 relayDeadline)',
+  'event SeckillPurchasePauseChanged(bool paused,bytes32 indexed evidenceHash)',
   'function openSeckillSession(bytes32 sessionId,uint64 policyVersion,uint64 startsAt)',
+  'function setSeckillPurchasesPaused(bool paused,bytes32 evidenceHash)',
 ]);
 
-test('coverage EOA executor and finality bind the exact sender, target, calldata and nonce', async () => {
+test('coverage EOA executor and receipt finality bind the exact action without Archive RPC', async () => {
   const execution = coverageExecution();
   const executor = new HttpCoverageBreakerEoaExecutor({
     url: 'https://executor.example/coverage',
@@ -93,6 +94,21 @@ test('seckill EOA execution reaches finality without a Safe lookup service', asy
   assert.equal(observation.executionTxHash, TX_HASH);
 });
 
+test('seckill breaker receipt reaches finality without historical state calls', async () => {
+  const execution = seckillBreakerExecution();
+  const source = new ResilientSeckillChainSource({
+    primaryRpcUrl: 'https://primary.example',
+    fallbackRpcUrl: 'https://fallback.example',
+    fetchImpl: seckillBreakerRpcFetch(execution),
+  });
+  const observation = await source.observe({
+    ...execution,
+    submittedTxHash: TX_HASH,
+    priorState: 'SUBMITTED',
+  });
+  assert.equal(observation.state, 'FINAL');
+});
+
 function coverageExecution(): CoverageBreakerExecution {
   const calldata = coverageInterface.encodeFunctionData('setNewPaymentsPaused', [true, HASH_1]).toLowerCase();
   return {
@@ -129,6 +145,23 @@ function seckillExecution(): SeckillExecution {
       mainDeadline: startsAt + 3_600,
       relayDeadline: startsAt + 60,
     },
+  };
+}
+
+function seckillBreakerExecution(): SeckillExecution {
+  const calldata = seckillInterface.encodeFunctionData('setSeckillPurchasesPaused', [true, HASH_3]).toLowerCase();
+  return {
+    actionId: HASH_1,
+    sessionId: HASH_2,
+    actionKind: 'FORCE_CLOSE',
+    policyVersion: 1,
+    evidenceHash: HASH_3,
+    governanceWallet: GOVERNANCE,
+    targetAddress: ROUTER,
+    calldata,
+    calldataHash: keccak256(calldata).toLowerCase(),
+    minimumExecutorNonce: '7',
+    expected: { kind: 'FORCE_CLOSE', targetPaused: true },
   };
 }
 
@@ -192,9 +225,6 @@ function coverageRpcHarness() {
       logs: [{ address: ROUTER, topics: event.topics, data: event.data }],
     });
     if (request.method === 'eth_getBlockByNumber') return json({ hash: BLOCK_HASH });
-    if (request.method === 'eth_call') {
-      return json(coverageInterface.encodeFunctionResult('newPaymentsPaused', [true]));
-    }
     throw new Error(`UnexpectedRpc:${request.method}`);
   }) as typeof fetch;
   return harness;
@@ -211,6 +241,36 @@ function seckillRpcFetch(input: SeckillExecution): typeof fetch {
       input.expected.mainDeadline,
       input.expected.relayDeadline,
     ],
+  );
+  return (async (_url, init) => {
+    const request = JSON.parse(String(init?.body)) as { method: string };
+    if (request.method === 'eth_chainId') return json('0x38');
+    if (request.method === 'eth_blockNumber') return json('0x72');
+    if (request.method === 'eth_getTransactionByHash') return json({
+      hash: TX_HASH,
+      from: GOVERNANCE,
+      to: ROUTER,
+      input: input.calldata,
+      nonce: '0x7',
+      value: '0x0',
+    });
+    if (request.method === 'eth_getTransactionReceipt') return json({
+      transactionHash: TX_HASH,
+      blockNumber: '0x64',
+      blockHash: BLOCK_HASH,
+      status: '0x1',
+      logs: [{ address: ROUTER, topics: event.topics, data: event.data }],
+    });
+    if (request.method === 'eth_getBlockByNumber') return json({ hash: BLOCK_HASH });
+    throw new Error(`UnexpectedRpc:${request.method}`);
+  }) as typeof fetch;
+}
+
+function seckillBreakerRpcFetch(input: SeckillExecution): typeof fetch {
+  if (input.expected.kind !== 'FORCE_CLOSE') throw new Error('ExpectedForceClose');
+  const event = seckillInterface.encodeEventLog(
+    seckillInterface.getEvent('SeckillPurchasePauseChanged')!,
+    [true, input.evidenceHash],
   );
   return (async (_url, init) => {
     const request = JSON.parse(String(init?.body)) as { method: string };

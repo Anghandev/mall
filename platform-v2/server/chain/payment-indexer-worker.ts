@@ -28,47 +28,69 @@ export class ResilientBscPaymentChainSource implements PaymentChainSource {
   readonly #providers: JsonRpcProvider[];
   readonly #routerAddress: string;
 
-  constructor(input: { primaryRpcUrl?: string; fallbackRpcUrl?: string; routerAddress?: string }) {
-    if (!input.primaryRpcUrl || !input.fallbackRpcUrl) {
+  constructor(input: {
+    primaryRpcUrl?: string;
+    fallbackRpcUrl?: string;
+    routerAddress?: string;
+    providers?: readonly JsonRpcProvider[];
+  }) {
+    if (input.providers) {
+      if (input.providers.length !== 2) {
+        throw new CoreError('ExternalBlocked', 'Payment Indexer requires two independent BSC RPC endpoints', 503);
+      }
+      this.#providers = [...input.providers];
+    } else if (!input.primaryRpcUrl || !input.fallbackRpcUrl) {
       throw new CoreError('ExternalBlocked', 'Primary and fallback BSC RPC are required', 503);
+    } else {
+      const urls = [paymentRpcUrl(input.primaryRpcUrl), paymentRpcUrl(input.fallbackRpcUrl)];
+      if (urls[0] === urls[1]) {
+        throw new CoreError('ExternalBlocked', 'Payment Indexer requires distinct BSC RPC endpoints', 503);
+      }
+      this.#providers = urls.map((url) => new JsonRpcProvider(url, 56, { staticNetwork: true }));
     }
     if (!input.routerAddress || !/^0x[0-9a-fA-F]{40}$/.test(input.routerAddress)) {
       throw new CoreError('ExternalBlocked', 'PaymentRouter deployment address is unavailable', 503);
     }
     this.#routerAddress = input.routerAddress.toLowerCase();
-    this.#providers = [input.primaryRpcUrl, input.fallbackRpcUrl]
-      .map((url) => new JsonRpcProvider(url, 56, { staticNetwork: true }));
   }
 
-  head() {
-    return this.#withProvider((provider) => provider.getBlockNumber());
+  async head() {
+    const heads = await Promise.all(this.#providers.map((provider) => this.#withBscProvider(
+      provider,
+      () => provider.getBlockNumber(),
+    )));
+    const observedHead = Math.min(...heads);
+    assertBlockNumber(observedHead);
+    return observedHead;
   }
 
-  block(blockNumber: number) {
+  async block(blockNumber: number) {
     assertBlockNumber(blockNumber);
-    return this.#withProvider(async (provider) => {
+    const blocks = await Promise.all(this.#providers.map((provider) => this.#withBscProvider(provider, async () => {
       const value = await provider.getBlock(blockNumber);
-      if (!value || !value.hash) throw new CoreError('FinalityPending', 'BSC block is unavailable', 409);
-      return {
+      if (!value || !value.hash) throw new CoreError('ExternalBlocked', 'BSC block is unavailable from one RPC endpoint', 503);
+      return normalizeBlock({
         number: value.number,
         hash: value.hash,
         parentHash: value.parentHash,
         timestamp: value.timestamp,
-      };
-    });
+      });
+    })));
+    assertSameRpcEvidence(blocks[0], blocks[1], 'BSC RPC sources disagree on payment block evidence');
+    return blocks[0]!;
   }
 
-  logs(fromBlock: number, toBlock: number) {
+  async logs(fromBlock: number, toBlock: number) {
     assertBlockNumber(fromBlock);
     assertBlockNumber(toBlock);
     if (toBlock < fromBlock) throw new CoreError('InvalidFinality', 'Invalid payment log range');
-    return this.#withProvider(async (provider) => {
+    const observations = await Promise.all(this.#providers.map((provider) => this.#withBscProvider(provider, async () => {
       const values = await readAddressLogs(provider, {
         addresses: this.#routerAddress,
         fromBlock,
         toBlock,
       });
-      return values.map((value) => ({
+      return normalizeLogs(values.map((value) => ({
         address: value.address,
         topics: [...value.topics],
         data: value.data,
@@ -76,23 +98,24 @@ export class ResilientBscPaymentChainSource implements PaymentChainSource {
         blockHash: value.blockHash,
         blockNumber: value.blockNumber,
         logIndex: value.logIndex,
-      }));
-    });
+      })));
+    })));
+    assertSameRpcEvidence(observations[0], observations[1], 'BSC RPC sources disagree on payment Router logs');
+    return observations[0]!;
   }
 
-  async #withProvider<Result>(operation: (provider: JsonRpcProvider) => Promise<Result>) {
+  async #withBscProvider<Result>(provider: JsonRpcProvider, operation: () => Promise<Result>) {
     let lastError: unknown;
-    for (const provider of this.#providers) {
-      try {
-        if ((await provider.getNetwork()).chainId !== 56n) {
-          throw new CoreError('ExternalBlocked', 'RPC is not BSC chain 56', 503);
-        }
-        return await operation(provider);
-      } catch (error) {
-        lastError = error;
+    try {
+      if ((await provider.getNetwork()).chainId !== 56n) {
+        throw new CoreError('ExternalBlocked', 'RPC is not BSC chain 56', 503);
       }
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (error instanceof CoreError) throw error;
     }
-    throw new CoreError('ExternalBlocked', 'Both BSC RPC providers failed', 503, {
+    throw new CoreError('ExternalBlocked', 'BSC RPC provider failed', 503, {
       reason: lastError instanceof Error ? lastError.name : 'UnknownRpcFailure',
     });
   }
@@ -265,6 +288,53 @@ export class PollingPaymentIndexer {
 
 function assertBlockNumber(value: number) {
   if (!Number.isSafeInteger(value) || value < 0) throw new CoreError('InvalidFinality', 'Invalid BSC block number');
+}
+
+function paymentRpcUrl(value: string) {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new CoreError('ExternalBlocked', 'Payment Indexer RPC endpoint is invalid', 503);
+  }
+  if (url.protocol !== 'https:' || url.username || url.password) {
+    throw new CoreError('ExternalBlocked', 'Payment Indexer RPC endpoints require HTTPS without embedded credentials', 503);
+  }
+  return url.href;
+}
+
+function normalizeBlock(block: ChainBlock): ChainBlock {
+  return {
+    number: block.number,
+    hash: block.hash.toLowerCase(),
+    parentHash: block.parentHash.toLowerCase(),
+    timestamp: block.timestamp,
+  };
+}
+
+function normalizeLogs(logs: readonly IndexedLog[]) {
+  return logs.map((log) => ({
+    address: log.address.toLowerCase(),
+    topics: log.topics.map((topic) => topic.toLowerCase()),
+    data: log.data.toLowerCase(),
+    transactionHash: log.transactionHash.toLowerCase(),
+    blockHash: log.blockHash.toLowerCase(),
+    blockNumber: log.blockNumber,
+    logIndex: log.logIndex,
+  })).sort((left, right) =>
+    left.blockNumber - right.blockNumber
+    || left.logIndex - right.logIndex
+    || left.transactionHash.localeCompare(right.transactionHash));
+}
+
+function assertSameRpcEvidence(left: unknown, right: unknown, message: string) {
+  if (stableRpcValue(left) !== stableRpcValue(right)) {
+    throw new CoreError('InvalidFinality', message, 409);
+  }
+}
+
+function stableRpcValue(value: unknown) {
+  return JSON.stringify(value);
 }
 
 function abortableDelay(milliseconds: number, signal: AbortSignal) {

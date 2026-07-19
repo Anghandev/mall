@@ -4,8 +4,10 @@ import type { CoverageObservation, CoverageSource } from './coverage-worker.ts';
 
 const TOKEN = new Interface(['function balanceOf(address account) view returns (uint256)']);
 
+type CoverageRpcProvider = Pick<JsonRpcProvider, 'getNetwork' | 'getBlock' | 'call'>;
+
 export class ResilientBscCoverageSource implements CoverageSource {
-  readonly #providers: readonly JsonRpcProvider[];
+  readonly #providers: readonly CoverageRpcProvider[];
   readonly #assets: readonly {
     walletAddress: string;
     asset: 'USDT' | 'NPL';
@@ -16,16 +18,22 @@ export class ResilientBscCoverageSource implements CoverageSource {
   constructor(input: {
     primaryRpcUrl?: string;
     fallbackRpcUrl?: string;
+    providers?: readonly CoverageRpcProvider[];
     assets: readonly { walletAddress: string; asset: 'USDT' | 'NPL'; tokenAddress: string }[];
     clock?: () => Date;
   }) {
-    if (!input.primaryRpcUrl || !input.fallbackRpcUrl) {
+    if (input.providers && input.providers.length !== 2) {
+      throw new CoreError('ExternalBlocked', 'Two BSC RPC endpoints are required for coverage', 503);
+    }
+    if (!input.providers && (!input.primaryRpcUrl || !input.fallbackRpcUrl)) {
       throw new CoreError('ExternalBlocked', 'Two BSC RPC endpoints are required for coverage', 503);
     }
     if (input.assets.length === 0) throw new CoreError('ExternalBlocked', 'Coverage assets are unavailable', 503);
-    this.#providers = [input.primaryRpcUrl, input.fallbackRpcUrl].map(
-      (url) => new JsonRpcProvider(url, 56, { staticNetwork: true }),
-    );
+    this.#providers = input.providers
+      ? [...input.providers]
+      : [input.primaryRpcUrl!, input.fallbackRpcUrl!].map(
+          (url) => new JsonRpcProvider(url, 56, { staticNetwork: true }),
+        );
     const seen = new Set<string>();
     this.#assets = input.assets.map((item) => {
       const value = {
@@ -47,11 +55,8 @@ export class ResilientBscCoverageSource implements CoverageSource {
     if (networks.some((network) => network.chainId !== 56n)) {
       throw new CoreError('ExternalBlocked', 'Coverage RPC is not BSC chain 56', 503);
     }
-    const heads = await Promise.all(this.#providers.map((provider) => provider.getBlockNumber()));
-    const blockNumber = Math.min(...heads);
-    const observations = await Promise.all(this.#providers.map((provider) => observeAt(
+    const observations = await Promise.all(this.#providers.map((provider) => observeLatest(
       provider,
-      blockNumber,
       this.#assets,
     )));
     const [primary, fallback] = observations;
@@ -60,33 +65,37 @@ export class ResilientBscCoverageSource implements CoverageSource {
     }
     return {
       chainId: 56,
-      blockNumber,
+      blockNumber: primary.blockNumber,
       blockHash: primary.blockHash,
       canonical: true,
-      evidenceHash: hashJson({ blockNumber, primary, fallback }),
+      evidenceHash: hashJson({ primary, fallback }),
       observedAt: this.#clock(),
       assets: primary.assets,
     };
   }
 }
 
-async function observeAt(
-  provider: JsonRpcProvider,
-  blockNumber: number,
+async function observeLatest(
+  provider: CoverageRpcProvider,
   assets: readonly { walletAddress: string; asset: 'USDT' | 'NPL'; tokenAddress: string }[],
 ) {
-  const block = await provider.getBlock(blockNumber);
-  if (!block?.hash) throw new CoreError('ExternalBlocked', 'Canonical coverage block is unavailable', 503);
+  const before = await provider.getBlock('latest');
+  if (!before?.hash || !Number.isSafeInteger(before.number)) {
+    throw new CoreError('ExternalBlocked', 'Latest canonical coverage block is unavailable', 503);
+  }
   const values = await Promise.all(assets.map(async (asset) => {
     const result = await provider.call({
       to: asset.tokenAddress,
       data: TOKEN.encodeFunctionData('balanceOf', [asset.walletAddress]),
-      blockTag: blockNumber,
     });
     const balance = String(TOKEN.decodeFunctionResult('balanceOf', result)[0]);
     return { ...asset, balance };
   }));
-  return { blockHash: block.hash.toLowerCase(), assets: values };
+  const after = await provider.getBlock('latest');
+  if (!after?.hash || after.number !== before.number || after.hash.toLowerCase() !== before.hash.toLowerCase()) {
+    throw new CoreError('FinalityPending', 'Coverage head advanced while latest balances were observed', 409);
+  }
+  return { blockNumber: before.number, blockHash: before.hash.toLowerCase(), assets: values };
 }
 
 function address(value: string, name: string) {

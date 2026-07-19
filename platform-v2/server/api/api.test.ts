@@ -27,7 +27,7 @@ import {
   type PaymentQuoteRequest,
 } from './checkout.ts';
 import { allowedActionNames, CORE_ARTIFACT_VERSION } from './enums.ts';
-import { loadConfig, publicReadiness, requireProvider } from './config.ts';
+import { loadConfig, publicReadiness, requireProvider, type RuntimeReadinessSnapshot } from './config.ts';
 import { applyReceipt, replaceTransaction, requireFinal, submittedFinality } from './finality.ts';
 import {
   paymentAuthorizationDigest,
@@ -86,6 +86,7 @@ test('typed config reports blocked inputs without exposing secret values', () =>
   assert.equal(blocked.providerReadiness.KUAIDI100, 'CONFIGURATION_REQUIRED');
   assert.equal(blocked.providerReadiness.BNM, 'CONFIGURATION_REQUIRED');
   assert.equal(publicReadiness(blocked).writesEnabled, false);
+  assert.ok(publicReadiness(blocked).runtimeBlockers.length > 0);
   assert.throws(() => requireProvider(blocked, 'KUAIDI100'), { name: 'CoreError' });
 
   const ready = loadConfig(completeEnvironment());
@@ -117,7 +118,39 @@ test('typed config reports blocked inputs without exposing secret values', () =>
       Object.keys(ready.providerReadiness).map((provider) => [provider, 'CONFIGURATION_REQUIRED']),
     ) as typeof ready.providerReadiness,
   };
-  assert.equal(publicReadiness(paymentReady, paymentRuntimeReadiness(readinessTime, true), readinessTime).writesEnabled, true);
+  const readyReadiness = publicReadiness(paymentReady, paymentRuntimeReadiness(readinessTime, true, true), readinessTime);
+  assert.equal(readyReadiness.writesEnabled, true);
+  assert.deepEqual(readyReadiness.runtimeBlockers, []);
+  assert.deepEqual(
+    publicReadiness(paymentReady, paymentRuntimeReadiness(readinessTime, true, false), readinessTime).runtimeBlockers,
+    ['INDEXER_LAGGING'],
+  );
+  const healthyRuntime = paymentRuntimeReadiness(readinessTime, true, true);
+  const runtimeCases: Array<{ blocker: string; snapshot: RuntimeReadinessSnapshot }> = [
+    { blocker: 'RUNTIME_SNAPSHOT_EXPIRED', snapshot: { ...healthyRuntime, expiresAt: readinessTime.toISOString() } },
+    { blocker: 'DATABASE_UNAVAILABLE', snapshot: { ...healthyRuntime, databaseHealthy: false } },
+    { blocker: 'REDIS_UNAVAILABLE', snapshot: { ...healthyRuntime, redisHealthy: false } },
+    { blocker: 'SIGNER_UNAVAILABLE', snapshot: { ...healthyRuntime, signerHealthy: false } },
+    { blocker: 'INDEXER_UNHEALTHY', snapshot: { ...healthyRuntime, indexerHealthy: false } },
+    { blocker: 'INDEXER_LAGGING', snapshot: { ...healthyRuntime, indexerCaughtUp: false } },
+    { blocker: 'RPC_DIVERGENCE', snapshot: { ...healthyRuntime, rpcChain56Healthy: false } },
+    { blocker: 'QUOTE_SOURCE_UNHEALTHY', snapshot: { ...healthyRuntime, nplQuoteSourceHealthy: false } },
+    { blocker: 'CONTRACT_EVIDENCE_UNVERIFIED', snapshot: { ...healthyRuntime, componentHashesVerified: false } },
+  ];
+  for (const { blocker, snapshot } of runtimeCases) {
+    const blockedReadiness = publicReadiness(paymentReady, snapshot, readinessTime);
+    assert.equal(blockedReadiness.writesEnabled, false, blocker);
+    assert.deepEqual(blockedReadiness.runtimeBlockers, [blocker], blocker);
+    assert.deepEqual(publicReadiness(paymentReady, healthyRuntime, readinessTime).runtimeBlockers, [], `${blocker}:recovered`);
+  }
+  assert.deepEqual(
+    publicReadiness({ ...paymentReady, paymentDecisionBlocked: ['TEST_DECISION'] }, healthyRuntime, readinessTime).runtimeBlockers,
+    ['PAYMENT_DECISION_BLOCKED'],
+  );
+  assert.deepEqual(
+    publicReadiness({ ...paymentReady, deploymentReady: false }, healthyRuntime, readinessTime).runtimeBlockers,
+    ['PAYMENT_CONFIGURATION_REQUIRED'],
+  );
   assert.throws(
     () => loadConfig({ ...completeEnvironment(), PLATFORM_SERVICE_FEE_WALLET_ADDRESS: 'not-an-address' }),
     /address/,
@@ -1662,12 +1695,24 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
         legalId: '210211199001011234',
         contactPhone: '13800138000',
         settlementWallet: SAFE,
-        level: 'V1',
         idempotencyKey: 'merchant-http-create-1',
       }),
     });
     assert.equal(merchantApplication.status, 201);
     assert.equal(((await merchantApplication.json()) as { merchant: { merchantId: string } }).merchant.merchantId, 'merchant-created');
+    assert.equal((await fetch(`${base}/v2/admin/merchants`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        shopName: 'HTTP Merchant',
+        legalName: 'Legal Name',
+        legalId: '210211199001011234',
+        contactPhone: '13800138000',
+        settlementWallet: SAFE,
+        level: 'V1',
+        idempotencyKey: 'merchant-http-level-rejected',
+      }),
+    })).status, 400);
     assert.equal((await fetch(`${base}/v2/admin/merchants`, {
       method: 'POST',
       headers: bearerHeaders,
@@ -1685,10 +1730,19 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       headers: bearerHeaders,
       body: JSON.stringify({
         shopName: 'HTTP Merchant', legalName: 'Legal Name', legalId: '210211199001011234',
-        contactPhone: '13800138000', level: 'V1', licenseAssetId: HASH,
+        contactPhone: '13800138000', licenseAssetId: HASH,
         expectedVersion: 1, idempotencyKey: 'merchant-http-update-1',
       }),
     })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/merchants/merchant-created/application`, {
+      method: 'PUT',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        shopName: 'HTTP Merchant', legalName: 'Legal Name', legalId: '210211199001011234',
+        contactPhone: '13800138000', level: 'V1', licenseAssetId: HASH,
+        expectedVersion: 1, idempotencyKey: 'merchant-http-update-level-rejected',
+      }),
+    })).status, 400);
     const merchantReview = await fetch(`${base}/v2/admin/merchants/merchant-created/review-challenges`, {
       method: 'POST',
       headers: bearerHeaders,
@@ -2932,6 +2986,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     });
     assert.equal(blockedQuote.status, 503);
     runtimeReadiness.indexerHealthy = true;
+    runtimeReadiness.indexerCaughtUp = true;
     const quote = await fetch(`${base}/v2/payments/quotes`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
@@ -3195,7 +3250,7 @@ function completeEnvironment(): Record<string, string> {
   };
 }
 
-function paymentRuntimeReadiness(now: Date, indexerHealthy: boolean) {
+function paymentRuntimeReadiness(now: Date, indexerHealthy: boolean, indexerCaughtUp = indexerHealthy) {
   return {
     artifactVersion: CORE_ARTIFACT_VERSION,
     checkedAt: new Date(now.getTime() - 1_000).toISOString(),
@@ -3207,6 +3262,7 @@ function paymentRuntimeReadiness(now: Date, indexerHealthy: boolean) {
     signerBindingsVerified: true,
     nplQuoteSourceHealthy: true,
     indexerHealthy,
+    indexerCaughtUp,
     databaseHealthy: true,
     redisHealthy: true,
     rpcChain56Healthy: true,

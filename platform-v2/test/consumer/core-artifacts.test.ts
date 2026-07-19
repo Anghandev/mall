@@ -23,14 +23,15 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('settlement admin .16 checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-settlement-admin.16');
+test('audit-remediation .17 checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-settlement-admin.17');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
   assert.equal(openapi['x-artifactVersion'], artifactVersion);
   assert.equal(manifest.publicationStatus, 'COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT');
   assert.equal(contractManifest.publicationStatus, 'coordinated-settlement-admin-checkpoint');
+  assert.equal(contractManifest.deploymentArtifactVersion, '2.0.0-settlement-admin.16');
   assert.equal(manifest.decisionBlocked.includes('SECKILL_PRIZE_POOL_ACCOUNT'), false);
   assert.deepEqual(
     manifest.consumerTests.map((item: { path: string }) => item.path),
@@ -54,8 +55,8 @@ test('settlement admin .16 checkpoint has one identity, resolvable exports and e
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 34);
-  assert.equal(schemaManifest.schemas.core.migrations.at(-1)?.path, 'schema/business/034_reward_account_subtypes.sql');
+  assert.equal(schemaManifest.schemas.core.migrations.length, 37);
+  assert.equal(schemaManifest.schemas.core.migrations.at(-1)?.path, 'schema/business/037_payment_quote_source_evidence.sql');
   assert.equal(schemaManifest.schemas.audit.migrations.length, 4);
   for (const migration of [
     ...schemaManifest.schemas.core.migrations,
@@ -516,7 +517,7 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
     'AdminProductBatchTagResult',
     'AdminProductLifecycleBatchResult',
   ]) assert.match(declarations, new RegExp(`export interface ${name}\\b`), name);
-  assert.deepEqual(enums.merchantLevels, ['V1', 'V2', 'V3', 'V4', 'V5']);
+  assert.equal('merchantLevels' in enums, false);
   assert.deepEqual(enums.merchantLifecycleStatuses, [
     'PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED', 'BLACKLISTED',
   ]);
@@ -604,13 +605,11 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
     ),
     ['AVAILABLE', 'UNAVAILABLE'],
   );
-  assert.equal(
-    openapi.components.schemas.MerchantLifecycleDetail.properties.levelPolicy.properties.status.const,
-    'Deprecated',
-  );
-  assert.equal(openapi.components.schemas.MerchantLifecycleDetail.properties.levelPolicy.deprecated, true);
+  assert.equal('levelPolicy' in openapi.components.schemas.MerchantLifecycleDetail.properties, false);
   assert.equal(openapi.components.schemas.MerchantApplicationCreateRequest.required.includes('level'), false);
-  assert.equal(openapi.components.schemas.MerchantApplicationCreateRequest.properties.level.deprecated, true);
+  assert.equal('level' in openapi.components.schemas.MerchantApplicationCreateRequest.properties, false);
+  assert.equal(openapi.components.schemas.Readiness.required.includes('runtimeBlockers'), true);
+  assert.deepEqual(openapi.components.schemas.Readiness.properties.runtimeBlockers.items.enum, enums.runtimeBlockers);
   assert.equal('proposedSettlementWallet' in openapi.components.schemas.MerchantReviewChallengeRequest.properties, false);
   assert.deepEqual(
     Object.keys(openapi.components.schemas.MerchantOrderAnalytics.properties.cumulative.properties),

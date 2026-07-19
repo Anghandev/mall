@@ -15,10 +15,11 @@ The locked V2 interpretation is:
 
 - product price, merchant base receivable and concession are denominated in USDT;
 - launch payment is exactly 70% USDT plus 30% Oracle-equivalent NPL;
-- immutable PaymentRouter sends funds directly to the Custody/Reward Safes and
+- immutable PaymentRouter sends funds directly to the dedicated Service Fee,
+  Custody/Settlement and Reward/Distribution EOAs and
   normally retains zero balance;
-- settlement uses the append-only double-entry ledger and Safe MultiSend, not a
-  contract pull-Claim;
+- settlement uses the append-only double-entry ledger and one immutable EOA
+  ERC-20 transfer per payable, not a contract pull-Claim or batch executor;
 - BNM is existing backend points with Locked/Available states, not an ERC-20,
   mint or on-chain Claim.
 

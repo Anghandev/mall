@@ -43,7 +43,6 @@ describe('platform admin fail-closed experience', () => {
     expect(productBaseline.adminCapabilities.adminProductBatchTags).toBe(true);
     expect(productBaseline.adminCapabilities.adminProductLifecycleBatch).toBe(true);
     expect(productBaseline.adminCapabilities.notificationCampaignOperations).toBe(true);
-    expect(productBaseline.adminCapabilities.merchantLevelPolicy).toBe(true);
     expect(productBaseline.adminCapabilities.merchantFastShip48h).toBe(true);
     expect(productBaseline.adminCapabilities.merchantSettlementWalletGovernance).toBe(true);
     expect(productBaseline.adminCapabilities.adminSettlementRequests).toBe(true);
@@ -64,7 +63,7 @@ describe('platform admin fail-closed experience', () => {
       /^\w+ \/v2\/admin\/(?:merchant-)?stores(?:\/|$)/.test(operation),
     );
 
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.16');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.17');
     expect(coordinatedManifest.capabilityStatus.buyerShoppingStatementHttp).toBe('AVAILABLE');
     expect(coordinatedManifest.capabilityStatus.merchantReceivableStatementHttp).toBe('AVAILABLE');
     expect(storeStatuses).toEqual(['DRAFT', 'ACTIVE', 'SUSPENDED', 'CLOSED']);
@@ -723,6 +722,7 @@ describe('platform admin fail-closed experience', () => {
 
     expect((await screen.findAllByText('Fail closed')).length).toBeGreaterThan(0);
     expect(screen.getByText('Core 返回无阻断项')).toBeTruthy();
+    expect(screen.getByText('PAYMENT_CONFIGURATION_REQUIRED')).toBeTruthy();
     expect(screen.getByText('PAYMENT_ROUTER_ADDRESS_MANIFEST')).toBeTruthy();
     expect(screen.getByText('buyerShoppingStatementHttp').closest('li')?.className).toBe('capability-available');
     expect(screen.getByText('merchantReceivableStatementHttp').closest('li')?.className).toBe('capability-available');
@@ -961,6 +961,7 @@ function bootstrapResponse() {
       externalBlocked: ['PAYMENT_ROUTER_ADDRESS_MANIFEST'],
       paymentDecisionBlocked: [],
       paymentExternalBlocked: ['PAYMENT_ROUTER_ADDRESS_MANIFEST'],
+      runtimeBlockers: ['PAYMENT_CONFIGURATION_REQUIRED'],
       providers: { RPC_PRIMARY: 'CONFIGURATION_REQUIRED' },
       writesEnabled: false,
     },

@@ -101,7 +101,7 @@ describe('Mall Core artifact boundary', () => {
       ...Object.values(coordinatedRealtimeOperations),
     ];
 
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.16');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.17');
     expect(coordinatedOpenApi.paths['/v2/merchant/orders/exports']?.post?.operationId)
       .toBe('exportMerchantOrders');
     expect(coordinatedOpenApi.paths['/v2/admin/payments/{orderId}']?.get?.operationId)
@@ -146,6 +146,7 @@ describe('coordinated Core HTTP client', () => {
         externalBlocked: [],
         paymentDecisionBlocked: [],
         paymentExternalBlocked: [],
+        runtimeBlockers: [],
         providers: {},
         writesEnabled: true,
       },
@@ -891,6 +892,7 @@ function bootstrap() {
       externalBlocked: [],
       paymentDecisionBlocked: [],
       paymentExternalBlocked: [],
+      runtimeBlockers: [],
       providers: {},
       writesEnabled: true,
     },

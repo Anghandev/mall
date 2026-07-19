@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { artifactVersion } from '@abu24k/core-artifacts';
 import openApi from '@abu24k/core-artifacts/openapi';
 import merchantOperations from 'virtual:merchant-store-operations';
 import { createCoreApi, putMediaFile } from '../src/core-api';
@@ -537,7 +538,7 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
         body: JSON.stringify(input),
         headers: expect.objectContaining({
           authorization: 'Bearer merchant-session',
-          'x-abu-artifact-version': '2.0.0-settlement-admin.16',
+          'x-abu-artifact-version': artifactVersion,
         }),
       }),
     );
@@ -637,7 +638,7 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
       'https://core.example.test/v2/catalog/products',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'x-abu-artifact-version': '2.0.0-settlement-admin.16' }),
+        headers: expect.objectContaining({ 'x-abu-artifact-version': artifactVersion }),
       }),
     );
   });

@@ -53,7 +53,6 @@ export const productBaseline = Object.freeze({
     merchantQualificationEncryption: true,
     merchantReviewGovernance: true,
     merchantDrilldown: true,
-    merchantLevelPolicy: true,
     merchantFastShip48h: true,
     merchantSettlementWalletGovernance: true,
     cms: true,

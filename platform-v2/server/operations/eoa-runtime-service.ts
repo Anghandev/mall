@@ -42,11 +42,33 @@ const contractInterfaces = new Map(Object.entries(abiBundle.contracts).map(([nam
 const manifestContracts = new Map(contractManifest.contracts.map((entry) => [entry.name, entry.address?.toLowerCase()]));
 
 type StoredRecord = { requestHash: string; response: Record<string, unknown>; rawTransaction?: string };
+type RuntimeErrorCode =
+  | 'CHAIN_MISMATCH'
+  | 'SIGNATURE_MISMATCH'
+  | 'ROLE_MISMATCH'
+  | 'AMOUNT_MISMATCH'
+  | 'CALLDATA_MISMATCH'
+  | 'NONCE_MISMATCH'
+  | 'IDEMPOTENCY_CONFLICT'
+  | 'INVALID_ENVELOPE';
+
+class RuntimeRequestError extends Error {
+  readonly runtimeCode: RuntimeErrorCode;
+  readonly status: number;
+
+  constructor(runtimeCode: RuntimeErrorCode, message: string, status = 400) {
+    super(message);
+    this.name = 'RuntimeRequestError';
+    this.runtimeCode = runtimeCode;
+    this.status = status;
+  }
+}
+
 let state = await loadState(stateFile);
 let queue = Promise.resolve();
 
 const server = createServer((request, response) => {
-  void route(request, response).catch(() => send(response, 500, { error: 'EOA_RUNTIME_FAILURE' }));
+  void route(request, response).catch((error) => sendRuntimeError(response, error));
 });
 
 server.listen(port, host, () => console.log(`Abu 24K EOA runtime listening on ${host}:${port}`));
@@ -98,32 +120,63 @@ async function sign(input: Record<string, unknown>) {
 }
 
 async function settle(input: Record<string, unknown>) {
-  if (Number(input.chainId) !== 56) throw new Error('wrong chain');
-  const transferId = hash(input.transferId, 'transferId');
-  const executorWallet = address(input.executorWallet, 'executorWallet');
-  const executorNonce = integer(input.executorNonce, 'executorNonce');
-  const tokenAddress = address(input.tokenAddress, 'tokenAddress');
-  const recipientAddress = address(input.recipientAddress, 'recipientAddress');
-  const amount = positiveInteger(input.amount, 'amount');
-  const transferCalldata = bytes(input.transferCalldata, 'transferCalldata');
-  const requestDigest = hash(input.requestDigest, 'requestDigest');
-  const gasLimit = boundedGas(input.gasLimit);
-  const idempotencyKey = identifier(input.idempotencyKey, 'idempotencyKey');
+  if (Number(input.chainId) !== 56) throw new RuntimeRequestError('CHAIN_MISMATCH', 'wrong chain');
+  let transferId: string;
+  let executorWallet: string;
+  let executorNonce: bigint;
+  let tokenAddress: string;
+  let recipientAddress: string;
+  let amount: bigint;
+  let transferCalldata: string;
+  let requestDigest: string;
+  let gasLimit: bigint;
+  let idempotencyKey: string;
+  try {
+    transferId = hash(input.transferId, 'transferId');
+    executorWallet = address(input.executorWallet, 'executorWallet');
+    executorNonce = integer(input.executorNonce, 'executorNonce');
+    tokenAddress = address(input.tokenAddress, 'tokenAddress');
+    recipientAddress = address(input.recipientAddress, 'recipientAddress');
+    amount = positiveInteger(input.amount, 'amount');
+    transferCalldata = bytes(input.transferCalldata, 'transferCalldata');
+    requestDigest = hash(input.requestDigest, 'requestDigest');
+    gasLimit = boundedGas(input.gasLimit);
+    idempotencyKey = identifier(input.idempotencyKey, 'idempotencyKey');
+  } catch {
+    throw new RuntimeRequestError('INVALID_ENVELOPE', 'settlement envelope is invalid');
+  }
   const role = settlementWallets.get(executorWallet);
-  if (!role || role.tokenAddress !== tokenAddress) throw new Error('settlement role mismatch');
-  const decoded = transferInterface.decodeFunctionData('transfer', transferCalldata);
+  if (!role || role.tokenAddress !== tokenAddress) throw new RuntimeRequestError('ROLE_MISMATCH', 'settlement role mismatch');
+  let decoded: ReturnType<typeof transferInterface.decodeFunctionData>;
+  try {
+    decoded = transferInterface.decodeFunctionData('transfer', transferCalldata);
+  } catch {
+    throw new RuntimeRequestError('CALLDATA_MISMATCH', 'settlement calldata mismatch');
+  }
+  if (address(decoded[0], 'calldata recipient') !== recipientAddress) {
+    throw new RuntimeRequestError('CALLDATA_MISMATCH', 'settlement calldata recipient mismatch');
+  }
+  if (BigInt(decoded[1]) !== amount) {
+    throw new RuntimeRequestError('AMOUNT_MISMATCH', 'settlement calldata amount mismatch');
+  }
   if (
-    address(decoded[0], 'calldata recipient') !== recipientAddress
-    || BigInt(decoded[1]) !== amount
-    || transferInterface.encodeFunctionData('transfer', decoded).toLowerCase() !== transferCalldata
-  ) throw new Error('settlement calldata mismatch');
+    transferInterface.encodeFunctionData('transfer', decoded).toLowerCase() !== transferCalldata
+  ) throw new RuntimeRequestError('CALLDATA_MISMATCH', 'settlement calldata mismatch');
   const requestHash = hashJson(input);
   const existing = state[`settlement:${idempotencyKey}`];
   if (existing) return replayBroadcast(existing, requestHash);
   const replacementHash = optionalHash(input.replacementForExecutionTxHash);
-  if (replacementHash) await assertReplacement(replacementHash, role.wallet.address, tokenAddress, transferCalldata, executorNonce);
+  if (replacementHash) {
+    try {
+      await assertReplacement(replacementHash, role.wallet.address, tokenAddress, transferCalldata, executorNonce);
+    } catch {
+      throw new RuntimeRequestError('CALLDATA_MISMATCH', 'replacement transaction mismatch');
+    }
+  }
   const pendingNonce = await provider.getTransactionCount(role.wallet.address, 'pending');
-  if (!replacementHash && BigInt(pendingNonce) !== executorNonce) throw new Error('settlement nonce drift');
+  if (!replacementHash && BigInt(pendingNonce) !== executorNonce) {
+    throw new RuntimeRequestError('NONCE_MISMATCH', 'settlement nonce drift');
+  }
   const signed = await signTransaction(role.wallet, await transactionRequest({
     to: tokenAddress,
     data: transferCalldata,
@@ -447,7 +500,9 @@ async function loadState(path: string): Promise<Record<string, StoredRecord>> {
 }
 
 function replay(recordValue: StoredRecord, requestHash: string) {
-  if (recordValue.requestHash !== requestHash) throw new Error('idempotency conflict');
+  if (recordValue.requestHash !== requestHash) {
+    throw new RuntimeRequestError('IDEMPOTENCY_CONFLICT', 'idempotency conflict', 409);
+  }
   return recordValue.response;
 }
 
@@ -575,6 +630,13 @@ function stableJson(value: unknown): string {
       .join(',')}}`;
   }
   return JSON.stringify(value) ?? 'null';
+}
+
+function sendRuntimeError(response: ServerResponse, error: unknown) {
+  if (error instanceof RuntimeRequestError) {
+    return send(response, error.status, { error: { code: error.runtimeCode } });
+  }
+  return send(response, 500, { error: 'EOA_RUNTIME_FAILURE' });
 }
 
 function send(response: ServerResponse, status: number, value: unknown) {

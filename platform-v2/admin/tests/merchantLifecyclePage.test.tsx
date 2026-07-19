@@ -91,7 +91,7 @@ describe('merchant lifecycle page', () => {
     expect(screen.queryByRole('heading', { name: '商家审核发布' })).toBeNull();
   });
 
-  it('lets ADMIN sign the exact challenge with an independent wallet and renders Safe evidence', async () => {
+  it('lets ADMIN sign the exact challenge with an independent wallet and renders EOA evidence', async () => {
     const wallet = address('1');
     const secondarySigner = address('2');
     let current = merchantDetail({ merchant: { ...merchantDetail().merchant, qualificationComplete: true }, qualification: { ...qualification(), licenseAssetId: hash('a') } });
@@ -179,23 +179,22 @@ function merchantFetch(wallet: string, role: UserRole, detail: () => MerchantLif
 function merchantDetail(overrides: Partial<MerchantLifecycleDetail> = {}): MerchantLifecycleDetail {
   const base: MerchantLifecycleDetail = {
     artifactVersion,
-    merchant: { merchantId: 'merchant-1', shopName: '阿步金店', settlementWallet: address('3'), settlementWalletMutable: false, status: 'PENDING', level: 'V1', guaranteeStatus: 'READY', applicationVersion: 1, qualificationComplete: false, reviewedAt: null, reviewedBy: null, createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T00:00:00.000Z' },
+    merchant: { merchantId: 'merchant-1', shopName: '阿步金店', settlementWallet: address('3'), settlementWalletMutable: false, status: 'PENDING', guaranteeStatus: 'READY', applicationVersion: 1, qualificationComplete: false, reviewedAt: null, reviewedBy: null, createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T00:00:00.000Z' },
     qualification: qualification(),
-    levelPolicy: { status: 'Deprecated' },
     analytics: {
       orders: { totalFinalized: '3', ordinaryFinalized: '2', seckillFinalized: '1', cumulative: amounts('100', '70', '60', '55'), today: amounts('20', '14', '12', '11'), timezone: 'Asia/Shanghai', window: { start: '2026-07-15T16:00:00.000Z', end: '2026-07-16T16:00:00.000Z' } },
       fulfillment: { pendingShipment: '1', inTransit: '1', completed: '1', pickupCompleted: '0', fastShip48h: { status: 'AVAILABLE', numerator: '3', denominator: '4', bps: 7500, reason: null } },
       risk: { takeoverCases: '1', guaranteeUsedUsdt: '2', frozenReceivableUsedUsdt: '3', futureProceedsUsedUsdt: '4', platformAdvanceUsdt: '5', outstandingDebtUsdt: '6', abnormalOrderRateBps: null, unavailableReason: 'DecisionBlocked' },
       contributions: { finalizedNplBurnAmount: '7', fulfillmentAvailableBnmAmount: '8', ledgerReconciled: true },
     },
-    balances: ['LOCKED', 'AVAILABLE', 'REQUESTED', 'BATCHED', 'SETTLED'].map((state, index) => ({ state: state as MerchantLifecycleDetail['balances'][number]['state'], amount: String(index + 1) })),
+    balances: ['LOCKED', 'AVAILABLE', 'REQUESTED', 'SUBMITTED', 'SETTLED'].map((state, index) => ({ state: state as MerchantLifecycleDetail['balances'][number]['state'], amount: String(index + 1) })),
     settlements: [{ requestId: hash('d'), asset: 'USDT', amount: '5', state: 'SETTLED', requestedAt: '2026-07-16T00:00:00.000Z', finalExecutionTxHashes: [hash('e')], settledAt: '2026-07-16T01:00:00.000Z' }],
     reviews: [],
   };
   return { ...base, ...overrides };
 }
 function qualification() { return { access: 'FULL' as const, legalName: '阿步黄金有限公司', legalId: 'LICENSE-001', contactPhone: '13800138000', licenseAssetId: null, payloadHash: hash('1'), retentionPolicyVersion: 'pii-v1', version: 1, updatedAt: '2026-07-16T00:00:00.000Z' }; }
-function reviewChallenge(signer: string) { const expiresAt = '2099-01-01T00:00:00.000Z'; return { artifactVersion, actionId: hash('7'), merchantId: 'merchant-1', action: 'APPROVE' as const, fromStatus: 'PENDING' as const, toStatus: 'APPROVED' as const, applicationVersion: 1, reasonCode: 'QUALIFICATION_APPROVED', state: 'DRAFT' as const, secondarySigner: signer, expiresAt, typedData: { domain: { name: 'Abu24KV2Core' }, types: { SensitiveAction: [] }, primaryType: 'SensitiveAction', message: { action: 'APPROVE_MERCHANT', resourceType: 'MERCHANT', resourceId: 'merchant-1', policyVersion: '2', oldValueHash: hash('2'), newValueHash: hash('3'), safeAddress: address('4'), nonce: '7', deadline: String(Math.floor(Date.parse(expiresAt) / 1_000)) } }, digest: hash('6') }; }
+function reviewChallenge(signer: string) { const expiresAt = '2099-01-01T00:00:00.000Z'; return { artifactVersion, actionId: hash('7'), merchantId: 'merchant-1', action: 'APPROVE' as const, fromStatus: 'PENDING' as const, toStatus: 'APPROVED' as const, applicationVersion: 1, reasonCode: 'QUALIFICATION_APPROVED', state: 'DRAFT' as const, secondarySigner: signer, expiresAt, typedData: { domain: { name: 'Abu24KV2Core' }, types: { SensitiveAction: [] }, primaryType: 'SensitiveAction', message: { action: 'APPROVE_MERCHANT', resourceType: 'MERCHANT', resourceId: 'merchant-1', policyVersion: '2', oldValueHash: hash('2'), newValueHash: hash('3'), executorWallet: address('4'), nonce: '7', deadline: String(Math.floor(Date.parse(expiresAt) / 1_000)) } }, digest: hash('6') }; }
 function publishedDetail(current: MerchantLifecycleDetail, challenge: ReturnType<typeof reviewChallenge>): MerchantLifecycleDetail { return { ...current, merchant: { ...current.merchant, status: 'APPROVED', reviewedAt: '2026-07-16T01:00:00.000Z', reviewedBy: address('1') }, reviews: [{ actionId: challenge.actionId, action: 'APPROVE', fromStatus: 'PENDING', toStatus: 'APPROVED', applicationVersion: 1, reasonCode: challenge.reasonCode, state: 'PUBLISHED', secondarySigner: challenge.secondarySigner, actionDigest: challenge.digest, approvalSignatureHash: hash('f'), createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T01:00:00.000Z' }] }; }
 function uploadIntent(request: Record<string, unknown>, wallet: string) { return { artifactVersion, uploadIntentId: hash('8'), ownerWallet: wallet, purpose: 'MERCHANT_LICENSE', resourceType: 'MERCHANT', resourceId: 'merchant-1', contentType: request.contentType, sizeBytes: String(request.sizeBytes), contentSha256: request.contentSha256, state: 'UPLOADED', expiresAt: '2099-01-01T00:00:00.000Z', method: 'PUT', uploadUrl: 'https://storage.example/license', headers: {}, providerReferenceHash: hash('9'), writeOnce: true }; }
 function mediaAsset(wallet: string, request: Record<string, unknown>) { return { artifactVersion, assetId: hash('a'), uploadIntentId: hash('8'), ownerWallet: wallet, purpose: 'MERCHANT_LICENSE', resourceType: 'MERCHANT', resourceId: 'merchant-1', contentType: request.contentType, sizeBytes: String(request.sizeBytes), contentSha256: request.contentSha256, providerEvidenceHash: hash('b'), objectVersionHash: hash('c'), createdAt: '2026-07-16T00:00:00.000Z' }; }

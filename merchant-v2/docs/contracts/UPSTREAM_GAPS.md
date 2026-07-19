@@ -1,9 +1,9 @@
 # Merchant Workbench Core Gaps
 
-The merchant product consumes Core's coordinated `2.0.0-settlement-admin.16` artifact
+The merchant product consumes Core's coordinated `2.0.0-settlement-admin.17` artifact
 workspace package. Bootstrap, SIWE,
 merchant-bound Catalog/SKU/inventory management, immutable media, wallet-scoped fulfillment, merchant finance,
-guarantee-deposit evidence, signed settlement requests and Safe-finality
+guarantee-deposit evidence, signed settlement requests and per-payable EOA-finality
 history are connected through their published HTTP surfaces. The browser
 validates generated enums and immutable EIP-712 fields, keeps idempotency keys
 stable across retry, and fails closed on wallet, merchant, artifact or unknown
@@ -27,9 +27,9 @@ remain unchanged.
 
 | Gap ID | Published Core capability | Merchant evidence |
 |---|---|---|
-| GAP-MER-006 | Settlement outbox, ledger lifecycle and Safe finality projection | Order balances and `/v2/settlements` remain separate; no merchant completion shortcut |
+| GAP-MER-006 | Settlement outbox, ledger lifecycle and EOA finality projection | Order balances and `/v2/settlements` remain separate; no merchant completion shortcut |
 | GAP-MER-011 | Merchant USDT five-state balances plus guarantee, debt and takeover finance | Exact `MERCHANT_RECEIVABLE` rows, finance restrictions and evidence render without browser netting |
-| GAP-MER-012 | Merchant settlement intent, EIP-712 request, immutable batch and final Safe TxHash | Wallet signs Core typed data and submits `/v2/settlement-requests`; Requested/Batched/Settled history links final BSC hash |
+| GAP-MER-012 | Merchant settlement intent, EIP-712 request, immutable per-payable transfer and final EOA execution TxHash | Wallet signs Core typed data and submits `/v2/settlement-requests`; Requested/Submitted/Settled history links the final BSC hash |
 | GAP-MER-013 (reward/points slice) | NPL reward subtypes and finance-center BNM aggregate | All eight generated NPL subtypes render from `SettlementBalance.rewardSubtype`; Core-projected BNM Locked/Available totals render separately as non-transferable points with no settlement action |
 | GAP-MER-016 | Versioned public rules/help content | Wallet-targeted `SECKILL_RULES` CMS content renders with its bound policyVersion; absent or malformed content fails closed |
 | GAP-MER-004 | Merchant-bound unique product slot, save/replacement/review lifecycle, exact write locks and signed concession preview | Product form reads and writes only `/v2/merchant/**`; generated `allowedActions`, `writeLock`, `blockingResource` and signed EIP-712 preview fields fail closed on mismatch |
@@ -37,7 +37,7 @@ remain unchanged.
 | GAP-MER-005 (order-page/manual-batch slice) | Stable merchant order cursor, date/SKU/state/mode/kind filters, complete authoritative rows and atomic manual-shipment batch | The workbench serializes only published filters, preserves the full cursor, renders quantity/TxHash/kind/actions and submits 1-100 canonical shipment evidence rows with stable retry keys |
 | GAP-MER-003 | Merchant business dashboard with authoritative timezone/day, exact payment snapshots, current fulfillment queues and generated product/seckill state | Dashboard and finance Today metric consume `/v2/merchant/dashboard`; zero remains a real Core value while request failure stays visibly unavailable |
 | GAP-MER-014 | Tenant-scoped merchant profile, immutable settlement identity and owned Logo media validation | Settings consumes GET/PUT profile with expectedVersion/idempotency; only shopName/logoAssetId are editable and settlement wallet never enters the PUT body |
-| GAP-MER-015 | Merchant-scoped reverse-time audit read model and bounded CSV export | Filters/cursor, partial-history label, signature/Safe-or-chain hashes and exact Core CSV download are live without a browser-side audit replica |
+| GAP-MER-015 | Merchant-scoped reverse-time audit read model and bounded CSV export | Filters/cursor, partial-history label, signature/execution hashes and exact Core CSV download are live without a browser-side audit replica |
 | GAP-MER-001 (per-order receivable slice) | Merchant-scoped stable-cursor order statements with frozen amounts, lifecycle, journal and settlement references | Ordinary, fallback-retail and seckill-classified orders render exact Core evidence; tenant/wallet mismatch and authorization failure close the statement without browser netting |
 
 ## Resolved In Logistics Batch
@@ -80,4 +80,4 @@ create a local success state.
 | GAP-MER-001 | Coordinated merchant runtime endpoints beyond published payment, fulfillment and settlement/admin surfaces | Published reads and writes are live; unpublished writes remain unavailable |
 | GAP-MER-002 | Secondary-signature intents beyond the published printer binding plus production merchant allowlist and domain configuration | Printer binding signs the exact Core challenge; unpublished region-change intent, unauthorized/rejected/wrong-chain states remain fail closed |
 | GAP-MER-013 | Authoritative seckill revenue detail | Published NPL subtype balances and finance-center BNM totals are live; only the unpublished seckill revenue projection remains unavailable |
-| GAP-MER-018 | Provider accounts/devices, authorized merchant wallet, RPC/domain/Safe inputs | ExternalBlocked; no simulated success |
+| GAP-MER-018 | Provider accounts/devices, authorized merchant wallet and RPC/domain inputs | ExternalBlocked; no simulated success |

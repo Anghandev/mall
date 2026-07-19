@@ -598,12 +598,13 @@ function isSeckillPrizeReview(value: unknown) {
 
 function isSeckillPrizePayout(value: unknown) {
   return isRecord(value)
-    && hasExactKeys(value, ['state', 'requestId', 'batchId', 'finalSafeTxHash', 'finalExecutionTxHash'])
-    && ['AVAILABLE', 'REQUESTED', 'BATCHED', 'SETTLED', 'RETRYABLE', 'QUARANTINED'].includes(String(value.state))
+    && hasExactKeys(value, ['state', 'requestId', 'transferIds', 'finalExecutionTxHashes'])
+    && ['AVAILABLE', 'REQUESTED', 'SUBMITTED', 'SETTLED', 'RETRYABLE', 'QUARANTINED'].includes(String(value.state))
     && isNullableHash(value.requestId)
-    && isNullableHash(value.batchId)
-    && isNullableHash(value.finalSafeTxHash)
-    && isNullableHash(value.finalExecutionTxHash);
+    && Array.isArray(value.transferIds)
+    && value.transferIds.every((item) => bytes32Pattern.test(String(item)))
+    && Array.isArray(value.finalExecutionTxHashes)
+    && value.finalExecutionTxHashes.every((item) => bytes32Pattern.test(String(item)));
 }
 
 function samePrizeSnapshot(value: SeckillPrizeSettlementProjection, expected: SeckillPrizeSettlementProjection) {

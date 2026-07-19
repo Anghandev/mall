@@ -96,6 +96,20 @@ export interface EoaSettlementChainSource {
   }>;
 }
 
+export const deterministicEoaSettlementExecutorErrorCodes = [
+  'CHAIN_MISMATCH',
+  'SIGNATURE_MISMATCH',
+  'ROLE_MISMATCH',
+  'AMOUNT_MISMATCH',
+  'CALLDATA_MISMATCH',
+  'NONCE_MISMATCH',
+  'IDEMPOTENCY_CONFLICT',
+  'INVALID_ENVELOPE',
+] as const;
+
+export type DeterministicEoaSettlementExecutorErrorCode =
+  (typeof deterministicEoaSettlementExecutorErrorCodes)[number];
+
 interface SettlementTransferService {
   createTransfer(
     actor: { walletAddress: string; roles: readonly ['OPERATOR'] },
@@ -262,7 +276,10 @@ export class SettlementWorker {
          FROM core.settlement_transfer_attempts attempt
          JOIN core.settlement_transfers transfer ON transfer.transfer_id = attempt.transfer_id
          WHERE attempt.state = 'LEASED' AND attempt.leased_until < $1
-           AND transfer.state = 'LEASED'
+           AND (
+             transfer.state = 'LEASED'
+             OR (attempt.replacement_for_attempt_id IS NOT NULL AND transfer.state IN ('SUBMITTED','MINED'))
+           )
          ORDER BY attempt.leased_until, attempt.attempt_id
          LIMIT 1 FOR UPDATE OF attempt, transfer SKIP LOCKED`,
         [this.#clock()],
@@ -270,7 +287,7 @@ export class SettlementWorker {
       const row = result.rows[0];
       if (!row) return 0;
       await executor.query(
-        `UPDATE core.settlement_transfer_attempts SET state = 'FAILED', updated_at = $2
+        `UPDATE core.settlement_transfer_attempts SET state = 'RETRYABLE', updated_at = $2
          WHERE attempt_id = $1 AND state = 'LEASED'`,
         [row.attempt_id, this.#clock()],
       );
@@ -373,6 +390,26 @@ export class SettlementWorker {
 
   async replaceOnce() {
     const candidate = await this.#transactions.transaction(async (executor) => {
+      const retryableReplacement = await executor.query<{
+        transfer_id: string;
+        attempt_id: string;
+        replacement_for_attempt_id: string;
+      }>(
+        `SELECT transfer.transfer_id, attempt.attempt_id, attempt.replacement_for_attempt_id
+         FROM core.settlement_transfer_attempts attempt
+         JOIN core.settlement_transfers transfer ON transfer.transfer_id = attempt.transfer_id
+         WHERE transfer.state IN ('SUBMITTED','MINED')
+           AND attempt.state = 'RETRYABLE'
+           AND attempt.replacement_for_attempt_id IS NOT NULL
+         ORDER BY attempt.updated_at, transfer.transfer_id LIMIT 1
+         FOR UPDATE OF attempt, transfer SKIP LOCKED`,
+      );
+      if (retryableReplacement.rows[0]) {
+        const transfer = await loadTransfer(executor, retryableReplacement.rows[0].transfer_id, true);
+        const previous = await loadAttempt(executor, retryableReplacement.rows[0].replacement_for_attempt_id, true);
+        const attempt = await leaseExistingAttempt(executor, retryableReplacement.rows[0].attempt_id, this.#clock());
+        return { transfer, previous, attempt };
+      }
       const result = await executor.query<{ transfer_id: string; attempt_id: string }>(
         `SELECT transfer.transfer_id, attempt.attempt_id
          FROM core.settlement_transfers transfer
@@ -431,7 +468,15 @@ export class SettlementWorker {
       );
       if (!selected.rows[0]) return undefined;
       const transfer = await loadTransfer(executor, selected.rows[0].transfer_id, true);
-      const attempt = await createAttempt(executor, transfer, this.#clock());
+      const retryable = await executor.query<{ attempt_id: string }>(
+        `SELECT attempt_id FROM core.settlement_transfer_attempts
+         WHERE transfer_id = $1 AND state = 'RETRYABLE' AND replacement_for_attempt_id IS NULL
+         ORDER BY attempt_number DESC LIMIT 1 FOR UPDATE`,
+        [transfer.transfer_id],
+      );
+      const attempt = retryable.rows[0]
+        ? await leaseExistingAttempt(executor, retryable.rows[0].attempt_id, this.#clock())
+        : await createAttempt(executor, transfer, this.#clock());
       await executor.query(
         `UPDATE core.settlement_transfers SET state = 'LEASED'
          WHERE transfer_id = $1 AND state IN ('PENDING','RETRYABLE')`,
@@ -481,6 +526,19 @@ export class SettlementWorker {
         ],
       );
       await markItemSubmitted(executor, transfer, submitted.executionTxHash, now);
+      if (!replacementForTxHash) {
+        await executor.query(
+          `INSERT INTO core.outbox_events (
+             event_id, aggregate_type, aggregate_id, event_type, payload, idempotency_key, state
+           ) VALUES ($1,'SETTLEMENT_TRANSFER',$2,'SettlementTransferSubmitted',$3,$1,'PENDING')
+           ON CONFLICT (idempotency_key) DO NOTHING`,
+          [
+            `outbox:settlement-submitted:${transfer.transfer_id}`,
+            transfer.transfer_id,
+            JSON.stringify({ transferId: transfer.transfer_id, executionTxHash: submitted.executionTxHash }),
+          ],
+        );
+      }
       await enqueueTransferAudit(executor, {
         transfer,
         eventType: replacementForTxHash ? 'SettlementTransferReplaced' : 'SettlementTransferSubmitted',
@@ -715,10 +773,14 @@ export class SettlementWorker {
     leased: { transfer: TransferRow; attempt: AttemptRow },
     error: unknown,
   ) {
+    if (isDeterministicSettlementExecutorRejection(error)) {
+      await this.#markLeaseQuarantined(leased, error);
+      return;
+    }
     await this.#transactions.transaction(async (executor) => {
       const now = this.#clock();
       await executor.query(
-        `UPDATE core.settlement_transfer_attempts SET state = 'FAILED', updated_at = $2
+        `UPDATE core.settlement_transfer_attempts SET state = 'RETRYABLE', updated_at = $2
          WHERE attempt_id = $1 AND state = 'LEASED'`,
         [leased.attempt.attempt_id, now],
       );
@@ -731,7 +793,41 @@ export class SettlementWorker {
         transfer: leased.transfer,
         eventType: 'SettlementTransferSubmissionFailed',
         evidenceProfile: 'SYSTEM',
-        evidenceHash: hashJson({ name: errorName(error), message: errorMessage(error) }),
+        evidenceHash: hashJson(settlementSubmissionFailureEvidence(error, 'RETRYABLE')),
+        at: now,
+      });
+    });
+  }
+
+  async #markLeaseQuarantined(
+    leased: { transfer: TransferRow; attempt: AttemptRow },
+    error: unknown,
+  ) {
+    await this.#transactions.transaction(async (executor) => {
+      const now = this.#clock();
+      await executor.query(
+        `UPDATE core.settlement_transfer_attempts SET state = 'QUARANTINED', updated_at = $2
+         WHERE attempt_id = $1 AND state = 'LEASED'`,
+        [leased.attempt.attempt_id, now],
+      );
+      const transferQuarantined = await executor.query<{ transfer_id: string }>(
+        `UPDATE core.settlement_transfers SET state = 'QUARANTINED'
+         WHERE transfer_id = $1 AND state IN ('LEASED','SUBMITTED','MINED')
+         RETURNING transfer_id`,
+        [leased.transfer.transfer_id],
+      );
+      if (transferQuarantined.rows[0]) {
+        await executor.query(
+          `UPDATE core.settlement_requests SET state = 'QUARANTINED'
+           WHERE request_id = $1`,
+          [leased.transfer.request_id],
+        );
+      }
+      await enqueueTransferAudit(executor, {
+        transfer: leased.transfer,
+        eventType: 'SettlementTransferSubmissionQuarantined',
+        evidenceProfile: 'SYSTEM',
+        evidenceHash: hashJson(settlementSubmissionFailureEvidence(error, 'QUARANTINED')),
         at: now,
       });
     });
@@ -786,6 +882,21 @@ async function createAttempt(
       new Date(now.getTime() + 2 * 60 * 1000),
       now,
     ],
+  );
+  return loadAttempt(executor, attemptId);
+}
+
+async function leaseExistingAttempt(
+  executor: SqlExecutor,
+  attemptId: string,
+  now: Date,
+) {
+  const leaseToken = randomUUID();
+  await executor.query(
+    `UPDATE core.settlement_transfer_attempts
+     SET state = 'LEASED', lease_token = $2, leased_until = $3, updated_at = $4
+     WHERE attempt_id = $1 AND state = 'RETRYABLE'`,
+    [attemptId, leaseToken, new Date(now.getTime() + 2 * 60 * 1000), now],
   );
   return loadAttempt(executor, attemptId);
 }
@@ -1162,10 +1273,27 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value) ?? 'null';
 }
 
-function errorName(error: unknown) {
-  return error instanceof Error ? error.name : 'UnknownError';
+function isDeterministicSettlementExecutorRejection(error: unknown) {
+  return error instanceof CoreError
+    && error.details.deterministicExecutorFailure === true
+    && typeof error.details.executorErrorCode === 'string'
+    && deterministicEoaSettlementExecutorErrorCodes.includes(
+      error.details.executorErrorCode as DeterministicEoaSettlementExecutorErrorCode,
+    );
 }
 
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
+function settlementSubmissionFailureEvidence(error: unknown, disposition: 'RETRYABLE' | 'QUARANTINED') {
+  return {
+    disposition,
+    name: errorName(error),
+    coreCode: error instanceof CoreError ? error.code : null,
+    executorErrorCode: error instanceof CoreError && typeof error.details.executorErrorCode === 'string'
+      ? error.details.executorErrorCode
+      : null,
+    deterministicExecutorFailure: isDeterministicSettlementExecutorRejection(error),
+  };
+}
+
+function errorName(error: unknown) {
+  return error instanceof Error ? error.name : 'UnknownError';
 }

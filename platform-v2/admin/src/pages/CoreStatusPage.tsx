@@ -68,6 +68,7 @@ export function CoreStatusPage() {
       </section>
 
       <section className="status-columns">
+        <BlockedList title="Runtime Blockers" values={readiness?.runtimeBlockers} loading={bootstrap.loading} />
         <BlockedList title="Payment DecisionBlocked" values={readiness?.paymentDecisionBlocked} loading={bootstrap.loading} />
         <BlockedList title="Payment ExternalBlocked" values={readiness?.paymentExternalBlocked} loading={bootstrap.loading} />
       </section>

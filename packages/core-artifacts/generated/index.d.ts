@@ -1,4 +1,4 @@
-export declare const artifactVersion: "2.0.0-settlement-admin.16";
+export declare const artifactVersion: "2.0.0-settlement-admin.17";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
@@ -12,7 +12,6 @@ export type ContractOrderState = "NONE" | "PAID" | "SHIPPED" | "DELIVERED" | "AR
 export type OrderFinalityStatus = "NOT_SUBMITTED" | "PENDING" | "CONFIRMED" | "REPLACED" | "REORGED" | "FINAL";
 export type TransactionFinalityState = "SUBMITTED" | "MINED" | "REPLACED" | "REORGED" | "FINAL" | "FAILED";
 export type UserRole = "BUYER" | "MERCHANT" | "ADMIN" | "OPERATOR" | "ARBITRATOR" | "AUDITOR";
-export type MerchantLevel = "V1" | "V2" | "V3" | "V4" | "V5";
 export type MerchantLifecycleStatus = "PENDING" | "APPROVED" | "REJECTED" | "SUSPENDED" | "BLACKLISTED";
 export type MerchantReviewAction = "APPROVE" | "REJECT" | "BLACKLIST";
 export type MerchantQualificationAccess = "FULL" | "REDACTED" | "UNAVAILABLE";
@@ -70,7 +69,7 @@ export type NotificationCampaignTopic = "ANNOUNCEMENT" | "MAINTENANCE" | "ACTIVI
 export type NotificationCampaignState = "DRAFT" | "PUBLISHED" | "CANCELLED";
 export type NotificationDeliveryState = "PENDING" | "PROCESSING" | "DELIVERED" | "RETRY" | "CONFIGURATION_REQUIRED" | "DEAD_LETTER";
 export type NotificationCampaignAction = 'PUBLISH' | 'RETRY_FAILED';
-export type SystemConfigKey = "BUSINESS" | "FREIGHT" | "RPC" | "NPL_QUOTE" | "GAS" | "CHAIN" | "INTEGRATIONS" | "MERCHANT_LEVELS";
+export type SystemConfigKey = "BUSINESS" | "FREIGHT" | "RPC" | "NPL_QUOTE" | "GAS" | "CHAIN" | "INTEGRATIONS";
 export type AuditStreamName = "financial" | "governance" | "authentication" | "operational" | "backup";
 export type AuditEvidenceProfile = "RBAC" | "AUTHORIZATION" | "SIGNED_OFFCHAIN" | "SAFE_APPROVED" | "CHAIN_OBSERVED" | "CHAIN_FINAL" | "SYSTEM";
 export type OperationsMetricComponent = "HOST" | "REDIS" | "MQ" | "DATABASE" | "HTTP" | "PAYMENT" | "FULFILLMENT" | "RPC_PRIMARY" | "RPC_FALLBACK" | "EXPLORER";
@@ -95,7 +94,6 @@ export declare const contractOrderStates: readonly ContractOrderState[];
 export declare const orderFinalityStatuses: readonly OrderFinalityStatus[];
 export declare const finalityStates: readonly TransactionFinalityState[];
 export declare const userRoles: readonly UserRole[];
-export declare const merchantLevels: readonly MerchantLevel[];
 export declare const merchantLifecycleStatuses: readonly MerchantLifecycleStatus[];
 export declare const merchantReviewActions: readonly MerchantReviewAction[];
 export declare const merchantQualificationAccess: readonly MerchantQualificationAccess[];
@@ -178,8 +176,6 @@ export interface MerchantLifecycleSummary {
   settlementWallet: Address;
   settlementWalletMutable: false;
   status: MerchantLifecycleStatus;
-  /** @deprecated V1-V5 has no business effect. */
-  level: MerchantLevel;
   guaranteeStatus: GuaranteeStatus;
   applicationVersion: number;
   qualificationComplete: boolean;
@@ -215,8 +211,6 @@ export interface MerchantApplicationCreateRequest {
   legalId: string;
   contactPhone: string;
   settlementWallet: Address;
-  /** @deprecated Ignored by Core. */
-  level?: MerchantLevel;
   idempotencyKey: string;
 }
 
@@ -225,8 +219,6 @@ export interface MerchantApplicationUpdateRequest {
   legalName: string;
   legalId: string;
   contactPhone: string;
-  /** @deprecated Ignored by Core. */
-  level?: MerchantLevel;
   licenseAssetId: Bytes32 | null;
   expectedVersion: number;
   idempotencyKey: string;
@@ -282,8 +274,6 @@ export interface MerchantLifecycleDetail {
   artifactVersion: typeof artifactVersion;
   merchant: MerchantLifecycleSummary;
   qualification: MerchantQualification;
-  /** @deprecated V1-V5 price and quota policy is disabled. */
-  levelPolicy: Readonly<{ status: 'Deprecated' }>;
   analytics: Readonly<{
     orders: {
       totalFinalized: AtomicAmount;
@@ -1369,7 +1359,6 @@ export interface TakeoverAssignment {
   replacementMerchantId: string;
   replacementWallet: Address;
   replacementApplicationVersion: number;
-  replacementLevel: MerchantLevel;
   replacementLicenseAssetId: Bytes32;
   supersedesAssignmentId: Bytes32 | null;
   reasonCode: string;
@@ -1434,7 +1423,6 @@ export interface TakeoverCandidate {
   merchantId: string;
   settlementWallet: Address;
   shopName: string;
-  level: MerchantLevel;
   applicationVersion: number;
   qualificationComplete: true;
   guaranteeReady: true;
@@ -1785,7 +1773,7 @@ export interface MerchantBusinessDashboard {
   artifactVersion: typeof artifactVersion;
   timezone: 'Asia/Shanghai';
   window: BusinessDayWindow;
-  merchant: { merchantId: string; status: string; level: string; guaranteeStatus: GuaranteeStatus };
+  merchant: { merchantId: string; status: string; guaranteeStatus: GuaranteeStatus };
   product: {
     productId: string;
     title: string;

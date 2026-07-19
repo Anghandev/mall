@@ -69,9 +69,10 @@ source conflicts are indexed in `V2_DECISIONS.md`.
 ## PaymentRouter And Custody
 
 - `PaymentRouter` is immutable and non-upgradeable. It accepts only signed
-  EIP-712 quotes, enforces nonce/deadline/replay protection, supports ERC-1271,
-  atomically transfers both payment assets, classifies seckill boundary orders,
-  emits indexed payment events and exposes the new-payment breaker.
+  EIP-712 quotes, enforces nonce/deadline/replay protection, atomically transfers
+  both payment assets, classifies seckill boundary orders, emits indexed payment
+  events and exposes the new-payment breaker. Launch buyer admission and quote
+  issuance support ordinary EOA wallets only; the deployed Router is not changed.
 - For a successful launch payment, the Router transfers the exact 1%-of-list
   USDT service fee directly to the Platform Service Fee Wallet, transfers the
   remainder of the buyer's product-USDT leg plus delivery freight directly to
@@ -282,19 +283,20 @@ source conflicts are indexed in `V2_DECISIONS.md`.
   product or an order with Locked funds. Products with history are logically
   delisted only. Funds, policies, transfer intents, chain evidence and audit records are
   never deleted.
-- Authorization never uses `tx.origin`; it uses EIP-712, nonce, deadline,
-  ERC-1271 for supported user wallets, RBAC, secondary signatures and the
-  configured EOA authority as appropriate.
+- Authorization never uses `tx.origin`; it uses EOA signatures, EIP-712, nonce,
+  deadline, RBAC, secondary signatures and the configured EOA authority as
+  appropriate.
 
 ## Privacy And Retention
 
-- Buyer name, phone and detailed address remain encrypted for 60 days after
-  order completion. From day 30, Admin defaults to masked values; at day 60,
-  plaintext is deleted.
+- Buyer name, phone and detailed address remain encrypted long term. Launch has
+  no automatic day-based masking or deletion job. Role-scoped redacted
+  projections remain separate from retention.
 - Order ID, UID, wallet, TxHash, product and amount snapshots, ledger entries,
   EOA transfer intents/executions, fulfillment/arbitration results, risk evidence and audit logs
-  are retained permanently. Every authorized PII read, export and decrypt is
-  RBAC-scoped and audited.
+  are retained permanently. Before every full PII read, export or decrypt, Core
+  revalidates the current resource/role scope and atomically records audit
+  evidence; audit failure denies the plaintext response.
 
 ## Coverage And Circuit Breakers
 

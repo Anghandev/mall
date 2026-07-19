@@ -5,6 +5,7 @@ import {
   NPL_USDT_PAIR_ADDRESS,
   REQUIRED_CONFIRMATIONS,
   USDT_ADDRESS,
+  type RuntimeBlocker,
 } from './enums.ts';
 import coordinatedManifest from '../../../packages/core-artifacts/coordinated-manifest.json' with { type: 'json' };
 import contractManifest from '../../../packages/core-artifacts/contracts/contract-manifest.json' with { type: 'json' };
@@ -180,6 +181,8 @@ export interface RuntimeReadinessSnapshot {
   signerBindingsVerified: boolean;
   nplQuoteSourceHealthy: boolean;
   indexerHealthy: boolean;
+  indexerCaughtUp: boolean;
+  indexerErrorCode?: string;
   databaseHealthy: boolean;
   redisHealthy: boolean;
   rpcChain56Healthy: boolean;
@@ -325,6 +328,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
 }
 
 export function publicReadiness(config: CoreConfig, runtime?: RuntimeReadinessSnapshot, now = new Date()) {
+  const runtimeBlockers = runtimeReadinessBlockers(config, runtime, now);
   return {
     chainId: config.chainId,
     assets: { usdt: config.usdtAddress, npl: config.nplAddress, nplUsdtPair: config.nplUsdtPairAddress },
@@ -332,12 +336,9 @@ export function publicReadiness(config: CoreConfig, runtime?: RuntimeReadinessSn
     externalBlocked: config.externalBlocked,
     paymentDecisionBlocked: config.paymentDecisionBlocked,
     paymentExternalBlocked: config.paymentExternalBlocked,
+    runtimeBlockers,
     providers: config.providerReadiness,
-    writesEnabled:
-      config.deploymentReady &&
-      config.paymentDecisionBlocked.length === 0 &&
-      config.paymentExternalBlocked.length === 0 &&
-      runtimeReadinessValid(runtime, now),
+    writesEnabled: runtimeBlockers.length === 0,
   } as const;
 }
 
@@ -422,11 +423,48 @@ function runtimeReadinessValid(snapshot: RuntimeReadinessSnapshot | undefined, n
     snapshot.signerBindingsVerified,
     snapshot.nplQuoteSourceHealthy,
     snapshot.indexerHealthy,
+    snapshot.indexerCaughtUp,
     snapshot.databaseHealthy,
     snapshot.redisHealthy,
     snapshot.rpcChain56Healthy,
     snapshot.signerHealthy,
   ].every((value) => value === true);
+}
+
+function runtimeReadinessBlockers(
+  config: CoreConfig,
+  snapshot: RuntimeReadinessSnapshot | undefined,
+  now: Date,
+): RuntimeBlocker[] {
+  const blockers = new Set<RuntimeBlocker>();
+  if (config.paymentDecisionBlocked.length > 0) blockers.add('PAYMENT_DECISION_BLOCKED');
+  if (!config.deploymentReady || config.paymentExternalBlocked.length > 0) blockers.add('PAYMENT_CONFIGURATION_REQUIRED');
+  if (!snapshot || snapshot.artifactVersion !== CORE_ARTIFACT_VERSION) {
+    blockers.add('RUNTIME_SNAPSHOT_EXPIRED');
+    return [...blockers];
+  }
+  const checkedAt = Date.parse(snapshot.checkedAt);
+  const expiresAt = Date.parse(snapshot.expiresAt);
+  if (!Number.isFinite(checkedAt) || !Number.isFinite(expiresAt) || checkedAt > now.getTime() || expiresAt <= now.getTime()) {
+    blockers.add('RUNTIME_SNAPSHOT_EXPIRED');
+  }
+  if (!snapshot.databaseHealthy) blockers.add('DATABASE_UNAVAILABLE');
+  if (!snapshot.redisHealthy) blockers.add('REDIS_UNAVAILABLE');
+  if (!snapshot.signerHealthy) blockers.add('SIGNER_UNAVAILABLE');
+  if (!snapshot.indexerHealthy) blockers.add('INDEXER_UNHEALTHY');
+  if (snapshot.indexerHealthy && !snapshot.indexerCaughtUp) blockers.add('INDEXER_LAGGING');
+  if (snapshot.indexerErrorCode === 'InvalidFinality' || snapshot.indexerErrorCode === 'ReorgPending' || !snapshot.rpcChain56Healthy) {
+    blockers.add('RPC_DIVERGENCE');
+  }
+  if (!snapshot.nplQuoteSourceHealthy) blockers.add('QUOTE_SOURCE_UNHEALTHY');
+  if (
+    !snapshot.componentHashesVerified
+    || !snapshot.deployedRuntimeCodeVerified
+    || !snapshot.roleGrantsVerified
+    || !snapshot.walletRolesVerified
+    || !snapshot.signerBindingsVerified
+  ) blockers.add('CONTRACT_EVIDENCE_UNVERIFIED');
+  return [...blockers];
 }
 
 function validateProductionEndpoints(env: Readonly<Record<string, string | undefined>>) {

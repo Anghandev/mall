@@ -15,7 +15,6 @@ const BUSINESS_OFFSET_MS = 8 * 60 * 60 * 1_000;
 interface MerchantRow {
   merchant_id: string;
   status: string;
-  level: string;
   guarantee_status: string;
   settlement_wallet: string;
 }
@@ -93,7 +92,6 @@ export class BusinessAnalyticsService {
         merchant: {
           merchantId: merchant.merchant_id,
           status: merchant.status,
-          level: merchant.level,
           guaranteeStatus: merchant.guarantee_status,
         },
         product: product ? merchantProductProjection(product, now) : null,
@@ -207,7 +205,7 @@ function windowProjection(window: ReturnType<typeof businessDay>, now: Date) {
 async function requireMerchantScope(executor: SqlExecutor, actor: FulfillmentActor) {
   const wallet = actor.walletAddress.toLowerCase();
   const result = await executor.query<MerchantRow>(
-    `SELECT merchant.merchant_id, merchant.status, merchant.level,
+    `SELECT merchant.merchant_id, merchant.status,
        merchant.guarantee_status, lower(merchant.settlement_wallet) AS settlement_wallet
      FROM core.wallet_role_bindings binding
      JOIN core.merchants merchant ON merchant.merchant_id = binding.merchant_id

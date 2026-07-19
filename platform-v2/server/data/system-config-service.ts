@@ -16,7 +16,6 @@ import {
 import { CoreError } from '../api/errors.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
-import { validateMerchantLevelPayload } from './merchant-level-policy.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 
 const ZERO_HASH = `0x${'0'.repeat(64)}`;
@@ -145,6 +144,7 @@ export class SystemConfigService {
     return this.#transactions.transaction(async (executor) => {
       await requireCurrentRole(executor, wallet, ['ADMIN']);
       const row = await lockedConfig(executor, configVersionId);
+      assertConfigKeyActive(row.config_key);
       const current = await currentConfig(executor, row.config_key);
       const policyVersion = BigInt(await latestPolicyVersion(executor));
       const intent: SensitiveActionIntent = {
@@ -181,6 +181,7 @@ export class SystemConfigService {
     const prepared = await this.#transactions.transaction(async (executor) => {
       await requireCurrentRole(executor, wallet, ['ADMIN']);
       const row = await lockedConfig(executor, configVersionId);
+      assertConfigKeyActive(row.config_key);
       const existingPublication = await executor.query<{ action_digest: string; approval_signature_hash: string }>(
         `SELECT action_digest, approval_signature_hash
          FROM core.system_config_publication_events WHERE active_config_version_id = $1`,
@@ -302,10 +303,17 @@ export class SystemConfigService {
            WHERE event.active_config_version_id = version.config_version_id
          ) AS published
          FROM core.system_config_versions version
+         WHERE version.config_key <> 'MERCHANT_LEVELS'
          ORDER BY config_key, version DESC`,
       );
       return rows.rows.map((row) => configProjection(row, row.published));
     });
+  }
+}
+
+function assertConfigKeyActive(key: string) {
+  if (!CONFIG_KEYS.includes(key as ConfigKey)) {
+    throw new CoreError('InvalidRequest', 'System config key is retired', 409);
   }
 }
 
@@ -379,7 +387,6 @@ function validateConfigPayload(key: ConfigKey, value: unknown) {
     }
     return result;
   }
-  if (key === 'MERCHANT_LEVELS') return validateMerchantLevelPayload(input);
   exactKeys(input, ['ossCredentialRef', 'cdnEnabled', 'aiPromptVersion', 'aiProviderSecretRef']);
   if (typeof input.cdnEnabled !== 'boolean') throw new CoreError('InvalidRequest', 'CDN enabled must be boolean');
   return {

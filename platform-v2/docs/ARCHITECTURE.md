@@ -11,11 +11,13 @@ runtime dependency on `legacy/v1-npl-only/`.
 
 - Product prices and merchant settlement costs are denominated in USDT.
 - Buyer payment is exactly 70% USDT plus 30% Oracle-equivalent NPL.
-- USDT moves directly to the Custody Safe; 20%-of-list NPL is burned and
-  10%-of-list NPL moves directly to the Reward Safe. PaymentRouter normally
-  retains zero.
+- The 1%-of-list USDT fee moves to the Service Fee EOA; remaining product USDT
+  plus freight moves to the Custody/Settlement EOA. 20%-of-list NPL is burned
+  and 10%-of-list NPL moves to the Reward/Distribution EOA. PaymentRouter
+  normally retains zero.
 - Merchant proceeds are USDT-only and settle from the append-only double-entry
-  ledger through Safe MultiSend after the required business finality.
+  ledger through one immutable EOA ERC-20 transfer per payable after the
+  required business finality.
 - BNM is order-linked backend points, Locked at payment and Available after
   fulfillment finality. It is not an ERC-20 or a Claim payout.
 - V2 has no business-refund workflow. Merchant default enters platform takeover
@@ -24,8 +26,8 @@ runtime dependency on `legacy/v1-npl-only/`.
 ## Security Boundary
 
 - SIWE and scoped wallet-role bindings protect product sessions.
-- High-risk writes require RBAC, a secondary wallet signature and Safe
-  multisig approval.
+- High-risk writes require RBAC, an exact secondary wallet signature and direct
+  execution by the configured Platform Governance EOA.
 - Business and append-only audit stores are separate; audit records are hash
   chained and cannot be deleted.
 - Independent Circuit Breakers leave fulfillment, takeover, emergency

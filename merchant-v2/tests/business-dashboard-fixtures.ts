@@ -11,7 +11,6 @@ export const merchantBusinessDashboard: MerchantBusinessDashboard = {
   merchant: {
     merchantId: 'merchant-1',
     status: 'APPROVED',
-    level: 'STANDARD',
     guaranteeStatus: 'READY',
   },
   product: {

@@ -103,7 +103,7 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/mall');
 
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.16');
+    expect(artifactVersion).toBe('2.0.0-settlement-admin.17');
     expect(productBaseline.manifestsAligned).toBe(true);
     expect(productBaseline.knownOrderActions).toBe(allowedActionNames);
     expect(productBaseline.executableOrderActions).toBe(executableOrderActionNames);
@@ -112,7 +112,7 @@ describe('Mall V2 payment consumer', () => {
     expect(isCoreOrderActionExecutable('CONFIRM_RECEIPT')).toBe(true);
     expect(isCoreOrderActionExecutable('PAY_ORDER')).toBe(false);
     expect(mallRuntimeBoundary).toMatchObject({
-      artifactStatus: '2.0.0-settlement-admin.16',
+      artifactStatus: '2.0.0-settlement-admin.17',
       executableOrderActions: executableOrderActionNames,
       deploymentAuthorized: true,
       settlementAdminCapabilities: {
@@ -261,12 +261,18 @@ describe('Mall V2 payment consumer', () => {
     async (blockCode) => {
       const user = userEvent.setup();
       renderAt('/mall', readyServices({
-        getBootstrap: vi.fn().mockResolvedValue({ artifactVersion, writesEnabled: false, blockCode }),
+        getBootstrap: vi.fn().mockResolvedValue({
+          artifactVersion,
+          writesEnabled: false,
+          runtimeBlockers: ['SIGNER_UNAVAILABLE'],
+          blockCode,
+        }),
       }));
 
       await screen.findByRole('heading', { name: product.title });
       await openProductCheckout(user);
       expect(screen.getByText(`${blockCode}：Core 当前阻止新支付，不创建新报价。`)).toBeTruthy();
+      expect(screen.queryByText('SIGNER_UNAVAILABLE')).toBeNull();
     },
   );
 
@@ -1397,6 +1403,9 @@ describe('Mall V2 payment consumer', () => {
     const notifications: readonly NotificationInboxItem[] = [
       notificationItem,
       { ...notificationItem },
+      notification('settlement-submitted-message', 'SettlementTransferSubmitted', 'SETTLEMENT_SUBMITTED', {
+        requestId: 'settlement-request-submitted', executionTxHash: `0x${'d'.repeat(64)}`,
+      }),
       notification('payment-message', 'PaymentFinalized', 'PAYMENT_FINALIZED', { orderId: 'order-payment', state: 'LOCKED' }),
       notification('shipment-message', 'LogisticsUpdated', 'SHIPMENT_UPDATED', {
         orderId: 'order-shipment', provider: 'KUAIDI100', carrierCode: 'SF', trackingNumberHash: `0x${'5'.repeat(64)}`, status: 'IN_TRANSIT',
@@ -1419,6 +1428,7 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     await screen.findByRole('heading', { name: '结算已完成' });
     expect(screen.getAllByRole('heading', { name: '结算已完成' })).toHaveLength(1);
+    expect(screen.getByRole('heading', { name: '结算交易已提交' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '支付已确认' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '发货与物流已更新' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '自提履约已完成' })).toBeTruthy();
@@ -1665,6 +1675,7 @@ function bootstrap(writesEnabled: boolean): CorePaymentAvailability {
   return {
     artifactVersion,
     writesEnabled,
+    runtimeBlockers: writesEnabled ? [] : ['SIGNER_UNAVAILABLE'],
     blockCode: writesEnabled ? null : 'ExternalBlocked',
   };
 }

@@ -1,7 +1,7 @@
 # Mall Core API Publication Boundary
 
 Status: the previous handwritten `mall-api-v1` proposal is retired. Mall now
-consumes coordinated Core artifacts `2.0.0-settlement-admin.16`.
+consumes coordinated Core artifacts `2.0.0-settlement-admin.17`.
 
 The published boundary currently covers:
 
@@ -34,10 +34,10 @@ The published boundary currently covers:
   USDT/NPL payment atoms, BNM Locked/Available state, journal provenance and a
   paired `(createdAt, orderId)` cursor;
 - wallet settlement balances and requests, signed EIP-712 settlement intents,
-  Safe batching state and final Safe TxHash;
+  per-payable EOA transfer state and final execution TxHash;
 - seckill current/history/session projections, authoritative timer anchors,
   frozen winner candidate, review/rollover evidence, prize payout state/final
-  Safe TxHash, FINAL governance/rules/publication evidence and final-event
+  EOA execution TxHash, FINAL governance/rules/publication evidence and final-event
   numeric cursor replay;
 - public `/v2/ws` delivery bound to artifact version, session channel and last
   accepted cursor;

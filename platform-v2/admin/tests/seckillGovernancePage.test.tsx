@@ -86,7 +86,7 @@ describe('seckill governance workspace', () => {
     expect(bodyFor(fetchMock.mock.calls, '/cancel')).toEqual({});
   });
 
-  it('completes the ADMIN SIWE, draft, selected action, secondary signature and Safe proposal flow', async () => {
+  it('completes the ADMIN SIWE, draft, selected action, secondary signature and EOA execution flow', async () => {
     const wallet = address('1');
     const signer = address('2');
     const listed = governanceAction({ actionId: hash('1') });

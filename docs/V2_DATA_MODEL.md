@@ -184,8 +184,8 @@ overwrite a later reorg `LOCKED` state.
   default per wallet. Raw parser text is never stored. A saved row is not a
   fulfillment snapshot: checkout creates a new expiring `fulfillment_target`.
 - `core.account_write_commands` keeps profile/address write idempotency without
-  storing plaintext PII. Persisted PII binds the frozen 60-day retention and
-  day-30 masking policy version.
+  storing plaintext PII. Persisted PII binds the encrypted long-term retention
+  policy version; it has no automatic day-based masking or deletion schedule.
 - `core.buyer_account_locks` serializes account/address writes per buyer wallet,
   including concurrent first-address and default-address selection.
 - Settlement intents and requests retain the authoritative merchant scope
@@ -252,8 +252,8 @@ not a substitute for production PostgreSQL backup and restore evidence.
 
 ## Blocked Inputs
 
-Production PostgreSQL, Redis, encrypted backup storage, archive-capable delayed-
-finality RPCs, signer services and other provider accounts remain launch-time
+Production PostgreSQL, Redis, encrypted backup storage, two distinct BSC RPC
+endpoints, signer services and other provider accounts remain launch-time
 `ExternalBlocked` or `ConfigurationRequired`. The BNM backend schema, HTTPS
 endpoint, ignored credential and monotonic conformance evidence are verified;
 production Core still requires secure runtime injection and worker monitoring.

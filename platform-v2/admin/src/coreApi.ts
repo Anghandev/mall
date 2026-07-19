@@ -610,6 +610,7 @@ function parseBootstrap(value: unknown) {
       externalBlocked: stringArray(readiness.externalBlocked, 'externalBlocked'),
       paymentDecisionBlocked: stringArray(readiness.paymentDecisionBlocked, 'paymentDecisionBlocked'),
       paymentExternalBlocked: stringArray(readiness.paymentExternalBlocked, 'paymentExternalBlocked'),
+      runtimeBlockers: stringArray(readiness.runtimeBlockers, 'runtimeBlockers'),
       providers: Object.freeze(Object.fromEntries(Object.entries(providers).map(([name, state]) => {
         if (state !== 'READY' && state !== 'CONFIGURATION_REQUIRED') {
           throw invalidResponse(`Unknown provider readiness for ${name}`);

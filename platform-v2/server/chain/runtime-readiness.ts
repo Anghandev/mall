@@ -193,7 +193,7 @@ export class PaymentRuntimeReadinessMonitor {
   readonly #indexerStatus: () => Readonly<PaymentIndexerStatus>;
   readonly #clock: () => Date;
   readonly #intervalMs: number;
-  #base: Omit<RuntimeReadinessSnapshot, 'indexerHealthy'> | undefined;
+  #base: Omit<RuntimeReadinessSnapshot, 'indexerHealthy' | 'indexerCaughtUp' | 'indexerErrorCode'> | undefined;
   #controller: AbortController | undefined;
   #running: Promise<void> | undefined;
 
@@ -220,7 +220,12 @@ export class PaymentRuntimeReadinessMonitor {
   snapshot(): RuntimeReadinessSnapshot | undefined {
     if (!this.#base) return undefined;
     const indexer = this.#indexerStatus();
-    return Object.freeze({ ...this.#base, indexerHealthy: indexer.healthy && indexer.caughtUp });
+    return Object.freeze({
+      ...this.#base,
+      indexerHealthy: indexer.healthy,
+      indexerCaughtUp: indexer.caughtUp,
+      ...(indexer.errorCode ? { indexerErrorCode: indexer.errorCode } : {}),
+    });
   }
 
   async pollOnce() {

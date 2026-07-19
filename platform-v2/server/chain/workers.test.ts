@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { AbiCoder, Interface, Wallet, keccak256, type InterfaceAbi } from 'ethers';
+import { AbiCoder, Interface, Wallet, keccak256, type InterfaceAbi, type JsonRpcProvider } from 'ethers';
 import { CORE_ARTIFACT_VERSION, NPL_ADDRESS, USDT_ADDRESS } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import {
@@ -17,9 +17,9 @@ import type { GuaranteeDepositFinalityItem } from '../data/guarantee-deposit-ser
 import { RemoteExecutorClient } from './executor.ts';
 import {
   RpcBeneficiarySnapshotSource,
+  ResilientBscContractReader,
   RpcPaymentNplQuoteSource,
   RpcPaymentPolicyAttestationSource,
-  RpcWalletMessageSignatureVerifier,
   PAYMENT_POLICY_TUPLE_ABI,
   type ContractReader,
 } from './payment-sources.ts';
@@ -30,7 +30,11 @@ import {
   type IndexedChainBlock,
   type IndexerStore,
 } from './indexer.ts';
-import { PollingPaymentIndexer, type PaymentChainSource } from './payment-indexer-worker.ts';
+import {
+  PollingPaymentIndexer,
+  ResilientBscPaymentChainSource,
+  type PaymentChainSource,
+} from './payment-indexer-worker.ts';
 import { readAddressLogs } from './rpc-logs.ts';
 import {
   PaymentRuntimeReadinessMonitor,
@@ -41,6 +45,9 @@ import { scheduleFulfillmentJobs } from './scheduler.ts';
 import { RemoteSignerClient } from './signer.ts';
 import type { SqlExecutor, SqlTransactionRunner } from '../data/migrations.ts';
 import { LogisticsPrintWorker } from './logistics-print-worker.ts';
+import { HttpEoaSettlementBroadcaster, ResilientBscEoaSettlementChainSource } from './eoa-settlement-adapters.ts';
+import { ResilientBscCoverageSource } from './coverage-source.ts';
+import { deterministicEoaSettlementExecutorErrorCodes } from './settlement-worker.ts';
 
 const CONTRACT = '0x3333333333333333333333333333333333333333';
 const BUYER = '0x1111111111111111111111111111111111111111';
@@ -81,6 +88,35 @@ test('RPC log reader falls back to block receipts without widening the address f
   assert.deepEqual(calls, [{ method: 'eth_getBlockReceipts', params: ['0x64'] }]);
 });
 
+test('coverage evidence uses stable latest state without historical eth_call', async () => {
+  const calls: Array<Record<string, unknown>> = [];
+  const provider = {
+    getNetwork: async () => ({ chainId: 56n }),
+    getBlock: async (tag: string) => {
+      assert.equal(tag, 'latest');
+      return { number: 123, hash: HASH_1 };
+    },
+    call: async (transaction: Record<string, unknown>) => {
+      calls.push(transaction);
+      return AbiCoder.defaultAbiCoder().encode(['uint256'], [100n]);
+    },
+  };
+  const source = new ResilientBscCoverageSource({
+    providers: [
+      provider as unknown as JsonRpcProvider,
+      provider as unknown as JsonRpcProvider,
+    ],
+    assets: [{ walletAddress: BUYER, asset: 'USDT', tokenAddress: USDT_ADDRESS }],
+  });
+
+  const observation = await source.observe();
+
+  assert.equal(observation.blockNumber, 123);
+  assert.equal(observation.assets[0]?.balance, '100');
+  assert.equal(calls.length, 2);
+  assert.ok(calls.every((call) => !Object.hasOwn(call, 'blockTag')));
+});
+
 test('logistics print worker serializes polling and waits for the active dispatch on stop', async () => {
   let calls = 0;
   let release: (() => void) | undefined;
@@ -105,6 +141,115 @@ test('logistics print worker serializes polling and waits for the active dispatc
   assert.equal(calls, 1);
   await worker.pollOnce();
   assert.equal(calls, 2);
+});
+
+test('EOA settlement HTTP broadcaster only treats allowlisted 4xx codes as deterministic', async () => {
+  const envelope = {
+    chainId: 56 as const,
+    transferId: HASH_1,
+    executorWallet: BUYER,
+    executorNonce: '1',
+    tokenAddress: CONTRACT,
+    recipientAddress: MERCHANT,
+    amount: '25',
+    transferCalldata: ALLOWED_CALLDATA,
+    contentHash: HASH_2,
+    gasLimit: '100000',
+    requestDigest: HASH_3,
+    idempotencyKey: 'settlement-attempt:test:1',
+  };
+  for (const executorErrorCode of deterministicEoaSettlementExecutorErrorCodes) {
+    const deterministic = new HttpEoaSettlementBroadcaster({
+      url: 'http://127.0.0.1:8790/settlement',
+      token: 'token',
+      maxGasLimit: 100000n,
+      fetch: (async () => new Response(JSON.stringify({ error: { code: executorErrorCode } }), { status: 400 })) as typeof fetch,
+    });
+    await assert.rejects(
+      deterministic.submit(envelope),
+      (error: unknown) => error instanceof CoreError
+        && error.code === 'InvalidRequest'
+        && error.details.deterministicExecutorFailure === true
+        && error.details.executorErrorCode === executorErrorCode,
+    );
+  }
+
+  const ambiguous = new HttpEoaSettlementBroadcaster({
+    url: 'http://127.0.0.1:8790/settlement',
+    token: 'token',
+    maxGasLimit: 100000n,
+    fetch: (async () => new Response(JSON.stringify({ error: { code: 'TOKEN_EXPIRED' } }), { status: 401 })) as typeof fetch,
+  });
+  await assert.rejects(
+    ambiguous.submit(envelope),
+    (error: unknown) => error instanceof CoreError
+      && error.code === 'ExternalBlocked'
+      && error.details.deterministicExecutorFailure === false,
+  );
+
+  const timedOut = new HttpEoaSettlementBroadcaster({
+    url: 'http://127.0.0.1:8790/settlement',
+    token: 'token',
+    maxGasLimit: 100000n,
+    requestTimeoutMs: 100,
+    fetch: ((_: RequestInfo | URL, init?: RequestInit) => new Promise((_, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+    })) as typeof fetch,
+  });
+  await assert.rejects(
+    timedOut.submit(envelope),
+    (error: unknown) => error instanceof CoreError
+      && error.code === 'ExternalBlocked'
+      && error.details.deterministicExecutorFailure === false
+      && error.details.failure === 'TIMEOUT',
+  );
+});
+
+test('EOA settlement receipt evidence uses only the finalized transaction receipt, not Archive RPC calls', async () => {
+  const transfer = new Interface(['function transfer(address to,uint256 amount)']);
+  const transferEvent = new Interface(['event Transfer(address indexed from,address indexed to,uint256 amount)']).getEvent('Transfer')!;
+  const calldata = transfer.encodeFunctionData('transfer', [MERCHANT, 25n]);
+  const blockHash = `0x${'b'.repeat(64)}`;
+  const log = new Interface(['event Transfer(address indexed from,address indexed to,uint256 amount)'])
+    .encodeEventLog(transferEvent, [BUYER, MERCHANT, 25n]);
+  const rpcCalls: string[] = [];
+  const provider = {
+    send: async (method: string) => {
+      rpcCalls.push(method);
+      if (method === 'eth_chainId') return '0x38';
+      throw new Error(`UnexpectedSettlementRpcMethod:${method}`);
+    },
+    getTransaction: async () => ({ to: USDT_ADDRESS, data: calldata, from: BUYER, nonce: 7 }),
+    getTransactionReceipt: async () => ({
+      status: 1,
+      blockNumber: 100,
+      blockHash,
+      logs: [{ address: USDT_ADDRESS, topics: log.topics, data: log.data }],
+    }),
+    getBlockNumber: async () => 114,
+    getBlock: async () => ({ hash: blockHash }),
+  } as unknown as JsonRpcProvider;
+  const source = new ResilientBscEoaSettlementChainSource({ providers: [provider, provider] });
+
+  const receipt = await source.receipt(HASH_1);
+
+  assert.ok(receipt);
+  assert.deepEqual(receipt.transfers, [{
+    tokenAddress: USDT_ADDRESS,
+    from: BUYER,
+    to: MERCHANT,
+    amount: '25',
+  }]);
+  assert.deepEqual(receipt.transactionDeltas, [{
+    tokenAddress: USDT_ADDRESS,
+    account: BUYER,
+    delta: '-25',
+  }, {
+    tokenAddress: USDT_ADDRESS,
+    account: MERCHANT,
+    delta: '25',
+  }]);
+  assert.deepEqual(rpcCalls, ['eth_chainId', 'eth_chainId']);
 });
 
 test('Indexer decodes the frozen ABI, is idempotent and fails closed on reorg', async () => {
@@ -298,6 +443,94 @@ test('polling payment worker persists empty blocks, recovers a common-ancestor r
   });
 });
 
+test('resilient payment chain source cross-checks two RPC endpoints at the lower head', async () => {
+  assert.throws(
+    () => new ResilientBscPaymentChainSource({
+      primaryRpcUrl: 'https://bsc.example.invalid',
+      fallbackRpcUrl: 'https://bsc.example.invalid/',
+      routerAddress: CONTRACT,
+    }),
+    /distinct BSC RPC endpoints/,
+  );
+  const block100: ChainBlock = { number: 100, hash: blockHash(100), parentHash: blockHash(99), timestamp: 1_800_000_000 };
+  const log = {
+    address: CONTRACT,
+    topics: [HASH_1],
+    data: '0x1234',
+    transactionHash: HASH_2,
+    blockHash: block100.hash,
+    blockNumber: 100,
+    index: 0,
+  };
+  const source = new ResilientBscPaymentChainSource({
+    routerAddress: CONTRACT,
+    providers: [
+      paymentRpcProvider({ head: 102, blocks: [block100], logs: [log] }),
+      paymentRpcProvider({ head: 100, blocks: [block100], logs: [log] }),
+    ],
+  });
+  assert.equal(await source.head(), 100);
+  assert.deepEqual(await source.block(100), block100);
+  assert.deepEqual(await source.logs(100, 100), [{
+    address: CONTRACT.toLowerCase(),
+    topics: [HASH_1],
+    data: '0x1234',
+    transactionHash: HASH_2,
+    blockHash: block100.hash,
+    blockNumber: 100,
+    logIndex: 0,
+  }]);
+
+  const failing = new ResilientBscPaymentChainSource({
+    routerAddress: CONTRACT,
+    providers: [
+      paymentRpcProvider({ head: 100, blocks: [block100], logs: [] }),
+      paymentRpcProvider({ head: 100, blocks: [block100], logs: [], failHead: true }),
+    ],
+  });
+  await assert.rejects(failing.head(), /BSC RPC provider failed/);
+
+  const failingBlock = new ResilientBscPaymentChainSource({
+    routerAddress: CONTRACT,
+    providers: [
+      paymentRpcProvider({ head: 100, blocks: [block100], logs: [] }),
+      paymentRpcProvider({ head: 100, blocks: [block100], logs: [], failBlock: true }),
+    ],
+  });
+  await assert.rejects(failingBlock.block(100), /BSC RPC provider failed/);
+
+  const failingLogs = new ResilientBscPaymentChainSource({
+    routerAddress: CONTRACT,
+    providers: [
+      paymentRpcProvider({ head: 100, blocks: [block100], logs: [] }),
+      paymentRpcProvider({ head: 100, blocks: [block100], logs: [], failLogs: true }),
+    ],
+  });
+  await assert.rejects(failingLogs.logs(100, 100), /log query and block-receipt fallback are unavailable/);
+
+  const divergentBlock = new ResilientBscPaymentChainSource({
+    routerAddress: CONTRACT,
+    providers: [
+      paymentRpcProvider({ head: 100, blocks: [block100], logs: [] }),
+      paymentRpcProvider({
+        head: 100,
+        blocks: [{ ...block100, parentHash: blockHash(88) }],
+        logs: [],
+      }),
+    ],
+  });
+  await assert.rejects(divergentBlock.block(100), /payment block evidence/);
+
+  const divergentLogs = new ResilientBscPaymentChainSource({
+    routerAddress: CONTRACT,
+    providers: [
+      paymentRpcProvider({ head: 100, blocks: [block100], logs: [log] }),
+      paymentRpcProvider({ head: 100, blocks: [block100], logs: [{ ...log, data: '0x5678' }] }),
+    ],
+  });
+  await assert.rejects(divergentLogs.logs(100, 100), /payment Router logs/);
+});
+
 test('remote signer validates the recovered signer and never accepts an arbitrary signature', async () => {
   const wallet = Wallet.createRandom();
   const digest = HASH_1;
@@ -425,10 +658,12 @@ test('payment RPC sources compute exact NPL amounts from the fixed pair and bene
   const reader = new StubContractReader({
     pairReserves: {
       blockNumber: 40_000_000,
+      source: 'PRIMARY',
       token0: USDT_ADDRESS,
       token1: NPL_ADDRESS,
       reserve0: 50_000n * 10n ** 18n,
       reserve1: 500_000n * 10n ** 18n,
+      reservesHash: HASH_1,
     },
     referrerOf: MERCHANT,
     regionBeneficiaries: [
@@ -441,6 +676,7 @@ test('payment RPC sources compute exact NPL amounts from the fixed pair and bene
   const nplQuotes = new RpcPaymentNplQuoteSource({ reader });
   assert.deepEqual(await nplQuotes.quote({ listPriceUsdt: 100n, policyVersion: 1 }), {
     nplQuoteAmount: 1_000n,
+    quoteSourceEvidence: { source: 'PRIMARY', observedBlock: 40_000_000, reservesHash: HASH_1 },
   });
   const beneficiaries = new RpcBeneficiarySnapshotSource({ reader, beneficiaryRegistryAddress: CONTRACT });
   assert.deepEqual(await beneficiaries.resolve({
@@ -461,10 +697,12 @@ test('payment RPC sources compute exact NPL amounts from the fixed pair and bene
     reader: new StubContractReader({
       pairReserves: {
         blockNumber: 40_000_000,
+        source: 'FALLBACK',
         token0: NPL_ADDRESS,
         token1: USDT_ADDRESS,
         reserve0: 500_000n * 10n ** 18n,
         reserve1: 50_000n * 10n ** 18n - 1n,
+        reservesHash: HASH_2,
       },
     }),
   });
@@ -472,6 +710,29 @@ test('payment RPC sources compute exact NPL amounts from the fixed pair and bene
     lowLiquidity.quote({ listPriceUsdt: 100n, policyVersion: 1 }),
     /below the frozen minimum/,
   );
+});
+
+test('payment quote reader falls back to non-Archive latest reserves and records fallback evidence', async () => {
+  const calls: Array<Record<string, unknown>> = [];
+  const reader = new ResilientBscContractReader(undefined, undefined, [
+    pairRpcProvider({ fail: true }),
+    pairRpcProvider({ calls, blockNumber: 40_000_001 }),
+  ]);
+
+  const snapshot = await reader.pairReserves(CONTRACT);
+
+  assert.equal(snapshot.source, 'FALLBACK');
+  assert.equal(snapshot.blockNumber, 40_000_001);
+  assert.equal(snapshot.token0.toLowerCase(), USDT_ADDRESS);
+  assert.equal(snapshot.token1.toLowerCase(), NPL_ADDRESS);
+  assert.ok(calls.length > 0);
+  assert.ok(calls.every((call) => !Object.hasOwn(call, 'blockTag')));
+
+  const unavailable = new ResilientBscContractReader(undefined, undefined, [
+    pairRpcProvider({ fail: true }),
+    pairRpcProvider({ fail: true }),
+  ]);
+  await assert.rejects(unavailable.pairReserves(CONTRACT), /latest pair reserves are unavailable/);
 });
 
 test('payment policy attestation binds all 27 Registry fields and latest-version semantics', async () => {
@@ -534,21 +795,6 @@ test('payment policy attestation binds all 27 Registry fields and latest-version
   );
 });
 
-test('ERC-1271 verifier accepts only the contract-wallet magic value and fails closed on RPC errors', async () => {
-  const valid = new RpcWalletMessageSignatureVerifier(new StubContractReader({
-    isValidSignature: '0x1626ba7e',
-  }));
-  assert.equal(await valid.isValid(CONTRACT, 'SIWE message', '0x1234'), true);
-  const invalid = new RpcWalletMessageSignatureVerifier(new StubContractReader({
-    isValidSignature: '0xffffffff',
-  }));
-  assert.equal(await invalid.isValid(CONTRACT, 'SIWE message', '0x1234'), false);
-  assert.equal(
-    await new RpcWalletMessageSignatureVerifier(new StubContractReader({})).isValid(CONTRACT, 'SIWE message', '0x1234'),
-    false,
-  );
-});
-
 test('runtime readiness attests deployed code, bindings, roles, NPL quote source and live infrastructure', async () => {
   const router = '0x1000000000000000000000000000000000000001';
   const policyRegistry = '0x1000000000000000000000000000000000000002';
@@ -582,10 +828,12 @@ test('runtime readiness attests deployed code, bindings, roles, NPL quote source
     [`${operationsSafe}:code`]: '0x',
     pairReserves: {
       blockNumber: 40_000_000,
+      source: 'PRIMARY',
       token0: USDT_ADDRESS,
       token1: NPL_ADDRESS,
       reserve0: 50_000n * 10n ** 18n,
       reserve1: 500_000n * 10n ** 18n,
+      reservesHash: HASH_1,
     },
     hasRole: true,
   };
@@ -1088,6 +1336,78 @@ class MemoryPaymentChainSource implements PaymentChainSource {
   }
 }
 
+function paymentRpcProvider(input: {
+  head: number;
+  blocks: ChainBlock[];
+  logs: Array<{
+    address: string;
+    topics: string[];
+    data: string;
+    transactionHash: string;
+    blockHash: string;
+    blockNumber: number;
+    index: number;
+  }>;
+  failHead?: boolean;
+  failBlock?: boolean;
+  failLogs?: boolean;
+}) {
+  const blocks = new Map(input.blocks.map((block) => [block.number, block]));
+  return {
+    getNetwork: async () => ({ chainId: 56n }),
+    getBlockNumber: async () => {
+      if (input.failHead) throw new Error('head unavailable');
+      return input.head;
+    },
+    getBlock: async (blockNumber: number) => {
+      if (input.failBlock) throw new Error('block unavailable');
+      return blocks.get(blockNumber) ?? null;
+    },
+    getLogs: async ({ fromBlock, toBlock }: { fromBlock: number; toBlock: number }) => {
+      if (input.failLogs) throw new Error('logs unavailable');
+      return input.logs.filter((log) => log.blockNumber >= fromBlock && log.blockNumber <= toBlock);
+    },
+    send: async () => {
+      throw new Error('unexpected receipt fallback');
+    },
+  } as unknown as JsonRpcProvider;
+}
+
+function pairRpcProvider(input: {
+  fail?: boolean;
+  calls?: Array<Record<string, unknown>>;
+  blockNumber?: number;
+}) {
+  const pair = new Interface([
+    'function token0() view returns (address)',
+    'function token1() view returns (address)',
+    'function getReserves() view returns (uint112 reserve0,uint112 reserve1,uint32 blockTimestampLast)',
+  ]);
+  return {
+    getNetwork: async () => ({ chainId: 56n }),
+    getBlockNumber: async () => input.blockNumber ?? 40_000_000,
+    call: async (transaction: Record<string, unknown>) => {
+      if (input.fail) throw new Error('latest call unavailable');
+      input.calls?.push(transaction);
+      const data = String(transaction.data).toLowerCase();
+      if (data.startsWith(pair.getFunction('token0')!.selector.toLowerCase())) {
+        return pair.encodeFunctionResult('token0', [USDT_ADDRESS]);
+      }
+      if (data.startsWith(pair.getFunction('token1')!.selector.toLowerCase())) {
+        return pair.encodeFunctionResult('token1', [NPL_ADDRESS]);
+      }
+      if (data.startsWith(pair.getFunction('getReserves')!.selector.toLowerCase())) {
+        return pair.encodeFunctionResult('getReserves', [
+          50_000n * 10n ** 18n,
+          500_000n * 10n ** 18n,
+          1_800_000_000,
+        ]);
+      }
+      throw new Error('unexpected pair call');
+    },
+  } as unknown as JsonRpcProvider;
+}
+
 function blockHash(value: number) {
   return `0x${value.toString(16).padStart(64, '0')}`;
 }
@@ -1119,7 +1439,8 @@ class StubContractReader implements ContractReader {
   async pairReserves(_address: string) {
     if (!this.#values.pairReserves) throw new Error('Unexpected pair reserves request');
     return this.#values.pairReserves as {
-      blockNumber: number; token0: string; token1: string; reserve0: bigint; reserve1: bigint;
+      blockNumber: number; source: 'PRIMARY' | 'FALLBACK'; token0: string; token1: string;
+      reserve0: bigint; reserve1: bigint; reservesHash: string;
     };
   }
 }
@@ -1150,7 +1471,8 @@ class StubRuntimeReader implements RuntimeCodeReader {
 
   async pairReserves(_address: string) {
     return this.#values.pairReserves as {
-      blockNumber: number; token0: string; token1: string; reserve0: bigint; reserve1: bigint;
+      blockNumber: number; source: 'PRIMARY' | 'FALLBACK'; token0: string; token1: string;
+      reserve0: bigint; reserve1: bigint; reservesHash: string;
     };
   }
 }

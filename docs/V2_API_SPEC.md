@@ -158,9 +158,10 @@ PII use AES-256-GCM; one active default address is enforced transactionally.
 A saved address creates a fresh 30-minute fulfillment target and never rewrites
 the target snapshot of an existing quote or order. The first successful BUYER
 SIWE creates one permanent numeric UID for the wallet; buyer profile returns it
-as `accountId`. Buyer name, phone and detailed address remain encrypted for 60
-days after order completion, default to masked Admin display from day 30 and
-have plaintext deleted at day 60.
+as `accountId`. Buyer name, phone and detailed address remain encrypted long
+term. Launch performs no automatic day-based masking or deletion; every full
+PII read/export revalidates current authorization and atomically writes audit
+evidence before returning plaintext. Role-scoped redacted projections remain.
 
 Merchant profile and audit routes:
 

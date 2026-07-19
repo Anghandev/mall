@@ -6,7 +6,6 @@ import type { SqlExecutor, SqlTransactionRunner } from '../data/migrations.ts';
 
 const ROUTER = new Interface([
   'event PaymentPauseChanged(bool paused,bytes32 indexed evidenceHash)',
-  'function newPaymentsPaused() view returns (bool)',
 ]);
 const PAYMENT_PAUSE_TOPIC = ROUTER.getEvent('PaymentPauseChanged')!.topicHash.toLowerCase();
 
@@ -293,17 +292,6 @@ export class ResilientCoverageBreakerChainSource implements CoverageBreakerChain
     const decoded = decodePaymentPauseChanged(matchingLogs[0]!);
     if (decoded.paused !== input.targetPaused || decoded.evidenceHash !== input.evidenceHash) {
       throw new CoreError('InvalidFinality', 'PaymentPauseChanged does not match the frozen coverage action', 409);
-    }
-    const blockTag = receipt.blockNumber;
-    const stateCalldata = ROUTER.encodeFunctionData('newPaymentsPaused');
-    const [primaryState, fallbackState] = await Promise.all([
-      rpc(this.#fetch, primary, 'eth_call', [{ to: input.routerAddress, data: stateCalldata }, blockTag]),
-      rpc(this.#fetch, fallback, 'eth_call', [{ to: input.routerAddress, data: stateCalldata }, blockTag]),
-    ]);
-    const primaryPaused = Boolean(ROUTER.decodeFunctionResult('newPaymentsPaused', stringValue(primaryState, 'router state'))[0]);
-    const fallbackPaused = Boolean(ROUTER.decodeFunctionResult('newPaymentsPaused', stringValue(fallbackState, 'router state'))[0]);
-    if (primaryPaused !== input.targetPaused || fallbackPaused !== input.targetPaused) {
-      throw new CoreError('InvalidFinality', 'Router pause state does not match the finalized EOA action', 409);
     }
     return {
       state: confirmations >= 15 ? 'FINAL' : 'MINED',
@@ -1029,13 +1017,6 @@ function recordValue(value: unknown, name: string): Record<string, any> {
     throw new CoreError('InvalidFinality', `${name} is unavailable`, 409);
   }
   return value as Record<string, any>;
-}
-
-function stringValue(value: unknown, name: string) {
-  if (typeof value !== 'string' || !/^0x[0-9a-fA-F]*$/.test(value)) {
-    throw new CoreError('InvalidFinality', `${name} is invalid`, 409);
-  }
-  return value;
 }
 
 function hexNumber(value: unknown, name: string) {

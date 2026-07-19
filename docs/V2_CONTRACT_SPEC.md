@@ -24,8 +24,9 @@ beneficiary validation and atomic collection.
 
 The Router EIP-712 domain is `Abu24KPaymentRouter`, version `2`, BSC chain 56 and
 the deployed Router address. `pay` and `paySeckill` require both the configured
-quote signer and the buyer signature. `SignatureChecker` supports EOAs and
-ERC-1271 wallets. Authorization never uses `tx.origin`.
+quote signer and the buyer signature. Launch Core admits and signs quotes only
+for ordinary EOA buyer wallets. The immutable deployed Router is not changed,
+and authorization never uses `tx.origin`.
 
 The signed `PaymentIntent` binds:
 

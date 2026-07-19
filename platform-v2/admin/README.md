@@ -5,7 +5,7 @@ implements shared funds, contracts, API, Schema or signer behavior.
 
 ## Current Product Boundary
 
-- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.16`.
+- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.17`.
 - SIWE/JWT stays in memory. Every protected read and write is role-bound by
   Core and preserves typed `DecisionBlocked`, `ExternalBlocked`,
   `ConfigurationRequired` and correlation evidence.
@@ -15,9 +15,9 @@ implements shared funds, contracts, API, Schema or signer behavior.
   typed system configuration, append-only audit and operations/coverage
   monitoring.
 - The clearing workspace reads an order payment independently of the buyer
-  wallet, server-side filtered settlement-request and immutable Safe-batch
-  lists with stable cursors, and full request/batch detail. It renders Core
-  item totals and hashes, Safe nonce and owner approvals, execution replacements,
+  wallet, server-side filtered settlement-request and immutable EOA-transfer
+  lists with stable cursors, and full request/transfer detail. It renders Core
+  item totals and hashes, executor nonce and execution evidence, replacements,
   15-confirmation finality, coverage, independent breakers and reconciliation.
   `MINED 14/15`, `FAILED` and `REORGED` never render as final. There is no
   manual transfer, batch construction or browser-side financial calculation.
@@ -36,8 +36,8 @@ implements shared funds, contracts, API, Schema or signer behavior.
   HTTP replay, the artifact-bound `/v2/ws` finalized relay stream, action
   list/detail, session inventory locking, force-close, prize injection and
   breaker recovery. Every governed action uses Core-issued EIP-712 typed data,
-  an independent secondary wallet and a Safe proposal; `FINAL` is rendered
-  only from 15-confirmation Core evidence.
+  an independent secondary wallet and direct Platform Governance EOA execution;
+  `FINAL` is rendered only from 15-confirmation Core evidence.
 - Policy and takeover funding use Core-issued typed data. The wallet signs the
   exact typed payload; the frontend does not construct calldata, calculate
   funds or set final states.
@@ -48,15 +48,13 @@ implements shared funds, contracts, API, Schema or signer behavior.
 - The takeover workspace consumes the Core case queue, immutable assignment
   history and eligible replacement-merchant projection. ADMIN/OPERATOR can
   assign or reassign before shipment; AUDITOR remains read-only.
-- The merchant drilldown consumes the versioned V1-V5 level policy, named
-  sales and fulfillment aggregates, the zero-denominator-safe 48-hour ship
-  rate, finalized NPL Burn and Available BNM totals. Approved settlement-wallet
-  changes reuse the ADMIN review challenge, independent secondary EIP-712
-  signature and Safe publication path; ordinary profile edits expose no wallet
-  field.
-- CMS and configuration editors accept structured JSON objects because their
-  coordinated request types are open objects. Core remains the schema,
-  sanitization, decision and publication authority.
+- The merchant drilldown consumes named sales and fulfillment aggregates, the
+  zero-denominator-safe 48-hour ship rate, finalized NPL Burn and Available BNM
+  totals. V1-V5 controls are retired. The settlement wallet is permanently
+  immutable after approval; neither ordinary profile edits nor Admin governance
+  exposes a wallet-change action.
+- CMS and configuration editors use structured governed forms. Core remains the
+  schema, sanitization, decision and publication authority.
 - Notification operations consume the generated campaign projection, including
   delivery-state counts and `allowedActions`. ADMIN/OPERATOR create structured
   ALL/WALLET/MERCHANT/REGION audiences, publish with evidence and retry failed

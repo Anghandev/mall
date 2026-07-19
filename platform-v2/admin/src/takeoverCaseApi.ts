@@ -2,7 +2,6 @@ import {
   allowedActionNames,
   allowedActionReasonCodes,
   artifactVersion,
-  merchantLevels,
   orderProjectionStates,
   takeoverStates,
   type TakeoverAssignment,
@@ -217,7 +216,6 @@ function isTakeoverAssignment(value: unknown): value is TakeoverAssignment {
     && addressPattern.test(String(value.replacementWallet))
     && Number.isSafeInteger(value.replacementApplicationVersion)
     && Number(value.replacementApplicationVersion) >= 1
-    && merchantLevels.includes(value.replacementLevel as never)
     && bytes32Pattern.test(String(value.replacementLicenseAssetId))
     && (value.supersedesAssignmentId === null || bytes32Pattern.test(String(value.supersedesAssignmentId)))
     && reasonCodePattern.test(String(value.reasonCode))
@@ -234,7 +232,6 @@ function isTakeoverCandidate(value: unknown): value is TakeoverCandidate {
     && addressPattern.test(String(value.settlementWallet))
     && typeof value.shopName === 'string'
     && value.shopName.length >= 1
-    && merchantLevels.includes(value.level as never)
     && Number.isSafeInteger(value.applicationVersion)
     && Number(value.applicationVersion) >= 1
     && value.qualificationComplete === true

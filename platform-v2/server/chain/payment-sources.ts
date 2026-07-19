@@ -1,6 +1,4 @@
-import { AbiCoder, Contract, JsonRpcProvider, getAddress, hashMessage, keccak256, type InterfaceAbi } from 'ethers';
-import type { WalletMessageSignatureVerifier } from '../api/auth.ts';
-import type { WalletDigestSignatureVerifier } from '../api/settlement-signing.ts';
+import { AbiCoder, Contract, JsonRpcProvider, getAddress, keccak256, toUtf8Bytes, type InterfaceAbi } from 'ethers';
 import { CORE_ARTIFACT_VERSION, NPL_ADDRESS, NPL_USDT_PAIR_ADDRESS, USDT_ADDRESS } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import {
@@ -30,8 +28,6 @@ const POLICY_REGISTRY_ABI = [
   'function getOperations(uint64 version) view returns (address[] accounts,uint16[] weights)',
   'function latestVersion() view returns (uint64)',
 ];
-const ERC1271_ABI = ['function isValidSignature(bytes32 hash,bytes signature) view returns (bytes4)'];
-const ERC1271_MAGIC_VALUE = '0x1626ba7e';
 
 export interface ContractReader {
   call(address: string, abi: InterfaceAbi, method: string, args: readonly unknown[]): Promise<unknown>;
@@ -39,10 +35,12 @@ export interface ContractReader {
 
 export interface PairReserveSnapshot {
   blockNumber: number;
+  source: 'PRIMARY' | 'FALLBACK';
   token0: string;
   token1: string;
   reserve0: bigint;
   reserve1: bigint;
+  reservesHash: string;
 }
 
 export interface PairReserveReader extends ContractReader {
@@ -50,13 +48,28 @@ export interface PairReserveReader extends ContractReader {
 }
 
 export class ResilientBscContractReader implements PairReserveReader {
-  readonly #providers: JsonRpcProvider[];
+  readonly #providers: readonly { source: 'PRIMARY' | 'FALLBACK'; provider: JsonRpcProvider }[];
 
-  constructor(primaryRpcUrl?: string, fallbackRpcUrl?: string) {
-    if (!primaryRpcUrl || !fallbackRpcUrl) {
+  constructor(primaryRpcUrl?: string, fallbackRpcUrl?: string, providers?: readonly JsonRpcProvider[]) {
+    if (providers && providers.length !== 2) {
       throw new CoreError('ExternalBlocked', 'Primary and fallback BSC RPC are required', 503);
     }
-    this.#providers = [primaryRpcUrl, fallbackRpcUrl].map((url) => new JsonRpcProvider(url, 56, { staticNetwork: true }));
+    if (!providers && (!primaryRpcUrl || !fallbackRpcUrl)) {
+      throw new CoreError('ExternalBlocked', 'Primary and fallback BSC RPC are required', 503);
+    }
+    if (providers) {
+      this.#providers = [
+        { source: 'PRIMARY', provider: providers[0]! },
+        { source: 'FALLBACK', provider: providers[1]! },
+      ];
+    } else {
+      const urls = [contractRpcUrl(primaryRpcUrl!), contractRpcUrl(fallbackRpcUrl!)];
+      if (urls[0] === urls[1]) throw new CoreError('ExternalBlocked', 'Primary and fallback BSC RPC endpoints must be distinct', 503);
+      this.#providers = [
+        { source: 'PRIMARY', provider: new JsonRpcProvider(urls[0], 56, { staticNetwork: true }) },
+        { source: 'FALLBACK', provider: new JsonRpcProvider(urls[1], 56, { staticNetwork: true }) },
+      ];
+    }
   }
 
   async call(address: string, abi: InterfaceAbi, method: string, args: readonly unknown[]) {
@@ -88,46 +101,47 @@ export class ResilientBscContractReader implements PairReserveReader {
   }
 
   async pairReserves(pairAddress: string): Promise<PairReserveSnapshot> {
-    try {
-      const heads = await Promise.all(this.#providers.map(async (provider) => {
+    let lastError: unknown;
+    for (const entry of this.#providers) {
+      try {
+        const provider = entry.provider;
         const network = await provider.getNetwork();
         if (network.chainId !== 56n) throw new CoreError('ExternalBlocked', 'RPC is not BSC chain 56', 503);
-        return provider.getBlockNumber();
-      }));
-      const blockNumber = Math.min(...heads);
-      if (!Number.isSafeInteger(blockNumber) || blockNumber <= 0) {
-        throw new CoreError('ExternalBlocked', 'BSC RPC common block is unavailable', 503);
-      }
-      const snapshots = await Promise.all(this.#providers.map(async (provider) => {
         const pair = new Contract(pairAddress, PAIR_ABI, provider);
         const [token0, token1, reserves] = await Promise.all([
-          pair.getFunction('token0')({ blockTag: blockNumber }),
-          pair.getFunction('token1')({ blockTag: blockNumber }),
-          pair.getFunction('getReserves')({ blockTag: blockNumber }),
+          pair.getFunction('token0')(),
+          pair.getFunction('token1')(),
+          pair.getFunction('getReserves')(),
         ]);
-        return {
+        const blockNumber = await provider.getBlockNumber();
+        const snapshot = {
           blockNumber,
+          source: entry.source,
           token0: getAddress(String(token0)),
           token1: getAddress(String(token1)),
           reserve0: BigInt(reserves[0]),
           reserve1: BigInt(reserves[1]),
+          reservesHash: hashJson({
+            token0: String(token0).toLowerCase(),
+            token1: String(token1).toLowerCase(),
+            reserve0: BigInt(reserves[0]).toString(),
+            reserve1: BigInt(reserves[1]).toString(),
+          }),
         };
-      }));
-      if (stableRpcValue(snapshots[0]) !== stableRpcValue(snapshots[1])) {
-        throw new CoreError('InvalidFinality', 'BSC RPC providers returned inconsistent pair reserves', 409);
+        return snapshot;
+      } catch (error) {
+        lastError = error;
       }
-      return snapshots[0]!;
-    } catch (error) {
-      if (error instanceof CoreError) throw error;
-      throw new CoreError('ExternalBlocked', 'Both BSC RPC providers must return matching pair reserves', 503, {
-        reason: error instanceof Error ? error.name : 'UnknownRpcFailure',
-      });
     }
+    throw new CoreError('ExternalBlocked', 'BSC RPC latest pair reserves are unavailable', 503, {
+      source: 'PRIMARY_FALLBACK',
+      reason: lastError instanceof Error ? lastError.name : 'UnknownRpcFailure',
+    });
   }
 
   async #withProvider<Result>(operation: (provider: JsonRpcProvider) => Promise<Result>) {
     try {
-      const results = await Promise.all(this.#providers.map(async (provider) => {
+      const results = await Promise.all(this.#providers.map(async ({ provider }) => {
         const network = await provider.getNetwork();
         if (network.chainId !== 56n) throw new CoreError('ExternalBlocked', 'RPC is not BSC chain 56', 503);
         return operation(provider);
@@ -172,7 +186,14 @@ export class RpcPaymentNplQuoteSource implements PaymentNplQuoteSource {
     }
     const nplQuoteAmount = input.listPriceUsdt * nplLiquidity / usdtLiquidity;
     if (nplQuoteAmount <= 0n) throw new CoreError('InvalidFinality', 'NPL quote rounds to zero', 409);
-    return { nplQuoteAmount };
+    return {
+      nplQuoteAmount,
+      quoteSourceEvidence: {
+        source: snapshot.source,
+        observedBlock: snapshot.blockNumber,
+        reservesHash: snapshot.reservesHash,
+      },
+    };
   }
 }
 
@@ -295,32 +316,6 @@ export class RpcPaymentPolicyAttestationSource implements PaymentPolicyAttestati
   }
 }
 
-export class RpcWalletMessageSignatureVerifier implements WalletMessageSignatureVerifier, WalletDigestSignatureVerifier {
-  readonly #reader: ContractReader;
-
-  constructor(reader: ContractReader) {
-    this.#reader = reader;
-  }
-
-  async isValid(walletAddress: string, message: string, signature: string) {
-    return this.isValidDigest(walletAddress, hashMessage(message), signature);
-  }
-
-  async isValidDigest(walletAddress: string, digest: string, signature: string) {
-    try {
-      const result = await this.#reader.call(
-        address(walletAddress, 'contract wallet'),
-        ERC1271_ABI,
-        'isValidSignature',
-        [digest, signature],
-      );
-      return String(result).toLowerCase() === ERC1271_MAGIC_VALUE;
-    } catch {
-      return false;
-    }
-  }
-}
-
 function policyValues(value: unknown) {
   if (!Array.isArray(value) || value.length !== 27) {
     throw new CoreError('InvalidFinality', 'PolicyRegistry returned an invalid policy tuple', 409);
@@ -339,6 +334,35 @@ function address(value: string | undefined, name: string) {
 
 function isHash(value: string) {
   return /^0x[0-9a-fA-F]{64}$/.test(value);
+}
+
+function contractRpcUrl(value: string) {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new CoreError('ExternalBlocked', 'BSC RPC endpoint is invalid', 503);
+  }
+  if (url.protocol !== 'https:' || url.username || url.password) {
+    throw new CoreError('ExternalBlocked', 'BSC RPC endpoints require HTTPS without embedded credentials', 503);
+  }
+  return url.href;
+}
+
+function hashJson(value: unknown) {
+  return keccak256(toUtf8Bytes(stableJson(value))).toLowerCase();
+}
+
+function stableJson(value: unknown): string {
+  if (typeof value === 'bigint') return JSON.stringify(value.toString());
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => `${JSON.stringify(key)}:${stableJson(child)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
 }
 
 function stableRpcValue(value: unknown) {

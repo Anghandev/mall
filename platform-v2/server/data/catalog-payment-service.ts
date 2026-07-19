@@ -41,7 +41,14 @@ export interface PaymentNplQuoteSource {
   quote(input: {
     listPriceUsdt: bigint;
     policyVersion: number;
-  }): Promise<{ nplQuoteAmount: bigint }>;
+  }): Promise<{
+    nplQuoteAmount: bigint;
+    quoteSourceEvidence: {
+      source: 'PRIMARY' | 'FALLBACK';
+      observedBlock: number;
+      reservesHash: string;
+    };
+  }>;
 }
 
 export interface BeneficiarySnapshotSource {
@@ -280,6 +287,7 @@ export class CatalogPaymentService {
       policyVersion: policy.policyVersion,
     });
     if (nplQuote.nplQuoteAmount <= 0n) throw new CoreError('InvalidRequest', 'NPL quote is invalid');
+    assertQuoteSourceEvidence(nplQuote.quoteSourceEvidence);
     const beneficiaries = await this.#beneficiaries.resolve({
       buyer,
       merchant: prepared.catalog.settlement_wallet,
@@ -349,6 +357,7 @@ export class CatalogPaymentService {
         digest,
         signature: signed.signature,
         snapshotHash,
+        quoteSourceEvidence: nplQuote.quoteSourceEvidence,
       });
     });
     return quoteResponse(intent, digest, signed.signature, snapshotHash, this.#paymentRouterAddress, 'QUOTED', null);
@@ -409,6 +418,8 @@ export class CatalogPaymentService {
     if (
       seckillNplQuote.nplQuoteAmount <= 0n || fallbackNplQuote.nplQuoteAmount <= 0n
     ) throw new CoreError('InvalidRequest', 'NPL quote is invalid');
+    assertQuoteSourceEvidence(seckillNplQuote.quoteSourceEvidence);
+    assertQuoteSourceEvidence(fallbackNplQuote.quoteSourceEvidence);
     const nonce = this.#nonce();
     const shared = {
       orderId,
@@ -508,6 +519,10 @@ export class CatalogPaymentService {
         dual,
         digest,
         signature: signed.signature,
+        quoteSourceEvidence: {
+          SECKILL: seckillNplQuote.quoteSourceEvidence,
+          FALLBACK_RETAIL: fallbackNplQuote.quoteSourceEvidence,
+        },
       });
     });
     return seckillQuoteResponse(dual, digest, signed.signature, this.#paymentRouterAddress, 'QUOTED', null);
@@ -721,6 +736,7 @@ async function insertQuote(
     digest: string;
     signature: string;
     snapshotHash: string;
+    quoteSourceEvidence: { source: 'PRIMARY' | 'FALLBACK'; observedBlock: number; reservesHash: string };
   },
 ) {
   await executor.query(
@@ -754,15 +770,16 @@ async function insertQuote(
   );
   await executor.query(
     `INSERT INTO core.payment_quote_legs (
-       order_id, classification, reservation_id, snapshot_hash, intent,
+       order_id, classification, reservation_id, snapshot_hash, intent, quote_source_evidence,
        product_usdt_payment_amount, platform_service_fee_usdt,
        custody_product_usdt, freight_usdt, usdt_payment_amount
-     ) VALUES ($1,'ORDINARY',$2,$3,$4,$5,$6,$7,$8,$9)`,
+     ) VALUES ($1,'ORDINARY',$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
     [
       input.intent.orderId,
       input.intent.reservationId,
       input.snapshotHash,
       JSON.stringify(input.intent),
+      JSON.stringify(input.quoteSourceEvidence),
       input.intent.productUsdtPaymentAmount,
       input.intent.platformServiceFeeUsdt,
       input.intent.custodyProductUsdt,
@@ -784,6 +801,9 @@ async function insertSeckillQuote(
     dual: CanonicalSeckillIntent;
     digest: string;
     signature: string;
+    quoteSourceEvidence: Record<'SECKILL' | 'FALLBACK_RETAIL', {
+      source: 'PRIMARY' | 'FALLBACK'; observedBlock: number; reservesHash: string;
+    }>;
   },
 ) {
   await executor.query(
@@ -825,16 +845,17 @@ async function insertSeckillQuote(
   ] as const) {
     await executor.query(
       `INSERT INTO core.payment_quote_legs (
-         order_id, classification, reservation_id, snapshot_hash, intent,
+         order_id, classification, reservation_id, snapshot_hash, intent, quote_source_evidence,
          product_usdt_payment_amount, platform_service_fee_usdt,
          custody_product_usdt, freight_usdt, usdt_payment_amount
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
       [
         intent.orderId,
         classification,
         intent.reservationId,
         paymentIntentHash(intent),
         JSON.stringify(intent),
+        JSON.stringify(input.quoteSourceEvidence[classification]),
         intent.productUsdtPaymentAmount,
         intent.platformServiceFeeUsdt,
         intent.custodyProductUsdt,
@@ -1289,6 +1310,22 @@ function validateCreateQuote(input: CreateOrdinaryQuoteInput) {
       || !['DELIVERY', 'PICKUP'].includes(input.fulfillmentMode)
       || !isHash(input.fulfillmentTargetHash) || !isHash(input.regionCodeHash)
   ) throw new CoreError('InvalidRequest', 'Invalid payment quote request');
+}
+
+function assertQuoteSourceEvidence(value: unknown): asserts value is {
+  source: 'PRIMARY' | 'FALLBACK';
+  observedBlock: number;
+  reservesHash: string;
+} {
+  if (
+    !value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== 3
+    || Object.keys(value).some((key) => !['source', 'observedBlock', 'reservesHash'].includes(key))
+    || !['PRIMARY', 'FALLBACK'].includes(String((value as { source?: unknown }).source))
+    || !Number.isSafeInteger((value as { observedBlock?: unknown }).observedBlock)
+    || Number((value as { observedBlock?: unknown }).observedBlock) <= 0
+    || !isHash(String((value as { reservesHash?: unknown }).reservesHash))
+  ) throw new CoreError('InvalidFinality', 'NPL quote source evidence is invalid', 409);
 }
 
 function normalizeAddress(value: string) {

@@ -15,6 +15,7 @@ const SOURCE_EVENT_TYPES = [
   'FulfillmentFinalized',
   'TakeoverOpened',
   'SettlementRequested',
+  'SettlementTransferSubmitted',
   'SettlementTransferFinalized',
   'SettlementFinalityReorged',
   'BnmStateFinalized',
@@ -524,6 +525,7 @@ function topicForEvent(event: SourceEventRow) {
     FulfillmentFinalized: 'FULFILLMENT_FINALIZED',
     TakeoverOpened: 'TAKEOVER_OPENED',
     SettlementRequested: 'SETTLEMENT_REQUESTED',
+    SettlementTransferSubmitted: 'SETTLEMENT_SUBMITTED',
     SettlementTransferFinalized: 'SETTLEMENT_SETTLED',
     SettlementFinalityReorged: 'SETTLEMENT_REORGED',
   };

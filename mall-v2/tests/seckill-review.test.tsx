@@ -22,7 +22,7 @@ describe('seckill signed quote review', () => {
     const quote = seckillQuote();
     const broadcastPayment = vi.fn().mockResolvedValue(undefined);
     mocked.runtime = {
-      bootstrap: { artifactVersion, writesEnabled: true, blockCode: null },
+      bootstrap: { artifactVersion, writesEnabled: true, runtimeBlockers: [], blockCode: null },
       catalog: [],
       catalogState: 'ready',
       categories: [],

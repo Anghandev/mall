@@ -76,6 +76,7 @@ describe('coordinated fulfillment Core client', () => {
         externalBlocked: [],
         paymentDecisionBlocked: [],
         paymentExternalBlocked: [],
+        runtimeBlockers: [],
         providers: {},
         writesEnabled: true,
       },

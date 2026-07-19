@@ -23,10 +23,6 @@ export interface NonceRateLimiter {
   consume(input: { walletAddress: string; clientAddress: string; now: Date }): Promise<void>;
 }
 
-export interface WalletMessageSignatureVerifier {
-  isValid(walletAddress: string, message: string, signature: string): Promise<boolean>;
-}
-
 export interface SiweChallenge {
   message: string;
   nonce: string;

@@ -9,7 +9,6 @@ import {
   verifySiwe,
   type NonceRateLimiter,
   type NonceStore,
-  type WalletMessageSignatureVerifier,
 } from './auth.ts';
 import { orderAllowedActions, type ActionContext, type OrderProjection } from './allowed-actions.ts';
 import type { CoreConfig, RuntimeReadinessSnapshot } from './config.ts';
@@ -23,7 +22,6 @@ import {
   cmsContentFormats,
   cmsContentTypes,
   executableOrderActionNames,
-  merchantLevels,
   merchantLifecycleStatuses,
   merchantReviewActions,
   notificationCampaignTopics,
@@ -542,7 +540,7 @@ export interface NotificationApiService {
 
 export interface SystemConfigApiService {
   createVersion(actor: FulfillmentActor, input: {
-    configKey: 'BUSINESS' | 'RPC' | 'NPL_QUOTE' | 'GAS' | 'CHAIN' | 'INTEGRATIONS' | 'MERCHANT_LEVELS';
+    configKey: 'BUSINESS' | 'RPC' | 'NPL_QUOTE' | 'GAS' | 'CHAIN' | 'INTEGRATIONS';
     payload: unknown;
     effectiveFrom: string;
     idempotencyKey: string;
@@ -660,7 +658,6 @@ export interface MerchantLifecycleApiService {
     legalId: string;
     contactPhone: string;
     settlementWallet: string;
-    level?: 'V1' | 'V2' | 'V3' | 'V4' | 'V5';
     idempotencyKey: string;
     correlationId: string;
   }): Promise<unknown>;
@@ -669,7 +666,6 @@ export interface MerchantLifecycleApiService {
     legalName: string;
     legalId: string;
     contactPhone: string;
-    level?: 'V1' | 'V2' | 'V3' | 'V4' | 'V5';
     licenseAssetId: string | null;
     expectedVersion: number;
     idempotencyKey: string;
@@ -689,7 +685,6 @@ export interface ApiDependencies {
   runtimeReadiness?: RuntimeReadinessSnapshot | (() => RuntimeReadinessSnapshot | undefined);
   nonceStore: NonceStore;
   nonceRateLimiter: NonceRateLimiter;
-  walletSignatureVerifier?: WalletMessageSignatureVerifier;
   authDomain: string;
   authUri: string;
   resolveRoles(walletAddress: string): Promise<{ roles: readonly UserRole[]; merchantId?: string }>;
@@ -2469,7 +2464,7 @@ async function routeAdminServices(
     if (request.method === 'POST') {
       const body = await readJson(request);
       assertOnlyKeys(body, [
-        'shopName', 'legalName', 'legalId', 'contactPhone', 'settlementWallet', 'level', 'idempotencyKey',
+        'shopName', 'legalName', 'legalId', 'contactPhone', 'settlementWallet', 'idempotencyKey',
       ]);
       sendJson(response, 201, await dependencies.merchantLifecycleService.createApplication(actor, {
         shopName: requiredString(body, 'shopName'),
@@ -2477,7 +2472,6 @@ async function routeAdminServices(
         legalId: requiredString(body, 'legalId'),
         contactPhone: requiredString(body, 'contactPhone'),
         settlementWallet: requiredString(body, 'settlementWallet'),
-        ...(body.level === undefined ? {} : { level: merchantLifecycleLevel(body.level) }),
         idempotencyKey: requiredString(body, 'idempotencyKey'),
         correlationId,
       }), correlationId);
@@ -2489,7 +2483,7 @@ async function routeAdminServices(
     const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
     const body = await readJson(request);
     assertOnlyKeys(body, [
-      'shopName', 'legalName', 'legalId', 'contactPhone', 'level', 'licenseAssetId',
+      'shopName', 'legalName', 'legalId', 'contactPhone', 'licenseAssetId',
       'expectedVersion', 'idempotencyKey',
     ]);
     sendJson(response, 200, await dependencies.merchantLifecycleService.updateApplication(
@@ -2500,7 +2494,6 @@ async function routeAdminServices(
         legalName: requiredString(body, 'legalName'),
         legalId: requiredString(body, 'legalId'),
         contactPhone: requiredString(body, 'contactPhone'),
-        ...(body.level === undefined ? {} : { level: merchantLifecycleLevel(body.level) }),
         licenseAssetId: nullableString(body, 'licenseAssetId'),
         expectedVersion: requiredPositiveInteger(body, 'expectedVersion'),
         idempotencyKey: requiredString(body, 'idempotencyKey'),
@@ -4143,13 +4136,6 @@ function merchantLifecycleStatus(value: string | null): NonNullable<Parameters<M
     throw new CoreError('InvalidRequest', 'Unsupported merchant lifecycle status');
   }
   return value as NonNullable<Parameters<MerchantLifecycleApiService['list']>[1]['status']>;
-}
-
-function merchantLifecycleLevel(value: unknown): typeof merchantLevels[number] {
-  if (!merchantLevels.includes(value as typeof merchantLevels[number])) {
-    throw new CoreError('InvalidRequest', 'Unsupported merchant level');
-  }
-  return value as typeof merchantLevels[number];
 }
 
 function merchantReviewAction(value: unknown): Parameters<MerchantLifecycleApiService['createReviewChallenge']>[2]['action'] {

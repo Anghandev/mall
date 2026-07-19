@@ -1,7 +1,6 @@
 import {
   artifactVersion,
   guaranteeStatuses,
-  merchantLevels,
   merchantLifecycleStatuses,
   merchantReviewActions,
   settlementRequestStates,
@@ -249,7 +248,6 @@ function isMerchantSummary(value: unknown): value is MerchantLifecycleDetail['me
     && addressPattern.test(String(value.settlementWallet))
     && value.settlementWalletMutable === false
     && merchantLifecycleStatuses.includes(value.status as MerchantLifecycleStatus)
-    && merchantLevels.includes(value.level as never)
     && guaranteeStatuses.includes(value.guaranteeStatus as never)
     && Number.isSafeInteger(value.applicationVersion) && Number(value.applicationVersion) >= 0
     && typeof value.qualificationComplete === 'boolean'
@@ -260,18 +258,13 @@ function isMerchantSummary(value: unknown): value is MerchantLifecycleDetail['me
 
 function isMerchantLifecycleDetail(value: unknown): value is MerchantLifecycleDetail {
   if (!isRecord(value) || value.artifactVersion !== artifactVersion || !isMerchantSummary(value.merchant) || !isQualification(value.qualification)) return false;
-  if (!isLevelPolicy(value.levelPolicy)) return false;
   if (!isRecord(value.analytics) || !isOrderAnalytics(value.analytics.orders) || !isFulfillmentAnalytics(value.analytics.fulfillment)
     || !isRiskAnalytics(value.analytics.risk) || !isContributionAnalytics(value.analytics.contributions)) return false;
   if (!Array.isArray(value.balances) || value.balances.length !== 5 || !value.balances.every((item) => isRecord(item)
-    && ['LOCKED', 'AVAILABLE', 'REQUESTED', 'BATCHED', 'SETTLED'].includes(String(item.state)) && amountPattern.test(String(item.amount)))
+    && ['LOCKED', 'AVAILABLE', 'REQUESTED', 'SUBMITTED', 'SETTLED'].includes(String(item.state)) && amountPattern.test(String(item.amount)))
     || new Set(value.balances.map((item) => item.state)).size !== 5) return false;
   if (!Array.isArray(value.settlements) || !value.settlements.every(isSettlement)) return false;
   return Array.isArray(value.reviews) && value.reviews.every(isReviewEvidence);
-}
-
-function isLevelPolicy(value: unknown) {
-  return isRecord(value) && Object.keys(value).length === 1 && value.status === 'Deprecated';
 }
 
 function isQualification(value: unknown) {
@@ -359,7 +352,7 @@ function isMerchantReviewChallenge(
   return message.action === `${input.action}_MERCHANT` && message.resourceType === 'MERCHANT'
     && message.resourceId === merchant.merchant.merchantId && amountPattern.test(String(message.policyVersion))
     && bytes32Pattern.test(String(message.oldValueHash)) && bytes32Pattern.test(String(message.newValueHash))
-    && addressPattern.test(String(message.safeAddress)) && amountPattern.test(String(message.nonce))
+    && addressPattern.test(String(message.executorWallet)) && amountPattern.test(String(message.nonce))
     && String(message.deadline) === String(Math.floor(Date.parse(String(value.expiresAt)) / 1_000));
 }
 

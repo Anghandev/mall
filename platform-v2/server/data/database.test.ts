@@ -133,6 +133,9 @@ test('business and audit migrations apply from empty databases', async () => {
       '032_seckill_prize_settlement.sql',
       '033_eoa_wallet_execution.sql',
       '034_reward_account_subtypes.sql',
+      '035_settlement_attempt_retryable.sql',
+      '036_retire_merchant_levels.sql',
+      '037_payment_quote_source_evidence.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -846,7 +849,12 @@ test('merchant lifecycle encrypts qualification and governs exact review transit
     const created = await service.createApplication(operatorActor, applicationInput);
     const merchantId = created.merchant.merchantId;
     assert.equal(created.merchant.status, 'PENDING');
-    assert.deepEqual(created.levelPolicy, { status: 'Deprecated' });
+    assert.equal('level' in created.merchant, false);
+    assert.equal('levelPolicy' in created, false);
+    assert.equal((await db.query<{ level: string | null }>(
+      'SELECT level FROM core.merchants WHERE merchant_id = $1',
+      [merchantId],
+    )).rows[0]?.level, null);
     assert.deepEqual(created.analytics.fulfillment.fastShip48h, {
       status: 'UNAVAILABLE', numerator: '0', denominator: '0', bps: null,
       reason: 'NO_ELIGIBLE_DELIVERY_ORDERS',
@@ -1106,7 +1114,8 @@ test('merchant drilldown uses named canonical amounts and fails closed when cont
       clock: () => now,
     });
     const detail = await service.get({ walletAddress: admin.address, roles: ['ADMIN'] }, 'merchant-1');
-    assert.deepEqual(detail.levelPolicy, { status: 'Deprecated' });
+    assert.equal('level' in detail.merchant, false);
+    assert.equal('levelPolicy' in detail, false);
     const shanghaiNow = new Date(now.getTime() + 8 * 60 * 60_000);
     const shanghaiDayStart = new Date(Date.UTC(
       shanghaiNow.getUTCFullYear(), shanghaiNow.getUTCMonth(), shanghaiNow.getUTCDate(),
@@ -1718,7 +1727,6 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
     });
     const operatorActor = { walletAddress: operator.address, roles: ['OPERATOR'] as const };
     const adminActor = { walletAddress: admin.address, roles: ['ADMIN'] as const };
-    await seedMerchantLevelConfig(db, 1, '1000000000000000000000000', 2);
     const sessionInput = {
       policyVersion: '1',
       rulesContentHash: HASH,
@@ -1960,7 +1968,10 @@ test('catalog payment service builds an authoritative idempotent quote and recor
         },
       },
       nplQuotes: {
-        quote: async () => ({ nplQuoteAmount: 1_000n }),
+        quote: async () => ({
+          nplQuoteAmount: 1_000n,
+          quoteSourceEvidence: { source: 'PRIMARY', observedBlock: 40_000_000, reservesHash: HASH },
+        }),
       },
       beneficiaries: {
         resolve: async () => ({
@@ -2068,6 +2079,13 @@ test('catalog payment service builds an authoritative idempotent quote and recor
     assert.equal(quote.intent.freightUsdt, '5');
     assert.equal(quote.intent.usdtPaymentAmount, '75');
     assert.equal(quote.intent.nplPaymentAmount, '300');
+    assert.deepEqual((await db.query<{ quote_source_evidence: Record<string, unknown> }>(
+      `SELECT quote_source_evidence FROM core.payment_quote_legs
+       WHERE order_id = $1 AND classification = 'ORDINARY'`,
+      [quote.orderId],
+    )).rows[0]?.quote_source_evidence, {
+      source: 'PRIMARY', observedBlock: 40_000_000, reservesHash: HASH,
+    });
     assert.equal(quote.intent.productId, `0x${'b'.repeat(64)}`);
     assert.equal(quote.snapshotHash, paymentIntentHash(quote.intent));
     assert.equal(quote.approvalRequirements[0]?.requiredAmount, '75');
@@ -2442,14 +2460,12 @@ test('catalog management enforces product scope, signed preview, review locks an
         proposedSeckillInventory: 3,
       }],
     };
-    await seedMerchantLevelConfig(db, 1_000, '50', 2);
     const draft = await service.saveProductSlot(merchant, 'store-catalog-1', productInput);
     const productId = String(draft.productId);
     const skuId = String((draft.skus as Array<{ skuId: string }>)[0]!.skuId);
     assert.equal(draft.lifecycleState, 'DRAFT');
     assert.deepEqual(draft.allowedActions, ['SAVE_DRAFT', 'CREATE_CONCESSION_PREVIEW', 'SUBMIT_REVIEW', 'DELIST']);
     assert.equal((await service.saveProductSlot(merchant, 'store-catalog-1', productInput)).productId, productId);
-    await seedMerchantLevelConfig(db, 999, '1000000000000000000000000', 3);
     const tagBatchInput = {
       productIds: [productId],
       tagIds: [String(fastTag.tagId)],
@@ -3049,6 +3065,7 @@ test('seckill quote locks both inventories and final classification releases the
       nplQuotes: {
         quote: async ({ listPriceUsdt }) => ({
           nplQuoteAmount: listPriceUsdt * 10n,
+          quoteSourceEvidence: { source: 'PRIMARY', observedBlock: 40_000_000, reservesHash: HASH },
         }),
       },
       beneficiaries: {
@@ -3337,6 +3354,7 @@ test('seckill prize freezes the final canonical order and only the reviewed winn
       nplQuotes: {
         quote: async ({ listPriceUsdt }) => ({
           nplQuoteAmount: listPriceUsdt * 10n,
+          quoteSourceEvidence: { source: 'PRIMARY', observedBlock: 40_000_000, reservesHash: HASH },
         }),
       },
       beneficiaries: {
@@ -3800,6 +3818,12 @@ test('fulfillment targets encrypt delivery PII and bind quotes to an AMap six-di
        ) VALUES ($1,'MERCHANT','merchant-1','ACTIVE',$2)`,
       [MERCHANT, HASH],
     );
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES ($1,'BUYER',NULL,'ACTIVE',$2)`,
+      [BUYER, HASH],
+    );
     let regionCalls = 0;
     const regions = {
       reverseGeocode: async () => {
@@ -3903,6 +3927,71 @@ test('fulfillment targets encrypt delivery PII and bind quotes to an AMap six-di
     await insertOrder(db, targetOrderId, reservationId, delivery.targetHash, delivery.regionCodeHash);
     const detail = await service.getOrderTarget(buyer, targetOrderId);
     assert.equal(detail.payload.recipientName, 'Test Recipient');
+    assert.equal((await service.getOrderTarget(buyer, targetOrderId)).payload.phone, '+8613800000000');
+    await db.query(
+      `UPDATE core.wallet_role_bindings SET status = 'REVOKED', revoked_at = clock_timestamp()
+       WHERE lower(wallet_address) = $1 AND role = 'BUYER'`,
+      [BUYER],
+    );
+    await assert.rejects(service.getOrderTarget(buyer, targetOrderId), /outside the authenticated wallet scope/);
+    assert.equal((await service.getOrderTarget(merchant, targetOrderId)).payload.phone, '+8613800000000');
+    const platformReaders = [
+      { walletAddress: '0x9000000000000000000000000000000000000001', role: 'ADMIN' },
+      { walletAddress: '0x9000000000000000000000000000000000000002', role: 'OPERATOR' },
+      { walletAddress: '0x9000000000000000000000000000000000000003', role: 'ARBITRATOR' },
+    ] as const;
+    for (const reader of platformReaders) {
+      await grantRole(db, reader.walletAddress, reader.role);
+      const actor = { walletAddress: reader.walletAddress, roles: [reader.role] } as never;
+      assert.equal((await service.getOrderTarget(actor, targetOrderId)).payload.address, 'Test Road 1 Building 2 Room 3');
+      await db.query(
+        `UPDATE core.wallet_role_bindings SET status = 'REVOKED', revoked_at = clock_timestamp()
+         WHERE lower(wallet_address) = $1 AND role = $2`,
+        [reader.walletAddress, reader.role],
+      );
+      await assert.rejects(service.getOrderTarget(actor, targetOrderId), /outside the authenticated wallet scope/);
+    }
+    await db.query(
+      `UPDATE core.wallet_role_bindings SET status = 'REVOKED', revoked_at = clock_timestamp()
+       WHERE lower(wallet_address) = $1 AND role = 'MERCHANT'`,
+      [MERCHANT],
+    );
+    await assert.rejects(service.getOrderTarget(merchant, targetOrderId), /outside the authenticated wallet scope/);
+    await db.query(
+      `UPDATE core.wallet_role_bindings SET status = 'ACTIVE', revoked_at = NULL
+       WHERE lower(wallet_address) = $1 AND role = 'MERCHANT'`,
+      [MERCHANT],
+    );
+    const auditRows = await db.query<{ actor_role: string; count: string }>(
+      `SELECT actor_role, count(*)::text AS count
+       FROM core.audit_outbox_events
+       WHERE event_type = 'OrderFulfillmentTargetRead' AND resource_id = $1
+       GROUP BY actor_role ORDER BY actor_role`,
+      [targetOrderId],
+    );
+    assert.deepEqual(auditRows.rows, [
+      { actor_role: 'ADMIN', count: '1' },
+      { actor_role: 'ARBITRATOR', count: '1' },
+      { actor_role: 'BUYER', count: '2' },
+      { actor_role: 'MERCHANT', count: '1' },
+      { actor_role: 'OPERATOR', count: '1' },
+    ]);
+    await grantRole(db, '0x9000000000000000000000000000000000000004', 'OPERATOR');
+    const auditFailingTargets = new FulfillmentTargetService({
+      transactions: transactionAdapter(db, (sql) => {
+        if (sql.includes('INSERT INTO core.audit_outbox_events')) throw new Error('audit insert unavailable');
+      }),
+      regions,
+      encryptionKey: 'ab'.repeat(32),
+      clock: () => new Date(),
+    });
+    await assert.rejects(
+      auditFailingTargets.getOrderTarget(
+        { walletAddress: '0x9000000000000000000000000000000000000004', roles: ['OPERATOR'] },
+        targetOrderId,
+      ),
+      /audit insert unavailable/,
+    );
     const exportNow = new Date();
     const paymentTxHash = `0x${'6'.repeat(64)}`;
     await db.query(
@@ -7163,66 +7252,36 @@ test('system config keeps secrets as references and publishes exact old/new vers
     assert.equal(current.rows[0]?.payload.primaryRpcSecretRef, 'secret://rpc/primary-v2');
     assert.throws(
       () => service.createVersion(actor, {
-        configKey: 'MERCHANT_LEVELS',
+        configKey: 'MERCHANT_LEVELS' as never,
         payload: { levels: [{ level: 'V1', maxProductSettlementUsdt: '0', monthlySeckillQuota: -1 }] },
         effectiveFrom: '2020-01-01T00:00:00.000Z',
         idempotencyKey: 'merchant-levels-invalid',
         correlationId: 'merchant-levels-invalid',
       }),
-      /must contain V1-V5 exactly once/,
+      /System config key is invalid/,
     );
-    const merchantLevelsConfig = await service.createVersion(actor, {
-      configKey: 'MERCHANT_LEVELS',
-      payload: {
-        levels: ['V1', 'V2', 'V3', 'V4', 'V5'].map((level, index) => ({
-          level,
-          maxProductSettlementUsdt: String((index + 1) * 100),
-          monthlySeckillQuota: index,
-        })),
-      },
-      effectiveFrom: '2020-01-01T00:00:00.000Z',
-      idempotencyKey: 'merchant-levels-v1',
-      correlationId: 'merchant-levels-create-v1',
-    });
-    const currentMerchantLevelHash = await db.query<{ payload_hash: string }>(
-      "SELECT payload_hash FROM core.current_system_config WHERE config_key = 'MERCHANT_LEVELS'",
+    await db.query(
+      `INSERT INTO core.system_config_versions (
+         config_version_id, config_key, version, payload, payload_hash, effective_from,
+         idempotency_key, request_hash, created_by, created_at
+       ) VALUES ('system-config:merchant-levels:legacy', 'MERCHANT_LEVELS', 1, '{}', $1,
+         '2020-01-01T00:00:00.000Z', 'legacy-merchant-levels', $1, $2, $3)`,
+      [HASH, admin.address.toLowerCase(), now],
     );
-    const merchantLevelsIntent: SensitiveActionIntent = {
-      ...intent,
-      resourceId: merchantLevelsConfig.configVersionId,
-      oldValueHash: currentMerchantLevelHash.rows[0]!.payload_hash,
-      newValueHash: merchantLevelsConfig.payloadHash,
-      nonce: 103n,
-      deadline: BigInt(Math.floor(now.getTime() / 1_000) + 300),
-    };
-    const merchantLevelsApproval = {
-      action: merchantLevelsIntent.action,
-      resourceType: merchantLevelsIntent.resourceType,
-      resourceId: merchantLevelsIntent.resourceId,
-      policyVersion: merchantLevelsIntent.policyVersion.toString(),
-      oldValueHash: merchantLevelsIntent.oldValueHash,
-      newValueHash: merchantLevelsIntent.newValueHash,
-      executorWallet: merchantLevelsIntent.executorWallet,
-      nonce: merchantLevelsIntent.nonce.toString(),
-      deadline: merchantLevelsIntent.deadline.toString(),
-      signature: await secondary.signTypedData(
-        sensitiveActionDomain(governanceWallet), sensitiveActionTypes, merchantLevelsIntent,
-      ),
-    };
-    assert.equal((await service.publish(
-      actor, merchantLevelsConfig.configVersionId, merchantLevelsApproval,
-    )).published, true);
-    const currentLevels = await db.query<{ payload: { levels: Array<{ level: string }> } }>(
-      "SELECT payload FROM core.current_system_config WHERE config_key = 'MERCHANT_LEVELS'",
+    await assert.rejects(
+      service.approvalChallenge(actor, 'system-config:merchant-levels:legacy', {
+        nonce: '105', deadline: String(Math.floor(now.getTime() / 1_000) + 300),
+      }),
+      /System config key is retired/,
     );
-    assert.deepEqual(currentLevels.rows[0]?.payload.levels.map((rule) => rule.level), ['V1', 'V2', 'V3', 'V4', 'V5']);
+    assert.equal((await service.list(actor)).some((item) => String(item.configKey) === 'MERCHANT_LEVELS'), false);
     await assert.rejects(
       db.query("UPDATE core.system_config_versions SET payload = '{}' WHERE config_version_id = $1", [first.configVersionId]),
       /ImmutableRecord/,
     );
     assert.equal((await db.query<{ count: string }>(
       "SELECT count(*)::text AS count FROM core.audit_outbox_events WHERE event_type LIKE 'SystemConfig%'",
-    )).rows[0]?.count, '6');
+    )).rows[0]?.count, '4');
   } finally {
     await db.close();
   }
@@ -8094,6 +8153,389 @@ test('signed settlement request executes one immutable EOA transfer and settles 
     await db.close();
   }
 });
+
+test('ambiguous EOA submission failure retries the original attempt and settles once', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const prepared = await prepareRequestedSettlement(db);
+    let now = prepared.now;
+    const transfer = await prepared.settlements.createTransfer(prepared.operator, {
+      asset: 'USDT',
+      gasCap: '100000',
+      idempotencyKey: 'eoa-ambiguous-transfer-1',
+      runtime: prepared.runtime,
+      correlationId: 'eoa-ambiguous-transfer-1',
+    });
+    const executionTxHash = `0x${'4'.repeat(64)}`;
+    let receipt: EoaSettlementReceipt | undefined;
+    const submissions: Parameters<ConstructorParameters<typeof SettlementWorker>[0]['broadcaster']['submit']>[0][] = [];
+    let chainBroadcasts = 0;
+    const worker = () => new SettlementWorker({
+      transactions: transactionAdapter(db),
+      broadcaster: {
+        submit: async (input) => {
+          submissions.push(input);
+          if (submissions.length === 1) {
+            chainBroadcasts += 1;
+            throw new CoreError('ExternalBlocked', 'executor response was lost after broadcast', 503);
+          }
+          return {
+            executionTxHash,
+            executorWallet: input.executorWallet,
+            executorNonce: input.executorNonce,
+            requestDigest: input.requestDigest,
+          };
+        },
+        replace: async () => {
+          throw new Error('unexpected replacement');
+        },
+      },
+      chain: {
+        receipt: async () => receipt,
+        canonicalBlock: async (input) => ({
+          canonical: true,
+          observedBlockHash: input.blockHash,
+          evidenceHash: HASH,
+        }),
+      },
+      clock: () => now,
+    });
+
+    await assert.rejects(
+      worker().submitOnce(),
+      (error: unknown) => error instanceof CoreError && error.code === 'ExternalBlocked',
+    );
+    let attempts = await db.query<{
+      attempt_id: string;
+      request_digest: string;
+      executor_nonce: string;
+      state: string;
+    }>(
+      `SELECT attempt_id, request_digest, executor_nonce::text, state
+       FROM core.settlement_transfer_attempts WHERE transfer_id = $1 ORDER BY attempt_number`,
+      [transfer.transferId],
+    );
+    assert.equal(attempts.rows.length, 1);
+    assert.equal(attempts.rows[0]?.state, 'RETRYABLE');
+    assert.equal((await prepared.settlements.getAdminTransfer(
+      { walletAddress: prepared.operator.walletAddress, roles: ['AUDITOR'] },
+      transfer.transferId,
+    )).transfer.state, 'RETRYABLE');
+
+    now = new Date(now.getTime() + 1_000);
+    const restarted = worker();
+    assert.equal(await restarted.submitOnce(), 1);
+    assert.equal(submissions.length, 2);
+    assert.equal(chainBroadcasts, 1);
+    assert.equal(submissions[1]?.idempotencyKey, submissions[0]?.idempotencyKey);
+    assert.equal(submissions[1]?.requestDigest, submissions[0]?.requestDigest);
+    assert.equal(submissions[1]?.executorNonce, submissions[0]?.executorNonce);
+    attempts = await db.query<{
+      attempt_id: string;
+      request_digest: string;
+      executor_nonce: string;
+      state: string;
+    }>(
+      `SELECT attempt_id, request_digest, executor_nonce::text, state
+       FROM core.settlement_transfer_attempts WHERE transfer_id = $1 ORDER BY attempt_number`,
+      [transfer.transferId],
+    );
+    assert.deepEqual(attempts.rows.map((row) => row.attempt_id), [submissions[0]!.idempotencyKey]);
+    assert.deepEqual(attempts.rows.map((row) => row.state), ['SUBMITTED']);
+
+    const notifications = new NotificationService({ transactions: transactionAdapter(db), clock: () => now });
+    for (let projected = await notifications.projectNext(); projected > 0; projected = await notifications.projectNext()) {
+      // Drain the finite source outbox so the submitted transfer projection is observable.
+    }
+    const submittedNotifications = await db.query<{
+      source_event_type: string;
+      topic: string;
+      template_data: { copyKey?: string; executionTxHash?: string };
+    }>(
+      `SELECT source_event_type, topic, template_data
+       FROM core.notification_messages
+       WHERE source_event_type = 'SettlementTransferSubmitted'`,
+    );
+    assert.deepEqual(submittedNotifications.rows, [{
+      source_event_type: 'SettlementTransferSubmitted',
+      topic: 'SETTLEMENT_SUBMITTED',
+      template_data: { copyKey: 'SETTLEMENT_SUBMITTED', aggregateId: transfer.transferId, executionTxHash },
+    }]);
+
+    receipt = {
+      chainId: 56,
+      executionTxHash,
+      transactionTo: transfer.tokenAddress,
+      transactionCalldata: transfer.transferCalldata,
+      executorWallet: transfer.executorWallet,
+      executorNonce: transfer.executorNonce,
+      receiptStatus: 1,
+      blockNumber: 1_030,
+      blockHash: `0x${'e'.repeat(64)}`,
+      confirmations: 15,
+      canonicalBlock: true,
+      transfers: [{
+        tokenAddress: transfer.tokenAddress,
+        from: transfer.executorWallet,
+        to: transfer.recipientAddress,
+        amount: transfer.amount,
+      }],
+      transactionDeltas: [
+        { tokenAddress: transfer.tokenAddress, account: transfer.executorWallet, delta: `-${transfer.amount}` },
+        { tokenAddress: transfer.tokenAddress, account: transfer.recipientAddress, delta: transfer.amount },
+      ],
+      evidenceHash: `0x${'f'.repeat(64)}`,
+    };
+    assert.equal(await restarted.pollFinalityOnce(), 1);
+    const settled = await prepared.settlements.getAdminRequest(
+      { walletAddress: prepared.operator.walletAddress, roles: ['AUDITOR'] },
+      prepared.request.request_id,
+    );
+    assert.equal(settled.request.state, 'SETTLED');
+    assert.deepEqual(settled.request.finalExecutionTxHashes, [executionTxHash]);
+    await assertLedgerBalanced(db, 1);
+  } finally {
+    await db.close();
+  }
+});
+
+test('expired EOA submission lease reuses the same attempt idempotency key', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const prepared = await prepareRequestedSettlement(db);
+    let now = prepared.now;
+    const transfer = await prepared.settlements.createTransfer(prepared.operator, {
+      asset: 'USDT',
+      gasCap: '100000',
+      idempotencyKey: 'eoa-expired-lease-transfer-1',
+      runtime: prepared.runtime,
+      correlationId: 'eoa-expired-lease-transfer-1',
+    });
+    const attemptId = `settlement-attempt:${transfer.transferId}:1`;
+    const requestDigest = `0x${'6'.repeat(64)}`;
+    await db.query(
+      `UPDATE core.settlement_transfers SET state = 'LEASED' WHERE transfer_id = $1`,
+      [transfer.transferId],
+    );
+    await db.query(
+      `INSERT INTO core.settlement_transfer_attempts (
+         attempt_id, transfer_id, attempt_number, lease_token, request_digest,
+         transaction_to, transaction_calldata, executor_wallet, executor_nonce,
+         gas_limit, replacement_for_attempt_id, state, leased_until,
+         created_at, updated_at
+       ) VALUES ($1,$2,1,'expired-lease-token',$3,$4,$5,$6,$7,$8,NULL,'LEASED',$9,$10,$10)`,
+      [
+        attemptId,
+        transfer.transferId,
+        requestDigest,
+        transfer.tokenAddress,
+        transfer.transferCalldata,
+        transfer.executorWallet,
+        transfer.executorNonce,
+        transfer.gasCap,
+        new Date(now.getTime() - 1),
+        new Date(now.getTime() - 2 * 60 * 1000),
+      ],
+    );
+    const submissions: Parameters<ConstructorParameters<typeof SettlementWorker>[0]['broadcaster']['submit']>[0][] = [];
+    let receipt: EoaSettlementReceipt | undefined;
+    const worker = new SettlementWorker({
+      transactions: transactionAdapter(db),
+      broadcaster: {
+        submit: async (input) => {
+          submissions.push(input);
+          return {
+            executionTxHash: `0x${'7'.repeat(64)}`,
+            executorWallet: input.executorWallet,
+            executorNonce: input.executorNonce,
+            requestDigest: input.requestDigest,
+          };
+        },
+        replace: async () => {
+          throw new Error('unexpected replacement');
+        },
+      },
+      chain: {
+        receipt: async () => receipt,
+        canonicalBlock: async (input) => ({
+          canonical: true,
+          observedBlockHash: input.blockHash,
+          evidenceHash: HASH,
+        }),
+      },
+      clock: () => now,
+    });
+
+    assert.equal(await worker.recoverExpiredLeaseOnce(), 1);
+    now = new Date(now.getTime() + 1_000);
+    assert.equal(await worker.submitOnce(), 1);
+    assert.equal(submissions.length, 1);
+    assert.equal(submissions[0]?.idempotencyKey, attemptId);
+    assert.equal(submissions[0]?.requestDigest, requestDigest);
+    assert.equal(submissions[0]?.executorNonce, transfer.executorNonce);
+    const attempts = await db.query<{ attempt_id: string; state: string }>(
+      `SELECT attempt_id, state FROM core.settlement_transfer_attempts
+       WHERE transfer_id = $1 ORDER BY attempt_number`,
+      [transfer.transferId],
+    );
+    assert.deepEqual(attempts.rows, [{ attempt_id: attemptId, state: 'SUBMITTED' }]);
+    receipt = {
+      chainId: 56,
+      executionTxHash: `0x${'7'.repeat(64)}`,
+      transactionTo: transfer.tokenAddress,
+      transactionCalldata: transfer.transferCalldata,
+      executorWallet: transfer.executorWallet,
+      executorNonce: transfer.executorNonce,
+      receiptStatus: 1,
+      blockNumber: 1_031,
+      blockHash: `0x${'e'.repeat(64)}`,
+      confirmations: 15,
+      canonicalBlock: true,
+      transfers: [{
+        tokenAddress: transfer.tokenAddress,
+        from: transfer.executorWallet,
+        to: transfer.recipientAddress,
+        amount: transfer.amount,
+      }],
+      transactionDeltas: [
+        { tokenAddress: transfer.tokenAddress, account: transfer.executorWallet, delta: `-${transfer.amount}` },
+        { tokenAddress: transfer.tokenAddress, account: transfer.recipientAddress, delta: transfer.amount },
+      ],
+      evidenceHash: `0x${'f'.repeat(64)}`,
+    };
+    assert.equal(await worker.pollFinalityOnce(), 1);
+    assert.equal((await prepared.settlements.getAdminRequest(
+      { walletAddress: prepared.operator.walletAddress, roles: ['AUDITOR'] },
+      prepared.request.request_id,
+    )).request.state, 'SETTLED');
+  } finally {
+    await db.close();
+  }
+});
+
+test('deterministic EOA replacement rejection quarantines the submitted transfer', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const prepared = await prepareRequestedSettlement(db);
+    const transfer = await prepared.settlements.createTransfer(prepared.operator, {
+      asset: 'USDT',
+      gasCap: '100000',
+      idempotencyKey: 'eoa-replacement-deterministic-4xx-transfer-1',
+      runtime: prepared.runtime,
+      correlationId: 'eoa-replacement-deterministic-4xx-transfer-1',
+    });
+    let now = prepared.now;
+    const worker = new SettlementWorker({
+      transactions: transactionAdapter(db),
+      broadcaster: {
+        submit: async (input) => ({
+          executionTxHash: `0x${'2'.repeat(64)}`,
+          executorWallet: input.executorWallet,
+          executorNonce: input.executorNonce,
+          requestDigest: input.requestDigest,
+        }),
+        replace: async () => {
+          throw new CoreError('InvalidRequest', 'executor rejected exact calldata', 400, {
+            deterministicExecutorFailure: true,
+            executorErrorCode: 'CALLDATA_MISMATCH',
+          });
+        },
+      },
+      chain: {
+        receipt: async () => undefined,
+        canonicalBlock: async (input) => ({
+          canonical: true,
+          observedBlockHash: input.blockHash,
+          evidenceHash: HASH,
+        }),
+      },
+      replacementDelayMs: 1_000,
+      clock: () => now,
+    });
+
+    assert.equal(await worker.submitOnce(), 1);
+    now = new Date(now.getTime() + 1_001);
+    await assert.rejects(
+      worker.replaceOnce(),
+      (error: unknown) => error instanceof CoreError && error.code === 'InvalidRequest',
+    );
+    const attempts = await db.query<{ state: string }>(
+      'SELECT state FROM core.settlement_transfer_attempts WHERE transfer_id = $1 ORDER BY attempt_number',
+      [transfer.transferId],
+    );
+    assert.deepEqual(attempts.rows.map((row) => row.state), ['SUBMITTED', 'QUARANTINED']);
+    assert.equal(await worker.replaceOnce(), 0);
+    assert.equal((await prepared.settlements.getAdminTransfer(
+      { walletAddress: prepared.operator.walletAddress, roles: ['AUDITOR'] },
+      transfer.transferId,
+    )).transfer.state, 'QUARANTINED');
+    assert.equal((await prepared.settlements.getAdminRequest(
+      { walletAddress: prepared.operator.walletAddress, roles: ['AUDITOR'] },
+      prepared.request.request_id,
+    )).request.state, 'QUARANTINED');
+  } finally {
+    await db.close();
+  }
+});
+
+test('deterministic EOA executor 4xx quarantines without creating a replacement attempt', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const prepared = await prepareRequestedSettlement(db);
+    const transfer = await prepared.settlements.createTransfer(prepared.operator, {
+      asset: 'USDT',
+      gasCap: '100000',
+      idempotencyKey: 'eoa-deterministic-4xx-transfer-1',
+      runtime: prepared.runtime,
+      correlationId: 'eoa-deterministic-4xx-transfer-1',
+    });
+    const worker = new SettlementWorker({
+      transactions: transactionAdapter(db),
+      broadcaster: {
+        submit: async () => {
+          throw new CoreError('InvalidRequest', 'executor amount mismatch', 400, {
+            deterministicExecutorFailure: true,
+            executorErrorCode: 'AMOUNT_MISMATCH',
+          });
+        },
+        replace: async () => {
+          throw new Error('unexpected replacement');
+        },
+      },
+      chain: {
+        receipt: async () => undefined,
+        canonicalBlock: async (input) => ({
+          canonical: true,
+          observedBlockHash: input.blockHash,
+          evidenceHash: HASH,
+        }),
+      },
+      clock: () => prepared.now,
+    });
+
+    await assert.rejects(
+      worker.submitOnce(),
+      (error: unknown) => error instanceof CoreError && error.code === 'InvalidRequest',
+    );
+    const attempts = await db.query<{ state: string }>(
+      'SELECT state FROM core.settlement_transfer_attempts WHERE transfer_id = $1 ORDER BY attempt_number',
+      [transfer.transferId],
+    );
+    assert.deepEqual(attempts.rows.map((row) => row.state), ['QUARANTINED']);
+    assert.equal((await prepared.settlements.getAdminTransfer(
+      { walletAddress: prepared.operator.walletAddress, roles: ['AUDITOR'] },
+      transfer.transferId,
+    )).transfer.state, 'QUARANTINED');
+    assert.equal((await prepared.settlements.getAdminRequest(
+      { walletAddress: prepared.operator.walletAddress, roles: ['AUDITOR'] },
+      prepared.request.request_id,
+    )).request.state, 'QUARANTINED');
+    assert.equal(await worker.submitOnce(), 0);
+  } finally {
+    await db.close();
+  }
+});
+
 test('Admin clearing read model exposes requests and immutable EOA transfer evidence without a write path', async () => {
   const db = await createBusinessDatabase();
   try {
@@ -9722,6 +10164,7 @@ test('takeover assignment authorizes one qualified replacement merchant through 
     const service = new TakeoverCaseService({ transactions: transactionAdapter(db), clock: () => now });
     const candidates = await service.listCandidates(operator, takeover.caseId);
     assert.deepEqual(candidates.candidates.map((candidate) => candidate.merchantId), ['replacement-1', 'replacement-2']);
+    assert.equal(candidates.candidates.some((candidate) => 'level' in candidate), false);
     assert.equal((await service.listAdmin(auditor)).cases.length, 1);
     await assert.rejects(
       service.assign(auditor, takeover.caseId, {
@@ -9743,7 +10186,27 @@ test('takeover assignment authorizes one qualified replacement merchant through 
     };
     const first = await service.assign(operator, takeover.caseId, firstInput);
     assert.equal(first.assignment.version, 1);
+    assert.equal('replacementLevel' in first.assignment, false);
+    assert.equal((await db.query<{ replacement_level: string | null }>(
+      'SELECT replacement_level FROM core.takeover_assignments WHERE assignment_id = $1',
+      [first.assignment.assignmentId],
+    )).rows[0]?.replacement_level, null);
     assert.equal((await service.assign(operator, takeover.caseId, firstInput)).assignment.assignmentId, first.assignment.assignmentId);
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES ($1,'MERCHANT','merchant-1','ACTIVE',$2)
+       ON CONFLICT (wallet_address, role) DO UPDATE SET merchant_id = EXCLUDED.merchant_id, status = 'ACTIVE', revoked_at = NULL`,
+      [intent.merchant.toLowerCase(), HASH],
+    );
+    const originalActor = { walletAddress: intent.merchant, roles: ['MERCHANT'] as const, merchantId: 'merchant-1' };
+    const targets = new FulfillmentTargetService({
+      transactions: transactionAdapter(db),
+      regions: { reverseGeocode: async () => { throw new Error('unused'); } },
+      encryptionKey: deliveryKey,
+      clock: () => now,
+    });
+    await assert.rejects(targets.getOrderTarget(originalActor, intent.orderId), /outside the authenticated wallet scope/);
     const firstActor = { walletAddress: firstWallet.address, roles: ['MERCHANT'] as const, merchantId: 'replacement-1' };
     const secondActor = { walletAddress: secondWallet.address, roles: ['MERCHANT'] as const, merchantId: 'replacement-2' };
     assert.equal((await service.listMerchant(firstActor)).cases[0]?.caseId, takeover.caseId);
@@ -9763,14 +10226,19 @@ test('takeover assignment authorizes one qualified replacement merchant through 
       /ImmutableRecord/,
     );
 
-    const targets = new FulfillmentTargetService({
-      transactions: transactionAdapter(db),
-      regions: { reverseGeocode: async () => { throw new Error('unused'); } },
-      encryptionKey: deliveryKey,
-      clock: () => now,
-    });
     assert.equal((await targets.getOrderTarget(secondActor, intent.orderId)).payload.recipientName, 'Replacement Buyer');
     await assert.rejects(targets.getOrderTarget(firstActor, intent.orderId), /outside the authenticated wallet scope/);
+    await db.query(
+      `UPDATE core.wallet_role_bindings SET status = 'REVOKED', revoked_at = clock_timestamp()
+       WHERE lower(wallet_address) = $1 AND role = 'MERCHANT'`,
+      [secondWallet.address.toLowerCase()],
+    );
+    await assert.rejects(targets.getOrderTarget(secondActor, intent.orderId), /outside the authenticated wallet scope/);
+    await db.query(
+      `UPDATE core.wallet_role_bindings SET status = 'ACTIVE', revoked_at = NULL
+       WHERE lower(wallet_address) = $1 AND role = 'MERCHANT'`,
+      [secondWallet.address.toLowerCase()],
+    );
 
     const evidence = new EvidenceService({
       transactions: transactionAdapter(db),
@@ -11292,7 +11760,6 @@ async function seedCatalog(
       }),
     ],
   );
-  await seedMerchantLevelConfig(db);
   await db.query(
     `INSERT INTO core.merchants (
        merchant_id, settlement_wallet, status, level, guarantee_status
@@ -11339,57 +11806,6 @@ async function seedCatalog(
        merchant_cost_usdt, stock_total, stock_available, lifecycle_state
      ) VALUES ('sku-1', $1, 'product-1', 1, '{}', $2, $3, $4, $4, 'ACTIVE')`,
     [`0x${'c'.repeat(64)}`, listPriceUsdt, merchantCostUsdt, stock],
-  );
-}
-
-async function seedMerchantLevelConfig(
-  db: PGlite,
-  quota = 1_000,
-  maximum = '1000000000000000000000000',
-  version = 1,
-) {
-  const levels = ['V1', 'V2', 'V3', 'V4', 'V5'].map((level) => ({
-    level,
-    maxProductSettlementUsdt: maximum,
-    monthlySeckillQuota: quota,
-  }));
-  const payload = { levels };
-  const payloadHash = stableHash(payload);
-  await db.query(
-    `INSERT INTO core.system_config_versions (
-       config_version_id, config_key, version, payload, payload_hash, effective_from,
-       idempotency_key, request_hash, created_by, created_at
-     ) VALUES (
-       $1, 'MERCHANT_LEVELS', $2, $3, $4,
-       '2020-01-01T00:00:00.000Z', $5, $6,
-       '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', clock_timestamp()
-     ) ON CONFLICT (config_version_id) DO NOTHING`,
-    [
-      `system-config:merchant-levels:test${version === 1 ? '' : `:v${version}`}`,
-      version,
-      JSON.stringify(payload),
-      payloadHash,
-      `test-merchant-levels-v${version}`,
-      stableHash({ domain: 'test-merchant-levels', version, payload }),
-    ],
-  );
-  await db.query(
-    `INSERT INTO core.system_config_publication_events (
-       event_id, config_key, active_config_version_id, previous_config_version_id,
-       action_digest, secondary_signer, governance_wallet_address, approval_signature_hash, actor_wallet, created_at
-     ) VALUES (
-       $1, 'MERCHANT_LEVELS', $2, $3, $4,
-       '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-       '0xcccccccccccccccccccccccccccccccccccccccc', $5,
-       '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', clock_timestamp()
-     ) ON CONFLICT (event_id) DO NOTHING`,
-    [
-      `system-config-publication:merchant-levels:test${version === 1 ? '' : `:v${version}`}`,
-      `system-config:merchant-levels:test${version === 1 ? '' : `:v${version}`}`,
-      version === 1 ? null : `system-config:merchant-levels:test${version === 2 ? '' : `:v${version - 1}`}`,
-      stableHash({ domain: 'test-merchant-levels-publication', version, payloadHash }),
-      HASH,
-    ],
   );
 }
 

@@ -7,34 +7,39 @@ import {
 } from 'ethers';
 import { CoreError } from '../api/errors.ts';
 import type {
+  DeterministicEoaSettlementExecutorErrorCode,
   EoaSettlementBroadcaster,
   EoaSettlementChainSource,
   EoaSettlementReceipt,
 } from './settlement-worker.ts';
-import { readAddressLogs } from './rpc-logs.ts';
+import { deterministicEoaSettlementExecutorErrorCodes } from './settlement-worker.ts';
 
 const TRANSFER_EVENT = new Interface([
   'event Transfer(address indexed from,address indexed to,uint256 amount)',
 ]);
-const TRANSFER_TOPIC = TRANSFER_EVENT.getEvent('Transfer')!.topicHash.toLowerCase();
-const ERC20_READ = new Interface(['function balanceOf(address account) view returns (uint256)']);
 
 export class HttpEoaSettlementBroadcaster implements EoaSettlementBroadcaster {
   readonly #url: string;
   readonly #token: string;
   readonly #maxGasLimit: bigint;
   readonly #fetch: typeof fetch;
+  readonly #requestTimeoutMs: number;
 
   constructor(input: {
     url?: string;
     token?: string;
     maxGasLimit: bigint;
     fetch?: typeof fetch;
+    requestTimeoutMs?: number;
   }) {
     this.#url = secureEndpoint(input.url, input.token, 'EOA settlement executor').url;
     this.#token = input.token!;
     this.#maxGasLimit = input.maxGasLimit;
     this.#fetch = input.fetch ?? fetch;
+    this.#requestTimeoutMs = input.requestTimeoutMs ?? 10_000;
+    if (!Number.isSafeInteger(this.#requestTimeoutMs) || this.#requestTimeoutMs < 100 || this.#requestTimeoutMs > 60_000) {
+      throw new CoreError('InvalidRequest', 'EOA settlement executor timeout is invalid');
+    }
   }
 
   submit(input: Parameters<EoaSettlementBroadcaster['submit']>[0]) {
@@ -72,13 +77,36 @@ export class HttpEoaSettlementBroadcaster implements EoaSettlementBroadcaster {
       || !/^[1-9][0-9]*$/.test(input.gasLimit)
       || BigInt(input.gasLimit) > this.#maxGasLimit
     ) throw new CoreError('InvalidRequest', 'EOA settlement execution envelope is invalid');
-    const response = await this.#fetch(this.#url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${this.#token}` },
-      body: JSON.stringify(input),
-    });
-    if (!response.ok) throw new CoreError('ExternalBlocked', 'EOA settlement executor rejected the envelope', 503);
-    const body = await response.json() as Record<string, unknown>;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.#requestTimeoutMs);
+    let response: Response;
+    try {
+      response = await this.#fetch(this.#url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${this.#token}` },
+        body: JSON.stringify(input),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      throw new CoreError('ExternalBlocked', 'EOA settlement executor result is ambiguous', 503, {
+        deterministicExecutorFailure: false,
+        failure: controller.signal.aborted ? 'TIMEOUT' : 'TRANSPORT',
+        cause: error instanceof Error ? error.name : 'UnknownTransportFailure',
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!response.ok) throw executorHttpError(response.status, await response.text().catch(() => ''));
+    let body: Record<string, unknown>;
+    try {
+      body = await response.json() as Record<string, unknown>;
+    } catch (error) {
+      throw new CoreError('ExternalBlocked', 'EOA settlement executor result is ambiguous', 503, {
+        deterministicExecutorFailure: false,
+        failure: 'MALFORMED_RESPONSE',
+        cause: error instanceof Error ? error.name : 'UnknownResponseFailure',
+      });
+    }
     if (
       typeof body.executionTxHash !== 'string'
       || !isHash(body.executionTxHash)
@@ -107,7 +135,18 @@ export class HttpEoaSettlementBroadcaster implements EoaSettlementBroadcaster {
 export class ResilientBscEoaSettlementChainSource implements EoaSettlementChainSource {
   readonly #providers: readonly JsonRpcProvider[];
 
-  constructor(input: { primaryRpcUrl?: string; fallbackRpcUrl?: string }) {
+  constructor(input: {
+    primaryRpcUrl?: string;
+    fallbackRpcUrl?: string;
+    providers?: readonly JsonRpcProvider[];
+  }) {
+    if (input.providers) {
+      if (input.providers.length !== 2) {
+        throw new CoreError('ExternalBlocked', 'Settlement finality requires two independent BSC RPC endpoints', 503);
+      }
+      this.#providers = [...input.providers];
+      return;
+    }
     if (!input.primaryRpcUrl || !input.fallbackRpcUrl) {
       throw new CoreError('ExternalBlocked', 'Two BSC RPC endpoints are required for settlement finality', 503);
     }
@@ -199,12 +238,7 @@ async function observe(provider: JsonRpcProvider, txHash: string): Promise<Obser
       // Not an ERC-20 Transfer event.
     }
   }
-  const transactionDeltas = await readTransactionBalanceDeltas(
-    provider,
-    receipt.blockNumber,
-    txHash.toLowerCase(),
-    transfers,
-  );
+  const transactionDeltas = transactionDeltasFromTransfers(transfers);
   return {
     chainId: 56,
     executionTxHash: txHash.toLowerCase(),
@@ -222,80 +256,27 @@ async function observe(provider: JsonRpcProvider, txHash: string): Promise<Obser
   };
 }
 
-async function readTransactionBalanceDeltas(
-  provider: JsonRpcProvider,
-  blockNumber: number,
-  executionTxHash: string,
-  transfers: readonly { tokenAddress: string; from: string; to: string }[],
+function transactionDeltasFromTransfers(
+  transfers: readonly { tokenAddress: string; from: string; to: string; amount: string }[],
 ) {
-  if (blockNumber <= 0) throw new CoreError('InvalidFinality', 'Settlement block has no prior state', 409);
-  const pairs = new Map<string, { tokenAddress: string; account: string }>();
-  for (const transfer of transfers) {
-    for (const account of [transfer.from, transfer.to]) {
-      pairs.set(`${transfer.tokenAddress}:${account}`, { tokenAddress: transfer.tokenAddress, account });
-    }
-  }
-  const sortedPairs = [...pairs.values()].sort((left, right) =>
-    left.tokenAddress.localeCompare(right.tokenAddress) || left.account.localeCompare(right.account));
-  try {
-    const blockDeltas = await Promise.all(sortedPairs.map(async ({ tokenAddress, account }) => {
-      const data = ERC20_READ.encodeFunctionData('balanceOf', [account]);
-      const [beforeResult, afterResult] = await Promise.all([
-        provider.send('eth_call', [{ to: tokenAddress, data }, `0x${(blockNumber - 1).toString(16)}`]),
-        provider.send('eth_call', [{ to: tokenAddress, data }, `0x${blockNumber.toString(16)}`]),
-      ]);
-      const before = BigInt(ERC20_READ.decodeFunctionResult('balanceOf', beforeResult)[0]);
-      const after = BigInt(ERC20_READ.decodeFunctionResult('balanceOf', afterResult)[0]);
-      return { tokenAddress, account, delta: after - before };
-    }));
-    const tokenAddresses = [...new Set(sortedPairs.map((item) => item.tokenAddress))];
-    const blockLogs = tokenAddresses.length === 0
-      ? []
-      : await readAddressLogs(provider, {
-        addresses: tokenAddresses,
-        fromBlock: blockNumber,
-        toBlock: blockNumber,
-        topic0: TRANSFER_TOPIC,
-      });
-    const unrelatedTransfers = blockLogs
-      .filter((log) => log.transactionHash.toLowerCase() !== executionTxHash)
-      .map((log) => {
-        const event = TRANSFER_EVENT.parseLog({ topics: [...log.topics], data: log.data });
-        if (!event || event.name !== 'Transfer') throw new Error('invalid transfer event');
-        return {
-          tokenAddress: getAddress(log.address).toLowerCase(),
-          from: getAddress(String(event.args.from)).toLowerCase(),
-          to: getAddress(String(event.args.to)).toLowerCase(),
-          amount: String(event.args.amount),
-        };
-      });
-    return reconcileTransactionBalanceDeltas(blockDeltas, unrelatedTransfers);
-  } catch (error) {
-    throw new CoreError('ExternalBlocked', 'Archive RPC transaction balance evidence is unavailable', 503, {
-      cause: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-
-export function reconcileTransactionBalanceDeltas(
-  blockDeltas: readonly { tokenAddress: string; account: string; delta: bigint }[],
-  unrelatedTransfers: readonly { tokenAddress: string; from: string; to: string; amount: string }[],
-) {
-  const unrelated = new Map<string, bigint>();
+  const deltas = new Map<string, { tokenAddress: string; account: string; delta: bigint }>();
   const add = (tokenAddress: string, account: string, delta: bigint) => {
     const key = `${tokenAddress}:${account}`;
-    unrelated.set(key, (unrelated.get(key) ?? 0n) + delta);
+    const current = deltas.get(key);
+    deltas.set(key, {
+      tokenAddress,
+      account,
+      delta: (current?.delta ?? 0n) + delta,
+    });
   };
-  for (const transfer of unrelatedTransfers) {
+  for (const transfer of transfers) {
     const amount = BigInt(transfer.amount);
     add(transfer.tokenAddress, transfer.from, -amount);
     add(transfer.tokenAddress, transfer.to, amount);
   }
-  return blockDeltas.map((item) => ({
-    tokenAddress: item.tokenAddress,
-    account: item.account,
-    delta: (item.delta - (unrelated.get(`${item.tokenAddress}:${item.account}`) ?? 0n)).toString(),
-  }));
+  return [...deltas.values()]
+    .sort((left, right) => left.tokenAddress.localeCompare(right.tokenAddress) || left.account.localeCompare(right.account))
+    .map((item) => ({ ...item, delta: item.delta.toString() }));
 }
 
 function comparable(value: ObservedReceipt): Omit<ObservedReceipt, 'confirmations'> {
@@ -325,6 +306,45 @@ function settlementRpcUrl(value: string) {
     throw new CoreError('ExternalBlocked', 'Settlement RPC endpoints require HTTPS without embedded credentials', 503);
   }
   return url.href;
+}
+
+function executorHttpError(status: number, bodyText: string) {
+  const executorErrorCode = executorErrorCodeFromBody(bodyText);
+  if (
+    status >= 400
+    && status < 500
+    && executorErrorCode
+  ) {
+    throw new CoreError('InvalidRequest', 'EOA settlement executor rejected a deterministic envelope', status, {
+      deterministicExecutorFailure: true,
+      executorErrorCode,
+    });
+  }
+  throw new CoreError('ExternalBlocked', 'EOA settlement executor result is ambiguous', 503, {
+    deterministicExecutorFailure: false,
+    status,
+  });
+}
+
+function executorErrorCodeFromBody(bodyText: string): DeterministicEoaSettlementExecutorErrorCode | undefined {
+  try {
+    const parsed = JSON.parse(bodyText) as unknown;
+    const code = typeof parsed === 'object' && parsed !== null
+      ? (parsed as { error?: unknown }).error
+      : undefined;
+    const value = typeof code === 'string'
+      ? code
+      : (typeof code === 'object' && code !== null && typeof (code as { code?: unknown }).code === 'string'
+        ? (code as { code: string }).code
+        : undefined);
+    return deterministicEoaSettlementExecutorErrorCodes.includes(
+      value as DeterministicEoaSettlementExecutorErrorCode,
+    )
+      ? value as DeterministicEoaSettlementExecutorErrorCode
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function secureEndpoint(urlValue: string | undefined, token: string | undefined, name: string) {

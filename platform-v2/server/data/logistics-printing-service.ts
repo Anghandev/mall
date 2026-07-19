@@ -6,7 +6,6 @@ import {
   randomUUID,
 } from 'node:crypto';
 import { getAddress, TypedDataEncoder, verifyTypedData, type TypedDataDomain, type TypedDataField } from 'ethers';
-import type { WalletDigestSignatureVerifier } from '../api/settlement-signing.ts';
 import { CORE_ARTIFACT_VERSION } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import type { FulfillmentActor, ShipmentInput } from './fulfillment-service.ts';
@@ -215,7 +214,6 @@ export class LogisticsPrintingService {
   readonly #transactions: SqlTransactionRunner;
   readonly #encryptionKey: Buffer | undefined;
   readonly #verifyingContract: string;
-  readonly #contractWalletVerifier: WalletDigestSignatureVerifier | undefined;
   readonly #waybillAdapters: Readonly<Partial<Record<WaybillProvider, WaybillAdapter>>>;
   readonly #printAdapters: Readonly<Partial<Record<PrintProvider, PrintAdapter>>>;
   readonly #evidence: TrackingEvidenceWriter;
@@ -226,7 +224,6 @@ export class LogisticsPrintingService {
     transactions: SqlTransactionRunner;
     encryptionKey?: string;
     verifyingContract: string;
-    contractWalletVerifier?: WalletDigestSignatureVerifier;
     waybillAdapters?: Readonly<Partial<Record<WaybillProvider, WaybillAdapter>>>;
     printAdapters?: Readonly<Partial<Record<PrintProvider, PrintAdapter>>>;
     evidence: TrackingEvidenceWriter;
@@ -236,7 +233,6 @@ export class LogisticsPrintingService {
     this.#transactions = input.transactions;
     this.#encryptionKey = parseEncryptionKey(input.encryptionKey);
     this.#verifyingContract = normalizedAddress(input.verifyingContract, 'printer binding verifying contract');
-    this.#contractWalletVerifier = input.contractWalletVerifier;
     this.#waybillAdapters = input.waybillAdapters ?? {};
     this.#printAdapters = input.printAdapters ?? {};
     this.#evidence = input.evidence;
@@ -330,7 +326,6 @@ export class LogisticsPrintingService {
     }
     const message = bindingMessage(challenge);
     const domain = bindingDomain(this.#verifyingContract);
-    const digest = TypedDataEncoder.hash(domain, printerBindingTypes, message);
     let valid = false;
     try {
       valid = normalizedAddress(
@@ -339,9 +334,6 @@ export class LogisticsPrintingService {
       ) === wallet;
     } catch {
       valid = false;
-    }
-    if (!valid && this.#contractWalletVerifier) {
-      valid = await this.#contractWalletVerifier.isValidDigest(wallet, digest, input.signature);
     }
     if (!valid) throw new CoreError('InvalidSignature', 'Printer binding signature mismatch', 401);
     const signatureHash = hashText(input.signature.toLowerCase());

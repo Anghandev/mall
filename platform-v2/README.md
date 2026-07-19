@@ -7,10 +7,12 @@ workers and the `admin/` product consumer. It must not import V1 runtime code.
 
 - Product price and merchant settlement cost are USDT-denominated.
 - Buyer payment is exactly 70% USDT plus 30% Oracle-equivalent NPL.
-- Payment sends USDT directly to the Custody Safe, 20%-of-list NPL to Burn and
-  10%-of-list NPL to the Reward Safe; PaymentRouter normally retains zero.
+- Payment sends the 1%-of-list USDT fee to the Service Fee EOA, remaining
+  product USDT plus freight to the Custody/Settlement EOA, 20%-of-list NPL to
+  Burn and 10%-of-list NPL to the Reward/Distribution EOA; PaymentRouter
+  normally retains zero.
 - Merchant proceeds are USDT-only and later settle from the append-only ledger
-  through Safe MultiSend.
+  through one immutable EOA ERC-20 transfer per payable.
 - BNM is order-linked backend points, Locked at payment and Available after
   fulfillment finality. Monotonic order state versions fence late provider
   writes. BNM is not a token and is never minted or claimed.
@@ -20,11 +22,11 @@ workers and the `admin/` product consumer. It must not import V1 runtime code.
   persistent, idempotent failed-attempt evidence.
 - Merchant default enters takeover fulfillment. V2 has no business-refund
   interface.
-- Every write fails closed when its decision, RPC, Oracle, Safe, role or
+- Every write fails closed when its decision, RPC, quote source, EOA role or
   provider configuration is unavailable.
 
 The binding authority is `../docs/V2_SYSTEM_CONTRACT.md`. The current coordinated
-settlement/admin checkpoint is `2.0.0-settlement-admin.9`; production execution
+settlement/admin checkpoint is `2.0.0-settlement-admin.17`; production execution
 remains fail closed until same-version consumers, deployment evidence and the
-required external Safe, signer, RPC and provider inputs pass their release
+required EOA runtime, signer, RPC and provider inputs pass their release
 gates.

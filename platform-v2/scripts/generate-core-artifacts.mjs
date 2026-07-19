@@ -50,7 +50,6 @@ import {
   mediaContentTypes,
   mediaPurposes,
   mediaResourceTypes,
-  merchantLevels,
   merchantLifecycleStatuses,
   merchantQualificationAccess,
   merchantReviewActions,
@@ -89,6 +88,7 @@ import {
   systemConfigKeys,
   takeoverStates,
   userRoles,
+  runtimeBlockers,
 } from '../server/api/enums.ts';
 import { coreErrorCodes } from '../server/api/errors.ts';
 
@@ -138,6 +138,9 @@ const schemaSources = [
       '032_seckill_prize_settlement.sql',
       '033_eoa_wallet_execution.sql',
       '034_reward_account_subtypes.sql',
+      '035_settlement_attempt_retryable.sql',
+      '036_retire_merchant_levels.sql',
+      '037_payment_quote_source_evidence.sql',
     ],
   },
   {
@@ -181,6 +184,7 @@ const enums = {
   orderFinalityStatuses,
   finalityStates,
   userRoles,
+  runtimeBlockers,
   breakerScopes,
   catalogProductActions,
   catalogProductLifecycleStates,
@@ -207,7 +211,6 @@ const enums = {
   mediaContentTypes,
   mediaPurposes,
   mediaResourceTypes,
-  merchantLevels,
   merchantLifecycleStatuses,
   merchantQualificationAccess,
   merchantReviewActions,
@@ -1019,7 +1022,7 @@ function buildOpenApi() {
           type: 'object',
           required: [
             'chainId', 'assets', 'decisionBlocked', 'externalBlocked',
-            'paymentDecisionBlocked', 'paymentExternalBlocked', 'providers', 'writesEnabled',
+            'paymentDecisionBlocked', 'paymentExternalBlocked', 'runtimeBlockers', 'providers', 'writesEnabled',
           ],
           properties: {
             chainId: { const: BSC_CHAIN_ID },
@@ -1032,6 +1035,7 @@ function buildOpenApi() {
             externalBlocked: { type: 'array', items: { type: 'string' } },
             paymentDecisionBlocked: { type: 'array', items: { type: 'string' } },
             paymentExternalBlocked: { type: 'array', items: { type: 'string' } },
+            runtimeBlockers: { type: 'array', items: { type: 'string', enum: [...runtimeBlockers] } },
             providers: { type: 'object', additionalProperties: { enum: ['READY', 'CONFIGURATION_REQUIRED'] } },
             writesEnabled: { type: 'boolean' },
           },
@@ -1729,7 +1733,6 @@ function merchantLifecycleOpenApiSchemas() {
     updatedAt: timestamp,
   };
   return {
-    MerchantLevel: { type: 'string', enum: [...merchantLevels], deprecated: true },
     MerchantLifecycleStatus: { type: 'string', enum: [...merchantLifecycleStatuses] },
     MerchantReviewAction: { type: 'string', enum: [...merchantReviewActions] },
     MerchantQualificationAccess: { type: 'string', enum: [...merchantQualificationAccess] },
@@ -1739,7 +1742,6 @@ function merchantLifecycleOpenApiSchemas() {
       settlementWallet: ref('Address'),
       settlementWalletMutable: { const: false },
       status: ref('MerchantLifecycleStatus'),
-      level: { ...ref('MerchantLevel'), deprecated: true },
       guaranteeStatus: { enum: [...guaranteeStatuses] },
       applicationVersion: { type: 'integer', minimum: 0 },
       qualificationComplete: { type: 'boolean' },
@@ -1770,7 +1772,6 @@ function merchantLifecycleOpenApiSchemas() {
       legalId: { type: 'string', minLength: 6, maxLength: 32 },
       contactPhone: { type: 'string', minLength: 6, maxLength: 32 },
       settlementWallet: ref('Address'),
-      level: { ...ref('MerchantLevel'), deprecated: true },
       idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
     }, ['shopName', 'legalName', 'legalId', 'contactPhone', 'settlementWallet', 'idempotencyKey']),
     MerchantApplicationUpdateRequest: object({
@@ -1778,7 +1779,6 @@ function merchantLifecycleOpenApiSchemas() {
       legalName: { type: 'string', minLength: 2, maxLength: 80 },
       legalId: { type: 'string', minLength: 6, maxLength: 32 },
       contactPhone: { type: 'string', minLength: 6, maxLength: 32 },
-      level: { ...ref('MerchantLevel'), deprecated: true },
       licenseAssetId: nullable(hash),
       expectedVersion: { type: 'integer', minimum: 1 },
       idempotencyKey: { type: 'string', minLength: 8, maxLength: 128 },
@@ -1885,7 +1885,6 @@ function merchantLifecycleOpenApiSchemas() {
       artifactVersion: { const: artifactVersion },
       merchant: ref('MerchantLifecycleSummary'),
       qualification: ref('MerchantQualification'),
-      levelPolicy: { ...object({ status: { const: 'Deprecated' } }), deprecated: true },
       analytics: object({
         orders: ref('MerchantOrderAnalytics'),
         fulfillment: ref('MerchantFulfillmentAnalytics'),
@@ -3636,7 +3635,6 @@ function settlementAdminOpenApiSchemas() {
       replacementMerchantId: string,
       replacementWallet: address,
       replacementApplicationVersion: { type: 'integer', minimum: 1 },
-      replacementLevel: { enum: [...merchantLevels] },
       replacementLicenseAssetId: hash,
       supersedesAssignmentId: nullableHash,
       reasonCode: string,
@@ -3691,7 +3689,6 @@ function settlementAdminOpenApiSchemas() {
       merchantId: string,
       settlementWallet: address,
       shopName: string,
-      level: { enum: [...merchantLevels] },
       applicationVersion: { type: 'integer', minimum: 1 },
       qualificationComplete: { const: true },
       guaranteeReady: { const: true },
@@ -5958,7 +5955,6 @@ export type ContractOrderState = ${union(contractOrderStates)};
 export type OrderFinalityStatus = ${union(orderFinalityStatuses)};
 export type TransactionFinalityState = ${union(finalityStates)};
 export type UserRole = ${union(userRoles)};
-export type MerchantLevel = ${union(merchantLevels)};
 export type MerchantLifecycleStatus = ${union(merchantLifecycleStatuses)};
 export type MerchantReviewAction = ${union(merchantReviewActions)};
 export type MerchantQualificationAccess = ${union(merchantQualificationAccess)};
@@ -6041,7 +6037,6 @@ export declare const contractOrderStates: readonly ContractOrderState[];
 export declare const orderFinalityStatuses: readonly OrderFinalityStatus[];
 export declare const finalityStates: readonly TransactionFinalityState[];
 export declare const userRoles: readonly UserRole[];
-export declare const merchantLevels: readonly MerchantLevel[];
 export declare const merchantLifecycleStatuses: readonly MerchantLifecycleStatus[];
 export declare const merchantReviewActions: readonly MerchantReviewAction[];
 export declare const merchantQualificationAccess: readonly MerchantQualificationAccess[];
@@ -6124,8 +6119,6 @@ export interface MerchantLifecycleSummary {
   settlementWallet: Address;
   settlementWalletMutable: false;
   status: MerchantLifecycleStatus;
-  /** @deprecated V1-V5 has no business effect. */
-  level: MerchantLevel;
   guaranteeStatus: GuaranteeStatus;
   applicationVersion: number;
   qualificationComplete: boolean;
@@ -6161,8 +6154,6 @@ export interface MerchantApplicationCreateRequest {
   legalId: string;
   contactPhone: string;
   settlementWallet: Address;
-  /** @deprecated Ignored by Core. */
-  level?: MerchantLevel;
   idempotencyKey: string;
 }
 
@@ -6171,8 +6162,6 @@ export interface MerchantApplicationUpdateRequest {
   legalName: string;
   legalId: string;
   contactPhone: string;
-  /** @deprecated Ignored by Core. */
-  level?: MerchantLevel;
   licenseAssetId: Bytes32 | null;
   expectedVersion: number;
   idempotencyKey: string;
@@ -6228,8 +6217,6 @@ export interface MerchantLifecycleDetail {
   artifactVersion: typeof artifactVersion;
   merchant: MerchantLifecycleSummary;
   qualification: MerchantQualification;
-  /** @deprecated V1-V5 price and quota policy is disabled. */
-  levelPolicy: Readonly<{ status: 'Deprecated' }>;
   analytics: Readonly<{
     orders: {
       totalFinalized: AtomicAmount;
@@ -7315,7 +7302,6 @@ export interface TakeoverAssignment {
   replacementMerchantId: string;
   replacementWallet: Address;
   replacementApplicationVersion: number;
-  replacementLevel: MerchantLevel;
   replacementLicenseAssetId: Bytes32;
   supersedesAssignmentId: Bytes32 | null;
   reasonCode: string;
@@ -7380,7 +7366,6 @@ export interface TakeoverCandidate {
   merchantId: string;
   settlementWallet: Address;
   shopName: string;
-  level: MerchantLevel;
   applicationVersion: number;
   qualificationComplete: true;
   guaranteeReady: true;
@@ -7731,7 +7716,7 @@ export interface MerchantBusinessDashboard {
   artifactVersion: typeof artifactVersion;
   timezone: 'Asia/Shanghai';
   window: BusinessDayWindow;
-  merchant: { merchantId: string; status: string; level: string; guaranteeStatus: GuaranteeStatus };
+  merchant: { merchantId: string; status: string; guaranteeStatus: GuaranteeStatus };
   product: {
     productId: string;
     title: string;

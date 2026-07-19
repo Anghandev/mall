@@ -26,7 +26,6 @@ describe('merchant lifecycle admin API', () => {
     await expect(listMerchantLifecycle({ status: 'PENDING', search: '24K', limit: 25 }, 'jwt')).resolves.toMatchObject({ merchants: [{ merchantId: 'merchant-1' }] });
     await expect(getMerchantLifecycle('merchant-1', 'jwt')).resolves.toMatchObject({
       merchant: { settlementWalletMutable: false },
-      levelPolicy: { status: 'Deprecated' },
       analytics: { fulfillment: { fastShip48h: { status: 'AVAILABLE', numerator: '3', denominator: '4', bps: 7500 } } },
     });
 
@@ -56,7 +55,7 @@ describe('merchant lifecycle admin API', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({ expectedVersion: 1, licenseAssetId: hash('a') });
   });
 
-  it('binds the secondary EIP-712 challenge and requires published Safe evidence', async () => {
+  it('binds the secondary EIP-712 challenge and requires published EOA evidence', async () => {
     const current = merchantDetail({ merchant: { ...merchantDetail().merchant, qualificationComplete: true }, qualification: { ...fullQualification(), licenseAssetId: hash('a') } });
     const challenge = reviewChallenge();
     const published = merchantDetail({
@@ -77,7 +76,7 @@ describe('merchant lifecycle admin API', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({ signature: '0x1234' });
   });
 
-  it('rejects settlement wallet changes before any challenge or Safe publish request', async () => {
+  it('rejects settlement wallet changes before any challenge or EOA publish request', async () => {
     const current = merchantDetail({ merchant: { ...merchantDetail().merchant, status: 'APPROVED' } });
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -88,7 +87,7 @@ describe('merchant lifecycle admin API', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('accepts the deprecated level marker and zero-denominator unavailable 48H rate without inventing zero percent', async () => {
+  it('accepts zero-denominator unavailable 48H rate without inventing zero percent', async () => {
     const detail = merchantDetail();
     const unavailable = merchantDetail({
       analytics: {
@@ -99,7 +98,6 @@ describe('merchant lifecycle admin API', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(unavailable)));
 
     await expect(getMerchantLifecycle('merchant-1', 'jwt')).resolves.toMatchObject({
-      levelPolicy: { status: 'Deprecated' },
       analytics: { fulfillment: { fastShip48h: { status: 'UNAVAILABLE', denominator: '0', bps: null } } },
     });
   });
@@ -144,16 +142,15 @@ describe('merchant lifecycle admin API', () => {
 function merchantDetail(overrides: Partial<MerchantLifecycleDetail> = {}): MerchantLifecycleDetail {
   const base: MerchantLifecycleDetail = {
     artifactVersion,
-    merchant: { merchantId: 'merchant-1', shopName: '阿步金店', settlementWallet: address('3'), settlementWalletMutable: false, status: 'PENDING', level: 'V1', guaranteeStatus: 'READY', applicationVersion: 1, qualificationComplete: false, reviewedAt: null, reviewedBy: null, createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T00:00:00.000Z' },
+    merchant: { merchantId: 'merchant-1', shopName: '阿步金店', settlementWallet: address('3'), settlementWalletMutable: false, status: 'PENDING', guaranteeStatus: 'READY', applicationVersion: 1, qualificationComplete: false, reviewedAt: null, reviewedBy: null, createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T00:00:00.000Z' },
     qualification: fullQualification(),
-    levelPolicy: { status: 'Deprecated' },
     analytics: {
       orders: { totalFinalized: '3', ordinaryFinalized: '2', seckillFinalized: '1', cumulative: amounts('100', '70', '60', '55'), today: amounts('20', '14', '12', '11'), timezone: 'Asia/Shanghai', window: { start: '2026-07-15T16:00:00.000Z', end: '2026-07-16T16:00:00.000Z' } },
       fulfillment: { pendingShipment: '1', inTransit: '1', completed: '1', pickupCompleted: '0', fastShip48h: { status: 'AVAILABLE', numerator: '3', denominator: '4', bps: 7500, reason: null } },
       risk: { takeoverCases: '1', guaranteeUsedUsdt: '2', frozenReceivableUsedUsdt: '3', futureProceedsUsedUsdt: '4', platformAdvanceUsdt: '5', outstandingDebtUsdt: '6', abnormalOrderRateBps: null, unavailableReason: 'DecisionBlocked' },
       contributions: { finalizedNplBurnAmount: '7', fulfillmentAvailableBnmAmount: '8', ledgerReconciled: true },
     },
-    balances: ['LOCKED', 'AVAILABLE', 'REQUESTED', 'BATCHED', 'SETTLED'].map((state, index) => ({ state: state as MerchantLifecycleDetail['balances'][number]['state'], amount: String(index + 1) })),
+    balances: ['LOCKED', 'AVAILABLE', 'REQUESTED', 'SUBMITTED', 'SETTLED'].map((state, index) => ({ state: state as MerchantLifecycleDetail['balances'][number]['state'], amount: String(index + 1) })),
     settlements: [{ requestId: hash('d'), asset: 'USDT', amount: '5', state: 'SETTLED', requestedAt: '2026-07-16T00:00:00.000Z', finalExecutionTxHashes: [hash('e')], settledAt: '2026-07-16T01:00:00.000Z' }],
     reviews: [],
   };
@@ -169,7 +166,7 @@ function reviewChallenge() {
   return {
     artifactVersion, actionId: hash('7'), merchantId: 'merchant-1', action: 'APPROVE', fromStatus: 'PENDING', toStatus: 'APPROVED', applicationVersion: 1,
     reasonCode: 'QUALIFICATION_APPROVED', state: 'DRAFT', secondarySigner: address('2'), expiresAt,
-    typedData: { domain: { name: 'Abu24KV2Core' }, types: { SensitiveAction: [] }, primaryType: 'SensitiveAction', message: { action: 'APPROVE_MERCHANT', resourceType: 'MERCHANT', resourceId: 'merchant-1', policyVersion: '2', oldValueHash: hash('2'), newValueHash: hash('3'), safeAddress: address('4'), nonce: '7', deadline: String(Math.floor(Date.parse(expiresAt) / 1_000)) } },
+    typedData: { domain: { name: 'Abu24KV2Core' }, types: { SensitiveAction: [] }, primaryType: 'SensitiveAction', message: { action: 'APPROVE_MERCHANT', resourceType: 'MERCHANT', resourceId: 'merchant-1', policyVersion: '2', oldValueHash: hash('2'), newValueHash: hash('3'), executorWallet: address('4'), nonce: '7', deadline: String(Math.floor(Date.parse(expiresAt) / 1_000)) } },
     digest: hash('6'),
   } as const;
 }

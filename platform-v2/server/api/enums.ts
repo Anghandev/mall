@@ -1,4 +1,4 @@
-export const CORE_ARTIFACT_VERSION = '2.0.0-settlement-admin.16';
+export const CORE_ARTIFACT_VERSION = '2.0.0-settlement-admin.17';
 export const BSC_CHAIN_ID = 56;
 export const USDT_ADDRESS = '0x55d398326f99059ff775485246999027b3197955';
 export const NPL_ADDRESS = '0x4e8277ab31e4956b2cd48449793a57656dfc03d2';
@@ -47,8 +47,20 @@ export type OrderFinalityStatus = (typeof orderFinalityStatuses)[number];
 export const userRoles = ['BUYER', 'MERCHANT', 'ADMIN', 'OPERATOR', 'ARBITRATOR', 'AUDITOR'] as const;
 export type UserRole = (typeof userRoles)[number];
 
-export const merchantLevels = ['V1', 'V2', 'V3', 'V4', 'V5'] as const;
-export type MerchantLevel = (typeof merchantLevels)[number];
+export const runtimeBlockers = [
+  'PAYMENT_DECISION_BLOCKED',
+  'PAYMENT_CONFIGURATION_REQUIRED',
+  'RUNTIME_SNAPSHOT_EXPIRED',
+  'DATABASE_UNAVAILABLE',
+  'REDIS_UNAVAILABLE',
+  'SIGNER_UNAVAILABLE',
+  'INDEXER_UNHEALTHY',
+  'INDEXER_LAGGING',
+  'RPC_DIVERGENCE',
+  'QUOTE_SOURCE_UNHEALTHY',
+  'CONTRACT_EVIDENCE_UNVERIFIED',
+] as const;
+export type RuntimeBlocker = (typeof runtimeBlockers)[number];
 
 export const merchantLifecycleStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED', 'BLACKLISTED'] as const;
 export type MerchantLifecycleStatus = (typeof merchantLifecycleStatuses)[number];
@@ -410,7 +422,6 @@ export const systemConfigKeys = [
   'GAS',
   'CHAIN',
   'INTEGRATIONS',
-  'MERCHANT_LEVELS',
 ] as const;
 export type SystemConfigKey = (typeof systemConfigKeys)[number];
 

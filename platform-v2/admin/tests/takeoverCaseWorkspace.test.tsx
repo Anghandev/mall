@@ -125,8 +125,8 @@ function candidateList(): TakeoverCandidateList {
     artifactVersion,
     caseId: 'takeover-1',
     candidates: [
-      { merchantId: 'replacement-1', settlementWallet: address('3'), shopName: '北区仓', level: 'V3', applicationVersion: 4, qualificationComplete: true, guaranteeReady: true },
-      { merchantId: 'replacement-2', settlementWallet: address('4'), shopName: '南区仓', level: 'V4', applicationVersion: 7, qualificationComplete: true, guaranteeReady: true },
+      { merchantId: 'replacement-1', settlementWallet: address('3'), shopName: '北区仓', applicationVersion: 4, qualificationComplete: true, guaranteeReady: true },
+      { merchantId: 'replacement-2', settlementWallet: address('4'), shopName: '南区仓', applicationVersion: 7, qualificationComplete: true, guaranteeReady: true },
     ],
   };
 }
@@ -145,14 +145,14 @@ function takeoverCase(overrides: Partial<TakeoverCase> = {}): TakeoverCase {
 function assignment(overrides: Partial<TakeoverAssignment> = {}): TakeoverAssignment {
   return {
     assignmentId: hash('1'), caseId: 'takeover-1', orderId: 'order-1', version: 1, originalMerchantId: 'merchant-1',
-    replacementMerchantId: 'replacement-1', replacementWallet: address('3'), replacementApplicationVersion: 4, replacementLevel: 'V3', replacementLicenseAssetId: hash('2'),
+    replacementMerchantId: 'replacement-1', replacementWallet: address('3'), replacementApplicationVersion: 4, replacementLicenseAssetId: hash('2'),
     supersedesAssignmentId: null, reasonCode: 'REGION_MATCH', evidenceHash: hash('3'), assignedBy: address('1'), correlationId: 'takeover-assignment-ui', assignedAt: '2026-07-15T00:30:00.000Z',
     ...overrides,
   };
 }
 
 function assignmentV2() {
-  return assignment({ assignmentId: hash('4'), version: 2, replacementMerchantId: 'replacement-2', replacementWallet: address('4'), replacementApplicationVersion: 7, replacementLevel: 'V4', replacementLicenseAssetId: hash('5'), supersedesAssignmentId: hash('1'), reasonCode: 'WAREHOUSE_MATCH', evidenceHash: hash('e'), assignedAt: '2026-07-15T02:00:00.000Z' });
+  return assignment({ assignmentId: hash('4'), version: 2, replacementMerchantId: 'replacement-2', replacementWallet: address('4'), replacementApplicationVersion: 7, replacementLicenseAssetId: hash('5'), supersedesAssignmentId: hash('1'), reasonCode: 'WAREHOUSE_MATCH', evidenceHash: hash('e'), assignedAt: '2026-07-15T02:00:00.000Z' });
 }
 
 function session(role: UserRole) {

@@ -29,7 +29,6 @@ import {
   RpcBeneficiarySnapshotSource,
   RpcPaymentNplQuoteSource,
   RpcPaymentPolicyAttestationSource,
-  RpcWalletMessageSignatureVerifier,
 } from './chain/payment-sources.ts';
 import { AbiEventDecoder } from './chain/abi-decoder.ts';
 import {
@@ -143,7 +142,6 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   const auditDatabase = sqlExecutor(auditPool);
   const auditTransactions = postgresTransactionRunner(auditPool);
   const reader = new ResilientBscContractReader(config.rpcUrl, config.fallbackRpcUrl);
-  const walletSignatureVerifier = new RpcWalletMessageSignatureVerifier(reader);
   const signer = new RemoteSignerClient({
     url: required(config.signerServiceUrl, 'SIGNER_SERVICE_URL'),
     token: required(config.signerServiceToken, 'SIGNER_SERVICE_TOKEN'),
@@ -210,7 +208,6 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     transactions,
     ...(env.DELIVERY_DATA_ENCRYPTION_KEY ? { encryptionKey: env.DELIVERY_DATA_ENCRYPTION_KEY } : {}),
     verifyingContract: required(config.governanceWalletAddress, 'PLATFORM_GOVERNANCE_WALLET_ADDRESS'),
-    contractWalletVerifier: walletSignatureVerifier,
     evidence: evidenceService,
     fulfillment: fulfillmentService,
     waybillAdapters: {
@@ -586,7 +583,6 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     runtimeReadiness: () => readinessMonitor.snapshot(),
     nonceStore: new PostgresNonceStore(database),
     nonceRateLimiter: new RedisNonceRateLimiter(redis),
-    walletSignatureVerifier,
     authDomain,
     authUri,
     resolveRoles: (walletAddress) => resolveRoles(database, walletAddress, bnm),
@@ -623,14 +619,14 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
         ...input,
         operationsWalletAddress: required(
           config.operationsWalletAddress,
-          'OPERATIONS_TREASURY_SAFE_ADDRESS',
+          'OPERATIONS_GUARANTEE_WALLET_ADDRESS',
         ),
       }),
       fundTakeover: (actor, input) => takeoverFundingService.fundTakeover(actor, {
         ...input,
         operationsWalletAddress: required(
           config.operationsWalletAddress,
-          'OPERATIONS_TREASURY_SAFE_ADDRESS',
+          'OPERATIONS_GUARANTEE_WALLET_ADDRESS',
         ),
       }),
       getMerchantFinance: (actor, merchantId) => takeoverFundingService.getMerchantFinance(actor, merchantId),

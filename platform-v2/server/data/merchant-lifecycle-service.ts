@@ -16,7 +16,6 @@ import {
 } from '../api/auth.ts';
 import {
   CORE_ARTIFACT_VERSION,
-  merchantLevels,
   merchantLifecycleStatuses,
   merchantReviewActions,
 } from '../api/enums.ts';
@@ -25,13 +24,11 @@ import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 
-const LEVELS = merchantLevels;
 const STATUSES = merchantLifecycleStatuses;
 const REVIEW_ACTIONS = merchantReviewActions;
 const ZERO_HASH = `0x${'0'.repeat(64)}`;
 const BUSINESS_OFFSET_MS = 8 * 60 * 60 * 1_000;
 
-type MerchantLevel = (typeof LEVELS)[number];
 type MerchantStatus = (typeof STATUSES)[number];
 type ReviewAction = (typeof REVIEW_ACTIONS)[number];
 
@@ -39,7 +36,7 @@ interface MerchantRow {
   merchant_id: string;
   settlement_wallet: string;
   status: MerchantStatus;
-  level: MerchantLevel;
+  level: string | null;
   profile: Record<string, unknown>;
   guarantee_status: string;
   profile_version: string | number;
@@ -97,7 +94,6 @@ export interface MerchantApplicationInput {
   legalId: string;
   contactPhone: string;
   settlementWallet: string;
-  level?: MerchantLevel;
   idempotencyKey: string;
   correlationId: string;
 }
@@ -107,7 +103,6 @@ export interface MerchantApplicationUpdateInput {
   legalName: string;
   legalId: string;
   contactPhone: string;
-  level?: MerchantLevel;
   licenseAssetId: string | null;
   expectedVersion: number;
   idempotencyKey: string;
@@ -260,7 +255,7 @@ export class MerchantLifecycleService {
         `INSERT INTO core.merchants (
            merchant_id, settlement_wallet, status, level, profile, guarantee_status,
            application_version, created_at, updated_at
-         ) VALUES ($1,$2,'PENDING','V1',$3,'DECISION_BLOCKED',1,$4,$4)`,
+         ) VALUES ($1,$2,'PENDING',NULL,$3,'DECISION_BLOCKED',1,$4,$4)`,
         [merchantId, normalized.settlementWallet, JSON.stringify({ shopName: normalized.shopName }), now],
       );
       await executor.query(
@@ -593,7 +588,6 @@ export class MerchantLifecycleService {
       artifactVersion: CORE_ARTIFACT_VERSION,
       merchant: merchantSummaryProjection({ ...merchant, qualification_complete: Boolean(application?.license_asset_id) }),
       qualification,
-      levelPolicy: { status: 'Deprecated' as const },
       analytics: { orders, fulfillment, risk, contributions },
       balances,
       settlements,
@@ -609,7 +603,6 @@ function merchantSummaryProjection(row: MerchantRow & { qualification_complete: 
     settlementWallet: row.settlement_wallet.toLowerCase(),
     settlementWalletMutable: false as const,
     status: row.status,
-    level: row.level,
     guaranteeStatus: row.guarantee_status,
     applicationVersion: Number(row.application_version),
     qualificationComplete: row.qualification_complete,
@@ -1118,14 +1111,14 @@ function merchantStateHash(
     merchantId: merchant.merchant_id,
     settlementWallet: merchant.settlement_wallet.toLowerCase(),
     status,
-    level: merchant.level,
+    retiredLevel: merchant.level ?? null,
     applicationVersion: Number(merchant.application_version),
     ...(reasonCode ? { reasonCode } : {}),
   });
 }
 
 function applicationInput(input: MerchantApplicationInput) {
-  assertOnlyKeys(input, ['shopName', 'legalName', 'legalId', 'contactPhone', 'settlementWallet', 'level', 'idempotencyKey', 'correlationId']);
+  assertOnlyKeys(input, ['shopName', 'legalName', 'legalId', 'contactPhone', 'settlementWallet', 'idempotencyKey', 'correlationId']);
   validateIdempotencyKey(input.idempotencyKey);
   return {
     shopName: boundedText(input.shopName, 'shop name', 1, 80),
@@ -1139,7 +1132,7 @@ function applicationInput(input: MerchantApplicationInput) {
 }
 
 function applicationUpdateInput(input: MerchantApplicationUpdateInput) {
-  assertOnlyKeys(input, ['shopName', 'legalName', 'legalId', 'contactPhone', 'level', 'licenseAssetId', 'expectedVersion', 'idempotencyKey', 'correlationId']);
+  assertOnlyKeys(input, ['shopName', 'legalName', 'legalId', 'contactPhone', 'licenseAssetId', 'expectedVersion', 'idempotencyKey', 'correlationId']);
   if (!Number.isSafeInteger(input.expectedVersion) || input.expectedVersion < 1) throw new CoreError('InvalidRequest', 'Merchant application expected version is invalid');
   validateIdempotencyKey(input.idempotencyKey);
   return {
@@ -1307,7 +1300,7 @@ async function lifecycleAudit(executor: SqlExecutor, input: {
   await enqueueAudit(executor, {
     sourceEventId: auditSourceId('merchant-lifecycle', { eventType: input.eventType, requestHash: input.requestHash }),
     streamName: input.signature ? 'governance' : 'operational',
-    evidenceProfile: input.signature ? 'SAFE_APPROVED' : 'RBAC',
+    evidenceProfile: input.signature ? 'SIGNED_OFFCHAIN' : 'RBAC',
     eventType: input.eventType,
     resourceType: 'MERCHANT',
     resourceId: input.merchantId,

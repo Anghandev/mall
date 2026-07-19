@@ -195,11 +195,11 @@ the Core HTTP adapter; only secure production Core configuration injection and
 worker monitoring remain rollout work.
 
 The configured public BSC RPCs support chain, block, receipt and block-receipt
-reads but returned `missing trie node` for historical `eth_call`. The bounded
-settlement run therefore retained the broadcaster's mode-600 exact balance
-deltas and revalidated both transactions, Transfer events, canonical blocks and
-confirmations through both RPCs. Production delayed finality requires two
-independent archive-capable RPC endpoints; this is a pre-launch configuration requirement, not a reason
-to repeat or enlarge the completed micro-test.
+reads but returned `missing trie node` for historical `eth_call`. Active
+settlement finality now derives exact deltas from the finalized transaction's
+ERC-20 Transfer logs, coverage uses stable dual-RPC `latest` observations and
+breaker finality uses the canonical receipt/event. Production requires two
+distinct Chain-56 RPC endpoints, not Archive capability; the historical bounded
+micro-test evidence remains unchanged.
 
 There is no business refund, on-chain BNM token or Claim fallback.

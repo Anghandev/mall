@@ -198,6 +198,7 @@ async function mockPublicCore(page: import('@playwright/test').Page) {
           externalBlocked: [],
           paymentDecisionBlocked: [],
           paymentExternalBlocked: [],
+          runtimeBlockers: [],
           providers: {},
           writesEnabled: true,
         },

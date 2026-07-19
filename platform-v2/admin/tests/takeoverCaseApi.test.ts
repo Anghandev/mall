@@ -123,8 +123,8 @@ export function candidateList(): TakeoverCandidateList {
     artifactVersion,
     caseId: 'takeover-1',
     candidates: [
-      { merchantId: 'replacement-1', settlementWallet: address('3'), shopName: '北区仓', level: 'V3', applicationVersion: 4, qualificationComplete: true, guaranteeReady: true },
-      { merchantId: 'replacement-2', settlementWallet: address('4'), shopName: '南区仓', level: 'V4', applicationVersion: 7, qualificationComplete: true, guaranteeReady: true },
+      { merchantId: 'replacement-1', settlementWallet: address('3'), shopName: '北区仓', applicationVersion: 4, qualificationComplete: true, guaranteeReady: true },
+      { merchantId: 'replacement-2', settlementWallet: address('4'), shopName: '南区仓', applicationVersion: 7, qualificationComplete: true, guaranteeReady: true },
     ],
   };
 }
@@ -158,7 +158,7 @@ export function assignment(overrides: Partial<TakeoverAssignment> = {}): Takeove
   return {
     assignmentId: hash('1'), caseId: 'takeover-1', orderId: 'order-1', version: 1,
     originalMerchantId: 'merchant-1', replacementMerchantId: 'replacement-1', replacementWallet: address('3'),
-    replacementApplicationVersion: 4, replacementLevel: 'V3', replacementLicenseAssetId: hash('2'),
+    replacementApplicationVersion: 4, replacementLicenseAssetId: hash('2'),
     supersedesAssignmentId: null, reasonCode: 'REGION_MATCH', evidenceHash: hash('3'),
     assignedBy: address('1'), correlationId: 'takeover-assignment-test', assignedAt: '2026-07-15T00:30:00.000Z',
     ...overrides,

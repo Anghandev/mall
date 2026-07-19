@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.16",
+  "artifactVersion": "2.0.0-settlement-admin.17",
   "formatVersion": 1,
   "databaseEngine": "postgresql",
   "schemas": {
@@ -175,6 +175,21 @@
           "name": "034_reward_account_subtypes.sql",
           "path": "schema/business/034_reward_account_subtypes.sql",
           "sha256": "2f699a4c2df257fd56d3313f601ef3a1c57e77cd7b7d6469e31d7946284b3260"
+        },
+        {
+          "name": "035_settlement_attempt_retryable.sql",
+          "path": "schema/business/035_settlement_attempt_retryable.sql",
+          "sha256": "0c84b3484c0f24f106b4c3f71e0b01eb92d960d39f9397818d5e94818a3f393e"
+        },
+        {
+          "name": "036_retire_merchant_levels.sql",
+          "path": "schema/business/036_retire_merchant_levels.sql",
+          "sha256": "a7e0763d13ad405fe7c9bb3e64e78021f539dea79759f48cf4a7c7864b6fd8f3"
+        },
+        {
+          "name": "037_payment_quote_source_evidence.sql",
+          "path": "schema/business/037_payment_quote_source_evidence.sql",
+          "sha256": "cd54a566f156862e08b95079509d7236807016aac068bccf2c1a636d67f31c82"
         }
       ]
     },
