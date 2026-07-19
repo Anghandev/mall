@@ -701,7 +701,16 @@ async function validateDraft(
      LIMIT 1`,
     [payload.rulesContentHash.toLowerCase()],
   );
-  if (!rules.rows[0]) errors.push({ code: 'DecisionBlocked', field: 'rulesContentHash' });
+  const inheritedCanonicalRules = !rules.rows[0] && policyVersion === 2
+    ? await executor.query<{ policy_version: string | number }>(
+      `SELECT policy_version FROM core.canonical_policy_publications
+       WHERE policy_version = 1 AND rules_content_hash = $1`,
+      [payload.rulesContentHash.toLowerCase()],
+    )
+    : undefined;
+  if (!rules.rows[0] && !inheritedCanonicalRules?.rows[0]) {
+    errors.push({ code: 'DecisionBlocked', field: 'rulesContentHash' });
+  }
   return { errors, policy };
 }
 
@@ -714,7 +723,7 @@ async function assertPolicyV2ServiceFeeOnlyDiff(
   const base = await executor.query<{
     payload: Record<string, unknown>;
     rules_content_hash: string;
-  }>('SELECT payload, rules_content_hash FROM core.policy_snapshots WHERE policy_version = 1', []);
+  }>('SELECT payload, rules_content_hash FROM core.canonical_policy_publications WHERE policy_version = 1', []);
   if (!base.rows[0]) {
     throw new CoreError('ArtifactVersionMismatch', 'Policy V1 snapshot is unavailable for the V2 diff', 409);
   }

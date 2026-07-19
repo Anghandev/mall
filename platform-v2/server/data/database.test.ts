@@ -6151,22 +6151,6 @@ test('policy publication binds the Registry signature and EOA execution, activat
        ) VALUES ($1, 'ADMIN', 'ACTIVE', $2)`,
       [admin.address.toLowerCase(), HASH],
     );
-    await db.query(
-      `INSERT INTO core.cms_entries (
-         entry_id, slug, content_type, placement, created_by, created_at
-       ) VALUES ('cms:rules', 'seckill-rules', 'SECKILL_RULES', 'SECKILL_RULES', $1, $2)`,
-      [admin.address.toLowerCase(), new Date('2026-07-15T03:00:00.000Z')],
-    );
-    await db.query(
-      `INSERT INTO core.cms_versions (
-         version_id, entry_id, version, locale, content_format, source_content,
-         sanitized_content, content_hash, audience, idempotency_key, request_hash,
-         created_by, created_at
-       ) VALUES ('cms:rules:v1', 'cms:rules', 1, 'zh-CN', 'STRUCTURED_RICH_TEXT',
-         '{"type":"doc","children":[]}', '{"type":"doc","children":[]}',
-         $1, '{"type":"ALL"}', 'seed-policy-rules', $2, $3, $4)`,
-      [rulesHash, HASH, admin.address.toLowerCase(), new Date('2026-07-15T03:00:00.000Z')],
-    );
     const priorPolicy = paymentPolicyPayload();
     const policy = {
       ...priorPolicy,
