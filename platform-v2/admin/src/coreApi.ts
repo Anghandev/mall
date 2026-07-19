@@ -540,7 +540,7 @@ export async function createWalletSession(provider: WalletProvider): Promise<Cor
 async function requestJson(path: string, init: RequestInit) {
   let response: Response;
   try {
-    response = await fetch(`${coreOrigin}${path}`, init);
+    response = await fetch(coreApiUrl(path), init);
   } catch {
     throw new CoreApiError({
       code: 'ExternalBlocked',
@@ -572,6 +572,10 @@ async function requestJson(path: string, init: RequestInit) {
     ...(error?.correlationId ? { correlationId: error.correlationId } : {}),
     ...(error?.details ? { details: error.details } : {}),
   });
+}
+
+export function coreApiUrl(path: string, origin = coreOrigin) {
+  return `${origin}${path}`;
 }
 
 export function requestCoreJson(path: string, init: RequestInit = {}) {

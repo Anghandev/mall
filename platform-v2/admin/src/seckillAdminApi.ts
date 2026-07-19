@@ -292,13 +292,18 @@ export function subscribeSeckillEvents(
   };
 }
 
-export function seckillWebSocketUrl(sessionId: string, cursor = '0', pageOrigin = window.location.origin) {
+export function seckillWebSocketUrl(
+  sessionId: string,
+  cursor = '0',
+  pageOrigin = window.location.origin,
+  coreApiOrigin = coreOrigin,
+) {
   requireSessionId(sessionId);
   requireCursor(cursor);
   if (websocketProtocol.publicationStatus !== 'AVAILABLE' || typeof websocketProtocol.endpoint !== 'string') {
     throw new CoreApiError({ code: 'ConfigurationRequired', message: 'Coordinated WebSocket protocol is unavailable', status: 503 });
   }
-  const url = new URL(websocketProtocol.endpoint, new URL(coreOrigin || pageOrigin, pageOrigin));
+  const url = new URL(`${coreApiOrigin}${websocketProtocol.endpoint}`, pageOrigin);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('artifactVersion', artifactVersion);
   url.searchParams.set('channel', `seckill:${sessionId.toLowerCase()}`);

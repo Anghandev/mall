@@ -10,6 +10,7 @@ import {
   decideFulfillmentRequest,
   deactivateAdminLogisticsWarehouse,
   createWalletSession,
+  coreApiUrl,
   fetchAdminLogisticsCarrierConfig,
   fetchAdminLogisticsProviderConfigs,
   fetchAdminLogisticsWarehouses,
@@ -29,6 +30,10 @@ import {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('coordinated fulfillment Core client', () => {
+  it('routes production HTTP requests through the /core prefix', () => {
+    expect(coreApiUrl('/v2/bootstrap', '/core')).toBe('/core/v2/bootstrap');
+  });
+
   it('rejects a bootstrap from a different artifact version', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       artifactVersion: '2.0.0-stale',

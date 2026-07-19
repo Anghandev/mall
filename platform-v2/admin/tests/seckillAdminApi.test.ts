@@ -44,12 +44,12 @@ describe('seckill admin coordinated Core client', () => {
     ]);
   });
 
-  it('binds WebSocket artifact, channel and resume cursor to the published protocol', () => {
+  it('binds the production Core prefix, artifact, channel and resume cursor to the published protocol', () => {
     const sessionId = hash('a');
-    const url = new URL(seckillWebSocketUrl(sessionId, '19', 'https://admin.abu24k.test'));
+    const url = new URL(seckillWebSocketUrl(sessionId, '19', 'https://www.npleon.com', '/core'));
 
     expect(url.protocol).toBe('wss:');
-    expect(url.pathname).toBe('/v2/ws');
+    expect(url.pathname).toBe('/core/v2/ws');
     expect(Object.fromEntries(url.searchParams)).toEqual({ artifactVersion, channel: `seckill:${sessionId}`, cursor: '19' });
   });
 

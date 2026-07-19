@@ -38,11 +38,13 @@ function files(path) {
 
 const violations = [];
 let containsArtifactVersion = false;
+let containsProductionCoreOrigin = false;
 const foundRequired = new Set();
 for (const file of files(root)) {
   if (!/\.(?:js|css|html)$/.test(file)) continue;
   const content = readFileSync(file, 'utf8');
   if (content.includes(artifactVersion)) containsArtifactVersion = true;
+  if (/["'`]\/core["'`]/.test(content)) containsProductionCoreOrigin = true;
   for (const marker of required) if (content.includes(marker)) foundRequired.add(marker);
   for (const marker of forbidden) {
     if (content.includes(marker)) violations.push(`${file}: ${marker}`);
@@ -50,7 +52,17 @@ for (const file of files(root)) {
 }
 
 if (!containsArtifactVersion) violations.push(`production bundle does not contain coordinated artifact ${artifactVersion}`);
+if (!containsProductionCoreOrigin) violations.push('production bundle does not contain the /core API origin');
 for (const marker of required) if (!foundRequired.has(marker)) violations.push(`production bundle does not contain required Admin operation ${marker}`);
+
+const indexHtml = readFileSync(join(root, 'index.html'), 'utf8');
+const localAssetUrls = [...indexHtml.matchAll(/\b(?:src|href)=["']([^"']+)["']/g)]
+  .map((match) => match[1])
+  .filter((url) => url.startsWith('/'));
+if (localAssetUrls.length === 0) violations.push('production index does not contain local assets');
+for (const url of localAssetUrls) {
+  if (!url.startsWith('/platform/assets/')) violations.push(`production index asset is outside /platform/: ${url}`);
+}
 
 if (violations.length > 0) {
   console.error(`Production bundle contains forbidden markers:\n${violations.join('\n')}`);

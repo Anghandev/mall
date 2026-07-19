@@ -1,7 +1,11 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vitest/config';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+  base: '/platform/',
+  ...(mode === 'production' ? {
+    define: { 'import.meta.env.VITE_CORE_API_ORIGIN': JSON.stringify('/core') },
+  } : {}),
   plugins: [react()],
   server: {
     proxy: {
@@ -15,4 +19,4 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: './tests/setup.ts',
   },
-});
+}));
