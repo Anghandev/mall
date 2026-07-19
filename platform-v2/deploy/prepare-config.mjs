@@ -38,8 +38,24 @@ for (const [key, address] of roles) {
 }
 
 const rpc = required('BSC_RPC_URL');
+const fallbackRpc = required('BSC_FALLBACK_RPC_URL');
 const provider = new JsonRpcProvider(rpc, 56, { staticNetwork: true });
-if ((await provider.getNetwork()).chainId !== 56n) throw new Error('BSC_RPC_URL is not chain 56');
+const fallbackProvider = new JsonRpcProvider(fallbackRpc, 56, { staticNetwork: true });
+const [primaryNetwork, fallbackNetwork, primaryHead, fallbackHead] = await Promise.all([
+  provider.getNetwork(),
+  fallbackProvider.getNetwork(),
+  provider.getBlockNumber(),
+  fallbackProvider.getBlockNumber(),
+]);
+if (primaryNetwork.chainId !== 56n || fallbackNetwork.chainId !== 56n) throw new Error('BSC RPC is not chain 56');
+const commonHead = Math.min(primaryHead, fallbackHead);
+const [primaryBlock, fallbackBlock] = await Promise.all([
+  provider.getBlock(commonHead),
+  fallbackProvider.getBlock(commonHead),
+]);
+if (!primaryBlock?.hash || primaryBlock.hash.toLowerCase() !== fallbackBlock?.hash?.toLowerCase()) {
+  throw new Error('BSC RPCs do not agree on the production cutover block');
+}
 const usdt = '0x55d398326f99059fF775485246999027B3197955'.toLowerCase();
 const npl = '0x4e8277ab31e4956b2cd48449793a57656dfc03d2'.toLowerCase();
 const [usdtCode, nplCode] = await Promise.all([provider.getCode(usdt), provider.getCode(npl)]);
@@ -72,7 +88,7 @@ for (const name of await readdir(receiptDirectory)) {
   );
 }
 if (routerMicrotestBlocks.length === 0) throw new Error('Router microtest cutover evidence is unavailable');
-const paymentIndexerStartBlock = Math.max(...routerMicrotestBlocks) + 1;
+const paymentIndexerStartBlock = Math.max(Math.max(...routerMicrotestBlocks), commonHead) + 1;
 
 const databasePassword = secret();
 const redisPassword = secret();
@@ -104,7 +120,7 @@ await writeEnv('core.env', [
   line('MERCHANT_PII_ENCRYPTION_KEY', secret()),
   line('TRACKING_HASH_KEY', secret()),
   line('BSC_RPC_URL', rpc),
-  line('BSC_FALLBACK_RPC_URL', required('BSC_FALLBACK_RPC_URL')),
+  line('BSC_FALLBACK_RPC_URL', fallbackRpc),
   line('PAYMENT_INDEXER_START_BLOCK', paymentIndexerStartBlock),
   ...roles.map(([, address]) => line(address, required(address))),
   line('SIGNER_SERVICE_URL', 'http://127.0.0.1:8790/sign'),
