@@ -1,0 +1,32 @@
+{
+  "artifactVersion": "2.0.0-settlement-admin.16",
+  "chainId": 56,
+  "architecture": "FIVE_ROLE_EOA_V2",
+  "status": "SUPERSEDED_PRE_LAUNCH",
+  "decisionId": "D-V2-037",
+  "reason": "Platform Service Fee EOA changed before public launch",
+  "productionStateAtCutover": {
+    "orders": 0,
+    "paymentQuotes": 0,
+    "inventoryReservations": 0,
+    "seckillSessions": 0
+  },
+  "priorRouter": {
+    "address": "0x6CC78118fe053f0836D653de3E64666bb591632b",
+    "deploymentBlock": 110724943,
+    "deployedCodeHash": "0xdf184242d96d300a1d6c1f26b1b3bfd516349fe582b1b8a5698bd0d8841f0720",
+    "deploymentTxHash": "0x94d794f81f3f88d430e2f4dc637e6f2c5a09f43667c7340e88b410b0fdcd3e5c",
+    "sourceVerified": true,
+    "assetsAtCutover": {
+      "native": "0",
+      "usdt": "0",
+      "npl": "0"
+    }
+  },
+  "replacement": {
+    "address": "0xF127055e811768E87f5BAee62F2E5b9De863664c",
+    "deploymentBlock": 110882311,
+    "deploymentTxHash": "0xcce07b4d8a287c674fb9a3affffe494f76a34bfa02af201f9d5a8b0b0659fd10"
+  },
+  "historyPolicy": "Append-only evidence; never reactivate or rewrite"
+}

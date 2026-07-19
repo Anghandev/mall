@@ -328,10 +328,12 @@ source conflicts are indexed in `V2_DECISIONS.md`.
   New EOA-bound contracts require a separate deployment manifest and may not
   reuse the old addresses or authorization evidence.
 - Before Mall public launch, while production orders and active seckill sessions
-  are both zero, the EOA-bound PaymentRouter may be directly superseded from
+  and all quotes and inventory reservations are zero, the EOA-bound PaymentRouter may be directly superseded from
   the same source, compiler settings and creation bytecode, with its constructor
   differing only in the newly confirmed Platform Service Fee EOA. Immutable
-  references must prove runtime differences are confined to that address slot.
+  references must prove runtime differences are confined to that address and
+  the deterministic EIP-712 domain separator bound to the replacement contract
+  address.
   Policy V2 is future-only and its machine diff from V1 permits only that
   off-chain Router-recipient binding plus required version/decision-evidence
   metadata. Every amount, rate, route, timing and beneficiary field remains

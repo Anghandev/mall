@@ -18,6 +18,8 @@
     "fullChainEvidenceSha256": "345428449103de8e8f43c21b718fdcead2fe388c8b97d7002ef2c19c679d1d96",
     "settlementPacketSha256": "8f7077312dd41b1599484c692dfe39af9eb5da5f5be6910c557b858a1f3ebc18",
     "settlementReceiptsSha256": "61e3d4291964f07df58d10c19b3a381e697fd36c1004e3c900fbea882fb7608d",
+    "routerCutoverPacketSha256": "8e5d61df5f9d1491712660149487f2fe5d405dd67a522f538289317751fc0bf8",
+    "routerCutoverReceiptsSha256": "0bb7eb88384542e39fb686b31f809e1f575211d2e34ebd2529dcf0d73c7d3970",
     "microTestStatus": "PAYMENT_SECKILL_BREAKERS_FULFILLMENT_AND_SETTLEMENT_COMPLETE",
     "guaranteeMainnetStatus": "NOT_EXECUTED_1000_USDT_BUDGET_BOUNDARY",
     "sourceVerificationSha256": "c722a63cd89a528f2e6670d39c9c98bb1afc5239e15ad98a42c2136e151feafa",
@@ -40,11 +42,21 @@
       "sourceVerified": true
     },
     "PaymentRouterV2": {
-      "address": "0x6CC78118fe053f0836D653de3E64666bb591632b",
-      "deploymentBlock": 110724943,
-      "deployedCodeHash": "0xdf184242d96d300a1d6c1f26b1b3bfd516349fe582b1b8a5698bd0d8841f0720",
-      "deploymentTxHash": "0x94d794f81f3f88d430e2f4dc637e6f2c5a09f43667c7340e88b410b0fdcd3e5c",
+      "address": "0xF127055e811768E87f5BAee62F2E5b9De863664c",
+      "deploymentBlock": 110882311,
+      "deployedCodeHash": "0x5a49d60865659b711f87606a6a6893effa954d4f85b06aa3fb12a97f3a9e9191",
+      "deploymentTxHash": "0xcce07b4d8a287c674fb9a3affffe494f76a34bfa02af201f9d5a8b0b0659fd10",
       "sourceVerified": true
     }
+  },
+  "routerCutover": {
+    "status": "PRE_LAUNCH_DIRECT_REPLACEMENT",
+    "priorRouter": "0x6CC78118fe053f0836D653de3E64666bb591632b",
+    "activeRouter": "0xF127055e811768E87f5BAee62F2E5b9De863664c",
+    "platformServiceFeeWallet": "0x4b2454c21989cdf65377ca9a1b2a70bc8707d1d6",
+    "deploymentTxHash": "0xcce07b4d8a287c674fb9a3affffe494f76a34bfa02af201f9d5a8b0b0659fd10",
+    "deploymentBlock": 110882311,
+    "deployedCodeHash": "0x5a49d60865659b711f87606a6a6893effa954d4f85b06aa3fb12a97f3a9e9191",
+    "evidenceHash": "0x007564918c3b8bed1d39e637274b705786ed688aac9966b9ab8d736c0c642463"
   }
 }

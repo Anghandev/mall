@@ -69,8 +69,8 @@
     {
       "name": "PaymentRouterV2",
       "source": "platform-v2/contracts/PaymentRouterV2.sol",
-      "address": "0x6cc78118fe053f0836d653de3e64666bb591632b",
-      "deploymentBlock": 110724943,
+      "address": "0xf127055e811768e87f5baee62f2e5b9de863664c",
+      "deploymentBlock": 110882311,
       "status": "DEPLOYED",
       "constructorInputs": [
         {
@@ -116,7 +116,7 @@
       ],
       "bytecodeSha256": "28cc1fc8c2a4bc733111ba4412d493b6b3f9e5b06ec9eeb6e0a854c32963d07c",
       "deployedBytecodeSha256": "42b749372f8692ea48bd6b7f2a825275759d91ad528d3e9cd6f745ab4854eb74",
-      "deployedCodeHash": "0xdf184242d96d300a1d6c1f26b1b3bfd516349fe582b1b8a5698bd0d8841f0720"
+      "deployedCodeHash": "0x5a49d60865659b711f87606a6a6893effa954d4f85b06aa3fb12a97f3a9e9191"
     }
   ],
   "postDeploymentRoleGrants": [],

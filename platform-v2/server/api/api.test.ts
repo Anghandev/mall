@@ -486,8 +486,9 @@ test('governed USDT concession uses only the fixed 45/45/10 Custody pools', () =
   ]);
   assert.equal(policy.concessionDestinationSetHash, paymentAllocationSetHash());
 
+  const { policyVersion: _policyVersion, ...policyFields } = policy;
   const payload = {
-    ...policy,
+    ...policyFields,
     merchantGuaranteeMinimumUsdt: policy.merchantGuaranteeMinimumUsdt.toString(),
   };
   assert.throws(
@@ -3145,7 +3146,6 @@ function completeEnvironment(): Record<string, string> {
     PII_RETENTION_POLICY_VERSION: 'pii-v1',
     BSC_RPC_URL: 'https://rpc.example.invalid',
     BSC_FALLBACK_RPC_URL: 'https://fallback-rpc.example.invalid',
-    PAYMENT_INDEXER_START_BLOCK: '110733622',
     PLATFORM_GOVERNANCE_WALLET_ADDRESS: SAFE,
     PLATFORM_SERVICE_FEE_WALLET_ADDRESS: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     USDT_SETTLEMENT_WALLET_ADDRESS: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',

@@ -11,6 +11,12 @@ deployment evidence. Those contracts received no policy publication or user
 funds and are permanently `SUPERSEDED`; the file must never become the active
 manifest or be deleted as migration cleanup.
 
+`bsc-payment-v2-eoa-router-superseded-pre-launch.json` preserves the first
+EOA-bound Router after its pre-launch service-fee-recipient replacement. The
+production database had no orders, quotes, reservations or seckill sessions at
+cutover. The Policy and Beneficiary registries remain active; only that Router
+is historical and it must never be restored as the active manifest entry.
+
 The file contains no secrets. It is committed with the release so both
 `contracts:artifacts` and `artifacts:check` reproduce the same deployed manifest:
 
