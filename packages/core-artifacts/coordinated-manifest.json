@@ -60,7 +60,7 @@
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "bc0fb059daebe8d8b829f3cf22e77739afbe0ee4056eb1c9b9ef7029c0df0782"
+      "sha256": "6cbd2a4d8187b23088fa3de6c71b475a0ed31f8b2d20cebeef7123ccb851c0f0"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",

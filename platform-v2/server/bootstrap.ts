@@ -519,7 +519,8 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     }),
     indexer: new ChainIndexer(decoder, indexerStore),
     store: indexerStore,
-    deploymentBlock: required(config.paymentRouterDeploymentBlock, 'PAYMENT_ROUTER_DEPLOYMENT_BLOCK_MANIFEST'),
+    deploymentBlock: config.paymentIndexerStartBlock
+      ?? required(config.paymentRouterDeploymentBlock, 'PAYMENT_ROUTER_DEPLOYMENT_BLOCK_MANIFEST'),
   });
   await paymentIndexer.pollOnce().catch(() => undefined);
   paymentIndexer.start();

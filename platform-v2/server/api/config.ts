@@ -136,6 +136,7 @@ export interface CoreConfig {
   fallbackRpcUrl: string | undefined;
   paymentRouterAddress: string | undefined;
   paymentRouterDeploymentBlock: number | undefined;
+  paymentIndexerStartBlock: number | undefined;
   policyRegistryAddress: string | undefined;
   beneficiaryRegistryAddress: string | undefined;
   governanceWalletAddress: string | undefined;
@@ -201,6 +202,15 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
   const paymentRouterDeployment = manifestContractDeployment('PaymentRouterV2');
   const paymentRouterAddress = paymentRouterDeployment?.address;
   const paymentRouterDeploymentBlock = paymentRouterDeployment?.deploymentBlock;
+  const paymentIndexerStartBlock = parseOptionalPositiveInteger(
+    env.PAYMENT_INDEXER_START_BLOCK,
+    'PAYMENT_INDEXER_START_BLOCK',
+  );
+  if (
+    paymentIndexerStartBlock !== undefined
+    && paymentRouterDeploymentBlock !== undefined
+    && paymentIndexerStartBlock < paymentRouterDeploymentBlock
+  ) throw new CoreError('InvalidRequest', 'PAYMENT_INDEXER_START_BLOCK predates the Router deployment', 500);
   const policyRegistryAddress = manifestContractAddress('PolicyRegistryV2');
   const beneficiaryRegistryAddress = manifestContractAddress('BeneficiaryRegistryV2');
   const externalBlocked = [
@@ -260,6 +270,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     fallbackRpcUrl: env.BSC_FALLBACK_RPC_URL,
     paymentRouterAddress,
     paymentRouterDeploymentBlock,
+    paymentIndexerStartBlock,
     policyRegistryAddress,
     beneficiaryRegistryAddress,
     governanceWalletAddress: normalizeOptionalAddress(env.PLATFORM_GOVERNANCE_WALLET_ADDRESS),

@@ -124,6 +124,10 @@ test('typed config reports blocked inputs without exposing secret values', () =>
   );
   assert.throws(() => loadConfig({ ...completeEnvironment(), REQUIRED_CONFIRMATIONS: '12' }), /frozen at 15/);
   assert.throws(
+    () => loadConfig({ ...completeEnvironment(), PAYMENT_INDEXER_START_BLOCK: '1' }),
+    /predates the Router deployment/,
+  );
+  assert.throws(
     () => loadConfig({ ...completeEnvironment(), SETTLEMENT_EXECUTOR_URL: 'http://executor.example.invalid' }),
     /must use HTTPS/,
   );
@@ -3141,6 +3145,7 @@ function completeEnvironment(): Record<string, string> {
     PII_RETENTION_POLICY_VERSION: 'pii-v1',
     BSC_RPC_URL: 'https://rpc.example.invalid',
     BSC_FALLBACK_RPC_URL: 'https://fallback-rpc.example.invalid',
+    PAYMENT_INDEXER_START_BLOCK: '110733622',
     PLATFORM_GOVERNANCE_WALLET_ADDRESS: SAFE,
     PLATFORM_SERVICE_FEE_WALLET_ADDRESS: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     USDT_SETTLEMENT_WALLET_ADDRESS: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',

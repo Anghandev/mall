@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { JsonRpcProvider, Wallet, keccak256 } from 'ethers';
 
@@ -54,6 +54,25 @@ const nplEvidence = receipt.receipts.find((item) => item.asset === 'NPL')?.final
 if (!/^0x[0-9a-f]{64}$/.test(usdtEvidence ?? '') || !/^0x[0-9a-f]{64}$/.test(nplEvidence ?? '')) {
   throw new Error('Settlement conformance evidence is unavailable');
 }
+const contractManifest = JSON.parse(await readFile(
+  resolve('packages/core-artifacts/contracts/contract-manifest.json'),
+  'utf8',
+));
+const routerAddress = contractManifest.contracts
+  .find((contract) => contract.name === 'PaymentRouterV2')?.address?.toLowerCase();
+if (!/^0x[0-9a-f]{40}$/.test(routerAddress ?? '')) throw new Error('PaymentRouter deployment is unavailable');
+const receiptDirectory = resolve('platform-v2/deployments');
+const routerMicrotestBlocks = [];
+for (const name of await readdir(receiptDirectory)) {
+  if (!name.endsWith('-receipts-private.json')) continue;
+  collectRouterBlocks(
+    JSON.parse(await readFile(join(receiptDirectory, name), 'utf8')),
+    routerAddress,
+    routerMicrotestBlocks,
+  );
+}
+if (routerMicrotestBlocks.length === 0) throw new Error('Router microtest cutover evidence is unavailable');
+const paymentIndexerStartBlock = Math.max(...routerMicrotestBlocks) + 1;
 
 const databasePassword = secret();
 const redisPassword = secret();
@@ -86,6 +105,7 @@ await writeEnv('core.env', [
   line('TRACKING_HASH_KEY', secret()),
   line('BSC_RPC_URL', rpc),
   line('BSC_FALLBACK_RPC_URL', required('BSC_FALLBACK_RPC_URL')),
+  line('PAYMENT_INDEXER_START_BLOCK', paymentIndexerStartBlock),
   ...roles.map(([, address]) => line(address, required(address))),
   line('SIGNER_SERVICE_URL', 'http://127.0.0.1:8790/sign'),
   line('SIGNER_SERVICE_TOKEN', signerToken),
@@ -128,3 +148,18 @@ await writeEnv('eoa-runtime.env', [
 
 await writeFile(join(target, 'README'), 'Generated production configuration. Keep mode 0600 and never commit or print values.\n', { mode: 0o600 });
 console.log(`Prepared ${target} with mode-0600 configuration files`);
+
+function collectRouterBlocks(value, routerAddress, blocks) {
+  if (Array.isArray(value)) {
+    for (const item of value) collectRouterBlocks(item, routerAddress, blocks);
+    return;
+  }
+  if (!value || typeof value !== 'object') return;
+  if (
+    typeof value.to === 'string'
+    && value.to.toLowerCase() === routerAddress
+    && Number.isSafeInteger(value.blockNumber)
+    && value.blockNumber > 0
+  ) blocks.push(value.blockNumber);
+  for (const child of Object.values(value)) collectRouterBlocks(child, routerAddress, blocks);
+}
