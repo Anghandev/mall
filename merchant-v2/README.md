@@ -4,6 +4,18 @@ React + TypeScript merchant workbench. It owns only this directory, consumes
 coordinated Core artifacts and fails closed when a required capability is
 unpublished.
 
+## Production deployment
+
+- Public URL: `https://www.npleon.com/merchant/`
+- Static asset base: `/merchant/`
+- BrowserRouter basename: `/merchant`
+- Core API base: `/core` (requests resolve to `/core/v2/**`)
+
+The production build fixes the Core API base to same-origin `/core`. Nginx must
+serve existing files under `/merchant/` and fall back every unmatched
+`/merchant/**` deep link to `/merchant/index.html`. `/core/**` must be proxied to
+Core separately; it must not use the SPA fallback.
+
 ## Local checks
 
 ```sh
@@ -112,12 +124,12 @@ authorized production wallets and physical
 camera/printer acceptance remain externally blocked. The browser never calls
 the buyer-only payment projection with a merchant session.
 
-Core is expected on the same origin. A separately hosted local Core can be
-selected with `VITE_CORE_API_BASE_URL`; production deployment must provide the
-corresponding HTTPS/CORS policy rather than a client-side fallback.
+Core is expected on the same origin. `VITE_CORE_API_BASE_URL` may select a
+separately hosted Core during local development only. Production builds ignore
+that override and always use `/core`, so Nginx must proxy `/core/**` to Core.
 
 For local visual review only, run the dev server and append
 `?__merchant_visual_review__=1` to a workspace route such as
-`/dashboard?__merchant_visual_review__=1`. Vite
+`/merchant/dashboard?__merchant_visual_review__=1`. Vite
 removes this development-only branch from the production bundle, and
 `bundle:check` verifies that removal.

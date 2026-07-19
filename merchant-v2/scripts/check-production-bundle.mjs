@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { artifactVersion } from '@abu24k/core-artifacts';
@@ -6,6 +6,9 @@ import { artifactVersion } from '@abu24k/core-artifacts';
 const dist = fileURLToPath(new URL('../dist/', import.meta.url));
 const textExtensions = new Set(['.css', '.html', '.js', '.map']);
 const coreBoundary = '支付、履约、替代商家接管、结算、商品、媒体、商家资料、审计与订单导出能力已发布；平台全局运营与清算读取保持 Admin-only';
+const publicBasePath = '/merchant/';
+const routerBasename = '/merchant';
+const coreApiBaseUrl = '/core';
 const forbidden = [
   'legacy/' + 'v1-npl-only',
   '__merchant_visual_review__',
@@ -47,6 +50,8 @@ const forbidden = [
 let filesChecked = 0;
 let sawCoreBoundary = false;
 let sawArtifactVersion = false;
+let sawCoreApiBaseUrl = false;
+let sawRouterBasename = false;
 
 for (const path of walk(dist)) {
   if (!textExtensions.has(extname(path))) continue;
@@ -54,6 +59,10 @@ for (const path of walk(dist)) {
   const contents = readFileSync(path, 'utf8');
   sawCoreBoundary ||= contents.includes(coreBoundary);
   sawArtifactVersion ||= contents.includes(artifactVersion);
+  if (extname(path) === '.js') {
+    sawCoreApiBaseUrl ||= /function\s+\w+\(\w+=[`'"]\/core[`'"]\)/.test(contents);
+    sawRouterBasename ||= /basename:[A-Za-z_$][\w$]*\.routerBasename/.test(contents);
+  }
   for (const token of forbidden) {
     if (contents.includes(token)) throw new Error(`Production bundle contains forbidden token: ${token}`);
   }
@@ -67,7 +76,27 @@ if (!sawArtifactVersion) {
   throw new Error('Production bundle is missing the coordinated Core artifact version');
 }
 
-console.log(`OK merchant production bundle: ${filesChecked} text files, no review bypass or sample records`);
+const indexHtml = readFileSync(join(dist, 'index.html'), 'utf8');
+const assetReferences = [...indexHtml.matchAll(/(?:src|href)="(\/merchant\/assets\/[^"?#]+)(?:[?#][^"]*)?"/g)]
+  .map((match) => match[1]);
+if (assetReferences.length === 0 || /(?:src|href)="\/assets\//.test(indexHtml)) {
+  throw new Error('Production HTML must reference static assets under /merchant/assets/');
+}
+for (const reference of assetReferences) {
+  const assetPath = join(dist, reference.slice(publicBasePath.length));
+  if (!existsSync(assetPath) || !statSync(assetPath).isFile()) {
+    throw new Error(`Production HTML references a missing static asset: ${reference}`);
+  }
+}
+
+if (!sawRouterBasename) {
+  throw new Error(`Production bundle is missing the BrowserRouter basename: ${routerBasename}`);
+}
+if (!sawCoreApiBaseUrl) {
+  throw new Error(`Production bundle is missing the fixed Core API base URL: ${coreApiBaseUrl}`);
+}
+
+console.log(`OK merchant production bundle: ${filesChecked} text files, ${assetReferences.length} /merchant/ assets, /core API base, no review bypass or sample records`);
 
 function* walk(directory) {
   for (const name of readdirSync(directory)) {

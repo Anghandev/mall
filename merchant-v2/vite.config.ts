@@ -1,6 +1,7 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vitest/config';
 import openApi from '@abu24k/core-artifacts/openapi';
+import { merchantDeployment } from './src/bootstrap';
 
 const merchantStoreOperationsId = 'virtual:merchant-store-operations';
 const resolvedMerchantStoreOperationsId = `\0${merchantStoreOperationsId}`;
@@ -14,7 +15,11 @@ const merchantStoreOperations = Object.freeze({
   exportOrders: operationPath('exportMerchantOrders', 'post'),
 });
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  base: merchantDeployment.publicBasePath,
+  ...(command === 'build' ? {
+    define: { 'import.meta.env.VITE_CORE_API_BASE_URL': JSON.stringify(merchantDeployment.coreApiBaseUrl) },
+  } : {}),
   plugins: [{
     name: 'merchant-openapi-operations',
     resolveId(id) {
@@ -36,7 +41,7 @@ export default defineConfig({
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     setupFiles: ['./tests/setup.ts'],
   },
-});
+}));
 
 function operationPath(operationId: string, method: 'get' | 'post' | 'put') {
   for (const [path, entry] of Object.entries(openApi.paths)) {
