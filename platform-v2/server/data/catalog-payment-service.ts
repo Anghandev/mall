@@ -21,6 +21,7 @@ import {
   type CanonicalSeckillIntent,
 } from '../api/payment-signing.ts';
 import type { SignerRequest } from '../chain/signer.ts';
+import type { BnmWalletRegistrationSource } from '../chain/bnm-availability-worker.ts';
 import { reserveInventory } from './inventory.ts';
 import { assertWalletPaymentAllowed } from './risk-service.ts';
 import { assertQuoteFulfillmentTarget } from './fulfillment-target-service.ts';
@@ -179,6 +180,7 @@ export class CatalogPaymentService {
   readonly #nplQuotes: PaymentNplQuoteSource;
   readonly #beneficiaries: BeneficiarySnapshotSource;
   readonly #policies: PaymentPolicyAttestationSource;
+  readonly #bnmWallets: BnmWalletRegistrationSource;
   readonly #paymentRouterAddress: string;
   readonly #clock: () => Date;
   readonly #bytes32: () => string;
@@ -190,6 +192,7 @@ export class CatalogPaymentService {
     nplQuotes: PaymentNplQuoteSource;
     beneficiaries: BeneficiarySnapshotSource;
     policies: PaymentPolicyAttestationSource;
+    bnmWallets: BnmWalletRegistrationSource;
     paymentRouterAddress: string;
     clock?: () => Date;
     bytes32?: () => string;
@@ -200,6 +203,7 @@ export class CatalogPaymentService {
     this.#nplQuotes = input.nplQuotes;
     this.#beneficiaries = input.beneficiaries;
     this.#policies = input.policies;
+    this.#bnmWallets = input.bnmWallets;
     try {
       this.#paymentRouterAddress = getAddress(input.paymentRouterAddress).toLowerCase();
     } catch {
@@ -248,9 +252,13 @@ export class CatalogPaymentService {
       }
       return loadExistingQuote(executor, buyer, input.idempotencyKey);
     });
-    if (existing) return existingQuoteResponse(existing, input, this.#paymentRouterAddress);
+    if (existing) {
+      await this.#bnmWallets.assertRegistered(buyer);
+      return existingQuoteResponse(existing, input, this.#paymentRouterAddress);
+    }
 
     const prepared = await this.#transactions.transaction((executor) => loadPreparation(executor, buyer, input, this.#clock()));
+    await this.#bnmWallets.assertRegistered(buyer);
     const policy = parsePaymentPolicySnapshot(Number(prepared.policy.policy_version), prepared.policy.payload);
     await this.#policies.assertPublished({
       artifactVersion: prepared.policy.artifact_version,
@@ -358,8 +366,12 @@ export class CatalogPaymentService {
       }
       return loadExistingSeckillQuote(executor, buyer, input.idempotencyKey);
     });
-    if (existing) return existingSeckillQuoteResponse(existing, input, this.#paymentRouterAddress);
+    if (existing) {
+      await this.#bnmWallets.assertRegistered(buyer);
+      return existingSeckillQuoteResponse(existing, input, this.#paymentRouterAddress);
+    }
     const prepared = await this.#transactions.transaction((executor) => loadSeckillPreparation(executor, buyer, input, this.#clock()));
+    await this.#bnmWallets.assertRegistered(buyer);
     const policy = parsePaymentPolicySnapshot(Number(prepared.policy.policy_version), prepared.policy.payload);
     await this.#policies.assertPublished({
       artifactVersion: prepared.policy.artifact_version,

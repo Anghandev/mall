@@ -144,6 +144,14 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     token: required(config.signerServiceToken, 'SIGNER_SERVICE_TOKEN'),
     expectedSigner: required(config.quoteSignerAddress, 'QUOTE_SIGNER_ADDRESS'),
   });
+  const bnm = new HttpBnmAvailabilityAdapter({
+    ...(env.BNM_AVAILABILITY_URL ? { url: env.BNM_AVAILABILITY_URL } : {}),
+    ...(env.BNM_API_TOKEN ? { token: env.BNM_API_TOKEN } : {}),
+    ...(env.BNM_PROJECT_ID ? { projectId: env.BNM_PROJECT_ID } : {}),
+    ...(config.bnmMonotonicConformanceEvidenceHash
+      ? { conformanceEvidenceHash: config.bnmMonotonicConformanceEvidenceHash }
+      : {}),
+  });
   const paymentService = new CatalogPaymentService({
     transactions,
     signer,
@@ -156,6 +164,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
       reader,
       policyRegistryAddress: required(config.policyRegistryAddress, 'POLICY_REGISTRY_ADDRESS_MANIFEST'),
     }),
+    bnmWallets: bnm,
     paymentRouterAddress: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),
   });
   const catalogManagementService = new CatalogManagementService({ transactions, signer });
@@ -492,14 +501,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   const riskService = new RiskService({ transactions });
   const bnmWorker = new BnmAvailabilityWorker({
     transactions,
-    adapter: new HttpBnmAvailabilityAdapter({
-      ...(env.BNM_AVAILABILITY_URL ? { url: env.BNM_AVAILABILITY_URL } : {}),
-      ...(env.BNM_API_TOKEN ? { token: env.BNM_API_TOKEN } : {}),
-      ...(env.BNM_PROJECT_ID ? { projectId: env.BNM_PROJECT_ID } : {}),
-      ...(config.bnmMonotonicConformanceEvidenceHash
-        ? { conformanceEvidenceHash: config.bnmMonotonicConformanceEvidenceHash }
-        : {}),
-    }),
+    adapter: bnm,
   });
   const decoder = await AbiEventDecoder.load(ABI_BUNDLE_PATH, {
     PaymentRouterV2: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),

@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { AbiCoder, Interface, Wallet, keccak256, type InterfaceAbi } from 'ethers';
 import { CORE_ARTIFACT_VERSION, NPL_ADDRESS, USDT_ADDRESS } from '../api/enums.ts';
+import { CoreError } from '../api/errors.ts';
 import {
   paymentAllocationSetHash,
   paymentBeneficiarySetHash,
@@ -858,6 +859,50 @@ test('BNM adapter is idempotency-bound, validates acknowledgements and fails clo
   assert.throws(
     () => new HttpBnmAvailabilityAdapter({ url: 'http://bnm.example.invalid' }),
     /must use HTTPS/,
+  );
+
+  let registrationRequest: Request | undefined;
+  const registered = new HttpBnmAvailabilityAdapter({
+    url: 'https://bnm.example.invalid/v1/order-points/state',
+    token: 'provider-token',
+    projectId: 'abu-24k',
+    conformanceEvidenceHash: HASH_2,
+    fetch: (async (input, init) => {
+      registrationRequest = new Request(input, init);
+      return new Response(JSON.stringify({
+        projectId: 'abu-24k',
+        walletAddress: BUYER.toLowerCase(),
+        registered: true,
+        conformanceEvidenceHash: HASH_2,
+        checkedAt: '2026-07-14T00:00:00.000Z',
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch,
+  });
+  await registered.assertRegistered(BUYER);
+  assert.equal(registrationRequest?.headers.get('idempotency-key'), `bnm-wallet-status:${BUYER.toLowerCase()}`);
+  assert.deepEqual(await registrationRequest?.json(), {
+    operation: 'CHECK_WALLET',
+    projectId: 'abu-24k',
+    conformanceEvidenceHash: HASH_2,
+    walletAddress: BUYER.toLowerCase(),
+  });
+
+  const unregistered = new HttpBnmAvailabilityAdapter({
+    url: 'https://bnm.example.invalid/v1/order-points/state',
+    token: 'provider-token',
+    projectId: 'abu-24k',
+    conformanceEvidenceHash: HASH_2,
+    fetch: (async () => new Response(JSON.stringify({
+      projectId: 'abu-24k',
+      walletAddress: BUYER.toLowerCase(),
+      registered: false,
+      conformanceEvidenceHash: HASH_2,
+      checkedAt: '2026-07-14T00:00:00.000Z',
+    }), { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch,
+  });
+  await assert.rejects(
+    unregistered.assertRegistered(BUYER),
+    (error: unknown) => error instanceof CoreError && error.code === 'Forbidden' && error.status === 403,
   );
 
   let request: Request | undefined;

@@ -272,6 +272,7 @@ test('risk observations create exact restrictions, block new payment and preserv
       nplQuotes: { quote: async () => { throw new Error('risk restriction must run before NPL quote access'); } },
       beneficiaries: { resolve: async () => { throw new Error('risk restriction must run before beneficiary lookup'); } },
       policies: { assertPublished: async () => { throw new Error('risk restriction must run before policy lookup'); } },
+      bnmWallets: { assertRegistered: async () => { throw new Error('risk restriction must run before BNM lookup'); } },
       paymentRouterAddress: '0x9999999999999999999999999999999999999999',
       clock: () => now,
     });
@@ -1948,6 +1949,7 @@ test('catalog payment service builds an authoritative idempotent quote and recor
       `0x${'7'.repeat(64)}`,
       `0x${'8'.repeat(64)}`,
     ];
+    let bnmRegistered = false;
     const service = new CatalogPaymentService({
       transactions: transactionAdapter(db),
       signer: {
@@ -1971,6 +1973,11 @@ test('catalog payment service builds an authoritative idempotent quote and recor
         }),
       },
       policies: { assertPublished: async () => undefined },
+      bnmWallets: {
+        assertRegistered: async () => {
+          if (!bnmRegistered) throw new CoreError('Forbidden', 'BNM registration required', 403);
+        },
+      },
       paymentRouterAddress: '0x9999999999999999999999999999999999999999',
       clock: () => quoteNow,
       bytes32: () => ids.shift()!,
@@ -1985,6 +1992,15 @@ test('catalog payment service builds an authoritative idempotent quote and recor
       fulfillmentTargetHash: HASH,
       regionCodeHash: HASH,
     };
+    await assert.rejects(
+      service.createOrdinaryQuote(BUYER, request),
+      (error: unknown) => error instanceof CoreError && error.code === 'Forbidden',
+    );
+    assert.equal(signCalls, 0);
+    assert.equal((await db.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM core.inventory_reservations',
+    )).rows[0]?.count, '0');
+    bnmRegistered = true;
     const catalog = await service.listCatalog();
     assert.equal(catalog[0]?.skus[0]?.listPriceUsdt, '100');
     assert.equal(catalog[0]?.subtitle, 'Authoritative catalog product');
@@ -2654,6 +2670,7 @@ test('catalog management enforces product scope, signed preview, review locks an
       nplQuotes: { quote: async () => { throw new Error('unused'); } },
       beneficiaries: { resolve: async () => { throw new Error('unused'); } },
       policies: { assertPublished: async () => { throw new Error('unused'); } },
+      bnmWallets: { assertRegistered: async () => { throw new Error('unused'); } },
       paymentRouterAddress: '0x9999999999999999999999999999999999999999',
       clock: () => now,
     });
@@ -3017,6 +3034,7 @@ test('seckill quote locks both inventories and final classification releases the
     await insertLiveSeckillSession(db, sessionId, now, 90);
     const ids = [`0x${'8'.repeat(64)}`, `0x${'d'.repeat(64)}`, `0x${'e'.repeat(64)}`];
     let signCalls = 0;
+    let bnmRegistrationChecks = 0;
     const service = new CatalogPaymentService({
       transactions: transactionAdapter(db),
       signer: {
@@ -3044,6 +3062,7 @@ test('seckill quote locks both inventories and final classification releases the
         }),
       },
       policies: { assertPublished: async () => undefined },
+      bnmWallets: { assertRegistered: async () => { bnmRegistrationChecks += 1; } },
       paymentRouterAddress: '0x9999999999999999999999999999999999999999',
       clock: () => now,
       bytes32: () => ids.shift()!,
@@ -3060,6 +3079,7 @@ test('seckill quote locks both inventories and final classification releases the
       regionCodeHash: HASH,
     };
     const quote = await service.createSeckillQuote(BUYER, request);
+    assert.equal(bnmRegistrationChecks, 1);
     const seckillPrizeAmount = quote.dual.seckill.merchantConcessionAllocations
       .find((allocation) => allocation.pool === 'SECKILL_PRIZE')!.amount;
     assert.equal(quote.dual.seckill.listPriceUsdt, '90');
@@ -3330,6 +3350,7 @@ test('seckill prize freezes the final canonical order and only the reviewed winn
         }),
       },
       policies: { assertPublished: async () => undefined },
+      bnmWallets: { assertRegistered: async () => undefined },
       paymentRouterAddress: '0x9999999999999999999999999999999999999999',
       clock: () => now,
       bytes32: () => ids.shift()!,

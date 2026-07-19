@@ -251,6 +251,9 @@ The two quote endpoints fail closed unless the payment-only `writesEnabled`
 readiness gate is true. This gate does not apply to submission tracking or
 reads, so an already broadcast transaction can still be indexed and reconciled
 while new quoting is paused.
+Both quote endpoints also require the authenticated wallet to be registered in
+the existing BNM system. An unregistered wallet receives `Forbidden` before
+inventory reservation or quote signing; Core never creates a BNM account.
 
 Delivery targets require AMap reverse geocoding and encrypted PII storage.
 Pickup targets bind an active store snapshot and immutable six-digit region.

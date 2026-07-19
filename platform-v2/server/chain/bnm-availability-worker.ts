@@ -22,6 +22,10 @@ export interface BnmAvailabilityAdapter {
   }>;
 }
 
+export interface BnmWalletRegistrationSource {
+  assertRegistered(walletAddress: string): Promise<void>;
+}
+
 export class HttpBnmAvailabilityAdapter implements BnmAvailabilityAdapter {
   readonly #url: string | undefined;
   readonly #token: string | undefined;
@@ -47,6 +51,66 @@ export class HttpBnmAvailabilityAdapter implements BnmAvailabilityAdapter {
     }
     this.#conformanceEvidenceHash = input.conformanceEvidenceHash?.toLowerCase();
     this.#fetch = input.fetch ?? globalThis.fetch;
+  }
+
+  async assertRegistered(walletAddress: string) {
+    const wallet = walletAddress.toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(wallet)) {
+      throw new CoreError('InvalidRequest', 'Invalid BNM wallet address', 409);
+    }
+    if (!this.#url || !this.#token || !this.#projectId || !this.#conformanceEvidenceHash) {
+      throw new CoreError('ConfigurationRequired', 'Existing BNM backend integration is unavailable', 503, {
+        provider: 'BNM',
+      });
+    }
+    const response = await this.#fetch(this.#url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${this.#token}`,
+        'content-type': 'application/json',
+        'idempotency-key': `bnm-wallet-status:${wallet}`,
+      },
+      body: JSON.stringify({
+        operation: 'CHECK_WALLET',
+        projectId: this.#projectId,
+        conformanceEvidenceHash: this.#conformanceEvidenceHash,
+        walletAddress: wallet,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    }).catch(() => {
+      throw new CoreError('ExternalBlocked', 'BNM wallet registration check failed', 503, { provider: 'BNM' });
+    });
+    if (!response.ok) {
+      throw new CoreError('ExternalBlocked', 'BNM backend rejected wallet registration check', 503, {
+        provider: 'BNM',
+        status: response.status,
+      });
+    }
+    const body = await response.json().catch(() => undefined) as
+      | {
+        projectId?: unknown;
+        walletAddress?: unknown;
+        registered?: unknown;
+        conformanceEvidenceHash?: unknown;
+        checkedAt?: unknown;
+      }
+      | undefined;
+    if (
+      !body
+      || body.projectId !== this.#projectId
+      || body.walletAddress !== wallet
+      || typeof body.registered !== 'boolean'
+      || typeof body.conformanceEvidenceHash !== 'string'
+      || body.conformanceEvidenceHash.toLowerCase() !== this.#conformanceEvidenceHash
+      || typeof body.checkedAt !== 'string'
+      || !Number.isFinite(Date.parse(body.checkedAt))
+    ) throw new CoreError('ExternalBlocked', 'BNM backend returned an invalid wallet registration check', 503, { provider: 'BNM' });
+    if (!body.registered) {
+      throw new CoreError('Forbidden', 'Register this wallet in the existing BNM system before checkout', 403, {
+        provider: 'BNM',
+        registrationRequired: true,
+      });
+    }
   }
 
   async setState(input: BnmAvailabilityInput) {

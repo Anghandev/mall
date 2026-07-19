@@ -132,6 +132,11 @@ conflict without storing plaintext delivery data.
 
 ## BNM Availability
 
+Ordinary and seckill quote creation first calls the same authenticated backend
+for a read-only wallet-registration check. A missing registration returns
+`Forbidden` before inventory reservation, quote signing or payment broadcast;
+transport, authentication or malformed-response failures remain
+`ExternalBlocked`. The check never creates a user or changes BNM state.
 Fulfillment completion writes one `BnmAvailabilityRequested` outbox event in
 the same PostgreSQL transaction as the order and ledger transition. The BNM
 worker calls only a configured HTTPS backend endpoint with order, buyer, exact

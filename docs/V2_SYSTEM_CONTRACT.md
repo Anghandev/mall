@@ -154,10 +154,14 @@ source conflicts are indexed in `V2_DECISIONS.md`.
 - BNM is the existing backend points project, valued 1:1 against the product
   USDT list price. Payment records Locked BNM; fulfillment finality makes it
   Available. V2 deploys no BNM ERC-20, performs no BNM mint and exposes no
-  on-chain BNM Claim. BNM is not an EOA-transfer liability. Every backend state
-  command carries an order-scoped monotonic version; the BNM backend must
-  atomically ignore lower versions and acknowledge the effective version/state.
-  Missing proof of that behavior is `ExternalBlocked`.
+  on-chain BNM Claim. A buyer must already have registered the same wallet in
+  the existing BNM system. Core verifies that registration before issuing an
+  ordinary or seckill quote; an unregistered wallet receives `Forbidden` before
+  inventory reservation or signing. V2 never auto-creates or duplicates a BNM
+  account. BNM is not an EOA-transfer liability. Every backend state command
+  carries an order-scoped monotonic version; the BNM backend must atomically
+  ignore lower versions and acknowledge the effective version/state. Missing
+  proof of that behavior is `ExternalBlocked`.
 
 ## Signed Settlement And EOA Transfers
 
