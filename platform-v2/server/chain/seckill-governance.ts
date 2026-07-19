@@ -176,6 +176,7 @@ export class HttpSeckillEoaExecutor implements SeckillEoaExecutor {
         policyVersion: input.policyVersion,
         evidenceHash: input.evidenceHash,
         minimumExecutorNonce: input.minimumExecutorNonce,
+        expected: input.expected,
         requestDigest,
       }),
     });

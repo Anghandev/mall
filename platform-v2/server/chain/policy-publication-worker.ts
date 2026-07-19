@@ -100,11 +100,7 @@ export class HttpPolicyEoaExecutor implements PolicyEoaExecutor {
 
   async execute(input: PolicyExecutionRequest) {
     validateExecutionRequest(input, this.#maxGasLimit);
-    const requestDigest = keccak256(new TextEncoder().encode(JSON.stringify({
-      artifactVersion: CORE_ARTIFACT_VERSION,
-      chainId: 56,
-      ...input,
-    }))).toLowerCase();
+    const requestDigest = policyExecutionRequestDigest(input);
     const response = await this.#fetch(this.#url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${this.#token}` },
@@ -119,6 +115,9 @@ export class HttpPolicyEoaExecutor implements PolicyEoaExecutor {
         data: input.calldata,
         dataHash: input.calldataHash,
         gasLimit: input.gasLimit,
+        policyVersion: input.policyVersion,
+        policyHash: input.policyHash,
+        operationsHash: input.operationsHash,
         requestDigest,
       }),
     });
@@ -143,6 +142,14 @@ export class HttpPolicyEoaExecutor implements PolicyEoaExecutor {
       executionEvidenceHash: body.executionEvidenceHash.toLowerCase(),
     };
   }
+}
+
+export function policyExecutionRequestDigest(input: PolicyExecutionRequest) {
+  return keccak256(new TextEncoder().encode(JSON.stringify({
+    artifactVersion: CORE_ARTIFACT_VERSION,
+    chainId: 56,
+    ...input,
+  }))).toLowerCase();
 }
 
 export class ResilientPolicyChainSource implements PolicyChainSource {

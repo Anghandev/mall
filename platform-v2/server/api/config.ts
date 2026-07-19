@@ -19,6 +19,7 @@ const externalVariables = [
   'AUTH_URI',
   'PII_RETENTION_POLICY_VERSION',
   'DELIVERY_DATA_ENCRYPTION_KEY',
+  'MERCHANT_PII_ENCRYPTION_KEY',
   'TRACKING_HASH_KEY',
   'AMAP_WEB_SERVICE_KEY',
   'BSC_RPC_URL',
@@ -433,7 +434,9 @@ function validateProductionEndpoints(env: Readonly<Record<string, string | undef
     'JPUSH_GATEWAY_URL',
   ]) {
     const value = env[name];
-    if (value && protocol(value) !== 'https:') throw new CoreError('InvalidRequest', `${name} must use HTTPS`, 500);
+    if (value && protocol(value) !== 'https:' && !isLoopbackHttp(value)) {
+      throw new CoreError('InvalidRequest', `${name} must use HTTPS outside loopback`, 500);
+    }
   }
   for (const name of ['BSC_RPC_URL', 'BSC_FALLBACK_RPC_URL']) {
     if (env[name] && protocol(env[name]) !== 'https:') {
@@ -445,6 +448,15 @@ function validateProductionEndpoints(env: Readonly<Record<string, string | undef
     && env.BSC_FALLBACK_RPC_URL
     && normalizedEndpoint(env.BSC_RPC_URL) === normalizedEndpoint(env.BSC_FALLBACK_RPC_URL)
   ) throw new CoreError('InvalidRequest', 'BSC primary and fallback RPC URLs must be distinct', 500);
+}
+
+function isLoopbackHttp(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' && ['127.0.0.1', 'localhost', '::1'].includes(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 function validateAuthOrigin(env: Readonly<Record<string, string | undefined>>) {

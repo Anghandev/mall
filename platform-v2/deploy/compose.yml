@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:16.9-bookworm
+    restart: unless-stopped
+    env_file: ./config/database.env
+    ports:
+      - "127.0.0.1:54329:5432"
+    volumes:
+      - abu24k_postgres:/var/lib/postgresql/data
+      - ./initdb/001-audit-database.sql:/docker-entrypoint-initdb.d/001-audit-database.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7.4.3-bookworm
+    restart: unless-stopped
+    env_file: ./config/redis.env
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    ports:
+      - "127.0.0.1:63829:6379"
+    volumes:
+      - abu24k_redis:/data
+
+  eoa-runtime:
+    image: abu24k-core:${ABU24K_RELEASE}
+    restart: unless-stopped
+    network_mode: host
+    env_file: ./config/eoa-runtime.env
+    command: ["pnpm", "--filter", "@abu24k/core", "operations:start"]
+    volumes:
+      - abu24k_eoa_state:/var/lib/abu24k
+
+  migrate:
+    image: abu24k-core:${ABU24K_RELEASE}
+    restart: "no"
+    network_mode: host
+    env_file: ./config/core.env
+    command: ["pnpm", "--filter", "@abu24k/core", "database:migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  core:
+    image: abu24k-core:${ABU24K_RELEASE}
+    restart: unless-stopped
+    network_mode: host
+    env_file: ./config/core.env
+    command: ["pnpm", "--filter", "@abu24k/core", "start"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      eoa-runtime:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  abu24k_postgres:
+  abu24k_redis:
+  abu24k_eoa_state:

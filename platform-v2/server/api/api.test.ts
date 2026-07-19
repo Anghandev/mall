@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import { Wallet } from 'ethers';
 import { WebSocket } from 'ws';
+import { resolveRoles } from '../bootstrap.ts';
 import { orderAllowedActions, settlementRequestAllowedAction } from './allowed-actions.ts';
 import {
   createSiweChallenge,
@@ -47,6 +48,7 @@ import {
   verifyWebhookHmac,
 } from './providers.ts';
 import { AmbiguousProviderResultError } from '../data/logistics-printing-service.ts';
+import type { SqlExecutor } from '../data/migrations.ts';
 import {
   CainiaoWaybillAdapter,
   FeiePrintAdapter,
@@ -79,6 +81,7 @@ test('typed config reports blocked inputs without exposing secret values', () =>
   assert.equal(blocked.requiredConfirmations, 15);
   assert.ok(blocked.externalBlocked.includes('DATABASE_URL'));
   assert.ok(blocked.externalBlocked.includes('PII_RETENTION_POLICY_VERSION'));
+  assert.ok(blocked.externalBlocked.includes('MERCHANT_PII_ENCRYPTION_KEY'));
   assert.ok(blocked.paymentExternalBlocked.includes('PLATFORM_SERVICE_FEE_WALLET_ADDRESS'));
   assert.equal(blocked.providerReadiness.KUAIDI100, 'CONFIGURATION_REQUIRED');
   assert.equal(blocked.providerReadiness.BNM, 'CONFIGURATION_REQUIRED');
@@ -124,6 +127,12 @@ test('typed config reports blocked inputs without exposing secret values', () =>
     () => loadConfig({ ...completeEnvironment(), SETTLEMENT_EXECUTOR_URL: 'http://executor.example.invalid' }),
     /must use HTTPS/,
   );
+  assert.doesNotThrow(() => loadConfig({
+    ...completeEnvironment(),
+    SIGNER_SERVICE_URL: 'http://127.0.0.1:8790/sign',
+    SETTLEMENT_EXECUTOR_URL: 'http://127.0.0.1:8790/settlement',
+    GOVERNANCE_EXECUTOR_URL: 'http://127.0.0.1:8790/governance',
+  }));
   assert.throws(
     () => loadConfig({ ...completeEnvironment(), BSC_RPC_URL: 'wss://rpc.example.invalid' }),
     /must use HTTPS/,
@@ -136,6 +145,31 @@ test('typed config reports blocked inputs without exposing secret values', () =>
     }),
     /must be distinct/,
   );
+});
+
+test('role resolution provisions only a BNM-registered wallet as BUYER', async () => {
+  const wallet = Wallet.createRandom().address.toLowerCase();
+  let stored = false;
+  let registrationChecks = 0;
+  const database: SqlExecutor = {
+    query: async <Row extends object>(sql: string) => {
+      if (sql.includes('INSERT INTO core.wallet_role_bindings')) {
+        stored = true;
+        return { rows: [] as Row[] };
+      }
+      return {
+        rows: (stored ? [{ role: 'BUYER', merchant_id: null }] : []) as Row[],
+      };
+    },
+  };
+  const result = await resolveRoles(database, wallet, {
+    assertRegistered: async (checkedWallet) => {
+      registrationChecks += 1;
+      assert.equal(checkedWallet, wallet);
+    },
+  });
+  assert.equal(registrationChecks, 1);
+  assert.deepEqual(result, { roles: ['BUYER'] });
 });
 
 test('SIWE nonce is domain-bound, one-use and yields an expiring RBAC session', async () => {
@@ -3103,6 +3137,7 @@ function completeEnvironment(): Record<string, string> {
     AUTH_DOMAIN: 'mall.abu.test',
     AUTH_URI: 'https://mall.abu.test',
     DELIVERY_DATA_ENCRYPTION_KEY: 'ab'.repeat(32),
+    MERCHANT_PII_ENCRYPTION_KEY: 'cd'.repeat(32),
     PII_RETENTION_POLICY_VERSION: 'pii-v1',
     BSC_RPC_URL: 'https://rpc.example.invalid',
     BSC_FALLBACK_RPC_URL: 'https://fallback-rpc.example.invalid',

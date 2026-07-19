@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import contractManifest from '../../packages/core-artifacts/contracts/contract-manifest.json' with { type: 'json' };
 import { createApiServer } from './api/app.ts';
@@ -31,7 +32,11 @@ import {
   RpcWalletMessageSignatureVerifier,
 } from './chain/payment-sources.ts';
 import { AbiEventDecoder } from './chain/abi-decoder.ts';
-import { BnmAvailabilityWorker, HttpBnmAvailabilityAdapter } from './chain/bnm-availability-worker.ts';
+import {
+  BnmAvailabilityWorker,
+  HttpBnmAvailabilityAdapter,
+  type BnmWalletRegistrationSource,
+} from './chain/bnm-availability-worker.ts';
 import { FulfillmentSchedulerWorker } from './chain/fulfillment-scheduler-worker.ts';
 import { LogisticsPrintWorker } from './chain/logistics-print-worker.ts';
 import {
@@ -583,7 +588,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     walletSignatureVerifier,
     authDomain,
     authUri,
-    resolveRoles: (walletAddress) => resolveRoles(database, walletAddress),
+    resolveRoles: (walletAddress) => resolveRoles(database, walletAddress, bnm),
     getOrderProjection: (orderId) => getOrderProjection(database, orderId),
     getPausedScopes: () => getPausedScopes(database),
     paymentService,
@@ -667,12 +672,36 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   };
 }
 
-async function resolveRoles(database: SqlExecutor, walletAddress: string) {
-  const result = await database.query<{ role: UserRole; merchant_id: string | null }>(
+export async function resolveRoles(
+  database: SqlExecutor,
+  walletAddress: string,
+  bnmWallets: BnmWalletRegistrationSource,
+) {
+  const wallet = walletAddress.toLowerCase();
+  let result = await database.query<{ role: UserRole; merchant_id: string | null }>(
     `SELECT role, merchant_id FROM core.wallet_role_bindings
      WHERE wallet_address = $1 AND status = 'ACTIVE' ORDER BY role`,
-    [walletAddress],
+    [wallet],
   );
+  if (result.rows.length === 0) {
+    await bnmWallets.assertRegistered(wallet);
+    const evidenceHash = `0x${createHash('sha256')
+      .update('ABU24K_BNM_BUYER_BINDING_V1\0')
+      .update(wallet)
+      .digest('hex')}`;
+    await database.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES ($1,'BUYER',NULL,'ACTIVE',$2)
+       ON CONFLICT (wallet_address, role) DO NOTHING`,
+      [wallet, evidenceHash],
+    );
+    result = await database.query<{ role: UserRole; merchant_id: string | null }>(
+      `SELECT role, merchant_id FROM core.wallet_role_bindings
+       WHERE wallet_address = $1 AND status = 'ACTIVE' ORDER BY role`,
+      [wallet],
+    );
+  }
   return {
     roles: result.rows.map((row) => row.role),
     ...(result.rows.find((row) => row.merchant_id)?.merchant_id

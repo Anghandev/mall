@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test';
 
 const surfaces = [
-  { name: 'Mall', url: 'http://127.0.0.1:4311/seckill' },
-  { name: 'Merchant', url: 'http://127.0.0.1:4312/' },
-  { name: 'Admin', url: 'http://127.0.0.1:4313/' },
+  { name: 'Mall', url: 'http://127.0.0.1:4311/mall/seckill' },
+  { name: 'Merchant', url: 'http://127.0.0.1:4312/merchant/' },
+  { name: 'Admin', url: 'http://127.0.0.1:4313/platform/' },
 ] as const;
 
 for (const surface of surfaces) {
