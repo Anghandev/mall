@@ -6144,7 +6144,7 @@ test('policy publication binds the Registry signature and EOA execution, activat
     const secondary = Wallet.createRandom();
     const governanceWallet = '0x9000000000000000000000000000000000000001';
     const registry = '0x9000000000000000000000000000000000000002';
-    const rulesHash = `0x${'3'.repeat(64)}`;
+    const rulesHash = HASH;
     await db.query(
       `INSERT INTO core.wallet_role_bindings (
          wallet_address, role, status, evidence_hash
@@ -6167,7 +6167,12 @@ test('policy publication binds the Registry signature and EOA execution, activat
          $1, '{"type":"ALL"}', 'seed-policy-rules', $2, $3, $4)`,
       [rulesHash, HASH, admin.address.toLowerCase(), new Date('2026-07-15T03:00:00.000Z')],
     );
-    const policy = paymentPolicyPayload();
+    const priorPolicy = paymentPolicyPayload();
+    const policy = {
+      ...priorPolicy,
+      platformServiceFeeWallet: '0x2222222222222222222222222222222222222224',
+      decisionEvidenceHash: `0x${'3'.repeat(64)}`,
+    };
     policy.concessionDestinationSetHash = paymentAllocationSetHash().toLowerCase();
     let now = new Date('2026-07-15T03:00:00.000Z');
     const frozenSessionId = `0x${'9'.repeat(64)}`;
@@ -6205,6 +6210,47 @@ test('policy publication binds the Registry signature and EOA execution, activat
         correlationId: 'policy-wrong-service-fee-wallet',
       }),
       /platformServiceFeeWallet does not match the attested PaymentRouter binding/,
+    );
+    await assert.rejects(
+      service.createDraft(actor, {
+        payload: {
+          rulesContentHash: rulesHash,
+          policy: { ...policy, seckillMainDuration: policy.seckillMainDuration + 1 },
+        },
+        idempotencyKey: 'policy-v2-forbidden-financial-diff',
+        correlationId: 'policy-v2-forbidden-financial-diff',
+      }),
+      /Policy V2 may only change the platform service-fee recipient/,
+    );
+    await assert.rejects(
+      service.createDraft(actor, {
+        payload: { rulesContentHash: rulesHash, policy: { ...policy, unsupportedFutureField: true } },
+        idempotencyKey: 'policy-v2-unknown-field',
+        correlationId: 'policy-v2-unknown-field',
+      }),
+      /Published payment policy contains unknown fields/,
+    );
+    await assert.rejects(
+      service.createDraft(actor, {
+        payload: {
+          rulesContentHash: rulesHash,
+          policy: {
+            ...policy,
+            genesisNodeDestinations: [{ ...policy.genesisNodeDestinations[0]!, memo: true }],
+          },
+        },
+        idempotencyKey: 'policy-v2-nested-unknown-field',
+        correlationId: 'policy-v2-nested-unknown-field',
+      }),
+      /genesisNodeDestinations\[0\] contains unknown fields/,
+    );
+    await assert.rejects(
+      service.createDraft(actor, {
+        payload: { rulesContentHash: HASH_2, policy },
+        idempotencyKey: 'policy-v2-forbidden-rules-diff',
+        correlationId: 'policy-v2-forbidden-rules-diff',
+      }),
+      /Policy V2 may only change the platform service-fee recipient/,
     );
     const draft = await service.createDraft(actor, {
       payload: { rulesContentHash: rulesHash, policy },
@@ -6278,7 +6324,7 @@ test('policy publication binds the Registry signature and EOA execution, activat
       policyVersion: 2,
       policyHash: signed.policyHash!,
       operationsHash: signed.operationsHash!,
-      decisionEvidenceHash: HASH_2,
+      decisionEvidenceHash: policy.decisionEvidenceHash,
       governanceExecutor: governanceWallet,
     };
     now = new Date(now.getTime() + 1_000);

@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { mkdir, open, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { JsonRpcProvider, Wallet, keccak256 } from 'ethers';
+import { Interface, JsonRpcProvider, Wallet, keccak256 } from 'ethers';
+import { validateRouterCutover } from './router-cutover.mjs';
 
 process.loadEnvFile(resolve('.env'));
 process.loadEnvFile(resolve('.env.wallets.local'));
@@ -24,14 +25,20 @@ const writeEnv = async (name, entries) => {
   try { await file.writeFile(`${entries.join('\n')}\n`); } finally { await file.close(); }
 };
 
-const roles = [
+const signingRoles = [
   ['PLATFORM_TECH_PRIVATE_KEY', 'PLATFORM_GOVERNANCE_WALLET_ADDRESS'],
-  ['WALLET_1_PRIVATE_KEY', 'PLATFORM_SERVICE_FEE_WALLET_ADDRESS'],
   ['WALLET_2_PRIVATE_KEY', 'USDT_SETTLEMENT_WALLET_ADDRESS'],
   ['WALLET_3_PRIVATE_KEY', 'NPL_REWARD_WALLET_ADDRESS'],
   ['WALLET_4_PRIVATE_KEY', 'OPERATIONS_GUARANTEE_WALLET_ADDRESS'],
 ];
-for (const [key, address] of roles) {
+const roleAddresses = [
+  'PLATFORM_GOVERNANCE_WALLET_ADDRESS',
+  'PLATFORM_SERVICE_FEE_WALLET_ADDRESS',
+  'USDT_SETTLEMENT_WALLET_ADDRESS',
+  'NPL_REWARD_WALLET_ADDRESS',
+  'OPERATIONS_GUARANTEE_WALLET_ADDRESS',
+];
+for (const [key, address] of signingRoles) {
   if (new Wallet(required(key)).address.toLowerCase() !== required(address).toLowerCase()) {
     throw new Error(`${key} does not match ${address}`);
   }
@@ -77,6 +84,16 @@ const contractManifest = JSON.parse(await readFile(
 const routerAddress = contractManifest.contracts
   .find((contract) => contract.name === 'PaymentRouterV2')?.address?.toLowerCase();
 if (!/^0x[0-9a-f]{40}$/.test(routerAddress ?? '')) throw new Error('PaymentRouter deployment is unavailable');
+const routerDeploymentBlock = contractManifest.contracts
+  .find((contract) => contract.name === 'PaymentRouterV2')?.deploymentBlock;
+const routerDeployedCodeHash = contractManifest.contracts
+  .find((contract) => contract.name === 'PaymentRouterV2')?.deployedCodeHash?.toLowerCase();
+if (!Number.isSafeInteger(routerDeploymentBlock) || routerDeploymentBlock <= 0) {
+  throw new Error('PaymentRouter deployment block is unavailable');
+}
+if (!/^0x[0-9a-f]{64}$/.test(routerDeployedCodeHash ?? '')) {
+  throw new Error('PaymentRouter deployed code hash is unavailable');
+}
 const receiptDirectory = resolve('platform-v2/deployments');
 const routerMicrotestBlocks = [];
 for (const name of await readdir(receiptDirectory)) {
@@ -87,8 +104,52 @@ for (const name of await readdir(receiptDirectory)) {
     routerMicrotestBlocks,
   );
 }
-if (routerMicrotestBlocks.length === 0) throw new Error('Router microtest cutover evidence is unavailable');
-const paymentIndexerStartBlock = Math.max(Math.max(...routerMicrotestBlocks), commonHead) + 1;
+let paymentIndexerStartBlock;
+if (routerMicrotestBlocks.length > 0) {
+  paymentIndexerStartBlock = Math.max(Math.max(...routerMicrotestBlocks), commonHead) + 1;
+} else {
+  const deploymentEvidence = JSON.parse(await readFile(
+    resolve('platform-v2/deployments/bsc-payment-v2.json'),
+    'utf8',
+  ));
+  const cutover = validateRouterCutover(deploymentEvidence.routerCutover, {
+    activeRouter: routerAddress,
+    platformServiceFeeWallet: required('PLATFORM_SERVICE_FEE_WALLET_ADDRESS'),
+    deploymentBlock: routerDeploymentBlock,
+    deployedCodeHash: routerDeployedCodeHash,
+  });
+  if (routerDeploymentBlock > commonHead) throw new Error('Router deployment is above the agreed RPC head');
+  const [primaryReceipt, fallbackReceipt, primaryRouterCode, fallbackRouterCode] = await Promise.all([
+    provider.getTransactionReceipt(cutover.deploymentTxHash),
+    fallbackProvider.getTransactionReceipt(cutover.deploymentTxHash),
+    provider.getCode(routerAddress, commonHead),
+    fallbackProvider.getCode(routerAddress, commonHead),
+  ]);
+  if (
+    !primaryReceipt || !fallbackReceipt
+    || primaryReceipt.status !== 1 || fallbackReceipt.status !== 1
+    || primaryReceipt.contractAddress?.toLowerCase() !== routerAddress
+    || fallbackReceipt.contractAddress?.toLowerCase() !== routerAddress
+    || primaryReceipt.blockNumber !== routerDeploymentBlock
+    || fallbackReceipt.blockNumber !== routerDeploymentBlock
+    || primaryReceipt.blockHash.toLowerCase() !== fallbackReceipt.blockHash.toLowerCase()
+    || primaryRouterCode === '0x' || primaryRouterCode !== fallbackRouterCode
+    || keccak256(primaryRouterCode).toLowerCase() !== routerDeployedCodeHash
+  ) throw new Error('Router cutover receipt or runtime code does not match the coordinated manifest');
+  const recipientCall = new Interface(['function platformServiceFeeWallet() view returns (address)'])
+    .encodeFunctionData('platformServiceFeeWallet');
+  const [primaryRecipient, fallbackRecipient] = await Promise.all([
+    provider.call({ to: routerAddress, data: recipientCall }, commonHead),
+    fallbackProvider.call({ to: routerAddress, data: recipientCall }, commonHead),
+  ]);
+  const decodedRecipient = new Interface(['function platformServiceFeeWallet() view returns (address)'])
+    .decodeFunctionResult('platformServiceFeeWallet', primaryRecipient)[0].toLowerCase();
+  if (
+    primaryRecipient !== fallbackRecipient
+    || decodedRecipient !== required('PLATFORM_SERVICE_FEE_WALLET_ADDRESS').toLowerCase()
+  ) throw new Error('Router service-fee recipient does not match production configuration');
+  paymentIndexerStartBlock = routerDeploymentBlock;
+}
 
 const databasePassword = secret();
 const redisPassword = secret();
@@ -122,7 +183,7 @@ await writeEnv('core.env', [
   line('BSC_RPC_URL', rpc),
   line('BSC_FALLBACK_RPC_URL', fallbackRpc),
   line('PAYMENT_INDEXER_START_BLOCK', paymentIndexerStartBlock),
-  ...roles.map(([, address]) => line(address, required(address))),
+  ...roleAddresses.map((address) => line(address, required(address))),
   line('SIGNER_SERVICE_URL', 'http://127.0.0.1:8790/sign'),
   line('SIGNER_SERVICE_TOKEN', signerToken),
   line('SETTLEMENT_EXECUTOR_URL', 'http://127.0.0.1:8790/settlement'),
@@ -157,8 +218,7 @@ await writeEnv('eoa-runtime.env', [
   line('SIGNER_SERVICE_TOKEN', signerToken),
   line('SETTLEMENT_EXECUTOR_TOKEN', settlementToken),
   line('GOVERNANCE_EXECUTOR_TOKEN', governanceToken),
-  ...roles
-    .filter(([key]) => key !== 'WALLET_1_PRIVATE_KEY')
+  ...signingRoles
     .flatMap(([key, address]) => [line(key, required(key)), line(address, required(address))]),
 ]);
 

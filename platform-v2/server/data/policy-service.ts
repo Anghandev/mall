@@ -673,6 +673,7 @@ async function validateDraft(
         'Policy platformServiceFeeWallet does not match the attested PaymentRouter binding',
       );
     }
+    await assertPolicyV2ServiceFeeOnlyDiff(executor, policy, payload.rulesContentHash);
     buildPolicyPublication(
       {
         policy,
@@ -702,6 +703,46 @@ async function validateDraft(
   );
   if (!rules.rows[0]) errors.push({ code: 'DecisionBlocked', field: 'rulesContentHash' });
   return { errors, policy };
+}
+
+async function assertPolicyV2ServiceFeeOnlyDiff(
+  executor: SqlExecutor,
+  policy: ReturnType<typeof parsePaymentPolicySnapshot>,
+  rulesContentHash: string,
+) {
+  if (policy.policyVersion !== 2) return;
+  const base = await executor.query<{
+    payload: Record<string, unknown>;
+    rules_content_hash: string;
+  }>('SELECT payload, rules_content_hash FROM core.policy_snapshots WHERE policy_version = 1', []);
+  if (!base.rows[0]) {
+    throw new CoreError('ArtifactVersionMismatch', 'Policy V1 snapshot is unavailable for the V2 diff', 409);
+  }
+  const prior = parsePaymentPolicySnapshot(1, base.rows[0].payload);
+  const {
+    policyVersion: _priorVersion,
+    platformServiceFeeWallet: priorServiceFeeWallet,
+    decisionEvidenceHash: priorDecisionEvidenceHash,
+    ...priorInvariant
+  } = prior;
+  const {
+    policyVersion: _nextVersion,
+    platformServiceFeeWallet: nextServiceFeeWallet,
+    decisionEvidenceHash: nextDecisionEvidenceHash,
+    ...nextInvariant
+  } = policy;
+  if (
+    canonicalJson(priorInvariant) !== canonicalJson(nextInvariant)
+    || base.rows[0].rules_content_hash.toLowerCase() !== rulesContentHash.toLowerCase()
+    || normalizeAddress(priorServiceFeeWallet) === normalizeAddress(nextServiceFeeWallet)
+    || priorDecisionEvidenceHash.toLowerCase() === nextDecisionEvidenceHash.toLowerCase()
+  ) {
+    throw new CoreError(
+      'InvalidRequest',
+      'Policy V2 may only change the platform service-fee recipient and its decision evidence',
+      409,
+    );
+  }
 }
 
 async function publicationMaterial(

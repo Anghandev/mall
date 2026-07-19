@@ -315,17 +315,28 @@ source conflicts are indexed in `V2_DECISIONS.md`.
   revenue, genesis-node mechanism, prize winner/payout/rollover, merchant-level
   retirement and PII retention are confirmed, not `DecisionBlocked`.
 - Primary and fallback BSC RPC both report chain 56. The five production roles
-  are distinct EOAs derived only inside ignored local configuration: Platform
-  Governance, Platform Service Fee, USDT Custody/Settlement, NPL
-  Reward/Distribution and Operations/Guarantee. `WALLET_5_PRIVATE_KEY` remains
-  an independent test counterparty/backup and is not a sixth production role.
-  Private keys and complete addresses are never printed or committed.
+  remain distinct EOAs. Governance, USDT Custody/Settlement, NPL
+  Reward/Distribution and Operations/Guarantee are ignored local signing roles.
+  The confirmed Platform Service Fee EOA is receive-only; V2 neither requires
+  nor stores its private key. `WALLET_5_PRIVATE_KEY` remains an independent test
+  counterparty/backup and is not a sixth production role. Private keys and
+  complete addresses are never printed or committed.
 - The prior three Safe-bound payment contracts were deployed on BSC from a bounded exact packet,
   source-verified on BscScan and bound to the coordinated manifest by deployment
   block and runtime code hash. They received no policy publication or user
   funds and are permanently `SUPERSEDED`; their evidence remains append-only.
   New EOA-bound contracts require a separate deployment manifest and may not
   reuse the old addresses or authorization evidence.
+- Before Mall public launch, while production orders and active seckill sessions
+  are both zero, the EOA-bound PaymentRouter may be directly superseded from
+  the same source, compiler settings and creation bytecode, with its constructor
+  differing only in the newly confirmed Platform Service Fee EOA. Immutable
+  references must prove runtime differences are confined to that address slot.
+  Policy V2 is future-only and its machine diff from V1 permits only that
+  off-chain Router-recipient binding plus required version/decision-evidence
+  metadata. Every amount, rate, route, timing and beneficiary field remains
+  canonically identical. The prior Router and Policy V1 remain historical
+  evidence and are never rewritten.
 - The existing BNM backend HTTPS endpoint, schema, ignored local credential and
   monotonic-state conformance evidence are configured and verified against the
   Core HTTP adapter. Production Core deployment must still inject that ignored

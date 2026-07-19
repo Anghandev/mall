@@ -8,6 +8,16 @@ import { CoreError } from './errors.ts';
 
 const CONCESSION_POOL_NAMES = ['SECKILL_PRIZE', 'NODE_REWARD', 'REWARD_RESERVE'] as const;
 const CONCESSION_POOL_WEIGHTS = [4_500, 4_500, 1_000] as const;
+const PAYMENT_POLICY_FIELDS = [
+  'usdtPaymentBps', 'nplPaymentBps', 'nplBurnListPriceBps', 'nplRewardListPriceBps',
+  'genesisBps', 'directReferralBps', 'districtBps', 'cityBps', 'provinceBps',
+  'regionBps', 'operationsBps', 'platformFeeBps', 'seckillPrizeBps',
+  'seckillMainDuration', 'relayInitial', 'relayIncrement', 'relayCap',
+  'requiredConfirmations', 'merchantGuaranteeMinimumUsdt', 'platformServiceFeeWallet',
+  'usdtSettlementWallet', 'nplRewardWallet', 'operationsWallet', 'circulationPool',
+  'concessionDestinationSetHash', 'decisionEvidenceHash', 'genesisNodeDestinations',
+  'operationsDestinations',
+] as const;
 
 export interface PaymentPolicySnapshot extends FrozenPaymentPolicy {
   platformFeeBps: number;
@@ -32,6 +42,14 @@ export function parsePaymentPolicySnapshot(
   payload: unknown,
 ): PaymentPolicySnapshot {
   const value = record(payload, 'payment policy');
+  const unexpected = Object.keys(value).filter((key) => !PAYMENT_POLICY_FIELDS.includes(
+    key as typeof PAYMENT_POLICY_FIELDS[number],
+  ));
+  if (unexpected.length > 0) {
+    throw new CoreError('InvalidRequest', 'Published payment policy contains unknown fields', 409, {
+      unexpected: unexpected.sort(),
+    });
+  }
   const policy: PaymentPolicySnapshot = {
     policyVersion,
     usdtPaymentBps: integer(value.usdtPaymentBps, 'usdtPaymentBps'),
@@ -111,6 +129,12 @@ function destinations(value: unknown, name: string) {
   if (!Array.isArray(value)) throw blocked(name);
   const parsed = value.map((item, index) => {
     const entry = record(item, `${name}[${index}]`);
+    const unexpected = Object.keys(entry).filter((key) => !['account', 'weightBps'].includes(key));
+    if (unexpected.length > 0) {
+      throw new CoreError('InvalidRequest', `${name}[${index}] contains unknown fields`, 409, {
+        unexpected: unexpected.sort(),
+      });
+    }
     return {
       account: text(entry.account, `${name}[${index}].account`).toLowerCase(),
       weightBps: integer(entry.weightBps, `${name}[${index}].weightBps`),
