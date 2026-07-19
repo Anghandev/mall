@@ -526,7 +526,10 @@ function optionalHash(value: unknown) {
 }
 
 function bytes(value: unknown, name: string) {
-  const result = text(value, name).toLowerCase();
+  if (typeof value !== 'string' || value.length === 0 || value.length > 128 * 1024) {
+    throw new Error(`${name} is invalid`);
+  }
+  const result = value.toLowerCase();
   if (!/^0x(?:[0-9a-f]{2})+$/.test(result)) throw new Error(`${name} is invalid`);
   return result;
 }
