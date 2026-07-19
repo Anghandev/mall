@@ -71,6 +71,7 @@ import {
   StatusNotice,
 } from './components';
 import type { BuyerEvidenceAction, PublishedSeckillSessionProjection } from './core-client';
+import { brandAssetUrl } from './deployment-paths';
 import { useMallRuntime, type BrowserPosition, type MallRuntimeValue } from './mall-runtime';
 
 export function SeckillScreen() {
@@ -116,7 +117,7 @@ export function SeckillScreen() {
       />
 
       <section className="seckill-hero" aria-label="秒杀活动状态">
-        <img src="/brand/prize-vault.png" alt="黑金秒杀奖池保险柜" />
+        <img src={brandAssetUrl('prize-vault.png')} alt="黑金秒杀奖池保险柜" />
         <div className="seckill-hero__overlay">
           <p>接力大奖池</p>
           <strong className="amount-placeholder">
@@ -295,7 +296,7 @@ export function MallScreen() {
       />
 
       <section className="catalog-banner">
-        <img src="/brand/market-banner.png" alt="阿步 24K 黑金精选陈列" />
+        <img src={brandAssetUrl('market-banner.png')} alt="阿步 24K 黑金精选陈列" />
         <div className="catalog-banner__copy">
           <span>24K SELECT</span>
           <strong>消费记录，履约后释放 BNM</strong>
@@ -535,7 +536,7 @@ export function StoresScreen() {
         description="位置、营业状态与行政区划需实时校验"
       />
 
-      <img className="store-hero" src="/brand/store-front.png" alt="阿步 24K 线下门店空间" />
+      <img className="store-hero" src={brandAssetUrl('store-front.png')} alt="阿步 24K 线下门店空间" />
 
       <div className="store-tools">
         <fieldset className="location-filter">
@@ -810,7 +811,7 @@ export function AssetsScreen() {
       </section>
 
       <section className="ledger-banner" aria-labelledby="ledger-title">
-        <img src="/brand/bnm-ledger.png" alt="BNM 资产凭证视觉" />
+        <img src={brandAssetUrl('bnm-ledger.png')} alt="BNM 资产凭证视觉" />
         <div>
           <p className="eyebrow">LOCKED / AVAILABLE</p>
           <h2 id="ledger-title">收益对账中心</h2>

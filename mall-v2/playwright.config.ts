@@ -7,7 +7,7 @@ export default defineConfig({
   outputDir: './test-results/playwright',
   reporter: 'line',
   use: {
-    baseURL: `http://127.0.0.1:${e2ePort}`,
+    baseURL: `http://127.0.0.1:${e2ePort}/mall/`,
     colorScheme: 'light',
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
@@ -20,7 +20,11 @@ export default defineConfig({
   ],
   webServer: {
     command: `../scripts/node node_modules/vite/bin/vite.js --host 127.0.0.1 --port ${e2ePort} --strictPort`,
-    url: `http://127.0.0.1:${e2ePort}`,
+    url: `http://127.0.0.1:${e2ePort}/mall/`,
+    env: {
+      ...process.env,
+      VITE_CORE_API_BASE_URL: '/core',
+    },
     reuseExistingServer: true,
     timeout: 120_000,
   },

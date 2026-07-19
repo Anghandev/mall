@@ -3,6 +3,7 @@ import type { Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  base: '/mall/',
   plugins: [mallCoreArtifactBoundary(), react()],
   server: {
     host: '127.0.0.1',

@@ -135,6 +135,27 @@ describe('Mall Core artifact boundary', () => {
 });
 
 describe('coordinated Core HTTP client', () => {
+  it('keeps the deployment proxy prefix ahead of coordinated Core paths', async () => {
+    const fetcher = vi.fn(async () => json({
+      artifactVersion,
+      status: 'CORE_API_READY',
+      readiness: {
+        chainId: 56,
+        assets: {},
+        decisionBlocked: [],
+        externalBlocked: [],
+        paymentDecisionBlocked: [],
+        paymentExternalBlocked: [],
+        providers: {},
+        writesEnabled: true,
+      },
+    }));
+
+    await createCoreClient({ baseUrl: '/core', fetch: fetcher }).getBootstrap();
+
+    expect(fetcher).toHaveBeenCalledWith('/core/v2/bootstrap', undefined);
+  });
+
   it('derives every payment path from coordinated OpenAPI', () => {
     expect(coordinatedPaymentOperations).toEqual({
       bootstrap: '/v2/bootstrap',

@@ -77,6 +77,13 @@ Requirement Matrix and consumes only coordinated Core artifacts.
 
 ## Routes
 
+Production is mounted at `https://www.npleon.com/mall/`. Vite assets and
+`BrowserRouter` navigation share the `/mall/` base, while Core HTTP and
+WebSocket traffic use `/core/v2/*` and `/core/v2/ws`. The production Core base
+is configured as `VITE_CORE_API_BASE_URL=/core`; see `.env.production.example`.
+
+BrowserRouter routes below are relative to the `/mall/` deployment base:
+
 - `/seckill`, `/mall`, `/stores`, `/assets`
 - `/assets/addresses`, `/assets/orders`, `/assets/activity`, `/assets/rewards`,
   `/assets/notifications`

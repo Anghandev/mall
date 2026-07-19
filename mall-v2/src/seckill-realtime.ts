@@ -180,9 +180,10 @@ export function createSeckillRealtimeClient(
 }
 
 function websocketUrl(baseUrl: string | undefined, sessionId: string, cursor: string) {
-  const origin = baseUrl || globalThis.location?.origin;
+  const browserOrigin = globalThis.location?.origin;
+  const origin = baseUrl || browserOrigin;
   if (!origin) throw new CoreClientError('ConfigurationRequired', '缺少实时服务地址');
-  const url = new URL('/v2/ws', origin);
+  const url = new URL(`${origin.replace(/\/+$/, '')}/v2/ws`, browserOrigin);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('artifactVersion', artifactVersion);
   url.searchParams.set('channel', `seckill:${sessionId.toLowerCase()}`);

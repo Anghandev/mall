@@ -37,7 +37,7 @@ describe('seckill realtime consumer', () => {
     const accepted: string[] = [];
     const states: SeckillRealtimeState[] = [];
     const client = createSeckillRealtimeClient({ listSeckillSessionEvents: listEvents } as unknown as CoreClient, {
-      baseUrl: 'https://core.mall.test',
+      baseUrl: '/core',
       reconnectDelayMs: 0,
       createSocket(url) {
         const socket = new FakeSocket();
@@ -63,6 +63,8 @@ describe('seckill realtime consumer', () => {
     expect(listEvents).toHaveBeenLastCalledWith(seckillSessionId, '2', 100);
     expect(new URL(sockets[1]!.url).searchParams.get('cursor')).toBe('2');
     expect(new URL(sockets[1]!.url).searchParams.get('channel')).toBe(`seckill:${seckillSessionId}`);
+    expect(new URL(sockets[1]!.url).pathname).toBe('/core/v2/ws');
+    expect(new URL(sockets[1]!.url).pathname).not.toBe('/v2/ws');
     expect(states).toContain('LIVE');
     expect(states).toContain('RECONNECTING');
     subscription.close();

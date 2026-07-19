@@ -53,6 +53,7 @@ import {
   type WalletSession,
 } from './core-client';
 import { productBaseline } from './bootstrap';
+import { coreApiBaseUrl } from './deployment-paths';
 import {
   createSeckillRealtimeClient,
   type SeckillRealtimeClient,
@@ -1632,11 +1633,12 @@ export function useMallRuntime() {
   return value;
 }
 
-const defaultCoreClient = createCoreClient();
+const coreClientInput = coreApiBaseUrl ? { baseUrl: coreApiBaseUrl } : {};
+const defaultCoreClient = createCoreClient(coreClientInput);
 
 export const defaultMallServices: MallServices = Object.freeze({
   core: defaultCoreClient,
-  realtime: createSeckillRealtimeClient(defaultCoreClient),
+  realtime: createSeckillRealtimeClient(defaultCoreClient, coreClientInput),
   wallet: createBrowserWalletGateway(),
   async getCurrentPosition() {
     if (!globalThis.navigator?.geolocation) {

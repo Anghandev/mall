@@ -8,6 +8,7 @@ import {
 import { BrowserRouter, Link, Navigate, useLocation } from 'react-router-dom';
 
 import { productBaseline } from './bootstrap';
+import { brandAssetUrl, mallBasePath } from './deployment-paths';
 import { MallRuntimeProvider, useMallRuntime, type MallServices } from './mall-runtime';
 import {
   ActivityScreen,
@@ -36,7 +37,7 @@ const primaryPaths = new Set(tabs.map((tab) => tab.path));
 
 export function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={mallBasePath}>
       <MallApp />
     </BrowserRouter>
   );
@@ -68,7 +69,7 @@ function MallShell() {
         </a>
         <header className="app-bar">
           <Link className="brand" to="/seckill" aria-label="阿步 24K 商城首页">
-            <img src="/brand/logo-mark.png" alt="" />
+            <img src={brandAssetUrl('logo-mark.png')} alt="" />
             <span>
               <strong>阿步 24K</strong>
               <small>商城 V2</small>

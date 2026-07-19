@@ -15,10 +15,10 @@ import { product, productVideoAssetId } from '../payment-fixtures';
 import { relayEvent, seckillSession, seckillSessionId } from '../seckill-fixtures';
 
 const screenshotRoutes = [
-  { path: '/seckill', name: 'seckill' },
-  { path: '/mall', name: 'mall' },
-  { path: '/stores', name: 'stores' },
-  { path: '/assets', name: 'assets' },
+  { path: '/mall/seckill', name: 'seckill' },
+  { path: '/mall/mall', name: 'mall' },
+  { path: '/mall/stores', name: 'stores' },
+  { path: '/mall/assets', name: 'assets' },
 ] as const;
 
 test('primary mobile shell is usable and does not overflow', async ({ page }, testInfo) => {
@@ -31,14 +31,14 @@ test('primary mobile shell is usable and does not overflow', async ({ page }, te
     await expectHealthyDocument(page);
     await page.evaluate(() => window.scrollTo(0, 0));
 
-    if (route.path === '/seckill') {
+    if (route.path === '/mall/seckill') {
       await expect(page.getByRole('heading', { name: product.title })).toBeVisible();
       await expect(page.getByText(/链上最终购买，接力时间增加 30 秒/)).toBeVisible();
       await expect(page.getByText(/00:5[89]:[0-5][0-9]/)).toBeVisible();
       await expect(page.getByText(/00:00:[0-5][0-9]/)).toBeVisible();
     }
 
-    if (route.path === '/seckill' || testInfo.project.name === 'mobile-393') {
+    if (route.path === '/mall/seckill' || testInfo.project.name === 'mobile-393') {
       await page.screenshot({
         path: `test-results/screenshots/${testInfo.project.name}-${route.name}.png`,
         fullPage: true,
@@ -56,14 +56,14 @@ test('primary mobile shell is usable and does not overflow', async ({ page }, te
 
 test('detail routes stay inside the mobile frame', async ({ page }, testInfo) => {
   await mockPublicCore(page);
-  for (const path of [`/mall/products/${product.productId}`, '/assets/addresses', '/assets/orders', '/assets/activity', '/assets/rewards', '/assets/notifications', '/checkout', '/checkout/review']) {
+  for (const path of [`/mall/mall/products/${product.productId}`, '/mall/assets/addresses', '/mall/assets/orders', '/mall/assets/activity', '/mall/assets/rewards', '/mall/assets/notifications', '/mall/checkout', '/mall/checkout/review']) {
     await page.goto(path);
     await expect(page.locator('.app-frame')).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);
     await expectHealthyDocument(page);
     await page.evaluate(() => window.scrollTo(0, 0));
-    if (testInfo.project.name === 'mobile-393' && [`/mall/products/${product.productId}`, '/assets/rewards', '/assets/notifications'].includes(path)) {
+    if (testInfo.project.name === 'mobile-393' && [`/mall/mall/products/${product.productId}`, '/mall/assets/rewards', '/mall/assets/notifications'].includes(path)) {
       await page.screenshot({
         path: `test-results/screenshots/${testInfo.project.name}-${path.split('/').at(-1)}.png`,
         fullPage: true,
@@ -76,7 +76,7 @@ test('product detail and saved-address checkout are keyboard operable and fail c
   test.skip(testInfo.project.name !== 'mobile-393', 'Focused purchase-flow acceptance');
   await mockWallet(page);
   await mockPublicCore(page);
-  await page.goto('/mall');
+  await page.goto('/mall/mall');
   await page.getByRole('button', { name: '连接钱包' }).click();
 
   const detailLink = page.getByRole('link', { name: `查看 ${product.title} 商品详情` });
@@ -105,7 +105,7 @@ test('product detail and saved-address checkout are keyboard operable and fail c
 
 test('production surface exposes no business-refund action', async ({ page }) => {
   await mockPublicCore(page);
-  await page.goto('/assets/orders');
+  await page.goto('/mall/assets/orders');
   await expect(page.getByRole('button', { name: /退款/ })).toHaveCount(0);
   await expect(page.getByRole('link', { name: /退款/ })).toHaveCount(0);
 });
@@ -114,7 +114,7 @@ test('buyer evidence form is keyboard-addressable and fits the mobile frame', as
   test.skip(testInfo.project.name !== 'mobile-393', 'Focused mobile evidence acceptance');
   await mockWallet(page);
   await mockPublicCore(page);
-  await page.goto('/assets/orders');
+  await page.goto('/mall/assets/orders');
   await page.getByRole('button', { name: '连接钱包' }).click();
   const exchange = page.getByRole('button', { name: '申请换货' });
   await exchange.focus();
@@ -139,7 +139,7 @@ test('buyer account and address review fit the mobile frame and remain keyboard 
   test.skip(testInfo.project.name !== 'mobile-393', 'Focused account acceptance');
   await mockWallet(page);
   await mockPublicCore(page);
-  await page.goto('/assets');
+  await page.goto('/mall/assets');
   await page.getByRole('button', { name: '连接钱包' }).click();
   await expect(page.getByRole('heading', { name: buyerProfile.nickname! })).toBeVisible();
   await expect(page.getByText('买家 UID：10001')).toBeVisible();
@@ -184,10 +184,11 @@ async function expectHealthyDocument(page: import('@playwright/test').Page) {
 async function mockPublicCore(page: import('@playwright/test').Page) {
   const session = seckillSession();
   const event = relayEvent();
-  await page.route('**/v2/**', async (route) => {
+  await page.route('**/core/v2/**', async (route) => {
     const url = new URL(route.request().url());
+    const corePath = url.pathname.slice('/core'.length);
     const json = (() => {
-      if (url.pathname === '/v2/bootstrap') return {
+      if (corePath === '/v2/bootstrap') return {
         artifactVersion,
         status: 'CORE_API_READY',
         readiness: {
@@ -201,61 +202,61 @@ async function mockPublicCore(page: import('@playwright/test').Page) {
           writesEnabled: true,
         },
       };
-      if (url.pathname === '/v2/catalog/products') return { products: [product] };
-      if (url.pathname === '/v2/catalog/categories') return { categories: catalogCategories };
-      if (url.pathname === '/v2/catalog/tags') return { tags: catalogTags };
-      const mediaAssetId = /^\/v2\/media\/assets\/(0x[0-9a-f]{64})\/access$/.exec(url.pathname)?.[1];
+      if (corePath === '/v2/catalog/products') return { products: [product] };
+      if (corePath === '/v2/catalog/categories') return { categories: catalogCategories };
+      if (corePath === '/v2/catalog/tags') return { tags: catalogTags };
+      const mediaAssetId = /^\/v2\/media\/assets\/(0x[0-9a-f]{64})\/access$/.exec(corePath)?.[1];
       if (mediaAssetId) {
         const access = publicMediaAccess(mediaAssetId);
         return {
           ...access,
           ...(mediaAssetId === productVideoAssetId ? {} : { contentType: 'image/png' }),
-          readUrl: 'http://127.0.0.1:4311/brand/store-front.png',
+          readUrl: new URL('/mall/brand/store-front.png', url.origin).toString(),
         };
       }
-      if (url.pathname === '/v2/seckill/sessions/current') return session;
-      if (url.pathname === '/v2/seckill/sessions/history') return {
+      if (corePath === '/v2/seckill/sessions/current') return session;
+      if (corePath === '/v2/seckill/sessions/history') return {
         items: [{ ...session, phase: 'SETTLED', storedPhase: 'SETTLED', winnerWallet: session.lastBuyerWallet }],
         nextCursor: null,
       };
-      if (url.pathname === `/v2/seckill/sessions/${seckillSessionId}/events`) return { items: [event], nextCursor: '1' };
-      if (url.pathname === `/v2/seckill/sessions/${seckillSessionId}`) return session;
-      if (url.pathname === '/v2/cms/public') return [];
-      if (url.pathname === '/v2/stores') return { stores: [] };
-      if (url.pathname === '/v2/auth/nonce') return { message: 'Sign in to Abu 24K V2' };
-      if (url.pathname === '/v2/auth/verify') return {
+      if (corePath === `/v2/seckill/sessions/${seckillSessionId}/events`) return { items: [event], nextCursor: '1' };
+      if (corePath === `/v2/seckill/sessions/${seckillSessionId}`) return session;
+      if (corePath === '/v2/cms/public') return [];
+      if (corePath === '/v2/stores') return { stores: [] };
+      if (corePath === '/v2/auth/nonce') return { message: 'Sign in to Abu 24K V2' };
+      if (corePath === '/v2/auth/verify') return {
         token: 'e2e-buyer-session',
         walletAddress: deliveryOrder.buyerWallet,
         roles: ['BUYER'],
       };
-      if (url.pathname === '/v2/orders') return { orders: [deliveryOrder], nextCursor: null };
-      if (url.pathname === '/v2/buyer/profile') return buyerProfile;
-      if (url.pathname === '/v2/buyer/overview') return buyerOverview;
-      if (url.pathname === '/v2/buyer/shopping-statements') return {
+      if (corePath === '/v2/orders') return { orders: [deliveryOrder], nextCursor: null };
+      if (corePath === '/v2/buyer/profile') return buyerProfile;
+      if (corePath === '/v2/buyer/overview') return buyerOverview;
+      if (corePath === '/v2/buyer/shopping-statements') return {
         artifactVersion,
         buyerWallet: deliveryOrder.buyerWallet,
         statements: [],
         nextCursor: null,
       };
-      if (url.pathname === '/v2/buyer/addresses/parse') return parsedBuyerAddress;
-      if (url.pathname === '/v2/buyer/addresses' && route.request().method() === 'POST') return buyerSavedAddress;
-      if (url.pathname === '/v2/buyer/addresses') return { artifactVersion, addresses: [buyerSavedAddress] };
-      if (url.pathname === `/v2/buyer/addresses/${buyerSavedAddress.addressId}/fulfillment-target`) return deliveryTarget;
-      if (url.pathname === `/v2/orders/${deliveryOrder.orderId}/takeover-timeline`) return buyerTakeoverTimeline;
-      if (url.pathname === '/v2/actions/order') return { allowedActions: [{ action: 'REQUEST_EXCHANGE', enabled: true }] };
-      if (url.pathname === `/v2/orders/${deliveryOrder.orderId}/fulfillment-target`) return { target: deliveryOrderTarget };
-      if (url.pathname === '/v2/settlements') return {
+      if (corePath === '/v2/buyer/addresses/parse') return parsedBuyerAddress;
+      if (corePath === '/v2/buyer/addresses' && route.request().method() === 'POST') return buyerSavedAddress;
+      if (corePath === '/v2/buyer/addresses') return { artifactVersion, addresses: [buyerSavedAddress] };
+      if (corePath === `/v2/buyer/addresses/${buyerSavedAddress.addressId}/fulfillment-target`) return deliveryTarget;
+      if (corePath === `/v2/orders/${deliveryOrder.orderId}/takeover-timeline`) return buyerTakeoverTimeline;
+      if (corePath === '/v2/actions/order') return { allowedActions: [{ action: 'REQUEST_EXCHANGE', enabled: true }] };
+      if (corePath === `/v2/orders/${deliveryOrder.orderId}/fulfillment-target`) return { target: deliveryOrderTarget };
+      if (corePath === '/v2/settlements') return {
         artifactVersion,
         wallet: deliveryOrder.buyerWallet,
         balances: [],
         points: [],
         requests: [],
       };
-      if (url.pathname === '/v2/notifications') return [];
-      if (url.pathname === `/v2/orders/${deliveryOrder.orderId}/evidence`) {
+      if (corePath === '/v2/notifications') return [];
+      if (corePath === `/v2/orders/${deliveryOrder.orderId}/evidence`) {
         return orderActionEvidence('REQUEST_EXCHANGE', 'PACKAGE_DAMAGED');
       }
-      if (url.pathname === `/v2/orders/${deliveryOrder.orderId}/exchange-requests`) {
+      if (corePath === `/v2/orders/${deliveryOrder.orderId}/exchange-requests`) {
         return buyerActionResult('REQUEST_EXCHANGE');
       }
       return { error: { code: 'UnknownState', message: 'E2E route not configured' } };
