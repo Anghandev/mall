@@ -863,6 +863,21 @@ test('runtime readiness attests deployed code, bindings, roles, NPL quote source
     nplQuoteSourceHealthy: true,
     rpcChain56Healthy: true,
   });
+  const singleRequestReader = new StubRuntimeReader(values, runtimeCode, 1);
+  const singleRequestAttestor = new RpcPaymentRuntimeAttestor({
+    reader: singleRequestReader,
+    deployments,
+    router,
+    policyRegistry,
+    beneficiaryRegistry,
+    governanceWallet,
+    platformServiceFeeWallet: '0x7000000000000000000000000000000000000000',
+    usdtSettlementWallet: usdtSafe,
+    nplRewardWallet: nplSafe,
+    operationsWallet: operationsSafe,
+  });
+  await singleRequestAttestor.attest();
+  assert.equal(singleRequestReader.maxConcurrentObserved, 1);
 
   let indexerHealthy = false;
   const now = new Date('2026-07-14T00:00:00.000Z');
@@ -1448,17 +1463,23 @@ class StubContractReader implements ContractReader {
 class StubRuntimeReader implements RuntimeCodeReader {
   readonly #values: Record<string, unknown>;
   readonly #code: string;
+  readonly #maxConcurrent: number;
+  #active = 0;
+  maxConcurrentObserved = 0;
 
-  constructor(values: Record<string, unknown>, code: string) {
+  constructor(values: Record<string, unknown>, code: string, maxConcurrent = Number.POSITIVE_INFINITY) {
     this.#values = values;
     this.#code = code;
+    this.#maxConcurrent = maxConcurrent;
   }
 
   async call(address: string, _abi: InterfaceAbi, method: string) {
-    const key = `${address.toLowerCase()}:${method}`;
-    if (key in this.#values) return this.#values[key];
-    if (method in this.#values) return this.#values[method];
-    throw new Error(`Unexpected method ${key}`);
+    return this.#bounded(async () => {
+      const key = `${address.toLowerCase()}:${method}`;
+      if (key in this.#values) return this.#values[key];
+      if (method in this.#values) return this.#values[method];
+      throw new Error(`Unexpected method ${key}`);
+    });
   }
 
   async chainId() {
@@ -1466,14 +1487,26 @@ class StubRuntimeReader implements RuntimeCodeReader {
   }
 
   async code(address: string) {
-    return String(this.#values[`${address.toLowerCase()}:code`] ?? this.#code);
+    return this.#bounded(async () => String(this.#values[`${address.toLowerCase()}:code`] ?? this.#code));
   }
 
   async pairReserves(_address: string) {
-    return this.#values.pairReserves as {
+    return this.#bounded(async () => this.#values.pairReserves as {
       blockNumber: number; source: 'PRIMARY' | 'FALLBACK'; token0: string; token1: string;
       reserve0: bigint; reserve1: bigint; reservesHash: string;
-    };
+    });
+  }
+
+  async #bounded<Result>(operation: () => Promise<Result>) {
+    this.#active += 1;
+    this.maxConcurrentObserved = Math.max(this.maxConcurrentObserved, this.#active);
+    try {
+      if (this.#active > this.#maxConcurrent) throw new Error('Runtime reader concurrency exceeded');
+      await Promise.resolve();
+      return await operation();
+    } finally {
+      this.#active -= 1;
+    }
   }
 }
 

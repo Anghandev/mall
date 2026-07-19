@@ -97,10 +97,13 @@ export class RpcPaymentRuntimeAttestor {
 
   async attest(): Promise<PaymentRuntimeAttestation> {
     const rpcChain56Healthy = await this.#reader.chainId() === 56;
-    const codeEntries = await Promise.all(this.#deployments.map(async (deployment) => ({
-      ...deployment,
-      actual: codeHash(await this.#reader.code(deployment.address)),
-    })));
+    const codeEntries: Array<RuntimeDeploymentExpectation & { actual: string }> = [];
+    for (const deployment of this.#deployments) {
+      codeEntries.push({
+        ...deployment,
+        actual: codeHash(await this.#reader.code(deployment.address)),
+      });
+    }
     const deployedRuntimeCodeVerified = codeEntries.every(
       (deployment) => deployment.actual === deployment.deployedCodeHash,
     );
@@ -118,21 +121,21 @@ export class RpcPaymentRuntimeAttestor {
       policyGovernanceWallet,
       policySecondarySigner,
       beneficiaryPolicy,
-    ] = await Promise.all([
-      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'usdt'),
-      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'npl'),
-      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'policyRegistry'),
-      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'beneficiaryRegistry'),
-      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'governanceWallet'),
-      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'platformServiceFeeWallet'),
-      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'usdtSettlementWallet'),
-      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'nplRewardWallet'),
-      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'operationsWallet'),
-      callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'quoteSigner'),
-      callAddress(this.#reader, this.#addresses.policyRegistry, POLICY_ABI, 'governanceWallet'),
-      callAddress(this.#reader, this.#addresses.policyRegistry, POLICY_ABI, 'secondarySigner'),
-      callAddress(this.#reader, this.#addresses.beneficiaryRegistry, BENEFICIARY_ABI, 'policyRegistry'),
-    ]);
+    ] = [
+      await callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'usdt'),
+      await callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'npl'),
+      await callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'policyRegistry'),
+      await callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'beneficiaryRegistry'),
+      await callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'governanceWallet'),
+      await callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'platformServiceFeeWallet'),
+      await callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'usdtSettlementWallet'),
+      await callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'nplRewardWallet'),
+      await callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'operationsWallet'),
+      await callAddress(this.#reader, this.#addresses.router, ROUTER_ABI, 'quoteSigner'),
+      await callAddress(this.#reader, this.#addresses.policyRegistry, POLICY_ABI, 'governanceWallet'),
+      await callAddress(this.#reader, this.#addresses.policyRegistry, POLICY_ABI, 'secondarySigner'),
+      await callAddress(this.#reader, this.#addresses.beneficiaryRegistry, BENEFICIARY_ABI, 'policyRegistry'),
+    ];
 
     const pair = await this.#reader.pairReserves(NPL_USDT_PAIR_ADDRESS);
     const token0 = pair.token0.toLowerCase();
@@ -150,7 +153,8 @@ export class RpcPaymentRuntimeAttestor {
       this.#addresses.nplRewardWallet,
       this.#addresses.operationsWallet,
     ];
-    const roleCodes = await Promise.all(roleAddresses.map((address) => this.#reader.code(address)));
+    const roleCodes: string[] = [];
+    for (const address of roleAddresses) roleCodes.push(await this.#reader.code(address));
     const walletRolesVerified = roleCodes.every((code) => code === '0x')
       && routerGovernanceWallet === this.#addresses.governanceWallet
       && policyGovernanceWallet === this.#addresses.governanceWallet
@@ -166,12 +170,12 @@ export class RpcPaymentRuntimeAttestor {
       && routerBeneficiary === this.#addresses.beneficiaryRegistry
       && beneficiaryPolicy === this.#addresses.policyRegistry;
 
-    const roleChecks = await Promise.all([
-      hasRole(this.#reader, this.#addresses.policyRegistry, POLICY_ABI, DEFAULT_ADMIN_ROLE, this.#addresses.governanceWallet),
-      hasRole(this.#reader, this.#addresses.policyRegistry, POLICY_ABI, role('POLICY_PUBLISHER_ROLE'), this.#addresses.governanceWallet),
-      hasRole(this.#reader, this.#addresses.beneficiaryRegistry, BENEFICIARY_ABI, DEFAULT_ADMIN_ROLE, this.#addresses.governanceWallet),
-      hasRole(this.#reader, this.#addresses.beneficiaryRegistry, BENEFICIARY_ABI, role('REGISTRY_EDITOR_ROLE'), this.#addresses.governanceWallet),
-    ]);
+    const roleChecks = [
+      await hasRole(this.#reader, this.#addresses.policyRegistry, POLICY_ABI, DEFAULT_ADMIN_ROLE, this.#addresses.governanceWallet),
+      await hasRole(this.#reader, this.#addresses.policyRegistry, POLICY_ABI, role('POLICY_PUBLISHER_ROLE'), this.#addresses.governanceWallet),
+      await hasRole(this.#reader, this.#addresses.beneficiaryRegistry, BENEFICIARY_ABI, DEFAULT_ADMIN_ROLE, this.#addresses.governanceWallet),
+      await hasRole(this.#reader, this.#addresses.beneficiaryRegistry, BENEFICIARY_ABI, role('REGISTRY_EDITOR_ROLE'), this.#addresses.governanceWallet),
+    ];
 
     return {
       deployedRuntimeCodeVerified: deployedRuntimeCodeVerified && contractBindingsVerified,
