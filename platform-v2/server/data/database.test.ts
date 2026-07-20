@@ -145,6 +145,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '039_mainnet_microtest_transfer_authorization.sql',
       '040_delivery_action_evidence.sql',
       '041_seckill_shared_inventory_reservations.sql',
+      '042_seed_seckill_breaker_scope.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -181,6 +182,14 @@ test('business and audit migrations apply from empty databases', async () => {
     assert.ok(businessTables.rows.some((row) => row.table_name === 'seckill_governance_actions'));
     assert.ok(businessTables.rows.some((row) => row.table_name === 'seckill_session_plans'));
     assert.ok(businessTables.rows.some((row) => row.table_name === 'seckill_prize_injections'));
+    const seededSeckillBreaker = await business.query<{ scope: string; paused: boolean; changed_by: string }>(
+      "SELECT scope, paused, changed_by FROM core.circuit_breakers WHERE scope = 'SECKILL_PURCHASE'",
+    );
+    assert.deepEqual(seededSeckillBreaker.rows, [{
+      scope: 'SECKILL_PURCHASE',
+      paused: false,
+      changed_by: 'MIGRATION:042_SEED_SECKILL_BREAKER_SCOPE',
+    }]);
     assert.equal(businessTables.rows.some((row) => row.table_name === 'claim_projections'), false);
     const finalityColumns = await business.query<{ column_name: string }>(
       "SELECT column_name FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'transaction_finality'",
@@ -207,6 +216,53 @@ test('business and audit migrations apply from empty databases', async () => {
   } finally {
     await business.close();
     await audit.close();
+  }
+});
+
+test('seckill breaker seed migration preserves an existing paused breaker', async () => {
+  const db = await PGlite.create();
+  const priorEvidenceHash = `0x${'a'.repeat(64)}`;
+  const priorChangedAt = new Date('2026-07-21T00:00:00.000Z');
+  try {
+    await applyMigrations(adapter(db), 'core', BUSINESS_MIGRATIONS);
+    await db.query(
+      `UPDATE core.circuit_breakers
+       SET paused = true, evidence_hash = $1, policy_version = NULL,
+           changed_by = 'TEST_EXISTING_FORCE_CLOSE', changed_at = $2
+       WHERE scope = 'SECKILL_PURCHASE'`,
+      [priorEvidenceHash, priorChangedAt],
+    );
+    await db.query(
+      "DELETE FROM core.schema_migrations WHERE migration_name = '042_seed_seckill_breaker_scope.sql'",
+    );
+
+    await applyMigrations(adapter(db), 'core', BUSINESS_MIGRATIONS);
+
+    assert.deepEqual((await db.query<{
+      scope: string;
+      paused: boolean;
+      evidence_hash: string;
+      policy_version: string | null;
+      changed_by: string;
+      changed_at: Date;
+    }>(
+      "SELECT scope, paused, evidence_hash, policy_version::text, changed_by, changed_at FROM core.circuit_breakers WHERE scope = 'SECKILL_PURCHASE'",
+    )).rows.map((row) => ({
+      ...row,
+      changed_at: row.changed_at.toISOString(),
+    })), [{
+      scope: 'SECKILL_PURCHASE',
+      paused: true,
+      evidence_hash: priorEvidenceHash,
+      policy_version: null,
+      changed_by: 'TEST_EXISTING_FORCE_CLOSE',
+      changed_at: priorChangedAt.toISOString(),
+    }]);
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.schema_migrations WHERE migration_name = '042_seed_seckill_breaker_scope.sql'",
+    )).rows[0]?.count, '1');
+  } finally {
+    await db.close();
   }
 });
 
@@ -1895,13 +1951,6 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
          unsettled_liability, coverage_met
        ) VALUES ('coverage:seckill',$1,'USDT',1000,1000,true)`,
       [custodySafe],
-    );
-    await db.query(
-      `INSERT INTO core.circuit_breakers (
-         scope, paused, evidence_hash, policy_version, changed_by, changed_at
-       ) VALUES ('SECKILL_PURCHASE',false,$1,1,'TEST',$2)
-       ON CONFLICT (scope) DO UPDATE SET paused = false`,
-      [HASH, now],
     );
     await db.query(
       `INSERT INTO core.cms_entries (
@@ -10041,7 +10090,7 @@ test('coverage recovery requires independent EIP-712 approval and EOA finality, 
     )).rows[0]?.count, '0');
     assert.deepEqual((await db.query<{ paused: boolean }>(
       'SELECT paused FROM core.circuit_breakers ORDER BY scope',
-    )).rows.map((row) => row.paused), [false, false]);
+    )).rows.map((row) => row.paused), [false, false, false]);
 
     resumePhase = 'REORGED';
     clock = new Date('2026-07-15T10:06:00.000Z');
@@ -10062,7 +10111,7 @@ test('coverage recovery requires independent EIP-712 approval and EOA finality, 
         "SELECT scope, cause_id, active FROM core.breaker_causes WHERE cause_type = 'COVERAGE' ORDER BY scope, cause_id",
       )).rows,
     };
-    assert.deepEqual(reorgBreakers, [true, true], JSON.stringify(reorgEvidence));
+    assert.deepEqual(reorgBreakers, [true, true, false], JSON.stringify(reorgEvidence));
     assert.equal((await db.query<{ count: string }>(
       `SELECT count(*)::text AS count FROM core.coverage_breaker_actions
        WHERE action = 'RESUME' AND state = 'PENDING_EXECUTION'`,
@@ -10073,7 +10122,7 @@ test('coverage recovery requires independent EIP-712 approval and EOA finality, 
     await governance.pollOnce();
     assert.deepEqual((await db.query<{ paused: boolean }>(
       'SELECT paused FROM core.circuit_breakers ORDER BY scope',
-    )).rows.map((row) => row.paused), [false, false]);
+    )).rows.map((row) => row.paused), [false, false, false]);
   } finally {
     await db.close();
   }
@@ -10583,6 +10632,7 @@ test('merchant guarantee finality is policy-bound, audited and frozen across dee
     )).rows, [
       { scope: 'NEW_PAYMENT', paused: true },
       { scope: 'NEW_SETTLEMENT_BATCH', paused: true },
+      { scope: 'SECKILL_PURCHASE', paused: false },
     ]);
     assert.equal((await db.query<{ evidence_profile: string }>(
       "SELECT evidence_profile FROM core.audit_outbox_events WHERE event_type = 'GuaranteeDepositReorged'",
@@ -10614,9 +10664,13 @@ test('merchant guarantee finality is policy-bound, audited and frozen across dee
     assert.equal((await db.query<{ guarantee_status: string }>(
       "SELECT guarantee_status FROM core.merchants WHERE merchant_id = 'merchant-1'",
     )).rows[0]?.guarantee_status, 'READY');
-    assert.ok((await db.query<{ paused: boolean }>(
-      'SELECT paused FROM core.circuit_breakers',
-    )).rows.every((row) => row.paused));
+    assert.deepEqual((await db.query<{ scope: string; paused: boolean }>(
+      'SELECT scope, paused FROM core.circuit_breakers ORDER BY scope',
+    )).rows, [
+      { scope: 'NEW_PAYMENT', paused: true },
+      { scope: 'NEW_SETTLEMENT_BATCH', paused: true },
+      { scope: 'SECKILL_PURCHASE', paused: false },
+    ]);
     assert.ok((await db.query<{ active: boolean }>(
       "SELECT active FROM core.breaker_causes WHERE cause_type = 'SECURITY'",
     )).rows.every((row) => !row.active));

@@ -30,7 +30,7 @@
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "3d48fad4772a32bb826ba78d9e31a1538866e86eccdd34a9dfc615eac2e6bd1a"
+      "sha256": "2ec74cbad6a618e88fe05297f39140e736d0f9bac4f5f3b41225f021b9851273"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
@@ -64,7 +64,7 @@
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "8d32536d8e4869cbed31c61eec6a74fcb103a106cd8931e51347b0472cdc47f2"
+      "sha256": "0a12b7996f1b89d7b384ab5b74dcf21d99480c77cd237847cf568766ed0774db"
     }
   ],
   "httpSurface": [

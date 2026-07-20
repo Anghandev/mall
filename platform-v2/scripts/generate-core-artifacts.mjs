@@ -145,6 +145,7 @@ const schemaSources = [
       '039_mainnet_microtest_transfer_authorization.sql',
       '040_delivery_action_evidence.sql',
       '041_seckill_shared_inventory_reservations.sql',
+      '042_seed_seckill_breaker_scope.sql',
     ],
   },
   {

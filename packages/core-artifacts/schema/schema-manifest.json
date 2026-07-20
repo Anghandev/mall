@@ -210,6 +210,11 @@
           "name": "041_seckill_shared_inventory_reservations.sql",
           "path": "schema/business/041_seckill_shared_inventory_reservations.sql",
           "sha256": "d3b2aaa9455e8021fc70c0a4bbb5f3820bd306ac4bc342339c8b5991e5ec8d66"
+        },
+        {
+          "name": "042_seed_seckill_breaker_scope.sql",
+          "path": "schema/business/042_seed_seckill_breaker_scope.sql",
+          "sha256": "a6157f935984cab8d7a371688474588e6e652e41d0e3fd8ca119fb598b3cf3a3"
         }
       ]
     },
