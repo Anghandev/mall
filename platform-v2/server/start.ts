@@ -9,7 +9,7 @@ await new Promise<void>((resolve, reject) => {
   runtime.server.once('error', reject);
   runtime.server.listen(port, host, resolve);
 });
-console.log(`Abu 24K Core listening on http://${host}:${port}`);
+console.log(`24K商城 Core listening on http://${host}:${port}`);
 
 const shutdown = async () => {
   await runtime.close();

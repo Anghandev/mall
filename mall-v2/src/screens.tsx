@@ -281,7 +281,7 @@ export function MallScreen() {
   return (
     <div className="screen screen--mall">
       <ScreenHeader
-        eyebrow="ABU SELECT"
+        eyebrow="24K SELECT"
         title="常规商城"
         description="商品、规格与价格以签名报价为准"
       />
@@ -293,7 +293,7 @@ export function MallScreen() {
       />
 
       <section className="catalog-banner">
-        <img src={brandAssetUrl('market-banner.png')} alt="阿步 24K 黑金精选陈列" />
+        <img src={brandAssetUrl('market-banner.png')} alt="24K商城黑金精选陈列" />
         <div className="catalog-banner__copy">
           <span>24K SELECT</span>
           <strong>消费记录，履约后释放 BNM</strong>
@@ -532,7 +532,7 @@ export function StoresScreen() {
         description="位置、营业状态与行政区划需实时校验"
       />
 
-      <img className="store-hero" src={brandAssetUrl('store-front.png')} alt="阿步 24K 线下门店空间" />
+      <img className="store-hero" src={brandAssetUrl('store-front.png')} alt="24K商城线下门店空间" />
 
       <div className="store-tools">
         <fieldset className="location-filter">

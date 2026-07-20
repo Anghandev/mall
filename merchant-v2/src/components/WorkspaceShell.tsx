@@ -45,9 +45,9 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
       <a className="skip-link" href="#main-content">跳到主要内容</a>
       <aside className={menuOpen ? 'sidebar open' : 'sidebar'} id="workspace-navigation">
         <div className="brand-lockup">
-          <img alt="阿步 24K" src={logo} />
+          <img alt="24K商城" src={logo} />
           <div>
-            <strong>阿步 24K</strong>
+            <strong>24K商城</strong>
             <span>商家工作台</span>
           </div>
           <button

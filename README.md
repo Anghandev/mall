@@ -1,4 +1,4 @@
-# Abu 24K Mall V2
+# 24K商城 V2
 
 This repository is the clean V2 workspace. Financial and state-machine
 authority lives in `docs/V2_SYSTEM_CONTRACT.md`; product traceability lives in

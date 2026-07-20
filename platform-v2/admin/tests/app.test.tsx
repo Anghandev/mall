@@ -52,6 +52,11 @@ describe('platform admin fail-closed experience', () => {
     expect(productBaseline.adminCapabilities.replacementMerchantFulfillment).toBe(true);
     expect(productBaseline.adminCapabilities.merchantStoreManagement).toBe(false);
     expect(productBaseline.adminCapabilities.merchantOrderExport).toBe(false);
+
+    renderAt('/');
+    expect(screen.getByRole('img', { name: '24K商城' })).toBeTruthy();
+    expect(screen.getByText('24K商城', { selector: '.brand-lockup strong' })).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/阿步|Abu 24K|ABU 24K/);
   });
 
   it('accepts the generated draft read status without exposing Merchant store-management operations', () => {

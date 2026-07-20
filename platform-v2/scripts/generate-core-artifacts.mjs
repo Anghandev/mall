@@ -633,7 +633,7 @@ function buildOpenApi() {
   });
   return {
     openapi: '3.1.0',
-    info: { title: 'Abu 24K V2 Core API', version: artifactVersion },
+    info: { title: '24K商城 V2 Core API', version: artifactVersion },
     'x-artifactVersion': artifactVersion,
     servers: [],
     paths: {

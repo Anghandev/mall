@@ -219,7 +219,7 @@ test('SIWE nonce is domain-bound, one-use and yields an expiring RBAC session', 
       walletAddress: wallet.address,
       domain: 'mall.abu.test',
       uri: 'https://mall.abu.test',
-      statement: 'Sign in to Abu 24K V2',
+      statement: 'Sign in to 24K商城 V2',
     },
     now,
   );
@@ -229,7 +229,7 @@ test('SIWE nonce is domain-bound, one-use and yields an expiring RBAC session', 
       walletAddress: wallet.address,
       domain: 'mall.abu.test',
       uri: 'https://mall.abu.test',
-      statement: 'Sign in to Abu 24K V2',
+      statement: 'Sign in to 24K商城 V2',
     },
     now,
   );
@@ -1524,6 +1524,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       body: JSON.stringify({ walletAddress: wallet.address }),
     });
     const challenge = (await nonceResponse.json()) as { message: string };
+    assert.match(challenge.message, /Sign in to 24K商城 V2/);
     const signature = await wallet.signMessage(challenge.message);
     const login = await fetch(`${base}/v2/auth/verify`, {
       method: 'POST',

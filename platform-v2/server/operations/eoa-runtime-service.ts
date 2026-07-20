@@ -71,7 +71,7 @@ const server = createServer((request, response) => {
   void route(request, response).catch((error) => sendRuntimeError(response, error));
 });
 
-server.listen(port, host, () => console.log(`Abu 24K EOA runtime listening on ${host}:${port}`));
+server.listen(port, host, () => console.log(`24K商城 EOA runtime listening on ${host}:${port}`));
 process.once('SIGTERM', () => server.close());
 process.once('SIGINT', () => server.close());
 

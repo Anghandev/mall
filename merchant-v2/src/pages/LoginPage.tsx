@@ -27,7 +27,7 @@ export function LoginPage() {
       <section className="login-brand" aria-labelledby="login-brand-title">
         <div className="login-brand-inner">
           <img alt="" src={logo} />
-          <p className="eyebrow">Abu 24K Merchant</p>
+          <p className="eyebrow">24K商城 · Merchant</p>
           <h1 id="login-brand-title">一件商品，一条清晰的履约链路。</h1>
           <p>从提报、交付到签名结算申请，所有关键操作绑定商家钱包与可审计证据。</p>
           <ul>

@@ -11,6 +11,7 @@ const expectedPackages = new Map([
 ]);
 const requiredRootScripts = [
   'typecheck',
+  'brand:check',
   'contracts:test',
   'requirements:check',
   'database:check',
@@ -40,8 +41,8 @@ for (const script of requiredRootScripts) {
     throw new Error(`Missing root script: ${script}`);
   }
 }
-if (!rootPackage.scripts.verify.startsWith('pnpm baseline:check &&')) {
-  throw new Error('Final verify must begin with the workspace baseline gate');
+if (!rootPackage.scripts.verify.startsWith('pnpm baseline:check && pnpm brand:check &&')) {
+  throw new Error('Final verify must begin with the workspace and visible-brand gates');
 }
 
 for (const [path, expectedName] of expectedPackages) {

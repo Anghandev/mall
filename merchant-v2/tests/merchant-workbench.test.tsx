@@ -430,6 +430,7 @@ describe('00 wallet gateway', () => {
     await user.click(connect);
 
     expect(await screen.findByRole('heading', { name: '运营大盘' })).toBeTruthy();
+    expect(screen.getByText('24K商城', { selector: '.brand-lockup strong' })).toBeTruthy();
     expect(createSiweChallenge).toHaveBeenCalledWith(walletAddress);
     expect(verifySiwe).toHaveBeenCalledWith('merchant.test wants you to sign in', '0xsigned');
     expect(walletRequest.mock.calls.map(([request]) => request.method)).toEqual([
@@ -465,6 +466,8 @@ describe('00 wallet gateway', () => {
     delete window.okxwallet;
     renderPage(<LoginPage />);
 
+    expect(screen.getByText('24K商城 · Merchant')).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/阿步|Abu 24K|ABU 24K/);
     expect(screen.getByRole('heading', { name: '连接授权商家钱包' })).toBeTruthy();
     expect(screen.queryByLabelText(/密码/)).toBeNull();
     const connect = screen.getByRole('button', { name: '连接钱包' }) as HTMLButtonElement;

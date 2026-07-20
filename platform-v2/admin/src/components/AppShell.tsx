@@ -40,8 +40,8 @@ export function AppShell({ children }: AppShellProps) {
       <a className="skip-link" href="#main-content">跳到主要内容</a>
       <header className="topbar">
         <div className="brand-lockup">
-          <img src={logoUrl} alt="阿步 24K" width="42" height="42" />
-          <span><strong>ABU 24K</strong><small>PLATFORM OPERATIONS</small></span>
+          <img src={logoUrl} alt="24K商城" width="42" height="42" />
+          <span><strong>24K商城</strong><small>PLATFORM OPERATIONS</small></span>
         </div>
         <button ref={menuButtonRef} className="mobile-menu" type="button" aria-label="打开后台模块导航" aria-expanded={mobileNavOpen} aria-controls="primary-navigation" onClick={() => setMobileNavOpen((open) => !open)}>
           <Menu aria-hidden="true" />

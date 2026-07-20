@@ -2,7 +2,7 @@
   "name": "@abu24k/v2-workspace",
   "version": "0.0.0",
   "private": true,
-  "description": "Abu 24K Mall V2 clean-rewrite workspace",
+  "description": "24K商城 V2 clean-rewrite workspace",
   "packageManager": "pnpm@10.30.2",
   "engines": {
     "node": ">=24.14.0 <25",
@@ -10,6 +10,7 @@
   },
   "scripts": {
     "baseline:check": "./scripts/node scripts/check-workspace-baseline.mjs",
+    "brand:check": "./scripts/node scripts/check-visible-branding.mjs",
     "typecheck": "pnpm -r --if-present typecheck",
     "contracts:test": "pnpm --filter @abu24k/core contracts:test",
     "requirements:check": "./scripts/node scripts/check-requirements.mjs",
@@ -21,7 +22,7 @@
     "consumer:check": "pnpm --filter @abu24k/core consumer:check",
     "e2e:full": "pnpm --filter @abu24k/core e2e:full",
     "micro:guard:test": "./scripts/node --test scripts/microtest/tx-guard.test.mjs",
-    "verify": "pnpm baseline:check && pnpm typecheck && pnpm contracts:test && pnpm requirements:check && pnpm database:check && pnpm api:check && pnpm micro:guard:test && pnpm admin:check && pnpm merchant:check && pnpm mall:check && pnpm consumer:check && pnpm e2e:full",
+    "verify": "pnpm baseline:check && pnpm brand:check && pnpm typecheck && pnpm contracts:test && pnpm requirements:check && pnpm database:check && pnpm api:check && pnpm micro:guard:test && pnpm admin:check && pnpm merchant:check && pnpm mall:check && pnpm consumer:check && pnpm e2e:full",
     "micro:init-env": "./scripts/node scripts/microtest/init-env.mjs",
     "micro:preflight": "./scripts/node scripts/microtest/preflight.mjs",
     "micro:report": "./scripts/node scripts/microtest/report.mjs"

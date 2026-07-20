@@ -626,7 +626,7 @@ describe('coordinated Core HTTP client', () => {
       calls.push({ url, ...(init ? { init } : {}) });
       if (url.endsWith('/v2/bootstrap')) return json(bootstrap());
       if (url.endsWith('/v2/catalog/products')) return json({ products: [product] });
-      if (url.endsWith('/v2/auth/nonce')) return json({ message: 'Sign in to Abu 24K V2' }, 201);
+      if (url.endsWith('/v2/auth/nonce')) return json({ message: 'Sign in to 24K商城 V2' }, 201);
       if (url.endsWith('/v2/auth/verify')) return json({ token: 'session', walletAddress: quote.intent.buyer, roles: ['BUYER'] });
       if (url.endsWith('/v2/payments/quotes')) return json(quote, 201);
       if (url.endsWith('/v2/payments/submissions')) return json({ orderId: quote.orderId, txHash: HASH_2, state: 'SUBMITTED' }, 202);
@@ -639,7 +639,7 @@ describe('coordinated Core HTTP client', () => {
     expect(await client.listCatalog()).toEqual([product]);
     const signMessage = vi.fn().mockResolvedValue('0xsignature');
     const session = await client.authenticate(quote.intent.buyer, signMessage);
-    expect(signMessage).toHaveBeenCalledWith('Sign in to Abu 24K V2');
+    expect(signMessage).toHaveBeenCalledWith('Sign in to 24K商城 V2');
     const response = await client.createOrdinaryQuote(session.token, selection());
     expect(response.intent).toStrictEqual(quote.intent);
     expect(response.approvalRequirements).toStrictEqual(quote.approvalRequirements);

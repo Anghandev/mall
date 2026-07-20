@@ -940,7 +940,7 @@ export function createPickupReceiptEnqueuer(input: { encryptionKey?: string; clo
     sourceReference: `pickup:${receipt.orderId}`,
     copyCount: 2,
     content: [
-      'ABU 24K PICKUP RECEIPT',
+      '24K商城 PICKUP RECEIPT',
       `Order: ${receipt.orderId}`,
       `Store: ${receipt.storeId}`,
       `Quantity: ${receipt.quantity}`,
@@ -1211,7 +1211,7 @@ function waybillContent(input: {
   trackingNumber: string;
 }) {
   return [
-    'ABU 24K WAYBILL',
+    '24K商城 WAYBILL',
     `Carrier: ${input.request.carrier_code}`,
     `Tracking: ${input.trackingNumber}`,
     `Order: ${input.request.order_id}`,

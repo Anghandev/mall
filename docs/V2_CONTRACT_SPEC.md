@@ -1,4 +1,4 @@
-# Abu 24K V2 Payment Contract Freeze
+# 24K商城 V2 Payment Contract Freeze
 
 Status: coordinated settlement/admin checkpoint
 `2.0.0-settlement-admin.16`. The generated manifest binds the three BSC

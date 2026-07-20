@@ -228,7 +228,7 @@ async function mockPublicCore(page: import('@playwright/test').Page) {
       if (corePath === `/v2/seckill/sessions/${seckillSessionId}`) return session;
       if (corePath === '/v2/cms/public') return [];
       if (corePath === '/v2/stores') return { stores: [] };
-      if (corePath === '/v2/auth/nonce') return { message: 'Sign in to Abu 24K V2' };
+      if (corePath === '/v2/auth/nonce') return { message: 'Sign in to 24K商城 V2' };
       if (corePath === '/v2/auth/verify') return {
         token: 'e2e-buyer-session',
         walletAddress: deliveryOrder.buyerWallet,

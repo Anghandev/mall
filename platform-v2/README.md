@@ -1,4 +1,4 @@
-# Abu 24K Platform Core V2
+# 24K商城 · Platform Core V2
 
 This directory owns the clean V2 contracts, server, data interfaces, chain
 workers and the `admin/` product consumer. It must not import V1 runtime code.

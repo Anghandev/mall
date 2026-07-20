@@ -829,7 +829,7 @@ async function route(
       walletAddress,
       domain: dependencies.authDomain,
       uri: dependencies.authUri,
-      statement: 'Sign in to Abu 24K V2',
+      statement: 'Sign in to 24K商城 V2',
     }, now);
     sendJson(response, 201, challenge, correlationId);
     return;

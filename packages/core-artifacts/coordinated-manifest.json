@@ -18,7 +18,7 @@
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "8d1595cc3060e0c41c9d561f1ac9448b379f48028db93fc00201893a85bd1efb"
+      "sha256": "6a1eb5ce664768200a748cc6325e853189a64b6209c91ca64098c160eb471bd1"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
@@ -60,7 +60,7 @@
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "fa8964696af45137bb019678d7f3f3081fb5fabd4df753005deee8814e576a20"
+      "sha256": "ca17b812db3b43596424dc703db7f05a8acc5610db1c18c7e2084b862423139c"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",

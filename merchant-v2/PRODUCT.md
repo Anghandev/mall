@@ -1,4 +1,4 @@
-# Abu 24K Merchant Workbench
+# 24K商城 · 商家工作台
 
 - Register: product
 - Users: one-product merchants, store operators and fulfillment staff.

@@ -1,4 +1,4 @@
-# Abu 24K V2 System Contract
+# 24K商城 V2 System Contract
 
 Status: frozen authority for the function-first V2 rewrite from
 `v2/core@1cab34d`, including the 2026-07-18 replacement of every Safe/multisig

@@ -1,4 +1,4 @@
-# Abu 24K V2 Data Model
+# 24K商城 V2 Data Model
 
 Status: coordinated local settlement/admin checkpoint
 `2.0.0-settlement-admin.16`. This document describes implemented catalog, media, payment,

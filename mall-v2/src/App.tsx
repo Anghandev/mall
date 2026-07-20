@@ -68,10 +68,10 @@ function MallShell() {
           跳到主要内容
         </a>
         <header className="app-bar">
-          <Link className="brand" to="/seckill" aria-label="阿步 24K 商城首页">
+          <Link className="brand" to="/seckill" aria-label="24K商城首页">
             <img src={brandAssetUrl('logo-mark.png')} alt="" />
             <span>
-              <strong>阿步 24K</strong>
+              <strong>24K商城</strong>
               <small>商城 V2</small>
             </span>
           </Link>

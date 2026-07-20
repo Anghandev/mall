@@ -1,4 +1,4 @@
-# Abu 24K Platform V2 Architecture
+# 24K商城 V2 Architecture
 
 ## Runtime Boundary
 
