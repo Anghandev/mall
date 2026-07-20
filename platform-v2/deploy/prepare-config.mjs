@@ -156,6 +156,9 @@ const redisPassword = secret();
 const signerToken = secret();
 const settlementToken = secret();
 const governanceToken = secret();
+const mediaStorageToken = secret();
+const mediaStorageSigningKey = secret();
+const mediaStorageEncryptionKey = secret();
 const databaseUrl = `postgres://abu24k:${databasePassword}@127.0.0.1:54329/abu24k_core`;
 const auditDatabaseUrl = `postgres://abu24k:${databasePassword}@127.0.0.1:54329/abu24k_audit`;
 
@@ -203,6 +206,8 @@ await writeEnv('core.env', [
   line('BNM_API_TOKEN', required('BNM_API_TOKEN')),
   line('BNM_PROJECT_ID', required('BNM_PROJECT_ID')),
   line('BNM_MONOTONIC_CONFORMANCE_EVIDENCE_HASH', required('BNM_MONOTONIC_CONFORMANCE_EVIDENCE_HASH')),
+  line('MEDIA_STORAGE_SIGNER_URL', 'http://127.0.0.1:8791'),
+  line('MEDIA_STORAGE_SIGNER_TOKEN', mediaStorageToken),
   line('MEDIA_UPLOAD_MAX_INTENTS_PER_WALLET_HOUR', '20'),
   line('MEDIA_UPLOAD_MAX_BYTES_PER_WALLET_HOUR', '104857600'),
   line('BSC_EXPLORER_API_URL', 'https://api.etherscan.io/v2/api'),
@@ -220,6 +225,16 @@ await writeEnv('eoa-runtime.env', [
   line('GOVERNANCE_EXECUTOR_TOKEN', governanceToken),
   ...signingRoles
     .flatMap(([key, address]) => [line(key, required(key)), line(address, required(address))]),
+]);
+await writeEnv('media-storage.env', [
+  line('NODE_ENV', 'production'),
+  line('MEDIA_STORAGE_HOST', '127.0.0.1'),
+  line('MEDIA_STORAGE_PORT', '8791'),
+  line('MEDIA_STORAGE_ROOT', '/var/lib/abu24k-media'),
+  line('MEDIA_STORAGE_PUBLIC_BASE_URL', 'https://www.npleon.com'),
+  line('MEDIA_STORAGE_SIGNER_TOKEN', mediaStorageToken),
+  line('MEDIA_STORAGE_URL_SIGNING_KEY', mediaStorageSigningKey),
+  line('MEDIA_STORAGE_ENCRYPTION_KEY', mediaStorageEncryptionKey),
 ]);
 
 await writeFile(join(target, 'README'), 'Generated production configuration. Keep mode 0600 and never commit or print values.\n', { mode: 0o600 });

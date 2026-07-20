@@ -7,6 +7,7 @@
   "scripts": {
     "start": "../scripts/node server/start.ts",
     "operations:start": "../scripts/node server/operations/eoa-runtime-service.ts",
+    "media-storage:start": "../scripts/node server/operations/media-storage-service.ts",
     "database:migrate": "../scripts/node scripts/migrate-production.ts",
     "typecheck": "../scripts/node ../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
     "contracts:build": "forge build",
@@ -16,7 +17,7 @@
     "artifacts:check": "pnpm contracts:artifacts:check && ../scripts/node scripts/generate-core-artifacts.mjs --check",
     "contracts:test": "forge fmt --check && forge build --sizes && forge test && ../scripts/node scripts/generate-contract-artifacts.mjs --check",
     "database:check": "../scripts/node --test --test-concurrency=1 server/data/database.test.ts",
-    "api:check": "../scripts/node --test --test-concurrency=1 server/api/api.test.ts server/chain/workers.test.ts server/chain/eoa-governance.test.ts server/operations/eoa-runtime-service.test.ts deploy/router-cutover.test.mjs",
+    "api:check": "../scripts/node --test --test-concurrency=1 server/api/api.test.ts server/chain/workers.test.ts server/chain/eoa-governance.test.ts server/operations/eoa-runtime-service.test.ts server/operations/media-storage-service.test.ts deploy/router-cutover.test.mjs",
     "consumer:check": "pnpm artifacts:check && ../scripts/node --test --test-concurrency=1 server/api/api.test.ts test/consumer/core-artifacts.test.ts",
     "e2e:full": "../scripts/node --test --test-concurrency=1 --test-name-pattern='takeover assignment authorizes' server/data/database.test.ts && ../scripts/node --test --test-concurrency=1 test/e2e/combined-v2.test.ts && ../scripts/node ../node_modules/@playwright/test/cli.js test --config test/e2e/playwright.config.ts && pnpm --filter @abu24k/mall test:e2e"
   },

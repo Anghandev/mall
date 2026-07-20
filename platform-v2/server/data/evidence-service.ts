@@ -627,7 +627,9 @@ export class HttpMediaStorageAdapter implements MediaStorageAdapter {
 
   async #request(path: string, input: unknown) {
     if (!this.#url || !this.#token) throw new CoreError('ConfigurationRequired', 'Media storage signer is not configured', 503);
-    if (!this.#url.startsWith('https://')) throw new CoreError('ConfigurationRequired', 'Media storage signer must use HTTPS', 503);
+    if (!secureMediaSignerUrl(this.#url)) {
+      throw new CoreError('ConfigurationRequired', 'Media storage signer must use HTTPS outside loopback', 503);
+    }
     let response: Response;
     try {
       response = await fetch(new URL(path, this.#url), {
@@ -650,6 +652,17 @@ export class HttpMediaStorageAdapter implements MediaStorageAdapter {
       throw new CoreError('ExternalBlocked', 'Media storage signer returned an invalid response', 503);
     }
     return body;
+  }
+}
+
+function secureMediaSignerUrl(value: string) {
+  try {
+    const url = new URL(value);
+    if (url.username || url.password) return false;
+    return url.protocol === 'https:'
+      || (url.protocol === 'http:' && ['127.0.0.1', 'localhost', '::1'].includes(url.hostname));
+  } catch {
+    return false;
   }
 }
 

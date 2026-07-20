@@ -33,6 +33,15 @@ services:
     volumes:
       - abu24k_eoa_state:/var/lib/abu24k
 
+  media-storage:
+    image: abu24k-core:${ABU24K_RELEASE}
+    restart: unless-stopped
+    network_mode: host
+    env_file: ./config/media-storage.env
+    command: ["pnpm", "--filter", "@abu24k/core", "media-storage:start"]
+    volumes:
+      - abu24k_media_storage:/var/lib/abu24k-media
+
   migrate:
     image: abu24k-core:${ABU24K_RELEASE}
     restart: "no"
@@ -56,6 +65,8 @@ services:
         condition: service_started
       eoa-runtime:
         condition: service_started
+      media-storage:
+        condition: service_started
       migrate:
         condition: service_completed_successfully
 
@@ -63,3 +74,4 @@ volumes:
   abu24k_postgres:
   abu24k_redis:
   abu24k_eoa_state:
+  abu24k_media_storage:

@@ -18,7 +18,8 @@ COPY platform-v2/server platform-v2/server
 COPY platform-v2/scripts platform-v2/scripts
 COPY packages/core-artifacts packages/core-artifacts
 
-RUN mkdir -p /var/lib/abu24k && chown -R node:node /var/lib/abu24k
+RUN mkdir -p /var/lib/abu24k /var/lib/abu24k-media \
+    && chown -R node:node /var/lib/abu24k /var/lib/abu24k-media
 
 USER node
 CMD ["pnpm", "--filter", "@abu24k/core", "start"]
