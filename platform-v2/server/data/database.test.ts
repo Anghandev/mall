@@ -11678,6 +11678,27 @@ test('evidence and media stay scoped, idempotent, hashed and immutable', async (
       /outside the actor order scope/,
     );
     await grantRole(db, '0x9999999999999999999999999999999999999997', 'ADMIN');
+    const platformDelivery = await evidence.createActionEvidence(
+      { walletAddress: '0x9999999999999999999999999999999999999997', roles: ['ADMIN'] },
+      {
+        orderId: intent.orderId,
+        action: 'RECORD_DELIVERY',
+        reasonCode: 'OPERATOR_DELIVERY_CONFIRMATION',
+        idempotencyKey: 'platform-delivery-evidence-1',
+      },
+    );
+    assert.equal(platformDelivery.actorRole, 'ADMIN');
+    await evidence.assertActionEvidence(
+      { walletAddress: '0x9999999999999999999999999999999999999997', roles: ['ADMIN'] },
+      { orderId: intent.orderId, action: 'RECORD_DELIVERY', evidenceHash: platformDelivery.evidenceHash },
+    );
+    await assert.rejects(
+      evidence.assertActionEvidence(
+        { walletAddress: '0x9999999999999999999999999999999999999997', roles: ['ADMIN'] },
+        { orderId: intent.orderId, action: 'RECORD_DELIVERY', evidenceHash: tracking.evidenceHash },
+      ),
+      /does not match the command/,
+    );
     const platformTracking = await evidence.createTrackingEvidence(
       {
         walletAddress: '0x9999999999999999999999999999999999999997',

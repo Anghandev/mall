@@ -1980,9 +1980,16 @@ async function route(
         });
         break;
       }
-      case 'delivery':
-        result = await dependencies.fulfillmentService.recordDelivery(actor, orderPath.orderId, base());
+      case 'delivery': {
+        const input = base();
+        await dependencies.evidenceService.assertActionEvidence(actor, {
+          orderId: orderPath.orderId,
+          action: 'RECORD_DELIVERY',
+          evidenceHash: input.evidenceHash,
+        });
+        result = await dependencies.fulfillmentService.recordDelivery(actor, orderPath.orderId, input);
         break;
+      }
       case 'pickup-credential':
         assertOnlyKeys(body, ['idempotencyKey', 'evidenceHash', 'code', 'expiresAt']);
         status = 201;
@@ -3985,6 +3992,7 @@ function evidenceAction(value: unknown): EvidenceAction {
     'OPEN_ARBITRATION',
     'VERIFY_PICKUP',
     'REQUEST_FORCED_RECEIPT',
+    'RECORD_DELIVERY',
   ].includes(String(value))) throw new CoreError('InvalidRequest', 'Unsupported evidence action');
   return value as EvidenceAction;
 }

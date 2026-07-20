@@ -16,6 +16,7 @@ const ACTIONS = [
   'OPEN_ARBITRATION',
   'VERIFY_PICKUP',
   'REQUEST_FORCED_RECEIPT',
+  'RECORD_DELIVERY',
 ] as const;
 const CARRIERS = ['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS'] as const;
 const CONTENT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'application/pdf'] as const;
@@ -1153,6 +1154,9 @@ async function authorizeActionOrder(
     && actor.merchantId === row.merchant_id;
   if (action === 'REQUEST_FORCED_RECEIPT') {
     if (merchant) return 'MERCHANT';
+  } else if (action === 'RECORD_DELIVERY') {
+    const platform = platformActorRole(actor);
+    if (platform) return platform;
   } else if (action === 'VERIFY_PICKUP') {
     if (merchant) return 'MERCHANT';
     const platform = platformActorRole(actor);

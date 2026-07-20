@@ -18,7 +18,7 @@
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "d6425af3144319a942177c9cd6fb4057f73043ad0afdba82711bbd178ac10d4b"
+      "sha256": "3c7dabd3cc18f0dcbeb3f9623c9bac81e5ea4d83b2fe9109b192d99dbd7a0c45"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
@@ -30,7 +30,7 @@
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "cd241f7109472a64f05303cf60a1ce9055ab697f904e858082743ddc643ad791"
+      "sha256": "b667ac5dc7d5f5cf1dfbfcf2a976ddab1099549358c3a7a34467a40f338b8d64"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
@@ -60,7 +60,7 @@
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "c88adf6f44a2a2773b8600178ab87fa7760cb65ac01f2578e1757a74938f7224"
+      "sha256": "e3c169e9078e56d0549b772ff0673e0506fc5d447a51f632c0efdbf3359dde38"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",

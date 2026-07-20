@@ -17907,7 +17907,8 @@
               "CONFIRM_RECEIPT",
               "OPEN_ARBITRATION",
               "VERIFY_PICKUP",
-              "REQUEST_FORCED_RECEIPT"
+              "REQUEST_FORCED_RECEIPT",
+              "RECORD_DELIVERY"
             ]
           },
           "reasonCode": {

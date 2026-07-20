@@ -200,6 +200,11 @@
           "name": "039_mainnet_microtest_transfer_authorization.sql",
           "path": "schema/business/039_mainnet_microtest_transfer_authorization.sql",
           "sha256": "e272bcb91bacbcc8822218a5083a7a4616aea23795562d75709c188f7ec20755"
+        },
+        {
+          "name": "040_delivery_action_evidence.sql",
+          "path": "schema/business/040_delivery_action_evidence.sql",
+          "sha256": "44a0b61c388a393d6e27fab8ec43276d5feaad5fc716c13f8404e12025428b38"
         }
       ]
     },

@@ -3041,7 +3041,13 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
         'ASSERT_ACTION',
         'ASSERT_ACTION',
         'ASSERT_ACTION',
+        'ASSERT_ACTION',
       ],
+    );
+    assert.equal(
+      evidenceCalls.find((call) => call.operation === 'ASSERT_ACTION'
+        && (call.input as { action?: string }).action === 'RECORD_DELIVERY')?.wallet,
+      wallet.address.toLowerCase(),
     );
     assert.deepEqual(
       fulfillmentCalls.map(({ operation, wallet, orderId }) => ({ operation, wallet, orderId })),

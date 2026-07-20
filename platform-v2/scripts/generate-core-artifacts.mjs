@@ -143,6 +143,7 @@ const schemaSources = [
       '037_payment_quote_source_evidence.sql',
       '038_manual_fulfillment_launch.sql',
       '039_mainnet_microtest_transfer_authorization.sql',
+      '040_delivery_action_evidence.sql',
     ],
   },
   {
@@ -4668,7 +4669,7 @@ function catalogManagementOpenApiSchemas() {
       properties: {
         action: { enum: [
           'REQUEST_EXCHANGE', 'REQUEST_DELAY', 'CONFIRM_RECEIPT',
-          'OPEN_ARBITRATION', 'VERIFY_PICKUP', 'REQUEST_FORCED_RECEIPT',
+          'OPEN_ARBITRATION', 'VERIFY_PICKUP', 'REQUEST_FORCED_RECEIPT', 'RECORD_DELIVERY',
         ] },
         reasonCode: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{1,63}$' },
         mediaAssetIds: { type: 'array', maxItems: 8, uniqueItems: true, items: { $ref: '#/components/schemas/Bytes32' } },
