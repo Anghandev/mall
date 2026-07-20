@@ -23,8 +23,8 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('fulfillment-launch .18 checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-fulfillment-launch.19');
+test('fulfillment-launch .20 checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-fulfillment-launch.20');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
@@ -55,8 +55,11 @@ test('fulfillment-launch .18 checkpoint has one identity, resolvable exports and
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 38);
-  assert.equal(schemaManifest.schemas.core.migrations.at(-1)?.path, 'schema/business/038_manual_fulfillment_launch.sql');
+  assert.equal(schemaManifest.schemas.core.migrations.length, 39);
+  assert.equal(
+    schemaManifest.schemas.core.migrations.at(-1)?.path,
+    'schema/business/039_mainnet_microtest_transfer_authorization.sql',
+  );
   assert.equal(schemaManifest.schemas.audit.migrations.length, 4);
   for (const migration of [
     ...schemaManifest.schemas.core.migrations,
@@ -492,6 +495,7 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
     'TakeoverFundingChallenge',
     'TakeoverFundingResult',
     'MerchantFinanceProjection',
+    'MerchantSettlementEligibility',
     'TakeoverFundingDetail',
     'PolicyDraftProjection',
     'PolicyDraftDetail',
@@ -517,6 +521,14 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
     'AdminProductBatchTagResult',
     'AdminProductLifecycleBatchResult',
   ]) assert.match(declarations, new RegExp(`export interface ${name}\\b`), name);
+  assert.deepEqual(
+    openapi.components.schemas.MerchantFinanceProjection.properties.allowedActions.items.enum,
+    ['REQUEST_MERCHANT_USDT'],
+  );
+  assert.deepEqual(
+    openapi.components.schemas.MerchantSettlementEligibility.properties.mode.enum,
+    ['FORMAL', 'MAINNET_MICROTEST', 'BLOCKED'],
+  );
   assert.equal('merchantLevels' in enums, false);
   assert.deepEqual(enums.merchantLifecycleStatuses, [
     'PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED', 'BLACKLISTED',

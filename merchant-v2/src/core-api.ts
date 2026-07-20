@@ -144,6 +144,8 @@ const storeStatusSet = new Set<string>(storeStatuses);
 const fulfillmentMethodSet = new Set<string>(fulfillmentMethods);
 const guaranteeStatusSet = new Set<string>(guaranteeStatuses);
 const guaranteeDepositStateSet = new Set<string>(merchantGuaranteeDepositStates);
+const merchantFinanceActionSet = new Set<string>(['REQUEST_MERCHANT_USDT']);
+const merchantSettlementEligibilityModeSet = new Set<string>(['FORMAL', 'MAINNET_MICROTEST', 'BLOCKED']);
 const settlementRailSet = new Set<string>(settlementRails);
 const settlementRequestStateSet = new Set<string>(settlementRequestStates);
 const takeoverStateSet = new Set<string>(takeoverStates);
@@ -2998,6 +3000,10 @@ function parseMerchantFinance(input: unknown): MerchantFinanceProjection {
   const merchant = record(value.merchant, 'merchant finance.merchant');
   const guarantee = value.guarantee === null ? null : record(value.guarantee, 'merchant finance.guarantee');
   const debt = value.debt === null ? null : record(value.debt, 'merchant finance.debt');
+  const settlementEligibility = record(
+    value.settlementEligibility,
+    'merchant finance.settlementEligibility',
+  );
   return {
     merchant: {
       merchant_id: string(merchant.merchant_id, 'merchant finance.merchant_id'),
@@ -3095,6 +3101,20 @@ function parseMerchantFinance(input: unknown): MerchantFinanceProjection {
         updated_at: dateTime(takeover.updated_at, 'merchant takeover.updated_at'),
       };
     }),
+    allowedActions: array(value.allowedActions, 'merchant finance.allowedActions').map((action) => (
+      enumValue(action, merchantFinanceActionSet, 'merchant finance.allowedActions item')
+    )),
+    settlementEligibility: {
+      mode: enumValue(
+        settlementEligibility.mode,
+        merchantSettlementEligibilityModeSet,
+        'merchant finance.settlementEligibility.mode',
+      ),
+      expiresAt: nullableDateTime(
+        settlementEligibility.expiresAt,
+        'merchant finance.settlementEligibility.expiresAt',
+      ),
+    },
   };
 }
 

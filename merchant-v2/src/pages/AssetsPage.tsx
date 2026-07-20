@@ -152,8 +152,7 @@ export function AssetsPage() {
   )) ?? [];
   const bnmPoints = settlements?.points ?? [];
   const disputedMerchantBalances = merchantBalances.filter((balance) => balance.state === 'DISPUTED');
-  const financeAllowsSettlement = finance?.merchant.status === 'APPROVED'
-    && finance.merchant.guarantee_status === 'READY';
+  const financeAllowsSettlement = finance?.allowedActions.includes('REQUEST_MERCHANT_USDT') === true;
   const hasAvailableMerchantBalance = merchantBalances.some((balance) => balance.state === 'AVAILABLE');
   const settlementValid = positiveAtomicPattern.test(settlementAmount);
   const settlementSubmitting = settlementCommand.phase === 'submitting';
@@ -389,7 +388,7 @@ export function AssetsPage() {
           </button>
         </form>
         {!financeAllowsSettlement && finance ? (
-          <p className="command-block-reason" role="status">当前 {finance.merchant.status} / {finance.merchant.guarantee_status}，Core 禁止新商家结算申请。</p>
+          <p className="command-block-reason" role="status">当前 {finance.merchant.status} / {finance.merchant.guarantee_status}，Core 未授权新商家结算申请。</p>
         ) : !hasAvailableMerchantBalance && settlements ? (
           <p className="command-block-reason" role="status">Core 未返回 Available 商家货款。</p>
         ) : null}
@@ -779,12 +778,22 @@ function AssetStateGrid({
 }
 
 function FinanceRestriction({ finance }: { finance: MerchantFinanceProjection }) {
-  const ready = finance.merchant.status === 'APPROVED' && finance.merchant.guarantee_status === 'READY';
-  if (ready) {
+  if (finance.settlementEligibility.mode === 'FORMAL') {
     return (
       <div className="system-notice ready" role="status">
         <ShieldCheck aria-hidden="true" size={18} />
         <div><strong>商家财务资格正常</strong><span>APPROVED / READY，结算仍由 Core 按可用来源逐笔校验。</span></div>
+      </div>
+    );
+  }
+  if (finance.settlementEligibility.mode === 'MAINNET_MICROTEST') {
+    return (
+      <div className="system-notice ready" role="status">
+        <ShieldCheck aria-hidden="true" size={18} />
+        <div>
+          <strong>仅授权受控主网微测</strong>
+          <span>正式保证金状态仍为 {finance.merchant.guarantee_status}；只能结算 Core 绑定的测试商品应收，资格到期即自动失效。</span>
+        </div>
       </div>
     );
   }

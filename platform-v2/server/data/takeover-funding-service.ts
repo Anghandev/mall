@@ -10,6 +10,10 @@ import type { UserRole } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
+import {
+  isMicrotestMerchantProduct,
+  type MainnetMicrotestEntitlement,
+} from './mainnet-microtest-entitlement.ts';
 
 const GUARANTEE_MINIMUM_USDT = 1_000n * 10n ** 18n;
 
@@ -57,6 +61,7 @@ export class TakeoverFundingService {
   readonly #verifyingContract: string | undefined;
   readonly #auditReady: () => boolean | Promise<boolean>;
   readonly #clock: () => Date;
+  readonly #mainnetMicrotestEntitlement: MainnetMicrotestEntitlement | undefined;
 
   constructor(input: {
     transactions: SqlTransactionRunner;
@@ -65,6 +70,7 @@ export class TakeoverFundingService {
     verifyingContract?: string;
     auditReady?: () => boolean | Promise<boolean>;
     clock?: () => Date;
+    mainnetMicrotestEntitlement?: MainnetMicrotestEntitlement;
   }) {
     this.#transactions = input.transactions;
     this.#secondarySigner = input.secondarySigner
@@ -78,6 +84,7 @@ export class TakeoverFundingService {
       : undefined;
     this.#auditReady = input.auditReady ?? (() => false);
     this.#clock = input.clock ?? (() => new Date());
+    this.#mainnetMicrotestEntitlement = input.mainnetMicrotestEntitlement;
   }
 
   fundingApprovalChallenge(
@@ -407,12 +414,35 @@ export class TakeoverFundingService {
         ),
       ]);
       if (!merchant.rows[0]) throw new CoreError('InvalidRequest', 'Merchant not found', 404);
+      const merchantRow = merchant.rows[0];
+      const guaranteeRow = guarantee.rows[0] as {
+        balance_usdt?: string;
+        source_evidence_hash?: string;
+      } | undefined;
+      const microtestEligible = merchantRow.status === 'APPROVED'
+        && merchantRow.settlement_wallet.toLowerCase() === this.#mainnetMicrotestEntitlement?.merchantWallet
+        && BigInt(guaranteeRow?.balance_usdt ?? '0') > 0n
+        && /^0x[0-9a-fA-F]{64}$/.test(guaranteeRow?.source_evidence_hash ?? '')
+        && guaranteeRow?.source_evidence_hash?.toLowerCase() === this.#mainnetMicrotestEntitlement?.evidenceHash
+        && isMicrotestMerchantProduct(
+          this.#mainnetMicrotestEntitlement,
+          merchantRow.merchant_id,
+          this.#mainnetMicrotestEntitlement?.productId ?? '',
+          this.#clock(),
+        );
+      const formalEligible = merchantRow.status === 'APPROVED' && merchantRow.guarantee_status === 'READY';
       return {
-        merchant: merchant.rows[0],
+        merchant: merchantRow,
         guarantee: guarantee.rows[0] ?? null,
         guaranteeDeposits: deposits.rows,
         debt: debt.rows[0] ?? null,
         takeovers: takeovers.rows,
+        allowedActions: formalEligible || microtestEligible ? ['REQUEST_MERCHANT_USDT'] : [],
+        settlementEligibility: formalEligible
+          ? { mode: 'FORMAL', expiresAt: null }
+          : microtestEligible
+            ? { mode: 'MAINNET_MICROTEST', expiresAt: this.#mainnetMicrotestEntitlement!.expiresAt.toISOString() }
+            : { mode: 'BLOCKED', expiresAt: null },
       };
     });
   }

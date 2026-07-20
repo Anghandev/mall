@@ -12,6 +12,11 @@ import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 import { reviewSeckillPrize } from './seckill-prize-service.ts';
+import {
+  isMicrotestMerchantProduct,
+  isMicrotestProductEligible,
+  type MainnetMicrotestEntitlement,
+} from './mainnet-microtest-entitlement.ts';
 
 const ROUTER = new Interface([
   'function openSeckillSession(bytes32 sessionId,uint64 policyVersion,uint64 startsAt)',
@@ -102,6 +107,7 @@ export class SeckillOperationsService {
   readonly #usdt: string;
   readonly #secondarySigner: string;
   readonly #clock: () => Date;
+  readonly #mainnetMicrotestEntitlement: MainnetMicrotestEntitlement | undefined;
 
   constructor(input: {
     transactions: SqlTransactionRunner;
@@ -112,6 +118,7 @@ export class SeckillOperationsService {
     usdtAddress?: string;
     secondarySignerAddress: string;
     clock?: () => Date;
+    mainnetMicrotestEntitlement?: MainnetMicrotestEntitlement;
   }) {
     this.#transactions = input.transactions;
     this.#governanceWallet = address(input.governanceWalletAddress, 'seckill governance wallet');
@@ -121,6 +128,7 @@ export class SeckillOperationsService {
     this.#usdt = address(input.usdtAddress ?? USDT_ADDRESS, 'USDT');
     this.#secondarySigner = address(input.secondarySignerAddress, 'seckill secondary signer');
     this.#clock = input.clock ?? (() => new Date());
+    this.#mainnetMicrotestEntitlement = input.mainnetMicrotestEntitlement;
   }
 
   list(actor: FulfillmentActor) {
@@ -162,8 +170,22 @@ export class SeckillOperationsService {
       const existing = await idempotentAction(executor, wallet, parsed.idempotencyKey, requestHash);
       if (existing) return actionProjection(executor, existing);
       const policy = await requireSessionPolicy(executor, parsed.policyVersion, parsed.rulesContentHash);
-      const catalog = await requireSessionCatalog(executor, parsed.productId, parsed.skuId, parsed.inventory);
-      await requireGuarantee(executor, catalog.merchant_id);
+      const catalog = await requireSessionCatalog(
+        executor,
+        parsed.productId,
+        parsed.skuId,
+        parsed.inventory,
+        parsed.seckillListPriceUsdt,
+        this.#mainnetMicrotestEntitlement,
+        this.#clock(),
+      );
+      await requireGuarantee(
+        executor,
+        catalog.merchant_id,
+        parsed.productId,
+        this.#mainnetMicrotestEntitlement,
+        this.#clock(),
+      );
       const coverageSnapshotId = await requireFullCoverage(executor);
       await requireSeckillBreakerOpen(executor);
       await requireNoSessionOverlap(executor, parsed.skuId, parsed.startsAt, parsed.mainDeadline);
@@ -191,6 +213,7 @@ export class SeckillOperationsService {
         relayDeadline: parsed.relayDeadline.toISOString(),
         timers: FIXED_TIMERS,
         guaranteeEvidenceHash: catalog.guarantee_evidence_hash,
+        guaranteeMode: catalog.guarantee_status === 'READY' ? 'FORMAL' : 'MAINNET_MICROTEST',
         coverageSnapshotId,
       };
       const evidenceHash = hashJson(snapshot);
@@ -851,29 +874,48 @@ async function requireSessionPolicy(executor: SqlExecutor, policyVersion: bigint
   return policy;
 }
 
-async function requireSessionCatalog(executor: SqlExecutor, productId: string, skuId: string, inventory: number) {
+async function requireSessionCatalog(
+  executor: SqlExecutor,
+  productId: string,
+  skuId: string,
+  inventory: number,
+  seckillListPriceUsdt: string,
+  mainnetMicrotestEntitlement: MainnetMicrotestEntitlement | undefined,
+  now: Date,
+) {
   const result = await executor.query<{
     merchant_id: string;
     merchant_status: string;
     guarantee_status: string;
+    settlement_wallet: string;
     product_version: string | number;
     product_policy_hash: string;
     chain_product_id: string;
     product_state: string;
+    default_freight_usdt: string;
     sku_version: string | number;
     chain_sku_id: string;
     sku_state: string;
+    list_price_usdt: string;
     stock_available: string | number;
+    total_stock_available: string | number;
     proposed_seckill_inventory: string | number;
     guarantee_evidence_hash: string;
+    guarantee_balance_usdt: string | null;
   }>(
     `SELECT product.merchant_id, merchant.status AS merchant_status,
-       merchant.guarantee_status, product.version AS product_version,
+       merchant.guarantee_status, merchant.settlement_wallet,
+       product.version AS product_version,
        product.product_policy_hash, product.chain_product_id,
-       product.lifecycle_state AS product_state, sku.sku_version,
+       product.lifecycle_state AS product_state, product.default_freight_usdt::text,
+       sku.sku_version,
        sku.chain_sku_id, sku.lifecycle_state AS sku_state,
-       sku.stock_available, sku.proposed_seckill_inventory,
-       guarantee.source_evidence_hash AS guarantee_evidence_hash
+       sku.list_price_usdt::text, sku.stock_available, sku.proposed_seckill_inventory,
+       (SELECT sum(all_skus.stock_available) FROM core.skus all_skus
+         WHERE all_skus.product_id = product.product_id
+           AND all_skus.lifecycle_state <> 'DELISTED') AS total_stock_available,
+       guarantee.source_evidence_hash AS guarantee_evidence_hash,
+       guarantee.balance_usdt::text AS guarantee_balance_usdt
      FROM core.products product
      JOIN core.skus sku ON sku.product_id = product.product_id
      JOIN core.merchants merchant ON merchant.merchant_id = product.merchant_id
@@ -884,7 +926,22 @@ async function requireSessionCatalog(executor: SqlExecutor, productId: string, s
   );
   const row = result.rows[0];
   if (!row) throw new CoreError('InvalidRequest', 'Session product or SKU was not found', 404);
-  if (row.merchant_status !== 'APPROVED' || row.guarantee_status !== 'READY') {
+  const microtestEligible = isMicrotestProductEligible(mainnetMicrotestEntitlement, {
+    merchantId: row.merchant_id,
+    merchantWallet: row.settlement_wallet,
+    productId,
+    listPriceUsdt: row.list_price_usdt,
+    freightUsdt: row.default_freight_usdt,
+    stockAvailable: Number(row.total_stock_available),
+    guaranteeBalanceUsdt: row.guarantee_balance_usdt ?? '0',
+    guaranteeEvidenceHash: row.guarantee_evidence_hash,
+  }, now) && mainnetMicrotestEntitlement !== undefined
+    && inventory === mainnetMicrotestEntitlement.seckillInventory
+    && BigInt(seckillListPriceUsdt) <= mainnetMicrotestEntitlement.maxListPriceUsdt;
+  if (
+    row.merchant_status !== 'APPROVED'
+    || (row.guarantee_status !== 'READY' && !microtestEligible)
+  ) {
     throw new CoreError('Forbidden', 'Merchant is not eligible for a seckill session', 409);
   }
   if (row.product_state !== 'ACTIVE' || row.sku_state !== 'ACTIVE') {
@@ -900,13 +957,29 @@ async function requireSessionCatalog(executor: SqlExecutor, productId: string, s
   return row;
 }
 
-async function requireGuarantee(executor: SqlExecutor, merchantId: string) {
-  const guarantee = await executor.query<{ balance_usdt: string; minimum_usdt: string }>(
-    'SELECT balance_usdt::text, minimum_usdt::text FROM core.merchant_guarantees WHERE merchant_id = $1',
+async function requireGuarantee(
+  executor: SqlExecutor,
+  merchantId: string,
+  productId: string,
+  mainnetMicrotestEntitlement: MainnetMicrotestEntitlement | undefined,
+  now: Date,
+) {
+  const guarantee = await executor.query<{
+    balance_usdt: string;
+    minimum_usdt: string;
+    source_evidence_hash: string;
+  }>(
+    `SELECT balance_usdt::text, minimum_usdt::text, source_evidence_hash
+     FROM core.merchant_guarantees WHERE merchant_id = $1`,
     [merchantId],
   );
   const row = guarantee.rows[0];
-  if (!row || BigInt(row.balance_usdt) < BigInt(row.minimum_usdt)) {
+  const microtestEligible = row !== undefined
+    && BigInt(row.balance_usdt) > 0n
+    && /^0x[0-9a-fA-F]{64}$/.test(row.source_evidence_hash)
+    && row.source_evidence_hash.toLowerCase() === mainnetMicrotestEntitlement?.evidenceHash
+    && isMicrotestMerchantProduct(mainnetMicrotestEntitlement, merchantId, productId, now);
+  if (!row || (BigInt(row.balance_usdt) < BigInt(row.minimum_usdt) && !microtestEligible)) {
     throw new CoreError('BreakerActive', 'Merchant guarantee is below 1,000 USDT', 409);
   }
 }

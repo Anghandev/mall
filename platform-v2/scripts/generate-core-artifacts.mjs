@@ -142,6 +142,7 @@ const schemaSources = [
       '036_retire_merchant_levels.sql',
       '037_payment_quote_source_evidence.sql',
       '038_manual_fulfillment_launch.sql',
+      '039_mainnet_microtest_transfer_authorization.sql',
     ],
   },
   {
@@ -926,6 +927,7 @@ function buildOpenApi() {
       '/v2/catalog/products': {
         get: {
           operationId: 'listCatalogProducts',
+          security: [{}, { bearerAuth: [] }],
           responses: {
             200: response('Active products and authoritative SKU prices', {
               type: 'object', required: ['products'],
@@ -938,6 +940,7 @@ function buildOpenApi() {
       '/v2/catalog/products/{productId}': {
         get: {
           operationId: 'getCatalogProduct',
+          security: [{}, { bearerAuth: [] }],
           parameters: [{ name: 'productId', in: 'path', required: true, schema: { type: 'string' } }],
           responses: {
             200: response('Active product detail', {
@@ -3595,12 +3598,21 @@ function settlementAdminOpenApiSchemas() {
       closed_at: nullableTimestamp,
       updated_at: timestamp,
     }),
+    MerchantSettlementEligibility: object({
+      mode: { enum: ['FORMAL', 'MAINNET_MICROTEST', 'BLOCKED'] },
+      expiresAt: nullableTimestamp,
+    }),
     MerchantFinanceProjection: object({
       merchant: ref('MerchantFinanceMerchant'),
       guarantee: nullable(ref('MerchantGuarantee')),
       guaranteeDeposits: { type: 'array', items: ref('MerchantGuaranteeDeposit') },
       debt: nullable(ref('MerchantDebt')),
       takeovers: { type: 'array', items: ref('MerchantTakeover') },
+      allowedActions: {
+        type: 'array',
+        items: { enum: ['REQUEST_MERCHANT_USDT'] },
+      },
+      settlementEligibility: ref('MerchantSettlementEligibility'),
     }),
     TakeoverFundingProjection: fundingProjection,
     TakeoverFundingItem: object({ source_type: string, amount_usdt: atomic, journal_id: string, evidence_hash: hash, created_at: timestamp }),
@@ -7258,12 +7270,19 @@ export interface MerchantTakeover {
   updated_at: string;
 }
 
+export interface MerchantSettlementEligibility {
+  mode: 'FORMAL' | 'MAINNET_MICROTEST' | 'BLOCKED';
+  expiresAt: string | null;
+}
+
 export interface MerchantFinanceProjection {
   merchant: MerchantFinanceMerchant;
   guarantee: MerchantGuarantee | null;
   guaranteeDeposits: readonly MerchantGuaranteeDeposit[];
   debt: MerchantDebt | null;
   takeovers: readonly MerchantTakeover[];
+  allowedActions: readonly 'REQUEST_MERCHANT_USDT'[];
+  settlementEligibility: MerchantSettlementEligibility;
 }
 
 export interface TakeoverFundingProjection {

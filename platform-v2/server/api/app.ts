@@ -121,8 +121,8 @@ const PRODUCT_SLOT_KEYS = [
 ] as const;
 
 export interface PaymentApiService {
-  listCatalog(): Promise<unknown>;
-  getProduct(productId: string): Promise<unknown>;
+  listCatalog(buyerWallet?: string): Promise<unknown>;
+  getProduct(productId: string, buyerWallet?: string): Promise<unknown>;
   createOrdinaryQuote(buyerWallet: string, input: CreateOrdinaryQuoteInput): Promise<unknown>;
   createSeckillQuote(buyerWallet: string, input: CreateSeckillQuoteInput): Promise<unknown>;
   submitPayment(
@@ -2194,12 +2194,27 @@ async function route(
     }
   }
   if (request.method === 'GET' && url.pathname === '/v2/catalog/products') {
-    sendJson(response, 200, { products: await dependencies.paymentService.listCatalog() }, correlationId);
+    const claims = request.headers.authorization
+      ? authorize(request, dependencies.config, dependencies.clock())
+      : undefined;
+    sendJson(response, 200, {
+      products: await dependencies.paymentService.listCatalog(
+        claims?.roles.includes('BUYER') ? claims.sub : undefined,
+      ),
+    }, correlationId);
     return;
   }
   const productId = pathParameter(url.pathname, '/v2/catalog/products/');
   if (request.method === 'GET' && productId) {
-    sendJson(response, 200, { product: await dependencies.paymentService.getProduct(productId) }, correlationId);
+    const claims = request.headers.authorization
+      ? authorize(request, dependencies.config, dependencies.clock())
+      : undefined;
+    sendJson(response, 200, {
+      product: await dependencies.paymentService.getProduct(
+        productId,
+        claims?.roles.includes('BUYER') ? claims.sub : undefined,
+      ),
+    }, correlationId);
     return;
   }
   if (request.method === 'POST' && url.pathname === '/v2/payments/quotes') {

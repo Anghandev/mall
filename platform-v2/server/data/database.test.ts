@@ -33,7 +33,11 @@ import {
 import { AuditOutboxWorker } from '../chain/audit-outbox-worker.ts';
 import { NotificationWorker } from '../chain/notification-worker.ts';
 import { OperationsMonitoringWorker, RuntimeMetricsRegistry } from '../chain/monitoring-worker.ts';
-import { SettlementWorker, type EoaSettlementReceipt } from '../chain/settlement-worker.ts';
+import {
+  SettlementWorker,
+  type EoaSettlementReceipt,
+  type EoaSettlementSubmissionInput,
+} from '../chain/settlement-worker.ts';
 import { ChainIndexer, type IndexedChainBlock } from '../chain/indexer.ts';
 import { appendAuditEntry, verifyAuditChain, type AuditRow } from './audit-chain.ts';
 import { AuditQueryService, enqueueAudit } from './audit-service.ts';
@@ -75,6 +79,7 @@ import { BusinessAnalyticsService } from './business-analytics-service.ts';
 import { AccountService } from './account-service.ts';
 import { assertWalletPaymentAllowed, RiskService } from './risk-service.ts';
 import { MerchantLifecycleService } from './merchant-lifecycle-service.ts';
+import { loadMainnetMicrotestEntitlement } from './mainnet-microtest-entitlement.ts';
 import { LogisticsAdminService } from './logistics-admin-service.ts';
 import {
   createPickupReceiptEnqueuer,
@@ -137,6 +142,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '036_retire_merchant_levels.sql',
       '037_payment_quote_source_evidence.sql',
       '038_manual_fulfillment_launch.sql',
+      '039_mainnet_microtest_transfer_authorization.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -1947,6 +1953,194 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
       idempotencyKey: 'seckill-session-no-level-quota',
     });
     assert.equal(secondSession.state, 'DRAFT');
+  } finally {
+    await db.close();
+  }
+});
+
+test('bounded mainnet micro-test entitlement gates catalog quotes and expires stored idempotent quotes', async () => {
+  const db = await createBusinessDatabase();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 2 * 60_000);
+  const otherBuyer = '0x7777777777777777777777777777777777777777';
+  try {
+    await seedCatalog(db, 1);
+    await db.query(
+      "UPDATE core.merchants SET guarantee_status = 'BELOW_MINIMUM' WHERE merchant_id = 'merchant-1'",
+    );
+    await db.query(
+      `INSERT INTO core.merchant_guarantees (
+         merchant_id, backing_wallet_address, balance_usdt, minimum_usdt,
+         source_evidence_hash, updated_at
+       ) VALUES ('merchant-1',$1,'1',$2,$3,$4)`,
+      ['0x5555555555555555555555555555555555555555', (1_000n * 10n ** 18n).toString(), HASH_2,
+        new Date(now.getTime() - 60_000)],
+    );
+    await db.query(
+      `INSERT INTO core.fulfillment_targets (
+         target_id, target_hash, buyer_wallet, idempotency_key, request_hash,
+         fulfillment_mode, region_code, region_code_hash, encrypted_payload,
+         encryption_iv, encryption_tag, expires_at, created_at
+       ) VALUES ('target:microtest-other',$1,$2,'seed-target-microtest-other',$1,'DELIVERY',
+         '110101',$3,$4,$5,$6,$7,$8)`,
+      [HASH_2, otherBuyer, HASH, Buffer.from('00', 'hex'), Buffer.alloc(12), Buffer.alloc(16),
+        new Date(now.getTime() + 60 * 60_000), now],
+    );
+    const entitlement = loadMainnetMicrotestEntitlement({
+      MAINNET_MICROTEST_MERCHANT_ID: 'merchant-1',
+      MAINNET_MICROTEST_MERCHANT_WALLET: MERCHANT,
+      MAINNET_MICROTEST_PRODUCT_ID: 'product-1',
+      MAINNET_MICROTEST_BUYER_WALLETS: [
+        BUYER,
+        '0x3333333333333333333333333333333333333333',
+        '0x4444444444444444444444444444444444444444',
+      ].join(','),
+      MAINNET_MICROTEST_EXPIRES_AT: expiresAt.toISOString(),
+      MAINNET_MICROTEST_MAX_LIST_PRICE_USDT: '1000',
+      MAINNET_MICROTEST_MAX_FREIGHT_USDT: '5',
+      MAINNET_MICROTEST_MAX_STOCK: '1',
+      MAINNET_MICROTEST_SECKILL_INVENTORY: '1',
+      MAINNET_MICROTEST_EVIDENCE_HASH: HASH_2,
+    }, now)!;
+    const ids = [`0x${'9'.repeat(64)}`, `0x${'8'.repeat(64)}`];
+    const service = new CatalogPaymentService({
+      transactions: transactionAdapter(db),
+      signer: {
+        sign: async () => ({
+          signature: `0x${'1'.repeat(130)}`,
+          signer: '0x8888888888888888888888888888888888888888',
+        }),
+      },
+      nplQuotes: {
+        quote: async () => ({
+          nplQuoteAmount: 1_000n,
+          quoteSourceEvidence: { source: 'PRIMARY', observedBlock: 40_000_000, reservesHash: HASH },
+        }),
+      },
+      beneficiaries: {
+        resolve: async () => ({
+          genesis: '0x0000000000000000000000000000000000000000',
+          directReferral: '0x5000000000000000000000000000000000000002',
+          district: '0x5000000000000000000000000000000000000003',
+          city: '0x5000000000000000000000000000000000000004',
+          province: '0x5000000000000000000000000000000000000005',
+          region: '0x5000000000000000000000000000000000000006',
+        }),
+      },
+      policies: { assertPublished: async () => undefined },
+      bnmWallets: { assertRegistered: async () => undefined },
+      paymentRouterAddress: '0x9999999999999999999999999999999999999999',
+      clock: () => now,
+      bytes32: () => ids.shift()!,
+      nonce: () => 7n,
+      mainnetMicrotestEntitlement: entitlement,
+    });
+    const mediaAssetId = `0x${'a'.repeat(64)}`;
+    const uploadIntentId = `0x${'b'.repeat(64)}`;
+    await db.query(
+      'UPDATE core.products SET main_image_asset_ids = $2::jsonb WHERE product_id = $1',
+      ['product-1', JSON.stringify([mediaAssetId])],
+    );
+    await db.query(
+      `INSERT INTO core.media_upload_intents (
+         upload_intent_id, owner_wallet, purpose, resource_type, resource_id,
+         object_key, content_type, size_bytes, content_sha256, idempotency_key,
+         request_hash, state, expires_at, provider_reference_hash,
+         provider_evidence_hash, verified_at, created_at, updated_at
+       ) VALUES ($1,$2,'PRODUCT_IMAGE','PRODUCT','product-1',$3,'image/webp',64,$4,$5,$4,
+         'VERIFIED',$6,$4,$4,$7,$7,$7)`,
+      [uploadIntentId, MERCHANT, 'microtest/product-1/main.webp', HASH,
+        'microtest-product-media-upload', new Date(now.getTime() + 60_000), now],
+    );
+    await db.query(
+      `INSERT INTO core.media_assets (
+         asset_id, upload_intent_id, owner_wallet, purpose, resource_type,
+         resource_id, object_key, content_type, size_bytes, content_sha256,
+         provider_evidence_hash, object_version_hash, created_at
+       ) VALUES ($1,$2,$3,'PRODUCT_IMAGE','PRODUCT','product-1',$4,'image/webp',64,$5,$5,$5,$6)`,
+      [mediaAssetId, uploadIntentId, MERCHANT, 'microtest/product-1/main.webp', HASH, now],
+    );
+    const evidence = new EvidenceService({
+      transactions: transactionAdapter(db),
+      mainnetMicrotestEntitlement: entitlement,
+      clock: () => now,
+      storage: {
+        createUpload: async () => { throw new Error('unused'); },
+        finalizeUpload: async () => { throw new Error('unused'); },
+        createRead: async (input) => ({
+          method: 'GET',
+          readUrl: 'https://media.example.invalid/microtest-product',
+          expiresAt: input.expiresAt.toISOString(),
+          providerReferenceHash: HASH,
+          assetId: input.assetId,
+          contentSha256: input.contentSha256,
+          objectVersionHash: input.objectVersionHash,
+        }),
+      },
+    });
+    await assert.rejects(evidence.createReadAccess(undefined, mediaAssetId), /not public/);
+    await assert.rejects(
+      evidence.createReadAccess({ walletAddress: otherBuyer, roles: ['BUYER'] }, mediaAssetId),
+      /outside the actor scope/,
+    );
+    assert.equal((await evidence.createReadAccess(
+      { walletAddress: BUYER, roles: ['BUYER'] },
+      mediaAssetId,
+    )).accessScope, 'AUTHENTICATED');
+    const request = {
+      idempotencyKey: 'microtest-checkout-1',
+      productId: 'product-1',
+      skuId: 'sku-1',
+      quantity: 1,
+      fulfillmentMode: 'DELIVERY' as const,
+      fulfillmentTargetHash: HASH,
+      regionCodeHash: HASH,
+    };
+    assert.equal((await service.listCatalog()).length, 0);
+    assert.equal((await service.listCatalog(BUYER)).length, 1);
+    assert.equal((await service.listCatalog(otherBuyer)).length, 0);
+    await assert.rejects(service.getProduct('product-1'), /Product not found/);
+    assert.equal((await service.getProduct('product-1', BUYER)).productId, 'product-1');
+    await assert.rejects(
+      service.createOrdinaryQuote(otherBuyer, {
+        ...request,
+        idempotencyKey: 'microtest-checkout-other',
+        fulfillmentTargetHash: HASH_2,
+      }),
+      (error: unknown) => error instanceof CoreError && error.code === 'InventoryUnavailable',
+    );
+    const quote = await service.createOrdinaryQuote(BUYER, request);
+    assert.equal(quote.intent.deadline, Math.floor(expiresAt.getTime() / 1000));
+    assert.equal(quote.intent.reservationDeadline, Math.floor(expiresAt.getTime() / 1000));
+
+    await db.query(
+      "UPDATE core.merchant_guarantees SET source_evidence_hash = $1 WHERE merchant_id = 'merchant-1'",
+      [HASH],
+    );
+    assert.equal((await service.listCatalog(BUYER)).length, 0);
+    await assert.rejects(
+      service.createOrdinaryQuote(BUYER, request),
+      (error: unknown) => error instanceof CoreError && error.code === 'Forbidden',
+    );
+    await db.query(
+      "UPDATE core.merchant_guarantees SET source_evidence_hash = $1 WHERE merchant_id = 'merchant-1'",
+      [HASH_2],
+    );
+    const expiredService = new CatalogPaymentService({
+      transactions: transactionAdapter(db),
+      signer: { sign: async () => { throw new Error('unused'); } },
+      nplQuotes: { quote: async () => { throw new Error('unused'); } },
+      beneficiaries: { resolve: async () => { throw new Error('unused'); } },
+      policies: { assertPublished: async () => undefined },
+      bnmWallets: { assertRegistered: async () => undefined },
+      paymentRouterAddress: '0x9999999999999999999999999999999999999999',
+      clock: () => new Date(expiresAt.getTime() + 1),
+      mainnetMicrotestEntitlement: entitlement,
+    });
+    await assert.rejects(
+      expiredService.createOrdinaryQuote(BUYER, request),
+      (error: unknown) => error instanceof CoreError && error.code === 'NonceExpired',
+    );
   } finally {
     await db.close();
   }
@@ -8186,6 +8380,167 @@ test('buyer shopping and merchant receivable statements preserve tenant-scoped o
       }),
       /MERCHANT binding is not active/,
     );
+  } finally {
+    await db.close();
+  }
+});
+
+test('micro-test merchant settlement excludes pre-entitlement orders and revalidates evidence on every stage', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const prepared = await prepareRequestedSettlement(db);
+    const orderCreatedAt = (await db.query<{ created_at: Date }>(
+      'SELECT created_at FROM core.orders WHERE order_id = $1',
+      [prepared.intent.orderId],
+    )).rows[0]!.created_at;
+    const guaranteeStartedAt = new Date(orderCreatedAt.getTime() + 1_000);
+    await db.query(
+      "UPDATE core.merchants SET guarantee_status = 'BELOW_MINIMUM' WHERE merchant_id = 'merchant-1'",
+    );
+    await db.query(
+      `INSERT INTO core.merchant_guarantees (
+         merchant_id, backing_wallet_address, balance_usdt, minimum_usdt,
+         source_evidence_hash, updated_at
+       ) VALUES ('merchant-1',$1,'1',$2,$3,$4)`,
+      [prepared.runtime.executorWallet, (1_000n * 10n ** 18n).toString(), HASH_2, guaranteeStartedAt],
+    );
+    const entitlement = loadMainnetMicrotestEntitlement({
+      MAINNET_MICROTEST_MERCHANT_ID: 'merchant-1',
+      MAINNET_MICROTEST_MERCHANT_WALLET: prepared.merchantWallet.address,
+      MAINNET_MICROTEST_PRODUCT_ID: 'product-1',
+      MAINNET_MICROTEST_BUYER_WALLETS: [
+        BUYER,
+        '0x3333333333333333333333333333333333333333',
+        '0x4444444444444444444444444444444444444444',
+      ].join(','),
+      MAINNET_MICROTEST_EXPIRES_AT: new Date(prepared.now.getTime() + 60 * 60_000).toISOString(),
+      MAINNET_MICROTEST_MAX_LIST_PRICE_USDT: '1000',
+      MAINNET_MICROTEST_MAX_FREIGHT_USDT: '0',
+      MAINNET_MICROTEST_MAX_STOCK: '1',
+      MAINNET_MICROTEST_SECKILL_INVENTORY: '1',
+      MAINNET_MICROTEST_EVIDENCE_HASH: HASH_2,
+    }, prepared.now)!;
+    const service = new SettlementService({
+      transactions: transactionAdapter(db),
+      clock: () => prepared.now,
+      mainnetMicrotestEntitlement: entitlement,
+    });
+    await assert.rejects(
+      service.createIntent(prepared.merchant, {
+        rail: 'MERCHANT_USDT',
+        amount: '1',
+        idempotencyKey: 'microtest-historical-intent',
+      }),
+      /Available settlement balance is insufficient/,
+    );
+    await assert.rejects(
+      service.createTransfer(prepared.operator, {
+        asset: 'USDT',
+        gasCap: '100000',
+        idempotencyKey: 'microtest-historical-transfer',
+        runtime: prepared.runtime,
+      }),
+      (error: unknown) => error instanceof CoreError && error.code === 'FinalityPending',
+    );
+
+    await db.query(
+      "UPDATE core.merchant_guarantees SET updated_at = $1 WHERE merchant_id = 'merchant-1'",
+      [new Date(orderCreatedAt.getTime() - 1_000)],
+    );
+    const challenge = await service.createIntent(prepared.merchant, {
+      rail: 'MERCHANT_USDT',
+      amount: '1',
+      idempotencyKey: 'microtest-current-intent',
+    });
+    const signature = await prepared.merchantWallet.signTypedData(
+      challenge.typedData.domain,
+      challenge.typedData.types,
+      challenge.typedData.message,
+    );
+    await db.query(
+      "UPDATE core.merchant_guarantees SET source_evidence_hash = $1 WHERE merchant_id = 'merchant-1'",
+      [HASH],
+    );
+    await assert.rejects(
+      service.createIntent(prepared.merchant, {
+        rail: 'MERCHANT_USDT',
+        amount: '1',
+        idempotencyKey: 'microtest-current-intent',
+      }),
+      (error: unknown) => error instanceof CoreError && error.code === 'Forbidden',
+    );
+    await assert.rejects(
+      service.submitRequest(prepared.merchant, { intentId: challenge.intent.intentId, signature }),
+      (error: unknown) => error instanceof CoreError && error.code === 'Forbidden',
+    );
+    await db.query(
+      "UPDATE core.merchant_guarantees SET source_evidence_hash = $1 WHERE merchant_id = 'merchant-1'",
+      [HASH_2],
+    );
+    assert.equal((await service.submitRequest(
+      prepared.merchant,
+      { intentId: challenge.intent.intentId, signature },
+    )).state, 'REQUESTED');
+    const transfer = await service.createTransfer(prepared.operator, {
+      asset: 'USDT',
+      gasCap: '100000',
+      idempotencyKey: 'microtest-current-transfer',
+      runtime: prepared.runtime,
+    });
+    assert.equal(transfer.state, 'PENDING');
+    assert.deepEqual((await db.query<{
+      authorization_mode: string;
+      authorization_expires_at: Date;
+      authorization_evidence_hash: string;
+    }>(
+      `SELECT authorization_mode, authorization_expires_at, authorization_evidence_hash
+       FROM core.settlement_transfers WHERE transfer_id = $1`,
+      [transfer.transferId],
+    )).rows[0], {
+      authorization_mode: 'MAINNET_MICROTEST',
+      authorization_expires_at: entitlement.expiresAt,
+      authorization_evidence_hash: HASH_2,
+    });
+
+    let broadcasts = 0;
+    const broadcaster = {
+      submit: async (input: EoaSettlementSubmissionInput) => {
+        broadcasts += 1;
+        return {
+          executionTxHash: `0x${'d'.repeat(64)}`,
+          executorWallet: input.executorWallet,
+          executorNonce: input.executorNonce,
+          requestDigest: input.requestDigest,
+        };
+      },
+      replace: async () => { throw new Error('unused'); },
+    };
+    const chain = {
+      receipt: async () => undefined,
+      canonicalBlock: async () => ({
+        canonical: true,
+        observedBlockHash: HASH,
+        evidenceHash: HASH_2,
+      }),
+    };
+    const expiredWorker = new SettlementWorker({
+      transactions: transactionAdapter(db),
+      broadcaster,
+      chain,
+      clock: () => new Date(entitlement.expiresAt.getTime() + 1),
+      mainnetMicrotestEntitlement: entitlement,
+    });
+    assert.equal(await expiredWorker.submitOnce(), 0);
+    assert.equal(broadcasts, 0);
+    const activeWorker = new SettlementWorker({
+      transactions: transactionAdapter(db),
+      broadcaster,
+      chain,
+      clock: () => prepared.now,
+      mainnetMicrotestEntitlement: entitlement,
+    });
+    assert.equal(await activeWorker.submitOnce(), 1);
+    assert.equal(broadcasts, 1);
   } finally {
     await db.close();
   }

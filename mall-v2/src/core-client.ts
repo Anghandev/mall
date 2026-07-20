@@ -196,7 +196,7 @@ export interface OrderActionEvidenceRequest {
 
 export interface CoreClient {
   getBootstrap(): Promise<CorePaymentAvailability>;
-  listCatalog(): Promise<readonly CatalogProduct[]>;
+  listCatalog(token?: string): Promise<readonly CatalogProduct[]>;
   listCatalogCategories(): Promise<readonly CatalogCategory[]>;
   listCatalogTags(): Promise<readonly CatalogTag[]>;
   createPublicMediaReadAccess(assetId: string): Promise<MediaReadAccessProjection>;
@@ -331,10 +331,11 @@ export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } 
       return parseBootstrap(await requestJson<unknown>(fetcher, `${baseUrl}${operations.bootstrap}`));
     },
 
-    async listCatalog() {
+    async listCatalog(token) {
       const value = await requestJson<unknown>(
         fetcher,
         `${baseUrl}${operations.catalog}`,
+        token ? { headers: authorizedHeaders(token) } : undefined,
       );
       return parseCatalogProducts(objectValue(value).products);
     },

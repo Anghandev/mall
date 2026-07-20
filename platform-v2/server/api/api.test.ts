@@ -61,6 +61,10 @@ import {
   settlementRequestTypes,
   verifySettlementRequestSignature,
 } from './settlement-signing.ts';
+import {
+  isMicrotestProductEligible,
+  loadMainnetMicrotestEntitlement,
+} from '../data/mainnet-microtest-entitlement.ts';
 
 const HASH = `0x${'1'.repeat(64)}`;
 const HASH_2 = `0x${'2'.repeat(64)}`;
@@ -181,6 +185,70 @@ test('typed config reports blocked inputs without exposing secret values', () =>
       BSC_FALLBACK_RPC_URL: 'https://rpc.example.invalid/',
     }),
     /must be distinct/,
+  );
+});
+
+test('mainnet micro-test entitlement is complete, bounded, expiring and evidence-bound', () => {
+  const now = new Date('2026-07-20T00:00:00.000Z');
+  const environment = {
+    MAINNET_MICROTEST_MERCHANT_ID: 'merchant-acceptance-1',
+    MAINNET_MICROTEST_MERCHANT_WALLET: '0x1111111111111111111111111111111111111111',
+    MAINNET_MICROTEST_PRODUCT_ID: 'product-acceptance-1',
+    MAINNET_MICROTEST_BUYER_WALLETS: [
+      '0x2222222222222222222222222222222222222222',
+      '0x3333333333333333333333333333333333333333',
+      '0x4444444444444444444444444444444444444444',
+    ].join(','),
+    MAINNET_MICROTEST_EXPIRES_AT: '2026-07-20T01:00:00.000Z',
+    MAINNET_MICROTEST_MAX_LIST_PRICE_USDT: '2000000000000000000',
+    MAINNET_MICROTEST_MAX_FREIGHT_USDT: '1000000000000000000',
+    MAINNET_MICROTEST_MAX_STOCK: '4',
+    MAINNET_MICROTEST_SECKILL_INVENTORY: '3',
+    MAINNET_MICROTEST_EVIDENCE_HASH: HASH,
+  };
+  const entitlement = loadMainnetMicrotestEntitlement(environment, now)!;
+  assert.equal(entitlement.buyerWallets.size, 3);
+  assert.equal(isMicrotestProductEligible(entitlement, {
+    merchantId: environment.MAINNET_MICROTEST_MERCHANT_ID,
+    merchantWallet: environment.MAINNET_MICROTEST_MERCHANT_WALLET,
+    productId: environment.MAINNET_MICROTEST_PRODUCT_ID,
+    listPriceUsdt: '1',
+    freightUsdt: '0',
+    stockAvailable: 1,
+    guaranteeBalanceUsdt: '1',
+    guaranteeEvidenceHash: HASH,
+  }, now), true);
+  assert.equal(isMicrotestProductEligible(entitlement, {
+    merchantId: environment.MAINNET_MICROTEST_MERCHANT_ID,
+    merchantWallet: environment.MAINNET_MICROTEST_MERCHANT_WALLET,
+    productId: environment.MAINNET_MICROTEST_PRODUCT_ID,
+    listPriceUsdt: '1',
+    freightUsdt: '0',
+    stockAvailable: 1,
+    guaranteeBalanceUsdt: '1',
+    guaranteeEvidenceHash: HASH_2,
+  }, now), false);
+  assert.throws(
+    () => loadMainnetMicrotestEntitlement({ ...environment, MAINNET_MICROTEST_PRODUCT_ID: undefined }, now),
+    /incomplete/,
+  );
+  assert.throws(
+    () => loadMainnetMicrotestEntitlement({ ...environment, MAINNET_MICROTEST_EXPIRES_AT: now.toISOString() }, now),
+    /expiry/,
+  );
+  assert.throws(
+    () => loadMainnetMicrotestEntitlement({
+      ...environment,
+      MAINNET_MICROTEST_MAX_LIST_PRICE_USDT: '2000000000000000001',
+    }, now),
+    /product and freight exceed/,
+  );
+  assert.throws(
+    () => loadMainnetMicrotestEntitlement({
+      ...environment,
+      MAINNET_MICROTEST_BUYER_WALLETS: '0x2222222222222222222222222222222222222222',
+    }, now),
+    /three unique/,
   );
 });
 

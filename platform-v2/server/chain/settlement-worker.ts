@@ -4,6 +4,7 @@ import { REQUIRED_CONFIRMATIONS } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import { auditSourceId, enqueueAudit } from '../data/audit-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from '../data/migrations.ts';
+import type { MainnetMicrotestEntitlement } from '../data/mainnet-microtest-entitlement.ts';
 import type { EoaRuntimeEvidence } from '../data/settlement-service.ts';
 
 interface TransferRow {
@@ -202,6 +203,7 @@ export class SettlementWorker {
   readonly #chain: EoaSettlementChainSource;
   readonly #replacementDelayMs: number;
   readonly #clock: () => Date;
+  readonly #mainnetMicrotestEntitlement: MainnetMicrotestEntitlement | undefined;
   #timer: NodeJS.Timeout | undefined;
   #inFlight: Promise<void> | undefined;
   #running = false;
@@ -212,6 +214,7 @@ export class SettlementWorker {
     chain: EoaSettlementChainSource;
     replacementDelayMs?: number;
     clock?: () => Date;
+    mainnetMicrotestEntitlement?: MainnetMicrotestEntitlement;
   }) {
     const delay = input.replacementDelayMs ?? 300_000;
     if (!Number.isSafeInteger(delay) || delay <= 0) {
@@ -222,6 +225,7 @@ export class SettlementWorker {
     this.#chain = input.chain;
     this.#replacementDelayMs = delay;
     this.#clock = input.clock ?? (() => new Date());
+    this.#mainnetMicrotestEntitlement = input.mainnetMicrotestEntitlement;
   }
 
   async pollOnce() {
@@ -461,10 +465,48 @@ export class SettlementWorker {
 
   async #leaseTransfer() {
     return this.#transactions.transaction(async (executor) => {
+      const now = this.#clock();
+      const configured = this.#mainnetMicrotestEntitlement;
+      const microtest = configured && now < configured.expiresAt ? configured : undefined;
       const selected = await executor.query<{ transfer_id: string }>(
-        `SELECT transfer_id FROM core.settlement_transfers
-         WHERE state IN ('PENDING','RETRYABLE')
-         ORDER BY created_at, transfer_id LIMIT 1 FOR UPDATE SKIP LOCKED`,
+        `SELECT transfer.transfer_id
+         FROM core.settlement_transfers transfer
+         JOIN core.settlement_requests request ON request.request_id = transfer.request_id
+         JOIN core.orders orders ON orders.order_id = transfer.order_id
+         LEFT JOIN core.merchants merchant ON merchant.merchant_id = orders.merchant_id
+         LEFT JOIN core.merchant_guarantees guarantee ON guarantee.merchant_id = merchant.merchant_id
+         WHERE transfer.state IN ('PENDING','RETRYABLE')
+           AND (
+             transfer.authorization_mode = 'FORMAL'
+             OR (
+               transfer.authorization_mode = 'MAINNET_MICROTEST'
+               AND request.rail = 'MERCHANT_USDT'
+               AND $1::text IS NOT NULL
+               AND merchant.status = 'APPROVED'
+               AND orders.merchant_id = $1
+               AND request.merchant_id = $1
+               AND lower(merchant.settlement_wallet) = lower($2)
+               AND orders.product_id = $3
+               AND lower(orders.buyer_wallet) = ANY($4::text[])
+               AND guarantee.balance_usdt > 0
+               AND lower(guarantee.source_evidence_hash) = lower($5)
+               AND orders.created_at >= guarantee.updated_at
+               AND transfer.authorization_evidence_hash = $5
+               AND transfer.authorization_expires_at = $6
+               AND $7::timestamptz < transfer.authorization_expires_at
+             )
+           )
+         ORDER BY transfer.created_at, transfer.transfer_id
+         LIMIT 1 FOR UPDATE OF transfer SKIP LOCKED`,
+        [
+          microtest?.merchantId ?? null,
+          microtest?.merchantWallet ?? null,
+          microtest?.productId ?? null,
+          microtest ? [...microtest.buyerWallets] : [],
+          microtest?.evidenceHash ?? null,
+          microtest?.expiresAt ?? null,
+          now,
+        ],
       );
       if (!selected.rows[0]) return undefined;
       const transfer = await loadTransfer(executor, selected.rows[0].transfer_id, true);
@@ -475,8 +517,8 @@ export class SettlementWorker {
         [transfer.transfer_id],
       );
       const attempt = retryable.rows[0]
-        ? await leaseExistingAttempt(executor, retryable.rows[0].attempt_id, this.#clock())
-        : await createAttempt(executor, transfer, this.#clock());
+        ? await leaseExistingAttempt(executor, retryable.rows[0].attempt_id, now)
+        : await createAttempt(executor, transfer, now);
       await executor.query(
         `UPDATE core.settlement_transfers SET state = 'LEASED'
          WHERE transfer_id = $1 AND state IN ('PENDING','RETRYABLE')`,

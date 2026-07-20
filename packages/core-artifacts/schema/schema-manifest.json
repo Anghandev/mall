@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-fulfillment-launch.19",
+  "artifactVersion": "2.0.0-fulfillment-launch.20",
   "formatVersion": 1,
   "databaseEngine": "postgresql",
   "schemas": {
@@ -195,6 +195,11 @@
           "name": "038_manual_fulfillment_launch.sql",
           "path": "schema/business/038_manual_fulfillment_launch.sql",
           "sha256": "2f997f83ffae886fc2bd9bcd7116400eddb54ce2747bf3babd3a69630a92873d"
+        },
+        {
+          "name": "039_mainnet_microtest_transfer_authorization.sql",
+          "path": "schema/business/039_mainnet_microtest_transfer_authorization.sql",
+          "sha256": "e272bcb91bacbcc8822218a5083a7a4616aea23795562d75709c188f7ec20755"
         }
       ]
     },

@@ -3,7 +3,7 @@
 Mall cannot resolve residual gaps by adding shared endpoints, schemas,
 financial logic or custom calldata.
 
-Mall consumes `@abu24k/core-artifacts@2.0.0-fulfillment-launch.19`. Catalog, SIWE,
+Mall consumes `@abu24k/core-artifacts@2.0.0-fulfillment-launch.20`. Catalog, SIWE,
 payments, stores, checkout targets, order/fulfillment projections and the
 fulfillment action catalog are published and consumed. Settlement balances,
 signed requests, per-payable EOA finality, public CMS and notifications are also consumed.

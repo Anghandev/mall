@@ -1009,7 +1009,11 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
       idempotencyKey: 'merchant-guarantee-consumer-1',
     };
 
-    expect((await api.getMerchantFinance('merchant-session')).merchant.guarantee_status).toBe('READY');
+    expect(await api.getMerchantFinance('merchant-session')).toMatchObject({
+      merchant: { guarantee_status: 'READY' },
+      allowedActions: ['REQUEST_MERCHANT_USDT'],
+      settlementEligibility: { mode: 'FORMAL', expiresAt: null },
+    });
     const settlements = await api.listSettlements('merchant-session');
     expect(settlements.requests[2]?.final_execution_tx_hashes).toEqual(
       settlementList.requests[2]?.final_execution_tx_hashes,
@@ -1041,6 +1045,18 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
       'https://core.example.test/v2/finance/merchant/guarantee-deposits',
       expect.objectContaining({ body: JSON.stringify(depositInput) }),
     );
+  });
+
+  it('fails closed on unknown merchant finance actions and eligibility modes', async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ ...merchantFinance, allowedActions: ['UNKNOWN_ACTION'] }))
+      .mockResolvedValueOnce(jsonResponse({
+        ...merchantFinance,
+        settlementEligibility: { mode: 'UNKNOWN_MODE', expiresAt: null },
+      })) as typeof fetch;
+    const api = createCoreApi('https://core.example.test');
+    await expect(api.getMerchantFinance('merchant-session')).rejects.toThrow(/allowedActions item/);
+    await expect(api.getMerchantFinance('merchant-session')).rejects.toThrow(/settlementEligibility.mode/);
   });
 
   it('consumes strict merchant receivable statements with the paired stable cursor', async () => {

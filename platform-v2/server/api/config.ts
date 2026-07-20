@@ -10,6 +10,10 @@ import {
 import coordinatedManifest from '../../../packages/core-artifacts/coordinated-manifest.json' with { type: 'json' };
 import contractManifest from '../../../packages/core-artifacts/contracts/contract-manifest.json' with { type: 'json' };
 import { CoreError } from './errors.ts';
+import {
+  loadMainnetMicrotestEntitlement,
+  type MainnetMicrotestEntitlement,
+} from '../data/mainnet-microtest-entitlement.ts';
 
 const externalVariables = [
   'DATABASE_URL',
@@ -168,6 +172,7 @@ export interface CoreConfig {
   paymentDecisionBlocked: readonly string[];
   paymentExternalBlocked: readonly string[];
   providerReadiness: Readonly<Record<ProviderName, 'READY' | 'CONFIGURATION_REQUIRED'>>;
+  mainnetMicrotestEntitlement: MainnetMicrotestEntitlement | undefined;
 }
 
 export interface RuntimeReadinessSnapshot {
@@ -197,6 +202,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     throw new CoreError('InvalidRequest', 'V2 runtime identity must use BSC 56 and fixed USDT/NPL', 500);
   }
   validateFrozenOverrides(env);
+  const mainnetMicrotestEntitlement = loadMainnetMicrotestEntitlement(env);
 
   const manifestDecisionBlocked: readonly string[] = coordinatedManifest.decisionBlocked;
   const decisionBlocked = [...manifestDecisionBlocked];
@@ -324,6 +330,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     paymentDecisionBlocked,
     paymentExternalBlocked,
     providerReadiness: Object.freeze(providerReadiness),
+    mainnetMicrotestEntitlement,
   });
 }
 

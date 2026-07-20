@@ -247,6 +247,8 @@ export const merchantFinance: MerchantFinanceProjection = {
     closed_at: null,
     updated_at: '2026-07-15T07:00:00.000Z',
   }],
+  allowedActions: ['REQUEST_MERCHANT_USDT'],
+  settlementEligibility: { mode: 'FORMAL', expiresAt: null },
 };
 
 export const guaranteeDepositResult: GuaranteeDepositProjection = {

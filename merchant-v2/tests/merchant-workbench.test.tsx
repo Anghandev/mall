@@ -398,7 +398,7 @@ async function enterSettings(client: CoreApi) {
 
 describe('00 wallet gateway', () => {
   it('consumes settlement-admin.16 without widening the merchant action boundary', () => {
-    expect(artifactVersion).toBe('2.0.0-fulfillment-launch.19');
+    expect(artifactVersion).toBe('2.0.0-fulfillment-launch.20');
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
     expect(coreBoundary.artifactVersion).toBe(artifactVersion);
     expect(coreBoundary.artifactsAvailable).toBe(true);
@@ -1693,11 +1693,29 @@ describe('05 asset rails', () => {
     const frozenFinance = {
       ...merchantFinance,
       merchant: { ...merchantFinance.merchant, guarantee_status: 'FROZEN' as const },
+      allowedActions: [],
+      settlementEligibility: { mode: 'BLOCKED' as const, expiresAt: null },
     };
     const frozen = await enterAssets(createMockCoreApi({ getMerchantFinance: async () => frozenFinance }));
     expect((await screen.findAllByText(/APPROVED \/ FROZEN/)).length).toBeGreaterThan(0);
     await frozen.user.type(screen.getByLabelText('申请金额（USDT 最小单位）'), '1');
     expect((screen.getByRole('button', { name: '签名并提交结算申请' }) as HTMLButtonElement).disabled).toBe(true);
+
+    cleanup();
+    const microtestFinance = {
+      ...merchantFinance,
+      merchant: { ...merchantFinance.merchant, guarantee_status: 'BELOW_MINIMUM' as const },
+      allowedActions: ['REQUEST_MERCHANT_USDT' as const],
+      settlementEligibility: {
+        mode: 'MAINNET_MICROTEST' as const,
+        expiresAt: '2026-07-20T12:00:00.000Z',
+      },
+    };
+    const microtest = await enterAssets(createMockCoreApi({ getMerchantFinance: async () => microtestFinance }));
+    expect(await screen.findByText('仅授权受控主网微测')).toBeTruthy();
+    expect(screen.getAllByText(/BELOW_MINIMUM/).length).toBeGreaterThan(0);
+    await microtest.user.type(screen.getByLabelText('申请金额（USDT 最小单位）'), '1');
+    expect((screen.getByRole('button', { name: '签名并提交结算申请' }) as HTMLButtonElement).disabled).toBe(false);
   });
 });
 

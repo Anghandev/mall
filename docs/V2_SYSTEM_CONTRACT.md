@@ -227,6 +227,31 @@ source conflicts are indexed in `V2_DECISIONS.md`.
   future merchant proceeds in that order. Platform advances become merchant
   debt. Merchant guarantee minimum is exactly 1,000 USDT; below it, new product
   listing and new orders are prohibited.
+- The 1,000-USDT minimum is the formal merchant trading-capital requirement,
+  not a requirement to spend 1,000 USDT in a bounded chain acceptance test.
+  Before launch, Core may load one temporary `MainnetMicrotestEntitlement`
+  that binds exactly one approved merchant and immutable settlement wallet,
+  one product, three buyer EOAs, one finalized non-zero guarantee evidence
+  hash, maximum list price/freight, total stock of at most four, seckill
+  inventory and an expiry no more than 24 hours away. Product plus freight is
+  bounded by the existing 3-USDT micro-test ceiling. It never changes the
+  merchant's `BELOW_MINIMUM` status or the formal threshold.
+- That entitlement authorizes only the bound product's publication, catalog,
+  quote, seckill and merchant-USDT settlement paths. Quotes are single-unit and
+  buyer-whitelisted, expire no later than the entitlement, and are revalidated
+  on idempotent reads. Settlement accepts only whitelisted-buyer orders created
+  at or after the bound guarantee evidence became final; historical orders,
+  other products and other merchants remain ineligible at intent, request and
+  transfer creation. Takeover eligibility and guarantee-loss funding are never
+  relaxed. Missing, mismatched, expired or cleared configuration fails closed
+  for every new Core action and for any not-yet-broadcast micro-test transfer.
+  Clearing Core configuration cannot revoke an already signed Router quote.
+  Cleanup therefore requires this exact order: pause the Router and Core
+  `NEW_PAYMENT` breaker, delist the product, wait through the entitlement and
+  all quote/reservation deadlines, settle every already-created micro-test
+  transfer, pass the dual-RPC/database cleanup gate, clear the entitlement,
+  restart Core, then resume new payments. Formal 1,000-USDT funding remains
+  `External/CapitalRequired`.
 - Successful receipt, pickup verification or final arbitration unlocks
   ordinary receivables, BNM and rewards. The seckill grand prize remains Locked
   until final session settlement.

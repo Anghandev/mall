@@ -169,8 +169,17 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     }),
     bnmWallets: bnm,
     paymentRouterAddress: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),
+    ...(config.mainnetMicrotestEntitlement
+      ? { mainnetMicrotestEntitlement: config.mainnetMicrotestEntitlement }
+      : {}),
   });
-  const catalogManagementService = new CatalogManagementService({ transactions, signer });
+  const catalogManagementService = new CatalogManagementService({
+    transactions,
+    signer,
+    ...(config.mainnetMicrotestEntitlement
+      ? { mainnetMicrotestEntitlement: config.mainnetMicrotestEntitlement }
+      : {}),
+  });
   const adminGlobalOperationsService = new AdminGlobalOperationsService({ transactions });
   const indexerStore = new PostgresIndexerStore(transactions);
   const seckillService = new SeckillService({ transactions });
@@ -182,6 +191,9 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     paymentRouterAddress: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),
     usdtAddress: USDT_ADDRESS,
     secondarySignerAddress: required(config.secondarySignerAddress, 'SECONDARY_SIGNER_ADDRESS'),
+    ...(config.mainnetMicrotestEntitlement
+      ? { mainnetMicrotestEntitlement: config.mainnetMicrotestEntitlement }
+      : {}),
   });
   const fulfillmentService = new FulfillmentService({
     transactions,
@@ -202,6 +214,9 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
       ? { trackingEncryptionKey: env.DELIVERY_DATA_ENCRYPTION_KEY }
       : {}),
     ...(uploadLimits ? { uploadLimits } : {}),
+    ...(config.mainnetMicrotestEntitlement
+      ? { mainnetMicrotestEntitlement: config.mainnetMicrotestEntitlement }
+      : {}),
     storage: new HttpMediaStorageAdapter({
       ...(env.MEDIA_STORAGE_SIGNER_URL ? { url: env.MEDIA_STORAGE_SIGNER_URL } : {}),
       ...(env.MEDIA_STORAGE_SIGNER_TOKEN ? { token: env.MEDIA_STORAGE_SIGNER_TOKEN } : {}),
@@ -257,6 +272,9 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   const logisticsPrintWorker = new LogisticsPrintWorker({ dispatcher: logisticsPrintingService });
   const settlementService = new SettlementService({
     transactions,
+    ...(config.mainnetMicrotestEntitlement
+      ? { mainnetMicrotestEntitlement: config.mainnetMicrotestEntitlement }
+      : {}),
     secondarySignerAddress: required(config.secondarySignerAddress, 'SECONDARY_SIGNER_ADDRESS'),
     governanceVerifyingContract: required(
       config.governanceWalletAddress,
@@ -288,6 +306,9 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     governanceWallet: required(config.governanceWalletAddress, 'PLATFORM_GOVERNANCE_WALLET_ADDRESS'),
     verifyingContract: required(config.governanceWalletAddress, 'PLATFORM_GOVERNANCE_WALLET_ADDRESS'),
     auditReady,
+    ...(config.mainnetMicrotestEntitlement
+      ? { mainnetMicrotestEntitlement: config.mainnetMicrotestEntitlement }
+      : {}),
   });
   const guaranteeDepositService = new GuaranteeDepositService({
     transactions,
@@ -477,6 +498,9 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
       config.settlementReplacementDelayMs,
       'SETTLEMENT_REPLACEMENT_DELAY_MS',
     ),
+    ...(config.mainnetMicrotestEntitlement
+      ? { mainnetMicrotestEntitlement: config.mainnetMicrotestEntitlement }
+      : {}),
   });
   const fulfillmentScheduler = new FulfillmentSchedulerWorker({
     service: fulfillmentService,

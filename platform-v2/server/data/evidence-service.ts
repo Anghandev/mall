@@ -4,6 +4,10 @@ import { CORE_ARTIFACT_VERSION, type UserRole } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
+import {
+  isMicrotestProductEligible,
+  type MainnetMicrotestEntitlement,
+} from './mainnet-microtest-entitlement.ts';
 
 const ACTIONS = [
   'REQUEST_EXCHANGE',
@@ -135,6 +139,7 @@ export class EvidenceService {
   readonly #trackingEncryptionKey: Buffer | undefined;
   readonly #uploadLimits: MediaUploadLimits | undefined;
   readonly #clock: () => Date;
+  readonly #mainnetMicrotestEntitlement: MainnetMicrotestEntitlement | undefined;
 
   constructor(input: {
     transactions: SqlTransactionRunner;
@@ -143,6 +148,7 @@ export class EvidenceService {
     trackingEncryptionKey?: string;
     uploadLimits?: MediaUploadLimits;
     clock?: () => Date;
+    mainnetMicrotestEntitlement?: MainnetMicrotestEntitlement;
   }) {
     this.#transactions = input.transactions;
     this.#storage = input.storage;
@@ -150,6 +156,7 @@ export class EvidenceService {
     this.#trackingEncryptionKey = parseTrackingEncryptionKey(input.trackingEncryptionKey);
     this.#uploadLimits = input.uploadLimits;
     this.#clock = input.clock ?? (() => new Date());
+    this.#mainnetMicrotestEntitlement = input.mainnetMicrotestEntitlement;
   }
 
   createActionEvidence(actor: FulfillmentActor, input: {
@@ -570,7 +577,13 @@ export class EvidenceService {
     validateProviderHash(assetId, 'assetId');
     const authorized = await this.#transactions.transaction(async (executor) => {
       const asset = await loadMediaAssetById(executor, assetId.toLowerCase());
-      const accessScope = await authorizeMediaRead(executor, actor, asset);
+      const accessScope = await authorizeMediaRead(
+        executor,
+        actor,
+        asset,
+        this.#mainnetMicrotestEntitlement,
+        this.#clock(),
+      );
       return { asset, accessScope };
     });
     const expiresAt = new Date(this.#clock().getTime() + 5 * 60_000);
@@ -878,10 +891,17 @@ async function authorizeMediaRead(
   executor: SqlExecutor,
   actor: FulfillmentActor | undefined,
   asset: MediaAssetRow,
+  mainnetMicrotestEntitlement: MainnetMicrotestEntitlement | undefined,
+  now: Date,
 ): Promise<'PUBLIC' | 'AUTHENTICATED'> {
   if (await isPublicMediaAsset(executor, asset)) return 'PUBLIC';
   if (!actor) throw new CoreError('Forbidden', 'Media asset is not public', 403);
   const wallet = actorWallet(actor);
+  if (
+    hasRole(actor, 'BUYER')
+    && mainnetMicrotestEntitlement?.buyerWallets.has(wallet)
+    && await isMicrotestProductMediaAsset(executor, asset, mainnetMicrotestEntitlement, now)
+  ) return 'AUTHENTICATED';
   if (asset.purpose === 'MERCHANT_LICENSE') {
     if (await hasActivePlatformMediaRole(executor, actor, wallet, ['ADMIN', 'OPERATOR'])) {
       return 'AUTHENTICATED';
@@ -937,25 +957,13 @@ async function authorizeMediaRead(
   throw new CoreError('Forbidden', 'Media asset is outside the actor scope', 403);
 }
 
-async function isPublicMediaAsset(executor: SqlExecutor, asset: MediaAssetRow) {
+async function isPublicMediaAsset(
+  executor: SqlExecutor,
+  asset: MediaAssetRow,
+) {
   if (asset.resource_type === 'PRODUCT' && ['PRODUCT_IMAGE', 'PRODUCT_VIDEO'].includes(asset.purpose)) {
-    const result = await executor.query<{ visible: boolean }>(
-      `SELECT EXISTS (
-         SELECT 1 FROM core.products product
-         JOIN core.merchants merchant ON merchant.merchant_id = product.merchant_id
-         WHERE product.product_id = $1 AND product.lifecycle_state = 'ACTIVE'
-           AND merchant.status = 'APPROVED' AND merchant.guarantee_status = 'READY'
-           AND (
-             product.video_asset_id = $2
-             OR EXISTS (
-               SELECT 1 FROM jsonb_array_elements_text(product.main_image_asset_ids) media(asset_id)
-               WHERE media.asset_id = $2
-             )
-           )
-       ) AS visible`,
-      [asset.resource_id, asset.asset_id],
-    );
-    return result.rows[0]?.visible === true;
+    const row = await loadProductMediaEligibility(executor, asset);
+    return row?.bound === true && row.merchant_status === 'APPROVED' && row.guarantee_status === 'READY';
   }
   if (asset.resource_type === 'CATEGORY' && asset.purpose === 'CATEGORY_ICON') {
     const result = await executor.query<{ visible: boolean }>(
@@ -986,6 +994,65 @@ async function isPublicMediaAsset(executor: SqlExecutor, asset: MediaAssetRow) {
     return result.rows[0]?.visible === true;
   }
   return false;
+}
+
+async function isMicrotestProductMediaAsset(
+  executor: SqlExecutor,
+  asset: MediaAssetRow,
+  entitlement: MainnetMicrotestEntitlement,
+  now: Date,
+) {
+  if (asset.resource_type !== 'PRODUCT' || !['PRODUCT_IMAGE', 'PRODUCT_VIDEO'].includes(asset.purpose)) {
+    return false;
+  }
+  const row = await loadProductMediaEligibility(executor, asset);
+  return row?.bound === true && row.merchant_status === 'APPROVED' && isMicrotestProductEligible(entitlement, {
+    merchantId: row.merchant_id,
+    merchantWallet: row.settlement_wallet,
+    productId: asset.resource_id,
+    listPriceUsdt: row.list_price_usdt,
+    freightUsdt: row.default_freight_usdt,
+    stockAvailable: Number(row.stock_available),
+    guaranteeBalanceUsdt: row.guarantee_balance_usdt ?? '0',
+    guaranteeEvidenceHash: row.guarantee_evidence_hash,
+  }, now);
+}
+
+async function loadProductMediaEligibility(executor: SqlExecutor, asset: MediaAssetRow) {
+  const result = await executor.query<{
+    merchant_id: string;
+    settlement_wallet: string;
+    merchant_status: string;
+    guarantee_status: string;
+    default_freight_usdt: string;
+    list_price_usdt: string;
+    stock_available: string | number;
+    guarantee_balance_usdt: string | null;
+    guarantee_evidence_hash: string | null;
+    bound: boolean;
+  }>(
+    `SELECT product.merchant_id, merchant.settlement_wallet,
+       merchant.status AS merchant_status, merchant.guarantee_status,
+       product.default_freight_usdt::text,
+       max(sku.list_price_usdt)::text AS list_price_usdt,
+       sum(sku.stock_available) AS stock_available,
+       guarantee.balance_usdt::text AS guarantee_balance_usdt,
+       guarantee.source_evidence_hash AS guarantee_evidence_hash,
+       (product.video_asset_id = $2 OR EXISTS (
+         SELECT 1 FROM jsonb_array_elements_text(product.main_image_asset_ids) media(asset_id)
+         WHERE media.asset_id = $2
+       )) AS bound
+     FROM core.products product
+     JOIN core.merchants merchant ON merchant.merchant_id = product.merchant_id
+     JOIN core.skus sku ON sku.product_id = product.product_id AND sku.lifecycle_state <> 'DELISTED'
+     LEFT JOIN core.merchant_guarantees guarantee ON guarantee.merchant_id = merchant.merchant_id
+     WHERE product.product_id = $1 AND product.lifecycle_state = 'ACTIVE'
+     GROUP BY product.merchant_id, merchant.settlement_wallet, merchant.status,
+       merchant.guarantee_status, product.default_freight_usdt, guarantee.balance_usdt,
+       guarantee.source_evidence_hash, product.video_asset_id, product.main_image_asset_ids`,
+    [asset.resource_id, asset.asset_id],
+  );
+  return result.rows[0];
 }
 
 async function hasActivePlatformMediaRole(

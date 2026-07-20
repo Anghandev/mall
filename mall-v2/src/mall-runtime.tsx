@@ -321,7 +321,7 @@ export function MallRuntimeProvider({
   useEffect(() => {
     mediaAccessCache.current.clear();
     mediaAccessInFlight.current.clear();
-  }, [services]);
+  }, [services, session?.walletAddress]);
 
   useEffect(() => {
     let active = true;
@@ -475,6 +475,9 @@ export function MallRuntimeProvider({
         setPendingSubmission(recovered);
         setSubmittedTxHash(recovered?.txHash ?? null);
         setSession(nextSession);
+        const products = await services.core.listCatalog(nextSession.token);
+        setCatalog(products);
+        setCatalogState(products.length > 0 ? 'ready' : 'empty');
         await loadAuthenticatedBundles(nextSession);
         await loadCms(nextSession.token).catch(() => setCmsState('error'));
       });
@@ -483,7 +486,7 @@ export function MallRuntimeProvider({
     async reloadCatalog() {
       setCatalogState('loading');
       await run(async () => {
-        const products = await services.core.listCatalog();
+        const products = await services.core.listCatalog(session?.token);
         setCatalog(products);
         setCatalogState(products.length > 0 ? 'ready' : 'empty');
       }, () => setCatalogState('error'));
@@ -1095,14 +1098,20 @@ export function MallRuntimeProvider({
     if (!forceRefresh && cached && Date.parse(cached.expiresAt) > Date.now() + 30_000) return Promise.resolve(cached);
     const pending = mediaAccessInFlight.current.get(key);
     if (pending) return pending;
-    const request = services.core.createPublicMediaReadAccess(key)
+    const request = services.core.createPublicMediaReadAccess(key).catch((reason: unknown) => {
+      if (session && reason instanceof CoreClientError && reason.code === 'Forbidden') {
+        return services.core.createAuthenticatedMediaReadAccess(session.token, key);
+      }
+      throw reason;
+    });
+    const tracked = request
       .then((access) => {
         mediaAccessCache.current.set(key, access);
         return access;
       })
       .finally(() => mediaAccessInFlight.current.delete(key));
-    mediaAccessInFlight.current.set(key, request);
-    return request;
+    mediaAccessInFlight.current.set(key, tracked);
+    return tracked;
   }
 
   async function evidenceFileHash(file: File) {

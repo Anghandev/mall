@@ -13,6 +13,10 @@ import type { SignerRequest } from '../chain/signer.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
+import {
+  isMicrotestProductEligible,
+  type MainnetMicrotestEntitlement,
+} from './mainnet-microtest-entitlement.ts';
 
 const LOCKED_SESSION_PHASES = ['PREHEAT', 'LIVE', 'SETTLING'] as const;
 const FULFILLMENT_MODES = ['DELIVERY', 'PICKUP'] as const;
@@ -119,17 +123,20 @@ export class CatalogManagementService {
   readonly #signer: CatalogPreviewSigner;
   readonly #clock: () => Date;
   readonly #bytes32: () => string;
+  readonly #mainnetMicrotestEntitlement: MainnetMicrotestEntitlement | undefined;
 
   constructor(input: {
     transactions: SqlTransactionRunner;
     signer: CatalogPreviewSigner;
     clock?: () => Date;
     bytes32?: () => string;
+    mainnetMicrotestEntitlement?: MainnetMicrotestEntitlement;
   }) {
     this.#transactions = input.transactions;
     this.#signer = input.signer;
     this.#clock = input.clock ?? (() => new Date());
     this.#bytes32 = input.bytes32 ?? (() => `0x${randomBytes(32).toString('hex')}`);
+    this.#mainnetMicrotestEntitlement = input.mainnetMicrotestEntitlement;
   }
 
   listCategories(includeInactive = false, actor?: FulfillmentActor) {
@@ -615,7 +622,13 @@ export class CatalogManagementService {
         return productProjection(executor, await requireProduct(executor, productId), actor);
       }
       const now = this.#clock();
-      const transition = await prepareProductLifecycleDecision(executor, product, input.decision, now);
+      const transition = await prepareProductLifecycleDecision(
+        executor,
+        product,
+        input.decision,
+        now,
+        this.#mainnetMicrotestEntitlement,
+      );
       await applyProductLifecycleDecision(executor, {
         eventId: this.#bytes32(), product, decision: transition.event,
         from: product.lifecycle_state, to: transition.to, reasonCode: input.reasonCode,
@@ -904,7 +917,13 @@ export class CatalogManagementService {
       for (const product of products) {
         prepared.push({
           product,
-          transition: await prepareProductLifecycleDecision(executor, product, value.action, now),
+          transition: await prepareProductLifecycleDecision(
+            executor,
+            product,
+            value.action,
+            now,
+            this.#mainnetMicrotestEntitlement,
+          ),
         });
       }
 
@@ -1614,6 +1633,7 @@ async function prepareProductLifecycleDecision(
   product: ProductRow,
   decision: CatalogReviewDecision,
   now: Date,
+  mainnetMicrotestEntitlement?: MainnetMicrotestEntitlement,
 ) {
   const writeLock = await productWriteLock(executor, product, now);
   if (!platformProductActions(product, writeLock).includes(decision)) {
@@ -1632,11 +1652,47 @@ async function prepareProductLifecycleDecision(
     await assertSubmittedPreviewCurrent(executor, product, now);
   }
   if (decision === 'PUBLISH') {
-    const merchant = await executor.query<{ status: string; guarantee_status: string }>(
-      'SELECT status, guarantee_status FROM core.merchants WHERE merchant_id = $1',
-      [product.merchant_id],
+    const merchant = await executor.query<{
+      status: string;
+      guarantee_status: string;
+      settlement_wallet: string;
+      default_freight_usdt: string;
+      list_price_usdt: string;
+      stock_available: string | number;
+      guarantee_balance_usdt: string | null;
+      guarantee_evidence_hash: string | null;
+    }>(
+      `SELECT merchant.status, merchant.guarantee_status, merchant.settlement_wallet,
+         product.default_freight_usdt::text, sku.list_price_usdt::text,
+         sku.stock_available, guarantee.balance_usdt::text AS guarantee_balance_usdt,
+         guarantee.source_evidence_hash AS guarantee_evidence_hash
+       FROM core.products product
+       JOIN core.merchants merchant ON merchant.merchant_id = product.merchant_id
+       JOIN core.skus sku ON sku.product_id = product.product_id
+       LEFT JOIN core.merchant_guarantees guarantee ON guarantee.merchant_id = merchant.merchant_id
+       WHERE product.product_id = $1
+       ORDER BY sku.sku_id`,
+      [product.product_id],
     );
-    if (merchant.rows[0]?.status !== 'APPROVED' || merchant.rows[0]?.guarantee_status !== 'READY') {
+    const totalStock = merchant.rows.reduce((sum, row) => sum + Number(row.stock_available), 0);
+    const microtestEligible = merchant.rows.length > 0 && merchant.rows.every((row) => isMicrotestProductEligible(
+      mainnetMicrotestEntitlement,
+      {
+        merchantId: product.merchant_id,
+        merchantWallet: row.settlement_wallet,
+        productId: product.product_id,
+        listPriceUsdt: row.list_price_usdt,
+        freightUsdt: row.default_freight_usdt,
+        stockAvailable: totalStock,
+        guaranteeBalanceUsdt: row.guarantee_balance_usdt ?? '0',
+        guaranteeEvidenceHash: row.guarantee_evidence_hash,
+      },
+      now,
+    ));
+    if (
+      merchant.rows[0]?.status !== 'APPROVED'
+      || (merchant.rows[0]?.guarantee_status !== 'READY' && !microtestEligible)
+    ) {
       throw new CoreError('Forbidden', 'Merchant is not eligible for publication', 409);
     }
   }

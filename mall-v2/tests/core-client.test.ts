@@ -101,7 +101,7 @@ describe('Mall Core artifact boundary', () => {
       ...Object.values(coordinatedRealtimeOperations),
     ];
 
-    expect(artifactVersion).toBe('2.0.0-fulfillment-launch.19');
+    expect(artifactVersion).toBe('2.0.0-fulfillment-launch.20');
     expect(coordinatedOpenApi.paths['/v2/merchant/orders/exports']?.post?.operationId)
       .toBe('exportMerchantOrders');
     expect(coordinatedOpenApi.paths['/v2/admin/payments/{orderId}']?.get?.operationId)
@@ -640,6 +640,9 @@ describe('coordinated Core HTTP client', () => {
     const signMessage = vi.fn().mockResolvedValue('0xsignature');
     const session = await client.authenticate(quote.intent.buyer, signMessage);
     expect(signMessage).toHaveBeenCalledWith('Sign in to 24K商城 V2');
+    expect(await client.listCatalog(session.token)).toEqual([product]);
+    expect(calls.find((call) => call.init?.headers && call.url.endsWith('/v2/catalog/products'))?.init?.headers)
+      .toMatchObject({ authorization: 'Bearer session' });
     const response = await client.createOrdinaryQuote(session.token, selection());
     expect(response.intent).toStrictEqual(quote.intent);
     expect(response.approvalRequirements).toStrictEqual(quote.approvalRequirements);
