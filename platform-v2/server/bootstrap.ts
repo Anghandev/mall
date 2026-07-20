@@ -546,35 +546,21 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     deploymentBlock: config.paymentIndexerStartBlock
       ?? required(config.paymentRouterDeploymentBlock, 'PAYMENT_ROUTER_DEPLOYMENT_BLOCK_MANIFEST'),
   });
-  await paymentIndexer.pollOnce().catch(() => undefined);
   paymentIndexer.start();
   if (config.providerReadiness.BNM === 'READY') {
-    await bnmWorker.pollOnce().catch(() => undefined);
     bnmWorker.start();
   }
-  await fulfillmentScheduler.pollOnce().catch(() => undefined);
   fulfillmentScheduler.start();
-  await coverageWorker.pollOnce().catch(() => undefined);
   coverageWorker.start();
-  await coverageBreakerGovernanceWorker.pollOnce().catch(() => undefined);
   coverageBreakerGovernanceWorker.start();
-  await seckillGovernanceWorker.pollOnce().catch(() => undefined);
   seckillGovernanceWorker.start();
-  await guaranteeDepositWorker.pollOnce().catch(() => undefined);
   guaranteeDepositWorker.start();
-  await settlementTransferScheduler.pollOnce().catch(() => undefined);
   settlementTransferScheduler.start();
-  await settlementWorker.pollOnce().catch(() => undefined);
   settlementWorker.start();
-  await auditWorker.pollOnce().catch(() => undefined);
   auditWorker.start();
-  await notificationWorker.pollOnce().catch(() => undefined);
   notificationWorker.start();
-  await logisticsPrintWorker.pollOnce().catch(() => undefined);
   logisticsPrintWorker.start();
-  await monitoringWorker.pollOnce().catch(() => undefined);
   monitoringWorker.start();
-  await policyFinalityWorker.pollOnce().catch(() => undefined);
   policyFinalityWorker.start();
 
   const runtimeAttestor = new RpcPaymentRuntimeAttestor({
@@ -603,7 +589,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     signerHealthy: () => signer.health(),
     indexerStatus: () => paymentIndexer.status(),
   });
-  await readinessMonitor.pollOnce();
+  // Startup must remain fail-closed without making the HTTP recovery surface wait on worker probes.
   readinessMonitor.start();
   const server = createApiServer({
     config,
