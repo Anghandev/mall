@@ -539,10 +539,17 @@ export class CatalogPaymentService {
         [input.orderId, buyer],
       );
       const quote = result.rows[0];
+      const txHash = input.txHash.toLowerCase();
+      if (quote?.state === 'PAID') {
+        if (quote.submitted_tx_hash?.toLowerCase() !== txHash) {
+          throw new CoreError('IdempotencyConflict', 'Indexed payment transaction does not match the submission', 409);
+        }
+        return { orderId: input.orderId, txHash, state: 'SUBMITTED' as const };
+      }
       if (!quote || !['QUOTED', 'SUBMITTED', 'REORGED'].includes(quote.state)) {
         throw new CoreError('InvalidRequest', 'Payment quote is not submittable', 409);
       }
-      if (quote.submitted_tx_hash && quote.submitted_tx_hash.toLowerCase() !== input.txHash.toLowerCase()) {
+      if (quote.submitted_tx_hash && quote.submitted_tx_hash.toLowerCase() !== txHash) {
         if (input.replacementForTxHash?.toLowerCase() !== quote.submitted_tx_hash.toLowerCase()) {
           throw new CoreError('IdempotencyConflict', 'Replacement transaction does not match the prior submission', 409);
         }
@@ -551,9 +558,9 @@ export class CatalogPaymentService {
         `UPDATE core.payment_quotes SET state = 'SUBMITTED', submitted_tx_hash = $2,
            submitted_at = COALESCE(submitted_at, clock_timestamp()), updated_at = clock_timestamp()
          WHERE order_id = $1`,
-        [input.orderId, input.txHash.toLowerCase()],
+        [input.orderId, txHash],
       );
-      return { orderId: input.orderId, txHash: input.txHash.toLowerCase(), state: 'SUBMITTED' as const };
+      return { orderId: input.orderId, txHash, state: 'SUBMITTED' as const };
     });
   }
 

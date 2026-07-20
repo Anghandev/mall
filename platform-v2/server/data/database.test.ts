@@ -2147,6 +2147,15 @@ test('catalog payment service builds an authoritative idempotent quote and recor
       txHash: reorgReplacement,
       replacementForTxHash: replacementTx,
     })).state, 'SUBMITTED');
+    await db.query("UPDATE core.payment_quotes SET state = 'PAID' WHERE order_id = $1", [quote.orderId]);
+    assert.equal((await service.submitPayment(BUYER, {
+      orderId: quote.orderId,
+      txHash: reorgReplacement,
+    })).state, 'SUBMITTED');
+    await assert.rejects(
+      service.submitPayment(BUYER, { orderId: quote.orderId, txHash: firstTx }),
+      /Indexed payment transaction does not match/,
+    );
   } finally {
     await db.close();
   }
