@@ -107,6 +107,7 @@ Core artifact：`2.0.0-fulfillment-launch.18`
 | 线上 Core / 三端从 `.17` 发布为 `.18` | Pending |
 | 发布后 `writesEnabled=true` 且 `runtimeBlockers=[]` | Pending |
 | 生产 business/audit 备份完成并验证可恢复 | Pending |
+| 旧物引用核对、隔离清理和清理后 `pnpm verify` | Pass |
 
 当前线上仍为 `.17`，只读 bootstrap 返回
 `writesEnabled=false`，blocker 为 `RPC_DIVERGENCE`、

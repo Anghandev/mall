@@ -62,3 +62,10 @@ mock Core/钱包，Merchant/Admin 没有独立真实 Core 浏览器交易流。�
    才能开放购买。不得用关闭校验的方式变绿。
 
 物流供应商、打印设备和地图服务不在上述列表中，它们不是本次上线阻塞。
+
+## 旧物清理结果
+
+全量验收通过后，已按引用核对结果清理无引用占位脚本、可重建构建产物、
+旧 release 包缓存和失效 worktree 元数据。历史证据、migration、部署 manifest、
+V1 归档和独有 WIP 均已保留。清理后第二次完整 `pnpm verify` 退出 0。详见
+`docs/V2_LEGACY_ISOLATION_REPORT.md`。
