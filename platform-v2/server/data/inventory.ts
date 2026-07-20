@@ -9,6 +9,7 @@ export interface InventoryReservationInput {
   quantity: number;
   classification: 'ORDINARY' | 'SECKILL' | 'FALLBACK_RETAIL';
   sessionId?: string;
+  capacityReservationId?: string;
   expiresAt: Date;
 }
 
@@ -21,7 +22,7 @@ export interface InventoryReservationRow {
 
 export async function reserveInventory(executor: SqlExecutor, input: InventoryReservationInput) {
   const result = await executor.query<InventoryReservationRow>(
-    `SELECT * FROM core.reserve_inventory($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    `SELECT * FROM core.reserve_inventory_with_capacity($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
     [
       input.reservationId,
       input.reservationHash,
@@ -32,6 +33,7 @@ export async function reserveInventory(executor: SqlExecutor, input: InventoryRe
       input.classification,
       input.expiresAt,
       input.sessionId ?? null,
+      input.capacityReservationId ?? input.reservationId,
     ],
   );
   const row = result.rows[0];

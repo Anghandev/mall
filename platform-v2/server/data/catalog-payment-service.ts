@@ -258,7 +258,12 @@ export class CatalogPaymentService {
         buyer,
       );
       return catalogProjection(
-        result.rows.filter((row) => catalogRowVisible(row, this.#mainnetMicrotestEntitlement, now, buyer)),
+        result.rows.filter((row) => catalogRowVisible(
+          row,
+          this.#mainnetMicrotestEntitlement,
+          now,
+          buyer,
+        ) || sessions.some((session) => session.sku_id === row.sku_id)),
         sessions,
         now,
       );
@@ -281,7 +286,12 @@ export class CatalogPaymentService {
         buyer,
       );
       const products = catalogProjection(
-        result.rows.filter((row) => catalogRowVisible(row, this.#mainnetMicrotestEntitlement, now, buyer)),
+        result.rows.filter((row) => catalogRowVisible(
+          row,
+          this.#mainnetMicrotestEntitlement,
+          now,
+          buyer,
+        ) || sessions.some((session) => session.sku_id === row.sku_id)),
         sessions,
         now,
       );
@@ -432,29 +442,23 @@ export class CatalogPaymentService {
     const buyer = normalizeAddress(buyerWallet);
     validateCreateQuote(input);
     if (!isHash(input.sessionId)) throw new CoreError('InvalidRequest', 'Invalid seckill session ID');
-    const existing = await this.#transactions.transaction(async (executor) => {
-      const identity = await loadQuoteIdentity(executor, buyer, input.idempotencyKey);
-      if (!identity) return undefined;
-      if (identity.quote_kind !== 'SECKILL') {
-        throw new CoreError('IdempotencyConflict', 'Idempotency key belongs to an ordinary quote', 409);
-      }
-      return loadExistingSeckillQuote(executor, buyer, input.idempotencyKey);
-    });
-    if (existing) {
+    const loadExisting = () => this.#transactions.transaction((executor) => (
+      loadExistingSeckillQuoteForIdempotency(executor, buyer, input.idempotencyKey)
+    ));
+    const reuseExisting = async (rows: StoredSeckillQuoteRow[]) => {
       await this.#bnmWallets.assertRegistered(buyer);
-      const existingQuote = existing[0];
-      if (existingQuote) {
-        await this.#transactions.transaction((executor) => assertStoredQuoteStillAuthorized(
-          executor,
-          existingQuote,
-          buyer,
-          input.quantity,
-          this.#mainnetMicrotestEntitlement,
-          this.#clock(),
-        ));
-      }
-      return existingSeckillQuoteResponse(existing, input, this.#paymentRouterAddress);
-    }
+      await this.#transactions.transaction((executor) => assertStoredSeckillQuoteStillAuthorized(
+        executor,
+        rows,
+        buyer,
+        input.quantity,
+        this.#mainnetMicrotestEntitlement,
+        this.#clock(),
+      ));
+      return existingSeckillQuoteResponse(rows, input, this.#paymentRouterAddress);
+    };
+    const existing = await loadExisting();
+    if (existing) return reuseExisting(existing);
     const prepared = await this.#transactions.transaction((executor) => loadSeckillPreparation(
       executor,
       buyer,
@@ -568,54 +572,62 @@ export class CatalogPaymentService {
       deadline,
       idempotencyKey: `seckill-quote:${buyer}:${input.idempotencyKey}`,
     });
-    await this.#transactions.transaction(async (executor) => {
-      const current = await loadSeckillPreparation(
-        executor,
-        buyer,
-        input,
-        this.#clock(),
-        this.#mainnetMicrotestEntitlement,
-      );
-      if (preparationFingerprint(current) !== preparationFingerprint(prepared)) {
-        throw new CoreError('IdempotencyConflict', 'Seckill catalog or policy changed while quote was signed', 409);
-      }
-      await reserveInventory(executor, {
-        reservationId: seckillReservationId,
-        reservationHash: seckillReservationHash,
-        policyVersion: policy.policyVersion,
-        skuId: prepared.catalog.sku_id,
-        buyerWallet: buyer,
-        quantity: input.quantity,
-        classification: 'SECKILL',
-        sessionId: input.sessionId,
-        expiresAt: new Date(reservationDeadline * 1000),
+    try {
+      await this.#transactions.transaction(async (executor) => {
+        const current = await loadSeckillPreparation(
+          executor,
+          buyer,
+          input,
+          this.#clock(),
+          this.#mainnetMicrotestEntitlement,
+        );
+        if (preparationFingerprint(current) !== preparationFingerprint(prepared)) {
+          throw new CoreError('IdempotencyConflict', 'Seckill catalog or policy changed while quote was signed', 409);
+        }
+        await reserveInventory(executor, {
+          reservationId: seckillReservationId,
+          reservationHash: seckillReservationHash,
+          policyVersion: policy.policyVersion,
+          skuId: prepared.catalog.sku_id,
+          buyerWallet: buyer,
+          quantity: input.quantity,
+          classification: 'SECKILL',
+          sessionId: input.sessionId,
+          expiresAt: new Date(reservationDeadline * 1000),
+        });
+        await reserveInventory(executor, {
+          reservationId: fallbackReservationId,
+          reservationHash: fallbackReservationHash,
+          policyVersion: policy.policyVersion,
+          skuId: prepared.catalog.sku_id,
+          buyerWallet: buyer,
+          quantity: input.quantity,
+          classification: 'FALLBACK_RETAIL',
+          sessionId: input.sessionId,
+          capacityReservationId: seckillReservationId,
+          expiresAt: new Date(reservationDeadline * 1000),
+        });
+        await insertSeckillQuote(executor, {
+          buyer,
+          idempotencyKey: input.idempotencyKey,
+          catalog: prepared.catalog,
+          policyVersion: policy.policyVersion,
+          sessionId: input.sessionId,
+          seckillUnitPrice: prepared.session.seckill_list_price_usdt,
+          dual,
+          digest,
+          signature: signed.signature,
+          quoteSourceEvidence: {
+            SECKILL: seckillNplQuote.quoteSourceEvidence,
+            FALLBACK_RETAIL: fallbackNplQuote.quoteSourceEvidence,
+          },
+        });
       });
-      await reserveInventory(executor, {
-        reservationId: fallbackReservationId,
-        reservationHash: fallbackReservationHash,
-        policyVersion: policy.policyVersion,
-        skuId: prepared.catalog.sku_id,
-        buyerWallet: buyer,
-        quantity: input.quantity,
-        classification: 'FALLBACK_RETAIL',
-        expiresAt: new Date(reservationDeadline * 1000),
-      });
-      await insertSeckillQuote(executor, {
-        buyer,
-        idempotencyKey: input.idempotencyKey,
-        catalog: prepared.catalog,
-        policyVersion: policy.policyVersion,
-        sessionId: input.sessionId,
-        seckillUnitPrice: prepared.session.seckill_list_price_usdt,
-        dual,
-        digest,
-        signature: signed.signature,
-        quoteSourceEvidence: {
-          SECKILL: seckillNplQuote.quoteSourceEvidence,
-          FALLBACK_RETAIL: fallbackNplQuote.quoteSourceEvidence,
-        },
-      });
-    });
+    } catch (error) {
+      const concurrent = await loadExisting();
+      if (!concurrent) throw error;
+      return reuseExisting(concurrent);
+    }
     return seckillQuoteResponse(dual, digest, signed.signature, this.#paymentRouterAddress, 'QUOTED', null);
   }
 
@@ -809,9 +821,7 @@ async function loadSeckillPreparation(
   if (
     !catalog || catalog.product_state !== 'ACTIVE' || catalog.sku_state !== 'ACTIVE'
       || catalog.merchant_status !== 'APPROVED'
-      || !catalogRowPurchasable(catalog, buyer, input.quantity, mainnetMicrotestEntitlement, now)
-      || Number(catalog.stock_available) < input.quantity
-  ) throw new CoreError('InventoryUnavailable', 'Seckill fallback inventory is unavailable', 409);
+  ) throw new CoreError('InventoryUnavailable', 'Seckill product or merchant is unavailable', 409);
   const sessionResult = await executor.query<SessionRow>(
     `SELECT session_id, policy_version, product_policy_hash, seckill_list_price_usdt::text,
        phase, starts_at, main_deadline, relay_deadline,
@@ -826,6 +836,14 @@ async function loadSeckillPreparation(
       || Number(session.available) < input.quantity
       || session.product_policy_hash.toLowerCase() !== catalog.product_policy_hash.toLowerCase()
   ) throw new CoreError('InventoryUnavailable', 'Seckill session is not live or has no inventory', 409);
+  if (!catalogRowSeckillPurchasable(
+    catalog,
+    session,
+    buyer,
+    input.quantity,
+    mainnetMicrotestEntitlement,
+    now,
+  )) throw new CoreError('Forbidden', 'Seckill quote is not authorized', 403);
   const policyResult = await executor.query<PolicyRow>(
     `SELECT artifact_version, policy_version, policy_hash,
        rules_content_hash, beneficiary_set_hash, payload FROM core.policy_snapshots
@@ -1012,6 +1030,107 @@ async function assertStoredQuoteStillAuthorized(
   ) throw new CoreError('Forbidden', 'Stored payment quote is no longer authorized', 403);
 }
 
+async function assertStoredSeckillQuoteStillAuthorized(
+  executor: SqlExecutor,
+  rows: StoredSeckillQuoteRow[],
+  buyer: string,
+  quantity: number,
+  mainnetMicrotestEntitlement: MainnetMicrotestEntitlement | undefined,
+  now: Date,
+) {
+  const seckill = rows.find((row) => row.classification === 'SECKILL');
+  const fallback = rows.find((row) => row.classification === 'FALLBACK_RETAIL');
+  if (
+    !seckill || !fallback || seckill.order_id !== fallback.order_id
+      || seckill.session_id !== fallback.session_id
+      || seckill.authorization_digest !== fallback.authorization_digest
+      || seckill.state !== fallback.state
+      || new Date(seckill.deadline) <= now
+  ) {
+    if (seckill && new Date(seckill.deadline) <= now) {
+      throw new CoreError('NonceExpired', 'Stored payment quote has expired', 401);
+    }
+    throw new CoreError('InvalidFinality', 'Stored seckill quote legs are invalid', 409);
+  }
+
+  const catalogResult = await executor.query<CatalogRow>(`${catalogSelect()}
+    WHERE product.product_id = $1 AND sku.sku_id = $2`, [seckill.product_id, seckill.sku_id]);
+  const catalog = catalogResult.rows[0];
+  if (
+    !catalog || catalog.product_state !== 'ACTIVE' || catalog.sku_state !== 'ACTIVE'
+      || catalog.merchant_status !== 'APPROVED'
+  ) throw new CoreError('Forbidden', 'Stored seckill quote is no longer authorized', 403);
+
+  const sessionResult = await executor.query<{
+    session_id: string;
+    policy_version: string | number;
+    product_policy_hash: string;
+    inventory: string | number;
+  }>(
+    `SELECT session_id, policy_version, product_policy_hash, inventory
+     FROM core.seckill_sessions
+     WHERE session_id = $1 AND product_id = $2 AND sku_id = $3 AND merchant_id = $4`,
+    [seckill.session_id, seckill.product_id, seckill.sku_id, catalog.merchant_id],
+  );
+  const session = sessionResult.rows[0];
+  const entitled = catalog.guarantee_status === 'READY' || (
+    session !== undefined
+      && mainnetMicrotestEntitlement !== undefined
+      && Number(session.inventory) === mainnetMicrotestEntitlement.seckillInventory
+      && isMicrotestBuyerEligible(
+        mainnetMicrotestEntitlement,
+        { ...microtestSubject(catalog), stockAvailable: Number(session.inventory) },
+        buyer,
+        quantity,
+        now,
+      )
+  );
+  if (
+    !session || Number(session.policy_version) !== seckill.intent.policyVersion
+      || session.product_policy_hash.toLowerCase() !== catalog.product_policy_hash.toLowerCase()
+      || !entitled
+  ) throw new CoreError('Forbidden', 'Stored seckill quote is no longer authorized', 403);
+
+  if (!['QUOTED', 'SUBMITTED', 'REORGED'].includes(seckill.state)) return;
+  const reservations = await executor.query<{
+    reservation_id: string;
+    policy_version: string | number;
+    sku_id: string;
+    buyer_wallet: string;
+    quantity: string | number;
+    classification: 'SECKILL' | 'FALLBACK_RETAIL';
+    session_id: string | null;
+    capacity_reservation_id: string;
+    state: string;
+    expires_at: Date;
+  }>(
+    `SELECT reservation_id, policy_version, sku_id, buyer_wallet, quantity, classification,
+       session_id, capacity_reservation_id, state, expires_at
+     FROM core.inventory_reservations
+     WHERE reservation_id IN ($1, $2) FOR UPDATE`,
+    [seckill.intent.reservationId, fallback.intent.reservationId],
+  );
+  const seckillReservation = reservations.rows.find((row) => row.reservation_id === seckill.intent.reservationId);
+  const fallbackReservation = reservations.rows.find((row) => row.reservation_id === fallback.intent.reservationId);
+  const matches = (reservation: typeof seckillReservation | undefined, classification: 'SECKILL' | 'FALLBACK_RETAIL') => (
+    reservation?.state === 'ACTIVE'
+      && reservation.classification === classification
+      && Number(reservation.policy_version) === seckill.intent.policyVersion
+      && reservation.sku_id === seckill.sku_id
+      && reservation.buyer_wallet.toLowerCase() === buyer
+      && BigInt(reservation.quantity) === BigInt(quantity)
+      && reservation.session_id === seckill.session_id
+      && Math.floor(new Date(reservation.expires_at).getTime() / 1_000) === seckill.intent.reservationDeadline
+  );
+  if (
+    !seckillReservation || !fallbackReservation
+      || !matches(seckillReservation, 'SECKILL')
+      || !matches(fallbackReservation, 'FALLBACK_RETAIL')
+      || seckillReservation.capacity_reservation_id !== seckillReservation.reservation_id
+      || fallbackReservation.capacity_reservation_id !== seckillReservation.reservation_id
+  ) throw new CoreError('InvalidFinality', 'Stored seckill inventory reservation is invalid', 409);
+}
+
 async function loadQuoteIdentity(executor: SqlExecutor, buyer: string, idempotencyKey: string) {
   const result = await executor.query<{ order_id: string; quote_kind: 'ORDINARY' | 'SECKILL' }>(
     `SELECT order_id, quote_kind FROM core.payment_quotes
@@ -1033,6 +1152,15 @@ async function loadExistingSeckillQuote(executor: SqlExecutor, buyer: string, id
     [buyer, idempotencyKey],
   );
   return result.rows;
+}
+
+async function loadExistingSeckillQuoteForIdempotency(executor: SqlExecutor, buyer: string, idempotencyKey: string) {
+  const identity = await loadQuoteIdentity(executor, buyer, idempotencyKey);
+  if (!identity) return undefined;
+  if (identity.quote_kind !== 'SECKILL') {
+    throw new CoreError('IdempotencyConflict', 'Idempotency key belongs to an ordinary quote', 409);
+  }
+  return loadExistingSeckillQuote(executor, buyer, idempotencyKey);
 }
 
 async function loadStoredQuote(executor: SqlExecutor, orderId: string, buyer: string) {
@@ -1366,7 +1494,7 @@ async function loadCatalogSeckillRows(
       productId: row.product_id,
       listPriceUsdt: row.list_price_usdt,
       freightUsdt: row.default_freight_usdt,
-      stockAvailable: Number(row.total_stock_available),
+      stockAvailable: Number(row.inventory) - Number(row.sold) - Number(row.reserved),
       guaranteeBalanceUsdt: row.guarantee_balance_usdt ?? '0',
       guaranteeEvidenceHash: row.guarantee_evidence_hash,
     }, now)
@@ -1452,6 +1580,24 @@ function catalogRowPurchasable(
     || isMicrotestBuyerEligible(
       mainnetMicrotestEntitlement,
       microtestSubject(row),
+      buyer,
+      quantity,
+      now,
+    );
+}
+
+function catalogRowSeckillPurchasable(
+  row: CatalogRow,
+  session: Pick<SessionRow, 'available'>,
+  buyer: string,
+  quantity: number,
+  mainnetMicrotestEntitlement: MainnetMicrotestEntitlement | undefined,
+  now: Date,
+) {
+  return row.guarantee_status === 'READY'
+    || isMicrotestBuyerEligible(
+      mainnetMicrotestEntitlement,
+      { ...microtestSubject(row), stockAvailable: Number(session.available) },
       buyer,
       quantity,
       now,

@@ -30,7 +30,7 @@
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "b667ac5dc7d5f5cf1dfbfcf2a976ddab1099549358c3a7a34467a40f338b8d64"
+      "sha256": "3d48fad4772a32bb826ba78d9e31a1538866e86eccdd34a9dfc615eac2e6bd1a"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",

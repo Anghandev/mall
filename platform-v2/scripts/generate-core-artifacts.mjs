@@ -144,6 +144,7 @@ const schemaSources = [
       '038_manual_fulfillment_launch.sql',
       '039_mainnet_microtest_transfer_authorization.sql',
       '040_delivery_action_evidence.sql',
+      '041_seckill_shared_inventory_reservations.sql',
     ],
   },
   {

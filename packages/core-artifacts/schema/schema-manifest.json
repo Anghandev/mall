@@ -205,6 +205,11 @@
           "name": "040_delivery_action_evidence.sql",
           "path": "schema/business/040_delivery_action_evidence.sql",
           "sha256": "44a0b61c388a393d6e27fab8ec43276d5feaad5fc716c13f8404e12025428b38"
+        },
+        {
+          "name": "041_seckill_shared_inventory_reservations.sql",
+          "path": "schema/business/041_seckill_shared_inventory_reservations.sql",
+          "sha256": "d3b2aaa9455e8021fc70c0a4bbb5f3820bd306ac4bc342339c8b5991e5ec8d66"
         }
       ]
     },

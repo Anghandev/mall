@@ -267,9 +267,11 @@ source conflicts are indexed in `V2_DECISIONS.md`.
 - A seckill intent binds both seckill and ordinary fallback quotes. Before
   payment, the customer acknowledges both prices and the classification rule.
 - Chain block time is authoritative. Inclusion before the deadline is seckill;
-  inclusion after it atomically uses the fallback price and ordinary inventory
-  and does not enter or win the prize pool. Failure of either required fallback
-  condition reverts the whole payment.
+  inclusion after it atomically uses the fallback price, the same session-locked
+  inventory allocation and does not enter or win the prize pool. The two signed
+  reservation IDs share one off-chain session allocation, so a dual quote never
+  double-reserves or requires separately available retail stock. Failure of the
+  selected leg or its shared allocation reverts the whole payment.
 - Each session has at most one winner: the last valid order that reaches
   canonical chain finality by the session cutoff. The winner receives the whole
   payable USDT pool for that session. Human review may reject cheating or an

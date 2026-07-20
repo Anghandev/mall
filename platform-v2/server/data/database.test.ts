@@ -66,7 +66,7 @@ import {
 import { leaseDurableJobs } from './queue.ts';
 import { SettlementService } from './settlement-service.ts';
 import { SeckillService } from './seckill-service.ts';
-import { SeckillOperationsService } from './seckill-operations-service.ts';
+import { releaseSeckillPlanInventory, SeckillOperationsService } from './seckill-operations-service.ts';
 import { settleMaturedSeckillPrizes } from './seckill-prize-service.ts';
 import { TakeoverFundingService, type TakeoverFundingApprovalInput } from './takeover-funding-service.ts';
 import { TakeoverCaseService } from './takeover-case-service.ts';
@@ -143,6 +143,8 @@ test('business and audit migrations apply from empty databases', async () => {
       '037_payment_quote_source_evidence.sql',
       '038_manual_fulfillment_launch.sql',
       '039_mainnet_microtest_transfer_authorization.sql',
+      '040_delivery_action_evidence.sql',
+      '041_seckill_shared_inventory_reservations.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -1571,7 +1573,7 @@ test('two PaymentCompleted logs in one transaction keep independent finality rec
   }
 });
 
-test('seckill and fallback reservations use independent session and retail inventory', async () => {
+test('seckill fallback reservation shares one session allocation and restores it once', async () => {
   const db = await createBusinessDatabase();
   try {
     await seedCatalog(db, 1);
@@ -1611,6 +1613,8 @@ test('seckill and fallback reservations use independent session and retail inven
       buyerWallet: BUYER,
       quantity: 1,
       classification: 'FALLBACK_RETAIL',
+      sessionId,
+      capacityReservationId: 'seckill-reservation',
       expiresAt: new Date(now.getTime() + 10 * 60_000),
     });
     const reserved = await db.query<{
@@ -1622,13 +1626,12 @@ test('seckill and fallback reservations use independent session and retail inven
       `SELECT sku.stock_available, sku.stock_reserved, session.reserved AS session_reserved, session.sold
        FROM core.skus sku JOIN core.seckill_sessions session ON session.sku_id = sku.sku_id`,
     );
-    assert.deepEqual(reserved.rows[0], { stock_available: 0, stock_reserved: 1, session_reserved: 1, sold: 0 });
+    assert.deepEqual(reserved.rows[0], { stock_available: 1, stock_reserved: 0, session_reserved: 1, sold: 0 });
     await db.query('SELECT core.consume_inventory_reservation_at($1, $2, $3)', [
-      'seckill-reservation',
+      'fallback-reservation',
       `0x${'a'.repeat(64)}`,
       now,
     ]);
-    await db.query("SELECT core.release_inventory_reservation('fallback-reservation', 'RELEASED')");
     const consumed = await db.query<{
       stock_available: number;
       stock_reserved: number;
@@ -1639,12 +1642,213 @@ test('seckill and fallback reservations use independent session and retail inven
        FROM core.skus sku JOIN core.seckill_sessions session ON session.sku_id = sku.sku_id`,
     );
     assert.deepEqual(consumed.rows[0], { stock_available: 1, stock_reserved: 0, session_reserved: 0, sold: 1 });
-    await db.query("SELECT core.restore_reorged_inventory_reservation('seckill-reservation')");
+    assert.deepEqual(
+      (await db.query<{ reservation_id: string; state: string }>(
+        `SELECT reservation_id, state FROM core.inventory_reservations
+         WHERE reservation_id IN ('seckill-reservation', 'fallback-reservation') ORDER BY reservation_id`,
+      )).rows,
+      [
+        { reservation_id: 'fallback-reservation', state: 'CONSUMED' },
+        { reservation_id: 'seckill-reservation', state: 'ACTIVE' },
+      ],
+    );
+    await db.query("SELECT core.restore_reorged_inventory_reservation('fallback-reservation')");
     const restored = await db.query<{ reserved: number; sold: number }>(
       'SELECT reserved, sold FROM core.seckill_sessions WHERE session_id = $1',
       [sessionId],
     );
     assert.deepEqual(restored.rows[0], { reserved: 1, sold: 0 });
+    assert.deepEqual(
+      (await db.query<{ state: string }>(
+        `SELECT state FROM core.inventory_reservations
+         WHERE reservation_id IN ('seckill-reservation', 'fallback-reservation') ORDER BY reservation_id`,
+      )).rows,
+      [{ state: 'ACTIVE' }, { state: 'ACTIVE' }],
+    );
+  } finally {
+    await db.close();
+  }
+});
+
+test('three seckill quotes consume only the session inventory locked at opening', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    await seedCatalog(db, 3);
+    const now = new Date(Math.floor(Date.now() / 1_000) * 1_000);
+    const sessionId = `0x${'e'.repeat(64)}`;
+    const actionId = `0x${'a'.repeat(64)}`;
+    await insertLiveSeckillSession(db, sessionId, now, 90, 3);
+    await db.query(
+      `INSERT INTO core.seckill_governance_actions (
+         action_id, session_id, policy_version, action_kind, evidence_hash,
+         governance_wallet_address, target_address, calldata, calldata_hash,
+         old_value_hash, new_value_hash, state, actor_wallet,
+         idempotency_key, request_hash, created_at, updated_at
+       ) VALUES ($1,$2,1,'OPEN_SESSION',$3,$4,$5,'0x00',$3,$3,$3,'DRAFT',$4,
+         'shared-allocation-plan',$3,$6,$6)`,
+      [actionId, sessionId, HASH, '0x3333333333333333333333333333333333333333',
+        '0x6666666666666666666666666666666666666666', now],
+    );
+    await db.query(
+      `INSERT INTO core.seckill_session_plans (
+         session_id, action_id, policy_version, merchant_id, product_id, sku_id,
+         product_policy_hash, rules_content_hash, starts_at, main_deadline,
+         relay_deadline, inventory, seckill_list_price_usdt, snapshot,
+         inventory_lock_state, created_at, updated_at
+      ) VALUES ($1,$2,1,'merchant-1','product-1','sku-1',$3,$3,$4,$5,$6,3,90,'{}',
+         'LOCKED',$7,$7)`,
+      [sessionId, actionId, HASH, new Date(now.getTime() - 60_000),
+        new Date(now.getTime() + 59 * 60_000), now, now],
+    );
+    await db.query('UPDATE core.seckill_sessions SET governance_action_id = $2 WHERE session_id = $1', [sessionId, actionId]);
+    await db.query(
+      `UPDATE core.skus
+       SET stock_available = 0, stock_seckill_locked = 3
+       WHERE sku_id = 'sku-1'`,
+    );
+    let nextId = 0;
+    let nextNonce = 0n;
+    const service = new CatalogPaymentService({
+      transactions: transactionAdapter(db),
+      signer: {
+        sign: async () => ({
+          signature: `0x${'1'.repeat(130)}`,
+          signer: '0x8888888888888888888888888888888888888888',
+        }),
+      },
+      nplQuotes: {
+        quote: async ({ listPriceUsdt }) => ({
+          nplQuoteAmount: listPriceUsdt * 10n,
+          quoteSourceEvidence: { source: 'PRIMARY', observedBlock: 40_000_000, reservesHash: HASH },
+        }),
+      },
+      beneficiaries: {
+        resolve: async () => ({
+          genesis: '0x0000000000000000000000000000000000000000',
+          directReferral: '0x5000000000000000000000000000000000000002',
+          district: '0x5000000000000000000000000000000000000003',
+          city: '0x5000000000000000000000000000000000000004',
+          province: '0x5000000000000000000000000000000000000005',
+          region: '0x5000000000000000000000000000000000000006',
+        }),
+      },
+      policies: { assertPublished: async () => undefined },
+      bnmWallets: { assertRegistered: async () => undefined },
+      paymentRouterAddress: '0x9999999999999999999999999999999999999999',
+      clock: () => now,
+      bytes32: () => `0x${(++nextId).toString(16).padStart(64, '0')}`,
+      nonce: () => ++nextNonce,
+    });
+    const quotes = [];
+    for (let index = 0; index < 3; index += 1) {
+      quotes.push(await service.createSeckillQuote(BUYER, {
+        idempotencyKey: `locked-session-quote-${index}`,
+        sessionId,
+        productId: 'product-1',
+        skuId: 'sku-1',
+        quantity: 1,
+        fulfillmentMode: 'DELIVERY',
+        fulfillmentTargetHash: HASH,
+        regionCodeHash: HASH,
+      }));
+    }
+    const inventory = await db.query<{
+      stock_available: number;
+      stock_reserved: number;
+      stock_seckill_locked: number;
+      reserved: number;
+      sold: number;
+    }>(
+      `SELECT sku.stock_available, sku.stock_reserved, sku.stock_seckill_locked,
+         session.reserved, session.sold
+       FROM core.skus sku
+       JOIN core.seckill_sessions session ON session.sku_id = sku.sku_id
+       WHERE session.session_id = $1`,
+      [sessionId],
+    );
+    assert.deepEqual(inventory.rows[0], {
+      stock_available: 0,
+      stock_reserved: 0,
+      stock_seckill_locked: 3,
+      reserved: 3,
+      sold: 0,
+    });
+    for (const quote of quotes) {
+      const pair = await db.query<{
+        capacity_reservation_id: string;
+        session_id: string;
+      }>(
+        `SELECT capacity_reservation_id, session_id
+         FROM core.inventory_reservations WHERE reservation_id = $1`,
+        [quote.dual.fallback.reservationId],
+      );
+      assert.deepEqual(pair.rows[0], {
+        capacity_reservation_id: quote.dual.seckill.reservationId,
+        session_id: sessionId,
+      });
+    }
+    const fallbackPayment = paymentInput(quotes[0]!.dual.fallback, 'FALLBACK_RETAIL');
+    fallbackPayment.event.confirmations = 1;
+    const payments = new PostgresPaymentStore(transactionAdapter(db));
+    await payments.record(fallbackPayment);
+    assert.deepEqual(
+      (await db.query<{ reserved: number; sold: number }>(
+        'SELECT reserved, sold FROM core.seckill_sessions WHERE session_id = $1',
+        [sessionId],
+      )).rows[0],
+      { reserved: 2, sold: 1 },
+    );
+    const releaseAt = new Date(now.getTime() + 11 * 60_000);
+    await transactionAdapter(db).transaction((executor) => (
+      releaseSeckillPlanInventory(executor, sessionId, releaseAt, true)
+    ));
+    assert.deepEqual(
+      (await db.query<{ inventory_lock_state: string; released_at: Date | null }>(
+        'SELECT inventory_lock_state, released_at FROM core.seckill_session_plans WHERE session_id = $1',
+        [sessionId],
+      )).rows[0],
+      { inventory_lock_state: 'LOCKED', released_at: null },
+    );
+    await payments.reverse(
+      paymentEventKey(
+        fallbackPayment.event.transactionHash,
+        fallbackPayment.event.logIndex,
+        fallbackPayment.event.blockHash,
+      ),
+      HASH_2,
+    );
+    assert.deepEqual(
+      (await db.query<{ reserved: number; sold: number }>(
+        'SELECT reserved, sold FROM core.seckill_sessions WHERE session_id = $1',
+        [sessionId],
+      )).rows[0],
+      { reserved: 3, sold: 0 },
+    );
+    await transactionAdapter(db).transaction((executor) => (
+      releaseSeckillPlanInventory(executor, sessionId, releaseAt, true)
+    ));
+    assert.deepEqual(
+      (await db.query<{
+        stock_total: number;
+        stock_available: number;
+        stock_seckill_locked: number;
+      }>('SELECT stock_total, stock_available, stock_seckill_locked FROM core.skus WHERE sku_id = $1', ['sku-1'])).rows[0],
+      { stock_total: 3, stock_available: 3, stock_seckill_locked: 0 },
+    );
+    assert.deepEqual(
+      (await db.query<{ reserved: number; sold: number }>(
+        'SELECT reserved, sold FROM core.seckill_sessions WHERE session_id = $1',
+        [sessionId],
+      )).rows[0],
+      { reserved: 0, sold: 0 },
+    );
+    assert.equal(
+      (await db.query<{ inventory_lock_state: string }>(
+        'SELECT inventory_lock_state FROM core.seckill_session_plans WHERE session_id = $1',
+        [sessionId],
+      )).rows[0]?.inventory_lock_state,
+      'RELEASED',
+    );
   } finally {
     await db.close();
   }
@@ -2146,6 +2350,125 @@ test('bounded mainnet micro-test entitlement gates catalog quotes and expires st
   }
 });
 
+test('mainnet micro-test entitlement remains valid after its seckill inventory is locked', async () => {
+  const db = await createBusinessDatabase();
+  const now = new Date(Math.floor(Date.now() / 1_000) * 1_000);
+  const expiresAt = new Date(now.getTime() + 2 * 60_000);
+  try {
+    await seedCatalog(db, 1);
+    await db.query("UPDATE core.merchants SET guarantee_status = 'BELOW_MINIMUM' WHERE merchant_id = 'merchant-1'");
+    await db.query(
+      `INSERT INTO core.merchant_guarantees (
+         merchant_id, backing_wallet_address, balance_usdt, minimum_usdt,
+         source_evidence_hash, updated_at
+       ) VALUES ('merchant-1',$1,'1',$2,$3,$4)`,
+      ['0x5555555555555555555555555555555555555555', (1_000n * 10n ** 18n).toString(), HASH_2,
+        new Date(now.getTime() - 60_000)],
+    );
+    const entitlement = loadMainnetMicrotestEntitlement({
+      MAINNET_MICROTEST_MERCHANT_ID: 'merchant-1',
+      MAINNET_MICROTEST_MERCHANT_WALLET: MERCHANT,
+      MAINNET_MICROTEST_PRODUCT_ID: 'product-1',
+      MAINNET_MICROTEST_BUYER_WALLETS: [
+        BUYER,
+        '0x3333333333333333333333333333333333333333',
+        '0x4444444444444444444444444444444444444444',
+      ].join(','),
+      MAINNET_MICROTEST_EXPIRES_AT: expiresAt.toISOString(),
+      MAINNET_MICROTEST_MAX_LIST_PRICE_USDT: '1000',
+      MAINNET_MICROTEST_MAX_FREIGHT_USDT: '5',
+      MAINNET_MICROTEST_MAX_STOCK: '1',
+      MAINNET_MICROTEST_SECKILL_INVENTORY: '1',
+      MAINNET_MICROTEST_EVIDENCE_HASH: HASH_2,
+    }, now)!;
+    const sessionId = `0x${'d'.repeat(64)}`;
+    await insertLiveSeckillSession(db, sessionId, now, 90);
+    await db.query(
+      "UPDATE core.skus SET stock_available = 0, stock_seckill_locked = 1 WHERE sku_id = 'sku-1'",
+    );
+    const ids = [
+      `0x${'9'.repeat(64)}`,
+      `0x${'8'.repeat(64)}`,
+      `0x${'7'.repeat(64)}`,
+      `0x${'6'.repeat(64)}`,
+      `0x${'5'.repeat(64)}`,
+      `0x${'4'.repeat(64)}`,
+    ];
+    let signCalls = 0;
+    let markSecondSignerReady!: () => void;
+    let releaseFirstSigner!: () => void;
+    let releaseSecondSigner!: () => void;
+    const secondSignerReady = new Promise<void>((resolve) => { markSecondSignerReady = resolve; });
+    const firstSignerReleased = new Promise<void>((resolve) => { releaseFirstSigner = resolve; });
+    const secondSignerReleased = new Promise<void>((resolve) => { releaseSecondSigner = resolve; });
+    const service = new CatalogPaymentService({
+      transactions: transactionAdapter(db),
+      signer: {
+        sign: async () => {
+          signCalls += 1;
+          if (signCalls === 2) markSecondSignerReady();
+          await (signCalls === 1 ? firstSignerReleased : secondSignerReleased);
+          return {
+            signature: `0x${'1'.repeat(130)}`,
+            signer: '0x8888888888888888888888888888888888888888',
+          };
+        },
+      },
+      nplQuotes: {
+        quote: async ({ listPriceUsdt }) => ({
+          nplQuoteAmount: listPriceUsdt * 10n,
+          quoteSourceEvidence: { source: 'PRIMARY', observedBlock: 40_000_000, reservesHash: HASH },
+        }),
+      },
+      beneficiaries: {
+        resolve: async () => ({
+          genesis: '0x0000000000000000000000000000000000000000',
+          directReferral: '0x5000000000000000000000000000000000000002',
+          district: '0x5000000000000000000000000000000000000003',
+          city: '0x5000000000000000000000000000000000000004',
+          province: '0x5000000000000000000000000000000000000005',
+          region: '0x5000000000000000000000000000000000000006',
+        }),
+      },
+      policies: { assertPublished: async () => undefined },
+      bnmWallets: { assertRegistered: async () => undefined },
+      paymentRouterAddress: '0x9999999999999999999999999999999999999999',
+      clock: () => now,
+      bytes32: () => ids.shift()!,
+      nonce: () => 7n,
+      mainnetMicrotestEntitlement: entitlement,
+    });
+    assert.equal((await service.listCatalog(BUYER)).length, 1);
+    const request = {
+      idempotencyKey: 'entitled-locked-seckill',
+      sessionId,
+      productId: 'product-1',
+      skuId: 'sku-1',
+      quantity: 1,
+      fulfillmentMode: 'DELIVERY',
+      fulfillmentTargetHash: HASH,
+      regionCodeHash: HASH,
+    } as const;
+    const first = service.createSeckillQuote(BUYER, request);
+    const second = service.createSeckillQuote(BUYER, request);
+    await secondSignerReady;
+    releaseFirstSigner();
+    const quote = await first;
+    releaseSecondSigner();
+    const retry = await second;
+    assert.equal(quote.dual.seckill.sessionId, sessionId);
+    assert.equal(retry.orderId, quote.orderId);
+    assert.equal(retry.authorizationDigest, quote.authorizationDigest);
+    assert.equal(retry.dual.seckill.reservationId, quote.dual.seckill.reservationId);
+    assert.equal(retry.dual.fallback.reservationId, quote.dual.fallback.reservationId);
+    const laterRetry = await service.createSeckillQuote(BUYER, request);
+    assert.equal(laterRetry.orderId, quote.orderId);
+    assert.equal(signCalls, 2);
+  } finally {
+    await db.close();
+  }
+});
+
 test('catalog payment service builds an authoritative idempotent quote and records transaction replacement', async () => {
   const db = await createBusinessDatabase();
   try {
@@ -2475,8 +2798,8 @@ test('business analytics uses canonical Asia Shanghai finality windows and fail-
     await db.query(
       `INSERT INTO core.inventory_reservations (
          reservation_id, reservation_hash, policy_version, sku_id, buyer_wallet,
-         quantity, classification, state, expires_at, consumed_order_id
-       ) VALUES ($1, $2, 1, 'sku-1', $3, 1, 'ORDINARY', 'CONSUMED', $4, $5)`,
+         quantity, classification, capacity_reservation_id, state, expires_at, consumed_order_id
+       ) VALUES ($1, $2, 1, 'sku-1', $3, 1, 'ORDINARY', $1, 'CONSUMED', $4, $5)`,
       [malformedReservationId, `0x${'6'.repeat(64)}`, BUYER, new Date(now.getTime() + 60_000), malformedOrderId],
     );
     await insertOrder(db, malformedOrderId, malformedReservationId);
@@ -3347,7 +3670,7 @@ test('seckill quote locks both inventories and final classification releases the
       `SELECT sku.stock_reserved, session.reserved AS session_reserved
        FROM core.skus sku JOIN core.seckill_sessions session ON session.sku_id = sku.sku_id`,
     );
-    assert.deepEqual(reserved.rows[0], { stock_reserved: 1, session_reserved: 1 });
+    assert.deepEqual(reserved.rows[0], { stock_reserved: 0, session_reserved: 1 });
 
     const event = paymentInput(quote.dual.seckill, 'SECKILL');
     event.event.blockTimestamp = new Date(now.getTime() + 42_000);
@@ -7027,9 +7350,9 @@ test('notifications consume finalized domain events independently and isolate Co
     await db.query(
       `INSERT INTO core.inventory_reservations (
          reservation_id, reservation_hash, policy_version, sku_id, buyer_wallet,
-         quantity, classification, state, expires_at
+         quantity, classification, capacity_reservation_id, state, expires_at
        ) VALUES ('reservation-notification', $1, 1, 'sku-1', $2, 1,
-         'ORDINARY', 'ACTIVE', clock_timestamp() + interval '1 hour')`,
+         'ORDINARY', 'reservation-notification', 'ACTIVE', clock_timestamp() + interval '1 hour')`,
       [`0x${'8'.repeat(64)}`, BUYER],
     );
     await insertOrder(db, 'order-notification', 'reservation-notification');
@@ -12526,20 +12849,27 @@ async function publishTestPolicy(db: PGlite, policyVersion: number) {
   );
 }
 
-async function insertLiveSeckillSession(db: PGlite, sessionId: string, now: Date, unitPrice: number) {
+async function insertLiveSeckillSession(
+  db: PGlite,
+  sessionId: string,
+  now: Date,
+  unitPrice: number,
+  inventory = 1,
+) {
   await db.query(
     `INSERT INTO core.seckill_sessions (
        session_id, policy_version, merchant_id, product_id, sku_id,
        product_policy_hash, starts_at, main_deadline, relay_deadline,
        inventory, seckill_list_price_usdt, phase, snapshot
      ) VALUES ($1, 1, 'merchant-1', 'product-1', 'sku-1', $2,
-       $3, $4, $5, 1, $6, 'LIVE', '{}')`,
+       $3, $4, $5, $6, $7, 'LIVE', '{}')`,
     [
       sessionId,
       HASH,
       new Date(now.getTime() - 60_000),
       new Date(now.getTime() + 59 * 60_000),
       new Date(now.getTime() + 60_000),
+      inventory,
       unitPrice,
     ],
   );
