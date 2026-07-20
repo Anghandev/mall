@@ -324,6 +324,7 @@ function validateGovernanceRequest(
     targetAddress: parsed.to,
     calldata: parsed.data,
     calldataHash: parsed.dataHash,
+    gasLimit: parsed.gasLimit.toString(),
     minimumExecutorNonce,
     expected,
   };

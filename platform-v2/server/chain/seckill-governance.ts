@@ -58,6 +58,7 @@ export interface SeckillExecution {
   targetAddress: string;
   calldata: string;
   calldataHash: string;
+  gasLimit: string;
   minimumExecutorNonce: string;
   expected: SeckillExpectation;
 }
@@ -168,6 +169,7 @@ export class HttpSeckillEoaExecutor implements SeckillEoaExecutor {
         value: '0',
         data: input.calldata,
         dataHash: input.calldataHash,
+        gasLimit: input.gasLimit,
         resourceType: 'SECKILL_GOVERNANCE_ACTION',
         resourceId: input.actionId,
         sessionId: input.sessionId,
@@ -363,6 +365,7 @@ export class SeckillGovernanceWorker {
   readonly #transactions: SqlTransactionRunner;
   readonly #executor: SeckillEoaExecutor;
   readonly #chain: SeckillChainSource;
+  readonly #executionGasLimit: string;
   readonly #clock: () => Date;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #running: Promise<void> | undefined;
@@ -372,11 +375,16 @@ export class SeckillGovernanceWorker {
     transactions: SqlTransactionRunner;
     executor: SeckillEoaExecutor;
     chain: SeckillChainSource;
+    executionGasLimit: string;
     clock?: () => Date;
   }) {
     this.#transactions = input.transactions;
     this.#executor = input.executor;
     this.#chain = input.chain;
+    if (!/^[1-9][0-9]*$/.test(input.executionGasLimit)) {
+      throw new CoreError('ConfigurationRequired', 'Seckill execution gas limit is invalid', 503);
+    }
+    this.#executionGasLimit = input.executionGasLimit;
     this.#clock = input.clock ?? (() => new Date());
   }
 
@@ -385,6 +393,10 @@ export class SeckillGovernanceWorker {
     const executions = await this.#pendingExecutions(10);
     for (const action of executions) {
       try {
+        if (!action.approval_deadline || action.approval_deadline.getTime() <= this.#clock().getTime()) {
+          await this.#expirePendingExecution(action.action_id);
+          continue;
+        }
         const execution = await this.#executionFor(action);
         const result = await this.#executor.execute(execution);
         await this.#recordExecution(action.action_id, result);
@@ -475,7 +487,7 @@ export class SeckillGovernanceWorker {
       const minimumExecutorNonce = prior.rows[0]?.max_executor_nonce === null
         ? '0'
         : (BigInt(prior.rows[0]!.max_executor_nonce) + 1n).toString();
-      return executionFromRow(executor, action, minimumExecutorNonce);
+      return executionFromRow(executor, action, minimumExecutorNonce, this.#executionGasLimit);
     });
   }
 
@@ -545,7 +557,7 @@ export class SeckillGovernanceWorker {
         throw new CoreError('InvalidFinality', 'Seckill EOA nonce or transaction hash is unavailable', 409);
       }
       return {
-        ...await executionFromRow(executor, action, String(action.executor_nonce)),
+        ...await executionFromRow(executor, action, String(action.executor_nonce), this.#executionGasLimit),
         submittedTxHash: action.submitted_tx_hash,
         priorState: action.state as SeckillFinalityCandidate['priorState'],
         ...(action.execution_tx_hash && action.block_number !== null && action.block_hash
@@ -558,6 +570,26 @@ export class SeckillGovernanceWorker {
             }
           : {}),
       };
+    });
+  }
+
+  #expirePendingExecution(actionId: string) {
+    return this.#transactions.transaction(async (executor) => {
+      const action = await lockedAction(executor, actionId);
+      const now = this.#clock();
+      if (action.state !== 'PENDING_EXECUTION'
+        || (action.approval_deadline && action.approval_deadline.getTime() > now.getTime())) return;
+      await executor.query(
+        "UPDATE core.seckill_governance_actions SET state = 'FAILED', updated_at = $2 WHERE action_id = $1",
+        [action.action_id, now],
+      );
+      await appendTransition(executor, action, 'FAILED', { reasonCode: 'APPROVAL_EXPIRED' }, now);
+      await enqueueWorkerAudit(executor, action, 'SeckillEoaApprovalExpired', 'SYSTEM', {
+        reasonCode: 'APPROVAL_EXPIRED',
+      }, now);
+      if (action.action_kind === 'OPEN_SESSION') {
+        await releaseSeckillPlanInventory(executor, action.session_id, now, false);
+      }
     });
   }
 
@@ -642,6 +674,7 @@ async function executionFromRow(
   executor: SqlExecutor,
   row: SeckillActionRow,
   minimumExecutorNonce: string,
+  gasLimit: string,
 ): Promise<SeckillExecution> {
   let expected: SeckillExpectation;
   if (row.action_kind === 'OPEN_SESSION') {
@@ -690,6 +723,7 @@ async function executionFromRow(
     targetAddress: row.target_address,
     calldata: row.calldata,
     calldataHash: row.calldata_hash,
+    gasLimit,
     minimumExecutorNonce,
     expected,
   };
@@ -1068,6 +1102,7 @@ export function seckillExecutionRequestDigest(input: SeckillExecution) {
     || !isHash(input.evidenceHash)
     || !Number.isSafeInteger(input.policyVersion)
     || input.policyVersion < 1
+    || !/^[1-9][0-9]*$/.test(input.gasLimit)
     || !isCanonicalNonce(input.minimumExecutorNonce)
   ) throw new CoreError('InvalidRequest', 'Seckill EOA execution request is invalid');
   if (keccak256(input.calldata).toLowerCase() !== input.calldataHash.toLowerCase()) {
@@ -1336,8 +1371,16 @@ function fetchWithDeadline(fetchImpl: typeof fetch, timeoutMs = 10_000): typeof 
 }
 
 function secureUrl(value: string, name: string) {
-  const url = new URL(value);
-  if (url.protocol !== 'https:') throw new CoreError('ExternalBlocked', `${name} requires HTTPS`, 503);
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new CoreError('ConfigurationRequired', `${name} URL is invalid`, 503);
+  }
+  const loopback = ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
+  if (url.username || url.password || (url.protocol !== 'https:' && !(loopback && url.protocol === 'http:'))) {
+    throw new CoreError('ExternalBlocked', `${name} requires HTTPS outside loopback`, 503);
+  }
   return url;
 }
 

@@ -94,6 +94,23 @@ test('seckill EOA execution reaches finality without a Safe lookup service', asy
   assert.equal(observation.executionTxHash, TX_HASH);
 });
 
+test('seckill EOA executor permits authenticated loopback HTTP but rejects remote HTTP', async () => {
+  const execution = seckillExecution();
+  const loopback = new HttpSeckillEoaExecutor({
+    url: 'http://127.0.0.1:8790/governance',
+    token: 'token',
+    fetchImpl: executorFetch(execution, seckillExecutionRequestDigest(execution)),
+  });
+  assert.equal((await loopback.execute(execution)).submittedTxHash, TX_HASH);
+
+  const remote = new HttpSeckillEoaExecutor({
+    url: 'http://executor.example/seckill',
+    token: 'token',
+    fetchImpl: executorFetch(execution, seckillExecutionRequestDigest(execution)),
+  });
+  await assert.rejects(() => remote.execute(execution), /requires HTTPS outside loopback/);
+});
+
 test('seckill breaker receipt reaches finality without historical state calls', async () => {
   const execution = seckillBreakerExecution();
   const source = new ResilientSeckillChainSource({
@@ -138,6 +155,7 @@ function seckillExecution(): SeckillExecution {
     targetAddress: ROUTER,
     calldata,
     calldataHash: keccak256(calldata).toLowerCase(),
+    gasLimit: '1000000',
     minimumExecutorNonce: '7',
     expected: {
       kind: 'OPEN_SESSION',
@@ -160,6 +178,7 @@ function seckillBreakerExecution(): SeckillExecution {
     targetAddress: ROUTER,
     calldata,
     calldataHash: keccak256(calldata).toLowerCase(),
+    gasLimit: '1000000',
     minimumExecutorNonce: '7',
     expected: { kind: 'FORCE_CLOSE', targetPaused: true },
   };
@@ -172,6 +191,7 @@ function executorFetch(input: CoverageBreakerExecution | SeckillExecution, reque
     assert.equal(body.from, input.governanceWallet);
     assert.equal(body.to, 'routerAddress' in input ? input.routerAddress : input.targetAddress);
     assert.equal(body.data, input.calldata);
+    if ('gasLimit' in input) assert.equal(body.gasLimit, input.gasLimit);
     return httpJson({
       executorWallet: input.governanceWallet,
       executorNonce: '7',

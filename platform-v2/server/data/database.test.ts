@@ -2048,6 +2048,7 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
     const reorged = new Set<string>();
     const worker = new SeckillGovernanceWorker({
       transactions: transactionAdapter(db),
+      executionGasLimit: '1000000',
       executor: {
         execute: async (input: SeckillExecution) => {
           const current = nonceByExecutor.get(input.governanceWallet) ?? BigInt(input.minimumExecutorNonce);

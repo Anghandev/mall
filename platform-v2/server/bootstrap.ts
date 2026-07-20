@@ -468,6 +468,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
       ...(config.rpcUrl ? { primaryRpcUrl: config.rpcUrl } : {}),
       ...(config.fallbackRpcUrl ? { fallbackRpcUrl: config.fallbackRpcUrl } : {}),
     }),
+    executionGasLimit: required(config.executorMaxGasLimit, 'EXECUTOR_MAX_GAS_LIMIT').toString(),
   });
   const executorMaxGasLimit = required(config.executorMaxGasLimit, 'EXECUTOR_MAX_GAS_LIMIT');
   const settlementTransferScheduler = new SettlementTransferScheduler({
