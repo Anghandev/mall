@@ -1,7 +1,7 @@
 # 24K 商城 V2 上线前全量验收清单
 
 验收日期：2026-07-20
-基线：`v2/core@79f93885d70f74fd21ef40d8d9e611263d6c23f2`
+生产发布基线：`v2/core@a1c00261dc279af876407bf083e6540312d6da8e`
 Core artifact：`2.0.0-fulfillment-launch.18`
 
 状态只使用 `Pass` / `Fail` / `Pending` / `Phase2` / `External`。`Pass`
@@ -12,7 +12,7 @@ Core artifact：`2.0.0-fulfillment-launch.18`
 
 | 验收项 | 状态 | 证据 |
 |---|---|---|
-| HEAD 精确为 `79f93885...` | Pass | `git rev-parse HEAD` |
+| 发布 HEAD 精确为 `a1c00261...` | Pass | `git rev-parse HEAD` |
 | 验收开始时工作区干净 | Pass | `git status --short` 无输出 |
 | Mall / Merchant / Admin 消费同一 artifact | Pass | 三份 `package.json` 均为 `workspace:2.0.0-fulfillment-launch.18` |
 | OpenAPI SHA-256 | Pass | `8d1595cc3060e0c41c9d561f1ac9448b379f48028db93fc00201893a85bd1efb` |
@@ -74,7 +74,7 @@ Core artifact：`2.0.0-fulfillment-launch.18`
 | RBAC 和撤权旧 JWT 无法继续读写 | Pass | Auth/PII/fulfillment 负向测试 |
 | PII 加密、当前权限复核、读取/导出审计 | Pass | DB/API tests |
 | Circuit Breaker 暂停/恢复，履约/恢复/审计仍可用 | Pass | Contract/worker/DB tests + 历史 BSC 证据 |
-| 业务/审计备份恢复与 audit hash chain | Pass | Database backup/restore tests; 生产发布前仍需执行实际备份 |
+| 业务/审计备份恢复与 audit hash chain | Pass | 生产加密备份已恢复验证；五条 audit stream 全部通过 |
 
 ## 6. Phase 2 与 External
 
@@ -104,12 +104,12 @@ Core artifact：`2.0.0-fulfillment-launch.18`
 |---|---|
 | 本清单所有本地首发项目为 `Pass` 或精确 `External` | Pass |
 | 最终 `pnpm verify` 通过 | Pass |
-| 线上 Core / 三端从 `.17` 发布为 `.18` | Pending |
-| 发布后 `writesEnabled=true` 且 `runtimeBlockers=[]` | Pending |
-| 生产 business/audit 备份完成并验证可恢复 | Pending |
+| 线上 Core / 三端从 `.17` 发布为 `.18` | Pass |
+| 发布后 `writesEnabled=true` 且 `runtimeBlockers=[]` | Pass |
+| 生产 business/audit 备份完成并验证可恢复 | Pass |
 | 旧物引用核对、隔离清理和清理后 `pnpm verify` | Pass |
 
-当前线上仍为 `.17`，只读 bootstrap 返回
-`writesEnabled=false`，blocker 为 `RPC_DIVERGENCE`、
-`QUOTE_SOURCE_UNHEALTHY`和 `CONTRACT_EVIDENCE_UNVERIFIED`。这三项是资金/报价
-安全门禁，与快递、打印、地图配置无关，不得通过放宽校验绕过。
+当前线上 Core、EOA runtime、Mall、Merchant 和 Admin 均已发布为 `.18`。
+公网 bootstrap 连续 600 秒的 121 个样本全部返回
+`writesEnabled=true`、`runtimeBlockers=[]`。快递、打印和地图继续属于 Phase 2，
+未配置不影响当前商城下单、支付和手工履约。
