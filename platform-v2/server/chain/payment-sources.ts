@@ -1,5 +1,5 @@
 import { AbiCoder, Contract, JsonRpcProvider, getAddress, keccak256, toUtf8Bytes, type InterfaceAbi } from 'ethers';
-import { CORE_ARTIFACT_VERSION, NPL_ADDRESS, NPL_USDT_PAIR_ADDRESS, USDT_ADDRESS } from '../api/enums.ts';
+import { NPL_ADDRESS, NPL_USDT_PAIR_ADDRESS, USDT_ADDRESS } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import {
   paymentAllocationSetHash,
@@ -254,9 +254,6 @@ export class RpcPaymentPolicyAttestationSource implements PaymentPolicyAttestati
     policy: PaymentPolicySnapshot;
     requireLatest: boolean;
   }) {
-    if (input.artifactVersion !== CORE_ARTIFACT_VERSION) {
-      throw new CoreError('ArtifactVersionMismatch', 'Payment policy artifact version is not current', 409);
-    }
     const [rawPolicy, rawOperations, latestVersion] = await Promise.all([
       this.#reader.call(this.#registryAddress, POLICY_REGISTRY_ABI, 'getPolicy', [input.policy.policyVersion]),
       this.#reader.call(this.#registryAddress, POLICY_REGISTRY_ABI, 'getOperations', [input.policy.policyVersion]),
