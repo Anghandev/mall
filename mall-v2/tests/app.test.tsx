@@ -115,7 +115,7 @@ describe('Mall V2 payment consumer', () => {
     expect(isCoreOrderActionExecutable('CONFIRM_RECEIPT')).toBe(true);
     expect(isCoreOrderActionExecutable('PAY_ORDER')).toBe(false);
     expect(mallRuntimeBoundary).toMatchObject({
-      artifactStatus: '2.0.0-fulfillment-launch.18',
+      artifactStatus: '2.0.0-fulfillment-launch.19',
       executableOrderActions: executableOrderActionNames,
       deploymentAuthorized: true,
       settlementAdminCapabilities: {
