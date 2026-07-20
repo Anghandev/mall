@@ -64,28 +64,39 @@ const BUNDLE_PATH = fileURLToPath(
 
 test('RPC log reader falls back to block receipts without widening the address filter', async () => {
   const calls: Array<{ method: string; params: unknown[] }> = [];
+  let activeReceipts = 0;
+  let maxConcurrentReceipts = 0;
   const provider = {
     getLogs: async () => { throw new Error('limit exceeded'); },
     send: async (method: string, params: unknown[]) => {
+      activeReceipts += 1;
+      maxConcurrentReceipts = Math.max(maxConcurrentReceipts, activeReceipts);
       calls.push({ method, params });
+      const blockNumber = Number(BigInt(String(params[0])));
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      activeReceipts -= 1;
       return [{ logs: [
-        rpcReceiptLog({ address: CONTRACT, blockNumber: 100, logIndex: 2 }),
-        rpcReceiptLog({ address: BUYER, blockNumber: 100, logIndex: 3 }),
-        rpcReceiptLog({ address: CONTRACT, blockNumber: 100, logIndex: 4, topic0: HASH_2 }),
+        rpcReceiptLog({ address: CONTRACT, blockNumber, logIndex: 2 }),
+        rpcReceiptLog({ address: BUYER, blockNumber, logIndex: 3 }),
+        rpcReceiptLog({ address: CONTRACT, blockNumber, logIndex: 4, topic0: HASH_2 }),
       ] }];
     },
   };
   const logs = await readAddressLogs(provider as Parameters<typeof readAddressLogs>[0], {
     addresses: CONTRACT,
     fromBlock: 100,
-    toBlock: 100,
+    toBlock: 101,
     topic0: HASH_1,
   });
-  assert.equal(logs.length, 1);
-  assert.equal(logs[0]?.address, CONTRACT);
-  assert.equal(logs[0]?.blockNumber, 100);
-  assert.equal(logs[0]?.logIndex, 2);
-  assert.deepEqual(calls, [{ method: 'eth_getBlockReceipts', params: ['0x64'] }]);
+  assert.deepEqual(logs.map((log) => [log.address, log.blockNumber, log.logIndex]), [
+    [CONTRACT, 100, 2],
+    [CONTRACT, 101, 2],
+  ]);
+  assert.equal(maxConcurrentReceipts, 2);
+  assert.deepEqual(calls, [
+    { method: 'eth_getBlockReceipts', params: ['0x64'] },
+    { method: 'eth_getBlockReceipts', params: ['0x65'] },
+  ]);
 });
 
 test('coverage evidence uses the lower common RPC height for every balance', async () => {
@@ -369,7 +380,7 @@ test('polling payment worker persists empty blocks, recovers a common-ancestor r
     blockHash: block100.hash,
     blockNumber: block100.number,
     logIndex: 0,
-  }]);
+  }], 5);
   const store = new MemoryIndexerStore();
   const worker = new PollingPaymentIndexer({
     source,
@@ -387,6 +398,7 @@ test('polling payment worker persists empty blocks, recovers a common-ancestor r
   });
   assert.deepEqual(await store.checkpoint(), { blockNumber: 101, blockHash: block101.hash });
   assert.deepEqual(source.logRanges, [[100, 101]]);
+  assert.equal(source.maxConcurrentBlockReads, 3);
   assert.equal(store.events.length, 1);
 
   const mismatched102: ChainBlock = {
@@ -1309,8 +1321,12 @@ class MemoryPaymentChainSource implements PaymentChainSource {
   readonly blocks = new Map<number, ChainBlock>();
   logsByBlock = new Map<number, IndexedLog[]>();
   readonly logRanges: Array<[number, number]> = [];
+  readonly #blockDelayMs: number;
+  #activeBlockReads = 0;
+  maxConcurrentBlockReads = 0;
 
-  constructor(blocks: ChainBlock[], logs: IndexedLog[]) {
+  constructor(blocks: ChainBlock[], logs: IndexedLog[], blockDelayMs = 0) {
+    this.#blockDelayMs = blockDelayMs;
     this.replace(blocks, logs);
   }
 
@@ -1340,7 +1356,14 @@ class MemoryPaymentChainSource implements PaymentChainSource {
   async block(blockNumber: number) {
     const block = this.blocks.get(blockNumber);
     if (!block) throw new Error(`Missing block ${blockNumber}`);
-    return block;
+    this.#activeBlockReads += 1;
+    this.maxConcurrentBlockReads = Math.max(this.maxConcurrentBlockReads, this.#activeBlockReads);
+    try {
+      if (this.#blockDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.#blockDelayMs));
+      return block;
+    } finally {
+      this.#activeBlockReads -= 1;
+    }
   }
 
   async logs(fromBlock: number, toBlock: number) {

@@ -59,8 +59,17 @@ async function readBlockReceipts(
   const addressSet = new Set(input.addresses);
   const topic0 = input.topic0?.toLowerCase();
   const logs: RpcLogRecord[] = [];
-  for (let blockNumber = input.fromBlock; blockNumber <= input.toBlock; blockNumber += 1) {
-    const receipts = await provider.send('eth_getBlockReceipts', [toQuantity(blockNumber)]);
+  const receiptBatches = await Promise.all(Array.from(
+    { length: input.toBlock - input.fromBlock + 1 },
+    async (_, offset) => {
+      const blockNumber = input.fromBlock + offset;
+      return {
+        blockNumber,
+        receipts: await provider.send('eth_getBlockReceipts', [toQuantity(blockNumber)]),
+      };
+    },
+  ));
+  for (const { blockNumber, receipts } of receiptBatches) {
     if (!Array.isArray(receipts)) throw new Error('MalformedBlockReceipts');
     for (const receipt of receipts) {
       if (!isRecord(receipt) || !Array.isArray(receipt.logs)) throw new Error('MalformedBlockReceipt');

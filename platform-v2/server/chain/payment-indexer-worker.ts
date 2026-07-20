@@ -242,10 +242,10 @@ export class PollingPaymentIndexer {
   }
 
   async #segment(fromBlock: number, toBlock: number): Promise<ChainSegmentBlock[]> {
-    const blocks: ChainBlock[] = [];
-    for (let blockNumber = fromBlock; blockNumber <= toBlock; blockNumber += 1) {
-      blocks.push(await this.#source.block(blockNumber));
-    }
+    const blocks = await Promise.all(Array.from(
+      { length: toBlock - fromBlock + 1 },
+      (_, offset) => this.#source.block(fromBlock + offset),
+    ));
     const logStart = Math.max(fromBlock, this.#deploymentBlock);
     const logs = logStart <= toBlock ? await this.#source.logs(logStart, toBlock) : [];
     const blockHashes = new Map(blocks.map((block) => [block.number, block.hash.toLowerCase()]));
