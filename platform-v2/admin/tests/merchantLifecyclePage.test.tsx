@@ -144,7 +144,7 @@ describe('merchant lifecycle page', () => {
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/review-challenges'))).toBe(false);
   });
 
-  it('does not ask the wallet to sign when the challenge signer is not independent', async () => {
+  it('uses the frozen platform technical wallet for both admin auth and secondary signing', async () => {
     const wallet = address('1');
     const provider = walletProvider(wallet);
     window.ethereum = provider;
@@ -157,8 +157,7 @@ describe('merchant lifecycle page', () => {
     await user.type(within(review).getByLabelText('原因代码'), 'QUALIFICATION_APPROVED');
     await user.type(within(review).getByLabelText('Idempotency key'), 'merchant-review-1');
     await user.click(within(review).getByRole('button', { name: '二次签名并发布' }));
-    expect(await screen.findByText('Merchant review requires an independent secondary wallet')).toBeTruthy();
-    expect(provider.request.mock.calls.some(([input]) => input.method === 'eth_signTypedData_v4')).toBe(false);
+    await waitFor(() => expect(provider.request.mock.calls.some(([input]) => input.method === 'eth_signTypedData_v4')).toBe(true));
   });
 });
 

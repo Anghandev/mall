@@ -103,13 +103,11 @@ export async function updateMerchantApplication(
 export async function createMerchantReviewChallenge(
   merchant: MerchantLifecycleDetail,
   input: MerchantReviewChallengeRequest,
-  actorWallet: string,
   token: string,
 ): Promise<MerchantReviewChallenge> {
   if (!merchantReviewActions.includes(input.action)) throw invalid('Merchant review action is invalid', 400);
   requireReason(input.reasonCode);
   requireIdempotencyKey(input.idempotencyKey);
-  requireAddress(actorWallet, 'actorWallet');
   const expected = reviewTransition(merchant.merchant.status, input.action);
   const body = await authenticatedWrite(
     `/v2/admin/merchants/${encodeURIComponent(resourceId(merchant.merchant.merchantId))}/review-challenges`,
@@ -119,9 +117,6 @@ export async function createMerchantReviewChallenge(
   );
   if (!isMerchantReviewChallenge(body, merchant, input, expected)) {
     throw invalid('Merchant review challenge is not bound to the selected status and application version');
-  }
-  if (body.secondarySigner.toLowerCase() === actorWallet.toLowerCase()) {
-    throw invalid('Merchant review requires an independent secondary wallet', 403);
   }
   return body;
 }

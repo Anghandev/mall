@@ -215,7 +215,7 @@ describe('seckill admin coordinated Core client', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const received = await createSeckillGovernanceChallenge(action, input, 'jwt');
-    await expect(submitSeckillGovernanceApproval(action, received, { ...input, signature: '0x1234' }, address('1'), 'jwt')).resolves.toMatchObject({ state: 'SECONDARY_SIGNED' });
+    await expect(submitSeckillGovernanceApproval(action, received, { ...input, signature: '0x1234' }, 'jwt')).resolves.toMatchObject({ state: 'SECONDARY_SIGNED' });
     await expect(executeSeckillGovernanceAction(signed, 'jwt')).resolves.toMatchObject({ state: 'PENDING_EXECUTION' });
     await expect(cancelSeckillGovernanceAction(action, 'jwt')).resolves.toMatchObject({ state: 'CANCELLED' });
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([

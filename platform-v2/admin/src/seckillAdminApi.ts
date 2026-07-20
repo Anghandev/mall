@@ -188,12 +188,8 @@ export async function submitSeckillGovernanceApproval(
   action: SeckillGovernanceActionProjection,
   challenge: SeckillGovernanceChallenge,
   input: SeckillGovernanceApprovalRequest,
-  actorWallet: string,
   token: string,
 ): Promise<SeckillGovernanceActionProjection> {
-  if (!addressPattern.test(actorWallet) || actorWallet.toLowerCase() === challenge.signer.toLowerCase()) {
-    throw invalid('Seckill approval requires an independent secondary wallet', 403);
-  }
   if (!isSeckillGovernanceChallenge(challenge, action, input) || !signaturePattern.test(input.signature)) {
     throw invalid('Seckill governance approval does not match its challenge', 400);
   }

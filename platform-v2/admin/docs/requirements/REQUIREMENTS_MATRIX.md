@@ -177,7 +177,7 @@ parallel API or local financial calculation:
   artifact-bound finalized relay WebSocket are rendered. `.9` additionally
   consumes action list/detail, role-scoped session draft and inventory lock,
   force-close, prize injection and seckill-purchase breaker recovery. Each
-  action follows Core `allowedActions` through independent secondary-wallet
+  action follows Core `allowedActions` through configured secondary-wallet
   EIP-712 signing, direct Platform Governance EOA execution and 15-confirmation
   finality; `REORGED` and `FAILED` never render as effective. The current projection also renders the
   immutable final-order candidate, cutoff/block/log evidence, whole-pool

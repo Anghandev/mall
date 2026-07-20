@@ -230,7 +230,7 @@ function MerchantDetail(props: {
         {props.canWrite && q.access === 'FULL' ? <ApplicationEditor detail={detail} token={props.token} sessionWallet={props.sessionWallet} onChanged={props.onChanged} /> : null}
       </section>
 
-      {props.canReview ? <ReviewWorkspace detail={detail} sessionWallet={props.sessionWallet} token={props.token} onChanged={props.onChanged} onError={props.onError} /> : null}
+      {props.canReview ? <ReviewWorkspace detail={detail} token={props.token} onChanged={props.onChanged} onError={props.onError} /> : null}
       <DecisionBlocks />
       <Analytics detail={detail} />
       <SettlementEvidence detail={detail} />
@@ -292,7 +292,7 @@ function ApplicationEditor({ detail, token, sessionWallet, onChanged }: { detail
   </form>;
 }
 
-function ReviewWorkspace(props: { detail: MerchantLifecycleDetail; sessionWallet: string; token: string; onChanged(detail: MerchantLifecycleDetail, message: string): void; onError(error: CoreApiError | null): void }) {
+function ReviewWorkspace(props: { detail: MerchantLifecycleDetail; token: string; onChanged(detail: MerchantLifecycleDetail, message: string): void; onError(error: CoreApiError | null): void }) {
   const actions = allowedReviewActions(props.detail.merchant.status);
   const [action, setAction] = useState<MerchantReviewAction | ''>(actions[0] ?? '');
   const [reasonCode, setReasonCode] = useState('');
@@ -307,7 +307,7 @@ function ReviewWorkspace(props: { detail: MerchantLifecycleDetail; sessionWallet
         action,
         reasonCode,
         idempotencyKey,
-      }, props.sessionWallet, props.token);
+      }, props.token);
       if (!window.ethereum) throw new CoreApiError({ code: 'ConfigurationRequired', message: '未检测到支持 EIP-1193 的二次签名钱包', status: 503 });
       const signature = await window.ethereum.request({ method: 'eth_signTypedData_v4', params: [challenge.secondarySigner, JSON.stringify(challenge.typedData)] });
       if (typeof signature !== 'string') throw new CoreApiError({ code: 'InvalidResponse', message: '钱包没有返回签名', status: 502 });

@@ -37,7 +37,7 @@ implements shared funds, contracts, API, Schema or signer behavior.
   HTTP replay, the artifact-bound `/v2/ws` finalized relay stream, action
   list/detail, session inventory locking, force-close, prize injection and
   breaker recovery. Every governed action uses Core-issued EIP-712 typed data,
-  an independent secondary wallet and direct Platform Governance EOA execution;
+  the configured secondary signer and direct Platform Governance EOA execution;
   `FINAL` is rendered only from 15-confirmation Core evidence.
 - Policy and takeover funding use Core-issued typed data. The wallet signs the
   exact typed payload; the frontend does not construct calldata, calculate

@@ -189,7 +189,7 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
         throw new CoreApiError({ code: 'InvalidResponse', message: '二次钱包返回了无效签名', status: 400 });
       }
       const updated = await submitSeckillGovernanceApproval(
-        selected, challenge, { nonce, deadline, signature }, session.walletAddress, session.token,
+        selected, challenge, { nonce, deadline, signature }, session.token,
       );
       setActions((items) => items.map((item) => item.actionId === updated.actionId ? updated : item));
       setSelected(updated);

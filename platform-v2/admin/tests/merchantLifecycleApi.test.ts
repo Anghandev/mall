@@ -71,7 +71,7 @@ describe('merchant lifecycle admin API', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const bound = await createMerchantReviewChallenge(current, { action: 'APPROVE', reasonCode: 'QUALIFICATION_APPROVED', idempotencyKey: 'review-approve-1' }, address('1'), 'jwt');
+    const bound = await createMerchantReviewChallenge(current, { action: 'APPROVE', reasonCode: 'QUALIFICATION_APPROVED', idempotencyKey: 'review-approve-1' }, 'jwt');
     await expect(publishMerchantReview(bound, '0x1234', 'jwt')).resolves.toMatchObject({ merchant: { status: 'APPROVED' }, reviews: [{ approvalSignatureHash: hash('f') }] });
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({ signature: '0x1234' });
   });
@@ -83,7 +83,7 @@ describe('merchant lifecycle admin API', () => {
 
     await expect(createMerchantReviewChallenge(current, {
       action: 'CHANGE_SETTLEMENT_WALLET' as never, reasonCode: 'WALLET_ROTATION', idempotencyKey: 'wallet-change-1',
-    }, address('1'), 'jwt')).rejects.toMatchObject({ status: 400 });
+    }, 'jwt')).rejects.toMatchObject({ status: 400 });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -102,9 +102,9 @@ describe('merchant lifecycle admin API', () => {
     });
   });
 
-  it('fails closed before signing when Core returns the actor as secondary signer', async () => {
+  it('accepts the frozen platform technical wallet as both admin actor and secondary signer', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ ...reviewChallenge(), secondarySigner: address('1') }, 201)));
-    await expect(createMerchantReviewChallenge(merchantDetail(), { action: 'APPROVE', reasonCode: 'QUALIFICATION_APPROVED', idempotencyKey: 'review-approve-1' }, address('1'), 'jwt')).rejects.toMatchObject({ status: 403 });
+    await expect(createMerchantReviewChallenge(merchantDetail(), { action: 'APPROVE', reasonCode: 'QUALIFICATION_APPROVED', idempotencyKey: 'review-approve-1' }, 'jwt')).resolves.toMatchObject({ secondarySigner: address('1') });
   });
 
   it('uploads a purpose-bound license and completes provider-sealed media', async () => {
