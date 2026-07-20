@@ -579,10 +579,10 @@ export class SeckillGovernanceWorker {
       const now = this.#clock();
       if (action.state !== 'PENDING_EXECUTION' || !approvalExpired(action.approval_deadline, now)) return;
       await executor.query(
-        "UPDATE core.seckill_governance_actions SET state = 'FAILED', updated_at = $2 WHERE action_id = $1",
+        "UPDATE core.seckill_governance_actions SET state = 'CANCELLED', updated_at = $2 WHERE action_id = $1",
         [action.action_id, now],
       );
-      await appendTransition(executor, action, 'FAILED', { reasonCode: 'APPROVAL_EXPIRED' }, now);
+      await appendTransition(executor, action, 'CANCELLED', { reasonCode: 'APPROVAL_EXPIRED' }, now);
       await enqueueWorkerAudit(executor, action, 'SeckillEoaApprovalExpired', 'SYSTEM', {
         reasonCode: 'APPROVAL_EXPIRED',
       }, now);
