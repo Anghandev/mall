@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "24K商城 V2 Core API",
-    "version": "2.0.0-fulfillment-launch.18"
+    "version": "2.0.0-fulfillment-launch.19"
   },
-  "x-artifactVersion": "2.0.0-fulfillment-launch.18",
+  "x-artifactVersion": "2.0.0-fulfillment-launch.19",
   "servers": [],
   "paths": {
     "/v2/buyer/profile": {
@@ -9549,7 +9549,7 @@
         },
         "responses": {
           "201": {
-            "description": "AMap-bound merchant store draft",
+            "description": "Location-bound merchant store draft",
             "headers": {
               "x-correlation-id": {
                 "schema": {
@@ -12011,7 +12011,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "status": {
             "const": "CORE_API_READY"
@@ -12324,7 +12324,7 @@
             "minimum": 1
           },
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "allowedActions": {
             "type": "array",
@@ -12374,6 +12374,30 @@
             "type": "number",
             "minimum": -90,
             "maximum": 90
+          },
+          "address": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 300
+          },
+          "province": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "city": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "district": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "regionCode": {
+            "type": "string",
+            "pattern": "^[0-9]{6}$"
           }
         }
       },
@@ -13461,7 +13485,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "relation": {
             "enum": [
@@ -13566,7 +13590,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "exportId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -13695,7 +13719,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "operationId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -13825,7 +13849,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "operationId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15863,7 +15887,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -15962,7 +15986,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -16914,7 +16938,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "productId": {
             "type": "string",
@@ -17087,7 +17111,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "storeId": {
             "type": "string",
@@ -17213,7 +17237,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "productId": {
             "type": "string",
@@ -17315,7 +17339,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "previewId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -17474,7 +17498,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "adjustmentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -17599,7 +17623,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "uploadIntentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -17697,7 +17721,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -17783,7 +17807,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -17963,7 +17987,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "evidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
@@ -18222,7 +18246,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -18496,7 +18520,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifact_version": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "wallet_address": {
             "$ref": "#/components/schemas/Address"
@@ -18803,7 +18827,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -18996,7 +19020,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "buyerWallet": {
             "$ref": "#/components/schemas/Address"
@@ -19375,7 +19399,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "merchantId": {
             "type": "string",
@@ -19552,7 +19576,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "requests": {
             "type": "array",
@@ -19716,7 +19740,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "request": {
             "$ref": "#/components/schemas/AdminSettlementRequest"
@@ -19890,7 +19914,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "transfers": {
             "type": "array",
@@ -20046,7 +20070,7 @@
             "const": 56
           },
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "tokenCodeHash": {
             "$ref": "#/components/schemas/Bytes32"
@@ -20457,7 +20481,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "transfer": {
             "$ref": "#/components/schemas/AdminSettlementTransferEnvelope"
@@ -21592,7 +21616,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "assignment": {
             "$ref": "#/components/schemas/TakeoverAssignment"
@@ -21805,7 +21829,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "cases": {
             "type": "array",
@@ -21870,7 +21894,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "caseId": {
             "type": "string",
@@ -21951,7 +21975,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "case": {
             "allOf": [
@@ -22163,7 +22187,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -22386,7 +22410,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -23252,7 +23276,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "snapshotId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -23335,7 +23359,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -24941,7 +24965,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -25189,7 +25213,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -25771,7 +25795,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "sessionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -26010,7 +26034,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "protocolVersion": {
             "const": 1
@@ -26083,7 +26107,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -26435,7 +26459,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "addresses": {
             "type": "array",
@@ -26690,7 +26714,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -26857,7 +26881,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "orderId": {
             "type": "string",
@@ -26892,7 +26916,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "merchantId": {
             "type": "string",
@@ -27368,7 +27392,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "exportId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -27850,7 +27874,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "observation": {
             "$ref": "#/components/schemas/RiskObservation"
@@ -27876,7 +27900,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "generatedAt": {
             "type": "string",
@@ -28147,7 +28171,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "challengeId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -28214,7 +28238,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "bindingId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -28323,7 +28347,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "requestId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -28433,7 +28457,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "batchId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -28470,7 +28494,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "printJobId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -28639,7 +28663,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "configVersionId": {
             "anyOf": [
@@ -28874,7 +28898,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "providers": {
             "type": "array",
@@ -29055,7 +29079,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "warehouseId": {
             "type": "string",
@@ -29146,7 +29170,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "warehouses": {
             "type": "array",
@@ -29211,7 +29235,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "waybills": {
             "type": "array",
@@ -29230,7 +29254,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "printJobs": {
             "type": "array",
@@ -29558,7 +29582,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "merchants": {
             "type": "array",
@@ -29745,7 +29769,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -30212,7 +30236,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.18"
+            "const": "2.0.0-fulfillment-launch.19"
           },
           "merchant": {
             "$ref": "#/components/schemas/MerchantLifecycleSummary"

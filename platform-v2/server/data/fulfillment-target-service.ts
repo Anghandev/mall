@@ -39,6 +39,11 @@ export interface StoreInput {
   businessHours: string;
   longitude: number;
   latitude: number;
+  address?: string;
+  province?: string;
+  city?: string;
+  district?: string;
+  regionCode?: string;
   correlationId: string;
 }
 
@@ -347,7 +352,7 @@ export class FulfillmentTargetService {
       return loadStoreCommand(executor, wallet, input.idempotencyKey, requestHash);
     });
     if (existing) return existing.result;
-    const region = await this.#regions.reverseGeocode({ longitude: input.longitude, latitude: input.latitude });
+    const region = await resolveStoreRegion(this.#regions, input);
     return this.#transactions.transaction(async (executor) => {
       await lockStoreCommand(executor, wallet, input.idempotencyKey);
       const raced = await loadStoreCommand(executor, wallet, input.idempotencyKey, requestHash);
@@ -1126,6 +1131,11 @@ function storeCreatePayload(input: StoreInput) {
     businessHours: input.businessHours.trim(),
     longitude: input.longitude,
     latitude: input.latitude,
+    ...(input.address ? { address: input.address.trim() } : {}),
+    ...(input.province ? { province: input.province.trim() } : {}),
+    ...(input.city ? { city: input.city.trim() } : {}),
+    ...(input.district ? { district: input.district.trim() } : {}),
+    ...(input.regionCode ? { regionCode: input.regionCode } : {}),
   };
 }
 
@@ -1421,6 +1431,43 @@ function validateStoreInput(input: StoreInput) {
     throw new CoreError('InvalidRequest', 'Invalid store input');
   }
   validateCoordinates(input.longitude, input.latitude);
+  const manualRegion = [input.address, input.province, input.city, input.district, input.regionCode];
+  const hasManualRegion = manualRegion.every((value) => typeof value === 'string' && value.trim().length > 0);
+  const hasAnyManualRegion = manualRegion.some((value) => value !== undefined);
+  if (hasAnyManualRegion && !hasManualRegion) {
+    throw new CoreError('InvalidRequest', 'Manual store administrative region is incomplete');
+  }
+  if (hasManualRegion && (
+    input.address!.trim().length < 5
+    || input.address!.length > 300
+    || [input.province!, input.city!, input.district!].some((value) => value.trim().length > 64)
+    || !/^[0-9]{6}$/.test(input.regionCode!)
+  )) throw new CoreError('InvalidRequest', 'Manual store administrative region is invalid');
+}
+
+async function resolveStoreRegion(resolver: AdministrativeRegionResolver, input: StoreInput) {
+  if (input.address && input.province && input.city && input.district && input.regionCode) {
+    const formattedAddress = input.address.trim();
+    const province = input.province.trim();
+    const city = input.city.trim();
+    const district = input.district.trim();
+    return {
+      province,
+      city,
+      district,
+      formattedAddress,
+      regionCode: input.regionCode,
+      sourceReferenceHash: hashJson({
+        source: 'MERCHANT_DECLARED', formattedAddress, province, city, district,
+        regionCode: input.regionCode, longitude: input.longitude, latitude: input.latitude,
+      }),
+      source: 'BUYER_DECLARED' as const,
+    };
+  }
+  return {
+    ...await resolver.reverseGeocode({ longitude: input.longitude, latitude: input.latitude }),
+    source: 'AMAP' as const,
+  };
 }
 
 function validateStoreProfileInput(input: StoreProfileInput) {

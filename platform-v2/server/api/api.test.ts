@@ -2685,6 +2685,11 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
         businessHours: '09:00-18:00',
         longitude: 116.397,
         latitude: 39.908,
+        address: 'Beijing Dongcheng Test Road 24',
+        province: 'Beijing',
+        city: 'Beijing',
+        district: 'Dongcheng',
+        regionCode: '110101',
       }),
     });
     assert.equal(createStore.status, 201);

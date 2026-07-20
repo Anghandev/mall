@@ -782,7 +782,7 @@ test('merchant lifecycle encrypts qualification and governs exact review transit
   const operator = Wallet.createRandom();
   const auditor = Wallet.createRandom();
   const arbitrator = Wallet.createRandom();
-  const secondary = Wallet.createRandom();
+  const secondary = admin;
   const wrongSigner = Wallet.createRandom();
   const governanceWallet = Wallet.createRandom().address;
   const settlementWallet = Wallet.createRandom().address;
@@ -1648,7 +1648,7 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
   const db = await createBusinessDatabase();
   const admin = Wallet.createRandom();
   const operator = Wallet.createRandom();
-  const secondary = Wallet.createRandom();
+  const secondary = admin;
   const governanceWallet = '0x3333333333333333333333333333333333333333';
   const custodySafe = '0x4444444444444444444444444444444444444444';
   const operationsSafe = '0x5555555555555555555555555555555555555555';
@@ -2904,17 +2904,21 @@ test('merchant store management versions verified profiles while AMap location r
        ) VALUES ($1,'MERCHANT','merchant-1','ACTIVE',$2)`,
       [MERCHANT, HASH],
     );
+    let reverseGeocodeCalls = 0;
     const service = new FulfillmentTargetService({
       transactions: transactionAdapter(db),
       regions: {
-        reverseGeocode: async () => ({
-          regionCode: '210211',
-          province: 'Liaoning',
-          city: 'Dalian',
-          district: 'Ganjingzi',
-          formattedAddress: 'Dalian Ganjingzi Software Park 24',
-          sourceReferenceHash: HASH_2,
-        }),
+        reverseGeocode: async () => {
+          reverseGeocodeCalls += 1;
+          return {
+            regionCode: '210211',
+            province: 'Liaoning',
+            city: 'Dalian',
+            district: 'Ganjingzi',
+            formattedAddress: 'Dalian Ganjingzi Software Park 24',
+            sourceReferenceHash: HASH_2,
+          };
+        },
       },
       encryptionKey: 'ab'.repeat(32),
       clock: () => now,
@@ -2931,6 +2935,7 @@ test('merchant store management versions verified profiles while AMap location r
     });
     assert.equal(created.status, 'DRAFT');
     assert.equal(created.regionCode, '210211');
+    assert.equal(reverseGeocodeCalls, 1);
     assert.equal(created.allowedActions.find((item) => item.action === 'ACTIVATE')?.enabled, false);
     assert.equal((await service.createStore(merchant, {
       idempotencyKey: 'merchant-store-create-full-1',
@@ -2942,6 +2947,23 @@ test('merchant store management versions verified profiles while AMap location r
       correlationId: 'merchant-store-create-full-retry',
     })).storeId, created.storeId);
     assert.equal((await service.listStores()).length, 0);
+    const manual = await service.createStore(merchant, {
+      idempotencyKey: 'merchant-store-create-manual-1',
+      name: '24K Manual Store',
+      phone: '+8641112345679',
+      businessHours: '09:00-18:00',
+      longitude: 121.54,
+      latitude: 38.89,
+      address: 'Dalian Ganjingzi Manual Road 24',
+      province: 'Liaoning',
+      city: 'Dalian',
+      district: 'Ganjingzi',
+      regionCode: '210212',
+      correlationId: 'merchant-store-create-manual-1',
+    });
+    assert.equal(manual.regionCode, '210212');
+    assert.equal(manual.address, 'Dalian Ganjingzi Manual Road 24');
+    assert.equal(reverseGeocodeCalls, 1);
     await assert.rejects(
       service.listMerchantStores({
         walletAddress: '0x9999999999999999999999999999999999999999',
@@ -3053,7 +3075,7 @@ test('merchant store management versions verified profiles while AMap location r
     )).rows[0]?.count, '4');
     assert.equal((await db.query<{ count: string }>(
       "SELECT count(*)::text AS count FROM core.audit_outbox_events WHERE resource_type = 'MERCHANT_STORE'",
-    )).rows[0]?.count, '4');
+    )).rows[0]?.count, '5');
   } finally {
     await db.close();
   }

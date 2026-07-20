@@ -727,7 +727,7 @@ function buildOpenApi() {
           security: [{ bearerAuth: [] }],
           requestBody: body({ $ref: '#/components/schemas/CreateMerchantStoreRequest' }),
           responses: {
-            201: response('AMap-bound merchant store draft', { $ref: '#/components/schemas/MerchantManagedStore' }),
+            201: response('Location-bound merchant store draft', { $ref: '#/components/schemas/MerchantManagedStore' }),
             default: errorResponse,
           },
         },
@@ -4787,6 +4787,11 @@ function fulfillmentOpenApiSchemas() {
         businessHours: { type: 'string', minLength: 1, maxLength: 240 },
         longitude: { type: 'number', minimum: -180, maximum: 180 },
         latitude: { type: 'number', minimum: -90, maximum: 90 },
+        address: { type: 'string', minLength: 5, maxLength: 300 },
+        province: { type: 'string', minLength: 1, maxLength: 64 },
+        city: { type: 'string', minLength: 1, maxLength: 64 },
+        district: { type: 'string', minLength: 1, maxLength: 64 },
+        regionCode: { type: 'string', pattern: '^[0-9]{6}$' },
       },
     },
     UpdateMerchantStoreRequest: {
@@ -8237,6 +8242,11 @@ export interface CreateMerchantStoreRequest {
   businessHours: string;
   longitude: number;
   latitude: number;
+  address?: string;
+  province?: string;
+  city?: string;
+  district?: string;
+  regionCode?: string;
 }
 
 export interface UpdateMerchantStoreRequest {

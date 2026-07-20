@@ -527,12 +527,9 @@ export class SeckillOperationsService {
     const deadline = unsigned(input.deadline, 'seckill approval deadline');
     validateDeadline(deadline, this.#clock());
     return this.#transactions.transaction(async (executor) => {
-      const wallet = await requireCurrentRole(executor, actor, ['ADMIN']);
+      await requireCurrentRole(executor, actor, ['ADMIN']);
       const action = await lockedAction(executor, actionId.toLowerCase());
       if (action.state !== 'DRAFT') throw new CoreError('InvalidRequest', 'Seckill action is not awaiting approval', 409);
-      if (wallet === this.#secondarySigner) {
-        throw new CoreError('Forbidden', 'Seckill approval requires an independent secondary wallet', 403);
-      }
       const intent = actionIntent(action, nonce, deadline);
       const domain = sensitiveActionDomain(action.target_address);
       return Object.freeze({
@@ -574,9 +571,6 @@ export class SeckillOperationsService {
         ) return actionProjection(executor, action);
         throw new CoreError('IdempotencyConflict', 'Seckill action approval no longer matches the draft', 409);
       }
-      if (wallet === this.#secondarySigner) {
-        throw new CoreError('Forbidden', 'Seckill approval requires an independent secondary wallet', 403);
-      }
       const intent = actionIntent(action, nonce, deadline);
       const approval = verifySensitiveActionApproval(
         intent,
@@ -586,9 +580,6 @@ export class SeckillOperationsService {
         action.target_address,
         this.#clock(),
       );
-      if (approval.signer === wallet) {
-        throw new CoreError('Forbidden', 'Seckill approval requires an independent secondary wallet', 403);
-      }
       const now = this.#clock();
       await executor.query(
         `UPDATE core.seckill_governance_actions

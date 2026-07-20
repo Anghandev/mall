@@ -208,8 +208,10 @@ source conflicts are indexed in `V2_DECISIONS.md`.
   tracking, GPS sorting and AMap/Baidu navigation are Phase 2. Missing provider,
   device or map configuration never blocks ordering, payment, manual shipment,
   receipt confirmation, takeover, arbitration or launch acceptance. Delivery
-  addresses accept audited manual province/city/district/six-digit region input;
-  map-assisted parsing is optional and cannot be the only save path.
+  addresses and merchant store creation accept audited manual
+  province/city/district/six-digit region input; store coordinates remain
+  required and immutable. Map-assisted parsing is optional and cannot be the
+  only save path.
 - Customers may request exchange or delay and may enter platform arbitration.
   Arbitration keeps payment, BNM and all rewards Locked.
 - Seven days after payment finality without valid shipment evidence opens

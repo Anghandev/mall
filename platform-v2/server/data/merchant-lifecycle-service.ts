@@ -366,9 +366,6 @@ export class MerchantLifecycleService {
     const wallet = normalizeAddress(actor.walletAddress);
     return this.#transactions.transaction(async (executor) => {
       const roles = await requireCurrentRole(executor, actor, ['ADMIN']);
-      if (wallet === this.#secondarySigner) {
-        throw new CoreError('Forbidden', 'Merchant review actor cannot be the secondary signer', 403);
-      }
       const merchant = await lockedMerchant(executor, merchantId);
       const toStatus = reviewTransition(merchant.status, action);
       const application = await latestApplication(executor, merchant);
@@ -423,9 +420,6 @@ export class MerchantLifecycleService {
     assertHash(actionId, 'merchant review action ID');
     assertSignature(signature);
     const wallet = normalizeAddress(actor.walletAddress);
-    if (wallet === this.#secondarySigner) {
-      throw new CoreError('Forbidden', 'Merchant review actor cannot be the secondary signer', 403);
-    }
     if (!await this.#auditReady()) throw new CoreError('ExternalBlocked', 'Audit database is unavailable for merchant review', 503);
     const prepared = await this.#transactions.transaction(async (executor) => {
       await requireCurrentRole(executor, actor, ['ADMIN']);

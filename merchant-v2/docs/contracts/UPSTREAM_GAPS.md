@@ -1,6 +1,6 @@
 # Merchant Workbench Core Gaps
 
-The merchant product consumes Core's coordinated `2.0.0-fulfillment-launch.18` artifact
+The merchant product consumes Core's coordinated `2.0.0-fulfillment-launch.19` artifact
 workspace package. Bootstrap, SIWE,
 merchant-bound Catalog/SKU/inventory management, immutable media, wallet-scoped fulfillment, merchant finance,
 guarantee-deposit evidence, signed settlement requests and per-payable EOA-finality

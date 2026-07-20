@@ -17,6 +17,10 @@ const contracts = [
 ];
 const deploymentEvidencePath = join(coreRoot, 'deployments', 'bsc-payment-v2.json');
 const verifiedDeploymentArtifactVersions = new Map([
+  ['2.0.0-fulfillment-launch.19', new Set([
+    '2.0.0-settlement-admin.17',
+    '2.0.0-settlement-admin.16',
+  ])],
   ['2.0.0-fulfillment-launch.18', new Set([
     '2.0.0-settlement-admin.17',
     '2.0.0-settlement-admin.16',

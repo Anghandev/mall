@@ -1417,7 +1417,10 @@ async function route(
   if (request.method === 'POST' && url.pathname === '/v2/merchant/stores') {
     const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['MERCHANT']);
     const body = await readJson(request);
-    assertOnlyKeys(body, ['idempotencyKey', 'name', 'phone', 'businessHours', 'longitude', 'latitude']);
+    assertOnlyKeys(body, [
+      'idempotencyKey', 'name', 'phone', 'businessHours', 'longitude', 'latitude',
+      'address', 'province', 'city', 'district', 'regionCode',
+    ]);
     sendJson(
       response,
       201,
@@ -1428,6 +1431,11 @@ async function route(
         businessHours: requiredString(body, 'businessHours'),
         longitude: requiredNumber(body, 'longitude'),
         latitude: requiredNumber(body, 'latitude'),
+        ...(body.address === undefined ? {} : { address: requiredString(body, 'address') }),
+        ...(body.province === undefined ? {} : { province: requiredString(body, 'province') }),
+        ...(body.city === undefined ? {} : { city: requiredString(body, 'city') }),
+        ...(body.district === undefined ? {} : { district: requiredString(body, 'district') }),
+        ...(body.regionCode === undefined ? {} : { regionCode: requiredString(body, 'regionCode') }),
         correlationId,
       }),
       correlationId,
