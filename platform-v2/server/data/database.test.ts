@@ -3941,6 +3941,34 @@ test('payment event atomically consumes inventory and posts balanced Locked jour
   }
 });
 
+test('payment indexer accepts a current-app quote bound to an immutable previously published policy', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    await seedCatalog(db, 1, MERCHANT, { policyArtifactVersion: '2.0.0-settlement-admin.16' });
+    const intent = paymentIntent();
+    await reserveInventory(adapter(db), {
+      reservationId: intent.reservationId,
+      reservationHash: intent.reservationHash,
+      policyVersion: intent.policyVersion,
+      skuId: 'sku-1',
+      buyerWallet: intent.buyer,
+      quantity: intent.quantity,
+      classification: 'ORDINARY',
+      expiresAt: new Date(intent.reservationDeadline * 1000),
+    });
+    await insertPaymentQuote(db, intent, 'cross-artifact-policy-quote');
+
+    assert.equal((await new PostgresPaymentStore(transactionAdapter(db)).record(paymentInput(intent))).status, 'RECORDED');
+    assert.equal((await db.query<{ artifact_version: string }>(
+      'SELECT artifact_version FROM core.payment_quotes WHERE order_id = $1',
+      [intent.orderId],
+    )).rows[0]?.artifact_version, CORE_ARTIFACT_VERSION);
+    await assertLedgerBalanced(db, 1);
+  } finally {
+    await db.close();
+  }
+});
+
 test('payment ledger keeps separate reward subtypes when one wallet fills multiple beneficiary roles', async () => {
   const db = await createBusinessDatabase();
   try {
@@ -12268,6 +12296,7 @@ async function seedCatalog(
   options: {
     buyerWallet?: string;
     policyPayload?: Record<string, unknown>;
+    policyArtifactVersion?: string;
     listPriceUsdt?: string;
     merchantCostUsdt?: string;
     fulfillmentTargetHash?: string;
@@ -12276,6 +12305,7 @@ async function seedCatalog(
 ) {
   const buyerWallet = options.buyerWallet ?? BUYER;
   const policyPayload = options.policyPayload ?? paymentPolicyPayload();
+  const policyArtifactVersion = options.policyArtifactVersion ?? CORE_ARTIFACT_VERSION;
   const listPriceUsdt = options.listPriceUsdt ?? '100';
   const merchantCostUsdt = options.merchantCostUsdt ?? '60';
   const fulfillmentTargetHash = options.fulfillmentTargetHash ?? HASH;
@@ -12284,8 +12314,8 @@ async function seedCatalog(
     `INSERT INTO core.policy_snapshots (
        policy_version, artifact_version, policy_hash,
        rules_content_hash, beneficiary_set_hash, payload, publication_status
-     ) VALUES (1, '${CORE_ARTIFACT_VERSION}', $1, $1, $1, $2, 'PUBLISHED')`,
-    [HASH, JSON.stringify(policyPayload)],
+     ) VALUES (1, $3, $1, $1, $1, $2, 'PUBLISHED')`,
+    [HASH, JSON.stringify(policyPayload), policyArtifactVersion],
   );
   await db.query(
     `INSERT INTO core.policy_publication_transitions (

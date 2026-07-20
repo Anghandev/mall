@@ -1232,8 +1232,8 @@ async function loadQuoteContext(executor: SqlExecutor, event: CanonicalPaymentEv
 
   const policyResult = await executor.query<{ payload: unknown }>(
     `SELECT payload FROM core.policy_snapshots
-     WHERE policy_version = $1 AND artifact_version = $2 AND publication_status = 'PUBLISHED'`,
-    [quote.policy_version, quote.artifact_version],
+     WHERE policy_version = $1 AND publication_status = 'PUBLISHED'`,
+    [quote.policy_version],
   );
   const policy = policyResult.rows[0];
   if (!policy) throw new CoreError('InvalidFinality', 'Published quote policy is unavailable', 409);

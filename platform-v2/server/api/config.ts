@@ -460,7 +460,7 @@ function runtimeReadinessBlockers(
   if (!snapshot.signerHealthy) blockers.add('SIGNER_UNAVAILABLE');
   if (!snapshot.indexerHealthy) blockers.add('INDEXER_UNHEALTHY');
   if (snapshot.indexerHealthy && !snapshot.indexerCaughtUp) blockers.add('INDEXER_LAGGING');
-  if (snapshot.indexerErrorCode === 'InvalidFinality' || snapshot.indexerErrorCode === 'ReorgPending' || !snapshot.rpcChain56Healthy) {
+  if (snapshot.indexerErrorCode === 'ReorgPending' || !snapshot.rpcChain56Healthy) {
     blockers.add('RPC_DIVERGENCE');
   }
   if (!snapshot.nplQuoteSourceHealthy) blockers.add('QUOTE_SOURCE_UNHEALTHY');

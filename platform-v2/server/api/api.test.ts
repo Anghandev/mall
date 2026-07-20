@@ -148,6 +148,14 @@ test('typed config reports blocked inputs without exposing secret values', () =>
     assert.deepEqual(publicReadiness(paymentReady, healthyRuntime, readinessTime).runtimeBlockers, [], `${blocker}:recovered`);
   }
   assert.deepEqual(
+    publicReadiness(paymentReady, {
+      ...healthyRuntime,
+      indexerHealthy: false,
+      indexerErrorCode: 'InvalidFinality',
+    }, readinessTime).runtimeBlockers,
+    ['INDEXER_UNHEALTHY'],
+  );
+  assert.deepEqual(
     publicReadiness({ ...paymentReady, paymentDecisionBlocked: ['TEST_DECISION'] }, healthyRuntime, readinessTime).runtimeBlockers,
     ['PAYMENT_DECISION_BLOCKED'],
   );
