@@ -103,7 +103,7 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/mall');
 
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.17');
+    expect(artifactVersion).toBe('2.0.0-fulfillment-launch.18');
     expect(productBaseline.manifestsAligned).toBe(true);
     expect(productBaseline.knownOrderActions).toBe(allowedActionNames);
     expect(productBaseline.executableOrderActions).toBe(executableOrderActionNames);
@@ -112,7 +112,7 @@ describe('Mall V2 payment consumer', () => {
     expect(isCoreOrderActionExecutable('CONFIRM_RECEIPT')).toBe(true);
     expect(isCoreOrderActionExecutable('PAY_ORDER')).toBe(false);
     expect(mallRuntimeBoundary).toMatchObject({
-      artifactStatus: '2.0.0-settlement-admin.17',
+      artifactStatus: '2.0.0-fulfillment-launch.18',
       executableOrderActions: executableOrderActionNames,
       deploymentAuthorized: true,
       settlementAdminCapabilities: {
@@ -325,10 +325,9 @@ describe('Mall V2 payment consumer', () => {
     expect((await screen.findByRole('img', { name: '买家头像' })).getAttribute('src')).toBe(authenticatedAvatarAccess().readUrl);
   });
 
-  it('forces parse review before address CRUD and creates checkout target from the saved address', async () => {
+  it('creates and edits a manual address without map services, then binds the saved target', async () => {
     const user = userEvent.setup();
     let addresses = [{ ...buyerSavedAddress, isDefault: false }];
-    const parseBuyerAddress = vi.fn<CoreClient['parseBuyerAddress']>().mockResolvedValue(parsedBuyerAddress);
     const createBuyerAddress = vi.fn<CoreClient['createBuyerAddress']>().mockImplementation(async (_token, request) => {
       const created = { ...buyerSavedAddress, label: request.label, isDefault: request.isDefault };
       addresses = [created];
@@ -348,7 +347,6 @@ describe('Mall V2 payment consumer', () => {
       getBuyerProfile: vi.fn().mockResolvedValue(buyerProfile),
       getBuyerOverview: vi.fn().mockResolvedValue(buyerOverview),
       listBuyerAddresses: vi.fn().mockImplementation(async () => addresses),
-      parseBuyerAddress,
       createBuyerAddress,
       updateBuyerAddress,
       setDefaultBuyerAddress,
@@ -358,20 +356,26 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/assets/addresses', services);
 
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
-    await user.type(screen.getByLabelText('地址文本'), '张三 13800138000 辽宁省大连市中山区示例路 24 号');
-    expect(screen.queryByRole('button', { name: /确认并保存/ })).toBeNull();
-    await user.click(screen.getByRole('button', { name: '解析并复核' }));
-    expect(await screen.findByRole('heading', { name: '复核识别结果' })).toBeTruthy();
-    expect(screen.getAllByText(parsedBuyerAddress.regionCode!).length).toBeGreaterThan(0);
-    expect(document.body.textContent).not.toContain(parsedBuyerAddress.sourceReferenceHash!);
-    await user.click(screen.getByRole('button', { name: /确认并保存/ }));
+    const form = screen.getByRole('form', { name: '新增收货地址' });
+    await user.type(within(form).getByLabelText('收货人'), '张三');
+    await user.type(within(form).getByLabelText('手机号'), '13800138000');
+    await user.type(within(form).getByLabelText('省份'), '辽宁省');
+    await user.type(within(form).getByLabelText('城市'), '大连市');
+    await user.type(within(form).getByLabelText('区县'), '中山区');
+    await user.type(within(form).getByLabelText('六位行政区代码'), '210202');
+    await user.type(within(form).getByLabelText('详细地址'), '示例路 24 号');
+    await user.click(within(form).getByRole('button', { name: /保存地址/ }));
     await waitFor(() => expect(createBuyerAddress).toHaveBeenCalledTimes(1));
     expect(createBuyerAddress).toHaveBeenCalledWith('buyer-session', expect.objectContaining({
-      recipientName: parsedBuyerAddress.recipientName,
-      phone: parsedBuyerAddress.phone,
-      detailAddress: parsedBuyerAddress.detailAddress,
-      longitude: parsedBuyerAddress.longitude,
-      latitude: parsedBuyerAddress.latitude,
+      recipientName: '张三',
+      phone: '13800138000',
+      province: '辽宁省',
+      city: '大连市',
+      district: '中山区',
+      regionCode: '210202',
+      detailAddress: '示例路 24 号',
+      longitude: null,
+      latitude: null,
     }));
 
     await user.click(screen.getByRole('button', { name: '用于下单' }));
@@ -389,27 +393,18 @@ describe('Mall V2 payment consumer', () => {
     expect(await screen.findByRole('heading', { name: '暂无已保存地址' })).toBeTruthy();
   });
 
-  it('keeps address parsing and version conflicts visibly fail closed', async () => {
+  it('keeps manual address version conflicts visibly fail closed', async () => {
     const user = userEvent.setup();
-    const parseBuyerAddress = vi.fn<CoreClient['parseBuyerAddress']>()
-      .mockRejectedValue(new CoreClientError('ConfigurationRequired', 'AMAP is not configured'));
     const updateBuyerAddress = vi.fn<CoreClient['updateBuyerAddress']>()
       .mockRejectedValue(new CoreClientError('UnknownState', 'Buyer address version changed'));
     renderAt('/assets/addresses', readyServices({
       getBuyerProfile: vi.fn().mockResolvedValue(buyerProfile),
       getBuyerOverview: vi.fn().mockResolvedValue(buyerOverview),
       listBuyerAddresses: vi.fn().mockResolvedValue([buyerSavedAddress]),
-      parseBuyerAddress,
       updateBuyerAddress,
     }));
 
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
-    await user.type(screen.getByLabelText('地址文本'), '张三 13800138000 辽宁省大连市中山区');
-    await user.click(screen.getByRole('button', { name: '解析并复核' }));
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('AMAP is not configured'));
-    expect(screen.queryByRole('heading', { name: '复核识别结果' })).toBeNull();
-    await user.click(screen.getByRole('button', { name: '关闭' }));
-
     await user.click(screen.getByRole('button', { name: '编辑' }));
     await user.click(screen.getByRole('button', { name: '保存修改' }));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Buyer address version changed'));
@@ -821,7 +816,7 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.queryByRole('heading', { name: '秒杀订单配置' })).toBeNull();
   });
 
-  it('filters Core store codes, sorts by Haversine distance and falls back when map popups are blocked', async () => {
+  it('filters Core stores by administrative codes without map or location controls', async () => {
     const user = userEvent.setup();
     const createPublicMediaReadAccess = vi.fn((assetId: string) => Promise.resolve(publicMediaAccess(assetId)));
     const fartherStore = {
@@ -845,7 +840,6 @@ describe('Mall V2 payment consumer', () => {
       createPublicMediaReadAccess,
       listStores: vi.fn().mockResolvedValue([fartherStore, otherCityStore, store]),
     });
-    const open = vi.spyOn(globalThis, 'open').mockReturnValue(null);
     renderAt('/stores', services);
 
     const storeHeading = await screen.findByRole('heading', { name: store.name });
@@ -864,24 +858,9 @@ describe('Mall V2 payment consumer', () => {
       expect(storeImages[index]?.getAttribute('src')).toBe(publicMediaAccess(assetId).readUrl);
       expect(createPublicMediaReadAccess).toHaveBeenCalledWith(assetId.toLowerCase());
     }
-    expect(screen.getAllByText('定位后显示')).toHaveLength(2);
-    await user.click(screen.getByRole('button', { name: '获取距离' }));
-    await screen.findByText('0.0 km');
-    const sortedHeadings = within(screen.getByLabelText('可用自提门店')).getAllByRole('heading', { level: 2 });
-    expect(sortedHeadings[0]?.textContent).toBe(store.name);
-    expect(sortedHeadings[1]?.textContent).toBe(fartherStore.name);
-    expect(screen.getByText('最近')).toBeTruthy();
     expect(screen.getByRole('link', { name: `拨打 ${store.name} 电话` }).getAttribute('href')).toBe(`tel:${store.phone}`);
-    await user.click(within(storeArticle).getByRole('button', { name: '高德导航' }));
-    const amap = new URL(String(open.mock.calls[0]?.[0]));
-    expect(amap.origin).toBe('https://uri.amap.com');
-    expect(amap.searchParams.get('to')).toBe(`${store.longitude},${store.latitude},${store.name}`);
-    expect(screen.getByText(/浏览器拦截了地图弹窗/)).toBeTruthy();
-    const baiduFallback = within(storeArticle).getByRole('link', { name: '当前页打开百度' });
-    const baidu = new URL(baiduFallback.getAttribute('href')!);
-    expect(baidu.origin).toBe('https://api.map.baidu.com');
-    expect(baidu.searchParams.get('location')).toBe(`${store.latitude},${store.longitude}`);
-    open.mockRestore();
+    expect(within(storeArticle).queryByRole('button', { name: /导航|距离/ })).toBeNull();
+    expect(screen.queryByText(/km|最近/)).toBeNull();
   });
 
   it('clears stale public stores when a reload fails', async () => {
@@ -916,9 +895,7 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: '到店自提' }));
     expect(await screen.findByText(`营业时间：${store.businessHours}`)).toBeTruthy();
     expect(await screen.findAllByRole('img', { name: new RegExp(`${store.name} 门店图片`) })).toHaveLength(storeImageAssetIds.length);
-    await user.click(screen.getByRole('button', { name: '定位最近门店' }));
     const nearestSelection = await screen.findByRole('button', { name: `选择 ${store.name}` });
-    await waitFor(() => expect(document.activeElement).toBe(nearestSelection));
     expect(createPickupTarget).not.toHaveBeenCalled();
     await user.click(nearestSelection);
 
@@ -982,7 +959,10 @@ describe('Mall V2 payment consumer', () => {
 
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     await screen.findByText('BNM 后台积分');
-    expect(screen.getByText('KUAIDI100 · 运输中 · 05/18 13:00')).toBeTruthy();
+    expect(screen.getByText('顺丰')).toBeTruthy();
+    expect(screen.getByText('SF1234567890')).toBeTruthy();
+    expect(screen.getByText('易碎品，请当面签收')).toBeTruthy();
+    expect(screen.getByText('运输中 · 05/18 13:00')).toBeTruthy();
     expect(screen.getByText(deliveryOrder.exactAmounts.bnmAmount)).toBeTruthy();
     expect(screen.getByText(/13800138000/)).toBeTruthy();
     expect(screen.getByText('PARTIAL_LEGACY')).toBeTruthy();
@@ -1634,7 +1614,6 @@ function servicesWith(overrides: Partial<CoreClient>): MallServices {
   return {
     core,
     wallet,
-    getCurrentPosition: vi.fn().mockResolvedValue({ latitude: store.latitude, longitude: store.longitude }),
     createIdempotencyKey: () => 'mall-test-idempotency',
     hashEvidenceFile: vi.fn().mockResolvedValue(HASH_3),
     submissionStore: {

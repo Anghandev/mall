@@ -136,6 +136,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '035_settlement_attempt_retryable.sql',
       '036_retire_merchant_levels.sql',
       '037_payment_quote_source_evidence.sql',
+      '038_manual_fulfillment_launch.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -570,12 +571,18 @@ test('buyer account data is encrypted, tenant scoped and creates targets only fr
       recipientName: 'Li Si',
       phone: '13900139000',
       detailAddress: 'Dalian Software Park Building 2',
-      longitude: 121.61,
-      latitude: 38.91,
+      province: 'Liaoning',
+      city: 'Dalian',
+      district: 'Ganjingzi',
+      regionCode: '210211',
+      longitude: null,
+      latitude: null,
       isDefault: true,
       idempotencyKey: 'buyer-address-office-1',
     });
     assert.equal(office.isDefault, true);
+    assert.equal(office.regionCode, '210211');
+    assert.equal(reverseGeocodeCalls, 1);
     const listed = await service.listBuyerAddresses(buyer);
     assert.equal(listed.addresses.length, 2);
     assert.equal(listed.addresses.filter((address) => address.isDefault).length, 1);
@@ -2171,7 +2178,9 @@ test('business analytics uses canonical Asia Shanghai finality windows and fail-
          wallet_address, role, merchant_id, status, evidence_hash
        ) VALUES
          ($1, 'MERCHANT', 'merchant-1', 'ACTIVE', $3),
-         ($2, 'ADMIN', NULL, 'ACTIVE', $3)`,
+         ($2, 'ADMIN', NULL, 'ACTIVE', $3)
+       ON CONFLICT (wallet_address, role) DO UPDATE
+         SET merchant_id = excluded.merchant_id, status = 'ACTIVE', revoked_at = NULL`,
       [MERCHANT, admin, HASH],
     );
     const now = new Date((intent.issuedAt + 120) * 1_000);
@@ -3261,6 +3270,17 @@ test('seckill quote locks both inventories and final classification releases the
       transactions: transactionAdapter(db),
       clock: () => new Date(event.event.finalizedAt!.getTime() + 60_000),
     });
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES
+         ($1,'BUYER',NULL,'ACTIVE',$4),
+         ($2,'MERCHANT','merchant-1','ACTIVE',$4),
+         ($3,'ARBITRATOR',NULL,'ACTIVE',$4)
+       ON CONFLICT (wallet_address, role) DO UPDATE
+         SET merchant_id = excluded.merchant_id, status = 'ACTIVE', revoked_at = NULL`,
+      [BUYER, MERCHANT, '0x4444444444444444444444444444444444444444', HASH],
+    );
     const buyer = { walletAddress: BUYER, roles: ['BUYER'] as const };
     const merchant = { walletAddress: MERCHANT, roles: ['MERCHANT'] as const, merchantId: 'merchant-1' };
     const arbitrator = { walletAddress: '0x4444444444444444444444444444444444444444', roles: ['ARBITRATOR'] as const };
@@ -3855,6 +3875,18 @@ test('fulfillment targets encrypt delivery PII and bind quotes to an AMap six-di
     });
     const buyer = { walletAddress: BUYER, roles: ['BUYER'] as const };
     const merchant = { walletAddress: MERCHANT, roles: ['MERCHANT'] as const, merchantId: 'merchant-1' };
+    await service.createDeliveryTarget(buyer, {
+      idempotencyKey: 'buyer-declared-region-before-amap',
+      recipientName: 'Manual Recipient',
+      phone: '+8613800000001',
+      address: 'Manual Road 1',
+      province: 'False Province',
+      city: 'False City',
+      district: 'False District',
+      regionCode: '310101',
+      longitude: null,
+      latitude: null,
+    });
     const store = await service.createStore(merchant, {
       idempotencyKey: 'store-create-command-1',
       name: 'Huangpu Store',
@@ -3874,6 +3906,14 @@ test('fulfillment targets encrypt delivery PII and bind quotes to an AMap six-di
       correlationId: 'store-create-retry-1',
     })).storeId, store.storeId);
     assert.equal(regionCalls, 1);
+    assert.deepEqual((await db.query<{
+      province: string; city: string; district: string; source: string;
+    }>(
+      'SELECT province, city, district, source FROM core.administrative_regions WHERE region_code = $1',
+      ['310101'],
+    )).rows[0], {
+      province: 'Shanghai', city: 'Shanghai', district: 'Huangpu', source: 'AMAP',
+    });
     await db.query(
       "UPDATE core.merchant_stores SET status = 'ACTIVE', version = version + 1 WHERE store_id = $1",
       [store.storeId],
@@ -3952,7 +3992,7 @@ test('fulfillment targets encrypt delivery PII and bind quotes to an AMap six-di
     for (const reader of platformReaders) {
       await grantRole(db, reader.walletAddress, reader.role);
       const actor = { walletAddress: reader.walletAddress, roles: [reader.role] } as never;
-      assert.equal((await service.getOrderTarget(actor, targetOrderId)).payload.address, 'Test Road 1 Building 2 Room 3');
+      assert.equal((await service.getOrderTarget(actor, targetOrderId)).payload.address, 'Shanghai Huangpu Test Road 1');
       await db.query(
         `UPDATE core.wallet_role_bindings SET status = 'REVOKED', revoked_at = clock_timestamp()
          WHERE lower(wallet_address) = $1 AND role = $2`,
@@ -5288,6 +5328,101 @@ test('fulfillment service keeps evidence append-only and unlocks every order lia
     );
     assert.deepEqual(bnmSync.rows.map((row) => row.state), ['AVAILABLE', 'LOCKED']);
     await assertLedgerBalanced(db, 0);
+  } finally {
+    await db.close();
+  }
+});
+
+test('manual fulfillment revalidates revoked merchant and platform roles before exposing tracking or changing state', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const intent = await recordFinalPayment(db);
+    const now = new Date((intent.issuedAt + 60) * 1000);
+    const merchant = { walletAddress: MERCHANT, roles: ['MERCHANT'] as const, merchantId: 'merchant-1' };
+    const operator = {
+      walletAddress: '0x3333333333333333333333333333333333333333',
+      roles: ['OPERATOR'] as const,
+    };
+    const evidence = new EvidenceService({
+      transactions: transactionAdapter(db),
+      trackingHashKey: 'cd'.repeat(32),
+      trackingEncryptionKey: 'ef'.repeat(32),
+      clock: () => now,
+      storage: {
+        createUpload: async () => { throw new Error('unused'); },
+        finalizeUpload: async () => { throw new Error('unused'); },
+        createRead: async () => { throw new Error('unused'); },
+      },
+    });
+    const fulfillment = new FulfillmentService({
+      transactions: transactionAdapter(db),
+      trackingEncryptionKey: 'ef'.repeat(32),
+      clock: () => now,
+    });
+    const tracking = await evidence.createTrackingEvidence(merchant, {
+      orderId: intent.orderId,
+      carrierCode: 'SF',
+      trackingNumber: 'SFROLECHECK001',
+      note: 'Role revocation evidence',
+      idempotencyKey: 'role-check-tracking-active',
+    });
+
+    await db.query(
+      `UPDATE core.wallet_role_bindings SET status = 'REVOKED', revoked_at = clock_timestamp()
+       WHERE lower(wallet_address) = $1 AND role = 'MERCHANT'`,
+      [MERCHANT],
+    );
+    await assert.rejects(
+      evidence.createTrackingEvidence(merchant, {
+        orderId: intent.orderId,
+        carrierCode: 'SF',
+        trackingNumber: 'SFROLECHECK002',
+        idempotencyKey: 'role-check-tracking-revoked',
+      }),
+      /outside the actor order scope/,
+    );
+    await assert.rejects(
+      fulfillment.recordShipment(merchant, intent.orderId, {
+        idempotencyKey: 'role-check-shipment-revoked',
+        evidenceHash: String(tracking.evidenceHash),
+        carrierCode: 'SF',
+        trackingNumberHash: String(tracking.trackingNumberHash),
+      }),
+      /Order merchant is required/,
+    );
+    await assert.rejects(fulfillment.getOrder(merchant, intent.orderId), /outside the authenticated wallet scope/);
+
+    await db.query(
+      `UPDATE core.wallet_role_bindings SET status = 'ACTIVE', revoked_at = NULL
+       WHERE lower(wallet_address) = $1 AND role = 'MERCHANT'`,
+      [MERCHANT],
+    );
+    await fulfillment.recordShipment(merchant, intent.orderId, {
+      idempotencyKey: 'role-check-shipment-active',
+      evidenceHash: String(tracking.evidenceHash),
+      carrierCode: 'SF',
+      trackingNumberHash: String(tracking.trackingNumberHash),
+    });
+    assert.equal((await fulfillment.getOrder(operator, intent.orderId)).shipments[0]?.trackingNumber, 'SFROLECHECK001');
+
+    await db.query(
+      `UPDATE core.wallet_role_bindings SET status = 'REVOKED', revoked_at = clock_timestamp()
+       WHERE lower(wallet_address) = $1 AND role = 'OPERATOR'`,
+      [operator.walletAddress],
+    );
+    await assert.rejects(fulfillment.getOrder(operator, intent.orderId), /outside the authenticated wallet scope/);
+    await assert.rejects(fulfillment.searchAdminOrders(operator), /role is required/);
+    await assert.rejects(
+      fulfillment.recordDelivery(operator, intent.orderId, {
+        idempotencyKey: 'role-check-delivery-revoked',
+        evidenceHash: `0x${'7'.repeat(64)}`,
+      }),
+      /role is required/,
+    );
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.orders WHERE order_id = $1',
+      [intent.orderId],
+    )).rows[0]?.state, 'SHIPPED');
   } finally {
     await db.close();
   }
@@ -7941,7 +8076,9 @@ test('buyer shopping and merchant receivable statements preserve tenant-scoped o
          wallet_address, role, merchant_id, status, evidence_hash
        ) VALUES
          ($1,'BUYER',NULL,'ACTIVE',$3),
-         ($2,'MERCHANT','merchant-1','ACTIVE',$3)`,
+         ($2,'MERCHANT','merchant-1','ACTIVE',$3)
+       ON CONFLICT (wallet_address, role) DO UPDATE
+         SET merchant_id = excluded.merchant_id, status = 'ACTIVE', revoked_at = NULL`,
       [prepared.intent.buyer, prepared.merchantWallet.address.toLowerCase(), HASH],
     );
     const service = new OrderStatementService({ transactions: transactionAdapter(db) });
@@ -9873,7 +10010,9 @@ test('takeover funding consumes final guarantee first and records Operations adv
     await db.query(
       `INSERT INTO core.wallet_role_bindings (
          wallet_address, role, merchant_id, status, evidence_hash
-       ) VALUES ($1,'MERCHANT','merchant-1','ACTIVE',$2)`,
+       ) VALUES ($1,'MERCHANT','merchant-1','ACTIVE',$2)
+       ON CONFLICT (wallet_address, role) DO UPDATE
+         SET merchant_id = excluded.merchant_id, status = 'ACTIVE', revoked_at = NULL`,
       [MERCHANT, HASH],
     );
     const guaranteeDeposits = new GuaranteeDepositService({
@@ -10138,7 +10277,11 @@ test('takeover assignment authorizes one qualified replacement merchant through 
     await grantRole(db, auditorWallet.address, 'AUDITOR');
     const operator = { walletAddress: operatorWallet.address, roles: ['OPERATOR'] as const };
     const auditor = { walletAddress: auditorWallet.address, roles: ['AUDITOR'] as const };
-    const fulfillment = new FulfillmentService({ transactions: transactionAdapter(db), clock: () => now });
+    const fulfillment = new FulfillmentService({
+      transactions: transactionAdapter(db),
+      clock: () => now,
+      trackingEncryptionKey: deliveryKey,
+    });
     const takeover = await fulfillment.openTakeover(operator, intent.orderId, {
       idempotencyKey: 'replacement-assignment-open-1',
       evidenceHash: `0x${'6'.repeat(64)}`,
@@ -10264,6 +10407,7 @@ test('takeover assignment authorizes one qualified replacement merchant through 
       orderId: intent.orderId,
       carrierCode: 'SF',
       trackingNumber: 'SF-REPLACEMENT-001',
+      note: 'Replacement warehouse handoff',
       idempotencyKey: 'replacement-tracking-evidence-1',
     });
     const trackingNumberHash = tracking.trackingNumberHash;
@@ -10281,6 +10425,10 @@ test('takeover assignment authorizes one qualified replacement merchant through 
       trackingNumberHash,
     });
     assert.equal(shipped.state, 'SHIPPED');
+    const shipmentProjection = (await fulfillment.getOrder(operator, intent.orderId)).shipments[0];
+    assert.equal(shipmentProjection?.trackingNumber, 'SFREPLACEMENT001');
+    assert.equal(shipmentProjection?.note, 'Replacement warehouse handoff');
+    assert.equal(shipmentProjection?.evidenceHash, tracking.evidenceHash);
     assert.equal((await service.getMerchant(secondActor, takeover.caseId)).case.state, 'FULFILLING');
     await assert.rejects(
       service.assign(operator, takeover.caseId, {
@@ -11034,6 +11182,7 @@ test('evidence and media stay scoped, idempotent, hashed and immutable', async (
       orderId: intent.orderId,
       carrierCode: 'SF',
       trackingNumber: ' sf-123 456 ',
+      note: 'Fragile package',
       idempotencyKey: 'tracking-evidence-1',
     });
     assert.equal(tracking.carrierCode, 'SF');
@@ -11041,6 +11190,7 @@ test('evidence and media stay scoped, idempotent, hashed and immutable', async (
       orderId: intent.orderId,
       carrierCode: 'SF',
       trackingNumber: 'SF123456',
+      note: 'Fragile package',
       idempotencyKey: 'tracking-evidence-1',
     }), tracking);
     await evidence.assertTrackingEvidence(merchant, {
@@ -11067,13 +11217,15 @@ test('evidence and media stay scoped, idempotent, hashed and immutable', async (
       }),
       /Evidence input changed/,
     );
-    const trackingStorage = await db.query<{ payload: string }>(
-      `SELECT payload::text AS payload FROM core.evidence_envelopes
+    const trackingStorage = await db.query<{ payload: string; encrypted_tracking: string }>(
+      `SELECT payload::text AS payload, encode(encrypted_tracking_number, 'hex') AS encrypted_tracking
+       FROM core.evidence_envelopes
        WHERE evidence_hash = $1`,
       [tracking.evidenceHash],
     );
     assert.equal(JSON.stringify(trackingStorage.rows).includes('SF123456'), false);
     assert.equal(JSON.stringify(trackingStorage.rows).includes('sf-123 456'), false);
+    assert.equal(JSON.stringify(trackingStorage.rows).includes('Fragile package'), false);
     assert.throws(
       () => evidence.createTrackingEvidence(merchant, {
         orderId: intent.orderId,
@@ -11120,6 +11272,7 @@ test('evidence and media stay scoped, idempotent, hashed and immutable', async (
       ),
       /outside the actor order scope/,
     );
+    await grantRole(db, '0x9999999999999999999999999999999999999997', 'ADMIN');
     const platformTracking = await evidence.createTrackingEvidence(
       {
         walletAddress: '0x9999999999999999999999999999999999999997',
@@ -11318,6 +11471,20 @@ async function prepareRequestedSettlement(db: PGlite) {
 
 async function recordFinalPayment(db: PGlite, intent = paymentIntent()) {
   await seedCatalog(db, 1, intent.merchant);
+  await db.query(
+    `INSERT INTO core.wallet_role_bindings (
+       wallet_address, role, merchant_id, status, evidence_hash
+     ) VALUES
+       ($1,'BUYER',NULL,'ACTIVE',$5),
+       ($2,'MERCHANT','merchant-1','ACTIVE',$5),
+       ($3,'OPERATOR',NULL,'ACTIVE',$5),
+       ($4,'ARBITRATOR',NULL,'ACTIVE',$5)
+     ON CONFLICT (wallet_address, role) DO UPDATE
+       SET merchant_id = excluded.merchant_id, status = 'ACTIVE', revoked_at = NULL`,
+    [intent.buyer.toLowerCase(), intent.merchant.toLowerCase(),
+      '0x3333333333333333333333333333333333333333',
+      '0x4444444444444444444444444444444444444444', HASH],
+  );
   await reserveInventory(adapter(db), {
     reservationId: intent.reservationId,
     reservationHash: intent.reservationHash,

@@ -20,7 +20,7 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
 | MAL-CAT-001 | 35-39 | Horizontal multilevel categories, product waterfall, BNM badge, seckill overlay and route | - | Category filtering works; active seckill blocks ordinary checkout | Verified | - |
 | MAL-CAT-002 | 40-42 | Product detail, sticky Buy action, seckill-disabled state, SlideUp configuration sheet | - | Action remains reachable and follows authoritative product state | Verified | - |
 | MAL-CHK-001 | 43-49 | Confirmation prerequisite; SKU matrix/manual selection; +/- quantity; delivery/pickup; default full address fields; empty-address guidance; nearest store/address/hours/detail | D-V2-002, D-V2-012, D-V2-021, D-V2-031 | No confirmation without valid SKU, quantity, mode and authoritative address/store; exact product 70% USDT + 30% equivalent NPL legs, flat delivery freight or zero pickup freight, five-minute expiry and totals come only from the backend-generated signed Core quote; Mall performs no pricing or allocation calculation | Verified | - |
-| MAL-STORE-001 | 50-53 | Country/city/district selectors; GPS 1.2km display; Call and Navigation buttons; JSBridge AMap/Baidu launch | - | Browser/local tests cover permission, loading, denial, unavailable, deep-link generation and fallback states; real-device proof is tracked only by MAL-GOAL-004 | Verified | - |
+| MAL-STORE-001 | 50-53 | Country/city/district selectors; GPS 1.2km display; Call and Navigation buttons; JSBridge AMap/Baidu launch | D-V2-038 | Launch keeps manual region filtering and store contact; GPS distance and AMap/Baidu navigation are Phase 2 and absent from the launch UI | Overridden | - |
 | MAL-ASSET-001 | 54-64 | Assets shell; avatar, nickname, account ID, address entry; four order groups/counts; View All | - | Profile and canonical counts render from Core projection | Verified | - |
 | MAL-ASSET-002 | 65-70 | Seckill/shopping tabs; session number; exact 70% product-USDT leg split into service fee and Custody product amounts, separate freight, 30% NPL, Locked BNM and winner/prize states | D-V2-002, D-V2-003, D-V2-007, D-V2-008, D-V2-031, D-V2-032, D-V2-035 | Exact service-fee USDT, Custody product USDT, freight USDT, total USDT and NPL amounts render from Core; the published winner's whole payable prize exposes Locked/Available/Requested/Submitted/Settled and final execution TxHash; BNM exposes only Locked/Available | Verified | - |
 | MAL-ASSET-003 | 71-74 | Source BNM totals, provenance link and withdrawal control | D-V2-008, D-V2-035 | BNM is existing backend points with only Locked and Available totals plus order/fulfillment provenance; no token address, mint, EOA transfer or on-chain withdrawal action is rendered | Verified | - |
@@ -51,7 +51,7 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
 | MAL-GOAL-001 | Final Goal | React + TypeScript Web DApp; mobile full-screen; desktop max about 430px centered; 375/393/430 acceptance | - | Typecheck plus Playwright at required widths with no overlap/overflow | Frozen | GAP-MAL-002 |
 | MAL-GOAL-002 | Final Goal | Ordinary EOA wallet connect, wrong chain, rejection and MaxUint256 disclosure/revocation | D-V2-002, D-V2-015 | Browser consumer tests cover the supported EOA wallet states; unsupported wallet types fail closed before quote issuance | Overridden | GAP-MAL-001 |
 | MAL-GOAL-003 | Final Goal | Keyboard/focus/labels/reduced motion/safe areas; no production fixtures; no business-refund or direct on-chain withdrawal entry | D-V2-004, D-V2-007, D-V2-008 | Accessibility and production-bundle negative tests prove no fixture, empty action, disabled placeholder, BNM token action or direct settlement calldata ships | Frozen | GAP-MAL-002, GAP-MAL-015 |
-| MAL-GOAL-004 | Final Goal | Physical wallet, GPS, call/navigation and production HTTPS/WSS acceptance | D-V2-019 | Real wallet, mobile device, native link, provider and production-domain evidence only; local mocks cannot satisfy this row | ExternalBlocked | GAP-MAL-016 |
+| MAL-GOAL-004 | Final Goal | Physical wallet, GPS, call/navigation and production HTTPS/WSS acceptance | D-V2-019, D-V2-038 | Physical wallet and production HTTPS/WSS remain launch acceptance; GPS/map navigation/provider evidence is Phase 2 | Overridden | - |
 | MAL-GOAL-005 | Final Goal | Payment batch real Core path: product/SKU -> atomic reservation -> five-minute backend-generated signed exact 70% USDT + 30% equivalent NPL quote with service-fee/Custody/freight split -> allowance -> PaymentRouter -> indexed event -> order projection | D-V2-001, D-V2-002, D-V2-003, D-V2-011, D-V2-012, D-V2-017, D-V2-021, D-V2-028, D-V2-031 | Mall consumer and integration tests use one published Core artifact and real local API/indexer; quote and intent bind amounts, order, product, inventory reservation, payer/payees, policyVersion, deadline and one-use nonce; Router performs no external TWAP read; inventory, 1%-of-list direct fee, remaining product USDT, freight, Burn NPL and Reward NPL are atomic and separately projected; no static fixture, local formula, handwritten calldata or disabled action counts | Frozen | GAP-MAL-001, GAP-MAL-003, GAP-MAL-004, GAP-MAL-015 |
 | MAL-GOAL-006 | Final Goal | Transferable-asset ledger lifecycle and BNM backend-points lifecycle | D-V2-007, D-V2-008, D-V2-017, D-V2-023, D-V2-035 | USDT/NPL/prize rows prove Locked/Available/Requested/Submitted/Settled, immutable per-payable EOA transfer-intent identity and final 15-confirmation execution TxHash; BNM proves only Locked/Available with no ERC-20, mint, EOA transfer or on-chain withdrawal | Verified | - |
 
@@ -127,11 +127,11 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
   bind avatar updates only after the `BUYER_AVATAR` / `BUYER` write-once upload
   is provider-verified. Media identity, owner wallet and content hashes are
   checked before rendering or binding.
-- `MAL-ADDR-001`: raw pasted text is sent only to the Core parser, every parsed
-  field must be reviewed before create, and saved addresses support list,
-  update, delete and default writes with optimistic versions. Checkout hashes
-  are created by Core from the selected saved address. `ConfigurationRequired`
-  and version conflicts remain visible and fail closed.
+- `MAL-ADDR-001`: launch uses direct manual name, phone, province, city,
+  district, six-digit region code and detailed-address input. Coordinates are
+  null and no map service is required. Saved addresses support list, update,
+  delete and default writes with optimistic versions; checkout hashes are
+  created only by Core from the selected saved address.
 - Buyer order rows consume takeover timelines and render only history status,
   public state transitions, evidence type and occurrence time. Internal evidence
   hashes are rejected by the strict client parser.
@@ -140,9 +140,9 @@ source clause and points to the binding Decision ID. `DecisionBlocked` and
   store DTOs with business hours and one to five unique image asset IDs. Store
   lists and pickup selection resolve every `STORE_IMAGE` through signed public
   media access, and a failed initial load or filtered reload clears stale store
-  data. Existing local coverage verifies GPS distance, telephone links and the
-  navigation fallback; physical-device evidence remains `MAL-GOAL-004`
-  `ExternalBlocked`.
+  data. Existing local coverage verifies administrative-region filtering and
+  telephone links. GPS distance and map navigation are Phase 2 and absent from
+  launch acceptance.
 
 - `MAL-CAT-001`: the Mall consumes `.9` `categoryId`, `tagIds`, `subtitle`,
   `richDetail`, `defaultFreightUsdt`, `fulfillmentModes` and each SKU's

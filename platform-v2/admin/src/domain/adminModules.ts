@@ -245,6 +245,8 @@ export const adminModules: readonly AdminModule[] = [
   },
 ];
 
+export const launchAdminModules = Object.freeze(adminModules.filter((module) => module.id !== 'logistics'));
+
 export const requirementIds = adminModules.flatMap((module) => module.requirements);
 
 export const globalRequirementIds = ['ADM-GLOBAL-003', 'ADM-SRC-001'] as const;

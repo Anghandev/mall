@@ -256,7 +256,9 @@ Both quote endpoints also require the authenticated wallet to be registered in
 the existing BNM system. An unregistered wallet receives `Forbidden` before
 inventory reservation or quote signing; Core never creates a BNM account.
 
-Delivery targets require AMap reverse geocoding and encrypted PII storage.
+Launch delivery targets accept complete buyer-declared province, city, district
+and six-digit region code with nullable coordinates, and always use encrypted
+PII storage. AMap parsing/reverse geocoding is Phase 2 and is not a launch gate.
 Pickup targets bind an active store snapshot and immutable six-digit region.
 Quotes accept only an unexpired target belonging to the authenticated buyer.
 Order reads are wallet/role scoped; decrypted target payloads are returned only
@@ -279,7 +281,10 @@ reach 15-confirmation finality. Seven-day delivery takeover starts from that
 finality timestamp, not the payment block timestamp. Pickup-timeout takeover is
 still `DecisionBlocked`.
 
-Manual shipment batches contain 1-100 unique orders. Core sorts and locks the
+The launch UI uses only the single-order manual shipment path: create canonical
+tracking evidence from carrier, raw tracking number and optional note/evidence,
+then record the shipment with the returned hashes. Manual shipment batches
+remain a Phase 2/internal compatibility surface and contain 1-100 unique orders. Core sorts and locks the
 orders, revalidates each canonical tracking-evidence envelope, authorizes every
 row and writes every shipment in one database transaction. One invalid item
 rolls back the whole batch. The actor wallet and batch idempotency key acquire a
@@ -288,7 +293,7 @@ requests return the same immutable result. New batches also lock every sorted
 actor/item-idempotency identity before command lookup, so different batch keys
 cannot duplicate or ambiguously conflict on one shipment command.
 Electronic-waybill creation, label printing and raw tracking-number export are
-not part of this endpoint.
+not part of launch acceptance.
 
 `GET /v2/merchant/dashboard` and `GET /v2/admin/dashboard` publish an
 `Asia/Shanghai` `[start,end)` natural-day window. Today payment counts and

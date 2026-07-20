@@ -23,7 +23,7 @@ pnpm --filter @abu24k/merchant check
 ```
 
 The app consumes the coordinated `@abu24k/core-artifacts` workspace package at
-`2.0.0-settlement-admin.17`. This batch keeps exact NPL payment quotes under
+`2.0.0-fulfillment-launch.18`. This batch keeps exact NPL payment quotes under
 Core authority without a production on-chain TWAP dependency; the workbench
 does not calculate or sign buyer payment amounts. In addition to Bootstrap,
 merchant SIWE and the
@@ -56,8 +56,8 @@ Store photos use owned `STORE_IMAGE` intent -> provider PUT -> completion ->
 controlled-read evidence and are limited to one through five for activation.
 Every command preserves its idempotency key on retry, uses the current Core
 version and renders Core capabilities, conflicts and authorization failures
-without a browser-side state transition. The signed printer-binding flow
-remains available as a separate store-scoped command.
+without a browser-side state transition. Printer binding is Phase 2 and is not
+loaded or exposed by the launch store page.
 
 The dashboard and finance-center Today metric consume
 `GET /v2/merchant/dashboard` directly. Core owns the `Asia/Shanghai` day
@@ -69,15 +69,14 @@ availability does not gate the merchant projection.
 
 The fulfillment center consumes Core's stable `(createdAt, orderId)` cursor,
 server-side date/SKU/state/mode/order-kind filters, complete quantity/payment
-TxHash/order-kind/`allowedActions` rows, the atomic manual-shipment batch,
-provider-issued electronic waybills, durable print jobs and the merchant-scoped
-PII-authorized Excel export. Export requests preserve the applied filters and
-current stable cursor, validate the returned tenant/filter snapshot and verify
-the exact downloaded bytes against Core's SHA-256 content hash. Batch, export
-and print retries preserve their idempotency keys. The browser submits only
-published provider/carrier/store/order fields or Core-issued canonical
-tracking/evidence hashes; it does not derive tracking numbers, print content or
-financial state.
+TxHash/order-kind/`allowedActions` rows, provider-independent manual shipment
+and the merchant-scoped PII-authorized Excel export. Export requests preserve
+the applied filters and current stable cursor, validate the returned
+tenant/filter snapshot and verify the exact downloaded bytes against Core's
+SHA-256 content hash. The browser submits the raw carrier/tracking/note only to
+Core's canonical evidence endpoint, then records shipment with returned hashes.
+Electronic waybills, print jobs and batch shipment are Phase 2 and absent from
+launch.
 Carrier codes come from the generated Core enum. Platform carrier enablement
 and provider configuration remain Core authority: `ConfigurationRequired` and
 `InvalidRequest` responses stay visible and never become a browser-side
@@ -119,9 +118,9 @@ camera/BarcodeDetector path or the always-available manual field, then submits
 the existing order/store-bound Core verification command. Unsupported cameras,
 denied permission and recognition failure remain explicit errors and never
 simulate a successful scan. The approved settlement wallet is permanently
-immutable and has no migration or recovery action. Real provider accounts,
-authorized production wallets and physical
-camera/printer acceptance remain externally blocked. The browser never calls
+immutable and has no migration or recovery action. Authorized production
+wallets and physical camera acceptance remain rollout inputs; logistics
+providers and printers are Phase 2. The browser never calls
 the buyer-only payment projection with a merchant session.
 
 Core is expected on the same origin. `VITE_CORE_API_BASE_URL` may select a

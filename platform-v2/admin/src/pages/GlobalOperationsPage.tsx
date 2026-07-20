@@ -22,7 +22,6 @@ import {
   EyeOff,
   FileSpreadsheet,
   KeyRound,
-  PackagePlus,
   RefreshCw,
   RotateCcw,
   Search,
@@ -33,7 +32,6 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   batchAddAdminProductTags,
   batchApplyAdminProductLifecycle,
@@ -72,13 +70,6 @@ type SearchForm = {
   to: string;
   pendingReview: PendingReviewFilter;
 };
-
-type LogisticsSelection = Readonly<{
-  enabled: boolean;
-  merchantId: string | null;
-  orderIds: readonly string[];
-  reason: string;
-}>;
 
 const emptySearchForm: SearchForm = {
   resourceTypes: [...adminResourceTypes],
@@ -471,9 +462,7 @@ function GlobalBatchActions(props: {
   onSelectedTagIdsChange(value: readonly string[]): void;
   onTagIdempotencyChange(value: string): void;
 }) {
-  const navigate = useNavigate();
   const allProducts = props.selectedCount > 0 && props.selectedResources.every((resource) => resource.resourceType === 'PRODUCT');
-  const logisticsSelection = qualifyLogisticsSelection(props.selectedResources, props.canWrite);
   const tagBlock = !props.canWrite ? 'AUDITOR 只读：Forbidden'
     : !allProducts ? '仅支持全部选择为商品'
       : !props.canAddTags ? batchTagBlockReason(props.selectedResources)
@@ -490,12 +479,6 @@ function GlobalBatchActions(props: {
   const toggleTag = (tagId: string) => props.onSelectedTagIdsChange(
     props.selectedTagIds.includes(tagId) ? props.selectedTagIds.filter((id) => id !== tagId) : [...props.selectedTagIds, tagId],
   );
-  const openLogistics = () => {
-    if (!logisticsSelection.enabled || !logisticsSelection.merchantId) return;
-    const query = new URLSearchParams({ view: 'OPERATIONS', merchantId: logisticsSelection.merchantId });
-    logisticsSelection.orderIds.forEach((orderId) => query.append('orderIds', orderId));
-    navigate(`/logistics?${query.toString()}`);
-  };
   return (
     <section className="batch-bar global-batch-bar" aria-labelledby="global-batch-title">
       <div><p className="section-kicker" id="global-batch-title">授权批处理</p><strong className="tabular">已选择 {props.selectedCount} 项</strong></div>
@@ -506,10 +489,6 @@ function GlobalBatchActions(props: {
       <div className="global-batch-fields">
         <label>导出 idempotency key<input value={props.exportIdempotencyKey} onChange={(event) => props.onExportIdempotencyChange(event.target.value)} minLength={8} maxLength={128} /></label>
         <div><span>导出权限</span><strong>{props.selectedCount < 1 ? '请选择资源' : props.canExportCsv && props.canExportExcel ? 'CSV / Excel allowed' : 'Core row capability denied'}</strong></div>
-      </div>
-      <div className="global-logistics-command">
-        <div className="global-tag-heading"><span><PackagePlus aria-hidden="true" /><strong>订单面单</strong></span><small id="global-logistics-reason">{logisticsSelection.reason}</small></div>
-        <button className="button button-quiet" type="button" disabled={!logisticsSelection.enabled} aria-describedby="global-logistics-reason" onClick={openLogistics}><PackagePlus aria-hidden="true" />进入面单与打印</button>
       </div>
       <div className="global-tag-command">
         <div className="global-tag-heading"><span><Tags aria-hidden="true" /><strong>批量增加商品标签</strong></span><small>{tagBlock ?? '每行 ADD_PRODUCT_TAGS allowed'}</small></div>
@@ -597,21 +576,6 @@ function lifecycleBlockReason(resources: readonly AdminResourceSummary[], capabi
   const blocked = resources.flatMap((resource) => resource.allowedBatchActions)
     .find((item) => item.action === capability && !item.enabled);
   return blocked?.reasonCode ?? `Core 未授权 ${capability}`;
-}
-
-function qualifyLogisticsSelection(resources: readonly AdminResourceSummary[], canWrite: boolean): LogisticsSelection {
-  if (!canWrite) return { enabled: false, merchantId: null, orderIds: [], reason: 'AUDITOR 只读：Forbidden' };
-  if (resources.length < 1) return { enabled: false, merchantId: null, orderIds: [], reason: '请选择订单' };
-  if (resources.some((resource) => resource.resourceType !== 'ORDER')) return { enabled: false, merchantId: null, orderIds: [], reason: '仅支持全部选择为订单' };
-  const merchantIds = resources.map((resource) => resource.merchantId?.trim() ?? '');
-  if (merchantIds.some((merchantId) => !merchantId)) return { enabled: false, merchantId: null, orderIds: [], reason: '所选订单缺少商家归属' };
-  if (merchantIds.some((merchantId) => merchantId !== merchantIds[0])) return { enabled: false, merchantId: null, orderIds: [], reason: '所选订单必须属于同一商家' };
-  return {
-    enabled: true,
-    merchantId: merchantIds[0]!,
-    orderIds: resources.map((resource) => resource.resourceId),
-    reason: `${resources.length} 个同商家订单可进入面单与打印`,
-  };
 }
 
 function resourceKey(resource: Pick<AdminResourceSummary, 'resourceType' | 'resourceId'>) {

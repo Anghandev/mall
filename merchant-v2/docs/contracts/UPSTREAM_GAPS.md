@@ -1,6 +1,6 @@
 # Merchant Workbench Core Gaps
 
-The merchant product consumes Core's coordinated `2.0.0-settlement-admin.17` artifact
+The merchant product consumes Core's coordinated `2.0.0-fulfillment-launch.18` artifact
 workspace package. Bootstrap, SIWE,
 merchant-bound Catalog/SKU/inventory management, immutable media, wallet-scoped fulfillment, merchant finance,
 guarantee-deposit evidence, signed settlement requests and per-payable EOA-finality
@@ -40,12 +40,12 @@ remain unchanged.
 | GAP-MER-015 | Merchant-scoped reverse-time audit read model and bounded CSV export | Filters/cursor, partial-history label, signature/execution hashes and exact Core CSV download are live without a browser-side audit replica |
 | GAP-MER-001 (per-order receivable slice) | Merchant-scoped stable-cursor order statements with frozen amounts, lifecycle, journal and settlement references | Ordinary, fallback-retail and seckill-classified orders render exact Core evidence; tenant/wallet mismatch and authorization failure close the statement without browser netting |
 
-## Resolved In Logistics Batch
+## Retained Phase 2 Logistics Contracts
 
 | Gap ID | Published Core capability | Merchant evidence |
 |---|---|---|
-| GAP-MER-009 | Wallet-bound Feie/Yilianyun Device ID binding plus durable one-copy waybill and two-copy pickup print jobs | The connected merchant signs the exact Core challenge; the workbench renders tenant-scoped jobs and retries with stable command keys |
-| GAP-MER-010 | Kuaidi100/Cainiao waybill batches, provider tracking evidence and shipment recording | Selected eligible delivery orders submit only published provider/carrier/store/order fields; each authoritative result and failure state is rendered without browser-generated tracking data |
+| GAP-MER-009 | Wallet-bound Feie/Yilianyun Device ID binding plus durable one-copy waybill and two-copy pickup print jobs | Phase 2; launch UI neither loads nor exposes printer binding or print jobs |
+| GAP-MER-010 | Kuaidi100/Cainiao waybill batches and provider tracking evidence | Phase 2; launch uses only provider-independent manual tracking evidence and single-order shipment recording |
 
 The Merchant consumer uses Core's generated carrier-code enum but does not
 read or write platform carrier/provider configuration. A disabled carrier or
@@ -78,6 +78,6 @@ create a local success state.
 | Gap ID | Required Core capability | Fail-closed behavior |
 |---|---|---|
 | GAP-MER-001 | Coordinated merchant runtime endpoints beyond published payment, fulfillment and settlement/admin surfaces | Published reads and writes are live; unpublished writes remain unavailable |
-| GAP-MER-002 | Secondary-signature intents beyond the published printer binding plus production merchant allowlist and domain configuration | Printer binding signs the exact Core challenge; unpublished region-change intent, unauthorized/rejected/wrong-chain states remain fail closed |
+| GAP-MER-002 | Production merchant allowlist and domain configuration | Unauthorized, rejected and wrong-chain states remain fail closed; printer binding and region-change workflows are not launch capabilities |
 | GAP-MER-013 | Authoritative seckill revenue detail | Published NPL subtype balances and finance-center BNM totals are live; only the unpublished seckill revenue projection remains unavailable |
-| GAP-MER-018 | Provider accounts/devices, authorized merchant wallet and RPC/domain inputs | ExternalBlocked; no simulated success |
+| GAP-MER-018 | Authorized merchant wallet and RPC/domain inputs | ExternalBlocked; no simulated success. Logistics provider accounts/devices are Phase 2 and do not block launch |

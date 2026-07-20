@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.17",
+  "artifactVersion": "2.0.0-fulfillment-launch.18",
   "formatVersion": 1,
   "databaseEngine": "postgresql",
   "schemas": {
@@ -190,6 +190,11 @@
           "name": "037_payment_quote_source_evidence.sql",
           "path": "schema/business/037_payment_quote_source_evidence.sql",
           "sha256": "cd54a566f156862e08b95079509d7236807016aac068bccf2c1a636d67f31c82"
+        },
+        {
+          "name": "038_manual_fulfillment_launch.sql",
+          "path": "schema/business/038_manual_fulfillment_launch.sql",
+          "sha256": "2f997f83ffae886fc2bd9bcd7116400eddb54ce2747bf3babd3a69630a92873d"
         }
       ]
     },

@@ -12,7 +12,7 @@ are never soft-deletable.
 |---|---:|---|---|---|---|---|
 | ADM-SRC-001 | 1-3 | Platform-admin title and global-spec scope | - | Local source hash equals SOURCE record | Frozen | - |
 | ADM-GLOBAL-001 | 4-8 | AND/OR search; exact order ID/product ID/TxHash; fuzzy/exact wallet; exact UID/phone; start/end and Today/Yesterday/7d/30d; PendingReview/Yellow/BreakerRed status | - | Shared list shell serializes filters server-side and preserves PII authorization | Frozen | GAP-ADM-003 |
-| ADM-GLOBAL-002 | 9-11 | List batch engine; Export Excel/CSV; batch electronic-waybill/pickup printing | - | Resource capability and selected rows come from allowedActions; exports/prints are audited | Frozen | GAP-ADM-003, GAP-ADM-012 |
+| ADM-GLOBAL-002 | 9-11 | List batch engine; Export Excel/CSV; batch electronic-waybill/pickup printing | D-V2-038 | Export remains governed; electronic-waybill and pickup printing are Phase 2 and absent from launch acceptance | Overridden | GAP-ADM-003 |
 | ADM-GLOBAL-003 | 12 | Batch modify/list/delist/review approve-reject/soft delete | D-V2-017, D-V2-021 | Soft delete only for ordinary resources explicitly authorized; funds/chain/audit never delete | Overridden | GAP-ADM-003 |
 | ADM-DASH-001 | 14-17 | Today orders, GMV USDT, ship rate, seckill sessions, new UID users and merchants | D-V2-030 | Authoritative timezone and canonical values; unavailable is not zero | Verified | - |
 | ADM-DASH-002 | 18-19 | Pending merchant/product reviews, after-sale cases and low-stock products | D-V2-004, D-V2-026 | After-sale excludes business refunds and includes exchange/delay/arbitration/takeover queues; stock below 100 creates an alert only | Overridden | GAP-ADM-005, GAP-ADM-011 |
@@ -48,7 +48,7 @@ are never soft-deletable.
 | ADM-RISK-005 | 84 | Source 2-hour restriction for cancellation and frequent pickup/address changes | D-V2-004, D-V2-026 | Three cancellations in 5 minutes still restrict payment for 2 hours; 10 address changes or 10 pickup-store changes in 20 minutes create separate alert/audit evidence only and never restrict payment | Overridden | GAP-ADM-011 |
 | ADM-RISK-006 | 85 | Separate wallet/IP-range/device blacklists; manual/automatic lock | - | RBAC, expiry/reason/evidence and immutable audit required | Frozen | GAP-ADM-011 |
 | ADM-LOG-001 | 87-90 | SF/JD/YTO/ZTO/STO/EMS enabled states and default carrier | - | Provider readiness and carrier versioning tested | Verified | - |
-| ADM-LOG-002 | 91 | Cainiao/Kuaidi100 PartnerID secret reference, monthly waybill account and real tracking-number adapter | D-V2-019 | Adapter validates secret-reference completeness, callback/error handling and typed ConfigurationRequired without storing/rendering secrets; real account acceptance is ADM-GOAL-003 | Verified | - |
+| ADM-LOG-002 | 91 | Cainiao/Kuaidi100 PartnerID secret reference, monthly waybill account and real tracking-number adapter | D-V2-019, D-V2-038 | Phase 2 only; launch fulfillment and acceptance do not depend on provider configuration | Overridden | - |
 | ADM-LOG-003 | 92-93 | Platform/partner warehouse shipping-address library | - | RBAC writes and audit; exact address fields validated | Verified | - |
 | ADM-LOG-004 | 94 | Source forced-refund return warehouse | D-V2-004 | No refund destination is emitted; exchange/takeover logistics use their own allowedActions | Overridden | - |
 | ADM-LOG-005 | 95 | Source per-count/per-weight/remote freight model | D-V2-002, D-V2-022, D-V2-031 | Replaced by one product-level flat `defaultFreightUsdt` for delivery and zero for pickup; Core binds product USDT, freight and total separately, with freight excluded from NPL/BNM/concession/prize formulas | Overridden | - |
@@ -237,7 +237,8 @@ Real production media/providers, domains, infrastructure and devices remain
 - `ADM-GLOBAL-002`: selected order IDs are sent only to the read-only batch
   preview. The UI renders each row's authoritative `allowedActions` and the
   enabled intersection, but never turns that result into an unpublished write.
-  Excel/CSV, waybill/pickup print and arbitrary batch writes remain disabled.
+  Excel/CSV remains governed; waybill/pickup print is Phase 2 and absent from
+  launch, while arbitrary batch writes remain disabled.
 - `ADM-TAKE-001` and `ADM-TAKE-002`: the Admin order table consumes Core-owned
   quantity, creation time, order kind, payment TxHash and row-level
   `allowedActions`. The product no longer performs a second parallel action
@@ -311,8 +312,7 @@ search and product-lifecycle contracts:
 - `ADM-GLOBAL-002`: a cross-resource selection consumes each row's
   `allowedBatchActions`; Core creates the audited CSV/Excel bytes and the
   browser never synthesizes export rows. Electronic-waybill and pickup-print
-  portions remain outside this surface, so the full row is not reported
-  complete.
+  portions are Phase 2 and absent from the launch surface.
 - `ADM-GLOBAL-003`: an all-product selection enables approve, reject, publish,
   hide or delist only when every selected row publishes the corresponding
   capability. The UI requires an uppercase reason code, an explicit inline
@@ -382,7 +382,9 @@ The Admin product consumes the coordinated logistics contracts while remaining
 pinned to `@abu24k/core-artifacts@2.0.0-merchant-fulfillment.1`; it does not
 publish or copy a parallel API:
 
-- `ADM-LOG-001`: ADMIN and OPERATOR submit the complete SF/JD/YTO/ZTO/STO/EMS
+- The following contracts remain published as Phase 2 compatibility metadata;
+  launch Admin has no `/logistics` route, navigation or runtime call to them.
+- `ADM-LOG-001`: the retained contract versions the complete SF/JD/YTO/ZTO/STO/EMS
   enabled set, one enabled default carrier and an idempotency key. AUDITOR is
   read-only and every response is artifact/version validated.
 - `ADM-LOG-002`: Kuaidi100 and Cainiao consume secret references for partner,
@@ -397,16 +399,15 @@ publish or copy a parallel API:
 - `ADM-LOG-004`: no refund or return-warehouse control, route or destination is
   rendered. Exchange and takeover retain their separate frozen fulfillment
   behavior.
-- Cross-merchant merchant-filtered waybill batches, waybill lists, print-job
-  lists and idempotent retry are consumed with exact request bodies. This does
-  not complete the broader export/pickup-print scope in `ADM-GLOBAL-002`.
+- Cross-merchant waybill batches, waybill lists, print-job lists and idempotent
+  retry remain Phase 2 contracts and are not consumed by launch Admin.
 - `ADM-LOG-005`: the original count/weight/remote model is overridden. Product
   management writes the existing flat `defaultFreightUsdt`; payment trace reads
   Core's product USDT, freight and total fields. Admin performs no calculation.
 
 Real Kuaidi100/Cainiao accounts, provider acceptance and physical printer/device
-evidence remain `ExternalBlocked`. All fixtures stay under `tests/**`; none is
-present in the production bundle.
+evidence are Phase 2 operational inputs and not launch blockers. All fixtures
+stay under `tests/**`; none is present in the production bundle.
 
 ## Merchant Stores `.1` Consumer Boundary
 

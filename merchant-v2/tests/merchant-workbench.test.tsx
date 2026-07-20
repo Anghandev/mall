@@ -242,6 +242,21 @@ function createMockCoreApi(overrides: Partial<CoreApi> = {}): CoreApi {
       reasonCode: 'ConfigurationRequired',
     }],
     createOrderTrackingEvidence: async () => takeoverTrackingEvidence,
+    createOrderActionEvidence: async (orderId, input) => ({
+      artifactVersion,
+      evidenceHash: `0x${'f'.repeat(64)}`,
+      ownerWallet: walletAddress,
+      actorRole: 'MERCHANT',
+      purpose: 'FULFILLMENT_ACTION',
+      resourceType: 'ORDER',
+      resourceId: orderId,
+      action: input.action,
+      reasonCode: input.reasonCode,
+      trackingNumberHash: null,
+      mediaAssetIds: [],
+      payload: {},
+      createdAt: '2026-07-14T12:00:00.000Z',
+    }),
     recordShipment: async (orderId, input) => ({
       orderId,
       state: 'SHIPPED',
@@ -383,7 +398,7 @@ async function enterSettings(client: CoreApi) {
 
 describe('00 wallet gateway', () => {
   it('consumes settlement-admin.16 without widening the merchant action boundary', () => {
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.17');
+    expect(artifactVersion).toBe('2.0.0-fulfillment-launch.18');
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
     expect(coreBoundary.artifactVersion).toBe(artifactVersion);
     expect(coreBoundary.artifactsAvailable).toBe(true);
@@ -762,7 +777,7 @@ describe('03 fulfillment center', () => {
     const user = userEvent.setup();
     renderPage(<FulfillmentPage />);
 
-    expect(screen.getByRole('columnheader', { name: '物流单号哈希' })).toBeTruthy();
+    expect(screen.getByRole('columnheader', { name: '运单号' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /商家强制签收|直接完成订单/ })).toBeNull();
     expect(screen.getAllByText('商家会话不可用').length).toBeGreaterThan(0);
 
@@ -953,155 +968,23 @@ describe('03 fulfillment center', () => {
       .toBe(exportMerchantOrders.mock.calls[1]?.[0].idempotencyKey);
   });
 
-  it('submits authorized rows as one atomic shipment batch and keeps every idempotency key on retry', async () => {
-    const secondOrderId = `0x${'a'.repeat(64)}`;
-    const shippableOrders = [deliveryOrder, { ...deliveryOrder, orderId: secondOrderId, skuId: 'sku-second' }]
-      .map((order) => ({
-        ...order,
-        state: 'PAID' as const,
-        shippedAt: null,
-        deliveredAt: null,
-        shipments: [],
-        logistics: [],
-        allowedActions: [{ action: 'RECORD_SHIPMENT' as const, enabled: true }],
-      }));
-    const recordShipmentBatch = vi.fn()
-      .mockRejectedValueOnce(new CoreApiError('NetworkUnavailable', '批量网络中断'))
-      .mockResolvedValueOnce({
-        batchId: `0x${'8'.repeat(64)}`,
-        shipments: shippableOrders.map((order) => ({
-          orderId: order.orderId,
-          state: 'SHIPPED' as const,
-          shipmentId: `shipment-${order.skuId}`,
-          carrierCode: 'SF',
-          trackingNumberHash,
-          recordedAt: '2026-07-14T12:00:00.000Z',
-        })),
-        createdAt: '2026-07-14T12:00:00.000Z',
-      });
-    const client = createMockCoreApi({
-      listFulfillmentOrders: async () => ({ orders: shippableOrders, nextCursor: null }),
-      recordShipmentBatch,
-    });
-    const user = await enterFulfillment(client);
-
-    for (const order of shippableOrders) {
-      await user.click(await screen.findByLabelText(`选择批量发货 ${order.orderId}`));
-      await user.type(screen.getByLabelText(`批量物流单号哈希 ${order.orderId}`), trackingNumberHash);
-      await user.type(screen.getByLabelText(`批量发货证据哈希 ${order.orderId}`), evidenceHash);
-    }
-    await user.selectOptions(screen.getByLabelText(`批量承运商 ${secondOrderId}`), 'JD');
-    await user.click(screen.getByRole('button', { name: '原子提交批量发货' }));
-    expect((await screen.findByRole('alert')).textContent).toContain('批量网络中断');
-    await user.click(screen.getByRole('button', { name: '原子提交批量发货' }));
-
-    expect(await screen.findByText(/批量发货已原子确认/)).toBeTruthy();
-    expect(recordShipmentBatch).toHaveBeenCalledTimes(2);
-    expect(recordShipmentBatch.mock.calls[0]?.[0]).toEqual(recordShipmentBatch.mock.calls[1]?.[0]);
-    expect(recordShipmentBatch.mock.calls[1]?.[0].items.map((item: { carrierCode: string }) => item.carrierCode))
-      .toEqual(['SF', 'JD']);
-  });
-
-  it('creates a provider waybill batch from selected delivery orders and renders Core tracking evidence', async () => {
-    const shippableOrder = {
-      ...deliveryOrder,
-      state: 'PAID' as const,
-      shippedAt: null,
-      deliveredAt: null,
-      shipments: [],
-      logistics: [],
-      allowedActions: [{ action: 'RECORD_SHIPMENT' as const, enabled: true }],
-    };
-    const createMerchantWaybillBatch = vi.fn()
-      .mockRejectedValueOnce(new CoreApiError('NetworkUnavailable', '面单网络中断'))
-      .mockResolvedValueOnce(waybillBatchResult);
-    const client = createMockCoreApi({
-      listFulfillmentOrders: async () => ({ orders: [shippableOrder], nextCursor: null }),
-      createMerchantWaybillBatch,
-      listMerchantPrintJobs: async () => [waybillPrintJob],
-    });
-    const user = await enterFulfillment(client);
-    await user.click(await screen.findByLabelText(`选择批量发货 ${deliveryOrderId}`));
-    const submit = screen.getByRole('button', { name: '创建电子面单批次' });
-    await user.click(submit);
-    expect((await screen.findByRole('alert')).textContent).toContain('面单网络中断');
-    await user.click(submit);
-
-    expect(await screen.findByText('SF1234567890')).toBeTruthy();
-    expect(screen.getByText('kuaidi-task-24k')).toBeTruthy();
-    expect(screen.getAllByText(waybillBatchResult.items[0]!.trackingNumberHash!).length).toBeGreaterThan(0);
-    expect(createMerchantWaybillBatch).toHaveBeenCalledTimes(2);
-    expect(createMerchantWaybillBatch.mock.calls[0]?.[0]).toEqual(createMerchantWaybillBatch.mock.calls[1]?.[0]);
-    expect(createMerchantWaybillBatch).toHaveBeenLastCalledWith(expect.objectContaining({
-      provider: 'KUAIDI100',
-      carrierCode: 'SF',
-      storeId,
-      orderIds: [deliveryOrderId],
-      idempotencyKey: expect.stringMatching(/^merchant-waybill-batch-/),
-    }), 'test-session');
-  });
-
-  it.each([
-    ['ConfigurationRequired', 'Waybill provider configuration is incomplete'],
-    ['InvalidRequest', 'Carrier is disabled by the current platform configuration'],
-  ] as const)('fails closed when Core rejects a waybill with %s', async (code, message) => {
-    const shippableOrder = {
-      ...deliveryOrder,
-      state: 'PAID' as const,
-      shippedAt: null,
-      deliveredAt: null,
-      shipments: [],
-      logistics: [],
-      allowedActions: [{ action: 'RECORD_SHIPMENT' as const, enabled: true }],
-    };
-    const createMerchantWaybillBatch = vi.fn(async () => {
-      throw new CoreApiError(code, message);
-    });
-    const user = await enterFulfillment(createMockCoreApi({
-      listFulfillmentOrders: async () => ({ orders: [shippableOrder], nextCursor: null }),
-      createMerchantWaybillBatch,
+  it('keeps batch shipment, electronic waybill and printer controls out of the launch UI', async () => {
+    await enterFulfillment(createMockCoreApi({
+      listFulfillmentOrders: async () => ({ orders: [deliveryOrder], nextCursor: null }),
     }));
-    await user.click(await screen.findByLabelText(`选择批量发货 ${deliveryOrderId}`));
-    await user.click(screen.getByRole('button', { name: '创建电子面单批次' }));
+    await screen.findByRole('button', { name: `处理订单 ${deliveryOrderId}` });
 
-    expect((await screen.findByRole('alert')).textContent).toContain(`${code}：${message}`);
-    expect(createMerchantWaybillBatch).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText('SF1234567890')).toBeNull();
-  });
-
-  it('reads durable waybill and pickup receipt jobs and retries a non-accepted job with one stable command', async () => {
-    const queuedJob = { ...waybillPrintJob, state: 'QUEUED' as const, attempts: 0, errorCode: null };
-    const retryMerchantPrintJob = vi.fn()
-      .mockRejectedValueOnce(new CoreApiError('NetworkUnavailable', '打印重试网络中断'))
-      .mockResolvedValueOnce(queuedJob);
-    const client = createMockCoreApi({
-      listMerchantPrintJobs: async () => [waybillPrintJob, pickupPrintJob],
-      retryMerchantPrintJob,
-    });
-    const user = await enterFulfillment(client);
-
-    expect(await screen.findByText('PICKUP_RECEIPT')).toBeTruthy();
-    expect(screen.getByText('PROVIDER_TIMEOUT')).toBeTruthy();
-    expect(screen.getByText('yly-print-24k')).toBeTruthy();
-    const retry = screen.getByRole('button', { name: '重试' });
-    await user.click(retry);
-    expect((await screen.findByRole('alert')).textContent).toContain('打印重试网络中断');
-    await user.click(retry);
-
-    await waitFor(() => expect(retryMerchantPrintJob).toHaveBeenCalledTimes(2));
-    expect(retryMerchantPrintJob.mock.calls[0]?.[1]).toBe(retryMerchantPrintJob.mock.calls[1]?.[1]);
-    expect(retryMerchantPrintJob).toHaveBeenLastCalledWith(
-      waybillPrintJob.printJobId,
-      expect.stringMatching(/^merchant-print-retry-/),
-      'test-session',
-    );
+    expect(screen.queryByText(/批量发货|电子面单|打印队列|打印机/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /批量|面单|打印/ })).toBeNull();
   });
 
   it('submits a platform-review request but never exposes direct merchant receipt completion', async () => {
     const requestForcedReceipt = vi.fn(createMockCoreApi().requestForcedReceipt);
+    const createOrderActionEvidence = vi.fn(createMockCoreApi().createOrderActionEvidence);
     const client = createMockCoreApi({
       listFulfillmentOrders: async () => ({ orders: [deliveryOrder], nextCursor: null }),
       getOrderFulfillmentTarget: async () => deliveryTarget,
+      createOrderActionEvidence,
       requestForcedReceipt,
     });
     const user = await enterFulfillment(client);
@@ -1109,19 +992,23 @@ describe('03 fulfillment center', () => {
     await screen.findByText('陈先生');
 
     await user.type(screen.getByLabelText('申请原因代码'), 'delivered_review');
-    await user.type(screen.getByLabelText('签收证据哈希'), evidenceHash);
     await user.click(screen.getByRole('button', { name: '申请平台审核' }));
 
     expect(await screen.findByText(/forced-receipt-result/)).toBeTruthy();
     expect(requestForcedReceipt).toHaveBeenCalledWith(
       deliveryOrderId,
       expect.objectContaining({
-        evidenceHash,
+        evidenceHash: `0x${'f'.repeat(64)}`,
         reasonCode: 'DELIVERED_REVIEW',
         idempotencyKey: expect.stringMatching(/^merchant-forced-receipt-/),
       }),
       'test-session',
     );
+    expect(createOrderActionEvidence).toHaveBeenCalledWith(deliveryOrderId, expect.objectContaining({
+      action: 'REQUEST_FORCED_RECEIPT',
+      reasonCode: 'DELIVERED_REVIEW',
+      idempotencyKey: expect.stringMatching(/^merchant-forced-receipt-.+-evidence$/),
+    }), 'test-session');
     expect(screen.queryByRole('button', { name: /商家强制签收|直接完成订单/ })).toBeNull();
   });
 
@@ -1141,21 +1028,21 @@ describe('03 fulfillment center', () => {
         orderId: deliveryOrderId,
         state: 'SHIPPED',
         shipmentId: 'shipment-retry-ok',
-        carrierCode: 'SF_EXPRESS',
+        carrierCode: 'SF',
         trackingNumberHash,
         recordedAt: '2026-07-14T12:00:00.000Z',
       });
     const client = createMockCoreApi({
       listFulfillmentOrders: async () => ({ orders: [shippableOrder], nextCursor: null }),
       getOrderFulfillmentTarget: async () => deliveryTarget,
+      createOrderTrackingEvidence: vi.fn(async () => takeoverTrackingEvidence),
       recordShipment,
     });
     const user = await enterFulfillment(client);
     await user.click(await screen.findByRole('button', { name: `处理订单 ${deliveryOrderId}` }));
     await screen.findByText('陈先生');
-    await user.type(screen.getByLabelText('承运商代码'), 'sf_express');
-    await user.type(screen.getByLabelText('物流单号哈希'), trackingNumberHash);
-    await user.type(screen.getByLabelText('发货证据哈希'), evidenceHash);
+    await user.selectOptions(screen.getByLabelText('快递公司'), 'SF');
+    await user.type(screen.getByLabelText('运单号'), 'SF1234567890');
 
     await user.click(screen.getByRole('button', { name: '提交发货证据' }));
     expect((await screen.findByRole('alert')).textContent).toContain('网络中断');
@@ -1610,49 +1497,24 @@ describe('04 store controls', () => {
     expect(screen.queryByText(/门店资料已保存/)).toBeNull();
   });
 
-  it('loads merchant stores and signs then applies an exact printer binding challenge', async () => {
-    const createMerchantPrinterBindingChallenge = vi.fn(async () => printerChallenge);
-    const applyMerchantPrinterBinding = vi.fn()
-      .mockRejectedValueOnce(new CoreApiError('NetworkUnavailable', '绑定网络中断'))
-      .mockResolvedValueOnce(printerBinding);
-    const { user, walletRequest } = await enterStores(createMockCoreApi({
+  it('keeps the Phase 2 printer binding workflow out of the launch store page', async () => {
+    const getMerchantPrinterBinding = vi.fn();
+    const createMerchantPrinterBindingChallenge = vi.fn();
+    const applyMerchantPrinterBinding = vi.fn();
+    await enterStores(createMockCoreApi({
+      getMerchantPrinterBinding,
       createMerchantPrinterBindingChallenge,
       applyMerchantPrinterBinding,
     }));
-
     expect(await screen.findByText(merchantStore.address)).toBeTruthy();
     const region = screen.getByLabelText('6 位行政区划代码') as HTMLInputElement;
     expect(region.disabled).toBe(true);
     expect(region.readOnly).toBe(true);
-    await user.type(screen.getByLabelText('Device ID'), printerBinding.deviceId);
-    const submit = screen.getByRole('button', { name: '绑定设备' });
-    await user.click(submit);
-    expect((await screen.findByRole('alert')).textContent).toContain('绑定网络中断');
-    await user.click(submit);
-
-    expect(await screen.findByText('绑定版本 v2 已生效')).toBeTruthy();
-    expect(screen.getByText(new RegExp(printerChallenge.digest))).toBeTruthy();
-    expect(createMerchantPrinterBindingChallenge).toHaveBeenCalledTimes(1);
-    expect(applyMerchantPrinterBinding).toHaveBeenCalledTimes(2);
-    expect(applyMerchantPrinterBinding.mock.calls[0]?.[1]).toEqual(applyMerchantPrinterBinding.mock.calls[1]?.[1]);
-    const typedCalls = walletRequest.mock.calls.filter(([request]) => request.method === 'eth_signTypedData_v4');
-    expect(typedCalls).toHaveLength(1);
-    expect(JSON.parse(String(typedCalls[0]?.[0].params?.[1]))).toEqual(printerChallenge.typedData);
-  });
-
-  it('fails closed when the selected print provider is not configured', async () => {
-    const blockedBootstrap: CoreBootstrap = {
-      ...bootstrap,
-      readiness: {
-        ...bootstrap.readiness,
-        providers: { ...bootstrap.readiness.providers, FEIE: 'CONFIGURATION_REQUIRED' },
-      },
-    };
-    const { user } = await enterStores(createMockCoreApi({ bootstrap: async () => blockedBootstrap }));
-    await user.type(await screen.findByLabelText('Device ID'), 'FEIE-DEVICE-001');
-
-    expect(screen.getByText(/ConfigurationRequired：FEIE/)).toBeTruthy();
-    expect((screen.getByRole('button', { name: '绑定设备' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByText(/核销云打印机|打印服务|Device ID/)).toBeNull();
+    expect(screen.queryByRole('button', { name: '绑定设备' })).toBeNull();
+    expect(getMerchantPrinterBinding).not.toHaveBeenCalled();
+    expect(createMerchantPrinterBindingChallenge).not.toHaveBeenCalled();
+    expect(applyMerchantPrinterBinding).not.toHaveBeenCalled();
   });
 });
 

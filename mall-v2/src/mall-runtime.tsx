@@ -48,7 +48,6 @@ import {
   type CorePaymentAvailability,
   type CoreClient,
   type FulfillmentEvidenceContentType,
-  type ParsedBuyerAddress,
   type PublishedSeckillSessionProjection,
   type WalletSession,
 } from './core-client';
@@ -64,17 +63,11 @@ import { createBrowserWalletGateway, type ApprovalStatus, type WalletGateway } f
 type SignedQuote = PaymentQuoteResponse | SeckillQuoteResponse;
 type LoadState = 'loading' | 'ready' | 'empty' | 'error';
 
-export interface BrowserPosition {
-  latitude: number;
-  longitude: number;
-}
-
 export type BuyerAddressDraft = Omit<BuyerAddressWriteRequest, 'expectedVersion' | 'idempotencyKey'>;
 
 export interface MallServices {
   core: CoreClient;
   wallet: WalletGateway;
-  getCurrentPosition(): Promise<BrowserPosition>;
   createIdempotencyKey(): string;
   hashEvidenceFile(file: Blob): Promise<string>;
   submissionStore: SubmissionStore;
@@ -116,8 +109,6 @@ export interface MallRuntimeValue {
   taxonomyState: LoadState;
   stores: readonly MerchantStore[];
   storesState: LoadState;
-  location: BrowserPosition | null;
-  locationState: 'idle' | 'loading' | 'ready' | 'error';
   checkoutTarget: CheckoutTarget | null;
   seckillSession: PublishedSeckillSessionProjection | null;
   seckillSessionState: LoadState;
@@ -148,8 +139,6 @@ export interface MallRuntimeValue {
   shoppingStatementsNextCursor: OrderStatementCursor | null;
   shoppingStatementsLoadingMore: boolean;
   shoppingStatementsError: string | null;
-  parsedBuyerAddress: ParsedBuyerAddress | null;
-  addressParseState: 'idle' | 'loading' | 'ready' | 'error';
   settlements: SettlementListProjection | null;
   settlementsState: 'idle' | LoadState;
   notifications: readonly NotificationInboxItem[];
@@ -179,7 +168,6 @@ export interface MallRuntimeValue {
   reloadSeckill(): Promise<void>;
   selectSeckillSession(): boolean;
   reloadStores(regionCode?: string): Promise<void>;
-  requestLocation(): Promise<void>;
   createPickupTarget(storeId: string): Promise<void>;
   reloadOrders(): Promise<void>;
   loadMoreOrders(): Promise<void>;
@@ -190,9 +178,7 @@ export interface MallRuntimeValue {
   ): Promise<boolean>;
   reloadBuyerAccount(): Promise<void>;
   saveBuyerProfile(nickname: string, avatarFile: File | null): Promise<boolean>;
-  parseBuyerAddress(rawText: string): Promise<boolean>;
-  clearParsedBuyerAddress(): void;
-  createBuyerAddress(label: string, isDefault: boolean): Promise<boolean>;
+  createBuyerAddress(draft: BuyerAddressDraft): Promise<boolean>;
   updateBuyerAddress(addressId: string, draft: BuyerAddressDraft): Promise<boolean>;
   deleteBuyerAddress(addressId: string): Promise<boolean>;
   setDefaultBuyerAddress(addressId: string): Promise<boolean>;
@@ -234,8 +220,6 @@ export function MallRuntimeProvider({
   const [taxonomyState, setTaxonomyState] = useState<LoadState>('loading');
   const [stores, setStores] = useState<readonly MerchantStore[]>([]);
   const [storesState, setStoresState] = useState<LoadState>('loading');
-  const [location, setLocation] = useState<BrowserPosition | null>(null);
-  const [locationState, setLocationState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [checkoutTarget, setCheckoutTarget] = useState<CheckoutTarget | null>(null);
   const [seckillSession, setSeckillSession] = useState<PublishedSeckillSessionProjection | null>(null);
   const [seckillSessionState, setSeckillSessionState] = useState<LoadState>('loading');
@@ -265,8 +249,6 @@ export function MallRuntimeProvider({
   const [shoppingStatementsNextCursor, setShoppingStatementsNextCursor] = useState<OrderStatementCursor | null>(null);
   const [shoppingStatementsLoadingMore, setShoppingStatementsLoadingMore] = useState(false);
   const [shoppingStatementsError, setShoppingStatementsError] = useState<string | null>(null);
-  const [parsedBuyerAddress, setParsedBuyerAddress] = useState<ParsedBuyerAddress | null>(null);
-  const [addressParseState, setAddressParseState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [settlements, setSettlements] = useState<SettlementListProjection | null>(null);
   const [settlementsState, setSettlementsState] = useState<'idle' | LoadState>('idle');
   const [notifications, setNotifications] = useState<readonly NotificationInboxItem[]>([]);
@@ -425,8 +407,6 @@ export function MallRuntimeProvider({
     taxonomyState,
     stores,
     storesState,
-    location,
-    locationState,
     checkoutTarget,
     seckillSession,
     seckillSessionState,
@@ -457,8 +437,6 @@ export function MallRuntimeProvider({
     shoppingStatementsNextCursor,
     shoppingStatementsLoadingMore,
     shoppingStatementsError,
-    parsedBuyerAddress,
-    addressParseState,
     settlements,
     settlementsState,
     notifications,
@@ -568,15 +546,6 @@ export function MallRuntimeProvider({
         setStores([]);
         setStoresState('error');
       });
-    },
-
-    async requestLocation() {
-      setLocationState('loading');
-      await run(async () => {
-        const nextLocation = await services.getCurrentPosition();
-        setLocation(nextLocation);
-        setLocationState('ready');
-      }, () => setLocationState('error'));
     },
 
     async createPickupTarget(storeId) {
@@ -763,54 +732,26 @@ export function MallRuntimeProvider({
       }
     },
 
-    async parseBuyerAddress(rawText) {
-      setBusy(true);
-      setError(null);
-      setAddressParseState('loading');
-      setParsedBuyerAddress(null);
-      try {
-        const parsed = await services.core.parseBuyerAddress(requireSession().token, rawText);
-        setParsedBuyerAddress(parsed);
-        setAddressParseState('ready');
-        return true;
-      } catch (reason) {
-        setAddressParseState('error');
-        setError(errorMessage(reason));
-        return false;
-      } finally {
-        setBusy(false);
-      }
-    },
-
-    clearParsedBuyerAddress() {
-      setParsedBuyerAddress(null);
-      setAddressParseState('idle');
-    },
-
-    async createBuyerAddress(label, isDefault) {
+    async createBuyerAddress(draft) {
       setBusy(true);
       setError(null);
       try {
         const activeSession = requireSession();
-        const parsed = parsedBuyerAddress;
-        if (!parsed?.canSave || parsed.missingFields.length > 0) {
-          throw new CoreClientError('InvalidRequest', '必须先完成地址解析并复核所有字段');
-        }
-        const required = completeParsedAddress(parsed);
         const created = await services.core.createBuyerAddress(activeSession.token, {
-          label: label.trim(),
-          recipientName: required.recipientName,
-          phone: required.phone,
-          detailAddress: required.detailAddress,
-          longitude: required.longitude,
-          latitude: required.latitude,
-          isDefault,
+          ...draft,
+          label: draft.label.trim(),
+          recipientName: draft.recipientName.trim(),
+          province: draft.province.trim(),
+          city: draft.city.trim(),
+          district: draft.district.trim(),
+          detailAddress: draft.detailAddress.trim(),
+          regionCode: draft.regionCode.trim(),
+          longitude: null,
+          latitude: null,
           idempotencyKey: services.createIdempotencyKey(),
         });
         setBuyerAddresses((current) => [created, ...current.filter((item) => item.addressId !== created.addressId)]);
         setBuyerAddressesState('ready');
-        setParsedBuyerAddress(null);
-        setAddressParseState('idle');
         await loadBuyerAddresses(activeSession);
         return true;
       } catch (reason) {
@@ -1083,8 +1024,6 @@ export function MallRuntimeProvider({
     checkoutTarget,
     error,
     fulfillmentMode,
-    location,
-    locationState,
     seckillSession,
     seckillSessionState,
     seckillHistory,
@@ -1113,8 +1052,6 @@ export function MallRuntimeProvider({
     shoppingStatementsNextCursor,
     shoppingStatementsLoadingMore,
     shoppingStatementsError,
-    parsedBuyerAddress,
-    addressParseState,
     settlements,
     settlementsState,
     notifications,
@@ -1489,8 +1426,6 @@ export function MallRuntimeProvider({
     setShoppingStatementsNextCursor(null);
     setShoppingStatementsLoadingMore(false);
     setShoppingStatementsError(null);
-    setParsedBuyerAddress(null);
-    setAddressParseState('idle');
     setSettlements(null);
     setSettlementsState('idle');
     setNotifications([]);
@@ -1604,23 +1539,6 @@ function assertBuyerProjectionWallet(wallet: string, session: WalletSession) {
   }
 }
 
-function completeParsedAddress(parsed: ParsedBuyerAddress) {
-  if (
-    !parsed.recipientName
-    || !parsed.phone
-    || !parsed.detailAddress
-    || parsed.longitude === null
-    || parsed.latitude === null
-  ) throw new CoreClientError('InvalidRequest', '地址解析仍缺少必填字段');
-  return {
-    recipientName: parsed.recipientName,
-    phone: parsed.phone,
-    detailAddress: parsed.detailAddress,
-    longitude: parsed.longitude,
-    latitude: parsed.latitude,
-  };
-}
-
 function assertBuyerSettlement(rail: SettlementRail, amount: string): asserts rail is 'REWARD_NPL' | 'PRIZE_USDT' {
   if (!['REWARD_NPL', 'PRIZE_USDT'].includes(rail) || !/^[1-9][0-9]*$/.test(amount)) {
     throw new CoreClientError('InvalidRequest', '结算轨道或金额无效');
@@ -1640,21 +1558,6 @@ export const defaultMallServices: MallServices = Object.freeze({
   core: defaultCoreClient,
   realtime: createSeckillRealtimeClient(defaultCoreClient, coreClientInput),
   wallet: createBrowserWalletGateway(),
-  async getCurrentPosition() {
-    if (!globalThis.navigator?.geolocation) {
-      throw new CoreClientError('ExternalBlocked', '当前设备未提供安全定位能力');
-    }
-    return new Promise<BrowserPosition>((resolve, reject) => {
-      globalThis.navigator.geolocation.getCurrentPosition(
-        (position) => resolve({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        }),
-        () => reject(new CoreClientError('ExternalBlocked', '未取得设备定位授权')),
-        { enableHighAccuracy: true, maximumAge: 30_000, timeout: 10_000 },
-      );
-    });
-  },
   createIdempotencyKey() {
     return `mall-${globalThis.crypto.randomUUID()}`;
   },

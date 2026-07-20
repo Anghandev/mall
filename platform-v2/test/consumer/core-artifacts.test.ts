@@ -23,8 +23,8 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('audit-remediation .17 checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-settlement-admin.17');
+test('fulfillment-launch .18 checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-fulfillment-launch.18');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
@@ -55,8 +55,8 @@ test('audit-remediation .17 checkpoint has one identity, resolvable exports and 
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 37);
-  assert.equal(schemaManifest.schemas.core.migrations.at(-1)?.path, 'schema/business/037_payment_quote_source_evidence.sql');
+  assert.equal(schemaManifest.schemas.core.migrations.length, 38);
+  assert.equal(schemaManifest.schemas.core.migrations.at(-1)?.path, 'schema/business/038_manual_fulfillment_launch.sql');
   assert.equal(schemaManifest.schemas.audit.migrations.length, 4);
   for (const migration of [
     ...schemaManifest.schemas.core.migrations,

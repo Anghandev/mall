@@ -1,4 +1,4 @@
-export declare const artifactVersion: "2.0.0-settlement-admin.17";
+export declare const artifactVersion: "2.0.0-fulfillment-launch.18";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
@@ -2303,8 +2303,12 @@ export interface CreateDeliveryTargetRequest {
   recipientName: string;
   phone: string;
   address: string;
-  longitude: number;
-  latitude: number;
+  longitude: number | null;
+  latitude: number | null;
+  province: string;
+  city: string;
+  district: string;
+  regionCode: string;
 }
 
 export interface CreatePickupTargetRequest {
@@ -2335,8 +2339,8 @@ export interface DeliveryTargetPayload {
   recipientName: string;
   phone: string;
   address: string;
-  longitude: number;
-  latitude: number;
+  longitude: number | null;
+  latitude: number | null;
   regionCode: string;
 }
 
@@ -2372,7 +2376,11 @@ export interface FulfillmentRequestProjection {
 export interface ShipmentProjection {
   shipmentId: string;
   carrierCode: string;
+  trackingNumber: string | null;
   trackingNumberHash: Bytes32;
+  note: string | null;
+  evidenceHash: Bytes32;
+  mediaAssetIds: readonly Bytes32[];
   providerReferenceHash: Bytes32 | null;
   createdAt: string;
 }
@@ -2951,8 +2959,8 @@ export interface BuyerSavedAddress {
   recipientName: string;
   phone: string;
   detailAddress: string;
-  longitude: number;
-  latitude: number;
+  longitude: number | null;
+  latitude: number | null;
   province: string;
   city: string;
   district: string;

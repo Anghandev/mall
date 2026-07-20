@@ -120,12 +120,15 @@ and the timer does not silently discard a rejected polling cycle.
 Payment and settlement breakers do not stop this scheduler or any fulfillment,
 takeover, arbitration, reconciliation or audit action.
 
-Kuaidi100 and Cainiao callbacks authenticate an HMAC over exact raw body bytes.
+Kuaidi100 and Cainiao callbacks are Phase 2 compatibility surfaces and are not
+started or required for launch. When configured, they authenticate an HMAC over exact raw body bytes.
 Each provider/event identity is immutable and idempotent. Unsupported status,
 future timestamp, bad signature or missing secret fails closed. A `DELIVERED`
 event moves only the fulfillment state; it does not itself release balances.
 
-AMap reverse geocoding validates the national six-digit region code and records
+AMap reverse geocoding is Phase 2. Launch accepts complete audited manual
+province/city/district/six-digit-code input and does not call a map provider.
+When configured, reverse geocoding validates the national six-digit region code and records
 the response evidence hash. Missing key, malformed provider response or region
 drift returns `ConfigurationRequired`, `ExternalBlocked` or an idempotency
 conflict without storing plaintext delivery data.

@@ -1,13 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  printProviders,
   type CreateMerchantStoreRequest,
   type MediaReadAccessProjection,
   type MerchantManagedStore,
   type MerchantStoreAction,
-  type PrintProvider,
-  type PrinterBinding,
-  type PrinterBindingChallenge,
   type UpdateMerchantStoreRequest,
 } from '@abu24k/core-artifacts';
 import {
@@ -15,7 +11,6 @@ import {
   ImagePlus,
   MapPin,
   Plus,
-  Printer,
   RefreshCw,
   Save,
   ShieldCheck,
@@ -39,20 +34,6 @@ type LoadState<T> =
   | { phase: 'error'; message: string; code?: string; status?: number };
 
 type Feedback = { tone: 'success' | 'error' | 'info'; message: string };
-
-type BindingCommandState =
-  | { phase: 'idle' }
-  | { phase: 'submitting' }
-  | { phase: 'success'; binding: PrinterBinding; digest: string }
-  | { phase: 'error'; message: string };
-
-type BindingAttempt = {
-  fingerprint: string;
-  challengeKey: string;
-  applyKey: string;
-  challenge?: PrinterBindingChallenge;
-  signature?: string;
-};
 
 type StoreDraft = {
   name: string;
@@ -91,7 +72,7 @@ const reasonLabels = {
 } as const;
 
 export function StoresPage() {
-  const { api, bootstrap, session, signTypedData } = useCoreRuntime();
+  const { api, session } = useCoreRuntime();
   const [storesState, setStoresState] = useState<LoadState<readonly MerchantManagedStore[]>>({ phase: 'idle' });
   const [selectedStoreId, setSelectedStoreId] = useState('');
   const [draft, setDraft] = useState<StoreDraft>();
@@ -101,11 +82,6 @@ export function StoresPage() {
   const [storeFeedback, setStoreFeedback] = useState<Feedback>();
   const [closeArmed, setCloseArmed] = useState(false);
   const [imageAccess, setImageAccess] = useState<Record<string, MediaReadAccessProjection>>({});
-  const [bindingState, setBindingState] = useState<LoadState<PrinterBinding | null>>({ phase: 'idle' });
-  const [provider, setProvider] = useState<PrintProvider>('FEIE');
-  const [deviceId, setDeviceId] = useState('');
-  const [commandState, setCommandState] = useState<BindingCommandState>({ phase: 'idle' });
-  const bindingAttempt = useRef<BindingAttempt | undefined>(undefined);
   const commandKeys = useRef(new Map<string, { fingerprint: string; key: string }>());
   const sessionTokenRef = useRef(session?.token);
   const selectedStoreRef = useRef(selectedStoreId);
@@ -139,32 +115,6 @@ export function StoresPage() {
     }
   }, [api, session]);
 
-  const loadBinding = useCallback(async (quiet = false) => {
-    if (!session || !selectedStoreId) {
-      setBindingState({ phase: 'idle' });
-      return;
-    }
-    const token = session.token;
-    const storeId = selectedStoreId;
-    if (!quiet) setBindingState({ phase: 'loading' });
-    try {
-      const binding = await api.getMerchantPrinterBinding(storeId, token);
-      if (sessionTokenRef.current !== token || selectedStoreRef.current !== storeId) return;
-      if (binding && binding.merchantId !== session.merchantId) {
-        throw new CoreApiError('InvalidResponse', '打印机绑定不属于当前商家。');
-      }
-      setBindingState({ phase: 'ready', value: binding });
-      if (binding) {
-        setProvider(binding.provider);
-        setDeviceId(binding.deviceId);
-      }
-    } catch (error) {
-      if (sessionTokenRef.current === token && selectedStoreRef.current === storeId) {
-        setBindingState(errorState(error));
-      }
-    }
-  }, [api, selectedStoreId, session]);
-
   useEffect(() => {
     void loadStores();
   }, [loadStores]);
@@ -194,26 +144,6 @@ export function StoresPage() {
     }));
   }, [api, selectedStore, session]);
 
-  useEffect(() => {
-    bindingAttempt.current = undefined;
-    setCommandState({ phase: 'idle' });
-    void loadBinding();
-  }, [loadBinding]);
-
-  const currentBinding = bindingState.phase === 'ready' ? bindingState.value : null;
-  const providerReadiness = bootstrap.phase === 'ready'
-    ? bootstrap.value.readiness.providers[provider]
-    : undefined;
-  const providerReady = providerReadiness === 'READY';
-  const deviceValid = deviceId.trim().length >= 3 && deviceId.trim().length <= 128;
-  const bindingSubmitting = commandState.phase === 'submitting';
-  const bindingAllowed = Boolean(
-    session
-    && selectedStore
-    && bindingState.phase === 'ready'
-    && providerReady
-    && deviceValid,
-  );
   const canUpdate = capabilityEnabled(selectedStore, 'UPDATE_PROFILE');
   const canActivate = capabilityEnabled(selectedStore, 'ACTIVATE');
   const canClose = capabilityEnabled(selectedStore, 'CLOSE');
@@ -228,10 +158,6 @@ export function StoresPage() {
     setSelectedStoreId(storeId);
     setStoreFeedback(undefined);
     setCloseArmed(false);
-    setProvider('FEIE');
-    setDeviceId('');
-    bindingAttempt.current = undefined;
-    setCommandState({ phase: 'idle' });
   }
 
   function commandKey(scope: string, payload: unknown) {
@@ -409,59 +335,6 @@ export function StoresPage() {
     setStoreFeedback({ tone: 'error', message: readableStoreError(error) });
   }
 
-  function updateBindingDraft(update: () => void) {
-    bindingAttempt.current = undefined;
-    setCommandState({ phase: 'idle' });
-    update();
-  }
-
-  async function submitBinding() {
-    if (!session || !selectedStore || !bindingAllowed || bindingSubmitting) return;
-    const normalizedDeviceId = deviceId.trim();
-    const fingerprint = `${selectedStore.storeId}:${provider}:${normalizedDeviceId}`;
-    const attempt = bindingAttempt.current?.fingerprint === fingerprint
-      ? bindingAttempt.current
-      : {
-          fingerprint,
-          challengeKey: createIdempotencyKey('printer-challenge'),
-          applyKey: createIdempotencyKey('printer-apply'),
-        };
-    bindingAttempt.current = attempt;
-    setCommandState({ phase: 'submitting' });
-    try {
-      const challenge = attempt.challenge ?? await api.createMerchantPrinterBindingChallenge(
-        selectedStore.storeId,
-        { provider, deviceId: normalizedDeviceId, idempotencyKey: attempt.challengeKey },
-        session.token,
-      );
-      attempt.challenge = challenge;
-      if (
-        challenge.storeId !== selectedStore.storeId
-        || challenge.merchantId !== session.merchantId
-        || challenge.signer.toLowerCase() !== session.walletAddress.toLowerCase()
-        || Date.parse(challenge.expiresAt) <= Date.now()
-      ) throw new Error('打印机绑定挑战与当前商家会话不匹配。');
-      const signature = attempt.signature ?? await signTypedData(challenge.typedData);
-      attempt.signature = signature;
-      const binding = await api.applyMerchantPrinterBinding(selectedStore.storeId, {
-        challengeId: challenge.challengeId,
-        signature,
-        idempotencyKey: attempt.applyKey,
-      }, session.token);
-      if (
-        binding.merchantId !== session.merchantId
-        || binding.verifiedByWallet.toLowerCase() !== session.walletAddress.toLowerCase()
-        || binding.provider !== provider
-        || binding.deviceId !== normalizedDeviceId
-      ) throw new Error('打印机绑定结果与签名请求不匹配。');
-      bindingAttempt.current = undefined;
-      setBindingState({ phase: 'ready', value: binding });
-      setCommandState({ phase: 'success', binding, digest: challenge.digest });
-    } catch (error) {
-      setCommandState({ phase: 'error', message: readableError(error) });
-    }
-  }
-
   return (
     <div className="page-stack">
       <PageHeader
@@ -471,7 +344,7 @@ export function StoresPage() {
             {createOpen ? '取消新增' : '新增门店'}
           </button>
         )}
-        description="创建高德坐标绑定的门店，维护版本化资料、实景图和核销打印设备。"
+        description="创建坐标绑定的门店，维护版本化资料和实景图。"
         eyebrow="04 / 网点设置"
         title="门店管理"
       />
@@ -558,28 +431,6 @@ export function StoresPage() {
             </form>
           )}
 
-          {selectedStore ? (
-            <form className="section-block form-section printer-binding-panel" onSubmit={(event) => { event.preventDefault(); void submitBinding(); }} aria-labelledby="printer-binding-title">
-              <div className="section-heading"><div><p className="eyebrow">Signed device binding</p><h2 id="printer-binding-title">核销云打印机</h2></div><Printer aria-hidden="true" size={20} /></div>
-              {bindingState.phase === 'loading' ? <LoadingRows count={2} /> : null}
-              {bindingState.phase === 'error' ? <EmptyState blocked description={bindingState.message} title={loadErrorTitle(bindingState)} /> : null}
-              {bindingState.phase === 'ready' && !currentBinding ? <EmptyState description="该门店尚未绑定打印机。" title="暂无设备" /> : null}
-              {currentBinding ? <dl className="binding-summary">
-                <div><dt>当前设备</dt><dd>{currentBinding.provider} / {currentBinding.deviceId}</dd></div>
-                <div><dt>绑定版本</dt><dd>v{currentBinding.version}</dd></div>
-                <div><dt>签名摘要</dt><dd><code>{currentBinding.signatureHash}</code></dd></div>
-              </dl> : null}
-              <div className="two-column-fields">
-                <div className="field"><label htmlFor="print-provider">打印服务</label><select disabled={!session || bindingSubmitting || bindingState.phase !== 'ready'} id="print-provider" onChange={(event) => updateBindingDraft(() => setProvider(event.target.value as PrintProvider))} value={provider}>{printProviders.map((name) => <option key={name} value={name}>{name}</option>)}</select></div>
-                <div className="field"><label htmlFor="printer-device-id">Device ID</label><input autoComplete="off" disabled={!session || bindingSubmitting || bindingState.phase !== 'ready'} id="printer-device-id" maxLength={128} minLength={3} onChange={(event) => updateBindingDraft(() => setDeviceId(event.target.value))} placeholder="服务商设备编号" value={deviceId} /></div>
-              </div>
-              {providerReadiness === 'CONFIGURATION_REQUIRED' ? <p className="form-error" role="alert">ConfigurationRequired：{provider} 生产账号或凭据未配置，绑定命令已关闭。</p> : null}
-              {commandState.phase === 'error' ? <p className="form-error" role="alert">{commandState.message}</p> : null}
-              {commandState.phase === 'success' ? <div className="binding-success" role="status"><ShieldCheck aria-hidden="true" size={18} /><div><strong>绑定版本 v{commandState.binding.version} 已生效</strong><span>digest {commandState.digest}</span><span>signature {commandState.binding.signatureHash}</span></div></div> : null}
-              <button aria-label="绑定设备" className="button primary wide" disabled={!bindingAllowed || bindingSubmitting} type="submit">{bindingSubmitting ? <RefreshCw aria-hidden="true" size={16} /> : <ShieldCheck aria-hidden="true" size={16} />} {bindingSubmitting ? '签名并提交中' : '签名并绑定设备'}</button>
-              <div className="signature-note"><ShieldCheck aria-hidden="true" size={17} />Core challenge 绑定门店、商家、设备新旧值、nonce 和有效期；浏览器只签署该 typedData。</div>
-            </form>
-          ) : null}
         </div>
       </div>
     </div>
@@ -660,8 +511,4 @@ function validImage(file: File) {
 
 function shortHash(value: string) {
   return `${value.slice(0, 10)}…${value.slice(-8)}`;
-}
-
-function createIdempotencyKey(scope: string) {
-  return `merchant-${scope}-${crypto.randomUUID()}`;
 }

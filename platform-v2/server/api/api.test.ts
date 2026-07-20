@@ -1919,8 +1919,12 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       recipientName: 'Zhang San',
       phone: '13800138000',
       detailAddress: 'Dalian Software Park Building 1',
-      longitude: 121.6,
-      latitude: 38.9,
+      province: 'Liaoning',
+      city: 'Dalian',
+      district: 'Ganjingzi',
+      regionCode: '210211',
+      longitude: null,
+      latitude: null,
       isDefault: true,
       idempotencyKey: 'buyer-address-http-1',
     };
@@ -2304,6 +2308,8 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     assert.equal((await postOrderAction('tracking-evidence', {
       carrierCode: 'SF',
       trackingNumber: 'SF123456',
+      note: 'Fragile package',
+      mediaAssetIds: [],
       idempotencyKey: 'http-tracking-evidence-1',
     })).status, 201);
     assert.deepEqual(evidenceCalls.map((call) => call.operation), [

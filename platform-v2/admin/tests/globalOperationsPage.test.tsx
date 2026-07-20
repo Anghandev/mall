@@ -103,8 +103,8 @@ describe('Admin global operations page', () => {
     await user.click(await screen.findByRole('button', { name: '查询' }));
     await user.click(await screen.findByRole('checkbox', { name: '选择 PRODUCT product-1' }));
 
-    expect(screen.getAllByText('AUDITOR 只读：Forbidden')).toHaveLength(3);
-    expect(screen.getByRole('button', { name: '进入面单与打印' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getAllByText('AUDITOR 只读：Forbidden')).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: '进入面单与打印' })).toBeNull();
     expect(screen.getByRole('button', { name: '批量加标签' }).hasAttribute('disabled')).toBe(true);
     expect(screen.getByRole('button', { name: '隐藏商品' }).hasAttribute('disabled')).toBe(true);
     expect(screen.getByRole('button', { name: '导出 CSV' }).hasAttribute('disabled')).toBe(false);
@@ -113,7 +113,7 @@ describe('Admin global operations page', () => {
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/v2/admin/catalog/products/batch-lifecycle'))).toBe(false);
   });
 
-  it('opens logistics operations with same-merchant order IDs prefilled', async () => {
+  it('keeps Phase 2 waybill and print commands absent for same-merchant orders', async () => {
     const wallet = address('5');
     window.ethereum = walletProvider(wallet);
     const response = globalSearchResponse({
@@ -128,17 +128,11 @@ describe('Admin global operations page', () => {
     await user.click(await screen.findByRole('checkbox', { name: '选择 ORDER order-1' }));
     await user.click(screen.getByRole('checkbox', { name: '选择 ORDER order-2' }));
 
-    const command = screen.getByRole('button', { name: '进入面单与打印' });
-    expect(command.hasAttribute('disabled')).toBe(false);
-    expect(screen.getByText('2 个同商家订单可进入面单与打印')).toBeTruthy();
-    await user.click(command);
-
-    expect((await screen.findByRole('tab', { name: '面单与打印' })).getAttribute('aria-selected')).toBe('true');
-    expect((await screen.findByLabelText('商家 ID') as HTMLInputElement).value).toBe('merchant-1');
-    expect((screen.getByLabelText('订单 ID · 每行或逗号分隔') as HTMLTextAreaElement).value).toBe('order-1\norder-2');
+    expect(screen.queryByRole('button', { name: '进入面单与打印' })).toBeNull();
+    expect(screen.queryByText(/面单与打印/)).toBeNull();
   });
 
-  it('blocks cross-merchant order selections from the logistics command', async () => {
+  it('does not restore Phase 2 logistics commands for cross-merchant selections', async () => {
     const wallet = address('6');
     window.ethereum = walletProvider(wallet);
     const response = globalSearchResponse({
@@ -153,8 +147,8 @@ describe('Admin global operations page', () => {
     await user.click(await screen.findByRole('checkbox', { name: '选择 ORDER order-1' }));
     await user.click(screen.getByRole('checkbox', { name: '选择 ORDER order-2' }));
 
-    expect(screen.getByText('所选订单必须属于同一商家')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '进入面单与打印' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.queryByText('所选订单必须属于同一商家')).toBeNull();
+    expect(screen.queryByRole('button', { name: '进入面单与打印' })).toBeNull();
   });
 
   it('keeps the lifecycle idempotency key after failure and retries the same atomic request', async () => {

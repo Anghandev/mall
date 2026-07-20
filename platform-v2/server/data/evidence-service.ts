@@ -1,6 +1,6 @@
-import { createCipheriv, createHash, createHmac, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'node:crypto';
 import { normalizeAddress } from '../api/auth.ts';
-import { CORE_ARTIFACT_VERSION } from '../api/enums.ts';
+import { CORE_ARTIFACT_VERSION, type UserRole } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
@@ -223,12 +223,16 @@ export class EvidenceService {
     orderId: string;
     carrierCode: Carrier;
     trackingNumber: string;
+    note?: string | null;
+    mediaAssetIds?: string[];
     idempotencyKey: string;
   }) {
     const wallet = actorWallet(actor);
     if (!CARRIERS.includes(input.carrierCode)) throw new CoreError('InvalidRequest', 'Unsupported carrier code');
     validateResourceId(input.orderId);
     const normalizedTracking = normalizeTrackingNumber(input.trackingNumber);
+    const note = boundedShipmentNote(input.note);
+    const mediaAssetIds = uniqueIds(input.mediaAssetIds ?? [], 'mediaAssetIds');
     validateIdempotencyKey(input.idempotencyKey);
     if (input.idempotencyKey.toUpperCase().replace(/[^A-Z0-9]/g, '').includes(normalizedTracking)) {
       throw new CoreError('InvalidRequest', 'Idempotency key must not contain a tracking number');
@@ -240,11 +244,12 @@ export class EvidenceService {
       normalizedTracking,
     );
     const encryptedTracking = encryptTracking(
-      normalizedTracking,
+      JSON.stringify({ trackingNumber: normalizedTracking, note }),
       requireTrackingEncryptionKey(this.#trackingEncryptionKey),
     );
     return this.#transactions.transaction(async (executor) => {
       const actorRole = await authorizeShipmentOrder(executor, actor, input.orderId);
+      await verifyMediaAssets(executor, wallet, 'ORDER', input.orderId, mediaAssetIds);
       const requestHash = hashJson({
         domain: 'ABU24K_SHIPMENT_EVIDENCE_V1',
         artifactVersion: CORE_ARTIFACT_VERSION,
@@ -253,6 +258,8 @@ export class EvidenceService {
         orderId: input.orderId,
         carrierCode: input.carrierCode,
         trackingNumberHash,
+        note,
+        mediaAssetIds,
         idempotencyKey: input.idempotencyKey,
       });
       const existing = await executor.query<EvidenceRow>(
@@ -262,14 +269,20 @@ export class EvidenceService {
       if (existing.rows[0]) return existingEvidence(existing.rows[0], requestHash);
       const createdAt = this.#clock();
       const evidenceHash = hashJson({ requestHash, createdAt: createdAt.toISOString() });
-      const payload = { actorRole, carrierCode: input.carrierCode, trackingNumberHash };
+      const payload = {
+        actorRole,
+        carrierCode: input.carrierCode,
+        trackingNumberHash,
+        noteConfigured: note !== null,
+        mediaAssetIds,
+      };
       const inserted = await executor.query<EvidenceRow>(
         `INSERT INTO core.evidence_envelopes (
            evidence_hash, owner_wallet, actor_role, purpose, resource_type, resource_id,
            action_type, reason_code, tracking_number_hash, media_asset_ids,
            payload, payload_hash, idempotency_key, created_at,
            encrypted_tracking_number, tracking_iv, tracking_tag
-         ) VALUES ($1,$2,$3,'SHIPMENT_TRACKING','ORDER',$4,'RECORD_SHIPMENT',NULL,$5,'[]',$6,$7,$8,$9,$10,$11,$12)
+         ) VALUES ($1,$2,$3,'SHIPMENT_TRACKING','ORDER',$4,'RECORD_SHIPMENT',NULL,$5,$6,$7,$8,$9,$10,$11,$12,$13)
          ON CONFLICT (owner_wallet, idempotency_key) DO NOTHING
          RETURNING *`,
         [
@@ -278,6 +291,7 @@ export class EvidenceService {
           actorRole,
           input.orderId,
           trackingNumberHash,
+          JSON.stringify(mediaAssetIds),
           JSON.stringify(payload),
           requestHash,
           input.idempotencyKey,
@@ -1023,6 +1037,13 @@ function normalizeTrackingNumber(value: string) {
   return normalized;
 }
 
+function boundedShipmentNote(value: string | null | undefined) {
+  if (value === undefined || value === null || value.trim() === '') return null;
+  const note = value.trim();
+  if (note.length > 500) throw new CoreError('InvalidRequest', 'Shipment note must contain at most 500 characters');
+  return note;
+}
+
 function safeObjectSegment(value: string) {
   return createHash('sha256').update(value).digest('hex').slice(0, 32);
 }
@@ -1044,6 +1065,7 @@ async function authorizeActionOrder(
   orderId: string,
   action: EvidenceAction,
 ): Promise<EvidenceRow['actor_role']> {
+  actor = await revalidateActor(executor, actor);
   const row = await loadOrderScope(executor, orderId);
   const wallet = actorWallet(actor);
   const buyer = hasRole(actor, 'BUYER') && row.buyer_wallet === wallet;
@@ -1070,6 +1092,7 @@ async function authorizeShipmentOrder(
   actor: FulfillmentActor,
   orderId: string,
 ): Promise<EvidenceRow['actor_role']> {
+  actor = await revalidateActor(executor, actor);
   const row = await loadOrderScope(executor, orderId);
   const wallet = actorWallet(actor);
   if (
@@ -1097,6 +1120,28 @@ async function authorizeShipmentOrder(
   const platform = platformActorRole(actor);
   if (platform) return platform;
   throw new CoreError('Forbidden', 'Shipment evidence is outside the actor order scope', 403);
+}
+
+async function revalidateActor(executor: SqlExecutor, actor: FulfillmentActor): Promise<FulfillmentActor> {
+  const walletAddress = actorWallet(actor);
+  const bindings = await executor.query<{ role: UserRole; merchant_id: string | null }>(
+    `SELECT role, merchant_id FROM core.wallet_role_bindings
+     WHERE lower(wallet_address) = $1 AND status = 'ACTIVE' AND role = ANY($2::text[])
+     ORDER BY role`,
+    [walletAddress, [...actor.roles]],
+  );
+  const merchantBinding = bindings.rows.find((binding) => (
+    binding.role === 'MERCHANT'
+    && actor.merchantId !== undefined
+    && binding.merchant_id === actor.merchantId
+  ));
+  return {
+    walletAddress,
+    roles: bindings.rows
+      .filter((binding) => binding.role !== 'MERCHANT' || binding === merchantBinding)
+      .map((binding) => binding.role),
+    ...(merchantBinding ? { merchantId: merchantBinding.merchant_id! } : {}),
+  };
 }
 
 async function loadOrderScope(executor: SqlExecutor, orderId: string) {
@@ -1319,6 +1364,41 @@ function encryptTracking(value: string, key: Buffer) {
   const cipher = createCipheriv('aes-256-gcm', key, iv);
   const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
   return { ciphertext, iv, tag: cipher.getAuthTag() };
+}
+
+export function createTrackingEvidenceDecryptor(value: string | undefined) {
+  const key = parseTrackingEncryptionKey(value);
+  return (encrypted: Uint8Array, iv: Uint8Array, tag: Uint8Array) => {
+    try {
+      const decipher = createDecipheriv('aes-256-gcm', requireTrackingEncryptionKey(key), Buffer.from(iv));
+      decipher.setAuthTag(Buffer.from(tag));
+      const plaintext = Buffer.concat([
+        decipher.update(Buffer.from(encrypted)),
+        decipher.final(),
+      ]).toString('utf8');
+      try {
+        const parsed = JSON.parse(plaintext) as unknown;
+        if (
+          parsed
+          && typeof parsed === 'object'
+          && !Array.isArray(parsed)
+          && typeof (parsed as Record<string, unknown>).trackingNumber === 'string'
+        ) {
+          const note = (parsed as Record<string, unknown>).note;
+          return {
+            trackingNumber: (parsed as Record<string, string>).trackingNumber,
+            note: typeof note === 'string' ? note : null,
+          };
+        }
+      } catch {
+        // Legacy envelopes encrypted only the normalized tracking number.
+      }
+      return { trackingNumber: plaintext, note: null };
+    } catch (error) {
+      if (error instanceof CoreError) throw error;
+      throw new CoreError('ExternalBlocked', 'Tracking evidence decryption failed', 503);
+    }
+  };
 }
 
 function hashJson(value: unknown) {

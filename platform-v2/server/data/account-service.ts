@@ -24,8 +24,12 @@ type DeliveryTargetCreator = (
     recipientName: string;
     phone: string;
     address: string;
-    longitude: number;
-    latitude: number;
+    longitude?: number | null;
+    latitude?: number | null;
+    province: string;
+    city: string;
+    district: string;
+    regionCode: string;
   },
 ) => Promise<unknown>;
 
@@ -41,8 +45,12 @@ export interface BuyerAddressInput {
   recipientName: string;
   phone: string;
   detailAddress: string;
-  longitude: number;
-  latitude: number;
+  longitude?: number | null;
+  latitude?: number | null;
+  province?: string;
+  city?: string;
+  district?: string;
+  regionCode?: string;
   isDefault: boolean;
   expectedVersion?: number;
   idempotencyKey: string;
@@ -430,8 +438,12 @@ export class AccountService {
       recipientName: requiredPayloadString(payload, 'recipientName'),
       phone: requiredPayloadString(payload, 'phone'),
       address: requiredPayloadString(payload, 'detailAddress'),
-      longitude: requiredPayloadNumber(payload, 'longitude'),
-      latitude: requiredPayloadNumber(payload, 'latitude'),
+      longitude: nullablePayloadNumber(payload, 'longitude'),
+      latitude: nullablePayloadNumber(payload, 'latitude'),
+      province: requiredPayloadString(payload, 'province'),
+      city: requiredPayloadString(payload, 'city'),
+      district: requiredPayloadString(payload, 'district'),
+      regionCode: requiredPayloadString(payload, 'regionCode'),
     });
   }
 
@@ -739,7 +751,7 @@ export class AccountService {
       );
     });
     if (replay) return replay;
-    const region = await this.#regions.reverseGeocode({ longitude: input.longitude, latitude: input.latitude });
+    const region = await resolveBuyerAddressRegion(this.#regions, input);
     return this.#transactions.transaction(async (executor) => {
       await lockBuyerAccount(executor, wallet, this.#clock());
       const duplicate = await accountCommand(executor, wallet, input.idempotencyKey, requestHash);
@@ -760,8 +772,8 @@ export class AccountService {
         recipientName: input.recipientName.trim(),
         phone: input.phone,
         detailAddress: input.detailAddress.trim(),
-        longitude: input.longitude,
-        latitude: input.latitude,
+        longitude: input.longitude ?? null,
+        latitude: input.latitude ?? null,
         province: region.province,
         city: region.city,
         district: region.district,
@@ -880,8 +892,8 @@ function buyerAddressProjection(row: BuyerAddressRow, key: Buffer) {
     recipientName: requiredPayloadString(payload, 'recipientName'),
     phone: requiredPayloadString(payload, 'phone'),
     detailAddress: requiredPayloadString(payload, 'detailAddress'),
-    longitude: requiredPayloadNumber(payload, 'longitude'),
-    latitude: requiredPayloadNumber(payload, 'latitude'),
+    longitude: nullablePayloadNumber(payload, 'longitude'),
+    latitude: nullablePayloadNumber(payload, 'latitude'),
     province: requiredPayloadString(payload, 'province'),
     city: requiredPayloadString(payload, 'city'),
     district: requiredPayloadString(payload, 'district'),
@@ -1158,10 +1170,56 @@ function validateBuyerAddress(input: BuyerAddressInput) {
     || input.recipientName.trim().length < 1 || input.recipientName.trim().length > 64
     || !/^1[3-9][0-9]{9}$/.test(input.phone)
     || input.detailAddress.trim().length < 5 || input.detailAddress.trim().length > 300
-    || !Number.isFinite(input.longitude) || input.longitude < -180 || input.longitude > 180
-    || !Number.isFinite(input.latitude) || input.latitude < -90 || input.latitude > 90
   ) throw new CoreError('InvalidRequest', 'Buyer address is incomplete or invalid');
+  const manualRegion = [input.province, input.city, input.district, input.regionCode];
+  const hasManualRegion = manualRegion.every((value) => typeof value === 'string' && value.trim().length > 0);
+  const hasAnyManualRegion = manualRegion.some((value) => value !== undefined);
+  if (hasAnyManualRegion && !hasManualRegion) {
+    throw new CoreError('InvalidRequest', 'Manual administrative region is incomplete');
+  }
+  if (hasManualRegion && !/^[0-9]{6}$/.test(input.regionCode!)) {
+    throw new CoreError('InvalidRequest', 'regionCode must contain six digits');
+  }
+  const hasCoordinates = Number.isFinite(input.longitude) && Number.isFinite(input.latitude);
+  if (!hasManualRegion && !hasCoordinates) {
+    throw new CoreError('InvalidRequest', 'Manual region or coordinates are required');
+  }
+  if (
+    hasCoordinates
+    && ((input.longitude as number) < -180 || (input.longitude as number) > 180
+      || (input.latitude as number) < -90 || (input.latitude as number) > 90)
+  ) throw new CoreError('InvalidRequest', 'Buyer address coordinates are invalid');
   if (input.expectedVersion !== undefined) validateExpectedVersion(input.expectedVersion);
+}
+
+async function resolveBuyerAddressRegion(
+  resolver: AdministrativeRegionResolver,
+  input: BuyerAddressInput,
+) {
+  if (input.province && input.city && input.district && input.regionCode) {
+    const province = input.province.trim();
+    const city = input.city.trim();
+    const district = input.district.trim();
+    if ([province, city, district].some((value) => value.length > 64)) {
+      throw new CoreError('InvalidRequest', 'Manual administrative region is invalid');
+    }
+    return {
+      province,
+      city,
+      district,
+      formattedAddress: `${province}${city}${district}${input.detailAddress.trim()}`,
+      regionCode: input.regionCode,
+      sourceReferenceHash: hashJson({ source: 'BUYER_DECLARED', province, city, district, regionCode: input.regionCode }),
+      source: 'BUYER_DECLARED' as const,
+    };
+  }
+  return {
+    ...await resolver.reverseGeocode({
+      longitude: input.longitude as number,
+      latitude: input.latitude as number,
+    }),
+    source: 'AMAP' as const,
+  };
 }
 
 function validateMerchantProfile(input: MerchantProfileUpdate) {
@@ -1220,6 +1278,15 @@ function requiredPayloadString(payload: Record<string, unknown>, name: string) {
 function requiredPayloadNumber(payload: Record<string, unknown>, name: string) {
   const value = payload[name];
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new CoreError('ExternalBlocked', 'Encrypted account data is invalid', 503);
+  return value;
+}
+
+function nullablePayloadNumber(payload: Record<string, unknown>, name: string) {
+  const value = payload[name];
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new CoreError('ExternalBlocked', 'Encrypted account data is invalid', 503);
+  }
   return value;
 }
 

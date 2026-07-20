@@ -113,7 +113,11 @@ export const deliveryOrder: FulfillmentOrder = {
   shipments: [{
     shipmentId: 'shipment-001',
     carrierCode: 'SF',
+    trackingNumber: 'SF1234567890',
     trackingNumberHash: hash('9'),
+    note: '易碎品，请当面签收',
+    evidenceHash: hash('8'),
+    mediaAssetIds: [],
     providerReferenceHash: null,
     createdAt: '2033-05-18T04:00:00.000Z',
   }],

@@ -141,6 +141,7 @@ const schemaSources = [
       '035_settlement_attempt_retryable.sql',
       '036_retire_merchant_levels.sql',
       '037_payment_quote_source_evidence.sql',
+      '038_manual_fulfillment_launch.sql',
     ],
   },
   {
@@ -2351,8 +2352,12 @@ function accountOpenApiSchemas() {
     recipientName: { type: 'string', minLength: 1, maxLength: 64 },
     phone: { type: 'string', pattern: '^1[3-9][0-9]{9}$' },
     detailAddress: { type: 'string', minLength: 5, maxLength: 300 },
-    longitude: { type: 'number', minimum: -180, maximum: 180 },
-    latitude: { type: 'number', minimum: -90, maximum: 90 },
+    longitude: nullable({ type: 'number', minimum: -180, maximum: 180 }),
+    latitude: nullable({ type: 'number', minimum: -90, maximum: 90 }),
+    province: { type: 'string', minLength: 1, maxLength: 64 },
+    city: { type: 'string', minLength: 1, maxLength: 64 },
+    district: { type: 'string', minLength: 1, maxLength: 64 },
+    regionCode: { type: 'string', pattern: '^[0-9]{6}$' },
     isDefault: { type: 'boolean' },
   };
   const availableCount = object({ status: { const: 'AVAILABLE' }, count: ref('AtomicAmount') });
@@ -2390,11 +2395,7 @@ function accountOpenApiSchemas() {
     BuyerSavedAddress: object({
       addressId: string,
       ...addressFields,
-      province: string,
-      city: string,
-      district: string,
       formattedAddress: string,
-      regionCode: { type: 'string', pattern: '^[0-9]{6}$' },
       version: { type: 'integer', minimum: 1 },
       updatedAt: timestamp,
     }),
@@ -4668,6 +4669,8 @@ function catalogManagementOpenApiSchemas() {
       properties: {
         carrierCode: { enum: ['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS'] },
         trackingNumber: { type: 'string', minLength: 6, maxLength: 64 },
+        note: { anyOf: [{ type: 'string', maxLength: 500 }, { type: 'null' }] },
+        mediaAssetIds: { type: 'array', maxItems: 8, uniqueItems: true, items: { $ref: '#/components/schemas/Bytes32' } },
         idempotencyKey,
       },
     },
@@ -4816,14 +4819,18 @@ function fulfillmentOpenApiSchemas() {
     CreateDeliveryTargetRequest: {
       type: 'object',
       additionalProperties: false,
-      required: ['idempotencyKey', 'recipientName', 'phone', 'address', 'longitude', 'latitude'],
+      required: ['idempotencyKey', 'recipientName', 'phone', 'address', 'province', 'city', 'district', 'regionCode'],
       properties: {
         idempotencyKey,
         recipientName: { type: 'string', minLength: 1, maxLength: 64 },
         phone: { type: 'string', pattern: '^[+]?[0-9-]{7,20}$' },
         address: { type: 'string', minLength: 5, maxLength: 300 },
-        longitude: { type: 'number', minimum: -180, maximum: 180 },
-        latitude: { type: 'number', minimum: -90, maximum: 90 },
+        longitude: { anyOf: [{ type: 'number', minimum: -180, maximum: 180 }, { type: 'null' }] },
+        latitude: { anyOf: [{ type: 'number', minimum: -90, maximum: 90 }, { type: 'null' }] },
+        province: { type: 'string', minLength: 1, maxLength: 64 },
+        city: { type: 'string', minLength: 1, maxLength: 64 },
+        district: { type: 'string', minLength: 1, maxLength: 64 },
+        regionCode: { $ref: '#/components/schemas/RegionCode' },
       },
     },
     CreatePickupTargetRequest: {
@@ -4860,8 +4867,8 @@ function fulfillmentOpenApiSchemas() {
         recipientName: { type: 'string' },
         phone: { type: 'string' },
         address: { type: 'string' },
-        longitude: { type: 'number' },
-        latitude: { type: 'number' },
+        longitude: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+        latitude: { anyOf: [{ type: 'number' }, { type: 'null' }] },
         regionCode: { $ref: '#/components/schemas/RegionCode' },
       },
     },
@@ -4906,12 +4913,17 @@ function fulfillmentOpenApiSchemas() {
       type: 'object',
       additionalProperties: false,
       required: [
-        'shipmentId', 'carrierCode', 'trackingNumberHash', 'providerReferenceHash', 'createdAt',
+        'shipmentId', 'carrierCode', 'trackingNumber', 'trackingNumberHash', 'note',
+        'evidenceHash', 'mediaAssetIds', 'providerReferenceHash', 'createdAt',
       ],
       properties: {
         shipmentId: { type: 'string', minLength: 1 },
         carrierCode: { type: 'string', pattern: '^[A-Z0-9_-]{2,32}$' },
+        trackingNumber: { anyOf: [{ type: 'string', minLength: 6, maxLength: 64 }, { type: 'null' }] },
         trackingNumberHash: { $ref: '#/components/schemas/Bytes32' },
+        note: { anyOf: [{ type: 'string', maxLength: 500 }, { type: 'null' }] },
+        evidenceHash: { $ref: '#/components/schemas/Bytes32' },
+        mediaAssetIds: { type: 'array', items: { $ref: '#/components/schemas/Bytes32' } },
         providerReferenceHash: { anyOf: [{ $ref: '#/components/schemas/Bytes32' }, { type: 'null' }] },
         createdAt: timestamp,
       },
@@ -8246,8 +8258,12 @@ export interface CreateDeliveryTargetRequest {
   recipientName: string;
   phone: string;
   address: string;
-  longitude: number;
-  latitude: number;
+  longitude: number | null;
+  latitude: number | null;
+  province: string;
+  city: string;
+  district: string;
+  regionCode: string;
 }
 
 export interface CreatePickupTargetRequest {
@@ -8278,8 +8294,8 @@ export interface DeliveryTargetPayload {
   recipientName: string;
   phone: string;
   address: string;
-  longitude: number;
-  latitude: number;
+  longitude: number | null;
+  latitude: number | null;
   regionCode: string;
 }
 
@@ -8315,7 +8331,11 @@ export interface FulfillmentRequestProjection {
 export interface ShipmentProjection {
   shipmentId: string;
   carrierCode: string;
+  trackingNumber: string | null;
   trackingNumberHash: Bytes32;
+  note: string | null;
+  evidenceHash: Bytes32;
+  mediaAssetIds: readonly Bytes32[];
   providerReferenceHash: Bytes32 | null;
   createdAt: string;
 }
@@ -8894,8 +8914,8 @@ export interface BuyerSavedAddress {
   recipientName: string;
   phone: string;
   detailAddress: string;
-  longitude: number;
-  latitude: number;
+  longitude: number | null;
+  latitude: number | null;
   province: string;
   city: string;
   district: string;

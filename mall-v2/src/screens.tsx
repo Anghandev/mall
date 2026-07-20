@@ -7,18 +7,15 @@ import {
   ChevronRight,
   CircleDollarSign,
   Clock3,
-  Copy,
   FileClock,
   FileUp,
   Headphones,
   History,
   ImageOff,
-  LocateFixed,
   LockKeyhole,
   MapPinned,
   Megaphone,
   Minus,
-  Navigation,
   Package,
   PackageOpen,
   Phone,
@@ -72,7 +69,7 @@ import {
 } from './components';
 import type { BuyerEvidenceAction, PublishedSeckillSessionProjection } from './core-client';
 import { brandAssetUrl } from './deployment-paths';
-import { useMallRuntime, type BrowserPosition, type MallRuntimeValue } from './mall-runtime';
+import { useMallRuntime, type MallRuntimeValue } from './mall-runtime';
 
 export function SeckillScreen() {
   const runtime = useMallRuntime();
@@ -522,11 +519,10 @@ export function StoresScreen() {
   const [districtCode, setDistrictCode] = useState('');
   const cityCodes = useMemo(() => regionCityCodes(runtime.stores), [runtime.stores]);
   const districtCodes = useMemo(() => regionDistrictCodes(runtime.stores, cityCode), [runtime.stores, cityCode]);
-  const visibleStores = sortStoresByDistance(runtime.stores.filter((store) => (
+  const visibleStores = runtime.stores.filter((store) => (
     (!cityCode || cityCodeFor(store.regionCode) === cityCode)
       && (!districtCode || store.regionCode === districtCode)
-  )), runtime.location);
-  const nearestStoreId = runtime.location ? visibleStores[0]?.storeId ?? null : null;
+  ));
 
   return (
     <div className="screen screen--stores">
@@ -573,18 +569,8 @@ export function StoresScreen() {
           <button className="button button--secondary" type="button" onClick={() => void runtime.reloadStores()} disabled={runtime.busy}>
             <RefreshCw aria-hidden="true" size={18} /> 重新同步门店
           </button>
-          <button className="button button--secondary" type="button" onClick={() => void runtime.requestLocation()} disabled={runtime.busy}>
-            <LocateFixed aria-hidden="true" size={18} />
-            {runtime.locationState === 'loading' ? '定位中' : '获取距离'}
-          </button>
         </div>
       </div>
-
-      {runtime.locationState !== 'ready' ? (
-        <StatusNotice title="设备定位尚未验证" tone="warning">
-          未授权定位时只展示 Core 门店资料，不推断最近门店或虚构距离。
-        </StatusNotice>
-      ) : null}
 
       {runtime.storesState === 'loading' ? <StoreListSkeleton /> : null}
       {runtime.storesState === 'error' ? (
@@ -596,7 +582,7 @@ export function StoresScreen() {
       {runtime.storesState === 'ready' && visibleStores.length > 0 ? (
         <div className="store-list" aria-label="可用自提门店">
           {visibleStores.map((store) => (
-            <StoreRow key={store.storeId} store={store} location={runtime.location} nearest={store.storeId === nearestStoreId} />
+            <StoreRow key={store.storeId} store={store} />
           ))}
         </div>
       ) : null}
@@ -612,8 +598,7 @@ function StoreListSkeleton() {
   );
 }
 
-function StoreRow({ store, location, nearest }: { store: MerchantStore; location: BrowserPosition | null; nearest: boolean }) {
-  const distance = location ? distanceKm(location, store) : null;
+function StoreRow({ store }: { store: MerchantStore }) {
   return (
     <article className="store-row">
       <div className="store-row__header">
@@ -622,7 +607,6 @@ function StoreRow({ store, location, nearest }: { store: MerchantStore; location
           <p>{store.address}</p>
         </div>
         <div className="store-row__badges">
-          {nearest ? <span className="status-pill status-pill--locked"><LocateFixed aria-hidden="true" size={13} />最近</span> : null}
           <span className={store.status === 'ACTIVE' ? 'status-pill status-pill--success' : 'status-pill status-pill--muted'}>
             {store.status === 'ACTIVE' ? '营业中' : store.status}
           </span>
@@ -631,7 +615,6 @@ function StoreRow({ store, location, nearest }: { store: MerchantStore; location
       <StoreMediaGallery store={store} />
       <dl className="store-row__facts">
         <div><dt>行政区</dt><dd>{store.regionCode}</dd></div>
-        <div><dt>距离</dt><dd>{distance === null ? '定位后显示' : `${distance.toFixed(1)} km`}</dd></div>
         <div><dt>营业时间</dt><dd>{store.businessHours}</dd></div>
         <div><dt>版本</dt><dd>v{store.version}</dd></div>
       </dl>
@@ -639,43 +622,8 @@ function StoreRow({ store, location, nearest }: { store: MerchantStore; location
         <a className="button button--secondary" href={`tel:${store.phone}`} aria-label={`拨打 ${store.name} 电话`}>
           <Phone aria-hidden="true" size={18} /> 拨号
         </a>
-        <StoreNavigation store={store} />
       </div>
     </article>
-  );
-}
-
-function StoreNavigation({ store }: { store: MerchantStore }) {
-  const [popupBlocked, setPopupBlocked] = useState(false);
-  const urls = mapNavigationUrls(store);
-
-  function openNavigation(url: string) {
-    let popup: Window | null = null;
-    try {
-      popup = globalThis.open(url, '_blank');
-      if (popup) popup.opener = null;
-    } catch {
-      popup = null;
-    }
-    setPopupBlocked(!popup);
-  }
-
-  return (
-    <div className="store-navigation">
-      <button className="button button--secondary" type="button" onClick={() => openNavigation(urls.amap)}>
-        <Navigation aria-hidden="true" size={18} /> 高德导航
-      </button>
-      <button className="button button--secondary" type="button" onClick={() => openNavigation(urls.baidu)}>
-        <Navigation aria-hidden="true" size={18} /> 百度导航
-      </button>
-      {popupBlocked ? (
-        <div className="navigation-fallback" role="status">
-          <p>浏览器拦截了地图弹窗，请改用当前页打开。</p>
-          <a href={urls.amap}>当前页打开高德</a>
-          <a href={urls.baidu}>当前页打开百度</a>
-        </div>
-      ) : null}
-    </div>
   );
 }
 
@@ -865,9 +813,23 @@ function BuyerProfileForm({ onClose }: { onClose(): void }) {
 export function AddressScreen() {
   const runtime = useMallRuntime();
   const location = useLocation();
-  const [rawText, setRawText] = useState('');
-  const [label, setLabel] = useState('家');
-  const [isDefault, setIsDefault] = useState(false);
+  const [draft, setDraft] = useState({
+    label: '家', recipientName: '', phone: '', province: '', city: '', district: '',
+    regionCode: '', detailAddress: '', isDefault: false,
+  });
+  const phoneInvalid = draft.phone.length > 0 && !/^1[3-9][0-9]{9}$/.test(draft.phone);
+  const regionCodeInvalid = draft.regionCode.length > 0 && !/^[0-9]{6}$/.test(draft.regionCode);
+  const canSave = Boolean(
+    runtime.session
+    && draft.label.trim()
+    && draft.recipientName.trim()
+    && /^1[3-9][0-9]{9}$/.test(draft.phone)
+    && draft.province.trim()
+    && draft.city.trim()
+    && draft.district.trim()
+    && /^[0-9]{6}$/.test(draft.regionCode)
+    && draft.detailAddress.trim().length >= 5,
+  );
 
   return (
     <div className="screen screen--detail">
@@ -878,46 +840,41 @@ export function AddressScreen() {
         backTo={location.state && typeof location.state === 'object' && 'returnTo' in location.state && location.state.returnTo === '/checkout' ? '/checkout' : '/assets'}
       />
 
-      <section className="section-block" aria-labelledby="paste-address-title">
+      <form
+        className="section-block address-review"
+        aria-labelledby="manual-address-title"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void runtime.createBuyerAddress({ ...draft, longitude: null, latitude: null }).then((saved) => {
+            if (saved) setDraft((current) => ({ ...current, recipientName: '', phone: '', detailAddress: '' }));
+          });
+        }}
+      >
         <div className="section-heading">
-          <div>
-            <p className="eyebrow">SMART PARSE</p>
-            <h2 id="paste-address-title">粘贴识别</h2>
-          </div>
-          <Copy aria-hidden="true" size={19} />
+          <div><p className="eyebrow">MANUAL ADDRESS</p><h2 id="manual-address-title">新增收货地址</h2></div>
+          <MapPinned aria-hidden="true" size={19} />
         </div>
-        <label className="field">
-          地址文本
-          <textarea
-            rows={4}
-            value={rawText}
-            onChange={(event) => setRawText(event.target.value)}
-            disabled={!runtime.session || runtime.busy}
-            placeholder="例：张三 13800138000 辽宁省大连市中山区示例路 24 号"
-            aria-describedby="parser-reason"
-            maxLength={1000}
-          />
-        </label>
-        <p id="parser-reason" className="field-help">原始粘贴文本只发往 Core 解析，不写入本地缓存或持久化记录。</p>
-        <button
-          className="button button--secondary"
-          type="button"
-          disabled={!runtime.session || runtime.busy || rawText.trim().length < 5}
-          onClick={() => void runtime.parseBuyerAddress(rawText).then((parsed) => { if (parsed) setRawText(''); })}
-        >
-          <ScanLine aria-hidden="true" size={18} /> {runtime.addressParseState === 'loading' ? '正在解析' : '解析并复核'}
-        </button>
-      </section>
-
-      {runtime.parsedBuyerAddress ? (
-        <AddressReview
-          label={label}
-          isDefault={isDefault}
-          onLabelChange={setLabel}
-          onDefaultChange={setIsDefault}
-          onCancel={runtime.clearParsedBuyerAddress}
-        />
-      ) : null}
+        <div className="form-grid">
+          <label className="field">地址标签<input value={draft.label} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} maxLength={32} disabled={!runtime.session || runtime.busy} required /></label>
+          <label className="field">收货人<input value={draft.recipientName} onChange={(event) => setDraft((current) => ({ ...current, recipientName: event.target.value }))} maxLength={64} autoComplete="name" disabled={!runtime.session || runtime.busy} required /></label>
+          <label className="field">
+            手机号
+            <input value={draft.phone} onChange={(event) => setDraft((current) => ({ ...current, phone: event.target.value.replace(/\D/g, '').slice(0, 11) }))} inputMode="numeric" autoComplete="tel" aria-invalid={phoneInvalid} disabled={!runtime.session || runtime.busy} required />
+            {phoneInvalid ? <span className="field-error" role="alert">请输入有效的 11 位手机号</span> : null}
+          </label>
+          <label className="field">省份<input value={draft.province} onChange={(event) => setDraft((current) => ({ ...current, province: event.target.value }))} maxLength={64} autoComplete="address-level1" disabled={!runtime.session || runtime.busy} required /></label>
+          <label className="field">城市<input value={draft.city} onChange={(event) => setDraft((current) => ({ ...current, city: event.target.value }))} maxLength={64} autoComplete="address-level2" disabled={!runtime.session || runtime.busy} required /></label>
+          <label className="field">区县<input value={draft.district} onChange={(event) => setDraft((current) => ({ ...current, district: event.target.value }))} maxLength={64} autoComplete="address-level3" disabled={!runtime.session || runtime.busy} required /></label>
+          <label className="field">
+            六位行政区代码
+            <input value={draft.regionCode} onChange={(event) => setDraft((current) => ({ ...current, regionCode: event.target.value.replace(/\D/g, '').slice(0, 6) }))} inputMode="numeric" pattern="[0-9]{6}" aria-invalid={regionCodeInvalid} disabled={!runtime.session || runtime.busy} required />
+            {regionCodeInvalid ? <span className="field-error" role="alert">请输入六位行政区代码</span> : null}
+          </label>
+        </div>
+        <label className="field">详细地址<textarea value={draft.detailAddress} onChange={(event) => setDraft((current) => ({ ...current, detailAddress: event.target.value }))} rows={3} maxLength={300} autoComplete="street-address" disabled={!runtime.session || runtime.busy} required /></label>
+        <label className="check-field"><input type="checkbox" checked={draft.isDefault} onChange={(event) => setDraft((current) => ({ ...current, isDefault: event.target.checked }))} disabled={!runtime.session || runtime.busy} /><span>设为默认地址</span></label>
+        <button className="button button--primary" type="submit" disabled={runtime.busy || !canSave}><Save aria-hidden="true" size={18} /> {runtime.busy ? '正在保存' : '保存地址'}</button>
+      </form>
 
       {!runtime.session ? <StatusNotice title="需要钱包登录">登录后只读写当前 BUYER 会话所有的加密地址。</StatusNotice> : null}
       {runtime.buyerAddressesState === 'loading' ? <div className="address-list-skeleton" aria-label="正在加载收货地址" /> : null}
@@ -930,7 +887,7 @@ export function AddressScreen() {
         </div>
       ) : null}
       {runtime.session && runtime.buyerAddressesState === 'empty' ? (
-        <EmptyState title="暂无已保存地址">先粘贴地址并完成 Core 解析复核，再保存。</EmptyState>
+        <EmptyState title="暂无已保存地址">填写完整收货信息和六位行政区代码后保存。</EmptyState>
       ) : null}
       {runtime.buyerAddresses.length > 0 ? (
         <section className="saved-addresses" aria-labelledby="saved-address-title">
@@ -942,75 +899,6 @@ export function AddressScreen() {
   );
 }
 
-function AddressReview({
-  label,
-  isDefault,
-  onLabelChange,
-  onDefaultChange,
-  onCancel,
-}: {
-  label: string;
-  isDefault: boolean;
-  onLabelChange(value: string): void;
-  onDefaultChange(value: boolean): void;
-  onCancel(): void;
-}) {
-  const runtime = useMallRuntime();
-  const parsed = runtime.parsedBuyerAddress!;
-  const headingRef = useRef<HTMLHeadingElement>(null);
-  useEffect(() => headingRef.current?.focus(), []);
-  const fields = [
-    ['收货人', parsed.recipientName],
-    ['手机号', parsed.phone],
-    ['省份', parsed.province],
-    ['城市', parsed.city],
-    ['区县', parsed.district],
-    ['详细地址', parsed.detailAddress],
-    ['行政区代码', parsed.regionCode],
-    ['经度', parsed.longitude === null ? null : String(parsed.longitude)],
-    ['纬度', parsed.latitude === null ? null : String(parsed.latitude)],
-  ] as const;
-  return (
-    <form
-      className="address-review"
-      aria-labelledby="address-review-title"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void runtime.createBuyerAddress(label, isDefault);
-      }}
-    >
-      <div className="section-heading">
-        <div><p className="eyebrow">REVIEW REQUIRED</p><h2 id="address-review-title" ref={headingRef} tabIndex={-1}>复核识别结果</h2></div>
-        <BadgeCheck aria-hidden="true" size={20} />
-      </div>
-      <p className="field-help">请逐项确认姓名、手机号、省市区和详细地址。未点击“确认并保存”不会写入地址簿。</p>
-      <dl className="address-review__fields">
-        {fields.map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{value ?? '缺失'}</dd></div>)}
-      </dl>
-      {parsed.missingFields.length > 0 ? (
-        <div className="address-review__missing" role="alert">
-          <strong>缺少必填字段</strong>
-          <ul>{parsed.missingFields.map((field) => <li key={field}>{field}</li>)}</ul>
-        </div>
-      ) : null}
-      <label className="field">
-        地址标签
-        <input value={label} onChange={(event) => onLabelChange(event.target.value)} maxLength={32} required />
-      </label>
-      <label className="check-field">
-        <input type="checkbox" checked={isDefault} onChange={(event) => onDefaultChange(event.target.checked)} />
-        <span>设为默认地址</span>
-      </label>
-      <div className="profile-form__actions">
-        <button className="button button--secondary" type="button" onClick={onCancel} disabled={runtime.busy}>取消</button>
-        <button className="button button--primary" type="submit" disabled={runtime.busy || !parsed.canSave || !label.trim()}>
-          <Save aria-hidden="true" size={18} /> {runtime.busy ? '正在保存' : '确认并保存'}
-        </button>
-      </div>
-    </form>
-  );
-}
-
 function SavedAddressRow({ address }: { address: BuyerSavedAddress }) {
   const runtime = useMallRuntime();
   const [editing, setEditing] = useState(false);
@@ -1019,6 +907,10 @@ function SavedAddressRow({ address }: { address: BuyerSavedAddress }) {
     label: address.label,
     recipientName: address.recipientName,
     phone: address.phone,
+    province: address.province,
+    city: address.city,
+    district: address.district,
+    regionCode: address.regionCode,
     detailAddress: address.detailAddress,
     isDefault: address.isDefault,
   });
@@ -1027,6 +919,10 @@ function SavedAddressRow({ address }: { address: BuyerSavedAddress }) {
     draft.label.trim()
     && draft.recipientName.trim()
     && !phoneInvalid
+    && draft.province.trim()
+    && draft.city.trim()
+    && draft.district.trim()
+    && /^[0-9]{6}$/.test(draft.regionCode)
     && draft.detailAddress.trim().length >= 5,
   );
 
@@ -1039,8 +935,8 @@ function SavedAddressRow({ address }: { address: BuyerSavedAddress }) {
           event.preventDefault();
           void runtime.updateBuyerAddress(address.addressId, {
             ...draft,
-            longitude: address.longitude,
-            latitude: address.latitude,
+            longitude: null,
+            latitude: null,
           }).then((saved) => { if (saved) setEditing(false); });
         }}
       >
@@ -1051,6 +947,10 @@ function SavedAddressRow({ address }: { address: BuyerSavedAddress }) {
           <input value={draft.phone} onChange={(event) => setDraft((current) => ({ ...current, phone: event.target.value.replace(/\D/g, '').slice(0, 11) }))} inputMode="numeric" autoComplete="tel" aria-invalid={phoneInvalid} />
           {phoneInvalid ? <span className="field-error" role="alert">请输入有效的 11 位手机号</span> : null}
         </label>
+        <label className="field">省份<input value={draft.province} onChange={(event) => setDraft((current) => ({ ...current, province: event.target.value }))} maxLength={64} autoComplete="address-level1" /></label>
+        <label className="field">城市<input value={draft.city} onChange={(event) => setDraft((current) => ({ ...current, city: event.target.value }))} maxLength={64} autoComplete="address-level2" /></label>
+        <label className="field">区县<input value={draft.district} onChange={(event) => setDraft((current) => ({ ...current, district: event.target.value }))} maxLength={64} autoComplete="address-level3" /></label>
+        <label className="field">六位行政区代码<input value={draft.regionCode} onChange={(event) => setDraft((current) => ({ ...current, regionCode: event.target.value.replace(/\D/g, '').slice(0, 6) }))} inputMode="numeric" pattern="[0-9]{6}" /></label>
         <label className="field">详细地址<textarea value={draft.detailAddress} onChange={(event) => setDraft((current) => ({ ...current, detailAddress: event.target.value }))} rows={3} maxLength={300} autoComplete="street-address" /></label>
         <label className="check-field"><input type="checkbox" checked={draft.isDefault} onChange={(event) => setDraft((current) => ({ ...current, isDefault: event.target.checked }))} /><span>设为默认地址</span></label>
         <div className="profile-form__actions">
@@ -1196,6 +1096,7 @@ function OrderRow({
 }) {
   const runtime = useMallRuntime();
   const logistics = order.logistics.at(-1);
+  const shipment = order.shipments.at(-1);
   const buyerActions = actions.filter((action) => BUYER_FULFILLMENT_ACTIONS.includes(action.action));
   const [activeAction, setActiveAction] = useState<BuyerEvidenceAction | null>(null);
   return (
@@ -1234,11 +1135,15 @@ function OrderRow({
           <h3>物流</h3>
           <Truck aria-hidden="true" size={17} />
         </div>
-        {logistics ? (
-          <p>{logistics.provider} · {logisticsStatusLabel(logistics.status)} · {formatIso(logistics.occurredAt)}</p>
-        ) : order.shipments[0] ? (
-          <p>{order.shipments[0].carrierCode} · 运单 {shortHash(order.shipments[0].trackingNumberHash)}</p>
-        ) : <p>尚无有效物流证据</p>}
+        {shipment ? (
+          <dl className="order-row__identity">
+            <div><dt>快递公司</dt><dd>{carrierLabel(shipment.carrierCode)}</dd></div>
+            <div><dt>运单号</dt><dd>{shipment.trackingNumber ?? '运单号暂不可用'}</dd></div>
+            <div><dt>发货时间</dt><dd>{formatIso(shipment.createdAt)}</dd></div>
+            {shipment.note ? <div><dt>发货备注</dt><dd>{shipment.note}</dd></div> : null}
+            {logistics ? <div><dt>物流状态</dt><dd>{logisticsStatusLabel(logistics.status)} · {formatIso(logistics.occurredAt)}</dd></div> : null}
+          </dl>
+        ) : <p>尚无有效发货证据</p>}
       </section>
 
       <section className="order-row__section" aria-label="资产状态">
@@ -2070,15 +1975,7 @@ export function CheckoutScreen() {
 function CheckoutTargetSelector() {
   const runtime = useMallRuntime();
   const addresses = [...runtime.buyerAddresses].sort((left, right) => Number(right.isDefault) - Number(left.isDefault));
-  const pickupStores = sortStoresByDistance(runtime.stores, runtime.location);
-  const nearestStoreId = runtime.location ? pickupStores[0]?.storeId ?? null : null;
-  const nearestStoreButtonRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    if (runtime.fulfillmentMode === 'PICKUP' && runtime.locationState === 'ready') {
-      nearestStoreButtonRef.current?.focus();
-    }
-  }, [nearestStoreId, runtime.fulfillmentMode, runtime.locationState]);
+  const pickupStores = runtime.stores;
 
   return (
     <section className="checkout-target" aria-labelledby="checkout-target-title">
@@ -2125,27 +2022,19 @@ function CheckoutTargetSelector() {
         </div>
       ) : (
         <div className="pickup-options">
-          <div className="pickup-location-tools">
-            <button className="button button--secondary" type="button" onClick={() => void runtime.requestLocation()} disabled={runtime.busy}>
-              <LocateFixed aria-hidden="true" size={18} /> {runtime.locationState === 'loading' ? '定位中' : '定位最近门店'}
-            </button>
-            <p>{runtime.locationState === 'ready' ? '已按真实距离排序，焦点已移至最近门店；选择前不会创建 Core 自提目标。' : '定位后才排序和标记最近门店。'}</p>
-          </div>
           {runtime.storesState === 'loading' ? <StoreListSkeleton /> : null}
           {runtime.storesState === 'empty' ? <p className="section-copy">当前没有可用自提门店。</p> : null}
           {runtime.storesState === 'error' ? <p className="field-error">门店列表不可用，无法创建自提目标。</p> : null}
           {pickupStores.map((store) => (
-            <article className={store.storeId === nearestStoreId ? 'pickup-option is-nearest' : 'pickup-option'} key={store.storeId}>
+            <article className="pickup-option" key={store.storeId}>
               <StoreMediaGallery store={store} compact />
               <div className="pickup-option__selection">
                 <span>
-                  <strong>{store.name} {store.storeId === nearestStoreId ? <span className="status-pill status-pill--locked">最近</span> : null}</strong>
+                  <strong>{store.name}</strong>
                   <small>{store.address}</small>
                   <small>营业时间：{store.businessHours}</small>
-                  {runtime.location ? <small>距离：{distanceKm(runtime.location, store).toFixed(1)} km</small> : null}
                 </span>
                 <button
-                  ref={store.storeId === nearestStoreId ? nearestStoreButtonRef : undefined}
                   type="button"
                   className="button button--secondary"
                   aria-label={`选择 ${store.name}`}
@@ -2767,44 +2656,10 @@ function regionDistrictCodes(stores: readonly MerchantStore[], cityCode: string)
     .map((store) => store.regionCode))].sort();
 }
 
-function sortStoresByDistance(stores: readonly MerchantStore[], location: BrowserPosition | null) {
-  if (!location) return [...stores];
-  return [...stores].sort((left, right) => distanceKm(location, left) - distanceKm(location, right));
-}
-
-function mapNavigationUrls(store: MerchantStore) {
-  const amap = new URL('https://uri.amap.com/navigation');
-  amap.search = new URLSearchParams({
-    to: `${store.longitude},${store.latitude},${store.name}`,
-    mode: 'walk',
-    policy: '1',
-    src: 'abu24k-mall',
-  }).toString();
-  const baidu = new URL('https://api.map.baidu.com/marker');
-  baidu.search = new URLSearchParams({
-    location: `${store.latitude},${store.longitude}`,
-    title: store.name,
-    content: store.address,
-    output: 'html',
-    src: 'abu24k-mall',
-  }).toString();
-  return { amap: amap.href, baidu: baidu.href };
-}
-
 function activityCountState(state: MallRuntimeValue['ordersState'], authenticated: boolean) {
   if (!authenticated) return '未登录';
   if (state === 'loading' || state === 'idle') return '同步中';
   return '同步失败';
-}
-
-function distanceKm(location: BrowserPosition, store: MerchantStore) {
-  const radians = (value: number) => value * Math.PI / 180;
-  const latitudeDelta = radians(store.latitude - location.latitude);
-  const longitudeDelta = radians(store.longitude - location.longitude);
-  const a = Math.sin(latitudeDelta / 2) ** 2
-    + Math.cos(radians(location.latitude)) * Math.cos(radians(store.latitude))
-    * Math.sin(longitudeDelta / 2) ** 2;
-  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 function orderMatchesTab(order: FulfillmentOrder, tab: string) {
@@ -2853,6 +2708,10 @@ function logisticsStatusLabel(status: FulfillmentOrder['logistics'][number]['sta
     DELIVERED: '已送达',
     EXCEPTION: '物流异常',
   } as const)[status];
+}
+
+function carrierLabel(code: string) {
+  return ({ SF: '顺丰', JD: '京东物流', YTO: '圆通', ZTO: '中通', STO: '申通', EMS: 'EMS' } as Record<string, string>)[code] ?? code;
 }
 
 function balanceStateLabel(state: FulfillmentOrder['balances'][number]['state']) {

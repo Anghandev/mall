@@ -14,7 +14,11 @@ import {
 } from '../api/enums.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 import { captureMerchantFutureProceeds } from './takeover-funding-service.ts';
-import { assertTrackingEvidenceRecord, type Carrier } from './evidence-service.ts';
+import {
+  assertTrackingEvidenceRecord,
+  createTrackingEvidenceDecryptor,
+  type Carrier,
+} from './evidence-service.ts';
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_PICKUP_ATTEMPTS = 5;
@@ -186,45 +190,57 @@ export class FulfillmentService {
   readonly #clock: () => Date;
   readonly #executableActions: ReadonlySet<AllowedActionName>;
   readonly #enqueuePickupReceipt: PickupReceiptEnqueuer | undefined;
+  readonly #decryptTracking: ReturnType<typeof createTrackingEvidenceDecryptor> | undefined;
 
   constructor(input: {
     transactions: SqlTransactionRunner;
     clock?: () => Date;
     executableActions?: Iterable<AllowedActionName>;
     enqueuePickupReceipt?: PickupReceiptEnqueuer;
+    trackingEncryptionKey?: string;
   }) {
     this.#transactions = input.transactions;
     this.#clock = input.clock ?? (() => new Date());
     this.#executableActions = new Set(input.executableActions ?? executableOrderActionNames);
     this.#enqueuePickupReceipt = input.enqueuePickupReceipt;
+    this.#decryptTracking = input.trackingEncryptionKey
+      ? createTrackingEvidenceDecryptor(input.trackingEncryptionKey)
+      : undefined;
   }
 
   getOrder(actor: FulfillmentActor, orderId: string) {
     return this.#transactions.transaction(async (executor) => {
+      const currentActor = await revalidateActor(executor, actor);
       const order = await loadOrder(executor, orderId);
-      await assertCanRead(executor, actor, order);
+      await assertCanRead(executor, currentActor, order);
       const pausedScopes = await loadPausedScopes(executor);
       return orderProjection(
         executor,
         order,
-        await allowedActionsForOrder(executor, order, actor, this.#clock(), pausedScopes, this.#executableActions),
+        await allowedActionsForOrder(executor, order, currentActor, this.#clock(), pausedScopes, this.#executableActions),
+        this.#decryptTracking,
       );
     });
   }
 
   listOrders(actor: FulfillmentActor) {
     return this.#transactions.transaction(async (executor) => {
-      const privileged = hasRole(actor, 'ADMIN', 'OPERATOR', 'ARBITRATOR', 'AUDITOR');
+      const currentActor = await revalidateActor(executor, actor);
+      const privileged = hasRole(currentActor, 'ADMIN', 'OPERATOR', 'ARBITRATOR', 'AUDITOR');
       const result = await executor.query<{ order_id: string }>(
         privileged
           ? 'SELECT order_id FROM core.orders ORDER BY created_at DESC, order_id'
           : `SELECT order_id FROM core.orders
              WHERE buyer_wallet = $1 OR merchant_wallet = $1 OR merchant_id = $2
              ORDER BY created_at DESC, order_id`,
-        privileged ? [] : [normalizedWallet(actor.walletAddress), actor.merchantId ?? ''],
+        privileged ? [] : [normalizedWallet(currentActor.walletAddress), currentActor.merchantId ?? ''],
       );
       const orders = [];
-      for (const row of result.rows) orders.push(await orderProjection(executor, await loadOrder(executor, row.order_id)));
+      for (const row of result.rows) {
+        const order = await loadOrder(executor, row.order_id);
+        await assertCanRead(executor, currentActor, order);
+        orders.push(await orderProjection(executor, order, [], this.#decryptTracking));
+      }
       return orders;
     });
   }
@@ -232,18 +248,22 @@ export class FulfillmentService {
   listOrderPage(actor: FulfillmentActor, input: OrderPageQuery = {}) {
     const query = orderPageQuery(input);
     return this.#transactions.transaction(async (executor) => {
+      const currentActor = await revalidateActor(executor, actor);
       const now = this.#clock();
-      const { sql, params } = orderPageSql(actor, query, now);
+      const { sql, params } = orderPageSql(currentActor, query, now);
       const result = await executor.query<OrderPageRow>(sql, params);
       const pageRows = result.rows.slice(0, query.limit);
       const pausedScopes = await loadPausedScopes(executor);
-      const orders = pageRows.map((row) => {
+      const orders = [];
+      for (const row of pageRows) {
         const order = normalizeOrderDates(row);
-        return orderPageProjection(
+        await assertCanRead(executor, currentActor, order);
+        orders.push(orderPageProjection(
           order,
-          allowedActionsFromState(order, order, actor, now, pausedScopes, this.#executableActions),
-        );
-      });
+          allowedActionsFromState(order, order, currentActor, now, pausedScopes, this.#executableActions),
+          this.#decryptTracking,
+        ));
+      }
       const last = pageRows.at(-1);
       return {
         orders,
@@ -258,18 +278,23 @@ export class FulfillmentService {
     assertRole(actor, 'ADMIN', 'OPERATOR', 'AUDITOR');
     const query = orderPageQuery(input);
     return this.#transactions.transaction(async (executor) => {
+      const currentActor = await revalidateActor(executor, actor);
+      assertRole(currentActor, 'ADMIN', 'OPERATOR', 'AUDITOR');
       const now = this.#clock();
-      const { sql, params } = orderPageSql(actor, query, now);
+      const { sql, params } = orderPageSql(currentActor, query, now);
       const result = await executor.query<OrderPageRow>(sql, params);
       const pageRows = result.rows.slice(0, query.limit);
       const pausedScopes = await loadPausedScopes(executor);
-      const orders = pageRows.map((row) => {
+      const orders = [];
+      for (const row of pageRows) {
         const order = normalizeOrderDates(row);
-        return orderPageProjection(
+        await assertCanRead(executor, currentActor, order);
+        orders.push(orderPageProjection(
           order,
-          allowedActionsFromState(order, order, actor, now, pausedScopes, this.#executableActions),
-        );
-      });
+          allowedActionsFromState(order, order, currentActor, now, pausedScopes, this.#executableActions),
+          this.#decryptTracking,
+        ));
+      }
       const last = pageRows.at(-1);
       return {
         orders,
@@ -297,6 +322,7 @@ export class FulfillmentService {
       throw new CoreError('InvalidRequest', 'Order action preview contains duplicate orders');
     }
     return this.#transactions.transaction(async (executor) => {
+      const currentActor = await revalidateActor(executor, actor);
       const now = this.#clock();
       const pausedScopes = await loadPausedScopes(executor);
       const rows: Array<{
@@ -305,13 +331,13 @@ export class FulfillmentService {
       }> = [];
       for (const orderId of [...orderIds].sort()) {
         const order = await loadOrder(executor, orderId);
-        await assertCanRead(executor, actor, order);
+        await assertCanRead(executor, currentActor, order);
         rows.push({
           orderId,
           allowedActions: await allowedActionsForOrder(
             executor,
             order,
-            actor,
+            currentActor,
             now,
             pausedScopes,
             this.#executableActions,
@@ -338,7 +364,8 @@ export class FulfillmentService {
       executor,
       order,
       command,
-    ) => recordShipmentCommand(executor, actor, order, input, command));
+      currentActor,
+    ) => recordShipmentCommand(executor, currentActor, order, input, command));
   }
 
   recordShipmentBatch(actor: FulfillmentActor, input: ShipmentBatchInput) {
@@ -361,6 +388,7 @@ export class FulfillmentService {
     const wallet = normalizedWallet(actor.walletAddress);
     const requestHash = hashJson({ type: 'RECORD_SHIPMENT_BATCH', input });
     return this.#transactions.transaction(async (executor) => {
+      const currentActor = await revalidateActor(executor, actor);
       await executor.query(
         'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
         [`fulfillment-shipment-batch:${wallet}:${input.idempotencyKey}`],
@@ -397,13 +425,13 @@ export class FulfillmentService {
           continue;
         }
         const order = await loadOrder(executor, item.orderId, true);
-        await assertTrackingEvidenceRecord(executor, actor, {
+        await assertTrackingEvidenceRecord(executor, currentActor, {
           orderId: item.orderId,
           carrierCode: item.carrierCode,
           trackingNumberHash: item.trackingNumberHash,
           evidenceHash: item.evidenceHash,
         });
-        results.set(item.orderId, await recordShipmentCommand(executor, actor, order, item, {
+        results.set(item.orderId, await recordShipmentCommand(executor, currentActor, order, item, {
           id: `command:${randomUUID()}`,
           actor: wallet,
           type: 'RECORD_SHIPMENT',
@@ -430,8 +458,8 @@ export class FulfillmentService {
 
   recordDelivery(actor: FulfillmentActor, orderId: string, input: FulfillmentCommandInput) {
     validateCommand(input);
-    return this.#command(actor, orderId, 'RECORD_DELIVERY', input, async (executor, order, command) => {
-      assertRole(actor, 'OPERATOR', 'ADMIN');
+    return this.#command(actor, orderId, 'RECORD_DELIVERY', input, async (executor, order, command, currentActor) => {
+      assertRole(currentActor, 'OPERATOR', 'ADMIN');
       assertFinalPayment(order);
       if (order.state !== 'SHIPPED') throw new CoreError('UnknownState', 'Delivery requires a shipped order', 409);
       const evidenceId = `evidence:${randomUUID()}`;
@@ -466,8 +494,8 @@ export class FulfillmentService {
       || !Number.isFinite(input.occurredAt.getTime())
       || input.occurredAt.getTime() > this.#clock().getTime() + 5 * 60_000
     ) throw new CoreError('InvalidRequest', 'Invalid logistics update');
-    return this.#command(actor, orderId, 'RECORD_LOGISTICS_UPDATE', input, async (executor, order, command) => {
-      assertRole(actor, 'OPERATOR', 'ADMIN');
+    return this.#command(actor, orderId, 'RECORD_LOGISTICS_UPDATE', input, async (executor, order, command, currentActor) => {
+      assertRole(currentActor, 'OPERATOR', 'ADMIN');
       assertFinalPayment(order);
       if (order.fulfillment_mode !== 'DELIVERY' || !['SHIPPED', 'DELIVERED'].includes(order.state)) {
         throw new CoreError('UnknownState', 'Logistics update requires a shipped delivery order', 409);
@@ -539,8 +567,8 @@ export class FulfillmentService {
       orderId,
       'REGISTER_PICKUP_CREDENTIAL',
       { ...input, code: sha256(input.code) },
-      async (executor, order, command) => {
-        assertBuyer(actor, order);
+      async (executor, order, command, currentActor) => {
+        assertBuyer(currentActor, order);
         assertFinalPayment(order);
         if (order.fulfillment_mode !== 'PICKUP' || order.state !== 'PAID') {
           throw new CoreError('UnknownState', 'Pickup credential requires a paid pickup order', 409);
@@ -596,8 +624,8 @@ export class FulfillmentService {
       orderId,
       'VERIFY_PICKUP',
       { ...input, code: sha256(input.code) },
-      async (executor, order, command) => {
-        assertMerchantOrOperator(actor, order);
+      async (executor, order, command, currentActor) => {
+        assertMerchantOrOperator(currentActor, order);
         assertFinalPayment(order);
         if (order.fulfillment_mode !== 'PICKUP' || order.state !== 'PAID') {
           throw new CoreError('UnknownState', 'Pickup verification requires a paid pickup order', 409);
@@ -705,8 +733,8 @@ export class FulfillmentService {
       orderId,
       'DECIDE_FULFILLMENT_REQUEST',
       input,
-      async (executor, order, command) => {
-        assertMerchantOrOperator(actor, order);
+      async (executor, order, command, currentActor) => {
+        assertMerchantOrOperator(currentActor, order);
         assertFinalPayment(order);
         if (!['PAID', 'SHIPPED', 'DELIVERED'].includes(order.state)) {
           throw new CoreError('UnknownState', 'Fulfillment request cannot be decided from the current order state', 409);
@@ -749,8 +777,8 @@ export class FulfillmentService {
 
   openArbitration(actor: FulfillmentActor, orderId: string, input: RequestInput) {
     validateRequest(input);
-    return this.#command(actor, orderId, 'OPEN_ARBITRATION', input, async (executor, order, command) => {
-      if (!isBuyer(actor, order) && !hasRole(actor, 'OPERATOR', 'ADMIN')) {
+    return this.#command(actor, orderId, 'OPEN_ARBITRATION', input, async (executor, order, command, currentActor) => {
+      if (!isBuyer(currentActor, order) && !hasRole(currentActor, 'OPERATOR', 'ADMIN')) {
         throw new CoreError('Forbidden', 'Buyer or platform role is required', 403);
       }
       assertFinalPayment(order);
@@ -787,8 +815,8 @@ export class FulfillmentService {
   decideArbitration(actor: FulfillmentActor, orderId: string, input: ArbitrationDecisionInput) {
     validateCommand(input);
     validateCode(input.noteCode, 'noteCode');
-    return this.#command(actor, orderId, 'DECIDE_ARBITRATION', input, async (executor, order, command) => {
-      assertRole(actor, 'ARBITRATOR', 'ADMIN');
+    return this.#command(actor, orderId, 'DECIDE_ARBITRATION', input, async (executor, order, command, currentActor) => {
+      assertRole(currentActor, 'ARBITRATOR', 'ADMIN');
       if (order.state !== 'ARBITRATION') throw new CoreError('UnknownState', 'Order is not in arbitration', 409);
       const openRequest = await loadOpenRequest(executor, orderId, 'ARBITRATION');
       const evidenceId = `evidence:${randomUUID()}`;
@@ -840,8 +868,8 @@ export class FulfillmentService {
 
   openTakeover(actor: FulfillmentActor, orderId: string, input: RequestInput) {
     validateRequest(input);
-    return this.#command(actor, orderId, 'OPEN_TAKEOVER', input, async (executor, order, command) => {
-      if (!isBuyer(actor, order) && !hasRole(actor, 'OPERATOR', 'ADMIN')) {
+    return this.#command(actor, orderId, 'OPEN_TAKEOVER', input, async (executor, order, command, currentActor) => {
+      if (!isBuyer(currentActor, order) && !hasRole(currentActor, 'OPERATOR', 'ADMIN')) {
         throw new CoreError('Forbidden', 'Buyer or platform role is required', 403);
       }
       assertFinalPayment(order);
@@ -908,8 +936,8 @@ export class FulfillmentService {
 
   requestForcedReceipt(actor: FulfillmentActor, orderId: string, input: RequestInput) {
     validateRequest(input);
-    return this.#command(actor, orderId, 'REQUEST_FORCED_RECEIPT', input, async (executor, order, command) => {
-      assertMerchant(actor, order);
+    return this.#command(actor, orderId, 'REQUEST_FORCED_RECEIPT', input, async (executor, order, command, currentActor) => {
+      assertMerchant(currentActor, order);
       assertFinalPayment(order);
       if (
         order.state !== 'DELIVERED'
@@ -939,8 +967,8 @@ export class FulfillmentService {
   decideForcedReceipt(actor: FulfillmentActor, orderId: string, input: DecisionInput) {
     validateCommand(input);
     validateCode(input.noteCode, 'noteCode');
-    return this.#command(actor, orderId, 'DECIDE_FORCED_RECEIPT', input, async (executor, order, command) => {
-      assertRole(actor, 'OPERATOR', 'ADMIN');
+    return this.#command(actor, orderId, 'DECIDE_FORCED_RECEIPT', input, async (executor, order, command, currentActor) => {
+      assertRole(currentActor, 'OPERATOR', 'ADMIN');
       if (order.state !== 'DELIVERED') throw new CoreError('UnknownState', 'Order is not delivered', 409);
       const openRequest = await loadOpenRequest(executor, orderId, 'FORCED_RECEIPT');
       const evidenceId = `evidence:${randomUUID()}`;
@@ -969,8 +997,8 @@ export class FulfillmentService {
 
   confirmReceipt(actor: FulfillmentActor, orderId: string, input: FulfillmentCommandInput) {
     validateCommand(input);
-    return this.#command(actor, orderId, 'CONFIRM_RECEIPT', input, async (executor, order, command) => {
-      assertBuyer(actor, order);
+    return this.#command(actor, orderId, 'CONFIRM_RECEIPT', input, async (executor, order, command, currentActor) => {
+      assertBuyer(currentActor, order);
       assertFinalPayment(order);
       if (order.state !== 'DELIVERED') throw new CoreError('UnknownState', 'Receipt requires a delivered order', 409);
       return completeOrder(executor, order, command, `evidence:${randomUUID()}`, input.evidenceHash, 'CUSTOMER_RECEIPT');
@@ -986,8 +1014,8 @@ export class FulfillmentService {
     input: RequestInput,
   ) {
     validateRequest(input);
-    return this.#command(actor, orderId, commandType, input, async (executor, order, command) => {
-      assertBuyer(actor, order);
+    return this.#command(actor, orderId, commandType, input, async (executor, order, command, currentActor) => {
+      assertBuyer(currentActor, order);
       assertFinalPayment(order);
       if (!['PAID', 'SHIPPED', 'DELIVERED'].includes(order.state)) {
         throw new CoreError('UnknownState', `${requestType} is unavailable for this order`, 409);
@@ -1021,6 +1049,7 @@ export class FulfillmentService {
       executor: SqlExecutor,
       order: OrderRow,
       command: { id: string; actor: string; type: CommandType; idempotencyKey: string; contentHash: string; now: Date },
+      currentActor: FulfillmentActor,
     ) => Promise<Result>,
   ): Promise<Result> {
     const wallet = normalizedWallet(actor.walletAddress);
@@ -1030,6 +1059,7 @@ export class FulfillmentService {
     }
     const contentHash = hashJson({ orderId, type, payload });
     return this.#transactions.transaction(async (executor) => {
+      const currentActor = await revalidateActor(executor, actor);
       await lockFulfillmentIdempotency(executor, wallet, idempotencyKey);
       const prior = await executor.query<ExistingCommandRow>(
         `SELECT command_id, order_id, command_type, content_hash, result
@@ -1051,7 +1081,7 @@ export class FulfillmentService {
         idempotencyKey,
         contentHash,
         now: this.#clock(),
-      });
+      }, currentActor);
     });
   }
 }
@@ -1372,6 +1402,7 @@ async function orderProjection(
   executor: SqlExecutor,
   order: OrderRow,
   allowedActions: ReturnType<typeof orderAllowedActions> = [],
+  decryptTracking?: ReturnType<typeof createTrackingEvidenceDecryptor>,
 ) {
   const [requests, shipments, logistics, balances] = await Promise.all([
     executor.query<{
@@ -1390,10 +1421,21 @@ async function orderProjection(
       carrier_code: string;
       tracking_number_hash: string;
       provider_reference_hash: string | null;
+      evidence_hash: string;
+      media_asset_ids: unknown;
+      encrypted_tracking_number: Uint8Array | null;
+      tracking_iv: Uint8Array | null;
+      tracking_tag: Uint8Array | null;
       created_at: Date;
     }>(
-      `SELECT shipment_id, carrier_code, tracking_number_hash, provider_reference_hash, created_at
-       FROM core.shipments WHERE order_id = $1 ORDER BY created_at, shipment_id`,
+      `SELECT shipment.shipment_id, shipment.carrier_code, shipment.tracking_number_hash,
+         shipment.provider_reference_hash, evidence.evidence_hash,
+         envelope.media_asset_ids, envelope.encrypted_tracking_number,
+         envelope.tracking_iv, envelope.tracking_tag, shipment.created_at
+       FROM core.shipments shipment
+       JOIN core.fulfillment_evidence evidence ON evidence.evidence_id = shipment.evidence_id
+       LEFT JOIN core.evidence_envelopes envelope ON envelope.evidence_hash = evidence.evidence_hash
+       WHERE shipment.order_id = $1 ORDER BY shipment.created_at, shipment.shipment_id`,
       [order.order_id],
     ),
     executor.query<{
@@ -1429,13 +1471,18 @@ async function orderProjection(
       requestedAt: new Date(row.requested_at).toISOString(),
       resolvedAt: row.resolved_at ? new Date(row.resolved_at).toISOString() : null,
     })),
-    shipments: shipments.rows.map((row) => ({
+    shipments: shipments.rows.map((row) => shipmentProjection({
       shipmentId: row.shipment_id,
       carrierCode: row.carrier_code,
       trackingNumberHash: row.tracking_number_hash,
       providerReferenceHash: row.provider_reference_hash,
+      evidenceHash: row.evidence_hash,
+      mediaAssetIds: row.media_asset_ids,
+      encryptedTrackingNumber: row.encrypted_tracking_number,
+      trackingIv: row.tracking_iv,
+      trackingTag: row.tracking_tag,
       createdAt: new Date(row.created_at).toISOString(),
-    })),
+    }, decryptTracking)),
     logistics: logistics.rows.map((row) => ({
       logisticsEventId: row.logistics_event_id,
       provider: row.provider,
@@ -1447,7 +1494,11 @@ async function orderProjection(
   };
 }
 
-function orderPageProjection(order: OrderPageRow, allowedActions: ReturnType<typeof orderAllowedActions>) {
+function orderPageProjection(
+  order: OrderPageRow,
+  allowedActions: ReturnType<typeof orderAllowedActions>,
+  decryptTracking?: ReturnType<typeof createTrackingEvidenceDecryptor>,
+) {
   const requests = recordArray(order.requests, 'order requests');
   const shipments = recordArray(order.shipments, 'order shipments');
   const logistics = recordArray(order.logistics, 'order logistics');
@@ -1461,13 +1512,18 @@ function orderPageProjection(order: OrderPageRow, allowedActions: ReturnType<typ
       requestedAt: requiredTimestamp(row.requestedAt, 'requestedAt'),
       resolvedAt: nullableTimestamp(row.resolvedAt, 'resolvedAt'),
     })),
-    shipments: shipments.map((row) => ({
+    shipments: shipments.map((row) => shipmentProjection({
       shipmentId: requiredText(row.shipmentId, 'shipmentId'),
       carrierCode: requiredText(row.carrierCode, 'carrierCode'),
       trackingNumberHash: requiredText(row.trackingNumberHash, 'trackingNumberHash'),
       providerReferenceHash: nullableText(row.providerReferenceHash, 'providerReferenceHash'),
+      evidenceHash: requiredText(row.evidenceHash, 'shipment evidenceHash'),
+      mediaAssetIds: row.mediaAssetIds,
+      encryptedTrackingNumber: optionalHexBytes(row.encryptedTrackingNumber, 'encryptedTrackingNumber'),
+      trackingIv: optionalHexBytes(row.trackingIv, 'trackingIv'),
+      trackingTag: optionalHexBytes(row.trackingTag, 'trackingTag'),
       createdAt: requiredTimestamp(row.createdAt, 'shipment createdAt'),
-    })),
+    }, decryptTracking)),
     logistics: logistics.map((row) => ({
       logisticsEventId: requiredText(row.logisticsEventId, 'logisticsEventId'),
       provider: requiredText(row.provider, 'logistics provider'),
@@ -1734,9 +1790,20 @@ function orderPageSql(actor: FulfillmentActor, query: ReturnType<typeof orderPag
             'carrierCode', shipment.carrier_code,
             'trackingNumberHash', shipment.tracking_number_hash,
             'providerReferenceHash', shipment.provider_reference_hash,
+            'evidenceHash', evidence.evidence_hash,
+            'mediaAssetIds', COALESCE(envelope.media_asset_ids, '[]'::jsonb),
+            'encryptedTrackingNumber', CASE WHEN envelope.encrypted_tracking_number IS NULL
+              THEN NULL ELSE encode(envelope.encrypted_tracking_number, 'hex') END,
+            'trackingIv', CASE WHEN envelope.tracking_iv IS NULL
+              THEN NULL ELSE encode(envelope.tracking_iv, 'hex') END,
+            'trackingTag', CASE WHEN envelope.tracking_tag IS NULL
+              THEN NULL ELSE encode(envelope.tracking_tag, 'hex') END,
             'createdAt', shipment.created_at
           ) ORDER BY shipment.created_at, shipment.shipment_id)
-          FROM core.shipments shipment WHERE shipment.order_id = orders.order_id
+          FROM core.shipments shipment
+          JOIN core.fulfillment_evidence evidence ON evidence.evidence_id = shipment.evidence_id
+          LEFT JOIN core.evidence_envelopes envelope ON envelope.evidence_hash = evidence.evidence_hash
+          WHERE shipment.order_id = orders.order_id
         ), '[]'::jsonb) AS shipments,
         COALESCE((
           SELECT jsonb_agg(jsonb_build_object(
@@ -1836,6 +1903,58 @@ function requiredText(value: unknown, label: string) {
 
 function nullableText(value: unknown, label: string) {
   return value === null ? null : requiredText(value, label);
+}
+
+function optionalHexBytes(value: unknown, label: string) {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Uint8Array) return value;
+  if (typeof value !== 'string' || !/^[0-9a-fA-F]+$/.test(value) || value.length % 2 !== 0) {
+    throw new CoreError('UnknownState', `${label} projection is invalid`, 409);
+  }
+  return Buffer.from(value, 'hex');
+}
+
+function shipmentProjection(
+  row: {
+    shipmentId: string;
+    carrierCode: string;
+    trackingNumberHash: string;
+    providerReferenceHash: string | null;
+    evidenceHash: string;
+    mediaAssetIds: unknown;
+    encryptedTrackingNumber: Uint8Array | null;
+    trackingIv: Uint8Array | null;
+    trackingTag: Uint8Array | null;
+    createdAt: string;
+  },
+  decryptTracking?: ReturnType<typeof createTrackingEvidenceDecryptor>,
+) {
+  const cipherParts = [row.encryptedTrackingNumber, row.trackingIv, row.trackingTag];
+  if (cipherParts.some(Boolean) && !cipherParts.every(Boolean)) {
+    throw new CoreError('UnknownState', 'Shipment tracking cipher is incomplete', 409);
+  }
+  const details = row.encryptedTrackingNumber && row.trackingIv && row.trackingTag
+    ? (decryptTracking ?? createTrackingEvidenceDecryptor(undefined))(
+      row.encryptedTrackingNumber,
+      row.trackingIv,
+      row.trackingTag,
+    )
+    : { trackingNumber: null, note: null };
+  const mediaAssetIds = Array.isArray(row.mediaAssetIds)
+    && row.mediaAssetIds.every((item) => typeof item === 'string' && /^0x[0-9a-f]{64}$/.test(item))
+    ? row.mediaAssetIds as string[]
+    : [];
+  return {
+    shipmentId: row.shipmentId,
+    carrierCode: row.carrierCode,
+    trackingNumber: details.trackingNumber,
+    trackingNumberHash: row.trackingNumberHash,
+    note: details.note,
+    evidenceHash: row.evidenceHash,
+    mediaAssetIds,
+    providerReferenceHash: row.providerReferenceHash,
+    createdAt: row.createdAt,
+  };
 }
 
 function requiredTimestamp(value: unknown, label: string) {
@@ -2040,8 +2159,7 @@ async function outbox(
 async function assertCanRead(executor: SqlExecutor, actor: FulfillmentActor, order: OrderRow) {
   if (
     isBuyer(actor, order)
-    || normalizedWallet(actor.walletAddress) === order.merchant_wallet.toLowerCase()
-    || actor.merchantId === order.merchant_id
+    || (actor.roles.includes('MERCHANT') && actor.merchantId === order.merchant_id)
     || hasRole(actor, 'ADMIN', 'OPERATOR', 'ARBITRATOR', 'AUDITOR')
   ) return;
   const assignment = await currentTakeoverAssignment(executor, order.order_id);
@@ -2054,6 +2172,29 @@ async function assertCanRead(executor: SqlExecutor, actor: FulfillmentActor, ord
     )
   ) return;
   throw new CoreError('Forbidden', 'Order is outside the authenticated wallet scope', 403);
+}
+
+async function revalidateActor(executor: SqlExecutor, actor: FulfillmentActor): Promise<FulfillmentActor> {
+  const walletAddress = normalizedWallet(actor.walletAddress);
+  const bindings = await executor.query<{ role: UserRole; merchant_id: string | null }>(
+    `SELECT role, merchant_id FROM core.wallet_role_bindings
+     WHERE lower(wallet_address) = $1 AND status = 'ACTIVE' AND role = ANY($2::text[])
+     ORDER BY role`,
+    [walletAddress, [...actor.roles]],
+  );
+  const merchantBinding = bindings.rows.find((binding) => (
+    binding.role === 'MERCHANT'
+    && actor.merchantId !== undefined
+    && binding.merchant_id === actor.merchantId
+  ));
+  const roles = bindings.rows
+    .filter((binding) => binding.role !== 'MERCHANT' || binding === merchantBinding)
+    .map((binding) => binding.role);
+  return {
+    walletAddress,
+    roles,
+    ...(merchantBinding ? { merchantId: merchantBinding.merchant_id! } : {}),
+  };
 }
 
 async function currentTakeoverAssignment(executor: SqlExecutor, orderId: string) {

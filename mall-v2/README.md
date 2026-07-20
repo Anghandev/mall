@@ -5,7 +5,7 @@ Requirement Matrix and consumes only coordinated Core artifacts.
 
 ## Current Runtime Boundary
 
-- Production consumes coordinated Core artifacts `2.0.0-settlement-admin.17` and derives
+- Production consumes coordinated Core artifacts `2.0.0-fulfillment-launch.18` and derives
   its HTTP paths from the published OpenAPI document.
 - The public catalog consumes active products/SKUs, enabled three-level
   categories, enabled tags, field-level product associations, rich detail,
@@ -21,7 +21,7 @@ Requirement Matrix and consumes only coordinated Core artifacts.
   from Core responses. Product payment uses the exact five-minute Core-signed
   70% USDT + 30% equivalent NPL quote; the Mall does not recalculate it or
   treat a submitted TxHash as final.
-- The Mall consumes published stores, browser-location-backed delivery/pickup
+- The Mall consumes published stores, manual encrypted delivery addresses and pickup
   targets and stable wallet order pages keyed by `(createdAt, orderId)`. Complete
   order rows carry quantity, kind, payment TxHash, logistics, balances and
   authoritative `allowedActions`; no second action lookup or local state
@@ -71,8 +71,8 @@ Requirement Matrix and consumes only coordinated Core artifacts.
   merchant/platform roles.
 - The coordinated manifest still has `deploymentAuthorized=false` and no
   executable `PAY_ORDER`. Wallet broadcast therefore remains fail closed until
-  Core publishes deployment evidence. Native navigation, production-device GPS
-  evidence remain externally blocked rather than using production fixtures.
+  Core publishes deployment evidence. Native navigation and production-device
+  GPS are Phase 2 and do not participate in launch acceptance.
 - The copied brand assets in `public/brand/` have no runtime dependency on the
   read-only legacy tree.
 

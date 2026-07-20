@@ -176,8 +176,12 @@ export interface BuyerAddressWriteRequest {
   recipientName: string;
   phone: string;
   detailAddress: string;
-  longitude: number;
-  latitude: number;
+  longitude: number | null;
+  latitude: number | null;
+  province: string;
+  city: string;
+  district: string;
+  regionCode: string;
   isDefault: boolean;
   expectedVersion?: number;
   idempotencyKey: string;
@@ -901,8 +905,8 @@ function parseBuyerSavedAddress(value: unknown): BuyerSavedAddress {
     throw new CoreClientError('InvalidResponse', '收货地址手机号无效');
   }
   boundedNonEmptyStringValue(address.detailAddress, 300);
-  boundedNumberValue(address.longitude, -180, 180);
-  boundedNumberValue(address.latitude, -90, 90);
+  if (address.longitude !== null) boundedNumberValue(address.longitude, -180, 180);
+  if (address.latitude !== null) boundedNumberValue(address.latitude, -90, 90);
   for (const field of ['province', 'city', 'district', 'formattedAddress'] as const) stringValue(address[field]);
   if (!/^[0-9]{6}$/.test(stringValue(address.regionCode))) {
     throw new CoreClientError('InvalidResponse', '收货地址行政区无效');
@@ -1067,8 +1071,10 @@ function validateBuyerAddressWrite(request: BuyerAddressWriteRequest, updating: 
   if (!/^1[3-9][0-9]{9}$/.test(request.phone)) throw new CoreClientError('InvalidRequest', '请输入有效的 11 位手机号');
   const detail = request.detailAddress.trim();
   if (detail.length < 5 || detail.length > 300) throw new CoreClientError('InvalidRequest', '详细地址需为 5-300 个字符');
-  boundedNumberValue(request.longitude, -180, 180);
-  boundedNumberValue(request.latitude, -90, 90);
+  if (request.longitude !== null) boundedNumberValue(request.longitude, -180, 180);
+  if (request.latitude !== null) boundedNumberValue(request.latitude, -90, 90);
+  for (const value of [request.province, request.city, request.district]) boundedNonEmptyStringValue(value.trim(), 64);
+  if (!/^[0-9]{6}$/.test(request.regionCode)) throw new CoreClientError('InvalidRequest', '请输入 6 位行政区编码');
   if (typeof request.isDefault !== 'boolean') throw new CoreClientError('InvalidRequest', '默认地址状态无效');
   if (updating) validateVersionedAccountCommand(request.expectedVersion, request.idempotencyKey);
   else if (request.expectedVersion !== undefined) throw new CoreClientError('InvalidRequest', '新建地址不应携带历史版本');
@@ -2085,7 +2091,11 @@ function parseFulfillmentOrder(value: unknown): FulfillmentOrder {
     const shipment = objectValue(shipmentValue);
     stringValue(shipment.shipmentId);
     stringValue(shipment.carrierCode);
+    if (shipment.trackingNumber !== null) boundedNonEmptyStringValue(shipment.trackingNumber, 64);
     bytes32Value(shipment.trackingNumberHash);
+    if (shipment.note !== null) boundedNonEmptyStringValue(shipment.note, 500);
+    bytes32Value(shipment.evidenceHash);
+    arrayValue(shipment.mediaAssetIds).forEach(bytes32Value);
     optionalBytes32Value(shipment.providerReferenceHash);
     isoValue(shipment.createdAt);
   });

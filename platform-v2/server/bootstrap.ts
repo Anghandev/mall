@@ -186,6 +186,9 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   const fulfillmentService = new FulfillmentService({
     transactions,
     ...(env.DELIVERY_DATA_ENCRYPTION_KEY
+      ? { trackingEncryptionKey: env.DELIVERY_DATA_ENCRYPTION_KEY }
+      : {}),
+    ...(env.DELIVERY_DATA_ENCRYPTION_KEY
       ? { enqueuePickupReceipt: createPickupReceiptEnqueuer({ encryptionKey: env.DELIVERY_DATA_ENCRYPTION_KEY }) }
       : {}),
   });

@@ -63,7 +63,7 @@ describe('platform admin fail-closed experience', () => {
       /^\w+ \/v2\/admin\/(?:merchant-)?stores(?:\/|$)/.test(operation),
     );
 
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.17');
+    expect(artifactVersion).toBe('2.0.0-fulfillment-launch.18');
     expect(coordinatedManifest.capabilityStatus.buyerShoppingStatementHttp).toBe('AVAILABLE');
     expect(coordinatedManifest.capabilityStatus.merchantReceivableStatementHttp).toBe('AVAILABLE');
     expect(storeStatuses).toEqual(['DRAFT', 'ACTIVE', 'SUSPENDED', 'CLOSED']);
@@ -101,7 +101,7 @@ describe('platform admin fail-closed experience', () => {
     expect(adminPiiExportOperations).toEqual([]);
   });
 
-  it('publishes the Admin logistics surface while keeping it closed before SIWE', () => {
+  it('keeps Phase 2 logistics APIs published but removes the launch route and navigation', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const merchantLogisticsPaths = coordinatedManifest.httpSurface.filter((operation) =>
@@ -118,73 +118,11 @@ describe('platform admin fail-closed experience', () => {
     expect(productBaseline.adminCapabilities.adminLogisticsAuditorRedaction).toBe(true);
 
     renderAt('/logistics');
-    expect(screen.getByRole('heading', { name: '物流配置' })).toBeTruthy();
-    expect(screen.getByText('ADM-LOG-001')).toBeTruthy();
-    expect(screen.getByText('ADM-LOG-002')).toBeTruthy();
-    expect(screen.getByText('ADM-LOG-003')).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '今日运营态势' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /物流配置/ })).toBeNull();
+    expect(screen.queryByRole('option', { name: '物流配置' })).toBeNull();
     expect(screen.getByRole('button', { name: 'SIWE 连接' })).toBeTruthy();
     expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('loads five Admin logistics projections and never echoes provider secret references', async () => {
-    const wallet = '0x1111111111111111111111111111111111111111';
-    window.ethereum = walletProvider(wallet);
-    const providerReferences: string[] = [];
-    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input);
-      if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
-      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['ADMIN'] });
-      if (url.endsWith('/v2/admin/logistics/carriers')) return jsonResponse(logisticsCarrierConfig());
-      if (url.endsWith('/v2/admin/logistics/providers') && !init?.method) return jsonResponse(logisticsProviderList());
-      if (url.endsWith('/v2/admin/logistics/warehouses')) return jsonResponse({ artifactVersion, warehouses: [] });
-      if (url.endsWith('/v2/admin/logistics/waybills?limit=50')) return jsonResponse({ artifactVersion, waybills: [] });
-      if (url.endsWith('/v2/admin/logistics/print-jobs?limit=50')) return jsonResponse({ artifactVersion, printJobs: [logisticsPrintJob()] });
-      if (url.endsWith('/v2/admin/logistics/provider-versions')) {
-        const body = JSON.parse(String(init?.body)) as Record<string, string>;
-        providerReferences.push(String(body.credentialSecretRef));
-        return jsonResponse(logisticsProviderList().providers[0], 201);
-      }
-      return jsonResponse({ error: { code: 'InvalidRequest', message: `Unexpected logistics request ${url}`, correlationId: 'logistics-ui-test' } }, 400);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-    const user = userEvent.setup();
-    renderAt('/logistics');
-    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
-
-    expect(await screen.findByRole('heading', { name: '承运商策略' })).toBeTruthy();
-    expect(screen.getAllByRole('checkbox').length).toBe(7);
-    expect(screen.getAllByText('KUAIDI100').length).toBeGreaterThan(0);
-    await user.type(screen.getByLabelText('Partner ID secret ref'), 'secret://partner');
-    await user.type(screen.getByLabelText('Credential secret ref'), 'secret://credential');
-    await user.type(screen.getByLabelText('Monthly account secret ref'), 'secret://monthly');
-    await user.type(screen.getByLabelText('Callback secret ref'), 'secret://callback');
-    await user.type(screen.getAllByLabelText('Idempotency key')[1]!, 'provider-version-1');
-    await user.click(screen.getByRole('button', { name: '提交引用版本' }));
-
-    expect(await screen.findByText(/输入已清除/)).toBeTruthy();
-    expect(providerReferences).toEqual(['secret://credential']);
-    expect((screen.getByLabelText('Credential secret ref') as HTMLInputElement).value).toBe('');
-    expect(screen.queryByDisplayValue('secret://credential')).toBeNull();
-    expect(fetchMock.mock.calls.filter(([input]) => /\/v2\/admin\/logistics\/(?:carriers|providers|warehouses|waybills\?|print-jobs\?)/.test(String(input))).length).toBeGreaterThanOrEqual(5);
-  });
-
-  it('renders Auditor warehouses as redacted and keeps all logistics writes absent', async () => {
-    const wallet = '0x1111111111111111111111111111111111111111';
-    window.ethereum = walletProvider(wallet);
-    const fetchMock = logisticsReadFetch(wallet, 'AUDITOR', [logisticsWarehouseRedacted()]);
-    vi.stubGlobal('fetch', fetchMock);
-    const user = userEvent.setup();
-    renderAt('/logistics');
-    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
-    await user.click(await screen.findByRole('tab', { name: '仓库' }));
-
-    expect(screen.getByText('AUDITOR 只读')).toBeTruthy();
-    expect(screen.getByText('Core 脱敏投影')).toBeTruthy();
-    expect(screen.getAllByText('已脱敏')).toHaveLength(3);
-    expect(screen.queryByRole('button', { name: '新建仓库' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '保存新版本' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '停用仓库' })).toBeNull();
-    expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes('/v2/admin/logistics/') && Boolean(init?.method && init.method !== 'GET'))).toBe(false);
   });
 
   it('treats the static action catalog as capability metadata, not runtime authorization', () => {
@@ -524,6 +462,24 @@ describe('platform admin fail-closed experience', () => {
       if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
       if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['OPERATOR'] });
       if (url.endsWith('/v2/admin/orders') && !init?.method) return jsonResponse(adminOrderPage([order]));
+      if (url.endsWith(`/v2/orders/${order.orderId}/tracking-evidence`)) {
+        return jsonResponse({
+          artifactVersion,
+          evidenceHash: hash('6'),
+          ownerWallet: wallet,
+          actorRole: 'OPERATOR',
+          purpose: 'SHIPMENT_TRACKING',
+          resourceType: 'ORDER',
+          resourceId: order.orderId,
+          action: 'RECORD_SHIPMENT',
+          reasonCode: null,
+          trackingNumberHash: hash('7'),
+          mediaAssetIds: [],
+          payload: {},
+          carrierCode: 'SF',
+          createdAt: '2026-07-14T09:59:00.000Z',
+        }, 201);
+      }
       if (url.endsWith(`/v2/orders/${order.orderId}/shipments`)) {
         return jsonResponse({
           orderId: order.orderId,
@@ -542,18 +498,76 @@ describe('platform admin fail-closed experience', () => {
 
     await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
     expect(await screen.findByRole('button', { name: '执行记录发货' })).toBeTruthy();
-    await user.type(screen.getByLabelText('证据哈希 · bytes32'), hash('6'));
-    await user.type(screen.getByLabelText('承运商代码'), 'sf');
-    await user.type(screen.getByLabelText('运单号哈希 · bytes32'), hash('7'));
+    await user.selectOptions(screen.getByLabelText('快递公司'), 'SF');
+    await user.type(screen.getByLabelText('运单号'), 'SF1234567890');
+    await user.type(screen.getByLabelText('发货备注 / 凭证说明'), '接管仓已交付快递');
     await user.click(screen.getByRole('button', { name: '执行记录发货' }));
 
     expect(await screen.findByText(/Core 已确认订单状态 SHIPPED/)).toBeTruthy();
+    const evidenceCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith(`/v2/orders/${order.orderId}/tracking-evidence`));
+    expect(JSON.parse(String(evidenceCall?.[1]?.body))).toMatchObject({
+      carrierCode: 'SF',
+      trackingNumber: 'SF1234567890',
+      note: '接管仓已交付快递',
+      mediaAssetIds: [],
+    });
     const commandCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith(`/v2/orders/${order.orderId}/shipments`));
     expect(JSON.parse(String(commandCall?.[1]?.body))).toMatchObject({
       carrierCode: 'SF',
       evidenceHash: hash('6'),
       trackingNumberHash: hash('7'),
     });
+  });
+
+  it('creates canonical arbitration evidence before opening arbitration', async () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    const order = fulfillmentOrder({
+      state: 'SHIPPED',
+      shippedAt: '2026-07-14T09:00:00.000Z',
+      allowedActions: [{ action: 'OPEN_ARBITRATION', enabled: true }],
+    });
+    window.ethereum = walletProvider(wallet);
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) return nonceResponse();
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: wallet, roles: ['OPERATOR'] });
+      if (url.endsWith('/v2/admin/orders') && !init?.method) return jsonResponse(adminOrderPage([order]));
+      if (url.endsWith(`/v2/orders/${order.orderId}/evidence`)) return jsonResponse({
+        artifactVersion,
+        evidenceHash: hash('a'),
+        ownerWallet: wallet,
+        actorRole: 'OPERATOR',
+        purpose: 'FULFILLMENT_ACTION',
+        resourceType: 'ORDER',
+        resourceId: order.orderId,
+        action: 'OPEN_ARBITRATION',
+        reasonCode: 'EVIDENCE_REVIEW',
+        trackingNumberHash: null,
+        mediaAssetIds: [],
+        payload: {},
+        createdAt: '2026-07-14T10:00:00.000Z',
+      }, 201);
+      if (url.endsWith(`/v2/orders/${order.orderId}/arbitrations`)) return jsonResponse({
+        orderId: order.orderId,
+        requestId: 'arbitration-1',
+        state: 'ARBITRATION',
+        openedAt: '2026-07-14T10:00:01.000Z',
+      }, 201);
+      return jsonResponse({ error: { code: 'InvalidRequest', message: 'Unexpected request' } }, 400);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderAt('/takeover');
+
+    await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    await user.type(await screen.findByLabelText('原因代码'), 'EVIDENCE_REVIEW');
+    await user.click(screen.getByRole('button', { name: '执行发起仲裁' }));
+
+    expect(await screen.findByText(/Core 已确认订单状态 ARBITRATION/)).toBeTruthy();
+    const evidenceCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith(`/v2/orders/${order.orderId}/evidence`));
+    const commandCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith(`/v2/orders/${order.orderId}/arbitrations`));
+    expect(JSON.parse(String(evidenceCall?.[1]?.body))).toMatchObject({ action: 'OPEN_ARBITRATION', reasonCode: 'EVIDENCE_REVIEW' });
+    expect(JSON.parse(String(commandCall?.[1]?.body))).toMatchObject({ evidenceHash: hash('a'), reasonCode: 'EVIDENCE_REVIEW' });
   });
 
   it('denies arbitration decisions to an operator even if a bad Core response enables the action', async () => {

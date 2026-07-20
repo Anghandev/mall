@@ -54,8 +54,12 @@ export const deliveryOrder: FulfillmentOrder = {
   requests: [],
   shipments: [{
     shipmentId: 'shipment-1',
-    carrierCode: 'SF_EXPRESS',
+    carrierCode: 'SF',
+    trackingNumber: 'SF123456789',
     trackingNumberHash,
+    note: '仓库已交接',
+    evidenceHash,
+    mediaAssetIds: [],
     providerReferenceHash: null,
     createdAt: '2026-07-02T08:00:00.000Z',
   }],

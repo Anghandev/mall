@@ -4,7 +4,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import logoUrl from '../assets/logo.jpg';
 import { coreState } from '../coreState';
 import { useCoreSession } from '../coreSession';
-import { adminModules } from '../domain/adminModules';
+import { launchAdminModules } from '../domain/adminModules';
 
 type AppShellProps = { children: ReactNode };
 
@@ -16,7 +16,7 @@ export function AppShell({ children }: AppShellProps) {
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const navigationRef = useRef<HTMLElement>(null);
   const { connect, disconnect, error: sessionError, session, status } = useCoreSession();
-  const currentModule = adminModules.find((module) => module.path === location.pathname) ?? adminModules[0]!;
+  const currentModule = launchAdminModules.find((module) => module.path === location.pathname) ?? launchAdminModules[0]!;
 
   useEffect(() => {
     setMobileNavOpen(false);
@@ -64,7 +64,7 @@ export function AppShell({ children }: AppShellProps) {
 
       <aside className={mobileNavOpen ? 'sidebar is-open' : 'sidebar'} id="primary-navigation">
         <nav ref={navigationRef} aria-label="平台后台模块">
-          {adminModules.map(({ path, label, icon: Icon, eyebrow }) => (
+          {launchAdminModules.map(({ path, label, icon: Icon, eyebrow }) => (
             <NavLink key={path} to={path} end={path === '/'}>
               <Icon aria-hidden="true" />
               <span><strong>{label}</strong><small>{eyebrow}</small></span>
@@ -82,7 +82,7 @@ export function AppShell({ children }: AppShellProps) {
         <label htmlFor="module-select">当前模块</label>
         <span><currentModule.icon aria-hidden="true" />
           <select id="module-select" value={currentModule.path} onChange={(event) => navigate(event.target.value)}>
-            {adminModules.map((module) => <option key={module.path} value={module.path}>{module.label}</option>)}
+            {launchAdminModules.map((module) => <option key={module.path} value={module.path}>{module.label}</option>)}
           </select>
           <ChevronDown aria-hidden="true" />
         </span>

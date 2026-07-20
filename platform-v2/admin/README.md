@@ -5,7 +5,7 @@ implements shared funds, contracts, API, Schema or signer behavior.
 
 ## Current Product Boundary
 
-- Production consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.17`.
+- Production consumes `@abu24k/core-artifacts@2.0.0-fulfillment-launch.18`.
 - SIWE/JWT stays in memory. Every protected read and write is role-bound by
   Core and preserves typed `DecisionBlocked`, `ExternalBlocked`,
   `ConfigurationRequired` and correlation evidence.
@@ -31,7 +31,8 @@ implements shared funds, contracts, API, Schema or signer behavior.
 - Admin order operations consume exact Core-side order/product/TxHash/wallet
   search, pending-review and breaker projections, full row `allowedActions`,
   and read-only batch enabled-intersection preview. OR, fuzzy wallet, UID/phone,
-  Yellow queue, exports, printing and arbitrary batch writes remain fail-closed.
+  Yellow queue and arbitrary batch writes remain fail-closed. Electronic-waybill
+  and printing operations are Phase 2 and absent from the launch UI.
 - Seckill control consumes current/history session snapshots, numeric-cursor
   HTTP replay, the artifact-bound `/v2/ws` finalized relay stream, action
   list/detail, session inventory locking, force-close, prize injection and
@@ -66,17 +67,18 @@ implements shared funds, contracts, API, Schema or signer behavior.
   thresholds, low-history wallet clustering and frequent
   address/store-change thresholds remain explicit fail-closed capabilities;
   monitoring alerts are never relabeled as transaction-risk events. Global
-  batch actions, logistics configuration and production provider accounts
-  remain fail-closed as
+  batch actions remain fail-closed; logistics-provider configuration is Phase 2
+  and absent from launch as
   recorded in `docs/contracts/UPSTREAM_GAPS.md`. Catalog writes consume `.5`
   runtime RBAC, `allowedActions`, `writeLock` and `blockingResource`; AUDITOR
   is read-only. Existing child categories move to root only through an explicit
   Core `parentCategoryId: null` update.
 - Funds, chain, policy, audit and historical evidence surfaces never expose a
   delete control. No production fixture is shipped.
-- The logistics checkpoint publishes printer binding, waybill batches and
-  durable print jobs under Merchant routes and separate platform logistics
-  operations under Admin routes. The merchant-store checkpoint additionally
+- The coordinated artifact retains historical Phase 2 printer, waybill and
+  logistics-provider APIs for later work, but launch Admin has no logistics
+  route, navigation or production call to them. The merchant-store checkpoint
+  additionally
   publishes merchant-owned store create, profile update, activate and close
   operations. Admin consumes the coordinated version but exposes no store
   editor and never calls or bundles those Merchant store-management routes.

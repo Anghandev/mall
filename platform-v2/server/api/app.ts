@@ -1715,6 +1715,10 @@ async function route(
       'address',
       'longitude',
       'latitude',
+      'province',
+      'city',
+      'district',
+      'regionCode',
     ]);
     sendJson(
       response,
@@ -1724,8 +1728,12 @@ async function route(
         recipientName: requiredString(body, 'recipientName'),
         phone: requiredString(body, 'phone'),
         address: requiredString(body, 'address'),
-        longitude: requiredNumber(body, 'longitude'),
-        latitude: requiredNumber(body, 'latitude'),
+        ...(body.longitude === undefined ? {} : { longitude: body.longitude === null ? null : requiredNumber(body, 'longitude') }),
+        ...(body.latitude === undefined ? {} : { latitude: body.latitude === null ? null : requiredNumber(body, 'latitude') }),
+        ...(body.province === undefined ? {} : { province: requiredString(body, 'province') }),
+        ...(body.city === undefined ? {} : { city: requiredString(body, 'city') }),
+        ...(body.district === undefined ? {} : { district: requiredString(body, 'district') }),
+        ...(body.regionCode === undefined ? {} : { regionCode: requiredString(body, 'regionCode') }),
       }),
       correlationId,
     );
@@ -1922,12 +1930,16 @@ async function route(
         });
         break;
       case 'tracking-evidence':
-        assertOnlyKeys(body, ['carrierCode', 'trackingNumber', 'idempotencyKey']);
+        assertOnlyKeys(body, ['carrierCode', 'trackingNumber', 'note', 'mediaAssetIds', 'idempotencyKey']);
         status = 201;
         result = await dependencies.evidenceService.createTrackingEvidence(actor, {
           orderId: orderPath.orderId,
           carrierCode: evidenceCarrier(body.carrierCode),
           trackingNumber: requiredString(body, 'trackingNumber'),
+          ...(body.note === undefined ? {} : { note: nullableString(body, 'note') }),
+          ...(body.mediaAssetIds === undefined
+            ? {}
+            : { mediaAssetIds: requiredStringArray(body, 'mediaAssetIds') }),
           idempotencyKey: requiredString(body, 'idempotencyKey'),
         });
         break;
@@ -3796,6 +3808,7 @@ function requiredDate(body: Record<string, unknown>, name: string) {
 function buyerAddressInput(body: Record<string, unknown>, requireVersion: boolean): BuyerAddressInput {
   assertOnlyKeys(body, [
     'label', 'recipientName', 'phone', 'detailAddress', 'longitude', 'latitude',
+    'province', 'city', 'district', 'regionCode',
     'isDefault', 'expectedVersion', 'idempotencyKey',
   ]);
   return {
@@ -3803,8 +3816,12 @@ function buyerAddressInput(body: Record<string, unknown>, requireVersion: boolea
     recipientName: requiredString(body, 'recipientName'),
     phone: requiredString(body, 'phone'),
     detailAddress: requiredString(body, 'detailAddress'),
-    longitude: requiredNumber(body, 'longitude'),
-    latitude: requiredNumber(body, 'latitude'),
+    ...(body.longitude === undefined ? {} : { longitude: body.longitude === null ? null : requiredNumber(body, 'longitude') }),
+    ...(body.latitude === undefined ? {} : { latitude: body.latitude === null ? null : requiredNumber(body, 'latitude') }),
+    ...(body.province === undefined ? {} : { province: requiredString(body, 'province') }),
+    ...(body.city === undefined ? {} : { city: requiredString(body, 'city') }),
+    ...(body.district === undefined ? {} : { district: requiredString(body, 'district') }),
+    ...(body.regionCode === undefined ? {} : { regionCode: requiredString(body, 'regionCode') }),
     isDefault: requiredBoolean(body, 'isDefault'),
     ...(requireVersion ? { expectedVersion: requiredPositiveInteger(body, 'expectedVersion') } : {}),
     idempotencyKey: requiredString(body, 'idempotencyKey'),

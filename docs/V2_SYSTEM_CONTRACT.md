@@ -197,6 +197,19 @@ source conflicts are indexed in `V2_DECISIONS.md`.
   or leaves both assets and inventory unchanged.
 - V2 has no no-reason refund, merchant-timeout refund, forced platform refund,
   refund button, refund API, refund reserve or business-refund method.
+- Launch delivery fulfillment is manual and provider-independent. An authorized
+  merchant records one supported carrier, the raw tracking number and optional
+  shipment note/evidence. Core hashes and encrypts the raw tracking data,
+  preserves immutable evidence for arbitration and exposes the usable shipment
+  details only to currently authorized order participants and platform roles.
+  Buyer confirmation, platform forced receipt and takeover remain Core
+  `allowedActions`; no UI writes a final state directly.
+- Kuaidi100/Cainiao, electronic waybills, printers, automatic logistics
+  tracking, GPS sorting and AMap/Baidu navigation are Phase 2. Missing provider,
+  device or map configuration never blocks ordering, payment, manual shipment,
+  receipt confirmation, takeover, arbitration or launch acceptance. Delivery
+  addresses accept audited manual province/city/district/six-digit region input;
+  map-assisted parsing is optional and cannot be the only save path.
 - Customers may request exchange or delay and may enter platform arbitration.
   Arbitration keeps payment, BNM and all rewards Locked.
 - Seven days after payment finality without valid shipment evidence opens
@@ -346,10 +359,10 @@ source conflicts are indexed in `V2_DECISIONS.md`.
   Core HTTP adapter. Production Core deployment must still inject that ignored
   configuration and monitor the worker; it must not copy credentials into a
   manifest or repository file.
-- Production domains/HTTPS/WSS, production databases and queues, other provider
-  accounts and credentials, approved merchant/admin wallets, encrypted backup
-  storage, printers and physical mobile-device evidence remain launch-time
-  operational configuration.
+- Production domains/HTTPS/WSS, production databases and queues, approved
+  merchant/admin wallets and encrypted backup storage remain launch-time
+  operational configuration. Logistics providers, printers, GPS and map
+  navigation are Phase 2 operational inputs, not launch blockers.
 - Provider absence returns `ConfigurationRequired` for the affected feature,
   but adapters, validation, typed errors and the local business path must still
   exist. It does not block unrelated local code completion or a separately

@@ -130,7 +130,9 @@ overwrite a later reorg `LOCKED` state.
 
 ## Fulfillment Storage
 
-- `core.administrative_regions` records frozen six-digit AMap region evidence.
+- `core.administrative_regions` records frozen six-digit governed, AMap or
+  buyer-declared region evidence. Launch buyer addresses may use audited
+  `BUYER_DECLARED` province/city/district/code input without coordinates.
 - `core.merchant_stores` records versioned pickup stores. Historical order
   snapshots do not change when a store later moves or closes.
 - `core.fulfillment_targets` binds buyer, delivery/pickup mode, target and
@@ -145,7 +147,10 @@ overwrite a later reorg `LOCKED` state.
   lookup, and sorted actor/item-idempotency locks serialize command reuse across
   different batches and the single-shipment path.
 - `core.fulfillment_evidence`, `core.shipments` and `core.logistics_events` are
-  immutable. Provider event identity is unique and callback order is preserved.
+  immutable. Launch shipment evidence encrypts the normalized tracking number
+  and optional note and retains media asset references for arbitration.
+  Provider event identity is unique and callback order is preserved for the
+  Phase 2 compatibility path.
 - `core.media_upload_intents` requires a signed write-once `PUT` and per-wallet
   rolling quota. Only a provider-sealed object version becomes an immutable
   `core.media_assets` row. Product images/video, category icons, store images
@@ -153,8 +158,8 @@ overwrite a later reorg `LOCKED` state.
   media is readable only while referenced by an active product or enabled
   category; other assets require an authorized short-lived signed GET. Object
   keys are never exposed to product clients. `core.evidence_envelopes`
-  binds the exact order action or normalized tracking hash; raw tracking
-  numbers are never persisted.
+  binds the exact order action or normalized tracking hash; tracking data is
+  never persisted in plaintext.
 - `core.pickup_credentials` stores salted hashes, binds the credential to the
   pickup store snapshotted by the order and allows one successful use before
   expiry. `core.pickup_verification_attempts` stores no plaintext code, keeps

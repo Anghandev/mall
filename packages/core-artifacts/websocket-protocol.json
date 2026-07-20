@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-settlement-admin.17",
+  "artifactVersion": "2.0.0-fulfillment-launch.18",
   "protocolVersion": 1,
   "transport": "wss",
   "publicationStatus": "AVAILABLE",
@@ -31,7 +31,7 @@
     ],
     "properties": {
       "artifactVersion": {
-        "const": "2.0.0-settlement-admin.17"
+        "const": "2.0.0-fulfillment-launch.18"
       },
       "protocolVersion": {
         "const": 1

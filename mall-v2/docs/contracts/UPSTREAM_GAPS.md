@@ -3,7 +3,7 @@
 Mall cannot resolve residual gaps by adding shared endpoints, schemas,
 financial logic or custom calldata.
 
-Mall consumes `@abu24k/core-artifacts@2.0.0-settlement-admin.17`. Catalog, SIWE,
+Mall consumes `@abu24k/core-artifacts@2.0.0-fulfillment-launch.18`. Catalog, SIWE,
 payments, stores, checkout targets, order/fulfillment projections and the
 fulfillment action catalog are published and consumed. Settlement balances,
 signed requests, per-payable EOA finality, public CMS and notifications are also consumed.
@@ -34,10 +34,10 @@ has no merchant export, clearing or takeover-assignment parser, UI or fixture.
 | GAP-MAL-007 | Resolved by `.17` winner-bound seckill prize projection and `PRIZE_USDT` settlement rail | Mall validates and renders the frozen candidate, review/rollover evidence, payout lifecycle and final EOA execution TxHash; only a wallet with a Core-published Available prize balance sees the existing signed request action |
 | GAP-MAL-008 | Resolved by `.9` buyer-scoped takeover timeline | Mall shows only `COMPLETE` / `PARTIAL_LEGACY` and public transitions; internal evidence hashes are rejected |
 | GAP-MAL-009 | Resolved by `2.0.0-settlement-admin.9` reward subtype and BNM totals publication | Mall renders only Core-projected wallet subtypes and Locked/Available BNM points; BNM remains non-transferable |
-| GAP-MAL-010 | Production GPS/device evidence and native AMap/Baidu navigation bridge beyond published stores | Browser distance is calculated only after permission; denial and native navigation remain ExternalBlocked |
-| GAP-MAL-011 | Resolved by `.9` PII-safe parser and encrypted retention contract | Raw pasted text is not stored; incomplete parse cannot be saved and provider absence is `ConfigurationRequired` |
+| GAP-MAL-010 | GPS distance and AMap/Baidu navigation | Phase 2; no launch UI or launch blocker |
+| GAP-MAL-011 | Resolved by `.18` encrypted manual-address contract | Mall submits complete province/city/district/six-digit code with null coordinates; provider absence does not block save or checkout |
 | GAP-MAL-012 | Resolved in current `.17` EOA-settlement projection | Mall renders request, immutable per-payable transfer identity, Settled state and final execution TxHash from Core |
 | GAP-MAL-013 | Configured production providers behind published readiness and typed ConfigurationRequired errors | Provider-dependent action disabled |
 | GAP-MAL-014 | Circuit Breaker recovery/read projections beyond published payment readiness | Payment readiness blocks new quotes; later breaker controls remain unavailable |
 | GAP-MAL-015 | Consumer tests for every remaining Mall capability | Affected Requirement IDs cannot become Verified |
-| GAP-MAL-016 | Real wallet/GPS/native links/devices/domains/HTTPS-WSS/RPC inputs | ExternalBlocked; no simulated success |
+| GAP-MAL-016 | Real wallet/domains/HTTPS-WSS/RPC inputs | ExternalBlocked; GPS/native map links are Phase 2 and not launch inputs |

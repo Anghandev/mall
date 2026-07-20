@@ -7,7 +7,6 @@ import {
   buyerProfile,
   buyerSavedAddress,
   buyerTakeoverTimeline,
-  parsedBuyerAddress,
 } from '../account-fixtures';
 import { buyerActionResult, orderActionEvidence } from '../evidence-fixtures';
 import { deliveryOrder, deliveryOrderTarget, deliveryTarget } from '../fulfillment-fixtures';
@@ -135,7 +134,7 @@ test('buyer evidence form is keyboard-addressable and fits the mobile frame', as
   await page.screenshot({ path: 'test-results/screenshots/mobile-393-order-evidence.png', fullPage: true });
 });
 
-test('buyer account and address review fit the mobile frame and remain keyboard operable', async ({ page }, testInfo) => {
+test('buyer account and manual address form fit the mobile frame and remain keyboard operable', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'mobile-393', 'Focused account acceptance');
   await mockWallet(page);
   await mockPublicCore(page);
@@ -144,14 +143,19 @@ test('buyer account and address review fit the mobile frame and remain keyboard 
   await expect(page.getByRole('heading', { name: buyerProfile.nickname! })).toBeVisible();
   await expect(page.getByText('买家 UID：10001')).toBeVisible();
   await page.getByRole('link', { name: '打开我的收货地址' }).click();
-  const rawText = page.getByLabel('地址文本');
-  await rawText.fill('张三 13800138000 辽宁省大连市中山区示例路 24 号');
-  await page.getByRole('button', { name: '解析并复核' }).focus();
+  const form = page.getByRole('form', { name: '新增收货地址' });
+  await form.getByLabel('收货人').fill('张三');
+  await form.getByLabel('手机号').fill('13800138000');
+  await form.getByLabel('省份').fill('辽宁省');
+  await form.getByLabel('城市').fill('大连市');
+  await form.getByLabel('区县').fill('中山区');
+  await form.getByLabel('六位行政区代码').fill('210202');
+  await form.getByLabel('详细地址').fill('示例路 24 号');
+  const saveButton = form.getByRole('button', { name: '保存地址' });
+  await saveButton.focus();
+  await expect(saveButton).toBeFocused();
   await page.keyboard.press('Enter');
-  const reviewHeading = page.getByRole('heading', { name: '复核识别结果' });
-  await expect(reviewHeading).toBeVisible();
-  await expect(reviewHeading).toBeFocused();
-  await expect(page.getByRole('button', { name: /确认并保存/ })).toBeEnabled();
+  await expect(page.getByText(buyerSavedAddress.formattedAddress)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
   await expectHealthyDocument(page);
   await page.screenshot({ path: 'test-results/screenshots/mobile-393-buyer-account.png', fullPage: true });
@@ -239,7 +243,6 @@ async function mockPublicCore(page: import('@playwright/test').Page) {
         statements: [],
         nextCursor: null,
       };
-      if (corePath === '/v2/buyer/addresses/parse') return parsedBuyerAddress;
       if (corePath === '/v2/buyer/addresses' && route.request().method() === 'POST') return buyerSavedAddress;
       if (corePath === '/v2/buyer/addresses') return { artifactVersion, addresses: [buyerSavedAddress] };
       if (corePath === `/v2/buyer/addresses/${buyerSavedAddress.addressId}/fulfillment-target`) return deliveryTarget;

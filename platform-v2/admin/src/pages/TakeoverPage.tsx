@@ -227,7 +227,14 @@ export function TakeoverPage() {
                     </dl>
                     <div className="fulfillment-evidence-streams">
                       <EvidenceGroup title="Shipments" empty="无发货证据">
-                        {selectedOrder.shipments.map((shipment) => <li key={shipment.shipmentId}><strong>{shipment.carrierCode} · {shipment.shipmentId}</strong><code>{shipment.trackingNumberHash}</code><small>{formatDate(shipment.createdAt)}</small></li>)}
+                        {selectedOrder.shipments.map((shipment) => (
+                          <li key={shipment.shipmentId}>
+                            <strong>{shipment.carrierCode} · {shipment.trackingNumber ?? '运单号不可用'}</strong>
+                            {shipment.note ? <span>{shipment.note}</span> : null}
+                            <code>{shipment.evidenceHash}</code>
+                            <small>{shipment.mediaAssetIds.length} 个凭证 · {formatDate(shipment.createdAt)}</small>
+                          </li>
+                        ))}
                       </EvidenceGroup>
                       <EvidenceGroup title="Logistics" empty="无物流事件">
                         {selectedOrder.logistics.map((event) => <li key={event.logisticsEventId}><strong>{event.provider} · {event.status}</strong><code>{event.locationHash ?? '无位置哈希'}</code><small>{formatDate(event.occurredAt)}</small></li>)}

@@ -36,6 +36,7 @@ import {
   type CoreErrorCode,
   type BreakerScope,
   type DeliveryResult,
+  type EvidenceEnvelopeProjection,
   type ForcedReceiptDecisionResult,
   type FulfillmentOrder,
   type FulfillmentMode,
@@ -275,6 +276,59 @@ export async function recordShipment(
       || (input.providerReferenceHash !== undefined && !bytes32Pattern.test(input.providerReferenceHash))
   ) throw invalidResponse('Shipment command input does not match the coordinated generated type');
   return postFulfillmentCommand(orderId, 'shipments', input, token, isShipmentResult, 'Shipment');
+}
+
+export async function createOrderTrackingEvidence(
+  orderId: string,
+  input: {
+    carrierCode: string;
+    trackingNumber: string;
+    note?: string | null;
+    mediaAssetIds?: readonly string[];
+    idempotencyKey: string;
+  },
+  token: string,
+): Promise<EvidenceEnvelopeProjection> {
+  if (
+    !bytes32Pattern.test(orderId)
+      || !logisticsCarrierCodes.includes(input.carrierCode as never)
+      || !/^[A-Za-z0-9-]{3,64}$/.test(input.trackingNumber.trim())
+      || input.idempotencyKey.length < 8
+      || input.idempotencyKey.length > 128
+      || (input.note !== undefined && input.note !== null && input.note.trim().length > 500)
+      || !(input.mediaAssetIds ?? []).every((assetId) => bytes32Pattern.test(assetId))
+  ) throw invalidResponse('Tracking evidence input does not match the coordinated generated type', 400);
+  const body = await requestJson(`/v2/orders/${encodeURIComponent(orderId)}/tracking-evidence`, {
+    body: JSON.stringify(input),
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    method: 'POST',
+  });
+  if (!isOrderEvidence(body, orderId, 'RECORD_SHIPMENT')) {
+    throw invalidResponse('Tracking evidence response does not match the coordinated generated type');
+  }
+  return body;
+}
+
+export async function createOrderActionEvidence(
+  orderId: string,
+  input: { action: 'OPEN_ARBITRATION'; reasonCode: string; idempotencyKey: string },
+  token: string,
+): Promise<EvidenceEnvelopeProjection> {
+  if (
+    !bytes32Pattern.test(orderId)
+      || !isReasonCode(input.reasonCode)
+      || input.idempotencyKey.length < 8
+      || input.idempotencyKey.length > 128
+  ) throw invalidResponse('Order evidence input does not match the coordinated generated type', 400);
+  const body = await requestJson(`/v2/orders/${encodeURIComponent(orderId)}/evidence`, {
+    body: JSON.stringify(input),
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    method: 'POST',
+  });
+  if (!isOrderEvidence(body, orderId, input.action)) {
+    throw invalidResponse('Order evidence response does not match the coordinated generated type');
+  }
+  return body;
 }
 
 export async function recordDelivery(
@@ -743,7 +797,12 @@ function isFulfillmentOrder(value: unknown): value is FulfillmentOrder {
     && Array.isArray(value.shipments)
     && value.shipments.every((item) => isRecord(item)
       && nonEmptyStrings(item, ['shipmentId', 'carrierCode'])
+      && (item.trackingNumber === null || (typeof item.trackingNumber === 'string' && item.trackingNumber.length > 0))
       && bytes32Pattern.test(String(item.trackingNumberHash))
+      && (item.note === null || typeof item.note === 'string')
+      && bytes32Pattern.test(String(item.evidenceHash))
+      && Array.isArray(item.mediaAssetIds)
+      && item.mediaAssetIds.every((assetId) => bytes32Pattern.test(String(assetId)))
       && (item.providerReferenceHash === null || bytes32Pattern.test(String(item.providerReferenceHash)))
       && isDateTime(item.createdAt))
     && Array.isArray(value.logistics)
@@ -898,6 +957,30 @@ function isShipmentResult(value: unknown): value is ShipmentResult {
     && nonEmptyStrings(value, ['shipmentId', 'carrierCode'])
     && bytes32Pattern.test(String(value.trackingNumberHash))
     && isDateTime(value.recordedAt);
+}
+
+function isOrderEvidence(
+  value: unknown,
+  orderId: string,
+  action: 'RECORD_SHIPMENT' | 'OPEN_ARBITRATION',
+): value is EvidenceEnvelopeProjection {
+  return isRecord(value)
+    && value.artifactVersion === artifactVersion
+    && bytes32Pattern.test(String(value.evidenceHash))
+    && addressPattern.test(String(value.ownerWallet))
+    && ['ADMIN', 'OPERATOR'].includes(String(value.actorRole))
+    && value.resourceType === 'ORDER'
+    && value.resourceId === orderId
+    && value.action === action
+    && Array.isArray(value.mediaAssetIds)
+    && value.mediaAssetIds.every((assetId) => bytes32Pattern.test(String(assetId)))
+    && isDateTime(value.createdAt)
+    && (action !== 'RECORD_SHIPMENT'
+      || (value.purpose === 'SHIPMENT_TRACKING'
+        && bytes32Pattern.test(String(value.trackingNumberHash))
+        && logisticsCarrierCodes.includes(value.carrierCode as never)))
+    && (action !== 'OPEN_ARBITRATION'
+      || (value.purpose === 'FULFILLMENT_ACTION' && isReasonCode(String(value.reasonCode))));
 }
 
 function isDeliveryResult(value: unknown): value is DeliveryResult {

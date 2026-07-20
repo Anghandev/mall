@@ -9,6 +9,8 @@ import { Ban, PackageCheck } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   CoreApiError,
+  createOrderActionEvidence,
+  createOrderTrackingEvidence,
   decideArbitration,
   decideForcedReceipt,
   decideFulfillmentRequest,
@@ -74,8 +76,8 @@ export function FulfillmentCommandPanel({
   const [reasonCode, setReasonCode] = useState('');
   const [noteCode, setNoteCode] = useState('');
   const [carrierCode, setCarrierCode] = useState('');
-  const [trackingNumberHash, setTrackingNumberHash] = useState('');
-  const [providerReferenceHash, setProviderReferenceHash] = useState('');
+  const [trackingNumber, setTrackingNumber] = useState('');
+  const [shipmentNote, setShipmentNote] = useState('');
   const [requestId, setRequestId] = useState('');
   const [decision, setDecision] = useState<DecisionValue>('');
   const [outcome, setOutcome] = useState<ArbitrationOutcomeValue>('');
@@ -96,11 +98,10 @@ export function FulfillmentCommandPanel({
     noteCode,
     order,
     outcome,
-    providerReferenceHash,
     reasonCode,
     requestId,
     roles,
-    trackingNumberHash,
+    trackingNumber,
   });
 
   useEffect(() => {
@@ -115,8 +116,8 @@ export function FulfillmentCommandPanel({
     setReasonCode('');
     setNoteCode('');
     setCarrierCode('');
-    setTrackingNumberHash('');
-    setProviderReferenceHash('');
+    setTrackingNumber('');
+    setShipmentNote('');
     setRequestId('');
     setDecision('');
     setOutcome('');
@@ -136,14 +137,22 @@ export function FulfillmentCommandPanel({
       const base = { idempotencyKey: nextIdempotencyKey, evidenceHash: evidenceHash.trim() };
       let result: PlatformFulfillmentCommandResult;
       switch (definition.action) {
-        case 'RECORD_SHIPMENT':
-          result = await recordShipment(order.orderId, {
-            ...base,
+        case 'RECORD_SHIPMENT': {
+          const evidence = await createOrderTrackingEvidence(order.orderId, {
             carrierCode: carrierCode.trim(),
-            trackingNumberHash: trackingNumberHash.trim(),
-            ...(providerReferenceHash.trim() ? { providerReferenceHash: providerReferenceHash.trim() } : {}),
+            trackingNumber: trackingNumber.trim(),
+            ...(shipmentNote.trim() ? { note: shipmentNote.trim() } : {}),
+            mediaAssetIds: [],
+            idempotencyKey: `${nextIdempotencyKey}:evidence`,
+          }, token);
+          result = await recordShipment(order.orderId, {
+            idempotencyKey: `${nextIdempotencyKey}:command`,
+            evidenceHash: evidence.evidenceHash,
+            carrierCode: carrierCode.trim(),
+            trackingNumberHash: evidence.trackingNumberHash!,
           }, token);
           break;
+        }
         case 'RECORD_DELIVERY':
           result = await recordDelivery(order.orderId, base, token);
           break;
@@ -155,9 +164,19 @@ export function FulfillmentCommandPanel({
             noteCode: noteCode.trim(),
           }, token);
           break;
-        case 'OPEN_ARBITRATION':
-          result = await openArbitration(order.orderId, { ...base, reasonCode: reasonCode.trim() }, token);
+        case 'OPEN_ARBITRATION': {
+          const evidence = await createOrderActionEvidence(order.orderId, {
+            action: 'OPEN_ARBITRATION',
+            reasonCode: reasonCode.trim(),
+            idempotencyKey: `${nextIdempotencyKey}:evidence`,
+          }, token);
+          result = await openArbitration(order.orderId, {
+            idempotencyKey: `${nextIdempotencyKey}:command`,
+            evidenceHash: evidence.evidenceHash,
+            reasonCode: reasonCode.trim(),
+          }, token);
           break;
+        }
         case 'DECIDE_ARBITRATION':
           if (!outcome) return;
           result = await decideArbitration(order.orderId, { ...base, outcome, noteCode: noteCode.trim() }, token);
@@ -201,17 +220,25 @@ export function FulfillmentCommandPanel({
         })}
       </select>
 
-      <label htmlFor="fulfillment-evidence">证据哈希 · bytes32</label>
-      <input id="fulfillment-evidence" value={evidenceHash} onChange={(event) => setEvidenceHash(event.target.value)} autoComplete="off" placeholder="0x + 64 hex" />
+      {definition.action !== 'RECORD_SHIPMENT' && definition.action !== 'OPEN_ARBITRATION' ? (
+        <>
+          <label htmlFor="fulfillment-evidence">证据哈希 · bytes32</label>
+          <input id="fulfillment-evidence" value={evidenceHash} onChange={(event) => setEvidenceHash(event.target.value)} autoComplete="off" placeholder="0x + 64 hex" />
+        </>
+      ) : null}
 
       {definition.action === 'RECORD_SHIPMENT' ? (
         <>
-          <label htmlFor="fulfillment-carrier">承运商代码</label>
-          <input id="fulfillment-carrier" value={carrierCode} onChange={(event) => setCarrierCode(event.target.value.toUpperCase())} autoComplete="off" placeholder="SF" />
-          <label htmlFor="fulfillment-tracking">运单号哈希 · bytes32</label>
-          <input id="fulfillment-tracking" value={trackingNumberHash} onChange={(event) => setTrackingNumberHash(event.target.value)} autoComplete="off" placeholder="0x + 64 hex" />
-          <label htmlFor="fulfillment-provider-reference">Provider reference hash · optional</label>
-          <input id="fulfillment-provider-reference" value={providerReferenceHash} onChange={(event) => setProviderReferenceHash(event.target.value)} autoComplete="off" placeholder="0x + 64 hex" />
+          <label htmlFor="fulfillment-carrier">快递公司</label>
+          <select id="fulfillment-carrier" value={carrierCode} onChange={(event) => setCarrierCode(event.target.value)}>
+            <option value="">请选择</option>
+            <option value="SF">顺丰</option><option value="JD">京东物流</option><option value="YTO">圆通</option>
+            <option value="ZTO">中通</option><option value="STO">申通</option><option value="EMS">EMS</option>
+          </select>
+          <label htmlFor="fulfillment-tracking">运单号</label>
+          <input id="fulfillment-tracking" value={trackingNumber} onChange={(event) => setTrackingNumber(event.target.value)} autoComplete="off" maxLength={64} placeholder="输入快递单上的运单号" />
+          <label htmlFor="fulfillment-shipment-note">发货备注 / 凭证说明</label>
+          <textarea id="fulfillment-shipment-note" value={shipmentNote} onChange={(event) => setShipmentNote(event.target.value)} maxLength={500} placeholder="可选" />
         </>
       ) : null}
 
@@ -277,11 +304,10 @@ function commandDisabledReason(input: {
   noteCode: string;
   order: FulfillmentOrder;
   outcome: ArbitrationOutcomeValue;
-  providerReferenceHash: string;
   reasonCode: string;
   requestId: string;
   roles: readonly UserRole[];
-  trackingNumberHash: string;
+  trackingNumber: string;
 }) {
   if (!input.definition.roles.some((role) => input.roles.includes(role))) {
     return `${input.definition.action} 不允许当前平台角色执行。`;
@@ -292,11 +318,11 @@ function commandDisabledReason(input: {
   if (input.actionsLoading) return '正在读取当前订单 allowedActions。';
   if (!input.action) return `Core 未向当前会话返回 ${input.definition.action}。`;
   if (!input.action.enabled) return `Core 拒绝 ${input.definition.action}：${input.action.reasonCode ?? 'UnknownState'}${input.action.deadline ? ` · ${input.action.deadline}` : ''}`;
-  if (!bytes32Pattern.test(input.evidenceHash.trim())) return '请输入 Core 要求的 bytes32 证据哈希。';
+  if (!['RECORD_SHIPMENT', 'OPEN_ARBITRATION'].includes(input.definition.action)
+    && !bytes32Pattern.test(input.evidenceHash.trim())) return '请输入 Core 要求的 bytes32 证据哈希。';
   if (input.definition.action === 'RECORD_SHIPMENT') {
-    if (!/^[A-Z0-9_-]{2,32}$/.test(input.carrierCode.trim())) return '承运商代码必须为 2—32 位大写字母、数字、下划线或连字符。';
-    if (!bytes32Pattern.test(input.trackingNumberHash.trim())) return '请输入 bytes32 运单号哈希。';
-    if (input.providerReferenceHash.trim() && !bytes32Pattern.test(input.providerReferenceHash.trim())) return 'Provider reference hash 必须为空或 bytes32。';
+    if (!['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS'].includes(input.carrierCode)) return '请选择快递公司。';
+    if (!/^[A-Za-z0-9-]{3,64}$/.test(input.trackingNumber.trim())) return '请输入有效运单号。';
   }
   if (input.definition.action === 'DECIDE_FULFILLMENT_REQUEST' && !input.requestId) return '请选择 Core 返回的待处理换货或延期申请。';
   if ((input.definition.action === 'OPEN_ARBITRATION' || input.definition.action === 'OPEN_TAKEOVER') && !reasonCodePattern.test(input.reasonCode.trim())) return '请输入 2—64 位有效原因代码。';

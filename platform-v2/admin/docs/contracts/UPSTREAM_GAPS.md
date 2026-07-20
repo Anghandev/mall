@@ -3,7 +3,7 @@
 The platform-admin product is a consumer. It cannot add shared endpoints,
 schemas, financial logic, calldata, signers or database behavior.
 
-The coordinated consumer is `@abu24k/core-artifacts@2.0.0-settlement-admin.17`.
+The coordinated consumer is `@abu24k/core-artifacts@2.0.0-fulfillment-launch.18`.
 Published paths still fail closed when Core returns `DecisionBlocked`,
 `ExternalBlocked` or `ConfigurationRequired`.
 
@@ -20,7 +20,7 @@ Published paths still fail closed when Core returns `DecisionBlocked`,
 | GAP-ADM-009 | Session actions, timers, inventory locks, force-close, Operations injection, breaker controls, canonical final-order candidate, whole-pool snapshot, non-substitution review, EOA payout and empty/force-closed rollover are published and consumed | Production executor readiness remains rollout configuration; Admin never substitutes a winner or locally settles/rolls a pool |
 | GAP-ADM-010 | Fulfillment commands, case-wide takeover projections, eligible replacement merchants, append-only assignment/reassignment history, ordered deductions, platform advance and debt are published and consumed | Production role wallets and replacement-merchant operations remain `ExternalBlocked` until configured |
 | GAP-ADM-011 | `.9` retains published risk observations, wallet/IP/device restrictions and blacklists, appeal/override audit evidence, payment enforcement, Admin overview and role-scoped manual restriction/appeal/decision writes; the product consumes generated DTOs and all published Admin paths | Add separate 20-minute/10-change address and pickup-store alert-only evidence plus below-100 stock and above-30% abnormal-order alerts; these must never create restrictions. Low-history clustering stays optional and production device/mempool sources remain external |
-| GAP-ADM-012 | Admin consumes six-carrier/default versioning, Kuaidi100/Cainiao secret-reference readiness, encrypted role-scoped warehouses, cross-merchant waybill batches/lists, durable print-job retry and the frozen flat pure-USDT freight fields | Real provider accounts and physical printer/device acceptance remain `ExternalBlocked`; the pickup-print portion of `ADM-GLOBAL-002` remains incomplete |
+| GAP-ADM-012 | Core artifacts retain six-carrier, provider, warehouse, waybill and print contracts as Phase 2 compatibility metadata; launch Admin consumes only manual takeover shipment and frozen flat pure-USDT freight | The launch UI has no logistics route, provider configuration, electronic-waybill or print action; provider accounts and devices do not block launch |
 | GAP-ADM-013 | CMS create/read/publish/rollback contracts are published and consumed | Real content, audience and production approval evidence must be supplied externally |
 | GAP-ADM-014 | Notification endpoints, inbox, structured campaign create/list/publish, delivery-state counts, Core-owned `allowedActions`, failed-delivery retry and worker states are published and consumed | Real SMS/SMTP/Push accounts remain `ConfigurationRequired` / `ExternalBlocked` |
 | GAP-ADM-015 | Typed versioned system-config create/list/publish is published and consumed; `NPL_QUOTE` binds the fixed pair, five-minute validity and minimum USDT liquidity; primary/fallback RPC, five EOA role/read interfaces and the Router Service Fee EOA manifest path are published | Production providers and deployment evidence remain rollout-only external configuration; the retired on-chain TWAP Source/Adapter is not a blocker |

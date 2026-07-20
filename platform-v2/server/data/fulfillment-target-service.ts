@@ -19,8 +19,12 @@ export interface DeliveryTargetInput {
   recipientName: string;
   phone: string;
   address: string;
-  longitude: number;
-  latitude: number;
+  longitude?: number | null;
+  latitude?: number | null;
+  province?: string;
+  city?: string;
+  district?: string;
+  regionCode?: string;
 }
 
 export interface PickupTargetInput {
@@ -171,14 +175,14 @@ export class FulfillmentTargetService {
     ));
     if (existing) return targetSummary(existing);
     const key = requireEncryptionKey(this.#key);
-    const region = await this.#regions.reverseGeocode({ longitude: input.longitude, latitude: input.latitude });
+    const region = await resolveDeliveryRegion(this.#regions, input);
     const now = this.#clock();
     const payload = {
       recipientName: input.recipientName,
       phone: input.phone,
-      address: input.address,
-      longitude: input.longitude,
-      latitude: input.latitude,
+      address: region.formattedAddress,
+      longitude: input.longitude ?? null,
+      latitude: input.latitude ?? null,
       regionCode: region.regionCode,
     };
     const encrypted = encrypt(payload, key);
@@ -788,13 +792,29 @@ async function ensureRegion(
     city: string;
     district: string;
     sourceReferenceHash: string;
+    source?: 'AMAP' | 'BUYER_DECLARED';
   },
 ) {
   await executor.query(
     `INSERT INTO core.administrative_regions (
        region_code, province, city, district, source, source_reference_hash, status
-     ) VALUES ($1,$2,$3,$4,'AMAP',$5,'ACTIVE') ON CONFLICT (region_code) DO NOTHING`,
-    [region.regionCode, region.province, region.city, region.district, region.sourceReferenceHash],
+     ) VALUES ($1,$2,$3,$4,$5,$6,'ACTIVE')
+     ON CONFLICT (region_code) DO UPDATE SET
+       province = excluded.province,
+       city = excluded.city,
+       district = excluded.district,
+       source = excluded.source,
+       source_reference_hash = excluded.source_reference_hash
+     WHERE core.administrative_regions.source = 'BUYER_DECLARED'
+       AND excluded.source IN ('AMAP', 'GOVERNED_IMPORT')`,
+    [
+      region.regionCode,
+      region.province,
+      region.city,
+      region.district,
+      region.source ?? 'AMAP',
+      region.sourceReferenceHash,
+    ],
   );
   const persisted = await executor.query<{
     province: string;
@@ -803,6 +823,12 @@ async function ensureRegion(
     status: string;
   }>('SELECT province, city, district, status FROM core.administrative_regions WHERE region_code = $1', [region.regionCode]);
   const row = persisted.rows[0];
+  if (region.source === 'BUYER_DECLARED') {
+    if (!row || row.status !== 'ACTIVE') {
+      throw new CoreError('IdempotencyConflict', 'Administrative region code is unavailable', 409);
+    }
+    return;
+  }
   if (
     !row
     || row.province !== region.province
@@ -1051,7 +1077,19 @@ function decryptTrackingText(ciphertext: Uint8Array, iv: Uint8Array, tag: Uint8A
   try {
     const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(iv));
     decipher.setAuthTag(Buffer.from(tag));
-    return Buffer.concat([decipher.update(Buffer.from(ciphertext)), decipher.final()]).toString('utf8');
+    const plaintext = Buffer.concat([decipher.update(Buffer.from(ciphertext)), decipher.final()]).toString('utf8');
+    try {
+      const parsed = JSON.parse(plaintext) as unknown;
+      if (
+        parsed
+        && typeof parsed === 'object'
+        && !Array.isArray(parsed)
+        && typeof (parsed as Record<string, unknown>).trackingNumber === 'string'
+      ) return (parsed as Record<string, string>).trackingNumber;
+    } catch {
+      // Legacy envelopes contain only the normalized tracking number.
+    }
+    return plaintext;
   } catch {
     throw new CoreError('ExternalBlocked', 'Tracking number decryption failed', 503);
   }
@@ -1331,7 +1369,44 @@ function validateDeliveryInput(input: DeliveryTargetInput) {
     || input.address.trim().length < 5
     || input.address.length > 300
   ) throw new CoreError('InvalidRequest', 'Invalid delivery target');
-  validateCoordinates(input.longitude, input.latitude);
+  const manualRegion = [input.province, input.city, input.district, input.regionCode];
+  const hasManualRegion = manualRegion.every((value) => typeof value === 'string' && value.trim().length > 0);
+  const hasAnyManualRegion = manualRegion.some((value) => value !== undefined);
+  if (hasAnyManualRegion && !hasManualRegion) throw new CoreError('InvalidRequest', 'Manual administrative region is incomplete');
+  if (hasManualRegion && !/^[0-9]{6}$/.test(input.regionCode!)) {
+    throw new CoreError('InvalidRequest', 'regionCode must contain six digits');
+  }
+  if (!hasManualRegion) validateCoordinates(input.longitude as number, input.latitude as number);
+}
+
+async function resolveDeliveryRegion(
+  resolver: AdministrativeRegionResolver,
+  input: DeliveryTargetInput,
+) {
+  if (input.province && input.city && input.district && input.regionCode) {
+    const province = input.province.trim();
+    const city = input.city.trim();
+    const district = input.district.trim();
+    if ([province, city, district].some((value) => value.length > 64)) {
+      throw new CoreError('InvalidRequest', 'Manual administrative region is invalid');
+    }
+    return {
+      province,
+      city,
+      district,
+      formattedAddress: `${province}${city}${district}${input.address.trim()}`,
+      regionCode: input.regionCode,
+      sourceReferenceHash: hashJson({ source: 'BUYER_DECLARED', province, city, district, regionCode: input.regionCode }),
+      source: 'BUYER_DECLARED' as const,
+    };
+  }
+  return {
+    ...await resolver.reverseGeocode({
+      longitude: input.longitude as number,
+      latitude: input.latitude as number,
+    }),
+    source: 'AMAP' as const,
+  };
 }
 
 function validateStoreInput(input: StoreInput) {

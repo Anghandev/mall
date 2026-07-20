@@ -10,22 +10,14 @@ import {
   type FulfillmentTarget,
   type MerchantOrderExport,
   type MerchantOrderExportRequest,
-  type MerchantStore,
   type OrderKind,
   type OrderProjectionState,
-  type PrintJob,
-  type ShipmentBatchItemRequest,
-  type WaybillBatchRequest,
-  type WaybillBatchResult,
-  type WaybillProvider,
-  waybillProviders,
 } from '@abu24k/core-artifacts';
 import {
   Box,
   Download,
   ListFilter,
   PackageCheck,
-  Printer,
   RefreshCw,
   ScanLine,
   Send,
@@ -43,17 +35,11 @@ type LoadState<T> =
   | { phase: 'ready'; value: T }
   | { phase: 'error'; message: string };
 
-type CommandKind = 'shipment' | 'batch-shipment' | 'forced-receipt' | 'pickup';
+type CommandKind = 'shipment' | 'forced-receipt' | 'pickup';
 type CommandState =
   | { phase: 'idle' }
   | { phase: 'submitting'; kind: CommandKind }
   | { phase: 'success'; message: string }
-  | { phase: 'error'; message: string };
-
-type WaybillCommandState =
-  | { phase: 'idle' }
-  | { phase: 'submitting' }
-  | { phase: 'ready'; value: WaybillBatchResult }
   | { phase: 'error'; message: string };
 
 type ExportState =
@@ -61,14 +47,6 @@ type ExportState =
   | { phase: 'submitting' }
   | { phase: 'success'; message: string }
   | { phase: 'error'; message: string };
-
-type BatchCarrierCode = ShipmentBatchItemRequest['carrierCode'];
-type WaybillCarrierCode = WaybillBatchRequest['carrierCode'];
-type BatchItemDraft = Readonly<{
-  carrierCode: BatchCarrierCode;
-  trackingNumberHash: string;
-  evidenceHash: string;
-}>;
 
 type FilterDraft = Readonly<{
   from: string;
@@ -79,17 +57,15 @@ type FilterDraft = Readonly<{
 }>;
 
 const bytes32Pattern = /^0x[0-9a-fA-F]{64}$/;
-const carrierPattern = /^[A-Z0-9_-]{2,32}$/;
 const reasonCodePattern = /^[A-Z0-9_:-]{2,64}$/;
 const pickupCodePattern = /^[0-9]{6}$/;
 const orderKinds = ['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] satisfies readonly OrderKind[];
-const batchCarrierCodes = logisticsCarrierCodes satisfies readonly BatchCarrierCode[];
 const emptyFilters: FilterDraft = { from: '', to: '', skuId: '', state: '', orderKind: '' };
-const deliveryColumns = ['选择', '订单号', '订单类型', 'SKU', '数量', '订单状态', '支付 TxHash', '下单时间', '支付最终性', '物流单号哈希', '操作'];
+const deliveryColumns = ['订单号', '订单类型', 'SKU', '数量', '订单状态', '支付 TxHash', '下单时间', '支付最终性', '运单号', '操作'];
 const pickupColumns = ['订单号', '订单类型', 'SKU', '数量', '订单状态', '支付 TxHash', '下单时间', '核销门店', '完成时间', '支付最终性', '操作'];
 
 export function FulfillmentPage() {
-  const { api, bootstrap, session } = useCoreRuntime();
+  const { api, session } = useCoreRuntime();
   const [searchParams] = useSearchParams();
   const [tab, setTab] = useState<'delivery' | 'pickup'>(() => (
     searchParams.get('mode') === 'pickup' ? 'pickup' : 'delivery'
@@ -102,28 +78,14 @@ export function FulfillmentPage() {
   const [activeFilters, setActiveFilters] = useState<FilterDraft>(emptyFilters);
   const [cursorHistory, setCursorHistory] = useState<readonly (FulfillmentOrderCursor | undefined)[]>([undefined]);
   const [pageIndex, setPageIndex] = useState(0);
-  const [batchSelection, setBatchSelection] = useState<readonly string[]>([]);
-  const [batchItems, setBatchItems] = useState<Readonly<Record<string, BatchItemDraft>>>({});
-  const [storesState, setStoresState] = useState<LoadState<readonly MerchantStore[]>>({ phase: 'idle' });
-  const [waybillProvider, setWaybillProvider] = useState<WaybillProvider>('KUAIDI100');
-  const [waybillCarrierCode, setWaybillCarrierCode] = useState<WaybillCarrierCode>('SF');
-  const [waybillStoreId, setWaybillStoreId] = useState('');
-  const [waybillState, setWaybillState] = useState<WaybillCommandState>({ phase: 'idle' });
-  const [printJobsState, setPrintJobsState] = useState<LoadState<readonly PrintJob[]>>({ phase: 'idle' });
-  const [retryingPrintJobId, setRetryingPrintJobId] = useState<string>();
-  const [printRetryError, setPrintRetryError] = useState<string>();
-  const [carrierCode, setCarrierCode] = useState('');
-  const [trackingNumberHash, setTrackingNumberHash] = useState('');
-  const [shipmentEvidenceHash, setShipmentEvidenceHash] = useState('');
-  const [receiptEvidenceHash, setReceiptEvidenceHash] = useState('');
+  const [carrierCode, setCarrierCode] = useState<(typeof logisticsCarrierCodes)[number]>('SF');
+  const [trackingNumber, setTrackingNumber] = useState('');
+  const [shipmentNote, setShipmentNote] = useState('');
   const [receiptReasonCode, setReceiptReasonCode] = useState('');
   const [pickupCode, setPickupCode] = useState('');
   const [pickupEvidenceHash, setPickupEvidenceHash] = useState('');
   const [exportState, setExportState] = useState<ExportState>({ phase: 'idle' });
   const commandKeys = useRef<Partial<Record<CommandKind, string>>>({});
-  const batchItemKeys = useRef<Record<string, string>>({});
-  const waybillAttempt = useRef<{ fingerprint: string; key: string } | undefined>(undefined);
-  const printRetryKeys = useRef<Record<string, string>>({});
   const exportAttempt = useRef<{ fingerprint: string; key: string } | undefined>(undefined);
   const selectedOrderRef = useRef<string | undefined>(undefined);
   const sessionTokenRef = useRef(session?.token);
@@ -175,43 +137,6 @@ export function FulfillmentPage() {
     }
   }, [api, selectedOrderId, session]);
 
-  const loadStores = useCallback(async () => {
-    if (!session) {
-      setStoresState({ phase: 'idle' });
-      setWaybillStoreId('');
-      return;
-    }
-    const token = session.token;
-    setStoresState({ phase: 'loading' });
-    try {
-      const stores = (await api.listMerchantStores()).filter((store) => store.merchantId === session.merchantId);
-      if (sessionTokenRef.current !== token) return;
-      setStoresState({ phase: 'ready', value: stores });
-      setWaybillStoreId((current) => stores.some((store) => store.storeId === current)
-        ? current
-        : stores[0]?.storeId ?? '');
-    } catch (error) {
-      if (sessionTokenRef.current === token) setStoresState({ phase: 'error', message: readableError(error) });
-    }
-  }, [api, session]);
-
-  const loadPrintJobs = useCallback(async (quiet = false) => {
-    if (!session) {
-      setPrintJobsState({ phase: 'idle' });
-      return;
-    }
-    const token = session.token;
-    if (!quiet) setPrintJobsState({ phase: 'loading' });
-    try {
-      const jobs = await api.listMerchantPrintJobs(token, 100);
-      if (sessionTokenRef.current === token) setPrintJobsState({ phase: 'ready', value: jobs });
-    } catch (error) {
-      if (sessionTokenRef.current === token) {
-        setPrintJobsState({ phase: 'error', message: readableError(error) });
-      }
-    }
-  }, [api, session]);
-
   useEffect(() => {
     void loadOrders();
   }, [loadOrders]);
@@ -219,11 +144,6 @@ export function FulfillmentPage() {
   useEffect(() => {
     void loadTarget();
   }, [loadTarget]);
-
-  useEffect(() => {
-    void loadStores();
-    void loadPrintJobs();
-  }, [loadPrintJobs, loadStores]);
 
   const orders = ordersState.phase === 'ready' ? ordersState.value.orders : [];
   const selectedOrder = orders.find((order) => order.orderId === selectedOrderId);
@@ -238,8 +158,6 @@ export function FulfillmentPage() {
   );
   const columns = tab === 'delivery' ? deliveryColumns : pickupColumns;
   const submitting = commandState.phase === 'submitting';
-  const waybillSubmitting = waybillState.phase === 'submitting';
-  const operationPending = submitting || waybillSubmitting || Boolean(retryingPrintJobId);
   const canExecute = (action: AllowedActionName) => (
     Boolean(session && selectedOrder && targetMatchesOrder)
     && canExecuteOrderAction(action, allowedActions)
@@ -247,49 +165,13 @@ export function FulfillmentPage() {
   const shipmentAllowed = selectedOrder?.fulfillmentMode === 'DELIVERY' && canExecute('RECORD_SHIPMENT');
   const receiptAllowed = selectedOrder?.fulfillmentMode === 'DELIVERY' && canExecute('REQUEST_FORCED_RECEIPT');
   const pickupAllowed = selectedOrder?.fulfillmentMode === 'PICKUP' && canExecute('VERIFY_PICKUP');
-  const shipmentValid = carrierPattern.test(carrierCode)
-    && bytes32Pattern.test(trackingNumberHash)
-    && bytes32Pattern.test(shipmentEvidenceHash);
-  const receiptValid = bytes32Pattern.test(receiptEvidenceHash)
-    && reasonCodePattern.test(receiptReasonCode);
+  const shipmentValid = logisticsCarrierCodes.includes(carrierCode)
+    && /^[A-Za-z0-9\s-]{6,64}$/.test(trackingNumber.trim())
+    && shipmentNote.trim().length <= 500;
+  const receiptValid = reasonCodePattern.test(receiptReasonCode);
   const pickupValid = pickupCodePattern.test(pickupCode)
     && bytes32Pattern.test(pickupEvidenceHash)
     && selectedTarget?.fulfillmentMode === 'PICKUP';
-  const selectedBatchOrders = batchSelection
-    .map((orderId) => orders.find((order) => order.orderId === orderId))
-    .filter((order): order is FulfillmentOrder => Boolean(order));
-  const batchValid = selectedBatchOrders.length > 0
-    && selectedBatchOrders.length <= 100
-    && selectedBatchOrders.every((order) => {
-      const draft = batchItems[order.orderId];
-      return draft !== undefined
-        && batchCarrierCodes.includes(draft.carrierCode)
-        && bytes32Pattern.test(draft.trackingNumberHash)
-        && bytes32Pattern.test(draft.evidenceHash)
-        && canExecuteOrderAction('RECORD_SHIPMENT', order.allowedActions);
-    });
-  const merchantStores = storesState.phase === 'ready' ? storesState.value : [];
-  const waybillStore = merchantStores.find((store) => store.storeId === waybillStoreId);
-  const waybillProviderReadiness = bootstrap.phase === 'ready'
-    ? bootstrap.value.readiness.providers[waybillProvider]
-    : undefined;
-  const waybillProviderReady = waybillProviderReadiness === 'READY';
-  const waybillValid = Boolean(
-    session
-    && waybillStore
-    && waybillStore.merchantId === session.merchantId
-    && waybillProviderReady
-    && selectedBatchOrders.length > 0
-    && selectedBatchOrders.length <= 100
-    && selectedBatchOrders.every((order) => (
-      order.fulfillmentMode === 'DELIVERY'
-      && canExecuteOrderAction('RECORD_SHIPMENT', order.allowedActions)
-    )),
-  );
-  const printJobs = printJobsState.phase === 'ready' ? printJobsState.value : [];
-  const selectedPickupJob = selectedOrder?.fulfillmentMode === 'PICKUP'
-    ? printJobs.find((job) => job.orderId === selectedOrder.orderId && job.jobKind === 'PICKUP_RECEIPT')
-    : undefined;
 
   function selectOrder(order: FulfillmentOrder) {
     selectedOrderRef.current = order.orderId;
@@ -298,10 +180,9 @@ export function FulfillmentPage() {
     setTab(order.fulfillmentMode === 'DELIVERY' ? 'delivery' : 'pickup');
     setCommandState({ phase: 'idle' });
     commandKeys.current = {};
-    setCarrierCode('');
-    setTrackingNumberHash('');
-    setShipmentEvidenceHash('');
-    setReceiptEvidenceHash('');
+    setCarrierCode('SF');
+    setTrackingNumber('');
+    setShipmentNote('');
     setReceiptReasonCode('');
     setPickupCode('');
     setPickupEvidenceHash('');
@@ -311,11 +192,6 @@ export function FulfillmentPage() {
     selectedOrderRef.current = undefined;
     setSelectedOrderId(undefined);
     setTargetState({ phase: 'idle' });
-    setBatchSelection([]);
-    setBatchItems({});
-    delete commandKeys.current['batch-shipment'];
-    batchItemKeys.current = {};
-    resetWaybillAttempt();
   }
 
   function changeTab(next: 'delivery' | 'pickup') {
@@ -364,47 +240,6 @@ export function FulfillmentPage() {
     resetOrderContext();
   }
 
-  function toggleBatchOrder(order: FulfillmentOrder) {
-    if (!canExecuteOrderAction('RECORD_SHIPMENT', order.allowedActions)) return;
-    setBatchSelection((selection) => (
-      selection.includes(order.orderId)
-        ? selection.filter((orderId) => orderId !== order.orderId)
-        : [...selection, order.orderId]
-    ));
-    setBatchItems((items) => {
-      if (batchSelection.includes(order.orderId)) {
-        const remaining = { ...items };
-        delete remaining[order.orderId];
-        return remaining;
-      }
-      return {
-        ...items,
-        [order.orderId]: { carrierCode: 'SF', trackingNumberHash: '', evidenceHash: '' },
-      };
-    });
-    delete commandKeys.current['batch-shipment'];
-    delete batchItemKeys.current[order.orderId];
-    resetWaybillAttempt();
-    setCommandState({ phase: 'idle' });
-  }
-
-  function resetWaybillAttempt() {
-    waybillAttempt.current = undefined;
-    setWaybillState({ phase: 'idle' });
-  }
-
-  function updateWaybillInput(update: () => void) {
-    resetWaybillAttempt();
-    update();
-  }
-
-  function updateBatchItem(orderId: string, patch: Partial<BatchItemDraft>) {
-    setBatchItems((items) => ({ ...items, [orderId]: { ...items[orderId]!, ...patch } }));
-    delete commandKeys.current['batch-shipment'];
-    delete batchItemKeys.current[orderId];
-    setCommandState({ phase: 'idle' });
-  }
-
   function updateCommandInput(kind: CommandKind, update: () => void) {
     delete commandKeys.current[kind];
     setCommandState({ phase: 'idle' });
@@ -428,11 +263,9 @@ export function FulfillmentPage() {
     try {
       const message = await operation(idempotencyKey(kind));
       delete commandKeys.current[kind];
-      if (kind === 'batch-shipment') batchItemKeys.current = {};
       setCommandState({ phase: 'success', message });
       void loadOrders(true);
       void loadTarget(true);
-      void loadPrintJobs(true);
     } catch (error) {
       setCommandState({ phase: 'error', message: readableError(error) });
     }
@@ -441,41 +274,36 @@ export function FulfillmentPage() {
   function submitShipment() {
     if (!session || !selectedOrder || !shipmentAllowed || !shipmentValid) return;
     void runCommand('shipment', async (key) => {
+      const evidence = await api.createOrderTrackingEvidence(selectedOrder.orderId, {
+        carrierCode,
+        trackingNumber: trackingNumber.trim(),
+        note: shipmentNote.trim() || null,
+        idempotencyKey: `${key}-evidence`,
+      }, session.token);
+      if (!evidence.trackingNumberHash) throw new CoreApiError('InvalidResponse', '发货证据缺少运单标识。');
       const result = await api.recordShipment(selectedOrder.orderId, {
         idempotencyKey: key,
-        evidenceHash: shipmentEvidenceHash,
+        evidenceHash: evidence.evidenceHash,
         carrierCode,
-        trackingNumberHash,
+        trackingNumberHash: evidence.trackingNumberHash,
       }, session.token);
+      setTrackingNumber('');
+      setShipmentNote('');
       return `发货证据已记录：${result.shipmentId}`;
-    });
-  }
-
-  function submitShipmentBatch() {
-    if (!session || !batchValid) return;
-    void runCommand('batch-shipment', async (key) => {
-      const result = await api.recordShipmentBatch({
-        idempotencyKey: key,
-        items: selectedBatchOrders.map((order) => {
-          const draft = batchItems[order.orderId]!;
-          const itemKey = batchItemKeys.current[order.orderId]
-            ?? idempotencyKeyForOrder('shipment-item', order.orderId);
-          batchItemKeys.current[order.orderId] = itemKey;
-          return { orderId: order.orderId, idempotencyKey: itemKey, ...draft };
-        }),
-      }, session.token);
-      setBatchSelection([]);
-      setBatchItems({});
-      return `批量发货已原子确认：${result.batchId} / ${result.shipments.length} 笔`;
     });
   }
 
   function submitForcedReceipt() {
     if (!session || !selectedOrder || !receiptAllowed || !receiptValid) return;
     void runCommand('forced-receipt', async (key) => {
+      const evidence = await api.createOrderActionEvidence(selectedOrder.orderId, {
+        action: 'REQUEST_FORCED_RECEIPT',
+        reasonCode: receiptReasonCode,
+        idempotencyKey: `${key}-evidence`,
+      }, session.token);
       const result = await api.requestForcedReceipt(selectedOrder.orderId, {
         idempotencyKey: key,
-        evidenceHash: receiptEvidenceHash,
+        evidenceHash: evidence.evidenceHash,
         reasonCode: receiptReasonCode,
       }, session.token);
       return `平台审核申请已提交：${result.requestId}`;
@@ -499,51 +327,6 @@ export function FulfillmentPage() {
       }, session.token);
       return `门店核销已完成：${result.fulfilledAt}`;
     });
-  }
-
-  async function submitWaybillBatch() {
-    if (!session || !waybillStore || !waybillValid || waybillSubmitting) return;
-    const orderIds = selectedBatchOrders.map((order) => order.orderId);
-    const fingerprint = [waybillProvider, waybillCarrierCode, waybillStore.storeId, ...orderIds].join(':');
-    const attempt = waybillAttempt.current?.fingerprint === fingerprint
-      ? waybillAttempt.current
-      : { fingerprint, key: idempotencyKeyForOrder('waybill-batch', orderIds.join('-')) };
-    waybillAttempt.current = attempt;
-    setWaybillState({ phase: 'submitting' });
-    try {
-      const result = await api.createMerchantWaybillBatch({
-        provider: waybillProvider,
-        carrierCode: waybillCarrierCode,
-        storeId: waybillStore.storeId,
-        orderIds,
-        idempotencyKey: attempt.key,
-      }, session.token);
-      setWaybillState({ phase: 'ready', value: result });
-      void loadOrders(true);
-      void loadPrintJobs(true);
-    } catch (error) {
-      setWaybillState({ phase: 'error', message: readableError(error) });
-    }
-  }
-
-  async function retryPrintJob(job: PrintJob) {
-    if (!session || job.state === 'ACCEPTED' || !job.provider || !job.deviceId || retryingPrintJobId) return;
-    const key = printRetryKeys.current[job.printJobId]
-      ?? idempotencyKeyForOrder('print-retry', job.printJobId);
-    printRetryKeys.current[job.printJobId] = key;
-    setRetryingPrintJobId(job.printJobId);
-    setPrintRetryError(undefined);
-    try {
-      const updated = await api.retryMerchantPrintJob(job.printJobId, key, session.token);
-      delete printRetryKeys.current[job.printJobId];
-      setPrintJobsState((state) => state.phase === 'ready'
-        ? { phase: 'ready', value: state.value.map((item) => item.printJobId === updated.printJobId ? updated : item) }
-        : state);
-    } catch (error) {
-      setPrintRetryError(readableError(error));
-    } finally {
-      setRetryingPrintJobId(undefined);
-    }
   }
 
   async function exportOrders() {
@@ -586,7 +369,6 @@ export function FulfillmentPage() {
       <PageHeader
         actions={(
           <div className="button-group">
-            <button className="button secondary" disabled={!session || printJobsState.phase === 'loading'} onClick={() => void loadPrintJobs()} type="button"><Printer aria-hidden="true" size={16} /> 刷新打印任务</button>
             <button className="button secondary" disabled={!session || ordersState.phase !== 'ready' || exportState.phase === 'submitting'} onClick={() => void exportOrders()} type="button"><Download aria-hidden="true" size={16} /> {exportState.phase === 'submitting' ? '正在导出' : '导出 Excel'}</button>
             <button className="button primary" disabled={!session || ordersState.phase === 'loading'} onClick={() => void loadOrders()} type="button"><RefreshCw aria-hidden="true" size={16} /> 刷新订单</button>
           </div>
@@ -627,10 +409,8 @@ export function FulfillmentPage() {
                   key={order.orderId}
                   onSelect={() => selectOrder(order)}
                   order={order}
-                  batchSelected={batchSelection.includes(order.orderId)}
-                  onToggleBatch={() => toggleBatchOrder(order)}
                   selected={order.orderId === selectedOrderId}
-                  selectionDisabled={operationPending}
+                  selectionDisabled={submitting}
                   target={order.orderId === selectedOrderId ? selectedTarget : undefined}
                 />
               ))}
@@ -638,36 +418,10 @@ export function FulfillmentPage() {
           </table>
         </div>
         <div className="selection-bar">
-          <span>第 {pageIndex + 1} 页 · {tab === 'delivery' ? `已选 ${batchSelection.length} 笔可发货订单` : '到店自提不进入发货批次'}</span>
+          <span>第 {pageIndex + 1} 页 · 选择单笔订单处理履约</span>
           <div className="button-group"><button className="button secondary" disabled={pageIndex === 0 || ordersState.phase === 'loading'} onClick={goToPreviousPage} type="button">上一页</button><button className="button secondary" disabled={ordersState.phase !== 'ready' || !ordersState.value.nextCursor} onClick={goToNextPage} type="button">下一页</button></div>
         </div>
-        {tab === 'delivery' && batchSelection.length > 0 ? (
-          <>
-          <form className="batch-shipment-panel waybill-panel" onSubmit={(event) => { event.preventDefault(); void submitWaybillBatch(); }}>
-            <div className="section-heading"><div><p className="eyebrow">Provider waybill batch</p><h3>电子面单与自动发货</h3></div><span>{batchSelection.length} / 100</span></div>
-            <div className="waybill-controls">
-              <div className="field"><label htmlFor="waybill-provider">面单服务</label><select disabled={operationPending} id="waybill-provider" onChange={(event) => updateWaybillInput(() => setWaybillProvider(event.target.value as WaybillProvider))} value={waybillProvider}>{waybillProviders.map((name) => <option key={name} value={name}>{name}</option>)}</select></div>
-              <div className="field"><label htmlFor="waybill-carrier">承运商</label><select disabled={operationPending} id="waybill-carrier" onChange={(event) => updateWaybillInput(() => setWaybillCarrierCode(event.target.value as WaybillCarrierCode))} value={waybillCarrierCode}>{batchCarrierCodes.map((code) => <option key={code} value={code}>{code}</option>)}</select></div>
-              <div className="field"><label htmlFor="waybill-store">发货门店</label><select disabled={operationPending || storesState.phase !== 'ready' || merchantStores.length === 0} id="waybill-store" onChange={(event) => updateWaybillInput(() => setWaybillStoreId(event.target.value))} value={waybillStoreId}><option value="">选择门店</option>{merchantStores.map((store) => <option key={store.storeId} value={store.storeId}>{store.name} / {store.storeId}</option>)}</select></div>
-            </div>
-            {storesState.phase === 'error' ? <p className="form-error" role="alert">{storesState.message}</p> : null}
-            {storesState.phase === 'ready' && merchantStores.length === 0 ? <p className="form-error" role="alert">ConfigurationRequired：当前商家没有可用发货门店。</p> : null}
-            {waybillProviderReadiness !== 'READY' ? <p className="form-error" role="alert">ConfigurationRequired：{waybillProvider} 服务未就绪，面单提交已关闭。</p> : null}
-            <div className="selection-bar"><span>Core 向服务商取号，写入真实 tracking number、发货证据和打印任务。</span><button className="button primary" disabled={!waybillValid || operationPending} type="submit"><Printer aria-hidden="true" size={16} /> {waybillSubmitting ? '正在创建面单' : '创建电子面单批次'}</button></div>
-            {waybillState.phase === 'error' ? <p className="form-error" role="alert">{waybillState.message}</p> : null}
-            {waybillState.phase === 'ready' ? <WaybillResults result={waybillState.value} /> : null}
-          </form>
-          <form className="batch-shipment-panel" onSubmit={(event) => { event.preventDefault(); submitShipmentBatch(); }}>
-            <div className="section-heading"><div><p className="eyebrow">Atomic manual batch</p><h3>手工批量发货</h3></div><span>{batchSelection.length} / 100</span></div>
-            <div className="table-wrap compact-table"><table><thead><tr><th scope="col">订单号</th><th scope="col">承运商</th><th scope="col">物流单号哈希</th><th scope="col">发货证据哈希</th></tr></thead><tbody>{selectedBatchOrders.map((order) => {
-              const draft = batchItems[order.orderId]!;
-              return <tr key={order.orderId}><td><code className="hash-value">{order.orderId}</code></td><td><select aria-label={`批量承运商 ${order.orderId}`} disabled={submitting} onChange={(event) => updateBatchItem(order.orderId, { carrierCode: event.target.value as BatchCarrierCode })} value={draft.carrierCode}>{batchCarrierCodes.map((code) => <option key={code} value={code}>{code}</option>)}</select></td><td><input aria-label={`批量物流单号哈希 ${order.orderId}`} disabled={submitting} onChange={(event) => updateBatchItem(order.orderId, { trackingNumberHash: event.target.value })} placeholder="0x + 64 位十六进制" value={draft.trackingNumberHash} /></td><td><input aria-label={`批量发货证据哈希 ${order.orderId}`} disabled={submitting} onChange={(event) => updateBatchItem(order.orderId, { evidenceHash: event.target.value })} placeholder="0x + 64 位十六进制" value={draft.evidenceHash} /></td></tr>;
-            })}</tbody></table></div>
-            <div className="selection-bar"><span>整批在 Core 单事务中成功或失败；失败重试复用同一批次和单项幂等键。</span><button className="button primary" disabled={!batchValid || operationPending} type="submit"><Send aria-hidden="true" size={16} /> 原子提交批量发货</button></div>
-          </form>
-          </>
-        ) : null}
-        <p className="panel-note">Excel 由 Core 在商家租户范围内解密 PII、审计并生成；本页只传递已应用筛选和当前稳定游标。电子面单路径仅提交 provider、carrier、store 和 orderIds。</p>
+        <p className="panel-note">Excel 由 Core 在商家租户范围内解密 PII、审计并生成；首发发货仅使用单订单手工履约。</p>
       </section>
 
       <section className="section-block order-check" aria-labelledby="order-check-title">
@@ -686,12 +440,12 @@ export function FulfillmentPage() {
       </section>
 
       {selectedOrder?.fulfillmentMode === 'DELIVERY' ? (
-        <div className="two-panel-grid">
+        <div>
           <form className="section-block compact-section" onSubmit={(event) => { event.preventDefault(); submitShipment(); }}>
             <div className="section-heading"><div><p className="eyebrow">Shipment evidence</p><h2>提交发货证据</h2></div><PackageCheck aria-hidden="true" size={19} /></div>
-            <div className="field"><label htmlFor="carrier-code">承运商代码</label><input autoComplete="off" disabled={!shipmentAllowed || submitting} id="carrier-code" onChange={(event) => updateCommandInput('shipment', () => setCarrierCode(event.target.value.toUpperCase()))} pattern="[A-Z0-9_-]{2,32}" placeholder="例如 SF_EXPRESS" value={carrierCode} /></div>
-            <div className="field"><label htmlFor="tracking-number-hash">物流单号哈希</label><input autoComplete="off" disabled={!shipmentAllowed || submitting} id="tracking-number-hash" onChange={(event) => updateCommandInput('shipment', () => setTrackingNumberHash(event.target.value))} pattern="0x[0-9a-fA-F]{64}" placeholder="0x + 64 位十六进制" value={trackingNumberHash} /><span className="field-help">Core 当前只接收已生成的 trackingNumberHash；本页不猜测原始单号哈希规则。</span></div>
-            <div className="field"><label htmlFor="shipment-evidence-hash">发货证据哈希</label><input autoComplete="off" disabled={!shipmentAllowed || submitting} id="shipment-evidence-hash" onChange={(event) => updateCommandInput('shipment', () => setShipmentEvidenceHash(event.target.value))} pattern="0x[0-9a-fA-F]{64}" placeholder="0x + 64 位十六进制" value={shipmentEvidenceHash} /></div>
+            <div className="field"><label htmlFor="carrier-code">快递公司</label><select disabled={!shipmentAllowed || submitting} id="carrier-code" onChange={(event) => updateCommandInput('shipment', () => setCarrierCode(event.target.value as (typeof logisticsCarrierCodes)[number]))} value={carrierCode}>{logisticsCarrierCodes.map((code) => <option key={code} value={code}>{carrierLabel(code)}</option>)}</select></div>
+            <div className="field"><label htmlFor="tracking-number">运单号</label><input autoComplete="off" disabled={!shipmentAllowed || submitting} id="tracking-number" maxLength={64} onChange={(event) => updateCommandInput('shipment', () => setTrackingNumber(event.target.value))} placeholder="输入快递单上的运单号" value={trackingNumber} /><span className="field-help">原始运单号由 Core 加密保存，页面不计算哈希。</span></div>
+            <div className="field"><label htmlFor="shipment-note">发货备注 / 凭证说明</label><textarea disabled={!shipmentAllowed || submitting} id="shipment-note" maxLength={500} onChange={(event) => updateCommandInput('shipment', () => setShipmentNote(event.target.value))} placeholder="可选：包裹数量、交接情况或其他发货凭证说明" value={shipmentNote} /></div>
             <button className="button primary wide" disabled={!shipmentAllowed || !shipmentValid || submitting} type="submit"><Send aria-hidden="true" size={16} /> 提交发货证据</button>
             <ActionBlockReason action="RECORD_SHIPMENT" actions={allowedActions} enabled={shipmentAllowed} />
             <p className="panel-note">发货只提交幂等履约证据，不代表签收或资产结算。</p>
@@ -700,7 +454,6 @@ export function FulfillmentPage() {
             <div className="section-heading"><div><p className="eyebrow">Receipt review</p><h2>申请平台确认签收</h2></div></div>
             <p>物流确认送达满 7 天后，商家仅可提交证据申请，由平台审核。仲裁期间资产继续 Locked。</p>
             <div className="field"><label htmlFor="receipt-reason-code">申请原因代码</label><input autoComplete="off" disabled={!receiptAllowed || submitting} id="receipt-reason-code" onChange={(event) => updateCommandInput('forced-receipt', () => setReceiptReasonCode(event.target.value.toUpperCase()))} pattern="[A-Z0-9_:-]{2,64}" placeholder="平台约定的原因代码" value={receiptReasonCode} /></div>
-            <div className="field"><label htmlFor="receipt-evidence-hash">签收证据哈希</label><input autoComplete="off" disabled={!receiptAllowed || submitting} id="receipt-evidence-hash" onChange={(event) => updateCommandInput('forced-receipt', () => setReceiptEvidenceHash(event.target.value))} pattern="0x[0-9a-fA-F]{64}" placeholder="0x + 64 位十六进制" value={receiptEvidenceHash} /></div>
             <button className="button secondary wide" disabled={!receiptAllowed || !receiptValid || submitting} type="submit">申请平台审核</button>
             <ActionBlockReason action="REQUEST_FORCED_RECEIPT" actions={allowedActions} enabled={receiptAllowed} />
             <p className="panel-note">本工作台没有“商家强制签收”或直接完成订单的操作。</p>
@@ -720,90 +473,32 @@ export function FulfillmentPage() {
             <ActionBlockReason action="VERIFY_PICKUP" actions={allowedActions} enabled={pickupAllowed} />
             <p className="panel-note">Core 绑定订单快照门店并持久化失败尝试；本页不能更换 storeId，也不能离线提交。</p>
           </form>
-          <section className="section-block compact-section" aria-labelledby="pickup-print-title">
-            <div className="section-heading"><div><p className="eyebrow">Two-copy receipt</p><h2 id="pickup-print-title">核销双联小票</h2></div><Printer aria-hidden="true" size={19} /></div>
-            {printJobsState.phase === 'loading' ? <LoadingRows count={2} /> : null}
-            {printJobsState.phase === 'error' ? <EmptyState blocked description={printJobsState.message} title="打印任务读取失败" /> : null}
-            {printJobsState.phase === 'ready' && !selectedPickupJob ? <EmptyState description="核销最终确认后，Core 会自动创建一份双联小票任务。" title="尚未生成小票" /> : null}
-            {selectedPickupJob ? <dl className="binding-summary">
-              <div><dt>任务状态</dt><dd>{selectedPickupJob.state}</dd></div>
-              <div><dt>打印份数</dt><dd>{selectedPickupJob.copyCount}</dd></div>
-              <div><dt>设备</dt><dd>{selectedPickupJob.provider ?? '未绑定'} / {selectedPickupJob.deviceId ?? '未绑定'}</dd></div>
-              <div><dt>内容哈希</dt><dd><code>{selectedPickupJob.contentHash}</code></dd></div>
-            </dl> : null}
-            <p className="panel-note">浏览器只读取 Core 的 PICKUP_RECEIPT / 2 联任务，不生成、编辑或重算打印内容。</p>
-          </section>
         </div>
       ) : null}
-
-      <section className="section-block print-jobs-panel" aria-labelledby="print-jobs-title">
-        <div className="section-heading"><div><p className="eyebrow">Durable print queue</p><h2 id="print-jobs-title">打印作业</h2></div><button className="button secondary" disabled={!session || printJobsState.phase === 'loading'} onClick={() => void loadPrintJobs()} type="button"><RefreshCw aria-hidden="true" size={16} /> 刷新</button></div>
-        {printJobsState.phase === 'loading' ? <LoadingRows count={3} /> : null}
-        {printJobsState.phase === 'idle' ? <EmptyState blocked description="连接授权商家钱包后读取作业。" title="商家会话不可用" /> : null}
-        {printJobsState.phase === 'error' ? <EmptyState blocked description={printJobsState.message} title="打印作业读取失败" /> : null}
-        {printRetryError ? <p className="form-error" role="alert">{printRetryError}</p> : null}
-        {printJobsState.phase === 'ready' && printJobs.length === 0 ? <EmptyState description="电子面单或到店核销后，Core 会在此创建作业。" title="暂无打印作业" /> : null}
-        {printJobs.length > 0 ? <div className="table-wrap"><table><thead><tr><th scope="col">任务</th><th scope="col">类型</th><th scope="col">订单 / 门店</th><th scope="col">设备</th><th scope="col">份数</th><th scope="col">状态</th><th scope="col">Provider reference</th><th scope="col">错误 / 下次重试</th><th scope="col">操作</th></tr></thead><tbody>{printJobs.map((job) => {
-          const retryBlocked = !job.provider || !job.deviceId;
-          return <tr key={job.printJobId}><td><code className="hash-value">{job.printJobId}</code></td><td>{job.jobKind}</td><td><code className="hash-value">{job.orderId}</code><small className="table-subline">{job.storeId}</small></td><td>{job.provider ?? '—'}<small className="table-subline">{job.deviceId ?? '未绑定设备'}</small></td><td className="numeric-cell">{job.copyCount}</td><td><span className={`state-text ${job.state === 'ACCEPTED' ? 'success' : job.state === 'FAILED' || job.state === 'CONFIGURATION_REQUIRED' ? 'blocked' : ''}`}>{job.state}</span></td><td>{job.providerReference ?? '—'}</td><td>{job.errorCode ?? '—'}<small className="table-subline">{job.nextAttemptAt ?? '无调度时间'}</small></td><td>{job.state === 'ACCEPTED' ? <span className="state-text success">已受理</span> : <button className="button secondary" disabled={!session || retryBlocked || Boolean(retryingPrintJobId)} onClick={() => void retryPrintJob(job)} type="button"><RefreshCw aria-hidden="true" size={15} /> {retryingPrintJobId === job.printJobId ? '重试中' : '重试'}</button>}{retryBlocked && job.state !== 'ACCEPTED' ? <small className="table-subline">ConfigurationRequired</small> : null}</td></tr>;
-        })}</tbody></table></div> : null}
-      </section>
 
       {commandState.phase === 'submitting' ? <div className="system-notice" role="status"><RefreshCw aria-hidden="true" size={18} /><div><strong>正在提交 Core</strong><span>使用稳定幂等键等待权威响应。</span></div></div> : null}
       {commandState.phase === 'success' ? <div className="system-notice ready" role="status"><PackageCheck aria-hidden="true" size={18} /><div><strong>履约命令已确认</strong><span>{commandState.message}</span></div></div> : null}
       {commandState.phase === 'error' ? <p className="form-error" role="alert">{commandState.message}</p> : null}
 
-      <div className="provider-strip" role="status">
-        <ProviderStatus bootstrap={bootstrap} name="KUAIDI100" label="快递接口" />
-        <ProviderStatus bootstrap={bootstrap} name="CAINIAO" label="菜鸟面单" />
-        <ProviderStatus bootstrap={bootstrap} name="FEIE" label="云打印机" />
-        <ProviderStatus bootstrap={bootstrap} name="YILIANYUN" label="易联云打印" />
-        <span><i className={`provider-dot ${ordersState.phase === 'ready' ? 'ready' : 'offline'}`} />Core 订单流：{ordersState.phase === 'ready' ? 'Connected' : 'Unavailable'}</span>
-      </div>
-    </div>
-  );
-}
-
-function WaybillResults({ result }: { result: WaybillBatchResult }) {
-  return (
-    <div aria-live="polite" className="waybill-results">
-      <div className="section-heading"><div><p className="eyebrow">Core result</p><h4>面单批次 {result.batchId}</h4></div><span>{result.items.length} 笔</span></div>
-      <div className="table-wrap compact-table"><table><thead><tr><th scope="col">订单</th><th scope="col">状态</th><th scope="col">真实运单号</th><th scope="col">Provider reference</th><th scope="col">跟踪 / 证据哈希</th><th scope="col">打印任务</th><th scope="col">错误</th></tr></thead><tbody>{result.items.map((item) => (
-        <tr key={item.requestId}>
-          <td><code className="hash-value">{item.orderId}</code></td>
-          <td><span className={`state-text ${item.state === 'COMPLETED' ? 'success' : item.state === 'FAILED' || item.state === 'CONFIGURATION_REQUIRED' ? 'blocked' : ''}`}>{item.state}</span></td>
-          <td>{item.trackingNumber ?? '—'}</td>
-          <td>{item.providerReference ?? '—'}</td>
-          <td>{item.trackingNumberHash ? <code className="hash-value">{item.trackingNumberHash}</code> : '—'}{item.shipmentEvidenceHash ? <code className="hash-value table-subline">{item.shipmentEvidenceHash}</code> : null}</td>
-          <td>{item.printJobId ? <code className="hash-value">{item.printJobId}</code> : '—'}</td>
-          <td>{item.errorCode ?? '—'}</td>
-        </tr>
-      ))}</tbody></table></div>
     </div>
   );
 }
 
 function OrderRow({
   order,
-  batchSelected,
   selected,
   selectionDisabled,
   target,
-  onToggleBatch,
   onSelect,
 }: {
   order: FulfillmentOrder;
-  batchSelected: boolean;
   selected: boolean;
   selectionDisabled: boolean;
   target: FulfillmentTarget | undefined;
-  onToggleBatch(): void;
   onSelect(): void;
 }) {
   const latestShipment = order.shipments.at(-1);
   const pickupStore = target?.fulfillmentMode === 'PICKUP' ? target.payload.name : '选择后读取';
-  const batchAllowed = order.fulfillmentMode === 'DELIVERY'
-    && canExecuteOrderAction('RECORD_SHIPMENT', order.allowedActions);
   const shared = [
     <td key="order"><code className="hash-value">{order.orderId}</code></td>,
     <td key="type"><span className="state-text">{order.orderKind}</span></td>,
@@ -815,12 +510,11 @@ function OrderRow({
   ];
   return (
     <tr aria-selected={selected}>
-      {order.fulfillmentMode === 'DELIVERY' ? <td><input aria-label={`选择批量发货 ${order.orderId}`} checked={batchSelected} disabled={!batchAllowed || selectionDisabled} onChange={onToggleBatch} type="checkbox" /></td> : null}
       {shared}
       {order.fulfillmentMode === 'DELIVERY' ? (
         <>
           <td><span className={order.finalityStatus === 'FINAL' ? 'state-text success' : 'state-text blocked'}>{order.finalityStatus}</span></td>
-          <td>{latestShipment ? <code className="hash-value">{latestShipment.trackingNumberHash}</code> : '—'}</td>
+          <td>{latestShipment?.trackingNumber ?? '—'}</td>
         </>
       ) : (
         <>
@@ -922,33 +616,18 @@ function ActionBlockReason({
   return <p className="panel-note" role="status">Core 阻断：{item?.reasonCode ?? '当前订单状态未授权此操作'}</p>;
 }
 
-function ProviderStatus({
-  bootstrap,
-  name,
-  label,
-}: {
-  bootstrap: ReturnType<typeof useCoreRuntime>['bootstrap'];
-  name: string;
-  label: string;
-}) {
-  const state = bootstrap.phase === 'ready'
-    ? bootstrap.value.readiness.providers[name] ?? 'CONFIGURATION_REQUIRED'
-    : 'CONFIGURATION_REQUIRED';
-  return <span><i className={`provider-dot ${state === 'READY' ? 'ready' : 'warning'}`} />{label}：{state === 'READY' ? 'Ready' : 'ConfigurationRequired'}</span>;
-}
-
 function timestamp(value: string | null) {
   return value ? <time dateTime={value}>{value}</time> : '—';
+}
+
+function carrierLabel(code: (typeof logisticsCarrierCodes)[number]) {
+  return ({ SF: '顺丰', JD: '京东物流', YTO: '圆通', ZTO: '中通', STO: '申通', EMS: 'EMS' } as const)[code];
 }
 
 function localDateTimeToIso(value: string) {
   const parsed = new Date(value);
   if (!Number.isFinite(parsed.getTime())) throw new Error('筛选时间无效。');
   return parsed.toISOString();
-}
-
-function idempotencyKeyForOrder(kind: string, orderId: string) {
-  return `merchant-${kind}-${orderId.slice(2, 10)}-${commandNonce()}`;
 }
 
 function commandNonce() {

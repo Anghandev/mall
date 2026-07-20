@@ -215,6 +215,8 @@ export interface MerchantReceivableStatementListOptions {
 export interface TrackingEvidenceRequest {
   carrierCode: LogisticsCarrierCode;
   trackingNumber: string;
+  note?: string | null;
+  mediaAssetIds?: readonly string[];
   idempotencyKey: string;
 }
 
@@ -380,6 +382,11 @@ export interface CoreApi {
   createOrderTrackingEvidence(
     orderId: string,
     input: TrackingEvidenceRequest,
+    token: string,
+  ): Promise<EvidenceEnvelopeProjection>;
+  createOrderActionEvidence(
+    orderId: string,
+    input: { action: 'REQUEST_FORCED_RECEIPT'; reasonCode: string; idempotencyKey: string },
     token: string,
   ): Promise<EvidenceEnvelopeProjection>;
   recordShipment(orderId: string, input: ShipmentRequest, token: string): Promise<ShipmentResult>;
@@ -780,6 +787,14 @@ export function createCoreApi(baseUrl = import.meta.env.VITE_CORE_API_BASE_URL ?
         `/v2/orders/${encodeURIComponent(orderId)}/tracking-evidence`,
         { method: 'POST', body: JSON.stringify(input), token },
       ), orderId, input.carrierCode);
+    },
+
+    async createOrderActionEvidence(orderId, input, token) {
+      return parseActionEvidenceEnvelope(await request(
+        normalizedBaseUrl,
+        `/v2/orders/${encodeURIComponent(orderId)}/evidence`,
+        { method: 'POST', body: JSON.stringify(input), token },
+      ), orderId, input.action, input.reasonCode);
     },
 
     async recordShipment(orderId, input, token) {
@@ -1816,7 +1831,13 @@ function parseShipmentProjection(input: unknown): ShipmentProjection {
   return {
     shipmentId: string(value.shipmentId, 'shipment.shipmentId'),
     carrierCode: string(value.carrierCode, 'shipment.carrierCode'),
+    trackingNumber: value.trackingNumber === null ? null : string(value.trackingNumber, 'shipment.trackingNumber'),
     trackingNumberHash: bytes32(value.trackingNumberHash, 'shipment.trackingNumberHash'),
+    note: value.note === null ? null : string(value.note, 'shipment.note'),
+    evidenceHash: bytes32(value.evidenceHash, 'shipment.evidenceHash'),
+    mediaAssetIds: array(value.mediaAssetIds, 'shipment.mediaAssetIds').map((assetId) => (
+      bytes32(assetId, 'shipment.mediaAssetId')
+    )),
     providerReferenceHash: nullableBytes32(value.providerReferenceHash, 'shipment.providerReferenceHash'),
     createdAt: dateTime(value.createdAt, 'shipment.createdAt'),
   };
@@ -2106,6 +2127,45 @@ function parseEvidenceEnvelope(
     payload: jsonObject(value.payload, 'tracking evidence payload'),
     carrierCode: expectedCarrierCode,
     createdAt: dateTime(value.createdAt, 'tracking evidence createdAt'),
+  };
+}
+
+function parseActionEvidenceEnvelope(
+  input: unknown,
+  expectedOrderId: string,
+  expectedAction: 'REQUEST_FORCED_RECEIPT',
+  expectedReasonCode: string,
+): EvidenceEnvelopeProjection {
+  const value = record(input, 'action evidence');
+  exactObjectKeys(value, [
+    'artifactVersion', 'evidenceHash', 'ownerWallet', 'actorRole', 'purpose',
+    'resourceType', 'resourceId', 'action', 'reasonCode', 'trackingNumberHash',
+    'mediaAssetIds', 'payload', 'createdAt',
+  ], 'action evidence');
+  exact(value.artifactVersion, artifactVersion, 'action evidence artifactVersion');
+  exact(value.actorRole, 'MERCHANT', 'action evidence actorRole');
+  exact(value.purpose, 'FULFILLMENT_ACTION', 'action evidence purpose');
+  exact(value.resourceType, 'ORDER', 'action evidence resourceType');
+  exact(value.resourceId, expectedOrderId, 'action evidence resourceId');
+  exact(value.action, expectedAction, 'action evidence action');
+  exact(value.reasonCode, expectedReasonCode, 'action evidence reasonCode');
+  exact(value.trackingNumberHash, null, 'action evidence trackingNumberHash');
+  return {
+    artifactVersion,
+    evidenceHash: bytes32(value.evidenceHash, 'action evidence evidenceHash'),
+    ownerWallet: address(value.ownerWallet, 'action evidence ownerWallet'),
+    actorRole: 'MERCHANT',
+    purpose: 'FULFILLMENT_ACTION',
+    resourceType: 'ORDER',
+    resourceId: expectedOrderId,
+    action: expectedAction,
+    reasonCode: expectedReasonCode,
+    trackingNumberHash: null,
+    mediaAssetIds: array(value.mediaAssetIds, 'action evidence mediaAssetIds').map((assetId) => (
+      bytes32(assetId, 'action evidence mediaAssetId')
+    )),
+    payload: jsonObject(value.payload, 'action evidence payload'),
+    createdAt: dateTime(value.createdAt, 'action evidence createdAt'),
   };
 }
 

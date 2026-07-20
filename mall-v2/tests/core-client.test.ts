@@ -101,7 +101,7 @@ describe('Mall Core artifact boundary', () => {
       ...Object.values(coordinatedRealtimeOperations),
     ];
 
-    expect(artifactVersion).toBe('2.0.0-settlement-admin.17');
+    expect(artifactVersion).toBe('2.0.0-fulfillment-launch.18');
     expect(coordinatedOpenApi.paths['/v2/merchant/orders/exports']?.post?.operationId)
       .toBe('exportMerchantOrders');
     expect(coordinatedOpenApi.paths['/v2/admin/payments/{orderId}']?.get?.operationId)
@@ -276,7 +276,8 @@ describe('coordinated Core HTTP client', () => {
     const client = createCoreClient({ baseUrl: 'https://core.mall.test', fetch: fetcher });
     const addressRequest = {
       label: '家', recipientName: '张三', phone: '13800138000', detailAddress: parsedBuyerAddress.detailAddress!,
-      longitude: parsedBuyerAddress.longitude!, latitude: parsedBuyerAddress.latitude!, isDefault: true,
+      province: '辽宁省', city: '大连市', district: '中山区', regionCode: '210202',
+      longitude: null, latitude: null, isDefault: true,
       idempotencyKey: 'mall-address-1',
     };
 
@@ -569,8 +570,9 @@ describe('coordinated Core HTTP client', () => {
       recipientName: '张三',
       phone: '13800138000',
       address: '辽宁省大连市中山区示例路 24 号',
-      longitude: 121.6389,
-      latitude: 38.914,
+      province: '辽宁省', city: '大连市', district: '中山区', regionCode: '210202',
+      longitude: null,
+      latitude: null,
     };
 
     expect(await client.listStores('210202')).toEqual([store]);

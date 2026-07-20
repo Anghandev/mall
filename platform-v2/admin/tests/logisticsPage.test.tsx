@@ -3,10 +3,15 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { App } from '../src/App';
+import { CoreSessionProvider } from '../src/coreSession';
+import { LogisticsPage } from '../src/pages/LogisticsPage';
 
 function renderLogistics(path = '/logistics') {
-  return render(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>);
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <CoreSessionProvider><LogisticsPage /></CoreSessionProvider>
+    </MemoryRouter>,
+  );
 }
 
 afterEach(() => {
