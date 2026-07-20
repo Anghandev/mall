@@ -46,6 +46,11 @@ type CreateDraft = {
   name: string;
   phone: string;
   businessHours: string;
+  address: string;
+  province: string;
+  city: string;
+  district: string;
+  regionCode: string;
   longitude: string;
   latitude: string;
 };
@@ -54,6 +59,11 @@ const emptyCreateDraft: CreateDraft = {
   name: '',
   phone: '',
   businessHours: '',
+  address: '',
+  province: '',
+  city: '',
+  district: '',
+  regionCode: '',
   longitude: '',
   latitude: '',
 };
@@ -151,6 +161,7 @@ export function StoresPage() {
     && validBusinessHours(draft.businessHours) && draft.imageAssetIds.length <= 5);
   const createFormValid = validName(createDraft.name) && validPhone(createDraft.phone)
     && validBusinessHours(createDraft.businessHours)
+    && validManualRegion(createDraft)
     && validCoordinate(createDraft.longitude, -180, 180)
     && validCoordinate(createDraft.latitude, -90, 90);
 
@@ -185,6 +196,11 @@ export function StoresPage() {
       name: createDraft.name.trim(),
       phone: createDraft.phone.trim(),
       businessHours: createDraft.businessHours.trim(),
+      address: createDraft.address.trim(),
+      province: createDraft.province.trim(),
+      city: createDraft.city.trim(),
+      district: createDraft.district.trim(),
+      regionCode: createDraft.regionCode.trim(),
       longitude: Number(createDraft.longitude),
       latitude: Number(createDraft.latitude),
     };
@@ -200,7 +216,7 @@ export function StoresPage() {
       setCreateDraft(emptyCreateDraft);
       setCreateOpen(false);
       await loadStores(created.storeId);
-      setStoreFeedback({ tone: 'success', message: '门店草稿已创建，行政区、地址和坐标已由 Core 绑定高德解析结果。' });
+      setStoreFeedback({ tone: 'success', message: '门店草稿已创建，行政区、详细地址和坐标已绑定且不可修改。' });
     } catch (error) {
       setStoreFeedback({ tone: 'error', message: readableStoreError(error) });
     } finally {
@@ -344,22 +360,27 @@ export function StoresPage() {
             {createOpen ? '取消新增' : '新增门店'}
           </button>
         )}
-        description="创建坐标绑定的门店，维护版本化资料和实景图。"
+        description="创建位置绑定的门店，维护版本化资料和实景图。"
         eyebrow="04 / 网点设置"
         title="门店管理"
       />
 
       {createOpen ? (
         <form className="section-block form-section store-create-panel" onSubmit={(event) => { event.preventDefault(); void createStore(); }} aria-labelledby="create-store-title">
-          <div className="section-heading"><div><p className="eyebrow">AMap-bound draft</p><h2 id="create-store-title">新建门店草稿</h2></div><MapPin aria-hidden="true" size={19} /></div>
+          <div className="section-heading"><div><p className="eyebrow">Immutable location</p><h2 id="create-store-title">新建门店草稿</h2></div><MapPin aria-hidden="true" size={19} /></div>
           <div className="store-create-grid">
             <div className="field"><label htmlFor="create-store-name">门店名称</label><input id="create-store-name" maxLength={100} onChange={(event) => setCreateDraft((current) => ({ ...current, name: event.target.value }))} required value={createDraft.name} /></div>
             <div className="field"><label htmlFor="create-store-phone">服务电话</label><input id="create-store-phone" inputMode="tel" maxLength={20} onChange={(event) => setCreateDraft((current) => ({ ...current, phone: event.target.value }))} pattern="[+]?[0-9-]{7,20}" required value={createDraft.phone} /></div>
             <div className="field"><label htmlFor="create-business-hours">营业时间</label><input id="create-business-hours" maxLength={240} onChange={(event) => setCreateDraft((current) => ({ ...current, businessHours: event.target.value }))} placeholder="09:00-18:00" required value={createDraft.businessHours} /></div>
-            <div className="field"><label htmlFor="create-longitude">高德经度</label><input id="create-longitude" inputMode="decimal" max="180" min="-180" onChange={(event) => setCreateDraft((current) => ({ ...current, longitude: event.target.value }))} required step="any" type="number" value={createDraft.longitude} /></div>
-            <div className="field"><label htmlFor="create-latitude">高德纬度</label><input id="create-latitude" inputMode="decimal" max="90" min="-90" onChange={(event) => setCreateDraft((current) => ({ ...current, latitude: event.target.value }))} required step="any" type="number" value={createDraft.latitude} /></div>
+            <div className="field"><label htmlFor="create-province">省</label><input id="create-province" maxLength={64} onChange={(event) => setCreateDraft((current) => ({ ...current, province: event.target.value }))} required value={createDraft.province} /></div>
+            <div className="field"><label htmlFor="create-city">市</label><input id="create-city" maxLength={64} onChange={(event) => setCreateDraft((current) => ({ ...current, city: event.target.value }))} required value={createDraft.city} /></div>
+            <div className="field"><label htmlFor="create-district">区县</label><input id="create-district" maxLength={64} onChange={(event) => setCreateDraft((current) => ({ ...current, district: event.target.value }))} required value={createDraft.district} /></div>
+            <div className="field"><label htmlFor="create-region-code">6 位行政区代码</label><input id="create-region-code" inputMode="numeric" maxLength={6} onChange={(event) => setCreateDraft((current) => ({ ...current, regionCode: event.target.value }))} pattern="[0-9]{6}" required value={createDraft.regionCode} /></div>
+            <div className="field"><label htmlFor="create-longitude">经度</label><input id="create-longitude" inputMode="decimal" max="180" min="-180" onChange={(event) => setCreateDraft((current) => ({ ...current, longitude: event.target.value }))} required step="any" type="number" value={createDraft.longitude} /></div>
+            <div className="field"><label htmlFor="create-latitude">纬度</label><input id="create-latitude" inputMode="decimal" max="90" min="-90" onChange={(event) => setCreateDraft((current) => ({ ...current, latitude: event.target.value }))} required step="any" type="number" value={createDraft.latitude} /></div>
           </div>
-          <div className="signature-note"><Crosshair aria-hidden="true" size={17} />只提交坐标。Core 调用高德反向地理编码后固化 6 位行政区和格式化地址，浏览器不手写地址。</div>
+          <div className="field"><label htmlFor="create-address">详细地址</label><input id="create-address" maxLength={300} minLength={5} onChange={(event) => setCreateDraft((current) => ({ ...current, address: event.target.value }))} required value={createDraft.address} /></div>
+          <div className="signature-note"><Crosshair aria-hidden="true" size={17} />完整地址和坐标会由 Core 固化。门店创建后位置永久锁定，搬迁需另建门店。</div>
           {storeFeedback ? <p className={`command-notice ${storeFeedback.tone}`} role={storeFeedback.tone === 'error' ? 'alert' : 'status'}>{storeFeedback.message}</p> : null}
           <button className="button primary" disabled={!createFormValid || Boolean(storeBusy)} type="submit">{storeBusy === 'create' ? '创建中…' : '创建草稿'}</button>
         </form>
@@ -410,10 +431,10 @@ export function StoresPage() {
               </fieldset>
 
               <div className="immutable-fieldset">
-                <div className="immutable-heading"><MapPin aria-hidden="true" size={20} /><div><strong>高德位置证据已冻结</strong><span>创建后行政区、地址和坐标不可通过资料保存变更</span></div></div>
-                <div className="field"><label htmlFor="store-address">反向解析地址</label><input disabled id="store-address" readOnly value={selectedStore.address} /></div>
+                <div className="immutable-heading"><MapPin aria-hidden="true" size={20} /><div><strong>门店位置已锁定</strong><span>创建后行政区、地址和坐标不可通过资料保存变更</span></div></div>
+                <div className="field"><label htmlFor="store-address">详细地址</label><input disabled id="store-address" readOnly value={selectedStore.address} /></div>
                 <div className="two-column-fields">
-                  <div className="field"><label htmlFor="coordinates">高德坐标</label><input disabled id="coordinates" readOnly value={`${selectedStore.longitude}, ${selectedStore.latitude}`} /></div>
+                  <div className="field"><label htmlFor="coordinates">门店坐标</label><input disabled id="coordinates" readOnly value={`${selectedStore.longitude}, ${selectedStore.latitude}`} /></div>
                   <div className="field"><label htmlFor="region-code">6 位行政区划代码</label><input disabled id="region-code" readOnly value={selectedStore.regionCode} /></div>
                 </div>
               </div>
@@ -500,6 +521,13 @@ function validCoordinate(value: string, minimum: number, maximum: number) {
   if (value.trim() === '') return false;
   const number = Number(value);
   return Number.isFinite(number) && number >= minimum && number <= maximum;
+}
+
+function validManualRegion(draft: CreateDraft) {
+  return draft.address.trim().length >= 5
+    && draft.address.length <= 300
+    && [draft.province, draft.city, draft.district].every((value) => value.trim().length >= 1 && value.length <= 64)
+    && /^[0-9]{6}$/.test(draft.regionCode.trim());
 }
 
 function validImage(file: File) {

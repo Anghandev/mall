@@ -1296,7 +1296,7 @@ describe('03b assigned takeover fulfillment', () => {
 });
 
 describe('04 store controls', () => {
-  it('creates an AMap-bound draft, binds a verified image, saves, activates and closes it by Core version', async () => {
+  it('creates a manually located draft, binds a verified image, saves, activates and closes it by Core version', async () => {
     const storeImageUploadIntent: typeof mediaUploadIntent = {
       ...mediaUploadIntent,
       uploadIntentId: `0x${'3'.repeat(64)}`,
@@ -1333,8 +1333,8 @@ describe('04 store controls', () => {
         businessHours: input.businessHours,
         longitude: input.longitude,
         latitude: input.latitude,
-        address: '上海市浦东新区世纪大道 24 号',
-        regionCode: '310115',
+        address: input.address!,
+        regionCode: input.regionCode!,
         imageAssetIds: [],
         status: 'DRAFT',
         version: 1,
@@ -1424,19 +1424,29 @@ describe('04 store controls', () => {
     await user.type(within(createForm).getByLabelText('门店名称'), '浦东黄金店');
     await user.type(within(createForm).getByLabelText('服务电话'), '021-87654321');
     await user.type(within(createForm).getByLabelText('营业时间'), '10:00-20:00');
-    await user.type(within(createForm).getByLabelText('高德经度'), '121.506');
-    await user.type(within(createForm).getByLabelText('高德纬度'), '31.245');
+    await user.type(within(createForm).getByLabelText('省'), '上海市');
+    await user.type(within(createForm).getByLabelText('市'), '上海市');
+    await user.type(within(createForm).getByLabelText('区县'), '浦东新区');
+    await user.type(within(createForm).getByLabelText('6 位行政区代码'), '310115');
+    await user.type(within(createForm).getByLabelText('经度'), '121.506');
+    await user.type(within(createForm).getByLabelText('纬度'), '31.245');
+    await user.type(within(createForm).getByLabelText('详细地址'), '上海市浦东新区世纪大道 24 号');
     await user.click(within(createForm).getByRole('button', { name: '创建草稿' }));
 
     expect(await screen.findByDisplayValue('上海市浦东新区世纪大道 24 号')).toBeTruthy();
+    expect(await screen.findByText(/门店草稿已创建/)).toBeTruthy();
     expect(createMerchantStore).toHaveBeenCalledWith(expect.objectContaining({
       name: '浦东黄金店',
+      address: '上海市浦东新区世纪大道 24 号',
+      province: '上海市',
+      city: '上海市',
+      district: '浦东新区',
+      regionCode: '310115',
       longitude: 121.506,
       latitude: 31.245,
       idempotencyKey: expect.stringMatching(/^merchant-create-store-/),
     }), 'test-session');
-    expect(createMerchantStore.mock.calls[0]?.[0]).not.toHaveProperty('regionCode');
-    expect(createMerchantStore.mock.calls[0]?.[0]).not.toHaveProperty('address');
+    expect(screen.getByText(/门店位置已锁定/)).toBeTruthy();
 
     const imageInput = document.querySelector<HTMLInputElement>('input[type="file"][multiple]');
     expect(imageInput).toBeTruthy();
@@ -1473,6 +1483,36 @@ describe('04 store controls', () => {
       expectedVersion: 3,
       idempotencyKey: expect.stringMatching(/^merchant-close-store-store-created-1-/),
     }), 'test-session');
+  });
+
+  it('requires the full manual location and stays fail closed when Core rejects creation', async () => {
+    const createMerchantStore = vi.fn(async () => {
+      throw new CoreApiError('ConfigurationRequired', '门店位置配置不可用');
+    });
+    const { user } = await enterStores(createMockCoreApi({ createMerchantStore }));
+
+    await user.click(await screen.findByRole('button', { name: '新增门店' }));
+    const createForm = screen.getByRole('heading', { name: '新建门店草稿' }).closest('form')!;
+    const createButton = within(createForm).getByRole('button', { name: '创建草稿' }) as HTMLButtonElement;
+    await user.type(within(createForm).getByLabelText('门店名称'), '浦东黄金店');
+    await user.type(within(createForm).getByLabelText('服务电话'), '021-87654321');
+    await user.type(within(createForm).getByLabelText('营业时间'), '10:00-20:00');
+    await user.type(within(createForm).getByLabelText('省'), '上海市');
+    await user.type(within(createForm).getByLabelText('市'), '上海市');
+    await user.type(within(createForm).getByLabelText('区县'), '浦东新区');
+    await user.type(within(createForm).getByLabelText('经度'), '121.506');
+    await user.type(within(createForm).getByLabelText('纬度'), '31.245');
+    await user.type(within(createForm).getByLabelText('详细地址'), '上海市浦东新区世纪大道 24 号');
+
+    expect(createButton.disabled).toBe(true);
+    await user.type(within(createForm).getByLabelText('6 位行政区代码'), '310115');
+    expect(createButton.disabled).toBe(false);
+    await user.click(createButton);
+
+    expect((await within(createForm).findByRole('alert')).textContent).toMatch(/ConfigurationRequired/);
+    expect(within(createForm).getByDisplayValue('上海市浦东新区世纪大道 24 号')).toBeTruthy();
+    expect(screen.queryByText(/门店草稿已创建/)).toBeNull();
+    expect(createMerchantStore).toHaveBeenCalledTimes(1);
   });
 
   it('refreshes after a version conflict and exposes permission failures without local success', async () => {
