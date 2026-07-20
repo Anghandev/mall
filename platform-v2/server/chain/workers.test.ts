@@ -88,23 +88,24 @@ test('RPC log reader falls back to block receipts without widening the address f
   assert.deepEqual(calls, [{ method: 'eth_getBlockReceipts', params: ['0x64'] }]);
 });
 
-test('coverage evidence uses stable latest state without historical eth_call', async () => {
-  const calls: Array<Record<string, unknown>> = [];
-  const provider = {
+test('coverage evidence uses the lower common RPC height for every balance', async () => {
+  const calls: Array<{ provider: string; blockTag: unknown }> = [];
+  const provider = (name: string, head: number) => ({
     getNetwork: async () => ({ chainId: 56n }),
-    getBlock: async (tag: string) => {
-      assert.equal(tag, 'latest');
+    getBlock: async (tag: string | number) => {
+      if (tag === 'latest') return { number: head, hash: head === 123 ? HASH_1 : HASH_2 };
+      assert.equal(tag, 123);
       return { number: 123, hash: HASH_1 };
     },
     call: async (transaction: Record<string, unknown>) => {
-      calls.push(transaction);
+      calls.push({ provider: name, blockTag: transaction.blockTag });
       return AbiCoder.defaultAbiCoder().encode(['uint256'], [100n]);
     },
-  };
+  });
   const source = new ResilientBscCoverageSource({
     providers: [
-      provider as unknown as JsonRpcProvider,
-      provider as unknown as JsonRpcProvider,
+      provider('primary', 124) as unknown as JsonRpcProvider,
+      provider('fallback', 123) as unknown as JsonRpcProvider,
     ],
     assets: [{ walletAddress: BUYER, asset: 'USDT', tokenAddress: USDT_ADDRESS }],
   });
@@ -114,7 +115,10 @@ test('coverage evidence uses stable latest state without historical eth_call', a
   assert.equal(observation.blockNumber, 123);
   assert.equal(observation.assets[0]?.balance, '100');
   assert.equal(calls.length, 2);
-  assert.ok(calls.every((call) => !Object.hasOwn(call, 'blockTag')));
+  assert.deepEqual(calls, [
+    { provider: 'primary', blockTag: 123 },
+    { provider: 'fallback', blockTag: 123 },
+  ]);
 });
 
 test('logistics print worker serializes polling and waits for the active dispatch on stop', async () => {

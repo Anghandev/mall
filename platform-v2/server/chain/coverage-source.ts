@@ -55,9 +55,15 @@ export class ResilientBscCoverageSource implements CoverageSource {
     if (networks.some((network) => network.chainId !== 56n)) {
       throw new CoreError('ExternalBlocked', 'Coverage RPC is not BSC chain 56', 503);
     }
-    const observations = await Promise.all(this.#providers.map((provider) => observeLatest(
+    const heads = await Promise.all(this.#providers.map((provider) => provider.getBlock('latest')));
+    if (heads.some((head) => !head?.hash || !Number.isSafeInteger(head.number))) {
+      throw new CoreError('ExternalBlocked', 'Latest canonical coverage block is unavailable', 503);
+    }
+    const commonHeight = Math.min(...heads.map((head) => head!.number));
+    const observations = await Promise.all(this.#providers.map((provider) => observeBlock(
       provider,
       this.#assets,
+      commonHeight,
     )));
     const [primary, fallback] = observations;
     if (!primary || !fallback || stableJson(primary) !== stableJson(fallback)) {
@@ -75,25 +81,27 @@ export class ResilientBscCoverageSource implements CoverageSource {
   }
 }
 
-async function observeLatest(
+async function observeBlock(
   provider: CoverageRpcProvider,
   assets: readonly { walletAddress: string; asset: 'USDT' | 'NPL'; tokenAddress: string }[],
+  blockNumber: number,
 ) {
-  const before = await provider.getBlock('latest');
-  if (!before?.hash || !Number.isSafeInteger(before.number)) {
-    throw new CoreError('ExternalBlocked', 'Latest canonical coverage block is unavailable', 503);
+  const before = await provider.getBlock(blockNumber);
+  if (!before?.hash || before.number !== blockNumber) {
+    throw new CoreError('ExternalBlocked', 'Common canonical coverage block is unavailable', 503);
   }
   const values = await Promise.all(assets.map(async (asset) => {
     const result = await provider.call({
       to: asset.tokenAddress,
       data: TOKEN.encodeFunctionData('balanceOf', [asset.walletAddress]),
+      blockTag: blockNumber,
     });
     const balance = String(TOKEN.decodeFunctionResult('balanceOf', result)[0]);
     return { ...asset, balance };
   }));
-  const after = await provider.getBlock('latest');
+  const after = await provider.getBlock(blockNumber);
   if (!after?.hash || after.number !== before.number || after.hash.toLowerCase() !== before.hash.toLowerCase()) {
-    throw new CoreError('FinalityPending', 'Coverage head advanced while latest balances were observed', 409);
+    throw new CoreError('FinalityPending', 'Coverage block changed while balances were observed', 409);
   }
   return { blockNumber: before.number, blockHash: before.hash.toLowerCase(), assets: values };
 }
