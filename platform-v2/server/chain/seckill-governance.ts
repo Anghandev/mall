@@ -393,7 +393,7 @@ export class SeckillGovernanceWorker {
     const executions = await this.#pendingExecutions(10);
     for (const action of executions) {
       try {
-        if (!action.approval_deadline || action.approval_deadline.getTime() <= this.#clock().getTime()) {
+        if (approvalExpired(action.approval_deadline, this.#clock())) {
           await this.#expirePendingExecution(action.action_id);
           continue;
         }
@@ -577,8 +577,7 @@ export class SeckillGovernanceWorker {
     return this.#transactions.transaction(async (executor) => {
       const action = await lockedAction(executor, actionId);
       const now = this.#clock();
-      if (action.state !== 'PENDING_EXECUTION'
-        || (action.approval_deadline && action.approval_deadline.getTime() > now.getTime())) return;
+      if (action.state !== 'PENDING_EXECUTION' || !approvalExpired(action.approval_deadline, now)) return;
       await executor.query(
         "UPDATE core.seckill_governance_actions SET state = 'FAILED', updated_at = $2 WHERE action_id = $1",
         [action.action_id, now],
@@ -1382,6 +1381,12 @@ function secureUrl(value: string, name: string) {
     throw new CoreError('ExternalBlocked', `${name} requires HTTPS outside loopback`, 503);
   }
   return url;
+}
+
+function approvalExpired(value: Date | string | null, now: Date) {
+  if (!value) return true;
+  const timestamp = value instanceof Date ? value.getTime() : Date.parse(String(value));
+  return !Number.isFinite(timestamp) || timestamp <= now.getTime();
 }
 
 function normalizedUrl(value: string) {
