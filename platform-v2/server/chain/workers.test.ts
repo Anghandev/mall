@@ -376,7 +376,6 @@ test('polling payment worker persists empty blocks, recovers a common-ancestor r
     indexer: new ChainIndexer(decoder, store),
     store,
     deploymentBlock: 100,
-    batchSize: 16,
     pollIntervalMs: 10,
   });
 

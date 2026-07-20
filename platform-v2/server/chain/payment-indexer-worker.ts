@@ -143,7 +143,7 @@ export class PollingPaymentIndexer {
     onStatus?: (status: Readonly<PaymentIndexerStatus>) => void;
   }) {
     assertBlockNumber(input.deploymentBlock);
-    const batchSize = input.batchSize ?? 64;
+    const batchSize = input.batchSize ?? 8;
     const pollIntervalMs = input.pollIntervalMs ?? 3_000;
     if (!Number.isSafeInteger(batchSize) || batchSize <= 0 || batchSize > 1_000) {
       throw new CoreError('InvalidRequest', 'Indexer batch size is invalid');
