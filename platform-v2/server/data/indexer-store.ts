@@ -373,16 +373,24 @@ async function assertHead(executor: SqlExecutor, expected: CanonicalCheckpoint |
 
 async function insertSegment(executor: SqlExecutor, segment: IndexedChainBlock[]) {
   if (segment.length === 0) throw new CoreError('InvalidFinality', 'Indexer segment is empty');
+  await executor.query(
+    `INSERT INTO core.chain_blocks (
+       block_hash, block_number, parent_hash, block_timestamp, canonical
+     )
+     SELECT block_hash, block_number, parent_hash, block_timestamp, true
+     FROM unnest($1::text[], $2::bigint[], $3::text[], $4::bigint[])
+       AS input(block_hash, block_number, parent_hash, block_timestamp)
+     ON CONFLICT (block_hash) DO UPDATE SET
+       canonical = true,
+       replaced_at = NULL`,
+    [
+      segment.map(({ block }) => block.hash),
+      segment.map(({ block }) => block.number),
+      segment.map(({ block }) => block.parentHash),
+      segment.map(({ block }) => block.timestamp),
+    ],
+  );
   for (const { block, events } of segment) {
-    await executor.query(
-      `INSERT INTO core.chain_blocks (
-         block_hash, block_number, parent_hash, block_timestamp, canonical
-       ) VALUES ($1, $2, $3, $4, true)
-       ON CONFLICT (block_hash) DO UPDATE SET
-         canonical = true,
-         replaced_at = NULL`,
-      [block.hash, block.number, block.parentHash, block.timestamp],
-    );
     for (const event of events) {
       await executor.query(
         `INSERT INTO core.chain_events (
