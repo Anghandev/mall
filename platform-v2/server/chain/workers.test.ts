@@ -92,7 +92,7 @@ test('RPC log reader falls back to block receipts without widening the address f
     [CONTRACT, 100, 2],
     [CONTRACT, 101, 2],
   ]);
-  assert.equal(maxConcurrentReceipts, 2);
+  assert.equal(maxConcurrentReceipts, 1);
   assert.deepEqual(calls, [
     { method: 'eth_getBlockReceipts', params: ['0x64'] },
     { method: 'eth_getBlockReceipts', params: ['0x65'] },
@@ -398,7 +398,7 @@ test('polling payment worker persists empty blocks, recovers a common-ancestor r
   });
   assert.deepEqual(await store.checkpoint(), { blockNumber: 101, blockHash: block101.hash });
   assert.deepEqual(source.logRanges, [[100, 101]]);
-  assert.equal(source.maxConcurrentBlockReads, 3);
+  assert.equal(source.maxConcurrentBlockReads, 1);
   assert.equal(store.events.length, 1);
 
   const mismatched102: ChainBlock = {
