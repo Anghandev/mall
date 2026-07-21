@@ -60,11 +60,11 @@
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "e3c169e9078e56d0549b772ff0673e0506fc5d447a51f632c0efdbf3359dde38"
+      "sha256": "39c42fbb7a055c6af68fba6aec50832b68afb7b1e9cd2ef1d23efe61518f514d"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "0a12b7996f1b89d7b384ab5b74dcf21d99480c77cd237847cf568766ed0774db"
+      "sha256": "9406dbb93714e1fe2ff373128291c43557e7a5d805dc9295101fa6b6a1c1596e"
     }
   ],
   "httpSurface": [

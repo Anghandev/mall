@@ -55,10 +55,10 @@ test('fulfillment-launch .20 checkpoint has one identity, resolvable exports and
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 42);
+  assert.equal(schemaManifest.schemas.core.migrations.length, 43);
   assert.equal(
     schemaManifest.schemas.core.migrations.at(-1)?.path,
-    'schema/business/042_seed_seckill_breaker_scope.sql',
+    'schema/business/043_live_seckill_reservation_window.sql',
   );
   assert.equal(schemaManifest.schemas.audit.migrations.length, 4);
   for (const migration of [
