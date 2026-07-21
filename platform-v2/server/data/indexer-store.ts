@@ -190,6 +190,7 @@ export async function recordSeckillRelayProjection(
     payment_event_key: string;
     buyer_wallet: string;
     session_id: string;
+    starts_at: Date;
     relay_deadline: Date;
     main_deadline: Date;
     phase: string;
@@ -197,7 +198,7 @@ export async function recordSeckillRelayProjection(
     relay_cap: string | number;
   }>(
     `SELECT payment.event_key AS payment_event_key, orders.buyer_wallet,
-       session.session_id, session.relay_deadline, session.main_deadline,
+       session.session_id, session.starts_at, session.relay_deadline, session.main_deadline,
        session.phase,
        policy.payload ->> 'relayIncrement' AS relay_increment,
        policy.payload ->> 'relayCap' AS relay_cap
@@ -214,9 +215,10 @@ export async function recordSeckillRelayProjection(
     [orderId, event.transactionHash.toLowerCase(), event.blockHash.toLowerCase(), event.logIndex],
   );
   const row = context.rows[0];
-  if (!row || row.session_id.toLowerCase() !== sessionId || row.phase !== 'LIVE') {
+  if (!row || row.session_id.toLowerCase() !== sessionId || !['PREHEAT', 'LIVE'].includes(row.phase)) {
     throw new CoreError('InvalidFinality', 'Seckill relay event has no matching live payment session', 409);
   }
+  const startsAt = Math.floor(row.starts_at.getTime() / 1000);
   const previousDeadline = Math.floor(row.relay_deadline.getTime() / 1000);
   const mainDeadline = Math.floor(row.main_deadline.getTime() / 1000);
   const relayIncrement = Number(row.relay_increment);
@@ -224,6 +226,7 @@ export async function recordSeckillRelayProjection(
   if (
     block.hash.toLowerCase() !== event.blockHash.toLowerCase()
     || block.number !== event.blockNumber
+    || block.timestamp < startsAt
     || block.timestamp >= previousDeadline
     || block.timestamp >= mainDeadline
     || !Number.isSafeInteger(relayIncrement) || relayIncrement <= 0

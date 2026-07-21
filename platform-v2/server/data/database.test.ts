@@ -3738,6 +3738,7 @@ test('seckill quote locks both inventories and final classification releases the
     event.event.finalizedAt = new Date(now.getTime() + 84_000);
     const store = new PostgresPaymentStore(transactionAdapter(db));
     await store.record(event);
+    await db.query("UPDATE core.seckill_sessions SET phase = 'PREHEAT' WHERE session_id = $1", [sessionId]);
     const relayBeforeFinality = await db.query<{ relay_deadline: Date }>(
       'SELECT relay_deadline FROM core.seckill_sessions WHERE session_id = $1',
       [sessionId],
