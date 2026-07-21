@@ -13,6 +13,7 @@ import type {
 } from '../data/catalog-payment-service.ts';
 
 const ZERO_ADDRESS = `0x${'0'.repeat(40)}`;
+const PUBLIC_RPC_REQUEST_INTERVAL_MS = 600;
 const PAIR_ABI = [
   'function token0() view returns (address)',
   'function token1() view returns (address)',
@@ -49,8 +50,12 @@ export interface PairReserveReader extends ContractReader {
 
 export class ResilientBscContractReader implements PairReserveReader {
   readonly #providers: readonly { source: 'PRIMARY' | 'FALLBACK'; provider: JsonRpcProvider }[];
+  readonly #requestIntervalMs: number;
+  readonly #providerTails = new Map<JsonRpcProvider, Promise<void>>();
+  readonly #networkChecks = new Map<JsonRpcProvider, Promise<void>>();
 
   constructor(primaryRpcUrl?: string, fallbackRpcUrl?: string, providers?: readonly JsonRpcProvider[]) {
+    this.#requestIntervalMs = providers ? 0 : PUBLIC_RPC_REQUEST_INTERVAL_MS;
     if (providers && providers.length !== 2) {
       throw new CoreError('ExternalBlocked', 'Primary and fallback BSC RPC are required', 503);
     }
@@ -105,15 +110,12 @@ export class ResilientBscContractReader implements PairReserveReader {
     for (const entry of this.#providers) {
       try {
         const provider = entry.provider;
-        const network = await provider.getNetwork();
-        if (network.chainId !== 56n) throw new CoreError('ExternalBlocked', 'RPC is not BSC chain 56', 503);
+        await this.#assertChain(provider);
         const pair = new Contract(pairAddress, PAIR_ABI, provider);
-        const [token0, token1, reserves] = await Promise.all([
-          pair.getFunction('token0')(),
-          pair.getFunction('token1')(),
-          pair.getFunction('getReserves')(),
-        ]);
-        const blockNumber = await provider.getBlockNumber();
+        const token0 = await this.#request(provider, () => pair.getFunction('token0')());
+        const token1 = await this.#request(provider, () => pair.getFunction('token1')());
+        const reserves = await this.#request(provider, () => pair.getFunction('getReserves')());
+        const blockNumber = await this.#request(provider, () => provider.getBlockNumber());
         const snapshot = {
           blockNumber,
           source: entry.source,
@@ -141,11 +143,11 @@ export class ResilientBscContractReader implements PairReserveReader {
 
   async #withProvider<Result>(operation: (provider: JsonRpcProvider) => Promise<Result>) {
     try {
-      const results = await Promise.all(this.#providers.map(async ({ provider }) => {
-        const network = await provider.getNetwork();
-        if (network.chainId !== 56n) throw new CoreError('ExternalBlocked', 'RPC is not BSC chain 56', 503);
-        return operation(provider);
-      }));
+      const results: Result[] = [];
+      for (const { provider } of this.#providers) {
+        await this.#assertChain(provider);
+        results.push(await this.#request(provider, () => operation(provider)));
+      }
       if (stableRpcValue(results[0]) !== stableRpcValue(results[1])) {
         throw new CoreError('InvalidFinality', 'BSC RPC providers returned inconsistent contract state', 409);
       }
@@ -155,6 +157,38 @@ export class ResilientBscContractReader implements PairReserveReader {
       throw new CoreError('ExternalBlocked', 'Both BSC RPC providers must return matching state', 503, {
         reason: error instanceof Error ? error.name : 'UnknownRpcFailure',
       });
+    }
+  }
+
+  async #assertChain(provider: JsonRpcProvider) {
+    let check = this.#networkChecks.get(provider);
+    if (!check) {
+      check = this.#request(provider, async () => {
+        if ((await provider.getNetwork()).chainId !== 56n) {
+          throw new CoreError('ExternalBlocked', 'RPC is not BSC chain 56', 503);
+        }
+      });
+      this.#networkChecks.set(provider, check);
+    }
+    try {
+      await check;
+    } catch (error) {
+      this.#networkChecks.delete(provider);
+      throw error;
+    }
+  }
+
+  async #request<Result>(provider: JsonRpcProvider, operation: () => Promise<Result>) {
+    const previous = this.#providerTails.get(provider) ?? Promise.resolve();
+    let release: (() => void) | undefined;
+    const complete = new Promise<void>((resolve) => { release = resolve; });
+    this.#providerTails.set(provider, previous.then(() => complete, () => complete));
+    await previous.catch(() => undefined);
+    try {
+      if (this.#requestIntervalMs > 0) await delay(this.#requestIntervalMs);
+      return await operation();
+    } finally {
+      release?.();
     }
   }
 }
@@ -360,6 +394,10 @@ function stableJson(value: unknown): string {
       .join(',')}}`;
   }
   return JSON.stringify(value) ?? 'null';
+}
+
+function delay(milliseconds: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function stableRpcValue(value: unknown) {

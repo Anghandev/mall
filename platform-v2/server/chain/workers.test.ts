@@ -750,6 +750,20 @@ test('payment quote reader falls back to non-Archive latest reserves and records
   await assert.rejects(unavailable.pairReserves(CONTRACT), /latest pair reserves are unavailable/);
 });
 
+test('contract reader serializes concurrent public RPC calls per provider', async () => {
+  const primary = { active: 0, maximum: 0 };
+  const fallback = { active: 0, maximum: 0 };
+  const reader = new ResilientBscContractReader(undefined, undefined, [
+    pairRpcProvider({ tracker: primary, delayMs: 2 }),
+    pairRpcProvider({ tracker: fallback, delayMs: 2 }),
+  ]);
+
+  await Promise.all([reader.code(CONTRACT), reader.code(CONTRACT)]);
+
+  assert.equal(primary.maximum, 1);
+  assert.equal(fallback.maximum, 1);
+});
+
 test('payment policy attestation binds all 27 Registry fields and latest-version semantics', async () => {
   const policy = paymentPolicySnapshot();
   const operationAccounts = policy.operationsDestinations.map((item) => item.account);
@@ -1415,16 +1429,31 @@ function pairRpcProvider(input: {
   fail?: boolean;
   calls?: Array<Record<string, unknown>>;
   blockNumber?: number;
+  delayMs?: number;
+  tracker?: { active: number; maximum: number };
 }) {
   const pair = new Interface([
     'function token0() view returns (address)',
     'function token1() view returns (address)',
     'function getReserves() view returns (uint112 reserve0,uint112 reserve1,uint32 blockTimestampLast)',
   ]);
+  const tracked = async <Value>(operation: () => Value | Promise<Value>) => {
+    if (input.tracker) {
+      input.tracker.active += 1;
+      input.tracker.maximum = Math.max(input.tracker.maximum, input.tracker.active);
+    }
+    try {
+      if (input.delayMs) await new Promise((resolve) => setTimeout(resolve, input.delayMs));
+      return await operation();
+    } finally {
+      if (input.tracker) input.tracker.active -= 1;
+    }
+  };
   return {
-    getNetwork: async () => ({ chainId: 56n }),
-    getBlockNumber: async () => input.blockNumber ?? 40_000_000,
-    call: async (transaction: Record<string, unknown>) => {
+    getNetwork: async () => tracked(() => ({ chainId: 56n })),
+    getBlockNumber: async () => tracked(() => input.blockNumber ?? 40_000_000),
+    getCode: async () => tracked(() => '0x6000'),
+    call: async (transaction: Record<string, unknown>) => tracked(() => {
       if (input.fail) throw new Error('latest call unavailable');
       input.calls?.push(transaction);
       const data = String(transaction.data).toLowerCase();
@@ -1442,7 +1471,7 @@ function pairRpcProvider(input: {
         ]);
       }
       throw new Error('unexpected pair call');
-    },
+    }),
   } as unknown as JsonRpcProvider;
 }
 
