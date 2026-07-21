@@ -72,6 +72,23 @@ test('coverage EOA executor and receipt finality bind the exact action without A
   await assert.rejects(() => source.observe(candidate), /drifted from its frozen EOA execution/);
 });
 
+test('coverage EOA executor permits authenticated loopback HTTP but rejects remote HTTP', async () => {
+  const execution = coverageExecution();
+  const loopback = new HttpCoverageBreakerEoaExecutor({
+    url: 'http://127.0.0.1:8790/governance',
+    token: 'token',
+    fetchImpl: executorFetch(execution, coverageBreakerExecutionRequestDigest(execution)),
+  });
+  assert.equal((await loopback.execute(execution)).submittedTxHash, TX_HASH);
+
+  const remote = new HttpCoverageBreakerEoaExecutor({
+    url: 'http://executor.example/coverage',
+    token: 'token',
+    fetchImpl: executorFetch(execution, coverageBreakerExecutionRequestDigest(execution)),
+  });
+  await assert.rejects(() => remote.execute(execution), /requires HTTPS outside loopback/);
+});
+
 test('seckill EOA execution reaches finality without a Safe lookup service', async () => {
   const execution = seckillExecution();
   const executor = new HttpSeckillEoaExecutor({

@@ -1069,8 +1069,9 @@ function secureUrl(value: string, name: string) {
   } catch {
     throw new CoreError('ConfigurationRequired', `${name} is invalid`, 503);
   }
-  if (url.protocol !== 'https:' || url.username || url.password) {
-    throw new CoreError('ExternalBlocked', `${name} requires HTTPS without URL credentials`, 503);
+  const loopback = ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
+  if (url.username || url.password || (url.protocol !== 'https:' && !(loopback && url.protocol === 'http:'))) {
+    throw new CoreError('ExternalBlocked', `${name} requires HTTPS outside loopback`, 503);
   }
   return url;
 }
