@@ -146,6 +146,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '040_delivery_action_evidence.sql',
       '041_seckill_shared_inventory_reservations.sql',
       '042_seed_seckill_breaker_scope.sql',
+      '043_live_seckill_reservation_window.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -1641,7 +1642,7 @@ test('seckill fallback reservation shares one session allocation and restores it
          product_policy_hash, starts_at, main_deadline, relay_deadline,
          inventory, seckill_list_price_usdt, phase, snapshot
        ) VALUES ($1, 1, 'merchant-1', 'product-1', 'sku-1', $2,
-         $3, $4, $5, 1, 80, 'LIVE', '{}')`,
+         $3, $4, $5, 1, 80, 'PREHEAT', '{}')`,
       [
         sessionId,
         HASH,
