@@ -736,12 +736,25 @@ export function createApiServer(dependencies: ApiDependencies) {
     try {
       await route(dependencies, request, response, correlationId);
     } catch (error) {
+      if (!(error instanceof CoreError)) {
+        console.error(JSON.stringify({
+          event: 'core_unexpected_error',
+          correlationId,
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+          source: unexpectedErrorSource(error),
+        }));
+      }
       const result = errorBody(error, correlationId);
       sendJson(response, result.status, result.body, correlationId);
     }
   });
   attachRealtimeServer(server, dependencies.seckillService);
   return server;
+}
+
+function unexpectedErrorSource(error: unknown) {
+  if (!(error instanceof Error) || !error.stack) return 'unknown';
+  return error.stack.split('\n').find((line) => line.includes('/app/'))?.trim() ?? 'unknown';
 }
 
 async function route(
