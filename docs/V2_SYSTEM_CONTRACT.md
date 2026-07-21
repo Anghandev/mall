@@ -232,7 +232,7 @@ source conflicts are indexed in `V2_DECISIONS.md`.
   Before launch, Core may load one temporary `MainnetMicrotestEntitlement`
   that binds exactly one approved merchant and immutable settlement wallet,
   one product, three buyer EOAs, one finalized non-zero guarantee evidence
-  hash, maximum list price/freight, total stock of at most four, seckill
+  hash, maximum list price/freight, total stock of at most ten, seckill
   inventory and an expiry no more than 24 hours away. Product plus freight is
   bounded by the existing 3-USDT micro-test ceiling. It never changes the
   merchant's `BELOW_MINIMUM` status or the formal threshold.

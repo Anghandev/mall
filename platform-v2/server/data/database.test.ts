@@ -4138,6 +4138,109 @@ test('seckill prize freezes the final canonical order and only the reviewed winn
   }
 });
 
+test('seckill prize settlement waits for pending cutoff payment finality before empty rollover', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    await seedCatalog(db, 1);
+    const now = new Date(Math.floor(Date.now() / 1000) * 1000);
+    const sessionId = `0x${'a'.repeat(64)}`;
+    await insertLiveSeckillSession(db, sessionId, now, 90);
+    const ids = [`0x${'b'.repeat(64)}`, `0x${'c'.repeat(64)}`, `0x${'d'.repeat(64)}`];
+    const catalog = new CatalogPaymentService({
+      transactions: transactionAdapter(db),
+      signer: {
+        sign: async () => ({
+          signature: `0x${'1'.repeat(130)}`,
+          signer: '0x8888888888888888888888888888888888888888',
+        }),
+      },
+      nplQuotes: {
+        quote: async ({ listPriceUsdt }) => ({
+          nplQuoteAmount: listPriceUsdt * 10n,
+          quoteSourceEvidence: { source: 'PRIMARY', observedBlock: 40_000_000, reservesHash: HASH },
+        }),
+      },
+      beneficiaries: {
+        resolve: async () => ({
+          genesis: '0x0000000000000000000000000000000000000000',
+          directReferral: '0x5000000000000000000000000000000000000002',
+          district: '0x5000000000000000000000000000000000000003',
+          city: '0x5000000000000000000000000000000000000004',
+          province: '0x5000000000000000000000000000000000000005',
+          region: '0x5000000000000000000000000000000000000006',
+        }),
+      },
+      policies: { assertPublished: async () => undefined },
+      bnmWallets: { assertRegistered: async () => undefined },
+      paymentRouterAddress: '0x9999999999999999999999999999999999999999',
+      clock: () => now,
+      bytes32: () => ids.shift()!,
+      nonce: () => 9n,
+    });
+    const quote = await catalog.createSeckillQuote(BUYER, {
+      idempotencyKey: 'seckill-prize-pending-finality',
+      sessionId,
+      productId: 'product-1',
+      skuId: 'sku-1',
+      quantity: 1,
+      fulfillmentMode: 'DELIVERY',
+      fulfillmentTargetHash: HASH,
+      regionCodeHash: HASH,
+    });
+    const payment = paymentInput(quote.dual.seckill, 'SECKILL');
+    payment.event.confirmations = 0;
+    payment.event.blockTimestamp = new Date(now.getTime() + 42_000);
+    await new PostgresPaymentStore(transactionAdapter(db)).record(payment);
+    const initialRelay = (await db.query<{ relay_deadline: Date }>(
+      'SELECT relay_deadline FROM core.seckill_sessions WHERE session_id = $1',
+      [sessionId],
+    )).rows[0]!.relay_deadline;
+    await recordSeckillRelayProjection(
+      adapter(db),
+      {
+        number: payment.event.blockNumber,
+        hash: payment.event.blockHash,
+        parentHash: blockHash(payment.event.blockNumber - 1),
+        timestamp: Math.floor(payment.event.blockTimestamp.getTime() / 1000),
+      },
+      decodedSeckillRelayEvent(
+        sessionId,
+        quote.orderId,
+        payment.event.blockHash,
+        Math.floor(initialRelay.getTime() / 1000) + 30,
+      ),
+    );
+    const settlementAt = new Date(now.getTime() + 7 * 60_000);
+    assert.deepEqual(await settleMaturedSeckillPrizes(adapter(db), settlementAt), []);
+    assert.equal((await db.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM core.seckill_prize_settlements WHERE session_id = $1',
+      [sessionId],
+    )).rows[0]?.count, '0');
+
+    await db.query(
+      `INSERT INTO core.chain_blocks (
+         block_hash, block_number, parent_hash, block_timestamp, canonical
+       ) VALUES ($1,$2,$3,$4,true)`,
+      [
+        blockHash(payment.event.blockNumber + 14),
+        payment.event.blockNumber + 14,
+        blockHash(payment.event.blockNumber + 13),
+        Math.floor((now.getTime() + 84_000) / 1000),
+      ],
+    );
+    await advancePaymentFinality(adapter(db), payment.event.blockNumber + 14);
+    assert.deepEqual(await settleMaturedSeckillPrizes(adapter(db), settlementAt), [sessionId]);
+    const settled = await db.query<{ state: string; candidate_order_id: string | null }>(
+      'SELECT state, candidate_order_id FROM core.seckill_prize_settlements WHERE session_id = $1',
+      [sessionId],
+    );
+    assert.equal(settled.rows[0]?.state, 'REVIEW_PENDING');
+    assert.equal(settled.rows[0]?.candidate_order_id, quote.orderId);
+  } finally {
+    await db.close();
+  }
+});
+
 test('empty seckill rolls its existing locked prize into the next session without creating a winner', async () => {
   const db = await createBusinessDatabase();
   try {

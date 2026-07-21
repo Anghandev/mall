@@ -85,6 +85,9 @@ export async function settleMaturedSeckillPrizes(executor: SqlExecutor, now: Dat
 
   const settled: string[] = [];
   for (const session of sessions.rows) {
+    if (await hasUnsettledWinnerCandidate(executor, session.session_id, session.cutoff_at, session.force_close_block_number)) {
+      continue;
+    }
     const winner = await selectWinner(executor, session.session_id, session.cutoff_at, session.force_close_block_number);
     const accountId = `seckill-prize:${session.session_id}:usdt`;
     const ledgerAmount = await lockedPrizeBalance(executor, accountId, session.settlement_wallet_address);
@@ -156,6 +159,46 @@ export async function settleMaturedSeckillPrizes(executor: SqlExecutor, now: Dat
     settled.push(session.session_id);
   }
   return settled;
+}
+
+async function hasUnsettledWinnerCandidate(
+  executor: SqlExecutor,
+  sessionId: string,
+  cutoffAt: Date,
+  forceCloseBlockNumber: string | number | null,
+) {
+  const result = await executor.query<{ exists: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM core.orders orders
+       JOIN core.payment_events payment
+         ON payment.order_id = orders.order_id
+       LEFT JOIN core.seckill_relay_events relay
+         ON relay.payment_event_key = payment.event_key
+        AND relay.canonical
+       LEFT JOIN core.transaction_finality finality
+         ON finality.resource_type = 'ORDER_PAYMENT'
+        AND finality.resource_id = orders.order_id
+        AND finality.tx_hash = payment.transaction_hash
+        AND finality.block_hash = payment.block_hash
+       WHERE orders.seckill_snapshot ->> 'sessionId' = $1
+         AND payment.canonical
+         AND payment.classification = 'SECKILL'
+         AND payment.observed_at <= $2
+         AND ($3::bigint IS NULL OR payment.block_number <= $3)
+         AND (
+           relay.relay_event_key IS NULL
+           OR relay.finalized = false
+           OR finality.transaction_id IS NULL
+           OR finality.state <> 'FINAL'
+           OR finality.receipt_status <> 1
+           OR finality.confirmations < finality.required_confirmations
+           OR orders.finality_status <> 'FINAL'
+         )
+     ) AS exists`,
+    [sessionId, cutoffAt, forceCloseBlockNumber],
+  );
+  return result.rows[0]?.exists === true;
 }
 
 export async function reviewSeckillPrize(

@@ -77,7 +77,7 @@ export function loadMainnetMicrotestEntitlement(
   if (maxListPriceUsdt + maxFreightUsdt > MAX_MICROTEST_USDT) {
     throw new CoreError('InvalidRequest', 'Mainnet micro-test product and freight exceed the bounded amount', 500);
   }
-  const maxStock = boundedInteger(env.MAINNET_MICROTEST_MAX_STOCK!, 'maximum stock', 1, 4);
+  const maxStock = boundedInteger(env.MAINNET_MICROTEST_MAX_STOCK!, 'maximum stock', 1, 10);
   const seckillInventory = boundedInteger(
     env.MAINNET_MICROTEST_SECKILL_INVENTORY!,
     'seckill inventory',
