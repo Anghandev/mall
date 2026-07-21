@@ -12,6 +12,7 @@ import { readAddressLogs } from './rpc-logs.ts';
 const DEFAULT_RPC_STABLE_BLOCK_LAG = 5;
 const DEFAULT_INDEXER_BATCH_SIZE = 128;
 const DEFAULT_INDEXER_BLOCK_FETCH_CONCURRENCY = 16;
+const DEFAULT_INDEXER_LOG_RANGE_SIZE = 32;
 const RPC_PROVIDER_RETRY_ATTEMPTS = 3;
 const RPC_PROVIDER_RETRY_DELAY_MS = 250;
 const DEFAULT_INDEXER_CAUGHT_UP_TOLERANCE_BLOCKS = 64;
@@ -299,7 +300,10 @@ export class PollingPaymentIndexer {
       (blockNumber) => this.#source.block(blockNumber),
     );
     const logStart = Math.max(fromBlock, this.#deploymentBlock);
-    const logs = logStart <= toBlock ? await this.#source.logs(logStart, toBlock) : [];
+    const logs: IndexedLog[] = [];
+    for (let start = logStart; start <= toBlock; start += DEFAULT_INDEXER_LOG_RANGE_SIZE) {
+      logs.push(...await this.#source.logs(start, Math.min(toBlock, start + DEFAULT_INDEXER_LOG_RANGE_SIZE - 1)));
+    }
     const blockHashes = new Map(blocks.map((block) => [block.number, block.hash.toLowerCase()]));
     const byBlock = new Map<number, IndexedLog[]>();
     for (const log of logs) {
