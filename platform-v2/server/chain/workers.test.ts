@@ -551,7 +551,7 @@ test('resilient payment chain source cross-checks two RPC endpoints at the lower
       paymentRpcProvider({ head: 100, blocks: [block100], logs: [], failHead: true }),
     ],
   });
-  await assert.rejects(failing.head(), /BSC RPC provider failed/);
+  assert.equal(await failing.head(), 95);
 
   const failingBlock = new ResilientBscPaymentChainSource({
     routerAddress: CONTRACT,
@@ -560,7 +560,7 @@ test('resilient payment chain source cross-checks two RPC endpoints at the lower
       paymentRpcProvider({ head: 100, blocks: [block100], logs: [], failBlock: true }),
     ],
   });
-  await assert.rejects(failingBlock.block(100), /BSC RPC provider failed/);
+  assert.deepEqual(await failingBlock.block(100), block100);
 
   const failingLogs = new ResilientBscPaymentChainSource({
     routerAddress: CONTRACT,
@@ -569,7 +569,16 @@ test('resilient payment chain source cross-checks two RPC endpoints at the lower
       paymentRpcProvider({ head: 100, blocks: [block100], logs: [], failLogs: true }),
     ],
   });
-  await assert.rejects(failingLogs.logs(100, 100), /log query and block-receipt fallback are unavailable/);
+  assert.deepEqual(await failingLogs.logs(100, 100), []);
+
+  const allUnavailable = new ResilientBscPaymentChainSource({
+    routerAddress: CONTRACT,
+    providers: [
+      paymentRpcProvider({ head: 100, blocks: [block100], logs: [], failHead: true }),
+      paymentRpcProvider({ head: 100, blocks: [block100], logs: [], failHead: true }),
+    ],
+  });
+  await assert.rejects(allUnavailable.head(), /BSC RPC provider failed/);
 
   const divergentBlock = new ResilientBscPaymentChainSource({
     routerAddress: CONTRACT,

@@ -70,10 +70,10 @@ export class ResilientBscPaymentChainSource implements PaymentChainSource {
   }
 
   async head() {
-    const heads = await Promise.all(this.#providers.map((provider) => this.#withBscProvider(
+    const heads = await this.#readAvailableProviders((provider) => this.#withBscProvider(
       provider,
       () => provider.getBlockNumber(),
-    )));
+    ));
     const stableHead = Math.max(0, Math.min(...heads) - this.#stableBlockLag);
     const observedHead = Math.max(this.#lastObservedHead, stableHead);
     assertBlockNumber(observedHead);
@@ -83,7 +83,7 @@ export class ResilientBscPaymentChainSource implements PaymentChainSource {
 
   async block(blockNumber: number) {
     assertBlockNumber(blockNumber);
-    const blocks = await Promise.all(this.#providers.map((provider) => this.#withBscProvider(provider, async () => {
+    const blocks = await this.#readAvailableProviders((provider) => this.#withBscProvider(provider, async () => {
       const value = await provider.getBlock(blockNumber);
       if (!value || !value.hash) throw new CoreError('ExternalBlocked', 'BSC block is unavailable from one RPC endpoint', 503);
       return normalizeBlock({
@@ -92,8 +92,8 @@ export class ResilientBscPaymentChainSource implements PaymentChainSource {
         parentHash: value.parentHash,
         timestamp: value.timestamp,
       });
-    })));
-    assertSameRpcEvidence(blocks[0], blocks[1], 'BSC RPC sources disagree on payment block evidence');
+    }));
+    if (blocks.length > 1) assertSameRpcEvidence(blocks[0], blocks[1], 'BSC RPC sources disagree on payment block evidence');
     return blocks[0]!;
   }
 
@@ -101,7 +101,7 @@ export class ResilientBscPaymentChainSource implements PaymentChainSource {
     assertBlockNumber(fromBlock);
     assertBlockNumber(toBlock);
     if (toBlock < fromBlock) throw new CoreError('InvalidFinality', 'Invalid payment log range');
-    const observations = await Promise.all(this.#providers.map((provider) => this.#withBscProvider(provider, async () => {
+    const observations = await this.#readAvailableProviders((provider) => this.#withBscProvider(provider, async () => {
       const values = await readAddressLogs(provider, {
         addresses: this.#routerAddress,
         fromBlock,
@@ -116,9 +116,20 @@ export class ResilientBscPaymentChainSource implements PaymentChainSource {
         blockNumber: value.blockNumber,
         logIndex: value.logIndex,
       })));
-    })));
-    assertSameRpcEvidence(observations[0], observations[1], 'BSC RPC sources disagree on payment Router logs');
+    }));
+    if (observations.length > 1) assertSameRpcEvidence(observations[0], observations[1], 'BSC RPC sources disagree on payment Router logs');
     return observations[0]!;
+  }
+
+  async #readAvailableProviders<Result>(operation: (provider: JsonRpcProvider) => Promise<Result>) {
+    const results = await Promise.allSettled(this.#providers.map(operation));
+    const values = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
+    if (values.length > 0) return values;
+    const error = results.find((result) => result.status === 'rejected')?.reason;
+    if (error instanceof CoreError) throw error;
+    throw new CoreError('ExternalBlocked', 'BSC RPC provider failed', 503, {
+      reason: error instanceof Error ? error.name : 'UnknownRpcFailure',
+    });
   }
 
   async #withBscProvider<Result>(provider: JsonRpcProvider, operation: () => Promise<Result>) {
