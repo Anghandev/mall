@@ -10,7 +10,8 @@ import {
 import { readAddressLogs } from './rpc-logs.ts';
 
 const DEFAULT_RPC_STABLE_BLOCK_LAG = 5;
-const DEFAULT_INDEXER_BATCH_SIZE = 32;
+const DEFAULT_INDEXER_BATCH_SIZE = 128;
+const DEFAULT_INDEXER_BLOCK_FETCH_CONCURRENCY = 16;
 const RPC_PROVIDER_RETRY_ATTEMPTS = 3;
 const RPC_PROVIDER_RETRY_DELAY_MS = 250;
 const DEFAULT_INDEXER_CAUGHT_UP_TOLERANCE_BLOCKS = 64;
@@ -288,10 +289,15 @@ export class PollingPaymentIndexer {
   }
 
   async #segment(fromBlock: number, toBlock: number): Promise<ChainSegmentBlock[]> {
-    const blocks: ChainBlock[] = [];
-    for (let blockNumber = fromBlock; blockNumber <= toBlock; blockNumber += 1) {
-      blocks.push(await this.#source.block(blockNumber));
-    }
+    const blockNumbers = Array.from(
+      { length: toBlock - fromBlock + 1 },
+      (_, index) => fromBlock + index,
+    );
+    const blocks = await mapWithConcurrency(
+      blockNumbers,
+      DEFAULT_INDEXER_BLOCK_FETCH_CONCURRENCY,
+      (blockNumber) => this.#source.block(blockNumber),
+    );
     const logStart = Math.max(fromBlock, this.#deploymentBlock);
     const logs = logStart <= toBlock ? await this.#source.logs(logStart, toBlock) : [];
     const blockHashes = new Map(blocks.map((block) => [block.number, block.hash.toLowerCase()]));
@@ -398,6 +404,18 @@ function stableRpcValue(value: unknown) {
 
 function fixedDelay(milliseconds: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function mapWithConcurrency<Input, Output>(
+  values: readonly Input[],
+  concurrency: number,
+  mapper: (value: Input) => Promise<Output>,
+) {
+  const output: Output[] = [];
+  for (let index = 0; index < values.length; index += concurrency) {
+    output.push(...await Promise.all(values.slice(index, index + concurrency).map(mapper)));
+  }
+  return output;
 }
 
 function abortableDelay(milliseconds: number, signal: AbortSignal) {

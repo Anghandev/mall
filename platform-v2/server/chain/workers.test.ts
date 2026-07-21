@@ -398,7 +398,7 @@ test('polling payment worker persists empty blocks, recovers a common-ancestor r
   });
   assert.deepEqual(await store.checkpoint(), { blockNumber: 101, blockHash: block101.hash });
   assert.deepEqual(source.logRanges, [[100, 101]]);
-  assert.equal(source.maxConcurrentBlockReads, 1);
+  assert.ok(source.maxConcurrentBlockReads > 1);
   assert.equal(store.events.length, 1);
 
   const mismatched102: ChainBlock = {
@@ -503,6 +503,33 @@ test('polling payment worker keeps recent healthy status through transient RPC t
   await new Promise((resolve) => setTimeout(resolve, 25));
   await strictWorker.stop();
   assert.equal(strictWorker.status().healthy, false);
+});
+
+test('polling payment worker fetches catch-up block batches with bounded concurrency', async () => {
+  const decoder = await AbiEventDecoder.load(BUNDLE_PATH, { PaymentRouterV2: CONTRACT });
+  const blocks = Array.from({ length: 17 }, (_, index) => ({
+    number: 99 + index,
+    hash: blockHash(99 + index),
+    parentHash: blockHash(98 + index),
+    timestamp: 1_800_000_000 + index,
+  }));
+  const source = new MemoryPaymentChainSource(blocks, [], 10);
+  const store = new MemoryIndexerStore();
+  const worker = new PollingPaymentIndexer({
+    source,
+    indexer: new ChainIndexer(decoder, store),
+    store,
+    deploymentBlock: 100,
+    batchSize: 16,
+  });
+
+  assert.deepEqual(await worker.pollOnce(), {
+    progressed: true,
+    caughtUp: true,
+    observedHead: 115,
+    lastIndexedBlock: 114,
+  });
+  assert.ok(source.maxConcurrentBlockReads > 1);
 });
 
 test('resilient payment chain source cross-checks two RPC endpoints at the lower head', async () => {
