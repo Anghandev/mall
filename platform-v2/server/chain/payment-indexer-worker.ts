@@ -304,6 +304,10 @@ export class PollingPaymentIndexer {
         const result = await this.pollOnce();
         if (result.progressed && !result.caughtUp) continue;
       } catch (error) {
+        console.warn('Payment indexer poll failed', {
+          code: error instanceof CoreError ? error.code : 'UnexpectedIndexerFailure',
+          message: error instanceof Error ? error.message : 'Unexpected payment indexer failure',
+        });
         if (!this.#hasRecentHealthyStatus()) {
           this.#publish({
             healthy: false,
