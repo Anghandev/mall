@@ -2120,6 +2120,15 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
     assert.equal(session.rows[0]?.inventory, 4);
     assert.equal(session.rows[0]?.governance_action_id, sessionAction.actionId);
     assert.equal(session.rows[0]?.rules_content_hash, HASH);
+    await assert.rejects(
+      service.createSession(operatorActor, {
+        ...sessionInput,
+        inventory: 1,
+        startsAt: new Date(now.getTime() + 31 * 60_000).toISOString(),
+        idempotencyKey: 'seckill-session-active-overlap',
+      }),
+      (error: unknown) => error instanceof CoreError && error.code === 'InvalidRequest',
+    );
 
     const injection = await service.createPrizeInjection(adminActor, sessionAction.sessionId, {
       amountUsdt: '50',
@@ -2200,11 +2209,12 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
       (await db.query<{ phase: string }>('SELECT phase FROM core.seckill_sessions WHERE session_id = $1', [sessionAction.sessionId])).rows[0]?.phase,
       'FORCE_CLOSED',
     );
+    await db.query("UPDATE core.seckill_sessions SET phase = 'SETTLED' WHERE session_id = $1", [sessionAction.sessionId]);
     const secondSession = await service.createSession(operatorActor, {
       ...sessionInput,
       inventory: 1,
-      startsAt: new Date(now.getTime() + 90 * 60_000).toISOString(),
-      idempotencyKey: 'seckill-session-no-level-quota',
+      startsAt: new Date(now.getTime() + 31 * 60_000).toISOString(),
+      idempotencyKey: 'seckill-session-after-settled-overlap',
     });
     assert.equal(secondSession.state, 'DRAFT');
   } finally {

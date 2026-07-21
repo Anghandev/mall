@@ -1049,7 +1049,7 @@ async function requireNoSessionOverlap(
     `SELECT EXISTS (
        SELECT 1 FROM core.seckill_session_plans plan
        JOIN core.seckill_governance_actions action ON action.action_id = plan.action_id
-       WHERE plan.sku_id = $1 AND action.state NOT IN ('REORGED','FAILED','CANCELLED')
+       WHERE plan.sku_id = $1 AND action.state NOT IN ('FINAL','REORGED','FAILED','CANCELLED')
          AND tstzrange(plan.starts_at, plan.main_deadline, '[)') && tstzrange($2, $3, '[)')
        UNION ALL
        SELECT 1 FROM core.seckill_sessions session
