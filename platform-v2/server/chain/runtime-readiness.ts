@@ -233,18 +233,30 @@ export class PaymentRuntimeReadinessMonitor {
   }
 
   async pollOnce() {
-    const [attestation, componentHashesVerified, databaseHealthy, redisHealthy, signerHealthy] = await Promise.all([
-      this.#attest().catch(() => failedAttestation()),
+    const [attestationResult, componentHashesVerified, databaseHealthy, redisHealthy, signerHealthy] = await Promise.all([
+      this.#attest().then((value) => ({ ok: true as const, value }), () => ({ ok: false as const })),
       booleanProbe(this.#componentHashesVerified),
       booleanProbe(this.#databaseHealthy),
       booleanProbe(this.#redisHealthy),
       booleanProbe(this.#signerHealthy),
     ]);
     const checkedAt = this.#clock();
+    const previous = this.#base;
+    const canReusePreviousAttestation = attestationResult.ok === false
+      && previous !== undefined
+      && Date.parse(previous.expiresAt) > checkedAt.getTime()
+      && attestationHealthy(previous);
+    const attestation = attestationResult.ok
+      ? attestationResult.value
+      : canReusePreviousAttestation
+        ? attestationFromSnapshot(previous)
+        : failedAttestation();
     this.#base = {
       artifactVersion: CORE_ARTIFACT_VERSION,
       checkedAt: checkedAt.toISOString(),
-      expiresAt: new Date(checkedAt.getTime() + this.#intervalMs * 2).toISOString(),
+      expiresAt: canReusePreviousAttestation
+        ? previous!.expiresAt
+        : new Date(checkedAt.getTime() + this.#intervalMs * 4).toISOString(),
       componentHashesVerified,
       ...attestation,
       databaseHealthy,
@@ -286,6 +298,27 @@ export async function verifyArtifactChecksums(artifactRoot: string) {
     if (actual !== match[1]) return false;
   }
   return true;
+}
+
+
+function attestationHealthy(snapshot: PaymentRuntimeAttestation) {
+  return snapshot.deployedRuntimeCodeVerified
+    && snapshot.roleGrantsVerified
+    && snapshot.walletRolesVerified
+    && snapshot.signerBindingsVerified
+    && snapshot.nplQuoteSourceHealthy
+    && snapshot.rpcChain56Healthy;
+}
+
+function attestationFromSnapshot(snapshot: PaymentRuntimeAttestation): PaymentRuntimeAttestation {
+  return {
+    deployedRuntimeCodeVerified: snapshot.deployedRuntimeCodeVerified,
+    roleGrantsVerified: snapshot.roleGrantsVerified,
+    walletRolesVerified: snapshot.walletRolesVerified,
+    signerBindingsVerified: snapshot.signerBindingsVerified,
+    nplQuoteSourceHealthy: snapshot.nplQuoteSourceHealthy,
+    rpcChain56Healthy: snapshot.rpcChain56Healthy,
+  };
 }
 
 function failedAttestation(): PaymentRuntimeAttestation {

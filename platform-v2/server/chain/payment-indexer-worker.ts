@@ -9,6 +9,12 @@ import {
 } from './indexer.ts';
 import { readAddressLogs } from './rpc-logs.ts';
 
+const DEFAULT_RPC_STABLE_BLOCK_LAG = 5;
+const RPC_PROVIDER_RETRY_ATTEMPTS = 3;
+const RPC_PROVIDER_RETRY_DELAY_MS = 250;
+const DEFAULT_INDEXER_CAUGHT_UP_TOLERANCE_BLOCKS = 8;
+const DEFAULT_INDEXER_TRANSIENT_FAILURE_GRACE_MS = 45_000;
+
 export interface PaymentChainSource {
   head(): Promise<number>;
   block(blockNumber: number): Promise<ChainBlock>;
@@ -27,12 +33,15 @@ export interface PaymentIndexerStatus {
 export class ResilientBscPaymentChainSource implements PaymentChainSource {
   readonly #providers: JsonRpcProvider[];
   readonly #routerAddress: string;
+  readonly #stableBlockLag: number;
+  #lastObservedHead = 0;
 
   constructor(input: {
     primaryRpcUrl?: string;
     fallbackRpcUrl?: string;
     routerAddress?: string;
     providers?: readonly JsonRpcProvider[];
+    stableBlockLag?: number;
   }) {
     if (input.providers) {
       if (input.providers.length !== 2) {
@@ -51,7 +60,12 @@ export class ResilientBscPaymentChainSource implements PaymentChainSource {
     if (!input.routerAddress || !/^0x[0-9a-fA-F]{40}$/.test(input.routerAddress)) {
       throw new CoreError('ExternalBlocked', 'PaymentRouter deployment address is unavailable', 503);
     }
+    const stableBlockLag = input.stableBlockLag ?? DEFAULT_RPC_STABLE_BLOCK_LAG;
+    if (!Number.isSafeInteger(stableBlockLag) || stableBlockLag < 0 || stableBlockLag > 32) {
+      throw new CoreError('InvalidRequest', 'Payment Indexer stable block lag is invalid');
+    }
     this.#routerAddress = input.routerAddress.toLowerCase();
+    this.#stableBlockLag = stableBlockLag;
   }
 
   async head() {
@@ -59,8 +73,10 @@ export class ResilientBscPaymentChainSource implements PaymentChainSource {
       provider,
       () => provider.getBlockNumber(),
     )));
-    const observedHead = Math.min(...heads);
+    const stableHead = Math.max(0, Math.min(...heads) - this.#stableBlockLag);
+    const observedHead = Math.max(this.#lastObservedHead, stableHead);
     assertBlockNumber(observedHead);
+    this.#lastObservedHead = observedHead;
     return observedHead;
   }
 
@@ -106,15 +122,18 @@ export class ResilientBscPaymentChainSource implements PaymentChainSource {
 
   async #withBscProvider<Result>(provider: JsonRpcProvider, operation: () => Promise<Result>) {
     let lastError: unknown;
-    try {
-      if ((await provider.getNetwork()).chainId !== 56n) {
-        throw new CoreError('ExternalBlocked', 'RPC is not BSC chain 56', 503);
+    for (let attempt = 1; attempt <= RPC_PROVIDER_RETRY_ATTEMPTS; attempt += 1) {
+      try {
+        if ((await provider.getNetwork()).chainId !== 56n) {
+          throw new CoreError('ExternalBlocked', 'RPC is not BSC chain 56', 503);
+        }
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        if (attempt < RPC_PROVIDER_RETRY_ATTEMPTS) await fixedDelay(RPC_PROVIDER_RETRY_DELAY_MS * attempt);
       }
-      return await operation();
-    } catch (error) {
-      lastError = error;
-      if (error instanceof CoreError) throw error;
     }
+    if (lastError instanceof CoreError) throw lastError;
     throw new CoreError('ExternalBlocked', 'BSC RPC provider failed', 503, {
       reason: lastError instanceof Error ? lastError.name : 'UnknownRpcFailure',
     });
@@ -128,8 +147,11 @@ export class PollingPaymentIndexer {
   readonly #deploymentBlock: number;
   readonly #batchSize: number;
   readonly #pollIntervalMs: number;
+  readonly #caughtUpToleranceBlocks: number;
+  readonly #transientFailureGraceMs: number;
   readonly #onStatus: ((status: Readonly<PaymentIndexerStatus>) => void) | undefined;
   #status: PaymentIndexerStatus = { healthy: false, caughtUp: false };
+  #lastHealthyAtMs = 0;
   #controller: AbortController | undefined;
   #running: Promise<void> | undefined;
 
@@ -140,6 +162,8 @@ export class PollingPaymentIndexer {
     deploymentBlock: number;
     batchSize?: number;
     pollIntervalMs?: number;
+    caughtUpToleranceBlocks?: number;
+    transientFailureGraceMs?: number;
     onStatus?: (status: Readonly<PaymentIndexerStatus>) => void;
   }) {
     assertBlockNumber(input.deploymentBlock);
@@ -151,12 +175,22 @@ export class PollingPaymentIndexer {
     if (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 10 || pollIntervalMs > 60_000) {
       throw new CoreError('InvalidRequest', 'Indexer poll interval is invalid');
     }
+    const caughtUpToleranceBlocks = input.caughtUpToleranceBlocks ?? DEFAULT_INDEXER_CAUGHT_UP_TOLERANCE_BLOCKS;
+    if (!Number.isSafeInteger(caughtUpToleranceBlocks) || caughtUpToleranceBlocks < 0 || caughtUpToleranceBlocks > 128) {
+      throw new CoreError('InvalidRequest', 'Indexer caught-up tolerance is invalid');
+    }
+    const transientFailureGraceMs = input.transientFailureGraceMs ?? DEFAULT_INDEXER_TRANSIENT_FAILURE_GRACE_MS;
+    if (!Number.isSafeInteger(transientFailureGraceMs) || transientFailureGraceMs < 0 || transientFailureGraceMs > 300_000) {
+      throw new CoreError('InvalidRequest', 'Indexer transient failure grace is invalid');
+    }
     this.#source = input.source;
     this.#indexer = input.indexer;
     this.#store = input.store;
     this.#deploymentBlock = input.deploymentBlock;
     this.#batchSize = batchSize;
     this.#pollIntervalMs = pollIntervalMs;
+    this.#caughtUpToleranceBlocks = caughtUpToleranceBlocks;
+    this.#transientFailureGraceMs = transientFailureGraceMs;
     this.#onStatus = input.onStatus;
   }
 
@@ -219,7 +253,7 @@ export class PollingPaymentIndexer {
     const toBlock = Math.min(observedHead, fromBlock + this.#batchSize - 1);
     const segment = await this.#segment(fromBlock, toBlock);
     await this.#indexer.ingestSegment(segment);
-    const caughtUp = toBlock >= observedHead;
+    const caughtUp = observedHead - toBlock <= this.#caughtUpToleranceBlocks;
     this.#publish({
       healthy: true,
       caughtUp,
@@ -269,20 +303,29 @@ export class PollingPaymentIndexer {
         const result = await this.pollOnce();
         if (result.progressed && !result.caughtUp) continue;
       } catch (error) {
-        this.#publish({
-          healthy: false,
-          caughtUp: false,
-          checkedAt: new Date().toISOString(),
-          errorCode: error instanceof CoreError ? error.code : 'UnexpectedIndexerFailure',
-        });
+        if (!this.#hasRecentHealthyStatus()) {
+          this.#publish({
+            healthy: false,
+            caughtUp: false,
+            checkedAt: new Date().toISOString(),
+            errorCode: error instanceof CoreError ? error.code : 'UnexpectedIndexerFailure',
+          });
+        }
       }
       await abortableDelay(this.#pollIntervalMs, signal);
     }
   }
 
   #publish(status: PaymentIndexerStatus) {
+    if (status.healthy) this.#lastHealthyAtMs = Date.now();
     this.#status = status;
     this.#onStatus?.(Object.freeze({ ...status }));
+  }
+
+  #hasRecentHealthyStatus() {
+    return this.#status.healthy === true
+      && this.#lastHealthyAtMs > 0
+      && Date.now() - this.#lastHealthyAtMs <= this.#transientFailureGraceMs;
   }
 }
 
@@ -335,6 +378,10 @@ function assertSameRpcEvidence(left: unknown, right: unknown, message: string) {
 
 function stableRpcValue(value: unknown) {
   return JSON.stringify(value);
+}
+
+function fixedDelay(milliseconds: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function abortableDelay(milliseconds: number, signal: AbortSignal) {

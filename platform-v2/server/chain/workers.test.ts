@@ -458,6 +458,53 @@ test('polling payment worker persists empty blocks, recovers a common-ancestor r
   });
 });
 
+test('polling payment worker keeps recent healthy status through transient RPC transport failures', async () => {
+  const decoder = await AbiEventDecoder.load(BUNDLE_PATH, { PaymentRouterV2: CONTRACT });
+  const block99: ChainBlock = { number: 99, hash: blockHash(99), parentHash: blockHash(98), timestamp: 1_800_000_000 };
+  const store = new MemoryIndexerStore();
+  let failHead = false;
+  const source: PaymentChainSource = {
+    head: async () => {
+      if (failHead) throw new Error('transient RPC transport failure');
+      return 99;
+    },
+    block: async (blockNumber: number) => {
+      if (blockNumber !== 99) throw new Error(`unexpected block ${blockNumber}`);
+      return block99;
+    },
+    logs: async () => [],
+  };
+  const worker = new PollingPaymentIndexer({
+    source,
+    indexer: new ChainIndexer(decoder, store),
+    store,
+    deploymentBlock: 100,
+    pollIntervalMs: 10,
+    transientFailureGraceMs: 100,
+  });
+
+  await worker.pollOnce();
+  assert.equal(worker.status().healthy, true);
+  failHead = true;
+  worker.start();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await worker.stop();
+  assert.equal(worker.status().healthy, true);
+
+  const strictWorker = new PollingPaymentIndexer({
+    source,
+    indexer: new ChainIndexer(decoder, new MemoryIndexerStore()),
+    store: new MemoryIndexerStore(),
+    deploymentBlock: 100,
+    pollIntervalMs: 10,
+    transientFailureGraceMs: 0,
+  });
+  strictWorker.start();
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  await strictWorker.stop();
+  assert.equal(strictWorker.status().healthy, false);
+});
+
 test('resilient payment chain source cross-checks two RPC endpoints at the lower head', async () => {
   assert.throws(
     () => new ResilientBscPaymentChainSource({
@@ -483,6 +530,7 @@ test('resilient payment chain source cross-checks two RPC endpoints at the lower
       paymentRpcProvider({ head: 102, blocks: [block100], logs: [log] }),
       paymentRpcProvider({ head: 100, blocks: [block100], logs: [log] }),
     ],
+    stableBlockLag: 0,
   });
   assert.equal(await source.head(), 100);
   assert.deepEqual(await source.block(100), block100);
@@ -544,6 +592,69 @@ test('resilient payment chain source cross-checks two RPC endpoints at the lower
     ],
   });
   await assert.rejects(divergentLogs.logs(100, 100), /payment Router logs/);
+});
+
+test('resilient payment chain source stays behind newest BSC RPC head flaps', async () => {
+  const stableBlock: ChainBlock = { number: 100, hash: blockHash(100), parentHash: blockHash(99), timestamp: 1_800_000_000 };
+  const unstableBlock: ChainBlock = { number: 105, hash: blockHash(105), parentHash: blockHash(104), timestamp: 1_800_000_015 };
+  const divergentUnstableBlock: ChainBlock = {
+    ...unstableBlock,
+    hash: blockHash(106),
+    parentHash: blockHash(88),
+  };
+  const source = new ResilientBscPaymentChainSource({
+    routerAddress: CONTRACT,
+    providers: [
+      paymentRpcProvider({ head: 105, blocks: [stableBlock, unstableBlock], logs: [] }),
+      paymentRpcProvider({ head: 105, blocks: [stableBlock, divergentUnstableBlock], logs: [] }),
+    ],
+  });
+
+  assert.equal(await source.head(), 100);
+  assert.deepEqual(await source.block(await source.head()), stableBlock);
+  await assert.rejects(source.block(105), /payment block evidence/);
+});
+
+test('resilient payment chain source does not move its safe head backward on RPC jitter', async () => {
+  let head = 105;
+  const stableBlock: ChainBlock = { number: 100, hash: blockHash(100), parentHash: blockHash(99), timestamp: 1_800_000_000 };
+  const source = new ResilientBscPaymentChainSource({
+    routerAddress: CONTRACT,
+    providers: [
+      paymentRpcProvider({ head: () => head, blocks: [stableBlock], logs: [] }),
+      paymentRpcProvider({ head: () => head, blocks: [stableBlock], logs: [] }),
+    ],
+  });
+
+  assert.equal(await source.head(), 100);
+  head = 104;
+  assert.equal(await source.head(), 100);
+});
+
+test('resilient payment chain source retries transient BSC RPC provider failures', async () => {
+  const block100: ChainBlock = { number: 100, hash: blockHash(100), parentHash: blockHash(99), timestamp: 1_800_000_000 };
+  let primaryHeadFailures = 1;
+  let fallbackBlockFailures = 1;
+  const source = new ResilientBscPaymentChainSource({
+    routerAddress: CONTRACT,
+    providers: [
+      paymentRpcProvider({
+        head: 105,
+        blocks: [block100],
+        logs: [],
+        failHead: () => primaryHeadFailures-- > 0,
+      }),
+      paymentRpcProvider({
+        head: 105,
+        blocks: [block100],
+        logs: [],
+        failBlock: () => fallbackBlockFailures-- > 0,
+      }),
+    ],
+  });
+
+  assert.equal(await source.head(), 100);
+  assert.deepEqual(await source.block(100), block100);
 });
 
 test('remote signer validates the recovered signer and never accepts an arbitrary signature', async () => {
@@ -904,6 +1015,29 @@ test('runtime readiness attests deployed code, bindings, roles, NPL quote source
   });
   await singleRequestAttestor.attest();
   assert.equal(singleRequestReader.maxConcurrentObserved, 1);
+
+  let transientNow = new Date('2026-07-14T00:00:00.000Z');
+  let transientAttempts = 0;
+  const transientMonitor = new PaymentRuntimeReadinessMonitor({
+    attest: async () => {
+      transientAttempts += 1;
+      if (transientAttempts === 1) return attestor.attest();
+      throw new Error('transient RPC evidence failure');
+    },
+    componentHashesVerified: async () => true,
+    databaseHealthy: async () => true,
+    redisHealthy: async () => true,
+    signerHealthy: async () => true,
+    indexerStatus: () => ({ healthy: true, caughtUp: true }),
+    clock: () => transientNow,
+    intervalMs: 1_000,
+  });
+  const firstSnapshot = await transientMonitor.pollOnce();
+  transientNow = new Date('2026-07-14T00:00:01.000Z');
+  const reusedSnapshot = await transientMonitor.pollOnce();
+  assert.equal(reusedSnapshot.deployedRuntimeCodeVerified, true);
+  assert.equal(reusedSnapshot.nplQuoteSourceHealthy, true);
+  assert.equal(reusedSnapshot.expiresAt, firstSnapshot.expiresAt);
 
   let indexerHealthy = false;
   const now = new Date('2026-07-14T00:00:00.000Z');
@@ -1389,7 +1523,7 @@ class MemoryPaymentChainSource implements PaymentChainSource {
 }
 
 function paymentRpcProvider(input: {
-  head: number;
+  head: number | (() => number);
   blocks: ChainBlock[];
   logs: Array<{
     address: string;
@@ -1400,29 +1534,33 @@ function paymentRpcProvider(input: {
     blockNumber: number;
     index: number;
   }>;
-  failHead?: boolean;
-  failBlock?: boolean;
-  failLogs?: boolean;
+  failHead?: boolean | (() => boolean);
+  failBlock?: boolean | (() => boolean);
+  failLogs?: boolean | (() => boolean);
 }) {
   const blocks = new Map(input.blocks.map((block) => [block.number, block]));
   return {
     getNetwork: async () => ({ chainId: 56n }),
     getBlockNumber: async () => {
-      if (input.failHead) throw new Error('head unavailable');
-      return input.head;
+      if (flag(input.failHead)) throw new Error('head unavailable');
+      return typeof input.head === 'function' ? input.head() : input.head;
     },
     getBlock: async (blockNumber: number) => {
-      if (input.failBlock) throw new Error('block unavailable');
+      if (flag(input.failBlock)) throw new Error('block unavailable');
       return blocks.get(blockNumber) ?? null;
     },
     getLogs: async ({ fromBlock, toBlock }: { fromBlock: number; toBlock: number }) => {
-      if (input.failLogs) throw new Error('logs unavailable');
+      if (flag(input.failLogs)) throw new Error('logs unavailable');
       return input.logs.filter((log) => log.blockNumber >= fromBlock && log.blockNumber <= toBlock);
     },
     send: async () => {
       throw new Error('unexpected receipt fallback');
     },
   } as unknown as JsonRpcProvider;
+}
+
+function flag(value: boolean | (() => boolean) | undefined) {
+  return typeof value === 'function' ? value() : value === true;
 }
 
 function pairRpcProvider(input: {
