@@ -10,9 +10,10 @@ import {
 import { readAddressLogs } from './rpc-logs.ts';
 
 const DEFAULT_RPC_STABLE_BLOCK_LAG = 5;
+const DEFAULT_INDEXER_BATCH_SIZE = 32;
 const RPC_PROVIDER_RETRY_ATTEMPTS = 3;
 const RPC_PROVIDER_RETRY_DELAY_MS = 250;
-const DEFAULT_INDEXER_CAUGHT_UP_TOLERANCE_BLOCKS = 8;
+const DEFAULT_INDEXER_CAUGHT_UP_TOLERANCE_BLOCKS = 64;
 const DEFAULT_INDEXER_TRANSIENT_FAILURE_GRACE_MS = 45_000;
 
 export interface PaymentChainSource {
@@ -167,7 +168,7 @@ export class PollingPaymentIndexer {
     onStatus?: (status: Readonly<PaymentIndexerStatus>) => void;
   }) {
     assertBlockNumber(input.deploymentBlock);
-    const batchSize = input.batchSize ?? 8;
+    const batchSize = input.batchSize ?? DEFAULT_INDEXER_BATCH_SIZE;
     const pollIntervalMs = input.pollIntervalMs ?? 3_000;
     if (!Number.isSafeInteger(batchSize) || batchSize <= 0 || batchSize > 1_000) {
       throw new CoreError('InvalidRequest', 'Indexer batch size is invalid');
