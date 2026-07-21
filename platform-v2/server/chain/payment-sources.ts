@@ -13,7 +13,7 @@ import type {
 } from '../data/catalog-payment-service.ts';
 
 const ZERO_ADDRESS = `0x${'0'.repeat(40)}`;
-const PUBLIC_RPC_REQUEST_INTERVAL_MS = 450;
+const PUBLIC_RPC_REQUEST_INTERVAL_MS = 350;
 const PAIR_ABI = [
   'function token0() view returns (address)',
   'function token1() view returns (address)',
