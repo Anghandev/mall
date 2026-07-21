@@ -22,7 +22,7 @@
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "563527b0c5f0f27c66dcb8fd5c5d5d1dd8058271310da792e12de0b5d44dbccf"
+      "sha256": "ac76df2b7314fbc6c51106c7d35e9ad339a18705f9a5646f59ef0db64e187af8"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
@@ -30,11 +30,11 @@
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "b41619c1b38990461c54e1ed3bd48912af8ff69644ed3c85de20e34deb464dff"
+      "sha256": "391d9c2bdfb7a3a5ea85077dfe6c42661d565d9dc74f894a18af678af5421c0d"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "2668fd018b2cefb2e7b77be8bb229b92d4590121fdfceb69d799b98659e18469"
+      "sha256": "5fd1e025cf21bb56772f17271d6da03a570e903b85275dd4f69ed420318568ca"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
@@ -64,7 +64,7 @@
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "9406dbb93714e1fe2ff373128291c43557e7a5d805dc9295101fa6b6a1c1596e"
+      "sha256": "19e6a3efdf5a2f29e2e7aef39ec48583c9c200d5974a552241e59e672c3e00af"
     }
   ],
   "httpSurface": [
@@ -316,6 +316,7 @@
     "websocket": "AVAILABLE"
   },
   "executableOrderActionNames": [
+    "PAY_ORDER",
     "REQUEST_EXCHANGE",
     "REQUEST_DELAY",
     "DECIDE_FULFILLMENT_REQUEST",

@@ -220,6 +220,11 @@
           "name": "043_live_seckill_reservation_window.sql",
           "path": "schema/business/043_live_seckill_reservation_window.sql",
           "sha256": "360eef6a91993427a665feb6fea50160b98ed5f5a59fee07c6bdede8687fe9e5"
+        },
+        {
+          "name": "044_settlement_execution_integrity.sql",
+          "path": "schema/business/044_settlement_execution_integrity.sql",
+          "sha256": "b721671360e053bdb3490186d85009e5500fe003084977457e3e3700b201f18e"
         }
       ]
     },

@@ -14,6 +14,10 @@ import {
 import abiBundle from '../../../packages/core-artifacts/contracts/abi-bundle.json' with { type: 'json' };
 import contractManifest from '../../../packages/core-artifacts/contracts/contract-manifest.json' with { type: 'json' };
 import { CORE_ARTIFACT_VERSION, NPL_ADDRESS, USDT_ADDRESS } from '../api/enums.ts';
+import {
+  verifySettlementExecutionAuthorization,
+  type SettlementExecutionAuthorization,
+} from '../api/settlement-signing.ts';
 import { coverageBreakerExecutionRequestDigest } from '../chain/coverage-breaker-governance.ts';
 import { policyExecutionRequestDigest } from '../chain/policy-publication-worker.ts';
 import { seckillExecutionRequestDigest } from '../chain/seckill-governance.ts';
@@ -45,6 +49,7 @@ type StoredRecord = { requestHash: string; response: Record<string, unknown>; ra
 type RuntimeErrorCode =
   | 'CHAIN_MISMATCH'
   | 'SIGNATURE_MISMATCH'
+  | 'AUTHORIZATION_MISMATCH'
   | 'ROLE_MISMATCH'
   | 'AMOUNT_MISMATCH'
   | 'CALLDATA_MISMATCH'
@@ -125,28 +130,55 @@ async function settle(input: Record<string, unknown>) {
   let executorWallet: string;
   let executorNonce: bigint;
   let tokenAddress: string;
+  let requestId: string;
+  let requestItemIndex: number;
+  let orderId: string;
+  let accountId: string;
+  let backingWalletAddress: string;
   let recipientAddress: string;
   let amount: bigint;
   let transferCalldata: string;
   let requestDigest: string;
   let gasLimit: bigint;
   let idempotencyKey: string;
+  let authorization: SettlementExecutionAuthorization;
   try {
     transferId = hash(input.transferId, 'transferId');
     executorWallet = address(input.executorWallet, 'executorWallet');
     executorNonce = integer(input.executorNonce, 'executorNonce');
     tokenAddress = address(input.tokenAddress, 'tokenAddress');
+    requestId = hash(input.requestId, 'requestId');
+    requestItemIndex = nonNegativeNumber(input.requestItemIndex, 'requestItemIndex');
+    orderId = hash(input.orderId, 'orderId');
+    accountId = text(input.accountId, 'accountId');
+    backingWalletAddress = address(input.backingWalletAddress, 'backingWalletAddress');
     recipientAddress = address(input.recipientAddress, 'recipientAddress');
     amount = positiveInteger(input.amount, 'amount');
     transferCalldata = bytes(input.transferCalldata, 'transferCalldata');
     requestDigest = hash(input.requestDigest, 'requestDigest');
     gasLimit = boundedGas(input.gasLimit);
     idempotencyKey = identifier(input.idempotencyKey, 'idempotencyKey');
+    authorization = object(input.authorization, 'authorization') as unknown as SettlementExecutionAuthorization;
   } catch {
     throw new RuntimeRequestError('INVALID_ENVELOPE', 'settlement envelope is invalid');
   }
   const role = settlementWallets.get(executorWallet);
   if (!role || role.tokenAddress !== tokenAddress) throw new RuntimeRequestError('ROLE_MISMATCH', 'settlement role mismatch');
+  try {
+    verifySettlementExecutionAuthorization(authorization, {
+      requestId,
+      requestItemIndex,
+      orderId,
+      accountId,
+      backingWalletAddress,
+      executorWallet,
+      tokenAddress,
+      recipientAddress,
+      amount: amount.toString(),
+    });
+  } catch {
+    throw new RuntimeRequestError('AUTHORIZATION_MISMATCH', 'settlement authorization mismatch');
+  }
   let decoded: ReturnType<typeof transferInterface.decodeFunctionData>;
   try {
     decoded = transferInterface.decodeFunctionData('transfer', transferCalldata);
@@ -606,6 +638,12 @@ function positiveInteger(value: unknown, name: string) {
 function positiveNumber(value: unknown, name: string) {
   const result = Number(value);
   if (!Number.isSafeInteger(result) || result <= 0) throw new Error(`${name} is invalid`);
+  return result;
+}
+
+function nonNegativeNumber(value: unknown, name: string) {
+  const result = Number(value);
+  if (!Number.isSafeInteger(result) || result < 0) throw new Error(`${name} is invalid`);
   return result;
 }
 

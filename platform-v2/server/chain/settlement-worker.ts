@@ -2,6 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { getAddress, keccak256, toUtf8Bytes } from 'ethers';
 import { REQUIRED_CONFIRMATIONS } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
+import {
+  verifySettlementExecutionAuthorization,
+  type SettlementExecutionAuthorization,
+  type SettlementRequestIntent,
+} from '../api/settlement-signing.ts';
 import { auditSourceId, enqueueAudit } from '../data/audit-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from '../data/migrations.ts';
 import type { MainnetMicrotestEntitlement } from '../data/mainnet-microtest-entitlement.ts';
@@ -14,6 +19,7 @@ interface TransferRow {
   request_item_index: number;
   order_id: string;
   account_id: string;
+  backing_wallet_address: string;
   merchant_id: string | null;
   policy_version: string | number;
   asset: 'USDT' | 'NPL';
@@ -28,6 +34,7 @@ interface TransferRow {
   state: string;
   submitted_at: Date | null;
   settled_at: Date | null;
+  authorization: SettlementExecutionAuthorization;
 }
 
 interface AttemptRow {
@@ -47,6 +54,11 @@ export interface EoaSettlementSubmissionInput {
   executorWallet: string;
   executorNonce: string;
   tokenAddress: string;
+  requestId: string;
+  requestItemIndex: number;
+  orderId: string;
+  accountId: string;
+  backingWalletAddress: string;
   recipientAddress: string;
   amount: string;
   transferCalldata: string;
@@ -54,6 +66,7 @@ export interface EoaSettlementSubmissionInput {
   gasLimit: string;
   requestDigest: string;
   idempotencyKey: string;
+  authorization: SettlementExecutionAuthorization;
 }
 
 export interface EoaSettlementSubmission {
@@ -100,6 +113,7 @@ export interface EoaSettlementChainSource {
 export const deterministicEoaSettlementExecutorErrorCodes = [
   'CHAIN_MISMATCH',
   'SIGNATURE_MISMATCH',
+  'AUTHORIZATION_MISMATCH',
   'ROLE_MISMATCH',
   'AMOUNT_MISMATCH',
   'CALLDATA_MISMATCH',
@@ -950,6 +964,11 @@ function submissionInput(transfer: TransferRow, attempt: AttemptRow): EoaSettlem
     executorWallet: transfer.executor_wallet,
     executorNonce: transfer.executor_nonce,
     tokenAddress: transfer.token_address,
+    requestId: transfer.request_id,
+    requestItemIndex: transfer.request_item_index,
+    orderId: transfer.order_id,
+    accountId: transfer.account_id,
+    backingWalletAddress: transfer.backing_wallet_address,
     recipientAddress: transfer.recipient_address,
     amount: transfer.amount,
     transferCalldata: transfer.transfer_calldata,
@@ -957,6 +976,7 @@ function submissionInput(transfer: TransferRow, attempt: AttemptRow): EoaSettlem
     gasLimit: transfer.gas_cap,
     requestDigest: attempt.request_digest,
     idempotencyKey: attempt.attempt_id,
+    authorization: transfer.authorization,
   };
 }
 
@@ -1021,21 +1041,108 @@ function validateReceipt(transfer: TransferRow, receipt: EoaSettlementReceipt) {
 }
 
 async function loadTransfer(executor: SqlExecutor, transferId: string, forUpdate = false) {
-  const result = await executor.query<TransferRow>(
+  const result = await executor.query<Omit<TransferRow, 'authorization'>>(
     `SELECT transfer.transfer_id, transfer.artifact_version, transfer.request_id,
        transfer.request_item_index, transfer.order_id, transfer.account_id,
+       request_item.backing_wallet_address,
        request.merchant_id, orders.policy_version, transfer.asset, transfer.token_address,
        transfer.executor_wallet, transfer.executor_nonce::text, transfer.recipient_address,
        transfer.amount::text, transfer.transfer_calldata, transfer.content_hash,
        transfer.gas_cap::text, transfer.state, transfer.submitted_at, transfer.settled_at
      FROM core.settlement_transfers transfer
      JOIN core.settlement_requests request ON request.request_id = transfer.request_id
+     JOIN core.settlement_request_items request_item
+       ON request_item.request_id = transfer.request_id
+      AND request_item.item_index = transfer.request_item_index
      JOIN core.orders orders ON orders.order_id = transfer.order_id
      WHERE transfer.transfer_id = $1${forUpdate ? ' FOR UPDATE OF transfer' : ''}`,
     [transferId],
   );
-  if (!result.rows[0]) throw new CoreError('InvalidRequest', 'Settlement transfer not found', 404);
-  return result.rows[0];
+  const transfer = result.rows[0];
+  if (!transfer) throw new CoreError('InvalidRequest', 'Settlement transfer not found', 404);
+  const authorization = await loadTransferAuthorization(executor, transfer);
+  verifySettlementExecutionAuthorization(authorization, {
+    requestId: transfer.request_id,
+    requestItemIndex: transfer.request_item_index,
+    orderId: transfer.order_id,
+    accountId: transfer.account_id,
+    backingWalletAddress: transfer.backing_wallet_address,
+    executorWallet: transfer.executor_wallet,
+    tokenAddress: transfer.token_address,
+    recipientAddress: transfer.recipient_address,
+    amount: transfer.amount,
+  });
+  return { ...transfer, authorization };
+}
+
+async function loadTransferAuthorization(
+  executor: SqlExecutor,
+  transfer: Omit<TransferRow, 'authorization'>,
+): Promise<SettlementExecutionAuthorization> {
+  const request = await executor.query<{
+    request_id: string;
+    signature: string;
+    intent_id: string;
+    artifact_version: string;
+    wallet_address: string;
+    recipient_address: string;
+    rail: SettlementRequestIntent['rail'];
+    asset_address: string;
+    executor_wallet: string;
+    amount: string;
+    items_hash: string;
+    nonce: string;
+    deadline: Date;
+  }>(
+    `SELECT request.request_id, request.signature, intent.intent_id,
+       intent.artifact_version, intent.wallet_address, intent.recipient_address,
+       intent.rail, intent.asset_address, intent.executor_wallet, intent.amount::text,
+       intent.items_hash, intent.nonce::text, intent.deadline
+     FROM core.settlement_requests request
+     JOIN core.settlement_intents intent ON intent.intent_id = request.intent_id
+     WHERE request.request_id = $1`,
+    [transfer.request_id],
+  );
+  const row = request.rows[0];
+  if (!row) throw new CoreError('InvalidFinality', 'Signed settlement request authorization is unavailable', 409);
+  const items = await executor.query<{
+    item_index: number;
+    order_id: string;
+    account_id: string;
+    backing_wallet_address: string;
+    amount: string;
+    item_hash: string;
+  }>(
+    `SELECT item_index, order_id, account_id, backing_wallet_address, amount::text, item_hash
+     FROM core.settlement_intent_items WHERE intent_id = $1 ORDER BY item_index`,
+    [row.intent_id],
+  );
+  return {
+    requestId: row.request_id,
+    selectedItemIndex: transfer.request_item_index,
+    intent: {
+      intentId: row.intent_id,
+      artifactVersion: row.artifact_version,
+      wallet: row.wallet_address,
+      recipient: row.recipient_address,
+      rail: row.rail,
+      asset: row.asset_address,
+      executorWallet: row.executor_wallet,
+      amount: row.amount,
+      itemsHash: row.items_hash,
+      nonce: row.nonce,
+      deadline: Math.floor(new Date(row.deadline).getTime() / 1000),
+    },
+    signature: row.signature,
+    items: items.rows.map((item) => ({
+      itemIndex: item.item_index,
+      orderId: item.order_id,
+      accountId: item.account_id,
+      backingWalletAddress: item.backing_wallet_address,
+      amount: item.amount,
+      itemHash: item.item_hash,
+    })),
+  };
 }
 
 async function loadAttempt(executor: SqlExecutor, attemptId: string, forUpdate = false) {

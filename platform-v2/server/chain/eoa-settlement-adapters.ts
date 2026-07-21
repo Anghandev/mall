@@ -68,6 +68,12 @@ export class HttpEoaSettlementBroadcaster implements EoaSettlementBroadcaster {
       || !isAddress(input.executorWallet)
       || !/^(0|[1-9][0-9]*)$/.test(input.executorNonce)
       || !isAddress(input.tokenAddress)
+      || !isHash(input.requestId)
+      || !Number.isSafeInteger(input.requestItemIndex)
+      || input.requestItemIndex < 0
+      || !isHash(input.orderId)
+      || !validIdentifier(input.accountId)
+      || !isAddress(input.backingWalletAddress)
       || !isAddress(input.recipientAddress)
       || !/^[1-9][0-9]*$/.test(input.amount)
       || !/^0x(?:[0-9a-fA-F]{2})+$/.test(input.transferCalldata)
@@ -76,6 +82,8 @@ export class HttpEoaSettlementBroadcaster implements EoaSettlementBroadcaster {
       || !validIdentifier(input.idempotencyKey)
       || !/^[1-9][0-9]*$/.test(input.gasLimit)
       || BigInt(input.gasLimit) > this.#maxGasLimit
+      || !input.authorization
+      || typeof input.authorization !== 'object'
     ) throw new CoreError('InvalidRequest', 'EOA settlement execution envelope is invalid');
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.#requestTimeoutMs);

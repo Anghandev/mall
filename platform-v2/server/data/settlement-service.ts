@@ -19,6 +19,9 @@ import {
 import { CoreError } from '../api/errors.ts';
 import {
   settlementIntentDigest,
+  settlementItemHash,
+  settlementItemsHash,
+  settlementRequestId,
   settlementRequestDomain,
   settlementRequestTypes,
   verifySettlementRequestSignature,
@@ -428,8 +431,7 @@ export class SettlementService {
         accountId: item.account_id,
         backingWalletAddress: item.backing_wallet_address,
         amount: item.selectedAmount,
-        itemHash: hashJson({
-          intentId,
+        itemHash: settlementItemHash(intentId, {
           itemIndex: index,
           orderId: item.order_id,
           accountId: item.account_id,
@@ -437,7 +439,7 @@ export class SettlementService {
           amount: item.selectedAmount,
         }),
       }));
-      const itemsHash = hashJson(items);
+      const itemsHash = settlementItemsHash(items);
       const intent: SettlementRequestIntent = {
         intentId,
         artifactVersion: CORE_ARTIFACT_VERSION,
@@ -668,8 +670,7 @@ export class SettlementService {
         accountId: input.accountId,
         backingWalletAddress: source.backing_wallet_address,
         amount: input.amount,
-        itemHash: hashJson({
-          intentId,
+        itemHash: settlementItemHash(intentId, {
           itemIndex: 0,
           orderId: input.orderId,
           accountId: input.accountId,
@@ -677,7 +678,7 @@ export class SettlementService {
           amount: input.amount,
         }),
       };
-      const itemsHash = hashJson([item]);
+      const itemsHash = settlementItemsHash([item]);
       const intent: SettlementRequestIntent = {
         intentId,
         artifactVersion: CORE_ARTIFACT_VERSION,
@@ -858,7 +859,7 @@ export class SettlementService {
         await assertAvailableSource(executor, intent, item, governedApproval, now);
       }
 
-      const requestId = hashJson({ intentId: intent.intent_id, digest: intent.intent_digest });
+      const requestId = settlementRequestId(rowIntent(intent));
       const signatureHash = keccak256(input.signature).toLowerCase();
       await executor.query(
         `INSERT INTO core.settlement_requests (

@@ -939,6 +939,7 @@ test('catalog, settlement/admin and seckill realtime capabilities publish the at
       && Number(contract.deploymentBlock) > 0
       && /^0x[0-9a-f]{64}$/.test(contract.deployedCodeHash ?? '')));
   const fulfillmentActions = [
+    'PAY_ORDER',
     'REQUEST_EXCHANGE',
     'REQUEST_DELAY',
     'DECIDE_FULFILLMENT_REQUEST',

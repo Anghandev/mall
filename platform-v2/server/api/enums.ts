@@ -120,6 +120,7 @@ export const allowedActionNames = [
 export type AllowedActionName = (typeof allowedActionNames)[number];
 
 export const executableOrderActionNames = [
+  'PAY_ORDER',
   'REQUEST_EXCHANGE',
   'REQUEST_DELAY',
   'DECIDE_FULFILLMENT_REQUEST',

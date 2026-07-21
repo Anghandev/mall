@@ -7,8 +7,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { Interface, Wallet, keccak256 } from 'ethers';
-import { USDT_ADDRESS } from '../api/enums.ts';
+import { Interface, Wallet, keccak256, toUtf8Bytes } from 'ethers';
+import { CORE_ARTIFACT_VERSION, USDT_ADDRESS } from '../api/enums.ts';
+import { settlementIntentDigest, settlementRequestDomain, settlementRequestTypes } from '../api/settlement-signing.ts';
 
 const HASH_1 = `0x${'1'.repeat(64)}`;
 const HASH_2 = `0x${'2'.repeat(64)}`;
@@ -24,6 +25,7 @@ test('EOA runtime replays one persisted raw transaction after HTTP response loss
   const reward = wallet('3');
   const operations = wallet('4');
   const recipient = wallet('5').address.toLowerCase();
+  const authorization = await signedAuthorization(wallet('5'), settlement.address.toLowerCase(), recipient);
   const broadcasts: string[] = [];
   let firstBroadcastSeen!: () => void;
   let releaseFirstBroadcast!: () => void;
@@ -63,6 +65,11 @@ test('EOA runtime replays one persisted raw transaction after HTTP response loss
     executorWallet: settlement.address.toLowerCase(),
     executorNonce: '0',
     tokenAddress: USDT_ADDRESS,
+    requestId: authorization.requestId,
+    requestItemIndex: 0,
+    orderId: authorization.items[0]!.orderId,
+    accountId: authorization.items[0]!.accountId,
+    backingWalletAddress: authorization.items[0]!.backingWalletAddress,
     recipientAddress: recipient,
     amount: '1',
     transferCalldata: TRANSFER.encodeFunctionData('transfer', [recipient, 1n]).toLowerCase(),
@@ -70,6 +77,7 @@ test('EOA runtime replays one persisted raw transaction after HTTP response loss
     gasLimit: '100000',
     requestDigest: HASH_3,
     idempotencyKey: 'settlement-runtime-response-loss-1',
+    authorization,
   };
   let runtime: ReturnType<typeof spawn> | undefined;
   try {
@@ -112,6 +120,128 @@ test('EOA runtime replays one persisted raw transaction after HTTP response loss
     await rm(temporary, { recursive: true, force: true });
   }
 });
+
+test('EOA runtime rejects calldata that is not bound to the original signed settlement request', async () => {
+  const temporary = await mkdtemp(join(tmpdir(), 'abu24k-eoa-runtime-authorization-'));
+  const governance = wallet('1');
+  const settlement = wallet('2');
+  const reward = wallet('3');
+  const operations = wallet('4');
+  const owner = wallet('5');
+  const recipient = owner.address.toLowerCase();
+  const attacker = wallet('6').address.toLowerCase();
+  const authorization = await signedAuthorization(owner, settlement.address.toLowerCase(), recipient);
+  const broadcasts: string[] = [];
+  const rpc = await fakeRpcServer(async (rawTransaction) => {
+    broadcasts.push(rawTransaction);
+    return keccak256(rawTransaction).toLowerCase();
+  });
+  const runtimePort = await unusedPort();
+  const env = {
+    ...process.env,
+    HOST: '127.0.0.1',
+    PORT: String(runtimePort),
+    BSC_RPC_URL: `http://127.0.0.1:${address(rpc).port}`,
+    PLATFORM_TECH_PRIVATE_KEY: governance.privateKey,
+    PLATFORM_GOVERNANCE_WALLET_ADDRESS: governance.address,
+    WALLET_2_PRIVATE_KEY: settlement.privateKey,
+    USDT_SETTLEMENT_WALLET_ADDRESS: settlement.address,
+    WALLET_3_PRIVATE_KEY: reward.privateKey,
+    NPL_REWARD_WALLET_ADDRESS: reward.address,
+    WALLET_4_PRIVATE_KEY: operations.privateKey,
+    OPERATIONS_GUARANTEE_WALLET_ADDRESS: operations.address,
+    SIGNER_SERVICE_TOKEN: 'signer-test-token',
+    SETTLEMENT_EXECUTOR_TOKEN: 'settlement-test-token',
+    GOVERNANCE_EXECUTOR_TOKEN: 'governance-test-token',
+    EXECUTOR_MAX_GAS_LIMIT: '1000000',
+    EXECUTION_STATE_FILE: join(temporary, 'execution-state.json'),
+  };
+  const runtime = await startRuntime(env);
+  try {
+    const response = await fetch(`http://127.0.0.1:${runtimePort}/settlement`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer settlement-test-token' },
+      body: JSON.stringify({
+        chainId: 56,
+        transferId: HASH_1,
+        executorWallet: settlement.address.toLowerCase(),
+        executorNonce: '0',
+        tokenAddress: USDT_ADDRESS,
+        requestId: authorization.requestId,
+        requestItemIndex: 0,
+        orderId: authorization.items[0]!.orderId,
+        accountId: authorization.items[0]!.accountId,
+        backingWalletAddress: authorization.items[0]!.backingWalletAddress,
+        recipientAddress: attacker,
+        amount: '1',
+        transferCalldata: TRANSFER.encodeFunctionData('transfer', [attacker, 1n]).toLowerCase(),
+        contentHash: HASH_2,
+        gasLimit: '100000',
+        requestDigest: HASH_3,
+        idempotencyKey: 'settlement-runtime-tampered-authorization-1',
+        authorization,
+      }),
+    });
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: { code: 'AUTHORIZATION_MISMATCH' } });
+    assert.equal(broadcasts.length, 0);
+  } finally {
+    await stopRuntime(runtime);
+    await close(rpc);
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
+
+async function signedAuthorization(owner: Wallet, executorWallet: string, recipient: string) {
+  const item = {
+    itemIndex: 0,
+    orderId: HASH_2,
+    accountId: 'merchant-usdt-account',
+    backingWalletAddress: executorWallet,
+    amount: '1',
+  };
+  const authorizedItem = { ...item, itemHash: hashJson({ intentId: HASH_1, ...item }) };
+  const intent = {
+    intentId: HASH_1,
+    artifactVersion: CORE_ARTIFACT_VERSION,
+    wallet: owner.address.toLowerCase(),
+    recipient,
+    rail: 'MERCHANT_USDT' as const,
+    asset: USDT_ADDRESS,
+    executorWallet,
+    amount: '1',
+    itemsHash: hashJson([authorizedItem]),
+    nonce: '0',
+    deadline: Math.floor(Date.now() / 1000) + 3600,
+  };
+  const signature = await owner.signTypedData(
+    settlementRequestDomain(executorWallet),
+    settlementRequestTypes,
+    intent,
+  );
+  return {
+    requestId: hashJson({ intentId: intent.intentId, digest: settlementIntentDigest(intent).toLowerCase() }),
+    selectedItemIndex: 0,
+    intent,
+    signature,
+    items: [authorizedItem],
+  };
+}
+
+function hashJson(value: unknown) {
+  return keccak256(toUtf8Bytes(stableJson(value))).toLowerCase();
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => `${JSON.stringify(key)}:${stableJson(child)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
 
 function wallet(digit: string) {
   return new Wallet(`0x${digit.repeat(64)}`);

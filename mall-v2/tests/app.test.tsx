@@ -111,9 +111,9 @@ describe('Mall V2 payment consumer', () => {
     expect(productBaseline.knownOrderActions).toBe(allowedActionNames);
     expect(productBaseline.executableOrderActions).toBe(executableOrderActionNames);
     expect(executableOrderActionNames).toContain('CONFIRM_RECEIPT');
-    expect(executableOrderActionNames).not.toContain('PAY_ORDER');
+    expect(executableOrderActionNames).toContain('PAY_ORDER');
     expect(isCoreOrderActionExecutable('CONFIRM_RECEIPT')).toBe(true);
-    expect(isCoreOrderActionExecutable('PAY_ORDER')).toBe(false);
+    expect(isCoreOrderActionExecutable('PAY_ORDER')).toBe(true);
     expect(mallRuntimeBoundary).toMatchObject({
       artifactStatus: '2.0.0-fulfillment-launch.20',
       executableOrderActions: executableOrderActionNames,

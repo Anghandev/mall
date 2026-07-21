@@ -41,7 +41,7 @@ test('all products consume one coordinated artifact without bypassing runtime au
   for (const action of allowedActionNames) {
     assert.equal(isCoreOrderActionExecutable(action), executableOrderActionNames.includes(action), action);
   }
-  assert.equal(isCoreOrderActionExecutable('PAY_ORDER'), false);
+  assert.equal(isCoreOrderActionExecutable('PAY_ORDER'), true);
 });
 
 test('merchant order export is coordinated, consumed by Merchant and absent from other products', () => {

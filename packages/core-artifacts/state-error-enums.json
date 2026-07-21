@@ -138,6 +138,7 @@
     "RECOVER_SURPLUS"
   ],
   "executableOrderActionNames": [
+    "PAY_ORDER",
     "REQUEST_EXCHANGE",
     "REQUEST_DELAY",
     "DECIDE_FULFILLMENT_REQUEST",

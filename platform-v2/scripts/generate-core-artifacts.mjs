@@ -147,6 +147,7 @@ const schemaSources = [
       '041_seckill_shared_inventory_reservations.sql',
       '042_seed_seckill_breaker_scope.sql',
       '043_live_seckill_reservation_window.sql',
+      '044_settlement_execution_integrity.sql',
     ],
   },
   {

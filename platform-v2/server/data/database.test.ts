@@ -10,7 +10,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { Interface, Wallet, id, keccak256, toUtf8Bytes, type InterfaceAbi, type Signer } from 'ethers';
 import { sensitiveActionDomain, sensitiveActionTypes, type SensitiveActionIntent } from '../api/auth.ts';
 import type { CanonicalPaymentIntent } from '../api/checkout.ts';
-import { CORE_ARTIFACT_VERSION, USDT_ADDRESS } from '../api/enums.ts';
+import { CORE_ARTIFACT_VERSION, NPL_ADDRESS, USDT_ADDRESS } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import { MiddlewareMonitoringSource, RpcExplorerHeightSource } from '../api/monitoring-sources.ts';
 import { paymentAllocationSetHash, paymentBeneficiarySetHash } from '../api/payment-policy.ts';
@@ -147,6 +147,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '041_seckill_shared_inventory_reservations.sql',
       '042_seed_seckill_breaker_scope.sql',
       '043_live_seckill_reservation_window.sql',
+      '044_settlement_execution_integrity.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -9084,6 +9085,34 @@ test('signed settlement request executes one immutable EOA transfer and settles 
       correlationId: 'eoa-settlement-transfer-1-retry',
     })).transferId, transfer.transferId);
 
+    const tamperedCalldata = new Interface(['function transfer(address recipient,uint256 amount)'])
+      .encodeFunctionData('transfer', [BUYER, 44n])
+      .toLowerCase();
+    await assert.rejects(
+      db.query(
+        `UPDATE core.settlement_transfers
+         SET recipient_address = $2, amount = 44, transfer_calldata = $3, content_hash = $4
+         WHERE transfer_id = $1`,
+        [transfer.transferId, BUYER, tamperedCalldata, `0x${'3'.repeat(64)}`],
+      ),
+      /ImmutableSettlementTransfer/,
+    );
+    for (const [column, value] of [
+      ['token_address', NPL_ADDRESS],
+      ['executor_wallet', BUYER],
+      ['executor_nonce', '8'],
+      ['gas_cap', '99999'],
+    ] as const) {
+      await assert.rejects(
+        db.query(`UPDATE core.settlement_transfers SET ${column} = $2 WHERE transfer_id = $1`, [transfer.transferId, value]),
+        /ImmutableSettlementTransfer/,
+      );
+    }
+    await assert.rejects(
+      db.query('DELETE FROM core.settlement_transfers WHERE transfer_id = $1', [transfer.transferId]),
+      /ImmutableSettlementTransfer/,
+    );
+
     const executionTxHash = `0x${'d'.repeat(64)}`;
     let receipt: EoaSettlementReceipt | undefined;
     let canonicalBlockHash = `0x${'e'.repeat(64)}`;
@@ -9121,6 +9150,34 @@ test('signed settlement request executes one immutable EOA transfer and settles 
     assert.equal(submittedInput.executorWallet, transfer.executorWallet);
     assert.equal(submittedInput.executorNonce, transfer.executorNonce);
     assert.equal(submittedInput.transferCalldata, transfer.transferCalldata);
+    const authorization = (submittedInput as unknown as {
+      authorization?: { requestId: string; selectedItemIndex: number; intent: { intentId: string }; signature: string };
+    }).authorization;
+    assert.deepEqual(authorization, {
+      requestId: prepared.request.request_id,
+      selectedItemIndex: 0,
+      intent: prepared.challenge.intent,
+      signature: prepared.signature,
+      items: prepared.challenge.items,
+    });
+    const attemptId = `settlement-attempt:${transfer.transferId}:1`;
+    for (const [column, value] of [
+      ['request_digest', HASH],
+      ['transaction_to', BUYER],
+      ['transaction_calldata', tamperedCalldata],
+      ['executor_wallet', BUYER],
+      ['executor_nonce', '8'],
+      ['gas_limit', '99999'],
+    ] as const) {
+      await assert.rejects(
+        db.query(`UPDATE core.settlement_transfer_attempts SET ${column} = $2 WHERE attempt_id = $1`, [attemptId, value]),
+        /ImmutableSettlementTransferAttempt/,
+      );
+    }
+    await assert.rejects(
+      db.query('DELETE FROM core.settlement_transfer_attempts WHERE attempt_id = $1', [attemptId]),
+      /ImmutableSettlementTransferAttempt/,
+    );
     assert.equal((await worker.submitOnce()), 0);
     assert.equal((await prepared.settlements.getAdminRequest(
       { walletAddress: prepared.operator.walletAddress, roles: ['AUDITOR'] },
@@ -12387,6 +12444,8 @@ async function prepareRequestedSettlement(db: PGlite) {
     operator,
     runtime,
     request,
+    challenge,
+    signature,
     requestedAmount: challenge.intent.amount,
   };
 }
