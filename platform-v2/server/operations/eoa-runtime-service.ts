@@ -20,13 +20,22 @@ import {
 } from '../api/settlement-signing.ts';
 import { coverageBreakerExecutionRequestDigest } from '../chain/coverage-breaker-governance.ts';
 import { policyExecutionRequestDigest } from '../chain/policy-publication-worker.ts';
-import { seckillExecutionRequestDigest } from '../chain/seckill-governance.ts';
+import {
+  seckillExecutionRequestDigest,
+  seckillNonceObservationEvidenceHash,
+} from '../chain/seckill-governance.ts';
 
 const host = process.env.HOST ?? '127.0.0.1';
 const port = positiveNumber(process.env.PORT ?? '8790', 'PORT');
 if (!['127.0.0.1', '::1', 'localhost'].includes(host)) throw new Error('EOA runtime must bind loopback only');
 
-const provider = new JsonRpcProvider(required('BSC_RPC_URL'), 56, { staticNetwork: true });
+const primaryRpcUrl = required('BSC_RPC_URL');
+const fallbackRpcUrl = required('BSC_FALLBACK_RPC_URL');
+if (normalizedUrl(primaryRpcUrl) === normalizedUrl(fallbackRpcUrl)) {
+  throw new Error('EOA runtime requires two independent BSC RPC endpoints');
+}
+const provider = new JsonRpcProvider(primaryRpcUrl, 56, { staticNetwork: true });
+const fallbackProvider = new JsonRpcProvider(fallbackRpcUrl, 56, { staticNetwork: true });
 const governance = wallet('PLATFORM_TECH_PRIVATE_KEY', 'PLATFORM_GOVERNANCE_WALLET_ADDRESS');
 const usdtSettlement = wallet('WALLET_2_PRIVATE_KEY', 'USDT_SETTLEMENT_WALLET_ADDRESS');
 const nplReward = wallet('WALLET_3_PRIVATE_KEY', 'NPL_REWARD_WALLET_ADDRESS');
@@ -60,12 +69,14 @@ type RuntimeErrorCode =
 class RuntimeRequestError extends Error {
   readonly runtimeCode: RuntimeErrorCode;
   readonly status: number;
+  readonly details: Readonly<Record<string, unknown>>;
 
-  constructor(runtimeCode: RuntimeErrorCode, message: string, status = 400) {
+  constructor(runtimeCode: RuntimeErrorCode, message: string, status = 400, details: Record<string, unknown> = {}) {
     super(message);
     this.name = 'RuntimeRequestError';
     this.runtimeCode = runtimeCode;
     this.status = status;
+    this.details = Object.freeze({ ...details });
   }
 }
 
@@ -205,7 +216,7 @@ async function settle(input: Record<string, unknown>) {
       throw new RuntimeRequestError('CALLDATA_MISMATCH', 'replacement transaction mismatch');
     }
   }
-  const pendingNonce = await provider.getTransactionCount(role.wallet.address, 'pending');
+  const pendingNonce = await dualPendingNonce(role.wallet.address);
   if (!replacementHash && BigInt(pendingNonce) !== executorNonce) {
     throw new RuntimeRequestError('NONCE_MISMATCH', 'settlement nonce drift');
   }
@@ -228,14 +239,22 @@ async function settle(input: Record<string, unknown>) {
 }
 
 async function govern(input: Record<string, unknown>) {
+  if (input.operation === 'PENDING_NONCE') return governancePendingNonce(input);
+  const requestDigest = hash(input.requestDigest, 'requestDigest');
+  const reconciliationOnly = input.reconciliationOnly === true;
+  if (input.reconciliationOnly !== undefined && !reconciliationOnly) {
+    throw new RuntimeRequestError('INVALID_ENVELOPE', 'governance reconciliation mode is invalid');
+  }
+  const requestHash = governanceRequestHash(input);
+  const existing = state[`governance:${requestDigest}`];
+  if (existing) return replayBroadcast(existing, requestHash);
   if (input.artifactVersion !== CORE_ARTIFACT_VERSION || Number(input.chainId) !== 56 || input.value !== '0') {
-    throw new Error('governance envelope mismatch');
+    throw new RuntimeRequestError('INVALID_ENVELOPE', 'governance envelope mismatch');
   }
   const from = address(input.from, 'from');
   const to = address(input.to, 'to');
   const data = bytes(input.data, 'data');
   const dataHash = hash(input.dataHash, 'dataHash');
-  const requestDigest = hash(input.requestDigest, 'requestDigest');
   const resourceId = text(input.resourceId, 'resourceId');
   const resourceType = text(input.resourceType, 'resourceType');
   const gasLimit = boundedGas(input.gasLimit);
@@ -245,13 +264,61 @@ async function govern(input: Record<string, unknown>) {
   if (!['POLICY', 'COVERAGE_BREAKER', 'SECKILL_GOVERNANCE_ACTION'].includes(resourceType)) {
     throw new Error('governance resource type is not allowed');
   }
-  const executor = validateGovernanceRequest(input, { from, to, data, dataHash, requestDigest, resourceId, resourceType, gasLimit });
-  const requestHash = hashJson(input);
-  const existing = state[`governance:${requestDigest}`];
-  if (existing) return replayBroadcast(existing, requestHash);
-  const pendingNonce = await provider.getTransactionCount(executor.address, 'pending');
+  let executor: Wallet;
+  try {
+    executor = validateGovernanceRequest(input, {
+      from, to, data, dataHash, requestDigest, resourceId, resourceType, gasLimit,
+    });
+  } catch (error) {
+    if (error instanceof RuntimeRequestError) throw error;
+    throw new RuntimeRequestError(
+      'INVALID_ENVELOPE',
+      error instanceof Error ? error.message : 'governance request is invalid',
+    );
+  }
+  const pendingNonce = await dualPendingNonce(executor.address);
   const minimumNonce = input.minimumExecutorNonce === undefined ? 0n : integer(input.minimumExecutorNonce, 'minimumExecutorNonce');
-  if (BigInt(pendingNonce) < minimumNonce) throw new Error('governance nonce is below the approved minimum');
+  if (resourceType === 'SECKILL_GOVERNANCE_ACTION' && reconciliationOnly) {
+    const relation = BigInt(pendingNonce) < minimumNonce
+      ? 'UNSIGNED_UNBROADCAST'
+      : BigInt(pendingNonce) > minimumNonce
+        ? 'NONCE_CONSUMED_UNKNOWN'
+        : 'STATE_RECORD_MISSING';
+    throw new RuntimeRequestError(
+      'NONCE_MISMATCH',
+      'governance reconciliation has no persisted transaction to replay',
+      409,
+      {
+        relation,
+        stateRecordPresent: false,
+        executorWallet: executor.address.toLowerCase(),
+        reservedNonce: minimumNonce.toString(),
+        primaryPendingNonce: String(pendingNonce),
+        fallbackPendingNonce: String(pendingNonce),
+      },
+    );
+  }
+  if (resourceType === 'SECKILL_GOVERNANCE_ACTION' && BigInt(pendingNonce) !== minimumNonce) {
+    const relation = BigInt(pendingNonce) < minimumNonce
+      ? 'UNSIGNED_UNBROADCAST'
+      : 'NONCE_CONSUMED_UNKNOWN';
+    throw new RuntimeRequestError(
+      'NONCE_MISMATCH',
+      'governance nonce does not match the reserved execution nonce',
+      409,
+      {
+        relation,
+        stateRecordPresent: false,
+        executorWallet: executor.address.toLowerCase(),
+        reservedNonce: minimumNonce.toString(),
+        primaryPendingNonce: String(pendingNonce),
+        fallbackPendingNonce: String(pendingNonce),
+      },
+    );
+  }
+  if (resourceType !== 'SECKILL_GOVERNANCE_ACTION' && BigInt(pendingNonce) < minimumNonce) {
+    throw new RuntimeRequestError('NONCE_MISMATCH', 'governance nonce is below the approved minimum', 409);
+  }
   const signed = await signTransaction(executor, { to, data, value: 0n, gasLimit, nonce: pendingNonce });
   const executionEvidenceHash = hashJson({ requestDigest, transactionHash: signed.hash, executorNonce: pendingNonce });
   const result = {
@@ -268,6 +335,22 @@ async function govern(input: Record<string, unknown>) {
   await record(`governance:${requestDigest}`, requestHash, result, signed.rawTransaction);
   await broadcast(signed.rawTransaction, signed.hash);
   return result;
+}
+
+async function governancePendingNonce(input: Record<string, unknown>) {
+  if (input.artifactVersion !== CORE_ARTIFACT_VERSION || Number(input.chainId) !== 56) {
+    throw new Error('governance nonce envelope mismatch');
+  }
+  const governanceWallet = address(input.governanceWallet, 'governanceWallet');
+  if (![governance.address.toLowerCase(), operations.address.toLowerCase()].includes(governanceWallet)) {
+    throw new Error('governance nonce wallet is not allowed');
+  }
+  const executorNonce = String(await dualPendingNonce(governanceWallet));
+  return {
+    executorWallet: governanceWallet,
+    executorNonce,
+    evidenceHash: seckillNonceObservationEvidenceHash(governanceWallet, executorNonce),
+  };
 }
 
 async function transactionRequest(
@@ -348,6 +431,7 @@ function validateGovernanceRequest(
   const expected = seckillExpectation(actionKind, input.expected);
   const policyVersion = positiveNumber(input.policyVersion, 'policyVersion');
   const execution: Parameters<typeof seckillExecutionRequestDigest>[0] = {
+    artifactVersion: text(input.artifactVersion, 'artifactVersion'),
     actionId: parsed.resourceId,
     sessionId,
     actionKind,
@@ -589,6 +673,34 @@ function required(name: string) {
   return value;
 }
 
+async function dualPendingNonce(walletAddress: string) {
+  const [primary, fallback] = await Promise.all([
+    provider.getTransactionCount(walletAddress, 'pending'),
+    fallbackProvider.getTransactionCount(walletAddress, 'pending'),
+  ]);
+  if (primary !== fallback) {
+    throw new RuntimeRequestError('NONCE_MISMATCH', 'BSC RPC sources disagree on the pending nonce', 409, {
+      relation: 'RPC_DIVERGENCE',
+      stateRecordPresent: false,
+      executorWallet: walletAddress.toLowerCase(),
+      primaryPendingNonce: String(primary),
+      fallbackPendingNonce: String(fallback),
+    });
+  }
+  return primary;
+}
+
+function normalizedUrl(value: string) {
+  const url = new URL(value);
+  url.hash = '';
+  return url.href.replace(/\/$/, '');
+}
+
+function governanceRequestHash(input: Record<string, unknown>) {
+  const { reconciliationOnly: _reconciliationOnly, ...identity } = input;
+  return hashJson(identity);
+}
+
 function text(value: unknown, name: string) {
   if (typeof value !== 'string' || value.length === 0 || value.length > 512) throw new Error(`${name} is invalid`);
   return value;
@@ -674,7 +786,9 @@ function stableJson(value: unknown): string {
 
 function sendRuntimeError(response: ServerResponse, error: unknown) {
   if (error instanceof RuntimeRequestError) {
-    return send(response, error.status, { error: { code: error.runtimeCode } });
+    return send(response, error.status, {
+      error: { code: error.runtimeCode, ...(Object.keys(error.details).length > 0 ? { details: error.details } : {}) },
+    });
   }
   return send(response, 500, { error: 'EOA_RUNTIME_FAILURE' });
 }

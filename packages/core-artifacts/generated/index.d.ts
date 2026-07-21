@@ -615,7 +615,7 @@ export interface SeckillSessionHistoryPage {
 export type SeckillGovernanceActionKind = 'OPEN_SESSION' | 'FORCE_CLOSE' | 'RESUME_PURCHASES' | 'PRIZE_INJECTION';
 export type SeckillGovernanceActionState =
   | 'DRAFT' | 'SECONDARY_SIGNED' | 'PENDING_EXECUTION' | 'SUBMITTED'
-  | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'CANCELLED';
+  | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'CANCELLED' | 'RECONCILE_REQUIRED';
 
 export interface SeckillSessionCreateRequest {
   policyVersion: AtomicAmount;
@@ -690,6 +690,12 @@ export interface SeckillGovernanceActionProjection {
   targetAddress: Address;
   calldataHash: Bytes32;
   executorNonce: AtomicAmount | null;
+  nonceReservedAt: string | null;
+  nonceReservationEvidenceHash: Bytes32 | null;
+  executionArtifactVersion: string | null;
+  executionRequestDigest: Bytes32 | null;
+  nonceReleasedAt: string | null;
+  nonceReleaseEvidenceHash: Bytes32 | null;
   submittedTxHash: Bytes32 | null;
   executionEvidenceHash: Bytes32 | null;
   executionTxHash: Bytes32 | null;

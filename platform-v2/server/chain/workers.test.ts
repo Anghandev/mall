@@ -220,6 +220,21 @@ test('EOA settlement HTTP broadcaster only treats allowlisted 4xx codes as deter
     );
   }
 
+  const nonceMismatch = new HttpEoaSettlementBroadcaster({
+    url: 'http://127.0.0.1:8790/settlement',
+    token: 'token',
+    maxGasLimit: 100000n,
+    fetch: (async () => new Response(JSON.stringify({
+      error: { code: 'NONCE_MISMATCH', details: { relation: 'RPC_DIVERGENCE' } },
+    }), { status: 409 })) as typeof fetch,
+  });
+  await assert.rejects(
+    nonceMismatch.submit(envelope),
+    (error: unknown) => error instanceof CoreError
+      && error.code === 'ExternalBlocked'
+      && error.details.deterministicExecutorFailure === false,
+  );
+
   const ambiguous = new HttpEoaSettlementBroadcaster({
     url: 'http://127.0.0.1:8790/settlement',
     token: 'token',

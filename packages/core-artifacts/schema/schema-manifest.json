@@ -225,6 +225,11 @@
           "name": "044_settlement_execution_integrity.sql",
           "path": "schema/business/044_settlement_execution_integrity.sql",
           "sha256": "b721671360e053bdb3490186d85009e5500fe003084977457e3e3700b201f18e"
+        },
+        {
+          "name": "045_settlement_nonce_release.sql",
+          "path": "schema/business/045_settlement_nonce_release.sql",
+          "sha256": "156cf626e27cf02829abac1810a5667fce09c4216460f7aa5c00fe0efd834237"
         }
       ]
     },

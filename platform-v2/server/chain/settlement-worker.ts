@@ -117,7 +117,6 @@ export const deterministicEoaSettlementExecutorErrorCodes = [
   'ROLE_MISMATCH',
   'AMOUNT_MISMATCH',
   'CALLDATA_MISMATCH',
-  'NONCE_MISMATCH',
   'IDEMPOTENCY_CONFLICT',
   'INVALID_ENVELOPE',
 ] as const;
@@ -559,7 +558,8 @@ export class SettlementWorker {
         [attempt.attempt_id, submitted.executionTxHash, now, attempt.lease_token],
       );
       await executor.query(
-        `UPDATE core.settlement_transfers SET state = 'SUBMITTED', submitted_at = COALESCE(submitted_at, $2)
+        `UPDATE core.settlement_transfers SET state = 'SUBMITTED', nonce_state = 'BROADCAST',
+           submitted_at = COALESCE(submitted_at, $2)
          WHERE transfer_id = $1 AND state IN ('LEASED','SUBMITTED','MINED')`,
         [transfer.transfer_id, now],
       );
@@ -861,16 +861,28 @@ export class SettlementWorker {
   ) {
     await this.#transactions.transaction(async (executor) => {
       const now = this.#clock();
+      const failureEvidenceHash = hashJson(settlementSubmissionFailureEvidence(error, 'QUARANTINED'));
       await executor.query(
         `UPDATE core.settlement_transfer_attempts SET state = 'QUARANTINED', updated_at = $2
          WHERE attempt_id = $1 AND state = 'LEASED'`,
         [leased.attempt.attempt_id, now],
       );
       const transferQuarantined = await executor.query<{ transfer_id: string }>(
-        `UPDATE core.settlement_transfers SET state = 'QUARANTINED'
+        `UPDATE core.settlement_transfers
+         SET state = 'QUARANTINED',
+           nonce_state = CASE WHEN NOT EXISTS (
+             SELECT 1 FROM core.settlement_transfer_attempts prior
+             WHERE prior.transfer_id = core.settlement_transfers.transfer_id
+               AND prior.execution_tx_hash IS NOT NULL
+           ) THEN 'RELEASED' ELSE nonce_state END,
+           nonce_release_evidence_hash = CASE WHEN NOT EXISTS (
+             SELECT 1 FROM core.settlement_transfer_attempts prior
+             WHERE prior.transfer_id = core.settlement_transfers.transfer_id
+               AND prior.execution_tx_hash IS NOT NULL
+           ) THEN $2 ELSE nonce_release_evidence_hash END
          WHERE transfer_id = $1 AND state IN ('LEASED','SUBMITTED','MINED')
          RETURNING transfer_id`,
-        [leased.transfer.transfer_id],
+        [leased.transfer.transfer_id, failureEvidenceHash],
       );
       if (transferQuarantined.rows[0]) {
         await executor.query(
@@ -883,7 +895,7 @@ export class SettlementWorker {
         transfer: leased.transfer,
         eventType: 'SettlementTransferSubmissionQuarantined',
         evidenceProfile: 'SYSTEM',
-        evidenceHash: hashJson(settlementSubmissionFailureEvidence(error, 'QUARANTINED')),
+        evidenceHash: failureEvidenceHash,
         at: now,
       });
     });

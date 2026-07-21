@@ -64,7 +64,7 @@ import {
   type RecordPaymentInput,
 } from './payment-store.ts';
 import { leaseDurableJobs } from './queue.ts';
-import { SettlementService } from './settlement-service.ts';
+import { nextAvailableSettlementExecutorNonce, SettlementService } from './settlement-service.ts';
 import { SeckillService } from './seckill-service.ts';
 import { releaseSeckillPlanInventory, SeckillOperationsService } from './seckill-operations-service.ts';
 import { settleMaturedSeckillPrizes } from './seckill-prize-service.ts';
@@ -2047,21 +2047,65 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
     };
 
     const nonceByExecutor = new Map<string, bigint>();
+    const executionByAction = new Map<string, {
+      executorWallet: string;
+      executorNonce: string;
+      submittedTxHash: string;
+      executionEvidenceHash: string;
+    }>();
+    let loseNextExecutionResponse = true;
+    let rejectNextExecutionBeforeSigning = false;
+    let nextExecutionNonceMismatch: 'RPC_DIVERGENCE' | 'NONCE_CONSUMED_UNKNOWN' | undefined;
     const reorged = new Set<string>();
     const worker = new SeckillGovernanceWorker({
       transactions: transactionAdapter(db),
       executionGasLimit: '1000000',
       executor: {
+        pendingNonce: async ({ governanceWallet }) => ({
+          executorWallet: governanceWallet,
+          executorNonce: (nonceByExecutor.get(governanceWallet) ?? 0n).toString(),
+          evidenceHash: HASH,
+        }),
         execute: async (input: SeckillExecution) => {
-          const current = nonceByExecutor.get(input.governanceWallet) ?? BigInt(input.minimumExecutorNonce);
-          nonceByExecutor.set(input.governanceWallet, current + 1n);
-          const executorNonce = current.toString();
-          return {
+          const existing = executionByAction.get(input.actionId);
+          if (existing) return existing;
+          if (input.reconciliationOnly) {
+            throw new CoreError('ExternalBlocked', 'runtime has no persisted transaction to replay', 503, {
+              nonceReconciliationRequired: true,
+              executorErrorCode: 'NONCE_MISMATCH',
+              executorDetails: { relation: 'STATE_RECORD_MISSING' },
+            });
+          }
+          if (rejectNextExecutionBeforeSigning) {
+            rejectNextExecutionBeforeSigning = false;
+            throw new CoreError('InvalidRequest', 'runtime rejected before signing', 400, {
+              deterministicExecutorFailure: true,
+              executorErrorCode: 'INVALID_ENVELOPE',
+            });
+          }
+          if (nextExecutionNonceMismatch) {
+            const relation = nextExecutionNonceMismatch;
+            nextExecutionNonceMismatch = undefined;
+            throw new CoreError('ExternalBlocked', 'runtime observed a consumed or divergent nonce', 503, {
+              nonceReconciliationRequired: relation === 'NONCE_CONSUMED_UNKNOWN',
+              executorErrorCode: 'NONCE_MISMATCH',
+              executorDetails: { relation },
+            });
+          }
+          const executorNonce = input.minimumExecutorNonce;
+          nonceByExecutor.set(input.governanceWallet, BigInt(executorNonce) + 1n);
+          const execution = {
             executorWallet: input.governanceWallet,
             executorNonce,
             submittedTxHash: keccak256(toUtf8Bytes(`execution:${input.actionId}:${executorNonce}`)),
             executionEvidenceHash: keccak256(toUtf8Bytes(`execution-evidence:${input.actionId}:${executorNonce}`)),
           };
+          executionByAction.set(input.actionId, execution);
+          if (loseNextExecutionResponse) {
+            loseNextExecutionResponse = false;
+            throw new CoreError('ExternalBlocked', 'executor response was lost after broadcast', 503);
+          }
+          return execution;
         },
       },
       chain: {
@@ -2108,7 +2152,39 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
     });
 
     await approve(sessionAction.actionId, '1');
+    assert.deepEqual(await worker.pollOnce(), { executions: 1, finality: 0 });
+    const reservedSessionExecution = (await db.query<{
+      state: string;
+      executor_nonce: string;
+      nonce_reservation_evidence_hash: string;
+      execution_artifact_version: string;
+      execution_request_digest: string;
+      submitted_tx_hash: string | null;
+    }>(
+      `SELECT state, executor_nonce::text, nonce_reservation_evidence_hash,
+         execution_artifact_version, execution_request_digest, submitted_tx_hash
+       FROM core.seckill_governance_actions WHERE action_id = $1`,
+      [sessionAction.actionId],
+    )).rows[0]!;
+    assert.deepEqual({
+      state: reservedSessionExecution.state,
+      executor_nonce: reservedSessionExecution.executor_nonce,
+      nonce_reservation_evidence_hash: reservedSessionExecution.nonce_reservation_evidence_hash,
+      submitted_tx_hash: reservedSessionExecution.submitted_tx_hash,
+    }, {
+      state: 'PENDING_EXECUTION',
+      executor_nonce: '0',
+      nonce_reservation_evidence_hash: HASH,
+      submitted_tx_hash: null,
+    });
+    assert.equal(reservedSessionExecution.execution_artifact_version, CORE_ARTIFACT_VERSION);
+    assert.match(reservedSessionExecution.execution_request_digest, /^0x[0-9a-f]{64}$/);
+    clock = new Date(now.getTime() + 11 * 60_000);
     assert.deepEqual(await worker.pollOnce(), { executions: 1, finality: 1 });
+    assert.equal((await db.query<{ execution_request_digest: string }>(
+      'SELECT execution_request_digest FROM core.seckill_governance_actions WHERE action_id = $1',
+      [sessionAction.actionId],
+    )).rows[0]?.execution_request_digest, reservedSessionExecution.execution_request_digest);
     assert.deepEqual(worker.status(), { healthy: true, errorCode: undefined });
     const session = await db.query<{
       phase: string; inventory: number; governance_action_id: string;
@@ -2219,6 +2295,104 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
       idempotencyKey: 'seckill-session-after-settled-overlap',
     });
     assert.equal(secondSession.state, 'DRAFT');
+    await approve(secondSession.actionId, '5');
+    rejectNextExecutionBeforeSigning = true;
+    await worker.pollOnce();
+    assert.equal(worker.status().errorCode, 'InvalidRequest');
+    const releasedReservation = (await db.query<{
+      state: string;
+      executor_nonce: string;
+      nonce_released_at: Date;
+      nonce_release_evidence_hash: string;
+    }>(
+      `SELECT state, executor_nonce::text, nonce_released_at, nonce_release_evidence_hash
+       FROM core.seckill_governance_actions WHERE action_id = $1`,
+      [secondSession.actionId],
+    )).rows[0]!;
+    assert.equal(releasedReservation.state, 'CANCELLED');
+    assert.ok(releasedReservation.nonce_released_at);
+    assert.match(releasedReservation.nonce_release_evidence_hash, /^0x[0-9a-f]{64}$/);
+
+    const thirdSession = await service.createSession(operatorActor, {
+      ...sessionInput,
+      inventory: 1,
+      startsAt: new Date(now.getTime() + 32 * 60_000).toISOString(),
+      idempotencyKey: 'seckill-session-after-nonce-release',
+    });
+    await approve(thirdSession.actionId, '6');
+    nextExecutionNonceMismatch = 'RPC_DIVERGENCE';
+    await worker.pollOnce();
+    assert.equal(worker.status().errorCode, 'ExternalBlocked');
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.seckill_governance_actions WHERE action_id = $1',
+      [thirdSession.actionId],
+    )).rows[0]?.state, 'PENDING_EXECUTION');
+    nextExecutionNonceMismatch = 'NONCE_CONSUMED_UNKNOWN';
+    await worker.pollOnce();
+    assert.equal(worker.status().errorCode, 'ExternalBlocked');
+    const reconcileRequired = (await db.query<{
+      state: string;
+      executor_nonce: string;
+      nonce_released_at: Date | null;
+      nonce_release_evidence_hash: string | null;
+    }>(
+      `SELECT state, executor_nonce::text, nonce_released_at, nonce_release_evidence_hash
+       FROM core.seckill_governance_actions WHERE action_id = $1`,
+      [thirdSession.actionId],
+    )).rows[0]!;
+    assert.deepEqual(reconcileRequired, {
+      state: 'RECONCILE_REQUIRED',
+      executor_nonce: releasedReservation.executor_nonce,
+      nonce_released_at: null,
+      nonce_release_evidence_hash: null,
+    });
+    assert.equal(
+      await nextAvailableSettlementExecutorNonce(adapter(db), governanceWallet, releasedReservation.executor_nonce),
+      (BigInt(releasedReservation.executor_nonce) + 1n).toString(),
+    );
+    assert.equal((await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM core.seckill_governance_transitions
+       WHERE action_id = $1 AND to_state = 'RECONCILE_REQUIRED'`,
+      [thirdSession.actionId],
+    )).rows[0]?.count, '1');
+    assert.equal((await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM core.audit_outbox_events
+       WHERE resource_id = $1 AND event_type = 'SeckillEoaNonceReconciliationRequired'`,
+      [thirdSession.actionId],
+    )).rows[0]?.count, '1');
+    const blockedReconcilePoll = await worker.pollOnce();
+    assert.equal(blockedReconcilePoll.executions, 1);
+    assert.equal(worker.status().errorCode, 'ExternalBlocked');
+    assert.equal(executionByAction.has(thirdSession.actionId), false);
+    assert.equal(
+      nonceByExecutor.get(governanceWallet),
+      BigInt(releasedReservation.executor_nonce),
+    );
+    const restoredExecution = {
+      executorWallet: governanceWallet,
+      executorNonce: releasedReservation.executor_nonce,
+      submittedTxHash: keccak256(toUtf8Bytes(
+        `execution:${thirdSession.actionId}:${releasedReservation.executor_nonce}`,
+      )),
+      executionEvidenceHash: keccak256(toUtf8Bytes(
+        `execution-evidence:${thirdSession.actionId}:${releasedReservation.executor_nonce}`,
+      )),
+    };
+    executionByAction.set(thirdSession.actionId, restoredExecution);
+    nonceByExecutor.set(governanceWallet, BigInt(releasedReservation.executor_nonce) + 1n);
+    const recoveredPoll = await worker.pollOnce();
+    assert.equal(recoveredPoll.executions, 1);
+    assert.ok(recoveredPoll.finality >= 1);
+    assert.deepEqual(worker.status(), { healthy: true, errorCode: undefined });
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.seckill_governance_actions WHERE action_id = $1',
+      [thirdSession.actionId],
+    )).rows[0]?.state, 'FINAL');
+    assert.equal((await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM core.seckill_governance_transitions
+       WHERE action_id = $1 AND from_state = 'RECONCILE_REQUIRED' AND to_state = 'SUBMITTED'`,
+      [thirdSession.actionId],
+    )).rows[0]?.count, '1');
   } finally {
     await db.close();
   }
@@ -9313,6 +9487,14 @@ test('ambiguous EOA submission failure retries the original attempt and settles 
     );
     assert.equal(attempts.rows.length, 1);
     assert.equal(attempts.rows[0]?.state, 'RETRYABLE');
+    assert.equal((await db.query<{ nonce_state: string }>(
+      'SELECT nonce_state FROM core.settlement_transfers WHERE transfer_id = $1',
+      [transfer.transferId],
+    )).rows[0]?.nonce_state, 'RESERVED');
+    assert.equal(
+      await nextAvailableSettlementExecutorNonce(adapter(db), transfer.executorWallet, transfer.executorNonce),
+      (BigInt(transfer.executorNonce) + 1n).toString(),
+    );
     assert.equal((await prepared.settlements.getAdminTransfer(
       { walletAddress: prepared.operator.walletAddress, roles: ['AUDITOR'] },
       transfer.transferId,
@@ -9561,10 +9743,12 @@ test('deterministic EOA replacement rejection quarantines the submitted transfer
     );
     assert.deepEqual(attempts.rows.map((row) => row.state), ['SUBMITTED', 'QUARANTINED']);
     assert.equal(await worker.replaceOnce(), 0);
-    assert.equal((await prepared.settlements.getAdminTransfer(
+    const replacementQuarantine = (await prepared.settlements.getAdminTransfer(
       { walletAddress: prepared.operator.walletAddress, roles: ['AUDITOR'] },
       transfer.transferId,
-    )).transfer.state, 'QUARANTINED');
+    )).transfer;
+    assert.equal(replacementQuarantine.state, 'QUARANTINED');
+    assert.equal(replacementQuarantine.nonceState, 'BROADCAST');
     assert.equal((await prepared.settlements.getAdminRequest(
       { walletAddress: prepared.operator.walletAddress, roles: ['AUDITOR'] },
       prepared.request.request_id,
@@ -9618,10 +9802,30 @@ test('deterministic EOA executor 4xx quarantines without creating a replacement 
       [transfer.transferId],
     );
     assert.deepEqual(attempts.rows.map((row) => row.state), ['QUARANTINED']);
-    assert.equal((await prepared.settlements.getAdminTransfer(
+    assert.deepEqual((await db.query<{ nonce_state: string; nonce_release_evidence_hash: string | null }>(
+      `SELECT nonce_state, nonce_release_evidence_hash
+       FROM core.settlement_transfers WHERE transfer_id = $1`,
+      [transfer.transferId],
+    )).rows[0], {
+      nonce_state: 'RELEASED',
+      nonce_release_evidence_hash: stableHash({
+        coreCode: 'InvalidRequest',
+        deterministicExecutorFailure: true,
+        disposition: 'QUARANTINED',
+        executorErrorCode: 'AMOUNT_MISMATCH',
+        name: 'CoreError',
+      }),
+    });
+    assert.equal(
+      await nextAvailableSettlementExecutorNonce(adapter(db), transfer.executorWallet, transfer.executorNonce),
+      transfer.executorNonce,
+    );
+    const preBroadcastQuarantine = (await prepared.settlements.getAdminTransfer(
       { walletAddress: prepared.operator.walletAddress, roles: ['AUDITOR'] },
       transfer.transferId,
-    )).transfer.state, 'QUARANTINED');
+    )).transfer;
+    assert.equal(preBroadcastQuarantine.state, 'QUARANTINED');
+    assert.equal(preBroadcastQuarantine.nonceState, 'RELEASED');
     assert.equal((await prepared.settlements.getAdminRequest(
       { walletAddress: prepared.operator.walletAddress, roles: ['AUDITOR'] },
       prepared.request.request_id,
@@ -11836,13 +12040,125 @@ test('governed takeover and Operations reimbursement bind secondary approval, fr
       evidenceHash: `0x${'7'.repeat(64)}`,
       checkedAt: now,
     });
+    const prizeReservationActionId = `0x${'9'.repeat(64)}`;
+    const prizeCalldata = new Interface(['function transfer(address recipient,uint256 amount)'])
+      .encodeFunctionData('transfer', [custodySafe, 1n])
+      .toLowerCase();
+    await db.query(
+      `INSERT INTO core.seckill_governance_actions (
+         action_id, session_id, policy_version, action_kind, evidence_hash,
+         governance_wallet_address, target_address, calldata, calldata_hash,
+         old_value_hash, new_value_hash, state, executor_nonce,
+         nonce_reserved_at, nonce_reservation_evidence_hash,
+         execution_artifact_version, execution_request_digest,
+         actor_wallet, idempotency_key, request_hash, created_at, updated_at
+       ) VALUES (
+         $1,$2,1,'PRIZE_INJECTION',$3,$4,$5,$6,$7,$3,$3,'PENDING_EXECUTION',1,
+         $8,$3,$9,$10,$4,'wallet4-prize-nonce-reservation',$3,$8,$8
+       )`,
+      [
+        prizeReservationActionId,
+        `0x${'8'.repeat(64)}`,
+        HASH,
+        operationsSafe,
+        USDT_ADDRESS,
+        prizeCalldata,
+        keccak256(prizeCalldata).toLowerCase(),
+        now,
+        CORE_ARTIFACT_VERSION,
+        HASH_2,
+      ],
+    );
+    await assert.rejects(
+      settlements.createTransfer(operator, {
+        asset: 'USDT',
+        gasCap: '100000',
+        idempotencyKey: 'wallet4-conflicting-eoa-transfer-1',
+        runtime: runtime(operationsSafe, '1'),
+      }),
+      (error: unknown) => error instanceof CoreError && error.code === 'FinalityPending',
+    );
+    await db.query(
+      `UPDATE core.seckill_governance_actions
+       SET state = 'RECONCILE_REQUIRED', updated_at = $2
+       WHERE action_id = $1`,
+      [prizeReservationActionId, now],
+    );
+    await assert.rejects(
+      settlements.createTransfer(operator, {
+        asset: 'USDT',
+        gasCap: '100000',
+        idempotencyKey: 'wallet4-reconcile-conflicting-eoa-transfer-1',
+        runtime: runtime(operationsSafe, '2'),
+      }),
+      (error: unknown) => error instanceof CoreError && error.code === 'FinalityPending',
+    );
+    await db.query(
+      `UPDATE core.seckill_governance_actions
+       SET state = 'SUBMITTED', submitted_tx_hash = $2,
+         execution_evidence_hash = $3, updated_at = $4
+       WHERE action_id = $1`,
+      [prizeReservationActionId, `0x${'a'.repeat(64)}`, `0x${'b'.repeat(64)}`, now],
+    );
     const operationsTransfer = await settlements.createTransfer(operator, {
       asset: 'USDT',
       gasCap: '100000',
       idempotencyKey: 'governed-operations-eoa-transfer-1',
-      runtime: runtime(operationsSafe, '1'),
+      runtime: runtime(operationsSafe, '2'),
       correlationId: 'governed-operations-eoa-transfer-1',
     });
+    await db.query(
+      "UPDATE core.seckill_governance_actions SET state = 'FAILED' WHERE action_id = $1",
+      [prizeReservationActionId],
+    );
+    const settlementConflictActionId = `0x${'6'.repeat(64)}`;
+    await db.query(
+      `INSERT INTO core.seckill_governance_actions (
+         action_id, session_id, policy_version, action_kind, evidence_hash,
+         governance_wallet_address, target_address, calldata, calldata_hash,
+         old_value_hash, new_value_hash, state, actor_wallet,
+         approval_deadline, idempotency_key, request_hash, created_at, updated_at
+       ) VALUES (
+         $1,$2,1,'PRIZE_INJECTION',$3,$4,$5,$6,$7,$3,$3,'PENDING_EXECUTION',$4,
+         $9,'wallet4-settlement-nonce-conflict',$3,$8,$8
+       )`,
+      [
+        settlementConflictActionId,
+        `0x${'7'.repeat(64)}`,
+        HASH,
+        operationsSafe,
+        USDT_ADDRESS,
+        prizeCalldata,
+        keccak256(prizeCalldata).toLowerCase(),
+        now,
+        new Date(now.getTime() + 10 * 60_000),
+      ],
+    );
+    let conflictingSeckillExecutions = 0;
+    const conflictingSeckillWorker = new SeckillGovernanceWorker({
+      transactions: transactionAdapter(db),
+      executionGasLimit: '100000',
+      executor: {
+        pendingNonce: async () => ({
+          executorWallet: operationsSafe,
+          executorNonce: operationsTransfer.executorNonce,
+          evidenceHash: HASH_2,
+        }),
+        execute: async () => {
+          conflictingSeckillExecutions += 1;
+          throw new Error('seckill execution must remain blocked by the settlement reservation');
+        },
+      },
+      chain: { observe: async () => ({ state: 'NOT_FOUND' }) },
+      clock: () => now,
+    });
+    assert.deepEqual(await conflictingSeckillWorker.pollOnce(), { executions: 1, finality: 0 });
+    assert.equal(conflictingSeckillWorker.status().errorCode, 'FinalityPending');
+    assert.equal(conflictingSeckillExecutions, 0);
+    assert.equal((await db.query<{ executor_nonce: string | null }>(
+      'SELECT executor_nonce::text FROM core.seckill_governance_actions WHERE action_id = $1',
+      [settlementConflictActionId],
+    )).rows[0]?.executor_nonce, null);
     const custodyTransfer = await settlements.createTransfer(operator, {
       asset: 'USDT',
       gasCap: '100000',
@@ -11851,6 +12167,7 @@ test('governed takeover and Operations reimbursement bind secondary approval, fr
       correlationId: 'governed-custody-eoa-transfer-1',
     });
     assert.equal(operationsTransfer.recipientAddress, replacementRecipient);
+    assert.equal(operationsTransfer.executorNonce, '2');
     assert.equal(custodyTransfer.recipientAddress, operationsSafe);
     assert.notEqual(operationsTransfer.transferId, custodyTransfer.transferId);
     await assertLedgerBalanced(db, 2);

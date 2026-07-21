@@ -205,6 +205,8 @@ interface AdminSettlementTransferRow {
   asset: 'USDT' | 'NPL';
   executor_wallet: string;
   executor_nonce: string;
+  nonce_state: 'RESERVED' | 'BROADCAST' | 'RELEASED';
+  nonce_release_evidence_hash: string | null;
   request_id: string;
   request_item_index: number;
   order_id: string;
@@ -1423,15 +1425,22 @@ export class SettlementService {
         : null;
       await lockLedgerAccounts(executor, [item.account_id]);
       await assertRequestedStateBalances(executor, [item]);
-      const reservedNonce = await executor.query<{ next_nonce: string }>(
-        `SELECT GREATEST(
-           $2::numeric,
-           COALESCE(max(executor_nonce) + 1, 0)
-         )::text AS next_nonce
-         FROM core.settlement_transfers WHERE executor_wallet = $1`,
-        [runtime.executorWallet, runtime.nextNonce],
+      const pendingSeckillReservation = await executor.query<{ action_id: string }>(
+        `SELECT action_id FROM core.seckill_governance_actions
+         WHERE governance_wallet_address = $1
+           AND state IN ('PENDING_EXECUTION','RECONCILE_REQUIRED')
+           AND executor_nonce IS NOT NULL
+         ORDER BY executor_nonce, action_id LIMIT 1`,
+        [runtime.executorWallet],
       );
-      const executorNonce = reservedNonce.rows[0]?.next_nonce;
+      if (pendingSeckillReservation.rows[0]) {
+        throw new CoreError('FinalityPending', 'The EOA nonce is reserved by an unresolved seckill execution', 409);
+      }
+      const executorNonce = await nextAvailableSettlementExecutorNonce(
+        executor,
+        runtime.executorWallet,
+        runtime.nextNonce,
+      );
       if (!executorNonce || !/^(0|[1-9][0-9]*)$/.test(executorNonce)) {
         throw new CoreError('UnknownState', 'EOA settlement nonce allocation failed', 409);
       }
@@ -1533,6 +1542,38 @@ export class SettlementService {
       return loadTransferProjection(executor, transferId);
     });
   }
+}
+
+export async function nextAvailableSettlementExecutorNonce(
+  executor: SqlExecutor,
+  executorWallet: string,
+  chainPendingNonce: string,
+) {
+  const result = await executor.query<{ next_nonce: string }>(
+    `WITH RECURSIVE occupied(executor_nonce) AS (
+       SELECT transfer.executor_nonce
+       FROM core.settlement_transfers transfer
+       WHERE transfer.executor_wallet = $1 AND transfer.nonce_state <> 'RELEASED'
+       UNION
+       SELECT action.executor_nonce
+       FROM core.seckill_governance_actions action
+       WHERE action.governance_wallet_address = $1
+         AND action.executor_nonce IS NOT NULL
+         AND action.nonce_release_evidence_hash IS NULL
+     ), candidate(next_nonce) AS (
+       SELECT $2::numeric
+       UNION ALL
+       SELECT candidate.next_nonce + 1
+       FROM candidate
+       WHERE EXISTS (SELECT 1 FROM occupied WHERE executor_nonce = candidate.next_nonce)
+     )
+     SELECT candidate.next_nonce::text AS next_nonce
+     FROM candidate
+     WHERE NOT EXISTS (SELECT 1 FROM occupied WHERE executor_nonce = candidate.next_nonce)
+     LIMIT 1`,
+    [executorWallet, chainPendingNonce],
+  );
+  return result.rows[0]?.next_nonce;
 }
 
 async function enqueueSettlementAuthorizationAudit(executor: SqlExecutor, input: {
@@ -2623,7 +2664,8 @@ function adminRequestProjection(row: AdminSettlementRequestRow) {
 
 function adminTransferSelect() {
   return `SELECT transfer.transfer_id, transfer.asset, transfer.executor_wallet,
-    transfer.executor_nonce::text, transfer.request_id, transfer.request_item_index,
+    transfer.executor_nonce::text, transfer.nonce_state, transfer.nonce_release_evidence_hash,
+    transfer.request_id, transfer.request_item_index,
     transfer.order_id, transfer.account_id, transfer.recipient_address,
     transfer.token_address, transfer.amount::text, transfer.transfer_calldata,
     transfer.content_hash, transfer.gas_cap::text, transfer.state,
@@ -2638,6 +2680,7 @@ function adminTransferSelect() {
 function adminTransferDetailSelect() {
   return `SELECT transfer.transfer_id, transfer.artifact_version, transfer.chain_id,
     transfer.asset, transfer.executor_wallet, transfer.executor_nonce::text,
+    transfer.nonce_state, transfer.nonce_release_evidence_hash,
     transfer.request_id, transfer.request_item_index, transfer.order_id, transfer.account_id,
     transfer.recipient_address, transfer.token_address, transfer.amount::text,
     transfer.transfer_calldata, transfer.content_hash, transfer.gas_cap::text,
@@ -2656,6 +2699,8 @@ function adminTransferProjection(row: AdminSettlementTransferRow) {
     asset: row.asset,
     executorWallet: row.executor_wallet,
     executorNonce: row.executor_nonce,
+    nonceState: row.nonce_state,
+    nonceReleaseEvidenceHash: row.nonce_release_evidence_hash,
     requestId: row.request_id,
     requestItemIndex: row.request_item_index,
     orderId: row.order_id,

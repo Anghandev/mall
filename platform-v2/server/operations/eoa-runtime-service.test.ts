@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer, type Server } from 'node:http';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +10,7 @@ import test from 'node:test';
 import { Interface, Wallet, keccak256, toUtf8Bytes } from 'ethers';
 import { CORE_ARTIFACT_VERSION, USDT_ADDRESS } from '../api/enums.ts';
 import { settlementIntentDigest, settlementRequestDomain, settlementRequestTypes } from '../api/settlement-signing.ts';
+import { seckillExecutionRequestDigest, type SeckillExecution } from '../chain/seckill-governance.ts';
 
 const HASH_1 = `0x${'1'.repeat(64)}`;
 const HASH_2 = `0x${'2'.repeat(64)}`;
@@ -45,6 +46,7 @@ test('EOA runtime replays one persisted raw transaction after HTTP response loss
     HOST: '127.0.0.1',
     PORT: String(runtimePort),
     BSC_RPC_URL: `http://127.0.0.1:${address(rpc).port}`,
+    BSC_FALLBACK_RPC_URL: `http://127.0.0.1:${address(rpc).port}/?fallback=1`,
     PLATFORM_TECH_PRIVATE_KEY: governance.privateKey,
     PLATFORM_GOVERNANCE_WALLET_ADDRESS: governance.address,
     WALLET_2_PRIVATE_KEY: settlement.privateKey,
@@ -142,6 +144,7 @@ test('EOA runtime rejects calldata that is not bound to the original signed sett
     HOST: '127.0.0.1',
     PORT: String(runtimePort),
     BSC_RPC_URL: `http://127.0.0.1:${address(rpc).port}`,
+    BSC_FALLBACK_RPC_URL: `http://127.0.0.1:${address(rpc).port}/?fallback=1`,
     PLATFORM_TECH_PRIVATE_KEY: governance.privateKey,
     PLATFORM_GOVERNANCE_WALLET_ADDRESS: governance.address,
     WALLET_2_PRIVATE_KEY: settlement.privateKey,
@@ -185,6 +188,267 @@ test('EOA runtime rejects calldata that is not bound to the original signed sett
     assert.equal(response.status, 400);
     assert.deepEqual(await response.json(), { error: { code: 'AUTHORIZATION_MISMATCH' } });
     assert.equal(broadcasts.length, 0);
+  } finally {
+    await stopRuntime(runtime);
+    await close(rpc);
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
+
+test('EOA runtime reports and enforces the exact reserved WALLET_4 seckill nonce', async () => {
+  const temporary = await mkdtemp(join(tmpdir(), 'abu24k-eoa-runtime-wallet4-nonce-'));
+  const governance = wallet('1');
+  const settlement = wallet('2');
+  const reward = wallet('3');
+  const operations = wallet('4');
+  const broadcasts: string[] = [];
+  const rpc = await fakeRpcServer(async (rawTransaction) => {
+    broadcasts.push(rawTransaction);
+    return keccak256(rawTransaction).toLowerCase();
+  });
+  const runtimePort = await unusedPort();
+  const env = {
+    ...process.env,
+    HOST: '127.0.0.1',
+    PORT: String(runtimePort),
+    BSC_RPC_URL: `http://127.0.0.1:${address(rpc).port}`,
+    BSC_FALLBACK_RPC_URL: `http://127.0.0.1:${address(rpc).port}/?fallback=1`,
+    PLATFORM_TECH_PRIVATE_KEY: governance.privateKey,
+    PLATFORM_GOVERNANCE_WALLET_ADDRESS: governance.address,
+    WALLET_2_PRIVATE_KEY: settlement.privateKey,
+    USDT_SETTLEMENT_WALLET_ADDRESS: settlement.address,
+    WALLET_3_PRIVATE_KEY: reward.privateKey,
+    NPL_REWARD_WALLET_ADDRESS: reward.address,
+    WALLET_4_PRIVATE_KEY: operations.privateKey,
+    OPERATIONS_GUARANTEE_WALLET_ADDRESS: operations.address,
+    SIGNER_SERVICE_TOKEN: 'signer-test-token',
+    SETTLEMENT_EXECUTOR_TOKEN: 'settlement-test-token',
+    GOVERNANCE_EXECUTOR_TOKEN: 'governance-test-token',
+    EXECUTOR_MAX_GAS_LIMIT: '1000000',
+    EXECUTION_STATE_FILE: join(temporary, 'execution-state.json'),
+  };
+  const runtime = await startRuntime(env);
+  try {
+    const nonceResponse = await fetch(`http://127.0.0.1:${runtimePort}/governance`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer governance-test-token' },
+      body: JSON.stringify({
+        operation: 'PENDING_NONCE',
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        chainId: 56,
+        governanceWallet: operations.address.toLowerCase(),
+      }),
+    });
+    assert.equal(nonceResponse.status, 200);
+    const nonce = await nonceResponse.json() as {
+      executorWallet: string;
+      executorNonce: string;
+      evidenceHash: string;
+    };
+    assert.equal(nonce.executorWallet, operations.address.toLowerCase());
+    assert.equal(nonce.executorNonce, '0');
+    assert.match(nonce.evidenceHash, /^0x[0-9a-f]{64}$/);
+
+    const calldata = TRANSFER.encodeFunctionData('transfer', [settlement.address, 1n]).toLowerCase();
+    const execution = (executorNonce: string): SeckillExecution => ({
+      artifactVersion: CORE_ARTIFACT_VERSION,
+      actionId: HASH_1,
+      sessionId: HASH_2,
+      actionKind: 'PRIZE_INJECTION',
+      policyVersion: 1,
+      evidenceHash: HASH_3,
+      governanceWallet: operations.address.toLowerCase(),
+      targetAddress: USDT_ADDRESS,
+      calldata,
+      calldataHash: keccak256(calldata).toLowerCase(),
+      gasLimit: '100000',
+      minimumExecutorNonce: executorNonce,
+      expected: {
+        kind: 'PRIZE_INJECTION',
+        amountUsdt: '1',
+        operationsWalletAddress: operations.address.toLowerCase(),
+        settlementWalletAddress: settlement.address.toLowerCase(),
+        tokenAddress: USDT_ADDRESS,
+      },
+    });
+    const request = (value: SeckillExecution) => ({
+      artifactVersion: CORE_ARTIFACT_VERSION,
+      chainId: 56,
+      from: value.governanceWallet,
+      to: value.targetAddress,
+      value: '0',
+      data: value.calldata,
+      dataHash: value.calldataHash,
+      gasLimit: value.gasLimit,
+      resourceType: 'SECKILL_GOVERNANCE_ACTION',
+      resourceId: value.actionId,
+      sessionId: value.sessionId,
+      actionKind: value.actionKind,
+      policyVersion: value.policyVersion,
+      evidenceHash: value.evidenceHash,
+      minimumExecutorNonce: value.minimumExecutorNonce,
+      expected: value.expected,
+      requestDigest: seckillExecutionRequestDigest(value),
+    });
+    const mismatched = await fetch(`http://127.0.0.1:${runtimePort}/governance`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer governance-test-token' },
+      body: JSON.stringify(request(execution('1'))),
+    });
+    assert.equal(mismatched.status, 409);
+    const mismatchBody = await mismatched.json() as {
+      error: { code: string; details: Record<string, unknown> };
+    };
+    assert.equal(mismatchBody.error.code, 'NONCE_MISMATCH');
+    assert.deepEqual(mismatchBody.error.details, {
+      relation: 'UNSIGNED_UNBROADCAST',
+      stateRecordPresent: false,
+      executorWallet: operations.address.toLowerCase(),
+      reservedNonce: '1',
+      primaryPendingNonce: '0',
+      fallbackPendingNonce: '0',
+    });
+    assert.equal(broadcasts.length, 0);
+
+    const replayOnly = await fetch(`http://127.0.0.1:${runtimePort}/governance`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer governance-test-token' },
+      body: JSON.stringify({ ...request(execution('0')), reconciliationOnly: true }),
+    });
+    assert.equal(replayOnly.status, 409);
+    const replayOnlyBody = await replayOnly.json() as {
+      error: { code: string; details: Record<string, unknown> };
+    };
+    assert.equal(replayOnlyBody.error.code, 'NONCE_MISMATCH');
+    assert.equal(replayOnlyBody.error.details.relation, 'STATE_RECORD_MISSING');
+    assert.equal(replayOnlyBody.error.details.stateRecordPresent, false);
+    assert.equal(broadcasts.length, 0);
+
+    const submitted = await fetch(`http://127.0.0.1:${runtimePort}/governance`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer governance-test-token' },
+      body: JSON.stringify(request(execution('0'))),
+    });
+    assert.equal(submitted.status, 200);
+    assert.equal((await submitted.json() as { executorNonce: string }).executorNonce, '0');
+    assert.equal(broadcasts.length, 1);
+  } finally {
+    await stopRuntime(runtime);
+    await close(rpc);
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
+
+test('EOA runtime replays a persisted seckill transaction after an artifact upgrade', async () => {
+  const temporary = await mkdtemp(join(tmpdir(), 'abu24k-eoa-runtime-seckill-upgrade-'));
+  const stateFile = join(temporary, 'execution-state.json');
+  const governance = wallet('1');
+  const settlement = wallet('2');
+  const reward = wallet('3');
+  const operations = wallet('4');
+  const calldata = TRANSFER.encodeFunctionData('transfer', [settlement.address, 1n]).toLowerCase();
+  const execution: SeckillExecution = {
+    artifactVersion: '2.0.0-fulfillment-launch.19',
+    actionId: HASH_1,
+    sessionId: HASH_2,
+    actionKind: 'PRIZE_INJECTION',
+    policyVersion: 1,
+    evidenceHash: HASH_3,
+    governanceWallet: operations.address.toLowerCase(),
+    targetAddress: USDT_ADDRESS,
+    calldata,
+    calldataHash: keccak256(calldata).toLowerCase(),
+    gasLimit: '100000',
+    minimumExecutorNonce: '0',
+    expected: {
+      kind: 'PRIZE_INJECTION',
+      amountUsdt: '1',
+      operationsWalletAddress: operations.address.toLowerCase(),
+      settlementWalletAddress: settlement.address.toLowerCase(),
+      tokenAddress: USDT_ADDRESS,
+    },
+  };
+  const requestDigest = seckillExecutionRequestDigest(execution);
+  const request = {
+    artifactVersion: execution.artifactVersion,
+    chainId: 56,
+    from: execution.governanceWallet,
+    to: execution.targetAddress,
+    value: '0',
+    data: execution.calldata,
+    dataHash: execution.calldataHash,
+    gasLimit: execution.gasLimit,
+    resourceType: 'SECKILL_GOVERNANCE_ACTION',
+    resourceId: execution.actionId,
+    sessionId: execution.sessionId,
+    actionKind: execution.actionKind,
+    policyVersion: execution.policyVersion,
+    evidenceHash: execution.evidenceHash,
+    minimumExecutorNonce: execution.minimumExecutorNonce,
+    expected: execution.expected,
+    requestDigest,
+  };
+  const rawTransaction = await operations.signTransaction({
+    chainId: 56,
+    nonce: 0,
+    to: USDT_ADDRESS,
+    data: calldata,
+    value: 0,
+    gasLimit: 100000,
+    gasPrice: 1,
+  });
+  const executionTxHash = keccak256(rawTransaction).toLowerCase();
+  const response = {
+    ...request,
+    executionTxHash,
+    submittedTxHash: executionTxHash,
+    executorWallet: operations.address.toLowerCase(),
+    executorNonce: '0',
+    executionEvidenceHash: HASH_3,
+  };
+  await writeFile(stateFile, `${JSON.stringify({
+    [`governance:${requestDigest}`]: {
+      requestHash: hashJson(request),
+      response,
+      rawTransaction,
+    },
+  })}\n`, { mode: 0o600 });
+
+  const broadcasts: string[] = [];
+  const rpc = await fakeRpcServer(async (raw) => {
+    broadcasts.push(raw);
+    return keccak256(raw).toLowerCase();
+  });
+  const runtimePort = await unusedPort();
+  const runtime = await startRuntime({
+    ...process.env,
+    HOST: '127.0.0.1',
+    PORT: String(runtimePort),
+    BSC_RPC_URL: `http://127.0.0.1:${address(rpc).port}`,
+    BSC_FALLBACK_RPC_URL: `http://127.0.0.1:${address(rpc).port}/?fallback=1`,
+    PLATFORM_TECH_PRIVATE_KEY: governance.privateKey,
+    PLATFORM_GOVERNANCE_WALLET_ADDRESS: governance.address,
+    WALLET_2_PRIVATE_KEY: settlement.privateKey,
+    USDT_SETTLEMENT_WALLET_ADDRESS: settlement.address,
+    WALLET_3_PRIVATE_KEY: reward.privateKey,
+    NPL_REWARD_WALLET_ADDRESS: reward.address,
+    WALLET_4_PRIVATE_KEY: operations.privateKey,
+    OPERATIONS_GUARANTEE_WALLET_ADDRESS: operations.address,
+    SIGNER_SERVICE_TOKEN: 'signer-test-token',
+    SETTLEMENT_EXECUTOR_TOKEN: 'settlement-test-token',
+    GOVERNANCE_EXECUTOR_TOKEN: 'governance-test-token',
+    EXECUTOR_MAX_GAS_LIMIT: '1000000',
+    EXECUTION_STATE_FILE: stateFile,
+  });
+  try {
+    const replay = await fetch(`http://127.0.0.1:${runtimePort}/governance`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer governance-test-token' },
+      body: JSON.stringify({ ...request, reconciliationOnly: true }),
+    });
+    assert.equal(replay.status, 200);
+    assert.equal((await replay.json() as { executionTxHash: string }).executionTxHash, executionTxHash);
+    assert.deepEqual(broadcasts, [rawTransaction]);
   } finally {
     await stopRuntime(runtime);
     await close(rpc);

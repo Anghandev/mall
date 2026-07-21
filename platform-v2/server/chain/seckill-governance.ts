@@ -49,6 +49,9 @@ interface PrizeExpectation {
 type SeckillExpectation = OpenExpectation | BreakerExpectation | PrizeExpectation;
 
 export interface SeckillExecution {
+  artifactVersion: string;
+  requestDigest?: string;
+  reconciliationOnly?: true;
   actionId: string;
   sessionId: string;
   actionKind: ActionKind;
@@ -64,6 +67,11 @@ export interface SeckillExecution {
 }
 
 export interface SeckillEoaExecutor {
+  pendingNonce(input: { governanceWallet: string }): Promise<{
+    executorWallet: string;
+    executorNonce: string;
+    evidenceHash: string;
+  }>;
   execute(input: SeckillExecution): Promise<{
     executorWallet: string;
     executorNonce: string;
@@ -152,17 +160,56 @@ export class HttpSeckillEoaExecutor implements SeckillEoaExecutor {
     this.#fetch = fetchWithDeadline(input.fetchImpl ?? fetch, input.requestTimeoutMs);
   }
 
+  async pendingNonce(input: { governanceWallet: string }) {
+    if (!this.#url || !this.#token) {
+      throw new CoreError('ConfigurationRequired', 'Seckill EOA executor is not configured', 503);
+    }
+    if (!isAddress(input.governanceWallet)) {
+      throw new CoreError('InvalidRequest', 'Seckill EOA wallet is invalid');
+    }
+    const response = await this.#fetch(secureUrl(this.#url, 'seckill EOA executor'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${this.#token}` },
+      body: JSON.stringify({
+        operation: 'PENDING_NONCE',
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        chainId: BSC_CHAIN_ID,
+        governanceWallet: getAddress(input.governanceWallet).toLowerCase(),
+      }),
+    });
+    if (!response.ok) throw new CoreError('ExternalBlocked', 'Seckill EOA nonce observation failed', 503);
+    const body = await responseJson(response) as Record<string, unknown>;
+    if (!isAddress(body.executorWallet) || !isCanonicalNonce(body.executorNonce) || !isHash(body.evidenceHash)) {
+      throw new CoreError('InvalidFinality', 'Seckill EOA nonce observation is invalid', 502);
+    }
+    const executorWallet = getAddress(body.executorWallet).toLowerCase();
+    if (executorWallet !== getAddress(input.governanceWallet).toLowerCase()) {
+      throw new CoreError('InvalidFinality', 'Seckill EOA nonce observation used the wrong wallet', 502);
+    }
+    if (body.evidenceHash.toLowerCase() !== seckillNonceObservationEvidenceHash(executorWallet, body.executorNonce)) {
+      throw new CoreError('InvalidFinality', 'Seckill EOA nonce observation evidence is not request-bound', 502);
+    }
+    return {
+      executorWallet,
+      executorNonce: body.executorNonce,
+      evidenceHash: body.evidenceHash.toLowerCase(),
+    };
+  }
+
   async execute(input: SeckillExecution) {
     if (!this.#url || !this.#token) {
       throw new CoreError('ConfigurationRequired', 'Seckill EOA executor is not configured', 503);
     }
     const url = secureUrl(this.#url, 'seckill EOA executor');
-    const requestDigest = seckillExecutionRequestDigest(input);
+    const requestDigest = input.requestDigest ?? seckillExecutionRequestDigest(input);
+    if (!isHash(requestDigest)) {
+      throw new CoreError('InvalidRequest', 'Seckill EOA execution digest is invalid');
+    }
     const response = await this.#fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${this.#token}` },
       body: JSON.stringify({
-        artifactVersion: CORE_ARTIFACT_VERSION,
+        artifactVersion: input.artifactVersion,
         chainId: BSC_CHAIN_ID,
         from: input.governanceWallet,
         to: input.targetAddress,
@@ -179,13 +226,14 @@ export class HttpSeckillEoaExecutor implements SeckillEoaExecutor {
         minimumExecutorNonce: input.minimumExecutorNonce,
         expected: input.expected,
         requestDigest,
+        ...(input.reconciliationOnly ? { reconciliationOnly: true } : {}),
       }),
     });
-    if (!response.ok) throw new CoreError('ExternalBlocked', 'Seckill EOA executor rejected the request', 503);
+    if (!response.ok) throw await seckillExecutorHttpError(response, input);
     const body = await responseJson(response) as Record<string, unknown>;
     if (
       !isCanonicalNonce(body.executorNonce)
-      || BigInt(body.executorNonce) < BigInt(input.minimumExecutorNonce)
+      || body.executorNonce !== input.minimumExecutorNonce
       || !isAddress(body.executorWallet)
       || !isHash(body.submittedTxHash)
       || !isHash(body.executionEvidenceHash)
@@ -393,12 +441,22 @@ export class SeckillGovernanceWorker {
     const executions = await this.#pendingExecutions(10);
     for (const action of executions) {
       try {
-        if (approvalExpired(action.approval_deadline, this.#clock())) {
+        if (action.executor_nonce === null && approvalExpired(action.approval_deadline, this.#clock())) {
           await this.#expirePendingExecution(action.action_id);
           continue;
         }
         const execution = await this.#executionFor(action);
-        const result = await this.#executor.execute(execution);
+        let result: Awaited<ReturnType<SeckillEoaExecutor['execute']>>;
+        try {
+          result = await this.#executor.execute(execution);
+        } catch (error) {
+          if (isDeterministicSeckillExecutorRejection(error)) {
+            await this.#releaseRejectedExecution(action.action_id, error);
+          } else if (isSeckillNonceReconciliationRequired(error)) {
+            await this.#markNonceReconciliationRequired(action.action_id, error);
+          }
+          throw error;
+        }
         await this.#recordExecution(action.action_id, result);
       } catch (error) {
         pollErrorCode ??= errorCode(error);
@@ -451,7 +509,9 @@ export class SeckillGovernanceWorker {
     return this.#transactions.transaction(async (executor) => (
       await executor.query<SeckillActionRow>(
         `SELECT * FROM core.seckill_governance_actions
-         WHERE state = 'PENDING_EXECUTION' ORDER BY created_at, action_id LIMIT $1`,
+         WHERE state IN ('PENDING_EXECUTION','RECONCILE_REQUIRED')
+         ORDER BY CASE WHEN state = 'RECONCILE_REQUIRED' THEN 0 ELSE 1 END,
+           created_at, action_id LIMIT $1`,
         [limit],
       )
     ).rows);
@@ -468,26 +528,108 @@ export class SeckillGovernanceWorker {
     ).rows);
   }
 
-  #executionFor(action: SeckillActionRow) {
+  async #executionFor(action: SeckillActionRow) {
+    const observation = action.executor_nonce === null
+      ? await this.#executor.pendingNonce({ governanceWallet: action.governance_wallet_address })
+      : undefined;
     return this.#transactions.transaction(async (executor) => {
-      const prior = await executor.query<{ max_executor_nonce: string | null; earlier_pending: boolean }>(
+      await executor.query(
+        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        [`settlement-executor:${action.governance_wallet_address}`],
+      );
+      let current = await lockedAction(executor, action.action_id);
+      if (!['PENDING_EXECUTION', 'RECONCILE_REQUIRED'].includes(current.state)) {
+        throw new CoreError('IdempotencyConflict', 'Seckill action changed before nonce reservation', 409);
+      }
+      let executorNonce = current.executor_nonce === null ? undefined : String(current.executor_nonce);
+      if (!executorNonce) {
+        if (
+          !observation
+          || !isAddress(observation.executorWallet)
+          || getAddress(observation.executorWallet).toLowerCase()
+            !== getAddress(current.governance_wallet_address).toLowerCase()
+          || !isCanonicalNonce(observation.executorNonce)
+          || !isHash(observation.evidenceHash)
+        ) throw new CoreError('InvalidFinality', 'Seckill EOA nonce observation is invalid', 502);
+        executorNonce = observation.executorNonce;
+      }
+      const conflicts = await executor.query<{
+        earlier_pending: boolean;
+        settlement_conflict: boolean;
+        seckill_conflict: boolean;
+      }>(
         `SELECT
-           (SELECT max(executor_nonce)::text FROM core.seckill_governance_actions
-            WHERE governance_wallet_address = $1 AND executor_nonce IS NOT NULL) AS max_executor_nonce,
            EXISTS (
              SELECT 1 FROM core.seckill_governance_actions earlier
-             WHERE earlier.governance_wallet_address = $1 AND earlier.state = 'PENDING_EXECUTION'
+             WHERE earlier.governance_wallet_address = $1
+               AND earlier.state IN ('PENDING_EXECUTION','RECONCILE_REQUIRED')
                AND (earlier.created_at, earlier.action_id) < ($2, $3)
-           ) AS earlier_pending`,
-        [action.governance_wallet_address, action.created_at, action.action_id],
+           ) AS earlier_pending,
+           EXISTS (
+             SELECT 1 FROM core.settlement_transfers transfer
+             WHERE transfer.executor_wallet = $1 AND transfer.nonce_state <> 'RELEASED'
+               AND (
+                 transfer.executor_nonce = $4::numeric
+                 OR (transfer.nonce_state = 'RESERVED' AND transfer.executor_nonce < $4::numeric)
+               )
+           ) AS settlement_conflict,
+           EXISTS (
+             SELECT 1 FROM core.seckill_governance_actions reserved
+             WHERE reserved.governance_wallet_address = $1
+               AND reserved.action_id <> $3
+               AND reserved.executor_nonce = $4::numeric
+               AND reserved.nonce_release_evidence_hash IS NULL
+           ) AS seckill_conflict`,
+        [current.governance_wallet_address, current.created_at, current.action_id, executorNonce],
       );
-      if (prior.rows[0]?.earlier_pending) {
-        throw new CoreError('FinalityPending', 'Earlier seckill action is awaiting an EOA nonce', 409);
+      if (conflicts.rows[0]?.earlier_pending) {
+        throw new CoreError('FinalityPending', 'Earlier seckill action is awaiting EOA execution', 409);
       }
-      const minimumExecutorNonce = prior.rows[0]?.max_executor_nonce === null
-        ? '0'
-        : (BigInt(prior.rows[0]!.max_executor_nonce) + 1n).toString();
-      return executionFromRow(executor, action, minimumExecutorNonce, this.#executionGasLimit);
+      if (conflicts.rows[0]?.settlement_conflict || conflicts.rows[0]?.seckill_conflict) {
+        throw new CoreError('FinalityPending', 'The EOA nonce is reserved by another execution path', 409);
+      }
+      if (current.executor_nonce === null) {
+        const now = this.#clock();
+        const executionArtifactVersion = CORE_ARTIFACT_VERSION;
+        const reserving = { ...current, execution_artifact_version: executionArtifactVersion };
+        const execution = await executionFromRow(executor, reserving, executorNonce, this.#executionGasLimit);
+        const executionRequestDigest = execution.requestDigest!;
+        await executor.query(
+          `UPDATE core.seckill_governance_actions
+           SET executor_nonce = $2, nonce_reserved_at = $3,
+             nonce_reservation_evidence_hash = $4, execution_artifact_version = $5,
+             execution_request_digest = $6, updated_at = $3
+           WHERE action_id = $1 AND state = 'PENDING_EXECUTION' AND executor_nonce IS NULL`,
+          [
+            current.action_id,
+            executorNonce,
+            now,
+            observation!.evidenceHash.toLowerCase(),
+            executionArtifactVersion,
+            executionRequestDigest,
+          ],
+        );
+        await enqueueWorkerAudit(executor, current, 'SeckillEoaNonceReserved', 'SYSTEM', {
+          executorNonce,
+          nonceObservationEvidenceHash: observation!.evidenceHash.toLowerCase(),
+          executionArtifactVersion,
+          executionRequestDigest,
+        }, now);
+        current = {
+          ...current,
+          executor_nonce: executorNonce,
+          nonce_reserved_at: now,
+          nonce_reservation_evidence_hash: observation!.evidenceHash.toLowerCase(),
+          execution_artifact_version: executionArtifactVersion,
+          execution_request_digest: executionRequestDigest,
+          updated_at: now,
+        };
+        return execution;
+      }
+      if (!current.execution_artifact_version || !current.execution_request_digest) {
+        throw new CoreError('InvalidFinality', 'Reserved seckill execution identity is unavailable', 409);
+      }
+      return executionFromRow(executor, current, executorNonce, this.#executionGasLimit);
     });
   }
 
@@ -507,7 +649,7 @@ export class SeckillGovernanceWorker {
     }
     return this.#transactions.transaction(async (executor) => {
       const action = await lockedAction(executor, actionId);
-      if (action.state !== 'PENDING_EXECUTION') {
+      if (!['PENDING_EXECUTION', 'RECONCILE_REQUIRED'].includes(action.state)) {
         if (
           String(action.executor_nonce) === execution.executorNonce
           && action.submitted_tx_hash === execution.submittedTxHash.toLowerCase()
@@ -517,30 +659,34 @@ export class SeckillGovernanceWorker {
       if (getAddress(execution.executorWallet).toLowerCase() !== getAddress(action.governance_wallet_address).toLowerCase()) {
         throw new CoreError('InvalidFinality', 'Seckill execution used the wrong EOA', 409);
       }
-      const prior = await executor.query<{ max_executor_nonce: string | null; earlier_pending: boolean }>(
-        `SELECT
-           (SELECT max(executor_nonce)::text FROM core.seckill_governance_actions
-            WHERE governance_wallet_address = $1 AND executor_nonce IS NOT NULL) AS max_executor_nonce,
-           EXISTS (
+      if (action.executor_nonce === null || String(action.executor_nonce) !== execution.executorNonce) {
+        throw new CoreError('InvalidFinality', 'Seckill EOA execution did not use the reserved nonce', 409);
+      }
+      const prior = await executor.query<{ earlier_pending: boolean; settlement_conflict: boolean }>(
+        `SELECT EXISTS (
              SELECT 1 FROM core.seckill_governance_actions earlier
-             WHERE earlier.governance_wallet_address = $1 AND earlier.state = 'PENDING_EXECUTION'
+             WHERE earlier.governance_wallet_address = $1
+               AND earlier.state IN ('PENDING_EXECUTION','RECONCILE_REQUIRED')
                AND (earlier.created_at, earlier.action_id) < ($2, $3)
-           ) AS earlier_pending`,
-        [action.governance_wallet_address, action.created_at, action.action_id],
+           ) AS earlier_pending,
+           EXISTS (
+             SELECT 1 FROM core.settlement_transfers transfer
+             WHERE transfer.executor_wallet = $1 AND transfer.nonce_state <> 'RELEASED'
+               AND transfer.executor_nonce = $4::numeric
+           ) AS settlement_conflict`,
+        [action.governance_wallet_address, action.created_at, action.action_id, execution.executorNonce],
       );
       if (
         prior.rows[0]?.earlier_pending
-        || (prior.rows[0]?.max_executor_nonce !== null
-          && BigInt(execution.executorNonce) <= BigInt(prior.rows[0]!.max_executor_nonce))
+        || prior.rows[0]?.settlement_conflict
       ) throw new CoreError('InvalidFinality', 'Seckill EOA nonce does not preserve action order', 409);
       const now = this.#clock();
       await executor.query(
         `UPDATE core.seckill_governance_actions
-         SET state = 'SUBMITTED', executor_nonce = $2, submitted_tx_hash = $3,
-           execution_evidence_hash = $4, updated_at = $5 WHERE action_id = $1`,
+         SET state = 'SUBMITTED', submitted_tx_hash = $2,
+           execution_evidence_hash = $3, updated_at = $4 WHERE action_id = $1`,
         [
           actionId,
-          execution.executorNonce,
           execution.submittedTxHash.toLowerCase(),
           execution.executionEvidenceHash.toLowerCase(),
           now,
@@ -548,6 +694,89 @@ export class SeckillGovernanceWorker {
       );
       await appendTransition(executor, action, 'SUBMITTED', execution, now);
       await enqueueWorkerAudit(executor, action, 'SeckillEoaSubmitted', 'SYSTEM', execution, now);
+    });
+  }
+
+  #releaseRejectedExecution(actionId: string, error: CoreError) {
+    return this.#transactions.transaction(async (executor) => {
+      const action = await lockedAction(executor, actionId);
+      if (action.state !== 'PENDING_EXECUTION' || action.executor_nonce === null) return;
+      if (action.submitted_tx_hash || action.execution_evidence_hash) {
+        throw new CoreError('InvalidFinality', 'A submitted seckill execution cannot release its nonce', 409);
+      }
+      const now = this.#clock();
+      const releaseEvidenceHash = hashJson({
+        actionId: action.action_id,
+        executorWallet: action.governance_wallet_address,
+        executorNonce: String(action.executor_nonce),
+        executionArtifactVersion: action.execution_artifact_version,
+        executionRequestDigest: action.execution_request_digest,
+        disposition: 'DETERMINISTIC_PREBROADCAST_REJECTION',
+        executorErrorCode: error.details.executorErrorCode,
+      });
+      await executor.query(
+        `UPDATE core.seckill_governance_actions
+         SET state = 'CANCELLED', nonce_released_at = $2,
+           nonce_release_evidence_hash = $3, updated_at = $2
+         WHERE action_id = $1 AND state = 'PENDING_EXECUTION'
+           AND executor_nonce IS NOT NULL AND submitted_tx_hash IS NULL`,
+        [action.action_id, now, releaseEvidenceHash],
+      );
+      const evidence = {
+        reasonCode: 'DETERMINISTIC_PREBROADCAST_REJECTION',
+        executorNonce: String(action.executor_nonce),
+        executorErrorCode: error.details.executorErrorCode,
+        releaseEvidenceHash,
+      };
+      await appendTransition(executor, action, 'CANCELLED', evidence, now);
+      await enqueueWorkerAudit(
+        executor,
+        action,
+        'SeckillEoaNonceReleased',
+        'SYSTEM',
+        evidence,
+        now,
+      );
+      if (action.action_kind === 'OPEN_SESSION') {
+        await releaseSeckillPlanInventory(executor, action.session_id, now, false);
+      }
+    });
+  }
+
+  #markNonceReconciliationRequired(actionId: string, error: CoreError) {
+    return this.#transactions.transaction(async (executor) => {
+      const action = await lockedAction(executor, actionId);
+      if (action.state !== 'PENDING_EXECUTION' || action.executor_nonce === null) return;
+      const now = this.#clock();
+      const evidenceHash = hashJson({
+        actionId: action.action_id,
+        executorWallet: action.governance_wallet_address,
+        executorNonce: String(action.executor_nonce),
+        executionRequestDigest: action.execution_request_digest,
+        executorErrorCode: error.details.executorErrorCode,
+        executorDetails: error.details.executorDetails,
+      });
+      await executor.query(
+        `UPDATE core.seckill_governance_actions
+         SET state = 'RECONCILE_REQUIRED', updated_at = $2
+         WHERE action_id = $1 AND state = 'PENDING_EXECUTION'
+           AND executor_nonce IS NOT NULL AND submitted_tx_hash IS NULL`,
+        [action.action_id, now],
+      );
+      const evidence = {
+        reasonCode: 'NONCE_CONSUMED_OR_RPC_DIVERGED',
+        executorNonce: String(action.executor_nonce),
+        evidenceHash,
+      };
+      await appendTransition(executor, action, 'RECONCILE_REQUIRED', evidence, now);
+      await enqueueWorkerAudit(
+        executor,
+        action,
+        'SeckillEoaNonceReconciliationRequired',
+        'SYSTEM',
+        evidence,
+        now,
+      );
     });
   }
 
@@ -577,9 +806,14 @@ export class SeckillGovernanceWorker {
     return this.#transactions.transaction(async (executor) => {
       const action = await lockedAction(executor, actionId);
       const now = this.#clock();
-      if (action.state !== 'PENDING_EXECUTION' || !approvalExpired(action.approval_deadline, now)) return;
+      if (
+        action.state !== 'PENDING_EXECUTION'
+        || action.executor_nonce !== null
+        || !approvalExpired(action.approval_deadline, now)
+      ) return;
       await executor.query(
-        "UPDATE core.seckill_governance_actions SET state = 'CANCELLED', updated_at = $2 WHERE action_id = $1",
+        `UPDATE core.seckill_governance_actions SET state = 'CANCELLED', updated_at = $2
+         WHERE action_id = $1 AND state = 'PENDING_EXECUTION' AND executor_nonce IS NULL`,
         [action.action_id, now],
       );
       await appendTransition(executor, action, 'CANCELLED', { reasonCode: 'APPROVAL_EXPIRED' }, now);
@@ -712,7 +946,8 @@ async function executionFromRow(
       tokenAddress: value.token_address,
     };
   }
-  return {
+  const execution: SeckillExecution = {
+    artifactVersion: row.execution_artifact_version ?? CORE_ARTIFACT_VERSION,
     actionId: row.action_id,
     sessionId: row.session_id,
     actionKind: row.action_kind,
@@ -725,6 +960,11 @@ async function executionFromRow(
     gasLimit,
     minimumExecutorNonce,
     expected,
+  };
+  return {
+    ...execution,
+    requestDigest: row.execution_request_digest ?? seckillExecutionRequestDigest(execution),
+    ...(row.state === 'RECONCILE_REQUIRED' ? { reconciliationOnly: true as const } : {}),
   };
 }
 
@@ -1092,7 +1332,10 @@ async function requireFullCoverage(executor: SqlExecutor) {
 
 export function seckillExecutionRequestDigest(input: SeckillExecution) {
   if (
-    !input.actionId
+    typeof input.artifactVersion !== 'string'
+    || input.artifactVersion.length < 1
+    || input.artifactVersion.length > 128
+    || !input.actionId
     || !input.sessionId
     || !isAddress(input.governanceWallet)
     || !isAddress(input.targetAddress)
@@ -1107,7 +1350,25 @@ export function seckillExecutionRequestDigest(input: SeckillExecution) {
   if (keccak256(input.calldata).toLowerCase() !== input.calldataHash.toLowerCase()) {
     throw new CoreError('InvalidRequest', 'Seckill calldata hash does not match the frozen action');
   }
-  return hashJson({ artifactVersion: CORE_ARTIFACT_VERSION, chainId: BSC_CHAIN_ID, ...input });
+  const {
+    requestDigest: _requestDigest,
+    reconciliationOnly: _reconciliationOnly,
+    ...identity
+  } = input;
+  return hashJson({ chainId: BSC_CHAIN_ID, ...identity });
+}
+
+export function seckillNonceObservationEvidenceHash(executorWallet: string, executorNonce: string) {
+  if (!isAddress(executorWallet) || !isCanonicalNonce(executorNonce)) {
+    throw new CoreError('InvalidRequest', 'Seckill EOA nonce observation identity is invalid');
+  }
+  return hashJson({
+    artifactVersion: CORE_ARTIFACT_VERSION,
+    chainId: BSC_CHAIN_ID,
+    executorWallet: getAddress(executorWallet).toLowerCase(),
+    executorNonce,
+    blockTag: 'pending',
+  });
 }
 
 function validateObservation(action: SeckillActionRow, observation: Exclude<SeckillObservation, { state: 'NOT_FOUND' }>) {
@@ -1441,4 +1702,49 @@ function stableJson(value: unknown): string {
 
 function errorCode(error: unknown) {
   return error instanceof CoreError ? error.code : 'SeckillGovernanceUnavailable';
+}
+
+async function seckillExecutorHttpError(response: Response, input: SeckillExecution) {
+  let executorErrorCode: string | undefined;
+  let executorDetails: Record<string, unknown> = {};
+  try {
+    const payload = await response.json() as { error?: { code?: unknown; details?: unknown } };
+    if (typeof payload.error?.code === 'string') executorErrorCode = payload.error.code;
+    if (payload.error?.details && typeof payload.error.details === 'object' && !Array.isArray(payload.error.details)) {
+      executorDetails = payload.error.details as Record<string, unknown>;
+    }
+  } catch {
+    // A malformed error response is ambiguous and must retain the nonce reservation.
+  }
+  const deterministicExecutorFailure = response.status === 400 && executorErrorCode === 'INVALID_ENVELOPE';
+  const retryableNonceMismatch = response.status === 409
+    && executorErrorCode === 'NONCE_MISMATCH'
+    && ['UNSIGNED_UNBROADCAST', 'RPC_DIVERGENCE'].includes(String(executorDetails.relation));
+  const nonceReconciliationRequired = response.status === 409
+    && executorErrorCode === 'NONCE_MISMATCH'
+    && !retryableNonceMismatch;
+  return new CoreError(
+    deterministicExecutorFailure ? 'InvalidRequest' : 'ExternalBlocked',
+    deterministicExecutorFailure
+      ? 'Seckill EOA executor rejected the request before signing'
+      : 'Seckill EOA executor result is ambiguous',
+    deterministicExecutorFailure ? 400 : 503,
+    {
+      deterministicExecutorFailure,
+      nonceReconciliationRequired,
+      ...(executorErrorCode ? { executorErrorCode } : {}),
+      ...(Object.keys(executorDetails).length > 0 ? { executorDetails } : {}),
+      executorStatus: response.status,
+    },
+  );
+}
+
+function isDeterministicSeckillExecutorRejection(error: unknown): error is CoreError {
+  return error instanceof CoreError
+    && error.details.deterministicExecutorFailure === true
+    && error.details.executorErrorCode === 'INVALID_ENVELOPE';
+}
+
+function isSeckillNonceReconciliationRequired(error: unknown): error is CoreError {
+  return error instanceof CoreError && error.details.nonceReconciliationRequired === true;
 }

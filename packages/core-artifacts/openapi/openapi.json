@@ -22445,6 +22445,12 @@
           "targetAddress",
           "calldataHash",
           "executorNonce",
+          "nonceReservedAt",
+          "nonceReservationEvidenceHash",
+          "executionArtifactVersion",
+          "executionRequestDigest",
+          "nonceReleasedAt",
+          "nonceReleaseEvidenceHash",
           "submittedTxHash",
           "executionEvidenceHash",
           "executionTxHash",
@@ -22493,7 +22499,8 @@
               "FINAL",
               "REORGED",
               "FAILED",
-              "CANCELLED"
+              "CANCELLED",
+              "RECONCILE_REQUIRED"
             ]
           },
           "evidenceHash": {
@@ -22512,6 +22519,69 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/AtomicAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nonceReservedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nonceReservationEvidenceHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "executionArtifactVersion": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "executionRequestDigest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nonceReleasedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nonceReleaseEvidenceHash": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
               },
               {
                 "type": "null"

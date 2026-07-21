@@ -101,6 +101,33 @@ describe('seckill admin coordinated Core client', () => {
     await expect(fetchSeckillGovernanceAction(action.actionId, 'jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
+  it('accepts nonce reconciliation evidence and rejects missing or extra projection fields', async () => {
+    const action = governanceAction({
+      state: 'RECONCILE_REQUIRED',
+      executorNonce: '7',
+      nonceReservedAt: '2026-07-16T00:01:00.000Z',
+      nonceReservationEvidenceHash: hash('4'),
+      executionArtifactVersion: artifactVersion,
+      executionRequestDigest: hash('5'),
+      allowedActions: [],
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([action])));
+    await expect(fetchSeckillGovernanceActions('jwt')).resolves.toEqual([action]);
+
+    for (const field of [
+      'nonceReservedAt', 'nonceReservationEvidenceHash', 'executionArtifactVersion',
+      'executionRequestDigest', 'nonceReleasedAt', 'nonceReleaseEvidenceHash',
+    ] as const) {
+      const incomplete = { ...action } as Record<string, unknown>;
+      delete incomplete[field];
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([incomplete])));
+      await expect(fetchSeckillGovernanceActions('jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
+    }
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([{ ...action, unexpected: true }])));
+    await expect(fetchSeckillGovernanceActions('jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
+  });
+
   it('creates every published seckill draft operation with exact bodies', async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
       const url = String(input);
@@ -246,7 +273,8 @@ function governanceAction(overrides: Partial<SeckillGovernanceActionProjection> 
   return {
     artifactVersion, actionId: hash('a'), sessionId: hash('b'), policyVersion: '2', actionKind: 'OPEN_SESSION', state: 'DRAFT',
     evidenceHash: hash('c'), executorWallet: address('4'), targetAddress: address('5'), calldataHash: hash('d'), executorNonce: null,
-    submittedTxHash: null, executionEvidenceHash: null, executionTxHash: null, blockNumber: null, blockHash: null, confirmations: 0,
+    nonceReservedAt: null, nonceReservationEvidenceHash: null, executionArtifactVersion: null, executionRequestDigest: null,
+    nonceReleasedAt: null, nonceReleaseEvidenceHash: null, submittedTxHash: null, executionEvidenceHash: null, executionTxHash: null, blockNumber: null, blockHash: null, confirmations: 0,
     canonical: null, actorWallet: address('1'), secondarySigner: null, approvalNonce: null, approvalDeadline: null,
     createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T00:00:00.000Z', sessionPlan: sessionPlan(),
     prizeInjection: null, allowedActions: ['APPROVE_SECONDARY', 'CANCEL'], ...overrides,

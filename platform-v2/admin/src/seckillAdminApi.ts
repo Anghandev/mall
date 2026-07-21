@@ -29,7 +29,7 @@ const coreOrigin = (import.meta.env.VITE_CORE_API_ORIGIN ?? '').trim().replace(/
 const governanceActionKinds = ['OPEN_SESSION', 'FORCE_CLOSE', 'RESUME_PURCHASES', 'PRIZE_INJECTION'] as const satisfies readonly SeckillGovernanceActionKind[];
 const governanceActionStates = [
   'DRAFT', 'SECONDARY_SIGNED', 'PENDING_EXECUTION', 'SUBMITTED', 'MINED',
-  'FINAL', 'REORGED', 'FAILED', 'CANCELLED',
+  'FINAL', 'REORGED', 'FAILED', 'CANCELLED', 'RECONCILE_REQUIRED',
 ] as const satisfies readonly SeckillGovernanceActionState[];
 const governanceAllowedActions = ['APPROVE_SECONDARY', 'EXECUTE', 'CANCEL'] as const;
 
@@ -350,8 +350,10 @@ async function writeAction(
 function isSeckillGovernanceAction(value: unknown): value is SeckillGovernanceActionProjection {
   if (!isRecord(value) || !hasExactKeys(value, [
     'artifactVersion', 'actionId', 'sessionId', 'policyVersion', 'actionKind', 'state', 'evidenceHash',
-    'executorWallet', 'targetAddress', 'calldataHash', 'executorNonce', 'submittedTxHash', 'executionEvidenceHash',
-    'executionTxHash', 'blockNumber', 'blockHash', 'confirmations', 'canonical', 'actorWallet',
+    'executorWallet', 'targetAddress', 'calldataHash', 'executorNonce',
+    'nonceReservedAt', 'nonceReservationEvidenceHash', 'executionArtifactVersion', 'executionRequestDigest',
+    'nonceReleasedAt', 'nonceReleaseEvidenceHash', 'submittedTxHash', 'executionEvidenceHash', 'executionTxHash',
+    'blockNumber', 'blockHash', 'confirmations', 'canonical', 'actorWallet',
     'secondarySigner', 'approvalNonce', 'approvalDeadline', 'createdAt', 'updatedAt', 'sessionPlan',
     'prizeInjection', 'allowedActions',
   ])) return false;
@@ -366,6 +368,12 @@ function isSeckillGovernanceAction(value: unknown): value is SeckillGovernanceAc
     && addressPattern.test(String(value.targetAddress))
     && bytes32Pattern.test(String(value.calldataHash))
     && isNullableAmount(value.executorNonce)
+    && isNullableDateTime(value.nonceReservedAt)
+    && isNullableHash(value.nonceReservationEvidenceHash)
+    && (value.executionArtifactVersion === null || typeof value.executionArtifactVersion === 'string')
+    && isNullableHash(value.executionRequestDigest)
+    && isNullableDateTime(value.nonceReleasedAt)
+    && isNullableHash(value.nonceReleaseEvidenceHash)
     && isNullableHash(value.submittedTxHash)
     && isNullableHash(value.executionEvidenceHash)
     && isNullableHash(value.executionTxHash)

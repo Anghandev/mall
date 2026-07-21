@@ -3,6 +3,7 @@ import type { SqlExecutor, SqlResult, SqlTransactionRunner } from '../data/migra
 import test from 'node:test';
 import { Interface, keccak256 } from 'ethers';
 import { CORE_ARTIFACT_VERSION } from '../api/enums.ts';
+import { CoreError } from '../api/errors.ts';
 import {
   HttpCoverageBreakerEoaExecutor,
   ResilientCoverageBreakerChainSource,
@@ -15,6 +16,7 @@ import {
   ResilientSeckillChainSource,
   SeckillGovernanceWorker,
   seckillExecutionRequestDigest,
+  seckillNonceObservationEvidenceHash,
   type SeckillExecution,
   type SeckillFinalityCandidate,
 } from './seckill-governance.ts';
@@ -98,6 +100,11 @@ test('seckill EOA execution reaches finality without a Safe lookup service', asy
     token: 'token',
     fetchImpl: executorFetch(execution, seckillExecutionRequestDigest(execution)),
   });
+  assert.deepEqual(await executor.pendingNonce({ governanceWallet: execution.governanceWallet }), {
+    executorWallet: GOVERNANCE,
+    executorNonce: '7',
+    evidenceHash: seckillNonceObservationEvidenceHash(GOVERNANCE, '7'),
+  });
   assert.equal((await executor.execute(execution)).submittedTxHash, TX_HASH);
   const fetchImpl = seckillRpcFetch(execution);
   const source = new ResilientSeckillChainSource({
@@ -132,6 +139,65 @@ test('seckill EOA executor permits authenticated loopback HTTP but rejects remot
   await assert.rejects(() => remote.execute(execution), /requires HTTPS outside loopback/);
 });
 
+test('seckill EOA executor distinguishes a proven pre-signing rejection from an ambiguous result', async () => {
+  const execution = seckillExecution();
+  const executor = new HttpSeckillEoaExecutor({
+    url: 'https://executor.example/seckill',
+    token: 'token',
+    fetchImpl: async () => new Response(
+      JSON.stringify({ error: { code: 'INVALID_ENVELOPE' } }),
+      { status: 400, headers: { 'content-type': 'application/json' } },
+    ),
+  });
+  await assert.rejects(
+    executor.execute(execution),
+    (error: unknown) => error instanceof CoreError
+      && error.code === 'InvalidRequest'
+      && error.details.deterministicExecutorFailure === true
+      && error.details.executorErrorCode === 'INVALID_ENVELOPE',
+  );
+});
+
+test('seckill EOA executor never releases a nonce mismatch and isolates consumed nonces', async () => {
+  const execution = seckillExecution();
+  const response = (relation: string, pendingNonce: string) => new Response(JSON.stringify({
+    error: {
+      code: 'NONCE_MISMATCH',
+      details: {
+        relation,
+        stateRecordPresent: false,
+        executorWallet: execution.governanceWallet,
+        reservedNonce: execution.minimumExecutorNonce,
+        primaryPendingNonce: pendingNonce,
+        fallbackPendingNonce: pendingNonce,
+      },
+    },
+  }), { status: 409, headers: { 'content-type': 'application/json' } });
+  const unsigned = new HttpSeckillEoaExecutor({
+    url: 'https://executor.example/seckill',
+    token: 'token',
+    fetchImpl: async () => response('UNSIGNED_UNBROADCAST', '6'),
+  });
+  await assert.rejects(
+    unsigned.execute(execution),
+    (error: unknown) => error instanceof CoreError
+      && error.details.deterministicExecutorFailure === false
+      && error.details.nonceReconciliationRequired === false,
+  );
+
+  const consumed = new HttpSeckillEoaExecutor({
+    url: 'https://executor.example/seckill',
+    token: 'token',
+    fetchImpl: async () => response('NONCE_CONSUMED_UNKNOWN', '8'),
+  });
+  await assert.rejects(
+    consumed.execute(execution),
+    (error: unknown) => error instanceof CoreError
+      && error.details.deterministicExecutorFailure === false
+      && error.details.nonceReconciliationRequired === true,
+  );
+});
+
 test('seckill governance worker submits a pending EOA action through the configured executor', async () => {
   const execution = seckillExecution();
   const now = new Date('2026-07-21T00:00:00.000Z');
@@ -149,6 +215,12 @@ test('seckill governance worker submits a pending EOA action through the configu
     new_value_hash: HASH_2,
     state: 'PENDING_EXECUTION',
     executor_nonce: null,
+    nonce_reserved_at: null,
+    nonce_reservation_evidence_hash: null,
+    execution_artifact_version: null,
+    execution_request_digest: null,
+    nonce_released_at: null,
+    nonce_release_evidence_hash: null,
     submitted_tx_hash: null,
     execution_evidence_hash: null,
     execution_tx_hash: null,
@@ -190,6 +262,11 @@ test('seckill governance worker submits a pending EOA action through the configu
     executionGasLimit: '1000000',
     clock: () => now,
     executor: {
+      pendingNonce: async () => ({
+        executorWallet: GOVERNANCE,
+        executorNonce: execution.minimumExecutorNonce,
+        evidenceHash: seckillNonceObservationEvidenceHash(GOVERNANCE, execution.minimumExecutorNonce),
+      }),
       execute: async (input) => {
         calls.push(input);
         assert.deepEqual(input, execution);
@@ -254,14 +331,15 @@ class SeckillWorkerMemoryTransactions implements SqlTransactionRunner {
   }
 
   async query(sql: string, params: unknown[] = []): Promise<{ rows: unknown[] }> {
-    if (sql.includes("WHERE state = 'PENDING_EXECUTION' ORDER BY created_at")) {
-      return { rows: this.action.state === 'PENDING_EXECUTION' ? [this.action] : [] };
+    if (sql.includes('pg_advisory_xact_lock')) return { rows: [] };
+    if (sql.includes("WHERE state IN ('PENDING_EXECUTION','RECONCILE_REQUIRED')")) {
+      return { rows: ['PENDING_EXECUTION', 'RECONCILE_REQUIRED'].includes(String(this.action.state)) ? [this.action] : [] };
     }
     if (sql.includes("WHERE state IN ('SUBMITTED','MINED','FINAL')")) {
       return { rows: ['SUBMITTED', 'MINED', 'FINAL'].includes(String(this.action.state)) ? [this.action] : [] };
     }
-    if (sql.includes('max(executor_nonce)::text') && sql.includes('earlier_pending')) {
-      return { rows: [{ max_executor_nonce: '6', earlier_pending: false }] };
+    if (sql.includes('AS earlier_pending') && sql.includes('AS settlement_conflict')) {
+      return { rows: [{ earlier_pending: false, settlement_conflict: false, seckill_conflict: false }] };
     }
     if (sql.includes('SELECT starts_at, main_deadline, relay_deadline FROM core.seckill_session_plans')) {
       return { rows: [this.plan] };
@@ -270,15 +348,26 @@ class SeckillWorkerMemoryTransactions implements SqlTransactionRunner {
       assert.equal(params[0], this.action.action_id);
       return { rows: [this.action] };
     }
+    if (sql.includes('SET executor_nonce = $2, nonce_reserved_at = $3')) {
+      this.action = {
+        ...this.action,
+        executor_nonce: params[1],
+        nonce_reserved_at: params[2],
+        nonce_reservation_evidence_hash: params[3],
+        execution_artifact_version: params[4],
+        execution_request_digest: params[5],
+        updated_at: params[2],
+      };
+      return { rows: [] };
+    }
     if (sql.includes("UPDATE core.seckill_governance_actions") && sql.includes("SET state = 'SUBMITTED'")) {
       assert.equal(params[0], this.action.action_id);
       this.action = {
         ...this.action,
         state: 'SUBMITTED',
-        executor_nonce: params[1],
-        submitted_tx_hash: params[2],
-        execution_evidence_hash: params[3],
-        updated_at: params[4],
+        submitted_tx_hash: params[1],
+        execution_evidence_hash: params[2],
+        updated_at: params[3],
       };
       return { rows: [] };
     }
@@ -326,7 +415,8 @@ function seckillExecution(): SeckillExecution {
   const startsAt = 1_800_000_000;
   const sessionId = HASH_2;
   const calldata = seckillInterface.encodeFunctionData('openSeckillSession', [sessionId, 1, startsAt]).toLowerCase();
-  return {
+  const execution: SeckillExecution = {
+    artifactVersion: CORE_ARTIFACT_VERSION,
     actionId: HASH_1,
     sessionId,
     actionKind: 'OPEN_SESSION',
@@ -345,11 +435,13 @@ function seckillExecution(): SeckillExecution {
       relayDeadline: startsAt + 60,
     },
   };
+  return { ...execution, requestDigest: seckillExecutionRequestDigest(execution) };
 }
 
 function seckillBreakerExecution(): SeckillExecution {
   const calldata = seckillInterface.encodeFunctionData('setSeckillPurchasesPaused', [true, HASH_3]).toLowerCase();
-  return {
+  const execution: SeckillExecution = {
+    artifactVersion: CORE_ARTIFACT_VERSION,
     actionId: HASH_1,
     sessionId: HASH_2,
     actionKind: 'FORCE_CLOSE',
@@ -363,11 +455,17 @@ function seckillBreakerExecution(): SeckillExecution {
     minimumExecutorNonce: '7',
     expected: { kind: 'FORCE_CLOSE', targetPaused: true },
   };
+  return { ...execution, requestDigest: seckillExecutionRequestDigest(execution) };
 }
 
 function executorFetch(input: CoverageBreakerExecution | SeckillExecution, requestDigest: string): typeof fetch {
   return (async (_url, init) => {
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    if (body.operation === 'PENDING_NONCE') return httpJson({
+      executorWallet: input.governanceWallet,
+      executorNonce: '7',
+      evidenceHash: seckillNonceObservationEvidenceHash(input.governanceWallet, '7'),
+    });
     assert.equal(body.artifactVersion, CORE_ARTIFACT_VERSION);
     assert.equal(body.from, input.governanceWallet);
     assert.equal(body.to, 'routerAddress' in input ? input.routerAddress : input.targetAddress);

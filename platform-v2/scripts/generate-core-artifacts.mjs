@@ -148,6 +148,7 @@ const schemaSources = [
       '042_seed_seckill_breaker_scope.sql',
       '043_live_seckill_reservation_window.sql',
       '044_settlement_execution_integrity.sql',
+      '045_settlement_nonce_release.sql',
     ],
   },
   {
@@ -3803,13 +3804,19 @@ function settlementAdminOpenApiSchemas() {
       actionKind: { enum: ['OPEN_SESSION', 'FORCE_CLOSE', 'RESUME_PURCHASES', 'PRIZE_INJECTION'] },
       state: { enum: [
         'DRAFT', 'SECONDARY_SIGNED', 'PENDING_EXECUTION', 'SUBMITTED',
-        'MINED', 'FINAL', 'REORGED', 'FAILED', 'CANCELLED',
+        'MINED', 'FINAL', 'REORGED', 'FAILED', 'CANCELLED', 'RECONCILE_REQUIRED',
       ] },
       evidenceHash: hash,
       executorWallet: address,
       targetAddress: address,
       calldataHash: hash,
       executorNonce: nullableAtomic,
+      nonceReservedAt: nullableTimestamp,
+      nonceReservationEvidenceHash: nullableHash,
+      executionArtifactVersion: nullableString,
+      executionRequestDigest: nullableHash,
+      nonceReleasedAt: nullableTimestamp,
+      nonceReleaseEvidenceHash: nullableHash,
       submittedTxHash: nullableHash,
       executionEvidenceHash: nullableHash,
       executionTxHash: nullableHash,
@@ -6592,7 +6599,7 @@ export interface SeckillSessionHistoryPage {
 export type SeckillGovernanceActionKind = 'OPEN_SESSION' | 'FORCE_CLOSE' | 'RESUME_PURCHASES' | 'PRIZE_INJECTION';
 export type SeckillGovernanceActionState =
   | 'DRAFT' | 'SECONDARY_SIGNED' | 'PENDING_EXECUTION' | 'SUBMITTED'
-  | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'CANCELLED';
+  | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'CANCELLED' | 'RECONCILE_REQUIRED';
 
 export interface SeckillSessionCreateRequest {
   policyVersion: AtomicAmount;
@@ -6667,6 +6674,12 @@ export interface SeckillGovernanceActionProjection {
   targetAddress: Address;
   calldataHash: Bytes32;
   executorNonce: AtomicAmount | null;
+  nonceReservedAt: string | null;
+  nonceReservationEvidenceHash: Bytes32 | null;
+  executionArtifactVersion: string | null;
+  executionRequestDigest: Bytes32 | null;
+  nonceReleasedAt: string | null;
+  nonceReleaseEvidenceHash: Bytes32 | null;
   submittedTxHash: Bytes32 | null;
   executionEvidenceHash: Bytes32 | null;
   executionTxHash: Bytes32 | null;

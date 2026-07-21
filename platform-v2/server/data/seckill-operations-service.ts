@@ -33,7 +33,7 @@ const FIXED_TIMERS = Object.freeze({
 type ActionKind = 'OPEN_SESSION' | 'FORCE_CLOSE' | 'RESUME_PURCHASES' | 'PRIZE_INJECTION';
 type ActionState =
   | 'DRAFT' | 'SECONDARY_SIGNED' | 'PENDING_EXECUTION' | 'SUBMITTED'
-  | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'CANCELLED';
+  | 'MINED' | 'FINAL' | 'REORGED' | 'FAILED' | 'CANCELLED' | 'RECONCILE_REQUIRED';
 
 export interface SeckillActionRow {
   action_id: string;
@@ -49,6 +49,12 @@ export interface SeckillActionRow {
   new_value_hash: string;
   state: ActionState;
   executor_nonce: string | number | null;
+  nonce_reserved_at: Date | null;
+  nonce_reservation_evidence_hash: string | null;
+  execution_artifact_version: string | null;
+  execution_request_digest: string | null;
+  nonce_released_at: Date | null;
+  nonce_release_evidence_hash: string | null;
   submitted_tx_hash: string | null;
   execution_evidence_hash: string | null;
   execution_tx_hash: string | null;
@@ -1155,6 +1161,12 @@ async function actionProjection(executor: SqlExecutor, row: SeckillActionRow) {
     targetAddress: row.target_address,
     calldataHash: row.calldata_hash,
     executorNonce: row.executor_nonce === null ? null : String(row.executor_nonce),
+    nonceReservedAt: row.nonce_reserved_at?.toISOString() ?? null,
+    nonceReservationEvidenceHash: row.nonce_reservation_evidence_hash,
+    executionArtifactVersion: row.execution_artifact_version,
+    executionRequestDigest: row.execution_request_digest,
+    nonceReleasedAt: row.nonce_released_at?.toISOString() ?? null,
+    nonceReleaseEvidenceHash: row.nonce_release_evidence_hash,
     submittedTxHash: row.submitted_tx_hash,
     executionEvidenceHash: row.execution_evidence_hash,
     executionTxHash: row.execution_tx_hash,

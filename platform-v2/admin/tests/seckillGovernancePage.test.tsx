@@ -263,16 +263,26 @@ describe('seckill governance workspace', () => {
     expect(screen.getByText('journal:rollover:1')).toBeTruthy();
   });
 
-  it('renders 14 confirmations, REORGED and FAILED without claiming finality', async () => {
+  it('renders nonce reconciliation evidence as blocked without claiming finality', async () => {
     const wallet = address('1');
     window.ethereum = walletProvider(wallet);
+    const reconcile = governanceAction({
+      actionId: hash('7'), state: 'RECONCILE_REQUIRED', allowedActions: [], executorNonce: '7',
+      nonceReservedAt: '2026-07-16T00:01:00.000Z', nonceReservationEvidenceHash: hash('8'),
+      executionArtifactVersion: artifactVersion, executionRequestDigest: hash('9'),
+    });
     const mined = governanceAction({ actionId: hash('e'), state: 'MINED', confirmations: 14, allowedActions: [], executorNonce: '3', submittedTxHash: hash('3'), executionEvidenceHash: hash('4'), executionTxHash: hash('5'), blockNumber: '100', blockHash: hash('6'), canonical: true });
     const reorged = governanceAction({ state: 'REORGED', allowedActions: [], executorNonce: '3', submittedTxHash: hash('3'), executionEvidenceHash: hash('4'), executionTxHash: hash('5'), blockNumber: '100', blockHash: hash('6'), canonical: false });
     const failed = governanceAction({ actionId: hash('f'), state: 'FAILED', allowedActions: [] });
-    vi.stubGlobal('fetch', governanceFetch(wallet, 'ADMIN', [mined, reorged, failed]));
+    vi.stubGlobal('fetch', governanceFetch(wallet, 'ADMIN', [reconcile, mined, reorged, failed]));
     const user = userEvent.setup();
     renderSeckill();
     await user.click(screen.getByRole('button', { name: 'SIWE 连接' }));
+    expect((await screen.findAllByText('RECONCILE_REQUIRED · 等待对账')).length).toBeGreaterThan(0);
+    expect(screen.getByText('nonce 已预留且广播状态不明；后续资金动作保持阻断，Core 仅重放已冻结请求并持续对账。')).toBeTruthy();
+    expect(screen.getByText('2026-07-16T00:01:00.000Z')).toBeTruthy();
+    expect(screen.getByText(hash('8'))).toBeTruthy();
+    expect(screen.getByText(hash('9'))).toBeTruthy();
     expect((await screen.findAllByText('MINED · 14/15')).length).toBeGreaterThan(0);
     expect((await screen.findAllByText('REORGED · 已回滚')).length).toBeGreaterThan(0);
     expect(screen.getByText('FAILED · 未生效')).toBeTruthy();
@@ -333,7 +343,8 @@ function governanceAction(overrides: Partial<SeckillGovernanceActionProjection> 
   return {
     artifactVersion, actionId: hash('a'), sessionId: hash('b'), policyVersion: '2', actionKind: 'OPEN_SESSION', state: 'DRAFT', evidenceHash: hash('c'),
     executorWallet: address('4'), targetAddress: address('5'), calldataHash: hash('d'), executorNonce: null, submittedTxHash: null, executionEvidenceHash: null,
-    executionTxHash: null, blockNumber: null, blockHash: null, confirmations: 0, canonical: null, actorWallet: address('1'), secondarySigner: null,
+    nonceReservedAt: null, nonceReservationEvidenceHash: null, executionArtifactVersion: null, executionRequestDigest: null,
+    nonceReleasedAt: null, nonceReleaseEvidenceHash: null, executionTxHash: null, blockNumber: null, blockHash: null, confirmations: 0, canonical: null, actorWallet: address('1'), secondarySigner: null,
     approvalNonce: null, approvalDeadline: null, createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T00:00:00.000Z',
     sessionPlan: sessionPlan(), prizeInjection: null, allowedActions: ['APPROVE_SECONDARY', 'CANCEL'], ...overrides,
   };
