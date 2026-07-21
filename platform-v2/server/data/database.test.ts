@@ -9669,6 +9669,7 @@ test('coverage breaker EOA action retries, reaches finality and replaces reorged
     let executions = 0;
     const governance = new CoverageBreakerGovernanceWorker({
       transactions: transactionAdapter(db),
+      executionGasLimit: '100000',
       executor: {
         execute: async (input) => {
           executions += 1;
@@ -9827,6 +9828,7 @@ test('coverage breaker EOA nonces keep an earlier RESUME before every later PAUS
     const requestedMinimums: string[] = [];
     const governance = new CoverageBreakerGovernanceWorker({
       transactions: transactionAdapter(db),
+      executionGasLimit: '100000',
       executor: {
         execute: async (input) => {
           requestedMinimums.push(input.minimumExecutorNonce);
@@ -9929,6 +9931,7 @@ test('coverage recovery requires independent EIP-712 approval and EOA finality, 
     let resumePhase: 'FINAL' | 'REORGED' = 'FINAL';
     const governance = new CoverageBreakerGovernanceWorker({
       transactions: transactionAdapter(db),
+      executionGasLimit: '100000',
       executor: {
         execute: async (input) => {
           executionNumber += 1;

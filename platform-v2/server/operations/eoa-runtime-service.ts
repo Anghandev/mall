@@ -303,6 +303,7 @@ function validateGovernanceRequest(
       targetPaused,
       evidenceHash,
       policyVersion: positiveNumber(input.policyVersion, 'policyVersion'),
+      gasLimit: parsed.gasLimit.toString(),
       minimumExecutorNonce,
     });
     if (digest !== parsed.requestDigest) throw new Error('coverage request digest mismatch');

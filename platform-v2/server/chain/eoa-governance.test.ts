@@ -66,6 +66,8 @@ test('coverage EOA executor and receipt finality bind the exact action without A
   harness.head = 114;
   const finalized = await source.observe(candidate);
   assert.equal(finalized.state, 'FINAL');
+  harness.transaction = { ...harness.transaction, gas: '0x186a1' };
+  await assert.rejects(() => source.observe(candidate), /drifted from its frozen EOA execution/);
   harness.transaction = { ...harness.transaction, from: ROUTER };
   await assert.rejects(() => source.observe(candidate), /drifted from its frozen EOA execution/);
 });
@@ -137,6 +139,7 @@ function coverageExecution(): CoverageBreakerExecution {
     targetPaused: true,
     evidenceHash: HASH_1,
     policyVersion: 1,
+    gasLimit: '100000',
     minimumExecutorNonce: '7',
   };
 }
@@ -191,7 +194,7 @@ function executorFetch(input: CoverageBreakerExecution | SeckillExecution, reque
     assert.equal(body.from, input.governanceWallet);
     assert.equal(body.to, 'routerAddress' in input ? input.routerAddress : input.targetAddress);
     assert.equal(body.data, input.calldata);
-    if ('gasLimit' in input) assert.equal(body.gasLimit, input.gasLimit);
+    assert.equal(body.gasLimit, input.gasLimit);
     return httpJson({
       executorWallet: input.governanceWallet,
       executorNonce: '7',
@@ -203,6 +206,7 @@ function executorFetch(input: CoverageBreakerExecution | SeckillExecution, reque
         targetPaused: input.targetPaused,
         evidenceHash: input.evidenceHash,
         policyVersion: input.policyVersion,
+        gasLimit: input.gasLimit,
       } : {
         sessionId: input.sessionId,
         actionKind: input.actionKind,
@@ -228,6 +232,7 @@ function coverageRpcHarness() {
       to: ROUTER,
       input: coverageExecution().calldata,
       nonce: '0x7',
+      gas: '0x186a0',
       value: '0x0',
     },
     fetch: undefined as unknown as typeof fetch,

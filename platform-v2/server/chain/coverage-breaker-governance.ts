@@ -51,6 +51,7 @@ export interface CoverageBreakerExecution {
   targetPaused: boolean;
   evidenceHash: string;
   policyVersion: number;
+  gasLimit: string;
   minimumExecutorNonce: string;
 }
 
@@ -152,6 +153,7 @@ export class HttpCoverageBreakerEoaExecutor implements CoverageBreakerEoaExecuto
         targetPaused: input.targetPaused,
         evidenceHash: input.evidenceHash,
         policyVersion: input.policyVersion,
+        gasLimit: input.gasLimit,
         minimumExecutorNonce: input.minimumExecutorNonce,
         requestDigest,
       }),
@@ -169,6 +171,7 @@ export class HttpCoverageBreakerEoaExecutor implements CoverageBreakerEoaExecuto
       || body.targetPaused !== input.targetPaused
       || body.evidenceHash !== input.evidenceHash
       || Number(body.policyVersion) !== input.policyVersion
+      || body.gasLimit !== input.gasLimit
       || body.minimumExecutorNonce !== input.minimumExecutorNonce
       || body.requestDigest !== requestDigest
     ) throw new CoreError('InvalidFinality', 'Coverage-breaker EOA executor response is not request-bound', 502);
@@ -253,6 +256,7 @@ export class ResilientCoverageBreakerChainSource implements CoverageBreakerChain
       || transaction.to !== getAddress(input.routerAddress).toLowerCase()
       || transaction.input !== input.calldata.toLowerCase()
       || transaction.nonce !== input.minimumExecutorNonce
+      || transaction.gasLimit !== input.gasLimit
       || transaction.value !== '0'
     ) {
       throw new CoreError('InvalidFinality', 'Coverage-breaker transaction drifted from its frozen EOA execution', 409);
@@ -305,6 +309,7 @@ export class CoverageBreakerGovernanceWorker {
   readonly #transactions: SqlTransactionRunner;
   readonly #executor: CoverageBreakerEoaExecutor;
   readonly #chain: CoverageBreakerChainSource;
+  readonly #executionGasLimit: string;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #running: Promise<void> | undefined;
   #lastErrorCode: string | undefined;
@@ -313,10 +318,15 @@ export class CoverageBreakerGovernanceWorker {
     transactions: SqlTransactionRunner;
     executor: CoverageBreakerEoaExecutor;
     chain: CoverageBreakerChainSource;
+    executionGasLimit: string;
   }) {
     this.#transactions = input.transactions;
     this.#executor = input.executor;
     this.#chain = input.chain;
+    if (!/^[1-9][0-9]*$/.test(input.executionGasLimit)) {
+      throw new CoreError('InvalidRequest', 'Coverage-breaker execution Gas limit is invalid');
+    }
+    this.#executionGasLimit = input.executionGasLimit;
   }
 
   async pollOnce() {
@@ -338,7 +348,7 @@ export class CoverageBreakerGovernanceWorker {
     const finality = await this.#pendingFinality(25);
     for (const action of finality) {
       try {
-        const observation = await this.#chain.observe(finalityCandidate(action));
+        const observation = await this.#chain.observe(finalityCandidate(action, this.#executionGasLimit));
         if (observation.state !== 'NOT_FOUND') await this.#recordObservation(action.action_id, observation);
       } catch (error) {
         pollErrorCode ??= errorCode(error);
@@ -413,7 +423,7 @@ export class CoverageBreakerGovernanceWorker {
       const minimumExecutorNonce = prior.rows[0]?.max_executor_nonce === null
         ? '0'
         : (BigInt(prior.rows[0]!.max_executor_nonce) + 1n).toString();
-      return executionFromRow(action, minimumExecutorNonce);
+      return executionFromRow(action, minimumExecutorNonce, this.#executionGasLimit);
     });
   }
 
@@ -575,7 +585,11 @@ export class CoverageBreakerGovernanceWorker {
   }
 }
 
-function executionFromRow(row: CoverageBreakerActionRow, minimumExecutorNonce: string): CoverageBreakerExecution {
+function executionFromRow(
+  row: CoverageBreakerActionRow,
+  minimumExecutorNonce: string,
+  gasLimit: string,
+): CoverageBreakerExecution {
   return {
     actionId: row.action_id,
     governanceWallet: row.governance_wallet_address,
@@ -585,16 +599,17 @@ function executionFromRow(row: CoverageBreakerActionRow, minimumExecutorNonce: s
     targetPaused: row.target_paused,
     evidenceHash: row.evidence_hash,
     policyVersion: Number(row.policy_version),
+    gasLimit,
     minimumExecutorNonce,
   };
 }
 
-function finalityCandidate(row: CoverageBreakerActionRow): CoverageBreakerFinalityCandidate {
+function finalityCandidate(row: CoverageBreakerActionRow, gasLimit: string): CoverageBreakerFinalityCandidate {
   if (row.executor_nonce === null || !row.submitted_tx_hash) {
     throw new CoreError('InvalidFinality', 'Coverage-breaker EOA nonce or transaction hash is unavailable', 409);
   }
   return {
-    ...executionFromRow(row, String(row.executor_nonce)),
+    ...executionFromRow(row, String(row.executor_nonce), gasLimit),
     submittedTxHash: row.submitted_tx_hash,
     priorState: row.state as CoverageBreakerFinalityCandidate['priorState'],
     ...(row.execution_tx_hash && row.block_number !== null && row.block_hash
@@ -619,6 +634,7 @@ export function coverageBreakerExecutionRequestDigest(input: CoverageBreakerExec
     || !isHash(input.evidenceHash)
     || !Number.isSafeInteger(input.policyVersion)
     || input.policyVersion < 1
+    || !/^[1-9][0-9]*$/.test(input.gasLimit)
     || !isCanonicalNonce(input.minimumExecutorNonce)
   ) throw new CoreError('InvalidRequest', 'Coverage-breaker EOA execution request is invalid');
   if (keccak256(input.calldata).toLowerCase() !== input.calldataHash.toLowerCase()) {
@@ -933,6 +949,7 @@ function normalizedTransaction(value: unknown, executionTxHash: string) {
     || typeof transaction.input !== 'string'
     || !/^0x[0-9a-fA-F]*$/.test(transaction.input)
     || !isHexQuantity(transaction.nonce)
+    || !isHexQuantity(transaction.gas)
     || !isHexQuantity(transaction.value)
   ) {
     throw new CoreError('InvalidFinality', 'Coverage-breaker transaction is malformed', 409);
@@ -943,6 +960,7 @@ function normalizedTransaction(value: unknown, executionTxHash: string) {
     to: getAddress(transaction.to).toLowerCase(),
     input: transaction.input.toLowerCase(),
     nonce: BigInt(transaction.nonce).toString(),
+    gasLimit: BigInt(transaction.gas).toString(),
     value: BigInt(transaction.value).toString(),
   };
 }
