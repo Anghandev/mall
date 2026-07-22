@@ -201,6 +201,7 @@ await writeEnv('eoa-runtime.env', [
   line('HOST', '127.0.0.1'),
   line('PORT', '8790'),
   line('BSC_RPC_URL', rpc),
+  line('BSC_FALLBACK_RPC_URL', fallbackRpc),
   line('EXECUTOR_MAX_GAS_LIMIT', '1000000'),
   line('EXECUTION_STATE_FILE', '/var/lib/abu24k/eoa-runtime-state.json'),
   line('SIGNER_SERVICE_TOKEN', signerToken),
