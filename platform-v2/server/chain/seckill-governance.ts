@@ -4,6 +4,7 @@ import { CoreError } from '../api/errors.ts';
 import { auditSourceId, enqueueAudit } from '../data/audit-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from '../data/migrations.ts';
 import {
+  lockSeckillPrizeFundingMutation,
   reverseFinalizedSeckillPrizeInjection,
   rollPendingSeckillPrizesIntoSession,
   settleMaturedSeckillPrizes,
@@ -1124,7 +1125,8 @@ async function finalizePrizeInjection(
   observation: CanonicalSeckillObservation,
   at: Date,
 ) {
-  await requireFullCoverage(executor);
+  await lockSeckillPrizeFundingMutation(executor);
+  await requireFullCoverage(executor, observation.blockNumber);
   const injection = await executor.query<{
     amount_usdt: string;
     settlement_wallet_address: string;
@@ -1255,10 +1257,14 @@ async function ensureLedgerAccount(
   ) throw new CoreError('InvalidFinality', 'Prize ledger account identity conflicts with immutable metadata', 409);
 }
 
-async function requireFullCoverage(executor: SqlExecutor) {
-  const result = await executor.query<{ item_count: string; covered_count: string }>(
+async function requireFullCoverage(executor: SqlExecutor, minimumBlockNumber = 0) {
+  const result = await executor.query<{
+    block_number: string | number | null;
+    item_count: string;
+    covered_count: string;
+  }>(
     `WITH latest AS (
-       SELECT snapshot.snapshot_id
+       SELECT snapshot.snapshot_id, snapshot.block_number
        FROM core.coverage_snapshots snapshot
        WHERE COALESCE((
          SELECT canonical FROM core.coverage_snapshot_canonicality observation
@@ -1267,11 +1273,16 @@ async function requireFullCoverage(executor: SqlExecutor) {
        ), snapshot.canonical)
        ORDER BY snapshot.recorded_at DESC, snapshot.snapshot_id DESC LIMIT 1
      )
-     SELECT count(*)::text AS item_count,
+     SELECT max(latest.block_number) AS block_number,
+       count(*)::text AS item_count,
        count(*) FILTER (WHERE item.coverage_met)::text AS covered_count
      FROM latest JOIN core.coverage_snapshot_items item USING (snapshot_id)`,
   );
-  if (result.rows[0]?.item_count === '0' || result.rows[0]?.item_count !== result.rows[0]?.covered_count) {
+  if (
+    result.rows[0]?.item_count === '0'
+    || result.rows[0]?.item_count !== result.rows[0]?.covered_count
+    || BigInt(result.rows[0]?.block_number ?? -1) < BigInt(minimumBlockNumber)
+  ) {
     throw new CoreError('BreakerActive', 'Prize injection cannot mask coverage below 100%', 409);
   }
 }

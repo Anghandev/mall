@@ -131,6 +131,14 @@ export async function settleMaturedSeckillPrizes(executor: SqlExecutor, now: Dat
          WHERE quote.session_id = session.session_id
            AND quote.state IN ('QUOTED','SUBMITTED','REORGED')
        )
+       AND NOT EXISTS (
+         SELECT 1 FROM core.seckill_governance_actions action
+         WHERE action.session_id = session.session_id
+           AND action.action_kind = 'PRIZE_INJECTION'
+           AND action.state IN (
+             'DRAFT','SECONDARY_SIGNED','PENDING_EXECUTION','RECONCILE_REQUIRED','SUBMITTED','MINED'
+           )
+       )
      ORDER BY session.starts_at, session.session_id
      FOR UPDATE OF session`,
     [now],

@@ -11,7 +11,7 @@ import { CoreError } from '../api/errors.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
-import { reviewSeckillPrize } from './seckill-prize-service.ts';
+import { lockSeckillPrizeFundingMutation, reviewSeckillPrize } from './seckill-prize-service.ts';
 import {
   isMicrotestMerchantProduct,
   isMicrotestProductEligible,
@@ -260,7 +260,7 @@ export class SeckillOperationsService {
         this.#mainnetMicrotestEntitlement,
         this.#clock(),
       );
-      const coverageSnapshotId = await requireFullCoverage(executor);
+      const coverageSnapshot = await requireFullCoverage(executor);
       await requireSeckillBreakerOpen(executor);
       await requireNoSessionOverlap(executor, parsed.skuId, parsed.startsAt, parsed.mainDeadline);
       await requireNoOrdinaryQuotes(executor, parsed.skuId, this.#clock());
@@ -288,7 +288,7 @@ export class SeckillOperationsService {
         timers: FIXED_TIMERS,
         guaranteeEvidenceHash: catalog.guarantee_evidence_hash,
         guaranteeMode: catalog.guarantee_status === 'READY' ? 'FORMAL' : 'MAINNET_MICROTEST',
-        coverageSnapshotId,
+        coverageSnapshotId: coverageSnapshot.snapshotId,
       };
       const evidenceHash = hashJson(snapshot);
       const calldata = ROUTER.encodeFunctionData('openSeckillSession', [
@@ -480,11 +480,18 @@ export class SeckillOperationsService {
     const amount = positiveAtomic(input.amountUsdt, 'prize injection amount');
     return this.#transactions.transaction(async (executor) => {
       const wallet = await requireCurrentRole(executor, actor, ['ADMIN']);
+      await lockSeckillPrizeFundingMutation(executor);
       const normalizedSessionId = sessionId.toLowerCase();
       const requestHash = hashJson({ wallet, sessionId: normalizedSessionId, amountUsdt: amount.toString() });
       const existing = await idempotentAction(executor, wallet, input.idempotencyKey, requestHash);
       if (existing) return actionProjection(executor, existing);
-      await requireFullCoverage(executor);
+      const coverageSnapshot = await requireFullCoverage(executor);
+      await requirePostInjectionCoverage(
+        executor,
+        coverageSnapshot,
+        this.#operationsWallet,
+        amount,
+      );
       const session = await executor.query<{
         policy_version: string | number; phase: string; prize_pool_usdt: string;
       }>(
@@ -1305,8 +1312,12 @@ async function requireGuarantee(
 }
 
 async function requireFullCoverage(executor: SqlExecutor) {
-  const snapshot = await executor.query<{ snapshot_id: string; canonical: boolean }>(
-    `SELECT snapshot.snapshot_id,
+  const snapshot = await executor.query<{
+    snapshot_id: string;
+    block_number: string | number;
+    canonical: boolean;
+  }>(
+    `SELECT snapshot.snapshot_id, snapshot.block_number,
        COALESCE((
          SELECT canonical FROM core.coverage_snapshot_canonicality observation
          WHERE observation.snapshot_id = snapshot.snapshot_id
@@ -1326,7 +1337,48 @@ async function requireFullCoverage(executor: SqlExecutor) {
   if (coverage.rows[0]?.item_count === '0' || coverage.rows[0]?.item_count !== coverage.rows[0]?.covered_count) {
     throw new CoreError('BreakerActive', 'Wallet assets / unsettled liabilities coverage is below 100%', 409);
   }
-  return row.snapshot_id;
+  return { snapshotId: row.snapshot_id, blockNumber: BigInt(row.block_number) };
+}
+
+async function requirePostInjectionCoverage(
+  executor: SqlExecutor,
+  snapshot: { snapshotId: string; blockNumber: bigint },
+  operationsWallet: string,
+  amount: bigint,
+) {
+  const item = (await executor.query<{
+    verified_asset_balance: string;
+    unsettled_liability: string;
+    coverage_met: boolean;
+  }>(
+    `SELECT verified_asset_balance::text, unsettled_liability::text, coverage_met
+     FROM core.coverage_snapshot_items
+     WHERE snapshot_id = $1 AND wallet_address = $2 AND asset = 'USDT'`,
+    [snapshot.snapshotId, operationsWallet],
+  )).rows[0];
+  const reservation = (await executor.query<{
+    reserved_amount: string;
+    stale_finality: boolean;
+  }>(
+    `SELECT
+       COALESCE(sum(injection.amount_usdt) FILTER (WHERE action.state IN (
+         'DRAFT','SECONDARY_SIGNED','PENDING_EXECUTION','RECONCILE_REQUIRED','SUBMITTED','MINED'
+       )), 0)::text AS reserved_amount,
+       COALESCE(bool_or(action.state = 'FINAL' AND action.block_number >= $2), false) AS stale_finality
+     FROM core.seckill_governance_actions action
+     JOIN core.seckill_prize_injections injection ON injection.action_id = action.action_id
+     WHERE action.action_kind = 'PRIZE_INJECTION'
+       AND action.governance_wallet_address = $1`,
+    [operationsWallet, snapshot.blockNumber.toString()],
+  )).rows[0];
+  if (
+    !item?.coverage_met
+    || reservation?.stale_finality
+    || BigInt(item.verified_asset_balance)
+      < BigInt(item.unsettled_liability) + BigInt(reservation?.reserved_amount ?? '0') + amount
+  ) {
+    throw new CoreError('BreakerActive', 'Prize injection would make Operations guarantee coverage insufficient', 409);
+  }
 }
 
 async function requireSeckillBreakerOpen(executor: SqlExecutor) {

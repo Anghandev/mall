@@ -1,7 +1,7 @@
 # 24K商城 V2 上线前验收报告
 
 > Historical `.18` acceptance snapshot only. Preserve it for audit, but do not
-> use it as current `.21` release or mainnet acceptance evidence.
+> use it as current `.22` release or mainnet acceptance evidence.
 
 日期：2026-07-20
 生产发布基线：`v2/core@a1c00261dc279af876407bf083e6540312d6da8e`

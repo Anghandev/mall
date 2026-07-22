@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "24K商城 V2 Core API",
-    "version": "2.0.0-fulfillment-launch.21"
+    "version": "2.0.0-fulfillment-launch.22"
   },
-  "x-artifactVersion": "2.0.0-fulfillment-launch.21",
+  "x-artifactVersion": "2.0.0-fulfillment-launch.22",
   "servers": [],
   "paths": {
     "/v2/buyer/profile": {
@@ -12327,7 +12327,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "status": {
             "const": "CORE_API_READY"
@@ -12640,7 +12640,7 @@
             "minimum": 1
           },
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "allowedActions": {
             "type": "array",
@@ -13801,7 +13801,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "relation": {
             "enum": [
@@ -13906,7 +13906,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "exportId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -14035,7 +14035,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "operationId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -14165,7 +14165,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "operationId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -16203,7 +16203,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -16302,7 +16302,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "orderId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -17269,7 +17269,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "productId": {
             "type": "string",
@@ -17442,7 +17442,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "storeId": {
             "type": "string",
@@ -17568,7 +17568,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "productId": {
             "type": "string",
@@ -17670,7 +17670,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "previewId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -17829,7 +17829,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "adjustmentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -17954,7 +17954,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "uploadIntentId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -18052,7 +18052,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -18138,7 +18138,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "assetId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -18319,7 +18319,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "evidenceHash": {
             "$ref": "#/components/schemas/Bytes32"
@@ -18578,7 +18578,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -18852,7 +18852,7 @@
             "$ref": "#/components/schemas/Bytes32"
           },
           "artifact_version": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "wallet_address": {
             "$ref": "#/components/schemas/Address"
@@ -19159,7 +19159,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -19352,7 +19352,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "buyerWallet": {
             "$ref": "#/components/schemas/Address"
@@ -19731,7 +19731,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "merchantId": {
             "type": "string",
@@ -19908,7 +19908,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "requests": {
             "type": "array",
@@ -20072,7 +20072,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "request": {
             "$ref": "#/components/schemas/AdminSettlementRequest"
@@ -20246,7 +20246,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "transfers": {
             "type": "array",
@@ -20402,7 +20402,7 @@
             "const": 56
           },
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "tokenCodeHash": {
             "$ref": "#/components/schemas/Bytes32"
@@ -20813,7 +20813,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "transfer": {
             "$ref": "#/components/schemas/AdminSettlementTransferEnvelope"
@@ -21989,7 +21989,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "assignment": {
             "$ref": "#/components/schemas/TakeoverAssignment"
@@ -22202,7 +22202,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "cases": {
             "type": "array",
@@ -22267,7 +22267,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "caseId": {
             "type": "string",
@@ -22348,7 +22348,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "case": {
             "allOf": [
@@ -22553,7 +22553,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "exposureId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -22804,7 +22804,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "exposureId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -22989,7 +22989,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -23218,7 +23218,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -24148,7 +24148,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "snapshotId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -24231,7 +24231,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -25837,7 +25837,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -26085,7 +26085,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "timezone": {
             "const": "Asia/Shanghai"
@@ -26667,7 +26667,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "sessionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -26906,7 +26906,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "protocolVersion": {
             "const": 1
@@ -26979,7 +26979,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -27331,7 +27331,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "addresses": {
             "type": "array",
@@ -27586,7 +27586,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "wallet": {
             "$ref": "#/components/schemas/Address"
@@ -27753,7 +27753,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "orderId": {
             "type": "string",
@@ -27788,7 +27788,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "merchantId": {
             "type": "string",
@@ -28264,7 +28264,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "exportId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -28746,7 +28746,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "observation": {
             "$ref": "#/components/schemas/RiskObservation"
@@ -28772,7 +28772,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "generatedAt": {
             "type": "string",
@@ -29043,7 +29043,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "challengeId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -29110,7 +29110,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "bindingId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -29219,7 +29219,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "requestId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -29329,7 +29329,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "batchId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -29366,7 +29366,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "printJobId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -29535,7 +29535,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "configVersionId": {
             "anyOf": [
@@ -29770,7 +29770,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "providers": {
             "type": "array",
@@ -29951,7 +29951,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "warehouseId": {
             "type": "string",
@@ -30042,7 +30042,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "warehouses": {
             "type": "array",
@@ -30107,7 +30107,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "waybills": {
             "type": "array",
@@ -30126,7 +30126,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "printJobs": {
             "type": "array",
@@ -30454,7 +30454,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "merchants": {
             "type": "array",
@@ -30641,7 +30641,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "actionId": {
             "$ref": "#/components/schemas/Bytes32"
@@ -31108,7 +31108,7 @@
         ],
         "properties": {
           "artifactVersion": {
-            "const": "2.0.0-fulfillment-launch.21"
+            "const": "2.0.0-fulfillment-launch.22"
           },
           "merchant": {
             "$ref": "#/components/schemas/MerchantLifecycleSummary"

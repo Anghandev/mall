@@ -1978,8 +1978,10 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
       `INSERT INTO core.coverage_snapshot_items (
          snapshot_id, wallet_address, asset, verified_asset_balance,
          unsettled_liability, coverage_met
-       ) VALUES ('coverage:seckill',$1,'USDT',1000,1000,true)`,
-      [custodySafe],
+       ) VALUES
+         ('coverage:seckill',$1,'USDT',1000,1000,true),
+         ('coverage:seckill',$2,'USDT',1050,1000,true)`,
+      [custodySafe, operationsSafe],
     );
     await db.query(
       `INSERT INTO core.cms_entries (
@@ -2235,13 +2237,84 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
       (error: unknown) => error instanceof CoreError && error.code === 'InvalidRequest',
     );
 
+    await assert.rejects(
+      service.createPrizeInjection(adminActor, sessionAction.sessionId, {
+        amountUsdt: '51',
+        idempotencyKey: 'seckill-prize-post-coverage-rejected',
+        correlationId: 'seckill-prize-post-coverage-rejected',
+      }),
+      (error: unknown) => error instanceof CoreError && error.code === 'BreakerActive',
+    );
     const injection = await service.createPrizeInjection(adminActor, sessionAction.sessionId, {
       amountUsdt: '50',
       idempotencyKey: 'seckill-prize-001',
       correlationId: 'seckill-prize-create',
     });
+    await assert.rejects(
+      service.createPrizeInjection(adminActor, sessionAction.sessionId, {
+        amountUsdt: '1',
+        idempotencyKey: 'seckill-prize-reserved-headroom-rejected',
+        correlationId: 'seckill-prize-reserved-headroom-rejected',
+      }),
+      (error: unknown) => error instanceof CoreError && error.code === 'BreakerActive',
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshots (
+         snapshot_id, chain_id, block_number, block_hash, canonical, evidence_hash, recorded_at
+       ) VALUES ('coverage:seckill:stale',56,99,$1,true,$2,$3)`,
+      [HASH_2, HASH, clock],
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshot_items (
+         snapshot_id, wallet_address, asset, verified_asset_balance,
+         unsettled_liability, coverage_met
+       ) VALUES
+         ('coverage:seckill:stale',$1,'USDT',1000,1000,true),
+         ('coverage:seckill:stale',$2,'USDT',1050,1000,true)`,
+      [custodySafe, operationsSafe],
+    );
     await approve(injection.actionId, '2');
     await worker.pollOnce();
+    assert.deepEqual(worker.status(), { healthy: false, errorCode: 'BreakerActive' });
+    assert.equal(
+      (await db.query<{ state: string }>(
+        'SELECT state FROM core.seckill_governance_actions WHERE action_id = $1',
+        [injection.actionId],
+      )).rows[0]?.state,
+      'SUBMITTED',
+    );
+    assert.equal(
+      (await db.query<{ prize_pool_usdt: string }>(
+        'SELECT prize_pool_usdt::text FROM core.seckill_sessions WHERE session_id = $1',
+        [sessionAction.sessionId],
+      )).rows[0]?.prize_pool_usdt,
+      '0',
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshots (
+         snapshot_id, chain_id, block_number, block_hash, canonical, evidence_hash, recorded_at
+       ) VALUES ('coverage:seckill:fresh',56,101,$1,true,$2,$3)`,
+      [`0x${'4'.repeat(64)}`, HASH_2, new Date(clock.getTime() + 1_000)],
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshot_items (
+         snapshot_id, wallet_address, asset, verified_asset_balance,
+         unsettled_liability, coverage_met
+       ) VALUES
+         ('coverage:seckill:fresh',$1,'USDT',1000,1000,true),
+         ('coverage:seckill:fresh',$2,'USDT',1000,1000,true)`,
+      [custodySafe, operationsSafe],
+    );
+    await worker.pollOnce();
+    assert.deepEqual(worker.status(), { healthy: true, errorCode: undefined });
+    await assert.rejects(
+      service.createPrizeInjection(adminActor, sessionAction.sessionId, {
+        amountUsdt: '1',
+        idempotencyKey: 'seckill-prize-stale-coverage-rejected',
+        correlationId: 'seckill-prize-stale-coverage-rejected',
+      }),
+      (error: unknown) => error instanceof CoreError && error.code === 'BreakerActive',
+    );
     assert.equal(
       (await db.query<{ prize_pool_usdt: string }>(
         'SELECT prize_pool_usdt::text FROM core.seckill_sessions WHERE session_id = $1',
@@ -5968,6 +6041,58 @@ test('seckill prize settlement waits for pending cutoff payment finality before 
     );
     assert.equal(settled.rows[0]?.state, 'REVIEW_PENDING');
     assert.equal(settled.rows[0]?.candidate_order_id, quote.orderId);
+  } finally {
+    await db.close();
+  }
+});
+
+test('empty seckill settlement waits for a non-terminal prize injection', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    await seedCatalog(db, 1);
+    const now = new Date(Math.floor(Date.now() / 1000) * 1000);
+    const sessionId = `0x${'1'.repeat(64)}`;
+    const actionId = `0x${'2'.repeat(64)}`;
+    await insertLiveSeckillSession(db, sessionId, now, 90);
+    await db.query(
+      `INSERT INTO core.seckill_governance_actions (
+         action_id, session_id, policy_version, action_kind, evidence_hash,
+         governance_wallet_address, target_address, calldata, calldata_hash,
+         old_value_hash, new_value_hash, state, executor_nonce, submitted_tx_hash,
+         execution_evidence_hash, actor_wallet, idempotency_key, request_hash,
+         created_at, updated_at, nonce_reserved_at, nonce_reservation_evidence_hash,
+         execution_artifact_version, execution_request_digest
+       ) VALUES ($1,$2,1,'PRIZE_INJECTION',$3,$4,$5,'0x00',$3,$3,$3,'MINED',0,$6,$3,
+         $4,'pending-prize-injection',$3,$7,$7,$7,$3,$8,$3)`,
+      [
+        actionId,
+        sessionId,
+        HASH,
+        '0x3333333333333333333333333333333333333333',
+        USDT_ADDRESS,
+        `0x${'3'.repeat(64)}`,
+        now,
+        CORE_ARTIFACT_VERSION,
+      ],
+    );
+
+    const settlementAt = new Date(now.getTime() + 7 * 60_000);
+    assert.deepEqual(await settleMaturedSeckillPrizes(adapter(db), settlementAt), []);
+    assert.equal((await db.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM core.seckill_prize_settlements WHERE session_id = $1',
+      [sessionId],
+    )).rows[0]?.count, '0');
+
+    await db.query(
+      "UPDATE core.seckill_governance_actions SET state = 'FAILED' WHERE action_id = $1",
+      [actionId],
+    );
+    assert.deepEqual(await settleMaturedSeckillPrizes(adapter(db), settlementAt), [sessionId]);
+    assert.deepEqual((await db.query<{ state: string; pool_amount_usdt: string }>(
+      `SELECT state, pool_amount_usdt::text
+       FROM core.seckill_prize_settlements WHERE session_id = $1`,
+      [sessionId],
+    )).rows[0], { state: 'ROLLED_OVER', pool_amount_usdt: '0' });
   } finally {
     await db.close();
   }

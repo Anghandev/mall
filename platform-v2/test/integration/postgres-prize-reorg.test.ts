@@ -21,6 +21,7 @@ import {
   lockSeckillPrizeFundingMutation,
   reconcileSeckillPrizeFundingReorgOnce,
   reverseFinalizedSeckillPrizeInjection,
+  settleMaturedSeckillPrizes,
 } from '../../server/data/seckill-prize-service.ts';
 import {
   SettlementWorker,
@@ -855,6 +856,149 @@ test('real PostgreSQL re-pauses after recovered payout reorg and completes a sec
     await Promise.allSettled(clients.map((client) => client.end()));
     await adminClient.query(`DROP DATABASE IF EXISTS ${databaseName} WITH (FORCE)`);
     await adminClient.end();
+  }
+});
+
+test('real PostgreSQL serializes prize injection creation against empty-session settlement', {
+  timeout: 300_000,
+}, async () => {
+  const adminConnectionString = requiredPostgresAdminUrl();
+  const databaseName = `abu24k_late_prize_${randomBytes(6).toString('hex')}`;
+  const databaseConnectionString = connectionForDatabase(adminConnectionString, databaseName);
+  const admin = new Client({ connectionString: connectionForDatabase(adminConnectionString, 'postgres') });
+  const clients: Client[] = [];
+  await admin.connect();
+  try {
+    await admin.query(`CREATE DATABASE ${databaseName}`);
+    const client = await connected(databaseConnectionString, clients);
+    await applyMigrations(client, 'core', MIGRATIONS);
+    const sourceSessionId = `0x${'1'.repeat(64)}`;
+    const blockHash = `0x${'6'.repeat(64)}`;
+    const operationsWallet = '0x5555555555555555555555555555555555555555';
+    const adminWallet = '0x9999999999999999999999999999999999999999';
+    const sourceAccountId = `seckill-prize:${sourceSessionId}:usdt`;
+    const walletAccountId = `wallet:usdt-custody:${SETTLEMENT_WALLET}:usdt`;
+    const now = new Date(Math.floor(Date.now() / 1_000) * 1_000);
+    const cutoffAt = new Date(now.getTime() + 60_000);
+    const settlementAt = new Date(cutoffAt.getTime() + 5 * 60_000);
+    await client.query('BEGIN');
+    try {
+      await client.query('SET LOCAL session_replication_role = replica');
+      await client.query(
+        `INSERT INTO core.policy_snapshots (
+           policy_version, artifact_version, policy_hash, rules_content_hash,
+           beneficiary_set_hash, payload, publication_status
+         ) VALUES (1,$1,$2,$3,$4,$5,'PUBLISHED')`,
+        [CORE_ARTIFACT_VERSION, HASH_1, HASH_2, HASH_3, JSON.stringify({ usdtSettlementWallet: SETTLEMENT_WALLET })],
+      );
+      await client.query(
+        `INSERT INTO core.merchants (
+           merchant_id, settlement_wallet, status, level, profile, guarantee_status
+         ) VALUES ('merchant:late',$1,'APPROVED','V1','{}','READY')`,
+        [SETTLEMENT_WALLET],
+      );
+      await client.query(
+        `INSERT INTO core.products (
+           product_id, chain_product_id, merchant_id, version, title, lifecycle_state,
+           product_policy_hash, merchant_concession_bps, metadata, subtitle,
+           rich_detail, default_freight_usdt, fulfillment_modes
+         ) VALUES ('product:late',$1,'merchant:late',1,'Late prize','ACTIVE',$2,0,
+           '{}','Late prize','{"blocks":[]}',0,'["DELIVERY"]')`,
+        [`0x${'7'.repeat(64)}`, HASH_1],
+      );
+      await client.query(
+        `INSERT INTO core.skus (
+           sku_id, chain_sku_id, product_id, sku_version, attributes, list_price_usdt,
+           merchant_cost_usdt, stock_total, stock_available, lifecycle_state
+         ) VALUES ('sku:late',$1,'product:late',1,'{}',1,1,2,2,'ACTIVE')`,
+        [`0x${'8'.repeat(64)}`],
+      );
+      await client.query(
+        `INSERT INTO core.seckill_sessions (
+           session_id, policy_version, merchant_id, product_id, sku_id,
+           product_policy_hash, starts_at, main_deadline, relay_deadline,
+           inventory, seckill_list_price_usdt, phase, prize_pool_usdt, snapshot
+         ) VALUES ($1,1,'merchant:late','product:late','sku:late',$2,$3,$4,$4,1,1,'LIVE',0,'{}')`,
+        [sourceSessionId, HASH_1, now, cutoffAt],
+      );
+      await client.query(
+        `INSERT INTO core.ledger_accounts (
+           account_id, owner_type, owner_id, asset, purpose, wallet_address
+         ) VALUES
+           ($1,'WALLET',$2,'USDT','WALLET_ASSET',$2),
+           ($3,'BENEFICIARY',$4,'USDT','SECKILL_PRIZE_LIABILITY',NULL)`,
+        [walletAccountId, SETTLEMENT_WALLET, sourceAccountId, sourceSessionId],
+      );
+      await client.query(
+        `INSERT INTO core.wallet_role_bindings (
+           wallet_address, role, merchant_id, status, evidence_hash
+         ) VALUES ($1,'ADMIN',NULL,'ACTIVE',$2)`,
+        [adminWallet, HASH_1],
+      );
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    }
+
+    await seedCoverage(client, 'coverage:postgres-late-prize:1', settlementAt, blockHash, HASH_3);
+    await client.query(
+      `INSERT INTO core.coverage_snapshot_items (
+         snapshot_id, wallet_address, asset, verified_asset_balance,
+         unsettled_liability, coverage_met
+       ) VALUES ('coverage:postgres-late-prize:1',$1,'USDT',20,0,true)`,
+      [operationsWallet],
+    );
+    const lockHolder = await connected(databaseConnectionString, clients);
+    const creator = await connected(databaseConnectionString, clients);
+    await lockHolder.query('BEGIN');
+    await lockSeckillPrizeFundingMutation(lockHolder);
+    const service = new SeckillOperationsService({
+      transactions: { transaction: <Result>(operation: (executor: Client) => Promise<Result>) => inTransaction(creator, operation) },
+      governanceWalletAddress: adminWallet,
+      operationsWalletAddress: operationsWallet,
+      settlementWalletAddress: SETTLEMENT_WALLET,
+      paymentRouterAddress: '0x6666666666666666666666666666666666666666',
+      secondarySignerAddress: '0x7777777777777777777777777777777777777777',
+      clock: () => settlementAt,
+    });
+    let creationCompleted = false;
+    const creation = service.createPrizeInjection(
+      { walletAddress: adminWallet, roles: ['ADMIN'] },
+      sourceSessionId,
+      {
+        amountUsdt: '20',
+        idempotencyKey: 'postgres-injection-settlement-race',
+        correlationId: 'postgres-injection-settlement-race',
+      },
+    ).finally(() => { creationCompleted = true; });
+    void creation.catch(() => undefined);
+    await delay(100);
+    assert.equal(creationCompleted, false);
+    assert.deepEqual(await settleMaturedSeckillPrizes(lockHolder, settlementAt), [sourceSessionId]);
+    await lockHolder.query('COMMIT');
+    await assert.rejects(
+      creation,
+      (error: unknown) => (error as { code?: string }).code === 'InvalidRequest',
+    );
+    assert.deepEqual((await client.query<{
+      phase: string;
+      outcome_state: string;
+      action_count: string;
+    }>(
+      `SELECT session.phase, outcome.state AS outcome_state,
+         (SELECT count(*)::text FROM core.seckill_governance_actions action
+          WHERE action.session_id = session.session_id
+            AND action.action_kind = 'PRIZE_INJECTION') AS action_count
+       FROM core.seckill_sessions session
+       JOIN core.seckill_prize_settlements outcome ON outcome.session_id = session.session_id
+       WHERE session.session_id = $1`,
+      [sourceSessionId],
+    )).rows[0], { phase: 'SETTLED', outcome_state: 'ROLLED_OVER', action_count: '0' });
+  } finally {
+    await Promise.allSettled(clients.map((client) => client.end()));
+    await admin.query(`DROP DATABASE IF EXISTS ${databaseName} WITH (FORCE)`);
+    await admin.end();
   }
 });
 

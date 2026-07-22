@@ -5,7 +5,7 @@ release acceptance `PENDING`. Historical evidence below does not establish Go
 for the current commit and must not replace the new bounded run.
 
 The current acceptance run is bound to artifact
-`2.0.0-fulfillment-launch.21`, the release commit produced by this Goal and the
+`2.0.0-fulfillment-launch.22`, the release commit produced by this Goal and the
 five-role EOA architecture in `V2_SYSTEM_CONTRACT.md`. The historical evidence
 below was produced under `2.0.0-settlement-admin.16` and cannot authorize or
 substitute for the new run. This document alone does not authorize a
