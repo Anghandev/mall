@@ -1156,11 +1156,23 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     seckillOperationsService: {
       list: async () => [],
       get: async (_actor, actionId) => ({ actionId, state: 'DRAFT' }),
+      listPrizeReorgExposures: async (actor) => [{
+        actor: actor.walletAddress, exposureId: HASH, state: 'RECOVERY_REQUIRED', recoveryEpisode: 2,
+      }],
+      getPrizeReorgExposure: async (actor, exposureId) => ({
+        actor: actor.walletAddress, exposureId, state: 'RECOVERY_REQUIRED', recoveryEpisode: 2,
+      }),
       createSession: async (actor, input) => ({ actionId: HASH, actor: actor.walletAddress, ...input }),
       createForceClose: async (actor, sessionId, input) => ({ actionId: HASH, actor: actor.walletAddress, sessionId, ...input }),
       createResume: async (actor, input) => ({ actionId: HASH, actor: actor.walletAddress, ...input }),
       createPrizeInjection: async (actor, sessionId, input) => ({ actionId: HASH, actor: actor.walletAddress, sessionId, ...input }),
       reviewWinner: async (actor, sessionId, input) => ({ actor: actor.walletAddress, sessionId, ...input }),
+      prizeRecoveryChallenge: async (actor, exposureId, input) => ({
+        actor: actor.walletAddress, exposureId, recoveryEpisode: 2, ...input, typedData: {},
+      }),
+      submitPrizeRecovery: async (actor, exposureId, input) => ({
+        actor: actor.walletAddress, exposureId, recoveryEpisode: 2, ...input,
+      }),
       approvalChallenge: async (_actor, actionId, input) => ({ actionId, ...input, typedData: {} }),
       submitApproval: async (_actor, actionId, input) => ({ actionId, state: 'SECONDARY_SIGNED', ...input }),
       execute: async (_actor, actionId) => ({ actionId, state: 'PENDING_EXECUTION' }),
@@ -1907,6 +1919,31 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     assert.equal(reviewedWinner.sessionId, SESSION_ID);
     assert.equal(reviewedWinner.decision, 'APPROVE');
     assert.equal(reviewedWinner.evidenceHash, HASH_2);
+    const prizeReorgList = await fetch(`${base}/v2/admin/seckill/prize-reorgs`, {
+      headers: bearerHeaders,
+    });
+    assert.equal(prizeReorgList.status, 200);
+    assert.equal((await prizeReorgList.json() as Array<Record<string, unknown>>)[0]?.recoveryEpisode, 2);
+    const prizeReorgDetail = await fetch(`${base}/v2/admin/seckill/prize-reorgs/${HASH}`, {
+      headers: bearerHeaders,
+    });
+    assert.equal(prizeReorgDetail.status, 200);
+    assert.equal((await prizeReorgDetail.json() as Record<string, unknown>).exposureId, HASH);
+    assert.equal((await fetch(`${base}/v2/admin/seckill/prize-reorgs/${HASH}/recovery-challenge`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({ nonce: '9', deadline: '1783990200' }),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/v2/admin/seckill/prize-reorgs/${HASH}/recovery`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        snapshotId: 'coverage:prize-recovery',
+        nonce: '9',
+        deadline: '1783990200',
+        signature: '0x1234',
+      }),
+    })).status, 201);
     assert.equal((await fetch(`${base}/v2/admin/seckill/breaker/resume`, {
       method: 'POST',
       headers: bearerHeaders,

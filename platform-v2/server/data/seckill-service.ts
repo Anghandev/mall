@@ -274,7 +274,9 @@ function sessionProjection(row: SessionRow, now: Date) {
     },
     prizePoolUsdt: row.prize_pool_usdt,
     lastBuyerWallet: row.last_buyer_wallet,
-    winnerWallet: row.review_decision === 'APPROVED' ? row.candidate_buyer_wallet : null,
+    winnerWallet: row.prize_settlement_state === 'APPROVED' && row.review_decision === 'APPROVED'
+      ? row.candidate_buyer_wallet
+      : null,
     prizeSettlement: row.prize_settlement_state ? {
       state: row.prize_settlement_state,
       cutoffAt: iso(row.prize_cutoff_at!),
@@ -298,7 +300,7 @@ function sessionProjection(row: SessionRow, now: Date) {
       awardJournalId: row.award_journal_id,
       rolloverTargetSessionId: row.rollover_target_session_id,
       rolloverJournalId: row.rollover_journal_id,
-      payout: row.review_decision === 'APPROVED' ? {
+      payout: row.prize_settlement_state === 'APPROVED' && row.review_decision === 'APPROVED' ? {
         state: row.payout_state ?? (BigInt(row.pool_snapshot_amount_usdt ?? '0') > 0n ? 'AVAILABLE' : 'SETTLED'),
         requestId: row.payout_request_id,
         transferIds: row.payout_transfer_ids ?? [],

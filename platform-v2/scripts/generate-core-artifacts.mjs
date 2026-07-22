@@ -149,6 +149,7 @@ const schemaSources = [
       '043_live_seckill_reservation_window.sql',
       '044_settlement_execution_integrity.sql',
       '045_settlement_nonce_release.sql',
+      '046_seckill_prize_reorg_recovery.sql',
     ],
   },
   {
@@ -507,6 +508,12 @@ const coordinatedManifest = {
     'SeckillPrizeSettlementProjection',
     'SeckillGovernanceActionProjection',
     'SeckillGovernanceChallenge',
+    'SeckillPrizeRecoveryChallenge',
+    'SeckillPrizeRecoveryProjection',
+    'SeckillPrizeReorgExposureProjection',
+    'SeckillPrizeReorgTransition',
+    'SeckillPrizeReorgRecoveryJob',
+    'SeckillPrizeReorgRemainder',
     'SeckillSessionPlanProjection',
     'SeckillPrizeInjectionProjection',
     'RealtimeEventPage',
@@ -2829,6 +2836,24 @@ function settlementAdminOpenApiPaths(errorResponse) {
     '/v2/admin/seckill/sessions/{sessionId}/winner-review': {
       post: resourceOperation('reviewSeckillWinner', 'sessionId', { $ref: '#/components/schemas/SeckillPrizeSettlementProjection' }, 200, 'SeckillWinnerReviewRequest'),
     },
+    '/v2/admin/seckill/prize-reorgs': {
+      get: operation('listSeckillPrizeReorgExposures', {
+        type: 'array', items: { $ref: '#/components/schemas/SeckillPrizeReorgExposureProjection' },
+      }),
+    },
+    '/v2/admin/seckill/prize-reorgs/{exposureId}': {
+      get: bytes32ResourceOperation(
+        'getSeckillPrizeReorgExposure',
+        'exposureId',
+        { $ref: '#/components/schemas/SeckillPrizeReorgExposureProjection' },
+      ),
+    },
+    '/v2/admin/seckill/prize-reorgs/{exposureId}/recovery-challenge': {
+      post: resourceOperation('createSeckillPrizeRecoveryChallenge', 'exposureId', { $ref: '#/components/schemas/SeckillPrizeRecoveryChallenge' }, 200, 'SeckillPrizeRecoveryChallengeRequest'),
+    },
+    '/v2/admin/seckill/prize-reorgs/{exposureId}/recovery': {
+      post: resourceOperation('recoverSeckillPrizeReorg', 'exposureId', { $ref: '#/components/schemas/SeckillPrizeRecoveryProjection' }, 201, 'SeckillPrizeRecoveryRequest'),
+    },
     '/v2/admin/seckill/breaker/resume': {
       post: operation('createSeckillBreakerResume', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 201, 'SeckillBreakerResumeRequest'),
     },
@@ -3753,6 +3778,88 @@ function settlementAdminOpenApiSchemas() {
       reasonCode: { type: 'string', minLength: 2, maxLength: 128 },
       evidenceHash: hash,
       idempotencyKey,
+    }),
+    SeckillPrizeRecoveryChallengeRequest: object({ nonce: atomic, deadline: atomic }),
+    SeckillPrizeRecoveryRequest: object({
+      snapshotId: { type: 'string', minLength: 1, maxLength: 256 },
+      nonce: atomic,
+      deadline: atomic,
+      signature: { type: 'string', pattern: '^0x(?:[0-9a-fA-F]{2})+$' },
+    }),
+    SeckillPrizeRecoveryChallenge: object({
+      artifactVersion: { const: artifactVersion },
+      exposureId: hash,
+      fundingId: string,
+      snapshotId: string,
+      evidenceHash: hash,
+      recoveryEpisode: { type: 'integer', minimum: 1 },
+      policyVersion: atomic,
+      signer: address,
+      executorWallet: address,
+      typedData: eip712TypedData,
+      digest: hash,
+    }),
+    SeckillPrizeRecoveryProjection: object({
+      recoveryId: hash,
+      exposureId: hash,
+      recoveryEpisode: { type: 'integer', minimum: 1 },
+      snapshotId: string,
+      evidenceHash: hash,
+      actorWallet: address,
+      secondarySigner: address,
+      secondarySignatureHash: hash,
+      approvalNonce: atomic,
+      approvalDeadline: timestamp,
+      createdAt: timestamp,
+    }),
+    SeckillPrizeReorgTransition: object({
+      transitionId: hash,
+      type: { enum: [
+        'QUARANTINED', 'FUNDING_REVERSED', 'PAYOUT_FINAL', 'PAYOUT_FAILED',
+        'PAYOUT_REORGED', 'REMAINDER_RECOVERABLE', 'REMAINDER_ROLLED_OVER',
+        'RESOLVED', 'BREAKER_RESUMED',
+      ] },
+      evidenceHash: hash,
+      payload: jsonObject,
+      createdAt: timestamp,
+    }),
+    SeckillPrizeReorgRecoveryJob: object({
+      state: string,
+      lastErrorCode: nullable(string),
+    }),
+    SeckillPrizeReorgRemainder: object({
+      remainderId: hash,
+      recoveryEpisode: { type: 'integer', minimum: 1 },
+      amountUsdt: atomic,
+      state: { enum: ['PENDING', 'ROLLED_OVER', 'SUPERSEDED'] },
+      targetSessionId: nullable(hash),
+    }),
+    SeckillPrizeReorgExposureProjection: object({
+      artifactVersion: { const: artifactVersion },
+      exposureId: hash,
+      fundingKind: { enum: ['INJECTION', 'PAYMENT_CONTRIBUTION', 'PAYOUT_RECOVERY'] },
+      fundingId: string,
+      sourceSessionId: hash,
+      liabilitySessionId: hash,
+      amountUsdt: atomic,
+      settlementWallet: address,
+      evidenceHash: hash,
+      sourceTxHash: hash,
+      sourceBlockHash: hash,
+      resolutionMode: { enum: ['STANDARD_REVERSAL', 'DEFICIT_MONITORING'] },
+      payoutSnapshot: jsonObject,
+      state: { enum: ['RECONCILING', 'RECOVERY_REQUIRED', 'RECOVERED'] },
+      recoveryEpisode: { type: 'integer', minimum: 1 },
+      breakerCause: object({
+        active: { type: 'boolean' },
+        evidenceHash: hash,
+        updatedAt: timestamp,
+      }),
+      reconciliation: nullable(ref('SeckillPrizeReorgRecoveryJob')),
+      remainder: nullable(ref('SeckillPrizeReorgRemainder')),
+      transitions: { type: 'array', items: ref('SeckillPrizeReorgTransition') },
+      recoveries: { type: 'array', items: ref('SeckillPrizeRecoveryProjection') },
+      createdAt: timestamp,
     }),
     SeckillBreakerResumeRequest: object({ sessionId: hash, idempotencyKey }),
     SeckillGovernanceChallengeRequest: object({ nonce: atomic, deadline: atomic }),
@@ -6620,6 +6727,11 @@ export interface SeckillWinnerReviewRequest {
   evidenceHash: Bytes32;
   idempotencyKey: string;
 }
+export interface SeckillPrizeRecoveryChallengeRequest { nonce: AtomicAmount; deadline: AtomicAmount }
+export interface SeckillPrizeRecoveryRequest extends SeckillPrizeRecoveryChallengeRequest {
+  snapshotId: string;
+  signature: string;
+}
 export interface SeckillBreakerResumeRequest { sessionId: Bytes32; idempotencyKey: string }
 export interface SeckillGovernanceChallengeRequest { nonce: AtomicAmount; deadline: AtomicAmount }
 export interface SeckillGovernanceApprovalRequest extends SeckillGovernanceChallengeRequest { signature: string }
@@ -6633,6 +6745,85 @@ export interface SeckillGovernanceChallenge {
   executorWallet: Address;
   typedData: Eip712TypedData;
   digest: Bytes32;
+}
+
+export interface SeckillPrizeRecoveryChallenge {
+  artifactVersion: typeof artifactVersion;
+  exposureId: Bytes32;
+  fundingId: string;
+  snapshotId: string;
+  evidenceHash: Bytes32;
+  recoveryEpisode: number;
+  policyVersion: AtomicAmount;
+  signer: Address;
+  executorWallet: Address;
+  typedData: Eip712TypedData;
+  digest: Bytes32;
+}
+
+export interface SeckillPrizeRecoveryProjection {
+  recoveryId: Bytes32;
+  exposureId: Bytes32;
+  recoveryEpisode: number;
+  snapshotId: string;
+  evidenceHash: Bytes32;
+  actorWallet: Address;
+  secondarySigner: Address;
+  secondarySignatureHash: Bytes32;
+  approvalNonce: AtomicAmount;
+  approvalDeadline: string;
+  createdAt: string;
+}
+
+export type SeckillPrizeReorgExposureState = 'RECONCILING' | 'RECOVERY_REQUIRED' | 'RECOVERED';
+export type SeckillPrizeReorgTransitionType =
+  | 'QUARANTINED' | 'FUNDING_REVERSED' | 'PAYOUT_FINAL' | 'PAYOUT_FAILED'
+  | 'PAYOUT_REORGED' | 'REMAINDER_RECOVERABLE' | 'REMAINDER_ROLLED_OVER'
+  | 'RESOLVED' | 'BREAKER_RESUMED';
+
+export interface SeckillPrizeReorgTransition {
+  transitionId: Bytes32;
+  type: SeckillPrizeReorgTransitionType;
+  evidenceHash: Bytes32;
+  payload: JsonObject;
+  createdAt: string;
+}
+
+export interface SeckillPrizeReorgRecoveryJob {
+  state: string;
+  lastErrorCode: string | null;
+}
+
+export interface SeckillPrizeReorgRemainder {
+  remainderId: Bytes32;
+  recoveryEpisode: number;
+  amountUsdt: AtomicAmount;
+  state: 'PENDING' | 'ROLLED_OVER' | 'SUPERSEDED';
+  targetSessionId: Bytes32 | null;
+}
+
+export interface SeckillPrizeReorgExposureProjection {
+  artifactVersion: typeof artifactVersion;
+  exposureId: Bytes32;
+  fundingKind: 'INJECTION' | 'PAYMENT_CONTRIBUTION' | 'PAYOUT_RECOVERY';
+  fundingId: string;
+  sourceSessionId: Bytes32;
+  liabilitySessionId: Bytes32;
+  amountUsdt: AtomicAmount;
+  settlementWallet: Address;
+  evidenceHash: Bytes32;
+  sourceTxHash: Bytes32;
+  sourceBlockHash: Bytes32;
+  resolutionMode: 'STANDARD_REVERSAL' | 'DEFICIT_MONITORING';
+  payoutSnapshot: JsonObject;
+  state: SeckillPrizeReorgExposureState;
+  recoveryEpisode: number;
+  breakerCause: Readonly<{ active: boolean; evidenceHash: Bytes32; updatedAt: string }>;
+  reconciliation: SeckillPrizeReorgRecoveryJob | null;
+  remainder: SeckillPrizeReorgRemainder | null;
+  transitions: readonly SeckillPrizeReorgTransition[];
+  recoveries: readonly SeckillPrizeRecoveryProjection[];
+  createdAt: string;
 }
 
 export interface SeckillSessionPlanProjection {

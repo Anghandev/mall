@@ -55,10 +55,10 @@ test('fulfillment-launch .20 checkpoint has one identity, resolvable exports and
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 43);
+  assert.equal(schemaManifest.schemas.core.migrations.length, 46);
   assert.equal(
     schemaManifest.schemas.core.migrations.at(-1)?.path,
-    'schema/business/043_live_seckill_reservation_window.sql',
+    'schema/business/046_seckill_prize_reorg_recovery.sql',
   );
   assert.equal(schemaManifest.schemas.audit.migrations.length, 4);
   for (const migration of [
@@ -105,6 +105,8 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'GET /v2/admin/risk/overview',
     'GET /v2/admin/seckill/actions',
     'GET /v2/admin/seckill/actions/{actionId}',
+    'GET /v2/admin/seckill/prize-reorgs',
+    'GET /v2/admin/seckill/prize-reorgs/{exposureId}',
     'GET /v2/admin/settlement-requests',
     'GET /v2/admin/settlement-requests/{requestId}',
     'GET /v2/admin/settlement-transfers',
@@ -191,6 +193,8 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'POST /v2/admin/seckill/actions/{actionId}/execute',
     'POST /v2/admin/seckill/actions/{actionId}/secondary-signature',
     'POST /v2/admin/seckill/breaker/resume',
+    'POST /v2/admin/seckill/prize-reorgs/{exposureId}/recovery',
+    'POST /v2/admin/seckill/prize-reorgs/{exposureId}/recovery-challenge',
     'POST /v2/admin/seckill/sessions',
     'POST /v2/admin/seckill/sessions/{sessionId}/force-close',
     'POST /v2/admin/seckill/sessions/{sessionId}/prize-injections',

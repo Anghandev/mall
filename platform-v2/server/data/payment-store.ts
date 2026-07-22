@@ -6,6 +6,12 @@ import { parsePaymentPolicySnapshot } from '../api/payment-policy.ts';
 import { paymentIntentHash } from '../api/payment-signing.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
+import {
+  lockSeckillPrizeFundingMutation,
+  prepareSeckillPrizeFundingReversal,
+  recordSeckillPrizeFundingReversed,
+  type PrizeFundingReversalPlan,
+} from './seckill-prize-service.ts';
 
 const REQUIRED_CONFIRMATIONS = 15;
 const USDT = 'USDT';
@@ -29,6 +35,7 @@ interface PaymentEventRow {
 
 interface JournalBalanceRow {
   account_id: string;
+  purpose: string;
   net_credit: string;
   balance_state: LedgerLine['balanceState'];
   backing_wallet_address: string | null;
@@ -430,6 +437,7 @@ export async function recordPaymentProjection(executor: SqlExecutor, input: Reco
 }
 
 export async function reversePaymentProjection(executor: SqlExecutor, eventKey: string, replacementBlockHash: string) {
+  await lockSeckillPrizeFundingMutation(executor);
   const payment = await executor.query<PaymentEventRow>(
     'SELECT * FROM core.payment_events WHERE event_key = $1 FOR UPDATE',
     [eventKey],
@@ -463,24 +471,75 @@ export async function reversePaymentProjection(executor: SqlExecutor, eventKey: 
       ? [[item.transfer_id, item.transfer_state] as const]
       : []),
   );
+  const contribution = await executor.query<{
+    session_id: string;
+    amount_usdt: string;
+    reversed_at: Date | null;
+    settlement_wallet_address: string;
+  }>(
+    `SELECT contribution.session_id, contribution.amount_usdt::text, contribution.reversed_at,
+       lower(policy.payload ->> 'usdtSettlementWallet') AS settlement_wallet_address
+     FROM core.seckill_prize_contributions contribution
+     JOIN core.seckill_sessions session ON session.session_id = contribution.session_id
+     JOIN core.policy_snapshots policy ON policy.policy_version = session.policy_version
+     WHERE contribution.payment_event_key = $1 FOR UPDATE OF contribution`,
+    [eventKey],
+  );
+  const prizeContribution = contribution.rows[0];
+  let prizeReversalPlan: PrizeFundingReversalPlan | undefined;
+  const reorgAt = new Date();
+  if (prizeContribution && !prizeContribution.reversed_at) {
+    prizeReversalPlan = await prepareSeckillPrizeFundingReversal(executor, {
+      fundingKind: 'PAYMENT_CONTRIBUTION',
+      fundingId: eventKey,
+      sourceSessionId: prizeContribution.session_id,
+      amountUsdt: prizeContribution.amount_usdt,
+      settlementWalletAddress: prizeContribution.settlement_wallet_address,
+      evidenceHash: replacementBlockHash.toLowerCase(),
+      sourceTxHash: row.transaction_hash,
+      sourceBlockHash: row.block_hash,
+      at: reorgAt,
+    });
+  }
   const currentBalances = await executor.query<JournalBalanceRow>(
-    `SELECT line.account_id, line.balance_state, line.backing_wallet_address,
+    `SELECT line.account_id, account.purpose, line.balance_state, line.backing_wallet_address,
        sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS net_credit
      FROM core.ledger_journals journal
      JOIN core.ledger_lines line ON line.journal_id = journal.journal_id
+     JOIN core.ledger_accounts account ON account.account_id = line.account_id
      WHERE journal.order_id = $1
-     GROUP BY line.account_id, line.balance_state, line.backing_wallet_address
+     GROUP BY line.account_id, account.purpose, line.balance_state, line.backing_wallet_address
      HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) <> 0
      ORDER BY line.account_id, line.balance_state`,
     [row.order_id],
   );
-  const reversalLines: LedgerLine[] = currentBalances.rows.map((line) => ({
+  const prizeBalances = currentBalances.rows.filter((line) => line.purpose === 'SECKILL_PRIZE_LIABILITY');
+  if (
+    prizeReversalPlan?.mode === 'DEFICIT_MONITORING'
+    && prizeBalances.reduce((total, line) => total + BigInt(line.net_credit), 0n)
+      !== BigInt(prizeContribution!.amount_usdt)
+  ) {
+    throw new CoreError('UnknownState', 'Reorged payment prize exposure does not match its contribution', 409);
+  }
+  const balancesToReverse = prizeReversalPlan?.mode === 'DEFICIT_MONITORING'
+    ? currentBalances.rows.filter((line) => line.purpose !== 'SECKILL_PRIZE_LIABILITY')
+    : currentBalances.rows;
+  const reversalLines: LedgerLine[] = balancesToReverse.map((line) => ({
     accountId: line.account_id,
     side: BigInt(line.net_credit) > 0n ? 'DEBIT' : 'CREDIT',
     amount: (BigInt(line.net_credit) < 0n ? -BigInt(line.net_credit) : BigInt(line.net_credit)).toString(),
     balanceState: line.balance_state,
     ...(line.backing_wallet_address ? { backingWalletAddress: line.backing_wallet_address } : {}),
   }));
+  if (prizeReversalPlan?.mode === 'DEFICIT_MONITORING') {
+    reversalLines.push({
+      accountId: prizeReversalPlan.debitAccountId,
+      side: 'DEBIT',
+      amount: prizeContribution!.amount_usdt,
+      balanceState: prizeReversalPlan.debitBalanceState,
+      backingWalletAddress: prizeContribution!.settlement_wallet_address,
+    });
+  }
   const reversalEventKey = `reorg:${eventKey}:${replacementBlockHash.toLowerCase()}`;
   const reversalJournalId = `reversal:${row.journal_id}:${replacementBlockHash.toLowerCase()}`;
   const paymentIdentity = await executor.query<{ policy_version: string; contract_address: string }>(
@@ -506,22 +565,12 @@ export async function reversePaymentProjection(executor: SqlExecutor, eventKey: 
     payload: { replacedEventKey: eventKey },
     lines: reversalLines,
   });
-  const contribution = await executor.query<{
-    session_id: string;
-    amount_usdt: string;
-    reversed_at: Date | null;
-  }>(
-    `SELECT session_id, amount_usdt::text, reversed_at
-     FROM core.seckill_prize_contributions WHERE payment_event_key = $1 FOR UPDATE`,
-    [eventKey],
-  );
-  const prizeContribution = contribution.rows[0];
   if (prizeContribution && !prizeContribution.reversed_at) {
     const updated = await executor.query<{ session_id: string }>(
       `UPDATE core.seckill_sessions
        SET prize_pool_usdt = prize_pool_usdt - $2, updated_at = clock_timestamp()
        WHERE session_id = $1 AND prize_pool_usdt >= $2 RETURNING session_id`,
-      [prizeContribution.session_id, prizeContribution.amount_usdt],
+      [prizeReversalPlan?.poolSessionId ?? prizeContribution.session_id, prizeContribution.amount_usdt],
     );
     if (!updated.rows[0]) throw new CoreError('UnknownState', 'Seckill prize pool cannot reverse the payment contribution', 409);
     await executor.query(
@@ -530,12 +579,14 @@ export async function reversePaymentProjection(executor: SqlExecutor, eventKey: 
        WHERE payment_event_key = $1`,
       [eventKey, reversalEventKey],
     );
-    await quarantineSeckillPrizeOutcome(
-      executor,
-      prizeContribution.session_id,
-      replacementBlockHash.toLowerCase(),
-      row.order_id,
-    );
+    if (prizeReversalPlan) {
+      await recordSeckillPrizeFundingReversed(executor, {
+        plan: prizeReversalPlan,
+        journalId: reversalJournalId,
+        evidenceHash: replacementBlockHash.toLowerCase(),
+        at: reorgAt,
+      });
+    }
   }
   await quarantineReorgedSettlements(executor, {
     paymentEventKey: eventKey,
@@ -850,51 +901,6 @@ async function quarantineReorgedSettlements(
       ],
     );
   }
-}
-
-async function quarantineSeckillPrizeOutcome(
-  executor: SqlExecutor,
-  sessionId: string,
-  evidenceHash: string,
-  orderId: string,
-) {
-  const outcome = await executor.query<{ state: string }>(
-    `SELECT state FROM core.seckill_prize_settlements
-     WHERE session_id = $1 FOR UPDATE`,
-    [sessionId],
-  );
-  if (!outcome.rows[0]) return;
-  await executor.query(
-    `UPDATE core.seckill_prize_settlements
-     SET state = 'QUARANTINED', updated_at = clock_timestamp()
-     WHERE session_id = $1 AND state <> 'QUARANTINED'`,
-    [sessionId],
-  );
-  const eventId = hashJson({ sessionId, evidenceHash, orderId, eventType: 'QUARANTINED' });
-  await executor.query(
-    `INSERT INTO core.seckill_prize_settlement_events (
-       event_id, session_id, event_type, evidence_hash, payload, created_at
-     ) VALUES ($1,$2,'QUARANTINED',$3,$4,clock_timestamp())
-     ON CONFLICT (event_id) DO NOTHING`,
-    [eventId, sessionId, evidenceHash, JSON.stringify({ orderId, reasonCode: 'PAYMENT_REORG' })],
-  );
-  const causeId = `seckill-prize-reorg:${sessionId}`;
-  await executor.query(
-    `INSERT INTO core.breaker_causes (
-       scope, cause_type, cause_id, active, evidence_hash, updated_at
-     ) VALUES ('NEW_SETTLEMENT_BATCH','SECURITY',$1,true,$2,clock_timestamp())
-     ON CONFLICT (scope, cause_type, cause_id) DO UPDATE
-       SET active = true, evidence_hash = EXCLUDED.evidence_hash, updated_at = EXCLUDED.updated_at`,
-    [causeId, evidenceHash],
-  );
-  await executor.query(
-    `INSERT INTO core.circuit_breakers (
-       scope, paused, evidence_hash, policy_version, changed_by, changed_at
-     ) VALUES ('NEW_SETTLEMENT_BATCH',true,$1,NULL,'SECKILL_PRIZE_REORG',clock_timestamp())
-     ON CONFLICT (scope) DO UPDATE SET paused = true, evidence_hash = EXCLUDED.evidence_hash,
-       policy_version = NULL, changed_by = EXCLUDED.changed_by, changed_at = EXCLUDED.changed_at`,
-    [evidenceHash],
-  );
 }
 
 async function quarantineDeepReorgPayment(

@@ -4,6 +4,7 @@ import { CoreError } from '../api/errors.ts';
 import { auditSourceId, enqueueAudit } from '../data/audit-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from '../data/migrations.ts';
 import {
+  reverseFinalizedSeckillPrizeInjection,
   rollPendingSeckillPrizesIntoSession,
   settleMaturedSeckillPrizes,
 } from '../data/seckill-prize-service.ts';
@@ -1210,70 +1211,19 @@ async function reversePrizeInjection(
   observation: Extract<SeckillObservation, { state: 'REORGED' }>,
   at: Date,
 ) {
-  const injection = await executor.query<{
-    amount_usdt: string;
-    settlement_wallet_address: string;
-    final_journal_id: string | null;
-    reversal_journal_id: string | null;
-  }>(
-    `SELECT amount_usdt::text, settlement_wallet_address, final_journal_id, reversal_journal_id
-     FROM core.seckill_prize_injections WHERE action_id = $1 FOR UPDATE`,
-    [action.action_id],
-  );
-  const row = injection.rows[0];
-  if (!row?.final_journal_id || row.reversal_journal_id) return;
-  const walletAccountId = `wallet:usdt-custody:${row.settlement_wallet_address}:usdt`;
-  const liabilityAccountId = `seckill-prize:${action.session_id}:usdt`;
-  const journalId = `journal:seckill-prize-reversal:${action.action_id}`;
   const sourceTxHash = observation.executionTxHash ?? action.execution_tx_hash;
   const sourceBlockHash = observation.blockHash ?? action.block_hash;
   if (!sourceTxHash || !sourceBlockHash) throw new CoreError('InvalidFinality', 'Prize reorg lacks original chain evidence', 409);
-  await executor.query(
-    'SELECT core.post_resource_balanced_journal($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)',
-    [
-      journalId,
-      `seckill-prize:${action.action_id}:reorg:${observation.canonicalBlockHash ?? 'unknown'}`,
-      'SECKILL_PRIZE_INJECTION_REVERSED',
-      'SECKILL_SESSION',
-      action.session_id,
-      null,
-      action.policy_version,
-      observation.observationEvidenceHash,
-      sourceTxHash,
-      sourceBlockHash,
-      'CHAIN_EVENT',
-      observation.observationEvidenceHash,
-      row.final_journal_id,
-      JSON.stringify({ actionId: action.action_id, sessionId: action.session_id, amountUsdt: row.amount_usdt }),
-      JSON.stringify([
-        {
-          account_id: liabilityAccountId,
-          side: 'DEBIT',
-          amount: row.amount_usdt,
-          balance_state: 'LOCKED',
-          backing_wallet_address: row.settlement_wallet_address,
-        },
-        {
-          account_id: walletAccountId,
-          side: 'CREDIT',
-          amount: row.amount_usdt,
-          balance_state: 'POSTED',
-          backing_wallet_address: row.settlement_wallet_address,
-        },
-      ]),
-    ],
-  );
-  const updated = await executor.query<{ session_id: string }>(
-    `UPDATE core.seckill_sessions SET prize_pool_usdt = prize_pool_usdt - $2, updated_at = $3
-     WHERE session_id = $1 AND prize_pool_usdt >= $2 RETURNING session_id`,
-    [action.session_id, row.amount_usdt, at],
-  );
-  if (!updated.rows[0]) throw new CoreError('UnknownState', 'Prize pool cannot reverse the reorged injection', 409);
-  await executor.query(
-    `UPDATE core.seckill_prize_injections SET reversal_journal_id = $2, updated_at = $3
-     WHERE action_id = $1`,
-    [action.action_id, journalId, at],
-  );
+  await reverseFinalizedSeckillPrizeInjection(executor, {
+    actionId: action.action_id,
+    sessionId: action.session_id,
+    policyVersion: Number(action.policy_version),
+    evidenceHash: observation.observationEvidenceHash,
+    sourceTxHash,
+    sourceBlockHash,
+    canonicalBlockHash: observation.canonicalBlockHash ?? 'unknown',
+    at,
+  });
 }
 
 async function ensureLedgerAccount(

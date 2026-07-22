@@ -104,6 +104,53 @@ interface InjectionRow {
   reversal_journal_id: string | null;
 }
 
+interface PrizeRecoveryContext {
+  exposureId: string;
+  fundingId: string;
+  causeId: string;
+  recoveryEpisode: number;
+  coverageSnapshotId: string;
+  coverageEvidenceHash: string;
+  policyVersion: bigint;
+  oldValueHash: string;
+  newValueHash: string;
+  evidenceHash: string;
+}
+
+interface PrizeReorgExposureRow {
+  exposure_id: string;
+  funding_kind: 'INJECTION' | 'PAYMENT_CONTRIBUTION';
+  funding_id: string;
+  source_session_id: string;
+  liability_session_id: string;
+  amount_usdt: string;
+  settlement_wallet_address: string;
+  evidence_hash: string;
+  source_tx_hash: string;
+  source_block_hash: string;
+  resolution_mode: 'STANDARD_REVERSAL' | 'DEFICIT_MONITORING';
+  payout_snapshot: unknown;
+  created_at: Date;
+  cause_active: boolean;
+  cause_evidence_hash: string;
+  cause_updated_at: Date;
+  job_state: string | null;
+  job_error_code: string | null;
+  remainder_id: string | null;
+  remainder_recovery_episode: string | number | null;
+  remainder_amount_usdt: string | null;
+  remainder_state: string | null;
+  remainder_target_session_id: string | null;
+}
+
+interface PrizeReorgTransitionRow {
+  transition_id: string;
+  transition_type: string;
+  evidence_hash: string;
+  payload: unknown;
+  created_at: Date;
+}
+
 export class SeckillOperationsService {
   readonly #transactions: SqlTransactionRunner;
   readonly #governanceWallet: string;
@@ -152,6 +199,27 @@ export class SeckillOperationsService {
     return this.#transactions.transaction(async (executor) => {
       await requireCurrentRole(executor, actor, ['ADMIN', 'OPERATOR', 'AUDITOR']);
       return actionProjection(executor, await loadAction(executor, actionId.toLowerCase()));
+    });
+  }
+
+  listPrizeReorgExposures(actor: FulfillmentActor) {
+    return this.#transactions.transaction(async (executor) => {
+      await requireCurrentRole(executor, actor, ['ADMIN', 'OPERATOR', 'AUDITOR']);
+      const exposures = await executor.query<{ exposure_id: string }>(
+        `SELECT exposure_id FROM core.seckill_prize_reorg_exposures
+         ORDER BY created_at DESC, exposure_id DESC LIMIT 100`,
+      );
+      return Object.freeze(await Promise.all(
+        exposures.rows.map((row) => prizeReorgExposureProjection(executor, row.exposure_id)),
+      ));
+    });
+  }
+
+  getPrizeReorgExposure(actor: FulfillmentActor, exposureId: string) {
+    assertHash(exposureId, 'prize reorg exposure ID');
+    return this.#transactions.transaction(async (executor) => {
+      await requireCurrentRole(executor, actor, ['ADMIN', 'OPERATOR', 'AUDITOR']);
+      return prizeReorgExposureProjection(executor, exposureId.toLowerCase());
     });
   }
 
@@ -547,6 +615,242 @@ export class SeckillOperationsService {
         createdAt: now,
       });
       return projection;
+    });
+  }
+
+  prizeRecoveryChallenge(
+    actor: FulfillmentActor,
+    exposureId: string,
+    input: { nonce: string; deadline: string },
+  ) {
+    assertHash(exposureId, 'prize reorg exposure ID');
+    const nonce = unsigned(input.nonce, 'prize recovery nonce');
+    const deadline = unsigned(input.deadline, 'prize recovery deadline');
+    validateDeadline(deadline, this.#clock());
+    return this.#transactions.transaction(async (executor) => {
+      await requireCurrentRole(executor, actor, ['ADMIN']);
+      const context = await prizeRecoveryContext(executor, exposureId.toLowerCase());
+      const intent = prizeRecoveryIntent(context, nonce, deadline, this.#governanceWallet);
+      const domain = sensitiveActionDomain(this.#paymentRouter);
+      return Object.freeze({
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        exposureId: context.exposureId,
+        fundingId: context.fundingId,
+        snapshotId: context.coverageSnapshotId,
+        evidenceHash: context.evidenceHash,
+        recoveryEpisode: context.recoveryEpisode,
+        policyVersion: context.policyVersion.toString(),
+        signer: this.#secondarySigner,
+        executorWallet: this.#governanceWallet,
+        typedData: {
+          domain,
+          types: sensitiveActionTypes,
+          primaryType: 'SensitiveAction',
+          message: serializableIntent(intent),
+        },
+        digest: TypedDataEncoder.hash(domain, sensitiveActionTypes, intent).toLowerCase(),
+      });
+    });
+  }
+
+  submitPrizeRecovery(
+    actor: FulfillmentActor,
+    exposureId: string,
+    input: {
+      snapshotId: string;
+      nonce: string;
+      deadline: string;
+      signature: string;
+      correlationId: string;
+    },
+  ) {
+    assertHash(exposureId, 'prize reorg exposure ID');
+    const snapshotId = boundedText(input.snapshotId, 'coverage snapshot ID', 1, 256);
+    const nonce = unsigned(input.nonce, 'prize recovery nonce');
+    const deadline = unsigned(input.deadline, 'prize recovery deadline');
+    validateDeadline(deadline, this.#clock());
+    const signatureHash = signatureDigest(input.signature);
+    return this.#transactions.transaction(async (executor) => {
+      const actorWallet = await requireCurrentRole(executor, actor, ['ADMIN']);
+      const prior = await executor.query<{
+        recovery_id: string;
+        exposure_id: string;
+        recovery_episode: string | number;
+        coverage_snapshot_id: string;
+        actor_wallet: string;
+        secondary_signer: string;
+        secondary_signature_hash: string;
+        approval_nonce: string;
+        approval_deadline: Date;
+        evidence_hash: string;
+        created_at: Date;
+      }>(
+        `SELECT recovery_id, exposure_id, recovery_episode, coverage_snapshot_id, actor_wallet,
+           secondary_signer, secondary_signature_hash, approval_nonce::text,
+           approval_deadline, evidence_hash, created_at
+         FROM core.seckill_prize_reorg_recoveries
+         WHERE secondary_signer = $1 AND approval_nonce = $2`,
+        [this.#secondarySigner, nonce.toString()],
+      );
+      if (prior.rows[0]) {
+        const row = prior.rows[0];
+        if (
+          row.exposure_id !== exposureId.toLowerCase()
+          || row.coverage_snapshot_id !== snapshotId
+          || row.actor_wallet !== actorWallet
+          || row.secondary_signature_hash !== signatureHash
+          || row.approval_deadline.getTime() !== Number(deadline) * 1_000
+        ) throw new CoreError('IdempotencyConflict', 'Prize recovery nonce was already consumed', 409);
+        return prizeRecoveryProjection(row);
+      }
+      const context = await prizeRecoveryContext(executor, exposureId.toLowerCase());
+      if (context.coverageSnapshotId !== snapshotId) {
+        throw new CoreError('FinalityPending', 'Signed prize recovery coverage snapshot is stale', 409);
+      }
+      const intent = prizeRecoveryIntent(context, nonce, deadline, this.#governanceWallet);
+      const approval = verifySensitiveActionApproval(
+        intent,
+        input.signature,
+        this.#secondarySigner,
+        this.#governanceWallet,
+        this.#paymentRouter,
+        this.#clock(),
+      );
+      const domain = sensitiveActionDomain(this.#paymentRouter);
+      const digest = TypedDataEncoder.hash(domain, sensitiveActionTypes, intent).toLowerCase();
+      const now = this.#clock();
+      const recoveryId = hashJson({
+        domain: 'ABU24K_SECKILL_PRIZE_REORG_RECOVERY_V1',
+        exposureId: context.exposureId,
+        recoveryEpisode: context.recoveryEpisode,
+        snapshotId,
+        digest,
+        actorWallet,
+      });
+      await executor.query(
+        `INSERT INTO core.seckill_prize_reorg_recoveries (
+           recovery_id, exposure_id, recovery_episode, coverage_snapshot_id, evidence_hash,
+           actor_wallet, secondary_signer, secondary_signature_hash,
+           approval_nonce, approval_deadline, request_hash, created_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [
+          recoveryId,
+          context.exposureId,
+          context.recoveryEpisode,
+          snapshotId,
+          context.evidenceHash,
+          actorWallet,
+          approval.signer,
+          signatureHash,
+          nonce.toString(),
+          new Date(Number(deadline) * 1_000),
+          digest,
+          now,
+        ],
+      );
+      const closed = await executor.query<{ cause_id: string }>(
+        `UPDATE core.breaker_causes SET active = false, evidence_hash = $2, updated_at = $3
+         WHERE scope = 'NEW_SETTLEMENT_BATCH' AND cause_type = 'SECURITY'
+           AND cause_id = $1 AND active RETURNING cause_id`,
+        [context.causeId, context.evidenceHash, now],
+      );
+      if (!closed.rows[0]) throw new CoreError('UnknownState', 'Prize recovery breaker cause is unavailable', 409);
+      const remaining = await executor.query<{ blocked: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1 FROM core.breaker_causes
+           WHERE scope = 'NEW_SETTLEMENT_BATCH' AND active
+         ) AS blocked`,
+      );
+      const paused = remaining.rows[0]?.blocked !== false;
+      await executor.query(
+        `INSERT INTO core.circuit_breakers (
+           scope, paused, evidence_hash, policy_version, changed_by, changed_at
+         ) VALUES ('NEW_SETTLEMENT_BATCH',$1,$2,$3,'SECKILL_PRIZE_RECOVERY',$4)
+         ON CONFLICT (scope) DO UPDATE SET paused = EXCLUDED.paused,
+           evidence_hash = EXCLUDED.evidence_hash, policy_version = EXCLUDED.policy_version,
+           changed_by = EXCLUDED.changed_by, changed_at = EXCLUDED.changed_at`,
+        [paused, context.evidenceHash, context.policyVersion.toString(), now],
+      );
+      if (!paused) {
+        await executor.query(
+          `INSERT INTO core.breaker_events (
+             breaker_event_id, scope, action, cause_type, cause_id,
+             evidence_hash, policy_version, changed_by, changed_at
+           ) VALUES ($1,'NEW_SETTLEMENT_BATCH','RESUME','SECURITY',$2,$3,$4,
+             'SECKILL_PRIZE_RECOVERY',$5)
+           ON CONFLICT (breaker_event_id) DO NOTHING`,
+          [
+            hashJson({ recoveryId, causeId: context.causeId, action: 'RESUME' }),
+            context.causeId,
+            context.evidenceHash,
+            context.policyVersion.toString(),
+            now,
+          ],
+        );
+      }
+      const transitionPayload = {
+        recoveryId,
+        causeId: context.causeId,
+        coverageSnapshotId: snapshotId,
+        paused,
+      };
+      if (!paused) {
+        await executor.query(
+          `INSERT INTO core.seckill_prize_reorg_transitions (
+             transition_id, exposure_id, transition_type, evidence_hash, payload, created_at
+           ) VALUES ($1,$2,'BREAKER_RESUMED',$3,$4,$5)`,
+          [
+            hashJson({ exposureId: context.exposureId, transitionType: 'BREAKER_RESUMED', transitionPayload }),
+            context.exposureId,
+            context.evidenceHash,
+            JSON.stringify(transitionPayload),
+            now,
+          ],
+        );
+      }
+      await enqueueAudit(executor, {
+        sourceEventId: auditSourceId('audit:seckill-prize-recovery', { recoveryId, exposureId: context.exposureId }),
+        streamName: 'governance',
+        evidenceProfile: 'SIGNED_OFFCHAIN',
+        eventType: 'SeckillPrizeFundingReorgRecovered',
+        resourceType: 'SECKILL_PRIZE_REORG_EXPOSURE',
+        resourceId: context.exposureId,
+        actorWallet,
+        actorRole: 'ADMIN',
+        correlationId: input.correlationId,
+        requestHash: digest.slice(2),
+        payload: transitionPayload,
+        authorizationEvidence: {
+          scheme: 'RBAC_ROLE_REVALIDATION',
+          subject: actorWallet,
+          roles: ['ADMIN'],
+          evidenceHash: context.evidenceHash,
+          checkedAt: now.toISOString(),
+        },
+        signatureEvidence: {
+          scheme: 'EIP712',
+          signatureHash,
+          signer: approval.signer,
+          digest,
+          domain: `Abu24KV2Core:2:56:${this.#paymentRouter}`,
+          nonce: nonce.toString(),
+          deadline: deadline.toString(),
+        },
+        createdAt: now,
+      });
+      return prizeRecoveryProjection({
+        recovery_id: recoveryId,
+        exposure_id: context.exposureId,
+        recovery_episode: context.recoveryEpisode,
+        coverage_snapshot_id: snapshotId,
+        actor_wallet: actorWallet,
+        secondary_signer: approval.signer,
+        secondary_signature_hash: signatureHash,
+        approval_nonce: nonce.toString(),
+        approval_deadline: new Date(Number(deadline) * 1_000),
+        evidence_hash: context.evidenceHash,
+        created_at: now,
+      });
     });
   }
 
@@ -1259,6 +1563,324 @@ async function appendTransition(
      ) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (transition_id) DO NOTHING`,
     [transitionId, actionId, fromState, toState, JSON.stringify(evidence), at],
   );
+}
+
+async function prizeRecoveryContext(
+  executor: SqlExecutor,
+  exposureId: string,
+): Promise<PrizeRecoveryContext> {
+  const exposure = await executor.query<{
+    exposure_id: string;
+    funding_id: string;
+    cause_id: string;
+    cause_evidence_hash: string;
+    cause_updated_at: Date;
+    resolution_evidence_hash: string;
+    resolution_created_at: Date;
+    recovery_episode: string | number;
+  }>(
+    `SELECT exposure.exposure_id, exposure.funding_id, cause.cause_id,
+       cause.evidence_hash AS cause_evidence_hash, cause.updated_at AS cause_updated_at,
+       resolved.evidence_hash AS resolution_evidence_hash,
+       resolved.created_at AS resolution_created_at,
+       1 + (SELECT count(*) FROM core.seckill_prize_reorg_transitions episode
+         WHERE episode.exposure_id = exposure.exposure_id
+           AND episode.transition_type = 'PAYOUT_REORGED') AS recovery_episode
+     FROM core.seckill_prize_reorg_exposures exposure
+     JOIN core.breaker_causes cause
+       ON cause.scope = 'NEW_SETTLEMENT_BATCH'
+      AND cause.cause_type = 'SECURITY'
+      AND cause.cause_id = 'seckill-prize-funding-reorg:' || exposure.funding_id
+      AND cause.active
+     JOIN LATERAL (
+       SELECT transition_id, evidence_hash, created_at
+       FROM core.seckill_prize_reorg_transitions transition
+       WHERE transition.exposure_id = exposure.exposure_id
+         AND transition.transition_type = 'RESOLVED'
+       ORDER BY created_at DESC, transition_id DESC LIMIT 1
+     ) resolved ON true
+     LEFT JOIN LATERAL (
+       SELECT transition_id, created_at
+       FROM core.seckill_prize_reorg_transitions transition
+       WHERE transition.exposure_id = exposure.exposure_id
+         AND transition.transition_type = 'PAYOUT_REORGED'
+       ORDER BY created_at DESC, transition_id DESC LIMIT 1
+     ) reorged ON true
+     WHERE exposure.exposure_id = $1
+       AND (reorged.transition_id IS NULL
+         OR (resolved.created_at, resolved.transition_id) > (reorged.created_at, reorged.transition_id))
+     FOR UPDATE OF cause`,
+    [exposureId],
+  );
+  const row = exposure.rows[0];
+  if (!row) throw new CoreError('FinalityPending', 'Resolved prize reorg exposure is unavailable', 409);
+  const unresolved = await executor.query<{ exposure_id: string }>(
+    `SELECT candidate.exposure_id
+     FROM core.seckill_prize_reorg_exposures candidate
+     LEFT JOIN LATERAL (
+       SELECT transition_id, created_at
+       FROM core.seckill_prize_reorg_transitions transition
+       WHERE transition.exposure_id = candidate.exposure_id
+         AND transition.transition_type = 'RESOLVED'
+       ORDER BY created_at DESC, transition_id DESC LIMIT 1
+     ) resolved ON true
+     LEFT JOIN LATERAL (
+       SELECT transition_id, created_at
+       FROM core.seckill_prize_reorg_transitions transition
+       WHERE transition.exposure_id = candidate.exposure_id
+         AND transition.transition_type = 'PAYOUT_REORGED'
+       ORDER BY created_at DESC, transition_id DESC LIMIT 1
+     ) reorged ON true
+     WHERE candidate.funding_id = $1
+       AND (resolved.transition_id IS NULL OR (
+         reorged.transition_id IS NOT NULL
+         AND (resolved.created_at, resolved.transition_id) <= (reorged.created_at, reorged.transition_id)
+       ))
+     LIMIT 1`,
+    [row.funding_id],
+  );
+  if (unresolved.rows[0]) {
+    throw new CoreError('FinalityPending', 'Prize funding reorg still has unresolved exposure', 409);
+  }
+  const coverage = await executor.query<{
+    snapshot_id: string;
+    evidence_hash: string;
+    recorded_at: Date;
+  }>(
+    `SELECT snapshot.snapshot_id, snapshot.evidence_hash, snapshot.recorded_at
+     FROM core.coverage_snapshots snapshot
+     WHERE COALESCE((
+       SELECT canonical FROM core.coverage_snapshot_canonicality observation
+       WHERE observation.snapshot_id = snapshot.snapshot_id
+       ORDER BY observation.observed_at DESC, observation.observation_id DESC LIMIT 1
+     ), snapshot.canonical)
+       AND snapshot.recorded_at > GREATEST($1::timestamptz, $2::timestamptz)
+       AND EXISTS (
+         SELECT 1 FROM core.coverage_snapshot_items item
+         WHERE item.snapshot_id = snapshot.snapshot_id
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM core.coverage_snapshot_items item
+         WHERE item.snapshot_id = snapshot.snapshot_id AND NOT item.coverage_met
+       )
+     ORDER BY snapshot.recorded_at DESC, snapshot.snapshot_id DESC LIMIT 1`,
+    [row.cause_updated_at, row.resolution_created_at],
+  );
+  const freshCoverage = coverage.rows[0];
+  if (!freshCoverage) {
+    throw new CoreError('FinalityPending', 'Fresh canonical prize recovery coverage is unavailable', 409);
+  }
+  const policy = await executor.query<{ policy_version: string | number }>(
+    `SELECT policy_version FROM core.policy_snapshots
+     WHERE publication_status = 'PUBLISHED' ORDER BY policy_version DESC LIMIT 1`,
+  );
+  if (!policy.rows[0]) throw new CoreError('ExternalBlocked', 'Published policy is unavailable for prize recovery', 503);
+  const otherCauses = await executor.query<{ cause_type: string; cause_id: string; evidence_hash: string }>(
+    `SELECT cause_type, cause_id, evidence_hash FROM core.breaker_causes
+     WHERE scope = 'NEW_SETTLEMENT_BATCH' AND active AND cause_id <> $1
+     ORDER BY cause_type, cause_id`,
+    [row.cause_id],
+  );
+  const policyVersion = BigInt(policy.rows[0].policy_version);
+  const recoveryEpisode = Number(row.recovery_episode);
+  const oldValueHash = hashJson({
+    paused: true,
+    recoveryEpisode,
+    causeId: row.cause_id,
+    causeEvidenceHash: row.cause_evidence_hash,
+    resolutionEvidenceHash: row.resolution_evidence_hash,
+  });
+  const newValueHash = hashJson({
+    paused: otherCauses.rows.length > 0,
+    recoveryEpisode,
+    closedCauseId: row.cause_id,
+    remainingCauses: otherCauses.rows,
+    coverageSnapshotId: freshCoverage.snapshot_id,
+    coverageEvidenceHash: freshCoverage.evidence_hash,
+  });
+  return {
+    exposureId: row.exposure_id,
+    fundingId: row.funding_id,
+    causeId: row.cause_id,
+    recoveryEpisode,
+    coverageSnapshotId: freshCoverage.snapshot_id,
+    coverageEvidenceHash: freshCoverage.evidence_hash,
+    policyVersion,
+    oldValueHash,
+    newValueHash,
+    evidenceHash: hashJson({
+      exposureId: row.exposure_id,
+      recoveryEpisode,
+      causeId: row.cause_id,
+      resolutionEvidenceHash: row.resolution_evidence_hash,
+      coverageSnapshotId: freshCoverage.snapshot_id,
+      coverageEvidenceHash: freshCoverage.evidence_hash,
+      oldValueHash,
+      newValueHash,
+    }),
+  };
+}
+
+function prizeRecoveryIntent(
+  context: PrizeRecoveryContext,
+  nonce: bigint,
+  deadline: bigint,
+  executorWallet: string,
+): SensitiveActionIntent {
+  return {
+    action: 'RESOLVE_SECKILL_PRIZE_FUNDING_REORG',
+    resourceType: 'SECKILL_PRIZE_REORG_EXPOSURE',
+    resourceId: context.exposureId,
+    policyVersion: context.policyVersion,
+    oldValueHash: context.oldValueHash,
+    newValueHash: context.newValueHash,
+    executorWallet,
+    nonce,
+    deadline,
+  };
+}
+
+function prizeRecoveryProjection(row: {
+  recovery_id: string;
+  exposure_id: string;
+  recovery_episode: string | number;
+  coverage_snapshot_id: string;
+  actor_wallet: string;
+  secondary_signer: string;
+  secondary_signature_hash: string;
+  approval_nonce: string;
+  approval_deadline: Date;
+  evidence_hash: string;
+  created_at: Date;
+}) {
+  return Object.freeze({
+    recoveryId: row.recovery_id,
+    exposureId: row.exposure_id,
+    recoveryEpisode: Number(row.recovery_episode),
+    snapshotId: row.coverage_snapshot_id,
+    evidenceHash: row.evidence_hash,
+    actorWallet: row.actor_wallet,
+    secondarySigner: row.secondary_signer,
+    secondarySignatureHash: row.secondary_signature_hash,
+    approvalNonce: row.approval_nonce,
+    approvalDeadline: row.approval_deadline.toISOString(),
+    createdAt: row.created_at.toISOString(),
+  });
+}
+
+async function prizeReorgExposureProjection(executor: SqlExecutor, exposureId: string) {
+  const exposure = await executor.query<PrizeReorgExposureRow>(
+    `SELECT exposure.exposure_id, exposure.funding_kind, exposure.funding_id,
+       exposure.source_session_id, exposure.liability_session_id,
+       exposure.amount_usdt::text, exposure.settlement_wallet_address,
+       exposure.evidence_hash, exposure.source_tx_hash, exposure.source_block_hash,
+       exposure.resolution_mode, exposure.payout_snapshot, exposure.created_at,
+       cause.active AS cause_active, cause.evidence_hash AS cause_evidence_hash,
+       cause.updated_at AS cause_updated_at,
+       job.state AS job_state, job.last_error_code AS job_error_code,
+       remainder.remainder_id,
+       remainder.recovery_episode AS remainder_recovery_episode,
+       remainder.amount_usdt::text AS remainder_amount_usdt,
+       remainder.state AS remainder_state,
+       remainder.target_session_id AS remainder_target_session_id
+     FROM core.seckill_prize_reorg_exposures exposure
+     JOIN core.breaker_causes cause
+       ON cause.scope = 'NEW_SETTLEMENT_BATCH'
+      AND cause.cause_type = 'SECURITY'
+      AND cause.cause_id = 'seckill-prize-funding-reorg:' || exposure.funding_id
+     LEFT JOIN LATERAL (
+       SELECT state, last_error_code
+       FROM core.durable_jobs candidate
+       WHERE candidate.job_type = 'RECONCILE'
+         AND candidate.payload ->> 'exposureId' = exposure.exposure_id
+       ORDER BY candidate.created_at DESC, candidate.job_id DESC LIMIT 1
+     ) job ON true
+     LEFT JOIN LATERAL (
+       SELECT remainder_id, recovery_episode, amount_usdt, state, target_session_id
+       FROM core.seckill_prize_reorg_remainders candidate
+       WHERE candidate.exposure_id = exposure.exposure_id
+       ORDER BY candidate.recovery_episode DESC, candidate.created_at DESC,
+         candidate.remainder_id DESC LIMIT 1
+     ) remainder ON true
+     WHERE exposure.exposure_id = $1`,
+    [exposureId],
+  );
+  const row = exposure.rows[0];
+  if (!row) throw new CoreError('InvalidRequest', 'Prize reorg exposure was not found', 404);
+  const transitions = await executor.query<PrizeReorgTransitionRow>(
+    `SELECT transition_id, transition_type, evidence_hash, payload, created_at
+     FROM core.seckill_prize_reorg_transitions
+     WHERE exposure_id = $1 ORDER BY created_at, transition_id`,
+    [exposureId],
+  );
+  const recoveries = await executor.query<{
+    recovery_id: string;
+    exposure_id: string;
+    recovery_episode: string | number;
+    coverage_snapshot_id: string;
+    actor_wallet: string;
+    secondary_signer: string;
+    secondary_signature_hash: string;
+    approval_nonce: string;
+    approval_deadline: Date;
+    evidence_hash: string;
+    created_at: Date;
+  }>(
+    `SELECT recovery_id, exposure_id, recovery_episode, coverage_snapshot_id,
+       actor_wallet, secondary_signer, secondary_signature_hash,
+       approval_nonce::text, approval_deadline, evidence_hash, created_at
+     FROM core.seckill_prize_reorg_recoveries
+     WHERE exposure_id = $1 ORDER BY recovery_episode, recovery_id`,
+    [exposureId],
+  );
+  const transitionItems = transitions.rows.map((transition) => Object.freeze({
+    transitionId: transition.transition_id,
+    type: transition.transition_type,
+    evidenceHash: transition.evidence_hash,
+    payload: transition.payload,
+    createdAt: transition.created_at.toISOString(),
+  }));
+  const lastResolved = transitionItems.findLastIndex((transition) => transition.type === 'RESOLVED');
+  const lastPayoutReorged = transitionItems.findLastIndex((transition) => transition.type === 'PAYOUT_REORGED');
+  const state = lastResolved < lastPayoutReorged || lastResolved === -1
+    ? 'RECONCILING'
+    : row.cause_active ? 'RECOVERY_REQUIRED' : 'RECOVERED';
+  return Object.freeze({
+    artifactVersion: CORE_ARTIFACT_VERSION,
+    exposureId: row.exposure_id,
+    fundingKind: row.funding_kind,
+    fundingId: row.funding_id,
+    sourceSessionId: row.source_session_id,
+    liabilitySessionId: row.liability_session_id,
+    amountUsdt: row.amount_usdt,
+    settlementWallet: row.settlement_wallet_address,
+    evidenceHash: row.evidence_hash,
+    sourceTxHash: row.source_tx_hash,
+    sourceBlockHash: row.source_block_hash,
+    resolutionMode: row.resolution_mode,
+    payoutSnapshot: row.payout_snapshot,
+    state,
+    recoveryEpisode: 1 + transitionItems.filter((transition) => transition.type === 'PAYOUT_REORGED').length,
+    breakerCause: Object.freeze({
+      active: row.cause_active,
+      evidenceHash: row.cause_evidence_hash,
+      updatedAt: row.cause_updated_at.toISOString(),
+    }),
+    reconciliation: row.job_state === null ? null : Object.freeze({
+      state: row.job_state,
+      lastErrorCode: row.job_error_code,
+    }),
+    remainder: row.remainder_id === null ? null : Object.freeze({
+      remainderId: row.remainder_id,
+      recoveryEpisode: Number(row.remainder_recovery_episode),
+      amountUsdt: row.remainder_amount_usdt!,
+      state: row.remainder_state!,
+      targetSessionId: row.remainder_target_session_id,
+    }),
+    transitions: Object.freeze(transitionItems),
+    recoveries: Object.freeze(recoveries.rows.map(prizeRecoveryProjection)),
+    createdAt: row.created_at.toISOString(),
+  });
 }
 
 async function requireCurrentRole(executor: SqlExecutor, actor: FulfillmentActor, allowed: readonly string[]) {

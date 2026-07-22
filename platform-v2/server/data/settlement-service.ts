@@ -34,6 +34,7 @@ import {
   isMicrotestMerchantProduct,
   type MainnetMicrotestEntitlement,
 } from './mainnet-microtest-entitlement.ts';
+import { lockSeckillPrizeFundingMutation } from './seckill-prize-service.ts';
 
 const INTENT_TTL_SECONDS = 5 * 60;
 const RUNTIME_EVIDENCE_MAX_AGE_MS = 5 * 60 * 1000;
@@ -822,6 +823,7 @@ export class SettlementService {
     }
 
     return this.#transactions.transaction(async (executor) => {
+      await lockSeckillPrizeFundingMutation(executor);
       const intent = await loadIntent(executor, input.intentId, true);
       if (intent.wallet_address !== wallet) throw new CoreError('Forbidden', 'Settlement wallet mismatch', 403);
       if (intent.state === 'CONSUMED') return loadRequestProjectionByIntent(executor, intent.intent_id);
@@ -1353,6 +1355,7 @@ export class SettlementService {
     const tokenAddress = input.asset === 'USDT' ? USDT_ADDRESS : NPL_ADDRESS;
     const runtime = validateEoaRuntime(input.runtime, tokenAddress, this.#clock);
     return this.#transactions.transaction(async (executor) => {
+      await lockSeckillPrizeFundingMutation(executor);
       const existing = await executor.query<{ transfer_id: string }>(
         'SELECT transfer_id FROM core.settlement_transfers WHERE idempotency_key = $1',
         [input.idempotencyKey],

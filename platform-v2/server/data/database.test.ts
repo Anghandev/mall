@@ -67,7 +67,12 @@ import { leaseDurableJobs } from './queue.ts';
 import { nextAvailableSettlementExecutorNonce, SettlementService } from './settlement-service.ts';
 import { SeckillService } from './seckill-service.ts';
 import { releaseSeckillPlanInventory, SeckillOperationsService } from './seckill-operations-service.ts';
-import { settleMaturedSeckillPrizes } from './seckill-prize-service.ts';
+import {
+  reverseFinalizedSeckillPrizeInjection,
+  reviewSeckillPrize,
+  rollPendingSeckillPrizesIntoSession,
+  settleMaturedSeckillPrizes,
+} from './seckill-prize-service.ts';
 import { TakeoverFundingService, type TakeoverFundingApprovalInput } from './takeover-funding-service.ts';
 import { TakeoverCaseService } from './takeover-case-service.ts';
 import { OrderStatementService } from './order-statement-service.ts';
@@ -148,6 +153,8 @@ test('business and audit migrations apply from empty databases', async () => {
       '042_seed_seckill_breaker_scope.sql',
       '043_live_seckill_reservation_window.sql',
       '044_settlement_execution_integrity.sql',
+      '045_settlement_nonce_release.sql',
+      '046_seckill_prize_reorg_recovery.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -4138,12 +4145,31 @@ test('seckill quote locks both inventories and final classification releases the
   }
 });
 
-test('seckill prize freezes the final canonical order and only the reviewed winner can settle the whole session pool', async () => {
+test('seckill prize award is revoked and quarantined when finalized funding reorgs', async () => {
   const db = await createBusinessDatabase();
   const admin = Wallet.createRandom();
   const secondary = Wallet.createRandom();
+  const buyer = Wallet.createRandom();
+  const buyerAddress = buyer.address.toLowerCase();
+  const buyerTargetHash = `0x${'9'.repeat(64)}`;
   try {
     await seedCatalog(db, 1);
+    await db.query(
+      `INSERT INTO core.fulfillment_targets (
+         target_id, target_hash, buyer_wallet, idempotency_key, request_hash,
+         fulfillment_mode, region_code, region_code_hash, encrypted_payload,
+         encryption_iv, encryption_tag, expires_at, created_at
+       ) VALUES ('target:prize-reorg-buyer',$1,$2,'seed-prize-reorg-buyer',$1,'DELIVERY',
+         '110101',$3,$4,$5,$6,clock_timestamp() + interval '1 day',clock_timestamp())`,
+      [
+        buyerTargetHash,
+        buyerAddress,
+        HASH,
+        Buffer.from('00', 'hex'),
+        Buffer.alloc(12),
+        Buffer.alloc(16),
+      ],
+    );
     const now = new Date(Math.floor(Date.now() / 1000) * 1000);
     const sessionId = `0x${'6'.repeat(64)}`;
     await insertLiveSeckillSession(db, sessionId, now, 90);
@@ -4179,17 +4205,17 @@ test('seckill prize freezes the final canonical order and only the reviewed winn
       bytes32: () => ids.shift()!,
       nonce: () => 9n,
     });
-    const quote = await catalog.createSeckillQuote(BUYER, {
+    const quote = await catalog.createSeckillQuote(buyerAddress, {
       idempotencyKey: 'seckill-prize-final-order',
       sessionId,
       productId: 'product-1',
       skuId: 'sku-1',
       quantity: 1,
       fulfillmentMode: 'DELIVERY',
-      fulfillmentTargetHash: HASH,
+      fulfillmentTargetHash: buyerTargetHash,
       regionCodeHash: HASH,
     });
-    const prizeAmount = quote.dual.seckill.merchantConcessionAllocations
+    const paymentPrizeAmount = quote.dual.seckill.merchantConcessionAllocations
       .find((allocation) => allocation.pool === 'SECKILL_PRIZE')!.amount;
     const payment = paymentInput(quote.dual.seckill, 'SECKILL');
     payment.event.blockTimestamp = new Date(now.getTime() + 42_000);
@@ -4215,13 +4241,104 @@ test('seckill prize freezes the final canonical order and only the reviewed winn
       ),
     );
     await advancePaymentFinality(adapter(db), payment.event.blockNumber + 14);
-    assert.equal((await db.query<{ amount: string; pool: string }>(
+    const injectionAmount = '50';
+    const totalPrizeAmount = (BigInt(paymentPrizeAmount) + BigInt(injectionAmount)).toString();
+    const injectionActionId = `0x${'a'.repeat(64)}`;
+    const injectionId = `0x${'b'.repeat(64)}`;
+    const injectionJournalId = `journal:seckill-prize:${injectionActionId}`;
+    const custodyWallet = '0x3333333333333333333333333333333333333333';
+    const custodyAccountId = `wallet:usdt-custody:${custodyWallet}:usdt`;
+    const prizeAccountId = `seckill-prize:${sessionId}:usdt`;
+    await db.query(
+      `INSERT INTO core.ledger_accounts (
+         account_id, owner_type, owner_id, asset, purpose, wallet_address
+       ) VALUES ($1,'WALLET',$2,'USDT','WALLET_ASSET',$2)
+       ON CONFLICT (account_id) DO NOTHING`,
+      [custodyAccountId, custodyWallet],
+    );
+    await db.query(
+      `INSERT INTO core.seckill_governance_actions (
+         action_id, session_id, policy_version, action_kind, evidence_hash,
+         governance_wallet_address, target_address, calldata, calldata_hash,
+         old_value_hash, new_value_hash, state, executor_nonce, submitted_tx_hash,
+         execution_evidence_hash, actor_wallet, idempotency_key, request_hash,
+         created_at, updated_at, nonce_reserved_at, nonce_reservation_evidence_hash,
+         execution_artifact_version, execution_request_digest
+       ) VALUES ($1,$2,1,'PRIZE_INJECTION',$3,$4,$5,'0x00',$3,$3,$3,'FINAL',0,$6,$3,
+         $4,'prize-reorg-injection',$3,$7,$7,$7,$3,$8,$3)`,
+      [
+        injectionActionId,
+        sessionId,
+        HASH,
+        custodyWallet,
+        USDT_ADDRESS,
+        `0x${'c'.repeat(64)}`,
+        payment.event.finalizedAt,
+        CORE_ARTIFACT_VERSION,
+      ],
+    );
+    await db.query(
+      'SELECT core.post_resource_balanced_journal($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)',
+      [
+        injectionJournalId,
+        `seckill-prize:${injectionActionId}:final`,
+        'SECKILL_PRIZE_INJECTED',
+        'SECKILL_SESSION',
+        sessionId,
+        null,
+        1,
+        HASH,
+        `0x${'c'.repeat(64)}`,
+        `0x${'d'.repeat(64)}`,
+        'CHAIN_EVENT',
+        `0x${'c'.repeat(64)}`,
+        null,
+        JSON.stringify({ actionId: injectionActionId, sessionId, amountUsdt: injectionAmount }),
+        JSON.stringify([
+          {
+            account_id: custodyAccountId,
+            side: 'DEBIT',
+            amount: injectionAmount,
+            balance_state: 'POSTED',
+            backing_wallet_address: custodyWallet,
+          },
+          {
+            account_id: prizeAccountId,
+            side: 'CREDIT',
+            amount: injectionAmount,
+            balance_state: 'LOCKED',
+            backing_wallet_address: custodyWallet,
+          },
+        ]),
+      ],
+    );
+    await db.query(
+      `INSERT INTO core.seckill_prize_injections (
+         injection_id, action_id, session_id, amount_usdt, operations_wallet_address,
+         settlement_wallet_address, token_address, final_journal_id, created_at, updated_at
+       ) VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8,$8)`,
+      [
+        injectionId,
+        injectionActionId,
+        sessionId,
+        injectionAmount,
+        custodyWallet,
+        USDT_ADDRESS,
+        injectionJournalId,
+        payment.event.finalizedAt,
+      ],
+    );
+    await db.query(
+      'UPDATE core.seckill_sessions SET prize_pool_usdt = prize_pool_usdt + $2 WHERE session_id = $1',
+      [sessionId, injectionAmount],
+    );
+    assert.deepEqual((await db.query<{ amount: string; pool: string }>(
       `SELECT contribution.amount_usdt::text AS amount, session.prize_pool_usdt::text AS pool
        FROM core.seckill_prize_contributions contribution
        JOIN core.seckill_sessions session ON session.session_id = contribution.session_id
        WHERE contribution.order_id = $1`,
       [quote.orderId],
-    )).rows[0]?.amount, prizeAmount);
+    )).rows[0], { amount: paymentPrizeAmount, pool: totalPrizeAmount });
 
     const settlementAt = new Date(now.getTime() + 7 * 60_000);
     assert.deepEqual(await settleMaturedSeckillPrizes(adapter(db), settlementAt), [sessionId]);
@@ -4232,7 +4349,7 @@ test('seckill prize freezes the final canonical order and only the reviewed winn
     assert.equal(pending.prizeSettlement?.candidate?.orderId, quote.orderId);
     assert.equal(pending.prizeSettlement?.candidate?.blockNumber, String(payment.event.blockNumber));
     assert.equal(pending.prizeSettlement?.candidate?.logIndex, String(payment.event.logIndex));
-    assert.equal(pending.prizeSettlement?.poolAmountUsdt, prizeAmount);
+    assert.equal(pending.prizeSettlement?.poolAmountUsdt, totalPrizeAmount);
     assert.equal(
       pending.prizeSettlement?.cutoffAt,
       (await db.query<{ cutoff_at: Date }>(
@@ -4247,6 +4364,7 @@ test('seckill prize freezes the final canonical order and only the reviewed winn
        ) VALUES ($1,'ADMIN',NULL,'ACTIVE',$2)`,
       [admin.address.toLowerCase(), HASH],
     );
+    let operationsNow = settlementAt;
     const operations = new SeckillOperationsService({
       transactions: transactionAdapter(db),
       governanceWalletAddress: '0x3333333333333333333333333333333333333333',
@@ -4254,7 +4372,7 @@ test('seckill prize freezes the final canonical order and only the reviewed winn
       settlementWalletAddress: '0x3333333333333333333333333333333333333333',
       paymentRouterAddress: '0x6666666666666666666666666666666666666666',
       secondarySignerAddress: secondary.address,
-      clock: () => settlementAt,
+      clock: () => operationsNow,
     });
     const reviewInput = {
       decision: 'APPROVE' as const,
@@ -4269,7 +4387,7 @@ test('seckill prize freezes the final canonical order and only the reviewed winn
       reviewInput,
     );
     assert.equal(approved.state, 'APPROVED');
-    assert.equal(approved.candidate?.buyerWallet, BUYER);
+    assert.equal(approved.candidate?.buyerWallet, buyerAddress);
     assert.equal(approved.review?.reviewedBy, admin.address.toLowerCase());
     assert.equal(approved.payout?.state, 'AVAILABLE');
     assert.equal((await operations.reviewWinner(
@@ -4288,26 +4406,1180 @@ test('seckill prize freezes the final canonical order and only the reviewed winn
 
     const settlements = new SettlementService({ transactions: transactionAdapter(db), clock: () => settlementAt });
     const intent = await settlements.createIntent(
-      { walletAddress: BUYER, roles: ['BUYER'] },
-      { rail: 'PRIZE_USDT', amount: prizeAmount, idempotencyKey: 'seckill-prize-winner-intent' },
+      { walletAddress: buyerAddress, roles: ['BUYER'] },
+      { rail: 'PRIZE_USDT', amount: totalPrizeAmount, idempotencyKey: 'seckill-prize-winner-intent' },
     );
-    assert.equal(intent.intent.wallet, BUYER);
-    assert.equal(intent.intent.recipient, BUYER);
-    assert.equal(intent.intent.amount, prizeAmount);
+    assert.equal(intent.intent.wallet, buyerAddress);
+    assert.equal(intent.intent.recipient, buyerAddress);
+    assert.equal(intent.intent.amount, totalPrizeAmount);
+    const payoutRequest = await settlements.submitRequest(
+      { walletAddress: buyerAddress, roles: ['BUYER'] },
+      {
+        intentId: intent.intent.intentId,
+        signature: await buyer.signTypedData(
+          intent.typedData.domain,
+          intent.typedData.types,
+          intent.typedData.message,
+        ),
+      },
+    );
+    assert.equal(payoutRequest.state, 'REQUESTED');
+    const operatorWallet = '0x9999999999999999999999999999999999999999';
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (
+         wallet_address, role, merchant_id, status, evidence_hash
+       ) VALUES ($1,'OPERATOR',NULL,'ACTIVE',$2)`,
+      [operatorWallet, HASH],
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshots (
+         snapshot_id, chain_id, block_number, block_hash, canonical, evidence_hash, recorded_at
+       ) VALUES ('coverage:prize-reorg',56,1000,$1,true,$2,$3)`,
+      [`0x${'4'.repeat(64)}`, `0x${'5'.repeat(64)}`, settlementAt],
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshot_items (
+         snapshot_id, wallet_address, asset, verified_asset_balance,
+         unsettled_liability, coverage_met
+       ) VALUES ('coverage:prize-reorg',$1,'USDT',100000,100000,true)`,
+      [custodyWallet],
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshot_canonicality (
+         observation_id, snapshot_id, canonical, observed_block_hash, evidence_hash, observed_at
+       ) VALUES ('coverage-observation:prize-reorg','coverage:prize-reorg',true,$1,$2,$3)`,
+      [`0x${'4'.repeat(64)}`, `0x${'5'.repeat(64)}`, settlementAt],
+    );
+    const transfer = await settlements.createTransfer(
+      { walletAddress: operatorWallet, roles: ['OPERATOR'] },
+      {
+        asset: 'USDT',
+        gasCap: '100000',
+        idempotencyKey: 'seckill-prize-reorg-transfer',
+        runtime: {
+          executorWallet: custodyWallet,
+          nextNonce: '7',
+          tokenAddress: USDT_ADDRESS,
+          tokenCodeHash: `0x${'7'.repeat(64)}`,
+          tokenTransferConformanceEvidenceHash: `0x${'8'.repeat(64)}`,
+          evidenceHash: `0x${'9'.repeat(64)}`,
+          checkedAt: settlementAt,
+        },
+      },
+    );
+    const payoutTxHash = `0x${'4'.repeat(64)}`;
+    const replacementPayoutTxHash = `0x${'5'.repeat(64)}`;
+    let payoutReceipt: EoaSettlementReceipt | undefined;
+    let payoutBlockCanonical = true;
+    let payoutCanonicalEvidence = HASH;
+    let workerNow = settlementAt;
+    let notifyBroadcastStarted!: () => void;
+    let releaseBroadcast!: () => void;
+    const broadcastStarted = new Promise<void>((resolve) => { notifyBroadcastStarted = resolve; });
+    const broadcastRelease = new Promise<void>((resolve) => { releaseBroadcast = resolve; });
+    const settlementWorker = new SettlementWorker({
+      transactions: transactionAdapter(db),
+      broadcaster: {
+        submit: async (input) => {
+          assert.equal(input.reconciliationOnly, undefined);
+          notifyBroadcastStarted();
+          await broadcastRelease;
+          return {
+            executionTxHash: payoutTxHash,
+            executorWallet: input.executorWallet,
+            executorNonce: input.executorNonce,
+            requestDigest: input.requestDigest,
+          };
+        },
+        replace: async (input) => {
+          assert.equal(input.reconciliationOnly, true);
+          return {
+            executionTxHash: replacementPayoutTxHash,
+            executorWallet: input.executorWallet,
+            executorNonce: input.executorNonce,
+            requestDigest: input.requestDigest,
+            replacementForExecutionTxHash: input.replacementForExecutionTxHash,
+          };
+        },
+      },
+      chain: {
+        receipt: async () => payoutReceipt,
+        canonicalBlock: async (input) => ({
+          canonical: payoutBlockCanonical,
+          observedBlockHash: payoutBlockCanonical ? input.blockHash : `0x${'8'.repeat(64)}`,
+          evidenceHash: payoutCanonicalEvidence,
+        }),
+      },
+      clock: () => workerNow,
+    });
+    const inFlightSubmission = settlementWorker.submitOnce();
+    await broadcastStarted;
     await assert.rejects(
       settlements.createIntent(
         { walletAddress: '0x7777777777777777777777777777777777777777', roles: ['BUYER'] },
-        { rail: 'PRIZE_USDT', amount: prizeAmount, idempotencyKey: 'seckill-prize-nonwinner-intent' },
+        { rail: 'PRIZE_USDT', amount: totalPrizeAmount, idempotencyKey: 'seckill-prize-nonwinner-intent' },
       ),
       (error: unknown) => error instanceof CoreError && error.code === 'FinalityPending',
     );
-    const finalProjection = await seckill.get(sessionId);
-    assert.equal(finalProjection.phase, 'SETTLED');
-    assert.equal(finalProjection.winnerWallet, BUYER);
-    assert.equal(finalProjection.prizeSettlement?.review?.reviewedBy, admin.address.toLowerCase());
-    assert.equal(finalProjection.prizeSettlement?.payout?.state, 'AVAILABLE');
-    assert.deepEqual(finalProjection.prizeSettlement?.payout?.transferIds, []);
-    assert.deepEqual(finalProjection.prizeSettlement?.payout?.finalExecutionTxHashes, []);
+    const reorgEvidenceHash = `0x${'e'.repeat(64)}`;
+    try {
+      await transactionAdapter(db).transaction(async (executor) => {
+        await executor.query(
+          `UPDATE core.seckill_governance_actions
+           SET state = 'REORGED', confirmations = 0, canonical = false, updated_at = $2
+           WHERE action_id = $1`,
+          [injectionActionId, settlementAt],
+        );
+        await reverseFinalizedSeckillPrizeInjection(executor, {
+          actionId: injectionActionId,
+          sessionId,
+          policyVersion: 1,
+          evidenceHash: reorgEvidenceHash,
+          sourceTxHash: `0x${'c'.repeat(64)}`,
+          sourceBlockHash: `0x${'d'.repeat(64)}`,
+          canonicalBlockHash: `0x${'f'.repeat(64)}`,
+          at: settlementAt,
+        });
+      });
+      assert.deepEqual((await db.query<{ transfer_state: string; attempt_state: string; resolution_mode: string }>(
+        `SELECT transfer.state AS transfer_state, attempt.state AS attempt_state,
+           exposure.resolution_mode
+         FROM core.settlement_transfers transfer
+         JOIN core.settlement_transfer_attempts attempt ON attempt.transfer_id = transfer.transfer_id
+         JOIN core.seckill_prize_reorg_exposures exposure ON exposure.funding_id = $2
+         WHERE transfer.transfer_id = $1`,
+        [transfer.transferId, injectionActionId],
+      )).rows[0], {
+        transfer_state: 'LEASED',
+        attempt_state: 'LEASED',
+        resolution_mode: 'DEFICIT_MONITORING',
+      });
+    } finally {
+      releaseBroadcast();
+    }
+    assert.equal(await inFlightSubmission, 1);
+    const quarantined = await seckill.get(sessionId);
+    assert.equal(quarantined.prizePoolUsdt, paymentPrizeAmount);
+    assert.equal(quarantined.winnerWallet, null);
+    assert.equal(quarantined.prizeSettlement?.state, 'QUARANTINED');
+    assert.equal(quarantined.prizeSettlement?.payout, null);
+    assert.deepEqual(
+      (await db.query<{ account_id: string; balance_state: string; amount: string }>(
+        `SELECT line.account_id, line.balance_state,
+           sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS amount
+         FROM core.ledger_lines line
+         WHERE line.account_id IN ($1,$2,$3)
+         GROUP BY line.account_id, line.balance_state
+         HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) <> 0
+         ORDER BY line.account_id, line.balance_state`,
+        [
+          prizeAccountId,
+          `buyer:${buyerAddress}:prize:usdt`,
+          'system:seckill-prize-reorg-deficit:usdt',
+        ],
+      )).rows,
+      [
+        {
+          account_id: `buyer:${buyerAddress}:prize:usdt`,
+          balance_state: 'SUBMITTED',
+          amount: totalPrizeAmount,
+        },
+        {
+          account_id: 'system:seckill-prize-reorg-deficit:usdt',
+          balance_state: 'POSTED',
+          amount: `-${injectionAmount}`,
+        },
+      ],
+    );
+    assert.equal(
+      (await db.query<{ count: string }>(
+        `SELECT count(*)::text AS count FROM core.ledger_journals
+         WHERE event_type = 'SECKILL_PRIZE_AWARD_REVERSED' AND reversal_of = $1`,
+        [approved.awardJournalId],
+      )).rows[0]?.count,
+      '0',
+    );
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.settlement_requests WHERE request_id = $1',
+      [payoutRequest.request_id],
+    )).rows[0]?.state, 'QUARANTINED');
+    assert.deepEqual((await db.query<{ transfer_state: string; attempt_state: string }>(
+      `SELECT transfer.state AS transfer_state, attempt.state AS attempt_state
+       FROM core.settlement_transfers transfer
+       JOIN core.settlement_transfer_attempts attempt ON attempt.transfer_id = transfer.transfer_id
+       WHERE transfer.transfer_id = $1`,
+      [transfer.transferId],
+    )).rows[0], { transfer_state: 'SUBMITTED', attempt_state: 'SUBMITTED' });
+    assert.equal((await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM core.durable_jobs
+       WHERE job_type = 'RECONCILE' AND resource_id = $1`,
+      [sessionId],
+    )).rows[0]?.count, '1');
+    assert.equal(await settlementWorker.reconcilePrizeFundingOnce(), 1);
+    assert.equal((await db.query<{ state: string }>(
+      `SELECT state FROM core.durable_jobs
+       WHERE job_type = 'RECONCILE' AND resource_id = $1`,
+      [sessionId],
+    )).rows[0]?.state, 'RETRY');
+    const originalAttemptId = `settlement-attempt:${transfer.transferId}:1`;
+    const replacementAttemptId = `settlement-attempt:${transfer.transferId}:2`;
+    await db.query(
+      `INSERT INTO core.settlement_transfer_attempts (
+         attempt_id, transfer_id, attempt_number, lease_token, request_digest,
+         transaction_to, transaction_calldata, executor_wallet, executor_nonce,
+         gas_limit, replacement_for_attempt_id, state, leased_until,
+         created_at, updated_at
+       ) VALUES ($1,$2,2,'prize-reorg-replacement-lease',$3,$4,$5,$6,$7,$8,$9,
+         'RETRYABLE',$10,$11,$11)`,
+      [
+        replacementAttemptId,
+        transfer.transferId,
+        `0x${'1'.repeat(64)}`,
+        transfer.tokenAddress,
+        transfer.transferCalldata,
+        transfer.executorWallet,
+        transfer.executorNonce,
+        transfer.gasCap,
+        originalAttemptId,
+        new Date(workerNow.getTime() + 120_000),
+        workerNow,
+      ],
+    );
+    workerNow = new Date(workerNow.getTime() + 1_000);
+    assert.equal(await settlementWorker.replaceOnce(), 1);
+    assert.deepEqual((await db.query<{ attempt_id: string; state: string }>(
+      `SELECT attempt_id, state FROM core.settlement_transfer_attempts
+       WHERE transfer_id = $1 ORDER BY attempt_number`,
+      [transfer.transferId],
+    )).rows, [
+      { attempt_id: originalAttemptId, state: 'REPLACED' },
+      { attempt_id: replacementAttemptId, state: 'SUBMITTED' },
+    ]);
+    payoutReceipt = {
+      chainId: 56,
+      executionTxHash: replacementPayoutTxHash,
+      transactionTo: transfer.tokenAddress,
+      transactionCalldata: transfer.transferCalldata,
+      executorWallet: transfer.executorWallet,
+      executorNonce: transfer.executorNonce,
+      receiptStatus: 1,
+      blockNumber: 1_200,
+      blockHash: `0x${'6'.repeat(64)}`,
+      confirmations: 15,
+      canonicalBlock: true,
+      transfers: [{
+        tokenAddress: transfer.tokenAddress,
+        from: transfer.executorWallet,
+        to: transfer.recipientAddress,
+        amount: transfer.amount,
+      }],
+      transactionDeltas: [
+        {
+          tokenAddress: transfer.tokenAddress,
+          account: transfer.executorWallet,
+          delta: `-${transfer.amount}`,
+        },
+        {
+          tokenAddress: transfer.tokenAddress,
+          account: transfer.recipientAddress,
+          delta: transfer.amount,
+        },
+      ],
+      evidenceHash: `0x${'7'.repeat(64)}`,
+    };
+    workerNow = new Date(settlementAt.getTime() + 6_000);
+    assert.equal(await settlementWorker.pollFinalityOnce(), 1);
+    assert.equal(await settlementWorker.reconcilePrizeFundingOnce(), 1);
+    assert.deepEqual((await db.query<{
+      transfer_state: string;
+      attempt_state: string;
+      request_state: string;
+      job_state: string;
+    }>(
+      `SELECT transfer.state AS transfer_state, attempt.state AS attempt_state,
+         request.state AS request_state, job.state AS job_state
+       FROM core.settlement_transfers transfer
+       JOIN core.settlement_transfer_attempts attempt ON attempt.transfer_id = transfer.transfer_id
+       JOIN core.settlement_requests request ON request.request_id = transfer.request_id
+       JOIN core.durable_jobs job ON job.resource_id = $2 AND job.job_type = 'RECONCILE'
+       WHERE transfer.transfer_id = $1 AND attempt.attempt_id = $3`,
+      [transfer.transferId, sessionId, replacementAttemptId],
+    )).rows[0], {
+      transfer_state: 'SETTLED',
+      attempt_state: 'SETTLED',
+      request_state: 'QUARANTINED',
+      job_state: 'SUCCEEDED',
+    });
+    assert.deepEqual((await db.query<{ transition_type: string }>(
+      `SELECT transition_type FROM core.seckill_prize_reorg_transitions
+       ORDER BY created_at, transition_type`,
+    )).rows.map((row) => row.transition_type).sort(), [
+      'FUNDING_REVERSED',
+      'PAYOUT_FINAL',
+      'QUARANTINED',
+      'RESOLVED',
+    ]);
+    const exposureId = (await db.query<{ exposure_id: string }>(
+      'SELECT exposure_id FROM core.seckill_prize_reorg_exposures WHERE funding_id = $1',
+      [injectionActionId],
+    )).rows[0]!.exposure_id;
+    const listedExposure = (await operations.listPrizeReorgExposures(
+      { walletAddress: admin.address, roles: ['ADMIN'] },
+    )).find((item) => item.exposureId === exposureId)!;
+    assert.equal(listedExposure.state, 'RECOVERY_REQUIRED');
+    assert.equal(listedExposure.recoveryEpisode, 1);
+    assert.equal(listedExposure.reconciliation?.state, 'SUCCEEDED');
+    const exposureDetail = await operations.getPrizeReorgExposure(
+      { walletAddress: admin.address, roles: ['ADMIN'] },
+      exposureId,
+    );
+    assert.equal(exposureDetail.remainder, null);
+    assert.equal(exposureDetail.transitions.some((item) => item.type === 'PAYOUT_FINAL'), true);
+    operationsNow = new Date(workerNow.getTime() + 1_000);
+    await db.query(
+      `INSERT INTO core.coverage_snapshots (
+         snapshot_id, chain_id, block_number, block_hash, canonical, evidence_hash, recorded_at
+       ) VALUES ('coverage:prize-recovery-initial',56,1201,$1,true,$2,$3)`,
+      [`0x${'a'.repeat(64)}`, `0x${'b'.repeat(64)}`, operationsNow],
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshot_items (
+         snapshot_id, wallet_address, asset, verified_asset_balance,
+         unsettled_liability, coverage_met
+       ) VALUES ('coverage:prize-recovery-initial',$1,'USDT',100000,0,true)`,
+      [custodyWallet],
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshot_canonicality (
+         observation_id, snapshot_id, canonical, observed_block_hash, evidence_hash, observed_at
+       ) VALUES ('coverage-observation:prize-recovery-initial',
+         'coverage:prize-recovery-initial',true,$1,$2,$3)`,
+      [`0x${'a'.repeat(64)}`, `0x${'b'.repeat(64)}`, operationsNow],
+    );
+    const initialRecoveryDeadline = String(Math.floor(operationsNow.getTime() / 1_000) + 300);
+    const initialRecoveryChallenge = await operations.prizeRecoveryChallenge(
+      { walletAddress: admin.address, roles: ['ADMIN'] },
+      exposureId,
+      { nonce: '100', deadline: initialRecoveryDeadline },
+    );
+    assert.equal(initialRecoveryChallenge.recoveryEpisode, 1);
+    const initialRecoverySignature = await secondary.signTypedData(
+      initialRecoveryChallenge.typedData.domain,
+      initialRecoveryChallenge.typedData.types,
+      initialRecoveryChallenge.typedData.message,
+    );
+    const initialRecovery = await operations.submitPrizeRecovery(
+      { walletAddress: admin.address, roles: ['ADMIN'] },
+      exposureId,
+      {
+        snapshotId: initialRecoveryChallenge.snapshotId,
+        nonce: '100',
+        deadline: initialRecoveryDeadline,
+        signature: initialRecoverySignature,
+        correlationId: 'prize-recovery-initial',
+      },
+    );
+    assert.equal(initialRecovery.recoveryEpisode, 1);
+    assert.deepEqual((await db.query<{
+      cause_active: boolean;
+      breaker_paused: boolean;
+      recovery_count: string;
+    }>(
+      `SELECT cause.active AS cause_active, breaker.paused AS breaker_paused,
+         (SELECT count(*)::text FROM core.seckill_prize_reorg_recoveries
+          WHERE exposure_id = $1) AS recovery_count
+       FROM core.breaker_causes cause
+       JOIN core.circuit_breakers breaker ON breaker.scope = cause.scope
+       WHERE cause.cause_id = $2`,
+      [exposureId, `seckill-prize-funding-reorg:${injectionActionId}`],
+    )).rows[0], { cause_active: false, breaker_paused: false, recovery_count: '1' });
+    payoutBlockCanonical = false;
+    payoutCanonicalEvidence = `0x${'8'.repeat(64)}`;
+    workerNow = new Date(workerNow.getTime() + 1_000);
+    assert.equal(await settlementWorker.reconcileSettledCanonicalityOnce(), 1);
+    assert.deepEqual((await db.query<{
+      transfer_state: string;
+      attempt_state: string;
+      finality_state: string;
+      job_state: string;
+    }>(
+      `SELECT transfer.state AS transfer_state, attempt.state AS attempt_state,
+         finality.state AS finality_state, job.state AS job_state
+       FROM core.settlement_transfers transfer
+       JOIN core.settlement_transfer_attempts attempt ON attempt.transfer_id = transfer.transfer_id
+       JOIN core.transaction_finality finality
+         ON finality.transaction_id = 'settlement-finality:' || attempt.attempt_id
+       JOIN core.durable_jobs job ON job.resource_id = $2 AND job.job_type = 'RECONCILE'
+       WHERE transfer.transfer_id = $1 AND attempt.attempt_id = $3`,
+      [transfer.transferId, sessionId, replacementAttemptId],
+    )).rows[0], {
+      transfer_state: 'SETTLED',
+      attempt_state: 'SETTLED',
+      finality_state: 'REORGED',
+      job_state: 'RETRY',
+    });
+    assert.deepEqual((await db.query<{
+      cause_active: boolean;
+      breaker_paused: boolean;
+      recovery_count: string;
+    }>(
+      `SELECT cause.active AS cause_active, breaker.paused AS breaker_paused,
+         (SELECT count(*)::text FROM core.seckill_prize_reorg_recoveries
+          WHERE exposure_id = $1) AS recovery_count
+       FROM core.breaker_causes cause
+       JOIN core.circuit_breakers breaker ON breaker.scope = cause.scope
+       WHERE cause.cause_id = $2`,
+      [exposureId, `seckill-prize-funding-reorg:${injectionActionId}`],
+    )).rows[0], { cause_active: true, breaker_paused: true, recovery_count: '1' });
+    payoutBlockCanonical = true;
+    payoutReceipt = {
+      ...payoutReceipt!,
+      receiptStatus: 0,
+      blockNumber: 1_201,
+      blockHash: `0x${'9'.repeat(64)}`,
+      confirmations: 14,
+      transfers: [],
+      transactionDeltas: [],
+      evidenceHash: `0x${'a'.repeat(64)}`,
+    };
+    workerNow = new Date(workerNow.getTime() + 1_000);
+    assert.equal(await settlementWorker.pollFinalityOnce(), 1);
+    assert.deepEqual((await db.query<{ transfer_state: string; finality_state: string }>(
+      `SELECT transfer.state AS transfer_state, finality.state AS finality_state
+       FROM core.settlement_transfers transfer
+       JOIN core.settlement_transfer_attempts attempt ON attempt.transfer_id = transfer.transfer_id
+       JOIN core.transaction_finality finality
+         ON finality.transaction_id = 'settlement-finality:' || attempt.attempt_id
+       WHERE transfer.transfer_id = $1 AND attempt.attempt_id = $2`,
+      [transfer.transferId, replacementAttemptId],
+    )).rows[0], { transfer_state: 'SETTLED', finality_state: 'MINED' });
+    assert.equal(await settlementWorker.reconcilePrizeFundingOnce(), 1);
+    payoutReceipt = {
+      ...payoutReceipt,
+      confirmations: 15,
+      evidenceHash: `0x${'b'.repeat(64)}`,
+    };
+    workerNow = new Date(workerNow.getTime() + 6_000);
+    assert.equal(await settlementWorker.pollFinalityOnce(), 1);
+    assert.equal(await settlementWorker.reconcilePrizeFundingOnce(), 1);
+    assert.deepEqual((await db.query<{
+      transfer_state: string;
+      attempt_state: string;
+      finality_state: string;
+      job_state: string;
+      remainder_state: string;
+      remainder_amount: string;
+    }>(
+      `SELECT transfer.state AS transfer_state, attempt.state AS attempt_state,
+         finality.state AS finality_state, job.state AS job_state,
+         remainder.state AS remainder_state,
+         remainder.amount_usdt::text AS remainder_amount
+       FROM core.settlement_transfers transfer
+       JOIN core.settlement_transfer_attempts attempt ON attempt.transfer_id = transfer.transfer_id
+       JOIN core.transaction_finality finality
+         ON finality.transaction_id = 'settlement-finality:' || attempt.attempt_id
+       JOIN core.durable_jobs job ON job.resource_id = $2 AND job.job_type = 'RECONCILE'
+       JOIN core.seckill_prize_reorg_remainders remainder ON remainder.exposure_id = job.payload ->> 'exposureId'
+       WHERE transfer.transfer_id = $1 AND attempt.attempt_id = $3`,
+      [transfer.transferId, sessionId, replacementAttemptId],
+    )).rows[0], {
+      transfer_state: 'QUARANTINED',
+      attempt_state: 'QUARANTINED',
+      finality_state: 'FAILED',
+      job_state: 'SUCCEEDED',
+      remainder_state: 'PENDING',
+      remainder_amount: paymentPrizeAmount,
+    });
+    const failedCanonicalityBefore = (await db.query<{ updated_at: Date }>(
+      'SELECT updated_at FROM core.transaction_finality WHERE transaction_id = $1',
+      [`settlement-finality:${replacementAttemptId}`],
+    )).rows[0]!.updated_at;
+    workerNow = new Date(workerNow.getTime() + 1_000);
+    assert.equal(await settlementWorker.reconcileSettledCanonicalityOnce(), 1);
+    const failedCanonicalityAfter = (await db.query<{ updated_at: Date }>(
+      'SELECT updated_at FROM core.transaction_finality WHERE transaction_id = $1',
+      [`settlement-finality:${replacementAttemptId}`],
+    )).rows[0]!.updated_at;
+    assert.ok(failedCanonicalityAfter > failedCanonicalityBefore);
+    assert.deepEqual((await db.query<{ account_id: string; balance_state: string; amount: string }>(
+      `SELECT line.account_id, line.balance_state,
+         sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS amount
+       FROM core.ledger_lines line
+       WHERE line.account_id IN ($1,$2,$3)
+       GROUP BY line.account_id, line.balance_state
+       HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) <> 0
+       ORDER BY line.account_id, line.balance_state`,
+      [
+        prizeAccountId,
+        `buyer:${buyerAddress}:prize:usdt`,
+        'system:seckill-prize-reorg-deficit:usdt',
+      ],
+    )).rows, [{
+      account_id: prizeAccountId,
+      balance_state: 'LOCKED',
+      amount: paymentPrizeAmount,
+    }]);
+    assert.deepEqual((await db.query<{ transition_type: string }>(
+      `SELECT transition_type FROM core.seckill_prize_reorg_transitions
+       ORDER BY created_at, transition_type`,
+    )).rows.map((row) => row.transition_type).sort(), [
+      'BREAKER_RESUMED',
+      'FUNDING_REVERSED',
+      'PAYOUT_FAILED',
+      'PAYOUT_FINAL',
+      'PAYOUT_REORGED',
+      'QUARANTINED',
+      'REMAINDER_RECOVERABLE',
+      'RESOLVED',
+      'RESOLVED',
+    ]);
+    operationsNow = new Date(workerNow.getTime() + 1_000);
+    const recoveryDeadline = String(Math.floor(operationsNow.getTime() / 1_000) + 300);
+    await assert.rejects(
+      operations.prizeRecoveryChallenge(
+        { walletAddress: admin.address, roles: ['ADMIN'] },
+        exposureId,
+        { nonce: '101', deadline: recoveryDeadline },
+      ),
+      (error: unknown) => error instanceof CoreError && error.code === 'FinalityPending',
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshots (
+         snapshot_id, chain_id, block_number, block_hash, canonical, evidence_hash, recorded_at
+       ) VALUES ('coverage:prize-recovery',56,1202,$1,true,$2,$3)`,
+      [`0x${'c'.repeat(64)}`, `0x${'d'.repeat(64)}`, operationsNow],
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshot_items (
+         snapshot_id, wallet_address, asset, verified_asset_balance,
+         unsettled_liability, coverage_met
+       ) VALUES ('coverage:prize-recovery',$1,'USDT',100000,0,true)`,
+      [custodyWallet],
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshot_canonicality (
+         observation_id, snapshot_id, canonical, observed_block_hash, evidence_hash, observed_at
+       ) VALUES ('coverage-observation:prize-recovery','coverage:prize-recovery',true,$1,$2,$3)`,
+      [`0x${'c'.repeat(64)}`, `0x${'d'.repeat(64)}`, operationsNow],
+    );
+    await db.query(
+      `INSERT INTO core.breaker_causes (
+         scope, cause_type, cause_id, active, evidence_hash, updated_at
+       ) VALUES ('NEW_SETTLEMENT_BATCH','SECURITY','independent-security-hold',true,$1,$2)`,
+      [HASH_2, operationsNow],
+    );
+    const challenge = await operations.prizeRecoveryChallenge(
+      { walletAddress: admin.address, roles: ['ADMIN'] },
+      exposureId,
+      { nonce: '101', deadline: recoveryDeadline },
+    );
+    assert.equal(challenge.recoveryEpisode, 2);
+    const invalidSignature = await Wallet.createRandom().signTypedData(
+      challenge.typedData.domain,
+      challenge.typedData.types,
+      challenge.typedData.message,
+    );
+    await assert.rejects(
+      operations.submitPrizeRecovery(
+        { walletAddress: admin.address, roles: ['ADMIN'] },
+        exposureId,
+        {
+          snapshotId: challenge.snapshotId,
+          nonce: '101',
+          deadline: recoveryDeadline,
+          signature: invalidSignature,
+          correlationId: 'prize-recovery-invalid-signature',
+        },
+      ),
+      (error: unknown) => error instanceof CoreError && error.code === 'InvalidSignature',
+    );
+    const recoverySignature = await secondary.signTypedData(
+      challenge.typedData.domain,
+      challenge.typedData.types,
+      challenge.typedData.message,
+    );
+    const recovery = await operations.submitPrizeRecovery(
+      { walletAddress: admin.address, roles: ['ADMIN'] },
+      exposureId,
+      {
+        snapshotId: challenge.snapshotId,
+        nonce: '101',
+        deadline: recoveryDeadline,
+        signature: recoverySignature,
+        correlationId: 'prize-recovery-final',
+      },
+    );
+    assert.equal(recovery.exposureId, exposureId);
+    assert.equal(recovery.recoveryEpisode, 2);
+    assert.equal(recovery.snapshotId, 'coverage:prize-recovery');
+    const recoveredExposure = await operations.getPrizeReorgExposure(
+      { walletAddress: admin.address, roles: ['ADMIN'] },
+      exposureId,
+    );
+    assert.equal(recoveredExposure.state, 'RECOVERED');
+    assert.equal(recoveredExposure.recoveryEpisode, 2);
+    assert.equal(recoveredExposure.recoveries.length, 2);
+    assert.equal(recoveredExposure.remainder?.state, 'PENDING');
+    assert.equal((await operations.submitPrizeRecovery(
+      { walletAddress: admin.address, roles: ['ADMIN'] },
+      exposureId,
+      {
+        snapshotId: challenge.snapshotId,
+        nonce: '101',
+        deadline: recoveryDeadline,
+        signature: recoverySignature,
+        correlationId: 'prize-recovery-final-replay',
+      },
+    )).recoveryId, recovery.recoveryId);
+    assert.deepEqual((await db.query<{
+      cause_active: boolean;
+      breaker_paused: boolean;
+      recovery_count: string;
+      resume_transition_count: string;
+    }>(
+      `SELECT cause.active AS cause_active, breaker.paused AS breaker_paused,
+         (SELECT count(*)::text FROM core.seckill_prize_reorg_recoveries
+          WHERE exposure_id = $1) AS recovery_count,
+         (SELECT count(*)::text FROM core.seckill_prize_reorg_transitions
+          WHERE exposure_id = $1 AND transition_type = 'BREAKER_RESUMED') AS resume_transition_count
+       FROM core.breaker_causes cause
+       JOIN core.circuit_breakers breaker ON breaker.scope = cause.scope
+       WHERE cause.cause_id = $2`,
+      [exposureId, `seckill-prize-funding-reorg:${injectionActionId}`],
+    )).rows[0], {
+      cause_active: false,
+      breaker_paused: true,
+      recovery_count: '2',
+      resume_transition_count: '1',
+    });
+    assert.equal((await db.query<{ active: boolean }>(
+      `SELECT active FROM core.breaker_causes
+       WHERE scope = 'NEW_SETTLEMENT_BATCH' AND cause_id = 'independent-security-hold'`,
+    )).rows[0]?.active, true);
+    await db.query(
+      `UPDATE core.breaker_causes SET active = false, updated_at = $1
+       WHERE scope = 'NEW_SETTLEMENT_BATCH' AND cause_id = 'independent-security-hold'`,
+      [operationsNow],
+    );
+    await db.query(
+      `UPDATE core.circuit_breakers SET paused = false, changed_by = 'TEST_INDEPENDENT_RECOVERY',
+         changed_at = $1 WHERE scope = 'NEW_SETTLEMENT_BATCH'`,
+      [operationsNow],
+    );
+    payoutBlockCanonical = false;
+    payoutCanonicalEvidence = `0x${'c'.repeat(64)}`;
+    workerNow = new Date(workerNow.getTime() + 1_000);
+    assert.equal(await settlementWorker.reconcileSettledCanonicalityOnce(), 1);
+    assert.deepEqual((await db.query<{
+      finality_state: string;
+      breaker_paused: boolean;
+      original_cause_active: boolean;
+      remainder_state: string;
+      pool: string;
+    }>(
+      `SELECT finality.state AS finality_state, breaker.paused AS breaker_paused,
+         cause.active AS original_cause_active, remainder.state AS remainder_state,
+         session.prize_pool_usdt::text AS pool
+       FROM core.transaction_finality finality
+       JOIN core.circuit_breakers breaker ON breaker.scope = 'NEW_SETTLEMENT_BATCH'
+       JOIN core.breaker_causes cause
+         ON cause.cause_id = $2 AND cause.scope = breaker.scope
+       JOIN core.seckill_prize_reorg_remainders remainder
+         ON remainder.exposure_id = $1 AND remainder.recovery_episode = 2
+       JOIN core.seckill_sessions session ON session.session_id = remainder.session_id
+       WHERE finality.transaction_id = $3`,
+      [
+        exposureId,
+        `seckill-prize-funding-reorg:${injectionActionId}`,
+        `settlement-finality:${replacementAttemptId}`,
+      ],
+    )).rows[0], {
+      finality_state: 'REORGED',
+      breaker_paused: true,
+      original_cause_active: true,
+      remainder_state: 'SUPERSEDED',
+      pool: '0',
+    });
+    const payoutRecoveryExposureId = (await db.query<{ exposure_id: string }>(
+      `SELECT exposure_id FROM core.seckill_prize_reorg_exposures
+       WHERE funding_kind = 'PAYOUT_RECOVERY'`,
+    )).rows[0]!.exposure_id;
+    const pendingPayoutRecovery = await operations.getPrizeReorgExposure(
+      { walletAddress: admin.address, roles: ['ADMIN'] },
+      payoutRecoveryExposureId,
+    );
+    assert.equal(pendingPayoutRecovery.state, 'RECONCILING');
+    assert.equal(
+      pendingPayoutRecovery.transitions.filter((transition) => transition.type === 'RESOLVED').length,
+      0,
+    );
+    payoutBlockCanonical = true;
+    payoutReceipt = {
+      ...payoutReceipt,
+      receiptStatus: 1,
+      blockNumber: 1_202,
+      blockHash: `0x${'d'.repeat(64)}`,
+      confirmations: 14,
+      transfers: [{
+        tokenAddress: transfer.tokenAddress,
+        from: transfer.executorWallet,
+        to: transfer.recipientAddress,
+        amount: transfer.amount,
+      }],
+      transactionDeltas: [
+        {
+          tokenAddress: transfer.tokenAddress,
+          account: transfer.executorWallet,
+          delta: `-${transfer.amount}`,
+        },
+        {
+          tokenAddress: transfer.tokenAddress,
+          account: transfer.recipientAddress,
+          delta: transfer.amount,
+        },
+      ],
+      evidenceHash: `0x${'e'.repeat(64)}`,
+    };
+    workerNow = new Date(workerNow.getTime() + 1_000);
+    assert.equal(await settlementWorker.pollFinalityOnce(), 1);
+    assert.equal(await settlementWorker.reconcilePrizeFundingOnce(), 1);
+    payoutReceipt = {
+      ...payoutReceipt,
+      confirmations: 15,
+      evidenceHash: `0x${'f'.repeat(64)}`,
+    };
+    workerNow = new Date(workerNow.getTime() + 6_000);
+    assert.equal(await settlementWorker.pollFinalityOnce(), 1);
+    assert.equal(await settlementWorker.reconcilePrizeFundingOnce(), 1);
+    assert.deepEqual((await db.query<{
+      finality_state: string;
+      settled_amount: string;
+      pool_amount: string;
+      deficit_amount: string;
+    }>(
+      `SELECT finality.state AS finality_state,
+         COALESCE((SELECT sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text
+           FROM core.ledger_lines line
+           WHERE line.account_id = $2 AND line.balance_state = 'SETTLED'),'0') AS settled_amount,
+         COALESCE((SELECT sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text
+           FROM core.ledger_lines line
+           WHERE line.account_id = $3 AND line.balance_state = 'LOCKED'),'0') AS pool_amount,
+         COALESCE((SELECT sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text
+           FROM core.ledger_lines line
+           WHERE line.account_id = 'system:seckill-prize-reorg-deficit:usdt'
+             AND line.balance_state = 'POSTED'),'0') AS deficit_amount
+       FROM core.transaction_finality finality WHERE finality.transaction_id = $1`,
+      [
+        `settlement-finality:${replacementAttemptId}`,
+        `buyer:${buyerAddress}:prize:usdt`,
+        prizeAccountId,
+      ],
+    )).rows[0], {
+      finality_state: 'FINAL',
+      settled_amount: totalPrizeAmount,
+      pool_amount: '0',
+      deficit_amount: `-${injectionAmount}`,
+    });
+    const terminalPayoutRecovery = await operations.getPrizeReorgExposure(
+      { walletAddress: admin.address, roles: ['ADMIN'] },
+      payoutRecoveryExposureId,
+    );
+    assert.equal(terminalPayoutRecovery.state, 'RECOVERY_REQUIRED');
+    assert.equal(
+      terminalPayoutRecovery.transitions.filter((transition) => transition.type === 'RESOLVED').length,
+      1,
+    );
+    payoutBlockCanonical = false;
+    payoutCanonicalEvidence = `0x${'1'.repeat(63)}2`;
+    workerNow = new Date(workerNow.getTime() + 1_000);
+    assert.equal(await settlementWorker.reconcileSettledCanonicalityOnce(), 1);
+    payoutBlockCanonical = true;
+    payoutReceipt = {
+      ...payoutReceipt,
+      receiptStatus: 0,
+      blockNumber: 1_203,
+      blockHash: `0x${'2'.repeat(63)}3`,
+      confirmations: 14,
+      transfers: [],
+      transactionDeltas: [],
+      evidenceHash: `0x${'3'.repeat(63)}4`,
+    };
+    workerNow = new Date(workerNow.getTime() + 1_000);
+    assert.equal(await settlementWorker.pollFinalityOnce(), 1);
+    assert.equal(await settlementWorker.reconcilePrizeFundingOnce(), 1);
+    payoutReceipt = {
+      ...payoutReceipt,
+      confirmations: 15,
+      evidenceHash: `0x${'4'.repeat(63)}5`,
+    };
+    workerNow = new Date(workerNow.getTime() + 6_000);
+    assert.equal(await settlementWorker.pollFinalityOnce(), 1);
+    assert.equal(await settlementWorker.reconcilePrizeFundingOnce(), 1);
+    assert.deepEqual((await db.query<{
+      finality_state: string;
+      settled_amount: string;
+      pool_amount: string;
+      deficit_amount: string;
+      remainder_episode: string;
+      remainder_amount: string;
+      remainder_state: string;
+    }>(
+      `SELECT finality.state AS finality_state,
+         COALESCE((SELECT sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text
+           FROM core.ledger_lines line
+           WHERE line.account_id = $2 AND line.balance_state = 'SETTLED'),'0') AS settled_amount,
+         COALESCE((SELECT sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text
+           FROM core.ledger_lines line
+           WHERE line.account_id = $3 AND line.balance_state = 'LOCKED'),'0') AS pool_amount,
+         COALESCE((SELECT sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text
+           FROM core.ledger_lines line
+           WHERE line.account_id = 'system:seckill-prize-reorg-deficit:usdt'
+             AND line.balance_state = 'POSTED'),'0') AS deficit_amount,
+         remainder.recovery_episode::text AS remainder_episode,
+         remainder.amount_usdt::text AS remainder_amount,
+         remainder.state AS remainder_state
+       FROM core.transaction_finality finality
+       JOIN core.seckill_prize_reorg_remainders remainder
+         ON remainder.exposure_id = $4 AND remainder.recovery_episode = 4
+       WHERE finality.transaction_id = $1`,
+      [
+        `settlement-finality:${replacementAttemptId}`,
+        `buyer:${buyerAddress}:prize:usdt`,
+        prizeAccountId,
+        exposureId,
+      ],
+    )).rows[0], {
+      finality_state: 'FAILED',
+      settled_amount: '0',
+      pool_amount: paymentPrizeAmount,
+      deficit_amount: '0',
+      remainder_episode: '4',
+      remainder_amount: paymentPrizeAmount,
+      remainder_state: 'PENDING',
+    });
+    const restoredPayoutRecovery = await operations.getPrizeReorgExposure(
+      { walletAddress: admin.address, roles: ['ADMIN'] },
+      payoutRecoveryExposureId,
+    );
+    assert.equal(restoredPayoutRecovery.state, 'RECOVERY_REQUIRED');
+    assert.equal(
+      restoredPayoutRecovery.transitions.filter((transition) => transition.type === 'PAYOUT_REORGED').length,
+      1,
+    );
+    assert.equal(
+      restoredPayoutRecovery.transitions.filter((transition) => transition.type === 'RESOLVED').length,
+      2,
+    );
+    operationsNow = new Date(workerNow.getTime() + 1_000);
+    await db.query(
+      `INSERT INTO core.coverage_snapshots (
+         snapshot_id, chain_id, block_number, block_hash, canonical, evidence_hash, recorded_at
+       ) VALUES ('coverage:prize-recovery-third',56,1203,$1,true,$2,$3)`,
+      [`0x${'d'.repeat(64)}`, `0x${'e'.repeat(64)}`, operationsNow],
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshot_items (
+         snapshot_id, wallet_address, asset, verified_asset_balance,
+         unsettled_liability, coverage_met
+       ) VALUES ('coverage:prize-recovery-third',$1,'USDT',100000,0,true)`,
+      [custodyWallet],
+    );
+    await db.query(
+      `INSERT INTO core.coverage_snapshot_canonicality (
+         observation_id, snapshot_id, canonical, observed_block_hash, evidence_hash, observed_at
+       ) VALUES ('coverage-observation:prize-recovery-third',
+         'coverage:prize-recovery-third',true,$1,$2,$3)`,
+      [`0x${'d'.repeat(64)}`, `0x${'e'.repeat(64)}`, operationsNow],
+    );
+    const recoverExposure = async (targetExposureId: string, nonce: string, correlationId: string) => {
+      const deadline = String(Math.floor(operationsNow.getTime() / 1_000) + 300);
+      const nextChallenge = await operations.prizeRecoveryChallenge(
+        { walletAddress: admin.address, roles: ['ADMIN'] },
+        targetExposureId,
+        { nonce, deadline },
+      );
+      const nextRecovery = await operations.submitPrizeRecovery(
+        { walletAddress: admin.address, roles: ['ADMIN'] },
+        targetExposureId,
+        {
+          snapshotId: nextChallenge.snapshotId,
+          nonce,
+          deadline,
+          signature: await secondary.signTypedData(
+            nextChallenge.typedData.domain,
+            nextChallenge.typedData.types,
+            nextChallenge.typedData.message,
+          ),
+          correlationId,
+        },
+      );
+      return nextRecovery;
+    };
+    assert.equal((await recoverExposure(exposureId, '102', 'prize-recovery-third')).recoveryEpisode, 4);
+    assert.equal((await db.query<{ paused: boolean }>(
+      "SELECT paused FROM core.circuit_breakers WHERE scope = 'NEW_SETTLEMENT_BATCH'",
+    )).rows[0]?.paused, true);
+    assert.equal((await recoverExposure(
+      payoutRecoveryExposureId,
+      '103',
+      'prize-recovery-payout-remainder',
+    )).recoveryEpisode, 2);
+    assert.equal((await db.query<{ paused: boolean }>(
+      "SELECT paused FROM core.circuit_breakers WHERE scope = 'NEW_SETTLEMENT_BATCH'",
+    )).rows[0]?.paused, false);
+    await assert.rejects(
+      settlements.createIntent(
+        { walletAddress: buyerAddress, roles: ['BUYER'] },
+        {
+          rail: 'PRIZE_USDT',
+          amount: totalPrizeAmount,
+          idempotencyKey: 'seckill-prize-quarantined-intent',
+        },
+      ),
+      (error: unknown) => error instanceof CoreError && error.code === 'FinalityPending',
+    );
+  } finally {
+    await db.close();
+  }
+});
+
+test('winning payment contribution reorg revokes the awarded prize without negative balances', async () => {
+  const db = await createBusinessDatabase();
+  const admin = Wallet.createRandom();
+  try {
+    await seedCatalog(db, 2);
+    const now = new Date(Math.floor(Date.now() / 1000) * 1000);
+    const sessionId = `0x${'9'.repeat(64)}`;
+    const secondBuyer = '0x7777777777777777777777777777777777777777';
+    const secondTargetHash = `0x${'8'.repeat(64)}`;
+    await insertLiveSeckillSession(db, sessionId, now, 90, 2);
+    await db.query(
+      `INSERT INTO core.fulfillment_targets (
+         target_id, target_hash, buyer_wallet, idempotency_key, request_hash,
+         fulfillment_mode, region_code, region_code_hash, encrypted_payload,
+         encryption_iv, encryption_tag, expires_at, created_at
+       ) VALUES ('target:second-buyer',$1,$2,'seed-second-buyer',$1,'DELIVERY',
+         '110101',$3,$4,$5,$6,clock_timestamp() + interval '1 day',clock_timestamp())`,
+      [
+        secondTargetHash,
+        secondBuyer,
+        HASH,
+        Buffer.from('00', 'hex'),
+        Buffer.alloc(12),
+        Buffer.alloc(16),
+      ],
+    );
+    const ids = ['1', '2', '3', '4', '5', '6'].map((digit) => `0x${digit.repeat(64)}`);
+    const catalog = new CatalogPaymentService({
+      transactions: transactionAdapter(db),
+      signer: {
+        sign: async () => ({
+          signature: `0x${'1'.repeat(130)}`,
+          signer: '0x8888888888888888888888888888888888888888',
+        }),
+      },
+      nplQuotes: {
+        quote: async ({ listPriceUsdt }) => ({
+          nplQuoteAmount: listPriceUsdt * 10n,
+          quoteSourceEvidence: { source: 'PRIMARY', observedBlock: 40_000_000, reservesHash: HASH },
+        }),
+      },
+      beneficiaries: {
+        resolve: async () => ({
+          genesis: '0x0000000000000000000000000000000000000000',
+          directReferral: '0x5000000000000000000000000000000000000002',
+          district: '0x5000000000000000000000000000000000000003',
+          city: '0x5000000000000000000000000000000000000004',
+          province: '0x5000000000000000000000000000000000000005',
+          region: '0x5000000000000000000000000000000000000006',
+        }),
+      },
+      policies: { assertPublished: async () => undefined },
+      bnmWallets: { assertRegistered: async () => undefined },
+      paymentRouterAddress: '0x9999999999999999999999999999999999999999',
+      clock: () => now,
+      bytes32: () => ids.shift()!,
+      nonce: () => 9n,
+    });
+    const firstQuote = await catalog.createSeckillQuote(BUYER, {
+      idempotencyKey: 'seckill-prize-reorg-first',
+      sessionId,
+      productId: 'product-1',
+      skuId: 'sku-1',
+      quantity: 1,
+      fulfillmentMode: 'DELIVERY',
+      fulfillmentTargetHash: HASH,
+      regionCodeHash: HASH,
+    });
+    const secondQuote = await catalog.createSeckillQuote(secondBuyer, {
+      idempotencyKey: 'seckill-prize-reorg-second',
+      sessionId,
+      productId: 'product-1',
+      skuId: 'sku-1',
+      quantity: 1,
+      fulfillmentMode: 'DELIVERY',
+      fulfillmentTargetHash: secondTargetHash,
+      regionCodeHash: HASH,
+    });
+    const firstPayment = paymentInput(firstQuote.dual.seckill, 'SECKILL');
+    firstPayment.event.transactionHash = `0x${'a'.repeat(64)}`;
+    firstPayment.event.blockHash = `0x${'b'.repeat(64)}`;
+    firstPayment.event.blockTimestamp = new Date(now.getTime() + 42_000);
+    firstPayment.event.finalizedAt = new Date(now.getTime() + 84_000);
+    const secondPayment = paymentInput(secondQuote.dual.seckill, 'SECKILL');
+    secondPayment.event.transactionHash = `0x${'c'.repeat(64)}`;
+    secondPayment.event.blockHash = firstPayment.event.blockHash;
+    secondPayment.event.logIndex = 2;
+    secondPayment.event.blockTimestamp = firstPayment.event.blockTimestamp;
+    secondPayment.event.finalizedAt = firstPayment.event.finalizedAt;
+    const store = new PostgresPaymentStore(transactionAdapter(db));
+    await store.record(firstPayment);
+    await store.record(secondPayment);
+    const block = {
+      number: firstPayment.event.blockNumber,
+      hash: firstPayment.event.blockHash,
+      parentHash: blockHash(firstPayment.event.blockNumber - 1),
+      timestamp: Math.floor(firstPayment.event.blockTimestamp.getTime() / 1000),
+    };
+    const relayDeadline = async () => {
+      const session = (await db.query<{ relay_deadline: Date; main_deadline: Date }>(
+        'SELECT relay_deadline, main_deadline FROM core.seckill_sessions WHERE session_id = $1',
+        [sessionId],
+      )).rows[0]!;
+      const previous = Math.floor(session.relay_deadline.getTime() / 1000);
+      return Math.min(
+        Math.floor(session.main_deadline.getTime() / 1000),
+        block.timestamp + Math.min(previous - block.timestamp + 30, 60),
+      );
+    };
+    const firstRelay = decodedSeckillRelayEvent(
+      sessionId,
+      firstQuote.orderId,
+      firstPayment.event.blockHash,
+      await relayDeadline(),
+    );
+    firstRelay.transactionHash = firstPayment.event.transactionHash;
+    await recordSeckillRelayProjection(adapter(db), block, firstRelay);
+    const secondRelay = decodedSeckillRelayEvent(
+      sessionId,
+      secondQuote.orderId,
+      secondPayment.event.blockHash,
+      await relayDeadline(),
+    );
+    secondRelay.transactionHash = secondPayment.event.transactionHash;
+    secondRelay.logIndex = 3;
+    await recordSeckillRelayProjection(adapter(db), block, secondRelay);
+    await advancePaymentFinality(adapter(db), firstPayment.event.blockNumber + 14);
+    const settlementAt = new Date((await db.query<{ relay_deadline: Date }>(
+      'SELECT relay_deadline FROM core.seckill_sessions WHERE session_id = $1',
+      [sessionId],
+    )).rows[0]!.relay_deadline.getTime() + 5 * 60_000 + 1_000);
+    assert.deepEqual(await settleMaturedSeckillPrizes(adapter(db), settlementAt), [sessionId]);
+    const approved = await reviewSeckillPrize(adapter(db), {
+      sessionId,
+      actorWallet: admin.address.toLowerCase(),
+      decision: 'APPROVE',
+      reasonCode: 'ORDER_VALID',
+      evidenceHash: HASH_2,
+      idempotencyKey: 'approve-second-buyer',
+      requestHash: `0x${'d'.repeat(64)}`,
+      at: settlementAt,
+    });
+    assert.equal(approved.candidate?.orderId, secondQuote.orderId);
+    const firstContribution = firstQuote.dual.seckill.merchantConcessionAllocations
+      .find((allocation) => allocation.pool === 'SECKILL_PRIZE')!.amount;
+    const secondContribution = secondQuote.dual.seckill.merchantConcessionAllocations
+      .find((allocation) => allocation.pool === 'SECKILL_PRIZE')!.amount;
+    assert.equal(approved.poolAmountUsdt, (BigInt(firstContribution) + BigInt(secondContribution)).toString());
+
+    const secondEventKey = paymentEventKey(
+      secondPayment.event.transactionHash,
+      secondPayment.event.logIndex,
+      secondPayment.event.blockHash,
+    );
+    assert.deepEqual(await store.reverse(secondEventKey, `0x${'e'.repeat(64)}`), {
+      status: 'REVERSED',
+      orderId: secondQuote.orderId,
+    });
+    const projection = await new SeckillService({
+      transactions: transactionAdapter(db),
+      clock: () => settlementAt,
+    }).get(sessionId);
+    assert.equal(projection.prizePoolUsdt, firstContribution);
+    assert.equal(projection.winnerWallet, null);
+    assert.equal(projection.prizeSettlement?.state, 'QUARANTINED');
+    assert.equal(projection.prizeSettlement?.payout, null);
+    assert.deepEqual(
+      (await db.query<{ account_id: string; balance_state: string; amount: string }>(
+        `SELECT line.account_id, line.balance_state,
+           sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END)::text AS amount
+         FROM core.ledger_lines line
+         WHERE line.account_id IN ($1,$2)
+         GROUP BY line.account_id, line.balance_state
+         HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) <> 0
+         ORDER BY line.account_id, line.balance_state`,
+        [`seckill-prize:${sessionId}:usdt`, `buyer:${secondBuyer}:prize:usdt`],
+      )).rows,
+      [{
+        account_id: `seckill-prize:${sessionId}:usdt`,
+        balance_state: 'LOCKED',
+        amount: firstContribution,
+      }],
+    );
+    assert.deepEqual((await db.query<{
+      amount_usdt: string;
+      session_id: string;
+      state: string;
+    }>(
+      `SELECT amount_usdt::text, session_id, state
+       FROM core.seckill_prize_reorg_remainders`,
+    )).rows, [{ amount_usdt: firstContribution, session_id: sessionId, state: 'PENDING' }]);
+    assert.deepEqual((await db.query<{ transition_type: string }>(
+      `SELECT transition_type FROM core.seckill_prize_reorg_transitions
+       ORDER BY transition_type`,
+    )).rows.map((row) => row.transition_type), [
+      'FUNDING_REVERSED',
+      'QUARANTINED',
+      'REMAINDER_RECOVERABLE',
+      'RESOLVED',
+    ]);
+    const recoveryTargetSessionId = `0x${'f'.repeat(64)}`;
+    await insertLiveSeckillSession(
+      db,
+      recoveryTargetSessionId,
+      new Date(settlementAt.getTime() + 60_000),
+      90,
+    );
+    await transactionAdapter(db).transaction((executor) => (
+      rollPendingSeckillPrizesIntoSession(executor, recoveryTargetSessionId, settlementAt)
+    ));
+    assert.deepEqual((await db.query<{
+      state: string;
+      target_session_id: string;
+      source_pool: string;
+      target_pool: string;
+    }>(
+      `SELECT remainder.state, remainder.target_session_id,
+         source.prize_pool_usdt::text AS source_pool,
+         target.prize_pool_usdt::text AS target_pool
+       FROM core.seckill_prize_reorg_remainders remainder
+       JOIN core.seckill_sessions source ON source.session_id = remainder.session_id
+       JOIN core.seckill_sessions target ON target.session_id = remainder.target_session_id`,
+    )).rows[0], {
+      state: 'ROLLED_OVER',
+      target_session_id: recoveryTargetSessionId,
+      source_pool: '0',
+      target_pool: firstContribution,
+    });
+    const negativeBalances = await db.query<{ account_id: string }>(
+      `SELECT line.account_id
+       FROM core.ledger_lines line
+       JOIN core.ledger_accounts account ON account.account_id = line.account_id
+       WHERE account.purpose = 'SECKILL_PRIZE_LIABILITY'
+       GROUP BY line.account_id, line.balance_state, line.backing_wallet_address
+       HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) < 0`,
+    );
+    assert.deepEqual(negativeBalances.rows, []);
   } finally {
     await db.close();
   }
@@ -4426,8 +5698,9 @@ test('empty seckill rolls its existing locked prize into the next session withou
     await insertLiveSeckillSession(db, sourceSessionId, now, 90);
     await insertLiveSeckillSession(db, targetSessionId, new Date(now.getTime() + 60 * 60_000), 90);
     const custodySafe = paymentPolicyPayload().usdtSettlementWallet;
-    const safeAccountId = `safe:usdt-custody:${custodySafe}:usdt`;
+    const safeAccountId = `wallet:usdt-custody:${custodySafe}:usdt`;
     const sourceAccountId = `seckill-prize:${sourceSessionId}:usdt`;
+    const injectionActionId = `0x${'a'.repeat(64)}`;
     await db.query(
       `INSERT INTO core.ledger_accounts (
          account_id, owner_type, owner_id, asset, purpose, wallet_address
@@ -4475,6 +5748,42 @@ test('empty seckill rolls its existing locked prize into the next session withou
       'UPDATE core.seckill_sessions SET prize_pool_usdt = 50 WHERE session_id = $1',
       [sourceSessionId],
     );
+    await db.query(
+      `INSERT INTO core.seckill_governance_actions (
+         action_id, session_id, policy_version, action_kind, evidence_hash,
+         governance_wallet_address, target_address, calldata, calldata_hash,
+         old_value_hash, new_value_hash, state, executor_nonce, submitted_tx_hash,
+         execution_evidence_hash, actor_wallet, idempotency_key, request_hash,
+         created_at, updated_at, nonce_reserved_at, nonce_reservation_evidence_hash,
+         execution_artifact_version, execution_request_digest
+       ) VALUES ($1,$2,1,'PRIZE_INJECTION',$3,$4,$5,'0x00',$3,$3,$3,'FINAL',0,$6,$3,
+         $4,'empty-prize-injection',$3,$7,$7,$7,$3,$8,$3)`,
+      [
+        injectionActionId,
+        sourceSessionId,
+        HASH,
+        custodySafe,
+        USDT_ADDRESS,
+        `0x${'b'.repeat(64)}`,
+        now,
+        CORE_ARTIFACT_VERSION,
+      ],
+    );
+    await db.query(
+      `INSERT INTO core.seckill_prize_injections (
+         injection_id, action_id, session_id, amount_usdt, operations_wallet_address,
+         settlement_wallet_address, token_address, final_journal_id, created_at, updated_at
+       ) VALUES ($1,$2,$3,50,$4,$4,$5,$6,$7,$7)`,
+      [
+        `0x${'c'.repeat(64)}`,
+        injectionActionId,
+        sourceSessionId,
+        custodySafe,
+        USDT_ADDRESS,
+        `journal:empty-prize:${sourceSessionId}`,
+        now,
+      ],
+    );
 
     assert.deepEqual(
       await settleMaturedSeckillPrizes(adapter(db), new Date(now.getTime() + 7 * 60_000)),
@@ -4508,6 +5817,44 @@ test('empty seckill rolls its existing locked prize into the next session withou
        FROM core.ledger_lines WHERE account_id = $1 AND balance_state = 'LOCKED'`,
       [`seckill-prize:${targetSessionId}:usdt`],
     )).rows[0]?.amount, '50');
+
+    await reverseFinalizedSeckillPrizeInjection(adapter(db), {
+      actionId: injectionActionId,
+      sessionId: sourceSessionId,
+      policyVersion: 1,
+      evidenceHash: `0x${'d'.repeat(64)}`,
+      sourceTxHash: `0x${'b'.repeat(64)}`,
+      sourceBlockHash: `0x${'e'.repeat(64)}`,
+      canonicalBlockHash: `0x${'f'.repeat(64)}`,
+      at: new Date(now.getTime() + 8 * 60_000),
+    });
+    assert.deepEqual((await db.query<{
+      session_id: string;
+      prize_pool_usdt: string;
+    }>(
+      `SELECT session_id, prize_pool_usdt::text FROM core.seckill_sessions
+       WHERE session_id IN ($1,$2) ORDER BY session_id`,
+      [sourceSessionId, targetSessionId],
+    )).rows, [
+      { session_id: sourceSessionId, prize_pool_usdt: '0' },
+      { session_id: targetSessionId, prize_pool_usdt: '0' },
+    ]);
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.seckill_prize_settlements WHERE session_id = $1',
+      [sourceSessionId],
+    )).rows[0]?.state, 'QUARANTINED');
+    assert.deepEqual((await db.query<{ account_id: string; amount: string }>(
+      `SELECT account_id,
+         sum(CASE WHEN side = 'CREDIT' THEN amount ELSE -amount END)::text AS amount
+       FROM core.ledger_lines
+       WHERE account_id IN ($1,$2) AND balance_state = 'LOCKED'
+       GROUP BY account_id
+       HAVING sum(CASE WHEN side = 'CREDIT' THEN amount ELSE -amount END) <> 0`,
+      [sourceAccountId, `seckill-prize:${targetSessionId}:usdt`],
+    )).rows, []);
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.ledger_journals WHERE event_type = 'SECKILL_PRIZE_FUNDING_RECALLED'",
+    )).rows[0]?.count, '1');
   } finally {
     await db.close();
   }

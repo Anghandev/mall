@@ -230,6 +230,11 @@
           "name": "045_settlement_nonce_release.sql",
           "path": "schema/business/045_settlement_nonce_release.sql",
           "sha256": "156cf626e27cf02829abac1810a5667fce09c4216460f7aa5c00fe0efd834237"
+        },
+        {
+          "name": "046_seckill_prize_reorg_recovery.sql",
+          "path": "schema/business/046_seckill_prize_reorg_recovery.sql",
+          "sha256": "83bc11a46a024c011dae4a815afe5b7cebc1686305cdd60f2f02ad0da0ee4bde"
         }
       ]
     },

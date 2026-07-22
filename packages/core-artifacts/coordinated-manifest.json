@@ -18,7 +18,7 @@
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "a1eb7e3762375062add9bd96729e3f6cc3f46e9c727d4e47f58fe0471030357f"
+      "sha256": "cc9196b3f74f39b113b7e29a355979340116afc1b446a2d0e0e2475674fc8139"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
@@ -26,11 +26,11 @@
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "ce1b100264cf36c232b8122c6bbadc4186977bc50aa0c72081d524948e3e00d8"
+      "sha256": "f62c63b1fa4832e54264b1aec7ba32364cf3ebb5d7dcf5a7ad76a879309d7764"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "c4a7c87f8773560dfd89f250d43cfe9654f0a2915b0dce77e1b0574e917998e2"
+      "sha256": "958064e97bbdaadbadf5a56b6a89cdb219b0fc6925fabbb97a5f1a8299323104"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
@@ -60,11 +60,11 @@
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "39c42fbb7a055c6af68fba6aec50832b68afb7b1e9cd2ef1d23efe61518f514d"
+      "sha256": "45d0924fafcc1b67a82de8e10443d201cf5c98186e70a9e6978650447b7352db"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "19e6a3efdf5a2f29e2e7aef39ec48583c9c200d5974a552241e59e672c3e00af"
+      "sha256": "bf09a12d1c8d8c3fef88c65e33c3c8d4482039f563b65037508f1d538bcb3dd0"
     }
   ],
   "httpSurface": [
@@ -94,6 +94,8 @@
     "GET /v2/admin/risk/overview",
     "GET /v2/admin/seckill/actions",
     "GET /v2/admin/seckill/actions/{actionId}",
+    "GET /v2/admin/seckill/prize-reorgs",
+    "GET /v2/admin/seckill/prize-reorgs/{exposureId}",
     "GET /v2/admin/settlement-requests",
     "GET /v2/admin/settlement-requests/{requestId}",
     "GET /v2/admin/settlement-transfers",
@@ -180,6 +182,8 @@
     "POST /v2/admin/seckill/actions/{actionId}/execute",
     "POST /v2/admin/seckill/actions/{actionId}/secondary-signature",
     "POST /v2/admin/seckill/breaker/resume",
+    "POST /v2/admin/seckill/prize-reorgs/{exposureId}/recovery",
+    "POST /v2/admin/seckill/prize-reorgs/{exposureId}/recovery-challenge",
     "POST /v2/admin/seckill/sessions",
     "POST /v2/admin/seckill/sessions/{sessionId}/force-close",
     "POST /v2/admin/seckill/sessions/{sessionId}/prize-injections",
@@ -404,6 +408,12 @@
     "SeckillPrizeSettlementProjection",
     "SeckillGovernanceActionProjection",
     "SeckillGovernanceChallenge",
+    "SeckillPrizeRecoveryChallenge",
+    "SeckillPrizeRecoveryProjection",
+    "SeckillPrizeReorgExposureProjection",
+    "SeckillPrizeReorgTransition",
+    "SeckillPrizeReorgRecoveryJob",
+    "SeckillPrizeReorgRemainder",
     "SeckillSessionPlanProjection",
     "SeckillPrizeInjectionProjection",
     "RealtimeEventPage",

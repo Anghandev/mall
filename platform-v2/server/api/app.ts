@@ -143,6 +143,8 @@ export interface SeckillApiService {
 export interface SeckillOperationsApiService {
   list(actor: FulfillmentActor): Promise<unknown>;
   get(actor: FulfillmentActor, actionId: string): Promise<unknown>;
+  listPrizeReorgExposures(actor: FulfillmentActor): Promise<unknown>;
+  getPrizeReorgExposure(actor: FulfillmentActor, exposureId: string): Promise<unknown>;
   createSession(actor: FulfillmentActor, input: {
     policyVersion: string;
     rulesContentHash: string;
@@ -174,6 +176,17 @@ export interface SeckillOperationsApiService {
     reasonCode: string;
     evidenceHash: string;
     idempotencyKey: string;
+    correlationId: string;
+  }): Promise<unknown>;
+  prizeRecoveryChallenge(actor: FulfillmentActor, exposureId: string, input: {
+    nonce: string;
+    deadline: string;
+  }): Promise<unknown>;
+  submitPrizeRecovery(actor: FulfillmentActor, exposureId: string, input: {
+    snapshotId: string;
+    nonce: string;
+    deadline: string;
+    signature: string;
     correlationId: string;
   }): Promise<unknown>;
   approvalChallenge(actor: FulfillmentActor, actionId: string, input: {
@@ -2622,6 +2635,59 @@ async function routeAdminServices(
       idempotencyKey: requiredString(body, 'idempotencyKey'),
       correlationId,
     }), correlationId);
+    return true;
+  }
+  if (request.method === 'GET' && url.pathname === '/v2/admin/seckill/prize-reorgs') {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
+    assertOnlySearchParams(url, []);
+    sendJson(response, 200, await dependencies.seckillOperationsService.listPrizeReorgExposures(
+      fulfillmentActor(claims),
+    ), correlationId);
+    return true;
+  }
+  const prizeReorgExposure = url.pathname.match(
+    /^\/v2\/admin\/seckill\/prize-reorgs\/(0x[0-9a-fA-F]{64})$/,
+  );
+  if (request.method === 'GET' && prizeReorgExposure) {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR', 'AUDITOR']);
+    assertOnlySearchParams(url, []);
+    sendJson(response, 200, await dependencies.seckillOperationsService.getPrizeReorgExposure(
+      fulfillmentActor(claims),
+      prizeReorgExposure[1]!.toLowerCase(),
+    ), correlationId);
+    return true;
+  }
+  const prizeRecoveryAction = url.pathname.match(
+    /^\/v2\/admin\/seckill\/prize-reorgs\/(0x[0-9a-fA-F]{64})\/(recovery-challenge|recovery)$/,
+  );
+  if (request.method === 'POST' && prizeRecoveryAction) {
+    const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN']);
+    const body = await readJson(request);
+    const exposureId = prizeRecoveryAction[1]!.toLowerCase();
+    if (prizeRecoveryAction[2] === 'recovery-challenge') {
+      assertOnlyKeys(body, ['nonce', 'deadline']);
+      sendJson(response, 200, await dependencies.seckillOperationsService.prizeRecoveryChallenge(
+        fulfillmentActor(claims),
+        exposureId,
+        {
+          nonce: requiredString(body, 'nonce'),
+          deadline: requiredString(body, 'deadline'),
+        },
+      ), correlationId);
+      return true;
+    }
+    assertOnlyKeys(body, ['snapshotId', 'nonce', 'deadline', 'signature']);
+    sendJson(response, 201, await dependencies.seckillOperationsService.submitPrizeRecovery(
+      fulfillmentActor(claims),
+      exposureId,
+      {
+        snapshotId: requiredString(body, 'snapshotId'),
+        nonce: requiredString(body, 'nonce'),
+        deadline: requiredString(body, 'deadline'),
+        signature: requiredString(body, 'signature'),
+        correlationId,
+      },
+    ), correlationId);
     return true;
   }
   const seckillSessionAction = url.pathname.match(

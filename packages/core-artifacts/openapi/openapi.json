@@ -2612,6 +2612,245 @@
         ]
       }
     },
+    "/v2/admin/seckill/prize-reorgs": {
+      "get": {
+        "operationId": "listSeckillPrizeReorgExposures",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SeckillPrizeReorgExposureProjection"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/admin/seckill/prize-reorgs/{exposureId}": {
+      "get": {
+        "operationId": "getSeckillPrizeReorgExposure",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeckillPrizeReorgExposureProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "exposureId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bytes32"
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/seckill/prize-reorgs/{exposureId}/recovery-challenge": {
+      "post": {
+        "operationId": "createSeckillPrizeRecoveryChallenge",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeckillPrizeRecoveryChallengeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeckillPrizeRecoveryChallenge"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "exposureId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v2/admin/seckill/prize-reorgs/{exposureId}/recovery": {
+      "post": {
+        "operationId": "recoverSeckillPrizeReorg",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeckillPrizeRecoveryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Authoritative Core result",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeckillPrizeRecoveryProjection"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed closed",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "exposureId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
     "/v2/admin/seckill/breaker/resume": {
       "post": {
         "operationId": "createSeckillBreakerResume",
@@ -22170,6 +22409,435 @@
           },
           "idempotencyKey": {
             "$ref": "#/components/schemas/IdempotencyKey"
+          }
+        }
+      },
+      "SeckillPrizeRecoveryChallengeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "nonce",
+          "deadline"
+        ],
+        "properties": {
+          "nonce": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "deadline": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          }
+        }
+      },
+      "SeckillPrizeRecoveryRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "snapshotId",
+          "nonce",
+          "deadline",
+          "signature"
+        ],
+        "properties": {
+          "snapshotId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "nonce": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "deadline": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^0x(?:[0-9a-fA-F]{2})+$"
+          }
+        }
+      },
+      "SeckillPrizeRecoveryChallenge": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "exposureId",
+          "fundingId",
+          "snapshotId",
+          "evidenceHash",
+          "recoveryEpisode",
+          "policyVersion",
+          "signer",
+          "executorWallet",
+          "typedData",
+          "digest"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-fulfillment-launch.20"
+          },
+          "exposureId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "fundingId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "snapshotId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "recoveryEpisode": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "policyVersion": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "signer": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "executorWallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "typedData": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "domain",
+              "types",
+              "primaryType",
+              "message"
+            ],
+            "properties": {
+              "domain": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "types": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "primaryType": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "digest": {
+            "$ref": "#/components/schemas/Bytes32"
+          }
+        }
+      },
+      "SeckillPrizeRecoveryProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "recoveryId",
+          "exposureId",
+          "recoveryEpisode",
+          "snapshotId",
+          "evidenceHash",
+          "actorWallet",
+          "secondarySigner",
+          "secondarySignatureHash",
+          "approvalNonce",
+          "approvalDeadline",
+          "createdAt"
+        ],
+        "properties": {
+          "recoveryId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "exposureId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "recoveryEpisode": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "snapshotId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "actorWallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "secondarySigner": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "secondarySignatureHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "approvalNonce": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "approvalDeadline": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SeckillPrizeReorgTransition": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "transitionId",
+          "type",
+          "evidenceHash",
+          "payload",
+          "createdAt"
+        ],
+        "properties": {
+          "transitionId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "type": {
+            "enum": [
+              "QUARANTINED",
+              "FUNDING_REVERSED",
+              "PAYOUT_FINAL",
+              "PAYOUT_FAILED",
+              "PAYOUT_REORGED",
+              "REMAINDER_RECOVERABLE",
+              "REMAINDER_ROLLED_OVER",
+              "RESOLVED",
+              "BREAKER_RESUMED"
+            ]
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SeckillPrizeReorgRecoveryJob": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state",
+          "lastErrorCode"
+        ],
+        "properties": {
+          "state": {
+            "type": "string",
+            "minLength": 1
+          },
+          "lastErrorCode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "SeckillPrizeReorgRemainder": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "remainderId",
+          "recoveryEpisode",
+          "amountUsdt",
+          "state",
+          "targetSessionId"
+        ],
+        "properties": {
+          "remainderId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "recoveryEpisode": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "amountUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "state": {
+            "enum": [
+              "PENDING",
+              "ROLLED_OVER",
+              "SUPERSEDED"
+            ]
+          },
+          "targetSessionId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "SeckillPrizeReorgExposureProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactVersion",
+          "exposureId",
+          "fundingKind",
+          "fundingId",
+          "sourceSessionId",
+          "liabilitySessionId",
+          "amountUsdt",
+          "settlementWallet",
+          "evidenceHash",
+          "sourceTxHash",
+          "sourceBlockHash",
+          "resolutionMode",
+          "payoutSnapshot",
+          "state",
+          "recoveryEpisode",
+          "breakerCause",
+          "reconciliation",
+          "remainder",
+          "transitions",
+          "recoveries",
+          "createdAt"
+        ],
+        "properties": {
+          "artifactVersion": {
+            "const": "2.0.0-fulfillment-launch.20"
+          },
+          "exposureId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "fundingKind": {
+            "enum": [
+              "INJECTION",
+              "PAYMENT_CONTRIBUTION",
+              "PAYOUT_RECOVERY"
+            ]
+          },
+          "fundingId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourceSessionId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "liabilitySessionId": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "amountUsdt": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "settlementWallet": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "evidenceHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "sourceTxHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "sourceBlockHash": {
+            "$ref": "#/components/schemas/Bytes32"
+          },
+          "resolutionMode": {
+            "enum": [
+              "STANDARD_REVERSAL",
+              "DEFICIT_MONITORING"
+            ]
+          },
+          "payoutSnapshot": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "state": {
+            "enum": [
+              "RECONCILING",
+              "RECOVERY_REQUIRED",
+              "RECOVERED"
+            ]
+          },
+          "recoveryEpisode": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "breakerCause": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "active",
+              "evidenceHash",
+              "updatedAt"
+            ],
+            "properties": {
+              "active": {
+                "type": "boolean"
+              },
+              "evidenceHash": {
+                "$ref": "#/components/schemas/Bytes32"
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "reconciliation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeckillPrizeReorgRecoveryJob"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "remainder": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeckillPrizeReorgRemainder"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "transitions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SeckillPrizeReorgTransition"
+            }
+          },
+          "recoveries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SeckillPrizeRecoveryProjection"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },

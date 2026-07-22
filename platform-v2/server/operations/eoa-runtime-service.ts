@@ -63,6 +63,7 @@ type RuntimeErrorCode =
   | 'AMOUNT_MISMATCH'
   | 'CALLDATA_MISMATCH'
   | 'NONCE_MISMATCH'
+  | 'RECONCILIATION_MISSING'
   | 'IDEMPOTENCY_CONFLICT'
   | 'INVALID_ENVELOPE';
 
@@ -152,6 +153,7 @@ async function settle(input: Record<string, unknown>) {
   let requestDigest: string;
   let gasLimit: bigint;
   let idempotencyKey: string;
+  let reconciliationOnly: boolean;
   let authorization: SettlementExecutionAuthorization;
   try {
     transferId = hash(input.transferId, 'transferId');
@@ -169,6 +171,10 @@ async function settle(input: Record<string, unknown>) {
     requestDigest = hash(input.requestDigest, 'requestDigest');
     gasLimit = boundedGas(input.gasLimit);
     idempotencyKey = identifier(input.idempotencyKey, 'idempotencyKey');
+    reconciliationOnly = input.reconciliationOnly === true;
+    if (input.reconciliationOnly !== undefined && !reconciliationOnly) {
+      throw new Error('invalid reconciliation mode');
+    }
     authorization = object(input.authorization, 'authorization') as unknown as SettlementExecutionAuthorization;
   } catch {
     throw new RuntimeRequestError('INVALID_ENVELOPE', 'settlement envelope is invalid');
@@ -205,9 +211,23 @@ async function settle(input: Record<string, unknown>) {
   if (
     transferInterface.encodeFunctionData('transfer', decoded).toLowerCase() !== transferCalldata
   ) throw new RuntimeRequestError('CALLDATA_MISMATCH', 'settlement calldata mismatch');
-  const requestHash = hashJson(input);
+  const canonicalInput = { ...input };
+  delete canonicalInput.reconciliationOnly;
+  const requestHash = hashJson(canonicalInput);
   const existing = state[`settlement:${idempotencyKey}`];
-  if (existing) return replayBroadcast(existing, requestHash);
+  if (existing) {
+    return reconciliationOnly
+      ? replay(existing, requestHash)
+      : replayBroadcast(existing, requestHash);
+  }
+  if (reconciliationOnly) {
+    throw new RuntimeRequestError(
+      'RECONCILIATION_MISSING',
+      'settlement reconciliation has no persisted transaction',
+      409,
+      { stateRecordPresent: false, idempotencyKey },
+    );
+  }
   const replacementHash = optionalHash(input.replacementForExecutionTxHash);
   if (replacementHash) {
     try {

@@ -80,6 +80,7 @@ export class HttpEoaSettlementBroadcaster implements EoaSettlementBroadcaster {
       || !isHash(input.contentHash)
       || !isHash(input.requestDigest)
       || !validIdentifier(input.idempotencyKey)
+      || (input.reconciliationOnly !== undefined && input.reconciliationOnly !== true)
       || !/^[1-9][0-9]*$/.test(input.gasLimit)
       || BigInt(input.gasLimit) > this.#maxGasLimit
       || !input.authorization

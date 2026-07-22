@@ -105,6 +105,32 @@ test('EOA runtime replays one persisted raw transaction after HTTP response loss
 
     const secondRuntime = await startRuntime(env);
     runtime = secondRuntime;
+    const reconciliation = await fetch(`http://127.0.0.1:${runtimePort}/settlement`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer settlement-test-token' },
+      body: JSON.stringify({ ...request, reconciliationOnly: true }),
+    });
+    assert.equal(reconciliation.status, 200);
+    assert.equal(
+      (await reconciliation.json() as { executionTxHash: string }).executionTxHash,
+      keccak256(broadcasts[0]!).toLowerCase(),
+    );
+    assert.equal(broadcasts.length, 1);
+    const missing = await fetch(`http://127.0.0.1:${runtimePort}/settlement`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer settlement-test-token' },
+      body: JSON.stringify({
+        ...request,
+        idempotencyKey: 'settlement-runtime-reconciliation-missing',
+        reconciliationOnly: true,
+      }),
+    });
+    assert.equal(missing.status, 409);
+    assert.equal(
+      (await missing.json() as { error: { code: string } }).error.code,
+      'RECONCILIATION_MISSING',
+    );
+    assert.equal(broadcasts.length, 1);
     const replay = await fetch(`http://127.0.0.1:${runtimePort}/settlement`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: 'Bearer settlement-test-token' },
