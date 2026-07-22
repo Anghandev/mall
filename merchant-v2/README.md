@@ -23,7 +23,7 @@ pnpm --filter @abu24k/merchant check
 ```
 
 The app consumes the coordinated `@abu24k/core-artifacts` workspace package at
-`2.0.0-fulfillment-launch.20`. This batch keeps exact NPL payment quotes under
+`2.0.0-fulfillment-launch.21`. This batch keeps exact NPL payment quotes under
 Core authority without a production on-chain TWAP dependency; the workbench
 does not calculate or sign buyer payment amounts. In addition to Bootstrap,
 merchant SIWE and the

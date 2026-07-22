@@ -23,8 +23,8 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('fulfillment-launch .20 checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-fulfillment-launch.20');
+test('fulfillment-launch .21 checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-fulfillment-launch.21');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
@@ -180,6 +180,7 @@ test('OpenAPI publishes all implemented Core operations with no dangling refs', 
     'POST /v2/admin/notification-campaigns/{campaignId}/publish',
     'POST /v2/admin/notification-campaigns/{campaignId}/retry-failed',
     'POST /v2/admin/orders/batch-actions/preview',
+    'POST /v2/admin/payments/{orderId}/txhash-recovery',
     'POST /v2/admin/policy-drafts',
     'POST /v2/admin/policy-drafts/{draftId}/approval-challenge',
     'POST /v2/admin/policy-drafts/{draftId}/execute',

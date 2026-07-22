@@ -122,21 +122,19 @@ test('typed config reports blocked inputs without exposing secret values', () =>
       Object.keys(ready.providerReadiness).map((provider) => [provider, 'CONFIGURATION_REQUIRED']),
     ) as typeof ready.providerReadiness,
   };
-  const readyReadiness = publicReadiness(paymentReady, paymentRuntimeReadiness(readinessTime, true, true), readinessTime);
+  const readyReadiness = publicReadiness(paymentReady, paymentRuntimeReadiness(readinessTime, true), readinessTime);
   assert.equal(readyReadiness.writesEnabled, true);
   assert.deepEqual(readyReadiness.runtimeBlockers, []);
-  assert.deepEqual(
-    publicReadiness(paymentReady, paymentRuntimeReadiness(readinessTime, true, false), readinessTime).runtimeBlockers,
-    ['INDEXER_LAGGING'],
-  );
-  const healthyRuntime = paymentRuntimeReadiness(readinessTime, true, true);
+  const healthyRuntime = paymentRuntimeReadiness(readinessTime, true);
   const runtimeCases: Array<{ blocker: string; snapshot: RuntimeReadinessSnapshot }> = [
     { blocker: 'RUNTIME_SNAPSHOT_EXPIRED', snapshot: { ...healthyRuntime, expiresAt: readinessTime.toISOString() } },
     { blocker: 'DATABASE_UNAVAILABLE', snapshot: { ...healthyRuntime, databaseHealthy: false } },
     { blocker: 'REDIS_UNAVAILABLE', snapshot: { ...healthyRuntime, redisHealthy: false } },
     { blocker: 'SIGNER_UNAVAILABLE', snapshot: { ...healthyRuntime, signerHealthy: false } },
-    { blocker: 'INDEXER_UNHEALTHY', snapshot: { ...healthyRuntime, indexerHealthy: false } },
-    { blocker: 'INDEXER_LAGGING', snapshot: { ...healthyRuntime, indexerCaughtUp: false } },
+    {
+      blocker: 'PAYMENT_RECEIPT_WORKER_UNHEALTHY',
+      snapshot: { ...healthyRuntime, paymentReceiptWorkerHealthy: false },
+    },
     { blocker: 'RPC_DIVERGENCE', snapshot: { ...healthyRuntime, rpcChain56Healthy: false } },
     { blocker: 'QUOTE_SOURCE_UNHEALTHY', snapshot: { ...healthyRuntime, nplQuoteSourceHealthy: false } },
     { blocker: 'CONTRACT_EVIDENCE_UNVERIFIED', snapshot: { ...healthyRuntime, componentHashesVerified: false } },
@@ -150,10 +148,10 @@ test('typed config reports blocked inputs without exposing secret values', () =>
   assert.deepEqual(
     publicReadiness(paymentReady, {
       ...healthyRuntime,
-      indexerHealthy: false,
-      indexerErrorCode: 'InvalidFinality',
+      paymentReceiptWorkerHealthy: false,
+      paymentReceiptWorkerErrorCode: 'InvalidFinality',
     }, readinessTime).runtimeBlockers,
-    ['INDEXER_UNHEALTHY'],
+    ['PAYMENT_RECEIPT_WORKER_UNHEALTHY'],
   );
   assert.deepEqual(
     publicReadiness({ ...paymentReady, paymentDecisionBlocked: ['TEST_DECISION'] }, healthyRuntime, readinessTime).runtimeBlockers,
@@ -168,10 +166,6 @@ test('typed config reports blocked inputs without exposing secret values', () =>
     /address/,
   );
   assert.throws(() => loadConfig({ ...completeEnvironment(), REQUIRED_CONFIRMATIONS: '12' }), /frozen at 15/);
-  assert.throws(
-    () => loadConfig({ ...completeEnvironment(), PAYMENT_INDEXER_START_BLOCK: '1' }),
-    /predates the Router deployment/,
-  );
   assert.throws(
     () => loadConfig({ ...completeEnvironment(), SETTLEMENT_EXECUTOR_URL: 'http://executor.example.invalid' }),
     /must use HTTPS/,
@@ -1094,6 +1088,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
         state: 'QUOTED',
       }),
       submitPayment: async (buyerWallet, input) => ({ ...input, buyerWallet, state: 'SUBMITTED' }),
+      recoverPayment: async (actor, input) => ({ ...input, actor: actor.walletAddress, state: 'SUBMITTED' }),
       getPayment: async (buyerWallet, orderId) => ({ orderId, buyerWallet, state: 'SUBMITTED' }),
       getAdminPayment: async (actor, orderId) => ({ orderId, actor: actor.walletAddress, state: 'SUBMITTED' }),
     },
@@ -1695,6 +1690,18 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     });
     assert.equal(adminPayment.status, 200);
     assert.equal(((await adminPayment.json()) as { orderId: string }).orderId, ORDER_ID);
+    assert.equal((await fetch(`${base}/v2/admin/payments/${ORDER_ID}/txhash-recovery`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${buyerOnlyToken}` },
+      body: JSON.stringify({ txHash: HASH_2 }),
+    })).status, 403);
+    const recoveredPayment = await fetch(`${base}/v2/admin/payments/${ORDER_ID}/txhash-recovery`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+      body: JSON.stringify({ txHash: HASH_2 }),
+    });
+    assert.equal(recoveredPayment.status, 202);
+    assert.equal(((await recoveredPayment.json()) as { orderId: string }).orderId, ORDER_ID);
     const adminRequests = await fetch(`${base}/v2/admin/settlement-requests?state=SUBMITTED&limit=20`, {
       headers: { authorization: `Bearer ${session.token}` },
     });
@@ -1862,22 +1869,31 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     assert.equal((await fetch(`${base}/v2/admin/seckill/actions`, {
       headers: { authorization: `Bearer ${session.token}` },
     })).status, 200);
+    const seckillDraftRequest = {
+      policyVersion: '1',
+      rulesContentHash: HASH,
+      productId: 'product-1',
+      skuId: 'sku-1',
+      inventory: 4,
+      seckillListPriceUsdt: '80',
+      startsAt: '2026-07-15T01:00:00.000Z',
+      idempotencyKey: 'seckill-http-session-1',
+    };
+    const blockedSeckillDraft = await fetch(`${base}/v2/admin/seckill/sessions`, {
+      method: 'POST',
+      headers: bearerHeaders,
+      body: JSON.stringify(seckillDraftRequest),
+    });
+    assert.equal(blockedSeckillDraft.status, 503);
+    runtimeReadiness.paymentReceiptWorkerHealthy = true;
     const seckillDraft = await fetch(`${base}/v2/admin/seckill/sessions`, {
       method: 'POST',
       headers: bearerHeaders,
-      body: JSON.stringify({
-        policyVersion: '1',
-        rulesContentHash: HASH,
-        productId: 'product-1',
-        skuId: 'sku-1',
-        inventory: 4,
-        seckillListPriceUsdt: '80',
-        startsAt: '2026-07-15T01:00:00.000Z',
-        idempotencyKey: 'seckill-http-session-1',
-      }),
+      body: JSON.stringify(seckillDraftRequest),
     });
     assert.equal(seckillDraft.status, 201);
     assert.equal(((await seckillDraft.json()) as { actionId: string }).actionId, HASH);
+    runtimeReadiness.paymentReceiptWorkerHealthy = false;
     assert.equal((await fetch(`${base}/v2/admin/seckill/actions/${HASH}/approval-challenge`, {
       method: 'POST',
       headers: bearerHeaders,
@@ -3116,8 +3132,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       body: JSON.stringify(quotePayload),
     });
     assert.equal(blockedQuote.status, 503);
-    runtimeReadiness.indexerHealthy = true;
-    runtimeReadiness.indexerCaughtUp = true;
+    runtimeReadiness.paymentReceiptWorkerHealthy = true;
     const quote = await fetch(`${base}/v2/payments/quotes`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
@@ -3141,6 +3156,7 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       }),
     });
     assert.equal(seckillQuote.status, 201);
+    runtimeReadiness.paymentReceiptWorkerHealthy = false;
     const submission = await fetch(`${base}/v2/payments/submissions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
@@ -3381,7 +3397,7 @@ function completeEnvironment(): Record<string, string> {
   };
 }
 
-function paymentRuntimeReadiness(now: Date, indexerHealthy: boolean, indexerCaughtUp = indexerHealthy) {
+function paymentRuntimeReadiness(now: Date, paymentReceiptWorkerHealthy: boolean) {
   return {
     artifactVersion: CORE_ARTIFACT_VERSION,
     checkedAt: new Date(now.getTime() - 1_000).toISOString(),
@@ -3392,8 +3408,7 @@ function paymentRuntimeReadiness(now: Date, indexerHealthy: boolean, indexerCaug
     walletRolesVerified: true,
     signerBindingsVerified: true,
     nplQuoteSourceHealthy: true,
-    indexerHealthy,
-    indexerCaughtUp,
+    paymentReceiptWorkerHealthy,
     databaseHealthy: true,
     redisHealthy: true,
     rpcChain56Healthy: true,

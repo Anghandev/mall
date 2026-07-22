@@ -17,7 +17,7 @@ const REQUIRED_CONFIRMATIONS = 15;
 const USDT = 'USDT';
 const NPL = 'NPL';
 const BNM = 'BNM_POINTS';
-const PAYMENT_COMPLETED_EVENT_SIGNATURE_HASH = id(
+export const PAYMENT_COMPLETED_EVENT_SIGNATURE_HASH = id(
   'PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)',
 ).toLowerCase();
 
@@ -348,6 +348,14 @@ export async function recordPaymentProjection(executor: SqlExecutor, input: Reco
     lines,
   });
 
+  const submittedFinality = await executor.query<{ transaction_id: string }>(
+    `SELECT transaction_id FROM core.transaction_finality
+     WHERE transaction_id LIKE 'payment-submission:%'
+       AND resource_type = 'ORDER_PAYMENT' AND resource_id = $1 AND tx_hash = $2
+     ORDER BY updated_at DESC LIMIT 1 FOR UPDATE`,
+    [intent.orderId, input.event.transactionHash],
+  );
+  const transactionId = submittedFinality.rows[0]?.transaction_id ?? `payment:${eventKey}`;
   await executor.query(
     `INSERT INTO core.payment_events (
        event_key, order_id, journal_id, transaction_hash, log_index, block_number,
@@ -403,11 +411,11 @@ export async function recordPaymentProjection(executor: SqlExecutor, input: Reco
        receipt_status = EXCLUDED.receipt_status,
        state = EXCLUDED.state,
        evidence = EXCLUDED.evidence,
-       submitted_at = EXCLUDED.submitted_at,
+       submitted_at = LEAST(core.transaction_finality.submitted_at, EXCLUDED.submitted_at),
        finalized_at = EXCLUDED.finalized_at,
        updated_at = clock_timestamp()`,
     [
-      `payment:${eventKey}`,
+      transactionId,
       intent.orderId,
       input.event.contractAddress,
       input.event.eventHash,
@@ -546,9 +554,12 @@ export async function reversePaymentProjection(executor: SqlExecutor, eventKey: 
     `SELECT orders.policy_version::text, finality.contract_address
      FROM core.orders orders
      JOIN core.transaction_finality finality
-       ON finality.transaction_id = $2
+       ON finality.resource_type = 'ORDER_PAYMENT'
+      AND finality.resource_id = orders.order_id
+      AND finality.tx_hash = $2
+      AND finality.block_hash = $3
      WHERE orders.order_id = $1`,
-    [row.order_id, `payment:${eventKey}`],
+    [row.order_id, row.transaction_hash, row.block_hash],
   );
   const identity = paymentIdentity.rows[0];
   if (!identity) throw new CoreError('InvalidFinality', 'Payment reorg identity is unavailable', 409);
@@ -650,9 +661,11 @@ export async function reversePaymentProjection(executor: SqlExecutor, eventKey: 
     [row.order_id],
   );
   await executor.query(
-    `UPDATE core.transaction_finality SET state = 'REORGED', updated_at = clock_timestamp()
-     WHERE transaction_id = $1`,
-    [`payment:${eventKey}`],
+    `UPDATE core.transaction_finality SET state = 'REORGED', finalized_at = NULL,
+       updated_at = clock_timestamp()
+     WHERE resource_type = 'ORDER_PAYMENT' AND resource_id = $1
+       AND tx_hash = $2 AND block_hash = $3`,
+    [row.order_id, row.transaction_hash, row.block_hash],
   );
   await executor.query(
     `INSERT INTO core.outbox_events (
@@ -1030,6 +1043,90 @@ export async function advancePaymentFinality(executor: SqlExecutor, canonicalHea
   }
 }
 
+export async function finalizePaymentProjection(
+  executor: SqlExecutor,
+  input: {
+    orderId: string;
+    transactionHash: string;
+    blockHash: string;
+    confirmations: number;
+    finalizedAt: Date;
+  },
+) {
+  if (
+    !isHash(input.orderId)
+    || !isHash(input.transactionHash)
+    || !isHash(input.blockHash)
+    || !Number.isSafeInteger(input.confirmations)
+    || input.confirmations < REQUIRED_CONFIRMATIONS
+    || !Number.isFinite(input.finalizedAt.getTime())
+  ) throw new CoreError('InvalidFinality', 'Invalid final payment receipt evidence');
+
+  const payment = await executor.query<{ event_key: string; classification: string }>(
+    `UPDATE core.payment_events
+     SET confirmations = $4
+     WHERE order_id = $1 AND transaction_hash = $2 AND block_hash = $3 AND canonical
+     RETURNING event_key, classification`,
+    [input.orderId, input.transactionHash, input.blockHash, input.confirmations],
+  );
+  const row = payment.rows[0];
+  if (!row || payment.rows.length !== 1) {
+    throw new CoreError('InvalidFinality', 'Final payment projection is unavailable', 409);
+  }
+  const finality = await executor.query<{ transaction_id: string }>(
+    `UPDATE core.transaction_finality
+     SET confirmations = $4, receipt_status = 1, state = 'FINAL', finalized_at = $5,
+       updated_at = clock_timestamp()
+     WHERE resource_type = 'ORDER_PAYMENT' AND resource_id = $1
+       AND tx_hash = $2 AND block_hash = $3
+     RETURNING transaction_id`,
+    [input.orderId, input.transactionHash, input.blockHash, input.confirmations, input.finalizedAt],
+  );
+  if (finality.rows.length !== 1) {
+    throw new CoreError('InvalidFinality', 'Final payment transaction evidence is unavailable', 409);
+  }
+  const orders = await executor.query<{ order_id: string }>(
+    `UPDATE core.orders SET finality_status = 'FINAL', updated_at = clock_timestamp()
+     WHERE order_id = $1 AND payment_tx_hash = $2 AND payment_block_hash = $3
+     RETURNING order_id`,
+    [input.orderId, input.transactionHash, input.blockHash],
+  );
+  if (!orders.rows[0]) throw new CoreError('InvalidFinality', 'Final payment order is unavailable', 409);
+  await executor.query(
+    `INSERT INTO core.outbox_events (
+       event_id, aggregate_type, aggregate_id, event_type, payload,
+       idempotency_key, state
+     ) VALUES ($1,'ORDER',$2,'PaymentFinalized',$3,$4,'PENDING')
+     ON CONFLICT (idempotency_key) DO NOTHING`,
+    [
+      `outbox:payment-final:${row.event_key}`,
+      input.orderId,
+      JSON.stringify({
+        eventKey: row.event_key,
+        orderId: input.orderId,
+        transactionHash: input.transactionHash,
+        blockHash: input.blockHash,
+        confirmations: input.confirmations,
+      }),
+      `payment-finalized:${row.event_key}`,
+    ],
+  );
+  await finalizeSeckillRelayProjection(executor, input.orderId);
+  const unusedReservations = await executor.query<{ reservation_id: string }>(
+    `SELECT leg.reservation_id
+     FROM core.payment_quote_legs leg
+     JOIN core.orders orders ON orders.order_id = leg.order_id
+     JOIN core.inventory_reservations reservation ON reservation.reservation_id = leg.reservation_id
+     WHERE leg.order_id = $1 AND reservation.state = 'ACTIVE'
+       AND leg.reservation_id <> orders.reservation_id
+     FOR UPDATE`,
+    [input.orderId],
+  );
+  for (const reservation of unusedReservations.rows) {
+    await executor.query("SELECT core.release_inventory_reservation($1, 'RELEASED')", [reservation.reservation_id]);
+  }
+}
+
 async function finalizeSeckillRelayProjection(executor: SqlExecutor, orderId: string) {
   const payment = await executor.query<{ classification: string }>(
     `SELECT classification FROM core.payment_events
@@ -1061,7 +1158,24 @@ async function finalizeSeckillRelayProjection(executor: SqlExecutor, orderId: st
        relay.previous_relay_deadline, relay.relay_deadline, relay.finalized_at`,
     [orderId],
   );
-  const row = finalized.rows[0];
+  let row = finalized.rows[0];
+  if (!row) {
+    const existing = await executor.query<typeof finalized.rows[number]>(
+      `SELECT relay.relay_event_key, relay.payment_event_key, relay.session_id,
+         relay.buyer_wallet, relay.transaction_hash,
+         relay.previous_relay_deadline, relay.relay_deadline, relay.finalized_at
+       FROM core.seckill_relay_events relay
+       JOIN core.transaction_finality finality
+         ON finality.resource_type = 'ORDER_PAYMENT'
+        AND finality.resource_id = relay.order_id
+        AND finality.tx_hash = relay.transaction_hash
+        AND finality.block_hash = relay.block_hash
+       WHERE relay.order_id = $1 AND relay.canonical AND relay.finalized
+         AND finality.state = 'FINAL' AND finality.finalized_at IS NOT NULL`,
+      [orderId],
+    );
+    row = existing.rows[0];
+  }
   if (!row) throw new CoreError('InvalidFinality', 'Final seckill payment is missing its Router relay event', 409);
   await executor.query(
     `INSERT INTO core.outbox_events (

@@ -2,7 +2,7 @@
 
 ## Runtime Boundary
 
-V2 Core is the shared authority for contracts, funds, data, API, indexer,
+V2 Core is the shared authority for contracts, funds, data, API, payment receipt finality,
 signer, executor and external adapters. Mall, merchant and platform-admin
 applications consume only its coordinated versioned artifacts. V2 has no
 runtime dependency on `legacy/v1-npl-only/`.

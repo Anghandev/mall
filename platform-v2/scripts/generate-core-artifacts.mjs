@@ -2744,6 +2744,20 @@ function settlementAdminOpenApiPaths(errorResponse) {
         { $ref: '#/components/schemas/PaymentProjection' },
       ),
     },
+    '/v2/admin/payments/{orderId}/txhash-recovery': {
+      post: {
+        ...operation(
+          'recoverAdminPaymentTxHash',
+          { $ref: '#/components/schemas/PaymentSubmissionResponse' },
+          202,
+          'PaymentTxHashRecoveryRequest',
+        ),
+        parameters: [{
+          name: 'orderId', in: 'path', required: true,
+          schema: { $ref: '#/components/schemas/Bytes32' },
+        }],
+      },
+    },
     '/v2/admin/settlement-requests': {
       get: {
         ...operation('listAdminSettlementRequests', { $ref: '#/components/schemas/AdminSettlementRequestList' }),
@@ -6010,6 +6024,13 @@ function paymentOpenApiSchemas() {
       type: 'object', additionalProperties: false, required: ['orderId', 'txHash'],
       properties: {
         orderId: { $ref: '#/components/schemas/Bytes32' },
+        txHash: { $ref: '#/components/schemas/Bytes32' },
+        replacementForTxHash: { $ref: '#/components/schemas/Bytes32' },
+      },
+    },
+    PaymentTxHashRecoveryRequest: {
+      type: 'object', additionalProperties: false, required: ['txHash'],
+      properties: {
         txHash: { $ref: '#/components/schemas/Bytes32' },
         replacementForTxHash: { $ref: '#/components/schemas/Bytes32' },
       },

@@ -54,11 +54,10 @@ import {
   ResilientSeckillChainSource,
   SeckillGovernanceWorker,
 } from './chain/seckill-governance.ts';
-import { ChainIndexer } from './chain/indexer.ts';
 import {
-  PollingPaymentIndexer,
-  ResilientBscPaymentChainSource,
-} from './chain/payment-indexer-worker.ts';
+  PaymentReceiptWorker,
+  ResilientBscPaymentReceiptSource,
+} from './chain/payment-receipt-worker.ts';
 import {
   PaymentRuntimeReadinessMonitor,
   RpcPaymentRuntimeAttestor,
@@ -93,7 +92,7 @@ import {
   postgresTransactionRunner,
 } from './data/connections.ts';
 import type { SqlExecutor } from './data/migrations.ts';
-import { PostgresIndexerStore } from './data/indexer-store.ts';
+import { PostgresPaymentReceiptRepository } from './data/payment-receipt-repository.ts';
 import { SettlementService } from './data/settlement-service.ts';
 import { SeckillService } from './data/seckill-service.ts';
 import { TakeoverFundingService } from './data/takeover-funding-service.ts';
@@ -181,7 +180,6 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
       : {}),
   });
   const adminGlobalOperationsService = new AdminGlobalOperationsService({ transactions });
-  const indexerStore = new PostgresIndexerStore(transactions);
   const seckillService = new SeckillService({ transactions });
   const seckillOperationsService = new SeckillOperationsService({
     transactions,
@@ -537,18 +535,20 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
   const decoder = await AbiEventDecoder.load(ABI_BUNDLE_PATH, {
     PaymentRouterV2: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),
   });
-  const paymentIndexer = new PollingPaymentIndexer({
-    source: new ResilientBscPaymentChainSource({
+  const paymentReceiptWorker = new PaymentReceiptWorker({
+    source: new ResilientBscPaymentReceiptSource({
       primaryRpcUrl: required(config.rpcUrl, 'BSC_RPC_URL'),
       fallbackRpcUrl: required(config.fallbackRpcUrl, 'BSC_FALLBACK_RPC_URL'),
       routerAddress: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),
     }),
-    indexer: new ChainIndexer(decoder, indexerStore),
-    store: indexerStore,
-    deploymentBlock: config.paymentIndexerStartBlock
-      ?? required(config.paymentRouterDeploymentBlock, 'PAYMENT_ROUTER_DEPLOYMENT_BLOCK_MANIFEST'),
+    repository: new PostgresPaymentReceiptRepository({
+      transactions,
+      routerAddress: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),
+    }),
+    decoder,
+    routerAddress: required(config.paymentRouterAddress, 'PAYMENT_ROUTER_ADDRESS_MANIFEST'),
   });
-  paymentIndexer.start();
+  paymentReceiptWorker.start();
   if (config.providerReadiness.BNM === 'READY') {
     bnmWorker.start();
   }
@@ -589,7 +589,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     },
     redisHealthy: async () => (await redis.ping()) === 'PONG',
     signerHealthy: () => signer.health(),
-    indexerStatus: () => paymentIndexer.status(),
+    receiptWorkerStatus: () => paymentReceiptWorker.status(),
   });
   // Startup must remain fail-closed without making the HTTP recovery surface wait on worker probes.
   readinessMonitor.start();
@@ -668,7 +668,7 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
       await notificationWorker.stop();
       await logisticsPrintWorker.stop();
       await auditWorker.stop();
-      await paymentIndexer.stop();
+      await paymentReceiptWorker.stop();
       await fulfillmentScheduler.stop();
       await settlementWorker.stop();
       await settlementTransferScheduler.stop();

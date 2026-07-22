@@ -1,11 +1,15 @@
 # BSC Mainnet EOA Deployment And Micro-Test Plan
 
-Status: `EOA_FULL_CHAIN_COMPLETE`; setup packet `COMPLETE_15_OF_15`;
-recovery, payment, seckill, breaker and dual-settlement packets `EXECUTED`.
+Status: historical packets `EOA_FULL_CHAIN_COMPLETE`; current three-buyer
+release acceptance `PENDING`. Historical evidence below does not establish Go
+for the current commit and must not replace the new bounded run.
 
-This plan is bound to settlement/admin artifact
-`2.0.0-settlement-admin.16` and the five-role EOA architecture in
-`V2_SYSTEM_CONTRACT.md`. It does not authorize a transaction.
+The current acceptance run is bound to artifact
+`2.0.0-fulfillment-launch.21`, the release commit produced by this Goal and the
+five-role EOA architecture in `V2_SYSTEM_CONTRACT.md`. The historical evidence
+below was produced under `2.0.0-settlement-admin.16` and cannot authorize or
+substitute for the new run. This document alone does not authorize a
+transaction.
 
 ## Current Evidence
 
@@ -37,7 +41,7 @@ This plan is bound to settlement/admin artifact
   resumed seckill purchases. Each governance event and state transition matched,
   both breakers finished unpaused and all receipts reached 15 confirmations on
   both RPCs.
-- The ordinary payment event was consumed by the real PGlite Indexer, projected
+- In the historical run, the ordinary payment event was consumed by the then-current PGlite Indexer, projected
   to a final order and completed through pickup verification. The same order
   unlocked the merchant USDT payable and one NPL beneficiary payable.
 - Both signed settlement requests passed Coverage, the settlement breaker
@@ -145,7 +149,8 @@ Actual native value plus Gas was `0.0000471636 BNB`, below the approved
    freight, NPL Burn and NPL Reward deltas with zero Router retention.
 8. Completed: execute the bounded live-seckill flow and prove reservation,
    classification and prize-liability evidence.
-9. Completed: project the real ordinary payment through the Indexer, finality
+9. Current release gate: submit each buyer txHash to `PaymentReceiptWorker`, verify
+   the exact Router receipt and 15-confirmation finality, then project payment
    and pickup fulfillment. The 1,000-USDT guarantee remains an explicit mainnet
    budget boundary and was not disguised as a micro amount.
 10. Completed: execute one signed `MERCHANT_USDT` request and one signed

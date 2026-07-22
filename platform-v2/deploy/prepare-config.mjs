@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdir, open, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { Interface, JsonRpcProvider, Wallet, keccak256 } from 'ethers';
 import { validateRouterCutover } from './router-cutover.mjs';
@@ -94,62 +94,46 @@ if (!Number.isSafeInteger(routerDeploymentBlock) || routerDeploymentBlock <= 0) 
 if (!/^0x[0-9a-f]{64}$/.test(routerDeployedCodeHash ?? '')) {
   throw new Error('PaymentRouter deployed code hash is unavailable');
 }
-const receiptDirectory = resolve('platform-v2/deployments');
-const routerMicrotestBlocks = [];
-for (const name of await readdir(receiptDirectory)) {
-  if (!name.endsWith('-receipts-private.json')) continue;
-  collectRouterBlocks(
-    JSON.parse(await readFile(join(receiptDirectory, name), 'utf8')),
-    routerAddress,
-    routerMicrotestBlocks,
-  );
-}
-let paymentIndexerStartBlock;
-if (routerMicrotestBlocks.length > 0) {
-  paymentIndexerStartBlock = Math.max(Math.max(...routerMicrotestBlocks), commonHead) + 1;
-} else {
-  const deploymentEvidence = JSON.parse(await readFile(
-    resolve('platform-v2/deployments/bsc-payment-v2.json'),
-    'utf8',
-  ));
-  const cutover = validateRouterCutover(deploymentEvidence.routerCutover, {
-    activeRouter: routerAddress,
-    platformServiceFeeWallet: required('PLATFORM_SERVICE_FEE_WALLET_ADDRESS'),
-    deploymentBlock: routerDeploymentBlock,
-    deployedCodeHash: routerDeployedCodeHash,
-  });
-  if (routerDeploymentBlock > commonHead) throw new Error('Router deployment is above the agreed RPC head');
-  const [primaryReceipt, fallbackReceipt, primaryRouterCode, fallbackRouterCode] = await Promise.all([
-    provider.getTransactionReceipt(cutover.deploymentTxHash),
-    fallbackProvider.getTransactionReceipt(cutover.deploymentTxHash),
-    provider.getCode(routerAddress, commonHead),
-    fallbackProvider.getCode(routerAddress, commonHead),
-  ]);
-  if (
-    !primaryReceipt || !fallbackReceipt
-    || primaryReceipt.status !== 1 || fallbackReceipt.status !== 1
-    || primaryReceipt.contractAddress?.toLowerCase() !== routerAddress
-    || fallbackReceipt.contractAddress?.toLowerCase() !== routerAddress
-    || primaryReceipt.blockNumber !== routerDeploymentBlock
-    || fallbackReceipt.blockNumber !== routerDeploymentBlock
-    || primaryReceipt.blockHash.toLowerCase() !== fallbackReceipt.blockHash.toLowerCase()
-    || primaryRouterCode === '0x' || primaryRouterCode !== fallbackRouterCode
-    || keccak256(primaryRouterCode).toLowerCase() !== routerDeployedCodeHash
-  ) throw new Error('Router cutover receipt or runtime code does not match the coordinated manifest');
-  const recipientCall = new Interface(['function platformServiceFeeWallet() view returns (address)'])
-    .encodeFunctionData('platformServiceFeeWallet');
-  const [primaryRecipient, fallbackRecipient] = await Promise.all([
-    provider.call({ to: routerAddress, data: recipientCall }, commonHead),
-    fallbackProvider.call({ to: routerAddress, data: recipientCall }, commonHead),
-  ]);
-  const decodedRecipient = new Interface(['function platformServiceFeeWallet() view returns (address)'])
-    .decodeFunctionResult('platformServiceFeeWallet', primaryRecipient)[0].toLowerCase();
-  if (
-    primaryRecipient !== fallbackRecipient
-    || decodedRecipient !== required('PLATFORM_SERVICE_FEE_WALLET_ADDRESS').toLowerCase()
-  ) throw new Error('Router service-fee recipient does not match production configuration');
-  paymentIndexerStartBlock = routerDeploymentBlock;
-}
+const deploymentEvidence = JSON.parse(await readFile(
+  resolve('platform-v2/deployments/bsc-payment-v2.json'),
+  'utf8',
+));
+const cutover = validateRouterCutover(deploymentEvidence.routerCutover, {
+  activeRouter: routerAddress,
+  platformServiceFeeWallet: required('PLATFORM_SERVICE_FEE_WALLET_ADDRESS'),
+  deploymentBlock: routerDeploymentBlock,
+  deployedCodeHash: routerDeployedCodeHash,
+});
+if (routerDeploymentBlock > commonHead) throw new Error('Router deployment is above the agreed RPC head');
+const [primaryReceipt, fallbackReceipt, primaryRouterCode, fallbackRouterCode] = await Promise.all([
+  provider.getTransactionReceipt(cutover.deploymentTxHash),
+  fallbackProvider.getTransactionReceipt(cutover.deploymentTxHash),
+  provider.getCode(routerAddress, commonHead),
+  fallbackProvider.getCode(routerAddress, commonHead),
+]);
+if (
+  !primaryReceipt || !fallbackReceipt
+  || primaryReceipt.status !== 1 || fallbackReceipt.status !== 1
+  || primaryReceipt.contractAddress?.toLowerCase() !== routerAddress
+  || fallbackReceipt.contractAddress?.toLowerCase() !== routerAddress
+  || primaryReceipt.blockNumber !== routerDeploymentBlock
+  || fallbackReceipt.blockNumber !== routerDeploymentBlock
+  || primaryReceipt.blockHash.toLowerCase() !== fallbackReceipt.blockHash.toLowerCase()
+  || primaryRouterCode === '0x' || primaryRouterCode !== fallbackRouterCode
+  || keccak256(primaryRouterCode).toLowerCase() !== routerDeployedCodeHash
+) throw new Error('Router cutover receipt or runtime code does not match the coordinated manifest');
+const recipientCall = new Interface(['function platformServiceFeeWallet() view returns (address)'])
+  .encodeFunctionData('platformServiceFeeWallet');
+const [primaryRecipient, fallbackRecipient] = await Promise.all([
+  provider.call({ to: routerAddress, data: recipientCall }, commonHead),
+  fallbackProvider.call({ to: routerAddress, data: recipientCall }, commonHead),
+]);
+const decodedRecipient = new Interface(['function platformServiceFeeWallet() view returns (address)'])
+  .decodeFunctionResult('platformServiceFeeWallet', primaryRecipient)[0].toLowerCase();
+if (
+  primaryRecipient !== fallbackRecipient
+  || decodedRecipient !== required('PLATFORM_SERVICE_FEE_WALLET_ADDRESS').toLowerCase()
+) throw new Error('Router service-fee recipient does not match production configuration');
 
 const databasePassword = secret();
 const redisPassword = secret();
@@ -185,7 +169,6 @@ await writeEnv('core.env', [
   line('TRACKING_HASH_KEY', secret()),
   line('BSC_RPC_URL', rpc),
   line('BSC_FALLBACK_RPC_URL', fallbackRpc),
-  line('PAYMENT_INDEXER_START_BLOCK', paymentIndexerStartBlock),
   ...roleAddresses.map((address) => line(address, required(address))),
   line('SIGNER_SERVICE_URL', 'http://127.0.0.1:8790/sign'),
   line('SIGNER_SERVICE_TOKEN', signerToken),
@@ -239,18 +222,3 @@ await writeEnv('media-storage.env', [
 
 await writeFile(join(target, 'README'), 'Generated production configuration. Keep mode 0600 and never commit or print values.\n', { mode: 0o600 });
 console.log(`Prepared ${target} with mode-0600 configuration files`);
-
-function collectRouterBlocks(value, routerAddress, blocks) {
-  if (Array.isArray(value)) {
-    for (const item of value) collectRouterBlocks(item, routerAddress, blocks);
-    return;
-  }
-  if (!value || typeof value !== 'object') return;
-  if (
-    typeof value.to === 'string'
-    && value.to.toLowerCase() === routerAddress
-    && Number.isSafeInteger(value.blockNumber)
-    && value.blockNumber > 0
-  ) blocks.push(value.blockNumber);
-  for (const child of Object.values(value)) collectRouterBlocks(child, routerAddress, blocks);
-}

@@ -129,6 +129,10 @@ export interface PaymentApiService {
     buyerWallet: string,
     input: { orderId: string; txHash: string; replacementForTxHash?: string },
   ): Promise<unknown>;
+  recoverPayment(
+    actor: FulfillmentActor,
+    input: { orderId: string; txHash: string; replacementForTxHash?: string },
+  ): Promise<unknown>;
   getPayment(buyerWallet: string, orderId: string): Promise<unknown>;
   getAdminPayment(actor: FulfillmentActor, orderId: string): Promise<unknown>;
 }
@@ -2351,6 +2355,32 @@ async function routeAdminServices(
   url: URL,
   correlationId: string,
 ) {
+  const adminPaymentRecovery = url.pathname.match(
+    /^\/v2\/admin\/payments\/(0x[0-9a-fA-F]{64})\/txhash-recovery$/,
+  );
+  if (request.method === 'POST' && adminPaymentRecovery) {
+    const claims = authorizeRoles(
+      request,
+      dependencies.config,
+      dependencies.clock(),
+      ['ADMIN', 'OPERATOR'],
+    );
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['txHash', 'replacementForTxHash']);
+    sendJson(
+      response,
+      202,
+      await dependencies.paymentService.recoverPayment(fulfillmentActor(claims), {
+        orderId: adminPaymentRecovery[1]!.toLowerCase(),
+        txHash: requiredString(body, 'txHash'),
+        ...(body.replacementForTxHash === undefined
+          ? {}
+          : { replacementForTxHash: requiredString(body, 'replacementForTxHash') }),
+      }),
+      correlationId,
+    );
+    return true;
+  }
   const adminPaymentOrderId = pathParameter(url.pathname, '/v2/admin/payments/');
   if (request.method === 'GET' && adminPaymentOrderId) {
     const claims = authorizeRoles(
@@ -2619,6 +2649,7 @@ async function routeAdminServices(
   }
   if (request.method === 'POST' && url.pathname === '/v2/admin/seckill/sessions') {
     const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
+    await assertPaymentWritesEnabled(dependencies, ['NEW_PAYMENT', 'SECKILL_PURCHASE']);
     const body = await readJson(request);
     assertOnlyKeys(body, [
       'policyVersion', 'rulesContentHash', 'productId', 'skuId', 'inventory',

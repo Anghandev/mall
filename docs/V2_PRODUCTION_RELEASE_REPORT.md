@@ -1,5 +1,9 @@
 # 24K商城 V2 生产发布报告
 
+> Historical `.18` release snapshot only. It is retained as immutable evidence
+> of that deployment and does not establish Go for artifact `.21`, the current
+> commit, the three-buyer mainnet run or the next production release.
+
 日期：2026-07-20
 发布提交：`a1c00261dc279af876407bf083e6540312d6da8e`
 Core artifact：`2.0.0-fulfillment-launch.18`
@@ -7,9 +11,9 @@ Core artifact：`2.0.0-fulfillment-launch.18`
 
 ## 结论
 
-`.18` 已发布，生产验收为 `Go`。商城购买 readiness 已开启，手工履约首发
-链路已上线。第三方物流、电子面单、打印机和地图仍为 Phase 2，不参与当前
-readiness 和上线门禁。
+`.18` 在 2026-07-20 当时的发布验收为 `Go`，但该结论已被当前
+`.21` 发布目标取代，不能作为当前 Go 证据。当前结论在三买家主网微测、
+cleanup gate、生产发布和 600 秒观察全部通过前仍为 `No-Go/PENDING`。
 
 ## 数据与迁移
 

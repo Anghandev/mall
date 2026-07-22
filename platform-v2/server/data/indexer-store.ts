@@ -138,8 +138,12 @@ async function projectPayments(executor: SqlExecutor, segment: IndexedChainBlock
     const ordered = [...events].sort((left, right) => left.logIndex - right.logIndex);
     for (const event of ordered) {
       if (event.contract !== 'PaymentRouterV2' || event.eventName !== 'PaymentCompleted') continue;
+      const confirmations = canonicalHead - block.number + 1;
+      const confirmationBlock = confirmations >= 15
+        ? segment.find((item) => item.block.number === block.number + 14)?.block
+        : undefined;
       await recordPaymentProjection(executor, {
-        event: canonicalPaymentEvent(block, event, segment, canonicalHead),
+        event: canonicalPaymentEvent(block, event, confirmations, confirmationBlock?.timestamp),
       });
     }
     for (const event of ordered) {
@@ -215,7 +219,11 @@ export async function recordSeckillRelayProjection(
     [orderId, event.transactionHash.toLowerCase(), event.blockHash.toLowerCase(), event.logIndex],
   );
   const row = context.rows[0];
-  if (!row || row.session_id.toLowerCase() !== sessionId || !['PREHEAT', 'LIVE'].includes(row.phase)) {
+  if (
+    !row
+    || row.session_id.toLowerCase() !== sessionId
+    || !['PREHEAT', 'LIVE', 'FORCE_CLOSED'].includes(row.phase)
+  ) {
     throw new CoreError('InvalidFinality', 'Seckill relay event has no matching live payment session', 409);
   }
   const startsAt = Math.floor(row.starts_at.getTime() / 1000);
@@ -270,18 +278,14 @@ export async function recordSeckillRelayProjection(
   return { status: 'RECORDED' as const, sessionId, orderId, relayDeadline: projectedDeadline };
 }
 
-function canonicalPaymentEvent(
-  block: IndexedChainBlock['block'],
+export function canonicalPaymentEvent(
+  block: Pick<IndexedChainBlock['block'], 'number' | 'hash' | 'timestamp'>,
   event: IndexedChainBlock['events'][number],
-  segment: IndexedChainBlock[],
-  canonicalHead: number,
+  confirmations: number,
+  confirmationTimestamp?: number,
 ): CanonicalPaymentEvent {
   const classification = paymentClassification(event.values.classification);
-  const confirmations = canonicalHead - block.number + 1;
-  const confirmationBlock = confirmations >= 15
-    ? segment.find((item) => item.block.number === block.number + 14)?.block
-    : undefined;
-  if (confirmations >= 15 && !confirmationBlock) {
+  if (confirmations >= 15 && confirmationTimestamp === undefined) {
     throw new CoreError('InvalidFinality', 'Canonical confirmation block is missing from the indexed segment');
   }
   return {
@@ -292,7 +296,7 @@ function canonicalPaymentEvent(
     blockNumber: event.blockNumber,
     blockHash: event.blockHash,
     blockTimestamp: new Date(block.timestamp * 1000),
-    ...(confirmationBlock ? { finalizedAt: new Date(confirmationBlock.timestamp * 1000) } : {}),
+    ...(confirmationTimestamp !== undefined ? { finalizedAt: new Date(confirmationTimestamp * 1000) } : {}),
     contractAddress: event.contractAddress,
     eventHash: event.eventHash,
     snapshotHash: requiredValue(event.values, 'snapshotHash'),

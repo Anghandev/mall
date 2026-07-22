@@ -35,7 +35,7 @@ artifact 或历史证据。
 | 迁移历史 | 38 个 business migration 及 artifact schema 副本 | 空库全量迁移和 append-only 审计链依赖 |
 | 旧部署清单 | Safe superseded manifest、首个 EOA Router superseded manifest | 证明旧合约已从生产入口退役，不得抹除 |
 | 主网私有证据 | `platform-v2/deployments/*private*.json` 和根 `output/` packet/receipt/runner | 可复核的部署、Policy、Router 切换和恢复证据 |
-| release 验收证据 | 4 个 `output/releases/*/acceptance/`，共 26 个文件 | 支付、Indexer、履约、EOA 结算和 readiness 证据；权限仍为 `0600` |
+| release 验收证据 | 4 个 `output/releases/*/acceptance/`，共 26 个文件 | 历史支付/Indexer、履约、EOA 结算和 readiness 证据；权限仍为 `0600` |
 | 当前产品 worktree | Mall/Merchant/Admin 三个 worktree | 每个分支相对 Core 仍有 1 个独有提交，不能清理 |
 | 合约 WIP 归档 | `codex/archive-v2-contract-wip-20260714` | 唯一保存未合并的旧合约 WIP，不是生产路径 |
 | 恢复锚点 | `rescue/parallel-v2-20260713-222206` 及已合并产品分支 refs | 不占用产品运行路径；保留用于本地恢复，不删 Git 历史 |
@@ -44,7 +44,8 @@ artifact 或历史证据。
 
 - `SafeERC20` 是 OpenZeppelin ERC-20 转账库，不是 Safe 多签依赖，不清理。
 - 旧 migration 中的 Safe 字段是 append-only 迁移历史，不按字符串删除。
-- Router cutover 回执仍决定 `PAYMENT_INDEXER_START_BLOCK`，不移动、不删除。
+- Router cutover、旧 Indexer checkpoint、chain 表和历史回执不移动、不删除；
+  `PAYMENT_INDEXER_START_BLOCK` 仅属于保留的旧回滚 release，当前生产配置不再生成或读取它。
 - TWAP/Archive 的负向测试是“生产不依赖”的证据，不当作死代码。
 - 快递100、电子面单、打印机、自动轨迹和地图仍为 Phase 2；本次没有删除其历史
   契约或新建替代系统。

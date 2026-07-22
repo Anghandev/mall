@@ -1089,6 +1089,7 @@ export async function releaseSeckillPlanInventory(
   at: Date,
   expireQuotes: boolean,
 ) {
+  void expireQuotes;
   const plan = await executor.query<PlanRow>(
     'SELECT * FROM core.seckill_session_plans WHERE session_id = $1 FOR UPDATE',
     [sessionId],
@@ -1099,45 +1100,31 @@ export async function releaseSeckillPlanInventory(
     `SELECT EXISTS (
        SELECT 1
        FROM core.payment_quotes quote
-       WHERE quote.session_id = $1 AND quote.state = 'PAID'
-         AND NOT EXISTS (
-           SELECT 1
-           FROM core.payment_events payment
-           JOIN core.transaction_finality finality
-             ON finality.resource_type = 'ORDER_PAYMENT'
-            AND finality.resource_id = quote.order_id
-            AND finality.tx_hash = payment.transaction_hash
-            AND finality.block_hash = payment.block_hash
-           WHERE payment.order_id = quote.order_id AND payment.canonical
-             AND payment.confirmations >= 15
-             AND finality.state = 'FINAL'
-             AND finality.receipt_status = 1
-             AND finality.confirmations >= finality.required_confirmations
+       WHERE quote.session_id = $1
+         AND (
+           quote.state IN ('QUOTED','SUBMITTED','REORGED')
+           OR (
+             quote.state = 'PAID'
+             AND NOT EXISTS (
+               SELECT 1
+               FROM core.payment_events payment
+               JOIN core.transaction_finality finality
+                 ON finality.resource_type = 'ORDER_PAYMENT'
+                AND finality.resource_id = quote.order_id
+                AND finality.tx_hash = payment.transaction_hash
+                AND finality.block_hash = payment.block_hash
+               WHERE payment.order_id = quote.order_id AND payment.canonical
+                 AND payment.confirmations >= 15
+                 AND finality.state = 'FINAL'
+                 AND finality.receipt_status = 1
+                 AND finality.confirmations >= finality.required_confirmations
+             )
+           )
          )
      ) AS exists`,
     [sessionId],
   );
   if (pendingPayment.rows[0]?.exists) return;
-  if (expireQuotes) {
-    const reservations = await executor.query<{ reservation_id: string }>(
-      `SELECT DISTINCT reservation.capacity_reservation_id AS reservation_id
-       FROM core.payment_quotes quote
-       JOIN core.payment_quote_legs leg ON leg.order_id = quote.order_id
-       JOIN core.inventory_reservations reservation ON reservation.reservation_id = leg.reservation_id
-       WHERE quote.session_id = $1 AND quote.state IN ('QUOTED','REORGED')
-         AND reservation.state = 'ACTIVE'`,
-      [sessionId],
-    );
-    for (const reservation of reservations.rows) {
-      await executor.query("SELECT core.release_inventory_reservation($1, 'RELEASED')", [reservation.reservation_id]);
-    }
-    await executor.query(
-      `UPDATE core.payment_quotes
-       SET state = 'EXPIRED', submitted_tx_hash = NULL, submitted_at = NULL, updated_at = $2
-       WHERE session_id = $1 AND state IN ('QUOTED','REORGED')`,
-      [sessionId, at],
-    );
-  }
   const session = await executor.query<{ sold: string | number; reserved: string | number }>(
     'SELECT sold, reserved FROM core.seckill_sessions WHERE session_id = $1 FOR UPDATE',
     [sessionId],

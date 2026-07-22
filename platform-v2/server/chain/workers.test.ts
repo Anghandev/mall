@@ -1110,7 +1110,7 @@ test('runtime readiness attests deployed code, bindings, roles, NPL quote source
     databaseHealthy: async () => true,
     redisHealthy: async () => true,
     signerHealthy: async () => true,
-    indexerStatus: () => ({ healthy: true, caughtUp: true }),
+    receiptWorkerStatus: () => ({ healthy: true }),
     clock: () => transientNow,
     intervalMs: 1_000,
   });
@@ -1121,7 +1121,7 @@ test('runtime readiness attests deployed code, bindings, roles, NPL quote source
   assert.equal(reusedSnapshot.nplQuoteSourceHealthy, true);
   assert.equal(reusedSnapshot.expiresAt, firstSnapshot.expiresAt);
 
-  let indexerHealthy = false;
+  let receiptWorkerHealthy = false;
   const now = new Date('2026-07-14T00:00:00.000Z');
   const monitor = new PaymentRuntimeReadinessMonitor({
     attest: () => attestor.attest(),
@@ -1129,13 +1129,13 @@ test('runtime readiness attests deployed code, bindings, roles, NPL quote source
     databaseHealthy: async () => true,
     redisHealthy: async () => true,
     signerHealthy: async () => true,
-    indexerStatus: () => ({ healthy: indexerHealthy, caughtUp: indexerHealthy }),
+    receiptWorkerStatus: () => ({ healthy: receiptWorkerHealthy }),
     clock: () => now,
     intervalMs: 10,
   });
-  assert.equal((await monitor.pollOnce()).indexerHealthy, false);
-  indexerHealthy = true;
-  assert.equal(monitor.snapshot()?.indexerHealthy, true);
+  assert.equal((await monitor.pollOnce()).paymentReceiptWorkerHealthy, false);
+  receiptWorkerHealthy = true;
+  assert.equal(monitor.snapshot()?.paymentReceiptWorkerHealthy, true);
   monitor.start();
   await new Promise((resolve) => setTimeout(resolve, 15));
   await monitor.stop();

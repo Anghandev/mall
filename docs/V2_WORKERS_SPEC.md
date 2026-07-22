@@ -1,42 +1,57 @@
 # 24K商城 V2 Payment And Fulfillment Workers
 
-Status: settlement/admin checkpoint `2.0.0-settlement-admin.16`. The EOA-bound
-contracts and bounded BSC execution evidence are published; production database,
-archive-RPC, signer and provider operations remain launch-time configuration.
+Status: receipt-worker architecture revision. The EOA-bound contracts and
+historical bounded BSC execution evidence remain published; current production
+database, signer and provider operations remain launch-time configuration.
 
-## Indexer
+## Payment Receipt Worker
 
-The indexer loads `PaymentRouterV2` from the coordinated ABI bundle and an
-address from the same-version manifest. It does not maintain a copied event
-signature. Every decoded `PaymentCompleted` binds artifact version, Router,
-event signature/hash, order, transaction, block hash/number and log index.
+The worker loads `PaymentRouterV2` from the coordinated ABI bundle and its
+address from the same-version manifest. It resumes every known unresolved
+replacement-lineage hash from
+`payment_quotes` and `transaction_finality`; restart never requires a deployment
+height or historical block catch-up. A replacement cannot evict a hash with a
+mined status-1 receipt, and older declared replacements remain observable until
+one exact Router payment wins finality.
 
-Canonical blocks must be contiguous and parent-linked. Replaying the same
-block/hash is idempotent. A replacement segment proves a common ancestor before
-the old branch is marked non-canonical. Payment projection, inventory
-consumption, order creation, balanced Locked journals, finality and outbox writes
-occur in one PostgreSQL transaction.
+For each `SUBMITTED` or `REORGED` hash, the primary RPC verifies Chain 56,
+status 1, the active Router target, canonical receipt block and the exact
+`PaymentCompleted` identity and signed snapshot. At 15 confirmations the
+fallback RPC independently verifies the same receipt evidence. Normal polling
+does not query both RPCs block by block. If a stored receipt reappears under the
+same txHash in another block, both RPCs must prove replacement of the old block
+before the worker records a reorg; it never rewrites FINAL block identity.
 
-The runtime polling worker starts from the manifest's authoritative Router
-`deploymentBlock`. It first persists the preceding block as a reorg baseline,
-then ingests every canonical block, including blocks with no Router logs. Empty
-blocks advance confirmations. Each poll compares RPC with the persisted
-checkpoint, walks back to a proven common ancestor on mismatch and atomically
-replaces the branch. Shutdown waits for the active poll before PostgreSQL closes.
+A seckill-classified receipt must contain one matching
+`SeckillRelayExtended` after `PaymentCompleted`. Receipt events are sorted by
+block and log index. Payment, relay, inventory consumption, order creation,
+balanced Locked journals, finality and outbox writes occur in one PostgreSQL
+transaction. Three receipts are finalized in chain order even if RPC responses
+arrive out of order. A same-session quote or active replacement lineage whose
+receipt is temporarily unavailable keeps a later relay retryable; once that
+lineage is proven failed it no longer masks a poisoned later deadline.
 
-When a payment first appears with 15 or more confirmations in one historical
-batch, `finalized_at` is the timestamp of its fifteenth canonical block. For an
-incrementally observed payment, Core uses that same canonical timestamp when
-available and the real confirmation observation time as fallback; it never
-reuses the payment block timestamp as finality time.
+`finalized_at` is the fifteenth canonical block timestamp. Before 15
+confirmations a missing or replaced receipt returns to `REORGED`/pending and no
+new receipt-driven business projection is admitted. A discovered post-finality
+deep reorg pauses the relevant breaker and creates `RECONCILE`/manual evidence.
+Ordinary FINAL hashes are audited for 24 hours; seckill FINAL hashes remain
+audited until that session is settled or force-closed;
+the worker does not automatically maintain or replay full historical branches.
 
-The same transaction may be re-included in a different block. Reorg handling
-posts a linked reversal and retains both branches as evidence. Before finality,
-the selected reservation returns to its reserved state. A reorg after 15
-confirmations never puts sold inventory back on sale: the selected reservation
-remains consumed and the order enters reconciliation. Re-inclusion of the same
-signed leg can rebuild the projection; a different seckill/fallback leg is
-quarantined. Only at 15 confirmations is the unused reservation released.
+After deadline, any unresolved quote is excluded only after both RPCs report
+`PaymentRouter.usedOrderId(orderId) == false` at one matching canonical block
+whose timestamp has reached the signed deadline. Core persists that proof before
+release. `true` creates durable manual-recovery evidence, leaves the quote and
+inventory unresolved and prevents session close until the wallet record, buyer,
+Admin or Operator restores the exact txHash. The worker never scans Router
+history to guess a missing hash.
+
+Production does not continuously store canonical or empty blocks and has no
+global caught-up/lag gate. Historical `chain_*` tables, checkpoints and the old
+continuous Indexer implementation remain isolated rollback evidence only; no
+shadow dual-write, old-session migration or automatic A-to-B-to-A recovery is
+required.
 
 ## RPC Sources
 
@@ -52,15 +67,15 @@ deployed registry. Both RPC providers failing returns `ExternalBlocked`.
 New ordinary and seckill quotes require a fresh runtime readiness snapshot.
 Core verifies artifact checksums, chain 56, deployed code hashes for all three
 contracts, the Router's immutable Platform Governance EOA binding, Registry EOA-held
-roles, quote and secondary signers,
-the fixed-pair reserve source, PostgreSQL, Redis, remote signer identity
-and a caught-up Indexer. The manifest must include each deployed address,
-runtime code hash and the Router deployment block.
+roles, quote and secondary signers, the fixed-pair reserve source, PostgreSQL,
+Redis, remote signer identity and a healthy `PaymentReceiptWorker`. The manifest
+must include each deployed address, runtime code hash and Router deployment block.
 
 Missing fulfillment providers, audit storage or settlement Executor do not
-disable payment quoting. Payment readiness never stops submission tracking,
-payment reads, Indexer polling, finality or reorg recovery. The Indexer continues
-running while `writesEnabled` is false.
+disable payment quoting. Receipt-worker or RPC failure pauses only new ordinary
+and seckill quotes and new seckill sessions. TxHash submission/recovery, payment
+reads, finality/reorg reconciliation, fulfillment, settlement and audit remain
+available.
 
 Trusted risk observations use a separate internal token and immutable evidence
 hash. The local rule engine applies the published Gas threshold and the frozen
@@ -172,5 +187,5 @@ Per-payable EOA settlement and EOA-governed administrative workers are published
 in this checkpoint. Settlement and breaker finality use canonical receipts,
 events and confirmations; coverage uses stable dual-RPC `latest` observations.
 Production requires two distinct Chain-56 RPC endpoints, not Archive state.
-Payment breakers never stop Indexer,
-finality, reorg recovery, fulfillment, reconciliation or audit processing.
+Payment breakers never stop receipt tracking, finality, reorg recovery,
+fulfillment, reconciliation or audit processing.

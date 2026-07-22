@@ -888,14 +888,10 @@ export class SeckillGovernanceWorker {
            AND NOT EXISTS (
              SELECT 1 FROM core.payment_quotes quote
              WHERE quote.session_id = session.session_id
-               AND (
-                 quote.state = 'SUBMITTED'
-                 OR (quote.state IN ('QUOTED','REORGED') AND quote.deadline > $1)
-               )
+               AND quote.state IN ('QUOTED','SUBMITTED','REORGED')
            )
          ORDER BY session.starts_at, session.session_id
          FOR UPDATE OF session`,
-        [now],
       );
       for (const session of sessions.rows) {
         await releaseSeckillPlanInventory(executor, session.session_id, now, true);

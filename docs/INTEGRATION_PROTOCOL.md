@@ -17,7 +17,7 @@ are controlled consumers under that Goal, not independent Goals.
 
 ## Shared Authority
 
-Core owns funds, contracts, Schema/migrations, database, API, indexer, signer,
+Core owns funds, contracts, Schema/migrations, database, API, payment receipt worker, signer,
 executor, adapters, OpenAPI, ABI, manifests, generated types, enums, WebSocket
 protocol and consumer tests. Products never duplicate or infer them.
 
@@ -32,7 +32,7 @@ Core publishes three coordinated checkpoints rather than one checkpoint per
 small change:
 
 1. payment: catalog/SKU, reservation, quote, allowance, PaymentRouter,
-   ordinary/seckill payment, payment indexer and order creation;
+   ordinary/seckill payment, receipt finality and order creation;
 2. fulfillment: shipment, logistics, pickup, exchange, delay, arbitration,
    takeover, administrative region and BNM Locked/Available;
 3. settlement/admin: double-entry ledger, guarantee/debt, reward and settlement
@@ -79,8 +79,8 @@ the same Core artifact version.
 ```text
 signed policy and reservation
   -> PaymentRouter atomic transfers to the configured funding EOAs
-  -> receipt plus expected event identity
-  -> payment indexer and balanced Locked journal entries
+  -> submitted txHash plus status-1 Router receipt and expected event identity
+  -> 15 canonical confirmations and atomic balanced Locked journal entries
   -> fulfillment / arbitration and Available entries
   -> signed settlement request and immutable per-payable EOA transfer intent
   -> 15-confirmation receipt plus reorg/replacement handling

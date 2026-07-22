@@ -141,7 +141,6 @@ export interface CoreConfig {
   fallbackRpcUrl: string | undefined;
   paymentRouterAddress: string | undefined;
   paymentRouterDeploymentBlock: number | undefined;
-  paymentIndexerStartBlock: number | undefined;
   policyRegistryAddress: string | undefined;
   beneficiaryRegistryAddress: string | undefined;
   governanceWalletAddress: string | undefined;
@@ -185,9 +184,8 @@ export interface RuntimeReadinessSnapshot {
   walletRolesVerified: boolean;
   signerBindingsVerified: boolean;
   nplQuoteSourceHealthy: boolean;
-  indexerHealthy: boolean;
-  indexerCaughtUp: boolean;
-  indexerErrorCode?: string;
+  paymentReceiptWorkerHealthy: boolean;
+  paymentReceiptWorkerErrorCode?: string;
   databaseHealthy: boolean;
   redisHealthy: boolean;
   rpcChain56Healthy: boolean;
@@ -211,15 +209,6 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
   const paymentRouterDeployment = manifestContractDeployment('PaymentRouterV2');
   const paymentRouterAddress = paymentRouterDeployment?.address;
   const paymentRouterDeploymentBlock = paymentRouterDeployment?.deploymentBlock;
-  const paymentIndexerStartBlock = parseOptionalPositiveInteger(
-    env.PAYMENT_INDEXER_START_BLOCK,
-    'PAYMENT_INDEXER_START_BLOCK',
-  );
-  if (
-    paymentIndexerStartBlock !== undefined
-    && paymentRouterDeploymentBlock !== undefined
-    && paymentIndexerStartBlock < paymentRouterDeploymentBlock
-  ) throw new CoreError('InvalidRequest', 'PAYMENT_INDEXER_START_BLOCK predates the Router deployment', 500);
   const policyRegistryAddress = manifestContractAddress('PolicyRegistryV2');
   const beneficiaryRegistryAddress = manifestContractAddress('BeneficiaryRegistryV2');
   const externalBlocked = [
@@ -279,7 +268,6 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     fallbackRpcUrl: env.BSC_FALLBACK_RPC_URL,
     paymentRouterAddress,
     paymentRouterDeploymentBlock,
-    paymentIndexerStartBlock,
     policyRegistryAddress,
     beneficiaryRegistryAddress,
     governanceWalletAddress: normalizeOptionalAddress(env.PLATFORM_GOVERNANCE_WALLET_ADDRESS),
@@ -429,8 +417,7 @@ function runtimeReadinessValid(snapshot: RuntimeReadinessSnapshot | undefined, n
     snapshot.walletRolesVerified,
     snapshot.signerBindingsVerified,
     snapshot.nplQuoteSourceHealthy,
-    snapshot.indexerHealthy,
-    snapshot.indexerCaughtUp,
+    snapshot.paymentReceiptWorkerHealthy,
     snapshot.databaseHealthy,
     snapshot.redisHealthy,
     snapshot.rpcChain56Healthy,
@@ -458,9 +445,8 @@ function runtimeReadinessBlockers(
   if (!snapshot.databaseHealthy) blockers.add('DATABASE_UNAVAILABLE');
   if (!snapshot.redisHealthy) blockers.add('REDIS_UNAVAILABLE');
   if (!snapshot.signerHealthy) blockers.add('SIGNER_UNAVAILABLE');
-  if (!snapshot.indexerHealthy) blockers.add('INDEXER_UNHEALTHY');
-  if (snapshot.indexerHealthy && !snapshot.indexerCaughtUp) blockers.add('INDEXER_LAGGING');
-  if (snapshot.indexerErrorCode === 'ReorgPending' || !snapshot.rpcChain56Healthy) {
+  if (!snapshot.paymentReceiptWorkerHealthy) blockers.add('PAYMENT_RECEIPT_WORKER_UNHEALTHY');
+  if (snapshot.paymentReceiptWorkerErrorCode === 'ReorgPending' || !snapshot.rpcChain56Healthy) {
     blockers.add('RPC_DIVERGENCE');
   }
   if (!snapshot.nplQuoteSourceHealthy) blockers.add('QUOTE_SOURCE_UNHEALTHY');

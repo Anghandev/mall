@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-fulfillment-launch.20",
+  "artifactVersion": "2.0.0-fulfillment-launch.21",
   "adminResourceTypes": [
     "ORDER",
     "PRODUCT",
@@ -72,8 +72,7 @@
     "DATABASE_UNAVAILABLE",
     "REDIS_UNAVAILABLE",
     "SIGNER_UNAVAILABLE",
-    "INDEXER_UNHEALTHY",
-    "INDEXER_LAGGING",
+    "PAYMENT_RECEIPT_WORKER_UNHEALTHY",
     "RPC_DIVERGENCE",
     "QUOTE_SOURCE_UNHEALTHY",
     "CONTRACT_EVIDENCE_UNVERIFIED"

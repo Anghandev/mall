@@ -94,6 +94,50 @@ source conflicts are indexed in `V2_DECISIONS.md`.
   allowance, stale quote, replay, mismatched snapshot or partial transfer
   reverts the entire payment and does not consume inventory.
 
+## Payment Receipt Finality
+
+- The buyer submits the wallet transaction hash to Core. Production does not
+  continuously scan or persist every BSC block from Router deployment.
+- `PaymentReceiptWorker` resumes every unresolved submitted/replaced hash from
+  PostgreSQL after restart; declaring a replacement never hides an older hash,
+  and a receipt-proven mined hash cannot be replaced. It accepts a payment only
+  on BSC 56 when the
+  status-1 receipt targets the active immutable Router, contains exactly the
+  signed quote's `PaymentCompleted`, remains in the canonical block and reaches
+  15 confirmations. At finality the fallback RPC independently verifies the
+  receipt and canonical block evidence. A later receipt for the same txHash in
+  a different block is a reorg, not a silent finality update, and both RPCs must
+  prove that the previously stored block was replaced.
+- A live seckill receipt must also contain its matching
+  `SeckillRelayExtended` after `PaymentCompleted`. Core processes both events,
+  in block/log order, with inventory, order, balanced ledger, finality and
+  outbox writes in one PostgreSQL transaction. Fallback-retail receipts contain
+  no relay event. A later relay remains pending while any same-session quote or
+  replacement lineage can still be its temporarily unavailable predecessor;
+  a proven failed predecessor no longer defers an invalid relay.
+- Before 15 confirmations a reorg returns the submitted hash to pending without
+  admitting it to the session. FINAL receipts remain under bounded per-hash
+  audit (ordinary payments for 24 hours and seckill payments until the session
+  closes). A discovered reorg after finality atomically activates
+  breaker plus `RECONCILE`/manual handling; it does not automatically replay a
+  full historical branch.
+- After a quote deadline, any unresolved order is released only when both RPCs
+  prove `PaymentRouter.usedOrderId(orderId) == false` at the same canonical
+  block whose timestamp has reached the signed Router deadline. The proof is
+  persisted before inventory release. A `true` result creates durable recovery
+  evidence and blocks
+  inventory/session close until the wallet record or an operator restores the
+  exact txHash through the buyer submission or audited Admin/Operator recovery
+  endpoint. Core never writes payment success without its receipt and event.
+- Receipt-worker or RPC failure pauses only new payment quotes and new seckill
+  sessions. TxHash submission/recovery, payment and order reads, fulfillment,
+  takeover, settlement, reconciliation and audit remain available. Once a
+  session is settled, its payments are not routinely polled again.
+- Historical chain tables and the retired continuous Indexer implementation
+  remain append-only rollback evidence. They are not a production health gate;
+  no empty-block checkpoint, full-history scan, shadow dual-write or automatic
+  A-to-B-to-A branch maintenance is required.
+
 ## NPL Reward Allocation
 
 - The NPL Reward/Distribution Wallet receives exactly 10% of the order's total USDT list price
@@ -182,7 +226,7 @@ source conflicts are indexed in `V2_DECISIONS.md`.
   contract. A submitted transfer is immutable; replacements retain the same
   intent identity and cannot settle a liability twice.
 - A payable becomes Settled only after its status-1 transfer receipt reaches 15
-  BSC confirmations and the indexer verifies chain, executor, nonce, token,
+  BSC confirmations and the settlement finality worker verifies chain, executor, nonce, token,
   recipient, amount, calldata, event, balance deltas, replacement and canonical
   block. Reorgs return affected entries to the last proven state without
   deleting evidence.

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { keccak256, toUtf8Bytes, type InterfaceAbi } from 'ethers';
 import type { RuntimeReadinessSnapshot } from '../api/config.ts';
 import { CORE_ARTIFACT_VERSION, NPL_ADDRESS, NPL_USDT_PAIR_ADDRESS, USDT_ADDRESS } from '../api/enums.ts';
-import type { PaymentIndexerStatus } from './payment-indexer-worker.ts';
+import type { PaymentReceiptWorkerStatus } from './payment-receipt-worker.ts';
 import type { ContractReader, PairReserveReader } from './payment-sources.ts';
 
 const ROUTER_ABI = [
@@ -194,10 +194,10 @@ export class PaymentRuntimeReadinessMonitor {
   readonly #databaseHealthy: () => Promise<boolean>;
   readonly #redisHealthy: () => Promise<boolean>;
   readonly #signerHealthy: () => Promise<boolean>;
-  readonly #indexerStatus: () => Readonly<PaymentIndexerStatus>;
+  readonly #receiptWorkerStatus: () => Readonly<PaymentReceiptWorkerStatus>;
   readonly #clock: () => Date;
   readonly #intervalMs: number;
-  #base: Omit<RuntimeReadinessSnapshot, 'indexerHealthy' | 'indexerCaughtUp' | 'indexerErrorCode'> | undefined;
+  #base: Omit<RuntimeReadinessSnapshot, 'paymentReceiptWorkerHealthy' | 'paymentReceiptWorkerErrorCode'> | undefined;
   #controller: AbortController | undefined;
   #running: Promise<void> | undefined;
 
@@ -207,7 +207,7 @@ export class PaymentRuntimeReadinessMonitor {
     databaseHealthy: () => Promise<boolean>;
     redisHealthy: () => Promise<boolean>;
     signerHealthy: () => Promise<boolean>;
-    indexerStatus: () => Readonly<PaymentIndexerStatus>;
+    receiptWorkerStatus: () => Readonly<PaymentReceiptWorkerStatus>;
     clock?: () => Date;
     intervalMs?: number;
   }) {
@@ -216,19 +216,18 @@ export class PaymentRuntimeReadinessMonitor {
     this.#databaseHealthy = input.databaseHealthy;
     this.#redisHealthy = input.redisHealthy;
     this.#signerHealthy = input.signerHealthy;
-    this.#indexerStatus = input.indexerStatus;
+    this.#receiptWorkerStatus = input.receiptWorkerStatus;
     this.#clock = input.clock ?? (() => new Date());
     this.#intervalMs = input.intervalMs ?? 30_000;
   }
 
   snapshot(): RuntimeReadinessSnapshot | undefined {
     if (!this.#base) return undefined;
-    const indexer = this.#indexerStatus();
+    const receiptWorker = this.#receiptWorkerStatus();
     return Object.freeze({
       ...this.#base,
-      indexerHealthy: indexer.healthy,
-      indexerCaughtUp: indexer.caughtUp,
-      ...(indexer.errorCode ? { indexerErrorCode: indexer.errorCode } : {}),
+      paymentReceiptWorkerHealthy: receiptWorker.healthy,
+      ...(receiptWorker.errorCode ? { paymentReceiptWorkerErrorCode: receiptWorker.errorCode } : {}),
     });
   }
 

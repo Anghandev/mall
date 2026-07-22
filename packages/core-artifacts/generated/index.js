@@ -1,4 +1,4 @@
-export const artifactVersion = "2.0.0-fulfillment-launch.20";
+export const artifactVersion = "2.0.0-fulfillment-launch.21";
 export const chainIdentity = Object.freeze({"chainId":56,"usdtAddress":"0x55d398326f99059ff775485246999027b3197955","nplAddress":"0x4e8277ab31e4956b2cd48449793a57656dfc03d2"});
 export const adminResourceTypes = Object.freeze(["ORDER","PRODUCT","MERCHANT"]);
 export const adminExportFormats = Object.freeze(["CSV","EXCEL"]);
@@ -8,7 +8,7 @@ export const contractOrderStates = Object.freeze(["NONE","PAID","SHIPPED","DELIV
 export const orderFinalityStatuses = Object.freeze(["NOT_SUBMITTED","PENDING","CONFIRMED","REPLACED","REORGED","FINAL"]);
 export const finalityStates = Object.freeze(["SUBMITTED","MINED","REPLACED","REORGED","FINAL","FAILED"]);
 export const userRoles = Object.freeze(["BUYER","MERCHANT","ADMIN","OPERATOR","ARBITRATOR","AUDITOR"]);
-export const runtimeBlockers = Object.freeze(["PAYMENT_DECISION_BLOCKED","PAYMENT_CONFIGURATION_REQUIRED","RUNTIME_SNAPSHOT_EXPIRED","DATABASE_UNAVAILABLE","REDIS_UNAVAILABLE","SIGNER_UNAVAILABLE","INDEXER_UNHEALTHY","INDEXER_LAGGING","RPC_DIVERGENCE","QUOTE_SOURCE_UNHEALTHY","CONTRACT_EVIDENCE_UNVERIFIED"]);
+export const runtimeBlockers = Object.freeze(["PAYMENT_DECISION_BLOCKED","PAYMENT_CONFIGURATION_REQUIRED","RUNTIME_SNAPSHOT_EXPIRED","DATABASE_UNAVAILABLE","REDIS_UNAVAILABLE","SIGNER_UNAVAILABLE","PAYMENT_RECEIPT_WORKER_UNHEALTHY","RPC_DIVERGENCE","QUOTE_SOURCE_UNHEALTHY","CONTRACT_EVIDENCE_UNVERIFIED"]);
 export const breakerScopes = Object.freeze(["NEW_PAYMENT","SECKILL_PURCHASE","NEW_SETTLEMENT_BATCH"]);
 export const catalogProductActions = Object.freeze(["SAVE_DRAFT","CREATE_CONCESSION_PREVIEW","SUBMIT_REVIEW","APPROVE","REJECT","PUBLISH","ADJUST_INVENTORY","HIDE","DELIST"]);
 export const catalogProductLifecycleStates = Object.freeze(["DRAFT","REVIEW","SCHEDULED","ACTIVE","SOLD_OUT","HIDDEN","DELISTED","LOCKED"]);

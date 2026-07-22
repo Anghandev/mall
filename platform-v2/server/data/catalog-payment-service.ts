@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { AbiCoder, MaxUint256, getAddress, keccak256 } from 'ethers';
+import { AbiCoder, MaxUint256, getAddress, keccak256, toUtf8Bytes } from 'ethers';
 import {
   buildDualPaymentQuote,
   buildPaymentIntent,
@@ -27,6 +27,8 @@ import { assertWalletPaymentAllowed } from './risk-service.ts';
 import { assertQuoteFulfillmentTarget } from './fulfillment-target-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
+import { auditSourceId, enqueueAudit } from './audit-service.ts';
+import { PAYMENT_COMPLETED_EVENT_SIGNATURE_HASH } from './payment-store.ts';
 import {
   blocksOrdinaryQuote,
   effectiveSeckillPhase,
@@ -633,37 +635,67 @@ export class CatalogPaymentService {
 
   submitPayment(buyerWallet: string, input: { orderId: string; txHash: string; replacementForTxHash?: string }) {
     const buyer = normalizeAddress(buyerWallet);
-    if (!isHash(input.orderId) || !isHash(input.txHash) || (input.replacementForTxHash && !isHash(input.replacementForTxHash))) {
-      throw new CoreError('InvalidRequest', 'Invalid payment submission');
+    validatePaymentSubmission(input);
+    return this.#transactions.transaction((executor) => recordPaymentSubmission(executor, {
+      buyer,
+      input,
+      routerAddress: this.#paymentRouterAddress,
+      source: 'BUYER_SUBMISSION',
+    }));
+  }
+
+  recoverPayment(
+    actor: FulfillmentActor,
+    input: { orderId: string; txHash: string; replacementForTxHash?: string },
+  ) {
+    if (!actor.roles.some((role) => ['ADMIN', 'OPERATOR'].includes(role))) {
+      throw new CoreError('Forbidden', 'Platform recovery role is required', 403);
     }
+    validatePaymentSubmission(input);
+    const now = this.#clock();
     return this.#transactions.transaction(async (executor) => {
-      const result = await executor.query<{ state: string; submitted_tx_hash: string | null }>(
-        'SELECT state, submitted_tx_hash FROM core.payment_quotes WHERE order_id = $1 AND buyer_wallet = $2 FOR UPDATE',
-        [input.orderId, buyer],
+      const quote = await executor.query<{ buyer_wallet: string }>(
+        'SELECT buyer_wallet FROM core.payment_quotes WHERE order_id = $1',
+        [input.orderId],
       );
-      const quote = result.rows[0];
-      const txHash = input.txHash.toLowerCase();
-      if (quote?.state === 'PAID') {
-        if (quote.submitted_tx_hash?.toLowerCase() !== txHash) {
-          throw new CoreError('IdempotencyConflict', 'Indexed payment transaction does not match the submission', 409);
-        }
-        return { orderId: input.orderId, txHash, state: 'SUBMITTED' as const };
-      }
-      if (!quote || !['QUOTED', 'SUBMITTED', 'REORGED'].includes(quote.state)) {
-        throw new CoreError('InvalidRequest', 'Payment quote is not submittable', 409);
-      }
-      if (quote.submitted_tx_hash && quote.submitted_tx_hash.toLowerCase() !== txHash) {
-        if (input.replacementForTxHash?.toLowerCase() !== quote.submitted_tx_hash.toLowerCase()) {
-          throw new CoreError('IdempotencyConflict', 'Replacement transaction does not match the prior submission', 409);
-        }
-      }
-      await executor.query(
-        `UPDATE core.payment_quotes SET state = 'SUBMITTED', submitted_tx_hash = $2,
-           submitted_at = COALESCE(submitted_at, clock_timestamp()), updated_at = clock_timestamp()
-         WHERE order_id = $1`,
-        [input.orderId, txHash],
-      );
-      return { orderId: input.orderId, txHash, state: 'SUBMITTED' as const };
+      if (!quote.rows[0]) throw new CoreError('InvalidRequest', 'Payment quote is unavailable', 404);
+      const result = await recordPaymentSubmission(executor, {
+        buyer: quote.rows[0].buyer_wallet,
+        input,
+        routerAddress: this.#paymentRouterAddress,
+        source: 'OPERATOR_TXHASH_RECOVERY',
+      });
+      const evidenceHash = keccak256(toUtf8Bytes(JSON.stringify({
+        orderId: input.orderId,
+        txHash: input.txHash.toLowerCase(),
+        actor: actor.walletAddress,
+        roles: [...actor.roles].sort(),
+      })));
+      await enqueueAudit(executor, {
+        sourceEventId: auditSourceId('audit:payment-txhash-recovery', {
+          orderId: input.orderId,
+          txHash: input.txHash.toLowerCase(),
+        }),
+        streamName: 'financial',
+        evidenceProfile: 'RBAC',
+        eventType: 'PAYMENT_TXHASH_RECOVERED',
+        resourceType: 'ORDER_PAYMENT',
+        resourceId: input.orderId,
+        actorWallet: actor.walletAddress,
+        actorRole: actor.roles.includes('ADMIN') ? 'ADMIN' : 'OPERATOR',
+        correlationId: `payment-txhash-recovery:${input.orderId}`,
+        requestHash: evidenceHash.slice(2),
+        payload: { orderId: input.orderId, txHash: input.txHash.toLowerCase() },
+        authorizationEvidence: {
+          scheme: 'RBAC_ROLE_REVALIDATION',
+          subject: actor.walletAddress,
+          roles: [...actor.roles],
+          evidenceHash,
+          checkedAt: now.toISOString(),
+        },
+        createdAt: now,
+      });
+      return result;
     });
   }
 
@@ -1681,6 +1713,112 @@ function reservationHash(
     ['bytes32', 'bytes32', 'address', 'uint32', 'uint64'],
     [reservationId, chainSkuId, buyer, quantity, reservationDeadline],
   ));
+}
+
+function validatePaymentSubmission(input: {
+  orderId: string;
+  txHash: string;
+  replacementForTxHash?: string;
+}) {
+  if (
+    !isHash(input.orderId)
+    || !isHash(input.txHash)
+    || (input.replacementForTxHash !== undefined && !isHash(input.replacementForTxHash))
+  ) throw new CoreError('InvalidRequest', 'Invalid payment submission');
+}
+
+async function recordPaymentSubmission(
+  executor: SqlExecutor,
+  input: {
+    buyer: string;
+    input: { orderId: string; txHash: string; replacementForTxHash?: string };
+    routerAddress: string;
+    source: 'BUYER_SUBMISSION' | 'OPERATOR_TXHASH_RECOVERY';
+  },
+) {
+  const result = await executor.query<{ state: string; submitted_tx_hash: string | null }>(
+    'SELECT state, submitted_tx_hash FROM core.payment_quotes WHERE order_id = $1 AND buyer_wallet = $2 FOR UPDATE',
+    [input.input.orderId, input.buyer],
+  );
+  const quote = result.rows[0];
+  const txHash = input.input.txHash.toLowerCase();
+  if (quote?.state === 'PAID') {
+    if (quote.submitted_tx_hash?.toLowerCase() !== txHash) {
+      throw new CoreError('IdempotencyConflict', 'Indexed payment transaction does not match the submission', 409);
+    }
+    return { orderId: input.input.orderId, txHash, state: 'SUBMITTED' as const };
+  }
+  if (!quote || !['QUOTED', 'SUBMITTED', 'REORGED'].includes(quote.state)) {
+    throw new CoreError('InvalidRequest', 'Payment quote is not submittable', 409);
+  }
+  if (quote.submitted_tx_hash && quote.submitted_tx_hash.toLowerCase() !== txHash) {
+    if (input.input.replacementForTxHash?.toLowerCase() !== quote.submitted_tx_hash.toLowerCase()) {
+      throw new CoreError('IdempotencyConflict', 'Replacement transaction does not match the prior submission', 409);
+    }
+    const previous = await executor.query<{ state: string; receipt_status: number | null }>(
+      `SELECT state, receipt_status FROM core.transaction_finality
+       WHERE resource_type = 'ORDER_PAYMENT' AND resource_id = $1 AND tx_hash = $2
+       ORDER BY (transaction_id LIKE 'payment-submission:%') DESC, updated_at DESC
+       LIMIT 1 FOR UPDATE`,
+      [input.input.orderId, quote.submitted_tx_hash.toLowerCase()],
+    );
+    if (
+      previous.rows[0]?.receipt_status === 1
+      || ['MINED', 'FINAL'].includes(previous.rows[0]?.state ?? '')
+    ) throw new CoreError('InvalidFinality', 'A mined payment transaction cannot be replaced', 409);
+  }
+  await executor.query(
+    `UPDATE core.payment_quotes SET state = 'SUBMITTED', submitted_tx_hash = $2,
+       submitted_at = COALESCE(submitted_at, clock_timestamp()), updated_at = clock_timestamp()
+     WHERE order_id = $1`,
+    [input.input.orderId, txHash],
+  );
+  if (quote.submitted_tx_hash && quote.submitted_tx_hash.toLowerCase() !== txHash) {
+    await executor.query(
+      `UPDATE core.transaction_finality
+       SET state = 'REPLACED', updated_at = clock_timestamp()
+       WHERE resource_type = 'ORDER_PAYMENT' AND resource_id = $1 AND tx_hash = $2
+         AND receipt_status IS NULL AND state IN ('SUBMITTED','REORGED')`,
+      [input.input.orderId, quote.submitted_tx_hash.toLowerCase()],
+    );
+  }
+  await executor.query(
+    `INSERT INTO core.transaction_finality (
+       transaction_id, resource_type, resource_id, chain_id, contract_address,
+       expected_event_hash, tx_hash, replacement_for_tx_hash,
+       confirmations, required_confirmations, state, evidence, submitted_at
+     ) VALUES ($1,'ORDER_PAYMENT',$2,56,$3,$4,$5,$6,0,15,'SUBMITTED',$7,clock_timestamp())
+     ON CONFLICT (transaction_id) DO UPDATE SET
+       replacement_for_tx_hash = EXCLUDED.replacement_for_tx_hash,
+       state = CASE
+         WHEN core.transaction_finality.state IN ('SUBMITTED','REPLACED','REORGED')
+           THEN 'SUBMITTED'
+         ELSE core.transaction_finality.state
+       END,
+       evidence = core.transaction_finality.evidence || EXCLUDED.evidence,
+       updated_at = clock_timestamp()`,
+    [
+      `payment-submission:${input.input.orderId}:${txHash}`,
+      input.input.orderId,
+      input.routerAddress,
+      PAYMENT_COMPLETED_EVENT_SIGNATURE_HASH,
+      txHash,
+      input.input.replacementForTxHash?.toLowerCase() ?? null,
+      JSON.stringify({ source: input.source }),
+    ],
+  );
+  await executor.query(
+    `UPDATE core.durable_jobs
+     SET payload = payload || $2::jsonb,
+       last_error_code = 'PAYMENT_TXHASH_RECOVERED_CONFIRMING', updated_at = clock_timestamp()
+     WHERE job_id = $1 AND job_type = 'RECONCILE'
+       AND state = 'CONFIGURATION_REQUIRED'`,
+    [
+      `payment-txhash-recovery:${input.input.orderId}`,
+      JSON.stringify({ recoveredTxHash: txHash, recoveredBy: input.source }),
+    ],
+  );
+  return { orderId: input.input.orderId, txHash, state: 'SUBMITTED' as const };
 }
 
 function validateCreateQuote(input: CreateOrdinaryQuoteInput) {

@@ -16,6 +16,7 @@ import { MiddlewareMonitoringSource, RpcExplorerHeightSource } from '../api/moni
 import { paymentAllocationSetHash, paymentBeneficiarySetHash } from '../api/payment-policy.ts';
 import { paymentIntentHash } from '../api/payment-signing.ts';
 import { AbiEventDecoder } from '../chain/abi-decoder.ts';
+import type { PaymentReceiptCandidate, PaymentReceiptObservation } from '../chain/payment-receipt-worker.ts';
 import { BnmAvailabilityWorker } from '../chain/bnm-availability-worker.ts';
 import { FulfillmentSchedulerWorker } from '../chain/fulfillment-scheduler-worker.ts';
 import { GuaranteeDepositWorker } from '../chain/guarantee-deposit-worker.ts';
@@ -55,10 +56,12 @@ import {
   type GuaranteeDepositChainObservation,
 } from './guarantee-deposit-service.ts';
 import { PostgresIndexerStore, recordSeckillRelayProjection } from './indexer-store.ts';
+import { PostgresPaymentReceiptRepository } from './payment-receipt-repository.ts';
 import { reserveInventory } from './inventory.ts';
 import { applyMigrations, type SqlExecutor, type SqlTransactionRunner } from './migrations.ts';
 import {
   advancePaymentFinality,
+  PAYMENT_COMPLETED_EVENT_SIGNATURE_HASH,
   paymentEventKey,
   PostgresPaymentStore,
   type RecordPaymentInput,
@@ -1889,6 +1892,23 @@ test('three seckill quotes consume only the session inventory locked at opening'
       )).rows[0],
       { reserved: 3, sold: 0 },
     );
+    const receiptRepository = new PostgresPaymentReceiptRepository({
+      transactions: transactionAdapter(db),
+      routerAddress: fallbackPayment.event.contractAddress,
+    });
+    const unresolved = await receiptRepository.expiredUnresolvedQuotes(releaseAt);
+    assert.equal(unresolved.length, 3);
+    for (const quote of unresolved) {
+      await receiptRepository.expireUnresolvedQuote(quote, {
+        state: 'UNUSED_AFTER_DEADLINE',
+        block: {
+          number: 1,
+          hash: HASH,
+          parentHash: HASH_2,
+          timestamp: Math.floor(releaseAt.getTime() / 1_000),
+        },
+      }, releaseAt);
+    }
     await transactionAdapter(db).transaction((executor) => (
       releaseSeckillPlanInventory(executor, sessionId, releaseAt, true)
     ));
@@ -2907,13 +2927,76 @@ test('catalog payment service builds an authoritative idempotent quote and recor
       () => service.getAdminPayment({ walletAddress: BUYER, roles: ['BUYER'] }, quote.orderId),
       /Platform role is required/,
     );
-    await db.query("UPDATE core.payment_quotes SET state = 'REORGED' WHERE order_id = $1", [quote.orderId]);
     const reorgReplacement = `0x${'9'.repeat(64)}`;
+    await db.query(
+      `UPDATE core.transaction_finality SET state = 'MINED', receipt_status = 1,
+         block_number = 100, block_hash = $2, confirmations = 1
+       WHERE resource_type = 'ORDER_PAYMENT' AND resource_id = $1 AND tx_hash = $3`,
+      [quote.orderId, HASH, replacementTx],
+    );
+    await assert.rejects(
+      service.submitPayment(BUYER, {
+        orderId: quote.orderId,
+        txHash: reorgReplacement,
+        replacementForTxHash: replacementTx,
+      }),
+      /already mined|cannot be replaced/i,
+    );
+    await db.query("UPDATE core.payment_quotes SET state = 'REORGED' WHERE order_id = $1", [quote.orderId]);
+    await db.query(
+      `UPDATE core.transaction_finality SET state = 'REORGED', receipt_status = NULL,
+         block_number = NULL, block_hash = NULL, confirmations = 0
+       WHERE resource_type = 'ORDER_PAYMENT' AND resource_id = $1 AND tx_hash = $2`,
+      [quote.orderId, replacementTx],
+    );
     assert.equal((await service.submitPayment(BUYER, {
       orderId: quote.orderId,
       txHash: reorgReplacement,
       replacementForTxHash: replacementTx,
     })).state, 'SUBMITTED');
+    const submittedFinality = await db.query<{
+      tx_hash: string;
+      replacement_for_tx_hash: string | null;
+      state: string;
+    }>(
+      `SELECT tx_hash, replacement_for_tx_hash, state
+       FROM core.transaction_finality WHERE transaction_id = $1`,
+      [`payment-submission:${quote.orderId}:${reorgReplacement}`],
+    );
+    assert.deepEqual(submittedFinality.rows[0], {
+      tx_hash: reorgReplacement,
+      replacement_for_tx_hash: replacementTx,
+      state: 'SUBMITTED',
+    });
+    assert.deepEqual((await db.query<{
+      tx_hash: string;
+      replacement_for_tx_hash: string | null;
+      state: string;
+    }>(
+      `SELECT tx_hash, replacement_for_tx_hash, state
+       FROM core.transaction_finality
+       WHERE resource_type = 'ORDER_PAYMENT' AND resource_id = $1
+       ORDER BY submitted_at, tx_hash`,
+      [quote.orderId],
+    )).rows, [
+      { tx_hash: firstTx, replacement_for_tx_hash: null, state: 'REPLACED' },
+      { tx_hash: replacementTx, replacement_for_tx_hash: firstTx, state: 'REPLACED' },
+      { tx_hash: reorgReplacement, replacement_for_tx_hash: replacementTx, state: 'SUBMITTED' },
+    ]);
+    const lineageRepository = new PostgresPaymentReceiptRepository({
+      transactions: transactionAdapter(db),
+      routerAddress: '0x9999999999999999999999999999999999999999',
+    });
+    assert.deepEqual(
+      (await lineageRepository.pendingReceipts())
+        .map((candidate) => ({ txHash: candidate.txHash, state: candidate.finalityState }))
+        .sort((left, right) => left.txHash.localeCompare(right.txHash)),
+      [
+        { txHash: firstTx, state: 'REPLACED' },
+        { txHash: replacementTx, state: 'REPLACED' },
+        { txHash: reorgReplacement, state: 'SUBMITTED' },
+      ],
+    );
     await db.query("UPDATE core.payment_quotes SET state = 'PAID' WHERE order_id = $1", [quote.orderId]);
     assert.equal((await service.submitPayment(BUYER, {
       orderId: quote.orderId,
@@ -2923,6 +3006,196 @@ test('catalog payment service builds an authoritative idempotent quote and recor
       service.submitPayment(BUYER, { orderId: quote.orderId, txHash: firstTx }),
       /Indexed payment transaction does not match/,
     );
+  } finally {
+    await db.close();
+  }
+});
+
+test('payment receipt repository resumes mined work and finalizes one immutable payment atomically', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const intent = paymentIntent();
+    await seedCatalog(db, 2, intent.merchant);
+    await reserveInventory(adapter(db), {
+      reservationId: intent.reservationId,
+      reservationHash: intent.reservationHash,
+      policyVersion: intent.policyVersion,
+      skuId: 'sku-1',
+      buyerWallet: intent.buyer,
+      quantity: intent.quantity,
+      classification: 'ORDINARY',
+      expiresAt: new Date(intent.reservationDeadline * 1_000),
+    });
+    await insertPaymentQuote(db, intent, 'receipt-worker-ordinary');
+    const txHash = `0x${'6'.repeat(64)}`;
+    await db.query(
+      `UPDATE core.payment_quotes SET state = 'SUBMITTED', submitted_tx_hash = $2,
+         submitted_at = clock_timestamp() WHERE order_id = $1`,
+      [intent.orderId, txHash],
+    );
+    const repository = new PostgresPaymentReceiptRepository({
+      transactions: transactionAdapter(db),
+      routerAddress: '0x9999999999999999999999999999999999999999',
+    });
+    const candidate: PaymentReceiptCandidate = {
+      orderId: intent.orderId,
+      quoteKind: 'ORDINARY',
+      txHash,
+      finalityState: 'SUBMITTED',
+    };
+    const mined = paymentReceiptObservation(candidate, 14);
+    await repository.recordMined(candidate, mined);
+    const resumed = await repository.pendingReceipts();
+    assert.equal(resumed.length, 1);
+    assert.equal(resumed[0]!.finalityState, 'MINED');
+    assert.equal(resumed[0]!.observedBlockHash, mined.block.hash);
+
+    const final = paymentReceiptObservation(resumed[0]!, 15);
+    await repository.recordFinal({
+      candidate: resumed[0]!,
+      observation: final,
+      events: [decodedPaymentEvent(intent, final.block.hash)],
+    });
+    await repository.recordFinal({
+      candidate: resumed[0]!,
+      observation: final,
+      events: [decodedPaymentEvent(intent, final.block.hash)],
+    });
+
+    const projection = await db.query<{
+      quote_state: string;
+      order_state: string;
+      finality_status: string;
+      finality_state: string;
+      transaction_id: string;
+      journals: string;
+    }>(
+      `SELECT quote.state AS quote_state, orders.state AS order_state,
+         orders.finality_status, finality.state AS finality_state,
+         finality.transaction_id,
+         (SELECT count(*)::text FROM core.ledger_journals WHERE order_id = quote.order_id) AS journals
+       FROM core.payment_quotes quote
+       JOIN core.orders orders ON orders.order_id = quote.order_id
+       JOIN core.transaction_finality finality
+         ON finality.resource_type = 'ORDER_PAYMENT'
+        AND finality.resource_id = quote.order_id
+       WHERE quote.order_id = $1`,
+      [intent.orderId],
+    );
+    assert.deepEqual(projection.rows[0], {
+      quote_state: 'PAID',
+      order_state: 'PAID',
+      finality_status: 'FINAL',
+      finality_state: 'FINAL',
+      transaction_id: `payment-submission:${intent.orderId}:${txHash}`,
+      journals: '1',
+    });
+    const monitored = await repository.pendingReceipts();
+    assert.equal(monitored.length, 1);
+    assert.equal(monitored[0]!.finalityState, 'FINAL');
+    const replacementBlockHash = `0x${'9'.repeat(64)}`;
+    await repository.recordReorged(monitored[0]!, replacementBlockHash);
+    const deepReorg = await db.query<{
+      quote_state: string;
+      order_state: string;
+      finality_state: string;
+      manual_reconcile: string | null;
+      breaker_paused: boolean;
+      reconcile_jobs: string;
+      journals: string;
+    }>(
+      `SELECT quote.state AS quote_state, orders.state AS order_state,
+         finality.state AS finality_state,
+         finality.evidence ->> 'manualReconciliationRequired' AS manual_reconcile,
+         (SELECT paused FROM core.circuit_breakers WHERE scope = 'NEW_PAYMENT') AS breaker_paused,
+         (SELECT count(*)::text FROM core.durable_jobs
+          WHERE job_type = 'RECONCILE' AND resource_id = quote.order_id) AS reconcile_jobs,
+         (SELECT count(*)::text FROM core.ledger_journals WHERE order_id = quote.order_id) AS journals
+       FROM core.payment_quotes quote
+       JOIN core.orders orders ON orders.order_id = quote.order_id
+       JOIN core.transaction_finality finality
+         ON finality.resource_type = 'ORDER_PAYMENT' AND finality.resource_id = quote.order_id
+       WHERE quote.order_id = $1`,
+      [intent.orderId],
+    );
+    assert.deepEqual(deepReorg.rows[0], {
+      quote_state: 'REORGED',
+      order_state: 'REORG_PENDING',
+      finality_state: 'REORGED',
+      manual_reconcile: 'true',
+      breaker_paused: true,
+      reconcile_jobs: '1',
+      journals: '2',
+    });
+  } finally {
+    await db.close();
+  }
+});
+
+test('payment receipt repository releases an expired hashless quote only after external unused proof', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const now = new Date();
+    const intent = {
+      ...paymentIntent(),
+      issuedAt: Math.floor(now.getTime() / 1_000) - 600,
+      deadline: Math.floor(now.getTime() / 1_000) - 300,
+      reservationDeadline: Math.floor(now.getTime() / 1_000) + 600,
+    };
+    await seedCatalog(db, 2, intent.merchant);
+    await reserveInventory(adapter(db), {
+      reservationId: intent.reservationId,
+      reservationHash: intent.reservationHash,
+      policyVersion: intent.policyVersion,
+      skuId: 'sku-1',
+      buyerWallet: intent.buyer,
+      quantity: intent.quantity,
+      classification: 'ORDINARY',
+      expiresAt: new Date(intent.reservationDeadline * 1_000),
+    });
+    await insertPaymentQuote(db, intent, 'receipt-worker-expired');
+    const repository = new PostgresPaymentReceiptRepository({
+      transactions: transactionAdapter(db),
+      routerAddress: '0x9999999999999999999999999999999999999999',
+    });
+    const unresolved = await repository.expiredUnresolvedQuotes(now);
+    assert.deepEqual(unresolved, [{ orderId: intent.orderId, deadline: new Date(intent.deadline * 1_000) }]);
+    const unusedEvidence = {
+      state: 'UNUSED_AFTER_DEADLINE' as const,
+      block: {
+        number: 123,
+        hash: `0x${'1'.repeat(64)}`,
+        parentHash: `0x${'2'.repeat(64)}`,
+        timestamp: intent.deadline,
+      },
+    };
+    await repository.expireUnresolvedQuote(unresolved[0]!, unusedEvidence, now);
+    const released = await db.query<{
+      quote_state: string;
+      reservation_state: string;
+      stock_available: number;
+      stock_reserved: number;
+    }>(
+      `SELECT quote.state AS quote_state, reservation.state AS reservation_state,
+         sku.stock_available, sku.stock_reserved
+       FROM core.payment_quotes quote
+       JOIN core.payment_quote_legs leg ON leg.order_id = quote.order_id
+       JOIN core.inventory_reservations reservation ON reservation.reservation_id = leg.reservation_id
+       JOIN core.skus sku ON sku.sku_id = reservation.sku_id
+       WHERE quote.order_id = $1`,
+      [intent.orderId],
+    );
+    assert.deepEqual(released.rows[0], {
+      quote_state: 'EXPIRED',
+      reservation_state: 'EXPIRED',
+      stock_available: 2,
+      stock_reserved: 0,
+    });
+    assert.equal((await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM core.audit_outbox_events
+       WHERE event_type = 'PAYMENT_ORDER_PROVEN_UNUSED' AND resource_id = $1`,
+      [intent.orderId],
+    )).rows[0]?.count, '1');
   } finally {
     await db.close();
   }
@@ -3918,37 +4191,49 @@ test('seckill quote locks both inventories and final classification releases the
     const event = paymentInput(quote.dual.seckill, 'SECKILL');
     event.event.blockTimestamp = new Date(now.getTime() + 42_000);
     event.event.finalizedAt = new Date(now.getTime() + 84_000);
-    const store = new PostgresPaymentStore(transactionAdapter(db));
-    await store.record(event);
+    await service.submitPayment(BUYER, { orderId: quote.orderId, txHash: event.event.transactionHash });
+    const receiptRepository = new PostgresPaymentReceiptRepository({
+      transactions: transactionAdapter(db),
+      routerAddress: event.event.contractAddress,
+    });
+    const candidate = (await receiptRepository.pendingReceipts())[0]!;
     await db.query("UPDATE core.seckill_sessions SET phase = 'PREHEAT' WHERE session_id = $1", [sessionId]);
     const relayBeforeFinality = await db.query<{ relay_deadline: Date }>(
       'SELECT relay_deadline FROM core.seckill_sessions WHERE session_id = $1',
       [sessionId],
     );
     const relayDeadline = Math.floor(relayBeforeFinality.rows[0]!.relay_deadline.getTime() / 1000) + 30;
+    const receipt = paymentReceiptObservation(candidate, 15);
+    receipt.block.timestamp = Math.floor(event.event.blockTimestamp.getTime() / 1_000);
+    receipt.confirmationBlock!.timestamp = Math.floor(event.event.finalizedAt!.getTime() / 1_000);
+    const paymentEvent = decodedPaymentEvent(quote.dual.seckill, event.event.blockHash, 'SECKILL');
     await assert.rejects(
-      recordSeckillRelayProjection(
-        adapter(db),
-        {
-          number: event.event.blockNumber,
-          hash: event.event.blockHash,
-          parentHash: blockHash(event.event.blockNumber - 1),
-          timestamp: Math.floor(event.event.blockTimestamp.getTime() / 1000),
-        },
-        decodedSeckillRelayEvent(sessionId, quote.orderId, event.event.blockHash, relayDeadline + 1),
-      ),
+      receiptRepository.recordFinal({
+        candidate,
+        observation: receipt,
+        events: [
+          paymentEvent,
+          decodedSeckillRelayEvent(sessionId, quote.orderId, event.event.blockHash, relayDeadline + 1),
+        ],
+      }),
       /deadline does not match the Router event/,
     );
-    await recordSeckillRelayProjection(
-      adapter(db),
-      {
-        number: event.event.blockNumber,
-        hash: event.event.blockHash,
-        parentHash: blockHash(event.event.blockNumber - 1),
-        timestamp: Math.floor(event.event.blockTimestamp.getTime() / 1000),
-      },
-      decodedSeckillRelayEvent(sessionId, quote.orderId, event.event.blockHash, relayDeadline),
-    );
+    assert.equal((await db.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM core.payment_events WHERE order_id = $1',
+      [quote.orderId],
+    )).rows[0]?.count, '0');
+    assert.equal((await db.query<{ relay_deadline: Date }>(
+      'SELECT relay_deadline FROM core.seckill_sessions WHERE session_id = $1',
+      [sessionId],
+    )).rows[0]!.relay_deadline.getTime(), relayBeforeFinality.rows[0]!.relay_deadline.getTime());
+    await receiptRepository.recordFinal({
+      candidate,
+      observation: receipt,
+      events: [
+        paymentEvent,
+        decodedSeckillRelayEvent(sessionId, quote.orderId, event.event.blockHash, relayDeadline),
+      ],
+    });
     const relayAfterIndexing = await db.query<{ relay_deadline: Date }>(
       'SELECT relay_deadline FROM core.seckill_sessions WHERE session_id = $1',
       [sessionId],
@@ -3957,7 +4242,6 @@ test('seckill quote locks both inventories and final classification releases the
       relayAfterIndexing.rows[0]!.relay_deadline.getTime(),
       relayBeforeFinality.rows[0]!.relay_deadline.getTime() + 30_000,
     );
-    await advancePaymentFinality(adapter(db), event.event.blockNumber + 14);
     const relayAfterFinality = await db.query<{ relay_deadline: Date; events: string }>(
       `SELECT session.relay_deadline,
          (SELECT count(*)::text FROM core.outbox_events
@@ -4097,6 +4381,7 @@ test('seckill quote locks both inventories and final classification releases the
     });
     assert.deepEqual(await liabilityStates(db, quote.orderId, 'LOCKED'), { USDT: seckillPrizeAmount });
 
+    const store = new PostgresPaymentStore(transactionAdapter(db));
     const selectedEventKey = paymentEventKey(
       event.event.transactionHash,
       event.event.logIndex,
@@ -14369,7 +14654,11 @@ function blockHash(value: number) {
   return `0x${value.toString(16).padStart(64, '0')}`;
 }
 
-function decodedPaymentEvent(intent: CanonicalPaymentIntent, canonicalBlockHash: string) {
+function decodedPaymentEvent(
+  intent: CanonicalPaymentIntent,
+  canonicalBlockHash: string,
+  classification: 'ORDINARY' | 'SECKILL' | 'FALLBACK_RETAIL' = 'ORDINARY',
+) {
   return {
     artifactVersion: CORE_ARTIFACT_VERSION,
     contract: 'PaymentRouterV2',
@@ -14377,7 +14666,7 @@ function decodedPaymentEvent(intent: CanonicalPaymentIntent, canonicalBlockHash:
     eventSignature: 'PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)',
     resourceId: intent.orderId,
     contractAddress: '0x9999999999999999999999999999999999999999',
-    eventHash: HASH,
+    eventHash: PAYMENT_COMPLETED_EVENT_SIGNATURE_HASH,
     transactionHash: `0x${'6'.repeat(64)}`,
     blockHash: canonicalBlockHash,
     blockNumber: 100,
@@ -14386,7 +14675,7 @@ function decodedPaymentEvent(intent: CanonicalPaymentIntent, canonicalBlockHash:
       orderId: intent.orderId,
       buyer: intent.buyer,
       merchant: intent.merchant,
-      classification: '0',
+      classification: classification === 'ORDINARY' ? '0' : classification === 'SECKILL' ? '1' : '2',
       policyVersion: String(intent.policyVersion),
       listPriceUsdt: intent.listPriceUsdt,
       productUsdtPaid: intent.productUsdtPaymentAmount,
@@ -14401,6 +14690,37 @@ function decodedPaymentEvent(intent: CanonicalPaymentIntent, canonicalBlockHash:
       reservationId: intent.reservationId,
       snapshotHash: paymentIntentHash(intent),
     },
+  };
+}
+
+function paymentReceiptObservation(
+  candidate: PaymentReceiptCandidate,
+  confirmations: number,
+): Extract<PaymentReceiptObservation, { state: 'MINED' }> {
+  const blockNumber = 100;
+  return {
+    state: 'MINED',
+    chainId: 56,
+    transactionHash: candidate.txHash,
+    status: 1,
+    to: '0x9999999999999999999999999999999999999999',
+    block: {
+      number: blockNumber,
+      hash: `0x${'5'.repeat(64)}`,
+      parentHash: blockHash(blockNumber - 1),
+      timestamp: Math.floor(Date.now() / 1_000),
+    },
+    ...(confirmations >= 15 ? {
+      confirmationBlock: {
+        number: blockNumber + 14,
+        hash: blockHash(blockNumber + 14),
+        parentHash: blockHash(blockNumber + 13),
+        timestamp: Math.floor(Date.now() / 1_000) + 42,
+      },
+    } : {}),
+    confirmations,
+    logs: [],
+    paymentLogIndex: 0,
   };
 }
 
