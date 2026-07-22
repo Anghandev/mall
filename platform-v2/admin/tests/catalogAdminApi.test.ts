@@ -177,7 +177,7 @@ function productInput(): AdminProductSlotInput {
   return {
     merchantId: 'merchant-1', idempotencyKey: 'product-save-1', title: '24K 金章', richDetail: {}, defaultFreightUsdt: '1000000', merchantConcessionBps: 2500,
     fulfillmentModes: ['DELIVERY'], categoryId: 'category-1', tagIds: ['tag-1'], mainImageAssetIds: [hash('3')],
-    skus: [{ attributes: { weight: '10g' }, listPriceUsdt: '7200000000', merchantBaseReceivableUsdt: '7000000000', stockTotal: 10, proposedSeckillInventory: 3 }],
+    skus: [{ attributes: { weight: '10g' }, listPriceUsdt: '7200000000', stockTotal: 10, proposedSeckillInventory: 3 }],
   };
 }
 

@@ -1,5 +1,8 @@
 # 24K商城品牌改名报告
 
+> Historical `.18` branding snapshot only. It does not establish current `.23`
+> release readiness, three-buyer mainnet acceptance or production Go.
+
 日期：2026-07-20
 品牌提交：`a256082b1c37daebac6236a872f3e3e61c8df342`
 生产 release：`a256082b1c37`

@@ -678,7 +678,6 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
         skuId: sku.skuId,
         attributes: sku.attributes,
         listPriceUsdt: sku.listPriceUsdt,
-        merchantBaseReceivableUsdt: sku.merchantBaseReceivableUsdt,
         stockTotal: Number(sku.stockTotal),
         proposedSeckillInventory: Number(sku.proposedSeckillInventory),
       })),

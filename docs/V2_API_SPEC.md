@@ -1,9 +1,11 @@
 # 24K商城 V2 Core API Contract
 
-Status: coordinated settlement/admin checkpoint `2.0.0-settlement-admin.16`. OpenAPI,
-generated types, ABI, manifests, enums, the fail-closed WebSocket protocol and
-consumer tests share this version. This checkpoint does not authorize a
-new deployment or transaction.
+Status: current coordinated No-Go repair baseline
+`2.0.0-fulfillment-launch.23`. OpenAPI, generated types, ABI, manifests,
+enums, the fail-closed WebSocket protocol and consumer tests share this
+version. The historical `2.0.0-settlement-admin.16` deployment lineage remains
+audit evidence only and does not authorize a new deployment, transaction or Go
+decision for `.23`.
 
 ## Authority
 

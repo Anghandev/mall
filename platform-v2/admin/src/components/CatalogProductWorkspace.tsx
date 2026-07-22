@@ -58,7 +58,6 @@ type SkuDraft = {
   skuId: string;
   attributes: string;
   listPriceUsdt: string;
-  merchantBaseReceivableUsdt: string;
   stockTotal: string;
   proposedSeckillInventory: string;
 };
@@ -81,7 +80,7 @@ type ProductDraft = {
 };
 
 const emptySku = (): SkuDraft => ({
-  skuId: '', attributes: '{}', listPriceUsdt: '', merchantBaseReceivableUsdt: '', stockTotal: '1', proposedSeckillInventory: '1',
+  skuId: '', attributes: '{}', listPriceUsdt: '', stockTotal: '1', proposedSeckillInventory: '1',
 });
 
 const emptyDraft = (): ProductDraft => ({
@@ -318,7 +317,8 @@ function SlotEvidence({ slot }: { slot: ProductSlotProjection }) {
 }
 
 function SkuEditor({ index, sku, canRemove, onChange, onRemove }: { index: number; sku: SkuDraft; canRemove: boolean; onChange(value: SkuDraft): void; onRemove(): void }) {
-  return <article><div className="catalog-sku-editor-heading"><strong>SKU {index + 1}</strong>{canRemove ? <button className="icon-button" type="button" onClick={onRemove} aria-label={`删除 SKU ${index + 1}`} title="删除 SKU"><Trash2 aria-hidden="true" /></button> : null}</div><div className="form-grid"><label>SKU ID · 编辑时保留<input value={sku.skuId} onChange={(event) => onChange({ ...sku, skuId: event.target.value })} /></label><label>属性 · JSON object<input value={sku.attributes} onChange={(event) => onChange({ ...sku, attributes: event.target.value })} required /></label><label>售价 · USDT atomic<input inputMode="numeric" value={sku.listPriceUsdt} onChange={(event) => onChange({ ...sku, listPriceUsdt: event.target.value })} required /></label><label>商家基础应收 · USDT atomic<input inputMode="numeric" value={sku.merchantBaseReceivableUsdt} onChange={(event) => onChange({ ...sku, merchantBaseReceivableUsdt: event.target.value })} required /></label><label>总库存<input type="number" min="1" value={sku.stockTotal} onChange={(event) => onChange({ ...sku, stockTotal: event.target.value })} required /></label><label>提议秒杀库存<input type="number" min="1" value={sku.proposedSeckillInventory} onChange={(event) => onChange({ ...sku, proposedSeckillInventory: event.target.value })} required /></label></div></article>;
+  const derivedBase = derivedMerchantBaseReceivable(sku.listPriceUsdt);
+  return <article><div className="catalog-sku-editor-heading"><strong>SKU {index + 1}</strong>{canRemove ? <button className="icon-button" type="button" onClick={onRemove} aria-label={`删除 SKU ${index + 1}`} title="删除 SKU"><Trash2 aria-hidden="true" /></button> : null}</div><div className="form-grid"><label>SKU ID · 编辑时保留<input value={sku.skuId} onChange={(event) => onChange({ ...sku, skuId: event.target.value })} /></label><label>属性 · JSON object<input value={sku.attributes} onChange={(event) => onChange({ ...sku, attributes: event.target.value })} required /></label><label>售价 · USDT atomic<input inputMode="numeric" value={sku.listPriceUsdt} onChange={(event) => onChange({ ...sku, listPriceUsdt: event.target.value })} required /></label><div className="catalog-form-hint"><strong>商家基础应收 · USDT atomic</strong><output>{derivedBase ?? '输入售价后由 Core 派生'}</output><small>只读：Core 按 70% USDT 付款减 1% 服务费派生。</small></div><label>总库存<input type="number" min="1" value={sku.stockTotal} onChange={(event) => onChange({ ...sku, stockTotal: event.target.value })} required /></label><label>提议秒杀库存<input type="number" min="1" value={sku.proposedSeckillInventory} onChange={(event) => onChange({ ...sku, proposedSeckillInventory: event.target.value })} required /></label></div></article>;
 }
 
 function productInput(draft: ProductDraft): AdminProductSlotInput {
@@ -328,7 +328,6 @@ function productInput(draft: ProductDraft): AdminProductSlotInput {
     ...(sku.skuId.trim() ? { skuId: sku.skuId.trim() } : {}),
     attributes: parseObject(sku.attributes, `SKU ${index + 1} 属性`),
     listPriceUsdt: sku.listPriceUsdt,
-    merchantBaseReceivableUsdt: sku.merchantBaseReceivableUsdt,
     stockTotal: Number(sku.stockTotal),
     proposedSeckillInventory: Number(sku.proposedSeckillInventory),
   }));
@@ -352,7 +351,7 @@ function draftFromProduct(product: ManagedCatalogProduct): ProductDraft {
     defaultFreightUsdt: product.defaultFreightUsdt, merchantConcessionBps: String(product.merchantConcessionBps), fulfillmentModes: [...product.fulfillmentModes],
     categoryId: product.categoryId ?? '', tagIds: [...product.tagIds], skus: product.skus.map((sku) => ({
       skuId: sku.skuId, attributes: JSON.stringify(sku.attributes), listPriceUsdt: sku.listPriceUsdt,
-      merchantBaseReceivableUsdt: sku.merchantBaseReceivableUsdt, stockTotal: sku.stockTotal, proposedSeckillInventory: sku.proposedSeckillInventory,
+      stockTotal: sku.stockTotal, proposedSeckillInventory: sku.proposedSeckillInventory,
     })),
   };
 }
@@ -365,3 +364,8 @@ function attributeText(attributes: Readonly<Record<string, unknown>>) { return O
 function formatDate(value: string) { return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)); }
 function invalid(message: string) { return new CoreApiError({ code: 'InvalidResponse', message, status: 400 }); }
 function asCoreError(cause: unknown) { return cause instanceof CoreApiError ? cause : new CoreApiError({ code: 'ExternalBlocked', message: `Catalog Core 能力不可用（${artifactVersion}）`, status: 503 }); }
+function derivedMerchantBaseReceivable(listPriceUsdt: string) {
+  if (!/^(0|[1-9][0-9]*)$/.test(listPriceUsdt) || listPriceUsdt === '0') return null;
+  const price = BigInt(listPriceUsdt);
+  return (price * 7_000n / 10_000n - price * 100n / 10_000n).toString();
+}

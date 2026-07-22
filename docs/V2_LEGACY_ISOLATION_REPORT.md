@@ -59,3 +59,54 @@ artifact 或历史证据。
 | 三个有独有提交的产品 worktree 保留 | Pass |
 | 清理后最小相关测试 | Pass：`baseline:check`、`requirements:check`、定向无引用检查 |
 | 清理后最终 `pnpm verify` | Pass：退出码 0 |
+
+## 2026-07-23 V1 / 旧入口复核
+
+当前目标文件要求继续清理 V1/旧系统；但权威边界仍规定
+`legacy/v1-npl-only/**` 只读，V1 删除必须进入单独 cutover 任务。本次只完成
+删除前引用扫描；任何 legacy 路径内的缓存移动不作为本 repair candidate 的通过项。
+
+### 结论
+
+- 不能直接删除整个 `legacy/v1-npl-only/**`：权威文档和
+  `scripts/check-workspace-baseline.mjs` 仍把 tracked V1 作为只读归档证据与
+  Phase 1 immutable legacy gate。删除 whole V1 会使 `pnpm baseline:check`
+  失败。
+- V2 runtime/workspace 没有 import/require `legacy/v1-npl-only/**`。现有命中
+  仅为 README/docs/baseline/bundle-check 的隔离或负向保护。
+- 没有把 legacy 内删除/移动作为当前 `.23` repair candidate 的完成证据。
+  先前被移到 Trash 的 ignored V1 缓存若需要复现旧系统，应在单独 cutover/
+  归档任务中恢复或登记；tracked V1 始终保留。
+- `.env`、`.env.production`、`test-artifacts/`、tracked V1、旧部署清单、
+  private packet/receipt、release acceptance 证据均未移动、未打印、未删除。
+
+### Legacy 路径内缓存移动：当前验收不采纳
+
+| 内容 | 状态 | 处理 |
+|---|---|---|
+| `legacy/v1-npl-only/node_modules/` | out-of-scope | 不作为 `.23` 修复证据；如需旧系统复现，单独 cutover/归档任务处理 |
+| `legacy/v1-npl-only/cache/` | out-of-scope | 同上 |
+| `legacy/v1-npl-only/out/` | out-of-scope | 同上 |
+| `legacy/v1-npl-only/.expo/` | out-of-scope | 同上 |
+
+Trash 目录：
+`/Users/ronnie/.Trash/abu24k-v1-ignored-cache-20260723T041638/`
+
+### 剩余 blocker
+
+| Blocker | 当前处理 |
+|---|---|
+| whole V1 删除与 `legacy` 只读权威冲突 | 保留 tracked V1；如要删除，需单独更新 authority、baseline gate，并先迁出/登记审计证据 |
+| baseline gate 锁定 5 个 legacy credential-debt blob | 保留；`baseline:check` 继续报告 `ExternalBlocked legacy credential rotation` |
+| 旧通用 Web3 micro 模板残留 | root micro 入口已收口为 Abu V2 BSC-only；Gas 只记录，不再作为小额硬 No-Go |
+| `SAFE_APPROVED` / `SAFE_OWNER_SET` audit profile 名称 | 仅剩 schema/audit/generated 兼容面；未命中 Safe proposer、`execTransaction`、MultiSend 或可执行 runtime 入口。若后续要求“发布面也零 Safe 字符串”，需新迁移与 artifact 大版本收口 |
+| `SETTLEMENT_BATCHED` 历史通知名 | migration 033 已转换为 `SETTLEMENT_SUBMITTED`，当前 settlement worker 只发 `SETTLEMENT_SUBMITTED`；Mall 保留只读历史文案 |
+
+### 本次最小验证
+
+```bash
+pnpm micro:guard:test
+pnpm baseline:check
+```
+
+两项均 PASS。

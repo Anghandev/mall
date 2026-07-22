@@ -40,6 +40,13 @@ const governance = wallet('PLATFORM_TECH_PRIVATE_KEY', 'PLATFORM_GOVERNANCE_WALL
 const usdtSettlement = wallet('WALLET_2_PRIVATE_KEY', 'USDT_SETTLEMENT_WALLET_ADDRESS');
 const nplReward = wallet('WALLET_3_PRIVATE_KEY', 'NPL_REWARD_WALLET_ADDRESS');
 const operations = wallet('WALLET_4_PRIVATE_KEY', 'OPERATIONS_GUARANTEE_WALLET_ADDRESS');
+assertDistinctRoleWallets([
+  ['PLATFORM_GOVERNANCE_WALLET_ADDRESS', governance.address],
+  ['PLATFORM_SERVICE_FEE_WALLET_ADDRESS', required('PLATFORM_SERVICE_FEE_WALLET_ADDRESS')],
+  ['USDT_SETTLEMENT_WALLET_ADDRESS', usdtSettlement.address],
+  ['NPL_REWARD_WALLET_ADDRESS', nplReward.address],
+  ['OPERATIONS_GUARANTEE_WALLET_ADDRESS', operations.address],
+]);
 const settlementWallets = new Map([
   [usdtSettlement.address.toLowerCase(), { wallet: usdtSettlement, tokenAddress: USDT_ADDRESS }],
   [nplReward.address.toLowerCase(), { wallet: nplReward, tokenAddress: NPL_ADDRESS }],
@@ -679,6 +686,16 @@ function wallet(keyName: string, addressName: string) {
   const value = new Wallet(required(keyName), provider);
   if (value.address.toLowerCase() !== address(required(addressName), addressName)) throw new Error(`${addressName} does not match its key`);
   return value;
+}
+
+function assertDistinctRoleWallets(entries: Array<[string, string]>) {
+  const seen = new Map<string, string>();
+  for (const [name, value] of entries) {
+    const normalized = address(value, name);
+    const previous = seen.get(normalized);
+    if (previous) throw new Error(`EOA runtime role wallet collision: ${previous} and ${name}`);
+    seen.set(normalized, name);
+  }
 }
 
 function boundedGas(value: unknown) {

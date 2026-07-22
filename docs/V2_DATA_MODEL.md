@@ -1,9 +1,10 @@
 # 24K商城 V2 Data Model
 
-Status: coordinated local settlement/admin checkpoint
-`2.0.0-settlement-admin.16`. This document describes implemented catalog, media, payment,
-fulfillment, settlement and administrative storage and does not authorize
-deployment.
+Status: current coordinated No-Go repair baseline
+`2.0.0-fulfillment-launch.23`. This document describes implemented catalog,
+media, payment, fulfillment, settlement and administrative storage and does not
+authorize deployment. Historical `2.0.0-settlement-admin.16` artifacts are
+lineage evidence only and do not prove the current `.23` release is Go.
 
 ## Storage Boundary
 
@@ -19,7 +20,9 @@ order snapshots are never recalculated from current configuration.
 ## Catalog And Reservations
 
 - `core.products` and `core.skus` own the off-chain IDs, immutable chain IDs,
-  USDT list price, merchant cost, concession rate and inventory.
+  USDT list price, Core-derived merchant base receivable, concession rate and
+  inventory. Product writes never accept a user-entered merchant base
+  receivable; Core derives `floor(list_price_usdt * 7000 / 10000) - floor(list_price_usdt * 100 / 10000)` (nominally 69%).
 - New products bind one active `core.merchant_stores` slot. The partial unique
   index permits at most one non-hidden/non-delisted product per store. Product
   states are Draft, Review, Scheduled, Active, SoldOut, Hidden, Delisted and

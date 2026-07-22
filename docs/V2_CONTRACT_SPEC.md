@@ -1,10 +1,13 @@
 # 24K商城 V2 Payment Contract Freeze
 
-Status: coordinated settlement/admin checkpoint
-`2.0.0-settlement-admin.16`. The generated manifest binds the three BSC
-deployment addresses, blocks and runtime code hashes and has
-`deploymentAuthorized: true`. This document does not authorize any additional
-transaction.
+Status: current `.23` No-Go repair candidate, with historical deployment lineage
+from `2.0.0-settlement-admin.16`. The generated manifest binds the three BSC
+deployment addresses, blocks and runtime code hashes through the contract
+manifest, but the coordinated `.23` manifest has `deploymentAuthorized: false`
+and `releaseGateStatus: NO_GO_REPAIR_BASELINE`. Historical authorization is
+recorded only under `historicalDeploymentLineage`; it does not prove the current
+`.23` release, W5/W1/W6 mainnet acceptance or production Go. This document does
+not authorize any additional transaction.
 
 ## Contract Set
 

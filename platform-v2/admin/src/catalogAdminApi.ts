@@ -247,7 +247,6 @@ function validateProductSlot(input: AdminProductSlotInput) {
     if (sku.skuId !== undefined) resourceId(sku.skuId);
     if (!isRecord(sku.attributes)) throw invalid('SKU attributes must be an object', 400);
     requireAmount(sku.listPriceUsdt, 'listPriceUsdt');
-    requireAmount(sku.merchantBaseReceivableUsdt, 'merchantBaseReceivableUsdt');
     if (!Number.isSafeInteger(sku.stockTotal) || sku.stockTotal < 1) throw invalid('SKU stockTotal must be positive', 400);
     if (!Number.isSafeInteger(sku.proposedSeckillInventory) || sku.proposedSeckillInventory < 1 || sku.proposedSeckillInventory > sku.stockTotal) {
       throw invalid('SKU proposedSeckillInventory must be positive and no greater than stockTotal', 400);

@@ -19,7 +19,10 @@ const ready = {
 test('cleanup gate requires pause, expiry, delisting and zero live obligations', () => {
   assert.doesNotThrow(() => assertCleanupSnapshot(ready));
   for (const [field, value] of [
+    ['primaryChain56', false],
+    ['fallbackChain56', false],
     ['primaryPaymentsPaused', false],
+    ['fallbackPaymentsPaused', false],
     ['databasePaymentsPaused', false],
     ['productState', 'ACTIVE'],
     ['activeQuotes', 1],
@@ -32,4 +35,5 @@ test('cleanup gate requires pause, expiry, delisting and zero live obligations',
     ...ready,
     now: new Date(ready.entitlementExpiresAt.getTime() - 1),
   }));
+  assert.doesNotThrow(() => assertCleanupSnapshot({ ...ready, productState: 'HIDDEN' }));
 });

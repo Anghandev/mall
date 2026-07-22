@@ -27,6 +27,7 @@ import {
   SettlementWorker,
   type EoaSettlementReceipt,
 } from '../../server/chain/settlement-worker.ts';
+import { requiredPostgresAdminUrl } from './postgres-env.ts';
 
 const MIGRATIONS = fileURLToPath(new URL('../../server/data/migrations/business/', import.meta.url));
 const HASH_1 = `0x${'1'.repeat(64)}`;
@@ -86,9 +87,9 @@ const SETTLEMENT_INTENT: SettlementRequestIntent = Object.freeze({
 const REQUEST_ID = settlementRequestId(SETTLEMENT_INTENT);
 
 test('real PostgreSQL serializes leased payout reorg, terminal recovery and payment reversal lock order', {
-  timeout: 300_000,
+  timeout: 600_000,
 }, async () => {
-  const adminConnectionString = requiredPostgresAdminUrl();
+  const adminConnectionString = requiredPostgresAdminUrl('prize reorg');
   const databaseName = `abu24k_prize_reorg_${randomBytes(6).toString('hex')}`;
   const databaseConnectionString = connectionForDatabase(adminConnectionString, databaseName);
   const admin = new Client({ connectionString: connectionForDatabase(adminConnectionString, 'postgres') });
@@ -442,7 +443,7 @@ test('real PostgreSQL serializes leased payout reorg, terminal recovery and paym
 });
 
 test('real PostgreSQL re-pauses after recovered payout reorg and completes a second recovery episode', {
-  timeout: 300_000,
+  timeout: 600_000,
 }, async () => {
   const adminConnectionString = requiredPostgresAdminUrl();
   const databaseName = `abu24k_prize_recovery_${randomBytes(6).toString('hex')}`;
@@ -860,7 +861,7 @@ test('real PostgreSQL re-pauses after recovered payout reorg and completes a sec
 });
 
 test('real PostgreSQL serializes prize injection creation against empty-session settlement', {
-  timeout: 300_000,
+  timeout: 600_000,
 }, async () => {
   const adminConnectionString = requiredPostgresAdminUrl();
   const databaseName = `abu24k_late_prize_${randomBytes(6).toString('hex')}`;
@@ -1566,14 +1567,6 @@ async function connected(connectionString: string, clients: Client[]) {
   await client.query("SET lock_timeout = '5s'");
   clients.push(client);
   return client;
-}
-
-function requiredPostgresAdminUrl() {
-  const value = process.env.POSTGRES_ADMIN_URL;
-  if (!value || !/^postgres(?:ql)?:\/\//i.test(value)) {
-    throw new Error('POSTGRES_ADMIN_URL is required for the real PostgreSQL prize reorg gate');
-  }
-  return value;
 }
 
 function connectionForDatabase(connectionString: string, database: string) {

@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { Interface, JsonRpcProvider, Wallet, keccak256 } from 'ethers';
+import { Interface, JsonRpcProvider, Wallet, getAddress, keccak256 } from 'ethers';
 import { validateRouterCutover } from './router-cutover.mjs';
 
 process.loadEnvFile(resolve('.env'));
@@ -25,6 +25,21 @@ const writeEnv = async (name, entries) => {
   try { await file.writeFile(`${entries.join('\n')}\n`); } finally { await file.close(); }
 };
 
+function assertDistinctRoleWallets(entries) {
+  const seen = new Map();
+  for (const [name, value] of entries) {
+    let normalized;
+    try {
+      normalized = getAddress(value).toLowerCase();
+    } catch {
+      throw new Error(`${name} is invalid`);
+    }
+    const previous = seen.get(normalized);
+    if (previous) throw new Error(`Production role wallet collision: ${previous} and ${name}`);
+    seen.set(normalized, name);
+  }
+}
+
 const signingRoles = [
   ['PLATFORM_TECH_PRIVATE_KEY', 'PLATFORM_GOVERNANCE_WALLET_ADDRESS'],
   ['WALLET_2_PRIVATE_KEY', 'USDT_SETTLEMENT_WALLET_ADDRESS'],
@@ -43,6 +58,7 @@ for (const [key, address] of signingRoles) {
     throw new Error(`${key} does not match ${address}`);
   }
 }
+assertDistinctRoleWallets(roleAddresses.map((name) => [name, required(name)]));
 
 const rpc = required('BSC_RPC_URL');
 const fallbackRpc = required('BSC_FALLBACK_RPC_URL');

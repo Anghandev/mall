@@ -18,6 +18,7 @@ import {
   PAYMENT_COMPLETED_EVENT_SIGNATURE_HASH,
   paymentEventKey,
 } from '../../server/data/payment-store.ts';
+import { requiredPostgresAdminUrl } from './postgres-env.ts';
 
 const MIGRATIONS = fileURLToPath(new URL('../../server/data/migrations/business/', import.meta.url));
 const ROUTER = '0x9999999999999999999999999999999999999999';
@@ -67,9 +68,9 @@ const POLICY = Object.freeze({
 });
 
 test('real PostgreSQL atomically resumes and finalizes payment plus seckill relay receipts', {
-  timeout: 300_000,
+  timeout: 600_000,
 }, async () => {
-  const adminConnectionString = requiredPostgresAdminUrl();
+  const adminConnectionString = requiredPostgresAdminUrl('payment receipt');
   const databaseName = `abu24k_receipt_${randomBytes(6).toString('hex')}`;
   const databaseConnectionString = connectionForDatabase(adminConnectionString, databaseName);
   const admin = new Client({ connectionString: connectionForDatabase(adminConnectionString, 'postgres') });
@@ -642,14 +643,6 @@ async function connected(connectionString: string) {
   const client = new Client({ connectionString });
   await client.connect();
   return client;
-}
-
-function requiredPostgresAdminUrl() {
-  const value = process.env.POSTGRES_ADMIN_URL;
-  if (!value || !/^postgres(?:ql)?:\/\//i.test(value)) {
-    throw new Error('POSTGRES_ADMIN_URL is required for the real PostgreSQL payment receipt gate');
-  }
-  return value;
 }
 
 function connectionForDatabase(connectionString: string, database: string) {

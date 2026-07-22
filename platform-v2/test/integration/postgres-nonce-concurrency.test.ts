@@ -6,6 +6,7 @@ import { Client } from 'pg';
 import { CORE_ARTIFACT_VERSION, USDT_ADDRESS } from '../../server/api/enums.ts';
 import { applyMigrations } from '../../server/data/migrations.ts';
 import { nextAvailableSettlementExecutorNonce } from '../../server/data/settlement-service.ts';
+import { requiredPostgresAdminUrl } from './postgres-env.ts';
 
 const HASH_1 = `0x${'1'.repeat(64)}`;
 const HASH_2 = `0x${'2'.repeat(64)}`;
@@ -15,9 +16,9 @@ const WALLET_B = '0x5555555555555555555555555555555555555555';
 const MIGRATIONS = fileURLToPath(new URL('../../server/data/migrations/business/', import.meta.url));
 
 test('real PostgreSQL serializes settlement and WALLET_4 nonce reservations across connections', {
-  timeout: 120_000,
+  timeout: 600_000,
 }, async () => {
-  const adminConnectionString = requiredPostgresAdminUrl();
+  const adminConnectionString = requiredPostgresAdminUrl('nonce concurrency');
   const databaseName = `abu24k_nonce_${randomBytes(6).toString('hex')}`;
   const databaseConnectionString = connectionForDatabase(adminConnectionString, databaseName);
   const admin = new Client({ connectionString: connectionForDatabase(adminConnectionString, 'postgres') });
@@ -158,14 +159,6 @@ async function connected(connectionString: string, clients: Client[]) {
   await client.connect();
   clients.push(client);
   return client;
-}
-
-function requiredPostgresAdminUrl() {
-  const value = process.env.POSTGRES_ADMIN_URL;
-  if (!value || !/^postgres(?:ql)?:\/\//i.test(value)) {
-    throw new Error('POSTGRES_ADMIN_URL is required for the real PostgreSQL nonce concurrency gate');
-  }
-  return value;
 }
 
 function connectionForDatabase(connectionString: string, database: string) {

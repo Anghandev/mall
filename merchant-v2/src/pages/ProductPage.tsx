@@ -59,7 +59,6 @@ interface SkuDraft {
   skuId?: string;
   attributes: string;
   listPriceUsdt: string;
-  merchantBaseReceivableUsdt: string;
   stockTotal: string;
   proposedSeckillInventory: string;
 }
@@ -756,13 +755,14 @@ function SkuEditor({
   onRemove(): void;
 }) {
   const set = (key: keyof SkuDraft, value: string) => onChange({ ...sku, [key]: value });
+  const derivedBase = derivedMerchantBaseReceivable(sku.listPriceUsdt);
   return (
     <fieldset className="sku-editor">
       <legend>SKU {index + 1}{sku.skuId ? ` / ${sku.skuId}` : ''}</legend>
       <button aria-label={`移除 SKU ${index + 1}`} className="icon-button sku-remove" disabled={!canEdit} onClick={onRemove} type="button"><Trash2 aria-hidden="true" size={16} /></button>
       <div className="field sku-attributes"><label htmlFor={`sku-attributes-${sku.key}`}>规格属性（JSON 对象）</label><input disabled={!canEdit} id={`sku-attributes-${sku.key}`} onChange={(event) => set('attributes', event.target.value)} spellCheck={false} value={sku.attributes} /></div>
       <div className="field"><label htmlFor={`sku-price-${sku.key}`}>商品售价（USDT 原子值）</label><input disabled={!canEdit} id={`sku-price-${sku.key}`} inputMode="numeric" onChange={(event) => set('listPriceUsdt', event.target.value)} value={sku.listPriceUsdt} /></div>
-      <div className="field"><label htmlFor={`sku-receivable-${sku.key}`}>商家基础应收（USDT 原子值）</label><input disabled={!canEdit} id={`sku-receivable-${sku.key}`} inputMode="numeric" onChange={(event) => set('merchantBaseReceivableUsdt', event.target.value)} value={sku.merchantBaseReceivableUsdt} /></div>
+      <div className="field"><span id={`sku-receivable-${sku.key}`}>商家基础应收（USDT 原子值）</span><output aria-labelledby={`sku-receivable-${sku.key}`}>{derivedBase ?? '输入售价后由 Core 派生'}</output><small>只读：Core 按 70% USDT 付款减 1% 服务费派生。</small></div>
       <div className="field"><label htmlFor={`sku-stock-${sku.key}`}>总库存</label><input disabled={!canEdit} id={`sku-stock-${sku.key}`} inputMode="numeric" min={1} onChange={(event) => set('stockTotal', event.target.value)} type="number" value={sku.stockTotal} /></div>
       <div className="field"><label htmlFor={`sku-seckill-${sku.key}`}>提报秒杀库存</label><input disabled={!canEdit} id={`sku-seckill-${sku.key}`} inputMode="numeric" min={1} onChange={(event) => set('proposedSeckillInventory', event.target.value)} type="number" value={sku.proposedSeckillInventory} /></div>
     </fieldset>
@@ -821,7 +821,6 @@ function productDraft(product: ManagedCatalogProduct | null): ProductDraft {
       skuId: sku.skuId,
       attributes: JSON.stringify(sku.attributes),
       listPriceUsdt: sku.listPriceUsdt,
-      merchantBaseReceivableUsdt: sku.merchantBaseReceivableUsdt,
       stockTotal: sku.stockTotal,
       proposedSeckillInventory: sku.proposedSeckillInventory,
     })),
@@ -849,7 +848,6 @@ function emptySku(): SkuDraft {
     key: crypto.randomUUID(),
     attributes: '{}',
     listPriceUsdt: '',
-    merchantBaseReceivableUsdt: '',
     stockTotal: '1',
     proposedSeckillInventory: '1',
   };
@@ -865,8 +863,6 @@ function productInput(draft: ProductDraft): Omit<ProductSlotInput, 'idempotencyK
   const richDetail = parseObject(draft.richDetail, '商品详情');
   const skus = draft.skus.map((sku, index) => {
     const listPriceUsdt = parseAtomic(sku.listPriceUsdt, `SKU ${index + 1} 商品售价`, true);
-    const merchantBaseReceivableUsdt = parseAtomic(sku.merchantBaseReceivableUsdt, `SKU ${index + 1} 商家基础应收`, false);
-    if (BigInt(merchantBaseReceivableUsdt) > BigInt(listPriceUsdt)) throw new Error(`SKU ${index + 1} 商家基础应收不能高于售价。`);
     const stockTotal = parsePositiveInteger(sku.stockTotal, `SKU ${index + 1} 总库存`);
     const proposedSeckillInventory = parsePositiveInteger(sku.proposedSeckillInventory, `SKU ${index + 1} 秒杀库存`);
     if (proposedSeckillInventory > stockTotal) throw new Error(`SKU ${index + 1} 秒杀库存不能超过总库存。`);
@@ -874,7 +870,6 @@ function productInput(draft: ProductDraft): Omit<ProductSlotInput, 'idempotencyK
       ...(sku.skuId ? { skuId: sku.skuId } : {}),
       attributes: parseObject(sku.attributes, `SKU ${index + 1} 规格属性`),
       listPriceUsdt,
-      merchantBaseReceivableUsdt,
       stockTotal,
       proposedSeckillInventory,
     };
@@ -910,6 +905,12 @@ function parseAtomic(value: string, label: string, positive: boolean) {
     throw new Error(`${label}必须是${positive ? '大于 0 的' : ''}规范化整数原子值。`);
   }
   return value;
+}
+
+function derivedMerchantBaseReceivable(listPriceUsdt: string) {
+  if (!/^(0|[1-9][0-9]*)$/.test(listPriceUsdt) || listPriceUsdt === '0') return null;
+  const price = BigInt(listPriceUsdt);
+  return (price * 7_000n / 10_000n - price * 100n / 10_000n).toString();
 }
 
 function parsePositiveInteger(value: string, label: string) {

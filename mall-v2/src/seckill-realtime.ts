@@ -1,4 +1,5 @@
 import { artifactVersion, type RealtimeEventEnvelope } from '@abu24k/core-artifacts';
+import websocketProtocol from '@abu24k/core-artifacts/websocket';
 
 import { CoreClientError, parseRealtimeEvent, type CoreClient } from './core-client';
 
@@ -183,7 +184,10 @@ function websocketUrl(baseUrl: string | undefined, sessionId: string, cursor: st
   const browserOrigin = globalThis.location?.origin;
   const origin = baseUrl || browserOrigin;
   if (!origin) throw new CoreClientError('ConfigurationRequired', '缺少实时服务地址');
-  const url = new URL(`${origin.replace(/\/+$/, '')}/v2/ws`, browserOrigin);
+  if (websocketProtocol.publicationStatus !== 'AVAILABLE' || typeof websocketProtocol.endpoint !== 'string') {
+    throw new CoreClientError('ConfigurationRequired', 'Core 实时协议未发布');
+  }
+  const url = new URL(`${origin.replace(/\/+$/, '')}${websocketProtocol.endpoint}`, browserOrigin);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('artifactVersion', artifactVersion);
   url.searchParams.set('channel', `seckill:${sessionId.toLowerCase()}`);

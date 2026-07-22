@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-fulfillment-launch.22",
+  "artifactVersion": "2.0.0-fulfillment-launch.23",
   "contracts": {
     "PolicyRegistryV2": [
       {

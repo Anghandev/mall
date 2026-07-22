@@ -10,4 +10,6 @@ test('production configuration gives the EOA runtime independent primary and fal
   const section = source.slice(start, end);
   assert.match(section, /line\('BSC_RPC_URL', rpc\)/);
   assert.match(section, /line\('BSC_FALLBACK_RPC_URL', fallbackRpc\)/);
+  assert.match(source, /assertDistinctRoleWallets\(roleAddresses\.map/);
+  assert.match(source, /Production role wallet collision/);
 });

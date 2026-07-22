@@ -398,7 +398,7 @@ async function enterSettings(client: CoreApi) {
 
 describe('00 wallet gateway', () => {
   it('consumes settlement-admin.16 without widening the merchant action boundary', () => {
-    expect(artifactVersion).toBe('2.0.0-fulfillment-launch.22');
+    expect(artifactVersion).toBe('2.0.0-fulfillment-launch.23');
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
     expect(coreBoundary.artifactVersion).toBe(artifactVersion);
     expect(coreBoundary.artifactsAvailable).toBe(true);
@@ -637,7 +637,8 @@ describe('02 one-product form', () => {
 
     expect(await screen.findByRole('heading', { name: '单品提报' })).toBeTruthy();
     expect((await screen.findByLabelText('商品标题') as HTMLInputElement).value).toBe('24K 足金金片');
-    expect((screen.getByLabelText('商家基础应收（USDT 原子值）') as HTMLInputElement).value).toBe('690');
+    expect(screen.getAllByText('690').length).toBeGreaterThan(0);
+    expect(screen.getByText('只读：Core 按 70% USDT 付款减 1% 服务费派生。')).toBeTruthy();
     expect((screen.getByLabelText('总库存') as HTMLInputElement).value).toBe('20');
     expect(screen.getByText(/product-history-1/)).toBeTruthy();
     expect(await screen.findByAltText('商品主图 1')).toBeTruthy();
@@ -690,7 +691,6 @@ describe('02 one-product form', () => {
         skus: [expect.objectContaining({
           skuId: managedProduct.skus[0]!.skuId,
           listPriceUsdt: '1000',
-          merchantBaseReceivableUsdt: '690',
           stockTotal: 20,
           proposedSeckillInventory: 10,
         })],

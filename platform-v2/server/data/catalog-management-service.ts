@@ -33,7 +33,6 @@ export interface ProductSkuInput {
   skuId?: string;
   attributes: Readonly<Record<string, unknown>>;
   listPriceUsdt: string;
-  merchantBaseReceivableUsdt: string;
   stockTotal: number;
   proposedSeckillInventory: number;
 }
@@ -1336,6 +1335,7 @@ async function upsertProductSkus(
   for (const input of inputs) {
     const skuId = input.skuId ?? resourceId('sku', `0x${randomBytes(32).toString('hex')}`);
     const current = byId.get(skuId);
+    const merchantBaseReceivableUsdt = postFeeMerchantBase(input.listPriceUsdt).toString();
     if (input.skuId && !current) throw new CoreError('Forbidden', 'SKU is outside the product scope', 403);
     retained.add(skuId);
     if (current) {
@@ -1347,7 +1347,7 @@ async function upsertProductSkus(
            proposed_seckill_inventory = $6
          WHERE sku_id = $1`,
         [skuId, JSON.stringify(input.attributes), input.listPriceUsdt,
-          input.merchantBaseReceivableUsdt, input.stockTotal, input.proposedSeckillInventory],
+          merchantBaseReceivableUsdt, input.stockTotal, input.proposedSeckillInventory],
       );
     } else {
       await executor.query(
@@ -1357,7 +1357,7 @@ async function upsertProductSkus(
            lifecycle_state, proposed_seckill_inventory
          ) VALUES ($1,$2,$3,1,$4,$5,$6,$7,$7,'DRAFT',$8)`,
         [skuId, `0x${randomBytes(32).toString('hex')}`, productId, JSON.stringify(input.attributes),
-          input.listPriceUsdt, input.merchantBaseReceivableUsdt, input.stockTotal,
+          input.listPriceUsdt, merchantBaseReceivableUsdt, input.stockTotal,
           input.proposedSeckillInventory],
       );
     }
@@ -1791,8 +1791,6 @@ function validateProductSlotInput(input: ProductSlotInput) {
       throw new CoreError('InvalidRequest', `skus[${index}].attributes must be an object`);
     }
     const listPriceUsdt = positiveInteger(sku.listPriceUsdt, `skus[${index}].listPriceUsdt`).toString();
-    const base = unsignedInteger(sku.merchantBaseReceivableUsdt, `skus[${index}].merchantBaseReceivableUsdt`);
-    if (base > BigInt(listPriceUsdt)) throw new CoreError('InvalidRequest', 'Merchant base receivable exceeds list price');
     if (!Number.isSafeInteger(sku.stockTotal) || sku.stockTotal <= 0) throw new CoreError('InvalidRequest', 'stockTotal must be positive');
     if (!Number.isSafeInteger(sku.proposedSeckillInventory) || sku.proposedSeckillInventory <= 0) {
       throw new CoreError('InvalidRequest', 'proposedSeckillInventory must be a positive integer');
@@ -1804,7 +1802,6 @@ function validateProductSlotInput(input: ProductSlotInput) {
       ...(sku.skuId ? { skuId: validateResourceId(sku.skuId, `skus[${index}].skuId`) } : {}),
       attributes: sku.attributes,
       listPriceUsdt,
-      merchantBaseReceivableUsdt: base.toString(),
       stockTotal: sku.stockTotal,
       proposedSeckillInventory: sku.proposedSeckillInventory,
     };
@@ -2057,7 +2054,11 @@ function catalogFingerprint(product: ProductRow, skus: SkuRow[]) {
 }
 
 function postFeeMerchantBase(listPriceUsdt: string) {
-  return BigInt(listPriceUsdt) * 6_900n / 10_000n;
+  return postFeeMerchantBaseAmount(BigInt(listPriceUsdt));
+}
+
+function postFeeMerchantBaseAmount(listPriceUsdt: bigint) {
+  return listPriceUsdt * 7_000n / 10_000n - listPriceUsdt * 100n / 10_000n;
 }
 
 function productLock(type: string, id: string, state: string) {

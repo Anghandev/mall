@@ -5,13 +5,27 @@ release acceptance `PENDING`. Historical evidence below does not establish Go
 for the current commit and must not replace the new bounded run.
 
 The current acceptance run is bound to artifact
-`2.0.0-fulfillment-launch.22`, the release commit produced by this Goal and the
+`2.0.0-fulfillment-launch.23`, the release commit produced by this Goal and the
 five-role EOA architecture in `V2_SYSTEM_CONTRACT.md`. The historical evidence
 below was produced under `2.0.0-settlement-admin.16` and cannot authorize or
 substitute for the new run. This document alone does not authorize a
 transaction.
 
-## Current Evidence
+## Current Gate For This Goal
+
+- `pnpm micro:preflight` is now the Abu V2 gate, not the old generic Web3
+  template. It must bind the same `.23` artifact, release commit,
+  mode-600 packet hash, five distinct production EOAs, W5/W1/W6 buyer set,
+  token-value ceiling, dual BSC RPC runtime code hashes, BNM and local
+  DB/Redis/signer/executor configuration before any runner is valid.
+- A runner that skips this preflight, uses W3 as a buyer, points at a stale
+  packet, mismatches commit/artifact/runtime hash, or exceeds the 3-USDT
+  token-value ceiling is No-Go.
+- Full local `pnpm verify` also requires `POSTGRES_ADMIN_URL` for the real
+  PostgreSQL gates. The tests read it from the shell or ignored local env files
+  (`.env`, `.env.runtime`, `.env.wallets.local`) and must never print the URL.
+
+## Historical Evidence Below (Not Current Go)
 
 - `pnpm verify` passed after all three products consumed the same Core artifact.
 - Contract unit, fuzz and invariant tests passed, including per-asset
@@ -61,13 +75,16 @@ The earlier Safe-bound deployments are historical evidence only:
 - they must not receive a policy, payment, settlement or governance action.
 
 The active deployment manifest is
-`platform-v2/deployments/bsc-payment-v2.json`. It is currently:
+`platform-v2/deployments/bsc-payment-v2.json`; it remains historical deployment
+lineage for the deployed EOA contracts. The `.23` coordinated artifact is still
+No-Go until W5/W1/W6 evidence passes. Current split:
 
 ```text
 architecture = FIVE_ROLE_EOA_V2
-deploymentStatus = DEPLOYED
-deploymentAuthorized = true
-contracts = three EOA-bound payment contracts
+contractManifest.deploymentStatus = DEPLOYED
+contractManifest.deploymentAuthorized = false
+coordinatedManifest.deploymentAuthorized = false
+coordinatedManifest.releaseGateStatus = NO_GO_REPAIR_BASELINE
 ```
 
 The approved setup packet SHA-256
@@ -98,10 +115,10 @@ The merchant remains `BELOW_MINIMUM` until formal capital is provided.
 ## Exact Packet Gate
 
 Before any broadcast, one ignored mode-600 packet must bind every transaction
-in execution order. The user has authorized Core to execute these bounded
-packets without repeating a chat SHA confirmation, provided each token-value
-action remains at or below 3 USDT and the existing Gas/total budgets do not
-change. The packet must contain:
+in execution order. Historical packet approvals and the previous `.22` No-Go
+baseline do not carry forward to the current `.23` repair candidate. A broadcast
+requires this release id, packet SHA-256, W5/W1/W6 buyer set and explicit user
+approval for that current bounded plan. The packet must contain:
 
 ```text
 chainId = 56

@@ -96,7 +96,7 @@ test('typed config reports blocked inputs without exposing secret values', () =>
   const ready = loadConfig(completeEnvironment());
   const serialized = JSON.stringify(publicReadiness(ready));
   assert.equal(publicReadiness(ready).writesEnabled, false);
-  assert.equal(ready.externalBlocked.includes('COORDINATED_DEPLOYMENT_AUTHORIZATION'), false);
+  assert.equal(ready.externalBlocked.includes('COORDINATED_DEPLOYMENT_AUTHORIZATION'), true);
   assert.equal(serialized.includes('test-jwt-secret'), false);
   assert.equal(serialized.includes('provider-secret'), false);
   assert.equal(ready.providerReadiness.BNM, 'READY');
@@ -2171,7 +2171,6 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       skus: [{
         attributes: { size: 'standard' },
         listPriceUsdt: '100',
-        merchantBaseReceivableUsdt: '60',
         stockTotal: 10,
         proposedSeckillInventory: 3,
       }],
@@ -2179,6 +2178,18 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
     assert.equal((await fetch(`${base}/v2/merchant/stores/store-1/product-slot`, {
       headers: bearerHeaders,
     })).status, 200);
+    assert.equal((await fetch(`${base}/v2/merchant/stores/store-1/product-slot`, {
+      method: 'PUT',
+      headers: bearerHeaders,
+      body: JSON.stringify({
+        ...productSlotBody,
+        idempotencyKey: 'http-product-slot-reject-base-1',
+        skus: [{
+          ...productSlotBody.skus[0],
+          merchantBaseReceivableUsdt: '60',
+        }],
+      }),
+    })).status, 400);
     assert.equal((await fetch(`${base}/v2/merchant/stores/store-1/product-slot`, {
       method: 'PUT',
       headers: bearerHeaders,

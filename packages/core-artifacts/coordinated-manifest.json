@@ -1,8 +1,15 @@
 {
-  "artifactVersion": "2.0.0-fulfillment-launch.22",
+  "artifactVersion": "2.0.0-fulfillment-launch.23",
   "publicationStatus": "COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT",
-  "deploymentAuthorized": true,
-  "deploymentAuthorizationEvidenceHash": "0x9d260a962e4cefe886ddf1382b1c6efb4ff06fef6fbac17bf7014b3b3e78c3eb",
+  "deploymentAuthorized": false,
+  "deploymentAuthorizationEvidenceHash": null,
+  "releaseGateStatus": "NO_GO_REPAIR_BASELINE",
+  "historicalDeploymentLineage": {
+    "artifactVersion": "2.0.0-settlement-admin.16",
+    "deploymentAuthorized": true,
+    "deploymentAuthorizationEvidenceHash": "0x9d260a962e4cefe886ddf1382b1c6efb4ff06fef6fbac17bf7014b3b3e78c3eb",
+    "note": "Historical deployment lineage only; does not authorize this artifact, W5/W1/W6 acceptance or production Go."
+  },
   "chain": {
     "name": "BSC Mainnet",
     "chainId": 56
@@ -14,57 +21,57 @@
   "components": {
     "packageMetadata": {
       "path": "package.json",
-      "sha256": "4d0d020791e77dc082cd856e5dc6eccf02bdf7a0d872499ac8ceabb9ba522868"
+      "sha256": "25f2a647ac01b1cf2428b786c98d3b36b2b37a2ff7caffd718c5c7cf751c1625"
     },
     "openapi": {
       "path": "openapi/openapi.json",
-      "sha256": "766a5847891e03c25f92b05f0a68f412fb7b8b68865c475df589222e27b1e1d4"
+      "sha256": "ad0283131f6640ddf8d76b3676aee29e4893e2bb8735b629e0ec2f3379752c56"
     },
     "generatedRuntime": {
       "path": "generated/index.js",
-      "sha256": "fb2f7baf16c4548bef70fa38513b6e82298c0a86fbd658dc7c0558f38cd262a7"
+      "sha256": "8ec3e8143ef1e5b1d730be66899bdfa653c72a49f3c13e606bc3dcba4b093409"
     },
     "generatedTypes": {
       "path": "generated/index.d.ts",
-      "sha256": "4de214f5e8cd10ccaa67b27ca0cd6ead59752992e9deb4af6394ff539385f66b"
+      "sha256": "b4f2d235dc2855d1a3c53f70bf2bb522b2c1920b01726d46cf7036eac7d81702"
     },
     "schemaManifest": {
       "path": "schema/schema-manifest.json",
-      "sha256": "1878268630bc045a507bce3c613d1031ac2545e2b2c49274d02fb502de04cd1b"
+      "sha256": "72c579c83d6d0ae9cd639d54c06e476ab96cba299b9400ef6edf05041a1e614e"
     },
     "stateErrorEnums": {
       "path": "state-error-enums.json",
-      "sha256": "d4d245f44c46280787f53cc21706cf55eb80e057406d6b327e255b6226aa1c0f"
+      "sha256": "5b908db17c1ced0dd2a110f0f9936898ecfbe4659aad12bc64cf3ac13aa73f4b"
     },
     "websocketProtocol": {
       "path": "websocket-protocol.json",
-      "sha256": "12c1a87de31995adb1260c81f0d5aa8be07b9b6a667709020f3ba69e72376184"
+      "sha256": "33ab6bdb91d3f800cf174f4e55f8a44ce7832a68f71e17924f16d80c25b9366e"
     },
     "abiBundle": {
       "path": "contracts/abi-bundle.json",
-      "sha256": "2bf71c717705b526acc90cfd3004a03ed11a829a427210035c87c287569154bb"
+      "sha256": "e2e1a585b941be14e85f011847a8aac0b45055e3069904fe5efd9597035c0f8f"
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "bf3800401b27be6e056321d551f3f043da002062cec68cfc7bdd535a6578fcba"
+      "sha256": "af96a72215569fb627ffa5874d65f4cfbc7ce6af9d1c7246c0eaacc4a0a57f66"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
-      "sha256": "2e43302eb39a1ac4e16212de343b06133941a135ec1dd157b715f73f73044d8d"
+      "sha256": "24d7308a89064678418183e2fbdd6a3457cc0c3c7201a766c51284a0e7f45972"
     },
     "roleCatalog": {
       "path": "contracts/role-catalog.json",
-      "sha256": "0bf33092c5ced4fd175998094efcdcd5af0fb18d438a6fe974f91a74368eec7c"
+      "sha256": "f1af1bef795e1433279feb16bf82d51a23ac03c7cffb38aebc11fece04869063"
     }
   },
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "76f872205c64313414c3c300cfbf1a683b815fd8cd14561bdce7493b405a3f4a"
+      "sha256": "cbc1f8f71562d06bdb98390eb2f1bcbf03b8bd8faa0df8022c1b4a15d944c414"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "b040d098ecead71dc1f28dee06b29be72dabc4a8c00a22238c4b80bfeebe7f53"
+      "sha256": "27b5f52e8a30166ce9fccf7d80f77d5251099f5cfadd35faae114b42d0a9f191"
     }
   ],
   "httpSurface": [

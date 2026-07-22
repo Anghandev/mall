@@ -3595,8 +3595,7 @@ test('catalog management enforces product scope, signed preview, review locks an
       tagIds: [String(tag.tagId)],
       skus: [{
         attributes: { size: 'standard' },
-        listPriceUsdt: '100',
-        merchantBaseReceivableUsdt: '60',
+        listPriceUsdt: '99',
         stockTotal: 10,
         proposedSeckillInventory: 3,
       }],
@@ -3605,6 +3604,11 @@ test('catalog management enforces product scope, signed preview, review locks an
     const productId = String(draft.productId);
     const skuId = String((draft.skus as Array<{ skuId: string }>)[0]!.skuId);
     assert.equal(draft.lifecycleState, 'DRAFT');
+    assert.equal((draft.skus as Array<{ merchantBaseReceivableUsdt: string }>)[0]?.merchantBaseReceivableUsdt, '69');
+    assert.equal((await db.query<{ merchant_cost_usdt: string }>(
+      'SELECT merchant_cost_usdt::text FROM core.skus WHERE sku_id = $1',
+      [skuId],
+    )).rows[0]?.merchant_cost_usdt, '69');
     assert.deepEqual(draft.allowedActions, ['SAVE_DRAFT', 'CREATE_CONCESSION_PREVIEW', 'SUBMIT_REVIEW', 'DELIST']);
     assert.equal((await service.saveProductSlot(merchant, 'store-catalog-1', productInput)).productId, productId);
     const tagBatchInput = {
@@ -3704,7 +3708,6 @@ test('catalog management enforces product scope, signed preview, review locks an
         skuId,
         attributes: { size: 'standard' },
         listPriceUsdt: '100',
-        merchantBaseReceivableUsdt: '60',
         stockTotal: 10,
         proposedSeckillInventory: 3,
       }],
@@ -3748,7 +3751,6 @@ test('catalog management enforces product scope, signed preview, review locks an
           skuId,
           attributes: {},
           listPriceUsdt: '100',
-          merchantBaseReceivableUsdt: '60',
           stockTotal: 10,
           proposedSeckillInventory: 3,
         }],
@@ -3915,7 +3917,6 @@ test('catalog management enforces product scope, signed preview, review locks an
       skus: [{
         attributes: { size: 'replacement' },
         listPriceUsdt: '100',
-        merchantBaseReceivableUsdt: '60',
         stockTotal: 5,
         proposedSeckillInventory: 2,
       }],
@@ -3970,7 +3971,6 @@ test('catalog management enforces product scope, signed preview, review locks an
       skus: [{
         attributes: { size: 'post-delist' },
         listPriceUsdt: '100',
-        merchantBaseReceivableUsdt: '60',
         stockTotal: 5,
         proposedSeckillInventory: 2,
       }],

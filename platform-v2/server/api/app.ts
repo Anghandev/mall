@@ -3554,14 +3554,13 @@ function productSlotInput(body: Record<string, unknown>, allowMerchantId = false
     }
     const sku = value as Record<string, unknown>;
     assertOnlyKeys(sku, [
-      'skuId', 'attributes', 'listPriceUsdt', 'merchantBaseReceivableUsdt',
-      'stockTotal', 'proposedSeckillInventory',
+      'skuId', 'attributes', 'listPriceUsdt', 'stockTotal',
+      'proposedSeckillInventory',
     ]);
     return {
       ...(sku.skuId === undefined ? {} : { skuId: requiredString(sku, 'skuId') }),
       attributes: requiredObject(sku, 'attributes'),
       listPriceUsdt: requiredString(sku, 'listPriceUsdt'),
-      merchantBaseReceivableUsdt: requiredString(sku, 'merchantBaseReceivableUsdt'),
       stockTotal: requiredPositiveInteger(sku, 'stockTotal'),
       proposedSeckillInventory: requiredPositiveInteger(sku, 'proposedSeckillInventory'),
     };

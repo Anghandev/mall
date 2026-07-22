@@ -9,18 +9,6 @@ export const CHAINS = {
     explorer: 'https://bscscan.com',
     native: 'BNB',
   },
-  eth: {
-    chainId: 1,
-    rpcEnv: 'ETH_RPC_URL',
-    explorer: 'https://etherscan.io',
-    native: 'ETH',
-  },
-  base: {
-    chainId: 8453,
-    rpcEnv: 'BASE_RPC_URL',
-    explorer: 'https://basescan.org',
-    native: 'ETH',
-  },
 };
 
 export function readEnvFile(file = '.env') {

@@ -23,8 +23,8 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('fulfillment-launch .22 checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-fulfillment-launch.22');
+test('fulfillment-launch .23 checkpoint has one identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-fulfillment-launch.23');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
@@ -32,6 +32,12 @@ test('fulfillment-launch .22 checkpoint has one identity, resolvable exports and
   assert.equal(manifest.publicationStatus, 'COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT');
   assert.equal(contractManifest.publicationStatus, 'coordinated-settlement-admin-checkpoint');
   assert.equal(contractManifest.deploymentArtifactVersion, '2.0.0-settlement-admin.16');
+  assert.equal(contractManifest.deploymentAuthorized, false);
+  assert.equal(contractManifest.deploymentAuthorizationEvidenceHash, null);
+  assert.equal(contractManifest.releaseGateStatus, 'NO_GO_REPAIR_BASELINE');
+  assert.equal(contractManifest.historicalDeploymentLineage.artifactVersion, '2.0.0-settlement-admin.16');
+  assert.equal(contractManifest.historicalDeploymentLineage.deploymentAuthorized, true);
+  assert.match(contractManifest.historicalDeploymentLineage.deploymentAuthorizationEvidenceHash, /^0x[0-9a-f]{64}$/);
   assert.equal(manifest.decisionBlocked.includes('SECKILL_PRIZE_POOL_ACCOUNT'), false);
   assert.deepEqual(
     manifest.consumerTests.map((item: { path: string }) => item.path),
@@ -921,12 +927,16 @@ test('catalog, settlement/admin and seckill realtime capabilities publish the at
   for (const [capability, status] of Object.entries(manifest.capabilityStatus)) {
     assert.equal(status, available.has(capability) ? 'AVAILABLE' : 'NOT_PUBLISHED_FAIL_CLOSED', capability);
   }
-  assert.equal(manifest.deploymentAuthorized, true);
-  assert.match(manifest.deploymentAuthorizationEvidenceHash!, /^0x[0-9a-f]{64}$/);
-  assert.equal(contractManifest.deploymentAuthorized, true);
+  assert.equal(manifest.deploymentAuthorized, false);
+  assert.equal(manifest.deploymentAuthorizationEvidenceHash, null);
+  assert.equal(manifest.releaseGateStatus, 'NO_GO_REPAIR_BASELINE');
+  assert.equal(manifest.historicalDeploymentLineage.artifactVersion, '2.0.0-settlement-admin.16');
+  assert.equal(manifest.historicalDeploymentLineage.deploymentAuthorized, true);
+  assert.match(manifest.historicalDeploymentLineage.deploymentAuthorizationEvidenceHash!, /^0x[0-9a-f]{64}$/);
+  assert.equal(contractManifest.deploymentAuthorized, false);
   assert.equal(
-    contractManifest.deploymentAuthorizationEvidenceHash,
-    manifest.deploymentAuthorizationEvidenceHash,
+    contractManifest.historicalDeploymentLineage.deploymentAuthorizationEvidenceHash,
+    manifest.historicalDeploymentLineage.deploymentAuthorizationEvidenceHash,
   );
   assert.deepEqual(contractManifest.contracts.map((contract: { name: string }) => contract.name).sort(), [
     'BeneficiaryRegistryV2',

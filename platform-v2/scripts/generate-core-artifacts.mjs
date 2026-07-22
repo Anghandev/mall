@@ -350,13 +350,21 @@ for (const path of Object.values(componentPaths)) {
   if (path.endsWith('.json')) assertVersion(path, content);
 }
 const publishedContractManifest = JSON.parse(readRequired(join(contractsRoot, 'contract-manifest.json')));
+const historicalDeploymentLineage = publishedContractManifest.historicalDeploymentLineage ?? {};
 
 const coordinatedManifest = {
   artifactVersion,
   publicationStatus: 'COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT',
-  deploymentAuthorized: publishedContractManifest.deploymentAuthorized === true,
-  deploymentAuthorizationEvidenceHash:
-    publishedContractManifest.deploymentAuthorizationEvidenceHash ?? null,
+  deploymentAuthorized: false,
+  deploymentAuthorizationEvidenceHash: null,
+  releaseGateStatus: 'NO_GO_REPAIR_BASELINE',
+  historicalDeploymentLineage: {
+    artifactVersion: historicalDeploymentLineage.artifactVersion ?? '2.0.0-settlement-admin.16',
+    deploymentAuthorized: historicalDeploymentLineage.deploymentAuthorized === true,
+    deploymentAuthorizationEvidenceHash:
+      historicalDeploymentLineage.deploymentAuthorizationEvidenceHash ?? null,
+    note: 'Historical deployment lineage only; does not authorize this artifact, W5/W1/W6 acceptance or production Go.',
+  },
   chain: { name: 'BSC Mainnet', chainId: BSC_CHAIN_ID },
   fixedAssets: { USDT: USDT_ADDRESS, NPL: NPL_ADDRESS },
   components: Object.fromEntries(
@@ -4467,14 +4475,12 @@ function catalogManagementOpenApiSchemas() {
     ProductSkuInput: {
       type: 'object', additionalProperties: false,
       required: [
-        'attributes', 'listPriceUsdt', 'merchantBaseReceivableUsdt',
-        'stockTotal', 'proposedSeckillInventory',
+        'attributes', 'listPriceUsdt', 'stockTotal', 'proposedSeckillInventory',
       ],
       properties: {
         skuId: resourceId,
         attributes: { type: 'object' },
         listPriceUsdt: { $ref: '#/components/schemas/AtomicAmount' },
-        merchantBaseReceivableUsdt: { $ref: '#/components/schemas/AtomicAmount' },
         stockTotal: { type: 'integer', minimum: 1 },
         proposedSeckillInventory: { type: 'integer', minimum: 1 },
       },
@@ -8240,7 +8246,6 @@ export interface ProductSkuInput {
   skuId?: string;
   attributes: JsonObject;
   listPriceUsdt: AtomicAmount;
-  merchantBaseReceivableUsdt: AtomicAmount;
   stockTotal: number;
   proposedSeckillInventory: number;
 }

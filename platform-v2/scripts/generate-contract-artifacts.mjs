@@ -17,6 +17,10 @@ const contracts = [
 ];
 const deploymentEvidencePath = join(coreRoot, 'deployments', 'bsc-payment-v2.json');
 const verifiedDeploymentArtifactVersions = new Map([
+  ['2.0.0-fulfillment-launch.23', new Set([
+    '2.0.0-settlement-admin.17',
+    '2.0.0-settlement-admin.16',
+  ])],
   ['2.0.0-fulfillment-launch.22', new Set([
     '2.0.0-settlement-admin.17',
     '2.0.0-settlement-admin.16',
@@ -121,8 +125,16 @@ const manifest = {
   sourceDigestSha256: sourceDigest,
   deploymentStatus: deploymentEvidence?.deploymentStatus ?? 'PENDING',
   deploymentArtifactVersion: deploymentEvidence?.artifactVersion ?? null,
-  deploymentAuthorized: deploymentEvidence?.deploymentAuthorized ?? false,
-  deploymentAuthorizationEvidenceHash: deploymentEvidence?.authorizationEvidenceHash ?? null,
+  deploymentAuthorized: false,
+  deploymentAuthorizationEvidenceHash: null,
+  releaseGateStatus: 'NO_GO_REPAIR_BASELINE',
+  historicalDeploymentLineage: deploymentEvidence
+    ? {
+      artifactVersion: deploymentEvidence.artifactVersion ?? null,
+      deploymentAuthorized: deploymentEvidence.deploymentAuthorized === true,
+      deploymentAuthorizationEvidenceHash: deploymentEvidence.authorizationEvidenceHash ?? null,
+    }
+    : null,
   externalBlocked: deploymentEvidence?.deploymentStatus === 'DEPLOYED'
     ? []
     : ['EOA_CONTRACT_REDEPLOYMENT_REQUIRED'],
