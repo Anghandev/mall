@@ -2056,6 +2056,23 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
       }),
       (error: unknown) => error instanceof CoreError && error.code === 'Forbidden',
     );
+    const alreadySettledSessionId = `0x${'7'.repeat(64)}`;
+    await insertLiveSeckillSession(db, alreadySettledSessionId, now, 90);
+    await db.query(
+      `INSERT INTO core.seckill_prize_settlements (
+         session_id, cutoff_at, state, pool_amount_usdt, pool_snapshot_hash, created_at, updated_at
+       ) VALUES ($1,$2,'ROLLOVER_PENDING',0,$3,$4,$4)`,
+      [alreadySettledSessionId, new Date(now.getTime() + 90_000), HASH_2, now],
+    );
+    await assert.rejects(
+      service.createPrizeInjection(adminActor, alreadySettledSessionId, {
+        amountUsdt: '1',
+        idempotencyKey: 'seckill-prize-after-settlement-rejected',
+        correlationId: 'seckill-prize-after-settlement-rejected',
+      }),
+      (error: unknown) => error instanceof CoreError && error.code === 'InvalidRequest',
+    );
+    await db.query("UPDATE core.seckill_sessions SET phase = 'SETTLED' WHERE session_id = $1", [alreadySettledSessionId]);
 
     const approve = async (actionId: string, nonce: string) => {
       const deadline = String(Math.floor(clock.getTime() / 1_000) + 600);

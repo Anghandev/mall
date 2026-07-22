@@ -493,14 +493,18 @@ export class SeckillOperationsService {
         amount,
       );
       const session = await executor.query<{
-        policy_version: string | number; phase: string; prize_pool_usdt: string;
+        policy_version: string | number; phase: string; prize_pool_usdt: string; settlement_exists: boolean;
       }>(
-        `SELECT policy_version, phase, prize_pool_usdt::text
-         FROM core.seckill_sessions WHERE session_id = $1 FOR UPDATE`,
+        `SELECT session.policy_version, session.phase, session.prize_pool_usdt::text,
+           EXISTS (
+             SELECT 1 FROM core.seckill_prize_settlements settlement
+             WHERE settlement.session_id = session.session_id
+           ) AS settlement_exists
+         FROM core.seckill_sessions session WHERE session.session_id = $1 FOR UPDATE`,
         [normalizedSessionId],
       );
       const row = session.rows[0];
-      if (!row || row.phase === 'FORCE_CLOSED' || row.phase === 'SETTLED') {
+      if (!row || row.phase === 'FORCE_CLOSED' || row.phase === 'SETTLED' || row.settlement_exists) {
         throw new CoreError('InvalidRequest', 'Prize injection requires an unsettled published session', 409);
       }
       const evidenceHash = hashJson({
