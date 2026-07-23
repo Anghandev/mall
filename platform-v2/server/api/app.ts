@@ -2663,19 +2663,22 @@ async function routeAdminServices(
   }
   if (request.method === 'POST' && url.pathname === '/v2/admin/seckill/sessions') {
     const claims = authorizeRoles(request, dependencies.config, dependencies.clock(), ['ADMIN', 'OPERATOR']);
-    await assertPaymentWritesEnabled(dependencies, ['NEW_PAYMENT', 'SECKILL_PURCHASE']);
     const body = await readJson(request);
     assertOnlyKeys(body, [
       'policyVersion', 'rulesContentHash', 'productId', 'skuId', 'inventory',
       'seckillListPriceUsdt', 'startsAt', 'idempotencyKey',
     ]);
+    const productId = requiredString(body, 'productId');
+    const inventory = requiredPositiveInteger(body, 'inventory');
+    const seckillListPriceUsdt = requiredString(body, 'seckillListPriceUsdt');
+    await assertSeckillSessionWritesEnabled(dependencies, { productId, inventory, seckillListPriceUsdt });
     sendJson(response, 201, await dependencies.seckillOperationsService.createSession(fulfillmentActor(claims), {
       policyVersion: requiredString(body, 'policyVersion'),
       rulesContentHash: requiredString(body, 'rulesContentHash'),
-      productId: requiredString(body, 'productId'),
+      productId,
       skuId: requiredString(body, 'skuId'),
-      inventory: requiredPositiveInteger(body, 'inventory'),
-      seckillListPriceUsdt: requiredString(body, 'seckillListPriceUsdt'),
+      inventory,
+      seckillListPriceUsdt,
       startsAt: requiredString(body, 'startsAt'),
       idempotencyKey: requiredString(body, 'idempotencyKey'),
       correlationId,
@@ -3464,6 +3467,44 @@ async function assertPaymentBreakersOpen(
   if (active.length > 0) {
     throw new CoreError('BreakerActive', 'New payment quote is paused', 409, { scopes: active });
   }
+}
+
+async function assertSeckillSessionWritesEnabled(
+  dependencies: ApiDependencies,
+  input: { productId: string; inventory: number; seckillListPriceUsdt: string },
+) {
+  const now = dependencies.clock();
+  const readiness = publicReadiness(
+    dependencies.config,
+    currentRuntimeReadiness(dependencies),
+    now,
+  );
+  if (readiness.writesEnabled) {
+    await assertPaymentBreakersOpen(dependencies, ['NEW_PAYMENT', 'SECKILL_PURCHASE']);
+    return;
+  }
+  const entitlement = dependencies.config.mainnetMicrotestEntitlement;
+  const seckillPrice = /^(0|[1-9][0-9]*)$/.test(input.seckillListPriceUsdt)
+    ? BigInt(input.seckillListPriceUsdt)
+    : undefined;
+  if (
+    entitlement
+    && dependencies.config.releaseAuthorization?.status === 'MICROTEST_AUTHORIZED'
+    && now < entitlement.expiresAt
+    && input.productId === entitlement.productId
+    && input.inventory === entitlement.seckillInventory
+    && seckillPrice !== undefined
+    && seckillPrice <= entitlement.maxListPriceUsdt
+    && readiness.paymentDecisionBlocked.length === 0
+    && readiness.paymentExternalBlocked.length === 1
+    && readiness.paymentExternalBlocked[0] === 'COORDINATED_DEPLOYMENT_AUTHORIZATION'
+    && readiness.runtimeBlockers.length === 1
+    && readiness.runtimeBlockers[0] === 'PAYMENT_CONFIGURATION_REQUIRED'
+  ) {
+    await assertPaymentBreakersOpen(dependencies, ['NEW_PAYMENT', 'SECKILL_PURCHASE']);
+    return;
+  }
+  await assertPaymentWritesEnabled(dependencies, ['NEW_PAYMENT', 'SECKILL_PURCHASE']);
 }
 
 export function allowsBoundedMainnetMicrotestPaymentWrite(
