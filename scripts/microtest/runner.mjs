@@ -9,7 +9,7 @@ import { appendTxLog, assertTxBudget, nativeToWei, updateTxLog, withExclusiveTxE
 
 const DEFAULT_PACKET = 'platform-v2/deployments/bsc-eoa-micro-packet-private.json';
 const MAX_TOKEN_VALUE_USDT = 3n * 10n ** 18n;
-const PRIVATE_KEY_ENV = Object.freeze([
+export const PRIVATE_KEY_ENV = Object.freeze([
   'PLATFORM_TECH_PRIVATE_KEY',
   'WALLET_1_PRIVATE_KEY',
   'WALLET_2_PRIVATE_KEY',
@@ -17,6 +17,7 @@ const PRIVATE_KEY_ENV = Object.freeze([
   'WALLET_4_PRIVATE_KEY',
   'WALLET_5_PRIVATE_KEY',
   'WALLET_6_PRIVATE_KEY',
+  'MICROTEST_WALLET_6_PRIVATE_KEY',
 ]);
 
 if (isCliEntry()) {

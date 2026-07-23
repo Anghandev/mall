@@ -1,6 +1,6 @@
 # Core Artifacts
 
-Version `2.0.0-fulfillment-launch.24` is the current coordinated local V2
+Version `2.0.0-fulfillment-launch.25` is the current coordinated local V2
 No-Go repair baseline for
 OpenAPI, generated public types, state/error catalogs, the fail-closed
 WebSocket protocol, ABI/event/role bundles, manifests and SHA-256 checksums.

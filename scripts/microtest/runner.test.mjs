@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { keccak256 } from 'ethers';
-import { normalizeRunnerTransactions, runAbuV2Runner } from './runner.mjs';
+import { PRIVATE_KEY_ENV, normalizeRunnerTransactions, runAbuV2Runner } from './runner.mjs';
 
 const ARTIFACT = '2.0.0-test.1';
 const COMMIT = 'abcdef0123456789abcdef0123456789abcdef01';
@@ -15,6 +15,13 @@ const HASH = `0x${'1'.repeat(64)}`;
 const TX_HASH = `0x${'a'.repeat(64)}`;
 const DATA = '0x1234';
 const DATA_HASH = keccak256(DATA).toLowerCase();
+
+test('runner local signer env includes all W5/W1/W6 buyer key labels and the micro W6 alias', () => {
+  assert.ok(PRIVATE_KEY_ENV.includes('WALLET_5_PRIVATE_KEY'));
+  assert.ok(PRIVATE_KEY_ENV.includes('WALLET_1_PRIVATE_KEY'));
+  assert.ok(PRIVATE_KEY_ENV.includes('WALLET_6_PRIVATE_KEY'));
+  assert.ok(PRIVATE_KEY_ENV.includes('MICROTEST_WALLET_6_PRIVATE_KEY'));
+});
 
 test('runner calls broadcast preflight, executes only packet-bound calldata and records spend', async () => {
   const root = mkdtempSync(join(tmpdir(), 'abu24k-runner-'));

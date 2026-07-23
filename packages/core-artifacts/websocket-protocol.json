@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-fulfillment-launch.24",
+  "artifactVersion": "2.0.0-fulfillment-launch.25",
   "protocolVersion": 1,
   "transport": "wss",
   "publicationStatus": "AVAILABLE",
@@ -31,7 +31,7 @@
     ],
     "properties": {
       "artifactVersion": {
-        "const": "2.0.0-fulfillment-launch.24"
+        "const": "2.0.0-fulfillment-launch.25"
       },
       "protocolVersion": {
         "const": 1

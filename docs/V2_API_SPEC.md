@@ -1,11 +1,11 @@
 # 24K商城 V2 Core API Contract
 
 Status: current coordinated No-Go repair baseline
-`2.0.0-fulfillment-launch.24`. OpenAPI, generated types, ABI, manifests,
+`2.0.0-fulfillment-launch.25`. OpenAPI, generated types, ABI, manifests,
 enums, the fail-closed WebSocket protocol and consumer tests share this
 version. The historical `2.0.0-settlement-admin.16` deployment lineage remains
 audit evidence only and does not authorize a new deployment, transaction or Go
-decision for `.24`.
+decision for `.25`.
 
 ## Authority
 

@@ -161,6 +161,7 @@ const mediaStorageSigningKey = secret();
 const mediaStorageEncryptionKey = secret();
 const databaseUrl = `postgres://abu24k:${databasePassword}@127.0.0.1:54329/abu24k_core`;
 const auditDatabaseUrl = `postgres://abu24k:${databasePassword}@127.0.0.1:54329/abu24k_audit`;
+const redisUrl = `redis://:${redisPassword}@127.0.0.1:63829/0`;
 
 await writeEnv('.env', [line('ABU24K_RELEASE', release)]);
 await writeEnv('database.env', [
@@ -175,7 +176,8 @@ await writeEnv('core.env', [
   line('PORT', '8788'),
   line('DATABASE_URL', databaseUrl),
   line('AUDIT_DATABASE_URL', auditDatabaseUrl),
-  line('REDIS_URL', `redis://:${redisPassword}@127.0.0.1:63829/0`),
+  line('REDIS_URL', redisUrl),
+  line('QUEUE_URL', redisUrl),
   line('JWT_SECRET', secret()),
   line('AUTH_DOMAIN', 'www.npleon.com'),
   line('AUTH_URI', 'https://www.npleon.com'),

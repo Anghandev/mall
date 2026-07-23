@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-fulfillment-launch.24",
+  "artifactVersion": "2.0.0-fulfillment-launch.25",
   "formatVersion": 1,
   "databaseEngine": "postgresql",
   "schemas": {
