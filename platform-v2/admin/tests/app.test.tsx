@@ -68,7 +68,7 @@ describe('platform admin fail-closed experience', () => {
       /^\w+ \/v2\/admin\/(?:merchant-)?stores(?:\/|$)/.test(operation),
     );
 
-    expect(artifactVersion).toBe('2.0.0-fulfillment-launch.29');
+    expect(artifactVersion).toBe('2.0.0-fulfillment-launch.30');
     expect(coordinatedManifest.capabilityStatus.buyerShoppingStatementHttp).toBe('AVAILABLE');
     expect(coordinatedManifest.capabilityStatus.merchantReceivableStatementHttp).toBe('AVAILABLE');
     expect(storeStatuses).toEqual(['DRAFT', 'ACTIVE', 'SUSPENDED', 'CLOSED']);

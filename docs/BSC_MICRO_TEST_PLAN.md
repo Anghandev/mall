@@ -1,11 +1,11 @@
 # BSC Mainnet EOA Deployment And Micro-Test Plan
 
-Status: historical packets `EOA_FULL_CHAIN_COMPLETE`; current W5/W1/W6
-non-zero seckill prize release acceptance `COMPLETE` for `.29`. Historical
-evidence below remains lineage only and did not replace the bounded run.
+Status: historical packets remain lineage only. Current `.30` acceptance uses
+new `MICROTEST_BUYER_1/2/3` wallets, an external `MICROTEST_AUTHORIZED`
+release-authorization file and one clean non-zero prize run.
 
 The completed acceptance run is bound to artifact
-`2.0.0-fulfillment-launch.29`, commit
+`2.0.0-fulfillment-launch.30`, commit
 `54961bab58a9c32c38fccf099759795a81a8b788` and the five-role EOA architecture
 in `V2_SYSTEM_CONTRACT.md`. The historical evidence below was produced under
 `2.0.0-settlement-admin.16` and did not authorize or substitute for the new run.
@@ -14,22 +14,22 @@ This document alone does not authorize a transaction.
 ## Current Gate For This Goal
 
 - `pnpm micro:preflight` is now the Abu V2 gate, not the old generic Web3
-  template. It must bind the same `.29` artifact, release commit,
-  mode-600 packet hash, five distinct production EOAs, W5/W1/W6 buyer set,
+  template. It must bind the same `.30` artifact, release commit,
+  mode-600 packet hash, five distinct production EOAs, MICROTEST_BUYER_1/2/3 buyer set,
   maximum value plus Gas ceiling, dual BSC RPC runtime code hashes, BNM and local
   DB/Redis/signer/executor configuration before any runner is valid.
 - A runner that skips this preflight, uses W3 as a buyer, points at a stale
   packet, mismatches commit/artifact/runtime hash, or exceeds the 3-USDT
   maximum value plus Gas ceiling is No-Go.
-- Production deployment authorization remained fail-closed during the bounded
-  micro-test. The runner could broadcast only when the mode-600 packet itself had
-  `broadcastAuthorized=true`, carried a bytes32 broadcast authorization evidence
-  hash, and matched the env-bound packet SHA-256. Future bounded micro-tests must
-  not use a production `releaseGateStatus=GO` manifest to bypass packet and
-  preflight gates.
-- Broadcast preflight derives the canonical W5/W1/W6 buyer addresses from the
-  ignored local W5/W1/W6 private-key env and derives the forbidden W3/NPL Reward
-  address from the ignored local W3 key; relabeling W3 as W6 remains No-Go.
+- Production deployment authorization remains external to the artifact during
+  the bounded micro-test. The runner may broadcast only when the signed external
+  release authorization is `MICROTEST_AUTHORIZED`, the mode-600 packet has
+  `broadcastAuthorized=true`, carries a bytes32 evidence hash and matches the
+  env-bound packet SHA-256. A production `GO` authorization must not bypass
+  packet and preflight gates.
+- Broadcast preflight derives the canonical MICROTEST_BUYER_1/2/3 buyer
+  addresses from the ignored local MICROTEST_BUYER_1/2/3 private-key env and
+  rejects any old `WALLET_1..6` or `MICROTEST_WALLET_6` address as a buyer.
 - Full local `pnpm verify` also requires `POSTGRES_ADMIN_URL` for the real
   PostgreSQL gates. The tests read it from the shell or ignored local env files
   (`.env`, `.env.runtime`, `.env.wallets.local`) and must never print the URL.
@@ -85,15 +85,14 @@ The earlier Safe-bound deployments are historical evidence only:
 
 The active deployment manifest is
 `platform-v2/deployments/bsc-payment-v2.json`; it remains historical deployment
-lineage for the deployed EOA contracts. The `.29` coordinated artifact is now
-GO after W5/W1/W6 non-zero prize evidence, cleanup and local release gate passed. Current split:
+lineage for the deployed EOA contracts. The `.30` coordinated artifact remains immutable and externally authorized only. A signed release authorization may later mark the same artifact SHA as GO after MICROTEST_BUYER_1/2/3 non-zero prize evidence, cleanup and local release gate pass. Current split:
 
 ```text
 architecture = FIVE_ROLE_EOA_V2
 contractManifest.deploymentStatus = DEPLOYED
 contractManifest.deploymentAuthorized = false
-coordinatedManifest.deploymentAuthorized = true
-coordinatedManifest.releaseGateStatus = GO
+coordinatedManifest.deploymentAuthorized = false
+coordinatedManifest.releaseGateStatus = EXTERNAL_AUTHORIZATION_REQUIRED
 ```
 
 The approved setup packet SHA-256
@@ -125,13 +124,12 @@ The merchant remains `BELOW_MINIMUM` until formal capital is provided.
 
 Before any broadcast, one ignored mode-600 packet must bind every transaction
 in execution order. Historical packet approvals and the previous `.22` No-Go
-baseline did not carry forward to the current `.29` acceptance. A broadcast
-requires this release id, packet SHA-256, W5/W1/W6 buyer set and the
+baseline did not carry forward to the current `.30` acceptance. A broadcast
+requires this release id, packet SHA-256, MICROTEST_BUYER_1/2/3 buyer set and the
 current Goal's standing authorization only while maximum value plus Gas
-remains within the <=3-USDT bounded plan. The `.29` artifact's production
-deployment authorization is now `true` only after the bounded micro-test passed;
-the packet's own broadcast authorization evidence is still what permitted the
-bounded micro-test. Nonce, target,
+remains within the <=3-USDT bounded plan. The `.30` artifact never becomes GO
+by changing manifest fields; only an external signed `GO` authorization for the
+same artifact SHA can follow a passed micro-test. Nonce, target,
 amount, assertion or budget drift stops execution. The packet must contain:
 
 ```text

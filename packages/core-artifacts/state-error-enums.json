@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-fulfillment-launch.29",
+  "artifactVersion": "2.0.0-fulfillment-launch.30",
   "adminResourceTypes": [
     "ORDER",
     "PRODUCT",
@@ -317,7 +317,8 @@
     "SUBMITTED",
     "SETTLED",
     "RETRYABLE",
-    "QUARANTINED"
+    "QUARANTINED",
+    "FAILED_CLOSED"
   ],
   "settlementTransferStates": [
     "PENDING",
@@ -328,7 +329,8 @@
     "FAILED",
     "REORGED",
     "RETRYABLE",
-    "QUARANTINED"
+    "QUARANTINED",
+    "FAILED_CLOSED"
   ],
   "merchantGuaranteeDepositStates": [
     "SUBMITTED",

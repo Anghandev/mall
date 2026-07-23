@@ -147,7 +147,7 @@ interface RequestedItemRow {
 
 interface RequestProjectionRow extends Record<string, unknown> {
   request_id: string;
-  state: 'REQUESTED' | 'SUBMITTED' | 'SETTLED' | 'RETRYABLE' | 'QUARANTINED';
+  state: SettlementRequestState;
 }
 
 interface TransferProjectionRow extends Record<string, unknown> {
@@ -1125,55 +1125,227 @@ export class SettlementService {
     assertRole(actor, 'ADMIN', 'OPERATOR', 'AUDITOR');
     requireHash(requestId, 'settlement request ID');
     return this.#transactions.transaction(async (executor) => {
-      const request = await loadAdminRequest(executor, requestId);
-      const items = await executor.query<AdminSettlementRequestItemRow>(
-        `SELECT item.item_index, item.order_id, item.account_id,
-           item.backing_wallet_address, item.amount::text, intent_item.item_hash,
-           item.requested_journal_id, item.submitted_journal_id,
-           item.settled_journal_id, orders.policy_version::text
-         FROM core.settlement_request_items item
-         JOIN core.settlement_requests request ON request.request_id = item.request_id
-         JOIN core.settlement_intent_items intent_item
-           ON intent_item.intent_id = request.intent_id AND intent_item.item_index = item.item_index
-         JOIN core.orders orders ON orders.order_id = item.order_id
-         WHERE item.request_id = $1 ORDER BY item.item_index`,
-        [requestId],
-      );
-      const transitions = await executor.query<AdminSettlementTransitionRow>(
-        `SELECT transition_id, request_item_index, transfer_id,
-           transition_sequence, transition_type, journal_id, created_at
-         FROM core.settlement_request_item_transitions
+      return loadAdminRequestDetail(executor, requestId);
+    });
+  }
+
+  failedCloseUnbroadcastQuarantinedRequest(
+    actor: FulfillmentActor,
+    input: {
+      requestId: string;
+      reasonCode: string;
+      evidenceHash: string;
+      idempotencyKey: string;
+      correlationId?: string;
+    },
+  ) {
+    assertRole(actor, 'ADMIN', 'OPERATOR');
+    requireHash(input.requestId, 'settlement request ID');
+    requireHash(input.evidenceHash, 'failed-close evidence hash');
+    validateIdempotencyKey(input.idempotencyKey);
+    if (!/^[A-Z0-9:_-]{4,80}$/.test(input.reasonCode)) {
+      throw new CoreError('InvalidRequest', 'Failed-close reason code is invalid', 400);
+    }
+    const wallet = normalizedAddress(actor.walletAddress, 'actor wallet');
+    const now = this.#clock();
+    const requestHash = hashJson({
+      requestId: input.requestId.toLowerCase(),
+      reasonCode: input.reasonCode,
+      evidenceHash: input.evidenceHash.toLowerCase(),
+      idempotencyKey: input.idempotencyKey,
+    });
+    return this.#transactions.transaction(async (executor) => {
+      const request = await executor.query<{
+        request_id: string;
+        state: SettlementRequestState;
+        rail: SettlementRail;
+        asset: 'USDT' | 'NPL';
+        executor_wallet: string;
+        merchant_id: string | null;
+        intent_digest: string;
+        amount: string;
+      }>(
+        `SELECT request_id, state, rail, asset, executor_wallet, merchant_id,
+           intent_digest, amount::text
+         FROM core.settlement_requests
          WHERE request_id = $1
-         ORDER BY request_item_index, transition_sequence`,
-        [requestId],
+         FOR UPDATE`,
+        [input.requestId.toLowerCase()],
       );
-      return {
-        artifactVersion: CORE_ARTIFACT_VERSION,
-        request: adminRequestProjection(request),
-        items: items.rows.map((row) => ({
-          itemIndex: row.item_index,
-          orderId: row.order_id,
-          accountId: row.account_id,
-          backingWalletAddress: row.backing_wallet_address,
-          amount: row.amount,
-          itemHash: row.item_hash,
-          policyVersion: row.policy_version,
-          journals: {
-            requested: row.requested_journal_id,
-            submitted: row.submitted_journal_id,
-            settled: row.settled_journal_id,
+      const row = request.rows[0];
+      if (!row) throw new CoreError('InvalidRequest', 'Settlement request not found', 404);
+      if (row.state === 'FAILED_CLOSED') return loadAdminRequestDetail(executor, row.request_id);
+      if (row.state !== 'QUARANTINED') {
+        throw new CoreError('InvalidRequest', 'Only quarantined settlement requests can be failed-closed', 409);
+      }
+      if (row.rail !== 'PRIZE_USDT' || row.asset !== 'USDT' || row.amount !== '1') {
+        throw new CoreError('InvalidRequest', 'Failed-close is limited to the one-atomic-USDT prize quarantine repair', 409);
+      }
+      const transfers = await executor.query<{
+        transfer_id: string;
+        state: SettlementTransferState;
+        amount: string;
+        submitted_at: Date | null;
+        execution_tx_hashes: string[];
+        nonce_state: string;
+      }>(
+        `SELECT transfer.transfer_id, transfer.state, transfer.amount::text,
+           transfer.submitted_at,
+           transfer.nonce_state,
+           ARRAY(
+             SELECT attempt.execution_tx_hash
+             FROM core.settlement_transfer_attempts attempt
+             WHERE attempt.transfer_id = transfer.transfer_id
+               AND attempt.execution_tx_hash IS NOT NULL
+             ORDER BY attempt.attempt_number
+           ) AS execution_tx_hashes
+         FROM core.settlement_transfers transfer
+         WHERE transfer.request_id = $1
+         FOR UPDATE`,
+        [row.request_id],
+      );
+      if (
+        transfers.rows.length !== 1
+        || transfers.rows[0]?.state !== 'QUARANTINED'
+        || transfers.rows[0]?.amount !== '1'
+      ) {
+        throw new CoreError('InvalidRequest', 'Failed-close prize quarantine repair must target exactly one unbroadcast one-atomic transfer', 409);
+      }
+      if (transfers.rows.some((transfer) => transfer.submitted_at || transfer.execution_tx_hashes.length > 0)) {
+        throw new CoreError('InvalidRequest', 'Quarantined settlement request has broadcast evidence and cannot be failed-closed', 409);
+      }
+      const items = await executor.query<{
+        item_index: number;
+        order_id: string;
+        account_id: string;
+        amount: string;
+        policy_version: string | number;
+      }>(
+        `SELECT item.item_index, item.order_id, item.account_id, item.amount::text,
+           orders.policy_version::text
+         FROM core.settlement_request_items item
+         JOIN core.orders orders ON orders.order_id = item.order_id
+         WHERE item.request_id = $1
+         ORDER BY item.item_index
+         FOR UPDATE OF item`,
+        [row.request_id],
+      );
+      if (items.rows.length === 0) {
+        throw new CoreError('UnknownState', 'Quarantined settlement request has no items', 409);
+      }
+      if (items.rows.length !== 1 || items.rows[0]?.amount !== '1') {
+        throw new CoreError('InvalidRequest', 'Failed-close prize quarantine repair must target exactly one one-atomic request item', 409);
+      }
+      await lockLedgerAccounts(executor, items.rows.map((item) => item.account_id));
+      await assertRequestedStateBalances(executor, items.rows.map((item) => ({
+        account_id: item.account_id,
+        amount: item.amount,
+        order_id: item.order_id,
+      })));
+      for (const item of items.rows) {
+        const journalId = `journal:settlement-failed-close:${row.request_id}:${item.item_index}`;
+        const lines = stateMoveLines(item.account_id, item.amount, 'REQUESTED', 'AVAILABLE', row.executor_wallet);
+        await postSettlementJournal(executor, {
+          journalId,
+          eventKey: `settlement-failed-close:${row.request_id}:${item.item_index}`,
+          eventType: 'SETTLEMENT_FAILED_CLOSED',
+          resourceType: 'SETTLEMENT_REQUEST',
+          resourceId: row.request_id,
+          orderId: item.order_id,
+          policyVersion: Number(item.policy_version),
+          contentHash: hashJson({
+            requestId: row.request_id,
+            itemIndex: item.item_index,
+            reasonCode: input.reasonCode,
+            evidenceHash: input.evidenceHash.toLowerCase(),
+            lines,
+          }),
+          sourceKind: 'RECONCILIATION',
+          sourceReferenceHash: input.evidenceHash.toLowerCase(),
+          payload: {
+            requestId: row.request_id,
+            itemIndex: item.item_index,
+            reasonCode: input.reasonCode,
+            idempotencyKey: input.idempotencyKey,
           },
-        })),
-        transitions: transitions.rows.map((row) => ({
-          transitionId: row.transition_id,
-          requestItemIndex: row.request_item_index,
-          transferId: row.transfer_id,
-          sequence: row.transition_sequence,
-          type: row.transition_type,
-          journalId: row.journal_id,
-          createdAt: timestamp(row.created_at),
-        })),
-      };
+          lines,
+        });
+        const sequence = await executor.query<{ next_sequence: number }>(
+          `SELECT COALESCE(max(transition_sequence), 0) + 1 AS next_sequence
+           FROM core.settlement_request_item_transitions
+           WHERE request_id = $1 AND request_item_index = $2`,
+          [row.request_id, item.item_index],
+        );
+        await executor.query(
+          `INSERT INTO core.settlement_request_item_transitions (
+             transition_id, request_id, request_item_index, transfer_id,
+             transition_sequence, transition_type, journal_id, created_at
+           ) VALUES ($1,$2,$3,NULL,$4,'FAILED_CLOSED',$5,$6)`,
+          [
+            `transition:${journalId}`,
+            row.request_id,
+            item.item_index,
+            sequence.rows[0]?.next_sequence ?? 2,
+            journalId,
+            now,
+          ],
+        );
+      }
+      await executor.query(
+        `UPDATE core.settlement_transfer_attempts
+         SET state = 'FAILED_CLOSED', updated_at = $2
+         WHERE transfer_id = ANY($1::text[])
+           AND state = 'QUARANTINED'
+           AND execution_tx_hash IS NULL`,
+        [transfers.rows.map((transfer) => transfer.transfer_id), now],
+      );
+      await executor.query(
+        `UPDATE core.settlement_transfers
+         SET state = 'FAILED_CLOSED',
+             nonce_state = CASE WHEN nonce_state = 'RESERVED' THEN 'RELEASED' ELSE nonce_state END,
+             nonce_release_evidence_hash = CASE WHEN nonce_state = 'RESERVED' THEN $2 ELSE nonce_release_evidence_hash END
+         WHERE request_id = $1 AND state = 'QUARANTINED'`,
+        [row.request_id, input.evidenceHash.toLowerCase()],
+      );
+      await executor.query(
+        `UPDATE core.settlement_requests
+         SET state = 'FAILED_CLOSED'
+         WHERE request_id = $1 AND state = 'QUARANTINED'`,
+        [row.request_id],
+      );
+      await enqueueAudit(executor, {
+        sourceEventId: auditSourceId('audit:settlement-failed-close', {
+          requestId: row.request_id,
+          idempotencyKey: input.idempotencyKey,
+        }),
+        streamName: 'financial',
+        evidenceProfile: 'AUTHORIZATION',
+        eventType: 'SettlementFailedClosed',
+        resourceType: 'SETTLEMENT_REQUEST',
+        resourceId: row.request_id,
+        ...(row.merchant_id ? { merchantId: row.merchant_id } : {}),
+        actorWallet: wallet,
+        actorRole: actor.roles[0]!,
+        correlationId: auditCorrelationId(input.correlationId),
+        requestHash: requestHash.slice(2),
+        payload: {
+          rail: row.rail,
+          asset: row.asset,
+          amount: row.amount,
+          reasonCode: input.reasonCode,
+          evidenceHash: input.evidenceHash.toLowerCase(),
+          transferIds: transfers.rows.map((transfer) => transfer.transfer_id),
+        },
+        authorizationEvidence: {
+          scheme: 'SESSION_RESOURCE_OWNERSHIP',
+          subject: wallet,
+          roles: [...actor.roles].sort(),
+          evidenceHash: input.evidenceHash.toLowerCase(),
+          checkedAt: now.toISOString(),
+        },
+        createdAt: now,
+      });
+      return loadAdminRequestDetail(executor, row.request_id);
     });
   }
 
@@ -1416,6 +1588,10 @@ export class SettlementService {
         throw new CoreError('FinalityPending', 'No eligible requested settlement items are available', 409);
       }
       const item = requestedItems.rows[0]!;
+      const recipientAddress = normalizedAddress(item.recipient_address, 'settlement recipient');
+      if (recipientAddress === runtime.executorWallet.toLowerCase()) {
+        throw new CoreError('InvalidRequest', 'Settlement transfer recipient cannot equal the EOA executor wallet', 409);
+      }
       const authorizationMode = item.rail === 'MERCHANT_USDT'
         && item.merchant_guarantee_status !== 'READY'
         ? 'MAINNET_MICROTEST'
@@ -1450,7 +1626,7 @@ export class SettlementService {
       const transferId = randomHash();
       const transferCalldata = ERC20_TRANSFER.encodeFunctionData(
         'transfer',
-        [normalizedAddress(item.recipient_address, 'settlement recipient'), BigInt(item.amount)],
+        [recipientAddress, BigInt(item.amount)],
       ).toLowerCase();
       const contentHash = hashJson({
         transferId,
@@ -1493,7 +1669,7 @@ export class SettlementService {
           tokenAddress,
           runtime.executorWallet,
           executorNonce,
-          normalizedAddress(item.recipient_address, 'settlement recipient'),
+          recipientAddress,
           item.amount,
           transferCalldata,
           contentHash,
@@ -2236,7 +2412,10 @@ async function lockLedgerAccounts(executor: SqlExecutor, accountIds: string[]) {
   if (locked.rows.length !== ids.length) throw new CoreError('InvalidFinality', 'Settlement account is unavailable', 409);
 }
 
-async function assertRequestedStateBalances(executor: SqlExecutor, items: readonly RequestedItemRow[]) {
+async function assertRequestedStateBalances(
+  executor: SqlExecutor,
+  items: readonly Pick<RequestedItemRow, 'order_id' | 'account_id' | 'amount'>[],
+) {
   for (const item of items) {
     const result = await executor.query<{ amount: string }>(
       `SELECT COALESCE(sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END),0)::text AS amount
@@ -2403,7 +2582,7 @@ async function postSettlementJournal(
     journalId: string;
     eventKey: string;
     eventType: 'SETTLEMENT_REQUESTED' | 'SETTLEMENT_SUBMITTED' | 'SETTLEMENT_SETTLED'
-      | 'SETTLEMENT_EXECUTION_REVERSED' | 'SETTLEMENT_FINALITY_REVERSED';
+      | 'SETTLEMENT_EXECUTION_REVERSED' | 'SETTLEMENT_FINALITY_REVERSED' | 'SETTLEMENT_FAILED_CLOSED';
     resourceType: 'SETTLEMENT_REQUEST' | 'SETTLEMENT_TRANSFER';
     resourceId: string;
     orderId: string;
@@ -2641,6 +2820,58 @@ async function loadAdminRequest(executor: SqlExecutor, requestId: string) {
   );
   if (!result.rows[0]) throw new CoreError('InvalidRequest', 'Settlement request not found', 404);
   return result.rows[0];
+}
+
+async function loadAdminRequestDetail(executor: SqlExecutor, requestId: string) {
+  const request = await loadAdminRequest(executor, requestId);
+  const items = await executor.query<AdminSettlementRequestItemRow>(
+    `SELECT item.item_index, item.order_id, item.account_id,
+       item.backing_wallet_address, item.amount::text, intent_item.item_hash,
+       item.requested_journal_id, item.submitted_journal_id,
+       item.settled_journal_id, orders.policy_version::text
+     FROM core.settlement_request_items item
+     JOIN core.settlement_requests request ON request.request_id = item.request_id
+     JOIN core.settlement_intent_items intent_item
+       ON intent_item.intent_id = request.intent_id AND intent_item.item_index = item.item_index
+     JOIN core.orders orders ON orders.order_id = item.order_id
+     WHERE item.request_id = $1 ORDER BY item.item_index`,
+    [requestId],
+  );
+  const transitions = await executor.query<AdminSettlementTransitionRow>(
+    `SELECT transition_id, request_item_index, transfer_id,
+       transition_sequence, transition_type, journal_id, created_at
+     FROM core.settlement_request_item_transitions
+     WHERE request_id = $1
+     ORDER BY request_item_index, transition_sequence`,
+    [requestId],
+  );
+  return {
+    artifactVersion: CORE_ARTIFACT_VERSION,
+    request: adminRequestProjection(request),
+    items: items.rows.map((row) => ({
+      itemIndex: row.item_index,
+      orderId: row.order_id,
+      accountId: row.account_id,
+      backingWalletAddress: row.backing_wallet_address,
+      amount: row.amount,
+      itemHash: row.item_hash,
+      policyVersion: row.policy_version,
+      journals: {
+        requested: row.requested_journal_id,
+        submitted: row.submitted_journal_id,
+        settled: row.settled_journal_id,
+      },
+    })),
+    transitions: transitions.rows.map((row) => ({
+      transitionId: row.transition_id,
+      requestItemIndex: row.request_item_index,
+      transferId: row.transfer_id,
+      sequence: row.transition_sequence,
+      type: row.transition_type,
+      journalId: row.journal_id,
+      createdAt: timestamp(row.created_at),
+    })),
+  };
 }
 
 function adminRequestProjection(row: AdminSettlementRequestRow) {

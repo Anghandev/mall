@@ -1,11 +1,11 @@
 # 24K商城 V2 Data Model
 
-Status: current coordinated GO release artifact
-`2.0.0-fulfillment-launch.29`. This document describes implemented catalog,
+Status: current coordinated immutable release artifact
+`2.0.0-fulfillment-launch.30`. This document describes implemented catalog,
 media, payment, fulfillment, settlement and administrative storage. Historical
-`2.0.0-settlement-admin.16` artifacts remain lineage evidence; current `.29`
-production authorization is proven only by the coordinated manifest plus
-`platform-v2/deployments/bsc-fulfillment-launch-authorization.json`.
+`2.0.0-settlement-admin.16` artifacts remain lineage evidence; current
+production authorization must come from an external signed release-authorization
+JSON that binds the artifact SHA, image digest and runtime config.
 
 ## Storage Boundary
 

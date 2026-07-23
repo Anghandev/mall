@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-fulfillment-launch.29",
+  "artifactVersion": "2.0.0-fulfillment-launch.30",
   "formatVersion": 1,
   "databaseEngine": "postgresql",
   "schemas": {
@@ -235,6 +235,11 @@
           "name": "046_seckill_prize_reorg_recovery.sql",
           "path": "schema/business/046_seckill_prize_reorg_recovery.sql",
           "sha256": "83bc11a46a024c011dae4a815afe5b7cebc1686305cdd60f2f02ad0da0ee4bde"
+        },
+        {
+          "name": "047_settlement_failed_close.sql",
+          "path": "schema/business/047_settlement_failed_close.sql",
+          "sha256": "626aedf60e00ab17ec6c96ca9aab608fae9244f6c5bfe96959d14888b150d543"
         }
       ]
     },

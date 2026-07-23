@@ -16,11 +16,13 @@ const TX_HASH = `0x${'a'.repeat(64)}`;
 const DATA = '0x1234';
 const DATA_HASH = keccak256(DATA).toLowerCase();
 
-test('runner local signer env includes all W5/W1/W6 buyer key labels and the micro W6 alias', () => {
-  assert.ok(PRIVATE_KEY_ENV.includes('WALLET_5_PRIVATE_KEY'));
-  assert.ok(PRIVATE_KEY_ENV.includes('WALLET_1_PRIVATE_KEY'));
-  assert.ok(PRIVATE_KEY_ENV.includes('WALLET_6_PRIVATE_KEY'));
-  assert.ok(PRIVATE_KEY_ENV.includes('MICROTEST_WALLET_6_PRIVATE_KEY'));
+test('runner local signer env includes all MICROTEST_BUYER_1/2/3 buyer key labels', () => {
+  assert.ok(PRIVATE_KEY_ENV.includes('MICROTEST_BUYER_1_PRIVATE_KEY'));
+  assert.ok(PRIVATE_KEY_ENV.includes('MICROTEST_BUYER_2_PRIVATE_KEY'));
+  assert.ok(PRIVATE_KEY_ENV.includes('MICROTEST_BUYER_3_PRIVATE_KEY'));
+  assert.equal(PRIVATE_KEY_ENV.includes('WALLET_1_PRIVATE_KEY'), false);
+  assert.equal(PRIVATE_KEY_ENV.includes('WALLET_5_PRIVATE_KEY'), false);
+  assert.equal(PRIVATE_KEY_ENV.includes('WALLET_6_PRIVATE_KEY'), false);
 });
 
 test('runner calls broadcast preflight, executes only packet-bound calldata and records spend', async () => {
@@ -36,7 +38,7 @@ test('runner calls broadcast preflight, executes only packet-bound calldata and 
       packetPath,
       packetSha256: createHash('sha256').update(readFileSync(packetPath)).digest('hex'),
       deploymentAuthorized: false,
-      releaseGateStatus: 'NO_GO_REPAIR_BASELINE',
+      releaseGateStatus: 'MICROTEST_AUTHORIZED',
       microtestBroadcastAuthorized: true,
     };
     let preflightCalled = false;
@@ -170,7 +172,7 @@ test('runner records submitted hash before receipt wait failures', async () => {
       packetPath,
       packetSha256: createHash('sha256').update(readFileSync(packetPath)).digest('hex'),
       deploymentAuthorized: false,
-      releaseGateStatus: 'NO_GO_REPAIR_BASELINE',
+      releaseGateStatus: 'MICROTEST_AUTHORIZED',
       microtestBroadcastAuthorized: true,
     };
     const fakeProvider = {
@@ -229,7 +231,7 @@ test('runner redacts provider error messages before returning them', async () =>
       packetPath,
       packetSha256: createHash('sha256').update(readFileSync(packetPath)).digest('hex'),
       deploymentAuthorized: false,
-      releaseGateStatus: 'NO_GO_REPAIR_BASELINE',
+      releaseGateStatus: 'MICROTEST_AUTHORIZED',
       microtestBroadcastAuthorized: true,
     };
     const fakeProvider = {
@@ -274,7 +276,7 @@ function packetFixture(overrides = {}) {
     artifactVersion: ARTIFACT,
     gitCommit: COMMIT,
     buyerWallets: [WALLET, '0x3333333333333333333333333333333333333333', '0x4444444444444444444444444444444444444444'],
-    buyerLabels: ['W5', 'W1', 'W6'],
+    buyerLabels: ['MICROTEST_BUYER_1', 'MICROTEST_BUYER_2', 'MICROTEST_BUYER_3'],
     bnbBudget: {
       maxNativeValuePerTxBnb: '0',
       maxGasCostPerTxBnb: '1',

@@ -1,13 +1,13 @@
 # 24K商城 V2 Payment Contract Freeze
 
-Status: current `.29` GO release artifact, with historical deployment lineage
+Status: current `.30` immutable artifact, with historical deployment lineage
 from `2.0.0-settlement-admin.16`. The generated manifests bind the three BSC
-deployment addresses, blocks and runtime code hashes and now have
-`deploymentAuthorized: true` plus `releaseGateStatus: GO`. The current
-authorization hash is recorded in the contract and coordinated manifests and is
-derived from `platform-v2/deployments/bsc-fulfillment-launch-authorization.json`,
-which binds W5/W1/W6 non-zero seckill prize acceptance, cleanup and winner USDT
-payout evidence. This document alone does not authorize an unrelated transaction.
+deployment addresses, blocks and runtime code hashes but intentionally keep
+`deploymentAuthorized: false` and
+`releaseGateStatus: EXTERNAL_AUTHORIZATION_REQUIRED`. A separate signed
+release-authorization JSON binds MICROTEST_BUYER_1/2/3 non-zero seckill prize
+acceptance, cleanup and winner USDT payout evidence. This document alone does
+not authorize a transaction.
 
 ## Contract Set
 

@@ -23,13 +23,13 @@ pnpm --filter @abu24k/merchant check
 ```
 
 The app consumes the coordinated `@abu24k/core-artifacts` workspace package at
-`2.0.0-fulfillment-launch.29`. This batch keeps exact NPL payment quotes under
+`2.0.0-fulfillment-launch.30`. This batch keeps exact NPL payment quotes under
 Core authority without a production on-chain TWAP dependency; the workbench
 does not calculate or sign buyer payment amounts. In addition to Bootstrap,
 merchant SIWE and the
 payment/fulfillment surfaces, the workbench consumes merchant finance,
 guarantee-deposit evidence, settlement intents, signed settlement requests and
-Safe-finality history. The help center reads wallet-targeted published CMS
+EOA-finality history. The help center reads wallet-targeted published CMS
 rules and displays their bound policy version. The product center consumes the
 merchant-bound one-store-one-product slot, generated lifecycle/actions/locks,
 complete SKU and inventory fields, write-once media intents, controlled media
@@ -43,7 +43,7 @@ non-transferable with no settlement action. The browser does not aggregate or
 recalculate authoritative funds. The asset center also consumes the
 merchant-scoped per-order receivable statement, including frozen base,
 concession and net amounts, current lifecycle rows, journal evidence and linked
-settlement request, batch and final Safe hashes. Its stable cursor loads older
+settlement request, batch and final EOA execution hashes. Its stable cursor loads older
 orders without browser-side financial aggregation. Seckill orders are
 classified in the same statement, while any extra seckill share remains
 `DecisionBlocked` and is never inferred by the browser.
@@ -108,7 +108,7 @@ Merchant routes without consuming or duplicating those Admin operations.
 
 Merchant audit consumes the reverse-time, tenant-scoped entry stream with
 server-side time/stream/event/module filters and cursor pagination. The UI
-shows signature and Safe/chain transaction hashes while labeling
+shows signature and EOA/chain transaction hashes while labeling
 `PARTIAL_PRE_MERCHANT_SCOPE` accurately instead of presenting a scoped page
 count as global chain proof. Bounded CSV export downloads only Core-returned
 content for ranges of at most 31 days and at most 1,000 rows.

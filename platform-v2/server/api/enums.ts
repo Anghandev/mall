@@ -1,4 +1,4 @@
-export const CORE_ARTIFACT_VERSION = '2.0.0-fulfillment-launch.29';
+export const CORE_ARTIFACT_VERSION = '2.0.0-fulfillment-launch.30';
 export const BSC_CHAIN_ID = 56;
 export const USDT_ADDRESS = '0x55d398326f99059ff775485246999027b3197955';
 export const NPL_ADDRESS = '0x4e8277ab31e4956b2cd48449793a57656dfc03d2';
@@ -299,7 +299,7 @@ export type BalanceState = (typeof balanceStates)[number];
 export const settlementIntentStates = ['ISSUED', 'CONSUMED', 'EXPIRED', 'CANCELLED'] as const;
 export type SettlementIntentState = (typeof settlementIntentStates)[number];
 
-export const settlementRequestStates = ['REQUESTED', 'SUBMITTED', 'SETTLED', 'RETRYABLE', 'QUARANTINED'] as const;
+export const settlementRequestStates = ['REQUESTED', 'SUBMITTED', 'SETTLED', 'RETRYABLE', 'QUARANTINED', 'FAILED_CLOSED'] as const;
 export type SettlementRequestState = (typeof settlementRequestStates)[number];
 
 export const settlementTransferStates = [
@@ -312,6 +312,7 @@ export const settlementTransferStates = [
   'REORGED',
   'RETRYABLE',
   'QUARANTINED',
+  'FAILED_CLOSED',
 ] as const;
 export type SettlementTransferState = (typeof settlementTransferStates)[number];
 

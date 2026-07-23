@@ -603,7 +603,7 @@ function isSeckillPrizeReview(value: unknown) {
 function isSeckillPrizePayout(value: unknown) {
   return isRecord(value)
     && hasExactKeys(value, ['state', 'requestId', 'transferIds', 'finalExecutionTxHashes'])
-    && ['AVAILABLE', 'REQUESTED', 'SUBMITTED', 'SETTLED', 'RETRYABLE', 'QUARANTINED'].includes(String(value.state))
+    && ['AVAILABLE', 'REQUESTED', 'SUBMITTED', 'SETTLED', 'RETRYABLE', 'QUARANTINED', 'FAILED_CLOSED'].includes(String(value.state))
     && isNullableHash(value.requestId)
     && Array.isArray(value.transferIds)
     && value.transferIds.every((item) => bytes32Pattern.test(String(item)))

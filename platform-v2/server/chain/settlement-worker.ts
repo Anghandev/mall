@@ -145,6 +145,16 @@ interface SettlementTransferService {
   ): Promise<unknown>;
 }
 
+interface SettlementWorkerLogger {
+  error(message: string, context?: unknown): void;
+}
+
+const defaultSettlementWorkerLogger: SettlementWorkerLogger = {
+  error(message, context) {
+    console.error(message, context);
+  },
+};
+
 export class SettlementTransferScheduler {
   readonly #service: SettlementTransferService;
   readonly #platformWallet: string;
@@ -153,6 +163,7 @@ export class SettlementTransferScheduler {
     gasCap: string;
     attest(): Promise<EoaRuntimeEvidence>;
   }[];
+  readonly #logger: SettlementWorkerLogger;
   #timer: NodeJS.Timeout | undefined;
   #inFlight: Promise<void> | undefined;
   #running = false;
@@ -165,9 +176,11 @@ export class SettlementTransferScheduler {
       gasCap: string;
       attest(): Promise<EoaRuntimeEvidence>;
     }[];
+    logger?: SettlementWorkerLogger;
   }) {
     this.#service = input.service;
     this.#platformWallet = address(input.platformWallet, 'platform wallet');
+    this.#logger = input.logger ?? defaultSettlementWorkerLogger;
     this.#targets = input.targets.map((target) => {
       positiveInteger(target.gasCap, 'settlement gas cap');
       return target;
@@ -177,8 +190,8 @@ export class SettlementTransferScheduler {
   async pollOnce() {
     let created = 0;
     for (const target of this.#targets) {
-      const runtime = await target.attest();
       try {
+        const runtime = await target.attest();
         await this.#service.createTransfer(
           { walletAddress: this.#platformWallet, roles: ['OPERATOR'] },
           {
@@ -192,7 +205,11 @@ export class SettlementTransferScheduler {
         created += 1;
       } catch (error) {
         if (error instanceof CoreError && ['FinalityPending', 'BreakerActive'].includes(error.code)) continue;
-        throw error;
+        this.#logger.error('settlement transfer scheduler target failed', {
+          asset: target.asset,
+          error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+        });
+        continue;
       }
     }
     return created;
@@ -225,6 +242,7 @@ export class SettlementWorker {
   readonly #replacementDelayMs: number;
   readonly #clock: () => Date;
   readonly #mainnetMicrotestEntitlement: MainnetMicrotestEntitlement | undefined;
+  readonly #logger: SettlementWorkerLogger;
   #timer: NodeJS.Timeout | undefined;
   #inFlight: Promise<void> | undefined;
   #running = false;
@@ -236,6 +254,7 @@ export class SettlementWorker {
     replacementDelayMs?: number;
     clock?: () => Date;
     mainnetMicrotestEntitlement?: MainnetMicrotestEntitlement;
+    logger?: SettlementWorkerLogger;
   }) {
     const delay = input.replacementDelayMs ?? 300_000;
     if (!Number.isSafeInteger(delay) || delay <= 0) {
@@ -247,16 +266,29 @@ export class SettlementWorker {
     this.#replacementDelayMs = delay;
     this.#clock = input.clock ?? (() => new Date());
     this.#mainnetMicrotestEntitlement = input.mainnetMicrotestEntitlement;
+    this.#logger = input.logger ?? defaultSettlementWorkerLogger;
   }
 
   async pollOnce() {
-    const recovered = await this.recoverExpiredLeaseOnce();
-    const submitted = await this.submitOnce();
-    const finalized = await this.pollFinalityOnce();
-    const reconciled = await this.reconcileSettledCanonicalityOnce();
-    const prizeFundingReconciled = await this.reconcilePrizeFundingOnce();
-    const replaced = await this.replaceOnce();
+    const recovered = await this.#safeStep('recoverExpiredLeaseOnce', () => this.recoverExpiredLeaseOnce());
+    const submitted = await this.#safeStep('submitOnce', () => this.submitOnce());
+    const finalized = await this.#safeStep('pollFinalityOnce', () => this.pollFinalityOnce());
+    const reconciled = await this.#safeStep('reconcileSettledCanonicalityOnce', () => this.reconcileSettledCanonicalityOnce());
+    const prizeFundingReconciled = await this.#safeStep('reconcilePrizeFundingOnce', () => this.reconcilePrizeFundingOnce());
+    const replaced = await this.#safeStep('replaceOnce', () => this.replaceOnce());
     return { recovered, submitted, finalized, reconciled, prizeFundingReconciled, replaced };
+  }
+
+  async #safeStep(name: string, step: () => Promise<number>) {
+    try {
+      return await step();
+    } catch (error) {
+      this.#logger.error('settlement worker step failed', {
+        step: name,
+        error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+      });
+      return 0;
+    }
   }
 
   reconcilePrizeFundingOnce() {

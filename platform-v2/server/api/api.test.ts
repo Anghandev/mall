@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { Wallet } from 'ethers';
 import { WebSocket } from 'ws';
@@ -219,12 +222,23 @@ test('bounded mainnet micro-test quote gate bypasses only production deployment 
     productId: 'product-micro',
     quantity: 1,
   }), false);
-  const noGoConfig = {
-    ...config,
-    deploymentReady: false,
-    externalBlocked: [...config.externalBlocked, 'COORDINATED_DEPLOYMENT_AUTHORIZATION'],
-    paymentExternalBlocked: ['COORDINATED_DEPLOYMENT_AUTHORIZATION'],
-  };
+  const noGoConfig = loadConfig({
+    ...completeEnvironment('MICROTEST_AUTHORIZED'),
+    MAINNET_MICROTEST_MERCHANT_ID: 'merchant-micro',
+    MAINNET_MICROTEST_MERCHANT_WALLET: '0x9999999999999999999999999999999999999999',
+    MAINNET_MICROTEST_PRODUCT_ID: 'product-micro',
+    MAINNET_MICROTEST_BUYER_WALLETS: [
+      buyer.address,
+      '0x8888888888888888888888888888888888888888',
+      '0x7777777777777777777777777777777777777777',
+    ].join(','),
+    MAINNET_MICROTEST_EXPIRES_AT: new Date(now.getTime() + 60 * 60_000).toISOString(),
+    MAINNET_MICROTEST_MAX_LIST_PRICE_USDT: '1000',
+    MAINNET_MICROTEST_MAX_FREIGHT_USDT: '0',
+    MAINNET_MICROTEST_MAX_STOCK: '3',
+    MAINNET_MICROTEST_SECKILL_INVENTORY: '3',
+    MAINNET_MICROTEST_EVIDENCE_HASH: HASH,
+  });
   const noGoReadiness = publicReadiness(noGoConfig, paymentRuntimeReadiness(now, true), now);
   assert.equal(noGoReadiness.writesEnabled, false);
   assert.deepEqual(noGoReadiness.paymentExternalBlocked, ['COORDINATED_DEPLOYMENT_AUTHORIZATION']);
@@ -3412,7 +3426,7 @@ function signingVectorIntent(): CanonicalPaymentIntent {
   };
 }
 
-function completeEnvironment(): Record<string, string> {
+function completeEnvironment(releaseStatus: 'GO' | 'MICROTEST_AUTHORIZED' | 'SUSPENDED' | 'NO_GO' = 'GO'): Record<string, string> {
   return {
     CHAIN_ID: '56',
     DATABASE_URL: 'postgres://test:test@localhost/business',
@@ -3472,7 +3486,78 @@ function completeEnvironment(): Record<string, string> {
     SMTP_URL: 'smtp://provider.invalid',
     JPUSH_APP_KEY: 'provider-secret',
     JPUSH_MASTER_SECRET: 'provider-secret',
+    ...releaseAuthorizationEnv(releaseStatus),
   };
+}
+
+function releaseAuthorizationEnv(status: 'GO' | 'MICROTEST_AUTHORIZED' | 'SUSPENDED' | 'NO_GO') {
+  const root = repoRoot();
+  const dir = mkdtempSync(join(tmpdir(), 'abu24k-release-auth-'));
+  const wallet = new Wallet(`0x${'7'.repeat(64)}`);
+  const path = join(dir, `release-${status.toLowerCase()}.json`);
+  const packetSha256 = `0x${'8'.repeat(64)}`;
+  const evidenceArchiveSha256 = `0x${'9'.repeat(64)}`;
+  const runtimeConfigSha256 = `0x${'a'.repeat(64)}`;
+  const imageDigest = `sha256:${'b'.repeat(64)}`;
+  const payload = {
+    schema: 'abu24k.releaseAuthorization.v1',
+    artifactVersion: CORE_ARTIFACT_VERSION,
+    chainId: 56,
+    status,
+    createdAt: '2026-07-24T00:00:00.000Z',
+    artifactSha256: sha256File(join(root, 'packages/core-artifacts/SHA256SUMS')),
+    coordinatedManifestSha256: sha256File(join(root, 'packages/core-artifacts/coordinated-manifest.json')),
+    openapiSha256: sha256File(join(root, 'packages/core-artifacts/openapi/openapi.json')),
+    contractsManifestSha256: sha256File(join(root, 'packages/core-artifacts/contracts/contract-manifest.json')),
+    gitCommit: 'abcdef0123456789abcdef0123456789abcdef01',
+    imageDigest,
+    runtimeConfigSha256,
+    packetSha256,
+    evidenceArchiveSha256,
+    signer: wallet.address,
+  };
+  const signedPayloadSha256 = `0x${createHash('sha256').update(stableJson(payload)).digest('hex')}`;
+  writeFileSync(path, `${JSON.stringify({
+    ...payload,
+    signature: (wallet as unknown as { signMessageSync(message: string): string }).signMessageSync(signedPayloadSha256),
+  })}\n`, { mode: 0o600 });
+  return {
+    RELEASE_AUTHORIZATION_PATH: path,
+    RELEASE_AUTHORIZATION_SHA256: sha256File(path),
+    RELEASE_AUTHORIZATION_SIGNER_ADDRESS: wallet.address,
+    RELEASE_GIT_COMMIT: payload.gitCommit,
+    RELEASE_IMAGE_DIGEST: imageDigest,
+    RELEASE_RUNTIME_CONFIG_SHA256: runtimeConfigSha256,
+    MAINNET_MICROTEST_PACKET_SHA256: packetSha256,
+    RELEASE_EVIDENCE_ARCHIVE_SHA256: evidenceArchiveSha256,
+  };
+}
+
+function repoRoot() {
+  let current = process.cwd();
+  for (;;) {
+    try {
+      readFileSync(join(current, 'packages/core-artifacts/SHA256SUMS'));
+      return current;
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) throw new Error('repo root not found');
+      current = parent;
+    }
+  }
+}
+
+function sha256File(path: string) {
+  return `0x${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  return `{${Object.keys(value as Record<string, unknown>)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`)
+    .join(',')}}`;
 }
 
 function paymentRuntimeReadiness(now: Date, paymentReceiptWorkerHealthy: boolean) {

@@ -1,6 +1,6 @@
 # 24K商城品牌改名报告
 
-> Historical `.18` branding snapshot only. It does not establish current `.29`
+> Historical `.18` branding snapshot only. It does not establish current `.30`
 > release readiness, three-buyer mainnet acceptance or production Go.
 
 日期：2026-07-20

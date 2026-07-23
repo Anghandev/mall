@@ -52,3 +52,12 @@ The generator rejects missing/extra contracts, duplicate addresses, invalid
 blocks, invalid code hashes, a different artifact version or chain, and a
 missing authorization evidence hash. Hand-editing generated manifests is never
 a publication path.
+
+## Historical fulfillment-launch authorization
+
+`historical/bsc-fulfillment-launch-authorization.29-historical-revoked.json`
+archives the previous `.29` launch authorization and is **not** a current
+release gate, rollback target or deploy input. Current `.30` release authority is
+external: each `SUSPENDED`, `MICROTEST_AUTHORIZED`, `GO` or `NO_GO` decision is a
+separate signed JSON file whose path and SHA-256 are supplied to deploy/runtime
+preflight commands.

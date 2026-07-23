@@ -158,6 +158,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '044_settlement_execution_integrity.sql',
       '045_settlement_nonce_release.sql',
       '046_seckill_prize_reorg_recovery.sql',
+      '047_settlement_failed_close.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -11610,6 +11611,171 @@ test('deterministic EOA executor 4xx quarantines without creating a replacement 
   }
 });
 
+test('ops failed-close refuses non-prize quarantined settlement requests', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const prepared = await prepareRequestedSettlement(db);
+    await prepared.settlements.createTransfer(prepared.operator, {
+      asset: 'USDT',
+      gasCap: '100000',
+      idempotencyKey: 'eoa-failed-close-transfer-1',
+      runtime: prepared.runtime,
+      correlationId: 'eoa-failed-close-transfer-1',
+    });
+    const worker = new SettlementWorker({
+      transactions: transactionAdapter(db),
+      broadcaster: {
+        submit: async () => {
+          throw new CoreError('InvalidRequest', 'executor amount mismatch', 400, {
+            deterministicExecutorFailure: true,
+            executorErrorCode: 'AMOUNT_MISMATCH',
+          });
+        },
+        replace: async () => {
+          throw new Error('unexpected replacement');
+        },
+      },
+      chain: {
+        receipt: async () => undefined,
+        canonicalBlock: async (input) => ({
+          canonical: true,
+          observedBlockHash: input.blockHash,
+          evidenceHash: HASH,
+        }),
+      },
+      clock: () => prepared.now,
+    });
+
+    await assert.rejects(
+      worker.submitOnce(),
+      (error: unknown) => error instanceof CoreError && error.code === 'InvalidRequest',
+    );
+    assert.deepEqual(await purposeBalances(db, prepared.intent.orderId, 'MERCHANT_RECEIVABLE'), {
+      AVAILABLE: '7',
+      REQUESTED: '45',
+    });
+    await assert.rejects(
+      async () => prepared.settlements.failedCloseUnbroadcastQuarantinedRequest(
+        { walletAddress: prepared.operator.walletAddress, roles: ['AUDITOR'] },
+        {
+          requestId: prepared.request.request_id,
+          reasonCode: 'UNBROADCAST_QUARANTINE_REPAIR',
+          evidenceHash: HASH,
+          idempotencyKey: 'failed-close-auditor-denied',
+        },
+      ),
+      (error: unknown) => error instanceof CoreError && error.code === 'Forbidden',
+    );
+    await assert.rejects(
+      prepared.settlements.failedCloseUnbroadcastQuarantinedRequest(prepared.operator, {
+        requestId: prepared.request.request_id,
+        reasonCode: 'UNBROADCAST_QUARANTINE_REPAIR',
+        evidenceHash: HASH,
+        idempotencyKey: 'failed-close-non-prize-denied',
+        correlationId: 'failed-close-non-prize-denied',
+      }),
+      /limited to the one-atomic-USDT prize quarantine repair/,
+    );
+  } finally {
+    await db.close();
+  }
+});
+
+test('ops failed-close restores only the one-atomic PRIZE_USDT unbroadcast quarantine through ledger and audit', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const prepared = await prepareOneAtomicPrizeSettlement(db);
+    const transfer = await prepared.settlements.createTransfer(prepared.operator, {
+      asset: 'USDT',
+      gasCap: '100000',
+      idempotencyKey: 'eoa-failed-close-prize-transfer-1',
+      runtime: prepared.runtime,
+      correlationId: 'eoa-failed-close-prize-transfer-1',
+    });
+    await markPrizeTransferQuarantined(db, prepared.requestId, transfer.transferId, prepared.now);
+
+    const closed = await prepared.settlements.failedCloseUnbroadcastQuarantinedRequest(prepared.operator, {
+      requestId: prepared.requestId,
+      reasonCode: 'UNBROADCAST_PRIZE_QUARANTINE_REPAIR',
+      evidenceHash: HASH,
+      idempotencyKey: 'failed-close-prize-unbroadcast-1',
+      correlationId: 'failed-close-prize-unbroadcast-1',
+    });
+    assert.equal(closed.request.rail, 'PRIZE_USDT');
+    assert.equal(closed.request.asset, 'USDT');
+    assert.equal(closed.request.amount, '1');
+    assert.equal(closed.request.state, 'FAILED_CLOSED');
+    assert.deepEqual(closed.request.transferIds, [transfer.transferId]);
+    assert.deepEqual(closed.request.finalExecutionTxHashes, []);
+    assert.equal(closed.transitions.at(-1)?.type, 'FAILED_CLOSED');
+    assert.deepEqual((await db.query<{ transfer_state: string; attempt_state: string; amount: string }>(
+      `SELECT transfer.state AS transfer_state, attempt.state AS attempt_state,
+              transfer.amount::text AS amount
+       FROM core.settlement_transfers transfer
+       JOIN core.settlement_transfer_attempts attempt ON attempt.transfer_id = transfer.transfer_id
+       WHERE transfer.transfer_id = $1`,
+      [transfer.transferId],
+    )).rows[0], {
+      transfer_state: 'FAILED_CLOSED',
+      attempt_state: 'FAILED_CLOSED',
+      amount: '1',
+    });
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.ledger_journals WHERE event_type = 'SETTLEMENT_FAILED_CLOSED'",
+    )).rows[0]?.count, '1');
+    assert.equal((await db.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM core.audit_outbox_events WHERE event_type = 'SettlementFailedClosed'",
+    )).rows[0]?.count, '1');
+    await assertLedgerBalanced(db, 1);
+
+    const idempotent = await prepared.settlements.failedCloseUnbroadcastQuarantinedRequest(prepared.operator, {
+      requestId: prepared.requestId,
+      reasonCode: 'UNBROADCAST_PRIZE_QUARANTINE_REPAIR',
+      evidenceHash: HASH,
+      idempotencyKey: 'failed-close-prize-unbroadcast-1',
+    });
+    assert.equal(idempotent.request.state, 'FAILED_CLOSED');
+  } finally {
+    await db.close();
+  }
+});
+
+test('ops failed-close refuses quarantined settlement requests with broadcast evidence', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const prepared = await prepareOneAtomicPrizeSettlement(db);
+    const transfer = await prepared.settlements.createTransfer(prepared.operator, {
+      asset: 'USDT',
+      gasCap: '100000',
+      idempotencyKey: 'eoa-failed-close-broadcast-transfer-1',
+      runtime: prepared.runtime,
+      correlationId: 'eoa-failed-close-broadcast-transfer-1',
+    });
+    await markPrizeTransferQuarantined(
+      db,
+      prepared.requestId,
+      transfer.transferId,
+      prepared.now,
+      `0x${'2'.repeat(64)}`,
+    );
+    assert.equal((await prepared.settlements.getAdminTransfer(
+      { walletAddress: prepared.operator.walletAddress, roles: ['AUDITOR'] },
+      transfer.transferId,
+    )).transfer.state, 'QUARANTINED');
+    await assert.rejects(
+      prepared.settlements.failedCloseUnbroadcastQuarantinedRequest(prepared.operator, {
+        requestId: prepared.requestId,
+        reasonCode: 'UNBROADCAST_QUARANTINE_REPAIR',
+        evidenceHash: HASH,
+        idempotencyKey: 'failed-close-broadcast-denied',
+      }),
+      /has broadcast evidence/,
+    );
+  } finally {
+    await db.close();
+  }
+});
+
 test('Admin clearing read model exposes requests and immutable EOA transfer evidence without a write path', async () => {
   const db = await createBusinessDatabase();
   try {
@@ -14539,6 +14705,237 @@ async function prepareRequestedSettlement(db: PGlite) {
     signature,
     requestedAmount: challenge.intent.amount,
   };
+}
+
+
+async function prepareOneAtomicPrizeSettlement(db: PGlite) {
+  const intent = paymentIntent();
+  await recordFinalPayment(db, intent);
+  const now = new Date((intent.issuedAt + 120) * 1000);
+  const source = (await db.query<{
+    account_id: string;
+    backing_wallet_address: string;
+    policy_version: string;
+  }>(
+    `SELECT account.account_id, line.backing_wallet_address,
+            orders.policy_version::text AS policy_version
+     FROM core.ledger_journals journal
+     JOIN core.ledger_lines line ON line.journal_id = journal.journal_id
+     JOIN core.ledger_accounts account ON account.account_id = line.account_id
+     JOIN core.orders orders ON orders.order_id = journal.order_id
+     WHERE journal.order_id = $1
+       AND account.purpose = 'SECKILL_PRIZE_LIABILITY'
+       AND account.asset = 'USDT'
+       AND line.balance_state = 'LOCKED'
+       AND line.side = 'CREDIT'
+       AND line.backing_wallet_address IS NOT NULL
+     ORDER BY account.account_id
+     LIMIT 1`,
+    [intent.orderId],
+  )).rows[0];
+  if (!source) throw new Error('one-atomic prize fixture source missing');
+
+  const requestId = deterministicHash(`one-atomic-prize-request:${intent.orderId}`);
+  const intentId = deterministicHash(`one-atomic-prize-intent:${intent.orderId}`);
+  const requestedJournalId = `journal:one-atomic-prize-request:${requestId}`;
+  const itemsHash = deterministicHash(`one-atomic-prize-items:${intent.orderId}`);
+  const intentDigest = deterministicHash(`one-atomic-prize-digest:${intent.orderId}`);
+  const itemHash = deterministicHash(`one-atomic-prize-item:${intent.orderId}`);
+  const requestHash = deterministicHash(`one-atomic-prize-request-hash:${intent.orderId}`);
+  const signatureHash = deterministicHash(`one-atomic-prize-signature:${intent.orderId}`);
+  const contentHash = deterministicHash(`one-atomic-prize-journal:${intent.orderId}`);
+  const buyer = intent.buyer.toLowerCase();
+  const executorWallet = source.backing_wallet_address.toLowerCase();
+  const lines = [
+    {
+      account_id: source.account_id,
+      side: 'DEBIT',
+      amount: '1',
+      balance_state: 'LOCKED',
+      backing_wallet_address: executorWallet,
+    },
+    {
+      account_id: source.account_id,
+      side: 'CREDIT',
+      amount: '1',
+      balance_state: 'REQUESTED',
+      backing_wallet_address: executorWallet,
+    },
+  ];
+  await db.query(
+    'SELECT core.post_resource_balanced_journal($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NULL,$13,$14)',
+    [
+      requestedJournalId,
+      `one-atomic-prize-request:${requestId}`,
+      'SETTLEMENT_REQUESTED',
+      'SETTLEMENT_REQUEST',
+      requestId,
+      intent.orderId,
+      Number(source.policy_version),
+      contentHash,
+      null,
+      null,
+      'SIGNED_REQUEST',
+      intentDigest,
+      JSON.stringify({ requestId, intentId, fixture: 'ONE_ATOMIC_PRIZE_QUARANTINE' }),
+      JSON.stringify(lines),
+    ],
+  );
+  await db.query(
+    `INSERT INTO core.settlement_intents (
+       intent_id, artifact_version, wallet_address, merchant_id, recipient_address, rail,
+       asset, asset_address, executor_wallet, amount, items_hash, intent_digest,
+       nonce, deadline, state, idempotency_key, request_hash, created_at, consumed_at
+     ) VALUES ($1,$2,$3,NULL,$3,'PRIZE_USDT','USDT',$4,$5,1,$6,$7,1,$8,'CONSUMED',$9,$10,$11,$11)`,
+    [
+      intentId,
+      CORE_ARTIFACT_VERSION,
+      buyer,
+      USDT_ADDRESS,
+      executorWallet,
+      itemsHash,
+      intentDigest,
+      new Date(now.getTime() + 60_000),
+      'one-atomic-prize-intent',
+      requestHash,
+      now,
+    ],
+  );
+  await db.query(
+    `INSERT INTO core.settlement_intent_items (
+       intent_id, item_index, order_id, account_id, backing_wallet_address, amount, item_hash
+     ) VALUES ($1,0,$2,$3,$4,1,$5)`,
+    [intentId, intent.orderId, source.account_id, executorWallet, itemHash],
+  );
+  await db.query(
+    `INSERT INTO core.settlement_requests (
+       request_id, intent_id, artifact_version, wallet_address, merchant_id, recipient_address,
+       rail, asset, asset_address, executor_wallet, amount, items_hash, intent_digest,
+       signature, signature_hash, state, requested_at
+     ) VALUES ($1,$2,$3,$4,NULL,$4,'PRIZE_USDT','USDT',$5,$6,1,$7,$8,$9,$10,'REQUESTED',$11)`,
+    [
+      requestId,
+      intentId,
+      CORE_ARTIFACT_VERSION,
+      buyer,
+      USDT_ADDRESS,
+      executorWallet,
+      itemsHash,
+      intentDigest,
+      `0x${'1'.repeat(130)}`,
+      signatureHash,
+      now,
+    ],
+  );
+  await db.query(
+    `INSERT INTO core.settlement_request_items (
+       request_id, item_index, order_id, account_id, backing_wallet_address, amount, requested_journal_id
+     ) VALUES ($1,0,$2,$3,$4,1,$5)`,
+    [requestId, intent.orderId, source.account_id, executorWallet, requestedJournalId],
+  );
+  await db.query(
+    `INSERT INTO core.settlement_request_item_transitions (
+       transition_id, request_id, request_item_index, transfer_id,
+       transition_sequence, transition_type, journal_id, created_at
+     ) VALUES ($1,$2,0,NULL,1,'REQUESTED',$3,$4)`,
+    [`transition:${requestedJournalId}`, requestId, requestedJournalId, now],
+  );
+  await db.query(
+    `INSERT INTO core.coverage_snapshots (
+       snapshot_id, chain_id, block_number, block_hash, canonical, evidence_hash, recorded_at
+     ) VALUES ('coverage:one-atomic-prize', 56, 1000, $1, true, $2, $3)`,
+    [`0x${'7'.repeat(64)}`, `0x${'8'.repeat(64)}`, now],
+  );
+  await db.query(
+    `INSERT INTO core.coverage_snapshot_items (
+       snapshot_id, wallet_address, asset, verified_asset_balance,
+       unsettled_liability, coverage_met
+     ) VALUES ('coverage:one-atomic-prize', $1, 'USDT', 70, 70, true)`,
+    [executorWallet],
+  );
+  await db.query(
+    `INSERT INTO core.coverage_snapshot_canonicality (
+       observation_id, snapshot_id, canonical, observed_block_hash, evidence_hash, observed_at
+     ) VALUES ('coverage-observation:one-atomic-prize', 'coverage:one-atomic-prize', true, $1, $2, $3)`,
+    [`0x${'7'.repeat(64)}`, `0x${'8'.repeat(64)}`, now],
+  );
+  const operator = {
+    walletAddress: '0x9999999999999999999999999999999999999999',
+    roles: ['OPERATOR'] as const,
+  };
+  const runtime = {
+    executorWallet,
+    nextNonce: '7',
+    tokenAddress: USDT_ADDRESS,
+    tokenCodeHash: `0x${'9'.repeat(64)}`,
+    tokenTransferConformanceEvidenceHash: `0x${'a'.repeat(64)}`,
+    evidenceHash: `0x${'b'.repeat(64)}`,
+    checkedAt: now,
+  };
+  return {
+    intent,
+    now,
+    settlements: new SettlementService({ transactions: transactionAdapter(db), clock: () => now }),
+    operator,
+    runtime,
+    requestId,
+  };
+}
+
+async function markPrizeTransferQuarantined(
+  db: PGlite,
+  requestId: string,
+  transferId: string,
+  now: Date,
+  executionTxHash?: string,
+) {
+  const transfer = (await db.query<{
+    executor_wallet: string;
+    executor_nonce: string;
+    token_address: string;
+  }>(
+    `SELECT executor_wallet, executor_nonce::text, token_address
+     FROM core.settlement_transfers
+     WHERE transfer_id = $1 AND request_id = $2`,
+    [transferId, requestId],
+  )).rows[0];
+  if (!transfer) throw new Error('prize transfer fixture missing');
+  await db.query(
+    `UPDATE core.settlement_requests
+     SET state = 'QUARANTINED'
+     WHERE request_id = $1`,
+    [requestId],
+  );
+  await db.query(
+    `UPDATE core.settlement_transfers
+     SET state = 'QUARANTINED'
+     WHERE transfer_id = $1 AND request_id = $2`,
+    [transferId, requestId],
+  );
+  await db.query(
+    `INSERT INTO core.settlement_transfer_attempts (
+       attempt_id, transfer_id, attempt_number, lease_token, request_digest,
+       transaction_to, transaction_calldata, execution_tx_hash, executor_wallet,
+       executor_nonce, gas_limit, replacement_for_attempt_id, state, leased_until,
+       created_at, submitted_at, updated_at
+     ) VALUES ($1,$2,1,$3,$4,$5,'0x1234',$6,$7,$8,100000,NULL,'QUARANTINED',$9,$9,$10,$9)`,
+    [
+      `attempt:one-atomic-prize:${transferId}`,
+      transferId,
+      `lease:one-atomic-prize:${transferId}`,
+      deterministicHash(`one-atomic-prize-attempt-digest:${transferId}`),
+      transfer.token_address,
+      executionTxHash ?? null,
+      transfer.executor_wallet,
+      transfer.executor_nonce,
+      now,
+      executionTxHash ? now : null,
+    ],
+  );
+}
+
+function deterministicHash(value: string) {
+  return `0x${createHash('sha256').update(value).digest('hex')}`;
 }
 
 async function recordFinalPayment(db: PGlite, intent = paymentIntent()) {

@@ -2358,6 +2358,7 @@ function seckillPayoutStateLabel(state: NonNullable<SeckillPrizeSettlementProjec
     SETTLED: 'Settled',
     RETRYABLE: '可重试',
     QUARANTINED: '已隔离',
+    FAILED_CLOSED: '已关闭',
   } as const)[state];
 }
 
@@ -2756,6 +2757,7 @@ function settlementStateLabel(state: SettlementBalance['state'] | SettlementRequ
     DISPUTED: 'Disputed',
     RETRYABLE: '可重试',
     QUARANTINED: '已隔离',
+    FAILED_CLOSED: '已关闭',
   } as const)[state];
 }
 

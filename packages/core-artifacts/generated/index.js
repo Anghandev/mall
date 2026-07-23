@@ -1,4 +1,4 @@
-export const artifactVersion = "2.0.0-fulfillment-launch.29";
+export const artifactVersion = "2.0.0-fulfillment-launch.30";
 export const chainIdentity = Object.freeze({"chainId":56,"usdtAddress":"0x55d398326f99059ff775485246999027b3197955","nplAddress":"0x4e8277ab31e4956b2cd48449793a57656dfc03d2"});
 export const adminResourceTypes = Object.freeze(["ORDER","PRODUCT","MERCHANT"]);
 export const adminExportFormats = Object.freeze(["CSV","EXCEL"]);
@@ -42,8 +42,8 @@ export const fulfillmentAssets = Object.freeze(["USDT","NPL","BNM_POINTS"]);
 export const arbitrationOutcomes = Object.freeze(["FULFILL","RESUME_FULFILLMENT"]);
 export const settlementRails = Object.freeze(["MERCHANT_USDT","REWARD_NPL","PRIZE_USDT","TAKEOVER_USDT","OPERATIONS_REIMBURSEMENT_USDT"]);
 export const settlementIntentStates = Object.freeze(["ISSUED","CONSUMED","EXPIRED","CANCELLED"]);
-export const settlementRequestStates = Object.freeze(["REQUESTED","SUBMITTED","SETTLED","RETRYABLE","QUARANTINED"]);
-export const settlementTransferStates = Object.freeze(["PENDING","LEASED","SUBMITTED","MINED","SETTLED","FAILED","REORGED","RETRYABLE","QUARANTINED"]);
+export const settlementRequestStates = Object.freeze(["REQUESTED","SUBMITTED","SETTLED","RETRYABLE","QUARANTINED","FAILED_CLOSED"]);
+export const settlementTransferStates = Object.freeze(["PENDING","LEASED","SUBMITTED","MINED","SETTLED","FAILED","REORGED","RETRYABLE","QUARANTINED","FAILED_CLOSED"]);
 export const merchantGuaranteeDepositStates = Object.freeze(["SUBMITTED","MINED","FINAL","REORGED","QUARANTINED"]);
 export const guaranteeStatuses = Object.freeze(["DECISION_BLOCKED","BELOW_MINIMUM","READY","FROZEN"]);
 export const breakerActions = Object.freeze(["PAUSE","RESUME"]);

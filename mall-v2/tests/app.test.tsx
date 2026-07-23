@@ -99,14 +99,14 @@ function NotificationConnectionProbe() {
 }
 
 describe('Mall V2 payment consumer', () => {
-  it('consumes the current coordinated Core checkpoint and enables authorized payment writes', async () => {
+  it('consumes the current coordinated Core checkpoint and keeps deployment authorization external', async () => {
     renderAt('/mall');
 
     expect(screen.getByRole('link', { name: '24K商城首页' })).toBeTruthy();
     expect(screen.getByText('24K商城', { selector: '.brand strong' })).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/阿步|Abu 24K|ABU 24K/);
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
-    expect(artifactVersion).toBe('2.0.0-fulfillment-launch.29');
+    expect(artifactVersion).toBe('2.0.0-fulfillment-launch.30');
     expect(productBaseline.manifestsAligned).toBe(true);
     expect(productBaseline.knownOrderActions).toBe(allowedActionNames);
     expect(productBaseline.executableOrderActions).toBe(executableOrderActionNames);
@@ -115,9 +115,9 @@ describe('Mall V2 payment consumer', () => {
     expect(isCoreOrderActionExecutable('CONFIRM_RECEIPT')).toBe(true);
     expect(isCoreOrderActionExecutable('PAY_ORDER')).toBe(true);
     expect(mallRuntimeBoundary).toMatchObject({
-      artifactStatus: '2.0.0-fulfillment-launch.29',
+      artifactStatus: '2.0.0-fulfillment-launch.30',
       executableOrderActions: executableOrderActionNames,
-      deploymentAuthorized: true,
+      deploymentAuthorized: false,
       settlementAdminCapabilities: {
         settlements: true,
         cms: true,

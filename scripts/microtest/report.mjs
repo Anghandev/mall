@@ -26,7 +26,7 @@ const report = `# Abu 24K V2 Mainnet Micro-Test Report
 - Status: \`NO-GO UNTIL FILLED AND VERIFIED\`
 - Can proceed to production deployment: \`NO\`
 - Note: This generated report is a local scaffold. A Go decision requires the
-  Abu V2 preflight-bound W5/W1/W6 packet, real receipt evidence, cleanup gate
+  Abu V2 preflight-bound MICROTEST_BUYER_1/2/3 packet, real receipt evidence, cleanup gate
   and 600-second production observation.
 
 ## Summary
@@ -61,7 +61,7 @@ ${txRows}
 ## Required Manual Sections
 
 - \`pnpm micro:preflight\` output bound to the same packet hash
-- W5/W1/W6 funding, BNM, approval and payment tx hashes
+- MICROTEST_BUYER_1/2/3 funding, BNM, approval and payment tx hashes
 - PaymentReceiptWorker 15-confirmation evidence
 - Router, Service Fee, Custody, Burn and Reward wallet balance deltas
 - Order, fulfillment, ledger and settlement reconciliation

@@ -150,6 +150,7 @@ const schemaSources = [
       '044_settlement_execution_integrity.sql',
       '045_settlement_nonce_release.sql',
       '046_seckill_prize_reorg_recovery.sql',
+      '047_settlement_failed_close.sql',
     ],
   },
   {
@@ -351,25 +352,25 @@ for (const path of Object.values(componentPaths)) {
 }
 const publishedContractManifest = JSON.parse(readRequired(join(contractsRoot, 'contract-manifest.json')));
 const historicalDeploymentLineage = publishedContractManifest.historicalDeploymentLineage ?? {};
-const contractDeploymentAuthorized = publishedContractManifest.deploymentAuthorized === true
-  && publishedContractManifest.deploymentStatus === 'DEPLOYED'
-  && typeof publishedContractManifest.deploymentAuthorizationEvidenceHash === 'string'
-  && /^0x[0-9a-fA-F]{64}$/.test(publishedContractManifest.deploymentAuthorizationEvidenceHash);
 
 const coordinatedManifest = {
   artifactVersion,
   publicationStatus: 'COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT',
-  deploymentAuthorized: contractDeploymentAuthorized,
-  deploymentAuthorizationEvidenceHash: contractDeploymentAuthorized
-    ? publishedContractManifest.deploymentAuthorizationEvidenceHash
-    : null,
-  releaseGateStatus: contractDeploymentAuthorized ? 'GO' : 'NO_GO_REPAIR_BASELINE',
+  deploymentAuthorized: false,
+  deploymentAuthorizationEvidenceHash: null,
+  releaseGateStatus: 'EXTERNAL_AUTHORIZATION_REQUIRED',
+  releaseAuthorization: {
+    mode: 'EXTERNAL_SIGNED_JSON',
+    authoritative: true,
+    allowedStatuses: ['SUSPENDED', 'MICROTEST_AUTHORIZED', 'GO', 'NO_GO'],
+    note: 'Release status is external to this immutable artifact. Changing only the signed authorization file does not regenerate the artifact.',
+  },
   historicalDeploymentLineage: {
     artifactVersion: historicalDeploymentLineage.artifactVersion ?? '2.0.0-settlement-admin.16',
-    deploymentAuthorized: historicalDeploymentLineage.deploymentAuthorized === true,
+    deploymentAuthorized: false,
     deploymentAuthorizationEvidenceHash:
       historicalDeploymentLineage.deploymentAuthorizationEvidenceHash ?? null,
-    note: 'Historical deployment lineage only; does not authorize this artifact, W5/W1/W6 acceptance or production Go.',
+    note: 'Historical deployment lineage only; it does not authorize this artifact, buyer acceptance or production Go.',
   },
   chain: { name: 'BSC Mainnet', chainId: BSC_CHAIN_ID },
   fixedAssets: { USDT: USDT_ADDRESS, NPL: NPL_ADDRESS },
@@ -2697,8 +2698,8 @@ function settlementAdminOpenApiPaths(errorResponse) {
     ...operation(operationId, responseSchema, status, requestSchema),
     parameters: [resourceParameter(parameter)],
   });
-  const bytes32ResourceOperation = (operationId, parameter, responseSchema) => ({
-    ...operation(operationId, responseSchema),
+  const bytes32ResourceOperation = (operationId, parameter, responseSchema, status = 200, requestSchema) => ({
+    ...operation(operationId, responseSchema, status, requestSchema),
     parameters: [{
       name: parameter,
       in: 'path',
@@ -2838,31 +2839,31 @@ function settlementAdminOpenApiPaths(errorResponse) {
       }),
     },
     '/v2/admin/seckill/actions/{actionId}': {
-      get: resourceOperation('getSeckillGovernanceAction', 'actionId', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }),
+      get: bytes32ResourceOperation('getSeckillGovernanceAction', 'actionId', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }),
     },
     '/v2/admin/seckill/actions/{actionId}/approval-challenge': {
-      post: resourceOperation('createSeckillGovernanceChallenge', 'actionId', { $ref: '#/components/schemas/SeckillGovernanceChallenge' }, 200, 'SeckillGovernanceChallengeRequest'),
+      post: bytes32ResourceOperation('createSeckillGovernanceChallenge', 'actionId', { $ref: '#/components/schemas/SeckillGovernanceChallenge' }, 200, 'SeckillGovernanceChallengeRequest'),
     },
     '/v2/admin/seckill/actions/{actionId}/secondary-signature': {
-      post: resourceOperation('submitSeckillGovernanceApproval', 'actionId', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 200, 'SeckillGovernanceApprovalRequest'),
+      post: bytes32ResourceOperation('submitSeckillGovernanceApproval', 'actionId', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 200, 'SeckillGovernanceApprovalRequest'),
     },
     '/v2/admin/seckill/actions/{actionId}/execute': {
-      post: resourceOperation('executeSeckillGovernanceAction', 'actionId', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 202, 'EmptyObject'),
+      post: bytes32ResourceOperation('executeSeckillGovernanceAction', 'actionId', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 202, 'EmptyObject'),
     },
     '/v2/admin/seckill/actions/{actionId}/cancel': {
-      post: resourceOperation('cancelSeckillGovernanceAction', 'actionId', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 200, 'EmptyObject'),
+      post: bytes32ResourceOperation('cancelSeckillGovernanceAction', 'actionId', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 200, 'EmptyObject'),
     },
     '/v2/admin/seckill/sessions': {
       post: operation('createSeckillSessionDraft', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 201, 'SeckillSessionCreateRequest'),
     },
     '/v2/admin/seckill/sessions/{sessionId}/force-close': {
-      post: resourceOperation('createSeckillForceClose', 'sessionId', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 201, 'SeckillForceCloseRequest'),
+      post: bytes32ResourceOperation('createSeckillForceClose', 'sessionId', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 201, 'SeckillForceCloseRequest'),
     },
     '/v2/admin/seckill/sessions/{sessionId}/prize-injections': {
-      post: resourceOperation('createSeckillPrizeInjection', 'sessionId', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 201, 'SeckillPrizeInjectionRequest'),
+      post: bytes32ResourceOperation('createSeckillPrizeInjection', 'sessionId', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 201, 'SeckillPrizeInjectionRequest'),
     },
     '/v2/admin/seckill/sessions/{sessionId}/winner-review': {
-      post: resourceOperation('reviewSeckillWinner', 'sessionId', { $ref: '#/components/schemas/SeckillPrizeSettlementProjection' }, 200, 'SeckillWinnerReviewRequest'),
+      post: bytes32ResourceOperation('reviewSeckillWinner', 'sessionId', { $ref: '#/components/schemas/SeckillPrizeSettlementProjection' }, 200, 'SeckillWinnerReviewRequest'),
     },
     '/v2/admin/seckill/prize-reorgs': {
       get: operation('listSeckillPrizeReorgExposures', {
@@ -2877,10 +2878,10 @@ function settlementAdminOpenApiPaths(errorResponse) {
       ),
     },
     '/v2/admin/seckill/prize-reorgs/{exposureId}/recovery-challenge': {
-      post: resourceOperation('createSeckillPrizeRecoveryChallenge', 'exposureId', { $ref: '#/components/schemas/SeckillPrizeRecoveryChallenge' }, 200, 'SeckillPrizeRecoveryChallengeRequest'),
+      post: bytes32ResourceOperation('createSeckillPrizeRecoveryChallenge', 'exposureId', { $ref: '#/components/schemas/SeckillPrizeRecoveryChallenge' }, 200, 'SeckillPrizeRecoveryChallengeRequest'),
     },
     '/v2/admin/seckill/prize-reorgs/{exposureId}/recovery': {
-      post: resourceOperation('recoverSeckillPrizeReorg', 'exposureId', { $ref: '#/components/schemas/SeckillPrizeRecoveryProjection' }, 201, 'SeckillPrizeRecoveryRequest'),
+      post: bytes32ResourceOperation('recoverSeckillPrizeReorg', 'exposureId', { $ref: '#/components/schemas/SeckillPrizeRecoveryProjection' }, 201, 'SeckillPrizeRecoveryRequest'),
     },
     '/v2/admin/seckill/breaker/resume': {
       post: operation('createSeckillBreakerResume', { $ref: '#/components/schemas/SeckillGovernanceActionProjection' }, 201, 'SeckillBreakerResumeRequest'),

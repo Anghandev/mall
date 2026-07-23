@@ -24,3 +24,13 @@ test('production Core configuration includes the queue Redis URL required by mic
   assert.match(section, /line\('REDIS_URL', redisUrl\)/);
   assert.match(section, /line\('QUEUE_URL', redisUrl\)/);
 });
+
+test('Nginx serves Mall and Merchant /assets business routes as SPA deep links without shadowing static assets', async () => {
+  const source = await readFile(new URL('./nginx-paths.conf', import.meta.url), 'utf8');
+  assert.match(source, /location = \/mall\/assets \{\n\s+root \/var\/opt\/abu24k\/current;\n\s+try_files \/mall\/index\.html =404;/);
+  assert.match(source, /location = \/mall\/assets\/ \{\n\s+root \/var\/opt\/abu24k\/current;\n\s+try_files \/mall\/index\.html =404;/);
+  assert.match(source, /location = \/merchant\/assets \{\n\s+root \/var\/opt\/abu24k\/current;\n\s+try_files \/merchant\/index\.html =404;/);
+  assert.match(source, /location = \/merchant\/assets\/ \{\n\s+root \/var\/opt\/abu24k\/current;\n\s+try_files \/merchant\/index\.html =404;/);
+  assert.match(source, /location \^~ \/mall\/ \{\n\s+root \/var\/opt\/abu24k\/current;\n\s+try_files \$uri \$uri\/ \/mall\/index\.html;/);
+  assert.match(source, /location \^~ \/merchant\/ \{\n\s+root \/var\/opt\/abu24k\/current;\n\s+try_files \$uri \$uri\/ \/merchant\/index\.html;/);
+});

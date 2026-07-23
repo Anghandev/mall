@@ -1211,6 +1211,7 @@ function parseSeckillPrizeSettlement(value: unknown, winnerWallet: unknown) {
       'SETTLED',
       'RETRYABLE',
       'QUARANTINED',
+      'FAILED_CLOSED',
     ] as const);
     optionalBytes32Value(payout.requestId);
     const transferIds = arrayValue(payout.transferIds);

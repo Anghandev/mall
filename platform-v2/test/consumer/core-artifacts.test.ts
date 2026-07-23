@@ -23,8 +23,8 @@ const contractManifest = readJson('contracts/contract-manifest.json');
 const schemaManifest = readJson('schema/schema-manifest.json');
 const declarations = readFileSync(join(artifactsRoot, 'generated/index.d.ts'), 'utf8');
 
-test('fulfillment-launch .29 checkpoint has one identity, resolvable exports and exact checksums', () => {
-  assert.equal(artifactVersion, '2.0.0-fulfillment-launch.29');
+test('fulfillment-launch .30 checkpoint has one immutable identity, resolvable exports and exact checksums', () => {
+  assert.equal(artifactVersion, '2.0.0-fulfillment-launch.30');
   for (const document of [manifest, websocket, enums, abiBundle, contractManifest, schemaManifest]) {
     assert.equal(document.artifactVersion, artifactVersion);
   }
@@ -32,11 +32,13 @@ test('fulfillment-launch .29 checkpoint has one identity, resolvable exports and
   assert.equal(manifest.publicationStatus, 'COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT');
   assert.equal(contractManifest.publicationStatus, 'coordinated-settlement-admin-checkpoint');
   assert.equal(contractManifest.deploymentArtifactVersion, '2.0.0-settlement-admin.16');
-  assert.equal(contractManifest.deploymentAuthorized, true);
-  assert.match(contractManifest.deploymentAuthorizationEvidenceHash, /^0x[0-9a-f]{64}$/);
-  assert.equal(contractManifest.releaseGateStatus, 'GO');
+  assert.equal(contractManifest.deploymentAuthorized, false);
+  assert.equal(contractManifest.deploymentAuthorizationEvidenceHash, null);
+  assert.equal(contractManifest.releaseGateStatus, 'EXTERNAL_AUTHORIZATION_REQUIRED');
+  assert.equal(contractManifest.releaseAuthorization.authoritative, true);
+  assert.equal(contractManifest.releaseAuthorization.mode, 'EXTERNAL_SIGNED_JSON');
   assert.equal(contractManifest.historicalDeploymentLineage.artifactVersion, '2.0.0-settlement-admin.16');
-  assert.equal(contractManifest.historicalDeploymentLineage.deploymentAuthorized, true);
+  assert.equal(contractManifest.historicalDeploymentLineage.deploymentAuthorized, false);
   assert.match(contractManifest.historicalDeploymentLineage.deploymentAuthorizationEvidenceHash, /^0x[0-9a-f]{64}$/);
   assert.equal(manifest.decisionBlocked.includes('SECKILL_PRIZE_POOL_ACCOUNT'), false);
   assert.deepEqual(
@@ -61,10 +63,10 @@ test('fulfillment-launch .29 checkpoint has one identity, resolvable exports and
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 46);
+  assert.equal(schemaManifest.schemas.core.migrations.length, 47);
   assert.equal(
     schemaManifest.schemas.core.migrations.at(-1)?.path,
-    'schema/business/046_seckill_prize_reorg_recovery.sql',
+    'schema/business/047_settlement_failed_close.sql',
   );
   assert.equal(schemaManifest.schemas.audit.migrations.length, 4);
   for (const migration of [
@@ -927,13 +929,15 @@ test('catalog, settlement/admin and seckill realtime capabilities publish the at
   for (const [capability, status] of Object.entries(manifest.capabilityStatus)) {
     assert.equal(status, available.has(capability) ? 'AVAILABLE' : 'NOT_PUBLISHED_FAIL_CLOSED', capability);
   }
-  assert.equal(manifest.deploymentAuthorized, true);
-  assert.match(manifest.deploymentAuthorizationEvidenceHash!, /^0x[0-9a-f]{64}$/);
-  assert.equal(manifest.releaseGateStatus, 'GO');
+  assert.equal(manifest.deploymentAuthorized, false);
+  assert.equal(manifest.deploymentAuthorizationEvidenceHash, null);
+  assert.equal(manifest.releaseGateStatus, 'EXTERNAL_AUTHORIZATION_REQUIRED');
+  assert.equal(manifest.releaseAuthorization.authoritative, true);
+  assert.equal(manifest.releaseAuthorization.mode, 'EXTERNAL_SIGNED_JSON');
   assert.equal(manifest.historicalDeploymentLineage.artifactVersion, '2.0.0-settlement-admin.16');
-  assert.equal(manifest.historicalDeploymentLineage.deploymentAuthorized, true);
+  assert.equal(manifest.historicalDeploymentLineage.deploymentAuthorized, false);
   assert.match(manifest.historicalDeploymentLineage.deploymentAuthorizationEvidenceHash!, /^0x[0-9a-f]{64}$/);
-  assert.equal(contractManifest.deploymentAuthorized, true);
+  assert.equal(contractManifest.deploymentAuthorized, false);
   assert.equal(
     contractManifest.historicalDeploymentLineage.deploymentAuthorizationEvidenceHash,
     manifest.historicalDeploymentLineage.deploymentAuthorizationEvidenceHash,

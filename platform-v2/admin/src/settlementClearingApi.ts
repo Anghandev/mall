@@ -160,7 +160,7 @@ function isAttempt(value: unknown) {
   return isRecord(value) && exact(value, ['attemptId','attemptNumber','requestDigest','executionTxHash','executorWallet','executorNonce','transactionTo','transactionCalldata','replacementForAttemptId','state','createdAt','submittedAt','updatedAt'])
     && isText(value.attemptId) && isInteger(value.attemptNumber, 1) && isHash(value.requestDigest) && (value.executionTxHash === null || isHash(value.executionTxHash))
     && isAddress(value.executorWallet) && isAmount(value.executorNonce) && isAddress(value.transactionTo) && isHex(value.transactionCalldata)
-    && nullableText(value.replacementForAttemptId) && ['LEASED','SUBMITTED','MINED','SETTLED','REPLACED','FAILED','REORGED','QUARANTINED'].includes(String(value.state))
+    && nullableText(value.replacementForAttemptId) && ['LEASED','SUBMITTED','MINED','SETTLED','REPLACED','FAILED','RETRYABLE','REORGED','QUARANTINED','FAILED_CLOSED'].includes(String(value.state))
     && isDate(value.createdAt) && nullableDate(value.submittedAt) && isDate(value.updatedAt);
 }
 

@@ -1,7 +1,7 @@
 # 24K商城 V2 上线前验收报告
 
 > Historical `.18` acceptance snapshot only. Preserve it for audit, but do not
-> use it as current `.29` release or mainnet acceptance evidence.
+> use it as current `.30` release or mainnet acceptance evidence.
 
 日期：2026-07-20
 生产发布基线：`v2/core@a1c00261dc279af876407bf083e6540312d6da8e`
@@ -9,10 +9,10 @@ Core artifact：`2.0.0-fulfillment-launch.18`
 
 ## 结论
 
-**历史 `.18` 当时结论为 Go；当前 `.29` artifact Go 另由本 Goal 的证据证明。**
+**历史 `.18` 当时结论为 Go；当前 `.30` artifact 本身不是 Go，必须由外置授权和本 Goal 的证据证明。**
 
-`.18` 的 Go 只保留为历史审计证据，不能替代当前 `.29` release id、
-W5/W1/W6 W5/W1/W6 非零奖池主网微测、cleanup gate、完整 release gate 和 600 秒生产观察。
+`.18` 的 Go 只保留为历史审计证据，不能替代当前 `.30` release id、
+MICROTEST_BUYER_1/2/3 非零奖池主网微测、cleanup gate、外置 release authorization 和 600 秒生产观察。
 
 - `.18` 已闭合单订单手工发货、用户查看/确认收货、平台接管/
   强制确认与仲裁证据保留。

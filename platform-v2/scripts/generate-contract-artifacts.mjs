@@ -16,8 +16,11 @@ const contracts = [
   'PaymentRouterV2',
 ];
 const deploymentEvidencePath = join(coreRoot, 'deployments', 'bsc-payment-v2.json');
-const releaseAuthorizationPath = join(coreRoot, 'deployments', 'bsc-fulfillment-launch-authorization.json');
 const verifiedDeploymentArtifactVersions = new Map([
+  ['2.0.0-fulfillment-launch.30', new Set([
+    '2.0.0-settlement-admin.17',
+    '2.0.0-settlement-admin.16',
+  ])],
   ['2.0.0-fulfillment-launch.29', new Set([
     '2.0.0-settlement-admin.17',
     '2.0.0-settlement-admin.16',
@@ -66,12 +69,6 @@ const verifiedDeploymentArtifactVersions = new Map([
 ]);
 const deploymentEvidence = existsSync(deploymentEvidencePath)
   ? validateDeploymentEvidence(JSON.parse(readFileSync(deploymentEvidencePath, 'utf8')))
-  : undefined;
-const releaseAuthorization = existsSync(releaseAuthorizationPath)
-  ? validateReleaseAuthorization(
-    JSON.parse(readFileSync(releaseAuthorizationPath, 'utf8')),
-    deploymentEvidence,
-  )
   : undefined;
 
 const roleGrants = [];
@@ -156,14 +153,20 @@ const manifest = {
   sourceDigestSha256: sourceDigest,
   deploymentStatus: deploymentEvidence?.deploymentStatus ?? 'PENDING',
   deploymentArtifactVersion: deploymentEvidence?.artifactVersion ?? null,
-  deploymentAuthorized: releaseAuthorization?.releaseGateStatus === 'GO',
-  deploymentAuthorizationEvidenceHash: releaseAuthorization?.authorizationEvidenceHash ?? null,
-  releaseGateStatus: releaseAuthorization?.releaseGateStatus ?? 'NO_GO_REPAIR_BASELINE',
+  deploymentAuthorized: false,
+  deploymentAuthorizationEvidenceHash: null,
+  releaseGateStatus: 'EXTERNAL_AUTHORIZATION_REQUIRED',
+  releaseAuthorization: {
+    mode: 'EXTERNAL_SIGNED_JSON',
+    authoritative: true,
+    note: 'SUSPENDED, MICROTEST_AUTHORIZED, GO and NO_GO are external signed release authorization files, not artifact fields.',
+  },
   historicalDeploymentLineage: deploymentEvidence
     ? {
       artifactVersion: deploymentEvidence.artifactVersion ?? null,
-      deploymentAuthorized: deploymentEvidence.deploymentAuthorized === true,
+      deploymentAuthorized: false,
       deploymentAuthorizationEvidenceHash: deploymentEvidence.authorizationEvidenceHash ?? null,
+      note: 'Historical deployment evidence only; release authorization is external and signed per artifact SHA.',
     }
     : null,
   externalBlocked: deploymentEvidence?.deploymentStatus === 'DEPLOYED'
@@ -285,71 +288,10 @@ function compatibleDeploymentArtifactVersion(value) {
     && (value === artifactVersion || verifiedDeploymentArtifactVersions.get(artifactVersion)?.has(value) === true);
 }
 
-function validateReleaseAuthorization(value, deploymentEvidence) {
-  if (!deploymentEvidence || deploymentEvidence.deploymentStatus !== 'DEPLOYED' || deploymentEvidence.deploymentAuthorized !== true) {
-    throw new Error('Release authorization requires deployed payment evidence');
-  }
-  if (
-    !value || value.artifactVersion !== artifactVersion || value.chainId !== 56
-      || value.architecture !== 'FIVE_ROLE_EOA_V2' || value.releaseGateStatus !== 'GO'
-      || !/^0x[0-9a-fA-F]{64}$/.test(value.authorizationEvidenceHash ?? '')
-      || value.deploymentEvidence?.artifactVersion !== deploymentEvidence.artifactVersion
-      || value.deploymentEvidence?.authorizationEvidenceHash?.toLowerCase() !== deploymentEvidence.authorizationEvidenceHash
-  ) throw new Error('Invalid fulfillment launch release authorization');
-  validateNonZeroPrizeAuthorizationEvidence(value.mainnetMicrotestEvidence);
-  const payload = { ...value };
-  delete payload.authorizationEvidenceHash;
-  const expected = `0x${sha256(stableJson(payload))}`;
-  if (value.authorizationEvidenceHash.toLowerCase() !== expected) {
-    throw new Error('Release authorization evidence hash mismatch');
-  }
-  return {
-    releaseGateStatus: 'GO',
-    authorizationEvidenceHash: value.authorizationEvidenceHash.toLowerCase(),
-  };
-}
-
-
-function validateNonZeroPrizeAuthorizationEvidence(evidence) {
-  const prize = evidence?.seckillPrize;
-  if (
-    !evidence || evidence.artifactVersionTested !== artifactVersion
-      || !Number.isSafeInteger(evidence.payments?.requiredConfirmations)
-      || evidence.payments.requiredConfirmations < 15
-      || !prize
-      || !Number.isSafeInteger(prize.merchantConcessionBps)
-      || prize.merchantConcessionBps <= 0
-      || positiveAtomicString(prize.prizePoolUsdtAtomic) !== true
-      || prize.expectedPrizePoolUsdtAtomic !== prize.prizePoolUsdtAtomic
-      || prize.winnerFrozen !== true
-      || !/^0x[0-9a-fA-F]{40}$/.test(prize.winnerWallet ?? '')
-      || !/^0x[0-9a-fA-F]{64}$/.test(prize.winnerPayoutTxHash ?? '')
-      || !Number.isSafeInteger(prize.winnerPayoutConfirmations)
-      || prize.winnerPayoutConfirmations < evidence.payments.requiredConfirmations
-      || prize.operationsPrizeInjectionUsed !== false
-  ) {
-    throw new Error('Release authorization requires non-zero seckill prize and confirmed winner USDT payout evidence');
-  }
-}
-
-function positiveAtomicString(value) {
-  return typeof value === 'string' && /^[0-9]+$/.test(value) && BigInt(value) > 0n;
-}
-
 function json(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
-}
-
-function stableJson(value) {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
-  if (value && typeof value === 'object') {
-    return `{${Object.keys(value).sort()
-      .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(value) ?? 'null';
 }

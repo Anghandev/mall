@@ -303,7 +303,7 @@ function preflightResultFor(filename) {
     gitCommit: COMMIT,
     packetSha256: createHash('sha256').update(readFileSync(filename)).digest('hex'),
     deploymentAuthorized: false,
-    releaseGateStatus: 'NO_GO_REPAIR_BASELINE',
+    releaseGateStatus: 'MICROTEST_AUTHORIZED',
     microtestBroadcastAuthorized: true,
   };
 }

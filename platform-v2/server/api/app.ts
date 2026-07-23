@@ -3479,6 +3479,7 @@ export function allowsBoundedMainnetMicrotestPaymentWrite(
     || context.productId !== entitlement.productId
     || !entitlement.buyerWallets.has(normalizeAddress(context.buyerWallet))
   ) return false;
+  if (config.releaseAuthorization?.status !== 'MICROTEST_AUTHORIZED') return false;
   return readiness.paymentDecisionBlocked.length === 0
     && readiness.paymentExternalBlocked.length === 1
     && readiness.paymentExternalBlocked[0] === 'COORDINATED_DEPLOYMENT_AUTHORIZATION'

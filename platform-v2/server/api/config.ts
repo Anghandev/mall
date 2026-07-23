@@ -11,6 +11,11 @@ import coordinatedManifest from '../../../packages/core-artifacts/coordinated-ma
 import contractManifest from '../../../packages/core-artifacts/contracts/contract-manifest.json' with { type: 'json' };
 import { CoreError } from './errors.ts';
 import {
+  releaseAuthorizationExternalBlockers,
+  verifyReleaseAuthorization,
+  type VerifiedReleaseAuthorization,
+} from './release-authorization.ts';
+import {
   loadMainnetMicrotestEntitlement,
   type MainnetMicrotestEntitlement,
 } from '../data/mainnet-microtest-entitlement.ts';
@@ -172,6 +177,7 @@ export interface CoreConfig {
   paymentExternalBlocked: readonly string[];
   providerReadiness: Readonly<Record<ProviderName, 'READY' | 'CONFIGURATION_REQUIRED'>>;
   mainnetMicrotestEntitlement: MainnetMicrotestEntitlement | undefined;
+  releaseAuthorization: VerifiedReleaseAuthorization | undefined;
 }
 
 export interface RuntimeReadinessSnapshot {
@@ -205,7 +211,8 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
   const manifestDecisionBlocked: readonly string[] = coordinatedManifest.decisionBlocked;
   const decisionBlocked = [...manifestDecisionBlocked];
   const paymentDecisionBlocked = [...manifestDecisionBlocked];
-  const deploymentReady = coordinatedDeploymentReady();
+  const releaseAuthorization = loadRuntimeReleaseAuthorization(env);
+  const deploymentReady = coordinatedDeploymentReady() && releaseAuthorization.authorization?.status === 'GO';
   const paymentRouterDeployment = manifestContractDeployment('PaymentRouterV2');
   const paymentRouterAddress = paymentRouterDeployment?.address;
   const paymentRouterDeploymentBlock = paymentRouterDeployment?.deploymentBlock;
@@ -213,6 +220,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
   const beneficiaryRegistryAddress = manifestContractAddress('BeneficiaryRegistryV2');
   const externalBlocked = [
     ...externalVariables.filter((name) => !env[name]),
+    ...releaseAuthorization.blockers,
     ...(!deploymentReady ? ['COORDINATED_DEPLOYMENT_AUTHORIZATION'] : []),
     ...(!paymentRouterAddress ? ['PAYMENT_ROUTER_ADDRESS_MANIFEST'] : []),
     ...(paymentRouterDeploymentBlock === undefined ? ['PAYMENT_ROUTER_DEPLOYMENT_BLOCK_MANIFEST'] : []),
@@ -221,6 +229,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
   ];
   const paymentExternalBlocked = [
     ...paymentExternalVariables.filter((name) => !env[name]),
+    ...releaseAuthorization.blockers,
     ...(!deploymentReady ? ['COORDINATED_DEPLOYMENT_AUTHORIZATION'] : []),
     ...(!paymentRouterAddress ? ['PAYMENT_ROUTER_ADDRESS_MANIFEST'] : []),
     ...(paymentRouterDeploymentBlock === undefined ? ['PAYMENT_ROUTER_DEPLOYMENT_BLOCK_MANIFEST'] : []),
@@ -319,6 +328,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     paymentExternalBlocked,
     providerReadiness: Object.freeze(providerReadiness),
     mainnetMicrotestEntitlement,
+    releaseAuthorization: releaseAuthorization.authorization,
   });
 }
 
@@ -338,14 +348,6 @@ export function publicReadiness(config: CoreConfig, runtime?: RuntimeReadinessSn
 }
 
 function coordinatedDeploymentReady() {
-  const coordinatedDeployment = coordinatedManifest as unknown as {
-    deploymentAuthorized: boolean;
-    deploymentAuthorizationEvidenceHash: unknown;
-  };
-  const contractDeployment = contractManifest as unknown as {
-    deploymentAuthorized: boolean;
-    deploymentAuthorizationEvidenceHash: unknown;
-  };
   if (
     coordinatedManifest.artifactVersion !== CORE_ARTIFACT_VERSION ||
     coordinatedManifest.artifactVersion !== contractManifest.artifactVersion ||
@@ -355,12 +357,6 @@ function coordinatedDeploymentReady() {
     throw new CoreError('ArtifactVersionMismatch', 'Deployment manifests do not match the coordinated artifact', 503);
   }
   return (
-    coordinatedDeployment.deploymentAuthorized === true &&
-    contractDeployment.deploymentAuthorized === true &&
-    typeof coordinatedDeployment.deploymentAuthorizationEvidenceHash === 'string' &&
-    /^0x[0-9a-fA-F]{64}$/.test(coordinatedDeployment.deploymentAuthorizationEvidenceHash) &&
-    coordinatedDeployment.deploymentAuthorizationEvidenceHash ===
-      contractDeployment.deploymentAuthorizationEvidenceHash &&
     contractManifest.deploymentStatus === 'DEPLOYED' &&
     contractManifest.contracts.every((contract) => {
       const deployment = contract as unknown as {
@@ -377,6 +373,27 @@ function coordinatedDeploymentReady() {
         && /^0x[0-9a-fA-F]{64}$/.test(deployment.deployedCodeHash);
     })
   );
+}
+
+function loadRuntimeReleaseAuthorization(env: Readonly<Record<string, string | undefined>>) {
+  const missing = releaseAuthorizationExternalBlockers(env);
+  if (missing.length > 0) return { authorization: undefined, blockers: missing };
+  try {
+    return {
+      authorization: verifyReleaseAuthorization({
+        cwd: process.cwd(),
+        env,
+        allowedStatuses: ['SUSPENDED', 'MICROTEST_AUTHORIZED', 'GO', 'NO_GO'],
+        requireGitCommit: true,
+      }),
+      blockers: [] as string[],
+    };
+  } catch (error) {
+    if (error instanceof CoreError) {
+      return { authorization: undefined, blockers: ['RELEASE_AUTHORIZATION_INVALID'] };
+    }
+    throw error;
+  }
 }
 
 function manifestContractAddress(name: string) {

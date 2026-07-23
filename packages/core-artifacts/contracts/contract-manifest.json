@@ -1,5 +1,5 @@
 {
-  "artifactVersion": "2.0.0-fulfillment-launch.29",
+  "artifactVersion": "2.0.0-fulfillment-launch.30",
   "publicationStatus": "coordinated-settlement-admin-checkpoint",
   "chain": {
     "name": "BSC Mainnet",
@@ -23,13 +23,19 @@
   "sourceDigestSha256": "713ab33de73d34855c3c707e2af837e7b49d59a6783dbf89b247e6eb5e9ae9e5",
   "deploymentStatus": "DEPLOYED",
   "deploymentArtifactVersion": "2.0.0-settlement-admin.16",
-  "deploymentAuthorized": true,
-  "deploymentAuthorizationEvidenceHash": "0xbf4230d51ac14b15afd54bd2604b9e2f572d0e1c16db25839ae1d1f543aeb947",
-  "releaseGateStatus": "GO",
+  "deploymentAuthorized": false,
+  "deploymentAuthorizationEvidenceHash": null,
+  "releaseGateStatus": "EXTERNAL_AUTHORIZATION_REQUIRED",
+  "releaseAuthorization": {
+    "mode": "EXTERNAL_SIGNED_JSON",
+    "authoritative": true,
+    "note": "SUSPENDED, MICROTEST_AUTHORIZED, GO and NO_GO are external signed release authorization files, not artifact fields."
+  },
   "historicalDeploymentLineage": {
     "artifactVersion": "2.0.0-settlement-admin.16",
-    "deploymentAuthorized": true,
-    "deploymentAuthorizationEvidenceHash": "0x9d260a962e4cefe886ddf1382b1c6efb4ff06fef6fbac17bf7014b3b3e78c3eb"
+    "deploymentAuthorized": false,
+    "deploymentAuthorizationEvidenceHash": "0x9d260a962e4cefe886ddf1382b1c6efb4ff06fef6fbac17bf7014b3b3e78c3eb",
+    "note": "Historical deployment evidence only; release authorization is external and signed per artifact SHA."
   },
   "externalBlocked": [],
   "decisionBlocked": [],

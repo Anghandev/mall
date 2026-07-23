@@ -208,7 +208,7 @@ describe('settlement/admin coordinated Core client', () => {
     await expect(fetchSettlementLedger('jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
-  it('validates the wallet-scoped settlement state and final Safe TxHash', async () => {
+  it('validates the wallet-scoped settlement state and final EOA execution TxHash', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       artifactVersion,
       wallet: address('1'),

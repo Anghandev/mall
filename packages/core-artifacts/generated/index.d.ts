@@ -1,4 +1,4 @@
-export declare const artifactVersion: "2.0.0-fulfillment-launch.29";
+export declare const artifactVersion: "2.0.0-fulfillment-launch.30";
 export declare const chainIdentity: Readonly<{ chainId: 56; usdtAddress: "0x55d398326f99059ff775485246999027b3197955"; nplAddress: "0x4e8277ab31e4956b2cd48449793a57656dfc03d2" }>;
 export type AtomicAmount = string;
 export type Bytes32 = string;
@@ -46,8 +46,8 @@ export type FulfillmentAsset = "USDT" | "NPL" | "BNM_POINTS";
 export type ArbitrationOutcome = "FULFILL" | "RESUME_FULFILLMENT";
 export type SettlementRail = "MERCHANT_USDT" | "REWARD_NPL" | "PRIZE_USDT" | "TAKEOVER_USDT" | "OPERATIONS_REIMBURSEMENT_USDT";
 export type SettlementIntentState = "ISSUED" | "CONSUMED" | "EXPIRED" | "CANCELLED";
-export type SettlementRequestState = "REQUESTED" | "SUBMITTED" | "SETTLED" | "RETRYABLE" | "QUARANTINED";
-export type SettlementTransferState = "PENDING" | "LEASED" | "SUBMITTED" | "MINED" | "SETTLED" | "FAILED" | "REORGED" | "RETRYABLE" | "QUARANTINED";
+export type SettlementRequestState = "REQUESTED" | "SUBMITTED" | "SETTLED" | "RETRYABLE" | "QUARANTINED" | "FAILED_CLOSED";
+export type SettlementTransferState = "PENDING" | "LEASED" | "SUBMITTED" | "MINED" | "SETTLED" | "FAILED" | "REORGED" | "RETRYABLE" | "QUARANTINED" | "FAILED_CLOSED";
 export type MerchantGuaranteeDepositState = "SUBMITTED" | "MINED" | "FINAL" | "REORGED" | "QUARANTINED";
 export type GuaranteeStatus = "DECISION_BLOCKED" | "BELOW_MINIMUM" | "READY" | "FROZEN";
 export type BreakerAction = "PAUSE" | "RESUME";

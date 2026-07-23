@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getAddress, keccak256, Wallet } from 'ethers';
 import { projectRootFromScript, readEnvFile } from './env-utils.mjs';
+import { verifyReleaseAuthorization } from '../../platform-v2/server/api/release-authorization.ts';
 
 const require = createRequire(import.meta.url);
 const REQUIRED_ENV = [
@@ -47,6 +48,11 @@ const REQUIRED_ENV = [
   'MAINNET_MICROTEST_MAX_NATIVE_VALUE_PER_TX',
   'MAINNET_MICROTEST_MAX_GAS_COST_PER_TX_BNB',
   'MAINNET_MICROTEST_MAX_TOTAL_NATIVE_SPEND_BNB',
+  'RELEASE_AUTHORIZATION_PATH',
+  'RELEASE_AUTHORIZATION_SHA256',
+  'RELEASE_GIT_COMMIT',
+  'RELEASE_IMAGE_DIGEST',
+  'RELEASE_RUNTIME_CONFIG_SHA256',
 ];
 
 const ROLE_ADDRESS_ENV = [
@@ -58,7 +64,7 @@ const ROLE_ADDRESS_ENV = [
 ];
 const MAX_MICROTEST_USDT = 3n * 10n ** 18n;
 const DEFAULT_PACKET = 'platform-v2/deployments/bsc-eoa-micro-packet-private.json';
-const REQUIRED_BUYER_LABELS = Object.freeze(['W5', 'W1', 'W6']);
+const REQUIRED_BUYER_LABELS = Object.freeze(['MICROTEST_BUYER_1', 'MICROTEST_BUYER_2', 'MICROTEST_BUYER_3']);
 
 if (isCliEntry()) {
   try {
@@ -110,6 +116,14 @@ export function validateAbuV2Preflight({
   }
 
   const artifactVersion = readJson(root, 'packages/core-artifacts/package.json').version;
+  const releaseCommit = gitCommit ?? currentGitCommit(root);
+  const releaseAuthorization = verifyReleaseAuthorization({
+    cwd: root,
+    env: { ...env, RELEASE_GIT_COMMIT: env.RELEASE_GIT_COMMIT ?? releaseCommit },
+    allowedStatuses: ['MICROTEST_AUTHORIZED'],
+    requireGitCommit: true,
+    allowDirtyGit: true,
+  });
   const manifest = readJson(root, 'packages/core-artifacts/contracts/contract-manifest.json');
   const coordinated = readJson(root, 'packages/core-artifacts/coordinated-manifest.json');
   if (coordinated.artifactVersion !== artifactVersion) {
@@ -137,7 +151,7 @@ export function validateAbuV2Preflight({
 
   const merchantWallet = address(env.MAINNET_MICROTEST_MERCHANT_WALLET, 'MAINNET_MICROTEST_MERCHANT_WALLET');
   const buyerWallets = env.MAINNET_MICROTEST_BUYER_WALLETS.split(',').map((value, index) => address(value.trim(), `MAINNET_MICROTEST_BUYER_WALLETS[${index}]`));
-  if (buyerWallets.length !== 3) throw new Error('MAINNET_MICROTEST_BUYER_WALLETS must contain exactly three buyers ordered W5,W1,W6');
+  if (buyerWallets.length !== 3) throw new Error('MAINNET_MICROTEST_BUYER_WALLETS must contain exactly three buyers ordered MICROTEST_BUYER_1/2/3');
   assertDistinct(buyerWallets.map((value, index) => [`buyer:${index + 1}`, value]), 'mainnet micro-test buyer');
   if (buyerWallets.some((buyer) => buyer.toLowerCase() === merchantWallet.toLowerCase())) {
     throw new Error('mainnet micro-test buyer cannot equal merchant wallet');
@@ -166,7 +180,6 @@ export function validateAbuV2Preflight({
   bytes32(env.MAINNET_MICROTEST_EVIDENCE_HASH, 'MAINNET_MICROTEST_EVIDENCE_HASH');
   bytes32(env.BNM_MONOTONIC_CONFORMANCE_EVIDENCE_HASH, 'BNM_MONOTONIC_CONFORMANCE_EVIDENCE_HASH');
 
-  const releaseCommit = gitCommit ?? currentGitCommit(root);
   const resolvedPacketPath = path.resolve(root, packetPath ?? env.MAINNET_MICROTEST_PACKET_PATH ?? DEFAULT_PACKET);
   const packet = readPrivatePacket(resolvedPacketPath);
   if (packet.chainId !== 56) throw new Error('micro-test packet must bind BSC chainId 56');
@@ -177,13 +190,13 @@ export function validateAbuV2Preflight({
     wallet: address(entry.wallet, `packet buyer[${index}]`),
   }));
   if (packetBuyers.length !== 3) {
-    throw new Error('micro-test packet must explicitly bind exactly three W5/W1/W6 buyer wallets');
+    throw new Error('micro-test packet must explicitly bind exactly three MICROTEST_BUYER_1/2/3 buyer wallets');
   }
   assertPacketBuyerLabels(packetBuyers);
   const envBuyersByLabel = new Map(REQUIRED_BUYER_LABELS.map((label, index) => [label, buyerWallets[index].toLowerCase()]));
   for (const packetBuyer of packetBuyers) {
     if (packetBuyer.wallet.toLowerCase() !== envBuyersByLabel.get(packetBuyer.label)) {
-      throw new Error(`micro-test packet ${packetBuyer.label} buyer wallet does not match MAINNET_MICROTEST_BUYER_WALLETS order W5,W1,W6`);
+      throw new Error(`micro-test packet ${packetBuyer.label} buyer wallet does not match MAINNET_MICROTEST_BUYER_WALLETS order MICROTEST_BUYER_1/2/3`);
     }
   }
   const packetBnbBudget = readPacketBnbBudget(packet);
@@ -194,7 +207,7 @@ export function validateAbuV2Preflight({
     throw new Error('micro-test packet sha256 does not match MAINNET_MICROTEST_PACKET_SHA256');
   }
   const microtestBroadcastAuthorized = requireBroadcastAuthorized
-    ? assertMicrotestBroadcastAuthorized({ coordinated, packet })
+    ? assertMicrotestBroadcastAuthorized({ releaseAuthorization, packet })
     : false;
 
   return Object.freeze({
@@ -205,8 +218,8 @@ export function validateAbuV2Preflight({
     packetPath: resolvedPacketPath,
     packetSha256,
     packetBnbBudget,
-    releaseGateStatus: coordinated.releaseGateStatus ?? 'UNSPECIFIED',
-    deploymentAuthorized: coordinated.deploymentAuthorized === true,
+    releaseGateStatus: releaseAuthorization.status,
+    deploymentAuthorized: releaseAuthorization.status === 'GO',
     buyerWallets,
     roleAddresses,
     contracts,
@@ -461,12 +474,9 @@ function assertDistinct(entries, label) {
   }
 }
 
-function assertMicrotestBroadcastAuthorized({ coordinated, packet }) {
-  if (coordinated.deploymentAuthorized === true || String(coordinated.releaseGateStatus ?? '').toUpperCase() === 'GO') {
-    throw new Error('bounded micro-test broadcast must not use a production GO coordinated manifest');
-  }
-  if (coordinated.deploymentAuthorized !== false || String(coordinated.releaseGateStatus ?? '').toUpperCase() !== 'NO_GO_REPAIR_BASELINE') {
-    throw new Error(`coordinated manifest release gate is ${coordinated.releaseGateStatus ?? 'UNSPECIFIED'}; bounded micro-test requires the fail-closed No-Go repair baseline`);
+function assertMicrotestBroadcastAuthorized({ releaseAuthorization, packet }) {
+  if (releaseAuthorization.status !== 'MICROTEST_AUTHORIZED') {
+    throw new Error(`bounded micro-test broadcast requires MICROTEST_AUTHORIZED release authorization, got ${releaseAuthorization.status}`);
   }
   if (packet.broadcastAuthorized !== true) {
     throw new Error('micro-test packet is not broadcastAuthorized');
@@ -497,40 +507,30 @@ function packetBroadcastAuthorizationEvidenceHash(packet) {
 }
 
 function assertPacketBuyerLabels(packetBuyers) {
-  if (packetBuyers.length !== 3) throw new Error('micro-test packet buyer labels must be exactly W5/W1/W6');
+  if (packetBuyers.length !== 3) throw new Error('micro-test packet buyer labels must be exactly MICROTEST_BUYER_1/2/3');
   const labelSet = new Set(packetBuyers.map((entry) => entry.label));
   if (labelSet.size !== 3 || REQUIRED_BUYER_LABELS.some((label) => !labelSet.has(label))) {
-    throw new Error('micro-test packet buyer labels must be exactly W5/W1/W6 and must not include W3');
+    throw new Error('micro-test packet buyer labels must be exactly MICROTEST_BUYER_1/2/3 and must not include old W wallets');
   }
 }
 
 function assertBroadcastBuyerKeyBinding(env, buyerWallets) {
-  const expectedByLabel = new Map([
-    ['W5', privateKeyAddress(env.WALLET_5_PRIVATE_KEY, 'WALLET_5_PRIVATE_KEY')],
-    ['W1', privateKeyAddress(env.WALLET_1_PRIVATE_KEY, 'WALLET_1_PRIVATE_KEY')],
-    ['W6', w6PrivateKeyAddress(env)],
-  ]);
-  const w3Wallet = privateKeyAddress(env.WALLET_3_PRIVATE_KEY, 'WALLET_3_PRIVATE_KEY');
-  if (buyerWallets.some((buyer) => buyer.toLowerCase() === w3Wallet.toLowerCase())) {
-    throw new Error('W3/NPL Reward wallet must not be a mainnet micro-test buyer');
+  const expectedByLabel = new Map(REQUIRED_BUYER_LABELS.map((label) => [
+    label,
+    privateKeyAddress(env[`${label}_PRIVATE_KEY`], `${label}_PRIVATE_KEY`),
+  ]));
+  const oldWallets = oldWalletPrivateKeyAddresses(env);
+  for (const buyer of buyerWallets) {
+    const old = oldWallets.get(buyer.toLowerCase());
+    if (old) {
+      throw new Error(`${old} must not be a mainnet micro-test buyer; use MICROTEST_BUYER_1/2/3`);
+    }
   }
   REQUIRED_BUYER_LABELS.forEach((label, index) => {
     if (buyerWallets[index].toLowerCase() !== expectedByLabel.get(label).toLowerCase()) {
       throw new Error(`MAINNET_MICROTEST_BUYER_WALLETS[${index}] must be the ${label} wallet derived from its local private key`);
     }
   });
-}
-
-function w6PrivateKeyAddress(env) {
-  const wallet6 = optionalPrivateKeyAddress(env.WALLET_6_PRIVATE_KEY, 'WALLET_6_PRIVATE_KEY');
-  const microtestW6 = optionalPrivateKeyAddress(env.MICROTEST_WALLET_6_PRIVATE_KEY, 'MICROTEST_WALLET_6_PRIVATE_KEY');
-  if (!wallet6 && !microtestW6) {
-    throw new Error('WALLET_6_PRIVATE_KEY or MICROTEST_WALLET_6_PRIVATE_KEY is required for broadcast buyer binding');
-  }
-  if (wallet6 && microtestW6 && wallet6.toLowerCase() !== microtestW6.toLowerCase()) {
-    throw new Error('WALLET_6_PRIVATE_KEY and MICROTEST_WALLET_6_PRIVATE_KEY must resolve to the same W6 wallet');
-  }
-  return wallet6 ?? microtestW6;
 }
 
 function privateKeyAddress(value, name) {
@@ -551,9 +551,21 @@ function optionalPrivateKeyAddress(value, name) {
 function buyerLabel(value, name) {
   const normalized = String(value ?? '').trim().toUpperCase();
   if (!REQUIRED_BUYER_LABELS.includes(normalized)) {
-    throw new Error(`${name} must be exactly one of W5/W1/W6 and must not include W3`);
+    throw new Error(`${name} must be exactly one of MICROTEST_BUYER_1/2/3 and must not include old W wallets`);
   }
   return normalized;
+}
+
+function oldWalletPrivateKeyAddresses(env) {
+  const result = new Map();
+  for (let index = 1; index <= 6; index += 1) {
+    const name = `WALLET_${index}_PRIVATE_KEY`;
+    const wallet = optionalPrivateKeyAddress(env[name], name);
+    if (wallet) result.set(wallet.toLowerCase(), name);
+  }
+  const legacyMicroW6 = optionalPrivateKeyAddress(env.MICROTEST_WALLET_6_PRIVATE_KEY, 'MICROTEST_WALLET_6_PRIVATE_KEY');
+  if (legacyMicroW6) result.set(legacyMicroW6.toLowerCase(), 'MICROTEST_WALLET_6_PRIVATE_KEY');
+  return result;
 }
 
 

@@ -9,16 +9,20 @@ import { validateAbuV2Preflight } from './preflight.mjs';
 
 const HASH = `0x${'1'.repeat(64)}`;
 const COMMIT = 'abcdef0123456789abcdef0123456789abcdef01';
-const ARTIFACT = '2.0.0-test.1';
+const ARTIFACT = '2.0.0-fulfillment-launch.30';
 const TEST_KEYS = Object.freeze({
+  BUYER1: privateKey(11),
+  BUYER2: privateKey(12),
+  BUYER3: privateKey(13),
   W1: privateKey(1),
   W3: privateKey(3),
   W5: privateKey(5),
   W6: privateKey(6),
+  AUTH: privateKey(20),
   OTHER: privateKey(9),
 });
 
-test('Abu V2 preflight accepts a commit-bound W5/W1/W6-labeled three-buyer packet', () => {
+test('Abu V2 preflight accepts a commit-bound MICROTEST_BUYER_1/2/3-labeled three-buyer packet', () => {
   withFixture((root, env, packetPath) => {
     const result = validateAbuV2Preflight({ cwd: root, env, packetPath, gitCommit: COMMIT });
     assert.equal(result.artifactVersion, ARTIFACT);
@@ -53,7 +57,7 @@ test('Abu V2 preflight rejects stale or non-deployed contract manifests', () => 
   withFixture((root, env, packetPath) => {
     writeContractManifest(root, { artifactVersion: '2.0.0-old' });
     assert.throws(
-      () => validateAbuV2Preflight({ cwd: root, env, packetPath, gitCommit: COMMIT }),
+      () => validateAbuV2Preflight({ cwd: root, env: envForPacket(packetPath), packetPath, gitCommit: COMMIT }),
       /contract manifest artifactVersion/,
     );
   });
@@ -61,7 +65,7 @@ test('Abu V2 preflight rejects stale or non-deployed contract manifests', () => 
   withFixture((root, env, packetPath) => {
     writeContractManifest(root, { chain: { name: 'BSC Testnet', chainId: 97 } });
     assert.throws(
-      () => validateAbuV2Preflight({ cwd: root, env, packetPath, gitCommit: COMMIT }),
+      () => validateAbuV2Preflight({ cwd: root, env: envForPacket(packetPath), packetPath, gitCommit: COMMIT }),
       /BSC chainId 56/,
     );
   });
@@ -69,7 +73,7 @@ test('Abu V2 preflight rejects stale or non-deployed contract manifests', () => 
   withFixture((root, env, packetPath) => {
     writeContractManifest(root, { deploymentStatus: 'PENDING' });
     assert.throws(
-      () => validateAbuV2Preflight({ cwd: root, env, packetPath, gitCommit: COMMIT }),
+      () => validateAbuV2Preflight({ cwd: root, env: envForPacket(packetPath), packetPath, gitCommit: COMMIT }),
       /deploymentStatus must be DEPLOYED/,
     );
   });
@@ -83,24 +87,24 @@ test('Abu V2 preflight rejects stale or non-deployed contract manifests', () => 
       ],
     });
     assert.throws(
-      () => validateAbuV2Preflight({ cwd: root, env, packetPath, gitCommit: COMMIT }),
+      () => validateAbuV2Preflight({ cwd: root, env: envForPacket(packetPath), packetPath, gitCommit: COMMIT }),
       /BeneficiaryRegistryV2 deployment status must be DEPLOYED/,
     );
   });
 });
 
-test('Abu V2 preflight requires packet-bound W5/W1/W6 buyer wallets', () => {
+test('Abu V2 preflight requires packet-bound MICROTEST_BUYER_1/2/3 buyer wallets', () => {
   withFixture((root, env) => {
     const missingBuyers = writePacket(root, 'packet-missing-buyers.json', packet({ buyerWallets: undefined }));
     assert.throws(
       () => validateAbuV2Preflight({ cwd: root, env, packetPath: missingBuyers, gitCommit: COMMIT }),
-      /explicitly bind exactly three W5\/W1\/W6/,
+      /explicitly bind exactly three MICROTEST_BUYER_1\/2\/3/,
     );
 
     const wrongCount = writePacket(root, 'packet-two-buyers.json', packet({ buyerWallets: [buyer(1), buyer(2)] }));
     assert.throws(
       () => validateAbuV2Preflight({ cwd: root, env, packetPath: wrongCount, gitCommit: COMMIT }),
-      /explicitly bind exactly three W5\/W1\/W6/,
+      /explicitly bind exactly three MICROTEST_BUYER_1\/2\/3/,
     );
 
     const mismatch = writePacket(root, 'packet-mismatch-buyers.json', packet({ buyerWallets: [buyer(1), buyer(2), buyer(9)] }));
@@ -112,19 +116,19 @@ test('Abu V2 preflight requires packet-bound W5/W1/W6 buyer wallets', () => {
     const missingLabels = writePacket(root, 'packet-missing-labels.json', packet({ buyerLabels: undefined }));
     assert.throws(
       () => validateAbuV2Preflight({ cwd: root, env, packetPath: missingLabels, gitCommit: COMMIT }),
-      /packet buyer label\[0\] must be exactly one of W5\/W1\/W6/,
+      /packet buyer label\[0\] must be exactly one of MICROTEST_BUYER_1\/2\/3/,
     );
 
-    const w3Label = writePacket(root, 'packet-w3-label.json', packet({ buyerLabels: ['W5', 'W1', 'W3'] }));
+    const w3Label = writePacket(root, 'packet-w3-label.json', packet({ buyerLabels: ['MICROTEST_BUYER_1', 'MICROTEST_BUYER_2', 'W3'] }));
     assert.throws(
       () => validateAbuV2Preflight({ cwd: root, env, packetPath: w3Label, gitCommit: COMMIT }),
-      /must be exactly one of W5\/W1\/W6/,
+      /must be exactly one of MICROTEST_BUYER_1\/2\/3/,
     );
 
     const w3AddressAsW6 = writePacket(root, 'packet-w3-address-as-w6.json', packet({
       broadcastAuthorized: true,
       buyerWallets: [buyer(1), buyer(2), walletForKey(TEST_KEYS.W3)],
-      buyerLabels: ['W5', 'W1', 'W6'],
+      buyerLabels: ['MICROTEST_BUYER_1', 'MICROTEST_BUYER_2', 'MICROTEST_BUYER_3'],
     }));
     assert.throws(
       () => validateAbuV2Preflight({
@@ -137,7 +141,7 @@ test('Abu V2 preflight requires packet-bound W5/W1/W6 buyer wallets', () => {
         gitCommit: COMMIT,
         requireBroadcastAuthorized: true,
       }),
-      /W3\/NPL Reward wallet must not be a mainnet micro-test buyer/,
+      /WALLET_3_PRIVATE_KEY must not be a mainnet micro-test buyer/,
     );
 
     const missingBudget = writePacket(root, 'packet-missing-budget.json', packet({ bnbBudget: undefined }));
@@ -156,7 +160,7 @@ test('Abu V2 preflight requires packet-bound W5/W1/W6 buyer wallets', () => {
 
 
 
-test('Abu V2 broadcast runner preflight requires bounded packet authorization while production release stays No-Go', () => {
+test('Abu V2 broadcast runner preflight requires bounded packet authorization through external MICROTEST authorization', () => {
   withFixture((root, env) => {
     const broadcastPacket = writePacket(root, 'packet-broadcast.json', packet({ broadcastAuthorized: false }));
     assert.throws(
@@ -176,24 +180,46 @@ test('Abu V2 broadcast runner preflight requires bounded packet authorization wh
     );
   });
 
-  withFixture((root, env) => {
+  withFixture((root) => {
     const productionGoPacket = writePacket(root, 'packet-production-go.json', packet({ broadcastAuthorized: true }));
     assert.throws(
-      () => validateAbuV2Preflight({ cwd: root, env: envForPacket(productionGoPacket), packetPath: productionGoPacket, gitCommit: COMMIT, requireBroadcastAuthorized: true }),
-      /must not use a production GO coordinated manifest/,
+      () => validateAbuV2Preflight({
+        cwd: root,
+        env: envForPacket(productionGoPacket, { status: 'GO' }),
+        packetPath: productionGoPacket,
+        gitCommit: COMMIT,
+        requireBroadcastAuthorized: true,
+      }),
+      /Release authorization status GO is not allowed/,
     );
-  }, {
-    deploymentAuthorized: true,
-    deploymentAuthorizationEvidenceHash: HASH,
-    releaseGateStatus: 'GO',
   });
 
   withFixture((root) => {
     const broadcastPacket = writePacket(root, 'packet-broadcast-go.json', packet({ broadcastAuthorized: true }));
     const result = validateAbuV2Preflight({ cwd: root, env: envForPacket(broadcastPacket), packetPath: broadcastPacket, gitCommit: COMMIT, requireBroadcastAuthorized: true });
     assert.equal(result.deploymentAuthorized, false);
-    assert.equal(result.releaseGateStatus, 'NO_GO_REPAIR_BASELINE');
+    assert.equal(result.releaseGateStatus, 'MICROTEST_AUTHORIZED');
     assert.equal(result.microtestBroadcastAuthorized, true);
+  });
+});
+
+test('MICROTEST authorization is signer-pinned and does not require final evidence archive', () => {
+  withFixture((root, env, packetPath) => {
+    const microtestEnv = { ...env };
+    delete microtestEnv.RELEASE_EVIDENCE_ARCHIVE_SHA256;
+    assert.equal(
+      validateAbuV2Preflight({ cwd: root, env: microtestEnv, packetPath, gitCommit: COMMIT }).releaseGateStatus,
+      'MICROTEST_AUTHORIZED',
+    );
+    assert.throws(
+      () => validateAbuV2Preflight({
+        cwd: root,
+        env: { ...microtestEnv, RELEASE_AUTHORIZATION_SIGNER_ADDRESS: walletForKey(TEST_KEYS.OTHER) },
+        packetPath,
+        gitCommit: COMMIT,
+      }),
+      /signer is not the configured trusted signer/,
+    );
   });
 });
 
@@ -280,7 +306,7 @@ test('Abu V2 preflight binds the expected mode-600 packet sha256', () => {
         packetPath,
         gitCommit: COMMIT,
       }),
-      /packet sha256 does not match MAINNET_MICROTEST_PACKET_SHA256/,
+      /packetSha256 does not match MAINNET_MICROTEST_PACKET_SHA256/,
     );
   });
 });
@@ -289,14 +315,17 @@ function withFixture(operation, coordinatedManifest = {}) {
   const root = mkdtempSync(join(tmpdir(), 'abu24k-v2-preflight-'));
   try {
     mkdirSync(join(root, 'packages/core-artifacts/contracts'), { recursive: true });
+    mkdirSync(join(root, 'packages/core-artifacts/openapi'), { recursive: true });
     writeFileSync(join(root, 'packages/core-artifacts/package.json'), JSON.stringify({ version: ARTIFACT }));
     writeFileSync(join(root, 'packages/core-artifacts/coordinated-manifest.json'), JSON.stringify({
       artifactVersion: ARTIFACT,
       deploymentAuthorized: false,
       deploymentAuthorizationEvidenceHash: null,
-      releaseGateStatus: 'NO_GO_REPAIR_BASELINE',
+      releaseGateStatus: 'EXTERNAL_AUTHORIZATION_REQUIRED',
       ...coordinatedManifest,
     }));
+    writeFileSync(join(root, 'packages/core-artifacts/openapi/openapi.json'), JSON.stringify({ 'x-artifactVersion': ARTIFACT }));
+    writeFileSync(join(root, 'packages/core-artifacts/SHA256SUMS'), `${'1'.repeat(64)}  package.json\n`);
     writeContractManifest(root);
     const packetPath = join(root, 'packet.json');
     writeFileSync(packetPath, JSON.stringify(packet()), { mode: 0o600 });
@@ -311,14 +340,17 @@ async function withFixtureAsync(operation, coordinatedManifest = {}) {
   const root = mkdtempSync(join(tmpdir(), 'abu24k-v2-preflight-'));
   try {
     mkdirSync(join(root, 'packages/core-artifacts/contracts'), { recursive: true });
+    mkdirSync(join(root, 'packages/core-artifacts/openapi'), { recursive: true });
     writeFileSync(join(root, 'packages/core-artifacts/package.json'), JSON.stringify({ version: ARTIFACT }));
     writeFileSync(join(root, 'packages/core-artifacts/coordinated-manifest.json'), JSON.stringify({
       artifactVersion: ARTIFACT,
       deploymentAuthorized: false,
       deploymentAuthorizationEvidenceHash: null,
-      releaseGateStatus: 'NO_GO_REPAIR_BASELINE',
+      releaseGateStatus: 'EXTERNAL_AUTHORIZATION_REQUIRED',
       ...coordinatedManifest,
     }));
+    writeFileSync(join(root, 'packages/core-artifacts/openapi/openapi.json'), JSON.stringify({ 'x-artifactVersion': ARTIFACT }));
+    writeFileSync(join(root, 'packages/core-artifacts/SHA256SUMS'), `${'1'.repeat(64)}  package.json\n`);
     writeContractManifest(root);
     await operation(root, envForPacket);
   } finally {
@@ -333,7 +365,8 @@ function writePacket(root, filename, value) {
   return packetPath;
 }
 
-function envForPacket(packetPath) {
+function envForPacket(packetPath, authorizationOverrides = {}) {
+  const releaseAuthorization = writeReleaseAuthorization(packetPath, authorizationOverrides);
   const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
   return {
     CHAIN_ID: '56',
@@ -355,6 +388,9 @@ function envForPacket(packetPath) {
     WALLET_5_PRIVATE_KEY: TEST_KEYS.W5,
     WALLET_6_PRIVATE_KEY: TEST_KEYS.W6,
     MICROTEST_WALLET_6_PRIVATE_KEY: TEST_KEYS.W6,
+    MICROTEST_BUYER_1_PRIVATE_KEY: TEST_KEYS.BUYER1,
+    MICROTEST_BUYER_2_PRIVATE_KEY: TEST_KEYS.BUYER2,
+    MICROTEST_BUYER_3_PRIVATE_KEY: TEST_KEYS.BUYER3,
     MAINNET_MICROTEST_MAX_NATIVE_VALUE_PER_TX: '0',
     MAINNET_MICROTEST_MAX_GAS_COST_PER_TX_BNB: '0.001',
     MAINNET_MICROTEST_MAX_TOTAL_NATIVE_SPEND_BNB: '0.01',
@@ -378,6 +414,12 @@ function envForPacket(packetPath) {
     MAINNET_MICROTEST_SECKILL_INVENTORY: '1',
     MAINNET_MICROTEST_EVIDENCE_HASH: HASH,
     ...(packetPath ? { MAINNET_MICROTEST_PACKET_SHA256: packetSha256(packetPath) } : {}),
+    RELEASE_AUTHORIZATION_PATH: releaseAuthorization.path,
+    RELEASE_AUTHORIZATION_SHA256: releaseAuthorization.sha256,
+    RELEASE_AUTHORIZATION_SIGNER_ADDRESS: releaseAuthorization.signer,
+    RELEASE_GIT_COMMIT: COMMIT,
+    RELEASE_IMAGE_DIGEST: `sha256:${'a'.repeat(64)}`,
+    RELEASE_RUNTIME_CONFIG_SHA256: `0x${'b'.repeat(64)}`,
   };
 }
 
@@ -390,7 +432,7 @@ function packet(overrides = {}) {
     artifactVersion: ARTIFACT,
     gitCommit: COMMIT,
     buyerWallets: [buyer(1), buyer(2), buyer(3)],
-    buyerLabels: ['W5', 'W1', 'W6'],
+    buyerLabels: ['MICROTEST_BUYER_1', 'MICROTEST_BUYER_2', 'MICROTEST_BUYER_3'],
     bnbBudget: {
       maxNativeValuePerTxBnb: '0',
       maxGasCostPerTxBnb: '0.001',
@@ -407,9 +449,9 @@ function contract(name, nibble) {
 
 function role(value) { return `0x${String(value).repeat(40).slice(0, 40)}`; }
 function buyer(value) {
-  if (value === 1) return walletForKey(TEST_KEYS.W5);
-  if (value === 2) return walletForKey(TEST_KEYS.W1);
-  if (value === 3) return walletForKey(TEST_KEYS.W6);
+  if (value === 1) return walletForKey(TEST_KEYS.BUYER1);
+  if (value === 2) return walletForKey(TEST_KEYS.BUYER2);
+  if (value === 3) return walletForKey(TEST_KEYS.BUYER3);
   return walletForKey(TEST_KEYS.OTHER);
 }
 
@@ -423,6 +465,53 @@ function walletForKey(privateKeyValue) {
 
 function packetSha256(packetPath) {
   return createHash('sha256').update(readFileSync(packetPath)).digest('hex');
+}
+
+function writeReleaseAuthorization(packetPath, overrides = {}) {
+  const root = join(packetPath, '..');
+  const wallet = new Wallet(TEST_KEYS.AUTH);
+  const packetHash = packetSha256(packetPath);
+  const authorizationPath = join(
+    root,
+    `release-authorization-${String(overrides.status ?? 'MICROTEST_AUTHORIZED').toLowerCase()}-${packetHash.slice(0, 12)}.json`,
+  );
+  const payload = {
+    schema: 'abu24k.releaseAuthorization.v1',
+    artifactVersion: ARTIFACT,
+    chainId: 56,
+    status: overrides.status ?? 'MICROTEST_AUTHORIZED',
+    createdAt: '2026-07-24T00:00:00.000Z',
+    artifactSha256: `0x${sha256File(join(root, 'packages/core-artifacts/SHA256SUMS'))}`,
+    coordinatedManifestSha256: `0x${sha256File(join(root, 'packages/core-artifacts/coordinated-manifest.json'))}`,
+    openapiSha256: `0x${sha256File(join(root, 'packages/core-artifacts/openapi/openapi.json'))}`,
+    contractsManifestSha256: `0x${sha256File(join(root, 'packages/core-artifacts/contracts/contract-manifest.json'))}`,
+    gitCommit: COMMIT,
+    imageDigest: `sha256:${'a'.repeat(64)}`,
+    runtimeConfigSha256: `0x${'b'.repeat(64)}`,
+    packetSha256: `0x${packetHash}`,
+    ...(overrides.status === 'GO' ? { evidenceArchiveSha256: `0x${'c'.repeat(64)}` } : {}),
+    signer: wallet.address,
+  };
+  const signedPayloadSha256 = `0x${createHash('sha256').update(stableJson(payload)).digest('hex')}`;
+  writeFileSync(authorizationPath, `${JSON.stringify({
+    ...payload,
+    signature: wallet.signMessageSync(signedPayloadSha256),
+  })}\n`, { mode: 0o600 });
+  chmodSync(authorizationPath, 0o600);
+  return { path: authorizationPath, sha256: `0x${sha256File(authorizationPath)}`, signer: wallet.address };
+}
+
+function sha256File(path) {
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
+function stableJson(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  return `{${Object.keys(value)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+    .join(',')}}`;
 }
 
 function writeContractManifest(root, overrides = {}) {

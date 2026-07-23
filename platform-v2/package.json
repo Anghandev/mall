@@ -9,6 +9,7 @@
     "operations:start": "../scripts/node server/operations/eoa-runtime-service.ts",
     "media-storage:start": "../scripts/node server/operations/media-storage-service.ts",
     "database:migrate": "../scripts/node scripts/migrate-production.ts",
+    "settlement:failed-close": "../scripts/node scripts/failed-close-quarantined-settlement.mjs",
     "typecheck": "../scripts/node ../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
     "contracts:build": "forge build",
     "contracts:artifacts": "../scripts/node scripts/generate-contract-artifacts.mjs",
