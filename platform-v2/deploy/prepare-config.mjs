@@ -225,6 +225,7 @@ await writeEnv('eoa-runtime.env', [
   line('SIGNER_SERVICE_TOKEN', signerToken),
   line('SETTLEMENT_EXECUTOR_TOKEN', settlementToken),
   line('GOVERNANCE_EXECUTOR_TOKEN', governanceToken),
+  line('PLATFORM_SERVICE_FEE_WALLET_ADDRESS', required('PLATFORM_SERVICE_FEE_WALLET_ADDRESS')),
   ...signingRoles
     .flatMap(([key, address]) => [line(key, required(key)), line(address, required(address))]),
 ]);

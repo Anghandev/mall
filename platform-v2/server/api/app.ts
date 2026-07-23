@@ -137,6 +137,12 @@ export interface PaymentApiService {
   getAdminPayment(actor: FulfillmentActor, orderId: string): Promise<unknown>;
 }
 
+export interface PaymentWriteContext {
+  buyerWallet: string;
+  productId: string;
+  quantity: number;
+}
+
 export interface SeckillApiService {
   current(): Promise<unknown>;
   get(sessionId: string): Promise<unknown>;
@@ -2256,7 +2262,6 @@ async function route(
   }
   if (request.method === 'POST' && url.pathname === '/v2/payments/quotes') {
     const claims = authorizeBuyer(request, dependencies.config, dependencies.clock());
-    await assertPaymentWritesEnabled(dependencies, ['NEW_PAYMENT']);
     const body = await readJson(request);
     assertOnlyKeys(body, [
       'idempotencyKey',
@@ -2276,6 +2281,11 @@ async function route(
       fulfillmentTargetHash: requiredString(body, 'fulfillmentTargetHash'),
       regionCodeHash: requiredString(body, 'regionCodeHash'),
     };
+    await assertPaymentWritesEnabled(dependencies, ['NEW_PAYMENT'], {
+      buyerWallet: claims.sub,
+      productId: quoteInput.productId,
+      quantity: quoteInput.quantity,
+    });
     sendJson(
       response,
       201,
@@ -2286,7 +2296,6 @@ async function route(
   }
   if (request.method === 'POST' && url.pathname === '/v2/seckill/quotes') {
     const claims = authorizeBuyer(request, dependencies.config, dependencies.clock());
-    await assertPaymentWritesEnabled(dependencies, ['NEW_PAYMENT', 'SECKILL_PURCHASE']);
     const body = await readJson(request);
     assertOnlyKeys(body, [
       'idempotencyKey',
@@ -2308,6 +2317,11 @@ async function route(
       fulfillmentTargetHash: requiredString(body, 'fulfillmentTargetHash'),
       regionCodeHash: requiredString(body, 'regionCodeHash'),
     };
+    await assertPaymentWritesEnabled(dependencies, ['NEW_PAYMENT', 'SECKILL_PURCHASE'], {
+      buyerWallet: claims.sub,
+      productId: quoteInput.productId,
+      quantity: quoteInput.quantity,
+    });
     sendJson(
       response,
       201,
@@ -3412,18 +3426,20 @@ function authorizeBuyer(request: IncomingMessage, config: CoreConfig, now: Date)
 async function assertPaymentWritesEnabled(
   dependencies: ApiDependencies,
   scopes: readonly ('NEW_PAYMENT' | 'SECKILL_PURCHASE')[],
+  context?: PaymentWriteContext,
 ) {
+  const now = dependencies.clock();
   const readiness = publicReadiness(
     dependencies.config,
     currentRuntimeReadiness(dependencies),
-    dependencies.clock(),
+    now,
   );
   if (readiness.writesEnabled) {
-    const paused = await dependencies.getPausedScopes();
-    const active = scopes.filter((scope) => paused.has(scope));
-    if (active.length > 0) {
-      throw new CoreError('BreakerActive', 'New payment quote is paused', 409, { scopes: active });
-    }
+    await assertPaymentBreakersOpen(dependencies, scopes);
+    return;
+  }
+  if (allowsBoundedMainnetMicrotestPaymentWrite(dependencies.config, readiness, now, context)) {
+    await assertPaymentBreakersOpen(dependencies, scopes);
     return;
   }
   if (readiness.paymentDecisionBlocked.length > 0) {
@@ -3437,6 +3453,37 @@ async function assertPaymentWritesEnabled(
     });
   }
   throw new CoreError('ConfigurationRequired', 'New payment quotes require a fresh verified runtime readiness snapshot', 503);
+}
+
+async function assertPaymentBreakersOpen(
+  dependencies: ApiDependencies,
+  scopes: readonly ('NEW_PAYMENT' | 'SECKILL_PURCHASE')[],
+) {
+  const paused = await dependencies.getPausedScopes();
+  const active = scopes.filter((scope) => paused.has(scope));
+  if (active.length > 0) {
+    throw new CoreError('BreakerActive', 'New payment quote is paused', 409, { scopes: active });
+  }
+}
+
+export function allowsBoundedMainnetMicrotestPaymentWrite(
+  config: CoreConfig,
+  readiness: ReturnType<typeof publicReadiness>,
+  now: Date,
+  context?: PaymentWriteContext,
+) {
+  const entitlement = config.mainnetMicrotestEntitlement;
+  if (!context || !entitlement || now >= entitlement.expiresAt) return false;
+  if (
+    context.quantity !== 1
+    || context.productId !== entitlement.productId
+    || !entitlement.buyerWallets.has(normalizeAddress(context.buyerWallet))
+  ) return false;
+  return readiness.paymentDecisionBlocked.length === 0
+    && readiness.paymentExternalBlocked.length === 1
+    && readiness.paymentExternalBlocked[0] === 'COORDINATED_DEPLOYMENT_AUTHORIZATION'
+    && readiness.runtimeBlockers.length === 1
+    && readiness.runtimeBlockers[0] === 'PAYMENT_CONFIGURATION_REQUIRED';
 }
 
 function currentRuntimeReadiness(dependencies: ApiDependencies) {

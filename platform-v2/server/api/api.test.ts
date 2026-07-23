@@ -17,7 +17,7 @@ import {
   type NonceStore,
   type StoredNonce,
 } from './auth.ts';
-import { createApiServer } from './app.ts';
+import { allowsBoundedMainnetMicrotestPaymentWrite, createApiServer } from './app.ts';
 import { concessionPreviewAuthorization } from './catalog-signing.ts';
 import {
   buildDualPaymentQuote,
@@ -188,6 +188,58 @@ test('typed config reports blocked inputs without exposing secret values', () =>
     }),
     /must be distinct/,
   );
+});
+
+test('bounded mainnet micro-test quote gate bypasses only production deployment authorization', () => {
+  const now = new Date();
+  const buyer = Wallet.createRandom();
+  const config = loadConfig({
+    ...completeEnvironment(),
+    MAINNET_MICROTEST_MERCHANT_ID: 'merchant-micro',
+    MAINNET_MICROTEST_MERCHANT_WALLET: '0x9999999999999999999999999999999999999999',
+    MAINNET_MICROTEST_PRODUCT_ID: 'product-micro',
+    MAINNET_MICROTEST_BUYER_WALLETS: [
+      buyer.address,
+      '0x8888888888888888888888888888888888888888',
+      '0x7777777777777777777777777777777777777777',
+    ].join(','),
+    MAINNET_MICROTEST_EXPIRES_AT: new Date(now.getTime() + 60 * 60_000).toISOString(),
+    MAINNET_MICROTEST_MAX_LIST_PRICE_USDT: '1000',
+    MAINNET_MICROTEST_MAX_FREIGHT_USDT: '0',
+    MAINNET_MICROTEST_MAX_STOCK: '3',
+    MAINNET_MICROTEST_SECKILL_INVENTORY: '3',
+    MAINNET_MICROTEST_EVIDENCE_HASH: HASH,
+  });
+  const readiness = publicReadiness(config, paymentRuntimeReadiness(now, true), now);
+  assert.equal(readiness.writesEnabled, false);
+  assert.deepEqual(readiness.paymentExternalBlocked, ['COORDINATED_DEPLOYMENT_AUTHORIZATION']);
+  assert.deepEqual(readiness.runtimeBlockers, ['PAYMENT_CONFIGURATION_REQUIRED']);
+  assert.equal(allowsBoundedMainnetMicrotestPaymentWrite(config, readiness, now, {
+    buyerWallet: buyer.address,
+    productId: 'product-micro',
+    quantity: 1,
+  }), true);
+  assert.equal(allowsBoundedMainnetMicrotestPaymentWrite(config, readiness, now, {
+    buyerWallet: '0x6666666666666666666666666666666666666666',
+    productId: 'product-micro',
+    quantity: 1,
+  }), false);
+  assert.equal(allowsBoundedMainnetMicrotestPaymentWrite(config, readiness, now, {
+    buyerWallet: buyer.address,
+    productId: 'product-other',
+    quantity: 1,
+  }), false);
+  assert.equal(allowsBoundedMainnetMicrotestPaymentWrite(config, readiness, now, {
+    buyerWallet: buyer.address,
+    productId: 'product-micro',
+    quantity: 2,
+  }), false);
+  assert.equal(allowsBoundedMainnetMicrotestPaymentWrite(
+    config,
+    publicReadiness(config, { ...paymentRuntimeReadiness(now, true), signerHealthy: false }, now),
+    now,
+    { buyerWallet: buyer.address, productId: 'product-micro', quantity: 1 },
+  ), false);
 });
 
 test('mainnet micro-test entitlement is complete, bounded, expiring and evidence-bound', () => {

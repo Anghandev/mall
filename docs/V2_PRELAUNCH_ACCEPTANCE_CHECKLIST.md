@@ -1,7 +1,7 @@
 # 24K商城 V2 上线前全量验收清单
 
 > Historical `.18` checklist only. Its Pass entries do not satisfy the current
-> `.27` mainnet, cleanup, deployment or production-observation gates.
+> `.28` mainnet, cleanup, deployment or production-observation gates.
 
 验收日期：2026-07-20
 生产发布基线：`v2/core@a1c00261dc279af876407bf083e6540312d6da8e`
