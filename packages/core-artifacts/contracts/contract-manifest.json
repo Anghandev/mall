@@ -23,9 +23,9 @@
   "sourceDigestSha256": "713ab33de73d34855c3c707e2af837e7b49d59a6783dbf89b247e6eb5e9ae9e5",
   "deploymentStatus": "DEPLOYED",
   "deploymentArtifactVersion": "2.0.0-settlement-admin.16",
-  "deploymentAuthorized": false,
-  "deploymentAuthorizationEvidenceHash": null,
-  "releaseGateStatus": "NO_GO_REPAIR_BASELINE",
+  "deploymentAuthorized": true,
+  "deploymentAuthorizationEvidenceHash": "0xbf4230d51ac14b15afd54bd2604b9e2f572d0e1c16db25839ae1d1f543aeb947",
+  "releaseGateStatus": "GO",
   "historicalDeploymentLineage": {
     "artifactVersion": "2.0.0-settlement-admin.16",
     "deploymentAuthorized": true,

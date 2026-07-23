@@ -1,0 +1,67 @@
+{
+  "architecture": "FIVE_ROLE_EOA_V2",
+  "artifactVersion": "2.0.0-fulfillment-launch.29",
+  "authorizationEvidenceHash": "0xbf4230d51ac14b15afd54bd2604b9e2f572d0e1c16db25839ae1d1f543aeb947",
+  "chainId": 56,
+  "createdAt": "2026-07-23T11:09:20Z",
+  "deploymentEvidence": {
+    "artifactVersion": "2.0.0-settlement-admin.16",
+    "authorizationEvidenceHash": "0x9d260a962e4cefe886ddf1382b1c6efb4ff06fef6fbac17bf7014b3b3e78c3eb"
+  },
+  "mainnetMicrotestEvidence": {
+    "artifactVersionTested": "2.0.0-fulfillment-launch.29",
+    "cleanupGate": {
+      "activeQuotes": 0,
+      "activeReservations": 0,
+      "passed": true,
+      "productState": "DELISTED",
+      "unsettledTransfers": 0
+    },
+    "evidenceArchive": "output/archived-mainnet-microtest-runs/20260723T104857Z-micro-20260723102734-final-nonzero-prize-pass",
+    "gitCommit": "54961bab58a9",
+    "openSessionTxHash": "0x997d35a740623f9799246e3b52627617c324e0e5d296a712d0f8ee5628470b14",
+    "payments": {
+      "items": [
+        {
+          "buyerLabel": "W5",
+          "classification": "SECKILL",
+          "confirmations": 18,
+          "orderId": "0x582dae751c42eddc7b4e4d71b83cb6b7c27ce98b9b3987bb571282d662f07db8",
+          "txHash": "0x07e18704cfc2c10c6caa8535afcfb6c55c2328d66258467e239d6c3eb31bd5cb"
+        },
+        {
+          "buyerLabel": "W1",
+          "classification": "SECKILL",
+          "confirmations": 19,
+          "orderId": "0x97a4566defd248b39a3d63e5fcefed340b4d0419dff422b2b412d5c14f7b9cc1",
+          "txHash": "0xeb47d96285915661a13b297c2b2f2b9672826d2b90989a313ab8ae1ad574712c"
+        },
+        {
+          "buyerLabel": "W6",
+          "classification": "SECKILL",
+          "confirmations": 18,
+          "orderId": "0x3df6db85d3785f9d75534b96e16e4d8f1f50789e1e5edf2c8ecb47e13abbfc7b",
+          "txHash": "0xced18493087879dd9713083a97d338abd2f77f160db07c6a1a1a38e93a2bcb14"
+        }
+      ],
+      "minimumObservedConfirmations": 18,
+      "requiredConfirmations": 15
+    },
+    "productId": "product-mainnet-micro-prize-micro-20260723102734",
+    "runId": "micro-20260723102734",
+    "seckillPrize": {
+      "expectedPrizePoolUsdtAtomic": "931500000000",
+      "merchantConcessionBps": 10000,
+      "operationsPrizeInjectionUsed": false,
+      "prizePoolUsdtAtomic": "931500000000",
+      "winnerFrozen": true,
+      "winnerOrderId": "0x3df6db85d3785f9d75534b96e16e4d8f1f50789e1e5edf2c8ecb47e13abbfc7b",
+      "winnerPayoutAmountUsdtAtomic": "931500000000",
+      "winnerPayoutConfirmations": 257,
+      "winnerPayoutTxHash": "0xe6a476894896d366a191848999480a1031a77b4971a3f5485c45397cba9a2c40",
+      "winnerWallet": "0x0ccd6c7e93e7f6ad09dd21563237956ee975e619"
+    },
+    "sessionId": "0xb646076e16f7f07b579196521a3ecacaa29f114fe328aa3ef178e9950ef41e4c"
+  },
+  "releaseGateStatus": "GO"
+}

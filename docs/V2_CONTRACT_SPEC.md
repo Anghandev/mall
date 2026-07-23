@@ -1,13 +1,13 @@
 # 24K商城 V2 Payment Contract Freeze
 
-Status: current `.28` No-Go repair candidate, with historical deployment lineage
-from `2.0.0-settlement-admin.16`. The generated manifest binds the three BSC
-deployment addresses, blocks and runtime code hashes through the contract
-manifest, but the coordinated `.28` manifest has `deploymentAuthorized: false`
-and `releaseGateStatus: NO_GO_REPAIR_BASELINE`. Historical authorization is
-recorded only under `historicalDeploymentLineage`; it does not prove the current
-`.28` release, W5/W1/W6 mainnet acceptance or production Go. This document does
-not authorize any additional transaction.
+Status: current `.29` GO release artifact, with historical deployment lineage
+from `2.0.0-settlement-admin.16`. The generated manifests bind the three BSC
+deployment addresses, blocks and runtime code hashes and now have
+`deploymentAuthorized: true` plus `releaseGateStatus: GO`. The current
+authorization hash is recorded in the contract and coordinated manifests and is
+derived from `platform-v2/deployments/bsc-fulfillment-launch-authorization.json`,
+which binds W5/W1/W6 non-zero seckill prize acceptance, cleanup and winner USDT
+payout evidence. This document alone does not authorize an unrelated transaction.
 
 ## Contract Set
 

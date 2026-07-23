@@ -99,7 +99,7 @@ function NotificationConnectionProbe() {
 }
 
 describe('Mall V2 payment consumer', () => {
-  it('consumes the current coordinated Core checkpoint and keeps payment writes fail closed', async () => {
+  it('consumes the current coordinated Core checkpoint and enables authorized payment writes', async () => {
     renderAt('/mall');
 
     expect(screen.getByRole('link', { name: '24K商城首页' })).toBeTruthy();
@@ -117,7 +117,7 @@ describe('Mall V2 payment consumer', () => {
     expect(mallRuntimeBoundary).toMatchObject({
       artifactStatus: '2.0.0-fulfillment-launch.29',
       executableOrderActions: executableOrderActionNames,
-      deploymentAuthorized: false,
+      deploymentAuthorized: true,
       settlementAdminCapabilities: {
         settlements: true,
         cms: true,

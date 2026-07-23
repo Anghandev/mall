@@ -32,9 +32,9 @@ test('fulfillment-launch .29 checkpoint has one identity, resolvable exports and
   assert.equal(manifest.publicationStatus, 'COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT');
   assert.equal(contractManifest.publicationStatus, 'coordinated-settlement-admin-checkpoint');
   assert.equal(contractManifest.deploymentArtifactVersion, '2.0.0-settlement-admin.16');
-  assert.equal(contractManifest.deploymentAuthorized, false);
-  assert.equal(contractManifest.deploymentAuthorizationEvidenceHash, null);
-  assert.equal(contractManifest.releaseGateStatus, 'NO_GO_REPAIR_BASELINE');
+  assert.equal(contractManifest.deploymentAuthorized, true);
+  assert.match(contractManifest.deploymentAuthorizationEvidenceHash, /^0x[0-9a-f]{64}$/);
+  assert.equal(contractManifest.releaseGateStatus, 'GO');
   assert.equal(contractManifest.historicalDeploymentLineage.artifactVersion, '2.0.0-settlement-admin.16');
   assert.equal(contractManifest.historicalDeploymentLineage.deploymentAuthorized, true);
   assert.match(contractManifest.historicalDeploymentLineage.deploymentAuthorizationEvidenceHash, /^0x[0-9a-f]{64}$/);
@@ -927,13 +927,13 @@ test('catalog, settlement/admin and seckill realtime capabilities publish the at
   for (const [capability, status] of Object.entries(manifest.capabilityStatus)) {
     assert.equal(status, available.has(capability) ? 'AVAILABLE' : 'NOT_PUBLISHED_FAIL_CLOSED', capability);
   }
-  assert.equal(manifest.deploymentAuthorized, false);
-  assert.equal(manifest.deploymentAuthorizationEvidenceHash, null);
-  assert.equal(manifest.releaseGateStatus, 'NO_GO_REPAIR_BASELINE');
+  assert.equal(manifest.deploymentAuthorized, true);
+  assert.match(manifest.deploymentAuthorizationEvidenceHash!, /^0x[0-9a-f]{64}$/);
+  assert.equal(manifest.releaseGateStatus, 'GO');
   assert.equal(manifest.historicalDeploymentLineage.artifactVersion, '2.0.0-settlement-admin.16');
   assert.equal(manifest.historicalDeploymentLineage.deploymentAuthorized, true);
   assert.match(manifest.historicalDeploymentLineage.deploymentAuthorizationEvidenceHash!, /^0x[0-9a-f]{64}$/);
-  assert.equal(contractManifest.deploymentAuthorized, false);
+  assert.equal(contractManifest.deploymentAuthorized, true);
   assert.equal(
     contractManifest.historicalDeploymentLineage.deploymentAuthorizationEvidenceHash,
     manifest.historicalDeploymentLineage.deploymentAuthorizationEvidenceHash,

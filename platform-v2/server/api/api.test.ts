@@ -96,7 +96,7 @@ test('typed config reports blocked inputs without exposing secret values', () =>
   const ready = loadConfig(completeEnvironment());
   const serialized = JSON.stringify(publicReadiness(ready));
   assert.equal(publicReadiness(ready).writesEnabled, false);
-  assert.equal(ready.externalBlocked.includes('COORDINATED_DEPLOYMENT_AUTHORIZATION'), true);
+  assert.equal(ready.externalBlocked.includes('COORDINATED_DEPLOYMENT_AUTHORIZATION'), false);
   assert.equal(serialized.includes('test-jwt-secret'), false);
   assert.equal(serialized.includes('provider-secret'), false);
   assert.equal(ready.providerReadiness.BNM, 'READY');
@@ -211,32 +211,47 @@ test('bounded mainnet micro-test quote gate bypasses only production deployment 
     MAINNET_MICROTEST_EVIDENCE_HASH: HASH,
   });
   const readiness = publicReadiness(config, paymentRuntimeReadiness(now, true), now);
-  assert.equal(readiness.writesEnabled, false);
-  assert.deepEqual(readiness.paymentExternalBlocked, ['COORDINATED_DEPLOYMENT_AUTHORIZATION']);
-  assert.deepEqual(readiness.runtimeBlockers, ['PAYMENT_CONFIGURATION_REQUIRED']);
+  assert.equal(readiness.writesEnabled, true);
+  assert.deepEqual(readiness.paymentExternalBlocked, []);
+  assert.deepEqual(readiness.runtimeBlockers, []);
   assert.equal(allowsBoundedMainnetMicrotestPaymentWrite(config, readiness, now, {
+    buyerWallet: buyer.address,
+    productId: 'product-micro',
+    quantity: 1,
+  }), false);
+  const noGoConfig = {
+    ...config,
+    deploymentReady: false,
+    externalBlocked: [...config.externalBlocked, 'COORDINATED_DEPLOYMENT_AUTHORIZATION'],
+    paymentExternalBlocked: ['COORDINATED_DEPLOYMENT_AUTHORIZATION'],
+  };
+  const noGoReadiness = publicReadiness(noGoConfig, paymentRuntimeReadiness(now, true), now);
+  assert.equal(noGoReadiness.writesEnabled, false);
+  assert.deepEqual(noGoReadiness.paymentExternalBlocked, ['COORDINATED_DEPLOYMENT_AUTHORIZATION']);
+  assert.deepEqual(noGoReadiness.runtimeBlockers, ['PAYMENT_CONFIGURATION_REQUIRED']);
+  assert.equal(allowsBoundedMainnetMicrotestPaymentWrite(noGoConfig, noGoReadiness, now, {
     buyerWallet: buyer.address,
     productId: 'product-micro',
     quantity: 1,
   }), true);
-  assert.equal(allowsBoundedMainnetMicrotestPaymentWrite(config, readiness, now, {
+  assert.equal(allowsBoundedMainnetMicrotestPaymentWrite(noGoConfig, noGoReadiness, now, {
     buyerWallet: '0x6666666666666666666666666666666666666666',
     productId: 'product-micro',
     quantity: 1,
   }), false);
-  assert.equal(allowsBoundedMainnetMicrotestPaymentWrite(config, readiness, now, {
+  assert.equal(allowsBoundedMainnetMicrotestPaymentWrite(noGoConfig, noGoReadiness, now, {
     buyerWallet: buyer.address,
     productId: 'product-other',
     quantity: 1,
   }), false);
-  assert.equal(allowsBoundedMainnetMicrotestPaymentWrite(config, readiness, now, {
+  assert.equal(allowsBoundedMainnetMicrotestPaymentWrite(noGoConfig, noGoReadiness, now, {
     buyerWallet: buyer.address,
     productId: 'product-micro',
     quantity: 2,
   }), false);
   assert.equal(allowsBoundedMainnetMicrotestPaymentWrite(
-    config,
-    publicReadiness(config, { ...paymentRuntimeReadiness(now, true), signerHealthy: false }, now),
+    noGoConfig,
+    publicReadiness(noGoConfig, { ...paymentRuntimeReadiness(now, true), signerHealthy: false }, now),
     now,
     { buyerWallet: buyer.address, productId: 'product-micro', quantity: 1 },
   ), false);

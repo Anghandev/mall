@@ -1,7 +1,7 @@
 # 24K商城 V2 生产发布报告
 
 > Historical `.18` release snapshot only. It is retained as immutable evidence
-> of that deployment and does not establish Go for artifact `.28`, the current
+> of that deployment and does not establish Go for artifact `.29`, the current
 > commit, the three-buyer mainnet run or the next production release.
 
 日期：2026-07-20
@@ -12,8 +12,9 @@ Core artifact：`2.0.0-fulfillment-launch.18`
 ## 结论
 
 `.18` 在 2026-07-20 当时的发布验收为 `Go`，但该结论已被当前
-`.28` 发布目标取代，不能作为当前 Go 证据。当前结论在三买家主网微测、
-cleanup gate、生产发布和 600 秒观察全部通过前仍为 `No-Go/PENDING`。
+`.29` 发布目标取代，不能作为当前 Go 证据。当前 `.29` artifact Go 已由
+非零奖池主网微测、cleanup gate、完整本地 release gate 和授权 manifest 证明；
+线上生产发布/600 秒观察必须另以 `.29` 运行态证据记录。
 
 ## 数据与迁移
 

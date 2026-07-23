@@ -1,10 +1,11 @@
 # 24K商城 V2 Data Model
 
-Status: current coordinated No-Go repair baseline
-`2.0.0-fulfillment-launch.28`. This document describes implemented catalog,
-media, payment, fulfillment, settlement and administrative storage and does not
-authorize deployment. Historical `2.0.0-settlement-admin.16` artifacts are
-lineage evidence only and do not prove the current `.28` release is Go.
+Status: current coordinated GO release artifact
+`2.0.0-fulfillment-launch.29`. This document describes implemented catalog,
+media, payment, fulfillment, settlement and administrative storage. Historical
+`2.0.0-settlement-admin.16` artifacts remain lineage evidence; current `.29`
+production authorization is proven only by the coordinated manifest plus
+`platform-v2/deployments/bsc-fulfillment-launch-authorization.json`.
 
 ## Storage Boundary
 

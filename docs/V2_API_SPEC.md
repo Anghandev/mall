@@ -1,11 +1,12 @@
 # 24K商城 V2 Core API Contract
 
-Status: current coordinated No-Go repair baseline
-`2.0.0-fulfillment-launch.28`. OpenAPI, generated types, ABI, manifests,
+Status: current coordinated GO release artifact
+`2.0.0-fulfillment-launch.29`. OpenAPI, generated types, ABI, manifests,
 enums, the fail-closed WebSocket protocol and consumer tests share this
 version. The historical `2.0.0-settlement-admin.16` deployment lineage remains
-audit evidence only and does not authorize a new deployment, transaction or Go
-decision for `.28`.
+audit evidence; the current `.29` release authorization is recorded in
+`platform-v2/deployments/bsc-fulfillment-launch-authorization.json` and binds
+the non-zero seckill prize micro-test, cleanup gate and winner USDT payout evidence.
 
 ## Authority
 
