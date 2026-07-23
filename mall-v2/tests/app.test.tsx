@@ -106,7 +106,7 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText('24K商城', { selector: '.brand strong' })).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/阿步|Abu 24K|ABU 24K/);
     expect(productBaseline.coreArtifacts).toBe(artifactVersion);
-    expect(artifactVersion).toBe('2.0.0-fulfillment-launch.23');
+    expect(artifactVersion).toBe('2.0.0-fulfillment-launch.24');
     expect(productBaseline.manifestsAligned).toBe(true);
     expect(productBaseline.knownOrderActions).toBe(allowedActionNames);
     expect(productBaseline.executableOrderActions).toBe(executableOrderActionNames);
@@ -115,7 +115,7 @@ describe('Mall V2 payment consumer', () => {
     expect(isCoreOrderActionExecutable('CONFIRM_RECEIPT')).toBe(true);
     expect(isCoreOrderActionExecutable('PAY_ORDER')).toBe(true);
     expect(mallRuntimeBoundary).toMatchObject({
-      artifactStatus: '2.0.0-fulfillment-launch.23',
+      artifactStatus: '2.0.0-fulfillment-launch.24',
       executableOrderActions: executableOrderActionNames,
       deploymentAuthorized: false,
       settlementAdminCapabilities: {
