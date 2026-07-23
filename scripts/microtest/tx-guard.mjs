@@ -56,6 +56,18 @@ export function appendTxLog(entry) {
   atomicWriteLog(log);
 }
 
+export function updateTxLog(hash, patch) {
+  requireExecutionLock();
+  const log = readTxLog();
+  const normalizedHash = String(hash ?? '').toLowerCase();
+  const index = log.findIndex((item) => item.hash.toLowerCase() === normalizedHash);
+  if (index === -1) throw new Error('Submitted transaction hash is missing from spend ledger');
+  const { totalSpentWei: _previousTotalSpentWei, ...current } = log[index];
+  const updated = validateLogEntry({ ...current, ...patch, hash: log[index].hash });
+  log[index] = updated;
+  atomicWriteLog(log);
+}
+
 export function nativeToWei(value) {
   const normalized = String(value);
   if (!/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,18})?$/.test(normalized)) {
@@ -79,6 +91,8 @@ export function assertTxBudget({
   functionCall,
   wallet,
   target,
+  calldataHash,
+  nonce,
   valueWei,
   estimatedGas,
   maxFeePerGasWei,
@@ -86,7 +100,17 @@ export function assertTxBudget({
 }) {
   requireExecutionLock();
   const packetBudget = readApprovedPacketBudget(env, preflightResult);
-  assertPacketTransactionBinding(packetBudget.packet, { operation, functionCall, wallet, target });
+  assertPacketTransactionBinding(packetBudget.packet, {
+    operation,
+    functionCall,
+    wallet,
+    target,
+    calldataHash,
+    nonce,
+    valueWei,
+    estimatedGas,
+    maxFeePerGasWei,
+  });
   const envMaxNativeValueWei = requiredNativeBudget(env.MAINNET_MICROTEST_MAX_NATIVE_VALUE_PER_TX, 'MAINNET_MICROTEST_MAX_NATIVE_VALUE_PER_TX');
   const envMaxGasCostWei = requiredNativeBudget(env.MAINNET_MICROTEST_MAX_GAS_COST_PER_TX_BNB, 'MAINNET_MICROTEST_MAX_GAS_COST_PER_TX_BNB');
   const envMaxTotalNativeSpendWei = requiredNativeBudget(env.MAINNET_MICROTEST_MAX_TOTAL_NATIVE_SPEND_BNB, 'MAINNET_MICROTEST_MAX_TOTAL_NATIVE_SPEND_BNB');
@@ -96,7 +120,7 @@ export function assertTxBudget({
   const maxNativeValueWei = minBigInt(envMaxNativeValueWei, BigInt(packetBudget.maxNativeValuePerTxWei));
   const maxGasCostWei = minBigInt(envMaxGasCostWei, BigInt(packetBudget.maxGasCostPerTxWei));
   const maxTotalNativeSpendWei = minBigInt(envMaxTotalNativeSpendWei, BigInt(packetBudget.maxTotalNativeSpendWei));
-  const value = runtimeUint(valueWei ?? 0, 'valueWei');
+  const value = runtimeUint(valueWei, 'valueWei');
   const gas = runtimeUint(estimatedGas, 'estimatedGas');
   const maxFee = runtimeUint(maxFeePerGasWei, 'maxFeePerGasWei');
   const gasCostWei = gas * maxFee;
@@ -107,7 +131,7 @@ export function assertTxBudget({
   console.log('--- tx preflight ---');
   console.log(`operation: ${operation}`);
   console.log(`function: ${functionCall}`);
-  console.log(`target: ${target}`);
+  console.log(`target: ${redactAddress(target)}`);
   console.log(`value: ${weiToNativeString(value)}`);
   console.log(`estimated gas: ${estimatedGas}`);
   console.log(`max fee per gas wei: ${maxFeePerGasWei}`);
@@ -118,7 +142,7 @@ export function assertTxBudget({
   console.log(`max gas cost per tx: ${weiToNativeString(maxGasCostWei)}`);
   console.log(`max total native spend: ${weiToNativeString(maxTotalNativeSpendWei)}`);
   console.log('gas policy: enforce approved packet BNB ceilings; Abu V2 token-value limits are enforced by micro:preflight');
-  console.log(`expected result: ${expectedResult}`);
+  console.log(`expected result: ${redactSensitive(expectedResult)}`);
 
   if (value > maxNativeValueWei) {
     throw new Error(`Refusing tx: native value exceeds MAINNET_MICROTEST_MAX_NATIVE_VALUE_PER_TX=${env.MAINNET_MICROTEST_MAX_NATIVE_VALUE_PER_TX}`);
@@ -141,11 +165,11 @@ function validateLogEntry(entry) {
   if (!entry || typeof entry !== 'object') throw new Error('Transaction log entry is invalid');
   const gasCostWei = nonNegativeInteger(entry.gasCostWei, 'gasCostWei');
   const valueWei = nonNegativeInteger(entry.valueWei, 'valueWei');
-  if (!['SUCCESS', 'FAILED'].includes(entry.status)) throw new Error('Transaction log status is invalid');
+  if (!['SUBMITTED', 'SUCCESS', 'FAILED'].includes(entry.status)) throw new Error('Transaction log status is invalid');
   if (!/^0x[0-9a-fA-F]{64}$/.test(entry.hash || '')) throw new Error('Transaction log hash is invalid');
   if (entry.chainId !== 56) throw new Error('Transaction log chainId must be BSC 56');
   if (!/^0x[0-9a-fA-F]{40}$/.test(entry.wallet || '')) throw new Error('Transaction log wallet is invalid');
-  const totalSpentWei = gasCostWei + (entry.status === 'SUCCESS' ? valueWei : 0n);
+  const totalSpentWei = gasCostWei + (entry.status === 'FAILED' ? 0n : valueWei);
   if (entry.totalSpentWei !== undefined && nonNegativeInteger(entry.totalSpentWei, 'totalSpentWei') !== totalSpentWei) {
     throw new Error('Transaction log total does not match gas and value');
   }
@@ -206,9 +230,14 @@ function readApprovedPacketBudget(env, preflightResult) {
   });
 }
 
-function assertPacketTransactionBinding(packet, { operation, functionCall, wallet, target }) {
+function assertPacketTransactionBinding(packet, { operation, functionCall, wallet, target, calldataHash, nonce, valueWei, estimatedGas, maxFeePerGasWei }) {
   const normalizedTarget = normalizeAddress(target, 'target');
   const normalizedWallet = normalizeAddress(wallet, 'wallet');
+  const normalizedCalldataHash = requiredHash(calldataHash, 'calldataHash');
+  const normalizedNonce = String(runtimeUint(nonce, 'nonce'));
+  const normalizedValueWei = String(runtimeUint(valueWei, 'valueWei'));
+  const normalizedGasLimit = String(runtimeUint(estimatedGas, 'gasLimit'));
+  const normalizedMaxFeePerGasWei = String(runtimeUint(maxFeePerGasWei, 'maxFeePerGasWei'));
   const entries = packetTransactionEntries(packet);
   if (!entries.length) throw new Error('micro-test packet must bind transaction targets and signer wallets');
   const matching = entries.find((entry) => {
@@ -216,12 +245,22 @@ function assertPacketTransactionBinding(packet, { operation, functionCall, walle
     const entryWallet = optionalAddress(entry.wallet);
     const entryFunction = String(entry.functionCall ?? '');
     const entryOperation = String(entry.operation ?? '');
+    const entryCalldataHash = optionalHash(entry.calldataHash);
+    const entryNonce = entry.nonce === undefined ? undefined : String(runtimeUint(entry.nonce, 'packet nonce'));
+    const entryValueWei = optionalPacketNativeValue(entry);
+    const entryGasLimit = entry.gasLimit === undefined ? undefined : String(runtimeUint(entry.gasLimit, 'packet gasLimit'));
+    const entryMaxFeePerGasWei = entry.maxFeePerGasWei === undefined ? undefined : String(runtimeUint(entry.maxFeePerGasWei, 'packet maxFeePerGasWei'));
     return entryTarget === normalizedTarget
       && entryWallet === normalizedWallet
       && entryFunction === String(functionCall)
-      && (!entryOperation || entryOperation === String(operation));
+      && (!entryOperation || entryOperation === String(operation))
+      && entryCalldataHash === normalizedCalldataHash
+      && entryNonce === normalizedNonce
+      && entryValueWei === normalizedValueWei
+      && entryGasLimit === normalizedGasLimit
+      && entryMaxFeePerGasWei === normalizedMaxFeePerGasWei;
   });
-  if (!matching) throw new Error('micro-test packet does not authorize this signer, target and function');
+  if (!matching) throw new Error('micro-test packet does not authorize this signer, target, function, calldata, nonce, value and gas cap');
 }
 
 function packetTransactionEntries(packet) {
@@ -244,6 +283,12 @@ function packetTransactionEntries(packet) {
       functionCall: item?.functionCall ?? item?.functionSignature ?? item?.function ?? item?.signature,
       target: item?.target ?? item?.to ?? item?.targetAddress ?? item?.contractAddress,
       wallet: item?.wallet ?? item?.from ?? item?.signer ?? item?.signerAddress ?? item?.fromAddress,
+      calldataHash: item?.calldataHash ?? item?.dataHash ?? item?.inputHash,
+      nonce: item?.nonce ?? item?.accountNonce,
+      valueWei: item?.valueWei ?? item?.nativeValueWei,
+      valueBnb: item?.valueBnb ?? item?.nativeValueBnb,
+      gasLimit: item?.gasLimit,
+      maxFeePerGasWei: item?.maxFeePerGasWei ?? item?.gasPriceWei ?? item?.feeCeilingWei,
     })));
 }
 
@@ -263,6 +308,32 @@ function optionalAddress(value) {
   } catch {
     return undefined;
   }
+}
+
+function requiredHash(value, name) {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(String(value ?? ''))) throw new Error(`${name} is invalid`);
+  return String(value).toLowerCase();
+}
+
+function optionalHash(value) {
+  if (value === undefined || value === null || String(value).trim() === '') return undefined;
+  return requiredHash(value, 'packet calldataHash');
+}
+
+function optionalPacketNativeValue(entry) {
+  const atomic = entry.valueWei ?? entry.nativeValueWei;
+  const decimal = entry.valueBnb ?? entry.nativeValueBnb;
+  if ((atomic === undefined || atomic === null || String(atomic).trim() === '')
+    && (decimal === undefined || decimal === null || String(decimal).trim() === '')) {
+    return undefined;
+  }
+  if (atomic !== undefined && atomic !== null && String(atomic).trim() !== ''
+    && decimal !== undefined && decimal !== null && String(decimal).trim() !== '') {
+    throw new Error('packet transaction must bind native value in exactly one format');
+  }
+  return atomic !== undefined && atomic !== null && String(atomic).trim() !== ''
+    ? String(runtimeUint(atomic, 'packet valueWei'))
+    : nativeToWei(String(decimal).trim()).toString();
 }
 
 function requiredBudgetField(budget, names, displayName) {
@@ -289,6 +360,20 @@ function runtimeUint(value, name) {
   const normalized = String(value);
   if (!/^(?:0|[1-9][0-9]*)$/.test(normalized)) throw new Error(`${name} must be a non-negative integer`);
   return BigInt(normalized);
+}
+
+function redactAddress(value) {
+  const normalized = getAddress(value);
+  return `${normalized.slice(0, 6)}…${normalized.slice(-4)}`;
+}
+
+function redactSensitive(value) {
+  return String(value ?? '')
+    .replace(/\b0x[0-9a-fA-F]{64,}\b/g, '0x<redacted-hex>')
+    .replace(/\b0x[0-9a-fA-F]{40}\b/g, (match) => redactAddress(match))
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer <redacted>')
+    .replace(/\b(private[_-]?key|secret|token|password)=([^&\s]+)/gi, '$1=<redacted>')
+    .replace(/https?:\/\/[^\s]+/gi, '<redacted-url>');
 }
 
 function requireExecutionLock() {
