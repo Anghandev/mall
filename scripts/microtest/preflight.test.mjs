@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -151,7 +152,7 @@ test('Abu V2 broadcast runner preflight requires a current Go coordinated manife
 
   withFixture((root, env) => {
     const broadcastPacket = writePacket(root, 'packet-broadcast-go.json', packet({ broadcastAuthorized: true }));
-    const result = validateAbuV2Preflight({ cwd: root, env, packetPath: broadcastPacket, gitCommit: COMMIT, requireBroadcastAuthorized: true });
+    const result = validateAbuV2Preflight({ cwd: root, env: envForPacket(broadcastPacket), packetPath: broadcastPacket, gitCommit: COMMIT, requireBroadcastAuthorized: true });
     assert.equal(result.deploymentAuthorized, true);
   }, {
     deploymentAuthorized: true,
@@ -161,7 +162,7 @@ test('Abu V2 broadcast runner preflight requires a current Go coordinated manife
 });
 
 test('Abu V2 broadcast preflight probes DB, queue, signer, executors and BNM before broadcast', async () => {
-  await withFixtureAsync(async (root, env) => {
+  await withFixtureAsync(async (root, envForPacket) => {
     const broadcastPacket = writePacket(root, 'packet-broadcast-go.json', packet({ broadcastAuthorized: true }));
     const calls = [];
     const probe = {
@@ -174,7 +175,7 @@ test('Abu V2 broadcast preflight probes DB, queue, signer, executors and BNM bef
     const { runAbuV2Preflight } = await import('./preflight.mjs');
     const result = await runAbuV2Preflight({
       cwd: root,
-      env,
+      env: envForPacket(broadcastPacket),
       packetPath: broadcastPacket,
       gitCommit: COMMIT,
       requireBroadcastAuthorized: true,
@@ -200,13 +201,13 @@ test('Abu V2 broadcast preflight probes DB, queue, signer, executors and BNM bef
 });
 
 test('Abu V2 broadcast preflight stops on a dead dependency before runner approval', async () => {
-  await withFixtureAsync(async (root, env) => {
+  await withFixtureAsync(async (root, envForPacket) => {
     const broadcastPacket = writePacket(root, 'packet-broadcast-go.json', packet({ broadcastAuthorized: true }));
     const { runAbuV2Preflight } = await import('./preflight.mjs');
     await assert.rejects(
       () => runAbuV2Preflight({
         cwd: root,
-        env,
+        env: envForPacket(broadcastPacket),
         packetPath: broadcastPacket,
         gitCommit: COMMIT,
         requireBroadcastAuthorized: true,
@@ -242,6 +243,20 @@ test('Abu V2 preflight requires mode-600 private packet files', () => {
   });
 });
 
+test('Abu V2 preflight binds the expected mode-600 packet sha256', () => {
+  withFixture((root, env, packetPath) => {
+    assert.throws(
+      () => validateAbuV2Preflight({
+        cwd: root,
+        env: { ...env, MAINNET_MICROTEST_PACKET_SHA256: '0'.repeat(64) },
+        packetPath,
+        gitCommit: COMMIT,
+      }),
+      /packet sha256 does not match MAINNET_MICROTEST_PACKET_SHA256/,
+    );
+  });
+});
+
 function withFixture(operation, coordinatedManifest = {}) {
   const root = mkdtempSync(join(tmpdir(), 'abu24k-v2-preflight-'));
   try {
@@ -258,7 +273,7 @@ function withFixture(operation, coordinatedManifest = {}) {
     const packetPath = join(root, 'packet.json');
     writeFileSync(packetPath, JSON.stringify(packet()), { mode: 0o600 });
     chmodSync(packetPath, 0o600);
-    operation(root, env(), packetPath);
+    operation(root, envForPacket(packetPath), packetPath, envForPacket);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -277,7 +292,7 @@ async function withFixtureAsync(operation, coordinatedManifest = {}) {
       ...coordinatedManifest,
     }));
     writeContractManifest(root);
-    await operation(root, env());
+    await operation(root, envForPacket);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -290,7 +305,7 @@ function writePacket(root, filename, value) {
   return packetPath;
 }
 
-function env() {
+function envForPacket(packetPath) {
   const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
   return {
     CHAIN_ID: '56',
@@ -329,6 +344,7 @@ function env() {
     MAINNET_MICROTEST_MAX_STOCK: '3',
     MAINNET_MICROTEST_SECKILL_INVENTORY: '1',
     MAINNET_MICROTEST_EVIDENCE_HASH: HASH,
+    ...(packetPath ? { MAINNET_MICROTEST_PACKET_SHA256: packetSha256(packetPath) } : {}),
   };
 }
 
@@ -357,6 +373,10 @@ function contract(name, nibble) {
 
 function role(value) { return `0x${String(value).repeat(40).slice(0, 40)}`; }
 function buyer(value) { return `0x${String(value + 6).repeat(40).slice(0, 40)}`; }
+
+function packetSha256(packetPath) {
+  return createHash('sha256').update(readFileSync(packetPath)).digest('hex');
+}
 
 function writeContractManifest(root, overrides = {}) {
   writeFileSync(join(root, 'packages/core-artifacts/contracts/contract-manifest.json'), JSON.stringify({

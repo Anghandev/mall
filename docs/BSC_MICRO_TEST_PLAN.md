@@ -5,7 +5,7 @@ release acceptance `PENDING`. Historical evidence below does not establish Go
 for the current commit and must not replace the new bounded run.
 
 The current acceptance run is bound to artifact
-`2.0.0-fulfillment-launch.25`, the release commit produced by this Goal and the
+`2.0.0-fulfillment-launch.26`, the release commit produced by this Goal and the
 five-role EOA architecture in `V2_SYSTEM_CONTRACT.md`. The historical evidence
 below was produced under `2.0.0-settlement-admin.16` and cannot authorize or
 substitute for the new run. This document alone does not authorize a
@@ -14,7 +14,7 @@ transaction.
 ## Current Gate For This Goal
 
 - `pnpm micro:preflight` is now the Abu V2 gate, not the old generic Web3
-  template. It must bind the same `.25` artifact, release commit,
+  template. It must bind the same `.26` artifact, release commit,
   mode-600 packet hash, five distinct production EOAs, W5/W1/W6 buyer set,
   maximum value plus Gas ceiling, dual BSC RPC runtime code hashes, BNM and local
   DB/Redis/signer/executor configuration before any runner is valid.
@@ -76,7 +76,7 @@ The earlier Safe-bound deployments are historical evidence only:
 
 The active deployment manifest is
 `platform-v2/deployments/bsc-payment-v2.json`; it remains historical deployment
-lineage for the deployed EOA contracts. The `.25` coordinated artifact is still
+lineage for the deployed EOA contracts. The `.26` coordinated artifact is still
 No-Go until W5/W1/W6 evidence passes. Current split:
 
 ```text
@@ -116,7 +116,7 @@ The merchant remains `BELOW_MINIMUM` until formal capital is provided.
 
 Before any broadcast, one ignored mode-600 packet must bind every transaction
 in execution order. Historical packet approvals and the previous `.22` No-Go
-baseline do not carry forward to the current `.25` repair candidate. A broadcast
+baseline do not carry forward to the current `.26` repair candidate. A broadcast
 requires this release id, packet SHA-256, W5/W1/W6 buyer set and the
 current Goal's standing authorization only while maximum value plus Gas
 remains within the <=3-USDT bounded plan. Nonce, target, amount, assertion or

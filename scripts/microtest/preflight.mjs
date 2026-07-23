@@ -43,6 +43,7 @@ const REQUIRED_ENV = [
   'MAINNET_MICROTEST_MAX_STOCK',
   'MAINNET_MICROTEST_SECKILL_INVENTORY',
   'MAINNET_MICROTEST_EVIDENCE_HASH',
+  'MAINNET_MICROTEST_PACKET_SHA256',
   'MAINNET_MICROTEST_MAX_NATIVE_VALUE_PER_TX',
   'MAINNET_MICROTEST_MAX_GAS_COST_PER_TX_BNB',
   'MAINNET_MICROTEST_MAX_TOTAL_NATIVE_SPEND_BNB',
@@ -187,6 +188,10 @@ export function validateAbuV2Preflight({
   const packetBnbBudget = readPacketBnbBudget(packet);
   assertEnvBnbBudgetWithinPacket(env, packetBnbBudget);
   const packetSha256 = sha256File(resolvedPacketPath);
+  const expectedPacketSha256 = packetHash(env.MAINNET_MICROTEST_PACKET_SHA256, 'MAINNET_MICROTEST_PACKET_SHA256');
+  if (packetSha256 !== expectedPacketSha256) {
+    throw new Error('micro-test packet sha256 does not match MAINNET_MICROTEST_PACKET_SHA256');
+  }
 
   return Object.freeze({
     artifactVersion,
@@ -391,6 +396,11 @@ function address(value, name) {
 function bytes32(value, name) {
   if (!/^0x[0-9a-fA-F]{64}$/.test(String(value))) throw new Error(`${name} must be bytes32`);
   return String(value).toLowerCase();
+}
+
+function packetHash(value, name) {
+  if (!/^(?:0x)?[0-9a-fA-F]{64}$/.test(String(value ?? ''))) throw new Error(`${name} is invalid`);
+  return String(value).toLowerCase().replace(/^0x/, '');
 }
 
 function atomicAmount(value, name, allowZero) {

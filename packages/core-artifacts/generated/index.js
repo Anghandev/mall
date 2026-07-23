@@ -1,4 +1,4 @@
-export const artifactVersion = "2.0.0-fulfillment-launch.25";
+export const artifactVersion = "2.0.0-fulfillment-launch.26";
 export const chainIdentity = Object.freeze({"chainId":56,"usdtAddress":"0x55d398326f99059ff775485246999027b3197955","nplAddress":"0x4e8277ab31e4956b2cd48449793a57656dfc03d2"});
 export const adminResourceTypes = Object.freeze(["ORDER","PRODUCT","MERCHANT"]);
 export const adminExportFormats = Object.freeze(["CSV","EXCEL"]);
