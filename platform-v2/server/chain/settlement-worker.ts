@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getAddress, keccak256, toUtf8Bytes } from 'ethers';
-import { REQUIRED_CONFIRMATIONS } from '../api/enums.ts';
+import { CORE_ARTIFACT_VERSION, REQUIRED_CONFIRMATIONS } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import {
   verifySettlementExecutionAuthorization,
@@ -487,6 +487,8 @@ export class SettlementWorker {
              finality.state AS finality_state, false AS recovered_prize,
              finality.updated_at
            FROM core.settlement_transfers transfer
+           JOIN core.settlement_requests request ON request.request_id = transfer.request_id
+           JOIN core.settlement_intents intent ON intent.intent_id = request.intent_id
            JOIN core.settlement_transfer_attempts attempt
              ON attempt.transfer_id = transfer.transfer_id AND attempt.state = 'SETTLED'
            JOIN core.transaction_finality finality
@@ -495,6 +497,8 @@ export class SettlementWorker {
             AND finality.tx_hash = attempt.execution_tx_hash
            WHERE transfer.state = 'SETTLED' AND finality.state = 'FINAL'
              AND finality.block_number IS NOT NULL AND finality.block_hash IS NOT NULL
+             AND transfer.artifact_version = $1
+             AND intent.artifact_version = $1
            UNION ALL
            SELECT transfer.transfer_id, attempt.attempt_id, finality.transaction_id,
              finality.block_number::text, finality.block_hash,
@@ -502,6 +506,7 @@ export class SettlementWorker {
              finality.updated_at
            FROM core.settlement_transfers transfer
            JOIN core.settlement_requests request ON request.request_id = transfer.request_id
+           JOIN core.settlement_intents intent ON intent.intent_id = request.intent_id
            JOIN core.settlement_transfer_attempts attempt
              ON attempt.transfer_id = transfer.transfer_id
             AND attempt.state IN ('FAILED','QUARANTINED')
@@ -512,6 +517,8 @@ export class SettlementWorker {
            WHERE transfer.state = 'QUARANTINED' AND request.state = 'QUARANTINED'
              AND finality.state IN ('FINAL','FAILED')
              AND finality.block_number IS NOT NULL AND finality.block_hash IS NOT NULL
+             AND transfer.artifact_version = $1
+             AND intent.artifact_version = $1
              AND EXISTS (
                SELECT 1 FROM core.durable_jobs job
                WHERE job.job_type = 'RECONCILE'
@@ -520,6 +527,7 @@ export class SettlementWorker {
              )
          ) candidate
          ORDER BY candidate.updated_at, candidate.transfer_id LIMIT 1`,
+        [CORE_ARTIFACT_VERSION],
       );
       const row = result.rows[0];
       if (!row) return undefined;
