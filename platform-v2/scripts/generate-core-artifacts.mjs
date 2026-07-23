@@ -351,13 +351,19 @@ for (const path of Object.values(componentPaths)) {
 }
 const publishedContractManifest = JSON.parse(readRequired(join(contractsRoot, 'contract-manifest.json')));
 const historicalDeploymentLineage = publishedContractManifest.historicalDeploymentLineage ?? {};
+const contractDeploymentAuthorized = publishedContractManifest.deploymentAuthorized === true
+  && publishedContractManifest.deploymentStatus === 'DEPLOYED'
+  && typeof publishedContractManifest.deploymentAuthorizationEvidenceHash === 'string'
+  && /^0x[0-9a-fA-F]{64}$/.test(publishedContractManifest.deploymentAuthorizationEvidenceHash);
 
 const coordinatedManifest = {
   artifactVersion,
   publicationStatus: 'COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT',
-  deploymentAuthorized: false,
-  deploymentAuthorizationEvidenceHash: null,
-  releaseGateStatus: 'NO_GO_REPAIR_BASELINE',
+  deploymentAuthorized: contractDeploymentAuthorized,
+  deploymentAuthorizationEvidenceHash: contractDeploymentAuthorized
+    ? publishedContractManifest.deploymentAuthorizationEvidenceHash
+    : null,
+  releaseGateStatus: contractDeploymentAuthorized ? 'GO' : 'NO_GO_REPAIR_BASELINE',
   historicalDeploymentLineage: {
     artifactVersion: historicalDeploymentLineage.artifactVersion ?? '2.0.0-settlement-admin.16',
     deploymentAuthorized: historicalDeploymentLineage.deploymentAuthorized === true,

@@ -223,7 +223,12 @@ async function verifyExternalDependencies(result, env, probe) {
     probe.redis(env.QUEUE_URL, 'queue Redis'),
     probe.signer(env.SIGNER_SERVICE_URL, env.SIGNER_SERVICE_TOKEN, env.PLATFORM_GOVERNANCE_WALLET_ADDRESS),
     probe.executor(env.SETTLEMENT_EXECUTOR_URL, env.SETTLEMENT_EXECUTOR_TOKEN, 'settlement executor'),
-    probe.executor(env.GOVERNANCE_EXECUTOR_URL, env.GOVERNANCE_EXECUTOR_TOKEN, 'governance executor'),
+    probe.executor(env.GOVERNANCE_EXECUTOR_URL, env.GOVERNANCE_EXECUTOR_TOKEN, 'governance executor', {
+      operation: 'PENDING_NONCE',
+      artifactVersion: result.artifactVersion,
+      chainId: 56,
+      governanceWallet: env.PLATFORM_GOVERNANCE_WALLET_ADDRESS,
+    }),
     probe.bnm(env.BNM_AVAILABILITY_URL, env.BNM_API_TOKEN, {
       projectId: env.BNM_PROJECT_ID,
       evidenceHash: env.BNM_MONOTONIC_CONFORMANCE_EVIDENCE_HASH,
@@ -275,11 +280,11 @@ async function probeSigner(url, token, expectedSigner) {
   }
 }
 
-async function probeExecutor(url, token, label) {
+async function probeExecutor(url, token, label, body = {}) {
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-    body: '{}',
+    body: JSON.stringify(body),
   });
   if (response.status === 401 || response.status === 403) {
     throw new Error(`${label} authentication failed`);
@@ -293,22 +298,41 @@ async function probeExecutor(url, token, label) {
 }
 
 async function probeBnm(url, token, input) {
-  const healthUrl = new URL(url);
-  healthUrl.searchParams.set('projectId', input.projectId);
-  healthUrl.searchParams.set('evidenceHash', input.evidenceHash);
-  healthUrl.searchParams.set('buyers', input.buyers.join(','));
-  const body = await fetchJson(healthUrl, token, { method: 'GET', label: 'BNM availability' });
-  if (body.status && !['READY', 'OK'].includes(String(body.status).toUpperCase())) {
-    throw new Error('BNM availability readiness check failed');
+  for (const buyer of input.buyers) {
+    const walletAddress = buyer.toLowerCase();
+    const body = await fetchJson(url, token, {
+      method: 'POST',
+      label: `BNM availability ${redactAddress(walletAddress)}`,
+      headers: {
+        'content-type': 'application/json',
+        'idempotency-key': `bnm-wallet-status:${walletAddress}`,
+      },
+      body: JSON.stringify({
+        operation: 'CHECK_WALLET',
+        projectId: input.projectId,
+        conformanceEvidenceHash: input.evidenceHash,
+        walletAddress,
+      }),
+    });
+    if (
+      body.projectId !== input.projectId
+      || String(body.walletAddress ?? '').toLowerCase() !== walletAddress
+      || body.registered !== true
+      || String(body.conformanceEvidenceHash ?? '').toLowerCase() !== input.evidenceHash.toLowerCase()
+      || !Number.isFinite(Date.parse(String(body.checkedAt ?? '')))
+    ) {
+      throw new Error(`BNM availability readiness check failed for ${redactAddress(walletAddress)}`);
+    }
   }
 }
 
-async function fetchJson(url, token, { method, label }) {
+async function fetchJson(url, token, { method, label, headers, body }) {
   let response;
   try {
     response = await fetch(url, {
       method,
-      headers: { accept: 'application/json', authorization: `Bearer ${token}` },
+      headers: { accept: 'application/json', authorization: `Bearer ${token}`, ...(headers ?? {}) },
+      ...(body === undefined ? {} : { body }),
     });
   } catch (error) {
     throw new Error(`${label} readiness check failed: ${redactedError(error)}`);
