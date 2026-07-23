@@ -74,7 +74,7 @@ artifact 或历史证据。
   失败。
 - V2 runtime/workspace 没有 import/require `legacy/v1-npl-only/**`。现有命中
   仅为 README/docs/baseline/bundle-check 的隔离或负向保护。
-- 没有把 legacy 内删除/移动作为当前 `.26` repair candidate 的完成证据。
+- 没有把 legacy 内删除/移动作为当前 `.27` repair candidate 的完成证据。
   先前被移到 Trash 的 ignored V1 缓存若需要复现旧系统，应在单独 cutover/
   归档任务中恢复或登记；tracked V1 始终保留。
 - `.env`、`.env.production`、`test-artifacts/`、tracked V1、旧部署清单、
@@ -84,7 +84,7 @@ artifact 或历史证据。
 
 | 内容 | 状态 | 处理 |
 |---|---|---|
-| `legacy/v1-npl-only/node_modules/` | out-of-scope | 不作为 `.26` 修复证据；如需旧系统复现，单独 cutover/归档任务处理 |
+| `legacy/v1-npl-only/node_modules/` | out-of-scope | 不作为 `.27` 修复证据；如需旧系统复现，单独 cutover/归档任务处理 |
 | `legacy/v1-npl-only/cache/` | out-of-scope | 同上 |
 | `legacy/v1-npl-only/out/` | out-of-scope | 同上 |
 | `legacy/v1-npl-only/.expo/` | out-of-scope | 同上 |

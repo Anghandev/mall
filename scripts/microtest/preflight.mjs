@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getAddress, keccak256 } from 'ethers';
+import { getAddress, keccak256, Wallet } from 'ethers';
 import { projectRootFromScript, readEnvFile } from './env-utils.mjs';
 
 const require = createRequire(import.meta.url);
@@ -147,6 +147,9 @@ export function validateAbuV2Preflight({
     const role = protocolRoleMap.get(buyer.toLowerCase());
     if (role) throw new Error(`mainnet micro-test buyer conflicts with protocol role ${role}`);
   }
+  if (requireBroadcastAuthorized) {
+    assertBroadcastBuyerKeyBinding(env, buyerWallets);
+  }
 
   const expiresAt = new Date(env.MAINNET_MICROTEST_EXPIRES_AT);
   const now = new Date();
@@ -169,8 +172,6 @@ export function validateAbuV2Preflight({
   if (packet.chainId !== 56) throw new Error('micro-test packet must bind BSC chainId 56');
   if (packet.artifactVersion !== artifactVersion) throw new Error(`micro-test packet artifactVersion ${packet.artifactVersion} does not match ${artifactVersion}`);
   if (packet.gitCommit !== releaseCommit) throw new Error('micro-test packet gitCommit does not match the current release commit');
-  if (requireBroadcastAuthorized) assertCoordinatedBroadcastAuthorized(coordinated);
-  if (requireBroadcastAuthorized && packet.broadcastAuthorized !== true) throw new Error('micro-test packet is not broadcastAuthorized');
   const packetBuyers = packetBuyerEntries(packet).map((entry, index) => ({
     label: buyerLabel(entry.label, `packet buyer label[${index}]`),
     wallet: address(entry.wallet, `packet buyer[${index}]`),
@@ -192,11 +193,15 @@ export function validateAbuV2Preflight({
   if (packetSha256 !== expectedPacketSha256) {
     throw new Error('micro-test packet sha256 does not match MAINNET_MICROTEST_PACKET_SHA256');
   }
+  const microtestBroadcastAuthorized = requireBroadcastAuthorized
+    ? assertMicrotestBroadcastAuthorized({ coordinated, packet })
+    : false;
 
   return Object.freeze({
     artifactVersion,
     gitCommit: releaseCommit,
     broadcastRequired: requireBroadcastAuthorized,
+    microtestBroadcastAuthorized,
     packetPath: resolvedPacketPath,
     packetSha256,
     packetBnbBudget,
@@ -364,7 +369,10 @@ function printSummary(result, skippedRpc) {
   console.log(`artifact: ${result.artifactVersion}`);
   console.log(`commit: ${result.gitCommit.slice(0, 12)}`);
   console.log(`packet sha256: ${result.packetSha256}`);
-  console.log(`release gate: ${result.releaseGateStatus}; broadcast authorized: ${result.deploymentAuthorized}`);
+  console.log(`production release gate: ${result.releaseGateStatus}; deployment authorized: ${result.deploymentAuthorized}`);
+  if (result.broadcastRequired) {
+    console.log(`micro-test broadcast authorized: ${result.microtestBroadcastAuthorized}`);
+  }
   console.log(`buyer wallets: ${result.buyerWallets.map(redactAddress).join(', ')}`);
   console.log(`contracts: ${result.contracts.map((item) => `${item.name}:${redactAddress(item.address)}`).join(', ')}`);
   if (skippedRpc) console.log('runtime RPC check: skipped by caller');
@@ -429,16 +437,18 @@ function assertDistinct(entries, label) {
   }
 }
 
-function assertCoordinatedBroadcastAuthorized(coordinated) {
-  if (coordinated.deploymentAuthorized !== true) {
-    throw new Error('coordinated manifest does not authorize broadcast for this artifact');
+function assertMicrotestBroadcastAuthorized({ coordinated, packet }) {
+  if (coordinated.deploymentAuthorized === true || String(coordinated.releaseGateStatus ?? '').toUpperCase() === 'GO') {
+    throw new Error('bounded micro-test broadcast must not use a production GO coordinated manifest');
   }
-  if (!/^0x[0-9a-fA-F]{64}$/.test(String(coordinated.deploymentAuthorizationEvidenceHash ?? ''))) {
-    throw new Error('coordinated manifest is missing deploymentAuthorizationEvidenceHash for broadcast');
+  if (coordinated.deploymentAuthorized !== false || String(coordinated.releaseGateStatus ?? '').toUpperCase() !== 'NO_GO_REPAIR_BASELINE') {
+    throw new Error(`coordinated manifest release gate is ${coordinated.releaseGateStatus ?? 'UNSPECIFIED'}; bounded micro-test requires the fail-closed No-Go repair baseline`);
   }
-  if (String(coordinated.releaseGateStatus ?? '').toUpperCase() !== 'GO') {
-    throw new Error(`coordinated manifest release gate is ${coordinated.releaseGateStatus ?? 'UNSPECIFIED'}; broadcast requires GO`);
+  if (packet.broadcastAuthorized !== true) {
+    throw new Error('micro-test packet is not broadcastAuthorized');
   }
+  bytes32(packetBroadcastAuthorizationEvidenceHash(packet), 'micro-test packet broadcast authorization evidence hash');
+  return true;
 }
 
 function packetBuyerEntries(packet) {
@@ -452,11 +462,65 @@ function packetBuyerEntries(packet) {
   return wallets.map((wallet, index) => ({ label: Array.isArray(labels) ? labels[index] : undefined, wallet }));
 }
 
+function packetBroadcastAuthorizationEvidenceHash(packet) {
+  return packet.broadcastAuthorizationEvidenceHash
+    ?? packet.authorizationEvidenceHash
+    ?? packet.broadcastAuthorization?.evidenceHash
+    ?? packet.mainnetMicrotest?.broadcastAuthorizationEvidenceHash
+    ?? packet.mainnetMicrotest?.authorizationEvidenceHash
+    ?? packet.acceptance?.broadcastAuthorizationEvidenceHash
+    ?? packet.acceptance?.authorizationEvidenceHash;
+}
+
 function assertPacketBuyerLabels(packetBuyers) {
   if (packetBuyers.length !== 3) throw new Error('micro-test packet buyer labels must be exactly W5/W1/W6');
   const labelSet = new Set(packetBuyers.map((entry) => entry.label));
   if (labelSet.size !== 3 || REQUIRED_BUYER_LABELS.some((label) => !labelSet.has(label))) {
     throw new Error('micro-test packet buyer labels must be exactly W5/W1/W6 and must not include W3');
+  }
+}
+
+function assertBroadcastBuyerKeyBinding(env, buyerWallets) {
+  const expectedByLabel = new Map([
+    ['W5', privateKeyAddress(env.WALLET_5_PRIVATE_KEY, 'WALLET_5_PRIVATE_KEY')],
+    ['W1', privateKeyAddress(env.WALLET_1_PRIVATE_KEY, 'WALLET_1_PRIVATE_KEY')],
+    ['W6', w6PrivateKeyAddress(env)],
+  ]);
+  const w3Wallet = privateKeyAddress(env.WALLET_3_PRIVATE_KEY, 'WALLET_3_PRIVATE_KEY');
+  if (buyerWallets.some((buyer) => buyer.toLowerCase() === w3Wallet.toLowerCase())) {
+    throw new Error('W3/NPL Reward wallet must not be a mainnet micro-test buyer');
+  }
+  REQUIRED_BUYER_LABELS.forEach((label, index) => {
+    if (buyerWallets[index].toLowerCase() !== expectedByLabel.get(label).toLowerCase()) {
+      throw new Error(`MAINNET_MICROTEST_BUYER_WALLETS[${index}] must be the ${label} wallet derived from its local private key`);
+    }
+  });
+}
+
+function w6PrivateKeyAddress(env) {
+  const wallet6 = optionalPrivateKeyAddress(env.WALLET_6_PRIVATE_KEY, 'WALLET_6_PRIVATE_KEY');
+  const microtestW6 = optionalPrivateKeyAddress(env.MICROTEST_WALLET_6_PRIVATE_KEY, 'MICROTEST_WALLET_6_PRIVATE_KEY');
+  if (!wallet6 && !microtestW6) {
+    throw new Error('WALLET_6_PRIVATE_KEY or MICROTEST_WALLET_6_PRIVATE_KEY is required for broadcast buyer binding');
+  }
+  if (wallet6 && microtestW6 && wallet6.toLowerCase() !== microtestW6.toLowerCase()) {
+    throw new Error('WALLET_6_PRIVATE_KEY and MICROTEST_WALLET_6_PRIVATE_KEY must resolve to the same W6 wallet');
+  }
+  return wallet6 ?? microtestW6;
+}
+
+function privateKeyAddress(value, name) {
+  if (!String(value ?? '').trim()) throw new Error(`${name} is required for broadcast buyer binding`);
+  return optionalPrivateKeyAddress(value, name);
+}
+
+function optionalPrivateKeyAddress(value, name) {
+  const normalized = String(value ?? '').trim();
+  if (!normalized) return undefined;
+  try {
+    return new Wallet(normalized).address;
+  } catch {
+    throw new Error(`${name} is invalid`);
   }
 }
 

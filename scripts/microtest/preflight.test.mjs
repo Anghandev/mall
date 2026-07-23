@@ -4,11 +4,19 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { Wallet } from 'ethers';
 import { validateAbuV2Preflight } from './preflight.mjs';
 
 const HASH = `0x${'1'.repeat(64)}`;
 const COMMIT = 'abcdef0123456789abcdef0123456789abcdef01';
 const ARTIFACT = '2.0.0-test.1';
+const TEST_KEYS = Object.freeze({
+  W1: privateKey(1),
+  W3: privateKey(3),
+  W5: privateKey(5),
+  W6: privateKey(6),
+  OTHER: privateKey(9),
+});
 
 test('Abu V2 preflight accepts a commit-bound W5/W1/W6-labeled three-buyer packet', () => {
   withFixture((root, env, packetPath) => {
@@ -113,6 +121,25 @@ test('Abu V2 preflight requires packet-bound W5/W1/W6 buyer wallets', () => {
       /must be exactly one of W5\/W1\/W6/,
     );
 
+    const w3AddressAsW6 = writePacket(root, 'packet-w3-address-as-w6.json', packet({
+      broadcastAuthorized: true,
+      buyerWallets: [buyer(1), buyer(2), walletForKey(TEST_KEYS.W3)],
+      buyerLabels: ['W5', 'W1', 'W6'],
+    }));
+    assert.throws(
+      () => validateAbuV2Preflight({
+        cwd: root,
+        env: {
+          ...envForPacket(w3AddressAsW6),
+          MAINNET_MICROTEST_BUYER_WALLETS: [buyer(1), buyer(2), walletForKey(TEST_KEYS.W3)].join(','),
+        },
+        packetPath: w3AddressAsW6,
+        gitCommit: COMMIT,
+        requireBroadcastAuthorized: true,
+      }),
+      /W3\/NPL Reward wallet must not be a mainnet micro-test buyer/,
+    );
+
     const missingBudget = writePacket(root, 'packet-missing-budget.json', packet({ bnbBudget: undefined }));
     assert.throws(
       () => validateAbuV2Preflight({ cwd: root, env, packetPath: missingBudget, gitCommit: COMMIT }),
@@ -129,35 +156,44 @@ test('Abu V2 preflight requires packet-bound W5/W1/W6 buyer wallets', () => {
 
 
 
-test('Abu V2 broadcast runner preflight requires a current Go coordinated manifest', () => {
+test('Abu V2 broadcast runner preflight requires bounded packet authorization while production release stays No-Go', () => {
   withFixture((root, env) => {
-    const broadcastPacket = writePacket(root, 'packet-broadcast.json', packet({ broadcastAuthorized: true }));
+    const broadcastPacket = writePacket(root, 'packet-broadcast.json', packet({ broadcastAuthorized: false }));
     assert.throws(
       () => validateAbuV2Preflight({ cwd: root, env, packetPath: broadcastPacket, gitCommit: COMMIT, requireBroadcastAuthorized: true }),
-      /coordinated manifest does not authorize broadcast/,
+      /micro-test packet is not broadcastAuthorized/,
     );
   });
 
   withFixture((root, env) => {
-    const pendingPacket = writePacket(root, 'packet-broadcast-pending.json', packet({ broadcastAuthorized: true }));
+    const missingEvidencePacket = writePacket(root, 'packet-broadcast-missing-evidence.json', packet({
+      broadcastAuthorized: true,
+      broadcastAuthorizationEvidenceHash: undefined,
+    }));
     assert.throws(
-      () => validateAbuV2Preflight({ cwd: root, env, packetPath: pendingPacket, gitCommit: COMMIT, requireBroadcastAuthorized: true }),
-      /broadcast requires GO/,
+      () => validateAbuV2Preflight({ cwd: root, env: envForPacket(missingEvidencePacket), packetPath: missingEvidencePacket, gitCommit: COMMIT, requireBroadcastAuthorized: true }),
+      /broadcast authorization evidence hash/,
     );
-  }, {
-    deploymentAuthorized: true,
-    deploymentAuthorizationEvidenceHash: HASH,
-    releaseGateStatus: 'PENDING_REVIEW',
   });
 
   withFixture((root, env) => {
-    const broadcastPacket = writePacket(root, 'packet-broadcast-go.json', packet({ broadcastAuthorized: true }));
-    const result = validateAbuV2Preflight({ cwd: root, env: envForPacket(broadcastPacket), packetPath: broadcastPacket, gitCommit: COMMIT, requireBroadcastAuthorized: true });
-    assert.equal(result.deploymentAuthorized, true);
+    const productionGoPacket = writePacket(root, 'packet-production-go.json', packet({ broadcastAuthorized: true }));
+    assert.throws(
+      () => validateAbuV2Preflight({ cwd: root, env: envForPacket(productionGoPacket), packetPath: productionGoPacket, gitCommit: COMMIT, requireBroadcastAuthorized: true }),
+      /must not use a production GO coordinated manifest/,
+    );
   }, {
     deploymentAuthorized: true,
     deploymentAuthorizationEvidenceHash: HASH,
     releaseGateStatus: 'GO',
+  });
+
+  withFixture((root) => {
+    const broadcastPacket = writePacket(root, 'packet-broadcast-go.json', packet({ broadcastAuthorized: true }));
+    const result = validateAbuV2Preflight({ cwd: root, env: envForPacket(broadcastPacket), packetPath: broadcastPacket, gitCommit: COMMIT, requireBroadcastAuthorized: true });
+    assert.equal(result.deploymentAuthorized, false);
+    assert.equal(result.releaseGateStatus, 'NO_GO_REPAIR_BASELINE');
+    assert.equal(result.microtestBroadcastAuthorized, true);
   });
 });
 
@@ -193,10 +229,6 @@ test('Abu V2 broadcast preflight probes DB, queue, signer, executors and BNM bef
       'redis:queue Redis',
       'signer',
     ]);
-  }, {
-    deploymentAuthorized: true,
-    deploymentAuthorizationEvidenceHash: HASH,
-    releaseGateStatus: 'GO',
   });
 });
 
@@ -224,10 +256,6 @@ test('Abu V2 broadcast preflight stops on a dead dependency before runner approv
       }),
       /business database readiness check failed/,
     );
-  }, {
-    deploymentAuthorized: true,
-    deploymentAuthorizationEvidenceHash: HASH,
-    releaseGateStatus: 'GO',
   });
 });
 
@@ -322,6 +350,11 @@ function envForPacket(packetPath) {
     SETTLEMENT_EXECUTOR_TOKEN: 'configured',
     GOVERNANCE_EXECUTOR_URL: 'http://127.0.0.1:8790/governance',
     GOVERNANCE_EXECUTOR_TOKEN: 'configured',
+    WALLET_1_PRIVATE_KEY: TEST_KEYS.W1,
+    WALLET_3_PRIVATE_KEY: TEST_KEYS.W3,
+    WALLET_5_PRIVATE_KEY: TEST_KEYS.W5,
+    WALLET_6_PRIVATE_KEY: TEST_KEYS.W6,
+    MICROTEST_WALLET_6_PRIVATE_KEY: TEST_KEYS.W6,
     MAINNET_MICROTEST_MAX_NATIVE_VALUE_PER_TX: '0',
     MAINNET_MICROTEST_MAX_GAS_COST_PER_TX_BNB: '0.001',
     MAINNET_MICROTEST_MAX_TOTAL_NATIVE_SPEND_BNB: '0.01',
@@ -352,6 +385,7 @@ function packet(overrides = {}) {
   return {
     schema: 'abu24k-v2-mainnet-microtest-acceptance-v1',
     broadcastAuthorized: false,
+    broadcastAuthorizationEvidenceHash: HASH,
     chainId: 56,
     artifactVersion: ARTIFACT,
     gitCommit: COMMIT,
@@ -372,7 +406,20 @@ function contract(name, nibble) {
 }
 
 function role(value) { return `0x${String(value).repeat(40).slice(0, 40)}`; }
-function buyer(value) { return `0x${String(value + 6).repeat(40).slice(0, 40)}`; }
+function buyer(value) {
+  if (value === 1) return walletForKey(TEST_KEYS.W5);
+  if (value === 2) return walletForKey(TEST_KEYS.W1);
+  if (value === 3) return walletForKey(TEST_KEYS.W6);
+  return walletForKey(TEST_KEYS.OTHER);
+}
+
+function privateKey(value) {
+  return `0x${String(value).padStart(64, '0')}`;
+}
+
+function walletForKey(privateKeyValue) {
+  return new Wallet(privateKeyValue).address;
+}
 
 function packetSha256(packetPath) {
   return createHash('sha256').update(readFileSync(packetPath)).digest('hex');

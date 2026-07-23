@@ -1,7 +1,7 @@
 # 24K商城 V2 上线前验收报告
 
 > Historical `.18` acceptance snapshot only. Preserve it for audit, but do not
-> use it as current `.26` release or mainnet acceptance evidence.
+> use it as current `.27` release or mainnet acceptance evidence.
 
 日期：2026-07-20
 生产发布基线：`v2/core@a1c00261dc279af876407bf083e6540312d6da8e`
@@ -9,9 +9,9 @@ Core artifact：`2.0.0-fulfillment-launch.18`
 
 ## 结论
 
-**历史 `.18` 当时结论为 Go；当前 `.26` 发布目标仍为 No-Go/PENDING。**
+**历史 `.18` 当时结论为 Go；当前 `.27` 发布目标仍为 No-Go/PENDING。**
 
-`.18` 的 Go 只保留为历史审计证据，不能替代当前 `.26` release id、
+`.18` 的 Go 只保留为历史审计证据，不能替代当前 `.27` release id、
 W5/W1/W6 三买家主网微测、cleanup gate 和 600 秒生产观察。
 
 - `.18` 已闭合单订单手工发货、用户查看/确认收货、平台接管/

@@ -5,7 +5,7 @@ release acceptance `PENDING`. Historical evidence below does not establish Go
 for the current commit and must not replace the new bounded run.
 
 The current acceptance run is bound to artifact
-`2.0.0-fulfillment-launch.26`, the release commit produced by this Goal and the
+`2.0.0-fulfillment-launch.27`, the release commit produced by this Goal and the
 five-role EOA architecture in `V2_SYSTEM_CONTRACT.md`. The historical evidence
 below was produced under `2.0.0-settlement-admin.16` and cannot authorize or
 substitute for the new run. This document alone does not authorize a
@@ -14,13 +14,22 @@ transaction.
 ## Current Gate For This Goal
 
 - `pnpm micro:preflight` is now the Abu V2 gate, not the old generic Web3
-  template. It must bind the same `.26` artifact, release commit,
+  template. It must bind the same `.27` artifact, release commit,
   mode-600 packet hash, five distinct production EOAs, W5/W1/W6 buyer set,
   maximum value plus Gas ceiling, dual BSC RPC runtime code hashes, BNM and local
   DB/Redis/signer/executor configuration before any runner is valid.
 - A runner that skips this preflight, uses W3 as a buyer, points at a stale
   packet, mismatches commit/artifact/runtime hash, or exceeds the 3-USDT
   maximum value plus Gas ceiling is No-Go.
+- Production deployment authorization remains fail-closed during the bounded
+  micro-test. The runner may broadcast only when the mode-600 packet itself has
+  `broadcastAuthorized=true`, carries a bytes32 broadcast authorization
+  evidence hash, and matches the env-bound packet SHA-256. A production
+  `releaseGateStatus=GO` manifest must not be used to bypass the bounded
+  micro-test gate.
+- Broadcast preflight derives the canonical W5/W1/W6 buyer addresses from the
+  ignored local W5/W1/W6 private-key env and derives the forbidden W3/NPL Reward
+  address from the ignored local W3 key; relabeling W3 as W6 remains No-Go.
 - Full local `pnpm verify` also requires `POSTGRES_ADMIN_URL` for the real
   PostgreSQL gates. The tests read it from the shell or ignored local env files
   (`.env`, `.env.runtime`, `.env.wallets.local`) and must never print the URL.
@@ -76,7 +85,7 @@ The earlier Safe-bound deployments are historical evidence only:
 
 The active deployment manifest is
 `platform-v2/deployments/bsc-payment-v2.json`; it remains historical deployment
-lineage for the deployed EOA contracts. The `.26` coordinated artifact is still
+lineage for the deployed EOA contracts. The `.27` coordinated artifact is still
 No-Go until W5/W1/W6 evidence passes. Current split:
 
 ```text
@@ -116,11 +125,13 @@ The merchant remains `BELOW_MINIMUM` until formal capital is provided.
 
 Before any broadcast, one ignored mode-600 packet must bind every transaction
 in execution order. Historical packet approvals and the previous `.22` No-Go
-baseline do not carry forward to the current `.26` repair candidate. A broadcast
+baseline do not carry forward to the current `.27` repair candidate. A broadcast
 requires this release id, packet SHA-256, W5/W1/W6 buyer set and the
 current Goal's standing authorization only while maximum value plus Gas
-remains within the <=3-USDT bounded plan. Nonce, target, amount, assertion or
-budget drift stops execution. The packet must contain:
+remains within the <=3-USDT bounded plan. The current artifact's production
+deployment authorization remains `false`; the packet's own broadcast
+authorization evidence is what permits the bounded micro-test. Nonce, target,
+amount, assertion or budget drift stops execution. The packet must contain:
 
 ```text
 chainId = 56
@@ -133,6 +144,7 @@ exact constructor arguments or calldata and calldata hash
 native value and token integer amounts
 eth_estimateGas, gas limit, fee ceiling and maximum BNB cost
 per-transaction and cumulative BNB/USDT/NPL budget
+bytes32 broadcast authorization evidence hash and broadcastAuthorized=true
 expected events and exact role-wallet/Burn/Router balance deltas
 post-transaction assertions and stop conditions
 ```

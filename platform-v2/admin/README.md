@@ -5,7 +5,7 @@ implements shared funds, contracts, API, Schema or signer behavior.
 
 ## Current Product Boundary
 
-- Production consumes `@abu24k/core-artifacts@2.0.0-fulfillment-launch.26`.
+- Production consumes `@abu24k/core-artifacts@2.0.0-fulfillment-launch.27`.
 - SIWE/JWT stays in memory. Every protected read and write is role-bound by
   Core and preserves typed `DecisionBlocked`, `ExternalBlocked`,
   `ConfigurationRequired` and correlation evidence.

@@ -3,7 +3,7 @@
 The platform-admin product is a consumer. It cannot add shared endpoints,
 schemas, financial logic, calldata, signers or database behavior.
 
-The coordinated consumer is `@abu24k/core-artifacts@2.0.0-fulfillment-launch.26`.
+The coordinated consumer is `@abu24k/core-artifacts@2.0.0-fulfillment-launch.27`.
 Published paths still fail closed when Core returns `DecisionBlocked`,
 `ExternalBlocked` or `ConfigurationRequired`.
 

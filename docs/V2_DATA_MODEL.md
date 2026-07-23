@@ -1,10 +1,10 @@
 # 24K商城 V2 Data Model
 
 Status: current coordinated No-Go repair baseline
-`2.0.0-fulfillment-launch.26`. This document describes implemented catalog,
+`2.0.0-fulfillment-launch.27`. This document describes implemented catalog,
 media, payment, fulfillment, settlement and administrative storage and does not
 authorize deployment. Historical `2.0.0-settlement-admin.16` artifacts are
-lineage evidence only and do not prove the current `.26` release is Go.
+lineage evidence only and do not prove the current `.27` release is Go.
 
 ## Storage Boundary
 

@@ -192,8 +192,8 @@ function readApprovedPacketBudget(env, preflightResult) {
   if (!preflightResult || typeof preflightResult !== 'object') {
     throw new Error('broadcast tx guard requires the current Abu V2 preflight result');
   }
-  if (preflightResult.deploymentAuthorized !== true || String(preflightResult.releaseGateStatus ?? '').toUpperCase() !== 'GO') {
-    throw new Error('broadcast tx guard requires a GO preflight result');
+  if (preflightResult.microtestBroadcastAuthorized !== true) {
+    throw new Error('broadcast tx guard requires an authorized bounded micro-test preflight result');
   }
   const packetPath = path.resolve(process.cwd(), env.MAINNET_MICROTEST_PACKET_PATH ?? DEFAULT_PACKET);
   const stat = fs.statSync(packetPath);

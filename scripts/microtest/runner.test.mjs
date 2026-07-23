@@ -35,8 +35,9 @@ test('runner calls broadcast preflight, executes only packet-bound calldata and 
       gitCommit: COMMIT,
       packetPath,
       packetSha256: createHash('sha256').update(readFileSync(packetPath)).digest('hex'),
-      deploymentAuthorized: true,
-      releaseGateStatus: 'GO',
+      deploymentAuthorized: false,
+      releaseGateStatus: 'NO_GO_REPAIR_BASELINE',
+      microtestBroadcastAuthorized: true,
     };
     let preflightCalled = false;
     const fakeProvider = {
@@ -168,8 +169,9 @@ test('runner records submitted hash before receipt wait failures', async () => {
       gitCommit: COMMIT,
       packetPath,
       packetSha256: createHash('sha256').update(readFileSync(packetPath)).digest('hex'),
-      deploymentAuthorized: true,
-      releaseGateStatus: 'GO',
+      deploymentAuthorized: false,
+      releaseGateStatus: 'NO_GO_REPAIR_BASELINE',
+      microtestBroadcastAuthorized: true,
     };
     const fakeProvider = {
       getNetwork: async () => ({ chainId: 56n }),
@@ -226,8 +228,9 @@ test('runner redacts provider error messages before returning them', async () =>
       gitCommit: COMMIT,
       packetPath,
       packetSha256: createHash('sha256').update(readFileSync(packetPath)).digest('hex'),
-      deploymentAuthorized: true,
-      releaseGateStatus: 'GO',
+      deploymentAuthorized: false,
+      releaseGateStatus: 'NO_GO_REPAIR_BASELINE',
+      microtestBroadcastAuthorized: true,
     };
     const fakeProvider = {
       getNetwork: async () => ({ chainId: 56n }),

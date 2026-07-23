@@ -66,7 +66,7 @@ importers:
   mall-v2:
     dependencies:
       '@abu24k/core-artifacts':
-        specifier: workspace:2.0.0-fulfillment-launch.26
+        specifier: workspace:2.0.0-fulfillment-launch.27
         version: link:../packages/core-artifacts
       ethers:
         specifier: 6.17.0
@@ -115,7 +115,7 @@ importers:
   merchant-v2:
     dependencies:
       '@abu24k/core-artifacts':
-        specifier: workspace:2.0.0-fulfillment-launch.26
+        specifier: workspace:2.0.0-fulfillment-launch.27
         version: link:../packages/core-artifacts
       lucide-react:
         specifier: 'catalog:'
@@ -194,7 +194,7 @@ importers:
   platform-v2/admin:
     dependencies:
       '@abu24k/core-artifacts':
-        specifier: workspace:2.0.0-fulfillment-launch.26
+        specifier: workspace:2.0.0-fulfillment-launch.27
         version: link:../../packages/core-artifacts
       lucide-react:
         specifier: 'catalog:'

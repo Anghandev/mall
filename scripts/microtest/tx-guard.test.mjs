@@ -302,8 +302,9 @@ function preflightResultFor(filename) {
     artifactVersion: ARTIFACT,
     gitCommit: COMMIT,
     packetSha256: createHash('sha256').update(readFileSync(filename)).digest('hex'),
-    deploymentAuthorized: true,
-    releaseGateStatus: 'GO',
+    deploymentAuthorized: false,
+    releaseGateStatus: 'NO_GO_REPAIR_BASELINE',
+    microtestBroadcastAuthorized: true,
   };
 }
 
