@@ -5,7 +5,7 @@ import {
   buildPaymentIntent,
   type CanonicalPaymentIntent,
 } from '../api/checkout.ts';
-import { CORE_ARTIFACT_VERSION, NPL_ADDRESS, USDT_ADDRESS } from '../api/enums.ts';
+import { CORE_ARTIFACT_VERSION, NPL_ADDRESS, USDT_ADDRESS, type UserRole } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import { parsePaymentPolicySnapshot } from '../api/payment-policy.ts';
 import type { PaymentPolicySnapshot } from '../api/payment-policy.ts';
@@ -51,7 +51,7 @@ export interface PaymentNplQuoteSource {
   }): Promise<{
     nplQuoteAmount: bigint;
     quoteSourceEvidence: {
-      source: 'PRIMARY' | 'FALLBACK';
+      source: 'PRIMARY' | 'FALLBACK' | 'PRIMARY_FALLBACK';
       observedBlock: number;
       reservesHash: string;
     };
@@ -654,6 +654,7 @@ export class CatalogPaymentService {
     validatePaymentSubmission(input);
     const now = this.#clock();
     return this.#transactions.transaction(async (executor) => {
+      const currentRoles = await requireCurrentPaymentRecoveryRoles(executor, actor);
       const quote = await executor.query<{ buyer_wallet: string }>(
         'SELECT buyer_wallet FROM core.payment_quotes WHERE order_id = $1',
         [input.orderId],
@@ -669,7 +670,7 @@ export class CatalogPaymentService {
         orderId: input.orderId,
         txHash: input.txHash.toLowerCase(),
         actor: actor.walletAddress,
-        roles: [...actor.roles].sort(),
+        roles: currentRoles,
       })));
       await enqueueAudit(executor, {
         sourceEventId: auditSourceId('audit:payment-txhash-recovery', {
@@ -682,7 +683,7 @@ export class CatalogPaymentService {
         resourceType: 'ORDER_PAYMENT',
         resourceId: input.orderId,
         actorWallet: actor.walletAddress,
-        actorRole: actor.roles.includes('ADMIN') ? 'ADMIN' : 'OPERATOR',
+        actorRole: currentRoles.includes('ADMIN') ? 'ADMIN' : 'OPERATOR',
         correlationId: `payment-txhash-recovery:${input.orderId}`,
         requestHash: evidenceHash.slice(2),
         payload: { orderId: input.orderId, txHash: input.txHash.toLowerCase() },
@@ -898,7 +899,7 @@ async function insertQuote(
     digest: string;
     signature: string;
     snapshotHash: string;
-    quoteSourceEvidence: { source: 'PRIMARY' | 'FALLBACK'; observedBlock: number; reservesHash: string };
+    quoteSourceEvidence: { source: 'PRIMARY' | 'FALLBACK' | 'PRIMARY_FALLBACK'; observedBlock: number; reservesHash: string };
   },
 ) {
   await executor.query(
@@ -964,7 +965,7 @@ async function insertSeckillQuote(
     digest: string;
     signature: string;
     quoteSourceEvidence: Record<'SECKILL' | 'FALLBACK_RETAIL', {
-      source: 'PRIMARY' | 'FALLBACK'; observedBlock: number; reservesHash: string;
+      source: 'PRIMARY' | 'FALLBACK' | 'PRIMARY_FALLBACK'; observedBlock: number; reservesHash: string;
     }>;
   },
 ) {
@@ -1832,7 +1833,7 @@ function validateCreateQuote(input: CreateOrdinaryQuoteInput) {
 }
 
 function assertQuoteSourceEvidence(value: unknown): asserts value is {
-  source: 'PRIMARY' | 'FALLBACK';
+  source: 'PRIMARY' | 'FALLBACK' | 'PRIMARY_FALLBACK';
   observedBlock: number;
   reservesHash: string;
 } {
@@ -1840,11 +1841,24 @@ function assertQuoteSourceEvidence(value: unknown): asserts value is {
     !value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== 3
     || Object.keys(value).some((key) => !['source', 'observedBlock', 'reservesHash'].includes(key))
-    || !['PRIMARY', 'FALLBACK'].includes(String((value as { source?: unknown }).source))
+    || !['PRIMARY', 'FALLBACK', 'PRIMARY_FALLBACK'].includes(String((value as { source?: unknown }).source))
     || !Number.isSafeInteger((value as { observedBlock?: unknown }).observedBlock)
     || Number((value as { observedBlock?: unknown }).observedBlock) <= 0
     || !isHash(String((value as { reservesHash?: unknown }).reservesHash))
   ) throw new CoreError('InvalidFinality', 'NPL quote source evidence is invalid', 409);
+}
+
+async function requireCurrentPaymentRecoveryRoles(executor: SqlExecutor, actor: FulfillmentActor): Promise<UserRole[]> {
+  const allowedSessionRoles = actor.roles.filter((role) => role === 'ADMIN' || role === 'OPERATOR');
+  if (allowedSessionRoles.length === 0) throw new CoreError('Forbidden', 'Platform recovery role is required', 403);
+  const result = await executor.query<{ role: UserRole }>(
+    `SELECT role FROM core.wallet_role_bindings
+     WHERE lower(wallet_address) = $1 AND status = 'ACTIVE' AND role = ANY($2::text[])
+     ORDER BY role`,
+    [normalizeAddress(actor.walletAddress), allowedSessionRoles],
+  );
+  if (!result.rows[0]) throw new CoreError('Forbidden', 'Current wallet role cannot recover payment txHash', 403);
+  return result.rows.map((row) => row.role);
 }
 
 function normalizeAddress(value: string) {

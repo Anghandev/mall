@@ -32,5 +32,6 @@ test('Nginx serves Mall and Merchant /assets business routes as SPA deep links w
   assert.match(source, /location = \/merchant\/assets \{\n\s+root \/var\/opt\/abu24k\/current;\n\s+try_files \/merchant\/index\.html =404;/);
   assert.match(source, /location = \/merchant\/assets\/ \{\n\s+root \/var\/opt\/abu24k\/current;\n\s+try_files \/merchant\/index\.html =404;/);
   assert.match(source, /location \^~ \/mall\/ \{\n\s+root \/var\/opt\/abu24k\/current;\n\s+try_files \$uri \$uri\/ \/mall\/index\.html;/);
-  assert.match(source, /location \^~ \/merchant\/ \{\n\s+root \/var\/opt\/abu24k\/current;\n\s+try_files \$uri \$uri\/ \/merchant\/index\.html;/);
+  assert.match(source, /location = \/block-burst\/rpc \{\n\s+limit_except POST \{ deny all; \}\n\s+proxy_pass https:\/\/bsc-dataseed\.binance\.org\//);
+  assert.match(source, /location = \/block-burst \{\n\s+return 301 \/mall\/block-blast;/);
 });

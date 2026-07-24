@@ -175,6 +175,12 @@ function assertNoCredentialValue(path, text) {
     if (!/(?:^|_)(?:KEY|UKEY|ACCESS_KEY_ID|SECRET|TOKEN|PASSWORD|MNEMONIC|SEED_PHRASE|CUSTOMER|USER|USER_ID|RPC_URL|DATABASE_URL|REDIS_URL|SMTP_URL)$/.test(name)) {
       continue;
     }
+    if (/^0x[0-9a-fA-F]{40}$/.test(value)) {
+      continue;
+    }
+    if (name.endsWith('_RPC_URL') && /^\/[A-Za-z0-9/_-]+$/.test(value)) {
+      continue;
+    }
     if (value !== '' && !/^\\?\$\{[A-Z][A-Z0-9_]*\}$/.test(value)) {
       throw new Error(`${path}: tracked credential value for ${name}`);
     }

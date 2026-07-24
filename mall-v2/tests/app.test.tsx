@@ -8,12 +8,13 @@ import {
   type NotificationInboxItem,
   type PaymentQuoteResponse,
 } from '@abu24k/core-artifacts';
+import { Interface } from 'ethers';
 import { MemoryRouter } from 'react-router-dom';
 import { vi } from 'vitest';
 
 import { MallApp, mallRuntimeBoundary } from '../src/App';
 import { isCoreOrderActionExecutable, productBaseline } from '../src/bootstrap';
-import { CoreClientError, type CoreClient, type CorePaymentAvailability } from '../src/core-client';
+import { CoreClientError, type CoreClient, type CorePaymentAvailability, type PublishedSeckillSessionProjection } from '../src/core-client';
 import { MallRuntimeProvider, useMallRuntime, validateSupportUrl, type MallServices, type PendingSubmission } from '../src/mall-runtime';
 import type { WalletGateway } from '../src/wallet';
 import { catalogCategories, catalogTags, publicMediaAccess } from './catalog-fixtures';
@@ -141,8 +142,10 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText('运动鞋')).toBeTruthy();
     expect(screen.getByText('黑金', { selector: '.taxonomy-strip span' })).toBeTruthy();
     expect(screen.getByText(product.subtitle)).toBeTruthy();
-    expect(screen.getByText(/USDT 原子单位/)).toBeTruthy();
+    expect(screen.getAllByText(/10\.00 USDT|80\.00 USDT/).length).toBeGreaterThan(0);
+    expect(document.body.textContent).not.toMatch(/USDT 原子单位/);
     expect(screen.getByText(/秒杀进行中/)).toBeTruthy();
+    expect(screen.getByText(/普通购买不可用，前往秒杀/)).toBeTruthy();
     const productImage = await screen.findByRole('img', { name: product.title });
     expect(productImage.getAttribute('src')).toBe(publicMediaAccess(product.mainImageAssetIds[0]!).readUrl);
     expect(createPublicMediaReadAccess).toHaveBeenCalledWith(product.mainImageAssetIds[0]!.toLowerCase());
@@ -214,16 +217,172 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.queryByLabelText(`${product.title} 商品视频`)).toBeNull();
   });
 
-  it('keeps all four primary tabs reachable and preserves the existing shell', async () => {
+  it('keeps all five primary tabs reachable and preserves the existing shell', async () => {
     const user = userEvent.setup();
     renderAt();
 
     const navigation = screen.getByRole('navigation', { name: '主要导航' });
-    for (const label of ['秒杀', '商城', '门店', '资产']) {
+    const labels = ['秒杀', '商城', '门店', '爆区块', '资产'];
+    for (const label of labels) {
       expect(within(navigation).getByRole('link', { name: label })).toBeTruthy();
     }
-    await user.click(within(navigation).getByRole('link', { name: '商城' }));
-    expect(screen.getByRole('heading', { name: '常规商城' })).toBeTruthy();
+    expect(Array.from(navigation.querySelectorAll('a')).map((link) => link.textContent?.trim())).toEqual(labels);
+    await user.click(within(navigation).getByRole('link', { name: '爆区块' }));
+    expect(screen.getByRole('heading', { name: '爆区块' })).toBeTruthy();
+    expect(screen.getByText(/独立玩法入口/)).toBeTruthy();
+  });
+
+  it('fails the block burst page closed until a production contract is configured', () => {
+    renderAt('/block-blast');
+
+    expect(screen.getByRole('heading', { name: '爆区块' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '生产合约未配置' })).toBeTruthy();
+    expect(screen.getByText(/MicroTest 不作为生产入口/)).toBeTruthy();
+    for (const label of ['打入 NPL', '领取本金', '领取奖励', '爆区块']) {
+      expect(screen.getByRole('button', { name: label }).hasAttribute('disabled')).toBe(true);
+    }
+  });
+
+  it('reads configured block burst pool and wallet state without Core coupling', async () => {
+    const user = userEvent.setup();
+    vi.stubEnv('VITE_BLOCK_BURST_CHAIN_ID', '56');
+    vi.stubEnv('VITE_BLOCK_BURST_NPL_TOKEN', BLOCK_BURST_NPL);
+    vi.stubEnv('VITE_BLOCK_BURST_PROXY', BLOCK_BURST_PROXY);
+    vi.stubEnv('VITE_BLOCK_BURST_RPC_URL', '/block-burst/rpc');
+    vi.stubEnv('VITE_BLOCK_BURST_ENABLE_WRITES', 'false');
+    const fetchSpy = mockBlockBurstRpc({ wallet: BLOCK_BURST_GUEST });
+    const authenticate = vi.fn().mockRejectedValue(new Error('Core login blocked'));
+    const previousEthereum = (globalThis as typeof globalThis & { ethereum?: unknown }).ethereum;
+    Object.defineProperty(globalThis, 'ethereum', {
+      configurable: true,
+      value: {
+        request: vi.fn(async ({ method }: { method: string }) => {
+          if (method === 'eth_chainId') return '0x38';
+          if (method === 'eth_requestAccounts') return [BLOCK_BURST_GUEST];
+          throw new Error(`unexpected wallet method ${method}`);
+        }),
+      },
+    });
+
+    try {
+      renderAt('/block-blast', readyServices({ authenticate }));
+
+      const nextSection = screen.getByRole('heading', { name: '下一次爆区块' }).closest('section')!;
+      expect(await within(nextSection).findByLabelText('当前期数2 / 10')).toBeTruthy();
+      expect(within(nextSection).getByLabelText('已入本金150 NPL')).toBeTruthy();
+      expect(within(nextSection).getByLabelText('本期目标200 万亿')).toBeTruthy();
+      expect(within(nextSection).getByLabelText('本期进度 0%')).toBeTruthy();
+      expect(within(nextSection).getByText('暂停中')).toBeTruthy();
+
+      await user.click(screen.getByRole('button', { name: '连接爆区块钱包' }));
+      expect(authenticate).not.toHaveBeenCalled();
+      expect(await screen.findByRole('button', { name: '切换爆区块钱包' })).toBeTruthy();
+      const accountSection = screen.getByRole('heading', { name: '我的本金权重' }).closest('section')!;
+      expect(await within(accountSection).findByLabelText('未领取本金25 NPL')).toBeTruthy();
+      expect(within(accountSection).getByLabelText('待领奖励3 NPL')).toBeTruthy();
+      expect(within(accountSection).getByLabelText('本金单数1')).toBeTruthy();
+      expect(await screen.findByText('本金单 #7')).toBeTruthy();
+      expect(fetchSpy).toHaveBeenCalled();
+      const rpcCalls = fetchSpy.mock.calls.map((call) => JSON.parse(String(call[1]?.body ?? '{}')) as { method: string; params?: [{ to?: string }] });
+      expect(new Set(rpcCalls.map((call) => call.method))).toEqual(new Set(['eth_chainId', 'eth_call']));
+      expect(rpcCalls.filter((call) => call.method === 'eth_call').every((call) => call.params?.[0]?.to?.toLowerCase() === BLOCK_BURST_PROXY.toLowerCase())).toBe(true);
+      expect(fetchSpy.mock.calls.every((call) => call[0] === '/block-burst/rpc')).toBe(true);
+    } finally {
+      fetchSpy.mockRestore();
+      if (previousEthereum === undefined) {
+        Reflect.deleteProperty(globalThis, 'ethereum');
+      } else {
+        Object.defineProperty(globalThis, 'ethereum', { configurable: true, value: previousEthereum });
+      }
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('colors the block burst tank by live progress thresholds', async () => {
+    vi.stubEnv('VITE_BLOCK_BURST_CHAIN_ID', '56');
+    vi.stubEnv('VITE_BLOCK_BURST_NPL_TOKEN', BLOCK_BURST_NPL);
+    vi.stubEnv('VITE_BLOCK_BURST_PROXY', BLOCK_BURST_PROXY);
+    vi.stubEnv('VITE_BLOCK_BURST_RPC_URL', '/block-burst/rpc');
+    vi.stubEnv('VITE_BLOCK_BURST_ENABLE_WRITES', 'false');
+    const fetchSpy = mockBlockBurstRpc({
+      activePrincipal: blockBurstNpl(140_000_000_000_000n),
+      currentTarget: blockBurstNpl(200_000_000_000_000n),
+    });
+
+    try {
+      renderAt('/block-blast', readyServices());
+
+      const tank = await screen.findByLabelText('本期进度 70%');
+      expect(tank.className).toContain('block-burst-tank--green');
+    } finally {
+      fetchSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('enables block burst approve and deposit only after explicit production write config', async () => {
+    const user = userEvent.setup();
+    vi.stubEnv('VITE_BLOCK_BURST_CHAIN_ID', '56');
+    vi.stubEnv('VITE_BLOCK_BURST_NPL_TOKEN', BLOCK_BURST_NPL);
+    vi.stubEnv('VITE_BLOCK_BURST_PROXY', BLOCK_BURST_PROXY);
+    vi.stubEnv('VITE_BLOCK_BURST_RPC_URL', '/block-burst/rpc');
+    vi.stubEnv('VITE_BLOCK_BURST_ENABLE_WRITES', 'true');
+    let allowance = 0n;
+    const fetchSpy = mockBlockBurstRpc({
+      wallet: BLOCK_BURST_GUEST,
+      getAllowance: () => allowance,
+      getBalance: () => blockBurstNpl(50n),
+    });
+    const sentTransactions: { from: string; to: string; data: string }[] = [];
+    const previousEthereum = (globalThis as typeof globalThis & { ethereum?: unknown }).ethereum;
+    Object.defineProperty(globalThis, 'ethereum', {
+      configurable: true,
+      value: {
+        request: vi.fn(async ({ method, params }: { method: string; params?: readonly unknown[] }) => {
+          if (method === 'eth_chainId') return '0x38';
+          if (method === 'eth_requestAccounts') return [BLOCK_BURST_GUEST];
+          if (method === 'eth_sendTransaction') {
+            const tx = params?.[0] as { from: string; to: string; data: string };
+            sentTransactions.push(tx);
+            if (tx.to.toLowerCase() === BLOCK_BURST_NPL.toLowerCase()) {
+              allowance = blockBurstNpl(10n);
+              return BLOCK_BURST_APPROVE_TX;
+            }
+            return BLOCK_BURST_DEPOSIT_TX;
+          }
+          throw new Error(`unexpected wallet method ${method}`);
+        }),
+      },
+    });
+
+    try {
+      const authenticate = vi.fn().mockRejectedValue(new Error('Core login blocked'));
+      renderAt('/block-blast', readyServices({ authenticate }));
+
+      await user.click(screen.getByRole('button', { name: '连接爆区块钱包' }));
+      expect(authenticate).not.toHaveBeenCalled();
+      expect(await screen.findByLabelText('未领取本金25 NPL')).toBeTruthy();
+      expect(await screen.findByText('钱包余额')).toBeTruthy();
+      await user.type(screen.getByLabelText('打入 NPL 数量'), '1.25');
+      await user.click(screen.getByRole('button', { name: /授权并打入 NPL|打入 NPL/ }));
+
+      expect(await screen.findByText(/已打入 1.25 NPL/)).toBeTruthy();
+      expect(sentTransactions).toHaveLength(2);
+      expect(sentTransactions[0]?.from.toLowerCase()).toBe(BLOCK_BURST_GUEST.toLowerCase());
+      expect(sentTransactions[0]?.to.toLowerCase()).toBe(BLOCK_BURST_NPL.toLowerCase());
+      expect(sentTransactions[0]?.data.startsWith(blockBurstTokenInterface.getFunction('approve')!.selector)).toBe(true);
+      expect(sentTransactions[1]?.to.toLowerCase()).toBe(BLOCK_BURST_PROXY.toLowerCase());
+      expect(sentTransactions[1]?.data.startsWith(blockBurstTestInterface.getFunction('deposit')!.selector)).toBe(true);
+      expect(fetchSpy.mock.calls.some((call) => JSON.parse(String(call[1]?.body ?? '{}')).method === 'eth_getTransactionReceipt')).toBe(true);
+    } finally {
+      fetchSpy.mockRestore();
+      if (previousEthereum === undefined) {
+        Reflect.deleteProperty(globalThis, 'ethereum');
+      } else {
+        Object.defineProperty(globalThis, 'ethereum', { configurable: true, value: previousEthereum });
+      }
+      vi.unstubAllEnvs();
+    }
   });
 
   it('renders the real buyer profile, UID and canonical overview counts', async () => {
@@ -240,7 +399,34 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText('2', { selector: '.order-status-item strong' })).toBeTruthy();
     expect(screen.getByText('3', { selector: '.order-status-item strong' })).toBeTruthy();
     expect(screen.getByText('1', { selector: '.order-status-item strong' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '收益三态' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'BNM 积分三态' })).toBeTruthy();
+    expect(screen.getByText(/不是代币/)).toBeTruthy();
     expect(document.body.textContent).not.toContain(deliveryOrder.buyerWallet);
+  });
+
+  it('summarizes Core reward ledgers into total, available and locked states', async () => {
+    const user = userEvent.setup();
+    renderAt('/assets', readyServices({
+      getBuyerOverview: vi.fn().mockResolvedValue(buyerOverview),
+      listSettlements: vi.fn().mockResolvedValue(settlementProjection),
+    }));
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    const summary = await screen.findByRole('heading', { name: '收益三态' });
+    const panel = summary.closest('section')!;
+    const bnm = within(panel).getByRole('heading', { name: 'BNM 积分三态' }).closest('article')!;
+    expect(within(bnm).getByText('1000')).toBeTruthy();
+    expect(within(bnm).getByText('300')).toBeTruthy();
+    expect(within(bnm).getByText('700')).toBeTruthy();
+
+    const genesis = within(panel).getByRole('heading', { name: '创世节点 NPL' }).closest('article')!;
+    expect(within(genesis).getAllByText('20')).toHaveLength(2);
+    expect(within(genesis).getAllByText('0')).toHaveLength(1);
+
+    const regional = within(panel).getByRole('heading', { name: '区域代理 NPL' }).closest('article')!;
+    expect(within(regional).getAllByText('30')).toHaveLength(2);
+    expect(within(regional).getByText('0')).toBeTruthy();
   });
 
   it('labels seckill and shopping counts as loaded-page statistics without placeholders', async () => {
@@ -442,18 +628,18 @@ describe('Mall V2 payment consumer', () => {
       regionCodeHash: deliveryTarget.regionCodeHash,
       label: '张三 · 辽宁省大连市中山区示例路 24 号',
     });
-    expect(screen.getByText(`${quote.intent.listPriceUsdt} USDT 原子单位`)).toBeTruthy();
+    expect(screen.getAllByText('120.00 USDT').length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole('link', { name: /核对报价/ }));
-    expect(screen.getByText(quote.intent.productUsdtPaymentAmount)).toBeTruthy();
-    expect(screen.getByText(quote.intent.platformServiceFeeUsdt)).toBeTruthy();
-    expect(screen.getByText(quote.intent.custodyProductUsdt)).toBeTruthy();
-    expect(screen.getByText(quote.intent.freightUsdt)).toBeTruthy();
-    expect(screen.getByText(quote.intent.usdtPaymentAmount)).toBeTruthy();
+    expect(screen.getByText('84.00 USDT')).toBeTruthy();
+    expect(screen.getByText('1.20 USDT')).toBeTruthy();
+    expect(screen.getByText('82.80 USDT')).toBeTruthy();
+    expect(screen.getAllByText('10.00 USDT').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('94.00 USDT').length).toBeGreaterThan(0);
     expect(screen.getByText(quote.intent.nplPaymentAmount)).toBeTruthy();
     expect(screen.getByText(/pay · BSC 56/)).toBeTruthy();
-    expect(screen.getByText(/canonical 原子单位/)).toBeTruthy();
-    expect(screen.getByText('当前 0')).toBeTruthy();
+    expect(screen.getByText(/USDT 已按 18 位原子单位换算为两位展示/)).toBeTruthy();
+    expect(screen.getByText('当前 0.00 USDT')).toBeTruthy();
     expect(screen.getByText('需要授权')).toBeTruthy();
     expect(screen.getByText('额度足够')).toBeTruthy();
     expect(screen.getByRole('heading', { name: '完整收货信息' })).toBeTruthy();
@@ -644,8 +830,8 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/seckill', readyServices({ getCurrentSeckillSession: vi.fn().mockResolvedValue(current) }));
 
     expect(await screen.findByText(new RegExp(expected))).toBeTruthy();
-    expect(screen.getAllByText(current.product.seckillListPriceUsdt, { exact: false }).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(current.prizePoolUsdt, { exact: false }).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('80.00 USDT', { exact: false }).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/240\.00(?: USDT)?/, { exact: false }).length).toBeGreaterThan(0);
     if (phase === 'LIVE') {
       expect(screen.getByText('00:59:00')).toBeTruthy();
       expect(screen.getByText('00:01:00')).toBeTruthy();
@@ -653,6 +839,54 @@ describe('Mall V2 payment consumer', () => {
       expect(screen.getByText(seckillRulesContentHash)).toBeTruthy();
       expect(screen.getByText(seckillPublicationTxHash)).toBeTruthy();
     }
+  });
+
+  it('fails seckill configuration closed and reloads once when a Core deadline reaches zero', async () => {
+    const expired = seckillSession({ relayDeadline: '2033-05-18T05:00:00.000Z' });
+    const getCurrentSeckillSession = vi.fn<CoreClient['getCurrentSeckillSession']>().mockResolvedValue(expired);
+    renderAt('/seckill', readyServices({ getCurrentSeckillSession }));
+
+    expect(await screen.findByText('00:00:00')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '配置秒杀订单' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText(/deadline 已到 0/)).toBeTruthy();
+    await waitFor(() => expect(getCurrentSeckillSession).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(getCurrentSeckillSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the seckill setup CTA stable while an expired deadline refresh is in flight', async () => {
+    const expired = seckillSession({ relayDeadline: '2033-05-18T05:00:00.000Z' });
+    const secondLoad = deferred<PublishedSeckillSessionProjection>();
+    const getCurrentSeckillSession = vi.fn<CoreClient['getCurrentSeckillSession']>()
+      .mockResolvedValueOnce(expired)
+      .mockReturnValueOnce(secondLoad.promise)
+      .mockResolvedValue(expired);
+    renderAt('/seckill', readyServices({ getCurrentSeckillSession }));
+
+    expect(await screen.findByText('00:00:00')).toBeTruthy();
+    await waitFor(() => expect(getCurrentSeckillSession).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('button', { name: '配置秒杀订单' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.queryByRole('button', { name: '处理中' })).toBeNull();
+
+    secondLoad.resolve(expired);
+  });
+
+  it('does not loop deadline reloads when Core refreshes serverTime for the same expired deadline', async () => {
+    const getCurrentSeckillSession = vi.fn<CoreClient['getCurrentSeckillSession']>()
+      .mockResolvedValueOnce(seckillSession({
+        serverTime: '2033-05-18T05:00:00.000Z',
+        relayDeadline: '2033-05-18T05:00:00.000Z',
+      }))
+      .mockResolvedValue(seckillSession({
+        serverTime: '2033-05-18T05:00:05.000Z',
+        relayDeadline: '2033-05-18T05:00:00.000Z',
+      }));
+    renderAt('/seckill', readyServices({ getCurrentSeckillSession }));
+
+    expect(await screen.findByText('00:00:00')).toBeTruthy();
+    await waitFor(() => expect(getCurrentSeckillSession).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(getCurrentSeckillSession).toHaveBeenCalledTimes(2);
   });
 
   it('shows only the published rules content bound to the current final session', async () => {
@@ -711,7 +945,7 @@ describe('Mall V2 payment consumer', () => {
     const user = userEvent.setup();
     renderAt('/seckill', services);
 
-    expect(await screen.findByText(/链上最终购买，接力时间增加 30 秒/)).toBeTruthy();
+    expect(await screen.findByText(/链上最终购买，Core 已发布接力延长 30 秒/)).toBeTruthy();
     expect(screen.getByText('实时')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '历史战报' }));
     expect(screen.getByText(`赢家 0x1111…1111`)).toBeTruthy();
@@ -1174,11 +1408,11 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('tab', { name: '消费购物' }));
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     expect(await screen.findByText(ordinaryShoppingStatement.paymentTxHash)).toBeTruthy();
-    expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.productUsdtPaymentAmount} 原子单位`)).toBeTruthy();
-    expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.platformServiceFeeUsdt} 原子单位`)).toBeTruthy();
-    expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.custodyProductUsdt} 原子单位`)).toBeTruthy();
-    expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.freightUsdt} 原子单位`)).toBeTruthy();
-    expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.usdtPaymentAmount} 原子单位`)).toBeTruthy();
+    expect(screen.getByText('14.00 USDT')).toBeTruthy();
+    expect(screen.getByText('0.20 USDT')).toBeTruthy();
+    expect(screen.getByText('13.80 USDT')).toBeTruthy();
+    expect(screen.getByText('1.00 USDT')).toBeTruthy();
+    expect(screen.getByText('15.00 USDT')).toBeTruthy();
     expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.nplPaymentAmount} 原子单位`)).toBeTruthy();
     expect(screen.getByText(`${ordinaryShoppingStatement.bnm.amount} 原子单位`)).toBeTruthy();
     expect(screen.getByText('可用')).toBeTruthy();
@@ -1283,7 +1517,7 @@ describe('Mall V2 payment consumer', () => {
     }
     expect(screen.getByLabelText('BNM 账户总额').textContent).toContain('700');
     expect(screen.getByLabelText('BNM 账户总额').textContent).toContain('300');
-    await user.click(screen.getByRole('button', { name: '签名申请结算 200' }));
+    await user.click(screen.getByRole('button', { name: '签名申请结算 200 NPL' }));
 
     await waitFor(() => expect(createSettlementIntent).toHaveBeenCalledWith('buyer-session', {
       rail: 'REWARD_NPL',
@@ -1327,7 +1561,7 @@ describe('Mall V2 payment consumer', () => {
       submitSettlementRequest,
     }));
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
-    await user.click(await screen.findByRole('button', { name: '签名申请结算 60' }));
+    await user.click(await screen.findByRole('button', { name: '签名申请结算 <0.01 USDT' }));
     await waitFor(() => expect(createSettlementIntent).toHaveBeenCalledWith('buyer-session', {
       rail: 'PRIZE_USDT',
       amount: '60',
@@ -1509,6 +1743,160 @@ describe('Mall V2 payment consumer', () => {
 
 const HASH_3 = `0x${'3'.repeat(64)}`;
 
+const BLOCK_BURST_NPL = '0x4e8277ab31e4956b2cd48449793a57656dfc03d2';
+const BLOCK_BURST_PROXY = '0x8151d38ea70Cd39A99872C50C861cDDEC00a6770';
+const BLOCK_BURST_OWNER = '0x7003BBCE2b3f83F5b2dDC5A8C1b9b5b5289a1b83';
+const BLOCK_BURST_APPROVE_TX = `0x${'a'.repeat(64)}`;
+const BLOCK_BURST_DEPOSIT_TX = `0x${'b'.repeat(64)}`;
+const blockBurstTestInterface = new Interface([
+  'function getPoolState() view returns (tuple(address token,address owner,uint256 currentPhase,uint256 maxPhases,uint256 initialTarget,uint256 currentTarget,uint256 rewardBps,uint256 releaseDuration,uint256 accRewardPerShare,uint256 totalActivePrincipal,uint256 totalDeposited,uint256 reservedRewards,uint256 unallocatedNpl,bool pausedDeposit,bool pausedExplode,bool pausedClaimPrincipal,bool pausedClaimReward))',
+  'function getNextExplosionState() view returns (tuple(uint256 phase,uint256 target,uint256 reward,uint256 activePrincipal,uint256 unallocatedNpl,bool principalReady,bool rewardReady,bool canExplode))',
+  'function getUserState(address user) view returns (tuple(address wallet,uint256 activePrincipal,uint256 rewardCredit,uint256 rewardDebt,uint256 pendingReward,uint256 positionCount))',
+  'function getUserPositions(address user) view returns (tuple(uint256 id,uint256 amount,uint256 claimedPrincipal,uint256 activePrincipal,uint256 depositedAt,uint256 joinedPhase,bool closed,uint256 claimablePrincipal)[])',
+  'function deposit(uint256 amount) returns (uint256 positionId,uint256 received)',
+  'function claimPrincipal(uint256[] positionIds) returns (uint256 amount)',
+  'function claimReward() returns (uint256 amount)',
+  'function explode() returns (uint256 phase,uint256 reward)',
+]);
+const blockBurstTokenInterface = new Interface([
+  'function allowance(address owner,address spender) view returns (uint256)',
+  'function approve(address spender,uint256 amount) returns (bool)',
+  'function balanceOf(address owner) view returns (uint256)',
+]);
+
+function mockBlockBurstRpc(options: {
+  wallet?: string;
+  getAllowance?: () => bigint;
+  getBalance?: () => bigint;
+  initialTarget?: bigint;
+  currentTarget?: bigint;
+  currentPhase?: bigint;
+  maxPhases?: bigint;
+  activePrincipal?: bigint;
+  nextCanExplode?: boolean;
+  receiptForTx?: (txHash: string) => { transactionHash: string; status: string; blockNumber: string; from?: string; to?: string; blockHash?: string };
+} = {}) {
+  const {
+    wallet = BUYER,
+    getAllowance = () => blockBurstNpl(100n),
+    getBalance = () => blockBurstNpl(100n),
+    initialTarget = blockBurstNpl(100_000_000_000_000n),
+    currentTarget = blockBurstNpl(200_000_000_000_000n),
+    currentPhase = 2n,
+    maxPhases = 10n,
+    activePrincipal = blockBurstNpl(150n),
+    nextCanExplode = false,
+    receiptForTx = (txHash: string) => ({
+      transactionHash: txHash,
+      from: wallet,
+      to: txHash === BLOCK_BURST_APPROVE_TX ? BLOCK_BURST_NPL : BLOCK_BURST_PROXY,
+      status: '0x1',
+      blockNumber: '0x1234',
+      blockHash: `0x${'4'.repeat(64)}`,
+    }),
+  } = options;
+  const selectors = {
+    pool: blockBurstTestInterface.getFunction('getPoolState')!.selector,
+    next: blockBurstTestInterface.getFunction('getNextExplosionState')!.selector,
+    user: blockBurstTestInterface.getFunction('getUserState')!.selector,
+    positions: blockBurstTestInterface.getFunction('getUserPositions')!.selector,
+    allowance: blockBurstTokenInterface.getFunction('allowance')!.selector,
+    balance: blockBurstTokenInterface.getFunction('balanceOf')!.selector,
+  };
+  return vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+    const body = JSON.parse(String(init?.body ?? '{}')) as { method: string; params?: unknown[] };
+    let result: unknown;
+    if (body.method === 'eth_chainId') {
+      result = '0x38';
+    } else if (body.method === 'eth_getTransactionReceipt') {
+      result = receiptForTx(String(body.params?.[0] ?? ''));
+    } else if (body.method === 'eth_getTransactionByHash') {
+      const txHash = String(body.params?.[0] ?? '');
+      result = {
+        hash: txHash,
+        from: wallet,
+        to: txHash === BLOCK_BURST_APPROVE_TX ? BLOCK_BURST_NPL : BLOCK_BURST_PROXY,
+        input: txHash === BLOCK_BURST_APPROVE_TX
+          ? blockBurstTokenInterface.encodeFunctionData('approve', [BLOCK_BURST_PROXY, blockBurstNpl(10n)])
+          : blockBurstTestInterface.encodeFunctionData('deposit', [blockBurstNpl(1n)]),
+      };
+    } else if (body.method === 'eth_call') {
+      const call = body.params?.[0] as { data?: string; to?: string } | undefined;
+      const to = call?.to?.toLowerCase();
+      const data = call?.data ?? '';
+      if (to === BLOCK_BURST_PROXY.toLowerCase() && data.startsWith(selectors.pool)) {
+        result = blockBurstTestInterface.encodeFunctionResult('getPoolState', [[
+          BLOCK_BURST_NPL,
+          BLOCK_BURST_OWNER,
+          currentPhase,
+          maxPhases,
+          initialTarget,
+          currentTarget,
+          1000n,
+          8640000n,
+          0n,
+          activePrincipal,
+          blockBurstNpl(160n),
+          blockBurstNpl(20n),
+          blockBurstNpl(4n),
+          false,
+          true,
+          false,
+          true,
+        ]]);
+      } else if (to === BLOCK_BURST_PROXY.toLowerCase() && data.startsWith(selectors.next)) {
+        result = blockBurstTestInterface.encodeFunctionResult('getNextExplosionState', [[
+          currentPhase >= maxPhases ? 0n : currentPhase + 1n,
+          currentTarget,
+          blockBurstNpl(20_000_000_000_000n),
+          activePrincipal,
+          blockBurstNpl(4n),
+          nextCanExplode,
+          nextCanExplode,
+          nextCanExplode,
+        ]]);
+      } else if (to === BLOCK_BURST_PROXY.toLowerCase() && data.startsWith(selectors.user)) {
+        result = blockBurstTestInterface.encodeFunctionResult('getUserState', [[
+          wallet,
+          blockBurstNpl(25n),
+          0n,
+          0n,
+          blockBurstNpl(3n),
+          1n,
+        ]]);
+      } else if (to === BLOCK_BURST_PROXY.toLowerCase() && data.startsWith(selectors.positions)) {
+        result = blockBurstTestInterface.encodeFunctionResult('getUserPositions', [[[
+          7n,
+          blockBurstNpl(30n),
+          blockBurstNpl(5n),
+          blockBurstNpl(25n),
+          1_721_000_000n,
+          1n,
+          false,
+          blockBurstNpl(2n),
+        ]]]);
+      } else if (to === BLOCK_BURST_NPL.toLowerCase() && data.startsWith(selectors.allowance)) {
+        result = blockBurstTokenInterface.encodeFunctionResult('allowance', [getAllowance()]);
+      } else if (to === BLOCK_BURST_NPL.toLowerCase() && data.startsWith(selectors.balance)) {
+        result = blockBurstTokenInterface.encodeFunctionResult('balanceOf', [getBalance()]);
+      } else {
+        throw new Error(`unexpected block burst calldata ${data}`);
+      }
+    } else {
+      throw new Error(`unexpected block burst rpc method ${body.method}`);
+    }
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  });
+}
+
+function blockBurstNpl(amount: bigint) {
+  return amount * (10n ** 18n);
+}
+
+
 function offlineServices(): MallServices {
   return servicesWith({
     getBootstrap: vi.fn().mockResolvedValue(bootstrap(false)),
@@ -1685,3 +2073,4 @@ function deferred<T>() {
 }
 
 const BUYER = '0x1111111111111111111111111111111111111111';
+const BLOCK_BURST_GUEST = '0x2222222222222222222222222222222222222222';

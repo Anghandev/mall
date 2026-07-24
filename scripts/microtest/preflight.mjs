@@ -122,7 +122,7 @@ export function validateAbuV2Preflight({
     env: { ...env, RELEASE_GIT_COMMIT: env.RELEASE_GIT_COMMIT ?? releaseCommit },
     allowedStatuses: ['MICROTEST_AUTHORIZED'],
     requireGitCommit: true,
-    allowDirtyGit: true,
+    allowDirtyGit: !requireBroadcastAuthorized,
   });
   const manifest = readJson(root, 'packages/core-artifacts/contracts/contract-manifest.json');
   const coordinated = readJson(root, 'packages/core-artifacts/coordinated-manifest.json');

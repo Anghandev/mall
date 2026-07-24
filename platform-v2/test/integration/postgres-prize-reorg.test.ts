@@ -753,7 +753,7 @@ test('real PostgreSQL re-pauses after recovered payout reorg and completes a sec
       blockHash: `0x${'2'.repeat(63)}3`,
       confirmations: 14,
       transfers: [],
-      transactionDeltas: [],
+      transferEventDeltas: [],
       evidenceHash: `0x${'3'.repeat(63)}4`,
     };
     workerNow = new Date(workerNow.getTime() + 1_000);
@@ -1496,7 +1496,7 @@ function successfulPayoutReceipt(): EoaSettlementReceipt {
       to: BUYER,
       amount: TOTAL_PRIZE_AMOUNT,
     }],
-    transactionDeltas: [
+    transferEventDeltas: [
       { tokenAddress: USDT_ADDRESS, account: SETTLEMENT_WALLET, delta: `-${TOTAL_PRIZE_AMOUNT}` },
       { tokenAddress: USDT_ADDRESS, account: BUYER, delta: TOTAL_PRIZE_AMOUNT },
     ],
@@ -1512,7 +1512,7 @@ function failedPayoutReceipt(confirmations: number, evidenceHash: string): EoaSe
     blockHash: HASH_3,
     confirmations,
     transfers: [],
-    transactionDeltas: [],
+    transferEventDeltas: [],
     evidenceHash,
   };
 }

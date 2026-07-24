@@ -240,6 +240,11 @@
           "name": "047_settlement_failed_close.sql",
           "path": "schema/business/047_settlement_failed_close.sql",
           "sha256": "626aedf60e00ab17ec6c96ca9aab608fae9244f6c5bfe96959d14888b150d543"
+        },
+        {
+          "name": "048_payment_quote_source_evidence_primary_fallback.sql",
+          "path": "schema/business/048_payment_quote_source_evidence_primary_fallback.sql",
+          "sha256": "e49fdd256d2c1cb465b05c055e8bed2d03da1da9f41249a1c18f0693cf6ac90d"
         }
       ]
     },

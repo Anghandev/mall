@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createCipheriv, createHash } from 'node:crypto';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -159,6 +159,7 @@ test('business and audit migrations apply from empty databases', async () => {
       '045_settlement_nonce_release.sql',
       '046_seckill_prize_reorg_recovery.sql',
       '047_settlement_failed_close.sql',
+      '048_payment_quote_source_evidence_primary_fallback.sql',
     ]);
     assert.deepEqual(auditNames, [
       '001_audit_schema.sql',
@@ -1259,6 +1260,58 @@ test('merchant drilldown uses named canonical amounts and fails closed when cont
       service.get({ walletAddress: admin.address, roles: ['ADMIN'] }, 'merchant-1'),
       /NPL Burn snapshot does not reconcile/,
     );
+  } finally {
+    await db.close();
+  }
+});
+
+test('existing database upgrades payment quote source evidence to PRIMARY_FALLBACK append-only', async () => {
+  const db = await PGlite.create();
+  try {
+    await db.exec(
+      `CREATE SCHEMA core;
+       CREATE TABLE core.schema_migrations (
+         migration_name text PRIMARY KEY,
+         applied_at timestamptz NOT NULL DEFAULT clock_timestamp()
+       );
+       CREATE TABLE core.payment_quote_legs (
+         quote_source_evidence jsonb
+       );
+       ALTER TABLE core.payment_quote_legs
+         ADD CONSTRAINT payment_quote_legs_quote_source_evidence_check CHECK (
+           quote_source_evidence IS NULL OR (
+             jsonb_typeof(quote_source_evidence) = 'object'
+             AND quote_source_evidence ?& ARRAY['source', 'observedBlock', 'reservesHash']
+             AND quote_source_evidence ->> 'source' IN ('PRIMARY', 'FALLBACK')
+             AND jsonb_typeof(quote_source_evidence -> 'observedBlock') = 'number'
+             AND (quote_source_evidence ->> 'observedBlock') ~ '^[1-9][0-9]*$'
+             AND (quote_source_evidence ->> 'reservesHash') ~ '^0x[0-9a-fA-F]{64}$'
+           )
+         );`,
+    );
+    const existingNames = readdirSync(BUSINESS_MIGRATIONS)
+      .filter((name) => name.endsWith('.sql') && name < '048_payment_quote_source_evidence_primary_fallback.sql')
+      .sort();
+    for (const name of existingNames) {
+      await db.query('INSERT INTO core.schema_migrations (migration_name) VALUES ($1)', [name]);
+    }
+    await applyMigrations(adapter(db), 'core', BUSINESS_MIGRATIONS);
+    await db.query(
+      `INSERT INTO core.payment_quote_legs (quote_source_evidence) VALUES ($1::jsonb)`,
+      [JSON.stringify({ source: 'PRIMARY_FALLBACK', observedBlock: 40_000_000, reservesHash: HASH })],
+    );
+    await assert.rejects(
+      db.query(
+        `INSERT INTO core.payment_quote_legs (quote_source_evidence) VALUES ($1::jsonb)`,
+        [JSON.stringify({ source: 'UNTRUSTED', observedBlock: 40_000_000, reservesHash: HASH })],
+      ),
+    );
+    const constraint = await db.query<{ constraint_definition: string }>(
+      `SELECT pg_get_constraintdef(oid) AS constraint_definition
+       FROM pg_constraint
+       WHERE conname = 'payment_quote_legs_quote_source_evidence_check'`,
+    );
+    assert.match(constraint.rows[0]!.constraint_definition, /PRIMARY_FALLBACK/);
   } finally {
     await db.close();
   }
@@ -3102,6 +3155,84 @@ test('catalog payment service builds an authoritative idempotent quote and recor
   }
 });
 
+test('payment txHash recovery revalidates current platform role before writing', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    await seedCatalog(db, 2);
+    const now = new Date();
+    let nextId = 0;
+    let nextNonce = 0n;
+    const service = new CatalogPaymentService({
+      transactions: transactionAdapter(db),
+      signer: {
+        sign: async () => ({ signature: `0x${'1'.repeat(130)}`, signer: '0x8888888888888888888888888888888888888888' }),
+      },
+      nplQuotes: {
+        quote: async () => ({
+          nplQuoteAmount: 1_000n,
+          quoteSourceEvidence: { source: 'PRIMARY_FALLBACK', observedBlock: 40_000_000, reservesHash: HASH },
+        }),
+      },
+      beneficiaries: {
+        resolve: async () => ({
+          genesis: '0x0000000000000000000000000000000000000000',
+          directReferral: '0x5000000000000000000000000000000000000002',
+          district: '0x5000000000000000000000000000000000000003',
+          city: '0x5000000000000000000000000000000000000004',
+          province: '0x5000000000000000000000000000000000000005',
+          region: '0x5000000000000000000000000000000000000006',
+        }),
+      },
+      policies: { assertPublished: async () => undefined },
+      bnmWallets: { assertRegistered: async () => undefined },
+      paymentRouterAddress: '0x9999999999999999999999999999999999999999',
+      clock: () => now,
+      bytes32: () => `0x${(++nextId).toString(16).padStart(64, '0')}`,
+      nonce: () => ++nextNonce,
+    });
+    const recoveryOperator = '0x9999999999999999999999999999999999999997';
+    await db.query(
+      `INSERT INTO core.wallet_role_bindings (wallet_address, role, status, evidence_hash)
+       VALUES ($1,'OPERATOR','ACTIVE',$2)`,
+      [recoveryOperator, HASH],
+    );
+    const request = {
+      idempotencyKey: 'recover-role-quote-1',
+      productId: 'product-1',
+      skuId: 'sku-1',
+      quantity: 1,
+      fulfillmentMode: 'DELIVERY' as const,
+      fulfillmentTargetHash: HASH,
+      regionCodeHash: HASH,
+    };
+    const quote = await service.createOrdinaryQuote(BUYER, request);
+    assert.equal((await service.recoverPayment(
+      { walletAddress: recoveryOperator, roles: ['OPERATOR'] },
+      { orderId: quote.orderId, txHash: `0x${'6'.repeat(64)}` },
+    )).state, 'SUBMITTED');
+
+    const revokedQuote = await service.createOrdinaryQuote(BUYER, {
+      ...request,
+      idempotencyKey: 'recover-role-quote-2',
+    });
+    await db.query(
+      "UPDATE core.wallet_role_bindings SET status = 'REVOKED', revoked_at = $2 WHERE wallet_address = $1 AND role = 'OPERATOR'",
+      [recoveryOperator, now],
+    );
+    await assert.rejects(
+      service.recoverPayment(
+        { walletAddress: recoveryOperator, roles: ['OPERATOR'] },
+        { orderId: revokedQuote.orderId, txHash: `0x${'7'.repeat(64)}` },
+      ),
+      (error: unknown) => error instanceof CoreError
+        && error.code === 'Forbidden'
+        && /Current wallet role/.test(error.message),
+    );
+  } finally {
+    await db.close();
+  }
+});
+
 test('payment receipt repository resumes mined work and finalizes one immutable payment atomically', async () => {
   const db = await createBusinessDatabase();
   try {
@@ -4521,6 +4652,44 @@ test('seckill quote locks both inventories and final classification releases the
   }
 });
 
+test('public seckill projections hide mainnet micro-test sessions', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const now = new Date('2033-05-18T05:00:00.000Z');
+    await seedCatalog(db, 1);
+    const microSessionId = `0x${'a'.repeat(64)}`;
+    await insertLiveSeckillSession(
+      db,
+      microSessionId,
+      now,
+      2,
+      1,
+      { guaranteeMode: 'MAINNET_MICROTEST' },
+    );
+    const seckill = new SeckillService({ transactions: transactionAdapter(db), clock: () => now });
+
+    await assert.rejects(
+      () => seckill.current(),
+      (error: unknown) => error instanceof CoreError && error.code === 'UnknownState',
+    );
+    await assert.rejects(
+      () => seckill.get(microSessionId),
+      (error: unknown) => error instanceof CoreError && error.code === 'UnknownState',
+    );
+    await assert.rejects(
+      () => seckill.events(microSessionId),
+      (error: unknown) => error instanceof CoreError && error.code === 'UnknownState',
+    );
+    assert.deepEqual(await seckill.history({ limit: 20 }), { items: [], nextCursor: null });
+
+    const formalSessionId = `0x${'b'.repeat(64)}`;
+    await insertLiveSeckillSession(db, formalSessionId, new Date(now.getTime() + 60_000), 2);
+    assert.equal((await seckill.current()).sessionId, formalSessionId);
+  } finally {
+    await db.close();
+  }
+});
+
 test('seckill prize award is revoked and quarantined when finalized funding reorgs', async () => {
   const db = await createBusinessDatabase();
   const admin = Wallet.createRandom();
@@ -5049,7 +5218,7 @@ test('seckill prize award is revoked and quarantined when finalized funding reor
         to: transfer.recipientAddress,
         amount: transfer.amount,
       }],
-      transactionDeltas: [
+      transferEventDeltas: [
         {
           tokenAddress: transfer.tokenAddress,
           account: transfer.executorWallet,
@@ -5215,7 +5384,7 @@ test('seckill prize award is revoked and quarantined when finalized funding reor
       blockHash: `0x${'9'.repeat(64)}`,
       confirmations: 14,
       transfers: [],
-      transactionDeltas: [],
+      transferEventDeltas: [],
       evidenceHash: `0x${'a'.repeat(64)}`,
     };
     workerNow = new Date(workerNow.getTime() + 1_000);
@@ -5502,7 +5671,7 @@ test('seckill prize award is revoked and quarantined when finalized funding reor
         to: transfer.recipientAddress,
         amount: transfer.amount,
       }],
-      transactionDeltas: [
+      transferEventDeltas: [
         {
           tokenAddress: transfer.tokenAddress,
           account: transfer.executorWallet,
@@ -5577,7 +5746,7 @@ test('seckill prize award is revoked and quarantined when finalized funding reor
       blockHash: `0x${'2'.repeat(63)}3`,
       confirmations: 14,
       transfers: [],
-      transactionDeltas: [],
+      transferEventDeltas: [],
       evidenceHash: `0x${'3'.repeat(63)}4`,
     };
     workerNow = new Date(workerNow.getTime() + 1_000);
@@ -10146,6 +10315,9 @@ test('monitoring treats missing samples as unavailable and alerts only when RPC 
       explorerApiKey: 'test-key',
       fetchImpl: (async (input) => {
         const url = String(input);
+        if (url.includes('explorer')) {
+          assert.equal(new URL(url).searchParams.get('chainid'), '56');
+        }
         const height = url.includes('explorer') ? explorerHeight : 100;
         return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: `0x${height.toString(16)}` }), {
           status: 200,
@@ -11151,7 +11323,7 @@ test('signed settlement request executes one immutable EOA transfer and settles 
         to: transfer.recipientAddress,
         amount: transfer.amount,
       }],
-      transactionDeltas: [
+      transferEventDeltas: [
         { tokenAddress: transfer.tokenAddress, account: transfer.executorWallet, delta: `-${transfer.amount}` },
         { tokenAddress: transfer.tokenAddress, account: transfer.recipientAddress, delta: transfer.amount },
       ],
@@ -11333,7 +11505,7 @@ test('ambiguous EOA submission failure retries the original attempt and settles 
         to: transfer.recipientAddress,
         amount: transfer.amount,
       }],
-      transactionDeltas: [
+      transferEventDeltas: [
         { tokenAddress: transfer.tokenAddress, account: transfer.executorWallet, delta: `-${transfer.amount}` },
         { tokenAddress: transfer.tokenAddress, account: transfer.recipientAddress, delta: transfer.amount },
       ],
@@ -11450,7 +11622,7 @@ test('expired EOA submission lease reuses the same attempt idempotency key', asy
         to: transfer.recipientAddress,
         amount: transfer.amount,
       }],
-      transactionDeltas: [
+      transferEventDeltas: [
         { tokenAddress: transfer.tokenAddress, account: transfer.executorWallet, delta: `-${transfer.amount}` },
         { tokenAddress: transfer.tokenAddress, account: transfer.recipientAddress, delta: transfer.amount },
       ],
@@ -12642,7 +12814,7 @@ test('EOA replacement preserves executor nonce and exact transfer calldata befor
         to: transfer.recipientAddress,
         amount: transfer.amount,
       }],
-      transactionDeltas: [
+      transferEventDeltas: [
         { tokenAddress: transfer.tokenAddress, account: transfer.executorWallet, delta: `-${transfer.amount}` },
         { tokenAddress: transfer.tokenAddress, account: transfer.recipientAddress, delta: transfer.amount },
       ],
@@ -12682,7 +12854,7 @@ test('failed EOA receipt quarantines the transfer and restores the requested led
       confirmations: 15,
       canonicalBlock: true,
       transfers: [],
-      transactionDeltas: [],
+      transferEventDeltas: [],
       evidenceHash: `0x${'f'.repeat(64)}`,
     };
     const worker = new SettlementWorker({
@@ -15610,6 +15782,7 @@ async function insertLiveSeckillSession(
   now: Date,
   unitPrice: number,
   inventory = 1,
+  snapshot: Record<string, unknown> = {},
 ) {
   await db.query(
     `INSERT INTO core.seckill_sessions (
@@ -15617,7 +15790,7 @@ async function insertLiveSeckillSession(
        product_policy_hash, starts_at, main_deadline, relay_deadline,
        inventory, seckill_list_price_usdt, phase, snapshot
      ) VALUES ($1, 1, 'merchant-1', 'product-1', 'sku-1', $2,
-       $3, $4, $5, $6, $7, 'LIVE', '{}')`,
+       $3, $4, $5, $6, $7, 'LIVE', $8)`,
     [
       sessionId,
       HASH,
@@ -15626,6 +15799,7 @@ async function insertLiveSeckillSession(
       new Date(now.getTime() + 60_000),
       inventory,
       unitPrice,
+      JSON.stringify(snapshot),
     ],
   );
 }

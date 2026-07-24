@@ -4,9 +4,11 @@ import {
   MapPin,
   ShoppingBag,
   WalletCards,
+  Zap,
 } from 'lucide-react';
 import { BrowserRouter, Link, Navigate, useLocation } from 'react-router-dom';
 
+import { BlockBurstScreen } from './block-burst';
 import { productBaseline } from './bootstrap';
 import { brandAssetUrl, mallBasePath } from './deployment-paths';
 import { MallRuntimeProvider, useMallRuntime, type MallServices } from './mall-runtime';
@@ -30,6 +32,7 @@ const tabs = [
   { path: '/seckill', label: '秒杀', icon: Flame },
   { path: '/mall', label: '商城', icon: ShoppingBag },
   { path: '/stores', label: '门店', icon: MapPin },
+  { path: '/block-blast', label: '爆区块', icon: Zap },
   { path: '/assets', label: '资产', icon: CircleDollarSign },
 ] as const;
 
@@ -108,18 +111,31 @@ function MallShell() {
             </section>
           ) : null}
           <div className="primary-screens" hidden={!isPrimary}>
-            <section hidden={activeRoot !== '/seckill'} aria-label="秒杀大厅">
-              <SeckillScreen />
-            </section>
-            <section hidden={activeRoot !== '/mall'} aria-label="常规商城">
-              <MallScreen />
-            </section>
-            <section hidden={activeRoot !== '/stores'} aria-label="线下门店">
-              <StoresScreen />
-            </section>
-            <section hidden={activeRoot !== '/assets'} aria-label="我的资产">
-              <AssetsScreen />
-            </section>
+            {isPrimary && activeRoot === '/seckill' ? (
+              <section aria-label="秒杀大厅">
+                <SeckillScreen />
+              </section>
+            ) : null}
+            {isPrimary && activeRoot === '/mall' ? (
+              <section aria-label="常规商城">
+                <MallScreen />
+              </section>
+            ) : null}
+            {isPrimary && activeRoot === '/stores' ? (
+              <section aria-label="线下门店">
+                <StoresScreen />
+              </section>
+            ) : null}
+            {isPrimary && activeRoot === '/block-blast' ? (
+              <section aria-label="爆区块">
+                <BlockBurstScreen />
+              </section>
+            ) : null}
+            {isPrimary && activeRoot === '/assets' ? (
+              <section aria-label="我的资产">
+                <AssetsScreen />
+              </section>
+            ) : null}
           </div>
 
           {!isPrimary ? <DetailRoute pathname={location.pathname} /> : null}
@@ -177,6 +193,7 @@ function getActiveRoot(pathname: string) {
   if (pathname.startsWith('/assets')) return '/assets';
   if (pathname.startsWith('/checkout')) return '/mall';
   if (pathname.startsWith('/stores')) return '/stores';
+  if (pathname.startsWith('/block-blast')) return '/block-blast';
   if (pathname.startsWith('/mall')) return '/mall';
   return '/seckill';
 }

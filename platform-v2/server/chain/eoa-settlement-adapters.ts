@@ -247,7 +247,7 @@ async function observe(provider: JsonRpcProvider, txHash: string): Promise<Obser
       // Not an ERC-20 Transfer event.
     }
   }
-  const transactionDeltas = transactionDeltasFromTransfers(transfers);
+  const transferEventDeltas = transferEventDeltasFromTransfers(transfers);
   return {
     chainId: 56,
     executionTxHash: txHash.toLowerCase(),
@@ -261,11 +261,11 @@ async function observe(provider: JsonRpcProvider, txHash: string): Promise<Obser
     confirmations: Math.max(0, head - receipt.blockNumber + 1),
     canonicalBlock,
     transfers,
-    transactionDeltas,
+    transferEventDeltas,
   };
 }
 
-function transactionDeltasFromTransfers(
+function transferEventDeltasFromTransfers(
   transfers: readonly { tokenAddress: string; from: string; to: string; amount: string }[],
 ) {
   const deltas = new Map<string, { tokenAddress: string; account: string; delta: bigint }>();
@@ -293,7 +293,7 @@ function comparable(value: ObservedReceipt): Omit<ObservedReceipt, 'confirmation
   return {
     ...comparableValue,
     transfers: [...value.transfers],
-    transactionDeltas: [...value.transactionDeltas],
+    transferEventDeltas: [...value.transferEventDeltas],
   };
 }
 

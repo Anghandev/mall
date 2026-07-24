@@ -36,7 +36,7 @@ export interface ContractReader {
 
 export interface PairReserveSnapshot {
   blockNumber: number;
-  source: 'PRIMARY' | 'FALLBACK';
+  source: 'PRIMARY' | 'FALLBACK' | 'PRIMARY_FALLBACK';
   token0: string;
   token1: string;
   reserve0: bigint;
@@ -106,39 +106,71 @@ export class ResilientBscContractReader implements PairReserveReader {
   }
 
   async pairReserves(pairAddress: string): Promise<PairReserveSnapshot> {
-    let lastError: unknown;
-    for (const entry of this.#providers) {
-      try {
-        const provider = entry.provider;
-        await this.#assertChain(provider);
-        const pair = new Contract(pairAddress, PAIR_ABI, provider);
-        const token0 = await this.#request(provider, () => pair.getFunction('token0')());
-        const token1 = await this.#request(provider, () => pair.getFunction('token1')());
-        const reserves = await this.#request(provider, () => pair.getFunction('getReserves')());
-        const blockNumber = await this.#request(provider, () => provider.getBlockNumber());
-        const snapshot = {
-          blockNumber,
-          source: entry.source,
-          token0: getAddress(String(token0)),
-          token1: getAddress(String(token1)),
-          reserve0: BigInt(reserves[0]),
-          reserve1: BigInt(reserves[1]),
-          reservesHash: hashJson({
-            token0: String(token0).toLowerCase(),
-            token1: String(token1).toLowerCase(),
-            reserve0: BigInt(reserves[0]).toString(),
-            reserve1: BigInt(reserves[1]).toString(),
-          }),
-        };
-        return snapshot;
-      } catch (error) {
-        lastError = error;
+    try {
+      const blockNumber = Math.min(
+        ...(await Promise.all(this.#providers.map((entry) => this.#observeBlockNumber(entry)))),
+      );
+      const observations = await Promise.all(
+        this.#providers.map((entry) => this.#observePairReserves(entry, pairAddress, blockNumber)),
+      );
+      const primary = observations[0]!;
+      const fallback = observations[1]!;
+      const primaryComparable = pairReserveComparable(primary);
+      const fallbackComparable = pairReserveComparable(fallback);
+      if (stableRpcValue(primaryComparable) !== stableRpcValue(fallbackComparable)) {
+        throw new CoreError('InvalidFinality', 'BSC RPC providers returned inconsistent NPL pair reserves', 409);
       }
+      return {
+        ...primaryComparable,
+        blockNumber,
+        source: 'PRIMARY_FALLBACK',
+        reservesHash: hashJson({
+          primary: { blockNumber: primary.blockNumber, reservesHash: primary.reservesHash },
+          fallback: { blockNumber: fallback.blockNumber, reservesHash: fallback.reservesHash },
+          reserves: primaryComparable,
+        }),
+      };
+    } catch (error) {
+      if (error instanceof CoreError) throw error;
+      throw new CoreError('ExternalBlocked', 'BSC RPC latest pair reserves are unavailable', 503, {
+        source: 'PRIMARY_FALLBACK',
+        reason: error instanceof Error ? error.name : 'UnknownRpcFailure',
+      });
     }
-    throw new CoreError('ExternalBlocked', 'BSC RPC latest pair reserves are unavailable', 503, {
-      source: 'PRIMARY_FALLBACK',
-      reason: lastError instanceof Error ? lastError.name : 'UnknownRpcFailure',
-    });
+  }
+
+  async #observeBlockNumber(entry: { provider: JsonRpcProvider }): Promise<number> {
+    const provider = entry.provider;
+    await this.#assertChain(provider);
+    return this.#request(provider, () => provider.getBlockNumber());
+  }
+
+  async #observePairReserves(
+    entry: { source: 'PRIMARY' | 'FALLBACK'; provider: JsonRpcProvider },
+    pairAddress: string,
+    blockNumber: number,
+  ): Promise<PairReserveSnapshot> {
+    const provider = entry.provider;
+    await this.#assertChain(provider);
+    const pair = new Contract(pairAddress, PAIR_ABI, provider);
+    const callAtBlock = { blockTag: blockNumber };
+    const token0 = await this.#request(provider, () => pair.getFunction('token0')(callAtBlock));
+    const token1 = await this.#request(provider, () => pair.getFunction('token1')(callAtBlock));
+    const reserves = await this.#request(provider, () => pair.getFunction('getReserves')(callAtBlock));
+    return {
+      blockNumber,
+      source: entry.source,
+      token0: getAddress(String(token0)),
+      token1: getAddress(String(token1)),
+      reserve0: BigInt(reserves[0]),
+      reserve1: BigInt(reserves[1]),
+      reservesHash: hashJson({
+        token0: String(token0).toLowerCase(),
+        token1: String(token1).toLowerCase(),
+        reserve0: BigInt(reserves[0]).toString(),
+        reserve1: BigInt(reserves[1]).toString(),
+      }),
+    };
   }
 
   async #withProvider<Result>(operation: (provider: JsonRpcProvider) => Promise<Result>) {
@@ -402,4 +434,13 @@ function delay(milliseconds: number) {
 
 function stableRpcValue(value: unknown) {
   return JSON.stringify(value, (_key, child) => typeof child === 'bigint' ? child.toString() : child);
+}
+
+function pairReserveComparable(value: PairReserveSnapshot): Omit<PairReserveSnapshot, 'source' | 'blockNumber' | 'reservesHash'> {
+  return {
+    token0: value.token0,
+    token1: value.token1,
+    reserve0: value.reserve0,
+    reserve1: value.reserve1,
+  };
 }

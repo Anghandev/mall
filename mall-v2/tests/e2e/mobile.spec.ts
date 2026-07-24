@@ -17,6 +17,7 @@ const screenshotRoutes = [
   { path: '/mall/seckill', name: 'seckill' },
   { path: '/mall/mall', name: 'mall' },
   { path: '/mall/stores', name: 'stores' },
+  { path: '/mall/block-blast', name: 'block-blast' },
   { path: '/mall/assets', name: 'assets' },
 ] as const;
 
@@ -32,9 +33,17 @@ test('primary mobile shell is usable and does not overflow', async ({ page }, te
 
     if (route.path === '/mall/seckill') {
       await expect(page.getByRole('heading', { name: product.title })).toBeVisible();
-      await expect(page.getByText(/链上最终购买，接力时间增加 30 秒/)).toBeVisible();
+      await expect(page.getByText(/链上最终购买，Core 已发布接力延长 30 秒/)).toBeVisible();
       await expect(page.getByText(/00:5[89]:[0-5][0-9]/)).toBeVisible();
       await expect(page.getByText(/00:00:[0-5][0-9]/)).toBeVisible();
+    }
+
+    if (route.path === '/mall/block-blast') {
+      await expect(page.getByRole('heading', { name: '爆区块', exact: true })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '生产合约未配置' })).toBeVisible();
+      for (const label of ['打入 NPL', '领取本金', '领取奖励', '爆区块']) {
+        await expect(page.getByRole('button', { name: label, exact: true })).toBeDisabled();
+      }
     }
 
     if (route.path === '/mall/seckill' || testInfo.project.name === 'mobile-393') {
@@ -188,9 +197,14 @@ async function expectHealthyDocument(page: import('@playwright/test').Page) {
 async function mockPublicCore(page: import('@playwright/test').Page) {
   const session = seckillSession();
   const event = relayEvent();
-  await page.route('**/core/v2/**', async (route) => {
+  await page.route('**/*', async (route) => {
     const url = new URL(route.request().url());
-    const corePath = url.pathname.slice('/core'.length);
+    const coreRoot = url.pathname.lastIndexOf('/core/v2/');
+    if (coreRoot < 0 && !url.pathname.startsWith('/v2/')) {
+      await route.continue();
+      return;
+    }
+    const corePath = coreRoot >= 0 ? url.pathname.slice(coreRoot + '/core'.length) : url.pathname;
     const json = (() => {
       if (corePath === '/v2/bootstrap') return {
         artifactVersion,

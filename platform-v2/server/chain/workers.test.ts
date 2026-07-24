@@ -301,7 +301,7 @@ test('EOA settlement receipt evidence uses only the finalized transaction receip
     to: MERCHANT,
     amount: '25',
   }]);
-  assert.deepEqual(receipt.transactionDeltas, [{
+  assert.deepEqual(receipt.transferEventDeltas, [{
     tokenAddress: USDT_ADDRESS,
     account: BUYER,
     delta: '-25',
@@ -923,22 +923,28 @@ test('payment RPC sources compute exact NPL amounts from the fixed pair and bene
 test('payment quote reader falls back to non-Archive latest reserves and records fallback evidence', async () => {
   const calls: Array<Record<string, unknown>> = [];
   const reader = new ResilientBscContractReader(undefined, undefined, [
-    pairRpcProvider({ fail: true }),
+    pairRpcProvider({ calls, blockNumber: 40_000_000 }),
     pairRpcProvider({ calls, blockNumber: 40_000_001 }),
   ]);
 
   const snapshot = await reader.pairReserves(CONTRACT);
 
-  assert.equal(snapshot.source, 'FALLBACK');
-  assert.equal(snapshot.blockNumber, 40_000_001);
+  assert.equal(snapshot.source, 'PRIMARY_FALLBACK');
+  assert.equal(snapshot.blockNumber, 40_000_000);
   assert.equal(snapshot.token0.toLowerCase(), USDT_ADDRESS);
   assert.equal(snapshot.token1.toLowerCase(), NPL_ADDRESS);
   assert.ok(calls.length > 0);
-  assert.ok(calls.every((call) => !Object.hasOwn(call, 'blockTag')));
+  assert.ok(calls.every((call) => call.blockTag === 40_000_000));
+
+  const divergent = new ResilientBscContractReader(undefined, undefined, [
+    pairRpcProvider({ reserve0: 50_000n * 10n ** 18n }),
+    pairRpcProvider({ reserve0: 49_999n * 10n ** 18n }),
+  ]);
+  await assert.rejects(divergent.pairReserves(CONTRACT), /inconsistent NPL pair reserves/);
 
   const unavailable = new ResilientBscContractReader(undefined, undefined, [
     pairRpcProvider({ fail: true }),
-    pairRpcProvider({ fail: true }),
+    pairRpcProvider(),
   ]);
   await assert.rejects(unavailable.pairReserves(CONTRACT), /latest pair reserves are unavailable/);
 });
@@ -1649,9 +1655,11 @@ function pairRpcProvider(input: {
   fail?: boolean;
   calls?: Array<Record<string, unknown>>;
   blockNumber?: number;
+  reserve0?: bigint;
+  reserve1?: bigint;
   delayMs?: number;
   tracker?: { active: number; maximum: number };
-}) {
+} = {}) {
   const pair = new Interface([
     'function token0() view returns (address)',
     'function token1() view returns (address)',
@@ -1685,8 +1693,8 @@ function pairRpcProvider(input: {
       }
       if (data.startsWith(pair.getFunction('getReserves')!.selector.toLowerCase())) {
         return pair.encodeFunctionResult('getReserves', [
-          50_000n * 10n ** 18n,
-          500_000n * 10n ** 18n,
+          input.reserve0 ?? 50_000n * 10n ** 18n,
+          input.reserve1 ?? 500_000n * 10n ** 18n,
           1_800_000_000,
         ]);
       }
@@ -1726,7 +1734,7 @@ class StubContractReader implements ContractReader {
   async pairReserves(_address: string) {
     if (!this.#values.pairReserves) throw new Error('Unexpected pair reserves request');
     return this.#values.pairReserves as {
-      blockNumber: number; source: 'PRIMARY' | 'FALLBACK'; token0: string; token1: string;
+      blockNumber: number; source: 'PRIMARY' | 'FALLBACK' | 'PRIMARY_FALLBACK'; token0: string; token1: string;
       reserve0: bigint; reserve1: bigint; reservesHash: string;
     };
   }
@@ -1764,7 +1772,7 @@ class StubRuntimeReader implements RuntimeCodeReader {
 
   async pairReserves(_address: string) {
     return this.#bounded(async () => this.#values.pairReserves as {
-      blockNumber: number; source: 'PRIMARY' | 'FALLBACK'; token0: string; token1: string;
+      blockNumber: number; source: 'PRIMARY' | 'FALLBACK' | 'PRIMARY_FALLBACK'; token0: string; token1: string;
       reserve0: bigint; reserve1: bigint; reservesHash: string;
     });
   }

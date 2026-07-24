@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -200,6 +201,34 @@ test('Abu V2 broadcast runner preflight requires bounded packet authorization th
     assert.equal(result.deploymentAuthorized, false);
     assert.equal(result.releaseGateStatus, 'MICROTEST_AUTHORIZED');
     assert.equal(result.microtestBroadcastAuthorized, true);
+  });
+});
+
+test('Abu V2 broadcast runner preflight rejects a dirty git worktree', () => {
+  withFixture((root, env) => {
+    execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
+    writeFileSync(join(root, 'dirty-runtime-change.txt'), 'dirty');
+    const broadcastPacket = writePacket(root, 'packet-broadcast-dirty.json', packet({ broadcastAuthorized: true }));
+    assert.throws(
+      () => validateAbuV2Preflight({
+        cwd: root,
+        env: envForPacket(broadcastPacket),
+        packetPath: broadcastPacket,
+        gitCommit: COMMIT,
+        requireBroadcastAuthorized: true,
+      }),
+      /clean git worktree/,
+    );
+    assert.equal(
+      validateAbuV2Preflight({
+        cwd: root,
+        env: envForPacket(broadcastPacket),
+        packetPath: broadcastPacket,
+        gitCommit: COMMIT,
+        requireBroadcastAuthorized: false,
+      }).releaseGateStatus,
+      'MICROTEST_AUTHORIZED',
+    );
   });
 });
 

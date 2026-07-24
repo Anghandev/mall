@@ -186,6 +186,7 @@ async function explorerHeight(fetchImpl: typeof fetch, rawUrl: string, apiKey: s
   const url = new URL(rawUrl);
   url.searchParams.set('module', 'proxy');
   url.searchParams.set('action', 'eth_blockNumber');
+  url.searchParams.set('chainid', '56');
   url.searchParams.set('apikey', apiKey);
   const response = await fetchImpl(url);
   if (!response.ok) throw new Error('ExplorerHeightUnavailable');

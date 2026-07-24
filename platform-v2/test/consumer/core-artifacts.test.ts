@@ -63,10 +63,10 @@ test('fulfillment-launch .30 checkpoint has one immutable identity, resolvable e
   assert.equal(schemaManifest.databaseEngine, 'postgresql');
   assert.equal(schemaManifest.schemas.core.migrationTable, 'core.schema_migrations');
   assert.equal(schemaManifest.schemas.audit.migrationTable, 'audit.schema_migrations');
-  assert.equal(schemaManifest.schemas.core.migrations.length, 47);
+  assert.equal(schemaManifest.schemas.core.migrations.length, 48);
   assert.equal(
     schemaManifest.schemas.core.migrations.at(-1)?.path,
-    'schema/business/047_settlement_failed_close.sql',
+    'schema/business/048_payment_quote_source_evidence_primary_fallback.sql',
   );
   assert.equal(schemaManifest.schemas.audit.migrations.length, 4);
   for (const migration of [

@@ -85,6 +85,7 @@ export class SeckillService {
       const result = await executor.query<SessionRow>(
         `${sessionSelect()}
          WHERE session.phase <> 'FORCE_CLOSED'
+           AND ${publicSessionPredicate()}
          ORDER BY
            CASE
              WHEN session.phase = 'SETTLED' THEN 3
@@ -105,7 +106,7 @@ export class SeckillService {
     assertSessionId(sessionId);
     return this.#transactions.transaction(async (executor) => {
       const result = await executor.query<SessionRow>(
-        `${sessionSelect()} WHERE session.session_id = $1`,
+        `${sessionSelect()} WHERE session.session_id = $1 AND ${publicSessionPredicate()}`,
         [sessionId.toLowerCase()],
       );
       if (!result.rows[0]) throw new CoreError('UnknownState', 'Seckill session was not found', 404);
@@ -120,6 +121,7 @@ export class SeckillService {
       const rows = await executor.query<SessionRow>(
         `${sessionSelect()}
          WHERE session.phase IN ('SETTLED', 'FORCE_CLOSED')
+           AND ${publicSessionPredicate()}
            AND ($1::timestamptz IS NULL OR session.starts_at < $1)
          ORDER BY session.starts_at DESC
          LIMIT $2`,
@@ -140,7 +142,7 @@ export class SeckillService {
     const cursor = eventCursor(input.cursor);
     const limit = pageLimit(input.limit);
     return this.#transactions.transaction(async (executor) => {
-      await requireSession(executor, sessionId.toLowerCase());
+      await requirePublicSession(executor, sessionId.toLowerCase());
       const rows = await executor.query<RelayEventRow>(
         `SELECT cursor, relay_event_key, payment_event_key, session_id,
            order_id, buyer_wallet, transaction_hash, block_number, block_hash,
@@ -315,9 +317,14 @@ function sessionProjection(row: SessionRow, now: Date) {
   };
 }
 
-async function requireSession(executor: SqlExecutor, sessionId: string) {
+function publicSessionPredicate() {
+  return "COALESCE(session.snapshot ->> 'guaranteeMode', 'FORMAL') <> 'MAINNET_MICROTEST'";
+}
+
+async function requirePublicSession(executor: SqlExecutor, sessionId: string) {
   const result = await executor.query<{ session_id: string }>(
-    'SELECT session_id FROM core.seckill_sessions WHERE session_id = $1',
+    `SELECT session_id FROM core.seckill_sessions session
+     WHERE session.session_id = $1 AND ${publicSessionPredicate()}`,
     [sessionId],
   );
   if (!result.rows[0]) throw new CoreError('UnknownState', 'Seckill session was not found', 404);

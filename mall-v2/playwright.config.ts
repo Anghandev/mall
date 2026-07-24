@@ -14,8 +14,10 @@ export default defineConfig({
   },
   projects: [
     { name: 'mobile-375', use: { viewport: { width: 375, height: 844 } } },
+    { name: 'mobile-390', use: { viewport: { width: 390, height: 844 } } },
     { name: 'mobile-393', use: { viewport: { width: 393, height: 852 } } },
     { name: 'mobile-430', use: { viewport: { width: 430, height: 932 } } },
+    { name: 'tablet-768', use: { viewport: { width: 768, height: 1024 } } },
     { name: 'desktop-1440', use: { viewport: { width: 1440, height: 1000 } } },
   ],
   webServer: {

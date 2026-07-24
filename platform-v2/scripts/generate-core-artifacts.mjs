@@ -151,6 +151,7 @@ const schemaSources = [
       '045_settlement_nonce_release.sql',
       '046_seckill_prize_reorg_recovery.sql',
       '047_settlement_failed_close.sql',
+      '048_payment_quote_source_evidence_primary_fallback.sql',
     ],
   },
   {

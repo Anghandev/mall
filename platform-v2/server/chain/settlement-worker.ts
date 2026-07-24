@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getAddress, keccak256, toUtf8Bytes } from 'ethers';
-import { CORE_ARTIFACT_VERSION, REQUIRED_CONFIRMATIONS } from '../api/enums.ts';
+import { CORE_ARTIFACT_VERSION, NPL_ADDRESS, REQUIRED_CONFIRMATIONS, USDT_ADDRESS } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import {
   verifySettlementExecutionAuthorization,
@@ -30,6 +30,7 @@ interface TransferRow {
   policy_version: string | number;
   asset: 'USDT' | 'NPL';
   token_address: string;
+  token_transfer_conformance_evidence_hash: string;
   executor_wallet: string;
   executor_nonce: string;
   recipient_address: string;
@@ -104,7 +105,7 @@ export interface EoaSettlementReceipt {
   confirmations: number;
   canonicalBlock: boolean;
   transfers: readonly { tokenAddress: string; from: string; to: string; amount: string }[];
-  transactionDeltas: readonly { tokenAddress: string; account: string; delta: string }[];
+  transferEventDeltas: readonly { tokenAddress: string; account: string; delta: string }[];
   evidenceHash: string;
 }
 
@@ -1470,6 +1471,8 @@ function validateReceipt(transfer: TransferRow, receipt: EoaSettlementReceipt) {
     receipt.chainId !== 56
     || !isHash(receipt.executionTxHash)
     || address(receipt.transactionTo, 'settlement transaction target') !== transfer.token_address
+    || transfer.token_address !== expectedSettlementTokenAddress(transfer.asset)
+    || !isHash(transfer.token_transfer_conformance_evidence_hash)
     || receipt.transactionCalldata.toLowerCase() !== transfer.transfer_calldata
     || address(receipt.executorWallet, 'settlement transaction sender') !== transfer.executor_wallet
     || receipt.executorNonce !== transfer.executor_nonce
@@ -1485,17 +1488,21 @@ function validateReceipt(transfer: TransferRow, receipt: EoaSettlementReceipt) {
     && address(event.from, 'transfer sender') === transfer.executor_wallet
     && address(event.to, 'transfer recipient') === transfer.recipient_address
     && event.amount === transfer.amount);
-  const senderDelta = receipt.transactionDeltas.find((delta) =>
+  const senderDelta = receipt.transferEventDeltas.find((delta) =>
     address(delta.tokenAddress, 'delta token') === transfer.token_address
     && address(delta.account, 'delta account') === transfer.executor_wallet);
-  const recipientDelta = receipt.transactionDeltas.find((delta) =>
+  const recipientDelta = receipt.transferEventDeltas.find((delta) =>
     address(delta.tokenAddress, 'delta token') === transfer.token_address
     && address(delta.account, 'delta account') === transfer.recipient_address);
   if (
     matchingTransfer.length !== 1
     || senderDelta?.delta !== `-${transfer.amount}`
     || recipientDelta?.delta !== transfer.amount
-  ) throw new CoreError('InvalidFinality', 'Settlement token transfer or balance deltas are invalid', 409);
+  ) throw new CoreError('InvalidFinality', 'Settlement token transfer or transfer event deltas are invalid', 409);
+}
+
+function expectedSettlementTokenAddress(asset: 'USDT' | 'NPL') {
+  return asset === 'USDT' ? USDT_ADDRESS : NPL_ADDRESS;
 }
 
 async function loadTransfer(executor: SqlExecutor, transferId: string, forUpdate = false) {
@@ -1505,6 +1512,7 @@ async function loadTransfer(executor: SqlExecutor, transferId: string, forUpdate
        transfer.request_item_index, transfer.order_id, transfer.account_id,
        request_item.backing_wallet_address,
        request.merchant_id, orders.policy_version, transfer.asset, transfer.token_address,
+       transfer.token_transfer_conformance_evidence_hash,
        transfer.executor_wallet, transfer.executor_nonce::text, transfer.recipient_address,
        transfer.amount::text, transfer.transfer_calldata, transfer.content_hash,
        transfer.gas_cap::text, transfer.state, transfer.submitted_at, transfer.settled_at

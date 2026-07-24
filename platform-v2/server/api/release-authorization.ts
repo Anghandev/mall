@@ -97,6 +97,9 @@ export function verifyReleaseAuthorization(input: VerifyReleaseAuthorizationInpu
   if (!/^[0-9a-f]{40}$/.test(gitCommit)) {
     throw new CoreError('ExternalBlocked', 'Release authorization gitCommit is invalid', 503);
   }
+  if (input.allowDirtyGit === false && currentGitStatus(cwd)?.trim()) {
+    throw new CoreError('ExternalBlocked', 'Release authorization requires a clean git worktree', 503);
+  }
   const expectedGitCommit = input.env.RELEASE_GIT_COMMIT?.trim() || currentGitCommit(cwd, input.allowDirtyGit === true);
   if (!expectedGitCommit) {
     if (input.requireGitCommit !== false) {
@@ -280,10 +283,19 @@ function trustedSignerAddress(env: Readonly<ReleaseAuthorizationEnv>) {
 function currentGitCommit(cwd: string, allowDirty: boolean) {
   try {
     if (!allowDirty) {
-      const status = execFileSync('git', ['status', '--porcelain'], { cwd, encoding: 'utf8' });
+      const status = currentGitStatus(cwd);
+      if (status === undefined) return undefined;
       if (status.trim().length > 0) return undefined;
     }
     return execFileSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' }).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+function currentGitStatus(cwd: string) {
+  try {
+    return execFileSync('git', ['status', '--porcelain'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
   } catch {
     return undefined;
   }
