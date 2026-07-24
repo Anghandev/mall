@@ -325,7 +325,7 @@ export function MallRuntimeProvider({
 
   useEffect(() => {
     let active = true;
-    void loadSeckillSurface(() => active).catch((reason: unknown) => {
+    void loadSeckillSurface(() => active, false).catch((reason: unknown) => {
       if (active) setSeckillRealtimeError(errorMessage(reason));
     });
     return () => { active = false; };
@@ -1348,8 +1348,15 @@ export function MallRuntimeProvider({
     );
   }
 
-  async function loadSeckillSurface(isActive: () => boolean) {
+  async function loadSeckillSurface(isActive: () => boolean, includeCurrent = true) {
     if (isActive()) setSeckillSessionState('loading');
+    if (!includeCurrent) {
+      const history = await services.core.listSeckillSessionHistory(undefined, 20);
+      if (!isActive()) return;
+      setSeckillHistory(history.items);
+      setSeckillSessionState((current) => current === 'loading' ? 'empty' : current);
+      return;
+    }
     const [current, history] = await Promise.allSettled([
       services.core.getCurrentSeckillSession(),
       services.core.listSeckillSessionHistory(undefined, 20),

@@ -6,6 +6,7 @@ import {
   WalletCards,
   Zap,
 } from 'lucide-react';
+import { useEffect } from 'react';
 import { BrowserRouter, Link, Navigate, useLocation } from 'react-router-dom';
 
 import { BlockBurstScreen } from './block-burst';
@@ -60,8 +61,10 @@ function MallShell() {
   const activeRoot = getActiveRoot(location.pathname);
   const runtime = useMallRuntime();
 
+  useRouteSeckillCurrentSync(location.pathname, runtime.bootstrap?.writesEnabled === true, runtime.reloadSeckill);
+
   if (location.pathname === '/') {
-    return <Navigate to="/seckill" replace />;
+    return <Navigate to="/mall" replace />;
   }
 
   return (
@@ -161,6 +164,21 @@ function MallShell() {
       </div>
     </div>
   );
+}
+
+function useRouteSeckillCurrentSync(
+  pathname: string,
+  shouldLoadCurrent: boolean,
+  reloadSeckill: ReturnType<typeof useMallRuntime>['reloadSeckill'],
+) {
+  useEffect(() => {
+    if (pathname !== '/seckill' && pathname !== '/assets/activity') return;
+    if (!shouldLoadCurrent) return;
+    void reloadSeckill();
+    // Keep this tied to route + Core write gate only. The runtime object changes as
+    // data loads, and including it would re-poll after every projection update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname, shouldLoadCurrent]);
 }
 
 function DetailRoute({ pathname }: { pathname: string }) {

@@ -27,6 +27,9 @@ export function assertCleanupSnapshot(snapshot) {
   if (snapshot.activeQuotes !== 0 || snapshot.activeReservations !== 0) {
     throw new Error('Cleanup gate found a live micro-test quote or reservation');
   }
+  if (snapshot.activeSettlementRequests !== 0) {
+    throw new Error('Cleanup gate found a non-terminal micro-test settlement request');
+  }
   if (snapshot.unsettledTransfers !== 0) {
     throw new Error('Cleanup gate found an unsettled micro-test transfer');
   }
@@ -69,6 +72,13 @@ export async function runCleanupGate(env = process.env, now = new Date()) {
            JOIN core.payment_quotes quote ON quote.order_id = leg.order_id
            WHERE quote.product_id = $1 AND lower(quote.buyer_wallet) = ANY($3::text[])
              AND reservation.state = 'ACTIVE' AND reservation.expires_at > $4) AS active_reservations,
+         (SELECT count(DISTINCT request.request_id)::int
+           FROM core.settlement_requests request
+           JOIN core.settlement_request_items item ON item.request_id = request.request_id
+           JOIN core.orders micro_order ON micro_order.order_id = item.order_id
+           WHERE micro_order.product_id = $1 AND micro_order.merchant_id = $2
+             AND lower(micro_order.buyer_wallet) = ANY($3::text[])
+             AND request.state NOT IN ('SETTLED', 'FAILED_CLOSED')) AS active_settlement_requests,
          (SELECT count(*)::int FROM core.settlement_transfers
            WHERE authorization_mode = 'MAINNET_MICROTEST' AND state <> 'SETTLED') AS unsettled_transfers`,
       [scope.productId, scope.merchantId, scope.buyerWallets, now],
@@ -85,6 +95,7 @@ export async function runCleanupGate(env = process.env, now = new Date()) {
       productState: row.product_state ?? null,
       activeQuotes: Number(row.active_quotes ?? -1),
       activeReservations: Number(row.active_reservations ?? -1),
+      activeSettlementRequests: Number(row.active_settlement_requests ?? -1),
       unsettledTransfers: Number(row.unsettled_transfers ?? -1),
     };
     assertCleanupSnapshot(snapshot);

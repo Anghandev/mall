@@ -13,6 +13,7 @@ const ready = {
   productState: 'DELISTED',
   activeQuotes: 0,
   activeReservations: 0,
+  activeSettlementRequests: 0,
   unsettledTransfers: 0,
 };
 
@@ -27,6 +28,7 @@ test('cleanup gate requires pause, expiry, delisting and zero live obligations',
     ['productState', 'ACTIVE'],
     ['activeQuotes', 1],
     ['activeReservations', 1],
+    ['activeSettlementRequests', 1],
     ['unsettledTransfers', 1],
   ]) {
     assert.throws(() => assertCleanupSnapshot({ ...ready, [field]: value }));

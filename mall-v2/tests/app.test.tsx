@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   allowedActionNames,
@@ -839,6 +839,26 @@ describe('Mall V2 payment consumer', () => {
       expect(screen.getByText(seckillRulesContentHash)).toBeTruthy();
       expect(screen.getByText(seckillPublicationTxHash)).toBeTruthy();
     }
+  });
+
+  it('does not let the initial history-only load erase a current seckill route session', async () => {
+    const current = seckillSession();
+    const slowInitialHistory = deferred<{ items: PublishedSeckillSessionProjection[]; nextCursor: string | null }>();
+    const listSeckillSessionHistory = vi.fn<CoreClient['listSeckillSessionHistory']>()
+      .mockReturnValueOnce(slowInitialHistory.promise)
+      .mockResolvedValue({ items: [], nextCursor: null });
+    renderAt('/seckill', readyServices({
+      getCurrentSeckillSession: vi.fn().mockResolvedValue(current),
+      listSeckillSessionHistory,
+    }));
+
+    expect(await screen.findByText(/主场和接力均以 Core 时间锚/)).toBeTruthy();
+    await act(async () => {
+      slowInitialHistory.resolve({ items: [], nextCursor: null });
+    });
+
+    expect(screen.getByText(/主场和接力均以 Core 时间锚/)).toBeTruthy();
+    expect(screen.queryByText('暂无已发布场次')).toBeNull();
   });
 
   it('fails seckill configuration closed and reloads once when a Core deadline reaches zero', async () => {
