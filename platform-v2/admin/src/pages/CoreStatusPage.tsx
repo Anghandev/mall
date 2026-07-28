@@ -131,7 +131,12 @@ function capabilityLabel(name: string) {
 }
 
 function publicationLabel(value: string) {
-  return value === 'COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT' ? '正式发布中' : value;
+  return ({
+    COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT: '正式发布中',
+    COORDINATED_MERCHANT_GOVERNANCE_CHECKPOINT: '正式发布中',
+    COORDINATED_FULFILLMENT_CHECKPOINT: '正式发布中',
+    COORDINATED_PAYMENT_CHECKPOINT: '正式发布中',
+  } as Record<string, string>)[value] ?? humanizeSystemKey(value);
 }
 
 function statusLabel(value: string | undefined) {
@@ -141,17 +146,40 @@ function statusLabel(value: string | undefined) {
 function humanStatusError(message: string) {
   if (/Core API is unreachable|gateway is unavailable|unavailable|unreachable/i.test(message)) return '后台服务暂时无法连接，请稍后重试。';
   if (/non-JSON|incompatible|artifact|version/i.test(message)) return '当前页面版本和后台版本不一致，请刷新页面或重新部署前端。';
-  return message;
+  return humanizeSystemKey(message);
 }
 
 function errorLabel(value: string | undefined) {
+  const text = String(value ?? '');
   return ({
     ExternalBlocked: '系统服务暂时异常',
     DecisionBlocked: '需要人工确认',
     ConfigurationRequired: '配置未完成',
     Forbidden: '没有权限',
     Unavailable: '未返回数据',
-  } as Record<string, string>)[String(value ?? '')] ?? (value || '操作失败');
+    RELEASE_AUTHORIZATION_INVALID: '发布授权和当前版本不匹配',
+    COORDINATED_DEPLOYMENT_AUTHORIZATION: '等待正式发布授权',
+    PAYMENT_CONFIGURATION_REQUIRED: '新支付配置未完成',
+    AMAP_WEB_SERVICE_KEY: '地图服务待配置',
+    SECRET_RESOLVER_URL: '密钥服务地址待配置',
+    SECRET_RESOLVER_TOKEN: '密钥服务令牌待配置',
+  } as Record<string, string>)[text] ?? (text ? humanizeSystemKey(text) : '操作失败');
+}
+
+function humanizeSystemKey(value: string) {
+  const replaced = value
+    .replace(/[_-]+/g, ' ')
+    .replace(/\bAPI\b/g, '接口')
+    .replace(/\bRPC\b/g, '链路')
+    .replace(/\bURL\b/g, '地址')
+    .replace(/\bTOKEN\b/g, '令牌')
+    .replace(/\bREQUIRED\b/g, '待配置')
+    .replace(/\bINVALID\b/g, '不匹配')
+    .replace(/\bAUTHORIZATION\b/g, '授权')
+    .replace(/\bCONFIGURATION\b/g, '配置')
+    .replace(/\bPAYMENT\b/g, '支付')
+    .replace(/\bRELEASE\b/g, '发布');
+  return /[\u4e00-\u9fff]/.test(replaced) ? replaced : '系统状态未就绪';
 }
 
 function BlockedList({ title, values, loading }: { title: string; values: readonly string[] | undefined; loading: boolean }) {

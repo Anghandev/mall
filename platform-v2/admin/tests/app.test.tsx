@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { artifactVersion } from '@abu24k/core-artifacts';
+import { artifactVersion, chainIdentity } from '@abu24k/core-artifacts';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
@@ -92,6 +92,36 @@ describe('platform admin simplified zero-guarantee experience', () => {
     expect(copy).toContain('商家已通过审核、门店已激活');
     expect(copy).not.toContain('publish-denied');
     expect(copy).not.toMatch(/保证金|1000|1,000|deposit/i);
+  });
+
+
+  it('shows Core readiness blockers in plain Chinese instead of raw system codes', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      artifactVersion,
+      status: 'CORE_API_READY',
+      readiness: {
+        chainId: 56,
+        assets: {
+          usdt: chainIdentity.usdtAddress,
+          npl: chainIdentity.nplAddress,
+          nplUsdtPair: '0x2955e33bb120714abf11ace2766e614e6e5955b2',
+        },
+        decisionBlocked: [],
+        externalBlocked: ['AMAP_WEB_SERVICE_KEY', 'SECRET_RESOLVER_URL', 'SECRET_RESOLVER_TOKEN'],
+        paymentDecisionBlocked: [],
+        paymentExternalBlocked: ['RELEASE_AUTHORIZATION_INVALID', 'COORDINATED_DEPLOYMENT_AUTHORIZATION'],
+        runtimeBlockers: ['PAYMENT_CONFIGURATION_REQUIRED'],
+        providers: { AMAP: 'CONFIGURATION_REQUIRED', BNM: 'READY' },
+        writesEnabled: false,
+      },
+    })));
+
+    renderAt('/core-status');
+
+    expect(await screen.findByText('发布授权和当前版本不匹配')).toBeTruthy();
+    expect(screen.getByText('等待正式发布授权')).toBeTruthy();
+    expect(screen.getByText('新支付配置未完成')).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/RELEASE_AUTHORIZATION_INVALID|COORDINATED_DEPLOYMENT_AUTHORIZATION|PAYMENT_CONFIGURATION_REQUIRED|AMAP_WEB_SERVICE_KEY|SECRET_RESOLVER_TOKEN/);
   });
 
   it('opens catalog, merchant, policy, seckill, clearing and core-status routes with simplified copy', async () => {
